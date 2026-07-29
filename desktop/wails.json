@@ -1,0 +1,22 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "ALAS",
+  "outputfilename": "ALAS",
+  "frontend:install": "npm install",
+  "frontend:build": "npm run build",
+  "frontend:dev:watcher": "npm run dev",
+  "frontend:dev:serverUrl": "auto",
+  "preBuildHooks": {
+    "*/*": "uv run python ../../../scripts/prebuild.py"
+  },
+  "author": {
+    "name": "Marcos Quiroga Rodríguez"
+  },
+  "info": {
+    "companyName": "ALAS",
+    "productName": "ALAS",
+    "productVersion": "1.0.0",
+    "copyright": "Copyright © 2026 Marcos Quiroga Rodríguez. Licensed under AGPL-3.0-or-later.",
+    "comments": "ALAS aircraft preliminary-design application"
+  }
+}
