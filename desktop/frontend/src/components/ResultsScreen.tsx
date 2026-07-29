@@ -6,7 +6,6 @@ import { ResultFigure } from "./ResultFigure";
 import { FieldPerformancePanel } from "./FieldPerformancePanel";
 import { RouteGlobe } from "./RouteGlobe";
 import { StatTile } from "./StatTile";
-import { sidecarDownload } from "../lib/sidecarClient";
 import type { ThemeName } from "./MenuBar";
 import { useT } from "../lib/i18n";
 

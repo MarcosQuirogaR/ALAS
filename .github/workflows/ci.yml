@@ -44,6 +44,9 @@ jobs:
       - name: Install
         working-directory: desktop/frontend
         run: npm ci
+      - name: Lint
+        working-directory: desktop/frontend
+        run: npm run lint
       - name: Build (tsc + vite)
         working-directory: desktop/frontend
         run: npm run build
