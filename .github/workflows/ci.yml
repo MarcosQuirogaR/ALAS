@@ -1,0 +1,49 @@
+# The same three gates CONTRIBUTING.md asks for before a pull request:
+# tests, lint/format, and the frontend typecheck-by-build. Kept separate from
+# release.yml so a red gate never blocks tagging a build of an older, green
+# commit.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    name: pytest + ruff
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Set up Python
+        run: uv python install 3.13
+      - name: Sync
+        run: uv sync --group dev
+      - name: Ruff lint
+        run: uv run ruff check .
+      - name: Ruff format
+        run: uv run ruff format --check .
+      - name: Tests
+        run: uv run pytest
+
+  frontend:
+    name: frontend typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: desktop/frontend/package-lock.json
+      - name: Install
+        working-directory: desktop/frontend
+        run: npm ci
+      - name: Build (tsc + vite)
+        working-directory: desktop/frontend
+        run: npm run build
