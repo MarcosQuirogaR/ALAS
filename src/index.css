@@ -1,0 +1,144 @@
+@import "tailwindcss";
+
+/*
+ * ALAS dark system.
+ *
+ * A deep neutral ground with a faint warm cast, text set below pure white so
+ * long reading doesn't glare, and a single terracotta accent. IBM Plex
+ * throughout: serif for display, sans for reading, mono for data.
+ */
+
+@theme {
+  --font-sans: "IBM Plex Sans", system-ui, "Segoe UI", sans-serif;
+  --font-serif: "IBM Plex Serif", Georgia, serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+
+  /* Ground */
+  --color-base: #101215;
+  --color-raised: #171a1f;
+  --color-raised-2: #1e2228;
+
+  /* Type is deliberately not #fff; off-white is far easier over long reads */
+  --color-fg: #c6cbd3;
+  --color-fg-strong: #eceef2;
+  --color-fg-dim: #848b96;
+
+  --color-rule: #262a31;
+  --color-rule-strong: #363c45;
+
+  /* One accent. Warm, so it reads as a signal rather than as neon. */
+  --color-accent: #d2694a;
+  --color-accent-bright: #e78561;
+  --color-accent-dim: #6b3323;
+}
+
+html {
+  scroll-behavior: smooth;
+  background: var(--color-base);
+}
+
+section[id] {
+  scroll-margin-top: 4.5rem;
+}
+
+body {
+  margin: 0;
+  background: var(--color-base);
+  color: var(--color-fg);
+  font-family: var(--font-sans);
+  font-size: 16px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--color-accent) 32%, transparent);
+  color: var(--color-fg-strong);
+}
+
+.text-balance {
+  text-wrap: balance;
+}
+
+/*
+ * Hero veil. On narrow screens the photograph is texture behind text, so it
+ * gets a flat, heavy scrim. From large screens up it becomes a left-to-right
+ * gradient: opaque where the words are, clearing by the right-hand third so
+ * the aircraft reads at close to full contrast.
+ */
+.hero-veil {
+  background: linear-gradient(
+    to bottom,
+    rgba(16, 18, 21, 0.93),
+    rgba(16, 18, 21, 0.89)
+  );
+}
+
+@media (min-width: 1024px) {
+  .hero-veil {
+    background: linear-gradient(
+      to right,
+      rgba(16, 18, 21, 0.99) 0%,
+      rgba(16, 18, 21, 0.98) 40%,
+      rgba(16, 18, 21, 0.88) 56%,
+      rgba(16, 18, 21, 0.55) 70%,
+      rgba(16, 18, 21, 0.26) 84%,
+      rgba(16, 18, 21, 0.14) 100%
+    );
+  }
+}
+
+/* Blends the photograph into the section below it. */
+.hero-fade {
+  background: linear-gradient(
+    to bottom,
+    transparent 62%,
+    rgba(16, 18, 21, 0.65) 86%,
+    var(--color-base) 100%
+  );
+}
+
+.section-mark {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  font-weight: 500;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--color-accent);
+}
+
+.prose-link {
+  color: var(--color-accent);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-thickness: 1px;
+  text-decoration-color: color-mix(in srgb, var(--color-accent) 45%, transparent);
+}
+
+.prose-link:hover {
+  text-decoration-color: var(--color-accent);
+}
+
+::-webkit-scrollbar {
+  width: 12px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--color-base);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-rule-strong);
+  border: 3px solid var(--color-base);
+  border-radius: 0;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-fg-dim);
+}
+
+:where(a, button):focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 3px;
+}

@@ -1,0 +1,137 @@
+/* ALAS documentation: matched to the site's dark system. */
+
+:root {
+  --md-primary-fg-color: #171a1f;
+  --md-primary-fg-color--light: #262a31;
+  --md-primary-fg-color--dark: #101215;
+  --md-primary-bg-color: #eceef2;
+  --md-accent-fg-color: #d2694a;
+}
+
+[data-md-color-scheme="slate"] {
+  --md-default-bg-color: #101215;
+  --md-default-fg-color: #eceef2;
+  --md-default-fg-color--light: #848b96;
+  --md-default-fg-color--lighter: #4a505a;
+  --md-default-fg-color--lightest: #262a31;
+  --md-typeset-color: #c6cbd3;
+  --md-typeset-a-color: #d2694a;
+  --md-code-bg-color: #171a1f;
+  --md-code-fg-color: #c6cbd3;
+  --md-hue: 220;
+}
+
+[data-md-color-scheme="default"] {
+  --md-default-bg-color: #faf9f6;
+  --md-default-fg-color: #16181c;
+  --md-default-fg-color--light: #6d737d;
+  --md-default-fg-color--lightest: #d9d6cd;
+  --md-typeset-color: #3d424b;
+  --md-typeset-a-color: #b4432e;
+  --md-code-bg-color: #f3f1ec;
+}
+
+/* Headings carry the serif, as on the site. */
+.md-typeset h1,
+.md-typeset h2,
+.md-typeset h3 {
+  font-family: "IBM Plex Serif", Georgia, serif;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+}
+
+.md-typeset h1 {
+  color: var(--md-default-fg-color);
+}
+
+/* Figures: caption sits under a rule. */
+.md-typeset figure {
+  margin: 2rem 0;
+  max-width: 100%;
+}
+
+/* Figures ship in both themes and already carry the right ground, so they
+   need a frame and nothing else: no white mat behind a dark plot. */
+.md-typeset figure img {
+  border: 1px solid var(--md-default-fg-color--lightest);
+  display: block;
+  margin-inline: auto;
+}
+
+.md-typeset figcaption {
+  margin-top: 0.6rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--md-default-fg-color--lightest);
+  font-size: 0.74rem;
+  line-height: 1.55;
+  color: var(--md-default-fg-color--light);
+  text-align: left;
+  max-width: 46rem;
+}
+
+/* Compact key-figure grid used in a few chapters. */
+.ave-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 0;
+  margin: 1.6rem 0;
+  border: 1px solid var(--md-default-fg-color--lightest);
+}
+
+.ave-stat {
+  padding: 0.8rem 1rem;
+  border-right: 1px solid var(--md-default-fg-color--lightest);
+}
+
+.ave-stat:last-child {
+  border-right: none;
+}
+
+.ave-stat .label {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.11em;
+  color: var(--md-default-fg-color--light);
+}
+
+.ave-stat .value {
+  margin-top: 0.25rem;
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--md-default-fg-color);
+}
+
+/* Tables read as data sheets rather than cards. */
+.md-typeset table:not([class]) {
+  border: 1px solid var(--md-default-fg-color--lightest);
+  border-radius: 0;
+  box-shadow: none;
+  font-size: 0.76rem;
+}
+
+.md-typeset table:not([class]) th {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.66rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  background: var(--md-code-bg-color);
+}
+
+/* Display-math equations can render wider than a narrow viewport; scroll
+   them horizontally instead of letting them push the whole page out. */
+mjx-container[display="true"] {
+  overflow-x: auto;
+  overflow-y: hidden;
+  max-width: 100%;
+}
+
+/* A long inline formula can't wrap or scroll without looking broken
+   mid-sentence, so on the narrowest phones scale MathJax down slightly
+   instead, which is enough for it to fit the column. */
+@media (max-width: 30em) {
+  mjx-container {
+    font-size: 90% !important;
+  }
+}

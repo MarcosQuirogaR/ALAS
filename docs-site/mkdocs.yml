@@ -1,0 +1,112 @@
+site_name: ALAS Docs
+site_description: >-
+  A complete, hands-on guide to ALAS, told through one aircraft: AVE,
+  the built-in long-range reference design.
+site_url: https://marcosquirogar.github.io/ALAS-site/docs/
+repo_url: https://github.com/MarcosQuirogaR/ALAS
+site_dir: site
+docs_dir: docs
+
+theme:
+  name: material
+  favicon: assets/icon.png
+  logo: assets/icon.png
+  palette:
+    - scheme: slate
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+    - scheme: default
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+  font:
+    text: IBM Plex Sans
+    code: IBM Plex Mono
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - navigation.footer
+    - toc.follow
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.tabs.link
+
+copyright: "© 2026 ALAS. AGPL-3.0-or-later."
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/MarcosQuirogaR/ALAS
+      name: ALAS on GitHub
+    - icon: material/download
+      link: https://github.com/MarcosQuirogaR/ALAS/releases
+      name: Download ALAS
+
+extra_css:
+  - assets/extra.css
+
+markdown_extensions:
+  - admonition
+  - def_list
+  - pymdownx.details
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.arithmatex:
+      generic: true
+  - pymdownx.highlight
+  - pymdownx.inlinehilite
+  - tables
+  - toc:
+      permalink: true
+  - attr_list
+  - md_in_html
+  - footnotes
+
+extra_javascript:
+  - javascripts/mathjax.js
+  - https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js
+
+nav:
+  - Home: index.md
+  - Get started:
+      - Installation: installation.md
+      - User guide: user-guide.md
+      - Gallery: gallery.md
+      - Meet AVE: meet-ave.md
+  - The AVE walkthrough:
+      - Mission requirements: mission-requirements.md
+      - Cabin & payload: cabin-and-payload.md
+      - Design space & optimizer: design-space-and-optimizer.md
+      - Running ALAS: running-aeroforge.md
+      - Optimization results: optimization-results.md
+      - Aerodynamic analysis: aerodynamic-analysis.md
+      - Transonic section analysis: transonic-analysis.md
+      - Airfoil screening: airfoil-screening.md
+      - Structural analysis: structural-analysis.md
+      - Propulsion analysis: propulsion-analysis.md
+      - Mission & route analysis: mission-and-route.md
+      - Weight, balance & stability: weight-balance-and-stability.md
+      - Low-speed & field performance: field-performance.md
+      - Reporting & export: reporting-and-export.md
+  - Reference:
+      - The pipeline, end to end: pipeline-diagram.md
+      - How ALAS works inside: architecture.md
+      - Configuration reference: reference/configuration.md
+      - Formulas & theory: reference/formulas.md
+  - Help:
+      - Troubleshooting: troubleshooting.md
+      - Glossary: glossary.md
