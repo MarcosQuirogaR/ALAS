@@ -4,16 +4,13 @@ This document describes the workflow, the pipeline, and how the modules connect
 and communicate. For the underlying equations see
 [`methods.md`](methods.md).
 
-> **Stale sections.** §2's module map and the "GUI integration"
-> subsections of §9e/§10c/§11e describe a PySide6 interface that no longer
-> exists — `desktop/` (Wails + React + a Python sidecar,
-> §12) is the only front-end left in this repo, and is now the primary one
-> throughout this document. Those Qt-specific subsections are kept as
-> historical design-rationale (the *patterns* — generic figure factories,
-> lazy per-discipline tabs, live config-driven previews — all carried over
-> into the React port) but their concrete `gui/*.py`/`QThread`/`MplCanvas`
-> references do not. Read §12 for the interface as it actually is; those
-> subsections are retained only for the design reasoning they record.
+> **On the front-end sections.** `desktop/` (Wails + React + a Python
+> sidecar) is the only front-end in this repo. §2a gives the current
+> picture; §12 covers the mechanism in depth (process model, how figures are
+> served, what's genuinely client-rendered). The "GUI integration"
+> paragraphs inside §9e/§10c/§11e predate the React port and are trimmed to
+> the physics/data facts that are still true, with a pointer to §12 for how
+> the current front-end actually renders each one.
 
 ## 1. The workflow at a glance
 
@@ -192,97 +189,40 @@ WebGL view, §12b, not PyVista).
 
 ## 2a. The GUI layer (front-end)
 
-The desktop app is a thin shell over `DesignPipeline` and adds no physics. Three
-ideas make it generic and maintainable:
+The desktop app (`desktop/`) is a thin shell over `DesignPipeline` and adds no
+physics; §12 covers its process model and figure pipeline in depth. Three
+ideas make it generic and maintainable, carried over from an earlier PySide6
+prototype but implemented natively in React against a FastAPI sidecar rather
+than ported line-for-line:
 
-- **Auto-generated forms.** `DataclassForm` walks any config dataclass and emits
-  a labelled, unit-annotated widget per field (recursing into nested dataclasses).
-  Widget decimal precision and step size are derived from value magnitude and unit
-  via `_spinbox_config` — no per-field UI code. The Inputs and Advanced tabs are
-  built directly from the config dataclasses; adding a config field gives it a
-  control in the GUI automatically.
-- **User-controlled design space.** `DesignSpaceTable` exposes three columns per
-  DOF: *Initial Value* (editable, the nominal/starting design), *Lower* (editable),
-  and *Upper* (editable). `get_initial_design()` returns a `DesignVector` from the
-  Initial Value column; `get_bounds()` returns the optimizer bounds list. A
-  *Reset to defaults* button restores the shipped values. The initial design is
-  passed to `DesignPipeline.run(initial_design=…)` and serves two roles: the
-  analysed design when optimisation is skipped, and the baseline comparison design
-  when it runs. When a preset is loaded, `set_design_vector` sets *Initial Value*
-  to the preset's vector and expands *Lower/Upper* to ±10 % around it — so every
-  preset must be calibrated so that `CL_required` at the nominal and at the
-  all-variables-at-minimum corner both stay below `requirements.max_cruise_cl`
-  (see `methods.md` §2, Preset calibration note).
-- **Threaded run, generic figures.** `PipelineWorker` (a `QThread`) runs
-  `DesignPipeline.run(make_plots=False, progress_callback=…)` so the UI stays
-  responsive and streams progress. On completion the GUI thread builds figures
-  with the same generic factories the CLI uses (`reporting.visualization`),
-  embedding them via `MplCanvas` (which supports `set_figure(fig)` for
-  externally-created figures such as the ASB three-view). To prevent deformation,
-  plots are stacked inside a scrollable layout (`_scrollable` using `QScrollArea`) with minimum height limits.
-  Results are consolidated into tabs: *Baseline W&B & Stability* (first tab — the
-  initial design's mass buildup, CG envelope, plan-view mass distribution and
-  detailed cabin/payload layout, with a text summary), *Summary* (formatted text),
-  *Optimization* (convergence, design evolution, airfoil comparison, airfoil spanwise
-  evolution, wing/fuselage/empennage 3D wireframes, baseline comparisons, and the 3D
-  threeview), *Aerodynamics* (lift/drag polar, drag component breakdown, span loading,
-  V-n flight-envelope diagram, VLM flow streamlines visualization, dynamic-mode
-  s-plane analysis, control-surface layout + tail-volume sizing check, NeuralFoil
-  airfoil sweeps vs. Reynolds), and *Weight & Balance* (mass breakdown bar, wing
-  fuel-volume-vs-required check, plan-view mass distribution, CG envelope, the
-  longitudinal stability diagram — split across two figures,
-  `figure_stability_side_view` (fuselage silhouette + CG/NP markers + moment
-  arms) and `figure_stability_metrics` (% MAC ruler + Cm-vs-CL + numeric
-  table), so each stays legible at the smaller heights a results tab embeds
-  them at instead of one cramped three-panel figure — and the cabin/payload
-  layout for the optimized design). Each tab section is wrapped in an
-  independent try/except so a failure in one section (e.g. VLM streamlines or
-  NeuralFoil) does not prevent the remaining tabs from rendering. A separate
-  **"Analyze baseline"** button computes only the first tab (no optimizer),
-  and a second **Cabin / Payload** 3D live-preview panel (beside the exterior 3D
-  preview on the Inputs tab) shows the seat/ULD layout across all decks live as the
-  config changes.
-- **Live / PNG view toggle (`ResultsView` corner widget).** A `Live`/`PNG`
-  button pair plus an `Export PNGs...` button sit in the tab strip's corner.
-  `Live` (default) shows the interactive `MplCanvas` figures built above;
-  `PNG` forces every still-lazy tab open (`_ensure_all_built`), renders each
-  visible `MplCanvas`/sub-tab to a flat PNG via `export_pngs()`, and swaps the
-  tab widget's pages for a static scrollable gallery grouped by top-level tab
-  (`_build_png_gallery`) — the same figures, just no toolbar/interactivity,
-  useful for pasting into a report or a chat. Switching back to `Live` is
-  instant (the original live pages are stashed, not rebuilt). `Export
-  PNGs...` writes the same render to a user-chosen folder without changing
-  the current view. `export_pngs()` also calls `_fix_never_shown_size()` on
-  each figure right before saving: a lazy tab that's force-built but was
-  never actually the *current* tab skips the Qt resize pass that sizes its
-  canvas to `aspect` (see `_ChartColumn.resizeEvent`), so it would otherwise
-  export frozen at Matplotlib's tiny construction-time default figsize —
-  `_fix_never_shown_size` detects exactly that (an already-shown figure, at
-  any size, is left untouched) and re-sizes it from the canvas's own
-  `aspect`/height bounds instead.
-- **Matching Chart, Landing & Take-Off, and Mission & Route (inside Results).**
-  After a run, `ResultsView.populate(result, origin, dest)` appends three extra
-  tabs directly inside the Results `QTabWidget`. `MatchingChartWidget` draws
-  the classical T/W₀ vs W/S design-space diagram: the cruise constraint curve,
-  the constant OEI-climb line (FAR 25.121), per-airport take-off constraint
-  curves (Raymer Ch.17), and per-airport landing W/S limits. `LTOWidget` shows
-  a schematic runway diagram annotated with TODR, BFL, ASD and LDR arrows plus
-  V speed markers (V1, VR, V2), and a grouped bar chart comparing required
-  distances against available runway lengths. Both are display-only — all
-  inputs (airports, CL values, thrust lapse, OEI gradient, k_land) come from
-  `PerformanceConfig` (Advanced Settings → Performance) and the
-  departure/arrival airport pair in the Inputs tab's Route group. "Mission &
-  Route" shows the textured 3D globe + SUAVE mission data (see §9) computed
-  automatically by the pipeline's Stage 5, not a separate widget-driven
-  computation like the other two.
-
-Data flow: `MainWindow` gathers the forms into a dict (including `performance`
-and `mission`) → `ALASConfig.from_dict` → `PipelineWorker(initial_design=…)`
-→ `PipelineResult` (already carrying `route`/`mission_result` from Stage 5) →
-`ResultsView.populate(result, origin, dest)` → all three extra tabs computed
-and appended in one call.
-The design-space table supplies both the `initial_design` and a per-run `bounds`
-override to the optimizer.
+- **Auto-generated forms.** `DynamicForm` (`desktop/frontend/src/components/
+  DynamicForm.tsx`) walks a config dataclass's JSON-schema-like field
+  metadata and emits a labelled, unit-annotated control per field (recursing
+  into nested dataclasses), with hover-help sourced from the same metadata
+  via `HelpHover`/`InfoTip.tsx` — no per-field UI code. The Inputs and
+  Advanced Settings pages are built directly from the config dataclasses;
+  adding a config field gives it a control automatically.
+- **User-controlled design space.** `DesignSpaceTable` exposes the same three
+  columns per DOF (Initial Value / Lower / Upper) the PySide6 prototype
+  established, editable, with a *Reset to defaults* control. Loading a preset
+  recentres Lower/Upper around its vector — every preset must still be
+  calibrated so `CL_required` at the nominal and the all-variables-at-minimum
+  corner both stay below `requirements.max_cruise_cl` (see `methods.md` §2,
+  Preset calibration note).
+- **Threaded run, server-rendered figures.** A Run is dispatched to the
+  FastAPI sidecar and tracked over WebSocket/polling (`sidecar/runs.py`,
+  `lib/sidecarClient.ts`) so the UI stays responsive and streams progress;
+  results are organised into the same discipline-grouped tabs the prototype
+  used (Baseline W&B & Stability, Summary, Optimization, Aerodynamics,
+  Weight & Balance, Propulsion Analysis, Structural Analysis, Mission &
+  Route, Model Comparison), each a lazy tab built from the shared
+  `RESULT_FIGURES` registry (§12b) rather than a bespoke widget per
+  discipline. `ResultsScreen.tsx` keeps a fetched figure mounted (hidden via
+  CSS) once its tab has been opened, so revisiting one never re-fetches. A
+  separate **Analyze baseline** action computes only the first tab (no
+  optimizer), and a **Cabin / Payload** live-preview panel (beside the
+  exterior 3D preview on Inputs) shows the seat/ULD layout across all decks
+  as the config changes, with no run needed.
 
 ## 3. The central data objects (how stages communicate)
 
@@ -681,51 +621,33 @@ the rest as sub-tabs.
 
 ### 9e. GUI integration
 
-`ResultsView.populate(result, origin, dest)` — the same call every other tab
-already used — appends the "Mission & Route" tab and immediately calls
-`_populate_mission(result, origin_airport, dest_airport)`, which reads
-`result.route`/`result.mission_result` straight off the `PipelineResult`
-(Stage 5 already computed them; see §9b). If mission analysis was disabled or
-unavailable, the route still renders (recomputed locally via
-`Route.for_airports` if `result.route` is `None`, using the same
-`config.mission` routing settings incl. `simbrief_username`) as a plain-
-colored line instead of the mass-colored one — `figure_mission_route_2d`'s
-`mass_profile` parameter is optional for exactly this degradation path. The
-reason mission data isn't showing (SUAVE not configured, disabled, a run
-error) is in the run log via `pipeline.py`'s `progress_callback`, not
-re-rendered as an in-scene message.
+The "Mission & Route" results tab reads `result.route`/`result.mission_result`
+straight off the `PipelineResult` (Stage 5 already computed them; see §9b).
+If mission analysis was disabled or unavailable, the route still renders
+(recomputed locally via `Route.for_airports` if `result.route` is `None`,
+using the same `config.mission` routing settings incl. `simbrief_username`)
+as a plain-colored line instead of the mass-colored one —
+`figure_mission_route_2d`'s `mass_profile` parameter is optional for exactly
+this degradation path. The reason mission data isn't showing (SUAVE not
+configured, disabled, a run error) is in the run log via `pipeline.py`'s
+`progress_callback`, not re-rendered as an in-scene message.
 
-The tab's top view slot is itself a small `QTabWidget` (`self._route_view_
-tabs`) with two entries: "2D Map" (`self._route_canvas`, an `MplCanvas`) and
-"3D Globe" (`self._globe_widget`, a `GlobeWidget`) — a view *selector*, kept
-deliberately separate from `self._mission_tabs` below it (Payload-Range,
-Mission Profile, Airspeeds, Flight Path, Aero Coefficients, Aero Forces, Drag
-Components), since "which route view" and "which telemetry plot" are
-orthogonal choices. Payload-Range is the one sub-tab not sourced from
-`mission_result` -- it's built straight from `result.optimized_report`/
-`baseline_report` (`physics.performance.payload_range_diagram`), so it's
-populated before the `mission_result`-availability gate and still renders
-when mission analysis is disabled. `_populate_mission` feeds both
-route views the same `route`/`mass_profile`/`altitude_profile` in one pass
-(`GlobeWidget.show_route(...)` right after `figure_mission_route_2d(...)`,
-each in its own try/except so a globe-specific failure — e.g. pyvista/
-pyvistaqt not installed, surfaced via `GlobeWidget.show_message`) — never
-blanks the 2D view or vice versa).
+The tab offers both a 2-D map and the 3-D globe (§12b covers which is
+server-rendered vs. genuinely client-side); Payload-Range is the one
+sub-view not sourced from `mission_result` — it's built straight from
+`result.optimized_report`/`baseline_report`
+(`physics.performance.payload_range_diagram`), so it renders even when
+mission analysis is disabled.
 
-`gui/widgets/mission_assets_widget.py` (`MissionAssetsWidget`, in Advanced
-Settings → Mission Analysis, above the auto-generated `MissionConfig` form)
-shows live status for the SUAVE venv / navdata / Earth texture and one-click
-**Download** buttons for the latter two, backed by
-`gui/worker.py`'s `AssetDownloadWorker` and the shared
-`alas.integration.assets` module (the same functions
+Advanced Settings → Mission Analysis shows live status for the SUAVE venv /
+navdata / Earth texture and one-click download for the latter two, backed by
+the shared `alas.integration.assets` module (the same functions
 `scripts/download_navdata.py`/`download_earth_texture.py` call, so there's
-one implementation, not two). The navdata button asks for confirmation first
-given its GPLv3 license. Provisioning the isolated SUAVE venv itself in a dev
-checkout (`scripts/provision_suave_venv.py`) stays a manual one-time terminal
-step — it installs a separate Python 3.10 interpreter via `uv`, a heavier
-system-level action than downloading a data file, so it isn't wrapped in a GUI
-button. (A packaged build doesn't need this at all — see §9a for how
-`scripts/build_suave_env.py` bundles the same venv automatically instead.)
+one implementation, not two). The navdata control asks for confirmation
+first given its GPLv3 license. Provisioning the isolated SUAVE venv itself in
+a dev checkout (`scripts/provision_suave_venv.py`) stays a manual one-time
+terminal step — a packaged build doesn't need this at all; see §9a for how
+`scripts/build_suave_env.py` bundles the same venv automatically instead.
 
 ## 10. Propulsion Analysis and the Engine Designer tab
 
@@ -819,38 +741,32 @@ correctness bug.
 
 ### 10c. GUI integration
 
-`ResultsView.populate()` appends "Propulsion Analysis" as an ordinary lazy
-figure-factory tab (`_build_propulsion_widget`, `results_view.py`) — a
-`_scrollable()` stack of 5 canvases (cycle summary + station temperatures,
-carpet plot, efficiency decomposition, BPR sensitivity, altitude/Mach
-sweep), the same pattern "Weight & Balance"/"Aerodynamics" already use, not
-a dedicated widget class. It reads `result.config.geometry.engine` and
+"Propulsion Analysis" is an ordinary lazy figure-factory results tab (§12b):
+5 figures (cycle summary + station temperatures, carpet plot, efficiency
+decomposition, BPR sensitivity, altitude/Mach sweep), the same pattern every
+other discipline tab uses. It reads `result.config.geometry.engine` and
 `result.config.requirements.cruise_mach/cruise_altitude_m`, so it always
 reflects whichever engine (preset or hand-edited) actually produced the
 displayed `AnalysisReport` — "all preset engines can be analyzed" falls out
 of reading the live `EngineConfig` rather than anything engine-specific in
 the tab itself.
 
-The Engine Designer Advanced Settings tab mirrors the Landing Gear tab's
-layout exactly: a header + reset button, a `QSplitter` with the editable
-form(s) on the left (a small internal `QTabWidget` with "Engine Parameters"
-and "Cycle Assumptions" pages, since there are two logically distinct
-dataclasses to edit) and a live preview `MplCanvas` on the right. The
-preview draws `figure_engine_designer_preview` — a vertically-stacked,
-narrow-panel-friendly layout distinct from `figure_propulsion_cycle_summary`
-(the wide, side-by-side figure the Results tab uses; squeezed into this
-tab's narrow column it crowded/overlapped). Its top panel draws
-`EngineConfig.nacelle_profile`'s raw (x-station, radius-fraction) control
-points as an actual labeled silhouette; its bottom panel is the same
-cycle-summary text as the Results tab, sourced from a shared
-`_propulsion_cycle_summary_lines()` helper so the two can never show
-different numbers for the same design even though they're different figure
-functions. A single cheap cycle evaluation per debounce tick, no parametric
-sweep. "Reset" reloads the current `engine_name`'s values from
-`ENGINE_DATABASE` (`apply_engine_spec()`) and resets `PropulsionCycleConfig`
-to its defaults — distinct from every other tab's flat "reset to defaults",
-since there is no single global default engine, only "whichever preset is
-currently selected".
+The Engine Designer Advanced Settings page pairs the editable form (two
+logically distinct dataclasses — engine parameters and cycle assumptions —
+since both are edited together) with a live preview: a vertically-stacked,
+narrow-panel-friendly layout distinct from the wide `figure_propulsion_cycle_
+summary` the Results tab uses, since squeezed into this page's narrow column
+that one crowded/overlapped. Its top panel draws `EngineConfig.
+nacelle_profile`'s raw (x-station, radius-fraction) control points as an
+actual labeled silhouette; its bottom panel is the same cycle-summary text
+as the Results tab, sourced from a shared `_propulsion_cycle_summary_lines()`
+helper so the two can never show different numbers for the same design even
+though they're different figure functions. A single cheap cycle evaluation
+per debounce tick, no parametric sweep. "Reset" reloads the current
+`engine_name`'s values from `ENGINE_DATABASE` (`apply_engine_spec()`) and
+resets `PropulsionCycleConfig` to its defaults — distinct from every other
+page's flat "reset to defaults", since there is no single global default
+engine, only "whichever preset is currently selected".
 
 ## 11. Structural Analysis (wingbox FEM)
 
@@ -1033,30 +949,27 @@ frequency.
 
 ### 11e. GUI integration and the FEM-vs-Torenbeek accuracy check
 
-Advanced Settings → **Structural Analysis** mirrors the Landing Gear tab's
-layout: a header + reset button, a `QSplitter` with the auto-generated
+Advanced Settings → **Structural Analysis** pairs the auto-generated
 `StructuresConfig` form (spar count/positions, materials, rib pattern,
-safety factor, NASTRAN path — the user-controlled inputs) on the left and a
-live preview on the right. The preview draws
-`figure_structures_designer_preview` (planform + spar lines + a compact
-sizing summary) from a cheap `size_wingbox()` call only — no FEM mesh, no
-NASTRAN — cheap enough for every debounce tick, the same "narrow preview
-distinct from the wide Results figure" pattern the Engine Designer tab
-established. Results → **Structural Analysis** is a lazy tab with its own
-internal `QTabWidget` (Sizing / Static Loads / Stress Margins / Normal
-Modes / Vibration / Patran Renders), each sub-tab built from one
+safety factor, NASTRAN path — the user-controlled inputs) with a live
+preview. The preview draws `figure_structures_designer_preview` (planform +
+spar lines + a compact sizing summary) from a cheap `size_wingbox()` call
+only — no FEM mesh, no NASTRAN — cheap enough for every debounce tick, the
+same "narrow preview distinct from the wide Results figure" pattern the
+Engine Designer page establishes (§10c). Results → **Structural Analysis**
+is a lazy tab (Sizing / Static Loads / Stress Margins / Normal Modes /
+Vibration / Patran Renders), each sub-view built from one
 `figure_structures_*` factory that degrades independently to a status
 message when its data isn't available (same convention as the Model
-Comparison tab). The Sizing sub-tab includes a FEM-vs-Torenbeek wing mass
+Comparison tab). The Sizing sub-view includes a FEM-vs-Torenbeek wing mass
 comparison bar — the FEM wingbox's own computed mass, doubled for both
 wings, next to `physics.mass`'s Torenbeek `component_masses["Wing"]`
 estimate for this same design — a read-only accuracy check ("how close is
 Torenbeek to a real sized structure for this design?"), explicitly not a
-feedback loop into the mass model. The Patran Renders sub-tab
-(`figure_structures_patran`) is the one sub-tab that isn't a live
-matplotlib plot of this process's own data — it reads and `imshow`s the
-PNG files `integration/patran_runner.py` (§11g) already wrote to disk, one
-panel per load case.
+feedback loop into the mass model. Patran Renders (`figure_structures_
+patran`) is the one sub-view that isn't a live matplotlib plot of this
+process's own data — it displays the PNG files `integration/patran_
+runner.py` (§11g) already wrote to disk, one per load case.
 
 ### 11g. Headless Patran deformation-plot export (opt-in, mirrors NASTRAN)
 
