@@ -1,0 +1,3 @@
+[build-system]
+requires = ["setuptools", "wheel", "numpy", "scipy", "matplotlib", "scikit-learn", "plotly"]
+build-backend = "setuptools.build_meta"

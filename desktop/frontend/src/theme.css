@@ -1,0 +1,285 @@
+/* =========================================================================
+   ALAS design system — a faithful CSS port of the PySide6 app's theme.
+   Palette values come straight from alas/reporting/theme.py (dark is the
+   DEFAULT_THEME); the derived shades (input_bg, hover_bg, muted, card_header,
+   sidebar_sel_bg, accent_hover/pressed, ...) are precomputed with the exact
+   same _shade(hex, delta) math the Qt stylesheet_for() helper uses, so the web
+   shell matches the Qt chrome pixel-for-pixel. Component rules below mirror
+   stylesheet_for()'s QSS section-by-section.
+   ========================================================================= */
+
+:root,
+:root[data-theme="dark"] {
+  --bg: #1e1e1e;
+  --panel: #262a31;
+  --border: #363b44;
+  --spine: #555555;
+  --tick: #cccccc;
+  --title: #ffffff;
+  --accent: #4f8cff;
+
+  --input-bg: #32363d;      /* shade(panel, +12) */
+  --input-bg-card: #32363d; /* shade(card_bg, +12) */
+  --disabled: #c3c3c3;      /* shade(title, -60) */
+  --hover-bg: #383c43;      /* shade(panel, +18) */
+  --sidebar-sel-bg: #00289b;/* shade(accent, -100) */
+  --card-bg: #262a31;
+  --card-header: #2e3239;   /* shade(panel, +8) */
+  --muted: #afafaf;         /* shade(title, -80) */
+  --sidebar-bg: #282828;    /* shade(bg, +10) */
+  --accent-hover: #63a0ff;  /* shade(accent, +20) */
+  --accent-pressed: #3b78eb;/* shade(accent, -20) */
+  --card-border: #3c414a;   /* shade(border, +6) */
+  --log-bg: #242424;        /* shade(bg, +6) */
+  --danger: #ff4d4d;
+  --warn: #e0a555;
+}
+
+:root[data-theme="grey"] {
+  --bg: #3a3a3a;
+  --panel: #41454c;
+  --border: #565b63;
+  --spine: #777777;
+  --tick: #dddddd;
+  --title: #ffffff;
+  --accent: #6aa2ff;
+
+  --input-bg: #4d5158;
+  --input-bg-card: #4d5158;
+  --disabled: #c3c3c3;
+  --hover-bg: #53575e;
+  --sidebar-sel-bg: #063e9b;
+  --card-bg: #41454c;
+  --card-header: #494d54;
+  --muted: #afafaf;
+  --sidebar-bg: #444444;
+  --accent-hover: #7eb6ff;
+  --accent-pressed: #568eeb;
+  --card-border: #5c6169;
+  --log-bg: #404040;
+  --danger: #ff4d4d;
+  --warn: #e0a555;
+}
+
+:root[data-theme="light"] {
+  --bg: #ffffff;
+  --panel: #f4f5f7;
+  --border: #dfe2e8;
+  --spine: #333333;
+  --tick: #333333;
+  --title: #000000;
+  --accent: #2563eb;
+
+  --input-bg: #eeeff1;
+  --input-bg-card: #ecedf0;
+  --disabled: #7a7a7a;
+  --hover-bg: #e8e9eb;
+  --sidebar-sel-bg: rgba(37, 99, 235, 0.14);
+  --card-bg: #f4f5f7;
+  --card-header: #eeeff1;
+  --muted: #5f6672;
+  --sidebar-bg: #fbfbfb;
+  --accent-hover: #3b78ef;
+  --accent-pressed: #1d4fd0;
+  --card-border: #dbdee4;
+  --log-bg: #f7f8fa;
+  --danger: #d93636;
+  --warn: #b06a12;
+}
+
+* { box-sizing: border-box; }
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background-color: var(--bg);
+  color: var(--title);
+  font-family: "Segoe UI", "Inter", "Helvetica Neue", Arial, sans-serif;
+  font-size: 13px;
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+::selection {
+  background: var(--accent);
+  color: #ffffff;
+}
+
+/* ---- Scrollbars (slim but visible, QScrollBar) ---------------------------- */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 4px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+*::-webkit-scrollbar-thumb:hover { background: var(--accent); background-clip: padding-box; }
+
+/* ========================================================================= */
+/* Inputs                                                                     */
+/* ========================================================================= */
+input[type="text"],
+input[type="number"],
+select,
+textarea,
+.af-input {
+  background-color: var(--input-bg);
+  color: var(--title);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 8px;
+  min-height: 26px;
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+}
+input[type="text"]:focus,
+input[type="number"]:focus,
+select:focus,
+textarea:focus,
+.af-input:focus {
+  border-color: var(--accent);
+}
+input:disabled, select:disabled, textarea:disabled {
+  color: var(--disabled);
+  background-color: color-mix(in srgb, var(--input-bg) 90%, #000);
+}
+input.af-error, select.af-error { border-color: var(--danger); }
+
+select {
+  appearance: none;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--muted) 50%),
+    linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+  background-position: calc(100% - 15px) 50%, calc(100% - 10px) 50%;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+  padding-right: 26px;
+}
+
+/* ========================================================================= */
+/* Buttons                                                                    */
+/* ========================================================================= */
+button, .af-btn {
+  background-color: var(--panel);
+  color: var(--title);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 7px 16px;
+  font-weight: 500;
+  font-size: 13px;
+  font-family: inherit;
+  min-height: 30px;
+  cursor: pointer;
+  transition: background-color 0.12s, border-color 0.12s;
+}
+button:hover, .af-btn:hover {
+  background-color: var(--hover-bg);
+  border-color: var(--accent);
+}
+button:active, .af-btn:active {
+  background-color: var(--accent-pressed);
+  border-color: var(--accent);
+  color: #fff;
+}
+button:disabled, .af-btn:disabled {
+  color: var(--disabled);
+  border-color: var(--border);
+  cursor: default;
+  opacity: 0.7;
+}
+button:disabled:hover { background-color: var(--panel); border-color: var(--border); }
+
+.af-btn-primary {
+  background-color: var(--accent);
+  color: #ffffff;
+  border: none;
+  font-weight: 600;
+}
+.af-btn-primary:hover { background-color: var(--accent-hover); border: none; }
+.af-btn-primary:active { background-color: var(--accent-pressed); }
+.af-btn-primary:disabled { background-color: var(--accent); opacity: 0.5; }
+
+/* ========================================================================= */
+/* Group box (card)                                                           */
+/* ========================================================================= */
+.af-card {
+  position: relative;
+  background-color: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 10px;
+  padding: 20px 14px 14px 14px;
+  margin-top: 14px;
+}
+.af-card > .af-card-title {
+  position: absolute;
+  top: -9px;
+  left: 20px;
+  padding: 2px 10px;
+  background: var(--card-bg);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+/* Checkboxes */
+.af-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  user-select: none;
+}
+.af-check input[type="checkbox"] {
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  min-height: 16px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--input-bg);
+  display: inline-grid;
+  place-content: center;
+  cursor: pointer;
+  padding: 0;
+}
+.af-check input[type="checkbox"]:hover { border-color: var(--accent); }
+.af-check input[type="checkbox"]:checked { background: var(--accent); border-color: var(--accent); }
+.af-check input[type="checkbox"]:checked::after {
+  content: "";
+  width: 4px;
+  height: 8px;
+  border: solid #fff;
+  border-width: 0 2px 2px 0;
+  transform: translateY(-1px) rotate(45deg);
+}
+
+/* Range slider (weight_slider) */
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  background: var(--border);
+  border-radius: 3px;
+  outline: none;
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
+  border: none;
+}
