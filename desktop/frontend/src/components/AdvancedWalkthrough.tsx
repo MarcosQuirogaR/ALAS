@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodríguez
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useT } from "../lib/i18n";
 
@@ -251,6 +251,7 @@ export function AdvancedWalkthrough({ onClose }: { onClose: () => void }) {
     () => CHAPTERS.find((c) => c.id === activeId) ?? CHAPTERS[0],
     [activeId]
   );
+  const contentRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -259,6 +260,13 @@ export function AdvancedWalkthrough({ onClose }: { onClose: () => void }) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
+
+  // Switching chapters (via the nav rail or Next/Back) should always land at
+  // the top of the new chapter, not wherever the previous one left the
+  // scroll position.
+  useEffect(() => {
+    contentRef.current?.scrollTo({ top: 0 });
+  }, [activeId]);
 
   const index = CHAPTERS.findIndex((c) => c.id === activeId);
 
@@ -295,7 +303,7 @@ export function AdvancedWalkthrough({ onClose }: { onClose: () => void }) {
             ))}
           </nav>
 
-          <article className="af-guide-content">
+          <article className="af-guide-content" ref={contentRef}>
             <h2 className="af-guide-title">{t(active.title)}</h2>
             {active.sections.map((s) => (
               <section key={s.heading} className="af-guide-section">

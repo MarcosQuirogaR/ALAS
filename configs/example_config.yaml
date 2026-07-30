@@ -32,7 +32,7 @@ requirements:
 # CG-envelope compliance, not a simplified/lumped stand-in).
 # cabin:
 #   passenger:                   # used when aircraft_type = passenger
-#     # Class mix — a class with count 0 is absent. If ALL counts are 0 the
+#     # Class mix -- a class with count 0 is absent. If ALL counts are 0 the
 #     # engine builds a single economy cabin of requirements.num_passengers.
 #     first:    {count: 8}
 #     business: {count: 42}
@@ -43,7 +43,7 @@ requirements:
 #     main_deck_uld: PMC
 #     lower_deck_uld: LD3
 #     loading_strategy: target_cg   # target_cg | min_pallets | door_proximity | uniform
-#     target_cg_pct_mac: 25.0       # <= 0 → auto-centre
+#     target_cg_pct_mac: 25.0       # <= 0 -> auto-centre
 
 # ---- OPTIMIZER BEHAVIOUR (optional) -----------------------------------------
 optimizer:

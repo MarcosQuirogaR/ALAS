@@ -210,7 +210,7 @@ def neutral_point(
     x_np_vlm = x_cg + sm_vlm * c_ref
 
     # Tail dynamic-pressure efficiency: scale the tail's (NP-aft) contribution.
-    # Wing-alone NP ≈ wing aerodynamic centre; the rest is the tail's doing.
+    # Wing-alone NP ~ wing aerodynamic centre; the rest is the tail's doing.
     wing = next((w for w in airplane.wings if w.name == "Main Wing"), airplane.wings[0])
     x_wing_ac = float(wing.aerodynamic_center()[0])
     eta_t = analysis.tail_efficiency

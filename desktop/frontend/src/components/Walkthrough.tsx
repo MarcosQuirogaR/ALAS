@@ -55,7 +55,7 @@ export const TOUR_STEPS: TourStep[] = [
   {
     title: "Help on every option",
     body:
-      "Hover the ⓘ next to any field or option for a plain-language explanation, and open a page's “How this works” panel for the full method behind it. Prefer a leaner screen? Toggle View ▸ Learn-more help to hide these instantly.",
+      "Hover any field's label for a plain-language explanation, and open a page's “How this works” panel for the full method behind it. Prefer a leaner screen? Toggle View ▸ Learn-more help to hide these instantly.",
     selector: ".af-content",
     page: "drag_model",
   },

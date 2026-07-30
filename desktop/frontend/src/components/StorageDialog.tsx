@@ -154,7 +154,8 @@ export function StorageDialog({ onClose }: { onClose: () => void }) {
                       onChange={(e) =>
                         setSelected((prev) => {
                           const next = new Set(prev);
-                          e.target.checked ? next.add(item.id) : next.delete(item.id);
+                          if (e.target.checked) next.add(item.id);
+                          else next.delete(item.id);
                           return next;
                         })
                       }
