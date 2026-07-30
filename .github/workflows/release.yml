@@ -96,6 +96,16 @@ jobs:
           path: artifacts
           merge-multiple: true
 
+      # CHANGELOG.md's whole history isn't the right release body -- just
+      # this tag's own section (everything between its "## [x.y.z]" heading
+      # and the next one, or EOF for the newest entry). Using the full file
+      # previously leaked the changelog's own preamble (the Keep a Changelog/
+      # SemVer blurb) into both the GitHub release body and the site's
+      # release-notes card, which reads the first few lines of it.
+      - name: Extract this version's changelog section
+        run: |
+          awk '/^## \[/{c++; if(c==2) exit; if(c==1) next} c==1' CHANGELOG.md > release-notes.md
+
       # ALAS-site/src/components/Downloads.tsx links to this repo's own
       # releases/latest/download/ALAS-windows.exe, so the default
       # repository-scoped GITHUB_TOKEN is enough -- no cross-repo PAT needed.
@@ -103,6 +113,6 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: artifacts/*
-          body_path: CHANGELOG.md
+          body_path: release-notes.md
           draft: true # reviewed before it goes live
           generate_release_notes: false
