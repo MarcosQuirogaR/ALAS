@@ -3,7 +3,7 @@
 ## Windows
 
 Download the executable from the
-[downloads page](/ALAS-site/#download) and run it. There is no
+[downloads page](/#download) and run it. There is no
 installer and no separate runtime to fetch: the whole analysis stack is
 inside the file.
 
@@ -82,7 +82,7 @@ it. You will need Python 3.10 or newer.
     ```
 
 Running with no arguments opens the same application the executable does.
-[Running ALAS](running-aeroforge.md) covers the command-line and
+[Running ALAS](running-alas.md) covers the command-line and
 library interfaces, which exist only in a source checkout.
 
 Optional dependency groups:

@@ -6,14 +6,14 @@ export default function Colophon() {
       <div className="mx-auto max-w-[68rem] px-6 py-12">
         <div className="flex flex-col gap-6 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-2.5">
-            <img src="/ALAS-site/brand/icon.png" alt="" className="h-6 w-6" />
+            <img src="/brand/icon.png" alt="" className="h-6 w-6" />
             <span className="font-serif text-[1rem] font-semibold text-fg-strong">
               ALAS
             </span>
           </div>
 
           <nav className="flex flex-wrap gap-x-7 gap-y-2 text-[0.86rem] text-fg-dim">
-            <a href="/ALAS-site/docs/" className="transition-colors hover:text-fg-strong">
+            <a href="/docs/" className="transition-colors hover:text-fg-strong">
               Documentation
             </a>
             <a
@@ -23,12 +23,12 @@ export default function Colophon() {
               Releases
             </a>
             <a
-              href="/ALAS-site/docs/troubleshooting/"
+              href="/docs/troubleshooting/"
               className="transition-colors hover:text-fg-strong"
             >
               Support
             </a>
-            <a href="/ALAS-site/acknowledgements/" className="transition-colors hover:text-fg-strong">
+            <a href="/acknowledgements/" className="transition-colors hover:text-fg-strong">
               Acknowledgements
             </a>
           </nav>

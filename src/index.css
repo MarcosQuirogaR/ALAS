@@ -3,8 +3,8 @@
 /*
  * ALAS dark system.
  *
- * A deep neutral ground with a faint warm cast, text set below pure white so
- * long reading doesn't glare, and a single terracotta accent. IBM Plex
+ * A deep neutral ground, text set below pure white so long reading doesn't
+ * glare, and a single sky-blue accent sampled from the logo. IBM Plex
  * throughout: serif for display, sans for reading, mono for data.
  */
 
@@ -26,10 +26,10 @@
   --color-rule: #262a31;
   --color-rule-strong: #363c45;
 
-  /* One accent. Warm, so it reads as a signal rather than as neon. */
-  --color-accent: #d2694a;
-  --color-accent-bright: #e78561;
-  --color-accent-dim: #6b3323;
+  /* One accent, sampled from the ALAS logo's wing-tip blue. */
+  --color-accent: #3bafde;
+  --color-accent-bright: #6fcbec;
+  --color-accent-dim: #14417c;
 }
 
 html {

@@ -1,6 +1,6 @@
 # ALAS: site
 
-Public web presence for [ALAS](https://marcosquirogar.github.io/ALAS-site/),
+Public web presence for [ALAS](https://alas.uvigo.es/),
 an aircraft preliminary-design pipeline. This repo holds the public
 website and documentation; the application source and release binaries live
 in the separate [MarcosQuirogaR/ALAS](https://github.com/MarcosQuirogaR/ALAS)
@@ -12,7 +12,7 @@ Two things live here:
   + Framer Motion, served at the site root.
 - **Documentation** (`docs-site/`): MkDocs + Material, a 25-chapter guide
   built around the AVE reference case, served at
-  [`/docs/`](https://marcosquirogar.github.io/ALAS-site/docs/). Every
+  [`/docs/`](https://alas.uvigo.es/docs/). Every
   figure in it comes from a real ALAS run.
 
 ## Develop

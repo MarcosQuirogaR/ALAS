@@ -4,14 +4,23 @@ const RELEASES_URL = 'https://github.com/MarcosQuirogaR/ALAS/releases'
 
 /** Release bodies are Markdown. Rather than pull in a renderer (and an HTML
  *  injection surface) for a few bullet points, take the first handful of
- *  lines, strip leading list markers, and render them as plain text. */
+ *  lines, strip the markup a changelog actually uses, and render as plain
+ *  text: list markers, **bold**, `code` spans, and [links](url) (kept as
+ *  their visible text -- a plain-text summary can't offer them as links
+ *  anyway). */
 function summarise(body: string, maxLines = 4): string[] {
   return body
     .split('\n')
     .map((l) => l.trim())
     .filter((l) => l.length > 0 && !l.startsWith('#'))
     .slice(0, maxLines)
-    .map((l) => l.replace(/^[-*•]\s*/, ''))
+    .map((l) =>
+      l
+        .replace(/^[-*•]\s*/, '')
+        .replace(/\*\*(.+?)\*\*/g, '$1')
+        .replace(/`([^`]+)`/g, '$1')
+        .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    )
 }
 
 export default function ReleaseNotes() {

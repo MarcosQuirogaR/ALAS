@@ -13,7 +13,7 @@ export default function Hero() {
           Acknowledgements. Positioned so the aircraft sits in the right-hand
           third, which the veil deliberately leaves clear. */}
       <img
-        src="/ALAS-site/brand/hero.jpg"
+        src="/brand/hero.jpg"
         alt=""
         aria-hidden="true"
         className="absolute inset-0 -z-20 h-full w-full object-cover object-[72%_42%]"
@@ -31,9 +31,8 @@ export default function Hero() {
         </h1>
 
         <p className="mt-7 max-w-[46ch] text-[1.08rem] leading-[1.6] text-fg">
-          A desktop application that sizes an aircraft against the mission you
-          give it, then analyses the result across every discipline that
-          decides whether the design actually works.
+          The desktop application that sizes an aircraft against the mission
+          you design.
         </p>
 
         <div className="mt-10 flex flex-col gap-4 sm:flex-row sm:items-center">
@@ -51,7 +50,7 @@ export default function Hero() {
           </a>
 
           <a
-            href="/ALAS-site/docs/"
+            href="/docs/"
             className="inline-flex items-center justify-center border border-rule-strong px-7 py-4 font-semibold text-fg-strong transition-colors hover:border-accent hover:text-accent-bright"
           >
             Read the documentation
@@ -59,7 +58,7 @@ export default function Hero() {
         </div>
 
         <p className="mt-6 font-mono text-[0.72rem] uppercase tracking-[0.13em] text-fg-dim">
-          Free · No account · Runs offline · Windows &amp; Linux
+          Free · Open source · Runs offline · Windows &amp; Linux
         </p>
       </div>
     </section>

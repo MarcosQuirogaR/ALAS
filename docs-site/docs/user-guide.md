@@ -25,11 +25,12 @@ Many pages also show a **live preview** beside the form: a small chart that
 redraws as you edit, so you can see the effect of a change without starting a
 run.
 
-!!! tip "The ⓘ markers are the real reference"
-    Nearly every field in the application carries an information marker with
-    its own explanation, written against the code that consumes it. Pages that
-    need more than a sentence also have a collapsible **How this works**
-    panel. This guide is the map; those markers are the territory.
+!!! tip "Field labels are the real reference"
+    Hover (or focus) almost any field's label in the application for its own
+    explanation, written against the code that consumes it -- no separate icon,
+    the label itself is the hover target. Pages that need more than a sentence
+    also have a collapsible **How this works** panel. This guide is the map;
+    those labels are the territory.
 
 ---
 

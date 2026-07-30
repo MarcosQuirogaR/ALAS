@@ -1,6 +1,6 @@
 /* Absolute so the header behaves identically on the landing page and on
    any standalone page that reuses it. */
-const BASE = '/ALAS-site/'
+const BASE = '/'
 
 const LINKS = [
   { href: `${BASE}#overview`, label: 'Overview' },
@@ -14,7 +14,7 @@ export default function Masthead() {
     <header className="sticky top-0 z-50 border-b border-rule bg-base/90 backdrop-blur-md">
       <div className="mx-auto flex max-w-[68rem] items-center justify-between gap-6 px-6 py-3.5">
         <a href={BASE} className="flex items-center gap-2.5">
-          <img src="/ALAS-site/brand/icon.png" alt="" className="h-7 w-7" />
+          <img src="/brand/icon.png" alt="" className="h-7 w-7" />
           <span className="font-serif text-[1.06rem] font-semibold tracking-[-0.01em] text-fg-strong">
             ALAS
           </span>

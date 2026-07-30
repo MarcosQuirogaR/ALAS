@@ -1,21 +1,21 @@
 const ENTRIES = [
   {
-    href: '/ALAS-site/docs/installation/',
+    href: '/docs/installation/',
     title: 'Installation',
     body: 'Getting it running, the optional extras, and the one-time setup for mission analysis.',
   },
   {
-    href: '/ALAS-site/docs/user-guide/',
+    href: '/docs/user-guide/',
     title: 'User guide',
     body: 'Every page, control and action in the application, with a suggested first session.',
   },
   {
-    href: '/ALAS-site/docs/meet-ave/',
+    href: '/docs/meet-ave/',
     title: 'Worked example',
     body: 'One aircraft carried through the whole pipeline, with its results explained.',
   },
   {
-    href: '/ALAS-site/docs/architecture/',
+    href: '/docs/architecture/',
     title: 'How it works inside',
     body: 'The internals: layering, fidelity levels, and what happens during a run.',
   },
@@ -31,7 +31,7 @@ export default function Documentation() {
           <h2 className="font-serif text-[1.85rem] font-semibold leading-[1.2] tracking-[-0.015em] text-fg-strong">
             Learn how to use it
           </h2>
-          <a href="/ALAS-site/docs/" className="prose-link text-[0.92rem]">
+          <a href="/docs/" className="prose-link text-[0.92rem]">
             Browse the full documentation →
           </a>
         </div>

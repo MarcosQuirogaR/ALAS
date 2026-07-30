@@ -62,13 +62,12 @@ export default function Downloads() {
 
         <div className="mt-8 flex flex-col gap-2 text-[0.86rem] leading-[1.6] text-fg-dim">
           <p>
-            Windows will show a SmartScreen prompt the first time, because the
-            build isn&rsquo;t code-signed yet, so choose{' '}
+            Windows may show a SmartScreen prompt the first time, so choose{' '}
             <span className="text-fg">More info → Run anyway</span>.
           </p>
           <p>
             Prefer to run from source, or on another platform? See the{' '}
-            <a href="/ALAS-site/docs/installation/" className="prose-link">
+            <a href="/docs/installation/" className="prose-link">
               installation guide
             </a>
             .

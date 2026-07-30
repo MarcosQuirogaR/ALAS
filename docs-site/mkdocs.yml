@@ -2,7 +2,7 @@ site_name: ALAS Docs
 site_description: >-
   A complete, hands-on guide to ALAS, told through one aircraft: AVE,
   the built-in long-range reference design.
-site_url: https://marcosquirogar.github.io/ALAS-site/docs/
+site_url: https://alas.uvigo.es/docs/
 repo_url: https://github.com/MarcosQuirogaR/ALAS
 site_dir: site
 docs_dir: docs
@@ -91,7 +91,7 @@ nav:
       - Mission requirements: mission-requirements.md
       - Cabin & payload: cabin-and-payload.md
       - Design space & optimizer: design-space-and-optimizer.md
-      - Running ALAS: running-aeroforge.md
+      - Running ALAS: running-alas.md
       - Optimization results: optimization-results.md
       - Aerodynamic analysis: aerodynamic-analysis.md
       - Transonic section analysis: transonic-analysis.md

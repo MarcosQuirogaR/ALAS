@@ -1,4 +1,4 @@
-name: Deploy to GitHub Pages
+name: Deploy
 
 on:
   push:
@@ -38,6 +38,46 @@ jobs:
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist
+
+      # alas.uvigo.es is provisioned as a University of Vigo webs9 hosting
+      # account: SFTP only, no shell (so rsync/scp, which need a remote
+      # command, aren't options), and the session is chrooted to the vhost
+      # root -- what's really /var/www/vhosts/alas/public/ on their
+      # filesystem is just /public/ from inside this session. Deployed here
+      # too, independent of whether GitHub Pages' custom-domain DNS ever
+      # gets configured, so the university domain works without depending
+      # on that.
+      #
+      # Plain `sftp put -r` (via third-party actions or otherwise) turned
+      # out unreliable here: with a glob source it refuses a destination it
+      # can't already prove is a directory, and even once past that, `-r`
+      # into a not-yet-existing remote subdirectory fails to canonicalize
+      # instead of creating it. Building an explicit batch (-mkdir for
+      # every directory, then put for every file) sidesteps both.
+      #
+      # `-o BatchMode=no` is load-bearing: OpenSSH's sftp implicitly sets
+      # BatchMode=yes whenever -b is used, which disables password/
+      # keyboard-interactive auth entirely -- with it left at the default,
+      # every attempt failed "Permission denied (password)" even with a
+      # verified byte-for-byte correct password (confirmed via a SHA-256
+      # comparison against a manual, non-batch login that worked fine).
+      # That manual login was the tell: identical credentials, identical
+      # network origin, the only difference was -b, which is what actually
+      # broke it, not an IP restriction as first suspected.
+      - name: Deploy to webs9 (alas.uvigo.es)
+        if: ${{ vars.WEBS9_SFTP_ENABLED == 'true' }}
+        env:
+          SSHPASS: ${{ secrets.WEBS9_SFTP_PASSWORD }}
+        run: |
+          cd dist
+          {
+            find . -mindepth 1 -type d | sed 's|^\./||' | awk '{print "-mkdir \"/public/" $0 "\""}'
+            find . -type f | sed 's|^\./||' | awk '{print "put \"" $0 "\" \"/public/" $0 "\""}'
+          } > sftp-batch.txt
+          docker run --rm -e SSHPASS -v "$PWD":/work -w /work alpine:3.19 sh -c '
+            apk add --no-cache openssh-client sshpass >/dev/null &&
+            sshpass -e sftp -o StrictHostKeyChecking=no -o BatchMode=no -P 22 -b sftp-batch.txt alas@webs9.uvigo.es
+          '
 
   deploy:
     needs: build

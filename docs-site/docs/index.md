@@ -1,6 +1,6 @@
 # ALAS documentation
 
-ALAS, Aircraft Layout, Analysis and Sizing, sizes an aircraft against a
+ALAS (Aircraft Layout, Analysis and Sizing) sizes an aircraft against a
 mission and then analyses what it came up with. You supply the
 requirements: how fast, how high, how heavy, how many passengers. It
 searches the geometry for something that meets them, and puts the result
