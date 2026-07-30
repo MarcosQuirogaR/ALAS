@@ -1,0 +1,926 @@
+/* =========================================================================
+   Layout for the ALAS desktop shell:
+   a menu bar on top, a left nav tree, a central stacked content area with a
+   right "3D Live Preview" dock, a bottom "Run Log" dock, and a bottom control
+   bar (DOE Sample / Surprise | Analyze baseline / Run / progress / status).
+   ========================================================================= */
+
+.af-window {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+/* ---- Menu bar ------------------------------------------------------------ */
+.af-menubar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 34px;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+  flex: 0 0 auto;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.af-menubar .af-brand {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-weight: 700;
+  font-size: 13px;
+  margin-right: 10px;
+  padding-left: 2px;
+}
+.af-menubar .af-brand img { width: 16px; height: 16px; }
+.af-menu {
+  position: relative;
+}
+.af-menu > .af-menu-label {
+  padding: 5px 11px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+}
+.af-menu:hover > .af-menu-label,
+.af-menu.open > .af-menu-label { background: var(--hover-bg); }
+.af-menu-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  min-width: 210px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 4px 0;
+  z-index: 200;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+.af-menu-item {
+  padding: 6px 14px;
+  margin: 1px 4px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  white-space: nowrap;
+}
+.af-menu-item:hover { background: var(--accent); color: #fff; }
+.af-menu-item.disabled { opacity: 0.42; cursor: default; }
+.af-menu-item.disabled:hover { background: transparent; color: var(--title); }
+.af-menu-item .af-check-mark { opacity: 0.9; }
+.af-menu-sep { height: 1px; background: var(--border); margin: 4px 8px; }
+
+/* ---- Body: nav | content | preview -------------------------------------- */
+.af-body {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* Nav sidebar — hover-expand rail.
+   Collapsed it's a thin accent strip; hovering slides the full tree out as an
+   overlay above the content, with a short delay before it collapses again. */
+.af-nav-wrap {
+  position: relative;
+  flex: 0 0 8px;
+  width: 8px;
+  align-self: stretch;
+  z-index: 60;
+  transition: flex-basis 180ms ease, width 180ms ease;
+}
+/* Pinned: the rail becomes a real, space-occupying column (the panel inside is
+   absolutely positioned, so only the wrapper can reserve layout space). Without
+   this the pinned panel simply covered the content pane -- menus, headers and
+   form fields sat underneath it and were unreachable. */
+.af-nav-wrap.pinned {
+  flex: 0 0 232px;
+  width: 232px;
+}
+.af-nav {
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 232px;
+  background: var(--sidebar-bg);
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 8px 4px;
+  transform: translateX(-224px);
+  transition: transform 180ms ease, box-shadow 180ms ease;
+  transition-delay: 360ms;
+  box-shadow: none;
+}
+.af-nav::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--accent);
+  opacity: 0.55;
+}
+.af-nav:hover {
+  transform: translateX(0);
+  transition-delay: 0ms;
+  box-shadow: 6px 0 26px rgba(0, 0, 0, 0.38);
+}
+.af-nav:hover::after { opacity: 0; }
+.af-nav.pinned {
+  transform: translateX(0);
+  transition-delay: 0ms;
+}
+.af-nav.pinned::after { opacity: 0; }
+.af-nav-group {
+  padding: 10px 12px 4px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--title);
+}
+.af-nav-subgroup {
+  padding: 8px 12px 2px 20px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--muted);
+}
+.af-nav-item {
+  padding: 8px 12px;
+  margin: 2px 6px 2px 14px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--title);
+  white-space: nowrap;
+}
+.af-nav-item.sub { margin-left: 24px; }
+.af-nav-item:hover { background: var(--hover-bg); }
+.af-nav-item.active {
+  background: var(--sidebar-sel-bg);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* Center + preview split */
+.af-center {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.af-content-row {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.af-content {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: auto;
+  /* No TOP padding on the scroll container itself. A sticky child (the Results
+     tab strip, position: sticky; top: 0) pins relative to this padded
+     scrollport, so a top padding here left a ~16px band ABOVE the pinned bar
+     that scrolled figures painted through -- the reported "gap between the top
+     and the selector, readable figures through it". Sides + bottom stay; the
+     top breathing room for normal pages is restored on the direct child below,
+     and the Results root zeroes it so its sticky bar pins flush. Zoom-safe:
+     no negative-margin/padding cancellation for Chromium to round apart. */
+  padding: 0 20px 16px 20px;
+  background: var(--bg);
+}
+/* Normal pages: the top breathing room the scroll container used to provide. */
+.af-content > * { padding-top: 16px; }
+/* Results: zero top pad so the sticky tab strip pins flush to the very top,
+   with nothing above it that could bleed through (higher specificity wins). */
+.af-content > .af-results-root { padding-top: 0; }
+
+/* Right preview dock */
+.af-dock {
+  position: relative;
+  flex: 0 0 var(--dock-w, 320px);
+  width: var(--dock-w, 320px);
+  min-width: 240px;
+  border-left: 1px solid var(--border);
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.af-dock-title {
+  background: var(--panel);
+  border-bottom: 2px solid var(--accent);
+  padding: 6px 10px;
+  font-weight: 600;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.af-dock-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 11px;
+  text-transform: none;
+  letter-spacing: normal;
+  font-weight: 500;
+}
+.af-dock-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.af-dock-resizer {
+  position: absolute;
+  left: -3px;
+  top: 0;
+  bottom: 0;
+  width: 6px;
+  cursor: col-resize;
+  z-index: 5;
+}
+
+/* Floating (undocked) 3D Live Preview -- a portal'd, fixed-position panel the
+   user can drag by its title bar and resize from its bottom-right corner,
+   the web-app equivalent of the old Qt QDockWidget's floating mode. */
+.af-dock-float {
+  position: fixed;
+  z-index: 5000;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+}
+.af-dock-float-title {
+  background: var(--panel);
+  border-bottom: 2px solid var(--accent);
+  padding: 6px 10px;
+  font-weight: 600;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  cursor: move;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.af-dock-float-resizer {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 16px;
+  height: 16px;
+  cursor: nwse-resize;
+  z-index: 5;
+}
+.af-dock-float-resizer::after {
+  content: "";
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  width: 8px;
+  height: 8px;
+  border-right: 2px solid var(--border);
+  border-bottom: 2px solid var(--border);
+}
+
+/* Preview zoom button row */
+.af-preview-btns { display: flex; gap: 6px; }
+.af-preview-btns button { flex: 1; padding: 6px 4px; font-size: 12px; }
+
+/* ---- Tabs (underline style, QTabBar) ------------------------------------- */
+.af-tabs {
+  display: flex;
+  gap: 2px;
+  border-bottom: 1px solid var(--border);
+  flex: 0 0 auto;
+}
+/* Results screen's tab strip: pinned to the top of the scrolling content
+   area so switching discipline tabs never requires scrolling back up past
+   a long figure grid first. An opaque background is needed since sticky
+   content otherwise has scrolled-past figures showing through underneath.
+   `position: sticky; top: 0` on its own only clamps the box to the
+   scrollport's top edge once scrolling starts -- no negative-margin/padding
+   "bleed" pairing and no gap-filling pseudo-element (both removed; see git
+   history). That pairing relied on a negative margin and an equal-and-
+   opposite padding exactly cancelling out, which is exactly the kind of
+   sub-pixel arithmetic Chromium's sticky-position code and its compositor
+   have been known to round independently (crbug 401693546) -- more visible
+   here since the whole UI is scaled via the non-standard CSS `zoom`
+   property (see App.tsx's zoom feature), and it was the reported cause of
+   the tab strip overlapping the Summary tab's own text/figures at some zoom
+   levels. Plain sticky-to-the-scrollport-edge can't overlap anything: it
+   only ever clamps to a position content flows into normally. */
+.af-tabs.sticky {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--bg);
+}
+.af-tab {
+  padding: 8px 16px;
+  color: var(--muted);
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  font-weight: 500;
+  font-size: 13px;
+  margin-bottom: -1px;
+}
+.af-tab:hover:not(.active) { color: var(--title); border-bottom-color: var(--border); }
+.af-tab.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+
+/* ---- Run Log dock (bottom) ---------------------------------------------- */
+.af-logdock {
+  flex: 0 0 auto;
+  height: var(--log-h, 140px);
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  position: relative;
+}
+.af-logdock-title {
+  padding: 5px 10px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--muted);
+  border-bottom: 1px solid var(--border);
+}
+.af-logdock-resizer {
+  position: absolute;
+  top: -3px; left: 0; right: 0;
+  height: 6px;
+  cursor: row-resize;
+  z-index: 5;
+}
+.af-log {
+  flex: 1 1 auto;
+  overflow: auto;
+  margin: 6px 8px 8px 8px;
+  background: var(--log-bg);
+  color: var(--title);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-family: "Cascadia Mono", "Consolas", monospace;
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.af-log .err { color: #ff6b6b; }
+.af-log .warn { color: var(--warn); }
+
+/* ---- Control bar (bottom) ----------------------------------------------- */
+.af-controlbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--border);
+  background: var(--bg);
+  flex: 0 0 auto;
+}
+.af-controlbar .sep {
+  width: 1px;
+  align-self: stretch;
+  background: var(--border);
+  margin: 2px 4px;
+}
+.af-progress {
+  flex: 1 1 auto;
+  height: 8px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  overflow: hidden;
+}
+.af-progress .bar {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 4px;
+  transition: width 0.2s;
+}
+.af-progress.indeterminate .bar {
+  width: 35% !important;
+  border-radius: 4px;
+  animation: af-indet 1.2s ease-in-out infinite;
+}
+@keyframes af-indet {
+  0%   { margin-left: -35%; }
+  100% { margin-left: 100%; }
+}
+.af-stage { font-size: 12px; color: var(--muted); white-space: nowrap; }
+.af-status { font-size: 13px; color: var(--title); white-space: nowrap; min-width: 48px; }
+
+/* ---- Page header (advanced screens) ------------------------------------- */
+.af-page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+.af-page-desc {
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.5;
+  max-width: 900px;
+}
+.af-page-title { font-size: 18px; font-weight: 700; margin: 0 0 6px 0; }
+
+/* ---- Form rows ----------------------------------------------------------- */
+.af-form-row {
+  display: grid;
+  /* `minmax(0, 300px)` not `minmax(200px, 300px)`: a fixed 200px lower bound
+     defeats CSS Grid's automatic overflow-preventing minimum, so a long
+     unbroken label token could render wider than the 300px upper bound and
+     spill visually into the control column instead of ever being allowed to
+     shrink. `0` restores the normal min-content clamp; the label itself
+     truncates with an ellipsis (below) rather than wrapping/overflowing. */
+  grid-template-columns: minmax(0, 300px) 1fr;
+  align-items: center;
+  gap: 12px;
+  padding: 5px 0;
+}
+.af-form-row > .af-form-label {
+  color: var(--title);
+  font-size: 13px;
+  /* Compress instead of overflowing; the full text is still one hover away
+     via the native `title` tooltip DynamicForm sets on this element. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.af-form-row .af-input,
+.af-form-row input,
+.af-form-row select { width: 100%; max-width: 420px; }
+.af-advanced-toggle {
+  margin: 12px 0 6px 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: none;
+  color: var(--accent);
+  font-weight: 600;
+  padding: 4px 0;
+  cursor: pointer;
+  min-height: 0;
+}
+.af-advanced-toggle:hover { background: transparent; border: none; text-decoration: underline; }
+.af-fieldset {
+  border: 1px solid var(--card-border);
+  border-radius: 8px;
+  padding: 8px 12px 10px 12px;
+  margin: 10px 0;
+}
+.af-fieldset > legend {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  padding: 0 6px;
+}
+
+/* ---- Design space + generic tables -------------------------------------- */
+.af-table { border-collapse: collapse; width: 100%; font-size: 13px; }
+.af-table th {
+  text-align: left;
+  background: var(--panel);
+  color: var(--title);
+  border: 1px solid var(--border);
+  padding: 7px 10px;
+  font-weight: 600;
+  font-size: 12px;
+  position: sticky;
+  top: 0;
+}
+.af-table td {
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  vertical-align: middle;
+}
+.af-table tbody tr:nth-child(even) { background: color-mix(in srgb, var(--hover-bg) 45%, transparent); }
+.af-table tbody tr.af-row-selected { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+.af-table td.desc { color: var(--muted); }
+.af-table input[type="number"] { width: 100%; min-height: 24px; padding: 3px 6px; }
+
+/* ---- Stat tile (StatTile.tsx): a labeled headline number ------------------
+   Shared by the Summary tab and the Field Performance tab so both present
+   their numbers the same way instead of one being ad hoc inline styles and
+   the other a plain table. */
+.af-stat-tile { background: var(--panel); border-radius: 8px; padding: 10px 14px; }
+.af-stat-tile .af-stat-value { font-size: 20px; font-weight: 700; margin-top: 2px; }
+
+/* ---- Chart card ---------------------------------------------------------- */
+.af-chart {
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 8px;
+  padding: 8px;
+}
+.af-chart-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 4px;
+  padding: 0 2px;
+}
+
+/* ---- Misc ---------------------------------------------------------------- */
+.af-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.5;
+  padding: 20px;
+  height: 100%;
+  min-height: 120px;
+  gap: 6px;
+}
+.af-issue-list { list-style: none; margin: 6px 0 0 0; padding: 0; }
+.af-issue-list li { padding: 3px 0; font-size: 12.5px; }
+.af-issue-list li.error { color: #ff6b6b; }
+.af-issue-list li.warning { color: var(--warn); }
+.af-help { color: var(--muted); font-size: 11px; }
+.af-row { display: flex; align-items: center; gap: 10px; }
+.af-spacer { flex: 1 1 auto; }
+.af-stack { display: flex; flex-direction: column; gap: 12px; }
+
+/* ---- Inline SVG figures (scale crisply to fill their container) ---------- */
+.af-svg { width: 100%; }
+.af-svg svg { width: 100%; height: auto; display: block; }
+.af-chart.fill { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.af-chart.fill .af-svg { flex: 1 1 auto; min-height: 0; display: flex; align-items: center; justify-content: center; }
+/* Fill-mode charts (the 3D live-preview dock, any preview embedded in a
+   height-constrained flex column) sit in a container with a real height
+   budget -- the generic width-driven `height: auto` above only ever grows
+   the SVG until its *width* fills the box, then stops, leaving the rest of
+   a taller box (e.g. after the user resizes the window/dock) as dead space
+   below/around it. Stretch to the full box here instead; the SVG's own
+   viewBox + default `preserveAspectRatio="xMidYMid meet"` still letterbox
+   rather than distort. */
+.af-chart.fill .af-svg svg { width: 100%; height: 100%; }
+.af-expand { cursor: pointer; opacity: 0.75; }
+.af-expand:hover { opacity: 1; color: var(--accent); }
+
+/* Full-screen figure view */
+.af-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 100000;
+  background: rgba(0, 0, 0, 0.72);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+.af-modal-body {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px 16px;
+  width: 94vw;
+  height: 92vh;
+  display: flex;
+  flex-direction: column;
+}
+.af-svg-modal { flex: 1 1 auto; min-height: 0; overflow: auto; display: flex; align-items: center; justify-content: center; }
+.af-svg-modal svg { width: 100%; height: auto; max-height: 100%; }
+
+/* ---- Results: fewer, larger, readable figures; user scrolls -------------- */
+.af-figure-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(560px, 1fr));
+  gap: 18px;
+}
+
+/* ---- Multi-column form flow (form pages with no side preview) ------------ */
+.af-form-cols {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+  gap: 0 34px;
+  align-items: start;
+}
+.af-form-cols > .af-fieldset { grid-column: 1 / -1; }
+
+/* ---- Boot splash (Splash.tsx) -------------------------------------------- */
+.af-splash {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: var(--bg);
+}
+.af-splash-logo {
+  width: 110px;
+  height: 110px;
+  object-fit: contain;
+  animation: af-splash-pulse 2.2s ease-in-out infinite;
+}
+@keyframes af-splash-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.65; transform: scale(0.96); }
+}
+.af-splash-title {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: var(--fg);
+}
+.af-splash-status { color: var(--muted); font-size: 13px; }
+.af-splash-error { color: var(--danger); }
+.af-splash-hint {
+  color: var(--muted);
+  font-size: 12px;
+  max-width: 420px;
+  text-align: center;
+  white-space: pre-wrap;
+}
+
+/* ---- Searchable combo box (DynamicForm.ComboSelect) ---------------------- */
+.af-combo {
+  position: relative;
+  width: 100%;
+  max-width: 420px;
+}
+.af-combo > input { padding-right: 26px; }
+.af-combo-arrow {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 11px;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.af-combo-panel {
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 0;
+  right: 0;
+  max-height: 260px;
+  overflow-y: auto;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  z-index: 300;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  padding: 3px 0;
+}
+.af-combo-opt {
+  padding: 5px 12px;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.af-combo-opt:hover { background: var(--accent); color: #fff; }
+.af-combo-opt.selected { color: var(--accent); font-weight: 600; }
+.af-combo-opt.selected:hover { color: #fff; }
+.af-combo-note {
+  padding: 5px 12px;
+  font-size: 11px;
+  color: var(--muted);
+  font-style: italic;
+}
+
+/* ---- Per-variable help: the LABEL itself is the hover target ------------- */
+/* No ⓘ icon anywhere -- pointing at a variable's name explains it. A subtle
+   dotted underline on hover is the only affordance, so a dense form stays
+   clean until the user actually asks for help. */
+.af-help-target { cursor: help; }
+.af-help-target:hover,
+.af-help-target:focus-visible {
+  color: var(--accent);
+  text-decoration: underline dotted currentColor 1px;
+  text-underline-offset: 3px;
+  outline: none;
+}
+/* The label cell is a grid child; the ellipsis lives on the hover-target span
+   so a long variable name truncates instead of spilling into the control. */
+.af-form-row > .af-form-label { display: flex; align-items: center; min-width: 0; }
+.af-label-text {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  max-width: 100%;
+}
+.af-infotip-pop {
+  z-index: 3000;
+  background: var(--panel);
+  border: 1px solid var(--card-border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.38);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+.af-infotip-head { font-weight: 700; color: var(--title); margin-bottom: 4px; }
+.af-infotip-body { color: var(--muted); }
+.af-infotip-body code,
+.af-howto-body code {
+  font-size: 11px;
+  background: var(--hover-bg);
+  padding: 0 4px;
+  border-radius: 3px;
+}
+
+/* ---- "How this works" collapsible deep-dive (HowItWorks.tsx) ------------- */
+.af-howto {
+  border: 1px solid var(--card-border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--panel) 45%, transparent);
+}
+.af-howto-toggle {
+  all: unset;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 9px 12px;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 12.5px;
+  color: var(--accent);
+}
+.af-howto-toggle:hover { text-decoration: underline; }
+.af-howto-caret { font-size: 10px; width: 10px; text-align: center; }
+.af-howto.open .af-howto-toggle { border-bottom: 1px solid var(--card-border); }
+.af-howto-body {
+  padding: 2px 15px 12px 15px;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+.af-howto-body p { margin: 9px 0; }
+.af-howto-body p:first-child { margin-top: 8px; }
+.af-howto-body strong { color: var(--title); }
+
+/* ---- Grouped option blocks (Airfoil Screening options) ------------------- */
+.af-opt-group + .af-opt-group {
+  margin-top: 14px;
+  border-top: 1px solid var(--border);
+  padding-top: 4px;
+}
+.af-opt-legend {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--muted);
+  margin: 8px 0 2px 0;
+}
+
+/* ---- Banners (transonic caveat, cancelled, generic notice) --------------- */
+.af-banner {
+  font-size: 12.5px;
+  line-height: 1.5;
+  border-radius: 8px;
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  color: var(--title);
+  background: color-mix(in srgb, var(--panel) 70%, transparent);
+}
+.af-banner.warn {
+  color: var(--warn);
+  border-color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 10%, transparent);
+}
+
+/* ---- Advanced Walkthrough (AdvancedWalkthrough.tsx) ---------------------- */
+.af-guide-body {
+  display: flex;
+  gap: 20px;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.af-guide-nav {
+  flex: 0 0 250px;
+  overflow-y: auto;
+  border-right: 1px solid var(--border);
+  padding-right: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.af-guide-navitem {
+  all: unset;
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 9px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  box-sizing: border-box;
+}
+.af-guide-navitem:hover { background: var(--hover-bg); }
+.af-guide-navitem.active { background: var(--sidebar-sel-bg); }
+.af-guide-navitem.active .af-guide-navtitle { color: var(--accent); }
+.af-guide-num {
+  flex: 0 0 auto;
+  width: 19px;
+  height: 19px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  font-size: 11px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  margin-top: 1px;
+}
+.af-guide-navitem.active .af-guide-num { border-color: var(--accent); color: var(--accent); }
+.af-guide-navtitle { display: block; font-size: 13px; font-weight: 600; color: var(--title); }
+.af-guide-navblurb { display: block; font-size: 11px; color: var(--muted); margin-top: 2px; line-height: 1.4; }
+.af-guide-content { flex: 1 1 auto; overflow-y: auto; padding-right: 6px; }
+.af-guide-title { font-size: 20px; font-weight: 700; margin: 0 0 4px; color: var(--title); }
+.af-guide-section { margin-top: 20px; }
+.af-guide-section h3 {
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--accent);
+  margin: 0 0 6px;
+}
+.af-guide-section p {
+  margin: 0 0 10px;
+  font-size: 13.5px;
+  line-height: 1.65;
+  color: var(--muted);
+  max-width: 68ch;
+}
+
+/* ---- Per-candidate MSES detail blocks (Airfoil Screening) ---------------- */
+.af-mses-detail {
+  border: 1px solid var(--card-border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--panel) 45%, transparent);
+  padding: 8px 12px;
+}
+.af-mses-detail > summary {
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--title);
+  list-style-position: outside;
+}
+.af-mses-detail > summary:hover { color: var(--accent); }
+.af-mses-detail[open] > summary { margin-bottom: 2px; }
+
+/* ---- Recommended-pick callout (Airfoil Screening) ------------------------ */
+.af-recommend {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 9%, var(--card-bg));
+}
+
+/* ---- Polish: smoother tab state transitions ----------------------------- */
+.af-tab { transition: color 120ms ease, border-color 120ms ease; }
+

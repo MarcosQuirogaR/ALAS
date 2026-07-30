@@ -1,0 +1,98 @@
+ALAS -- Aircraft Layout, Analysis and Sizing
+Copyright (C) 2026 Marcos Quiroga Rodríguez
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU Affero General Public License as published by the Free
+Software Foundation, either version 3 of the License, or (at your option) any
+later version.
+
+This program is distributed in the hope that it will be useful, but WITHOUT
+ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+details. You should have received a copy of the licence along with this
+program, in the file LICENSE. If not, see <https://www.gnu.org/licenses/>.
+
+SPDX-License-Identifier: AGPL-3.0-or-later
+
+
+-------------------------------------------------------------------------------
+Source code
+-------------------------------------------------------------------------------
+
+The complete corresponding source code for this program is published at:
+
+    https://github.com/MarcosQuirogaR/ALAS
+
+Section 13 of the AGPL applies to this program. ALAS runs a local HTTP server
+(the analysis sidecar) that the desktop shell talks to. That server is bound to
+the loopback interface and is not a network service in normal use -- but anyone
+who does make an ALAS instance reachable over a network must offer its users
+the corresponding source of their modified version.
+
+
+-------------------------------------------------------------------------------
+Authorship
+-------------------------------------------------------------------------------
+
+Under Spanish copyright law (Real Decreto Legislativo 1/1996, Texto Refundido
+de la Ley de Propiedad Intelectual, article 14), the author's moral rights --
+in particular the right to be recognised as author of the work and the right to
+the integrity of the work -- are unwaivable and inalienable. They are retained
+regardless of the licence granted above and are not transferred by it.
+
+Attribution to Marcos Quiroga Rodríguez must be preserved in redistributions
+and in derivative works.
+
+
+-------------------------------------------------------------------------------
+Commercial licensing
+-------------------------------------------------------------------------------
+
+The AGPL requires that any derivative work, including one made available over a
+network, be released under the same licence. Where those terms are unsuitable,
+a separate commercial licence may be negotiated with the copyright holder.
+
+Enquiries: https://github.com/MarcosQuirogaR/ALAS
+
+Any such commercial licence is governed by Spanish law, with the courts of the
+licensor's domicile in Spain having exclusive jurisdiction. This paragraph
+concerns only separately negotiated licences; it does not add to, restrict, or
+otherwise modify the AGPL grant above, which stands on its own terms.
+
+
+-------------------------------------------------------------------------------
+Trademarks
+-------------------------------------------------------------------------------
+
+"ALAS" and the ALAS logo are marks of the copyright holder. The AGPL grants
+rights in the software, not in the name: a fork may copy, modify and
+redistribute the code, but may not present itself as ALAS or use the name or
+logo in a way suggesting endorsement by, or affiliation with, this project.
+
+Nominative use -- stating accurately that software is derived from, compatible
+with, or based on ALAS -- is expressly permitted.
+
+
+-------------------------------------------------------------------------------
+Third-party components
+-------------------------------------------------------------------------------
+
+ALAS incorporates and interoperates with third-party software under their own
+licences, and vendors SUAVE 2.5.2 (LGPL-2.1) in the source tree. Two points
+are worth stating plainly because they are the ones a reader is most likely to
+question:
+
+  * SUAVE is LGPL-2.1 and this project is AGPL-3.0. The combination is
+    permitted. LGPL-2.1 section 3 allows a recipient to treat a copy under the
+    ordinary GPL version 2 or any later version, which is compatible with
+    AGPL-3.0. Independently of that route, ALAS never links SUAVE into its own
+    process: mission analysis runs in a separate Python interpreter, in an
+    isolated virtual environment, invoked as a subprocess. SUAVE's own licence
+    and copyright notices are preserved unmodified in its directory.
+
+  * External solvers -- MSES, MSC Nastran, MSC Patran -- are not distributed
+    with ALAS and are not covered by this licence. They are proprietary
+    programs supplied and licensed by the user, which ALAS invokes if present.
+    ALAS is fully functional without them.
+
+See THIRD-PARTY-NOTICES.md for the component-by-component list.

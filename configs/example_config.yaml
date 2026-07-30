@@ -1,0 +1,70 @@
+# =============================================================================
+# ALAS example configuration
+# =============================================================================
+# This file is the USER'S INPUT: the desired mission/targets and any overrides
+# to the geometry scaffold, optimizer, or analysis fidelity.
+#
+# It is a PARTIAL overlay -- you only need to specify what you want to change.
+# Anything omitted falls back to the built-in defaults (the "AVE long-range
+# transport" reference case). Unknown keys raise an error, so typos are caught.
+#
+# Run with:   python main.py -c configs/example_config.yaml --plots
+# Regenerate a full template with:   python main.py --save-config full.yaml
+# =============================================================================
+
+# ---- WHAT THE USER WANTS (mission requirements & targets) -------------------
+requirements:
+  cruise_mach: 0.84              # cruise design Mach number
+  cruise_altitude_m: 11887.2     # cruise altitude [m]
+  mtow_kg: 358670.0              # maximum take-off weight [kg]
+  aircraft_type: passenger       # "passenger" or "cargo" (selects the payload model)
+  num_passengers: 350            # used when aircraft_type = passenger
+  cargo_payload_kg: 102100.0     # used when aircraft_type = cargo
+  max_wing_area_m2: 535.0        # upper limit on wing planform area [m^2]
+  min_wing_loading_kg_m2: 485.0  # lower limit on MTOW/S [kg/m^2]
+  max_cruise_cl: 0.95            # stall guard on required cruise CL
+  target_static_margin: 0.10     # desired static margin (fraction of MAC)
+
+# ---- CABIN / PAYLOAD (optional) ---------------------------------------------
+# Drives the detailed interior layout (baseline pass, final analysis, the
+# Cabin/Payload preview, AND every optimizer candidate evaluation -- the
+# optimizer rebuilds this same detailed layout each call to check real
+# CG-envelope compliance, not a simplified/lumped stand-in).
+# cabin:
+#   passenger:                   # used when aircraft_type = passenger
+#     # Class mix -- a class with count 0 is absent. If ALL counts are 0 the
+#     # engine builds a single economy cabin of requirements.num_passengers.
+#     first:    {count: 8}
+#     business: {count: 42}
+#     premium:  {count: 36}
+#     economy:  {count: 264}
+#   cargo:                       # used when aircraft_type = cargo
+#     use_main_deck: true        # main-deck freighter (PMC pallets)
+#     main_deck_uld: PMC
+#     lower_deck_uld: LD3
+#     loading_strategy: target_cg   # target_cg | min_pallets | door_proximity | uniform
+#     target_cg_pct_mac: 25.0       # <= 0 -> auto-centre
+
+# ---- OPTIMIZER BEHAVIOUR (optional) -----------------------------------------
+optimizer:
+  solver:
+    max_iterations: 15           # differential-evolution generations
+    population_size: 6           # population multiplier on the number of variables
+    tolerance: 0.05
+    seed: 42                     # set for reproducible runs (null = random)
+    workers: 1                   # >1 to parallelise (objective must be picklable)
+
+# ---- ANALYSIS FIDELITY (optional) -------------------------------------------
+analysis:
+  sweep_alpha_min_deg: -4.0
+  sweep_alpha_max_deg: 10.0
+  sweep_n_points: 15
+
+# ---- GEOMETRY SCAFFOLD OVERRIDES (optional) ---------------------------------
+# Uncomment to change the family of aircraft (kept fixed during a run):
+# geometry:
+#   fuselage:
+#     diameter_m: 6.2
+#   wing:
+#     root_airfoil: "SC2-0714"
+#     tip_airfoil: "naca2410"
