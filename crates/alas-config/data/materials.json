@@ -1,0 +1,105 @@
+{
+  "available": [
+    "Al 2024-T3",
+    "Al 6061-T6",
+    "Al 7050-T7451",
+    "Al 7075-T6",
+    "Al-Li 2195-T8",
+    "CFRP QI",
+    "CFRP UD",
+    "GLARE 3",
+    "Steel 300M",
+    "Steel 4130",
+    "Ti-6Al-4V"
+  ],
+  "materials": [
+    {
+      "category": "metallic",
+      "e_pa": 71000000000.0,
+      "f_allow_pa": 380000000.0,
+      "name": "Al 7075-T6",
+      "nu": 0.33,
+      "rho_kg_m3": 2810.0
+    },
+    {
+      "category": "metallic",
+      "e_pa": 73100000000.0,
+      "f_allow_pa": 324000000.0,
+      "name": "Al 2024-T3",
+      "nu": 0.33,
+      "rho_kg_m3": 2780.0
+    },
+    {
+      "category": "composite",
+      "e_pa": 120000000000.0,
+      "f_allow_pa": 900000000.0,
+      "name": "CFRP UD",
+      "nu": 0.3,
+      "rho_kg_m3": 1600.0
+    },
+    {
+      "category": "metallic",
+      "e_pa": 210000000000.0,
+      "f_allow_pa": 460000000.0,
+      "name": "Steel 4130",
+      "nu": 0.3,
+      "rho_kg_m3": 7850.0
+    },
+    {
+      "category": "metallic",
+      "e_pa": 113800000000.0,
+      "f_allow_pa": 880000000.0,
+      "name": "Ti-6Al-4V",
+      "nu": 0.34,
+      "rho_kg_m3": 4430.0
+    },
+    {
+      "category": "metallic",
+      "e_pa": 71700000000.0,
+      "f_allow_pa": 440000000.0,
+      "name": "Al 7050-T7451",
+      "nu": 0.33,
+      "rho_kg_m3": 2830.0
+    },
+    {
+      "category": "metallic",
+      "e_pa": 68900000000.0,
+      "f_allow_pa": 240000000.0,
+      "name": "Al 6061-T6",
+      "nu": 0.33,
+      "rho_kg_m3": 2700.0
+    },
+    {
+      "category": "metallic",
+      "e_pa": 76000000000.0,
+      "f_allow_pa": 480000000.0,
+      "name": "Al-Li 2195-T8",
+      "nu": 0.33,
+      "rho_kg_m3": 2700.0
+    },
+    {
+      "category": "composite",
+      "e_pa": 55000000000.0,
+      "f_allow_pa": 450000000.0,
+      "name": "CFRP QI",
+      "nu": 0.31,
+      "rho_kg_m3": 1580.0
+    },
+    {
+      "category": "composite",
+      "e_pa": 58000000000.0,
+      "f_allow_pa": 280000000.0,
+      "name": "GLARE 3",
+      "nu": 0.33,
+      "rho_kg_m3": 2520.0
+    },
+    {
+      "category": "metallic",
+      "e_pa": 205000000000.0,
+      "f_allow_pa": 1400000000.0,
+      "name": "Steel 300M",
+      "nu": 0.29,
+      "rho_kg_m3": 7830.0
+    }
+  ]
+}

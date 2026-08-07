@@ -1,46 +1,12 @@
-# --- Python ---
-__pycache__/
-*.py[cod]
-*.egg-info/
-.eggs/
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
+/target/
+**/*.rs.bk
+*.pdb
 
-# --- Virtual environments (recreate with `uv sync` / scripts/provision_suave_venv.py) ---
-.venv/
-.suave-venv/
+# Run outputs and scratch analysis directories produced by the application.
+/out/
+/runs/
 
-# --- MSES (user-provisioned; NOT redistributable) ---
-# MSES is Mark Drela's solver, licensed per seat by MIT's Technology Licensing
-# Office. ALAS drives it as an external tool but may not distribute it, so
-# the binaries must never be committed. Drop your own install here (or point
-# Setup > External Tools anywhere else) and MSES analysis lights up.
-external tools/MSES/
-
-# --- Generated run artifacts ---
-outputs/
-_frames_tmp/
-
-# --- Downloaded enroute navdata (GPLv3, NOT redistributable under AGPL) ---
-# Published by the X-Plane project via mcantsin/x-plane-navdata. Fetched on
-# demand by scripts/download_navdata.py or Setup > External Tools; routing
-# falls back to a great circle until it is present.
-alas/data/navdata/
-
-# --- Vendored SUAVE 2.5.2 (LGPL-2.1, github.com/suavecode/SUAVE) ---
-# Keep the runtime package (trunk/); drop SUAVE's own dev-only test suite and
-# docs, which ALAS never imports and which are most of its file count.
-external tools/SUAVE-2.5.2/regression/
-external tools/SUAVE-2.5.2/doc/
-external tools/SUAVE-2.5.2/appveyor.yml
-
-# --- Editor / local tooling (machine-specific, not shared) ---
-.vscode/
-.claude/settings.local.json
-.claude/scheduled_tasks.lock
-
-# --- OS ---
-.DS_Store
-Thumbs.db
-*.log
+# Downloaded-on-demand assets: navigation data (GPL-3.0) and the Blue Marble
+# texture are fetched at runtime, never redistributed from this tree.
+/assets/navdata/
+/assets/textures/

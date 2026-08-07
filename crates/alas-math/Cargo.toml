@@ -1,0 +1,19 @@
+[package]
+name = "alas-math"
+description = "Numerical primitives with no single Python module of their own: pseudospectral operators, splines and small dense linear algebra."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+thiserror = { workspace = true }
+
+[dev-dependencies]
+alas-testkit = { path = "../alas-testkit" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[lints]
+workspace = true

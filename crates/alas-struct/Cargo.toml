@@ -1,0 +1,25 @@
+[package]
+name = "alas-struct"
+description = "The wingbox structural model: shared load integration, and (as they land) sizing and analytical solves."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# `load_cases`/`engine_point_loads_n` read directly off `DesignRequirements`,
+# `EngineConfig` and `MassModelConfig`, exactly as the reference does.
+alas-config = { path = "../alas-config" }
+# `sizing` reads the wingbox geometry (spar heights, local chord, airfoil
+# surface) off `WingStructureGeometry`, exactly as
+# `alas/physics/structural_sizing.py` does.
+alas-geom = { path = "../alas-geom" }
+
+[dev-dependencies]
+alas-testkit = { path = "../alas-testkit" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[lints]
+workspace = true
