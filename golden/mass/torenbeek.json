@@ -1,0 +1,162 @@
+{
+  "mass_fuselage_simple": [
+    {
+      "fuselage": "main_fuselage",
+      "mass_fuselage": 27343.60038847832,
+      "never_exceed_airspeed": 190.0,
+      "wing_to_tail_distance": 28.0
+    },
+    {
+      "fuselage": "main_fuselage",
+      "mass_fuselage": 21778.941626975306,
+      "never_exceed_airspeed": 150.0,
+      "wing_to_tail_distance": 22.5
+    },
+    {
+      "fuselage": "ovoid_fuselage",
+      "mass_fuselage": 29408.540841507234,
+      "never_exceed_airspeed": 190.0,
+      "wing_to_tail_distance": 28.0
+    }
+  ],
+  "mass_wing": [
+    {
+      "design_mass_TOGW": 285000.0,
+      "flap_deflection_angle": 30.0,
+      "main_gear_mounted_to_wing": false,
+      "mass_wing_total": 42910.744044856765,
+      "max_airspeed_for_flaps": 92.6,
+      "never_exceed_airspeed": 190.0,
+      "strut_y_location": null,
+      "suspended_mass": 242250.0,
+      "ultimate_load_factor": 3.75,
+      "wing": "main_wing"
+    },
+    {
+      "design_mass_TOGW": 285000.0,
+      "flap_deflection_angle": 0.0,
+      "main_gear_mounted_to_wing": false,
+      "mass_wing_total": 2627.3723327413095,
+      "max_airspeed_for_flaps": 0.0,
+      "never_exceed_airspeed": 190.0,
+      "strut_y_location": null,
+      "suspended_mass": 0.0,
+      "ultimate_load_factor": 3.75,
+      "wing": "hstab"
+    },
+    {
+      "design_mass_TOGW": 285000.0,
+      "flap_deflection_angle": 0.0,
+      "main_gear_mounted_to_wing": false,
+      "mass_wing_total": 826.3094586199131,
+      "max_airspeed_for_flaps": 0.0,
+      "never_exceed_airspeed": 190.0,
+      "strut_y_location": null,
+      "suspended_mass": 0.0,
+      "ultimate_load_factor": 3.75,
+      "wing": "vstab"
+    },
+    {
+      "design_mass_TOGW": 220000.0,
+      "flap_deflection_angle": 20.0,
+      "main_gear_mounted_to_wing": true,
+      "mass_wing_total": 40222.62131025414,
+      "max_airspeed_for_flaps": 85.0,
+      "never_exceed_airspeed": 210.0,
+      "strut_y_location": 8.0,
+      "suspended_mass": 176000.0,
+      "ultimate_load_factor": 3.75,
+      "wing": "main_wing"
+    }
+  ],
+  "mass_wing_basic_structure": [
+    {
+      "design_mass_TOGW": 285000.0,
+      "main_gear_mounted_to_wing": false,
+      "mass_wing_basic": 42152.00790260979,
+      "never_exceed_airspeed": 190.0,
+      "strut_y_location": null,
+      "suspended_mass": 242250.0,
+      "ultimate_load_factor": 3.75,
+      "wing": "main_wing"
+    },
+    {
+      "design_mass_TOGW": 285000.0,
+      "main_gear_mounted_to_wing": true,
+      "mass_wing_basic": 44370.5346343261,
+      "never_exceed_airspeed": 190.0,
+      "strut_y_location": null,
+      "suspended_mass": 242250.0,
+      "ultimate_load_factor": 3.75,
+      "wing": "main_wing"
+    },
+    {
+      "design_mass_TOGW": 285000.0,
+      "main_gear_mounted_to_wing": true,
+      "mass_wing_basic": 43694.84398582879,
+      "never_exceed_airspeed": 190.0,
+      "strut_y_location": 6.0,
+      "suspended_mass": 242250.0,
+      "ultimate_load_factor": 3.75,
+      "wing": "main_wing"
+    },
+    {
+      "design_mass_TOGW": 285000.0,
+      "main_gear_mounted_to_wing": false,
+      "mass_wing_basic": 2580.9158474865517,
+      "never_exceed_airspeed": 190.0,
+      "strut_y_location": null,
+      "suspended_mass": 0.0,
+      "ultimate_load_factor": 3.75,
+      "wing": "hstab"
+    },
+    {
+      "design_mass_TOGW": 285000.0,
+      "main_gear_mounted_to_wing": false,
+      "mass_wing_basic": 811.6988788014863,
+      "never_exceed_airspeed": 190.0,
+      "strut_y_location": null,
+      "suspended_mass": 0.0,
+      "ultimate_load_factor": 3.75,
+      "wing": "vstab"
+    }
+  ],
+  "mass_wing_high_lift_devices": [
+    {
+      "flap_deflection_angle": 30.0,
+      "mass_high_lift_devices": 0.0,
+      "max_airspeed_for_flaps": 92.6,
+      "wing": "main_wing"
+    },
+    {
+      "flap_deflection_angle": 15.0,
+      "mass_high_lift_devices": 0.0,
+      "max_airspeed_for_flaps": 92.6,
+      "wing": "main_wing"
+    },
+    {
+      "flap_deflection_angle": 0.0,
+      "mass_high_lift_devices": 0.0,
+      "max_airspeed_for_flaps": 0.0,
+      "wing": "hstab"
+    },
+    {
+      "flap_deflection_angle": 0.0,
+      "mass_high_lift_devices": 0.0,
+      "max_airspeed_for_flaps": 0.0,
+      "wing": "vstab"
+    }
+  ],
+  "mass_wing_spoilers_and_speedbrakes": [
+    {
+      "mass_basic_wing": 18000.0,
+      "mass_spoilers_and_speedbrakes": 270.0,
+      "wing": "main_wing"
+    },
+    {
+      "mass_basic_wing": 900.0,
+      "mass_spoilers_and_speedbrakes": 13.5,
+      "wing": "hstab"
+    }
+  ]
+}

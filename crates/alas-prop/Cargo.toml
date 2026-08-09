@@ -1,0 +1,25 @@
+[package]
+name = "alas-prop"
+description = "On-design turbofan cycle analysis: separate-flow, two-spool parametric thermodynamics."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# Every cycle evaluation reads the ambient state from `Atmosphere::new`, the
+# fitted "differentiable" model, exactly as `alas/physics/propulsion.py`'s
+# `asb.Atmosphere(altitude=...)` does.
+alas-atmo = { path = "../alas-atmo" }
+# `compute_turbofan_cycle` reads a `PropulsionCycleConfig` for every component
+# efficiency and pressure loss, exactly as the reference module does.
+alas-config = { path = "../alas-config" }
+
+[dev-dependencies]
+alas-testkit = { path = "../alas-testkit" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[lints]
+workspace = true

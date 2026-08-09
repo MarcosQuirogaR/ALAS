@@ -1,0 +1,24 @@
+{
+  "alas_commit": "7d1555c1f4db5110cf6cd187c156718e1a033b50",
+  "environment": {
+    "aerosandbox": "4.2.8",
+    "numpy": "2.5.1",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "python": "3.13.13",
+    "scipy": "1.17.1"
+  },
+  "fixtures": {
+    "differentiable": {
+      "description": "AeroSandbox Atmosphere() at its default 'differentiable' method: the fitted altitudes themselves, points between them, the flight envelope at 250 m spacing, and both ends of the fitted band",
+      "generator": "gen_atmo_differentiable.py"
+    },
+    "isa": {
+      "description": "AeroSandbox Atmosphere(method='isa'): pressure, temperature and every derived quantity, at each ISA table layer boundary, a point inside each layer, and both extrapolation directions",
+      "generator": "gen_atmo.py"
+    },
+    "us1976": {
+      "description": "SUAVE US_Standard_1976.compute_values: pressure, temperature and every derived gas property, at a spread of geometric altitudes covering every segment and both clamped extremes",
+      "generator": "gen_atmo_us1976.py"
+    }
+  }
+}
