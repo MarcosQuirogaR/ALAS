@@ -1,4 +1,5 @@
 ALAS -- Aircraft Layout, Analysis and Sizing
+Native implementation
 Copyright (C) 2026 Marcos Quiroga Rodríguez
 
 This program is free software: you can redistribute it and/or modify it under
@@ -16,18 +17,28 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 
 
 -------------------------------------------------------------------------------
-Source code
+Relationship to the Python implementation
 -------------------------------------------------------------------------------
 
-The complete corresponding source code for this program is published at:
+This is a reimplementation in Rust of ALAS, previously written in Python with a
+Wails desktop shell. The two share an author, a licence and a model catalogue;
+they share no code. The Python implementation remains the reference against
+which this one is validated, and the correspondence between them is recorded
+module by module in docs/PORTING.md.
 
-    https://github.com/MarcosQuirogaR/ALAS
 
-Section 13 of the AGPL applies to this program. ALAS runs a local HTTP server
-(the analysis sidecar) that the desktop shell talks to. That server is bound to
-the loopback interface and is not a network service in normal use -- but anyone
-who does make an ALAS instance reachable over a network must offer its users
-the corresponding source of their modified version.
+-------------------------------------------------------------------------------
+Network use
+-------------------------------------------------------------------------------
+
+Section 13 of the AGPL concerns making a modified version available to users
+over a network. This program is a single desktop executable: it runs no server
+and accepts no inbound connections. It makes outbound requests only when the
+user asks it to -- fetching a flight plan, navigation data, or a map texture --
+which does not engage section 13.
+
+The Python implementation did run a loopback HTTP server, and its NOTICE
+qualified this section accordingly. That qualification is no longer needed.
 
 
 -------------------------------------------------------------------------------
@@ -52,12 +63,14 @@ The AGPL requires that any derivative work, including one made available over a
 network, be released under the same licence. Where those terms are unsuitable,
 a separate commercial licence may be negotiated with the copyright holder.
 
-Enquiries: https://github.com/MarcosQuirogaR/ALAS
-
 Any such commercial licence is governed by Spanish law, with the courts of the
 licensor's domicile in Spain having exclusive jurisdiction. This paragraph
 concerns only separately negotiated licences; it does not add to, restrict, or
 otherwise modify the AGPL grant above, which stands on its own terms.
+
+Note that a commercial licence cannot be granted over the whole program while
+it contains translated SUAVE code, which is copyleft and not the licensor's to
+relicense. See THIRD-PARTY-NOTICES.md.
 
 
 -------------------------------------------------------------------------------
@@ -77,22 +90,26 @@ with, or based on ALAS -- is expressly permitted.
 Third-party components
 -------------------------------------------------------------------------------
 
-ALAS incorporates and interoperates with third-party software under their own
-licences, and vendors SUAVE 2.5.2 (LGPL-2.1) in the source tree. Two points
-are worth stating plainly because they are the ones a reader is most likely to
-question:
+This program contains code translated from other projects. A translation is a
+derivative work: the original licence follows it into this tree, whatever
+language it is written in. Two consequences are worth stating plainly, because
+they are the ones a reader is most likely to question:
 
-  * SUAVE is LGPL-2.1 and this project is AGPL-3.0. The combination is
-    permitted. LGPL-2.1 section 3 allows a recipient to treat a copy under the
-    ordinary GPL version 2 or any later version, which is compatible with
-    AGPL-3.0. Independently of that route, ALAS never links SUAVE into its own
-    process: mission analysis runs in a separate Python interpreter, in an
-    isolated virtual environment, invoked as a subprocess. SUAVE's own licence
-    and copyright notices are preserved unmodified in its directory.
+  * Modules translated from SUAVE (LGPL-2.1) carry that licence. LGPL-2.1
+    section 3 permits a recipient to treat a copy under the ordinary GPL
+    version 2 or any later version, which is compatible with AGPL-3.0, and this
+    program relies on that route. Unlike the Python implementation -- which
+    invoked SUAVE as a separate process and could argue it never combined with
+    it -- this program links translated SUAVE code directly, so the combination
+    rests on licence compatibility alone.
 
-  * External solvers -- MSES, MSC Nastran, MSC Patran -- are not distributed
-    with ALAS and are not covered by this licence. They are proprietary
-    programs supplied and licensed by the user, which ALAS invokes if present.
-    ALAS is fully functional without them.
+  * External solvers -- MSES, MSC Nastran, AVL, NASTRAN-95 -- are not
+    distributed with this program and are not covered by this licence. They are
+    separate executables, supplied and licensed by the user, which the program
+    invokes if present. The program is fully functional without them, reporting
+    the affected analyses as unavailable rather than substituting a silent
+    approximation.
 
-See THIRD-PARTY-NOTICES.md for the component-by-component list.
+Every translated module names its origin, the upstream licence and the source
+revision in a provenance header. THIRD-PARTY-NOTICES.md lists the components
+one by one.

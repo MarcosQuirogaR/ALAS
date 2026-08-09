@@ -1,0 +1,126 @@
+{
+  "cases": [
+    {
+      "input": {},
+      "issues": [],
+      "name": "defaults",
+      "why": "the shipped configuration is one nothing objects to"
+    },
+    {
+      "input": {
+        "requirements": {
+          "dive_speed_m_s": 100.0
+        }
+      },
+      "issues": [
+        {
+          "field_path": "requirements.dive_speed_m_s",
+          "message": "Cruise design point (126 m/s EAS at Mach 0.84 / 11,887 m) exceeds the design dive speed VD (100 m/s EAS) -- the aircraft would cruise outside its own structural flight envelope.",
+          "severity": "error"
+        }
+      ],
+      "name": "cruise_past_dive_speed",
+      "why": "the cruise design point sits outside the V-n envelope entirely: an error, which blocks the run"
+    },
+    {
+      "input": {
+        "requirements": {
+          "dive_speed_m_s": 130.0
+        }
+      },
+      "issues": [
+        {
+          "field_path": "requirements.dive_speed_m_s",
+          "message": "Cruise design point (126 m/s EAS) is above VC (104 m/s EAS = VD/1.25) -- the aircraft cruises in the V-n diagram's caution band, not normal operation.",
+          "severity": "warning"
+        }
+      ],
+      "name": "cruise_in_the_caution_band",
+      "why": "the cruise point is past VC but short of VD -- the diagram's yellow band, which is a warning and not a block"
+    },
+    {
+      "input": {
+        "geometry": {
+          "empennage": {
+            "hstab_tip_chord_m": 9.0,
+            "vstab_tip_chord_m": 10.0
+          }
+        }
+      },
+      "issues": [
+        {
+          "field_path": "geometry.empennage.hstab_tip_chord_m",
+          "message": "H-stab tip chord (9.00 m) must be smaller than its root chord (8.00 m).",
+          "severity": "error"
+        },
+        {
+          "field_path": "geometry.empennage.vstab_tip_chord_m",
+          "message": "V-stab tip chord (10.00 m) must be smaller than its root chord (9.50 m).",
+          "severity": "error"
+        }
+      ],
+      "name": "untapered_empennage",
+      "why": "both stabilisers wider at the tip than at the root: two errors from one rule, in the order the rule appends them"
+    },
+    {
+      "input": {
+        "geometry": {
+          "empennage": {
+            "hstab_tip_chord_m": 8.0
+          }
+        }
+      },
+      "issues": [
+        {
+          "field_path": "geometry.empennage.hstab_tip_chord_m",
+          "message": "H-stab tip chord (8.00 m) must be smaller than its root chord (8.00 m).",
+          "severity": "error"
+        }
+      ],
+      "name": "tip_chord_equal_to_root",
+      "why": "an untapered surface is rejected as well as an inverted one, since the comparison is >= and not >"
+    },
+    {
+      "input": {
+        "geometry": {
+          "empennage": {
+            "vstab_tip_chord_m": 10.0
+          }
+        },
+        "requirements": {
+          "dive_speed_m_s": 100.0
+        }
+      },
+      "issues": [
+        {
+          "field_path": "requirements.dive_speed_m_s",
+          "message": "Cruise design point (126 m/s EAS at Mach 0.84 / 11,887 m) exceeds the design dive speed VD (100 m/s EAS) -- the aircraft would cruise outside its own structural flight envelope.",
+          "severity": "error"
+        },
+        {
+          "field_path": "geometry.empennage.vstab_tip_chord_m",
+          "message": "V-stab tip chord (10.00 m) must be smaller than its root chord (9.50 m).",
+          "severity": "error"
+        }
+      ],
+      "name": "both_rules_at_once",
+      "why": "two rules firing on one configuration, collected in registration order rather than the first one stopping the rest"
+    },
+    {
+      "input": {
+        "preset": "A380-800"
+      },
+      "issues": [],
+      "name": "preset_a380",
+      "why": "a real aircraft through the loading path: a preset that changes both the cruise point and the empennage must still pass"
+    },
+    {
+      "input": {
+        "preset": "A320-200"
+      },
+      "issues": [],
+      "name": "preset_a320",
+      "why": "the same for a narrow-body, whose cruise altitude and dive speed are both lower"
+    }
+  ]
+}

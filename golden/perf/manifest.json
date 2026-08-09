@@ -1,0 +1,20 @@
+{
+  "alas_commit": "7d1555c1f4db5110cf6cd187c156718e1a033b50",
+  "environment": {
+    "aerosandbox": "4.2.8",
+    "numpy": "2.5.1",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "python": "3.13.13",
+    "scipy": "1.17.1"
+  },
+  "fixtures": {
+    "landing_gear": {
+      "description": "alas.physics.landing_gear.size_landing_gear across MTOW/CG-limit/fuselage/LandingGearConfig cases reaching each tire-selection, bogie-sizing, gear-count and turnover branch -- full LandingGearLayout",
+      "generator": "gen_perf_landing_gear.py"
+    },
+    "performance": {
+      "description": "alas.physics.performance closed-form point-performance surface: density_ratio, the four matching-chart constraint curves, build_matching_chart, the FAR-25 V-speed schedule, compute_field_performance, breguet_range_m and build_vn_diagram, across branch-reaching cases",
+      "generator": "gen_perf_performance.py"
+    }
+  }
+}

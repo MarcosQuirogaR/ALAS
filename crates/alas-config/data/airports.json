@@ -1,0 +1,224 @@
+{
+  "airports": [
+    {
+      "elevation_m": 25,
+      "icao": "EGLL",
+      "isa_deviation_c": 0.0,
+      "latitude_deg": 51.47,
+      "lda_m": 3902,
+      "longitude_deg": -0.4543,
+      "name": "London Heathrow (EGLL)",
+      "notes": "Busiest airport in Europe",
+      "toda_m": 3902
+    },
+    {
+      "elevation_m": 119,
+      "icao": "LFPG",
+      "isa_deviation_c": 0.0,
+      "latitude_deg": 49.0097,
+      "lda_m": 4215,
+      "longitude_deg": 2.5479,
+      "name": "Paris CDG (LFPG)",
+      "notes": "Longest runway: 09L/27R, 4215 m",
+      "toda_m": 4215
+    },
+    {
+      "elevation_m": 364,
+      "icao": "EDDF",
+      "isa_deviation_c": 0.0,
+      "latitude_deg": 50.0379,
+      "lda_m": 4000,
+      "longitude_deg": 8.5622,
+      "name": "Frankfurt (EDDF)",
+      "notes": "Central European hub, moderate elevation",
+      "toda_m": 4000
+    },
+    {
+      "elevation_m": 610,
+      "icao": "LEMD",
+      "isa_deviation_c": 0.0,
+      "latitude_deg": 40.4719,
+      "lda_m": 4100,
+      "longitude_deg": -3.5626,
+      "name": "Madrid Barajas (LEMD)",
+      "notes": "Significant elevation \u2014 density penalty",
+      "toda_m": 4100
+    },
+    {
+      "elevation_m": 19,
+      "icao": "OMDB",
+      "isa_deviation_c": 15,
+      "latitude_deg": 25.2532,
+      "lda_m": 4000,
+      "longitude_deg": 55.3657,
+      "name": "Dubai (OMDB)",
+      "notes": "Hot-day ops standard; ISA+15 typical summer",
+      "toda_m": 4000
+    },
+    {
+      "elevation_m": 7,
+      "icao": "WSSS",
+      "isa_deviation_c": 8,
+      "latitude_deg": 1.3644,
+      "lda_m": 4000,
+      "longitude_deg": 103.9915,
+      "name": "Singapore Changi (WSSS)",
+      "notes": "Tropical, near sea level",
+      "toda_m": 4000
+    },
+    {
+      "elevation_m": 1655,
+      "icao": "KDEN",
+      "isa_deviation_c": 0.0,
+      "latitude_deg": 39.8561,
+      "lda_m": 4877,
+      "longitude_deg": -104.6737,
+      "name": "Denver International (KDEN)",
+      "notes": "High-elevation hub in the US; longest available runway",
+      "toda_m": 4877
+    },
+    {
+      "elevation_m": 2230,
+      "icao": "MMMX",
+      "isa_deviation_c": 5,
+      "latitude_deg": 19.4363,
+      "lda_m": 3985,
+      "longitude_deg": -99.0721,
+      "name": "Mexico City (MMMX)",
+      "notes": "High-and-hot; severe density penalty",
+      "toda_m": 3985
+    },
+    {
+      "elevation_m": 1700,
+      "icao": "FAOR",
+      "isa_deviation_c": 10,
+      "latitude_deg": -26.1392,
+      "lda_m": 4418,
+      "longitude_deg": 28.246,
+      "name": "Johannesburg OR Tambo (FAOR)",
+      "notes": "High altitude + hot-day: classic challenging hub",
+      "toda_m": 4418
+    },
+    {
+      "elevation_m": 41,
+      "icao": "RJAA",
+      "isa_deviation_c": 0.0,
+      "latitude_deg": 35.772,
+      "lda_m": 4000,
+      "longitude_deg": 140.3929,
+      "name": "Tokyo Narita (RJAA)",
+      "notes": "Sea-level, ISA conditions nominal",
+      "toda_m": 4000
+    },
+    {
+      "elevation_m": 1624,
+      "icao": "HKJK",
+      "isa_deviation_c": 8,
+      "latitude_deg": -1.3192,
+      "lda_m": 4117,
+      "longitude_deg": 36.9278,
+      "name": "Nairobi Jomo Kenyatta (HKJK)",
+      "notes": "Classic hot-and-high reference case",
+      "toda_m": 4117
+    },
+    {
+      "elevation_m": 2813,
+      "icao": "SEQM",
+      "isa_deviation_c": 5,
+      "latitude_deg": -0.1292,
+      "lda_m": 3970,
+      "longitude_deg": -78.3575,
+      "name": "Quito Mariscal Sucre (SEQM)",
+      "notes": "Very high-altitude Andean airport",
+      "toda_m": 3970
+    },
+    {
+      "elevation_m": 2548,
+      "icao": "SKBO",
+      "isa_deviation_c": 5,
+      "latitude_deg": 4.7016,
+      "lda_m": 3800,
+      "longitude_deg": -74.1469,
+      "name": "Bogot\u00e1 El Dorado (SKBO)",
+      "notes": "High plateau; MTOW restrictions common",
+      "toda_m": 3800
+    },
+    {
+      "elevation_m": 2334,
+      "icao": "HAAB",
+      "isa_deviation_c": 10,
+      "latitude_deg": 8.9778,
+      "lda_m": 3800,
+      "longitude_deg": 38.7993,
+      "name": "Addis Ababa Bole (HAAB)",
+      "notes": "African highland hub; hot-day ops",
+      "toda_m": 3800
+    },
+    {
+      "elevation_m": 1337,
+      "icao": "VNKT",
+      "isa_deviation_c": 5,
+      "latitude_deg": 27.6966,
+      "lda_m": 3050,
+      "longitude_deg": 85.3591,
+      "name": "Kathmandu Tribhuvan (VNKT)",
+      "notes": "Short runway at moderate elevation; mountainous terrain",
+      "toda_m": 3050
+    },
+    {
+      "elevation_m": 430,
+      "icao": "LSGG",
+      "isa_deviation_c": 0.0,
+      "latitude_deg": 46.2381,
+      "lda_m": 3250,
+      "longitude_deg": 6.109,
+      "name": "Geneva (LSGG)",
+      "notes": "Asymmetric TODA/LDA; noise-restricted departure",
+      "toda_m": 3900
+    },
+    {
+      "elevation_m": 581,
+      "icao": "LOWI",
+      "isa_deviation_c": 0.0,
+      "latitude_deg": 47.2602,
+      "lda_m": 2000,
+      "longitude_deg": 11.3439,
+      "name": "Innsbruck (LOWI)",
+      "notes": "Alpine approach; very short LDA",
+      "toda_m": 2750
+    },
+    {
+      "elevation_m": 4061,
+      "icao": "SLLP",
+      "isa_deviation_c": 10,
+      "latitude_deg": -16.5133,
+      "lda_m": 3800,
+      "longitude_deg": -68.1925,
+      "name": "La Paz El Alto (SLLP)",
+      "notes": "Highest commercial airport in the world",
+      "toda_m": 4000
+    },
+    {
+      "elevation_m": 4,
+      "icao": "LXGB",
+      "isa_deviation_c": 0.0,
+      "latitude_deg": 36.1512,
+      "lda_m": 1507,
+      "longitude_deg": -5.3496,
+      "name": "Gibraltar (LXGB)",
+      "notes": "Very short runway; road crosses active runway",
+      "toda_m": 1836
+    },
+    {
+      "elevation_m": 2860,
+      "icao": "VNLK",
+      "isa_deviation_c": 0.0,
+      "latitude_deg": 27.6869,
+      "lda_m": 527,
+      "longitude_deg": 86.7311,
+      "name": "Lukla Tenzing-Hillary (VNLK)",
+      "notes": "Extreme mountain strip \u2014 reference edge case only",
+      "toda_m": 527
+    }
+  ]
+}

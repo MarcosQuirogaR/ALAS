@@ -1,0 +1,4 @@
+# `cargo xtask <command>` is the entry point CONTRIBUTING.md documents, and an
+# alias is what makes a workspace member reachable under that name.
+[alias]
+xtask = "run --quiet --package xtask --"

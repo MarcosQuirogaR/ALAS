@@ -1,0 +1,24 @@
+{
+  "alas_commit": "7d1555c1f4db5110cf6cd187c156718e1a033b50",
+  "environment": {
+    "aerosandbox": "4.2.8",
+    "numpy": "2.5.1",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "python": "3.13.13",
+    "scipy": "1.17.1"
+  },
+  "fixtures": {
+    "analytical": {
+      "description": "alas.physics.structural_analysis.analyze_structure on the sized wingbox for the default DesignVector/WingConfig geometry, default engine relief, across two-spar and partial-span-centre-spar StructuresConfig cases -- EI(y), per-load-case shear/moment/deflection/tip-deflection/spar stress, and the Rayleigh modal frequencies and shapes",
+      "generator": "gen_struct_analytical.py"
+    },
+    "loads": {
+      "description": "alas.physics.structural_loads: load_cases across DesignRequirements variations including additional_safety_factor != 1.0; elliptic_distributed_load across span/force/resolution combinations including a point past the tip; cantilever_shear_moment chained onto three of those plus a dense FEM-like case and a synthetic uniform load; engine_point_loads_n across zero thrust, a symmetric pair, a centerline engine, more than two engines, a non-default mass config, and the y > 1e-6 threshold",
+      "generator": "gen_struct_loads.py"
+    },
+    "sizing": {
+      "description": "alas.physics.structural_sizing.size_wingbox on the default DesignVector/WingConfig geometry across StructuresConfig cases (two-spar default, partial-span centre spar, rib-count override) -- full WingboxSizing: per-station chord/spar caps/webs/margins, rib spacing, mass breakdown and the sizing load case",
+      "generator": "gen_struct_sizing.py"
+    }
+  }
+}

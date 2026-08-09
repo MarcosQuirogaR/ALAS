@@ -1,0 +1,16 @@
+{
+  "alas_commit": "7d1555c1f4db5110cf6cd187c156718e1a033b50",
+  "environment": {
+    "aerosandbox": "absent",
+    "numpy": "1.26.4",
+    "platform": "Windows-10-10.0.26200-SP0",
+    "python": "3.10.20",
+    "scipy": "1.11.4"
+  },
+  "fixtures": {
+    "factors": {
+      "description": "SUAVE Units ratios to base SI, for every unit reachable from this program",
+      "generator": "gen_units.py"
+    }
+  }
+}

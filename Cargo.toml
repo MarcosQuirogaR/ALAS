@@ -1,0 +1,61 @@
+[workspace]
+resolver = "2"
+members = ["crates/*", "xtask"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "AGPL-3.0-or-later"
+authors = ["Marcos Quiroga Rodriguez <marcos.quiroga.rodriguez@gmail.com>"]
+rust-version = "1.85"
+
+# Dependencies are declared here once so every crate resolves the same version.
+# A new entry needs the justification described in CONTRIBUTING.md.
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tracing = "0.1"
+
+# The three crates every procedural macro is written with. `alas-config-derive`
+# is the only member that depends on them: a derive macro receives its input as
+# a token stream and has to parse Rust syntax to do anything at all, and there
+# is no standard-library facility for that.
+proc-macro2 = "1"
+quote = "1"
+syn = { version = "2", features = ["full"] }
+
+# The lint set is deliberately narrow. It encodes decisions that would otherwise
+# be re-argued in review -- panics, stray printing, unsafe -- and stops there.
+# Clippy's stylistic catalogue is not enabled: this project reviews numerical
+# behaviour, and a lint queue full of idiom preferences competes for the same
+# attention.
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[workspace.lints.clippy]
+# Library code reports through `tracing`; only the binary owns the console.
+print_stdout = "deny"
+print_stderr = "deny"
+dbg_macro = "deny"
+# A panic in library code is a bug. Analyses that cannot produce a number report
+# it through the stage status contract instead (see alas-types).
+unwrap_used = "deny"
+expect_used = "deny"
+todo = "warn"
+unimplemented = "warn"
+
+# Optimized builds are what gets benchmarked against the Python implementation,
+# so the release profile is part of the measurement and belongs in the tree.
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = "symbols"
+
+# Parity tests replay full analyses; running them at opt-level 0 makes the suite
+# slow enough that it stops being run.
+[profile.test]
+opt-level = 2

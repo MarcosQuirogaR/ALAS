@@ -1,0 +1,26 @@
+[package]
+name = "alas-config"
+description = "Everything a user can tune, as typed and documented structs, together with the field descriptors the settings interface is generated from."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# The cross-field validation rules need the cruise atmosphere to convert a
+# design point into the equivalent airspeed the certification speeds are
+# stated in. `alas-atmo` is a leaf crate with no dependencies of its own.
+alas-atmo = { path = "../alas-atmo" }
+alas-config-derive = { path = "../alas-config-derive" }
+alas-i18n = { path = "../alas-i18n" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+alas-testkit = { path = "../alas-testkit" }
+
+[lints]
+workspace = true
