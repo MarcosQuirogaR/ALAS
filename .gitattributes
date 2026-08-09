@@ -1,37 +1,6 @@
-# Line endings are decided here, not by each contributor's core.autocrlf.
-# The index is uniformly LF today; without this file that only holds while
-# everyone happens to share one git configuration, and a single contributor
-# with autocrlf=false on Windows would re-commit the whole tree as CRLF.
-* text=auto eol=lf
-
-# Windows-only tooling that genuinely wants CRLF.
-*.bat text eol=crlf
-*.cmd text eol=crlf
-*.ps1 text eol=crlf
-
-# Binary: never normalise, never diff as text.
-*.png binary
-*.jpg binary
-*.jpeg binary
-*.ico binary
-*.woff2 binary
-*.zip binary
-*.exe binary
-*.dat binary
-*.op2 binary
-*.bdf binary
-
-# The vendored SUAVE tree is 863 of this repository's files. Without this,
-# GitHub reports its Python as the project's own language, code search is
-# dominated by it, and dependency scanners attribute its abandoned
-# requirements to ALAS.
-# The pattern must be quoted: a backslash-escaped space is not valid here and
-# git rejects the whole line as a malformed attribute name.
-"external tools/SUAVE-2.5.2/**" linguist-vendored
-
-# Wails regenerates these from the Go bindings; they are not hand-edited.
-desktop/frontend/wailsjs/** linguist-generated
-
-# Reviewing a lockfile line by line is never useful.
-uv.lock -diff linguist-generated
-desktop/frontend/package-lock.json -diff linguist-generated
+# The Selig airfoil corpus stores each entry's bytes verbatim, including the
+# archive's own CRLF line endings, behind plain-LF `@stem` delimiter lines.
+# Line-ending normalization on checkin/checkout (core.autocrlf) would rewrite
+# those bytes and break the digest that proves this file against the zip
+# archive it was extracted from -- see docs/PORTING.md, Geometry.
+crates/alas-geom/data/selig.txt -text

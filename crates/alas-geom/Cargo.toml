@@ -1,0 +1,34 @@
+[package]
+name = "alas-geom"
+description = "Airfoil sections, wings, fuselages and the parametric aircraft builder: the shapes every disciplinary analysis measures."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# The builder reads a `DesignVector` and a `GeometryConfig` and returns a shape;
+# those two types are the whole of its input, so this edge is the crate's reason
+# for sitting above L1 rather than beside it.
+alas-config = { path = "../alas-config" }
+# `Airfoil::repanel` resamples a section through a cubic spline with a
+# second-derivative condition at one end and a first-derivative condition at the
+# other. `alas-math::spline` was built against that exact call.
+alas-math = { path = "../alas-math" }
+serde = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+alas-testkit = { path = "../alas-testkit" }
+# `tests/parity_selig.rs` checks resolved coordinates at `exact` tier, bit for
+# bit against Python's `float()`. serde_json's default float parser is fast
+# but not always correctly rounded (its own documentation names this
+# trade-off); `float_roundtrip` selects the correctly-rounded path instead,
+# adding no new crate to the dependency graph -- it only changes which
+# parsing routine already inside serde_json runs.
+serde_json = { workspace = true, features = ["float_roundtrip"] }
+
+[lints]
+workspace = true

@@ -1,0 +1,29 @@
+[package]
+name = "alas-payload"
+description = "The detailed interior: passenger cabin layout, ULD cargo loading, and the payload centre of gravity both produce."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# `CabinGeometry` samples a built `Airplane`'s fuselage and main wing, exactly
+# as `alas/physics/payload.py` does.
+alas-geom = { path = "../alas-geom" }
+# Every layout reads `CabinConfig`, `DesignRequirements` and `GeometryConfig`
+# directly; `apply_cabin_preset` writes back to the first two.
+alas-config = { path = "../alas-config" }
+# `oew_and_cg` sums `alas-mass::breakdown::OEW_KEYS`, which that module's own
+# doc names as the single canonical definition every other consumer imports
+# rather than redefining. Upstream's `payload.py` takes the same import.
+alas-mass = { path = "../alas-mass" }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+alas-testkit = { path = "../alas-testkit" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[lints]
+workspace = true

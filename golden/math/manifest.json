@@ -1,0 +1,28 @@
+{
+  "alas_commit": "7d1555c1f4db5110cf6cd187c156718e1a033b50",
+  "environment": {
+    "aerosandbox": "4.2.8",
+    "numpy": "2.5.1",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "python": "3.13.13",
+    "scipy": "1.17.1"
+  },
+  "fixtures": {
+    "bicubic": {
+      "description": "scipy.interpolate.RectBivariateSpline with kx=ky=3 and s=0: FITPACK knot placement, tensor-product coefficients and values at the nodes, at cell centres and beyond every side, for grids from the 4x4 minimum up to SUAVE's own 10x8 surrogate training grid",
+      "generator": "gen_math_bicubic.py"
+    },
+    "bspline": {
+      "description": "CasADi's 1-D 'bspline' interpolant, with SciPy's not-a-knot knot vector and coefficients for the same data as a structural check; includes the altitude grid AeroSandbox's default atmosphere uses",
+      "generator": "gen_math_bspline.py"
+    },
+    "chebyshev": {
+      "description": "SUAVE chebyshev_data: cosine-spaced nodes and the D/I pseudospectral operators",
+      "generator": "gen_math.py"
+    },
+    "spline": {
+      "description": "scipy.interpolate.CubicSpline: every combination of a first- or second-derivative boundary condition at each end, for a scalar and a 2-D dataset, evaluated at the knots and beyond both ends",
+      "generator": "gen_math_spline.py"
+    }
+  }
+}

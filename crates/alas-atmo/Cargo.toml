@@ -1,0 +1,24 @@
+[package]
+name = "alas-atmo"
+description = "Atmosphere models: AeroSandbox's ISA and its differentiable fit, and SUAVE's US Standard 1976."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# AeroSandbox's default atmosphere is a cubic B-spline fitted through the ISA,
+# not the closed form, so this crate needs the interpolating spline that
+# `alas-math` owns. Both are P1 leaves and `alas-math` depends on nothing in
+# the workspace, so the edge introduces no layering.
+alas-math = { path = "../alas-math" }
+tracing = { workspace = true }
+
+[dev-dependencies]
+alas-testkit = { path = "../alas-testkit" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[lints]
+workspace = true

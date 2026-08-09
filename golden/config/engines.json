@@ -1,0 +1,288 @@
+{
+  "available": [
+    "CF6-50",
+    "CFM56-5C",
+    "GE9X",
+    "GEnx-1B",
+    "LEAP-1A",
+    "PW1500G",
+    "Trent 900"
+  ],
+  "engines": [
+    {
+      "bypass_ratio": 10.0,
+      "cruise_tsfc_kg_kgf_hr": 0.5,
+      "fan_diameter_m": 3.4,
+      "fan_pressure_ratio": 1.45,
+      "manufacturer": "GE Aerospace",
+      "nacelle_length_m": 7.8,
+      "nacelle_max_radius_m": 2.1,
+      "name": "GE9X",
+      "overall_pressure_ratio": 60.0,
+      "thrust_kn": 467.0,
+      "turbine_inlet_temp_k": 1670.0
+    },
+    {
+      "bypass_ratio": 6.6,
+      "cruise_tsfc_kg_kgf_hr": 0.58,
+      "fan_diameter_m": 1.836,
+      "fan_pressure_ratio": 1.65,
+      "manufacturer": "CFM International",
+      "nacelle_length_m": 4.0,
+      "nacelle_max_radius_m": 1.1,
+      "name": "CFM56-5C",
+      "overall_pressure_ratio": 38.0,
+      "thrust_kn": 151.0,
+      "turbine_inlet_temp_k": 1600.0
+    },
+    {
+      "bypass_ratio": 8.5,
+      "cruise_tsfc_kg_kgf_hr": 0.54,
+      "fan_diameter_m": 2.946,
+      "fan_pressure_ratio": 1.55,
+      "manufacturer": "Rolls-Royce",
+      "nacelle_length_m": 6.8,
+      "nacelle_max_radius_m": 1.8,
+      "name": "Trent 900",
+      "overall_pressure_ratio": 39.0,
+      "thrust_kn": 374.0,
+      "turbine_inlet_temp_k": 1650.0
+    },
+    {
+      "bypass_ratio": 9.6,
+      "cruise_tsfc_kg_kgf_hr": 0.52,
+      "fan_diameter_m": 2.822,
+      "fan_pressure_ratio": 1.5,
+      "manufacturer": "GE Aerospace",
+      "nacelle_length_m": 5.8,
+      "nacelle_max_radius_m": 1.7,
+      "name": "GEnx-1B",
+      "overall_pressure_ratio": 45.0,
+      "thrust_kn": 339.0,
+      "turbine_inlet_temp_k": 1650.0
+    },
+    {
+      "bypass_ratio": 11.0,
+      "cruise_tsfc_kg_kgf_hr": 0.52,
+      "fan_diameter_m": 1.981,
+      "fan_pressure_ratio": 1.4,
+      "manufacturer": "CFM International",
+      "nacelle_length_m": 3.6,
+      "nacelle_max_radius_m": 1.15,
+      "name": "LEAP-1A",
+      "overall_pressure_ratio": 40.0,
+      "thrust_kn": 120.64,
+      "turbine_inlet_temp_k": 1650.0
+    },
+    {
+      "bypass_ratio": 12.0,
+      "cruise_tsfc_kg_kgf_hr": 0.5,
+      "fan_diameter_m": 1.854,
+      "fan_pressure_ratio": 1.35,
+      "manufacturer": "Pratt & Whitney",
+      "nacelle_length_m": 3.4,
+      "nacelle_max_radius_m": 1.08,
+      "name": "PW1500G",
+      "overall_pressure_ratio": 35.0,
+      "thrust_kn": 104.5,
+      "turbine_inlet_temp_k": 1650.0
+    },
+    {
+      "bypass_ratio": 4.4,
+      "cruise_tsfc_kg_kgf_hr": 0.63,
+      "fan_diameter_m": 2.19,
+      "fan_pressure_ratio": 1.7,
+      "manufacturer": "GE Aerospace",
+      "nacelle_length_m": 4.5,
+      "nacelle_max_radius_m": 1.3,
+      "name": "CF6-50",
+      "overall_pressure_ratio": 29.3,
+      "thrust_kn": 227.0,
+      "turbine_inlet_temp_k": 1500.0
+    }
+  ],
+  "nacelle_profiles": {
+    "CF6-50": [
+      [
+        0.0,
+        0.4
+      ],
+      [
+        0.36,
+        0.92
+      ],
+      [
+        0.6749999999999999,
+        1.0
+      ],
+      [
+        2.475,
+        1.0
+      ],
+      [
+        3.375,
+        0.82
+      ],
+      [
+        4.5,
+        0.45
+      ]
+    ],
+    "CFM56-5C": [
+      [
+        0.0,
+        0.4
+      ],
+      [
+        0.32,
+        0.92
+      ],
+      [
+        0.6,
+        1.0
+      ],
+      [
+        2.2,
+        1.0
+      ],
+      [
+        3.0,
+        0.82
+      ],
+      [
+        4.0,
+        0.45
+      ]
+    ],
+    "GE9X": [
+      [
+        0.0,
+        0.4
+      ],
+      [
+        0.624,
+        0.92
+      ],
+      [
+        1.17,
+        1.0
+      ],
+      [
+        4.29,
+        1.0
+      ],
+      [
+        5.85,
+        0.82
+      ],
+      [
+        7.8,
+        0.45
+      ]
+    ],
+    "GEnx-1B": [
+      [
+        0.0,
+        0.4
+      ],
+      [
+        0.46399999999999997,
+        0.92
+      ],
+      [
+        0.87,
+        1.0
+      ],
+      [
+        3.19,
+        1.0
+      ],
+      [
+        4.35,
+        0.82
+      ],
+      [
+        5.8,
+        0.45
+      ]
+    ],
+    "LEAP-1A": [
+      [
+        0.0,
+        0.4
+      ],
+      [
+        0.28800000000000003,
+        0.92
+      ],
+      [
+        0.54,
+        1.0
+      ],
+      [
+        1.9800000000000002,
+        1.0
+      ],
+      [
+        2.7,
+        0.82
+      ],
+      [
+        3.6,
+        0.45
+      ]
+    ],
+    "PW1500G": [
+      [
+        0.0,
+        0.4
+      ],
+      [
+        0.272,
+        0.92
+      ],
+      [
+        0.51,
+        1.0
+      ],
+      [
+        1.87,
+        1.0
+      ],
+      [
+        2.55,
+        0.82
+      ],
+      [
+        3.4,
+        0.45
+      ]
+    ],
+    "Trent 900": [
+      [
+        0.0,
+        0.4
+      ],
+      [
+        0.544,
+        0.92
+      ],
+      [
+        1.02,
+        1.0
+      ],
+      [
+        3.74,
+        1.0
+      ],
+      [
+        5.1,
+        0.82
+      ],
+      [
+        6.8,
+        0.45
+      ]
+    ]
+  }
+}

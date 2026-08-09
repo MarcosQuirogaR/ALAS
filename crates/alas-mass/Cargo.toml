@@ -1,0 +1,24 @@
+[package]
+name = "alas-mass"
+description = "Component mass estimation: Torenbeek's empirical wing and fuselage weight methods."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# `mass_wing`/`mass_fuselage_simple` take AeroSandbox's own `Wing`/`Fuselage`
+# as their geometry arguments, exactly as upstream does.
+alas-geom = { path = "../alas-geom" }
+# `breakdown` reads `DesignRequirements`, `GeometryConfig` and
+# `MassModelConfig` directly, exactly as `alas/physics/mass.py` does.
+alas-config = { path = "../alas-config" }
+
+[dev-dependencies]
+alas-testkit = { path = "../alas-testkit" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[lints]
+workspace = true

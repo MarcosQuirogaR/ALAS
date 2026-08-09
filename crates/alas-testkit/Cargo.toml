@@ -1,0 +1,16 @@
+[package]
+name = "alas-testkit"
+description = "Fixture loading and tolerance assertions for the parity tests."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[lints]
+workspace = true

@@ -1,0 +1,912 @@
+{
+  "cases": [
+    {
+      "config": {},
+      "inputs": {
+        "aero_aft_lim_x": 7.8,
+        "aero_fwd_lim_x": 7.0,
+        "cg_height_estimate_m": 2.9700000000000006,
+        "fuselage_diameter_m": 2.7,
+        "mtow_kg": 12000.0,
+        "x_mlg": 8.0,
+        "x_nlg": 2.2
+      },
+      "layout": {
+        "mlg_tire": {
+          "code": "light",
+          "diameter_m": 0.61,
+          "name": "Light transport (~24x7.7 class)",
+          "rated_load_kg": 3500.0,
+          "width_m": 0.2
+        },
+        "n_mlg_struts": 2,
+        "n_nlg_wheels": 1,
+        "nlg_tire": {
+          "code": "light",
+          "diameter_m": 0.61,
+          "name": "Light transport (~24x7.7 class)",
+          "rated_load_kg": 3500.0,
+          "width_m": 0.2
+        },
+        "pct_load_mlg_max": 1.1666666666666667,
+        "pct_load_nlg_max": 0.2916666666666667,
+        "r_mlg_total_design_kg": 11586.206896551725,
+        "r_nlg_design_kg": 2068.9655172413795,
+        "strut_material": "7075-T6 aluminium",
+        "track_width_m": 5.095000000000001,
+        "turnover_angle_deg": 56.979004100408204,
+        "turnover_ok": true,
+        "wheelbase_m": 5.8,
+        "wheels": [
+          {
+            "diameter_m": 0.61,
+            "group": "NLG",
+            "strut_label": "NLG",
+            "width_m": 0.2,
+            "x": 2.2,
+            "y": 0.0
+          },
+          {
+            "diameter_m": 0.61,
+            "group": "MLG",
+            "strut_label": "MLG-L",
+            "width_m": 0.2,
+            "x": 8.0,
+            "y": -2.7075000000000005
+          },
+          {
+            "diameter_m": 0.61,
+            "group": "MLG",
+            "strut_label": "MLG-L",
+            "width_m": 0.2,
+            "x": 8.0,
+            "y": -2.3875
+          },
+          {
+            "diameter_m": 0.61,
+            "group": "MLG",
+            "strut_label": "MLG-R",
+            "width_m": 0.2,
+            "x": 8.0,
+            "y": 2.3875
+          },
+          {
+            "diameter_m": 0.61,
+            "group": "MLG",
+            "strut_label": "MLG-R",
+            "width_m": 0.2,
+            "x": 8.0,
+            "y": 2.7075000000000005
+          }
+        ],
+        "wheels_per_mlg_strut": 2,
+        "x_mlg": 8.0,
+        "x_nlg": 2.2
+      },
+      "name": "light_single_wheel"
+    },
+    {
+      "config": {},
+      "inputs": {
+        "aero_aft_lim_x": 18.2,
+        "aero_fwd_lim_x": 16.8,
+        "cg_height_estimate_m": 4.345000000000001,
+        "fuselage_diameter_m": 3.95,
+        "mtow_kg": 79000.0,
+        "x_mlg": 18.5,
+        "x_nlg": 5.7
+      },
+      "layout": {
+        "mlg_tire": {
+          "code": "widebody",
+          "diameter_m": 1.32,
+          "name": "Widebody (~52x21 class, 787/A330)",
+          "rated_load_kg": 24000.0,
+          "width_m": 0.53
+        },
+        "n_mlg_struts": 2,
+        "n_nlg_wheels": 2,
+        "nlg_tire": {
+          "code": "narrowbody",
+          "diameter_m": 1.17,
+          "name": "Narrowbody (~46x17 class, A320/737)",
+          "rated_load_kg": 13000.0,
+          "width_m": 0.44
+        },
+        "pct_load_mlg_max": 1.2151898734177216,
+        "pct_load_nlg_max": 0.3291139240506329,
+        "r_mlg_total_design_kg": 77148.4375,
+        "r_nlg_design_kg": 10492.187499999995,
+        "strut_material": "300M high-strength steel",
+        "track_width_m": 7.407500000000001,
+        "turnover_angle_deg": 54.62234106258511,
+        "turnover_ok": true,
+        "wheelbase_m": 12.8,
+        "wheels": [
+          {
+            "diameter_m": 1.17,
+            "group": "NLG",
+            "strut_label": "NLG",
+            "width_m": 0.44,
+            "x": 5.7,
+            "y": -0.35200000000000004
+          },
+          {
+            "diameter_m": 1.17,
+            "group": "NLG",
+            "strut_label": "NLG",
+            "width_m": 0.44,
+            "x": 5.7,
+            "y": 0.35200000000000004
+          },
+          {
+            "diameter_m": 1.32,
+            "group": "MLG",
+            "strut_label": "MLG-L",
+            "width_m": 0.53,
+            "x": 18.5,
+            "y": -4.127750000000001
+          },
+          {
+            "diameter_m": 1.32,
+            "group": "MLG",
+            "strut_label": "MLG-L",
+            "width_m": 0.53,
+            "x": 18.5,
+            "y": -3.2797500000000004
+          },
+          {
+            "diameter_m": 1.32,
+            "group": "MLG",
+            "strut_label": "MLG-R",
+            "width_m": 0.53,
+            "x": 18.5,
+            "y": 3.2797500000000004
+          },
+          {
+            "diameter_m": 1.32,
+            "group": "MLG",
+            "strut_label": "MLG-R",
+            "width_m": 0.53,
+            "x": 18.5,
+            "y": 4.127750000000001
+          }
+        ],
+        "wheels_per_mlg_strut": 2,
+        "x_mlg": 18.5,
+        "x_nlg": 5.7
+      },
+      "name": "narrowbody_auto"
+    },
+    {
+      "config": {},
+      "inputs": {
+        "aero_aft_lim_x": 31.5,
+        "aero_fwd_lim_x": 29.0,
+        "cg_height_estimate_m": 6.347,
+        "fuselage_diameter_m": 5.77,
+        "mtow_kg": 254000.0,
+        "x_mlg": 32.0,
+        "x_nlg": 8.5
+      },
+      "layout": {
+        "mlg_tire": {
+          "code": "heavy",
+          "diameter_m": 1.4,
+          "name": "Heavy widebody (~54x21 class, A380/747)",
+          "rated_load_kg": 34000.0,
+          "width_m": 0.56
+        },
+        "n_mlg_struts": 2,
+        "n_nlg_wheels": 2,
+        "nlg_tire": {
+          "code": "widebody",
+          "diameter_m": 1.32,
+          "name": "Widebody (~52x21 class, 787/A330)",
+          "rated_load_kg": 24000.0,
+          "width_m": 0.53
+        },
+        "pct_load_mlg_max": 1.0708661417322836,
+        "pct_load_nlg_max": 0.1889763779527559,
+        "r_mlg_total_design_kg": 248595.74468085106,
+        "r_nlg_design_kg": 32425.531914893618,
+        "strut_material": "300M high-strength steel (titanium truck beam)",
+        "track_width_m": 10.8745,
+        "turnover_angle_deg": 53.94278806158091,
+        "turnover_ok": true,
+        "wheelbase_m": 23.5,
+        "wheels": [
+          {
+            "diameter_m": 1.32,
+            "group": "NLG",
+            "strut_label": "NLG",
+            "width_m": 0.53,
+            "x": 8.5,
+            "y": -0.42400000000000004
+          },
+          {
+            "diameter_m": 1.32,
+            "group": "NLG",
+            "strut_label": "NLG",
+            "width_m": 0.53,
+            "x": 8.5,
+            "y": 0.42400000000000004
+          },
+          {
+            "diameter_m": 1.4,
+            "group": "MLG",
+            "strut_label": "MLG-L",
+            "width_m": 0.56,
+            "x": 31.09,
+            "y": -5.88525
+          },
+          {
+            "diameter_m": 1.4,
+            "group": "MLG",
+            "strut_label": "MLG-L",
+            "width_m": 0.56,
+            "x": 31.09,
+            "y": -4.989249999999999
+          },
+          {
+            "diameter_m": 1.4,
+            "group": "MLG",
+            "strut_label": "MLG-L",
+            "width_m": 0.56,
+            "x": 32.91,
+            "y": -5.88525
+          },
+          {
+            "diameter_m": 1.4,
+            "group": "MLG",
+            "strut_label": "MLG-L",
+            "width_m": 0.56,
+            "x": 32.91,
+            "y": -4.989249999999999
+          },
+          {
+            "diameter_m": 1.4,
+            "group": "MLG",
+            "strut_label": "MLG-R",
+            "width_m": 0.56,
+            "x": 31.09,
+            "y": 4.989249999999999
+          },
+          {
+            "diameter_m": 1.4,
+            "group": "MLG",
+            "strut_label": "MLG-R",
+            "width_m": 0.56,
+            "x": 31.09,
+            "y": 5.88525
+          },
+          {
+            "diameter_m": 1.4,
+            "group": "MLG",
+            "strut_label": "MLG-R",
+            "width_m": 0.56,
+            "x": 32.91,
+            "y": 4.989249999999999
+          },
+          {
+            "diameter_m": 1.4,
+            "group": "MLG",
+            "strut_label": "MLG-R",
+            "width_m": 0.56,
+            "x": 32.91,
+            "y": 5.88525
+          }
+        ],
+        "wheels_per_mlg_strut": 4,
+        "x_mlg": 32.0,
+        "x_nlg": 8.5
+      },
+      "name": "widebody_auto"
+    },
+    {
+      "config": {},
+      "inputs": {
+        "aero_aft_lim_x": 39.5,
+        "aero_fwd_lim_x": 36.5,
+        "cg_height_estimate_m": 7.854,
+        "fuselage_diameter_m": 7.14,
+        "mtow_kg": 560000.0,
+        "x_mlg": 40.0,
+        "x_nlg": 10.0
+      },
+      "layout": {
+        "mlg_tire": {
+          "code": "widebody",
+          "diameter_m": 1.32,
+          "name": "Widebody (~52x21 class, 787/A330)",
+          "rated_load_kg": 24000.0,
+          "width_m": 0.53
+        },
+        "n_mlg_struts": 4,
+        "n_nlg_wheels": 2,
+        "nlg_tire": {
+          "code": "heavy",
+          "diameter_m": 1.4,
+          "name": "Heavy widebody (~54x21 class, A380/747)",
+          "rated_load_kg": 34000.0,
+          "width_m": 0.56
+        },
+        "pct_load_mlg_max": 1.0285714285714285,
+        "pct_load_nlg_max": 0.12142857142857143,
+        "r_mlg_total_design_kg": 550666.6666666666,
+        "r_nlg_design_kg": 65333.333333333336,
+        "strut_material": "300M high-strength steel",
+        "track_width_m": 13.509,
+        "turnover_angle_deg": 53.45707981939663,
+        "turnover_ok": true,
+        "wheelbase_m": 30.0,
+        "wheels": [
+          {
+            "diameter_m": 1.4,
+            "group": "NLG",
+            "strut_label": "NLG",
+            "width_m": 0.56,
+            "x": 10.0,
+            "y": -0.44800000000000006
+          },
+          {
+            "diameter_m": 1.4,
+            "group": "NLG",
+            "strut_label": "NLG",
+            "width_m": 0.56,
+            "x": 10.0,
+            "y": 0.44800000000000006
+          },
+          {
+            "diameter_m": 1.32,
+            "group": "MLG",
+            "strut_label": "MLG-L",
+            "width_m": 0.53,
+            "x": 38.284,
+            "y": -7.1785000000000005
+          },
+          {
+            "diameter_m": 1.32,
+            "group": "MLG",
+            "strut_label": "MLG-L",
+            "width_m": 0.53,
+            "x": 38.284,
+            "y": -6.3305
+          },
+          {
+            "diameter_m": 1.32,
+            "group": "MLG",
+            "strut_label": "MLG-L",
+            "width_m": 0.53,
+            "x": 40.0,
+            "y": -7.1785000000000005
+          },
+          {
+            "diameter_m": 1.32,
+            "group": "MLG",
+            "strut_label": "MLG-L",
+            "width_m": 0.53,
+            "x": 40.0,
+            "y": -6.3305
+          },
+          {
+            "diameter_m": 1.32,
+            "group": "MLG",
+            "strut_label": "MLG-L",
+            "width_m": 0.53,
+            "x": 41.716,
+            "y": -7.1785000000000005
+          },
+          {
+            "diameter_m": 1.32,
+            "group": "MLG",
+            "strut_label": "MLG-L",
+            "width_m": 0.53,
+            "x": 41.716,
+            "y": -6.3305
+          },
+          {
+            "diameter_m": 1.32,
+            "group": "MLG",
+            "strut_label": "MLG-R",
+            "width_m": 0.53,
+            "x": 38.284,
+            "y": 6.3305
+          },
+          {
+            "diameter_m": 1.32,
+            "group": "MLG",
+            "strut_label": "MLG-R",
+            "width_m": 0.53,
+            "x": 38.284,
+            "y": 7.1785000000000005
+          },
+          {
+            "diameter_m": 1.32,
+            "group": "MLG",
+            "strut_label": "MLG-R",
+            "width_m": 0.53,
+            "x": 40.0,
+            "y": 6.3305
+          },
+          {
+            "diameter_m": 1.32,
+            "group": "MLG",
+            "strut_label": "MLG-R",
+            "width_m": 0.53,
+            "x": 40.0,
+            "y": 7.1785000000000005
+          },
+          {
+            "diameter_m": 1.32,
+            "group": "MLG",
+            "strut_label": "MLG-R",
+            "width_m": 0.53,
+            "x": 41.716,
+            "y": 6.3305
+          },
+          {
+            "diameter_m": 1.32,
+            "group": "MLG",
+            "strut_label": "MLG-R",
+            "width_m": 0.53,
+            "x": 41.716,
+            "y": 7.1785000000000005
+          },
+          {
+            "diameter_m": 1.32,
+            "group": "MLG",
+            "strut_label": "MLG-Body-L",
+            "width_m": 0.53,
+            "x": 38.284,
+            "y": -3.463525
+          },
+          {
+            "diameter_m": 1.32,
+            "group": "MLG",
+            "strut_label": "MLG-Body-L",
+            "width_m": 0.53,
+            "x": 38.284,
+            "y": -2.6155250000000003
+          },
+          {
+            "diameter_m": 1.32,
+            "group": "MLG",
+            "strut_label": "MLG-Body-L",
+            "width_m": 0.53,
+            "x": 40.0,
+            "y": -3.463525
+          },
+          {
+            "diameter_m": 1.32,
+            "group": "MLG",
+            "strut_label": "MLG-Body-L",
+            "width_m": 0.53,
+            "x": 40.0,
+            "y": -2.6155250000000003
+          },
+          {
+            "diameter_m": 1.32,
+            "group": "MLG",
+            "strut_label": "MLG-Body-L",
+            "width_m": 0.53,
+            "x": 41.716,
+            "y": -3.463525
+          },
+          {
+            "diameter_m": 1.32,
+            "group": "MLG",
+            "strut_label": "MLG-Body-L",
+            "width_m": 0.53,
+            "x": 41.716,
+            "y": -2.6155250000000003
+          },
+          {
+            "diameter_m": 1.32,
+            "group": "MLG",
+            "strut_label": "MLG-Body-R",
+            "width_m": 0.53,
+            "x": 38.284,
+            "y": 2.6155250000000003
+          },
+          {
+            "diameter_m": 1.32,
+            "group": "MLG",
+            "strut_label": "MLG-Body-R",
+            "width_m": 0.53,
+            "x": 38.284,
+            "y": 3.463525
+          },
+          {
+            "diameter_m": 1.32,
+            "group": "MLG",
+            "strut_label": "MLG-Body-R",
+            "width_m": 0.53,
+            "x": 40.0,
+            "y": 2.6155250000000003
+          },
+          {
+            "diameter_m": 1.32,
+            "group": "MLG",
+            "strut_label": "MLG-Body-R",
+            "width_m": 0.53,
+            "x": 40.0,
+            "y": 3.463525
+          },
+          {
+            "diameter_m": 1.32,
+            "group": "MLG",
+            "strut_label": "MLG-Body-R",
+            "width_m": 0.53,
+            "x": 41.716,
+            "y": 2.6155250000000003
+          },
+          {
+            "diameter_m": 1.32,
+            "group": "MLG",
+            "strut_label": "MLG-Body-R",
+            "width_m": 0.53,
+            "x": 41.716,
+            "y": 3.463525
+          }
+        ],
+        "wheels_per_mlg_strut": 6,
+        "x_mlg": 40.0,
+        "x_nlg": 10.0
+      },
+      "name": "heavy_body_gear"
+    },
+    {
+      "config": {
+        "n_mlg_struts": 4,
+        "n_nlg_wheels": 2,
+        "strut_material": "titanium (custom)",
+        "tire_class": "widebody",
+        "wheels_per_mlg_strut": 6
+      },
+      "inputs": {
+        "aero_aft_lim_x": 31.5,
+        "aero_fwd_lim_x": 29.0,
+        "cg_height_estimate_m": 6.347,
+        "fuselage_diameter_m": 5.77,
+        "mtow_kg": 254000.0,
+        "x_mlg": 32.0,
+        "x_nlg": 8.5
+      },
+      "layout": {
+        "mlg_tire": {
+          "code": "widebody",
+          "diameter_m": 1.32,
+          "name": "Widebody (~52x21 class, 787/A330)",
+          "rated_load_kg": 24000.0,
+          "width_m": 0.53
+        },
+        "n_mlg_struts": 4,
+        "n_nlg_wheels": 2,
+        "nlg_tire": {
+          "code": "widebody",
+          "diameter_m": 1.32,
+          "name": "Widebody (~52x21 class, 787/A330)",
+          "rated_load_kg": 24000.0,
+          "width_m": 0.53
+        },
+        "pct_load_mlg_max": 2.267716535433071,
+        "pct_load_nlg_max": 0.1889763779527559,
+        "r_mlg_total_design_kg": 248595.74468085106,
+        "r_nlg_design_kg": 32425.531914893618,
+        "strut_material": "titanium (custom)",
+        "track_width_m": 10.9745,
+        "turnover_angle_deg": 53.70570296630485,
+        "turnover_ok": true,
+        "wheelbase_m": 23.5,
+        "wheels": [
+          {
+            "diameter_m": 1.32,
+            "group": "NLG",
+            "strut_label": "NLG",
+            "width_m": 0.53,
+            "x": 8.5,
+            "y": -0.42400000000000004
+          },
+          {
+            "diameter_m": 1.32,
+            "group": "NLG",
+            "strut_label": "NLG",
+            "width_m": 0.53,
+            "x": 8.5,
+            "y": 0.42400000000000004
+          },
+          {
+            "diameter_m": 1.32,
+            "group": "MLG",
+            "strut_label": "MLG-L",
+            "width_m": 0.53,
+            "x": 30.284,
+            "y": -5.911250000000001
+          },
+          {
+            "diameter_m": 1.32,
+            "group": "MLG",
+            "strut_label": "MLG-L",
+            "width_m": 0.53,
+            "x": 30.284,
+            "y": -5.06325
+          },
+          {
+            "diameter_m": 1.32,
+            "group": "MLG",
+            "strut_label": "MLG-L",
+            "width_m": 0.53,
+            "x": 32.0,
+            "y": -5.911250000000001
+          },
+          {
+            "diameter_m": 1.32,
+            "group": "MLG",
+            "strut_label": "MLG-L",
+            "width_m": 0.53,
+            "x": 32.0,
+            "y": -5.06325
+          },
+          {
+            "diameter_m": 1.32,
+            "group": "MLG",
+            "strut_label": "MLG-L",
+            "width_m": 0.53,
+            "x": 33.716,
+            "y": -5.911250000000001
+          },
+          {
+            "diameter_m": 1.32,
+            "group": "MLG",
+            "strut_label": "MLG-L",
+            "width_m": 0.53,
+            "x": 33.716,
+            "y": -5.06325
+          },
+          {
+            "diameter_m": 1.32,
+            "group": "MLG",
+            "strut_label": "MLG-R",
+            "width_m": 0.53,
+            "x": 30.284,
+            "y": 5.06325
+          },
+          {
+            "diameter_m": 1.32,
+            "group": "MLG",
+            "strut_label": "MLG-R",
+            "width_m": 0.53,
+            "x": 30.284,
+            "y": 5.911250000000001
+          },
+          {
+            "diameter_m": 1.32,
+            "group": "MLG",
+            "strut_label": "MLG-R",
+            "width_m": 0.53,
+            "x": 32.0,
+            "y": 5.06325
+          },
+          {
+            "diameter_m": 1.32,
+            "group": "MLG",
+            "strut_label": "MLG-R",
+            "width_m": 0.53,
+            "x": 32.0,
+            "y": 5.911250000000001
+          },
+          {
+            "diameter_m": 1.32,
+            "group": "MLG",
+            "strut_label": "MLG-R",
+            "width_m": 0.53,
+            "x": 33.716,
+            "y": 5.06325
+          },
+          {
+            "diameter_m": 1.32,
+            "group": "MLG",
+            "strut_label": "MLG-R",
+            "width_m": 0.53,
+            "x": 33.716,
+            "y": 5.911250000000001
+          },
+          {
+            "diameter_m": 1.32,
+            "group": "MLG",
+            "strut_label": "MLG-Body-L",
+            "width_m": 0.53,
+            "x": 30.284,
+            "y": -2.8932625
+          },
+          {
+            "diameter_m": 1.32,
+            "group": "MLG",
+            "strut_label": "MLG-Body-L",
+            "width_m": 0.53,
+            "x": 30.284,
+            "y": -2.0452625
+          },
+          {
+            "diameter_m": 1.32,
+            "group": "MLG",
+            "strut_label": "MLG-Body-L",
+            "width_m": 0.53,
+            "x": 32.0,
+            "y": -2.8932625
+          },
+          {
+            "diameter_m": 1.32,
+            "group": "MLG",
+            "strut_label": "MLG-Body-L",
+            "width_m": 0.53,
+            "x": 32.0,
+            "y": -2.0452625
+          },
+          {
+            "diameter_m": 1.32,
+            "group": "MLG",
+            "strut_label": "MLG-Body-L",
+            "width_m": 0.53,
+            "x": 33.716,
+            "y": -2.8932625
+          },
+          {
+            "diameter_m": 1.32,
+            "group": "MLG",
+            "strut_label": "MLG-Body-L",
+            "width_m": 0.53,
+            "x": 33.716,
+            "y": -2.0452625
+          },
+          {
+            "diameter_m": 1.32,
+            "group": "MLG",
+            "strut_label": "MLG-Body-R",
+            "width_m": 0.53,
+            "x": 30.284,
+            "y": 2.0452625
+          },
+          {
+            "diameter_m": 1.32,
+            "group": "MLG",
+            "strut_label": "MLG-Body-R",
+            "width_m": 0.53,
+            "x": 30.284,
+            "y": 2.8932625
+          },
+          {
+            "diameter_m": 1.32,
+            "group": "MLG",
+            "strut_label": "MLG-Body-R",
+            "width_m": 0.53,
+            "x": 32.0,
+            "y": 2.0452625
+          },
+          {
+            "diameter_m": 1.32,
+            "group": "MLG",
+            "strut_label": "MLG-Body-R",
+            "width_m": 0.53,
+            "x": 32.0,
+            "y": 2.8932625
+          },
+          {
+            "diameter_m": 1.32,
+            "group": "MLG",
+            "strut_label": "MLG-Body-R",
+            "width_m": 0.53,
+            "x": 33.716,
+            "y": 2.0452625
+          },
+          {
+            "diameter_m": 1.32,
+            "group": "MLG",
+            "strut_label": "MLG-Body-R",
+            "width_m": 0.53,
+            "x": 33.716,
+            "y": 2.8932625
+          }
+        ],
+        "wheels_per_mlg_strut": 6,
+        "x_mlg": 32.0,
+        "x_nlg": 8.5
+      },
+      "name": "forced_counts"
+    },
+    {
+      "config": {},
+      "inputs": {
+        "aero_aft_lim_x": 11.0,
+        "aero_fwd_lim_x": 6.4,
+        "cg_height_estimate_m": 9.5,
+        "fuselage_diameter_m": 6.5,
+        "mtow_kg": 120000.0,
+        "x_mlg": 12.0,
+        "x_nlg": 6.0
+      },
+      "layout": {
+        "mlg_tire": {
+          "code": "heavy",
+          "diameter_m": 1.4,
+          "name": "Heavy widebody (~54x21 class, A380/747)",
+          "rated_load_kg": 34000.0,
+          "width_m": 0.56
+        },
+        "n_mlg_struts": 2,
+        "n_nlg_wheels": 2,
+        "nlg_tire": {
+          "code": "heavy",
+          "diameter_m": 1.4,
+          "name": "Heavy widebody (~54x21 class, A380/747)",
+          "rated_load_kg": 34000.0,
+          "width_m": 0.56
+        },
+        "pct_load_mlg_max": 1.1333333333333333,
+        "pct_load_nlg_max": 0.5666666666666667,
+        "r_mlg_total_design_kg": 100000.0,
+        "r_nlg_design_kg": 112000.0,
+        "strut_material": "300M high-strength steel (titanium truck beam)",
+        "track_width_m": 12.125,
+        "turnover_angle_deg": 88.28583347734076,
+        "turnover_ok": false,
+        "wheelbase_m": 6.0,
+        "wheels": [
+          {
+            "diameter_m": 1.4,
+            "group": "NLG",
+            "strut_label": "NLG",
+            "width_m": 0.56,
+            "x": 6.0,
+            "y": -0.44800000000000006
+          },
+          {
+            "diameter_m": 1.4,
+            "group": "NLG",
+            "strut_label": "NLG",
+            "width_m": 0.56,
+            "x": 6.0,
+            "y": 0.44800000000000006
+          },
+          {
+            "diameter_m": 1.4,
+            "group": "MLG",
+            "strut_label": "MLG-L",
+            "width_m": 0.56,
+            "x": 12.0,
+            "y": -6.5105
+          },
+          {
+            "diameter_m": 1.4,
+            "group": "MLG",
+            "strut_label": "MLG-L",
+            "width_m": 0.56,
+            "x": 12.0,
+            "y": -5.6145
+          },
+          {
+            "diameter_m": 1.4,
+            "group": "MLG",
+            "strut_label": "MLG-R",
+            "width_m": 0.56,
+            "x": 12.0,
+            "y": 5.6145
+          },
+          {
+            "diameter_m": 1.4,
+            "group": "MLG",
+            "strut_label": "MLG-R",
+            "width_m": 0.56,
+            "x": 12.0,
+            "y": 6.5105
+          }
+        ],
+        "wheels_per_mlg_strut": 2,
+        "x_mlg": 12.0,
+        "x_nlg": 6.0
+      },
+      "name": "tippy_forward_cg"
+    }
+  ]
+}

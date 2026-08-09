@@ -1,0 +1,491 @@
+{
+  "altitude_sweep": {
+    "altitude_m": [
+      0.0,
+      5000.0,
+      11000.0
+    ],
+    "dimensional_thrust_kn": [
+      [
+        93.88151687922769,
+        97.06388607774505,
+        96.88169279885055
+      ],
+      [
+        36.00385130074033,
+        45.93566257143365,
+        50.5660751757181
+      ]
+    ],
+    "feasible_mask": [
+      [
+        true,
+        true,
+        true
+      ],
+      [
+        true,
+        true,
+        true
+      ]
+    ],
+    "inputs": {
+      "altitude_vector_m": [
+        0.0,
+        5000.0,
+        11000.0
+      ],
+      "bypass_ratio": 10.0,
+      "fan_pressure_ratio": 1.5,
+      "mach_values": [
+        0.0,
+        0.8
+      ],
+      "mdot_total_kg_s": 350.0,
+      "overall_pressure_ratio": 50.0,
+      "turbine_inlet_temperature_k": 1650.0
+    },
+    "mach_values": [
+      0.0,
+      0.8
+    ],
+    "specific_thrust_ms": [
+      [
+        268.232905369222,
+        277.3253887935573,
+        276.8048365681444
+      ],
+      [
+        102.86814657354381,
+        131.24475020409616,
+        144.4745005020517
+      ]
+    ],
+    "tsfc_mg_ns": [
+      [
+        7.914656712171528,
+        8.535976276908759,
+        9.524523610737267
+      ],
+      [
+        17.94292507421852,
+        16.162884836091262,
+        16.784564180521603
+      ]
+    ]
+  },
+  "anchor": {
+    "inputs": {
+      "bypass_ratio": 10.0,
+      "fan_pressure_ratio": 1.5,
+      "overall_pressure_ratio": 50.0,
+      "thrust_kn": 470.0,
+      "turbine_inlet_temperature_k": 1700.0
+    },
+    "mdot_total_kg_s": 1697.4804685636236,
+    "static_result": {
+      "cycle_feasible": true,
+      "exit_velocity_core_ms": 513.5499313385718,
+      "exit_velocity_fan_ms": 251.63978932654453,
+      "fuel_air_ratio": 0.024817737371357413,
+      "infeasibility_reason": "",
+      "overall_efficiency": 0.0,
+      "propulsive_efficiency": 0.0,
+      "specific_thrust_ms": 276.88094720624696,
+      "temperature_t0_k": 288.1499999999946,
+      "temperature_t13_k": 326.3753277958146,
+      "temperature_t25_k": 305.12605758318097,
+      "temperature_t3_k": 959.644221723458,
+      "temperature_t45_k": 1139.8633425297517,
+      "temperature_t4_k": 1700.0,
+      "temperature_t5_k": 798.2028694885582,
+      "temperature_t6_k": 798.2028694885582,
+      "thermal_efficiency": 0.42675240042982243,
+      "tsfc_mg_ns": 8.148476685071708
+    }
+  },
+  "bpr_sensitivity": {
+    "bypass_ratio_vector": [
+      1.0,
+      5.0,
+      10.0
+    ],
+    "feasible_mask": [
+      true,
+      true,
+      true
+    ],
+    "inputs": {
+      "altitude_m": 10000.0,
+      "bpr_vector": [
+        1.0,
+        5.0,
+        10.0
+      ],
+      "fan_pressure_ratio": 1.5,
+      "mach": 0.8,
+      "overall_pressure_ratio": 50.0,
+      "turbine_inlet_temperature_k": 1600.0
+    },
+    "specific_thrust_ms": [
+      429.3047127077799,
+      196.4637755994601,
+      139.35003788873325
+    ],
+    "tsfc_mg_ns": [
+      29.00036109666939,
+      21.123472848942072,
+      16.244235644613912
+    ]
+  },
+  "carpet_plot": {
+    "compressor_pressure_ratio_vector": [
+      40.0,
+      50.0,
+      60.0
+    ],
+    "feasible_mask": [
+      [
+        true,
+        true,
+        true
+      ],
+      [
+        true,
+        true,
+        true
+      ]
+    ],
+    "inputs": {
+      "altitude_m": 10000.0,
+      "bypass_ratio": 10.0,
+      "compressor_pressure_ratio_vector": [
+        40.0,
+        50.0,
+        60.0
+      ],
+      "fan_pressure_ratio": 1.5,
+      "mach": 0.8,
+      "tit_vector_k": [
+        1500.0,
+        1700.0
+      ]
+    },
+    "specific_thrust_ms": [
+      [
+        132.60080381000736,
+        129.3685254042741,
+        125.88923498325882
+      ],
+      [
+        149.5444679766854,
+        147.55336600358604,
+        145.47302705132023
+      ]
+    ],
+    "tit_vector_k": [
+      1500.0,
+      1700.0
+    ],
+    "tsfc_mg_ns": [
+      [
+        16.011920881172152,
+        15.447172530445865,
+        15.012001889181638
+      ],
+      [
+        17.76021005395023,
+        17.149122587649885,
+        16.644053031724088
+      ]
+    ]
+  },
+  "classify": [
+    {
+      "bypass_ratio": 0.5,
+      "label": "Turbojet / very-low-bypass"
+    },
+    {
+      "bypass_ratio": 0.999,
+      "label": "Turbojet / very-low-bypass"
+    },
+    {
+      "bypass_ratio": 1.0,
+      "label": "Low-bypass turbofan"
+    },
+    {
+      "bypass_ratio": 3.0,
+      "label": "Low-bypass turbofan"
+    },
+    {
+      "bypass_ratio": 4.999,
+      "label": "Low-bypass turbofan"
+    },
+    {
+      "bypass_ratio": 5.0,
+      "label": "High-bypass turbofan"
+    },
+    {
+      "bypass_ratio": 12.0,
+      "label": "High-bypass turbofan"
+    }
+  ],
+  "cycle_cases": [
+    {
+      "inputs": {
+        "altitude_m": 10668.0,
+        "bypass_ratio": 10.0,
+        "fan_pressure_ratio": 1.5,
+        "mach": 0.85,
+        "overall_pressure_ratio": 50.0,
+        "turbine_inlet_temperature_k": 1600.0
+      },
+      "name": "cruise_nominal",
+      "result": {
+        "cycle_feasible": true,
+        "exit_velocity_core_ms": 517.0835979296912,
+        "exit_velocity_fan_ms": 311.10445748513337,
+        "fuel_air_ratio": 0.02482050963880501,
+        "infeasibility_reason": "",
+        "overall_efficiency": 0.3546833000372261,
+        "propulsive_efficiency": 0.6934136714486361,
+        "specific_thrust_ms": 135.28963322075163,
+        "temperature_t0_k": 252.6758353440905,
+        "temperature_t13_k": 286.19524062644587,
+        "temperature_t25_k": 267.5619694085746,
+        "temperature_t3_k": 841.5023611213221,
+        "temperature_t45_k": 1108.8231304226547,
+        "temperature_t4_k": 1600.0,
+        "temperature_t5_k": 809.2253101967895,
+        "temperature_t6_k": 809.2253101967895,
+        "thermal_efficiency": 0.5115031829358717,
+        "tsfc_mg_ns": 16.678365617876395
+      }
+    },
+    {
+      "inputs": {
+        "altitude_m": 0.0,
+        "bypass_ratio": 10.0,
+        "fan_pressure_ratio": 1.5,
+        "mach": 0.0,
+        "overall_pressure_ratio": 45.0,
+        "turbine_inlet_temperature_k": 1700.0
+      },
+      "name": "static_takeoff",
+      "result": {
+        "cycle_feasible": true,
+        "exit_velocity_core_ms": 522.102134084179,
+        "exit_velocity_fan_ms": 251.63978932654453,
+        "fuel_air_ratio": 0.025577607258237017,
+        "infeasibility_reason": "",
+        "overall_efficiency": 0.0,
+        "propulsive_efficiency": 0.0,
+        "specific_thrust_ms": 278.9599330831779,
+        "temperature_t0_k": 288.1499999999946,
+        "temperature_t13_k": 326.3753277958146,
+        "temperature_t25_k": 305.12605758318097,
+        "temperature_t3_k": 929.0790171995757,
+        "temperature_t45_k": 1166.4166802777422,
+        "temperature_t4_k": 1700.0,
+        "temperature_t5_k": 825.0093499564791,
+        "temperature_t6_k": 825.0093499564791,
+        "thermal_efficiency": 0.42499588480943645,
+        "tsfc_mg_ns": 8.335379915590867
+      }
+    },
+    {
+      "inputs": {
+        "altitude_m": 3000.0,
+        "bypass_ratio": 8.0,
+        "fan_pressure_ratio": 1.6,
+        "mach": 0.45,
+        "overall_pressure_ratio": 40.0,
+        "turbine_inlet_temperature_k": 1650.0
+      },
+      "name": "climb_low_mach",
+      "result": {
+        "cycle_feasible": true,
+        "exit_velocity_core_ms": 529.0033939509034,
+        "exit_velocity_fan_ms": 306.7993249881434,
+        "fuel_air_ratio": 0.02555246776770949,
+        "infeasibility_reason": "",
+        "overall_efficiency": 0.23917429479322586,
+        "propulsive_efficiency": 0.5417535314626114,
+        "specific_thrust_ms": 196.36054259617063,
+        "temperature_t0_k": 280.1016047072894,
+        "temperature_t13_k": 323.61248546011893,
+        "temperature_t25_k": 296.6034994518806,
+        "temperature_t3_k": 871.032910085991,
+        "temperature_t45_k": 1158.7554909943574,
+        "temperature_t4_k": 1650.0,
+        "temperature_t5_k": 846.9638036600102,
+        "temperature_t6_k": 846.9638036600102,
+        "thermal_efficiency": 0.4414817456704151,
+        "tsfc_mg_ns": 14.458928702086519
+      }
+    },
+    {
+      "inputs": {
+        "altitude_m": 11000.0,
+        "bypass_ratio": 12.0,
+        "fan_pressure_ratio": 1.45,
+        "mach": 0.82,
+        "overall_pressure_ratio": 60.0,
+        "turbine_inlet_temperature_k": 1750.0
+      },
+      "name": "high_opr",
+      "result": {
+        "cycle_feasible": true,
+        "exit_velocity_core_ms": 546.7792172451026,
+        "exit_velocity_fan_ms": 307.47446791103977,
+        "fuel_air_ratio": 0.028308762880220086,
+        "infeasibility_reason": "",
+        "overall_efficiency": 0.3430289322558985,
+        "propulsive_efficiency": 0.6552107236076359,
+        "specific_thrust_ms": 131.17322439727826,
+        "temperature_t0_k": 249.39780910668705,
+        "temperature_t13_k": 279.5555103534403,
+        "temperature_t25_k": 264.09082166443727,
+        "temperature_t3_k": 878.4363492757952,
+        "temperature_t45_k": 1226.0279880645958,
+        "temperature_t4_k": 1750.0,
+        "temperature_t5_k": 904.8402927788877,
+        "temperature_t6_k": 904.8402927788877,
+        "thermal_efficiency": 0.5235398626676274,
+        "tsfc_mg_ns": 16.600927168162972
+      }
+    },
+    {
+      "inputs": {
+        "altitude_m": 9000.0,
+        "bypass_ratio": 0.8,
+        "fan_pressure_ratio": 2.2,
+        "mach": 0.9,
+        "overall_pressure_ratio": 30.0,
+        "turbine_inlet_temperature_k": 1600.0
+      },
+      "name": "low_bypass",
+      "result": {
+        "cycle_feasible": true,
+        "exit_velocity_core_ms": 611.7289939924757,
+        "exit_velocity_fan_ms": 337.867662365571,
+        "fuel_air_ratio": 0.026985004360060953,
+        "infeasibility_reason": "",
+        "overall_efficiency": 0.2085260385337768,
+        "propulsive_efficiency": 0.46285512308990806,
+        "specific_thrust_ms": 491.1310364210057,
+        "temperature_t0_k": 264.9379756565135,
+        "temperature_t13_k": 337.55394961990504,
+        "temperature_t25_k": 280.546520965269,
+        "temperature_t3_k": 754.1878723007912,
+        "temperature_t45_k": 1195.5131243228034,
+        "temperature_t4_k": 1600.0,
+        "temperature_t5_k": 1132.572634883034,
+        "temperature_t6_k": 1132.572634883034,
+        "thermal_efficiency": 0.4505211849913376,
+        "tsfc_mg_ns": 30.524784583297325
+      }
+    },
+    {
+      "inputs": {
+        "altitude_m": 0.0,
+        "bypass_ratio": 10.0,
+        "fan_pressure_ratio": 1.5,
+        "mach": 0.0,
+        "overall_pressure_ratio": 50.0,
+        "turbine_inlet_temperature_k": 400.0
+      },
+      "name": "infeasible_tit_below_compressor",
+      "result": {
+        "cycle_feasible": false,
+        "exit_velocity_core_ms": null,
+        "exit_velocity_fan_ms": null,
+        "fuel_air_ratio": null,
+        "infeasibility_reason": "Turbine inlet temperature (400 K) must exceed the compressor discharge temperature (960 K).",
+        "overall_efficiency": null,
+        "propulsive_efficiency": null,
+        "specific_thrust_ms": null,
+        "temperature_t0_k": null,
+        "temperature_t13_k": null,
+        "temperature_t25_k": null,
+        "temperature_t3_k": null,
+        "temperature_t45_k": null,
+        "temperature_t4_k": null,
+        "temperature_t5_k": null,
+        "temperature_t6_k": null,
+        "thermal_efficiency": null,
+        "tsfc_mg_ns": null
+      }
+    },
+    {
+      "inputs": {
+        "altitude_m": 10000.0,
+        "bypass_ratio": 10.0,
+        "fan_pressure_ratio": 1.5,
+        "mach": 0.8,
+        "overall_pressure_ratio": 50.0,
+        "turbine_inlet_temperature_k": 40000.0
+      },
+      "name": "infeasible_tit_above_heating",
+      "result": {
+        "cycle_feasible": false,
+        "exit_velocity_core_ms": null,
+        "exit_velocity_fan_ms": null,
+        "fuel_air_ratio": null,
+        "infeasibility_reason": "Turbine inlet temperature too high relative to the fuel heating value.",
+        "overall_efficiency": null,
+        "propulsive_efficiency": null,
+        "specific_thrust_ms": null,
+        "temperature_t0_k": null,
+        "temperature_t13_k": null,
+        "temperature_t25_k": null,
+        "temperature_t3_k": null,
+        "temperature_t45_k": null,
+        "temperature_t4_k": null,
+        "temperature_t5_k": null,
+        "temperature_t6_k": null,
+        "thermal_efficiency": null,
+        "tsfc_mg_ns": null
+      }
+    }
+  ],
+  "efficiency_decomposition": {
+    "compressor_pressure_ratio_vector": [
+      30.0,
+      40.0,
+      50.0
+    ],
+    "feasible_mask": [
+      true,
+      true,
+      true
+    ],
+    "inputs": {
+      "altitude_m": 10000.0,
+      "bypass_ratio": 10.0,
+      "fan_pressure_ratio": 1.5,
+      "mach": 0.8,
+      "pi_c_vector": [
+        30.0,
+        40.0,
+        50.0
+      ],
+      "turbine_inlet_temperature_k": 1600.0
+    },
+    "overall_efficiency": [
+      0.3175098338738494,
+      0.3322672898848115,
+      0.34458034385186126
+    ],
+    "propulsive_efficiency": [
+      0.6547354308399579,
+      0.6654878757166451,
+      0.6778064702754691
+    ],
+    "thermal_efficiency": [
+      0.4849437175967659,
+      0.4992837615967116,
+      0.5083757074667928
+    ]
+  }
+}
