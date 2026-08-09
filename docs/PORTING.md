@@ -412,7 +412,7 @@ P14 study, not a translation decision.
 | `alas/physics/dynamics.py` | 96 | `alas-stab::dynamics` | — | `closed` | todo — P7, not P4; needs `alas-aero::asb_vlm` |
 | `alas/physics/performance.py` | 555 | `alas-perf::performance` | — | `closed` | green — `golden/perf/performance.json` (point-performance surface; see scope note) |
 | `alas/physics/landing_gear.py` | 298 | `alas-perf::landing_gear` | — | `closed` | green — `golden/perf/landing_gear.json` |
-| `alas/physics/payload.py` | 540 | `alas-payload::payload` | — | `closed` | todo |
+| `alas/physics/payload.py` | 540 | `alas-payload::{geometry,layout,oew}` | — | `closed` | wip — `golden/payload/layout.json`; see the split below |
 | `alas/physics/cabin_layout.py` | 693 | `alas-payload::cabin` | — | `exact` | todo |
 | `alas/physics/cargo_loader.py` | 381 | `alas-payload::cargo` | — | `exact` | todo |
 | — | — | `alas-mass::torenbeek` | AeroSandbox, MIT | `closed` | green — `golden/mass/torenbeek.json` |
@@ -448,6 +448,49 @@ previously out of that row's scope. `control_surface_area` always returns
 always empty on every wing this program builds -- confirmed against the
 fixture, where every AeroSandbox-side `mass_wing_high_lift_devices` case
 also computes zero for the same reason.
+
+`alas/physics/payload.py` is `wip` rather than `green` because it is three
+things and only two of them have landed. `alas-payload::geometry`
+(`DeckSpec`, `CabinGeometry`) and `alas-payload::oew` (`oew_and_cg`) are
+translated and compared against `golden/payload/layout.json` by
+`tests/parity_geometry.rs` -- the deck table at `exact`, since those fractions
+are transcribed constants, and every sampler at `closed`.
+`alas-payload::layout` (`DeckItem`, `PayloadLayout`) is the vocabulary both
+engines produce and carries unit tests but no parity of its own, since nothing
+constructs one yet. Still `todo` in that file: `build_payload_layout`'s
+dispatcher, `simulate_passenger_counts` and `apply_cabin_preset`, all three of
+which need one or both layout engines. **Nothing may depend on this row until
+it is `green`**, which needs the two `todo` rows above it as well.
+
+The fixture is complete ahead of the code, deliberately. `golden/payload/layout.json`
+already records what the reference produces for all three modules: the cabin
+frame on four fuselages, the *entire item sequence and summary* of seventeen
+passenger and freighter layouts, `simulate_passenger_counts` across the shipped
+class mixes, and every branch of `apply_cabin_preset`. The item list is
+recorded in placement order because a layout is a sequence -- two
+implementations that place the same items in a different order have not agreed
+-- and the cases were chosen to reach the branches that are invisible from the
+totals: the exit-derived capacity ceiling binding before the floor does, the
+monument count exceeding the bay count so `_stack_y` narrows rather than
+overlaps, the bulk-overflow guard, all four cargo loading strategies, and a
+narrowbody hold too shallow for an LD3 so the loader degrades through
+`LOWER_HOLD_FALLBACKS`.
+
+Two decisions this row has already required. `oew_and_cg` takes
+`alas-mass`'s typed `MassBreakdown`/`MassCoordinates` rather than upstream's
+two `Dict`s, which makes upstream's "a component has a mass and no coordinate"
+branch unreachable by construction instead of incidentally: all three callers
+pass `calculate_component_masses` and `define_mass_coordinates` together and
+those always populate the same ten names. The negative-mass guard is kept,
+because that one *is* reachable -- an empirical weight correlation on a
+degenerate candidate can go below zero, and the optimizer evaluates those.
+And `alas-payload::numeric` reproduces CPython's float `//` and `round` and
+NumPy's `interp` from those implementations' own sources rather than from
+their documented behaviour. This is not fastidiousness: `int((usable -
+aisle_w) // seat_w)` is how many people sit in a row, and CPython's floor
+division answers 9 where `(a / b).floor()` answers 10 on inputs as ordinary as
+`1.0 // 0.1`. It is private to the crate; if a second crate needs it, it moves
+to `alas-math` rather than being copied.
 
 `alas-stab::modes` reproduces closed-form mode approximations whose author
 records a factor-of-two error in the phugoid root against AVL.

@@ -633,9 +633,13 @@ def _oew_section() -> list[dict]:
     empty = {k: 0.0 for k in masses}
     negative = copy.deepcopy(masses)
     negative["Wing"] = -1000.0
-    partial = copy.deepcopy(coords)
-    partial.pop("Systems")
 
+    # Upstream's "component has a mass and no coordinate" branch is not a case
+    # here: every caller passes `calculate_component_masses` and
+    # `define_mass_coordinates` together, and those always populate the same
+    # ten names, so no input this program can produce reaches it. The port's
+    # typed signature makes that unreachability structural rather than
+    # incidental -- see `alas-payload::oew`'s module doc.
     cases = [
         ("b787", masses, coords, "a real component breakdown"),
         ("all_zero", empty, coords, "no mass at all: the divide-by-zero guard"),
@@ -644,13 +648,6 @@ def _oew_section() -> list[dict]:
             negative,
             coords,
             "a negative mass is floored at zero rather than subtracting moment",
-        ),
-        (
-            "missing_coordinate",
-            masses,
-            partial,
-            "a component with a mass and no coordinate is skipped entirely, "
-            "so it leaves the total as well as the moment",
         ),
     ]
     out = []

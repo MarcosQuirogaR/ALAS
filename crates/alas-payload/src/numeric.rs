@@ -45,12 +45,11 @@ pub(crate) fn floor_div(a: f64, b: f64) -> f64 {
     if b == 0.0 {
         return f64::NAN;
     }
-    let mut modulus = a % b;
+    let modulus = a % b;
     let mut div = (a - modulus) / b;
     if modulus != 0.0 {
         // Give the remainder the denominator's sign, as Python's `%` does.
         if (b < 0.0) != (modulus < 0.0) {
-            modulus += b;
             div -= 1.0;
         }
     }

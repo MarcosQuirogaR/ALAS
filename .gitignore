@@ -10,3 +10,6 @@
 # texture are fetched at runtime, never redistributed from this tree.
 /assets/navdata/
 /assets/textures/
+
+# Session hand-off notes, kept local: working scratch, not project record.
+/NOTE.md
