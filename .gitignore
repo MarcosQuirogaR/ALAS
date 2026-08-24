@@ -1,15 +1,35 @@
 /target/
+/target-terra/
+/tmp/
+/.landmark-backups/
+/exports/
+/.codex/
+/.codex-metadata.json
+/.alas-onboarding-seen
+/.claude/
+/CONTEXT.md
+/MISSING-THINGS.md
 **/*.rs.bk
 *.pdb
 
 # Run outputs and scratch analysis directories produced by the application.
 /out/
 /runs/
+/outputs/
+/dist/
+/exported_figures/
+/reference_figures/
+/visual_check/
+/visual_check2/
 
 # Downloaded-on-demand assets: navigation data (GPL-3.0) and the Blue Marble
 # texture are fetched at runtime, never redistributed from this tree.
 /assets/navdata/
-/assets/textures/
+/assets/textures/*
+!/assets/textures/
+!/assets/textures/earth_blue_marble.png
+!/assets/textures/natural_earth_110m_land.geojson
+!/assets/textures/README.md
 
 # Session hand-off notes, kept local: working scratch, not project record.
 /NOTE.md

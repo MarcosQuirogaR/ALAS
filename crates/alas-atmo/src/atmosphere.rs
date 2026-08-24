@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-// Ported from aerosandbox/atmosphere/atmosphere.py
-// Upstream: AeroSandbox 4.2.8, MIT.
+// Ported from native aerodynamic model/atmosphere/atmosphere.py
+// Upstream: native aerodynamic model 4.2.8, MIT.
 // Reference: alas @ 7d1555c1f4db5110cf6cd187c156718e1a033b50.
 
 //! A point in the atmosphere: pressure and temperature by one of two altitude
@@ -74,7 +74,7 @@ pub enum DensityAltitudeMethod {
     /// The incompressible approximation. The only method this crate
     /// implements.
     Approximate,
-    /// An iterative match against the full density profile. AeroSandbox
+    /// An iterative match against the full density profile. native aerodynamic model
     /// raises `NotImplementedError` for this branch rather than providing
     /// it; see [`DensityAltitudeError::ExactNotImplemented`].
     Exact,
@@ -132,7 +132,7 @@ impl Default for Atmosphere {
 
 impl Atmosphere {
     /// A new atmosphere at `altitude_m` under the default (differentiable)
-    /// model, reproducing `asb.Atmosphere(altitude=...)`.
+    /// model, reproducing `Atmosphere(altitude=...)`.
     pub fn new(altitude_m: f64) -> Self {
         Self {
             altitude_m,
@@ -141,7 +141,7 @@ impl Atmosphere {
     }
 
     /// A new atmosphere at `altitude_m` under the closed-form ISA,
-    /// reproducing `asb.Atmosphere(altitude=..., method="isa")`.
+    /// reproducing `Atmosphere(altitude=..., method="isa")`.
     pub fn isa(altitude_m: f64) -> Self {
         Self::new(altitude_m).with_method(Method::Isa)
     }

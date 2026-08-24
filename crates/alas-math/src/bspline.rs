@@ -5,11 +5,11 @@
 //! points, and the knot, basis and solve primitives the bicubic surface next
 //! door is assembled from as well.
 //!
-//! AeroSandbox's `Atmosphere` class has two altitude models and defaults to
+//! native aerodynamic model's `Atmosphere` class has two altitude models and defaults to
 //! the one that is *not* the closed-form ISA: `"differentiable"`, a cubic
 //! B-spline fitted through the ISA at thirty-eight altitudes, built so that a
 //! gradient-based optimizer sees a smooth function. Every module in the
-//! reference implementation that writes `asb.Atmosphere(altitude=...)`
+//! reference implementation that writes `Atmosphere(altitude=...)`
 //! without naming a method -- the turbofan cycle, the performance envelope,
 //! the aerodynamic analysis, stability -- flies against that fit and not
 //! against the ISA. The two disagree by up to 1% in temperature, so a port
@@ -18,7 +18,7 @@
 //! reproducing the fit possible; `alas-atmo::differentiable` is the fit
 //! itself.
 //!
-//! Upstream reaches the spline through three layers -- AeroSandbox's
+//! Upstream reaches the spline through three layers -- native aerodynamic model's
 //! `InterpolatedModel`, its `numpy.interpn` shim, and finally CasADi's
 //! `interpolant(..., "bspline", ...)`. Nothing here is translated from any of
 //! them. What CasADi builds in the one-dimensional cubic case is the
@@ -42,6 +42,8 @@
 //! with it. An altitude outside the fitted band produces NaN upstream, and
 //! reproducing that is how a caller finds out it left the model's domain
 //! instead of receiving a plausible extrapolation.
+
+use crate::linalg::solve;
 
 /// The spline's degree. This module is the cubic case specifically, which is
 /// the only one either caller asks for; the knot rule above and the basis
@@ -245,70 +247,6 @@ pub(crate) fn collocation(t: &[f64], values: &[f64]) -> Vec<Vec<f64>> {
             row
         })
         .collect()
-}
-
-/// Solve `a * result = b` for a square `a` and a many-columned `b`, by
-/// Gaussian elimination with partial pivoting. The error is the elimination
-/// step that found no usable pivot.
-///
-/// The matrices here are at most a few tens of rows a side and banded, so a
-/// dense hand-rolled elimination is in scope; taking on a linear-algebra
-/// dependency to factor a 10-by-10 would be a larger commitment than the
-/// problem is.
-pub(crate) fn solve(a: &[Vec<f64>], b: &[Vec<f64>]) -> Result<Vec<Vec<f64>>, usize> {
-    let n = a.len();
-    let mut matrix: Vec<Vec<f64>> = a.to_vec();
-    let mut rhs: Vec<Vec<f64>> = b.to_vec();
-
-    for column in 0..n {
-        let pivot = (column..n)
-            .max_by(|&i, &j| matrix[i][column].abs().total_cmp(&matrix[j][column].abs()))
-            .unwrap_or(column);
-        if matrix[pivot][column] == 0.0 {
-            return Err(column);
-        }
-        matrix.swap(column, pivot);
-        rhs.swap(column, pivot);
-
-        let (eliminated, remaining) = matrix.split_at_mut(column + 1);
-        let (rhs_eliminated, rhs_remaining) = rhs.split_at_mut(column + 1);
-        let pivot_row = &eliminated[column];
-        let pivot_rhs = &rhs_eliminated[column];
-        let pivot_value = pivot_row[column];
-
-        for (row, rhs_row) in remaining.iter_mut().zip(rhs_remaining.iter_mut()) {
-            let factor = row[column] / pivot_value;
-            if factor == 0.0 {
-                continue;
-            }
-            for (target, source) in row.iter_mut().zip(pivot_row).skip(column) {
-                *target -= factor * source;
-            }
-            for (target, source) in rhs_row.iter_mut().zip(pivot_rhs) {
-                *target -= factor * source;
-            }
-        }
-    }
-
-    for column in (0..n).rev() {
-        let (solved_here, solved_later) = rhs.split_at_mut(column + 1);
-        let row = &mut solved_here[column];
-        for (offset, later) in solved_later.iter().enumerate() {
-            let coefficient = matrix[column][column + 1 + offset];
-            if coefficient == 0.0 {
-                continue;
-            }
-            for (value, other) in row.iter_mut().zip(later) {
-                *value -= coefficient * other;
-            }
-        }
-        let pivot_value = matrix[column][column];
-        for value in row.iter_mut() {
-            *value /= pivot_value;
-        }
-    }
-
-    Ok(rhs)
 }
 
 // A test asserts on values it constructed here directly, so a failed unwrap

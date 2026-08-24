@@ -151,7 +151,7 @@ pub struct AlasConfig {
     /// The wing box, and how it is sized and meshed.
     #[config(
         nested,
-        help = "Structural sizing and meshing: the spar and rib layout, the materials, the minimum gauges, and the finite-element model built from them."
+        help = "Structural sizing and meshing: the spar and rib layout, the materials, the minimum gauges, the main-wing structural mass centroid, and the finite-element model built from them."
     )]
     pub structures: StructuresConfig,
 
@@ -224,6 +224,7 @@ impl AlasConfig {
                     instance.preset = name.to_owned();
                     instance.geometry = preset.geometry.clone();
                     instance.requirements = preset.requirements.clone();
+                    instance.landing_gear = preset.landing_gear.clone();
                     if let Some(mass_model) = &preset.mass_model {
                         instance.mass_model = mass_model.clone();
                     }
@@ -263,6 +264,7 @@ mod tests {
         let preset = crate::presets::get("A380-800").unwrap();
         assert_eq!(config.geometry, preset.geometry);
         assert_eq!(config.requirements, preset.requirements);
+        assert_eq!(config.landing_gear, preset.landing_gear);
         assert_eq!(config.preset, "A380-800");
     }
 
@@ -275,6 +277,16 @@ mod tests {
         assert_eq!(config.mass_model.systems_mass_fraction, 0.13);
         assert_eq!(config.mass_model.furnishings_mass_fraction, 0.12);
         assert_eq!(config.performance.cl_max_to, 2.10);
+    }
+
+    #[test]
+    fn selecting_a_preset_does_not_relabel_the_interactive_default_route() {
+        let default_route = AlasConfig::default();
+        for name in ["A220-300", "A320-200"] {
+            let config = AlasConfig::from_value(&json!({"preset": name})).unwrap();
+            assert_eq!(config.departure_airport, default_route.departure_airport);
+            assert_eq!(config.arrival_airport, default_route.arrival_airport);
+        }
     }
 
     #[test]
@@ -314,6 +326,19 @@ mod tests {
         let config = AlasConfig::from_value(&json!({"preset": "DC-10"})).unwrap();
         let text = serde_json::to_string(&config).unwrap();
         assert_eq!(serde_json::from_str::<AlasConfig>(&text).unwrap(), config);
+    }
+
+    #[test]
+    fn removed_runtime_keys_are_rejected_as_unknown_settings() {
+        let config = AlasConfig::from_value(&json!({
+            "mission": {
+                "suave_venv_dir": "old-venv",
+                "suave_runner_dir": "old-runner"
+            }
+        }))
+        .expect_err("removed external-runtime settings must not remain accepted");
+        let message = format!("{config}");
+        assert!(message.contains("suave_venv_dir") || message.contains("suave_runner_dir"));
     }
 
     #[test]

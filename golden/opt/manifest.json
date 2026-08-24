@@ -1,0 +1,43 @@
+{
+  "fixtures": {
+    "objective": {
+      "description": "Design objective function, fuel volume, CG envelope checks, and history diagnostics",
+      "generator": "gen_opt_objective.py",
+      "runtime": "alas",
+      "alas_commit": "7d1555c1f4db5110cf6cd187c156718e1a033b50",
+      "environment": {
+        "numpy": "2.5.1",
+        "aerosandbox": "4.2.8",
+        "platform": "Windows-11-10.0.26200-SP0",
+        "scipy": "1.17.1",
+        "python": "3.13.13"
+      }
+    },
+    "optimizer": {
+      "description": "Differential Evolution optimizer execution and result properties",
+      "generator": "gen_opt_optimizer.py",
+      "runtime": "alas",
+      "alas_commit": "7d1555c1f4db5110cf6cd187c156718e1a033b50",
+      "environment": {
+        "numpy": "2.5.1",
+        "aerosandbox": "4.2.8",
+        "platform": "Windows-11-10.0.26200-SP0",
+        "scipy": "1.17.1",
+        "python": "3.13.13"
+      }
+    },
+    "sampling": {
+      "description": "Design variable sampling, widened bounds calculations, and validation error filtering",
+      "generator": "gen_opt_sampling.py",
+      "runtime": "alas",
+      "alas_commit": "7d1555c1f4db5110cf6cd187c156718e1a033b50",
+      "environment": {
+        "numpy": "2.5.1",
+        "aerosandbox": "4.2.8",
+        "platform": "Windows-11-10.0.26200-SP0",
+        "scipy": "1.17.1",
+        "python": "3.13.13"
+      }
+    }
+  }
+}

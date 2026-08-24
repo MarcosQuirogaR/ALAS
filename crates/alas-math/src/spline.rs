@@ -6,7 +6,7 @@
 //!
 //! `docs/PORTING.md` carries this row with no third-party provenance: nothing
 //! here is translated from a specific file. It exists because the future
-//! `alas-geom::asb::airfoil` repanel needs the same construction SciPy's
+//! `alas-geom::aircraft::airfoil` repanel needs the same construction SciPy's
 //! `CubicSpline` provides -- resampling an airfoil's coordinates onto new
 //! stations while pinning the leading-edge tangent and leaving the trailing
 //! edge's curvature free -- and that construction has one mathematically
@@ -51,6 +51,14 @@ pub enum CubicSplineError {
     /// Fewer than two knots were given; a spline needs at least one segment.
     #[error("a cubic spline needs at least 2 points, got {0}")]
     TooFewPoints(usize),
+    /// `y` did not have one value per knot in `x`.
+    #[error("x has {expected} points but y has {actual} values")]
+    LengthMismatch {
+        /// Number of knots in `x`.
+        expected: usize,
+        /// Number of value rows in `y`.
+        actual: usize,
+    },
     /// `x` was not strictly increasing.
     #[error("knot {index} ({value}) is not strictly greater than the previous knot")]
     KnotsNotIncreasing {
@@ -111,6 +119,12 @@ impl CubicSpline {
         let n_points = x.len();
         if n_points < 2 {
             return Err(CubicSplineError::TooFewPoints(n_points));
+        }
+        if y.len() != n_points {
+            return Err(CubicSplineError::LengthMismatch {
+                expected: n_points,
+                actual: y.len(),
+            });
         }
         for (index, pair) in x.windows(2).enumerate() {
             if pair[1] <= pair[0] {
@@ -441,6 +455,23 @@ mod tests {
             )
             .unwrap_err(),
             CubicSplineError::TooFewPoints(1)
+        );
+    }
+
+    #[test]
+    fn a_value_vector_with_no_rows_is_an_error_not_a_panic() {
+        assert_eq!(
+            CubicSpline::new(
+                &[0.0, 1.0],
+                &[],
+                Boundary::SecondDerivative(&[0.0]),
+                Boundary::SecondDerivative(&[0.0]),
+            )
+            .unwrap_err(),
+            CubicSplineError::LengthMismatch {
+                expected: 2,
+                actual: 0,
+            }
         );
     }
 

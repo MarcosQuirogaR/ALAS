@@ -32,12 +32,12 @@
 //!
 //! `_xsec_width` and `_xsec_height` do not survive the translation. Upstream
 //! keeps them in `stability.py` to read a cross-section that may carry either
-//! a `radius` or a `width`/`height` pair; `alas-geom::asb::fuselage`'s
+//! a `radius` or a `width`/`height` pair; `alas-geom::aircraft::fuselage`'s
 //! `FuselageXSec` resolves that in its constructor, so both accessors are the
 //! fields themselves here.
 
 use alas_config::GeometryConfig;
-use alas_geom::asb::airplane::Airplane;
+use alas_geom::aircraft::airplane::Airplane;
 
 use crate::numeric::interp;
 
@@ -354,10 +354,10 @@ fn decks(height_m: Option<f64>, diameter_m: f64) -> (Vec<DeckSpec>, DeckSpec) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alas_geom::asb::airfoil::Airfoil;
-    use alas_geom::asb::airplane::Airplane;
-    use alas_geom::asb::fuselage::{Fuselage, FuselageXSec, DEFAULT_SHAPE};
-    use alas_geom::asb::wing::{Wing, WingXSec};
+    use alas_geom::aircraft::airfoil::Airfoil;
+    use alas_geom::aircraft::airplane::Airplane;
+    use alas_geom::aircraft::fuselage::{Fuselage, FuselageXSec, DEFAULT_SHAPE};
+    use alas_geom::aircraft::wing::{Wing, WingXSec};
 
     fn xsec(x: f64, radius: f64) -> FuselageXSec {
         FuselageXSec::new([x, 0.0, 0.0], Some(radius), None, None, DEFAULT_SHAPE)

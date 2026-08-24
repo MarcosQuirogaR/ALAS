@@ -1,0 +1,2246 @@
+{
+  "schema_version": 1,
+  "records": [
+    {
+      "id": "tmotor-at1050-kv90",
+      "manufacturer": "T-MOTOR",
+      "model": "AT1050 KV90",
+      "kind": "motor",
+      "spec": {
+        "kv_rpm_per_v": 90,
+        "min_series_cells": 24,
+        "max_series_cells": 24,
+        "max_current_a": 135,
+        "max_power_w": 8000,
+        "max_static_thrust_n": null,
+        "mass_kg": 2.6,
+        "dimensions": {"length_m": 0.1106, "width_m": 0.1106, "height_m": 0.1198},
+        "recommended_propeller_diameter_m": null,
+        "recommended_propeller_pitch_m": null
+      },
+      "provenance": {
+        "publisher": "T-MOTOR",
+        "source_url": "https://store.tmotor.com/product/fixed-wing-motor-at1050.html",
+        "source_title": "AT1050 150CC Fixed-Wing UAV Motor",
+        "transformations": [
+          "mass divided by 1000 from g to kg",
+          "motor diameter and axial length divided by 1000 from mm to m",
+          "the page reports peak current and maximum thrust without an operating condition; thrust remains absent and current is retained as a published peak limit"
+        ]
+      }
+    },
+    {
+      "id": "tmotor-at8025-kv160",
+      "manufacturer": "T-MOTOR",
+      "model": "AT8025 KV160",
+      "kind": "motor",
+      "spec": {
+        "kv_rpm_per_v": 160,
+        "min_series_cells": 10,
+        "max_series_cells": 14,
+        "max_current_a": 115,
+        "max_power_w": 5800,
+        "max_static_thrust_n": null,
+        "mass_kg": 0.985,
+        "dimensions": {"length_m": 0.09, "width_m": 0.09, "height_m": 0.0758},
+        "recommended_propeller_diameter_m": null,
+        "recommended_propeller_pitch_m": null
+      },
+      "provenance": {
+        "publisher": "T-MOTOR",
+        "source_url": "https://store.tmotor.com/product/at8025-fixed-wing-motor.html",
+        "source_title": "AT8025 70CC Fixed-Wing UAV Motor KV160",
+        "transformations": [
+          "mass divided by 1000 from g to kg",
+          "motor diameter and axial length divided by 1000 from mm to m",
+          "the page labels 115 A as peak current for 180 s; no continuous-current rating is inferred"
+        ]
+      }
+    },
+    {
+      "id": "tmotor-at8025-kv190",
+      "manufacturer": "T-MOTOR",
+      "model": "AT8025 KV190",
+      "kind": "motor",
+      "spec": {
+        "kv_rpm_per_v": 190,
+        "min_series_cells": 10,
+        "max_series_cells": 12,
+        "max_current_a": 135,
+        "max_power_w": 6000,
+        "max_static_thrust_n": null,
+        "mass_kg": 0.99,
+        "dimensions": {"length_m": 0.09, "width_m": 0.09, "height_m": 0.0758},
+        "recommended_propeller_diameter_m": null,
+        "recommended_propeller_pitch_m": null
+      },
+      "provenance": {
+        "publisher": "T-MOTOR",
+        "source_url": "https://store.tmotor.com/product/at8025-fixed-wing-motor.html",
+        "source_title": "AT8025 70CC Fixed-Wing UAV Motor KV190",
+        "transformations": [
+          "mass divided by 1000 from g to kg",
+          "motor diameter and axial length divided by 1000 from mm to m",
+          "the page labels 135 A as peak current for 180 s; no continuous-current rating is inferred"
+        ]
+      }
+    },
+    {
+      "id": "tmotor-ax435b-kv220",
+      "manufacturer": "T-MOTOR",
+      "model": "AX435-B KV220",
+      "kind": "motor",
+      "spec": {
+        "kv_rpm_per_v": 220,
+        "min_series_cells": 12,
+        "max_series_cells": 12,
+        "max_current_a": 75,
+        "max_power_w": 1550,
+        "max_static_thrust_n": null,
+        "mass_kg": 0.485,
+        "dimensions": {"length_m": 0.0495, "width_m": 0.0495, "height_m": 0.089},
+        "recommended_propeller_diameter_m": null,
+        "recommended_propeller_pitch_m": null
+      },
+      "provenance": {
+        "publisher": "T-MOTOR",
+        "source_url": "https://store.tmotor.com/product/ax435-b-kv220-fixed-wing-motor.html",
+        "source_title": "AX435-B Fixed-Wing Cruising Motor KV220",
+        "transformations": [
+          "mass divided by 1000 from g to kg",
+          "motor diameter and axial length divided by 1000 from mm to m",
+          "the page reports peak current; no continuous-current or flight thrust value is inferred"
+        ]
+      }
+    },
+    {
+      "id": "hobbywing-h15-plus-esc",
+      "manufacturer": "HOBBYWING",
+      "model": "H15MD Plus-24S ESC",
+      "kind": "esc",
+      "spec": {
+        "min_series_cells": 24,
+        "max_series_cells": 28,
+        "continuous_current_a": 110,
+        "bec_min_voltage_v": null,
+        "bec_max_voltage_v": null,
+        "bec_continuous_current_a": null,
+        "bec_peak_current_a": null,
+        "mass_kg": 0.616,
+        "dimensions": {"length_m": 0.156, "width_m": 0.0836, "height_m": 0.0545}
+      },
+      "provenance": {
+        "publisher": "HOBBYWING",
+        "source_url": "https://www.hobbywing.com/en/products/h15-plus",
+        "source_title": "H15MD Plus-24S UAV Propulsion System ESC",
+        "transformations": [
+          "mass divided by 1000 from g to kg",
+          "dimensions divided by 1000 from mm to m",
+          "the page identifies 300 A as a 3 s ESC peak current and 110 A as continuous; the schema has no generic ESC peak field and BEC is explicitly absent"
+        ]
+      }
+    },
+    {
+      "id": "hobbywing-h15-plus-motor",
+      "manufacturer": "HOBBYWING",
+      "model": "H15MD Plus motor",
+      "kind": "motor",
+      "spec": {
+        "kv_rpm_per_v": 31,
+        "min_series_cells": 24,
+        "max_series_cells": 28,
+        "max_current_a": 110,
+        "max_power_w": 9300,
+        "max_static_thrust_n": null,
+        "mass_kg": 4.1,
+        "dimensions": {"length_m": 0.1671, "width_m": 0.1671, "height_m": 0.035},
+        "recommended_propeller_diameter_m": null,
+        "recommended_propeller_pitch_m": null
+      },
+      "provenance": {
+        "publisher": "HOBBYWING",
+        "source_url": "https://www.hobbywing.com/en/products/h15-plus",
+        "source_title": "H15MD Plus-24S UAV Propulsion System Motor",
+        "transformations": [
+          "mass divided by 1000 from g to kg",
+          "motor diameter and stator height divided by 1000 from mm to m",
+          "the page publishes a propulsion-system output and no fixed-wing operating point; static thrust remains absent"
+        ]
+      }
+    },
+    {
+      "id": "holybro-pixhawk-6x-rev3-module",
+      "manufacturer": "Holybro",
+      "model": "Pixhawk 6X Rev 3 FC module",
+      "kind": "electronics",
+      "spec": {
+        "role": "flight_controller",
+        "min_voltage_v": null,
+        "max_voltage_v": 6,
+        "max_current_a": 1.5,
+        "mass_kg": 0.023,
+        "dimensions": {"length_m": 0.0388, "width_m": 0.0318, "height_m": 0.0146},
+        "protocols": ["Pixhawk bus", "Ethernet", "PWM", "CAN"]
+      },
+      "provenance": {
+        "publisher": "Holybro",
+        "source_url": "https://holybro.com/products/pixhawk-6x-rev3",
+        "source_title": "Pixhawk 6X Rev 3 Flight Controller Module",
+        "transformations": [
+          "mass divided by 1000 from g to kg",
+          "dimensions divided by 1000 from mm to m",
+          "1.5 A is the published telem/output limiter, not a total flight-controller consumption rating"
+        ]
+      }
+    },
+    {
+      "id": "apc-12x6e",
+      "manufacturer": "APC Propellers",
+      "model": "12x6E Thin Electric",
+      "kind": "propeller",
+      "spec": {
+        "diameter_m": 0.3048,
+        "pitch_m": 0.1524,
+        "blade_count": 2,
+        "mass_kg": 0.026931,
+        "bore_diameter_m": 0.00635,
+        "electric_compatible": true
+      },
+      "provenance": {
+        "publisher": "APC Propellers",
+        "source_url": "https://www.apcprop.com/product/12x6e/",
+        "source_title": "12x6E Thin Electric Propeller",
+        "transformations": [
+          "diameter and pitch multiplied by 0.0254 from inches to m",
+          "the permitted retailer page identifies LP12060E as a two-blade propeller (https://pchobbies.com/products/electric-propeller12-x-6e)",
+          "bore diameter multiplied by 0.0254 from inches to m",
+          "mass multiplied by 0.028349523125 from ounces to kg"
+        ]
+      }
+    },
+    {
+      "id": "tmotor-auz19x12",
+      "manufacturer": "T-MOTOR",
+      "model": "AUZ19x12 carbon-fiber fixed-wing propeller",
+      "kind": "propeller",
+      "spec": {
+        "diameter_m": 0.4826,
+        "pitch_m": 0.3048,
+        "blade_count": null,
+        "mass_kg": null,
+        "bore_diameter_m": 0.008,
+        "electric_compatible": true
+      },
+      "provenance": {
+        "publisher": "T-MOTOR",
+        "source_url": "https://store.tmotor.com/product/auz19-12-carbon-fiber-fixed-wing-uav-propeller.html",
+        "source_title": "AUZ19x12 Carbon Fiber Propeller for Fixed-Wing Logistics",
+        "transformations": [
+          "diameter and pitch divided by 1000 from the published mm dimensions",
+          "the page reports average single-blade mass, not complete-propeller mass; mass remains absent",
+          "the page states an 8 mm motor shaft interface; hub bore is retained as 0.008 m"
+        ]
+      }
+    },
+    {
+      "id": "easy-composites-cfs-ri-1mm-250x225",
+      "manufacturer": "Easy Composites",
+      "model": "High Strength Carbon Fibre Sheet 1 mm 250 x 225 mm",
+      "kind": "material_stock",
+      "spec": {
+        "form": "sheet",
+        "dimensions": {"length_m": 0.25, "width_m": 0.225, "height_m": 0.001},
+        "mass_kg": 0.07425,
+        "youngs_modulus_pa": 31600000000,
+        "allowable_stress_pa": null
+      },
+      "provenance": {
+        "publisher": "Easy Composites",
+        "source_url": "https://www.easycomposites.co.uk/high-strength-carbon-fibre-sheet",
+        "source_title": "High Strength Carbon Fibre Sheet 1 mm",
+        "transformations": [
+          "dimensions divided by 1000 from mm to m",
+          "mass derived from the published 1.32 kg/m2 areal weight times the 0.25 m by 0.225 m sheet area",
+          "Young's modulus is the published 31.6 GPa 0/90 tension value; no allowable stress is inferred from tensile strength"
+        ]
+      }
+    },
+    {
+      "id": "spektrum-a170",
+      "manufacturer": "Spektrum",
+      "model": "A170 HV metal-gear mini servo",
+      "kind": "servo",
+      "spec": {
+        "mass_kg": 0.045,
+        "dimensions": {"length_m": 0.0356, "width_m": 0.015, "height_m": 0.0308},
+        "operating_points": [
+          {"voltage_v": 6, "stall_torque_nm": 0.77668668, "seconds_per_60_deg": 0.11, "stall_current_a": null},
+          {"voltage_v": 7.4, "stall_torque_nm": 1.0591182, "seconds_per_60_deg": 0.09, "stall_current_a": null},
+          {"voltage_v": 8.4, "stall_torque_nm": 1.1964113, "seconds_per_60_deg": 0.08, "stall_current_a": null}
+        ]
+      },
+      "provenance": {
+        "publisher": "Spektrum",
+        "source_url": "https://www.spektrumrc.com/product/spektrum-a170-high-voltage-high-torque-high-speed-metal-geared-digital-mini-servo/SPM-1096.html",
+        "source_title": "Spektrum A170 High-Voltage High-Torque High-Speed Metal-Geared Digital Mini Servo",
+        "transformations": [
+          "mass divided by 1000 from g to kg",
+          "dimensions divided by 1000 from mm to m",
+          "torque multiplied by 0.0980665 from kg-cm to N-m"
+        ]
+      }
+    },
+    {
+      "id": "spektrum-a6265",
+      "manufacturer": "Spektrum",
+      "model": "A6265 HV standard metal-gear aircraft servo",
+      "kind": "servo",
+      "spec": {
+        "mass_kg": 0.062,
+        "dimensions": {"length_m": 0.0409, "width_m": 0.0209, "height_m": 0.0318},
+        "operating_points": [
+          {"voltage_v": 6, "stall_torque_nm": 2.3143694, "seconds_per_60_deg": 0.15, "stall_current_a": null},
+          {"voltage_v": 8.4, "stall_torque_nm": 3.162644625, "seconds_per_60_deg": 0.1, "stall_current_a": null}
+        ]
+      },
+      "provenance": {
+        "publisher": "Spektrum",
+        "source_url": "https://www.spektrumrc.com/product/spektrum-a6265-standard-digital-hv-hi-torque-metal-gear-aircraft-servo/SPMSA6265.html",
+        "source_title": "Spektrum A6265 Standard Digital HV Hi-Torque Metal Gear Aircraft Servo",
+        "transformations": [
+          "mass divided by 1000 from g to kg",
+          "dimensions divided by 1000 from mm to m",
+          "torque multiplied by 0.0980665 from kg-cm to N-m"
+        ]
+      }
+    },
+    {
+      "id": "spektrum-ar630-plus",
+      "manufacturer": "Spektrum",
+      "model": "AR630+ DSMX 6-channel AS3X+ receiver",
+      "kind": "receiver",
+      "spec": {
+        "channel_count": 6,
+        "min_voltage_v": 3.5,
+        "max_voltage_v": 9,
+        "mass_kg": 0.0095,
+        "dimensions": {"length_m": 0.047, "width_m": 0.025, "height_m": 0.013},
+        "protocols": ["DSMX", "DSM2", "SRXL2"],
+        "telemetry": true
+      },
+      "provenance": {
+        "publisher": "Spektrum",
+        "source_url": "https://www.spektrumrc.com/product/spektrum-ar630-dsmx-6-channel-as3x-and-safe-receiver/SPM-1030.html",
+        "source_title": "Spektrum AR630+ DSMX 6-Channel AS3X+ and SAFE Receiver",
+        "transformations": [
+          "mass divided by 1000 from g to kg",
+          "dimensions divided by 1000 from mm to m"
+        ]
+      }
+    },
+    {
+      "id": "spektrum-ar10400t",
+      "manufacturer": "Spektrum",
+      "model": "AR10400T 10-channel PowerSafe telemetry receiver",
+      "kind": "receiver",
+      "spec": {
+        "channel_count": 10,
+        "min_voltage_v": 3.5,
+        "max_voltage_v": 12.6,
+        "mass_kg": 0.054,
+        "dimensions": {"length_m": 0.066, "width_m": 0.062, "height_m": 0.017},
+        "protocols": ["DSMX", "DSM2", "SRXL2"],
+        "telemetry": true
+      },
+      "provenance": {
+        "publisher": "Spektrum",
+        "source_url": "https://www.spektrumrc.com/product/spektrum-ar10400t-10-channel-powersafe-telemetry-receiver/SPMAR10400T.html",
+        "source_title": "Spektrum AR10400T 10-Channel PowerSafe Telemetry Receiver",
+        "transformations": [
+          "mass divided by 1000 from g to kg",
+          "dimensions divided by 1000 from mm to m"
+        ]
+      }
+    },
+    {
+      "id": "spektrum-ar6610t",
+      "manufacturer": "Spektrum",
+      "model": "AR6610T DSMX 6-channel telemetry receiver",
+      "kind": "receiver",
+      "spec": {
+        "channel_count": 6,
+        "min_voltage_v": 3.5,
+        "max_voltage_v": 9,
+        "mass_kg": 0.012,
+        "dimensions": {"length_m": 0.0498, "width_m": 0.0233, "height_m": 0.01502},
+        "protocols": ["DSMX", "DSM2", "SRXL2"],
+        "telemetry": true
+      },
+      "provenance": {
+        "publisher": "Spektrum",
+        "source_url": "https://www.spektrumrc.com/product/spektrum-ar6610t-dsmx-6-channel-telemetry-receiver/SPMAR6610T.html",
+        "source_title": "Spektrum AR6610T DSMX 6-Channel Telemetry Receiver",
+        "transformations": [
+          "mass divided by 1000 from g to kg",
+          "dimensions divided by 1000 from mm to m"
+        ]
+      }
+    },
+    {
+      "id": "spektrum-gps-telemetry-sensor",
+      "manufacturer": "Spektrum",
+      "model": "GPS Telemetry Sensor SPMA95871",
+      "kind": "electronics",
+      "spec": {
+        "role": "gps_telemetry_sensor",
+        "min_voltage_v": 3.3,
+        "max_voltage_v": 12.6,
+        "max_current_a": null,
+        "mass_kg": 0.01,
+        "dimensions": {"length_m": 0.038, "width_m": 0.023, "height_m": 0.013},
+        "protocols": ["Spektrum X-BUS"]
+      },
+      "provenance": {
+        "publisher": "Spektrum",
+        "source_url": "https://www.spektrumrc.com/product/spektrum-gps-telemetry-sensor/SPMA95871.html",
+        "source_title": "Spektrum GPS Telemetry Sensor",
+        "transformations": [
+          "mass divided by 1000 from g to kg",
+          "dimensions divided by 1000 from mm to m",
+          "maximum current remains absent because the product page publishes only input voltage"
+        ]
+      }
+    },
+    {
+      "id": "spektrum-smart-6s-5000-50c",
+      "manufacturer": "Spektrum",
+      "model": "Smart LiPo 22.2 V 5000 mAh 6S 50C IC5",
+      "kind": "battery",
+      "spec": {
+        "chemistry": "LiPo",
+        "series_cells": 6,
+        "nominal_voltage_v": 22.2,
+        "capacity_ah": 5,
+        "discharge_rating_c": 50,
+        "mass_kg": 0.76,
+        "dimensions": {"length_m": 0.142, "width_m": 0.046, "height_m": 0.056},
+        "connector": "IC5"
+      },
+      "provenance": {
+        "publisher": "Spektrum",
+        "source_url": "https://www.spektrumrc.com/product/spektrum-accessories-22.2v-5000mah-6s-50c-smart-lipo-battery-ic5/SPMX50006S50.html",
+        "source_title": "Spektrum Smart 22.2V 5000mAh 6S 50C LiPo Battery",
+        "transformations": [
+          "capacity divided by 1000 from mAh to Ah",
+          "mass divided by 1000 from g to kg",
+          "dimensions divided by 1000 from mm to m"
+        ]
+      }
+    },
+    {
+      "id": "spektrum-smart-4s-5000-50c-hardcase",
+      "manufacturer": "Spektrum",
+      "model": "Smart LiPo 14.8 V 5000 mAh 4S 50C hardcase IC5",
+      "kind": "battery",
+      "spec": {
+        "chemistry": "LiPo",
+        "series_cells": 4,
+        "nominal_voltage_v": 14.8,
+        "capacity_ah": 5,
+        "discharge_rating_c": 50,
+        "mass_kg": 0.48,
+        "dimensions": {"length_m": 0.138, "width_m": 0.047, "height_m": 0.038},
+        "connector": "IC5"
+      },
+      "provenance": {
+        "publisher": "Spektrum",
+        "source_url": "https://www.spektrumrc.com/product/spektrum-accessories-14.8v-5000mah-4s-50c-smart-hardcase-lipo-battery-ic5/SPMX50004S50H5.html",
+        "source_title": "Spektrum Smart 14.8V 5000mAh 4S 50C Hardcase LiPo Battery",
+        "transformations": [
+          "capacity divided by 1000 from mAh to Ah",
+          "dimensions divided by 1000 from mm to m",
+          "the current product page gives a 400-499 g weight range; the manufacturer's My Spektrum product record publishes 480 g and that exact value is retained (https://my.spektrumrc.com/Products/Default.aspx?ProdID=SPMX50004S50H5)"
+        ]
+      }
+    },
+    {
+      "id": "spektrum-smart-3s-3200-30c",
+      "manufacturer": "Spektrum",
+      "model": "Smart LiPo 11.1 V 3200 mAh 3S 30C IC3",
+      "kind": "battery",
+      "spec": {
+        "chemistry": "LiPo",
+        "series_cells": 3,
+        "nominal_voltage_v": 11.1,
+        "capacity_ah": 3.2,
+        "discharge_rating_c": 30,
+        "mass_kg": 0.237,
+        "dimensions": {"length_m": 0.14, "width_m": 0.042, "height_m": 0.02},
+        "connector": "IC3"
+      },
+      "provenance": {
+        "publisher": "Spektrum",
+        "source_url": "https://www.spektrumrc.com/product/spektrum-accessories-11.1v-3200mah-3s-30c-smart-lipo-battery-ic3/SPMX32003S30.html",
+        "source_title": "Spektrum Smart 11.1V 3200mAh 3S 30C LiPo Battery",
+        "transformations": [
+          "capacity divided by 1000 from mAh to Ah",
+          "mass divided by 1000 from oz-equivalent product mass to kg",
+          "dimensions divided by 1000 from mm to m"
+        ]
+      }
+    },
+    {
+      "id": "dubro-micro-profile-landing-gear",
+      "manufacturer": "Dubro Products",
+      "model": "Micro Profile Landing Gear DUB943",
+      "kind": "landing_gear",
+      "spec": {
+        "form": "fixed_profile",
+        "mass_kg": 0.034,
+        "max_aircraft_mass_kg": null,
+        "dimensions": null,
+        "nominal_voltage_v": null
+      },
+      "provenance": {
+        "publisher": "Horizon Hobby",
+        "source_url": "https://www.horizonhobby.com/product/micro-profile-landing-gear-1/DUB943.html",
+        "source_title": "Dubro Products Micro Profile Landing Gear",
+        "transformations": [
+          "mass divided by 1000 from g to kg",
+          "the page states suitability up to 5/8 inch profile width, not a certified aircraft-mass allowable"
+        ]
+      }
+    },
+    {
+      "id": "eflite-eflg500-retract",
+      "manufacturer": "E-flite",
+      "model": "60- to 120-Size Strut Ready Retractable Gear EFLG500",
+      "kind": "landing_gear",
+      "spec": {
+        "form": "retract_mechanism",
+        "mass_kg": 0.13,
+        "max_aircraft_mass_kg": 6.8,
+        "dimensions": null,
+        "nominal_voltage_v": null
+      },
+      "provenance": {
+        "publisher": "Horizon Hobby",
+        "source_url": "https://assets.horizonhobby.com/on/demandware.static/-/Sites-horizon-master/default/dw6debc48e/Manuals/EFLG500-Manual.pdf",
+        "source_title": "60- to 120-Size Strut Ready Retractable Gear Manual",
+        "transformations": [
+          "mass divided by 1000 from the stated 130 g unit mass to kg",
+          "the manual's stated 8.0-15.0 lb aircraft weight range was converted to a 6.8 kg upper application limit",
+          "the aircraft weight range is application guidance, not a structural certified allowable; bounding dimensions remain absent",
+          "primary manual reviewed on 2026-08-24"
+        ]
+      }
+    },
+    {
+      "id": "eflite-eflg700-retract",
+      "manufacturer": "E-flite",
+      "model": "90 degree Main Retracts with Controller EFLG700",
+      "kind": "landing_gear",
+      "spec": {
+        "form": "retract_mechanism",
+        "mass_kg": 0.39,
+        "max_aircraft_mass_kg": 15.9,
+        "dimensions": null,
+        "nominal_voltage_v": null
+      },
+      "provenance": {
+        "publisher": "Horizon Hobby",
+        "source_url": "https://www.horizonhobby.com/on/demandware.static/-/Sites-horizon-master/default/dwb64302f4/Manuals/EFLG700-manual-MULTI.pdf",
+        "source_title": "90 degree Main Retracts with Controller Manual",
+        "transformations": [
+          "mass is the stated 220 g retract plus 170 g strut, divided by 1000 to kg",
+          "the manual's stated 20.0-35.0 lb aircraft weight range was converted to a 15.9 kg upper application limit",
+          "the aircraft weight range is application guidance, not a structural certified allowable; bounding dimensions remain absent",
+          "primary manual reviewed on 2026-08-24"
+        ]
+      }
+    },
+    {
+      "id": "sunnysky-x2212-v3-kv980",
+      "manufacturer": "SunnySky",
+      "model": "X2212 V3 KV980",
+      "kind": "motor",
+      "spec": {
+        "kv_rpm_per_v": 980,
+        "min_series_cells": 3,
+        "max_series_cells": 4,
+        "max_current_a": 26,
+        "max_power_w": 385,
+        "max_static_thrust_n": null,
+        "mass_kg": 0.057,
+        "dimensions": {"length_m": 0.03, "width_m": 0.0275, "height_m": 0.0275},
+        "recommended_propeller_diameter_m": null,
+        "recommended_propeller_pitch_m": null
+      },
+      "provenance": {
+        "publisher": "SunnySky USA",
+        "source_url": "https://sunnyskyusa.com/products/sunnsky-x2212",
+        "source_title": "SunnySky X Series V3 X2212 V3 Brushless Motors - KV980",
+        "transformations": [
+          "body length, rotor diameter, and mass divided by 1000 from mm and g to SI units",
+          "the page states maximum continuous current for 30 s and maximum continuous power; these are retained as published limits",
+          "the page gives thrust only in gram-force test rows at named propeller, voltage, and current conditions; no single static-thrust limit is inferred"
+        ]
+      }
+    },
+    {
+      "id": "sunnysky-x2212-v3-kv1250",
+      "manufacturer": "SunnySky",
+      "model": "X2212 V3 KV1250",
+      "kind": "motor",
+      "spec": {
+        "kv_rpm_per_v": 1250,
+        "min_series_cells": 3,
+        "max_series_cells": 4,
+        "max_current_a": 35,
+        "max_power_w": 518,
+        "max_static_thrust_n": null,
+        "mass_kg": 0.059,
+        "dimensions": {"length_m": 0.03, "width_m": 0.0275, "height_m": 0.0275},
+        "recommended_propeller_diameter_m": null,
+        "recommended_propeller_pitch_m": null
+      },
+      "provenance": {
+        "publisher": "SunnySky USA",
+        "source_url": "https://sunnyskyusa.com/products/sunnsky-x2212",
+        "source_title": "SunnySky X Series V3 X2212 V3 Brushless Motors - KV1250",
+        "transformations": [
+          "body length, rotor diameter, and mass divided by 1000 from mm and g to SI units",
+          "the page states maximum continuous current for 30 s and maximum continuous power; these are retained as published limits",
+          "the page gives thrust only in gram-force test rows at named propeller, voltage, and current conditions; no single static-thrust limit is inferred"
+        ]
+      }
+    },
+    {
+      "id": "sunnysky-x2212-v3-kv1400",
+      "manufacturer": "SunnySky",
+      "model": "X2212 V3 KV1400",
+      "kind": "motor",
+      "spec": {
+        "kv_rpm_per_v": 1400,
+        "min_series_cells": 3,
+        "max_series_cells": 4,
+        "max_current_a": 37,
+        "max_power_w": 560,
+        "max_static_thrust_n": null,
+        "mass_kg": 0.057,
+        "dimensions": {"length_m": 0.03, "width_m": 0.0275, "height_m": 0.0275},
+        "recommended_propeller_diameter_m": null,
+        "recommended_propeller_pitch_m": null
+      },
+      "provenance": {
+        "publisher": "SunnySky USA",
+        "source_url": "https://sunnyskyusa.com/products/sunnsky-x2212",
+        "source_title": "SunnySky X Series V3 X2212 V3 Brushless Motors - KV1400",
+        "transformations": [
+          "body length, rotor diameter, and mass divided by 1000 from mm and g to SI units",
+          "the page states maximum continuous current for 30 s and maximum continuous power; these are retained as published limits",
+          "the page gives thrust only in gram-force test rows at named propeller, voltage, and current conditions; no single static-thrust limit is inferred"
+        ]
+      }
+    },
+    {
+      "id": "gens-ace-soaring-2200mah-3s-20c",
+      "manufacturer": "Gens ace",
+      "model": "Soaring 2200 mAh 3S 20C 11.1 V LiPo XT60",
+      "kind": "battery",
+      "spec": {
+        "chemistry": "LiPo",
+        "series_cells": 3,
+        "nominal_voltage_v": 11.1,
+        "capacity_ah": 2.2,
+        "discharge_rating_c": 20,
+        "mass_kg": 0.144,
+        "dimensions": {"length_m": 0.077, "width_m": 0.034, "height_m": 0.026},
+        "connector": "XT60"
+      },
+      "provenance": {
+        "publisher": "Gens ace",
+        "source_url": "https://gensace.de/products/6928493305614",
+        "source_title": "Gens ace Soaring 2200mAh 3S 20C 11.1V LiPo Battery with XT60 Plug",
+        "transformations": [
+          "capacity divided by 1000 from mAh to Ah",
+          "dimensions divided by 1000 from mm to m and mass divided by 1000 from g to kg",
+          "nominal energy is computed only from the source-stated 11.1 V and 2.2 Ah nameplate values"
+        ]
+      }
+    },
+    {
+      "id": "emax-eco-2306-kv1700",
+      "manufacturer": "Emax",
+      "model": "ECO 2306 KV1700",
+      "kind": "motor",
+      "spec": {
+        "kv_rpm_per_v": 1700,
+        "min_series_cells": 3,
+        "max_series_cells": 6,
+        "max_current_a": null,
+        "max_power_w": null,
+        "max_static_thrust_n": null,
+        "mass_kg": 0.0283,
+        "dimensions": {"length_m": 0.0302, "width_m": 0.0277, "height_m": 0.0277},
+        "recommended_propeller_diameter_m": null,
+        "recommended_propeller_pitch_m": null
+      },
+      "provenance": {
+        "publisher": "Emax",
+        "source_url": "https://emaxmodel.com/products/emax-eco-series-2306-6s-1700kv-4s-2400kv-brushless-motor-for-rc-drone-fpv-racing",
+        "source_title": "Emax ECO Series 2306 6S 1700KV 4S 2400KV Brushless Motor",
+        "transformations": [
+          "published motor dimensions divided by 1000 from mm to m",
+          "the description gives 28.3 g motor weight without silicone wire; that exact stated configuration is retained",
+          "the page provides no current, power, or fixed-wing thrust limit, so those fields remain absent"
+        ]
+      }
+    },
+    {
+      "id": "emax-eco-2306-kv1900",
+      "manufacturer": "Emax",
+      "model": "ECO 2306 KV1900",
+      "kind": "motor",
+      "spec": {
+        "kv_rpm_per_v": 1900,
+        "min_series_cells": 3,
+        "max_series_cells": 6,
+        "max_current_a": null,
+        "max_power_w": null,
+        "max_static_thrust_n": null,
+        "mass_kg": 0.0283,
+        "dimensions": {"length_m": 0.0302, "width_m": 0.0277, "height_m": 0.0277},
+        "recommended_propeller_diameter_m": null,
+        "recommended_propeller_pitch_m": null
+      },
+      "provenance": {
+        "publisher": "Emax",
+        "source_url": "https://emaxmodel.com/products/emax-eco-series-2306-6s-1700kv-4s-2400kv-brushless-motor-for-rc-drone-fpv-racing",
+        "source_title": "Emax ECO Series 2306 6S 1700KV 4S 2400KV Brushless Motor",
+        "transformations": [
+          "published motor dimensions divided by 1000 from mm to m",
+          "the description gives 28.3 g motor weight without silicone wire; that exact stated configuration is retained",
+          "the page provides no current, power, or fixed-wing thrust limit, so those fields remain absent"
+        ]
+      }
+    },
+    {
+      "id": "emax-eco-2306-kv2400",
+      "manufacturer": "Emax",
+      "model": "ECO 2306 KV2400",
+      "kind": "motor",
+      "spec": {
+        "kv_rpm_per_v": 2400,
+        "min_series_cells": 3,
+        "max_series_cells": 4,
+        "max_current_a": null,
+        "max_power_w": null,
+        "max_static_thrust_n": null,
+        "mass_kg": 0.0283,
+        "dimensions": {"length_m": 0.0302, "width_m": 0.0277, "height_m": 0.0277},
+        "recommended_propeller_diameter_m": null,
+        "recommended_propeller_pitch_m": null
+      },
+      "provenance": {
+        "publisher": "Emax",
+        "source_url": "https://emaxmodel.com/products/emax-eco-series-2306-6s-1700kv-4s-2400kv-brushless-motor-for-rc-drone-fpv-racing",
+        "source_title": "Emax ECO Series 2306 6S 1700KV 4S 2400KV Brushless Motor",
+        "transformations": [
+          "published motor dimensions divided by 1000 from mm to m",
+          "the description gives 28.3 g motor weight without silicone wire; that exact stated configuration is retained",
+          "the page provides no current, power, or fixed-wing thrust limit, so those fields remain absent"
+        ]
+      }
+    },
+    {
+      "id": "mateksys-f405-wte",
+      "manufacturer": "MATEKSYS",
+      "model": "F405-WTE fixed-wing flight controller",
+      "kind": "electronics",
+      "spec": {
+        "role": "flight_controller",
+        "min_voltage_v": 6.8,
+        "max_voltage_v": 30,
+        "max_current_a": null,
+        "mass_kg": 0.022,
+        "dimensions": {"length_m": 0.044, "width_m": 0.029, "height_m": 0.0127},
+        "protocols": ["ArduPilot", "INAV", "MAVLink", "CRSF"]
+      },
+      "provenance": {
+        "publisher": "MATEKSYS",
+        "source_url": "https://www.mateksys.com/?portfolio=f405-wte",
+        "source_title": "Flight Controller F405-WTE",
+        "transformations": [
+          "input range copied from the published 6.8-30 V PDB range",
+          "mass divided by 1000 from 22 g to kg",
+          "dimensions divided by 1000 from mm to m",
+          "maximum current remains absent because the published current values are separate regulator and sensor limits, not total controller consumption"
+        ]
+      }
+    },
+    {
+      "id": "mateksys-f405-wse",
+      "manufacturer": "MATEKSYS",
+      "model": "F405-WSE fixed-wing flight controller",
+      "kind": "electronics",
+      "spec": {
+        "role": "flight_controller",
+        "min_voltage_v": 6,
+        "max_voltage_v": 30,
+        "max_current_a": null,
+        "mass_kg": 0.020,
+        "dimensions": {"length_m": 0.044, "width_m": 0.029, "height_m": 0.010},
+        "protocols": ["ArduPilot", "INAV", "SBUS", "I2C"]
+      },
+      "provenance": {
+        "publisher": "MATEKSYS",
+        "source_url": "https://www.mateksys.com/?portfolio=f405-wse",
+        "source_title": "Flight Controller F405-WSE",
+        "transformations": [
+          "input range copied from the published 6-30 V DC input range",
+          "mass divided by 1000 from 20 g to kg",
+          "dimensions divided by 1000 from mm to m",
+          "maximum current remains absent because the published BEC and current-sensor values are not total controller consumption"
+        ]
+      }
+    },
+    {
+      "id": "mateksys-f405-wing",
+      "manufacturer": "MATEKSYS",
+      "model": "F405-WING fixed-wing flight controller",
+      "kind": "electronics",
+      "spec": {
+        "role": "flight_controller",
+        "min_voltage_v": 9,
+        "max_voltage_v": 30,
+        "max_current_a": null,
+        "mass_kg": 0.025,
+        "dimensions": {"length_m": 0.056, "width_m": 0.036, "height_m": 0.013},
+        "protocols": ["ArduPilot", "INAV", "SBUS", "I2C"]
+      },
+      "provenance": {
+        "publisher": "MATEKSYS",
+        "source_url": "https://www.mateksys.com/?portfolio=f405-wing",
+        "source_title": "Flight Controller F405-WING",
+        "transformations": [
+          "input range copied from the published 9-30 V range",
+          "mass divided by 1000 from 25 g to kg",
+          "dimensions divided by 1000 from mm to m",
+          "maximum current remains absent because the page publishes regulator and sensor limits rather than total controller consumption"
+        ]
+      }
+    },
+    {
+      "id": "mateksys-f405-wing-v2",
+      "manufacturer": "MATEKSYS",
+      "model": "F405-WING-V2 fixed-wing flight controller",
+      "kind": "electronics",
+      "spec": {
+        "role": "flight_controller",
+        "min_voltage_v": 9,
+        "max_voltage_v": 30,
+        "max_current_a": null,
+        "mass_kg": 0.025,
+        "dimensions": {"length_m": 0.054, "width_m": 0.036, "height_m": 0.013},
+        "protocols": ["ArduPilot", "INAV", "SBUS", "I2C"]
+      },
+      "provenance": {
+        "publisher": "MATEKSYS",
+        "source_url": "https://www.mateksys.com/?portfolio=f405-wing-v2",
+        "source_title": "Flight Controller F405-WING-V2",
+        "transformations": [
+          "input range copied from the published 9-30 V range",
+          "mass divided by 1000 from 25 g to kg",
+          "dimensions divided by 1000 from mm to m",
+          "maximum current remains absent because regulator output limits are not total controller consumption"
+        ]
+      }
+    },
+    {
+      "id": "mateksys-h743-wlite",
+      "manufacturer": "MATEKSYS",
+      "model": "H743-WLITE flight controller",
+      "kind": "electronics",
+      "spec": {
+        "role": "flight_controller",
+        "min_voltage_v": null,
+        "max_voltage_v": null,
+        "max_current_a": null,
+        "mass_kg": 0.022,
+        "dimensions": {"length_m": 0.044, "width_m": 0.029, "height_m": 0.0145},
+        "protocols": ["ArduPilot", "INAV", "CAN", "I2C"]
+      },
+      "provenance": {
+        "publisher": "MATEKSYS",
+        "source_url": "https://www.mateksys.com/?portfolio=h743-wlite",
+        "source_title": "H743-WLITE flight controller",
+        "transformations": [
+          "mass divided by 1000 from 22 g to kg",
+          "dimensions divided by 1000 from mm to m",
+          "input voltage remains absent because the product page does not state a board input range"
+        ]
+      }
+    },
+    {
+      "id": "mateksys-f405-vtol",
+      "manufacturer": "MATEKSYS",
+      "model": "F405-VTOL fixed-wing/VTOL flight controller",
+      "kind": "electronics",
+      "spec": {
+        "role": "flight_controller",
+        "min_voltage_v": 6.8,
+        "max_voltage_v": 30,
+        "max_current_a": null,
+        "mass_kg": 0.025,
+        "dimensions": {"length_m": 0.045, "width_m": 0.042, "height_m": 0.015},
+        "protocols": ["ArduPilot", "INAV", "MAVLink", "CAN"]
+      },
+      "provenance": {
+        "publisher": "MATEKSYS",
+        "source_url": "https://www.mateksys.com/?portfolio=f405-vtol",
+        "source_title": "F405-VTOL flight controller",
+        "transformations": [
+          "input range copied from the published 6.8-30 V range",
+          "mass divided by 1000 from 25 g to kg",
+          "dimensions divided by 1000 from mm to m",
+          "maximum current remains absent because the listed regulator outputs are not total controller consumption"
+        ]
+      }
+    },
+    {
+      "id": "mateksys-m10-l4-3100",
+      "manufacturer": "MATEKSYS",
+      "model": "M10-L4-3100 GNSS compass module",
+      "kind": "electronics",
+      "spec": {
+        "role": "gnss_compass",
+        "min_voltage_v": 4.5,
+        "max_voltage_v": 5.3,
+        "max_current_a": 0.06,
+        "mass_kg": 0.016,
+        "dimensions": {"length_m": 0.036, "width_m": 0.036, "height_m": 0.012},
+        "protocols": ["GPS", "GLONASS", "Galileo", "BeiDou", "DroneCAN", "I2C"]
+      },
+      "provenance": {
+        "publisher": "MATEKSYS",
+        "source_url": "https://www.mateksys.com/?portfolio=m10-l4-3100",
+        "source_title": "M10-L4-3100 GNSS compass module",
+        "transformations": [
+          "input range copied from the published 4.5-5.3 V range",
+          "60 mA power consumption converted to 0.06 A",
+          "dimensions divided by 1000 from mm to m",
+          "mass divided by 1000 from the published 16 g to kg",
+          "the product page marks this model end-of-life since December 2024; no replacement equivalence is inferred",
+          "primary product page reviewed on 2026-08-24"
+        ]
+      }
+    },
+    {
+      "id": "mateksys-f405-minite",
+      "manufacturer": "MATEKSYS",
+      "model": "F405-miniTE flight controller",
+      "kind": "electronics",
+      "spec": {
+        "role": "flight_controller",
+        "min_voltage_v": 6,
+        "max_voltage_v": 30,
+        "max_current_a": null,
+        "mass_kg": 0.005,
+        "dimensions": null,
+        "protocols": ["ArduPilot", "INAV", "BetaFlight", "DSHOT"]
+      },
+      "provenance": {
+        "publisher": "MATEKSYS",
+        "source_url": "https://www.mateksys.com/?portfolio=f405-minite",
+        "source_title": "F405-miniTE flight controller",
+        "transformations": [
+          "input range copied from the published 6-30 V range",
+          "mass divided by 1000 from 5 g to kg",
+          "dimensions remain absent because the page publishes a 28 mm board size but no board height"
+        ]
+      }
+    },
+    {
+      "id": "mateksys-f405-se",
+      "manufacturer": "MATEKSYS",
+      "model": "F405-SE fixed-wing flight controller",
+      "kind": "electronics",
+      "spec": {
+        "role": "flight_controller",
+        "min_voltage_v": 6,
+        "max_voltage_v": 36,
+        "max_current_a": null,
+        "mass_kg": 0.010,
+        "dimensions": null,
+        "protocols": ["ArduPilot", "INAV", "SBUS", "I2C"]
+      },
+      "provenance": {
+        "publisher": "MATEKSYS",
+        "source_url": "https://www.mateksys.com/?portfolio=f405-se",
+        "source_title": "F405-SE flight controller",
+        "transformations": [
+          "input range copied from the published 6-36 V range",
+          "mass divided by 1000 from 10 g to kg",
+          "dimensions remain absent because the page gives a 36 x 46 mm outline but no board height"
+        ]
+      }
+    },
+    {
+      "id": "mateksys-h743-wing",
+      "manufacturer": "MATEKSYS",
+      "model": "H743-WING fixed-wing flight controller",
+      "kind": "electronics",
+      "spec": {
+        "role": "flight_controller",
+        "min_voltage_v": null,
+        "max_voltage_v": null,
+        "max_current_a": null,
+        "mass_kg": 0.030,
+        "dimensions": {"length_m": 0.054, "width_m": 0.036, "height_m": 0.013},
+        "protocols": ["ArduPilot", "INAV", "CAN", "I2C"]
+      },
+      "provenance": {
+        "publisher": "MATEKSYS",
+        "source_url": "https://www.mateksys.com/?portfolio=h743-wing",
+        "source_title": "H743-WING fixed-wing flight controller",
+        "transformations": [
+          "mass divided by 1000 from 30 g to kg",
+          "dimensions divided by 1000 from mm to m",
+          "input voltage remains absent because the product page does not state a board input range"
+        ]
+      }
+    },
+    {
+      "id": "holybro-durandal",
+      "manufacturer": "Holybro",
+      "model": "Durandal H7 flight controller",
+      "kind": "electronics",
+      "spec": {
+        "role": "flight_controller",
+        "min_voltage_v": null,
+        "max_voltage_v": 6,
+        "max_current_a": null,
+        "mass_kg": 0.0688,
+        "dimensions": {"length_m": 0.080, "width_m": 0.045, "height_m": 0.0205},
+        "protocols": ["ArduPilot", "CAN", "PWM", "I2C"]
+      },
+      "provenance": {
+        "publisher": "Holybro",
+        "source_url": "https://docs.holybro.com/autopilot/durandal/overview-and-technical-specification",
+        "source_title": "Durandal Overview and Technical Specification",
+        "transformations": [
+          "maximum input voltage copied from the published 6 V rating",
+          "mass divided by 1000 from 68.8 g to kg",
+          "dimensions divided by 1000 from mm to m",
+          "maximum current remains absent because the published 1.5 A values are output limiters, not total controller consumption"
+        ]
+      }
+    },
+    {
+      "id": "holybro-pixhawk-5x-module",
+      "manufacturer": "Holybro",
+      "model": "Pixhawk 5X flight controller module",
+      "kind": "electronics",
+      "spec": {
+        "role": "flight_controller",
+        "min_voltage_v": null,
+        "max_voltage_v": 6,
+        "max_current_a": null,
+        "mass_kg": 0.023,
+        "dimensions": {"length_m": 0.0388, "width_m": 0.0318, "height_m": 0.0146},
+        "protocols": ["ArduPilot", "PX4", "CAN", "PWM"]
+      },
+      "provenance": {
+        "publisher": "Holybro",
+        "source_url": "https://holybro.com/products/pixhawk-5x",
+        "source_title": "Pixhawk 5X Flight Controller",
+        "transformations": [
+          "maximum input voltage copied from the published 6 V rating",
+          "mass divided by 1000 from 23 g to kg",
+          "dimensions divided by 1000 from mm to m",
+          "the module mass and dimensions exclude optional baseboards as stated by the product page"
+        ]
+      }
+    },
+    {
+      "id": "tattu-nmc-811-16000-6s",
+      "manufacturer": "Tattu",
+      "model": "NMC 811 5C 16000mAh 22.2V 6S1P LiPo",
+      "kind": "battery",
+      "spec": {
+        "chemistry": "NMC LiPo",
+        "series_cells": 6,
+        "nominal_voltage_v": 22.2,
+        "capacity_ah": 16,
+        "discharge_rating_c": 5,
+        "mass_kg": 1.47,
+        "dimensions": {"length_m": 0.192, "width_m": 0.077, "height_m": 0.049},
+        "connector": null
+      },
+      "provenance": {
+        "publisher": "Tattu",
+        "source_url": "https://www.genstattu.com/content/instock/Tattu-UAV-Product-Brochure.pdf",
+        "source_title": "Tattu UAV Product Brochure",
+        "transformations": [
+          "capacity divided by 1000 from mAh to Ah",
+          "dimensions divided by 1000 from mm to m",
+          "mass divided by 1000 from g to kg",
+          "connector remains absent because the brochure row does not state one"
+        ]
+      }
+    },
+    {
+      "id": "tattu-nmc-811-22000-6s",
+      "manufacturer": "Tattu",
+      "model": "NMC 811 5C 22000mAh 22.2V 6S1P LiPo",
+      "kind": "battery",
+      "spec": {
+        "chemistry": "NMC LiPo",
+        "series_cells": 6,
+        "nominal_voltage_v": 22.2,
+        "capacity_ah": 22,
+        "discharge_rating_c": 5,
+        "mass_kg": 1.988,
+        "dimensions": {"length_m": 0.207, "width_m": 0.092, "height_m": 0.050},
+        "connector": null
+      },
+      "provenance": {
+        "publisher": "Tattu",
+        "source_url": "https://www.genstattu.com/content/instock/Tattu-UAV-Product-Brochure.pdf",
+        "source_title": "Tattu UAV Product Brochure",
+        "transformations": [
+          "capacity divided by 1000 from mAh to Ah",
+          "dimensions divided by 1000 from mm to m",
+          "mass divided by 1000 from g to kg",
+          "connector remains absent because the brochure row does not state one"
+        ]
+      }
+    },
+    {
+      "id": "apc-8x6e",
+      "manufacturer": "APC Propellers",
+      "model": "8x6E",
+      "kind": "propeller",
+      "spec": {
+        "diameter_m": 0.2032,
+        "pitch_m": 0.1524,
+        "blade_count": null,
+        "mass_kg": 0.01389126633125,
+        "bore_diameter_m": 0.00635,
+        "electric_compatible": true
+      },
+      "provenance": {
+        "publisher": "APC Propellers",
+        "source_url": "https://www.apcprop.com/product/8x6e/",
+        "source_title": "8x6E - APC Propellers",
+        "transformations": [
+          "diameter and pitch multiplied by 0.0254 from the inch dimensions printed in the product title",
+          "product weight converted from 0.49 oz to kg and shaft diameter converted from 1/4 in to m",
+          "blade count remains absent because the product page does not publish it"
+        ]
+      }
+    },
+    {
+      "id": "apc-9x6e",
+      "manufacturer": "APC Propellers",
+      "model": "9x6E",
+      "kind": "propeller",
+      "spec": {
+        "diameter_m": 0.2286,
+        "pitch_m": 0.1524,
+        "blade_count": null,
+        "mass_kg": 0.01786019956875,
+        "bore_diameter_m": 0.00635,
+        "electric_compatible": true
+      },
+      "provenance": {
+        "publisher": "APC Propellers",
+        "source_url": "https://www.apcprop.com/product/9x6e/",
+        "source_title": "9x6E - APC Propellers",
+        "transformations": [
+          "diameter and pitch multiplied by 0.0254 from the inch dimensions printed in the product title",
+          "product weight converted from 0.63 oz to kg and shaft diameter converted from 1/4 in to m",
+          "blade count remains absent because the product page does not publish it"
+        ]
+      }
+    },
+    {
+      "id": "apc-10x5e",
+      "manufacturer": "APC Propellers",
+      "model": "10x5E",
+      "kind": "propeller",
+      "spec": {
+        "diameter_m": 0.254,
+        "pitch_m": 0.127,
+        "blade_count": null,
+        "mass_kg": 0.02012816141875,
+        "bore_diameter_m": 0.00635,
+        "electric_compatible": true
+      },
+      "provenance": {
+        "publisher": "APC Propellers",
+        "source_url": "https://www.apcprop.com/product/10x5e/",
+        "source_title": "10x5E - APC Propellers",
+        "transformations": [
+          "diameter and pitch multiplied by 0.0254 from the inch dimensions printed in the product title",
+          "product weight converted from 0.71 oz to kg and shaft diameter converted from 1/4 in to m",
+          "blade count remains absent because the product page does not publish it"
+        ]
+      }
+    },
+    {
+      "id": "apc-12x8e",
+      "manufacturer": "APC Propellers",
+      "model": "12x8E",
+      "kind": "propeller",
+      "spec": {
+        "diameter_m": 0.3048,
+        "pitch_m": 0.2032,
+        "blade_count": null,
+        "mass_kg": null,
+        "bore_diameter_m": null,
+        "electric_compatible": true
+      },
+      "provenance": {
+        "publisher": "APC Propellers",
+        "source_url": "https://www.apcprop.com/product/12x8e/",
+        "source_title": "12x8E - APC Propellers",
+        "transformations": [
+          "diameter and pitch multiplied by 0.0254 from the inch dimensions printed in the product title",
+          "the product title does not state blade count, mass, or bore diameter; those fields remain absent"
+        ]
+      }
+    },
+    {
+      "id": "apc-14x7e",
+      "manufacturer": "APC Propellers",
+      "model": "14x7E",
+      "kind": "propeller",
+      "spec": {
+        "diameter_m": 0.3556,
+        "pitch_m": 0.1778,
+        "blade_count": null,
+        "mass_kg": null,
+        "bore_diameter_m": null,
+        "electric_compatible": true
+      },
+      "provenance": {
+        "publisher": "APC Propellers",
+        "source_url": "https://www.apcprop.com/product/14x7e/",
+        "source_title": "14x7E - APC Propellers",
+        "transformations": [
+          "diameter and pitch multiplied by 0.0254 from the inch dimensions printed in the product title",
+          "the product title does not state blade count, mass, or bore diameter; those fields remain absent"
+        ]
+      }
+    },
+    {
+      "id": "apc-15x8e",
+      "manufacturer": "APC Propellers",
+      "model": "15x8E",
+      "kind": "propeller",
+      "spec": {
+        "diameter_m": 0.381,
+        "pitch_m": 0.2032,
+        "blade_count": null,
+        "mass_kg": null,
+        "bore_diameter_m": null,
+        "electric_compatible": true
+      },
+      "provenance": {
+        "publisher": "APC Propellers",
+        "source_url": "https://www.apcprop.com/product/15x8e/",
+        "source_title": "15x8E - APC Propellers",
+        "transformations": [
+          "diameter and pitch multiplied by 0.0254 from the inch dimensions printed in the product title",
+          "the product title does not state blade count, mass, or bore diameter; those fields remain absent"
+        ]
+      }
+    },
+    {
+      "id": "apc-16x8e",
+      "manufacturer": "APC Propellers",
+      "model": "16x8E",
+      "kind": "propeller",
+      "spec": {
+        "diameter_m": 0.4064,
+        "pitch_m": 0.2032,
+        "blade_count": null,
+        "mass_kg": null,
+        "bore_diameter_m": null,
+        "electric_compatible": true
+      },
+      "provenance": {
+        "publisher": "APC Propellers",
+        "source_url": "https://www.apcprop.com/product/16x8e/",
+        "source_title": "16x8E - APC Propellers",
+        "transformations": [
+          "diameter and pitch multiplied by 0.0254 from the inch dimensions printed in the product title",
+          "the product title does not state blade count, mass, or bore diameter; those fields remain absent"
+        ]
+      }
+    },
+    {
+      "id": "apc-17x8e",
+      "manufacturer": "APC Propellers",
+      "model": "17x8E",
+      "kind": "propeller",
+      "spec": {
+        "diameter_m": 0.4318,
+        "pitch_m": 0.2032,
+        "blade_count": null,
+        "mass_kg": null,
+        "bore_diameter_m": null,
+        "electric_compatible": true
+      },
+      "provenance": {
+        "publisher": "APC Propellers",
+        "source_url": "https://www.apcprop.com/product/17x8e/",
+        "source_title": "17x8E - APC Propellers",
+        "transformations": [
+          "diameter and pitch multiplied by 0.0254 from the inch dimensions printed in the product title",
+          "the product title does not state blade count, mass, or bore diameter; those fields remain absent"
+        ]
+      }
+    },
+    {
+      "id": "apc-10x7e",
+      "manufacturer": "APC Propellers",
+      "model": "10x7E",
+      "kind": "propeller",
+      "spec": {"diameter_m": 0.254, "pitch_m": 0.1778, "blade_count": null, "mass_kg": null, "bore_diameter_m": null, "electric_compatible": true},
+      "provenance": {
+        "publisher": "APC Propellers",
+        "source_url": "https://www.apcprop.com/product/10x7e/",
+        "source_title": "10x7E - APC Propellers",
+        "transformations": ["diameter and pitch multiplied by 0.0254 from the inch dimensions printed in the product title", "the product title does not state blade count, mass, or bore diameter; those fields remain absent"]
+      }
+    },
+    {
+      "id": "apc-11x7e",
+      "manufacturer": "APC Propellers",
+      "model": "11x7E",
+      "kind": "propeller",
+      "spec": {"diameter_m": 0.2794, "pitch_m": 0.1778, "blade_count": null, "mass_kg": null, "bore_diameter_m": null, "electric_compatible": true},
+      "provenance": {
+        "publisher": "APC Propellers",
+        "source_url": "https://www.apcprop.com/product/11x7e/",
+        "source_title": "11x7E - APC Propellers",
+        "transformations": ["diameter and pitch multiplied by 0.0254 from the inch dimensions printed in the product title", "the product title does not state blade count, mass, or bore diameter; those fields remain absent"]
+      }
+    },
+    {
+      "id": "apc-12x10e",
+      "manufacturer": "APC Propellers",
+      "model": "12x10E",
+      "kind": "propeller",
+      "spec": {"diameter_m": 0.3048, "pitch_m": 0.254, "blade_count": null, "mass_kg": null, "bore_diameter_m": null, "electric_compatible": true},
+      "provenance": {
+        "publisher": "APC Propellers",
+        "source_url": "https://www.apcprop.com/product/12x10e/",
+        "source_title": "12x10E - APC Propellers",
+        "transformations": ["diameter and pitch multiplied by 0.0254 from the inch dimensions printed in the product title", "the product title does not state blade count, mass, or bore diameter; those fields remain absent"]
+      }
+    },
+    {
+      "id": "apc-13x8e",
+      "manufacturer": "APC Propellers",
+      "model": "13x8E",
+      "kind": "propeller",
+      "spec": {"diameter_m": 0.3302, "pitch_m": 0.2032, "blade_count": null, "mass_kg": null, "bore_diameter_m": null, "electric_compatible": true},
+      "provenance": {
+        "publisher": "APC Propellers",
+        "source_url": "https://www.apcprop.com/product/13x8e/",
+        "source_title": "13x8E - APC Propellers",
+        "transformations": ["diameter and pitch multiplied by 0.0254 from the inch dimensions printed in the product title", "the product title does not state blade count, mass, or bore diameter; those fields remain absent"]
+      }
+    },
+    {
+      "id": "apc-14x10e",
+      "manufacturer": "APC Propellers",
+      "model": "14x10E",
+      "kind": "propeller",
+      "spec": {"diameter_m": 0.3556, "pitch_m": 0.254, "blade_count": null, "mass_kg": null, "bore_diameter_m": null, "electric_compatible": true},
+      "provenance": {
+        "publisher": "APC Propellers",
+        "source_url": "https://www.apcprop.com/product/14x10e/",
+        "source_title": "14x10E - APC Propellers",
+        "transformations": ["diameter and pitch multiplied by 0.0254 from the inch dimensions printed in the product title", "the product title does not state blade count, mass, or bore diameter; those fields remain absent"]
+      }
+    },
+    {
+      "id": "apc-15x10e",
+      "manufacturer": "APC Propellers",
+      "model": "15x10E",
+      "kind": "propeller",
+      "spec": {"diameter_m": 0.381, "pitch_m": 0.254, "blade_count": null, "mass_kg": null, "bore_diameter_m": null, "electric_compatible": true},
+      "provenance": {
+        "publisher": "APC Propellers",
+        "source_url": "https://www.apcprop.com/product/15x10e/",
+        "source_title": "15x10E - APC Propellers",
+        "transformations": ["diameter and pitch multiplied by 0.0254 from the inch dimensions printed in the product title", "the product title does not state blade count, mass, or bore diameter; those fields remain absent"]
+      }
+    },
+    {
+      "id": "hobbywing-skywalker-20a-v2-mini",
+      "manufacturer": "HOBBYWING",
+      "model": "Skywalker 20A V2 Mini ESC",
+      "kind": "esc",
+      "spec": {"min_series_cells": 2, "max_series_cells": 4, "continuous_current_a": 20, "bec_min_voltage_v": 5, "bec_max_voltage_v": 5, "bec_continuous_current_a": 2, "bec_peak_current_a": null, "mass_kg": 0.015, "dimensions": {"length_m": 0.034, "width_m": 0.015, "height_m": 0.01}},
+      "provenance": {"publisher": "HOBBYWING", "source_url": "https://www.hobbywing.com/en/uploads/file/20250930/64b726be7a56c9f415385f77683cdc46.pdf", "source_title": "Skywalker V2 user guide", "transformations": ["mass divided by 1000 from g to kg", "dimensions divided by 1000 from mm to m", "the guide labels 40 A as peak current; it is not placed in the continuous-current field"]}
+    },
+    {
+      "id": "hobbywing-skywalker-30a-v2-mini",
+      "manufacturer": "HOBBYWING",
+      "model": "Skywalker 30A V2 Mini ESC",
+      "kind": "esc",
+      "spec": {"min_series_cells": 2, "max_series_cells": 4, "continuous_current_a": 30, "bec_min_voltage_v": 5, "bec_max_voltage_v": 5, "bec_continuous_current_a": 3, "bec_peak_current_a": null, "mass_kg": 0.023, "dimensions": {"length_m": 0.044, "width_m": 0.018, "height_m": 0.01}},
+      "provenance": {"publisher": "HOBBYWING", "source_url": "https://www.hobbywing.com/en/uploads/file/20250930/64b726be7a56c9f415385f77683cdc46.pdf", "source_title": "Skywalker V2 user guide", "transformations": ["mass divided by 1000 from g to kg", "dimensions divided by 1000 from mm to m", "the guide labels 50 A as peak current; it is not placed in the continuous-current field"]}
+    },
+    {
+      "id": "hobbywing-skywalker-50a-6s-v2",
+      "manufacturer": "HOBBYWING",
+      "model": "Skywalker 50A-6S V2 ESC",
+      "kind": "esc",
+      "spec": {"min_series_cells": 3, "max_series_cells": 6, "continuous_current_a": 50, "bec_min_voltage_v": 5, "bec_max_voltage_v": 5, "bec_continuous_current_a": 6, "bec_peak_current_a": null, "mass_kg": 0.068, "dimensions": {"length_m": 0.073, "width_m": 0.03, "height_m": 0.012}},
+      "provenance": {"publisher": "HOBBYWING", "source_url": "https://www.hobbywing.com/en/uploads/file/20250930/64b726be7a56c9f415385f77683cdc46.pdf", "source_title": "Skywalker V2 user guide", "transformations": ["mass divided by 1000 from g to kg", "dimensions divided by 1000 from mm to m", "the guide labels 70 A as peak current; it is not placed in the continuous-current field"]}
+    },
+    {
+      "id": "hobbywing-skywalker-100a-v2",
+      "manufacturer": "HOBBYWING",
+      "model": "Skywalker 100A V2 ESC",
+      "kind": "esc",
+      "spec": {"min_series_cells": 3, "max_series_cells": 6, "continuous_current_a": 100, "bec_min_voltage_v": 5, "bec_max_voltage_v": 5, "bec_continuous_current_a": 7, "bec_peak_current_a": null, "mass_kg": 0.092, "dimensions": {"length_m": 0.085, "width_m": 0.036, "height_m": 0.009}},
+      "provenance": {"publisher": "HOBBYWING", "source_url": "https://www.hobbywing.com/en/uploads/file/20250930/64b726be7a56c9f415385f77683cdc46.pdf", "source_title": "Skywalker V2 user guide", "transformations": ["mass divided by 1000 from g to kg", "dimensions divided by 1000 from mm to m", "the guide labels 120 A as peak current; it is not placed in the continuous-current field"]}
+    },
+    {
+      "id": "hobbywing-skywalker-2814-sl-kv1000",
+      "manufacturer": "HOBBYWING",
+      "model": "Skywalker 2814 SL 1000KV motor",
+      "kind": "motor",
+      "spec": {"kv_rpm_per_v": 1000, "winding_resistance_ohm": 0.029, "no_load_current_a": 2, "no_load_test_voltage_v": 14.8, "min_series_cells": 3, "max_series_cells": 4, "max_current_a": 55.2, "max_power_w": 815.8, "max_static_thrust_n": null, "mass_kg": 0.115, "dimensions": {"length_m": 0.054, "width_m": 0.0351, "height_m": 0.0351}, "recommended_propeller_diameter_m": 0.3048, "recommended_propeller_pitch_m": 0.1524},
+      "provenance": {"publisher": "HOBBYWING", "source_url": "https://www.hobbywing.com/en/products/skywalker2814", "source_title": "Skywalker 2814 SL motor series", "transformations": ["mass divided by 1000 from g to kg", "motor diameter and axial length divided by 1000 from mm to m", "winding resistance converted from 29 mOhm to 0.029 Ohm; no-load current is associated with the published 14.8 V test voltage", "the page qualifies 55.2 A and 815.8 W by a timed test duration; the values are retained without inferring unlimited continuous operation", "representative 3S recommended propeller is 12x6E"]}
+    },
+    {
+      "id": "hobbywing-skywalker-2814-sl-kv1250",
+      "manufacturer": "HOBBYWING",
+      "model": "Skywalker 2814 SL 1250KV motor",
+      "kind": "motor",
+      "spec": {"kv_rpm_per_v": 1250, "winding_resistance_ohm": 0.0197, "no_load_current_a": 2.98, "no_load_test_voltage_v": 14.8, "min_series_cells": 3, "max_series_cells": 4, "max_current_a": 75.1, "max_power_w": 1111.5, "max_static_thrust_n": null, "mass_kg": 0.114, "dimensions": {"length_m": 0.054, "width_m": 0.0351, "height_m": 0.0351}, "recommended_propeller_diameter_m": 0.2794, "recommended_propeller_pitch_m": 0.1397},
+      "provenance": {"publisher": "HOBBYWING", "source_url": "https://www.hobbywing.com/en/products/skywalker2814", "source_title": "Skywalker 2814 SL motor series", "transformations": ["mass divided by 1000 from g to kg", "motor diameter and axial length divided by 1000 from mm to m", "winding resistance converted from 19.7 mOhm to 0.0197 Ohm; no-load current is associated with the published 14.8 V test voltage", "the page qualifies 75.1 A and 1111.5 W by a timed test duration; the values are retained without inferring unlimited continuous operation", "representative 3S recommended propeller is 11x5.5E"]}
+    },
+    {
+      "id": "holybro-sik-v3-100mw-air-radio",
+      "manufacturer": "Holybro",
+      "model": "SiK Telemetry Radio V3 100mW air radio",
+      "kind": "electronics",
+      "spec": {"role": "telemetry_radio", "min_voltage_v": 5, "max_voltage_v": 5, "max_current_a": 0.1, "mass_kg": 0.0235, "dimensions": {"length_m": 0.053, "width_m": 0.028, "height_m": 0.0107}, "protocols": ["SiK", "MAVLink", "UART"]},
+      "provenance": {"publisher": "Holybro", "source_url": "https://docs.holybro.com/radio/sik-telemetry-radio-v3", "source_title": "SiK Telemetry Radio V3", "transformations": ["mass divided by 1000 from g to kg", "dimensions divided by 1000 from mm to m", "100 mA is the published transmit current at 20 dBm; receive current is lower"]}
+    },
+    {
+      "id": "holybro-sik-v3-1w-air-radio",
+      "manufacturer": "Holybro",
+      "model": "SiK Telemetry Radio V3 1W air radio",
+      "kind": "electronics",
+      "spec": {"role": "telemetry_radio", "min_voltage_v": 7, "max_voltage_v": 28, "max_current_a": 0.4, "mass_kg": 0.067, "dimensions": {"length_m": 0.0665, "width_m": 0.032, "height_m": 0.0165}, "protocols": ["SiK", "MAVLink", "UART"]},
+      "provenance": {"publisher": "Holybro", "source_url": "https://holybro.com/collections/telemetry-radios/products/sik-telemetry-radio-1w", "source_title": "SiK Telemetry Radio - Long Range 1W", "transformations": ["mass divided by 1000 from g to kg", "dimensions divided by 1000 from mm to m", "the published 400 mA transmit current at 12 V and 30 dBm is retained as maximum supply current; the 30 mA receive current is lower"]}
+    },
+    {
+      "id": "easy-composites-cft-wf-30-27-1m",
+      "manufacturer": "Easy Composites",
+      "model": "30mm (27mm) woven finish carbon fibre tube, 1m",
+      "kind": "material_stock",
+      "spec": {"form": "tube", "dimensions": {"length_m": 1, "width_m": 0.03, "height_m": 0.03}, "mass_kg": 0.1938, "youngs_modulus_pa": 64000000000, "allowable_stress_pa": null},
+      "provenance": {"publisher": "Easy Composites", "source_url": "https://www.easycomposites.co.uk/30mm-woven-finish-carbon-fibre-tube", "source_title": "30mm (27mm) Woven Finish Roll Wrapped Carbon Fibre Tube", "transformations": ["length and outside diameter divided by 1000 from mm to m", "mass divided by 1000 from the published grams per metre for the 1 m selection", "the published 64 GPa is longitudinal tensile modulus; no allowable is inferred from the listed tensile strength"]}
+    },
+    {
+      "id": "radiomaster-er4-elrs-pwm",
+      "manufacturer": "RadioMaster",
+      "model": "ER4 2.4GHz ELRS PWM receiver",
+      "kind": "receiver",
+      "spec": {"channel_count": 4, "min_voltage_v": 4.5, "max_voltage_v": 8.4, "mass_kg": 0.003, "dimensions": {"length_m": 0.03, "width_m": 0.015, "height_m": 0.005}, "protocols": ["ExpressLRS", "CRSF", "SBUS"], "telemetry": true},
+      "provenance": {"publisher": "RadioMaster", "source_url": "https://www.radiomasterrc.com/products/er4-2-4ghz-elrs-pwm-receiver", "source_title": "ER4 2.4GHz ELRS PWM Receiver", "transformations": ["mass divided by 1000 from g to kg", "dimensions divided by 1000 from mm to m", "the stated telemetry power establishes telemetry support; it is not represented as electrical load"]}
+    },
+    {
+      "id": "radiomaster-er6-elrs-pwm",
+      "manufacturer": "RadioMaster",
+      "model": "ER6 2.4GHz ELRS PWM receiver",
+      "kind": "receiver",
+      "spec": {"channel_count": 6, "min_voltage_v": 4.5, "max_voltage_v": 8.4, "mass_kg": 0.0145, "dimensions": {"length_m": 0.043, "width_m": 0.025, "height_m": 0.015}, "protocols": ["ExpressLRS", "CRSF", "SBUS"], "telemetry": true},
+      "provenance": {"publisher": "RadioMaster", "source_url": "https://www.radiomasterrc.com/products/er6-2-4ghz-elrs-pwm-receiver", "source_title": "ER6 2.4GHz ELRS PWM Receiver", "transformations": ["mass divided by 1000 from g to kg", "dimensions divided by 1000 from mm to m", "the stated telemetry power establishes telemetry support; it is not represented as electrical load"]}
+    },
+    {
+      "id": "radiomaster-er6g-elrs-pwm",
+      "manufacturer": "RadioMaster",
+      "model": "ER6G 2.4GHz ELRS PWM receiver",
+      "kind": "receiver",
+      "spec": {"channel_count": 6, "min_voltage_v": 3.5, "max_voltage_v": 8.4, "mass_kg": 0.005, "dimensions": {"length_m": 0.042, "width_m": 0.013, "height_m": 0.008}, "protocols": ["ExpressLRS"], "telemetry": true},
+      "provenance": {"publisher": "RadioMaster", "source_url": "https://radiomasterrc.com/products/er6g-er6gv-2-4ghz-elrs-pwm-receiver", "source_title": "ER6G & ER6GV 2.4GHz ELRS PWM Receiver", "transformations": ["mass divided by 1000 from g to kg", "dimensions divided by 1000 from mm to m", "the stated telemetry power establishes telemetry support; it is not represented as electrical load"]}
+    },
+    {
+      "id": "radiomaster-er6gv-elrs-pwm-vario",
+      "manufacturer": "RadioMaster",
+      "model": "ER6GV 2.4GHz ELRS PWM receiver with vario",
+      "kind": "receiver",
+      "spec": {"channel_count": 6, "min_voltage_v": 3.5, "max_voltage_v": 8.4, "mass_kg": 0.005, "dimensions": {"length_m": 0.042, "width_m": 0.013, "height_m": 0.008}, "protocols": ["ExpressLRS"], "telemetry": true},
+      "provenance": {"publisher": "RadioMaster", "source_url": "https://radiomasterrc.com/products/er6g-er6gv-2-4ghz-elrs-pwm-receiver", "source_title": "ER6G & ER6GV 2.4GHz ELRS PWM Receiver", "transformations": ["mass divided by 1000 from g to kg", "dimensions divided by 1000 from mm to m", "the page identifies a built-in vario and telemetry support; sensor accuracy and electrical load remain absent"]}
+    },
+    {
+      "id": "spektrum-a6380",
+      "manufacturer": "Spektrum",
+      "model": "A6380 HV standard metal-gear aircraft servo",
+      "kind": "servo",
+      "spec": {"mass_kg": 0.0425, "dimensions": {"length_m": 0.039, "width_m": 0.019, "height_m": 0.037}, "operating_points": [{"voltage_v": 6, "stall_torque_nm": 0.71588545, "seconds_per_60_deg": 0.17, "stall_current_a": null}, {"voltage_v": 8.4, "stall_torque_nm": 1.12776475, "seconds_per_60_deg": 0.13, "stall_current_a": 2.5}]},
+      "provenance": {"publisher": "Spektrum", "source_url": "https://www.spektrumrc.com/product/spektrum-a6380-standard-digital-hv-high-torque-high-speed-metal-gear-aircraft-servo/SPMSA6380.html", "source_title": "Spektrum A6380 Standard Digital HV High Torque High Speed Metal Gear Aircraft Servo", "transformations": ["mass divided by 1000 from g to kg", "dimensions divided by 1000 from the page's mm values to m", "torque multiplied by 0.0980665 from kg-cm to N-m", "stall current of 2.5 A copied for the published 8.4 V stall point from https://www.spektrumrc.com/ProdInfo/Files/SPMSA6380-Manual-MULTI.pdf; no 6 V stall current is inferred", "manufacturer manual reviewed on 2026-08-24"]}
+    },
+    {
+      "id": "spektrum-a6300",
+      "manufacturer": "Spektrum",
+      "model": "A6300 HV standard brushless metal-gear aircraft servo",
+      "kind": "servo",
+      "spec": {"mass_kg": 0.0798, "dimensions": {"length_m": 0.04, "width_m": 0.02, "height_m": 0.038}, "operating_points": [{"voltage_v": 6, "stall_torque_nm": 2.67329279, "seconds_per_60_deg": 0.14, "stall_current_a": null}, {"voltage_v": 7.4, "stall_torque_nm": 3.299937725, "seconds_per_60_deg": 0.11, "stall_current_a": null}, {"voltage_v": 8.4, "stall_torque_nm": 3.7461403, "seconds_per_60_deg": 0.1, "stall_current_a": null}]},
+      "provenance": {"publisher": "Spektrum", "source_url": "https://www.spektrumrc.com/product/spektrum-a6300-standard-digital-hv-ultra-torque-brushless-metal-gear-aircraft-servo/SPMSA6300.html", "source_title": "Spektrum A6300 Standard Digital HV Ultra Torque Brushless Metal Gear Aircraft Servo", "transformations": ["mass divided by 1000 from g to kg", "dimensions divided by 1000 from the page's mm values to m", "torque multiplied by 0.0980665 from kg-cm to N-m"]}
+    },
+    {
+      "id": "spektrum-a6180",
+      "manufacturer": "Spektrum",
+      "model": "A6180 standard digital aircraft servo",
+      "kind": "servo",
+      "spec": {"mass_kg": 0.042, "dimensions": {"length_m": 0.0388, "width_m": 0.0188, "height_m": 0.0349}, "operating_points": [{"voltage_v": 4.8, "stall_torque_nm": 0.57859235, "seconds_per_60_deg": null, "stall_current_a": null}, {"voltage_v": 6, "stall_torque_nm": 0.6668522, "seconds_per_60_deg": 0.14, "stall_current_a": null}]},
+      "provenance": {"publisher": "Spektrum", "source_url": "https://www.spektrumrc.com/product/spektrum-a6180-standard-digital-aircraft-servo/SPMSA6180.html", "source_title": "Spektrum A6180 Standard Digital Aircraft Servo", "transformations": ["mass divided by 1000 from g to kg", "dimensions divided by 1000 from the page's mm values to m", "torque multiplied by 0.0980665 from kg-cm to N-m", "the page gives a 6 V transit time only; 4.8 V speed remains absent"]}
+    },
+    {
+      "id": "radiomaster-er8g-elrs-pwm",
+      "manufacturer": "RadioMaster",
+      "model": "ER8G 2.4GHz ELRS PWM receiver",
+      "kind": "receiver",
+      "spec": {"channel_count": 8, "min_voltage_v": 3.5, "max_voltage_v": 8.4, "mass_kg": 0.012, "dimensions": {"length_m": 0.06, "width_m": 0.0135, "height_m": 0.013}, "protocols": ["ExpressLRS", "CRSF", "SBUS"], "telemetry": true},
+      "provenance": {"publisher": "RadioMaster", "source_url": "https://www.radiomasterrc.com/products/er8g-er8gv-2-4ghz-elrs-pwm-receiver", "source_title": "ER8G & ER8GV 2.4GHz ELRS PWM Receiver", "transformations": ["mass divided by 1000 from g to kg", "dimensions divided by 1000 from mm to m", "the stated telemetry power establishes telemetry support; it is not represented as electrical load"]}
+    },
+    {
+      "id": "radiomaster-er8gv-elrs-pwm-vario",
+      "manufacturer": "RadioMaster",
+      "model": "ER8GV 2.4GHz ELRS PWM receiver with vario",
+      "kind": "receiver",
+      "spec": {"channel_count": 8, "min_voltage_v": 3.5, "max_voltage_v": 8.4, "mass_kg": 0.012, "dimensions": {"length_m": 0.06, "width_m": 0.0135, "height_m": 0.013}, "protocols": ["ExpressLRS", "CRSF", "SBUS"], "telemetry": true},
+      "provenance": {"publisher": "RadioMaster", "source_url": "https://www.radiomasterrc.com/products/er8g-er8gv-2-4ghz-elrs-pwm-receiver", "source_title": "ER8G & ER8GV 2.4GHz ELRS PWM Receiver", "transformations": ["mass divided by 1000 from g to kg", "dimensions divided by 1000 from mm to m", "the page identifies a built-in vario and telemetry support; sensor accuracy and electrical load remain absent"]}
+    },
+    {
+      "id": "tattu-plus-22000-6s-25c",
+      "manufacturer": "Tattu",
+      "model": "Plus 22000mAh 6S 25C LiPo Smart Battery XT90-S",
+      "kind": "battery",
+      "spec": {"chemistry": "LiPo", "series_cells": 6, "nominal_voltage_v": 22.2, "capacity_ah": 22, "discharge_rating_c": 25, "mass_kg": 2.65, "dimensions": {"length_m": 0.213, "width_m": 0.096, "height_m": 0.069}, "connector": "XT90-S"},
+      "provenance": {"publisher": "Tattu", "source_url": "https://www.genstattu.com/tattu-plus-25c-22000mah-6s1p-xt90-smart-lipo-battery.html", "source_title": "Tattu Plus 22000mAh 6S 25C 22.2V LiPo Smart Battery Pack with XT90-S Plug", "transformations": ["capacity divided by 1000 from mAh to Ah", "mass divided by 1000 from g to kg", "dimensions divided by 1000 from mm to m"]}
+    },
+    {
+      "id": "tattu-plus-22000-12s-25c",
+      "manufacturer": "Tattu",
+      "model": "Plus 22000mAh 12S 25C LiPo Smart Battery AS150",
+      "kind": "battery",
+      "spec": {"chemistry": "LiPo", "series_cells": 12, "nominal_voltage_v": 44.4, "capacity_ah": 22, "discharge_rating_c": 25, "mass_kg": 5.8, "dimensions": {"length_m": 0.235, "width_m": 0.172, "height_m": 0.116}, "connector": "AS150"},
+      "provenance": {"publisher": "Tattu", "source_url": "https://www.genstattu.com/tattu-plus-22000mah-44-4v-25c-12s1p-lipo-smart-battery-pack-with-as150-plug/", "source_title": "Tattu Plus 22000mAh 44.4V 25C 12S1P LiPo Smart Battery Pack with AS150 Plug", "transformations": ["capacity divided by 1000 from mAh to Ah", "mass divided by 1000 from g to kg", "dimensions divided by 1000 from mm to m"]}
+    },
+    {
+      "id": "tattu-gtech-22000-4s",
+      "manufacturer": "Tattu",
+      "model": "G-Tech 22000mAh 14.8V 25C 4S LiPo XT90-S",
+      "kind": "battery",
+      "spec": {
+        "chemistry": "LiPo",
+        "series_cells": 4,
+        "nominal_voltage_v": 14.8,
+        "capacity_ah": 22,
+        "discharge_rating_c": 25,
+        "mass_kg": 2.45,
+        "dimensions": {"length_m": 0.213, "width_m": 0.094, "height_m": 0.043},
+        "connector": "XT90-S"
+      },
+      "provenance": {
+        "publisher": "Tattu",
+        "source_url": "https://genstattu.com/tattu-g-tech-4s-22000mah-14-8v-25c-lipo-battery-with-xt90-s-plug-for-uav/",
+        "source_title": "Tattu G-Tech 4S 22000mAh 14.8V 25C LiPo Battery",
+        "transformations": [
+          "capacity divided by 1000 from mAh to Ah",
+          "dimensions divided by 1000 from mm to m",
+          "mass divided by 1000 from g to kg"
+        ]
+      }
+    },
+    {
+      "id": "tmotor-at2814-900kv",
+      "manufacturer": "T-MOTOR",
+      "model": "AT2814 Long Shaft 900KV",
+      "kind": "motor",
+      "spec": {
+        "kv_rpm_per_v": 900,
+        "winding_resistance_ohm": 0.082,
+        "no_load_current_a": 1.2,
+        "no_load_test_voltage_v": 10,
+        "min_series_cells": 3,
+        "max_series_cells": 4,
+        "max_current_a": 45,
+        "max_power_w": 650,
+        "max_static_thrust_n": null,
+        "mass_kg": 0.108,
+        "dimensions": {"length_m": 0.0545, "width_m": 0.0352, "height_m": 0.0352},
+        "recommended_propeller_diameter_m": null,
+        "recommended_propeller_pitch_m": null
+      },
+      "provenance": {
+        "publisher": "T-MOTOR",
+        "source_url": "https://uav-en.tmotor.com/2019/Motors_0226/214.html",
+        "source_title": "AT2814 Long Shaft Fixed-Wing Motor KV900",
+        "transformations": [
+          "mass divided by 1000 from g to kg and body dimensions divided by 1000 from mm to m",
+          "winding resistance converted from 82 mOhm to 0.082 Ohm; the stated 1.2 A no-load current is associated with the published 10 V test voltage",
+          "the source presents a maximum thrust without a matching flight condition, so static thrust remains absent"
+        ]
+      }
+    },
+    {
+      "id": "unmannedtech-gensace-gtech-2200-3s-45c-xt60",
+      "manufacturer": "Gens ace",
+      "model": "G-Tech 2200 mAh 3S1P 45C 11.1 V LiPo XT60",
+      "kind": "battery",
+      "spec": {
+        "chemistry": "LiPo",
+        "series_cells": 3,
+        "nominal_voltage_v": 11.1,
+        "capacity_ah": 2.2,
+        "discharge_rating_c": 45,
+        "mass_kg": 0.189,
+        "dimensions": {"length_m": 0.106, "width_m": 0.034, "height_m": 0.024},
+        "connector": "XT60"
+      },
+      "provenance": {
+        "publisher": "Unmanned Tech Shop",
+        "source_url": "https://www.unmannedtechshop.co.uk/products/gensace-g-tech-2200mah-11-1v-45c-3s1p-lipo-battery-pack-with-xt60-plug",
+        "source_title": "Gens ace G-Tech 2200mAh 11.1V 45C 3S1P LiPo Battery Pack with XT60 Plug",
+        "transformations": [
+          "capacity divided by 1000 from mAh to Ah, mass divided by 1000 from g to kg, and dimensions divided by 1000 from mm to m",
+          "the source publishes plus-or-minus 10 g mass and plus-or-minus 5 mm dimensions; central listed values are retained",
+          "the balance connector is not represented by the physical catalogue schema",
+          "values were manually reviewed on 2026-08-23; volatile price and availability remain outside ComponentRecord"
+        ]
+      }
+    },
+    {
+      "id": "unmannedtech-cnhl-black-2000-3s-100c-xt60",
+      "manufacturer": "China Hobby Line",
+      "model": "CNHL Black Series 2000 mAh 3S1P 100C 11.1 V LiPo XT60",
+      "kind": "battery",
+      "spec": {
+        "chemistry": "LiPo",
+        "series_cells": 3,
+        "nominal_voltage_v": 11.1,
+        "capacity_ah": 2.0,
+        "discharge_rating_c": 100,
+        "mass_kg": 0.181,
+        "dimensions": {"length_m": 0.078, "width_m": 0.039, "height_m": 0.036},
+        "connector": "XT60"
+      },
+      "provenance": {
+        "publisher": "Unmanned Tech Shop",
+        "source_url": "https://www.unmannedtechshop.co.uk/products/cnhl-black-series-2000mah-11-1v-3s-100c-lipo-battery",
+        "source_title": "CNHL Black Series 2000mAh 11.1V 3S 100C LiPo Battery",
+        "transformations": [
+          "capacity divided by 1000 from mAh to Ah, mass divided by 1000 from g to kg, and dimensions divided by 1000 from mm to m",
+          "100C is the published continuous rating; the separately published 200C burst rating is not collapsed into this field",
+          "the balance connector is not represented by the physical catalogue schema",
+          "values were manually reviewed on 2026-08-23; volatile price and inconsistent availability remain outside ComponentRecord"
+        ]
+      }
+    },
+    {
+      "id": "hitec-hs5565mh",
+      "manufacturer": "Hitec",
+      "model": "HS-5565MH digital metal-gear servo",
+      "kind": "servo",
+      "spec": {
+        "mass_kg": 0.059,
+        "dimensions": {"length_m": 0.04, "width_m": 0.02, "height_m": 0.038},
+        "operating_points": [
+          {
+            "voltage_v": 6.0,
+            "stall_torque_nm": 1.0787315,
+            "seconds_per_60_deg": null,
+            "stall_current_a": 2.1
+          }
+        ]
+      },
+      "provenance": {
+        "publisher": "Hitec",
+        "source_url": "https://www.hiteccs.com/actuators/product-details/HS-5565MH",
+        "source_title": "HS-5565MH Digital Metal Gear Servo",
+        "transformations": [
+          "mass divided by 1000 from g to kg and dimensions divided by 1000 from mm to m",
+          "6 V stall torque multiplied by 0.0980665 from kgf cm to N m",
+          "the 6 V spec sheet states a 2.1 A stall current"
+        ]
+      }
+    },
+    {
+      "id": "holybro-h-rtk-neo-f9p-uart",
+      "manufacturer": "Holybro",
+      "model": "H-RTK NEO-F9P UART helical GNSS module",
+      "kind": "electronics",
+      "spec": {
+        "role": "gps_sensor",
+        "min_voltage_v": 4.75,
+        "max_voltage_v": 5.25,
+        "max_current_a": 0.25,
+        "mass_kg": 0.04,
+        "dimensions": {"length_m": 0.0431, "width_m": 0.0441, "height_m": 0.022},
+        "protocols": ["UART"]
+      },
+      "provenance": {
+        "publisher": "Holybro",
+        "source_url": "https://holybro.com/products/h-rtk-neo-f9p-module",
+        "source_title": "H-RTK NEO-F9P GNSS Module",
+        "transformations": [
+          "mass divided by 1000 from g to kg and dimensions divided by 1000 from mm to m",
+          "the 250 mA published maximum is retained as a maximum supply current",
+          "the UART, helical-antenna, 40 cm cable variant is the priced configuration"
+        ]
+      }
+    }
+    ,{
+      "id": "tattu-gtech-10000-6s-30c-ec5",
+      "manufacturer": "Tattu",
+      "model": "G-Tech 10000mAh 6S 30C 22.2V LiPo EC5",
+      "kind": "battery",
+      "spec": {
+        "chemistry": "LiPo",
+        "series_cells": 6,
+        "nominal_voltage_v": 22.2,
+        "capacity_ah": 10.0,
+        "discharge_rating_c": 30,
+        "mass_kg": 1.35,
+        "dimensions": {"length_m": 0.176, "width_m": 0.066, "height_m": 0.058},
+        "connector": "EC5"
+      },
+      "provenance": {
+        "publisher": "Tattu",
+        "source_url": "https://genstattu.com/ta-30c-10000-6s1p-ec5.html",
+        "source_title": "Tattu G-Tech 6S 10000mAh 30C 22.2V LiPo Battery Pack with EC5 Plug",
+        "transformations": [
+          "capacity divided by 1000 from mAh to Ah, mass divided by 1000 from g to kg, and dimensions divided by 1000 from mm to m",
+          "the manufacturer publishes 6S/22.2 V, 30C, 1350 g, and 176 x 66 x 58 mm; central values are retained",
+          "the main discharge connector is EC5 as stated by the product title and specification table"
+        ]
+      }
+    },
+    {
+      "id": "tattu-gtech-16000-6s-30c-xt90s",
+      "manufacturer": "Tattu",
+      "model": "G-Tech 16000mAh 6S 30C 22.2V LiPo XT90-S",
+      "kind": "battery",
+      "spec": {
+        "chemistry": "LiPo",
+        "series_cells": 6,
+        "nominal_voltage_v": 22.2,
+        "capacity_ah": 16.0,
+        "discharge_rating_c": 30,
+        "mass_kg": 1.988,
+        "dimensions": {"length_m": 0.192, "width_m": 0.076, "height_m": 0.065},
+        "connector": "XT90-S"
+      },
+      "provenance": {
+        "publisher": "Tattu",
+        "source_url": "https://genstattu.com/ta-30c-16000-6s1p-xt90.html",
+        "source_title": "Tattu G-Tech 16000mAh 6S 30C 22.2V LiPo Battery Pack with XT90-S Plug",
+        "transformations": [
+          "capacity divided by 1000 from mAh to Ah, mass divided by 1000 from g to kg, and dimensions divided by 1000 from mm to m",
+          "the manufacturer publishes 6S/22.2 V, 30C, 1988 g, and 192 x 76 x 65 mm; central values are retained",
+          "the main discharge connector is XT90-S as stated by the product title"
+        ]
+      }
+    },
+    {
+      "id": "tattu-16000-6s-30c-as150",
+      "manufacturer": "Tattu",
+      "model": "16000mAh 6S 30C 22.2V LiPo AS150+AS150",
+      "kind": "battery",
+      "spec": {
+        "chemistry": "LiPo",
+        "series_cells": 6,
+        "nominal_voltage_v": 22.2,
+        "capacity_ah": 16.0,
+        "discharge_rating_c": 30,
+        "mass_kg": 2.0,
+        "dimensions": {"length_m": 0.192, "width_m": 0.077, "height_m": 0.066},
+        "connector": "AS150+AS150"
+      },
+      "provenance": {
+        "publisher": "Tattu",
+        "source_url": "https://genstattu.com/ta-30c-16000-6s1p-as-as150.html",
+        "source_title": "Tattu 16000mAh 6S 30C 22.2V LiPo Battery Pack with AS150+AS150 Plug",
+        "transformations": [
+          "capacity divided by 1000 from mAh to Ah, mass divided by 1000 from g to kg, and dimensions divided by 1000 from mm to m",
+          "the manufacturer publishes 6S/22.2 V, 30C, 2000 g, and 192 x 77 x 66 mm; central values are retained",
+          "the main discharge connector is AS150+AS150 as stated by the product title"
+        ]
+      }
+    },
+    {
+      "id": "tattu-plus-compact-10000-12s-15c-as150u",
+      "manufacturer": "Tattu",
+      "model": "Plus 1.0 Compact 10000mAh 12S 15C 44.4V LiPo Smart AS150U",
+      "kind": "battery",
+      "spec": {
+        "chemistry": "LiPo",
+        "series_cells": 12,
+        "nominal_voltage_v": 44.4,
+        "capacity_ah": 10.0,
+        "discharge_rating_c": 15,
+        "mass_kg": 2.978,
+        "dimensions": {"length_m": 0.21863, "width_m": 0.14932, "height_m": 0.08019},
+        "connector": "AS150U"
+      },
+      "provenance": {
+        "publisher": "Tattu",
+        "source_url": "https://genstattu.com/tattu-plus-1-0-compact-version-10000mah-44-4v-15c-12s1p-lipo-smart-battery-pack-with-as150uplug/",
+        "source_title": "Tattu Plus 1.0 Compact Version 10000mAh 44.4V 15C 12S1P LiPo Smart Battery Pack with AS150U Plug",
+        "transformations": [
+          "capacity divided by 1000 from mAh to Ah, mass divided by 1000 from g to kg, and dimensions divided by 1000 from mm to m",
+          "the manufacturer publishes 12S/44.4 V, 15C, 2978 g, and 218.63 x 149.32 x 80.19 mm; central values are retained",
+          "the main discharge connector is AS150U as stated by the product title"
+        ]
+      }
+    },
+    {
+      "id": "tattu-gtech-10000-12s-30c-as150u",
+      "manufacturer": "Tattu",
+      "model": "G-Tech 10000mAh 12S 30C 44.4V LiPo AS150U",
+      "kind": "battery",
+      "spec": {
+        "chemistry": "LiPo",
+        "series_cells": 12,
+        "nominal_voltage_v": 44.4,
+        "capacity_ah": 10.0,
+        "discharge_rating_c": 30,
+        "mass_kg": 2.8,
+        "dimensions": {"length_m": 0.182, "width_m": 0.067, "height_m": 0.115},
+        "connector": "AS150U"
+      },
+      "provenance": {
+        "publisher": "Tattu",
+        "source_url": "https://genstattu.com/ta-30c-10000-12s1p-as150u.html",
+        "source_title": "Tattu 44.4V 30C 12S 10000mAh LiPo Battery Pack with AS150U Plug",
+        "transformations": [
+          "capacity divided by 1000 from mAh to Ah, mass divided by 1000 from g to kg, and dimensions divided by 1000 from mm to m",
+          "the manufacturer publishes 12S/44.4 V, 30C, 2800 g, and 182 x 67 x 115 mm; central values are retained",
+          "the main discharge connector is AS150U as stated by the product title"
+        ]
+      }
+    },
+    {
+      "id": "tattu-pro-22000-14s-25c-as150uf",
+      "manufacturer": "Tattu",
+      "model": "Pro 22000mAh 14S 25C 51.8V LiPo Smart AS150U-F",
+      "kind": "battery",
+      "spec": {
+        "chemistry": "LiPo",
+        "series_cells": 14,
+        "nominal_voltage_v": 51.8,
+        "capacity_ah": 22.0,
+        "discharge_rating_c": 25,
+        "mass_kg": 7.35,
+        "dimensions": {"length_m": 0.117, "width_m": 0.174, "height_m": 0.238},
+        "connector": "AS150U-F"
+      },
+      "provenance": {
+        "publisher": "Tattu",
+        "source_url": "https://genstattu.com/tattu-pro-22000mah-51-8v-25c-14s-1p-lipo-smart-battery-pack-with-as150u-f-plug/",
+        "source_title": "Tattu Pro 22000mAh 51.8V 25C 14S1P LiPo Smart Battery Pack with AS150U-F Plug",
+        "transformations": [
+          "capacity divided by 1000 from mAh to Ah, mass divided by 1000 from g to kg, and dimensions divided by 1000 from mm to m",
+          "the manufacturer publishes 14S/51.8 V, 25C, 7350 g, and 117 x 174 x 238 mm; central values are retained",
+          "the main discharge connector is AS150U-F as stated by the product title"
+        ]
+      }
+    },
+    {
+      "id": "tattu-semisolid-30000-6s-3c-xt90s",
+      "manufacturer": "Tattu",
+      "model": "Semi-Solid State G-Tech 30000mAh 6S 3C 22.2V LiPo XT90-S",
+      "kind": "battery",
+      "spec": {
+        "chemistry": "LiPo, semi-solid-state",
+        "series_cells": 6,
+        "nominal_voltage_v": 22.2,
+        "capacity_ah": 30.0,
+        "discharge_rating_c": 3,
+        "mass_kg": 2.525,
+        "dimensions": {"length_m": 0.206, "width_m": 0.09, "height_m": 0.065},
+        "connector": "XT90-S"
+      },
+      "provenance": {
+        "publisher": "Tattu",
+        "source_url": "https://genstattu.com/tattu-semi-solid-state-30000mah-22-2v-5c-6s1p-g-tech-lipo-battery-pack-with-xt90-s-plug/",
+        "source_title": "Tattu Semi Solid 30000mAh 22.2V 5C 6S1P G-Tech LiPo Battery Pack with XT90-S Plug",
+        "transformations": [
+          "capacity divided by 1000 from mAh to Ah, mass divided by 1000 from g to kg, and dimensions divided by 1000 from mm to m",
+          "the page distinguishes 3C maximum constant current from 5C peak current; 3C is retained as the discharge rating",
+          "the main discharge connector is XT90-S as stated by the product title"
+        ]
+      }
+    },
+    {
+      "id": "gens-ace-550mah-3s-80c-xt30",
+      "manufacturer": "Gens ace",
+      "model": "550mAh 3S 80C 11.1V LiPo XT30",
+      "kind": "battery",
+      "spec": {
+        "chemistry": "LiPo",
+        "series_cells": 3,
+        "nominal_voltage_v": 11.1,
+        "capacity_ah": 0.55,
+        "discharge_rating_c": 80,
+        "mass_kg": 0.048,
+        "dimensions": {"length_m": 0.062, "width_m": 0.018, "height_m": 0.021},
+        "connector": "XT30"
+      },
+      "provenance": {
+        "publisher": "Gens ace",
+        "source_url": "https://gensace.de/collections/3s-lipo-battery/products/gens-ace-550mah-11-1v-80c-3s1p-lipo-battery-pack-with-xt30-plug",
+        "source_title": "Gens ace 550mAh 11.1V 80C 3S1P LiPo Battery Pack with XT30 Plug",
+        "transformations": [
+          "capacity divided by 1000 from mAh to Ah, mass divided by 1000 from g to kg, and dimensions divided by 1000 from mm to m",
+          "the product title and specification table provide the 3S/11.1 V, 80C, XT30, 48 g, and 62 x 18 x 21 mm values"
+        ]
+      }
+    },
+    {
+      "id": "gens-ace-gtech-2200-3s-45c-deans",
+      "manufacturer": "Gens ace",
+      "model": "G-Tech 2200mAh 3S 45C 11.1V LiPo Deans",
+      "kind": "battery",
+      "spec": {
+        "chemistry": "LiPo",
+        "series_cells": 3,
+        "nominal_voltage_v": 11.1,
+        "capacity_ah": 2.2,
+        "discharge_rating_c": 45,
+        "mass_kg": 0.18,
+        "dimensions": {"length_m": 0.106, "width_m": 0.034, "height_m": 0.023},
+        "connector": "Deans"
+      },
+      "provenance": {
+        "publisher": "Gens ace",
+        "source_url": "https://genstattu.com/gens-ace-2200mah-3s-45c-11-1v-g-tech-lipo-battery-pack-with-deans-plug/",
+        "source_title": "Gens ace 2200mAh 3S 45C 11.1V G-Tech LiPo Battery Pack with Deans Plug",
+        "transformations": [
+          "capacity divided by 1000 from mAh to Ah, mass divided by 1000 from g to kg, and dimensions divided by 1000 from mm to m",
+          "the product page publishes 3S1P/11.1 V, 45C, 180 g, and 106 x 34 x 23 mm",
+          "the main discharge connector is Deans as stated by the product title"
+        ]
+      }
+    },
+    {
+      "id": "hobbywing-skywalker-15a-v2",
+      "manufacturer": "HOBBYWING",
+      "model": "Skywalker 15A V2 ESC",
+      "kind": "esc",
+      "spec": {"min_series_cells": 2, "max_series_cells": 3, "continuous_current_a": 15, "bec_min_voltage_v": 5, "bec_max_voltage_v": 5, "bec_continuous_current_a": 2, "bec_peak_current_a": null, "mass_kg": 0.01, "dimensions": {"length_m": 0.038, "width_m": 0.017, "height_m": 0.005}},
+      "provenance": {"publisher": "HOBBYWING", "source_url": "https://www.hobbywing.com/en/uploads/file/20250930/64b726be7a56c9f415385f77683cdc46.pdf", "source_title": "Skywalker V2 user guide", "transformations": ["mass divided by 1000 from g to kg", "dimensions divided by 1000 from mm to m", "the guide lists a 15 A model with 30 A peak current; only the model continuous rating is retained"]}
+    },
+    {
+      "id": "hobbywing-skywalker-40a-v2-na",
+      "manufacturer": "HOBBYWING",
+      "model": "Skywalker 40A V2 ESC",
+      "kind": "esc",
+      "spec": {"min_series_cells": 3, "max_series_cells": 4, "continuous_current_a": 40, "bec_min_voltage_v": 5, "bec_max_voltage_v": 5, "bec_continuous_current_a": 5, "bec_peak_current_a": null, "mass_kg": 0.036, "dimensions": {"length_m": 0.06, "width_m": 0.025, "height_m": 0.008}},
+      "provenance": {"publisher": "HOBBYWING", "source_url": "https://www.hobbywing.com/en/uploads/file/20250930/64b726be7a56c9f415385f77683cdc46.pdf", "source_title": "Skywalker V2 user guide", "transformations": ["mass divided by 1000 from g to kg", "dimensions divided by 1000 from mm to m", "the guide lists a 40 A model with a higher peak-current row; only the model continuous rating is retained"]}
+    },
+    {
+      "id": "hobbywing-skywalker-60a-v2-na",
+      "manufacturer": "HOBBYWING",
+      "model": "Skywalker 60A V2 ESC",
+      "kind": "esc",
+      "spec": {"min_series_cells": 3, "max_series_cells": 6, "continuous_current_a": 60, "bec_min_voltage_v": 5, "bec_max_voltage_v": 5, "bec_continuous_current_a": 7, "bec_peak_current_a": null, "mass_kg": 0.068, "dimensions": {"length_m": 0.073, "width_m": 0.03, "height_m": 0.012}},
+      "provenance": {"publisher": "HOBBYWING", "source_url": "https://www.hobbywing.com/en/uploads/file/20250930/64b726be7a56c9f415385f77683cdc46.pdf", "source_title": "Skywalker V2 user guide", "transformations": ["mass divided by 1000 from g to kg", "dimensions divided by 1000 from mm to m", "the guide lists a 60 A model with an 80 A peak-current row; only the model continuous rating is retained"]}
+    },
+    {
+      "id": "hobbywing-skywalker-80a-v2-na",
+      "manufacturer": "HOBBYWING",
+      "model": "Skywalker 80A V2 ESC",
+      "kind": "esc",
+      "spec": {"min_series_cells": 3, "max_series_cells": 6, "continuous_current_a": 80, "bec_min_voltage_v": 5, "bec_max_voltage_v": 5, "bec_continuous_current_a": 7, "bec_peak_current_a": null, "mass_kg": 0.079, "dimensions": {"length_m": 0.085, "width_m": 0.036, "height_m": 0.009}},
+      "provenance": {"publisher": "HOBBYWING", "source_url": "https://www.hobbywing.com/en/uploads/file/20250930/64b726be7a56c9f415385f77683cdc46.pdf", "source_title": "Skywalker V2 user guide", "transformations": ["mass divided by 1000 from g to kg", "dimensions divided by 1000 from mm to m", "the guide lists an 80 A model with a 100 A peak-current row; only the model continuous rating is retained"]}
+    },
+    {
+      "id": "hobbywing-skywalker-2814-sl-kv1400",
+      "manufacturer": "HOBBYWING",
+      "model": "Skywalker 2814 SL 1400KV motor",
+      "kind": "motor",
+      "spec": {"kv_rpm_per_v": 1400, "winding_resistance_ohm": 0.0168, "no_load_current_a": 3.3, "no_load_test_voltage_v": 14.8, "min_series_cells": 3, "max_series_cells": 4, "max_current_a": 77.5, "max_power_w": 1148.6, "max_static_thrust_n": null, "mass_kg": 0.115, "dimensions": {"length_m": 0.054, "width_m": 0.0351, "height_m": 0.0351}, "recommended_propeller_diameter_m": 0.254, "recommended_propeller_pitch_m": 0.127},
+      "provenance": {"publisher": "HOBBYWING", "source_url": "https://www.hobbywing.com/en/products/skywalker2814", "source_title": "Skywalker 2814 SL motor series", "transformations": ["mass divided by 1000 from g to kg", "motor diameter and axial length divided by 1000 from mm to m", "winding resistance converted from 16.8 mOhm to 0.0168 Ohm; no-load current is associated with the published 14.8 V test voltage", "the page qualifies 77.5 A and 1148.6 W by a timed test duration; the values are retained without inferring unlimited continuous operation", "representative 3S recommended propeller is 10x5E"]}
+    },
+    {
+      "id": "hitec-hs311",
+      "manufacturer": "Hitec",
+      "model": "HS-311 standard nylon-gear servo",
+      "kind": "servo",
+      "spec": {
+        "mass_kg": 0.043,
+        "dimensions": {"length_m": 0.04, "width_m": 0.02, "height_m": 0.0365},
+        "operating_points": [
+          {"voltage_v": 4.8, "stall_torque_nm": 0.2941995, "seconds_per_60_deg": 0.19, "stall_current_a": 0.7},
+          {"voltage_v": 6.0, "stall_torque_nm": 0.36284605, "seconds_per_60_deg": 0.15, "stall_current_a": 0.8}
+        ]
+      },
+      "provenance": {"publisher": "Hitec", "source_url": "https://www.hiteccs.com/actuators/product-details/HS-311", "source_title": "HS-311 Standard Voltage Servo Actuator", "transformations": ["mass divided by 1000 from g to kg and dimensions divided by 1000 from mm to m", "stall torque converted from kgf cm to N m using 0.0980665", "stall current converted from mA to A; only explicitly tabulated 4.8 V and 6.0 V points are retained"]}
+    },
+    {
+      "id": "hitec-hs5085mg",
+      "manufacturer": "Hitec",
+      "model": "HS-5085MG metal-gear servo",
+      "kind": "servo",
+      "spec": {
+        "mass_kg": 0.0219,
+        "dimensions": {"length_m": 0.029, "width_m": 0.013, "height_m": 0.03},
+        "operating_points": [
+          {"voltage_v": 4.8, "stall_torque_nm": 0.3530394, "seconds_per_60_deg": 0.17, "stall_current_a": 1.7},
+          {"voltage_v": 6.0, "stall_torque_nm": 0.42168595, "seconds_per_60_deg": 0.13, "stall_current_a": 2.15}
+        ]
+      },
+      "provenance": {"publisher": "Hitec", "source_url": "https://www.hiteccs.com/actuators/product-details/HS-5085MG", "source_title": "HS-5085MG Metal Gear Servo", "transformations": ["mass divided by 1000 from g to kg and dimensions divided by 1000 from mm to m", "stall torque converted from kgf cm to N m using 0.0980665", "stall current converted from mA to A; only explicitly tabulated 4.8 V and 6.0 V points are retained"]}
+    },
+    {
+      "id": "hitec-hs5065mg",
+      "manufacturer": "Hitec",
+      "model": "HS-5065MG high-torque metal-gear servo",
+      "kind": "servo",
+      "spec": {
+        "mass_kg": 0.0119,
+        "dimensions": {"length_m": 0.0236, "width_m": 0.0116, "height_m": 0.024},
+        "operating_points": [
+          {"voltage_v": 4.8, "stall_torque_nm": 0.1765197, "seconds_per_60_deg": 0.14, "stall_current_a": 0.96},
+          {"voltage_v": 6.0, "stall_torque_nm": 0.2157463, "seconds_per_60_deg": 0.11, "stall_current_a": 1.2}
+        ]
+      },
+      "provenance": {"publisher": "Hitec", "source_url": "https://www.hiteccs.com/actuators/product-details/HS-5065MG", "source_title": "HS-5065MG High Torque Metal Gear Servo", "transformations": ["mass divided by 1000 from g to kg and dimensions divided by 1000 from mm to m", "stall torque converted from kgf cm to N m using 0.0980665", "stall current converted from mA to A; only explicitly tabulated 4.8 V and 6.0 V points are retained"]}
+    },
+    {
+      "id": "hitec-hs225bb",
+      "manufacturer": "Hitec",
+      "model": "HS-225BB nylon-gear servo",
+      "kind": "servo",
+      "spec": {
+        "mass_kg": 0.0277,
+        "dimensions": {"length_m": 0.0324, "width_m": 0.0168, "height_m": 0.031},
+        "operating_points": [
+          {"voltage_v": 4.8, "stall_torque_nm": 0.36284605, "seconds_per_60_deg": 0.15, "stall_current_a": 1.6},
+          {"voltage_v": 6.0, "stall_torque_nm": 0.4314926, "seconds_per_60_deg": 0.13, "stall_current_a": 2.0}
+        ]
+      },
+      "provenance": {"publisher": "Hitec", "source_url": "https://www.hiteccs.com/actuators/product-details/HS-225BB", "source_title": "HS-225BB Standard Voltage Servo Actuator", "transformations": ["mass divided by 1000 from g to kg and dimensions divided by 1000 from mm to m", "stall torque converted from kgf cm to N m using 0.0980665", "stall current converted from mA to A; only explicitly tabulated 4.8 V and 6.0 V points are retained"]}
+    },
+    {
+      "id": "frsky-archer-plus-sr10-stabilized",
+      "manufacturer": "FrSky",
+      "model": "ACCESS Archer Plus SR10+ stabilized receiver",
+      "kind": "receiver",
+      "spec": {"channel_count": 10, "min_voltage_v": 3.5, "max_voltage_v": 10, "mass_kg": 0.013, "dimensions": {"length_m": 0.0465, "width_m": 0.0263, "height_m": 0.0147}, "protocols": ["ACCESS", "ACCST D16", "PWM", "SBUS", "FBUS", "S.Port"], "telemetry": true},
+      "provenance": {"publisher": "FrSky", "source_url": "https://frskyna.com/products/frsky-access-accst-archer-plus-sr10-stabilized-receiver", "source_title": "FrSky ACCESS Archer Plus SR10+ Stabilized Receiver with 10 Channel Ports", "transformations": ["mass divided by 1000 from g to kg and dimensions divided by 1000 from mm to m", "the manufacturer publishes 10 configurable channel ports, 3.5-10 V operation, and less than 100 mA at 5 V; receiver current is not part of ReceiverSpec"]}
+    },
+    {
+      "id": "holybro-micro-m9n-gps",
+      "manufacturer": "Holybro",
+      "model": "Micro M9N GPS with case",
+      "kind": "electronics",
+      "spec": {"role": "gps_sensor", "min_voltage_v": 4.7, "max_voltage_v": 5.2, "max_current_a": 0.2, "mass_kg": 0.016, "dimensions": {"length_m": 0.034, "width_m": 0.028, "height_m": 0.011}, "protocols": ["UBX", "NMEA", "I2C"]},
+      "provenance": {"publisher": "Holybro", "source_url": "https://holybro.com/products/micro-m9n-gps", "source_title": "Micro M9N GPS", "transformations": ["mass divided by 1000 from g to kg and dimensions divided by 1000 from mm to m", "the published less-than-200 mA at 5 V consumption is retained as the maximum current bound", "the with-case variant is the priced configuration"]}
+    },
+    {
+      "id": "holybro-m10-gps-v2-standard",
+      "manufacturer": "Holybro",
+      "model": "M10 GPS V2 IP67 standard 10-pin",
+      "kind": "electronics",
+      "spec": {"role": "gps_sensor", "min_voltage_v": 4.7, "max_voltage_v": 5.2, "max_current_a": 0.2, "mass_kg": 0.0368, "dimensions": {"length_m": 0.051, "width_m": 0.051, "height_m": 0.0185}, "protocols": ["UBX", "NMEA", "I2C", "JST-GH-10P"]},
+      "provenance": {"publisher": "Holybro", "source_url": "https://holybro.com/products/m9n-m10-gps-v2", "source_title": "M9N & M10 GPS V2 (IP67), M10 Standard 10-Pin", "transformations": ["mass divided by 1000 from g to kg and the circular 51 mm body diameter and 18.5 mm height divided by 1000 from mm to m", "the circular body diameter is represented as equal length and width bounding dimensions", "the published less-than-200 mA at 5 V consumption is retained as the maximum current bound"]}
+    },
+    {
+      "id": "holybro-pm08-can-14s-200a",
+      "manufacturer": "Holybro",
+      "model": "PM08-CAN 14S 200A power module",
+      "kind": "electronics",
+      "spec": {"role": "power_module", "min_voltage_v": 7, "max_voltage_v": 60.9, "max_current_a": 200, "mass_kg": 0.185, "dimensions": {"length_m": 0.045, "width_m": 0.041, "height_m": 0.026}, "protocols": ["DroneCAN"]},
+      "provenance": {"publisher": "Holybro", "source_url": "https://holybro.com/products/dronecan-pm08-power-module-14s-200a", "source_title": "PM08-CAN Power Module 14S, 200A", "transformations": ["mass divided by 1000 from g to kg and dimensions divided by 1000 from mm to m", "the module is recorded with the published enclosure dimensions; cable length is excluded", "the published 200 A continuous current is used as maximum current and the 400/1000 A burst values are not substituted"]}
+    },
+    {
+      "id": "hitec-hs5086wp",
+      "manufacturer": "Hitec",
+      "model": "HS-5086WP waterproof metal-gear servo",
+      "kind": "servo",
+      "spec": {
+        "mass_kg": 0.0285,
+        "dimensions": {"length_m": 0.031, "width_m": 0.0152, "height_m": 0.031},
+        "operating_points": [
+          {"voltage_v": 4.8, "stall_torque_nm": 0.2941995, "seconds_per_60_deg": 0.18, "stall_current_a": 1.45},
+          {"voltage_v": 6.0, "stall_torque_nm": 0.3530394, "seconds_per_60_deg": 0.15, "stall_current_a": 1.8}
+        ]
+      },
+      "provenance": {"publisher": "Hitec", "source_url": "https://www.hiteccs.com/actuators/product-details/HS-5086WP", "source_title": "HS-5086WP Waterproof Servo Actuator", "transformations": ["mass divided by 1000 from g to kg and dimensions divided by 1000 from mm to m", "stall torque converted from kgf cm to N m using 0.0980665", "stall current converted from mA to A; the manufacturer page's explicit 4.8 V and 6.0 V values are retained"]}
+    },
+    {
+      "id": "hitec-hs646wp",
+      "manufacturer": "Hitec",
+      "model": "HS-646WP waterproof high-voltage servo",
+      "kind": "servo",
+      "spec": {
+        "mass_kg": 0.06,
+        "dimensions": {"length_m": 0.0418, "width_m": 0.021, "height_m": 0.04},
+        "operating_points": [
+          {"voltage_v": 6.0, "stall_torque_nm": 0.9414384, "seconds_per_60_deg": 0.2, "stall_current_a": 2.0},
+          {"voltage_v": 7.4, "stall_torque_nm": 1.1375714, "seconds_per_60_deg": 0.17, "stall_current_a": 2.2}
+        ]
+      },
+      "provenance": {"publisher": "Hitec", "source_url": "https://www.hiteccs.com/actuators/product-details/HS-646WP", "source_title": "HS-646WP Waterproof Servo Actuator", "transformations": ["mass divided by 1000 from g to kg and dimensions divided by 1000 from mm to m", "stall torque converted from kgf cm to N m using 0.0980665", "stall current converted from mA to A; only explicitly tabulated 6.0 V and 7.4 V points are retained"]}
+    },
+    {
+      "id": "hitec-hs7115th",
+      "manufacturer": "Hitec",
+      "model": "HS-7115TH titanium-gear high-voltage servo",
+      "kind": "servo",
+      "spec": {
+        "mass_kg": 0.02,
+        "dimensions": {"length_m": 0.026, "width_m": 0.008, "height_m": 0.038},
+        "operating_points": [
+          {"voltage_v": 6.0, "stall_torque_nm": 0.3138128, "seconds_per_60_deg": 0.12, "stall_current_a": 1.25},
+          {"voltage_v": 7.4, "stall_torque_nm": 0.38245935, "seconds_per_60_deg": 0.1, "stall_current_a": 1.5}
+        ]
+      },
+      "provenance": {"publisher": "Hitec", "source_url": "https://www.hiteccs.com/actuators/product-details/HS-7115TH", "source_title": "HS-7115TH High Voltage Titanium Gear Servo", "transformations": ["mass divided by 1000 from g to kg and dimensions divided by 1000 from mm to m", "stall torque converted from kgf cm to N m using 0.0980665", "stall current converted from mA to A; only explicitly tabulated 6.0 V and 7.4 V points are retained"]}
+    },
+    {
+      "id": "tmotor-ax435-a-kv220",
+      "manufacturer": "T-MOTOR",
+      "model": "AX435-A KV220 fixed-wing motor",
+      "kind": "motor",
+      "spec": {"kv_rpm_per_v": 220, "winding_resistance_ohm": 0.046, "no_load_current_a": 1.4, "no_load_test_voltage_v": 15, "min_series_cells": 12, "max_series_cells": 12, "max_current_a": 75, "max_power_w": 1550, "max_static_thrust_n": null, "mass_kg": 0.48, "dimensions": {"length_m": 0.0775, "width_m": 0.0495, "height_m": 0.0495}, "recommended_propeller_diameter_m": 0.4064, "recommended_propeller_pitch_m": 0.3302},
+      "provenance": {"publisher": "T-MOTOR", "source_url": "https://uav-en.tmotor.com/2025/at_1110/1287.html", "source_title": "AX435-A fixed-wing motor", "transformations": ["mass divided by 1000 from g to kg and motor diameter and length divided by 1000 from mm to m", "winding resistance converted from 46 mOhm to 0.046 Ohm; idle current is associated with the published 15 V test voltage", "the source labels maximum current as Peak Current; the value is retained without relabeling it continuous", "representative AUFZ 16x13 propeller dimensions converted from inches to metres"]}
+    },
+    {
+      "id": "tmotor-ax435-a-kv250",
+      "manufacturer": "T-MOTOR",
+      "model": "AX435-A KV250 fixed-wing motor",
+      "kind": "motor",
+      "spec": {"kv_rpm_per_v": 250, "winding_resistance_ohm": 0.037, "no_load_current_a": 1.6, "no_load_test_voltage_v": 15, "min_series_cells": 12, "max_series_cells": 12, "max_current_a": 82, "max_power_w": 2000, "max_static_thrust_n": null, "mass_kg": 0.48, "dimensions": {"length_m": 0.0775, "width_m": 0.0495, "height_m": 0.0495}, "recommended_propeller_diameter_m": 0.4318, "recommended_propeller_pitch_m": 0.2794},
+      "provenance": {"publisher": "T-MOTOR", "source_url": "https://uav-en.tmotor.com/2025/at_1110/1287.html", "source_title": "AX435-A fixed-wing motor", "transformations": ["mass divided by 1000 from g to kg and motor diameter and length divided by 1000 from mm to m", "winding resistance converted from 37 mOhm to 0.037 Ohm; idle current is associated with the published 15 V test voltage", "the source labels maximum current as Peak Current; the value is retained without relabeling it continuous", "representative AUFZ 17x11 propeller dimensions converted from inches to metres"]}
+    },
+    {
+      "id": "tmotor-ax435-b-kv220",
+      "manufacturer": "T-MOTOR",
+      "model": "AX435-B KV220 fixed-wing motor",
+      "kind": "motor",
+      "spec": {"kv_rpm_per_v": 220, "winding_resistance_ohm": 0.046, "no_load_current_a": 1.4, "no_load_test_voltage_v": 15, "min_series_cells": 12, "max_series_cells": 12, "max_current_a": 75, "max_power_w": 1550, "max_static_thrust_n": null, "mass_kg": 0.485, "dimensions": {"length_m": 0.089, "width_m": 0.0495, "height_m": 0.0495}, "recommended_propeller_diameter_m": 0.4064, "recommended_propeller_pitch_m": 0.3302},
+      "provenance": {"publisher": "T-MOTOR", "source_url": "https://uav-en.tmotor.com/2025/at_1110/1288.html", "source_title": "AX435-B fixed-wing motor", "transformations": ["mass divided by 1000 from g to kg and motor diameter and length divided by 1000 from mm to m", "winding resistance converted from 46 mOhm to 0.046 Ohm; idle current is associated with the published 15 V test voltage", "the source labels maximum current as Peak Current; the value is retained without relabeling it continuous", "representative AUFZ 16x13 propeller dimensions converted from inches to metres"]}
+    },
+    {
+      "id": "tmotor-ax435-b-kv250",
+      "manufacturer": "T-MOTOR",
+      "model": "AX435-B KV250 fixed-wing motor",
+      "kind": "motor",
+      "spec": {"kv_rpm_per_v": 250, "winding_resistance_ohm": 0.037, "no_load_current_a": 1.6, "no_load_test_voltage_v": 15, "min_series_cells": 12, "max_series_cells": 12, "max_current_a": 82, "max_power_w": 2000, "max_static_thrust_n": null, "mass_kg": 0.485, "dimensions": {"length_m": 0.089, "width_m": 0.0495, "height_m": 0.0495}, "recommended_propeller_diameter_m": 0.4318, "recommended_propeller_pitch_m": 0.2794},
+      "provenance": {"publisher": "T-MOTOR", "source_url": "https://uav-en.tmotor.com/2025/at_1110/1288.html", "source_title": "AX435-B fixed-wing motor", "transformations": ["mass divided by 1000 from g to kg and motor diameter and length divided by 1000 from mm to m", "winding resistance converted from 37 mOhm to 0.037 Ohm; idle current is associated with the published 15 V test voltage", "the source labels maximum current as Peak Current; the value is retained without relabeling it continuous", "representative AUFZ 17x11 propeller dimensions converted from inches to metres"]}
+    },
+    {
+      "id": "tmotor-ax525-a-kv250",
+      "manufacturer": "T-MOTOR",
+      "model": "AX525-A KV250 fixed-wing motor",
+      "kind": "motor",
+      "spec": {"kv_rpm_per_v": 250, "winding_resistance_ohm": 0.022, "no_load_current_a": 2.8, "no_load_test_voltage_v": 15, "min_series_cells": 12, "max_series_cells": 12, "max_current_a": 100, "max_power_w": 2250, "max_static_thrust_n": null, "mass_kg": 0.6, "dimensions": {"length_m": 0.068, "width_m": 0.0636, "height_m": 0.0636}, "recommended_propeller_diameter_m": 0.4572, "recommended_propeller_pitch_m": 0.3556},
+      "provenance": {"publisher": "T-MOTOR", "source_url": "https://uav-en.tmotor.com/2025/at_1110/1289.html", "source_title": "AX525-A fixed-wing motor", "transformations": ["mass divided by 1000 from g to kg and motor diameter and length divided by 1000 from mm to m", "winding resistance converted from 22 mOhm to 0.022 Ohm; idle current is associated with the published 15 V test voltage", "the source labels maximum current as Peak Current; the value is retained without relabeling it continuous", "representative AUFZ 18x14 propeller dimensions converted from inches to metres"]}
+    },
+    {
+      "id": "tmotor-ax525-b-kv250",
+      "manufacturer": "T-MOTOR",
+      "model": "AX525-B KV250 fixed-wing motor",
+      "kind": "motor",
+      "spec": {"kv_rpm_per_v": 250, "winding_resistance_ohm": 0.022, "no_load_current_a": 2.8, "no_load_test_voltage_v": 15, "min_series_cells": 12, "max_series_cells": 12, "max_current_a": 100, "max_power_w": 2250, "max_static_thrust_n": null, "mass_kg": 0.62, "dimensions": {"length_m": 0.0785, "width_m": 0.0636, "height_m": 0.0636}, "recommended_propeller_diameter_m": 0.4572, "recommended_propeller_pitch_m": 0.3556},
+      "provenance": {"publisher": "T-MOTOR", "source_url": "https://uav-en.tmotor.com/2025/ax-series-fixed-wing-motor_1110/1290.html", "source_title": "AX525-B fixed-wing motor", "transformations": ["mass divided by 1000 from g to kg and motor diameter and length divided by 1000 from mm to m", "winding resistance converted from 22 mOhm to 0.022 Ohm; idle current is associated with the published 15 V test voltage", "the source labels maximum current as Peak Current; the value is retained without relabeling it continuous", "representative AUFZ 18x14 propeller dimensions converted from inches to metres"]}
+    },
+    {
+      "id": "tmotor-ax530-a-kv260",
+      "manufacturer": "T-MOTOR",
+      "model": "AX530-A KV260 fixed-wing motor",
+      "kind": "motor",
+      "spec": {"kv_rpm_per_v": 260, "winding_resistance_ohm": 0.02, "no_load_current_a": 3.2, "no_load_test_voltage_v": 15, "min_series_cells": 12, "max_series_cells": 12, "max_current_a": 120, "max_power_w": 1008, "max_static_thrust_n": null, "mass_kg": 0.68, "dimensions": {"length_m": 0.073, "width_m": 0.0636, "height_m": 0.0636}, "recommended_propeller_diameter_m": 0.508, "recommended_propeller_pitch_m": 0.3302},
+      "provenance": {"publisher": "T-MOTOR", "source_url": "https://uav-en.tmotor.com/2025/ax-series-fixed-wing-motor_1110/1291.html", "source_title": "AX530-A fixed-wing motor", "transformations": ["mass divided by 1000 from g to kg and motor diameter and length divided by 1000 from mm to m", "winding resistance converted from 20 mOhm to 0.020 Ohm; idle current is associated with the published 15 V test voltage", "the source labels maximum current as Peak Current; the value is retained without relabeling it continuous", "representative AUFZ 20x13 propeller dimensions converted from inches to metres"]}
+    },
+    {
+      "id": "tmotor-ax530-b-kv260",
+      "manufacturer": "T-MOTOR",
+      "model": "AX530-B KV260 fixed-wing motor",
+      "kind": "motor",
+      "spec": {"kv_rpm_per_v": 260, "winding_resistance_ohm": 0.02, "no_load_current_a": 3.2, "no_load_test_voltage_v": 15, "min_series_cells": 12, "max_series_cells": 12, "max_current_a": 120, "max_power_w": 2600, "max_static_thrust_n": null, "mass_kg": 0.7, "dimensions": {"length_m": 0.0835, "width_m": 0.0636, "height_m": 0.0636}, "recommended_propeller_diameter_m": 0.508, "recommended_propeller_pitch_m": 0.3302},
+      "provenance": {"publisher": "T-MOTOR", "source_url": "https://uav-en.tmotor.com/2025/ax-series-fixed-wing-motor_1110/1292.html", "source_title": "AX530-B fixed-wing motor", "transformations": ["mass divided by 1000 from g to kg and motor diameter and length divided by 1000 from mm to m", "winding resistance converted from 20 mOhm to 0.020 Ohm; idle current is associated with the published 15 V test voltage", "the source labels maximum current as Peak Current; the value is retained without relabeling it continuous", "representative AUFZ 20x13 propeller dimensions converted from inches to metres"]}
+    },
+    {
+      "id": "hobbywing-platinum-hv-180a-v5",
+      "manufacturer": "HOBBYWING",
+      "model": "Platinum HV 180A V5 SBEC ESC",
+      "kind": "esc",
+      "spec": {"min_series_cells": 6, "max_series_cells": 14, "continuous_current_a": 180, "bec_min_voltage_v": 5, "bec_max_voltage_v": 12, "bec_continuous_current_a": 10, "bec_peak_current_a": null, "mass_kg": 0.2506, "dimensions": {"length_m": 0.1006, "width_m": 0.0455, "height_m": 0.0261}},
+      "provenance": {"publisher": "HOBBYWING", "source_url": "https://www.hobbywing.com/en/products/platinumhv180asbecv5.html", "source_title": "Platinum HV 180A V5 SBEC ESC", "transformations": ["mass divided by 1000 from g to kg and dimensions divided by 1000 from mm to m; fan is excluded as stated by the source", "the BEC range is stored as 5-12 V and the 10 A continuous output is retained; published peak output is not collapsed into continuous current", "the 180 A motor-current value is the published continuous rating"]}
+    },
+    {
+      "id": "hobbywing-platinum-hv-260a-v5",
+      "manufacturer": "HOBBYWING",
+      "model": "Platinum HV 260A V5 SBEC ESC",
+      "kind": "esc",
+      "spec": {"min_series_cells": 6, "max_series_cells": 14, "continuous_current_a": 260, "bec_min_voltage_v": 5, "bec_max_voltage_v": 12, "bec_continuous_current_a": 10, "bec_peak_current_a": null, "mass_kg": 0.297, "dimensions": {"length_m": 0.089, "width_m": 0.05, "height_m": 0.034}},
+      "provenance": {"publisher": "HOBBYWING", "source_url": "https://www.hobbywing.com/en/products/platinum-hv-260a-v5286.html", "source_title": "Platinum HV 260A V5 SBEC ESC", "transformations": ["mass divided by 1000 from g to kg and dimensions divided by 1000 from mm to m", "the BEC range is stored as 5-12 V and the 10 A continuous output is retained; published peak output is not collapsed into continuous current", "the 260 A motor-current value is the published continuous rating"]}
+    },
+    {
+      "id": "sika-carbodur-s512-1m",
+      "manufacturer": "Sika",
+      "model": "CarboDur S512 carbon-fibre plate, 1 m",
+      "kind": "material_stock",
+      "spec": {
+        "form": "carbon_fibre_plate",
+        "dimensions": {"length_m": 1, "width_m": 0.05, "height_m": 0.0012},
+        "mass_kg": 0.096,
+        "youngs_modulus_pa": 160000000000,
+        "allowable_stress_pa": 2800000000
+      },
+      "provenance": {
+        "publisher": "Sika",
+        "source_url": "https://usa.sika.com/dam/dms/us01/b/pds-cpd-SikaCarboDur-us.pdf",
+        "source_title": "Sika CarboDur carbon-fibre plate product data sheet",
+        "transformations": [
+          "length, width, and thickness divided by 1000 from the published mm dimensions",
+          "mass calculated from the published density and the 1 m plate volume",
+          "Young's modulus and the 2.8 GPa design tensile strength are retained as explicitly published design values; no ultimate strength is substituted"
+        ]
+      }
+    },
+    {
+      "id": "sika-carbodur-s812-1m",
+      "manufacturer": "Sika",
+      "model": "CarboDur S812 carbon-fibre plate, 1 m",
+      "kind": "material_stock",
+      "spec": {
+        "form": "carbon_fibre_plate",
+        "dimensions": {"length_m": 1, "width_m": 0.08, "height_m": 0.0012},
+        "mass_kg": 0.1536,
+        "youngs_modulus_pa": 160000000000,
+        "allowable_stress_pa": 2800000000
+      },
+      "provenance": {
+        "publisher": "Sika",
+        "source_url": "https://usa.sika.com/dam/dms/us01/b/pds-cpd-SikaCarboDur-us.pdf",
+        "source_title": "Sika CarboDur carbon-fibre plate product data sheet",
+        "transformations": [
+          "length, width, and thickness divided by 1000 from the published mm dimensions",
+          "mass calculated from the published density and the 1 m plate volume",
+          "Young's modulus and the 2.8 GPa design tensile strength are retained as explicitly published design values; no ultimate strength is substituted"
+        ]
+      }
+    }
+  ]
+}

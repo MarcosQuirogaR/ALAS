@@ -4,11 +4,12 @@
 """International Standard Atmosphere, read out of AeroSandbox's closed form.
 
 AeroSandbox's ``Atmosphere`` defaults to a CasADi B-spline fit of the 1976
-COESA model ("differentiable"); every altitude-dependent quantity in the
-reference program instead asks for ``method="isa"``, the closed-form
-barometric formula this fixture exercises. The two agree to about 1e-11, but
-this crate translates the closed form directly rather than a spline fit, so
-the fixture has to come from the same branch.
+COESA model ("differentiable"), and ALAS call sites normally retain that
+default. This fixture deliberately exercises the separate ``method="isa"``
+branch because the Rust crate translates that upstream API as well. Product
+call-path evidence for the default belongs to ``gen_atmo_differentiable.py``;
+using these closed-form values to validate an ALAS default call would test the
+wrong branch even if both happened to be numerically close.
 
 The case list walks every base altitude in AeroSandbox's ISA table (the layer
 boundaries where a shifted index or an off-by-one in the table walk would

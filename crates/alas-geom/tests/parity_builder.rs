@@ -237,7 +237,7 @@ fn compare_airplane(
 #[test]
 fn the_default_aircraft_with_engines_matches_the_reference() {
     let fixture: Fixture = alas_testkit::load("geom", "builder");
-    let builder = AircraftBuilder::new(Some(GeometryConfig::default()));
+    let builder = AircraftBuilder::new_reference_compatibility(Some(GeometryConfig::default()));
     let airplane = builder
         .build(None, true)
         .expect("the default aircraft builds cleanly");
@@ -264,7 +264,7 @@ fn the_default_aircraft_with_engines_matches_the_reference() {
 #[test]
 fn the_default_aircraft_without_engines_matches_the_reference() {
     let fixture: Fixture = alas_testkit::load("geom", "builder");
-    let builder = AircraftBuilder::new(Some(GeometryConfig::default()));
+    let builder = AircraftBuilder::new_reference_compatibility(Some(GeometryConfig::default()));
     let airplane = builder
         .build(None, false)
         .expect("the default aircraft builds cleanly");

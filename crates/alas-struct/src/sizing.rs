@@ -107,7 +107,7 @@ fn linspace(start: f64, stop: f64, n: usize) -> Vec<f64> {
 /// interior, one-sided at the two ends. For a uniform `y` this is the constant
 /// station spacing, but the general form is reproduced so the arithmetic
 /// matches upstream bit for bit.
-fn gradient_unit(f: &[f64]) -> Vec<f64> {
+pub(crate) fn gradient_unit(f: &[f64]) -> Vec<f64> {
     let n = f.len();
     let mut g = vec![0.0; n];
     if n < 2 {
@@ -131,9 +131,20 @@ fn trapezoid(y: &[f64], x: &[f64]) -> f64 {
     acc
 }
 
+/// The number of stations needed to keep every uniform rib panel at or below
+/// the maximum spacing. Both the root and tip are ribs, so panels plus one is
+/// the count. This is the count form of the panel-buckling sizing rule.
+fn rib_count_from_max_spacing(semi_span_m: f64, max_spacing_m: f64) -> i64 {
+    (semi_span_m / max_spacing_m).ceil() as i64 + 1
+}
+
 /// The spar-cap taper law: full section up to `eta_lock`, then linear taper to
 /// `tip_fraction` at the tip -- `_cap_taper`.
-fn cap_taper(eta: &[f64], eta_lock: f64, tip_fraction: f64) -> Vec<f64> {
+///
+/// Visible to `crate::mesh` as well: the mesh re-derives cap dimensions on its
+/// own, finer station grid rather than sampling this module's arrays, and has
+/// to apply the same law to do it.
+pub(crate) fn cap_taper(eta: &[f64], eta_lock: f64, tip_fraction: f64) -> Vec<f64> {
     let denom = (1.0 - eta_lock).max(1e-9);
     eta.iter()
         .map(|&e| {
@@ -293,7 +304,7 @@ pub fn size_wingbox(
     .max(0.5);
     let num_ribs = match cfg.num_ribs_override {
         Some(value) => value,
-        None => ((wsg.semi_span / l_rib).ceil() as i64 + 1).max(10),
+        None => rib_count_from_max_spacing(wsg.semi_span, l_rib).max(10),
     };
 
     // Mass breakdown (semi-wing).
@@ -380,6 +391,12 @@ mod tests {
         let x = vec![0.0, 0.25, 0.5, 0.75, 1.0];
         let y = x.clone();
         assert!((trapezoid(&y, &x) - 0.5).abs() < 1e-15);
+    }
+
+    #[test]
+    fn automatic_rib_count_uses_ceiling_panels_and_includes_both_end_ribs() {
+        assert_eq!(rib_count_from_max_spacing(5.0, 2.0), 4);
+        assert_eq!(rib_count_from_max_spacing(6.0, 2.0), 4);
     }
 
     #[test]

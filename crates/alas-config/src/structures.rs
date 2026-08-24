@@ -34,7 +34,7 @@ pub struct StructuresConfig {
     /// Whether a normal run sizes and analyses a wingbox.
     #[config(
         label = "Enabled",
-        help = "Size a generic wingbox (skin/spars/ribs) for the optimized design's main wing, write NASTRAN .bdf files, and compute theoretical (no-NASTRAN) deformations/stresses/frequencies as part of a normal Run, populating the Structural Analysis Results tab. Does not affect the mass model, CG, or optimizer -- purely a downstream analysis, like MSES/Propulsion Analysis."
+        help = "Size a generic wingbox (skin/spars/ribs) for the optimized design's main wing, write NASTRAN .bdf files, and compute theoretical (no-NASTRAN) deformations/stresses/frequencies as part of a normal Run, populating the Structural Analysis Results tab. This switch controls the downstream structural solve; the configured spars, materials, and gauges still define the main-wing mass centroid used by weight and balance, without replacing the Torenbeek total wing mass."
     )]
     pub enabled: bool,
 
@@ -183,7 +183,7 @@ pub struct StructuresConfig {
     /// How finely the spanwise integrals are sampled.
     #[config(
         label = "Spanwise integration stations",
-        help = "Number of spanwise points used for load/moment/deflection integration (sizing and the analytical deformation/stress solver). Higher = smoother curves, slower."
+        help = "Number of spanwise points used for load/moment/deflection integration, structural wing-mass centroid integration, and the analytical deformation/stress solver. Higher = smoother curves, slower."
     )]
     pub spanwise_stations: i64,
 
@@ -201,6 +201,58 @@ pub struct StructuresConfig {
         help = "Path (repo-root-relative or absolute) to nastran.exe. Leave blank to only generate .bdf files and use the theoretical (analytical) deformation/stress/frequency estimates -- no NASTRAN install is required for that path. Set on Setup > External Tools."
     )]
     pub nastran_exe_path: String,
+
+    /// Optional solver binary passed through MSC's launcher.
+    ///
+    /// Some MSC Student Edition installations ship a working `nastran.exe`
+    /// launcher separately from the `analysis.exe` it must start. Keeping the
+    /// two paths distinct avoids copying files into the vendor installation.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    #[config(
+        hidden,
+        label = "MSC NASTRAN solver override",
+        help = "Optional absolute path to MSC analysis.exe. When set, the NASTRAN launcher receives it as the a.solver keyword. Leave blank for complete installations whose launcher finds its own solver."
+    )]
+    pub nastran_solver_path: String,
+
+    /// Directory containing the locally built NASA NASTRAN-95 executable and
+    /// its `rf/` files.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    #[config(
+        hidden,
+        label = "Local NASTRAN-95 directory",
+        help = "Directory containing build/bin/nastran.exe and rf/NASINFO for the local NASA NASTRAN-95 adapter. This is independent of MSC NASTRAN; set it under Setup > External Tools to retain a local SOL 101/SOL 103 comparison across desktop launches."
+    )]
+    pub nastran95_dir_path: String,
+
+    /// Optional directory containing the GNU Fortran runtime used by the local
+    /// NASTRAN-95 executable.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    #[config(
+        hidden,
+        label = "NASTRAN-95 runtime directory",
+        help = "Optional directory containing libgfortran and companion runtime DLLs for local NASTRAN-95. Leave blank when the runtime is already on PATH."
+    )]
+    pub nastran95_runtime_path: String,
+
+    /// Optional short absolute staging directory for legacy NASTRAN-95 rigid
+    /// format files.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    #[config(
+        hidden,
+        label = "NASTRAN-95 RF staging directory",
+        help = "Optional short absolute directory used to stage local NASTRAN-95 rf files. The 1970s RFOPEN loader accepts at most 37 bytes here; C:/nas-rf is suitable on Windows."
+    )]
+    pub nastran95_rf_stage_path: String,
+
+    /// Optional open-core allocation for the local NASTRAN-95 solver.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    #[config(
+        hidden,
+        label = "NASTRAN-95 open-core words",
+        help = "Optional NASTRAN-95 OCMEM allocation in words. Leave blank to use the full allocation compiled into nastran.exe. Current local builds record that limit beside the executable; rebuild with a larger COMMON /ZZZZZZ/ allocation to solve a larger mesh."
+    )]
+    pub nastran95_open_core_words: String,
 
     /// Whether the solver is actually invoked.
     #[config(
@@ -231,10 +283,10 @@ pub struct StructuresConfig {
     )]
     pub run_sol_vibration_sine: bool,
 
-    /// Whether the random response is solved.
+    /// Whether force-PSD random-response RMS is calculated from SOL 111.
     #[config(
-        label = "Run random vibration (SOL 111)",
-        help = "Modal random-vibration response (PSD) to a white-noise engine-mounted excitation."
+        label = "Calculate random-vibration RMS from SOL 111",
+        help = "Integrate the solved unit-force SOL 111 response against the one-sided force PSD below. This produces displacement RMS in metres over the configured frequency sweep; it is not a base-acceleration calculation."
     )]
     pub run_sol_vibration_random: bool,
 
@@ -277,11 +329,19 @@ pub struct StructuresConfig {
     )]
     pub modal_damping_ratio: f64,
 
-    /// Excitation level for the random-vibration case.
+    /// The native force-PSD input for random-vibration RMS.
     #[config(
-        label = "Random vibration base PSD",
+        label = "Random excitation force PSD",
+        unit = "N^2/Hz",
+        help = "One-sided, flat force power spectral density at the engine excitation grid. RMS displacement is integral(|H(f)|^2 S_F df)^(1/2), where H is the solved SOL 111 unit-force receptance. Use the measured or specified PSD for the aircraft; 1 N^2/Hz is the neutral unit-input default."
+    )]
+    pub random_force_psd_n2_per_hz: f64,
+
+    /// Frozen Python-only acceleration PSD input.
+    #[config(
+        label = "Legacy random vibration base PSD (not used)",
         unit = "g^2/Hz",
-        help = "Flat white-noise acceleration power spectral density applied at the excitation point for the random-vibration case."
+        help = "Frozen-reference acceleration PSD retained for saved-file compatibility. It is not used by the product RMS path, which requires the force PSD above."
     )]
     pub psd_base_g2_per_hz: f64,
 
@@ -327,16 +387,27 @@ impl Default for StructuresConfig {
             spanwise_stations: 200,
             mesh_chordwise_points: 50,
             nastran_exe_path: String::new(),
+            nastran_solver_path: String::new(),
+            nastran95_dir_path: String::new(),
+            nastran95_runtime_path: String::new(),
+            nastran95_rf_stage_path: String::new(),
+            nastran95_open_core_words: String::new(),
             run_nastran: true,
             run_sol_static: true,
             run_sol_modes: true,
-            run_sol_vibration_sine: true,
+            // The RMS check still runs its bounded unit-force response below.
+            // An extended sweep is deliberately opt-in: a 500-point SOL 111
+            // deck is dominated by solver I/O on a full aircraft mesh.
+            run_sol_vibration_sine: false,
+            // A unit force PSD makes SOL 111 immediately observable; a user
+            // can replace it with the aircraft-specific excitation level.
             run_sol_vibration_random: true,
             timeout_s: 3600.0,
             n_modes: 30,
-            freq_sweep_max_hz: 500.0,
+            freq_sweep_max_hz: 60.0,
             freq_step_hz: 1.0,
             modal_damping_ratio: 0.02,
+            random_force_psd_n2_per_hz: 1.0,
             psd_base_g2_per_hz: 0.01,
             patran_exe_path: String::new(),
             run_patran_export: true,
@@ -452,5 +523,42 @@ mod tests {
         let config = StructuresConfig::default();
         assert!(config.freq_step_hz > 0.0);
         assert!(config.freq_step_hz < config.freq_sweep_max_hz);
+    }
+
+    #[test]
+    fn the_optional_msc_solver_override_preserves_old_saved_files() {
+        let default_json = serde_json::to_value(StructuresConfig::default()).unwrap();
+        assert!(default_json.get("nastran_solver_path").is_none());
+
+        let configured = StructuresConfig {
+            nastran_solver_path: "C:/MSC/analysis.exe".to_owned(),
+            ..StructuresConfig::default()
+        };
+        let configured_json = serde_json::to_value(&configured).unwrap();
+        assert_eq!(
+            configured_json["nastran_solver_path"],
+            "C:/MSC/analysis.exe"
+        );
+
+        let restored: StructuresConfig = serde_json::from_value(default_json).unwrap();
+        assert!(restored.nastran_solver_path.is_empty());
+    }
+
+    #[test]
+    fn local_nastran95_paths_are_optional_machine_preferences() {
+        let default_json = serde_json::to_value(StructuresConfig::default()).unwrap();
+        assert!(default_json.get("nastran95_dir_path").is_none());
+
+        let configured = StructuresConfig {
+            nastran95_dir_path: "C:/nastran-95".to_owned(),
+            nastran95_runtime_path: "C:/msys64/mingw64/bin".to_owned(),
+            nastran95_rf_stage_path: "C:/nas-rf".to_owned(),
+            nastran95_open_core_words: "32000000".to_owned(),
+            ..StructuresConfig::default()
+        };
+        let configured_json = serde_json::to_value(configured).unwrap();
+        assert_eq!(configured_json["nastran95_dir_path"], "C:/nastran-95");
+        assert_eq!(configured_json["nastran95_rf_stage_path"], "C:/nas-rf");
+        assert_eq!(configured_json["nastran95_open_core_words"], "32000000");
     }
 }

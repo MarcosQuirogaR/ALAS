@@ -1,0 +1,25 @@
+[package]
+name = "alas-route"
+description = "The lateral flight path between two airports: great circle, real jet airways, or an imported dispatch route."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# A route runs between two `Airport`s and reads their reference coordinates;
+# `alas-route::simbrief` also synthesizes one from a dispatch plan's own data.
+alas-config = { path = "../alas-config" }
+# `simbrief` parses a dispatch plan that arrives as JSON. It does not fetch
+# one -- see the module doc for where the transport lives.
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+alas-testkit = { path = "../alas-testkit" }
+serde = { workspace = true }
+
+[lints]
+workspace = true

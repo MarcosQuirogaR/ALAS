@@ -94,7 +94,7 @@ pub struct EngineConfig {
         decimals = 2,
         label = "Rated thrust per engine",
         unit = "kN",
-        help = "Maximum rated sea-level-static take-off thrust, per engine. Drives propulsion mass, the Matching Chart T/W lookup, and the SUAVE turbofan sizing target."
+        help = "Maximum rated sea-level-static take-off thrust, per engine. Drives propulsion mass, the Matching Chart T/W lookup, and the mission turbofan sizing target."
     )]
     pub thrust_kn: f64,
 
@@ -102,7 +102,7 @@ pub struct EngineConfig {
     #[config(
         label = "Bypass ratio (BPR)",
         unit = "-",
-        help = "Ratio of bypass (fan duct) to core mass flow. Feeds the SUAVE turbofan network and the Propulsion Analysis on-design cycle."
+        help = "Ratio of bypass (fan duct) to core mass flow. Feeds the mission turbofan network and the Propulsion Analysis on-design cycle."
     )]
     pub bypass_ratio: f64,
 
@@ -111,7 +111,7 @@ pub struct EngineConfig {
         advanced,
         label = "Overall (core) pressure ratio (OPR)",
         unit = "-",
-        help = "Total pressure ratio through the core compressors (LPC x HPC combined, NOT including the fan). Feeds SUAVE's compressor sizing (split into a fixed LPC ratio + a solved HPC ratio) and the Propulsion Analysis cycle's compressor_pressure_ratio."
+        help = "Total pressure ratio through the core compressors (LPC x HPC combined, NOT including the fan). Feeds mission compressor sizing (split into a fixed LPC ratio + a solved HPC ratio) and the Propulsion Analysis cycle's compressor_pressure_ratio."
     )]
     pub overall_pressure_ratio: f64,
 

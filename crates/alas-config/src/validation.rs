@@ -37,7 +37,7 @@
 //! builder additionally needs a fully constructed aeroplane for its stall
 //! terms, which is far too expensive to build on every validation tick. It
 //! evaluates the atmosphere through the closed-form ISA where upstream uses
-//! AeroSandbox's fitted default; the two agree to about 1e-11 and every number
+//! native aerodynamic model's fitted default; the two agree to about 1e-11 and every number
 //! the rule prints is rounded to the nearest whole metre per second.
 
 use serde::{Deserialize, Serialize};

@@ -9,7 +9,7 @@
 //! neither is large enough to justify a crate boundary, and both belong under
 //! "atmosphere" for a caller choosing between them.
 //!
-//! [`atmosphere`] is AeroSandbox's `Atmosphere` class: one point in the air,
+//! [`atmosphere`] is native aerodynamic model's `Atmosphere` class: one point in the air,
 //! evaluated by one of two altitude models. [`isa`] is the closed-form
 //! International Standard Atmosphere and [`differentiable`] is the cubic
 //! B-spline fitted through it, which is the model upstream uses when a caller
@@ -17,7 +17,7 @@
 //! [`Method`] is a modeling choice a caller makes deliberately, not a
 //! performance knob.
 //!
-//! [`us1976`] is SUAVE's US Standard 1976 model, which every SUAVE mission
+//! [`us1976`] is mission analysis model's US Standard 1976 model, which every mission analysis model mission
 //! segment uses instead of either.
 
 pub mod atmosphere;

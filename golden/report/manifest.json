@@ -1,0 +1,121 @@
+{
+  "fixtures": {
+    "reference_render_corpus": {
+      "alas_commit": "7d1555c1f4db5110cf6cd187c156718e1a033b50",
+      "description": "Reference registry render corpus for the representative FullAnalysis run, including exact available/unavailable contracts, axes, series, annotations, legends, and light/dark output metadata.",
+      "environment": {
+        "aerosandbox": "4.2.8",
+        "numpy": "2.5.1",
+        "platform": "Windows-11-10.0.26200-SP0",
+        "python": "3.13.13",
+        "scipy": "1.17.1"
+      },
+      "generator": "gen_reference_render_corpus.py",
+      "runtime": "alas"
+    },
+    "reference_render_w32": {
+      "alas_commit": "7d1555c1f4db5110cf6cd187c156718e1a033b50",
+      "description": "Pinned W3.2 light/dark contracts for the nine geometry and cabin figures generated from the reference FullAnalysis aircraft, payload layout, builder, and optimization history.",
+      "environment": {
+        "aerosandbox": "4.2.8",
+        "numpy": "2.5.1",
+        "platform": "Windows-11-10.0.26200-SP0",
+        "python": "3.13.13",
+        "scipy": "1.17.1"
+      },
+      "generator": "gen_reference_render_w32.py",
+      "runtime": "alas"
+    },
+    "reference_render_w33": {
+      "alas_commit": "7d1555c1f4db5110cf6cd187c156718e1a033b50",
+      "description": "Pinned light/dark panel, axis, series, annotation, legend, and unavailable-reason contracts for mission and route figures.",
+      "environment": {
+        "aerosandbox": "4.2.8",
+        "numpy": "2.5.1",
+        "platform": "Windows-11-10.0.26200-SP0",
+        "python": "3.13.13",
+        "scipy": "1.17.1"
+      },
+      "generator": "gen_reference_render_w33.py",
+      "runtime": "alas"
+    },
+    "reference_render_w38": {
+      "alas_commit": "7d1555c1f4db5110cf6cd187c156718e1a033b50",
+      "description": "Pinned W3.8 structural axis, external-result, and unavailable-state contracts derived from the reference visualization source, with the native missing-SOL-103 reason declared in the fixture.",
+      "environment": {
+        "aerosandbox": "4.2.8",
+        "numpy": "2.5.1",
+        "platform": "Windows-11-10.0.26200-SP0",
+        "python": "3.13.13",
+        "scipy": "1.17.1"
+      },
+      "generator": "gen_reference_render_w38.py",
+      "runtime": "alas"
+    },
+    "reference_render_w39": {
+      "alas_commit": "7d1555c1f4db5110cf6cd187c156718e1a033b50",
+      "description": "Pinned W3.9 light/dark optimization-history and airfoil-screening figure contracts generated from reference OptimizationHistory and screening candidates.",
+      "environment": {
+        "aerosandbox": "4.2.8",
+        "numpy": "2.5.1",
+        "platform": "Windows-11-10.0.26200-SP0",
+        "python": "3.13.13",
+        "scipy": "1.17.1"
+      },
+      "generator": "gen_reference_render_w39.py",
+      "runtime": "alas"
+    },
+    "route_geometry": {
+      "alas_commit": "7d1555c1f4db5110cf6cd187c156718e1a033b50",
+      "description": "3D sphere Cartesian projection and mission profile distance interpolation.",
+      "environment": {
+        "aerosandbox": "4.2.8",
+        "numpy": "2.5.1",
+        "platform": "Windows-11-10.0.26200-SP0",
+        "python": "3.13.13",
+        "scipy": "1.17.1"
+      },
+      "generator": "gen_report_route_geometry.py",
+      "runtime": "alas"
+    },
+    "theme": {
+      "alas_commit": "7d1555c1f4db5110cf6cd187c156718e1a033b50",
+      "description": "Theme palettes, resolved fallback behavior, and plot series color constants.",
+      "environment": {
+        "aerosandbox": "4.2.8",
+        "numpy": "2.5.1",
+        "platform": "Windows-11-10.0.26200-SP0",
+        "python": "3.13.13",
+        "scipy": "1.17.1"
+      },
+      "generator": "gen_report_theme.py",
+      "runtime": "alas"
+    },
+    "w61_mlg_count": {
+      "alas_commit": "7d1555c1f4db5110cf6cd187c156718e1a033b50",
+      "description": "W6.1 landing-gear evidence from the reference FullAnalysis and public landing-gear renderer, recording effective inputs, sizing calls, computed topology, and light/dark figure contracts.",
+      "environment": {
+        "aerosandbox": "4.2.8",
+        "numpy": "2.5.1",
+        "platform": "Windows-11-10.0.26200-SP0",
+        "python": "3.13.13",
+        "scipy": "1.17.1"
+      },
+      "generator": "gen_evidence_w61_mlg_count.py",
+      "runtime": "alas"
+    },
+    "w65_planform_area": {
+      "alas_commit": "7d1555c1f4db5110cf6cd187c156718e1a033b50",
+      "description": "W6.5 planform-area evidence across the seven presets, from preset resolution through built geometry, projected areas, reference axes, and renderer scale.",
+      "environment": {
+        "aerosandbox": "4.2.8",
+        "numpy": "2.5.1",
+        "platform": "Windows-11-10.0.26200-SP0",
+        "python": "3.13.13",
+        "scipy": "1.17.1"
+      },
+      "generator": "gen_evidence_w65_planform_area.py",
+      "runtime": "alas"
+    }
+  }
+}

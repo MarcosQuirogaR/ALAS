@@ -13,7 +13,7 @@ the data is code.
 Ported, they become JSON: `crates/alas-config/data/{materials,engines,
 airports}.json`, embedded in the crate and parsed once. That keeps a table of
 published material properties reviewable as a table, keeps it out of the
-500-line source limit it would otherwise dominate, and makes a correction to a
+700-line source limit it would otherwise dominate, and makes a correction to a
 published figure a one-line data change rather than a code change.
 
 This generator writes the parity copy under `golden/`. The crate's embedded

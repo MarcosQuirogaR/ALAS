@@ -4,8 +4,8 @@
 // Ported from alas/config/optimizer_config.py (`SolverSettings`)
 // Reference: alas @ rust-port-baseline.
 
-//! How the differential-evolution search is run: how long, how wide, and
-//! from where.
+//! How the aircraft-design search is run: which algorithm, how long, how wide,
+//! and from where.
 //!
 //! These settings decide how many aircraft get built and analysed, and each
 //! evaluation is a full geometry build, mass breakdown and vortex-lattice
@@ -34,6 +34,15 @@ use crate::ConfigNode;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ConfigNode)]
 #[serde(deny_unknown_fields)]
 pub struct SolverSettings {
+    /// Top-level optimizer selected for product searches.
+    #[serde(default = "default_optimizer_method")]
+    #[config(
+        options = OptimizerMethod,
+        label = "Optimization method",
+        help = "Select the search algorithm. Differential evolution preserves the historical scalar search; feasibility-first DE gives physical validity priority; NSGA-II retains a Pareto set; TuRBO-1 uses a local trust-region surrogate for expensive evaluations; CMA-ES adapts correlated continuous design steps."
+    )]
+    pub method: String,
+
     /// How new candidates are generated from the population.
     #[config(
         options = Strategy,
@@ -102,6 +111,7 @@ pub struct SolverSettings {
 impl Default for SolverSettings {
     fn default() -> Self {
         Self {
+            method: default_optimizer_method(),
             strategy: "best1bin".to_owned(),
             max_iterations: 15,
             population_size: 6,
@@ -113,6 +123,10 @@ impl Default for SolverSettings {
             seed_perturbation_fraction: 0.05,
         }
     }
+}
+
+fn default_optimizer_method() -> String {
+    "differential_evolution".to_owned()
 }
 
 // A test asserts on values it constructed here directly, so a failed unwrap
@@ -141,6 +155,18 @@ mod tests {
         assert!(!OptionSource::Strategy.editable());
         let accepted = OptionSource::Strategy.options().unwrap();
         assert!(accepted.contains(&settings.strategy.as_str()));
+    }
+
+    #[test]
+    fn every_product_optimizer_method_is_a_strict_gui_choice() {
+        let settings = SolverSettings::default();
+        let method = leaf("method", &settings);
+        assert_eq!(method.options, Some(OptionSource::OptimizerMethod));
+        assert!(!OptionSource::OptimizerMethod.editable());
+        assert!(OptionSource::OptimizerMethod
+            .options()
+            .unwrap()
+            .contains(&settings.method.as_str()));
     }
 
     #[test]

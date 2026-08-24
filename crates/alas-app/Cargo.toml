@@ -1,0 +1,34 @@
+[package]
+name = "alas-app"
+description = "Headless CLI and executable entry point for ALAS."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "alas"
+path = "src/main.rs"
+
+[dependencies]
+alas-types = { path = "../alas-types" }
+alas-config = { path = "../alas-config" }
+alas-gui = { path = "../alas-gui" }
+alas-pipeline = { path = "../alas-pipeline" }
+alas-aero = { path = "../alas-aero" }
+alas-mission = { path = "../alas-mission" }
+alas-struct = { path = "../alas-struct" }
+alas-exec = { path = "../alas-exec" }
+alas-route = { path = "../alas-route" }
+tracing = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+alas-testkit = { path = "../alas-testkit" }
+
+[lints]
+workspace = true

@@ -8,12 +8,16 @@ authors.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-# `mass_wing`/`mass_fuselage_simple` take AeroSandbox's own `Wing`/`Fuselage`
+# `mass_wing`/`mass_fuselage_simple` take native aerodynamic model's own `Wing`/`Fuselage`
 # as their geometry arguments, exactly as upstream does.
 alas-geom = { path = "../alas-geom" }
 # `breakdown` reads `DesignRequirements`, `GeometryConfig` and
 # `MassModelConfig` directly, exactly as `alas/physics/mass.py` does.
 alas-config = { path = "../alas-config" }
+# `transport_weight`'s correlations are written in imperial units and convert
+# through these ratios at every formula, exactly as the mission analysis model source does.
+alas-units = { path = "../alas-units" }
+thiserror = { workspace = true }
 
 [dev-dependencies]
 alas-testkit = { path = "../alas-testkit" }

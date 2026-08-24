@@ -20,7 +20,7 @@
 //! polytropic-efficiency relations, energy and momentum conservation) with no
 //! curve-fit constants; the only external input is the ambient state, read
 //! from [`alas_atmo::Atmosphere::new`] -- the fitted model upstream's
-//! `asb.Atmosphere(altitude=...)` selects when no method is named, not the
+//! `Atmosphere(altitude=...)` selects when no method is named, not the
 //! closed-form ISA.
 //!
 //! All station temperatures are stagnation ("total") temperatures in kelvin.

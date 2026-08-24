@@ -16,10 +16,17 @@
 //! implementation was tuned against, so the program produces a real aircraft
 //! before anything has been configured.
 //!
-//! Two fields are only editable while the cabin preset is set to `Custom`:
-//! a preset computes the passenger count and the cargo capacity from the
-//! layout, and letting both be edited would leave the two disagreeing with no
-//! indication of which one the run used.
+//! Two passenger load cases are kept distinct. A fixed-target case carries
+//! the stated passenger count through every candidate evaluation; a capacity
+//! case explicitly asks the optimizer to recompute how many seats each
+//! candidate shell holds. Real-aircraft presets use the former because a
+//! published planning seat count is not an operator class layout. The
+//! notional default uses the latter, preserving the reference design search.
+//!
+//! Passenger and cargo targets are editable while the cabin preset is set to
+//! `Custom`. A named preset computes its payload from geometry, and letting
+//! both be edited would leave the two disagreeing with no indication of which
+//! one the run used.
 
 use serde::{Deserialize, Serialize};
 
@@ -85,6 +92,14 @@ pub struct DesignRequirements {
         help = "Named seating/payload layout preset ('Ryanair', 'Iberia', 'Emirates' for passenger; 'Max payload', 'Dense payload' for cargo). 'Custom' lets you hand-edit the Cabin & Payload tab."
     )]
     pub cabin_preset: String,
+
+    /// Whether candidate geometry determines the passenger count.
+    #[serde(default = "default_optimize_passenger_capacity")]
+    #[config(
+        label = "Optimize passenger capacity",
+        help = "When enabled, each optimizer candidate recomputes its passenger count from the selected cabin preset and fuselage geometry. When disabled, num_passengers is the fixed load-case target throughout the run; use 'Custom' when no operator class layout is known. Real-aircraft presets disable this so their stated planning target is not silently replaced by a high-density capacity."
+    )]
+    pub optimize_passenger_capacity: bool,
 
     /// How many passengers the aircraft is sized for.
     #[config(
@@ -217,6 +232,7 @@ impl Default for DesignRequirements {
             mtow_kg: 358_670.0,
             aircraft_type: "passenger".to_owned(),
             cabin_preset: "Ryanair".to_owned(),
+            optimize_passenger_capacity: true,
             num_passengers: 350,
             cargo_payload_kg: 102_100.0,
             max_structural_payload_kg: 0.0,
@@ -235,7 +251,20 @@ impl Default for DesignRequirements {
     }
 }
 
+const fn default_optimize_passenger_capacity() -> bool {
+    true
+}
+
 impl DesignRequirements {
+    /// Whether the payload target is recomputed from each candidate's cabin.
+    ///
+    /// Cargo presets have always represented a fraction of geometric hold
+    /// capacity. Passenger targets opt into that behavior separately; when
+    /// the flag is false, [`Self::num_passengers`] is the load case.
+    pub fn resolves_payload_from_candidate_geometry(&self) -> bool {
+        self.aircraft_type == "cargo" || self.optimize_passenger_capacity
+    }
+
     /// Reject an unknown aircraft type, and bring the cabin preset into line
     /// with the type.
     ///
@@ -348,6 +377,56 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(freighter.payload_kg(), freighter.cargo_payload_kg);
+    }
+
+    #[test]
+    fn passenger_capacity_changes_only_when_the_load_case_requests_it() {
+        let fixed = DesignRequirements {
+            cabin_preset: "Custom".to_owned(),
+            optimize_passenger_capacity: false,
+            num_passengers: 130,
+            ..Default::default()
+        };
+        let capacity = DesignRequirements {
+            optimize_passenger_capacity: true,
+            ..fixed.clone()
+        };
+
+        assert!(!fixed.optimize_passenger_capacity);
+        assert_eq!(fixed.num_passengers, 130);
+        assert!(!fixed.resolves_payload_from_candidate_geometry());
+        assert!(capacity.resolves_payload_from_candidate_geometry());
+
+        let cargo = DesignRequirements {
+            aircraft_type: "cargo".to_owned(),
+            optimize_passenger_capacity: false,
+            ..fixed
+        };
+        assert!(cargo.resolves_payload_from_candidate_geometry());
+    }
+
+    #[test]
+    fn historical_files_without_the_load_case_flag_keep_the_reference_default() {
+        let mut value = serde_json::to_value(DesignRequirements::default()).unwrap();
+        value
+            .as_object_mut()
+            .unwrap()
+            .remove("optimize_passenger_capacity");
+        let requirements: DesignRequirements = serde_json::from_value(value).unwrap();
+
+        assert!(requirements.optimize_passenger_capacity);
+    }
+
+    #[test]
+    fn the_load_case_choice_reaches_the_settings_schema_as_a_checkbox() {
+        let schema = DesignRequirements::default().schema();
+        match &schema.field("optimize_passenger_capacity").unwrap().entry {
+            crate::Entry::Leaf(leaf) => {
+                assert_eq!(leaf.kind, crate::Kind::Bool);
+                assert_eq!(leaf.value, serde_json::Value::Bool(true));
+            }
+            crate::Entry::Node(_) => panic!("a load-case switch is not a group"),
+        }
     }
 
     #[test]

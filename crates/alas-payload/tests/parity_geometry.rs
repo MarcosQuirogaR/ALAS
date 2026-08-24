@@ -120,12 +120,19 @@ const PCT_MAC_PROBES: [f64; 6] = [-20.0, 0.0, 12.5, 25.0, 40.0, 100.0];
 /// overlay through the shared loading path, and the preset's own design vector
 /// where the overlay names one.
 fn cabin_geometry(input: &Value) -> CabinGeometry {
+    cabin_geometry_with_source_corrections(input, false)
+}
+
+fn cabin_geometry_with_source_corrections(
+    input: &Value,
+    use_source_corrected_geometry: bool,
+) -> CabinGeometry {
     let config = AlasConfig::from_value(input).expect("the overlay loads");
     let preset_name = input
         .get("preset")
         .and_then(Value::as_str)
         .unwrap_or_default();
-    let design_vector: Option<DesignVector> = if preset_name.is_empty() {
+    let mut design_vector: Option<DesignVector> = if preset_name.is_empty() {
         None
     } else {
         Some(
@@ -134,6 +141,19 @@ fn cabin_geometry(input: &Value) -> CabinGeometry {
                 .design_vector,
         )
     };
+
+    // Algorithm parity must compare the same input on both sides. The physical
+    // audit deliberately corrected the A380 length and closed its estimated
+    // taper distribution on Airbus S_ref; replay the frozen Python vector for
+    // the parity fixture and test the corrected geometry separately below.
+    if !use_source_corrected_geometry && preset_name == "A380-800" {
+        if let Some(design) = &mut design_vector {
+            design.fuselage_length_m = 72.72;
+            design.root_chord_m = 23.0;
+            design.break_chord_m = 11.3;
+            design.tip_chord_m = 3.5;
+        }
+    }
 
     let builder = AircraftBuilder::new(Some(config.geometry.clone()));
     let plane = builder
@@ -146,6 +166,18 @@ fn cabin_geometry(input: &Value) -> CabinGeometry {
         config.cabin.passenger.wall_thickness_m,
     )
     .expect("a built aircraft has a fuselage and a wing")
+}
+
+#[test]
+fn the_source_corrected_a380_frame_uses_the_current_length_and_finite_mac() {
+    let input = serde_json::json!({"preset": "A380-800"});
+    let geometry = cabin_geometry_with_source_corrections(&input, true);
+
+    assert_eq!(geometry.fus_len, 72.73);
+    assert_eq!(geometry.x_max - geometry.x_min, 72.73);
+    assert!(geometry.mac.is_finite() && geometry.mac > 0.0);
+    assert!(geometry.x_lemac.is_finite());
+    assert!(geometry.x_wing_ac.is_finite());
 }
 
 fn compare_deck(

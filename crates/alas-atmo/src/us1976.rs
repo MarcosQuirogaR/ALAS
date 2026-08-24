@@ -1,22 +1,22 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-// Ported from SUAVE/Attributes/Atmospheres/Earth/US_Standard_1976.py,
-// SUAVE/Analyses/Atmospheric/US_Standard_1976.py, SUAVE/Attributes/Gases/Air.py
-// and SUAVE/Attributes/Planets/Earth.py
-// Upstream: SUAVE 2.5.2, LGPL-2.1 (relicensed under GPL-2.0-or-later per
+// Ported from mission analysis model/Attributes/Atmospheres/Earth/US_Standard_1976.py,
+// mission analysis model/Analyses/Atmospheric/US_Standard_1976.py, mission analysis model/Attributes/Gases/Air.py
+// and mission analysis model/Attributes/Planets/Earth.py
+// Upstream: mission analysis model 2.5.2, LGPL-2.1 (relicensed under GPL-2.0-or-later per
 // LGPL-2.1 section 3; compatible with this program's AGPL-3.0-or-later).
 // Reference: alas @ rust-port-baseline.
 
-//! The U.S. Standard Atmosphere (1976), as SUAVE's mission stack evaluates it.
+//! The U.S. Standard Atmosphere (1976), as mission analysis model's mission stack evaluates it.
 //!
-//! Every SUAVE mission segment attaches one of these to compute pressure,
+//! Every mission analysis model mission segment attaches one of these to compute pressure,
 //! temperature and the gas properties the segment solver needs at whatever
 //! altitude it is currently integrating through. It is a different reference
-//! implementation from [`crate::isa`] -- SUAVE's break-point table rather than
-//! AeroSandbox's -- so the two are kept as separate submodules rather than
+//! implementation from [`crate::isa`] -- mission analysis model's break-point table rather than
+//! native aerodynamic model's -- so the two are kept as separate submodules rather than
 //! merged into one "the" atmosphere: nothing here assumes agreement with
-//! `isa`, and a caller that needs SUAVE parity must use this one.
+//! `isa`, and a caller that needs mission analysis model parity must use this one.
 //!
 //! # A different lapse-rate sign convention from `isa`
 //!
@@ -26,7 +26,7 @@
 //! `Analyses/Atmospheric/US_Standard_1976.py` defines it
 //! (`alpha = -(T[i+1] - T[i]) / (z[i+1] - z[i])`). The two are not unified,
 //! because unifying them would stop this module's arithmetic from matching
-//! SUAVE's own line for line, and a reader who assumes the sign is shared
+//! mission analysis model's own line for line, and a reader who assumes the sign is shared
 //! between the two atmosphere models would get every adiabatic layer's
 //! pressure wrong.
 
@@ -34,8 +34,8 @@ use std::sync::LazyLock;
 
 /// Specific gas constant of air, in m^2/(s^2*K).
 ///
-/// `SUAVE.Attributes.Gases.Air.gas_specific_constant`. Independent of
-/// [`crate::isa::GAS_CONSTANT_AIR`], which AeroSandbox derives instead from
+/// `mission analysis model.Attributes.Gases.Air.gas_specific_constant`. Independent of
+/// [`crate::isa::GAS_CONSTANT_AIR`], which native aerodynamic model derives instead from
 /// the universal gas constant and the molecular mass of air; the two agree to
 /// five significant figures but are not the same constant and are not
 /// unified here, for the same reason the lapse-rate sign is not unified (see
@@ -44,17 +44,17 @@ pub const GAS_CONSTANT_AIR: f64 = 287.052_874_2;
 
 /// Specific heat capacity of air at constant pressure, in J/(kg*K).
 ///
-/// `SUAVE.Attributes.Gases.Air.specific_heat_capacity`. Used only to form the
+/// `mission analysis model.Attributes.Gases.Air.specific_heat_capacity`. Used only to form the
 /// Prandtl number.
 const SPECIFIC_HEAT_CAPACITY_AIR: f64 = 1006.0;
 
 /// Sutherland's law constant, in kg/(m*s*sqrt(K)).
 ///
-/// `SUAVE.Attributes.Gases.Air.compute_absolute_viscosity`, cited upstream to
+/// `mission analysis model.Attributes.Gases.Air.compute_absolute_viscosity`, cited upstream to
 /// <https://www.cfd-online.com/Wiki/Sutherland's_law>. Numerically identical
 /// to [`crate::isa`]'s private Sutherland constant, but kept as this module's
 /// own copy rather than shared: the two upstream projects each define it
-/// independently (`AeroSandbox/atmosphere.py` and `SUAVE/Attributes/Gases/
+/// independently (`native aerodynamic model/atmosphere.py` and `mission analysis model/Attributes/Gases/
 /// Air.py` do not share code either), so one copy per translated source file
 /// is the more faithful port, not an oversight.
 const SUTHERLAND_C1: f64 = 1.458e-6;
@@ -62,9 +62,9 @@ const SUTHERLAND_C1: f64 = 1.458e-6;
 /// Sutherland's law reference temperature, in Kelvin. See [`SUTHERLAND_C1`].
 const SUTHERLAND_S: f64 = 110.4;
 
-/// Earth's mean radius, in metres. `SUAVE.Attributes.Planets.Earth.mean_radius`.
+/// Earth's mean radius, in metres. `mission analysis model.Attributes.Planets.Earth.mean_radius`.
 ///
-/// Used only to convert a geometric altitude into a geopotential one; SUAVE's
+/// Used only to convert a geometric altitude into a geopotential one; mission analysis model's
 /// `compute_gravity` (a `g0 * (Re / (Re + H))^2` correction) is a separate,
 /// unrelated method on the same class that this module does not call, because
 /// `compute_values` itself never calls it either -- gravity is held at
@@ -72,10 +72,10 @@ const SUTHERLAND_S: f64 = 110.4;
 const MEAN_RADIUS_M: f64 = 6.371e6;
 
 /// Standard sea-level gravity, in m/s^2.
-/// `SUAVE.Attributes.Planets.Earth.sea_level_gravity`.
+/// `mission analysis model.Attributes.Planets.Earth.sea_level_gravity`.
 const SEA_LEVEL_GRAVITY: f64 = 9.80665;
 
-/// One row of the break-point table: SUAVE's `self.breaks`, arrays indexed
+/// One row of the break-point table: mission analysis model's `self.breaks`, arrays indexed
 /// together.
 #[derive(Debug, Clone, Copy)]
 struct Break {
@@ -90,7 +90,7 @@ struct Break {
     density_kg_m3: f64,
 }
 
-/// `SUAVE.Attributes.Atmospheres.Earth.US_Standard_1976.__defaults__`'s
+/// `mission analysis model.Attributes.Atmospheres.Earth.US_Standard_1976.__defaults__`'s
 /// `self.breaks`: geopotential altitude, temperature, pressure and density at
 /// nine standard breakpoints, from -2 km to 84.852 km.
 const BREAKS: [Break; 9] = [
@@ -215,9 +215,9 @@ pub struct Values {
     pub density_kg_m3: f64,
     /// Speed of sound, in m/s, at a constant ratio of specific heats of 1.4.
     ///
-    /// SUAVE's `compute_speed_of_sound` also supports a temperature-varying
+    /// mission analysis model's `compute_speed_of_sound` also supports a temperature-varying
     /// `gamma` (`var_gamma=True`, a cubic fit in `Air.compute_gamma`), but no
-    /// caller in SUAVE's own mission stack ever passes it, so only the
+    /// caller in mission analysis model's own mission stack ever passes it, so only the
     /// constant-gamma path is translated here.
     pub speed_of_sound_m_s: f64,
     /// Dynamic viscosity, in kg/(m*s), from Sutherland's law.
@@ -332,7 +332,7 @@ mod tests {
     #[test]
     fn pressure_and_temperature_nearly_agree_either_side_of_every_segment_boundary() {
         // Unlike `crate::isa`'s table, which chains the barometric formula
-        // layer by layer, SUAVE's break-point table stores independently
+        // layer by layer, mission analysis model's break-point table stores independently
         // published pressure and temperature constants at each break -- they
         // are not derived from each other, so evaluating the segment below a
         // boundary at its own top does not reproduce the segment above's
@@ -366,7 +366,7 @@ mod tests {
     #[test]
     fn the_segment_above_a_boundary_wins_the_tie_and_matches_its_own_stored_base_value() {
         // `segment_for`'s documentation claims the higher-indexed segment
-        // wins at an exact break, matching SUAVE's mask-overwrite loop.
+        // wins at an exact break, matching mission analysis model's mask-overwrite loop.
         // Confirmed against the Python reference directly: querying exactly
         // 11000 m geopotential returns 22632.1 Pa -- `BREAKS[2]`'s own
         // stored base pressure, not a value derived from segment 1's formula

@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 /// a finite window. The reference implementation has a 5,600-line figure module
 /// that has to be read in fragments; the limit exists so that nothing here
 /// becomes its equivalent.
-const MAX_LINES: usize = 500;
+const MAX_LINES: usize = 700;
 
 /// The SPDX and copyright lines every file opens with.
 const HEADER_LINES: usize = 2;

@@ -1,0 +1,613 @@
+{
+  "cases": {
+    "baseline": {
+      "convert_axes": [
+        {
+          "from_axes": "geometry",
+          "result": [
+            -1.0,
+            0.0,
+            -0.0
+          ],
+          "to_axes": "body",
+          "vector": [
+            1.0,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "from_axes": "geometry",
+          "result": [
+            -0.0,
+            1.0,
+            -0.0
+          ],
+          "to_axes": "body",
+          "vector": [
+            0.0,
+            1.0,
+            0.0
+          ]
+        },
+        {
+          "from_axes": "geometry",
+          "result": [
+            -0.0,
+            0.0,
+            -1.0
+          ],
+          "to_axes": "body",
+          "vector": [
+            0.0,
+            0.0,
+            1.0
+          ]
+        },
+        {
+          "from_axes": "geometry",
+          "result": [
+            -2.0,
+            -3.0,
+            -5.5
+          ],
+          "to_axes": "body",
+          "vector": [
+            2.0,
+            -3.0,
+            5.5
+          ]
+        },
+        {
+          "from_axes": "body",
+          "result": [
+            0.9961946980917455,
+            0.0,
+            -0.08715574274765817
+          ],
+          "to_axes": "wind",
+          "vector": [
+            1.0,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "from_axes": "body",
+          "result": [
+            0.0,
+            1.0,
+            0.0
+          ],
+          "to_axes": "wind",
+          "vector": [
+            0.0,
+            1.0,
+            0.0
+          ]
+        },
+        {
+          "from_axes": "body",
+          "result": [
+            0.08715574274765817,
+            0.0,
+            0.9961946980917455
+          ],
+          "to_axes": "wind",
+          "vector": [
+            0.0,
+            0.0,
+            1.0
+          ]
+        },
+        {
+          "from_axes": "body",
+          "result": [
+            2.471745981295611,
+            -3.0,
+            5.304759354009284
+          ],
+          "to_axes": "wind",
+          "vector": [
+            2.0,
+            -3.0,
+            5.5
+          ]
+        }
+      ],
+      "dynamic_pressure": 6124.995779438588,
+      "freestream_velocity_geometry_axes": [
+        99.61946980917456,
+        0.0,
+        8.71557427476583
+      ],
+      "inputs": {
+        "alpha": 5.0,
+        "altitude_m": 0.0,
+        "beta": 0.0,
+        "p": 0.0,
+        "q": 0.0,
+        "r": 0.0,
+        "velocity": 100.0
+      },
+      "rotation_velocity_geometry_axes": [
+        [
+          -0.0,
+          -0.0,
+          0.0
+        ],
+        [
+          -0.0,
+          0.0,
+          0.0
+        ],
+        [
+          -0.0,
+          -0.0,
+          -0.0
+        ]
+      ]
+    },
+    "negative": {
+      "convert_axes": [
+        {
+          "from_axes": "geometry",
+          "result": [
+            -1.0,
+            0.0,
+            -0.0
+          ],
+          "to_axes": "body",
+          "vector": [
+            1.0,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "from_axes": "geometry",
+          "result": [
+            -0.0,
+            1.0,
+            -0.0
+          ],
+          "to_axes": "body",
+          "vector": [
+            0.0,
+            1.0,
+            0.0
+          ]
+        },
+        {
+          "from_axes": "geometry",
+          "result": [
+            -0.0,
+            0.0,
+            -1.0
+          ],
+          "to_axes": "body",
+          "vector": [
+            0.0,
+            0.0,
+            1.0
+          ]
+        },
+        {
+          "from_axes": "geometry",
+          "result": [
+            -2.0,
+            -3.0,
+            -5.5
+          ],
+          "to_axes": "body",
+          "vector": [
+            2.0,
+            -3.0,
+            5.5
+          ]
+        },
+        {
+          "from_axes": "body",
+          "result": [
+            0.9907374393020275,
+            0.10413070090691416,
+            0.08715574274765817
+          ],
+          "to_axes": "wind",
+          "vector": [
+            1.0,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "from_axes": "body",
+          "result": [
+            -0.10452846326765347,
+            0.9945218953682733,
+            0.0
+          ],
+          "to_axes": "wind",
+          "vector": [
+            0.0,
+            1.0,
+            0.0
+          ]
+        },
+        {
+          "from_axes": "body",
+          "result": [
+            -0.08667829446963064,
+            -0.009110255854363642,
+            0.9961946980917455
+          ],
+          "to_axes": "wind",
+          "vector": [
+            0.0,
+            0.0,
+            1.0
+          ]
+        },
+        {
+          "from_axes": "body",
+          "result": [
+            1.818329648824047,
+            -2.8254106914899912,
+            5.653382324999916
+          ],
+          "to_axes": "wind",
+          "vector": [
+            2.0,
+            -3.0,
+            5.5
+          ]
+        }
+      ],
+      "dynamic_pressure": 11208.448128009879,
+      "freestream_velocity_geometry_axes": [
+        247.68435982550687,
+        26.132115816913366,
+        -21.66957361740763
+      ],
+      "inputs": {
+        "alpha": -5.0,
+        "altitude_m": 11000.0,
+        "beta": -6.0,
+        "p": -0.02,
+        "q": 0.05,
+        "r": -0.01,
+        "velocity": 250.0
+      },
+      "rotation_velocity_geometry_axes": [
+        [
+          -0.0,
+          -0.0,
+          -0.0
+        ],
+        [
+          0.055,
+          -0.04,
+          0.09000000000000001
+        ],
+        [
+          0.0024999999999999953,
+          0.05,
+          -0.255
+        ]
+      ]
+    },
+    "rotation_rates": {
+      "convert_axes": [
+        {
+          "from_axes": "geometry",
+          "result": [
+            -1.0,
+            0.0,
+            -0.0
+          ],
+          "to_axes": "body",
+          "vector": [
+            1.0,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "from_axes": "geometry",
+          "result": [
+            -0.0,
+            1.0,
+            -0.0
+          ],
+          "to_axes": "body",
+          "vector": [
+            0.0,
+            1.0,
+            0.0
+          ]
+        },
+        {
+          "from_axes": "geometry",
+          "result": [
+            -0.0,
+            0.0,
+            -1.0
+          ],
+          "to_axes": "body",
+          "vector": [
+            0.0,
+            0.0,
+            1.0
+          ]
+        },
+        {
+          "from_axes": "geometry",
+          "result": [
+            -2.0,
+            -3.0,
+            -5.5
+          ],
+          "to_axes": "body",
+          "vector": [
+            2.0,
+            -3.0,
+            5.5
+          ]
+        },
+        {
+          "from_axes": "body",
+          "result": [
+            0.9980211966240684,
+            0.05230407459247085,
+            -0.03489949670250097
+          ],
+          "to_axes": "wind",
+          "vector": [
+            1.0,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "from_axes": "body",
+          "result": [
+            -0.052335956242943835,
+            0.9986295347545738,
+            0.0
+          ],
+          "to_axes": "wind",
+          "vector": [
+            0.0,
+            1.0,
+            0.0
+          ]
+        },
+        {
+          "from_axes": "body",
+          "result": [
+            0.034851668155187324,
+            0.0018264985323228533,
+            0.9993908270190958
+          ],
+          "to_axes": "wind",
+          "vector": [
+            0.0,
+            0.0,
+            1.0
+          ]
+        },
+        {
+          "from_axes": "body",
+          "result": [
+            2.3447344368304988,
+            -2.8812347131510045,
+            5.426850555200025
+          ],
+          "to_axes": "wind",
+          "vector": [
+            2.0,
+            -3.0,
+            5.5
+          ]
+        }
+      ],
+      "dynamic_pressure": 1694.4234660153122,
+      "freestream_velocity_geometry_axes": [
+        79.84169572992548,
+        4.186876499435507,
+        2.788133452414996
+      ],
+      "inputs": {
+        "alpha": 2.0,
+        "altitude_m": 8000.0,
+        "beta": -3.0,
+        "p": 0.01,
+        "q": 0.02,
+        "r": 0.03,
+        "velocity": 80.0
+      },
+      "rotation_velocity_geometry_axes": [
+        [
+          -0.0,
+          -0.0,
+          0.0
+        ],
+        [
+          0.005000000000000001,
+          0.06999999999999999,
+          0.045
+        ],
+        [
+          -0.135,
+          -0.11249999999999999,
+          -0.030000000000000006
+        ]
+      ]
+    },
+    "sideslip": {
+      "convert_axes": [
+        {
+          "from_axes": "geometry",
+          "result": [
+            -1.0,
+            0.0,
+            -0.0
+          ],
+          "to_axes": "body",
+          "vector": [
+            1.0,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "from_axes": "geometry",
+          "result": [
+            -0.0,
+            1.0,
+            -0.0
+          ],
+          "to_axes": "body",
+          "vector": [
+            0.0,
+            1.0,
+            0.0
+          ]
+        },
+        {
+          "from_axes": "geometry",
+          "result": [
+            -0.0,
+            0.0,
+            -1.0
+          ],
+          "to_axes": "body",
+          "vector": [
+            0.0,
+            0.0,
+            1.0
+          ]
+        },
+        {
+          "from_axes": "geometry",
+          "result": [
+            -2.0,
+            -3.0,
+            -5.5
+          ],
+          "to_axes": "body",
+          "vector": [
+            2.0,
+            -3.0,
+            5.5
+          ]
+        },
+        {
+          "from_axes": "body",
+          "result": [
+            0.9961969233988566,
+            -0.06966087492121549,
+            -0.052335956242943835
+          ],
+          "to_axes": "wind",
+          "vector": [
+            1.0,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "from_axes": "body",
+          "result": [
+            0.0697564737441253,
+            0.9975640502598242,
+            0.0
+          ],
+          "to_axes": "wind",
+          "vector": [
+            0.0,
+            1.0,
+            0.0
+          ]
+        },
+        {
+          "from_axes": "body",
+          "result": [
+            0.052208468483931986,
+            -0.0036507717575346025,
+            0.9986295347545738
+          ],
+          "to_axes": "wind",
+          "vector": [
+            0.0,
+            0.0,
+            1.0
+          ]
+        },
+        {
+          "from_axes": "body",
+          "result": [
+            2.070271002226963,
+            -3.152093145288344,
+            5.387790528664269
+          ],
+          "to_axes": "wind",
+          "vector": [
+            2.0,
+            -3.0,
+            5.5
+          ]
+        }
+      ],
+      "dynamic_pressure": 6531.84506143058,
+      "freestream_velocity_geometry_axes": [
+        119.54363080786278,
+        -8.370776849295037,
+        6.265016218071853
+      ],
+      "inputs": {
+        "alpha": 3.0,
+        "altitude_m": 3000.0,
+        "beta": 4.0,
+        "p": 0.0,
+        "q": 0.0,
+        "r": 0.0,
+        "velocity": 120.0
+      },
+      "rotation_velocity_geometry_axes": [
+        [
+          -0.0,
+          -0.0,
+          0.0
+        ],
+        [
+          -0.0,
+          0.0,
+          0.0
+        ],
+        [
+          -0.0,
+          -0.0,
+          -0.0
+        ]
+      ]
+    }
+  },
+  "points": [
+    [
+      0.0,
+      0.0,
+      0.0
+    ],
+    [
+      2.0,
+      0.5,
+      -1.0
+    ],
+    [
+      -3.5,
+      4.0,
+      0.75
+    ]
+  ]
+}

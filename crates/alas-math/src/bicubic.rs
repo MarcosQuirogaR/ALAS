@@ -4,7 +4,7 @@
 //! An interpolating bicubic spline over a rectangular grid, laid out the way
 //! FITPACK lays one out.
 //!
-//! SUAVE builds its lift and induced-drag surrogates by handing a table of
+//! mission analysis model builds its lift and induced-drag surrogates by handing a table of
 //! vortex-lattice results to `scipy.interpolate.RectBivariateSpline` with its
 //! defaults, and the mission then flies against the surrogate rather than
 //! against the table. Every mission number therefore depends on this surface,
@@ -34,7 +34,8 @@
 //! range instead; the knot rule, the basis recurrence and the solve are the
 //! same construction and live there.
 
-use crate::bspline::{collocation, knot_vector, solve, span_and_basis, DEGREE, ORDER};
+use crate::bspline::{collocation, knot_vector, span_and_basis, DEGREE, ORDER};
+use crate::linalg::solve;
 
 /// Which axis a construction error refers to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

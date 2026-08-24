@@ -1,0 +1,1606 @@
+{
+  "schema_version": 1,
+  "records": [
+    {
+      "id": "gens-ace-b-45c-1800-5s1p",
+      "manufacturer": "Gens Ace",
+      "model": "B-45C-1800-5S1P",
+      "kind": "battery",
+      "spec": {
+        "chemistry": "LiPo",
+        "series_cells": 5,
+        "nominal_voltage_v": 18.5,
+        "capacity_ah": 1.8,
+        "discharge_rating_c": 45,
+        "mass_kg": 0.23,
+        "dimensions": {
+          "length_m": 0.1,
+          "width_m": 0.033,
+          "height_m": 0.031
+        },
+        "connector": "XT60"
+      },
+      "provenance": {
+        "publisher": "RC Innovations",
+        "source_url": "https://rc-innovations.es/shop/6928493362549-bateria-lipo-gens-ace-5s-18-5v-1800mah-45c-7704",
+        "source_title": "Bateria LiPo Gens Ace 5s 18.5V 1800mAh 45C",
+        "transformations": [
+          "capacity divided by 1000 from mAh to Ah",
+          "mass divided by 1000 from g to kg",
+          "dimensions divided by 1000 from mm to m"
+        ]
+      }
+    },
+    {
+      "id": "frsky-neuron-ii-60",
+      "manufacturer": "FrSky",
+      "model": "Neuron II 60",
+      "kind": "esc",
+      "spec": {
+        "min_series_cells": 3,
+        "max_series_cells": 6,
+        "continuous_current_a": 60,
+        "bec_min_voltage_v": 5,
+        "bec_max_voltage_v": 8.4,
+        "bec_continuous_current_a": null,
+        "bec_peak_current_a": null,
+        "mass_kg": 0.075,
+        "dimensions": {
+          "length_m": 0.059,
+          "width_m": 0.034,
+          "height_m": 0.0152
+        }
+      },
+      "provenance": {
+        "publisher": "RC Innovations",
+        "source_url": "https://rc-innovations.es/shop/03111407-fr-sky-neuron-ii-60a-telemetria-s-port-fport-15662",
+        "source_title": "Fr-Sky Neuron II 60A Telemetria S.Port / FPORT",
+        "transformations": [
+          "mass divided by 1000 from g to kg",
+          "dimensions divided by 1000 from mm to m",
+          "the page states 5A@5-8.4V and 10A without identifying continuous and peak ratings unambiguously; both BEC current limits therefore remain absent"
+        ]
+      }
+    },
+    {
+      "id": "tmotor-at2317-880kv",
+      "manufacturer": "T-Motor",
+      "model": "AT2317 880KV",
+      "kind": "motor",
+      "spec": {
+        "kv_rpm_per_v": 880,
+        "min_series_cells": 2,
+        "max_series_cells": 4,
+        "max_current_a": null,
+        "max_power_w": 700,
+        "max_static_thrust_n": 16.671305,
+        "mass_kg": null,
+        "dimensions": null,
+        "recommended_propeller_diameter_m": 0.3048,
+        "recommended_propeller_pitch_m": 0.1524
+      },
+      "provenance": {
+        "publisher": "RC Innovations",
+        "source_url": "https://rc-innovations.es/shop/t-motor-at2317-19851",
+        "source_title": "T-motor AT2317",
+        "transformations": [
+          "880 KV selected from the page's 880, 1250, and 1400 KV variants",
+          "1.7 kgf maximum static thrust multiplied by standard gravity 9.80665 m/s2",
+          "recommended 12x6 inch propeller dimensions multiplied by exactly 0.0254 m/in"
+        ]
+      }
+    },
+    {
+      "id": "tmotor-as2306-1500kv",
+      "manufacturer": "T-Motor",
+      "model": "AS2306 1500KV",
+      "kind": "motor",
+      "spec": {
+        "kv_rpm_per_v": 1500,
+        "min_series_cells": null,
+        "max_series_cells": null,
+        "max_current_a": 16,
+        "max_power_w": 170,
+        "max_static_thrust_n": 7.71883355,
+        "mass_kg": 0.0276,
+        "dimensions": null,
+        "recommended_propeller_diameter_m": null,
+        "recommended_propeller_pitch_m": null
+      },
+      "provenance": {
+        "publisher": "RC Innovations",
+        "source_url": "https://rc-innovations.es/shop/6971360352105-t-motor-as2306-1500kv-11897",
+        "source_title": "T-motor AS2306 1500KV",
+        "transformations": [
+          "787 g maximum static thrust interpreted as 0.787 kgf and multiplied by standard gravity 9.80665 m/s2",
+          "mass divided by 1000 from g to kg"
+        ]
+      }
+    },
+    {
+      "id": "kst-ds315mg-v8",
+      "manufacturer": "KST",
+      "model": "DS315MG V8.0",
+      "kind": "servo",
+      "spec": {
+        "mass_kg": 0.02,
+        "dimensions": {
+          "length_m": 0.023,
+          "width_m": 0.012,
+          "height_m": 0.0275
+        },
+        "operating_points": [
+          {
+            "voltage_v": 4.8,
+            "stall_torque_nm": 0.2353596,
+            "seconds_per_60_deg": 0.1,
+            "stall_current_a": null
+          },
+          {
+            "voltage_v": 6,
+            "stall_torque_nm": 0.2941995,
+            "seconds_per_60_deg": 0.09,
+            "stall_current_a": null
+          },
+          {
+            "voltage_v": 7.2,
+            "stall_torque_nm": 0.42168595,
+            "seconds_per_60_deg": 0.08,
+            "stall_current_a": null
+          },
+          {
+            "voltage_v": 8.4,
+            "stall_torque_nm": 0.4707192,
+            "seconds_per_60_deg": 0.07,
+            "stall_current_a": null
+          }
+        ]
+      },
+      "provenance": {
+        "publisher": "RC Innovations",
+        "source_url": "https://rc-innovations.es/shop/4897073540061-kst-ds315mg-v8-0-12mm-20g-4-8kg-10585",
+        "source_title": "KST DS315MG V8.0 12mm 20g 4.8Kg",
+        "transformations": [
+          "torque multiplied by 0.0980665 from kgf cm to N m",
+          "mass divided by 1000 from g to kg",
+          "dimensions divided by 1000 from mm to m",
+          "the page publishes no servo current, so stall current remains absent"
+        ]
+      }
+    },
+    {
+      "id": "aeronaut-power-prop-14x7",
+      "manufacturer": "Aero-naut",
+      "model": "Power Prop 14x7",
+      "kind": "propeller",
+      "spec": {
+        "diameter_m": 0.3556,
+        "pitch_m": 0.1778,
+        "blade_count": null,
+        "mass_kg": null,
+        "bore_diameter_m": 0.01,
+        "electric_compatible": true
+      },
+      "provenance": {
+        "publisher": "RC Innovations",
+        "source_url": "https://rc-innovations.es/shop/722649-helice-aero-naut-power-prop-14x7-16646",
+        "source_title": "Helice Aero-naut Power Prop 14x7",
+        "transformations": [
+          "14x7 inch dimensions multiplied by exactly 0.0254 m/in",
+          "the page publishes no propeller mass, so mass remains absent"
+        ]
+      }
+    },
+    {
+      "id": "carbon-sheet-3k-500x400x1p5-matte",
+      "manufacturer": "RC Innovations",
+      "model": "Carbon 3K sheet 500x400x1.5 mm matte",
+      "kind": "material_stock",
+      "spec": {
+        "form": "sheet",
+        "dimensions": {
+          "length_m": 0.5,
+          "width_m": 0.4,
+          "height_m": 0.0015
+        },
+        "mass_kg": 0.5,
+        "youngs_modulus_pa": null,
+        "allowable_stress_pa": null
+      },
+      "provenance": {
+        "publisher": "RC Innovations",
+        "source_url": "https://rc-innovations.es/shop/plc00001204-plancha-fibra-carbono-3k-500x400-1-5mm-acabado-mate-11186",
+        "source_title": "Plancha fibra carbono 3K 500x400 1.5mm acabado mate",
+        "transformations": [
+          "mass divided by 1000 from approximate g to kg",
+          "dimensions divided by 1000 from mm to m",
+          "the retail page supplies no laminate modulus, layup allowables, or knockdown factors; structural properties remain absent"
+        ]
+      }
+    },
+    {
+      "id": "gens-ace-b-45c-1800-3s1p",
+      "manufacturer": "Gens Ace",
+      "model": "B-45C-1800-3S1P-XT60",
+      "kind": "battery",
+      "spec": {
+        "chemistry": "LiPo",
+        "series_cells": 3,
+        "nominal_voltage_v": 11.1,
+        "capacity_ah": 1.8,
+        "discharge_rating_c": 45,
+        "mass_kg": 0.15,
+        "dimensions": {
+          "length_m": 0.092,
+          "width_m": 0.025,
+          "height_m": 0.031
+        },
+        "connector": "XT60"
+      },
+      "provenance": {
+        "publisher": "RC Innovations",
+        "source_url": "https://rc-innovations.es/shop/gea183s45x6gt-bateria-lipo-gens-ace-g-tech-3s-11-1v-1800mah-45c-7700",
+        "source_title": "Bateria LiPo Gens Ace G-Tech 3s 11.1V 1800mAh 45C",
+        "transformations": [
+          "capacity divided by 1000 from mAh to Ah",
+          "mass divided by 1000 from g to kg",
+          "dimensions divided by 1000 from mm to m"
+        ]
+      }
+    },
+    {
+      "id": "gens-ace-6800-3s-120c-ec5",
+      "manufacturer": "Gens Ace",
+      "model": "6800mAh 3S 120C Bashing EC5",
+      "kind": "battery",
+      "spec": {
+        "chemistry": "LiPo",
+        "series_cells": 3,
+        "nominal_voltage_v": 11.1,
+        "capacity_ah": 6.8,
+        "discharge_rating_c": 120,
+        "mass_kg": 0.521,
+        "dimensions": {
+          "length_m": 0.157,
+          "width_m": 0.048,
+          "height_m": 0.032
+        },
+        "connector": "EC5"
+      },
+      "provenance": {
+        "publisher": "RC Innovations",
+        "source_url": "https://rc-innovations.es/shop/gea68003s12e5-gens-ace-3s-11-1v-6800mah-120c-bashing-series-ec5-6809",
+        "source_title": "Gens ACE 3s 11.1V 6800mAh 120C Bashing Series EC5",
+        "transformations": [
+          "capacity divided by 1000 from mAh to Ah",
+          "mass divided by 1000 from g to kg",
+          "dimensions divided by 1000 from mm to m"
+        ]
+      }
+    },
+    {
+      "id": "aeronaut-power-prop-9x9",
+      "manufacturer": "Aero-naut",
+      "model": "Power Prop 9x9",
+      "kind": "propeller",
+      "spec": {
+        "diameter_m": 0.2286,
+        "pitch_m": 0.2286,
+        "blade_count": null,
+        "mass_kg": null,
+        "bore_diameter_m": null,
+        "electric_compatible": null
+      },
+      "provenance": {
+        "publisher": "RC Innovations",
+        "source_url": "https://rc-innovations.es/shop/722619-helice-aero-naut-power-prop-9x9-16668",
+        "source_title": "Helice Aero-naut Power Prop 9x9",
+        "transformations": [
+          "diameter and pitch parsed from the source title and multiplied by exactly 0.0254 m/in",
+          "blade count, mass, bore, and performance map remain absent until a detailed page or manufacturer data sheet states them"
+        ]
+      }
+    },
+    {
+      "id": "aeronaut-power-prop-9x7",
+      "manufacturer": "Aero-naut",
+      "model": "Power Prop 9x7",
+      "kind": "propeller",
+      "spec": {
+        "diameter_m": 0.2286,
+        "pitch_m": 0.17779999999999999,
+        "blade_count": null,
+        "mass_kg": null,
+        "bore_diameter_m": null,
+        "electric_compatible": null
+      },
+      "provenance": {
+        "publisher": "RC Innovations",
+        "source_url": "https://rc-innovations.es/shop/722618-helice-aero-naut-power-prop-9x7-16667",
+        "source_title": "Helice Aero-naut Power Prop 9x7",
+        "transformations": [
+          "diameter and pitch parsed from the source title and multiplied by exactly 0.0254 m/in",
+          "blade count, mass, bore, and performance map remain absent until a detailed page or manufacturer data sheet states them"
+        ]
+      }
+    },
+    {
+      "id": "aeronaut-power-prop-9x6p5",
+      "manufacturer": "Aero-naut",
+      "model": "Power Prop 9x6.5",
+      "kind": "propeller",
+      "spec": {
+        "diameter_m": 0.2286,
+        "pitch_m": 0.1651,
+        "blade_count": null,
+        "mass_kg": null,
+        "bore_diameter_m": null,
+        "electric_compatible": null
+      },
+      "provenance": {
+        "publisher": "RC Innovations",
+        "source_url": "https://rc-innovations.es/shop/722620-helice-aero-naut-power-prop-9x6-5-16666",
+        "source_title": "Helice Aero-naut Power Prop 9x6.5",
+        "transformations": [
+          "diameter and pitch parsed from the source title and multiplied by exactly 0.0254 m/in",
+          "blade count, mass, bore, and performance map remain absent until a detailed page or manufacturer data sheet states them"
+        ]
+      }
+    },
+    {
+      "id": "aeronaut-power-prop-9x6",
+      "manufacturer": "Aero-naut",
+      "model": "Power Prop 9x6",
+      "kind": "propeller",
+      "spec": {
+        "diameter_m": 0.2286,
+        "pitch_m": 0.15239999999999998,
+        "blade_count": null,
+        "mass_kg": null,
+        "bore_diameter_m": null,
+        "electric_compatible": null
+      },
+      "provenance": {
+        "publisher": "RC Innovations",
+        "source_url": "https://rc-innovations.es/shop/722617-helice-aero-naut-power-prop-9x6-16665",
+        "source_title": "Helice Aero-naut Power Prop 9x6",
+        "transformations": [
+          "diameter and pitch parsed from the source title and multiplied by exactly 0.0254 m/in",
+          "blade count, mass, bore, and performance map remain absent until a detailed page or manufacturer data sheet states them"
+        ]
+      }
+    },
+    {
+      "id": "aeronaut-power-prop-9x5",
+      "manufacturer": "Aero-naut",
+      "model": "Power Prop 9x5",
+      "kind": "propeller",
+      "spec": {
+        "diameter_m": 0.2286,
+        "pitch_m": 0.127,
+        "blade_count": null,
+        "mass_kg": null,
+        "bore_diameter_m": null,
+        "electric_compatible": null
+      },
+      "provenance": {
+        "publisher": "RC Innovations",
+        "source_url": "https://rc-innovations.es/shop/722616-helice-aero-naut-power-prop-9x5-16664",
+        "source_title": "Helice Aero-naut Power Prop 9x5",
+        "transformations": [
+          "diameter and pitch parsed from the source title and multiplied by exactly 0.0254 m/in",
+          "blade count, mass, bore, and performance map remain absent until a detailed page or manufacturer data sheet states them"
+        ]
+      }
+    },
+    {
+      "id": "aeronaut-power-prop-9x4",
+      "manufacturer": "Aero-naut",
+      "model": "Power Prop 9x4",
+      "kind": "propeller",
+      "spec": {
+        "diameter_m": 0.2286,
+        "pitch_m": 0.1016,
+        "blade_count": null,
+        "mass_kg": null,
+        "bore_diameter_m": null,
+        "electric_compatible": null
+      },
+      "provenance": {
+        "publisher": "RC Innovations",
+        "source_url": "https://rc-innovations.es/shop/722615-helice-aero-naut-power-prop-9x4-16663",
+        "source_title": "Helice Aero-naut Power Prop 9x4",
+        "transformations": [
+          "diameter and pitch parsed from the source title and multiplied by exactly 0.0254 m/in",
+          "blade count, mass, bore, and performance map remain absent until a detailed page or manufacturer data sheet states them"
+        ]
+      }
+    },
+    {
+      "id": "aeronaut-power-prop-18x10",
+      "manufacturer": "Aero-naut",
+      "model": "Power Prop 18x10",
+      "kind": "propeller",
+      "spec": {
+        "diameter_m": 0.4572,
+        "pitch_m": 0.254,
+        "blade_count": null,
+        "mass_kg": null,
+        "bore_diameter_m": null,
+        "electric_compatible": null
+      },
+      "provenance": {
+        "publisher": "RC Innovations",
+        "source_url": "https://rc-innovations.es/shop/722690-helice-aero-naut-power-prop-18x10-16662",
+        "source_title": "Helice Aero-naut Power Prop 18x10",
+        "transformations": [
+          "diameter and pitch parsed from the source title and multiplied by exactly 0.0254 m/in",
+          "blade count, mass, bore, and performance map remain absent until a detailed page or manufacturer data sheet states them"
+        ]
+      }
+    },
+    {
+      "id": "aeronaut-power-prop-17x10",
+      "manufacturer": "Aero-naut",
+      "model": "Power Prop 17x10",
+      "kind": "propeller",
+      "spec": {
+        "diameter_m": 0.43179999999999996,
+        "pitch_m": 0.254,
+        "blade_count": null,
+        "mass_kg": null,
+        "bore_diameter_m": null,
+        "electric_compatible": null
+      },
+      "provenance": {
+        "publisher": "RC Innovations",
+        "source_url": "https://rc-innovations.es/shop/722680-helice-aero-naut-power-prop-17x10-16661",
+        "source_title": "Helice Aero-naut Power Prop 17x10",
+        "transformations": [
+          "diameter and pitch parsed from the source title and multiplied by exactly 0.0254 m/in",
+          "blade count, mass, bore, and performance map remain absent until a detailed page or manufacturer data sheet states them"
+        ]
+      }
+    },
+    {
+      "id": "aeronaut-power-prop-16x8",
+      "manufacturer": "Aero-naut",
+      "model": "Power Prop 16x8",
+      "kind": "propeller",
+      "spec": {
+        "diameter_m": 0.4064,
+        "pitch_m": 0.2032,
+        "blade_count": null,
+        "mass_kg": null,
+        "bore_diameter_m": null,
+        "electric_compatible": null
+      },
+      "provenance": {
+        "publisher": "RC Innovations",
+        "source_url": "https://rc-innovations.es/shop/722668-helice-aero-naut-power-prop-16x8-16660",
+        "source_title": "Helice Aero-naut Power Prop 16x8",
+        "transformations": [
+          "diameter and pitch parsed from the source title and multiplied by exactly 0.0254 m/in",
+          "blade count, mass, bore, and performance map remain absent until a detailed page or manufacturer data sheet states them"
+        ]
+      }
+    },
+    {
+      "id": "aeronaut-power-prop-16x7",
+      "manufacturer": "Aero-naut",
+      "model": "Power Prop 16x7",
+      "kind": "propeller",
+      "spec": {
+        "diameter_m": 0.4064,
+        "pitch_m": 0.17779999999999999,
+        "blade_count": null,
+        "mass_kg": null,
+        "bore_diameter_m": null,
+        "electric_compatible": null
+      },
+      "provenance": {
+        "publisher": "RC Innovations",
+        "source_url": "https://rc-innovations.es/shop/722667-helice-aero-naut-power-prop-16x7-16659",
+        "source_title": "Helice Aero-naut Power Prop 16x7",
+        "transformations": [
+          "diameter and pitch parsed from the source title and multiplied by exactly 0.0254 m/in",
+          "blade count, mass, bore, and performance map remain absent until a detailed page or manufacturer data sheet states them"
+        ]
+      }
+    },
+    {
+      "id": "aeronaut-power-prop-16x11",
+      "manufacturer": "Aero-naut",
+      "model": "Power Prop 16x11",
+      "kind": "propeller",
+      "spec": {
+        "diameter_m": 0.4064,
+        "pitch_m": 0.2794,
+        "blade_count": null,
+        "mass_kg": null,
+        "bore_diameter_m": null,
+        "electric_compatible": null
+      },
+      "provenance": {
+        "publisher": "RC Innovations",
+        "source_url": "https://rc-innovations.es/shop/722671-helice-aero-naut-power-prop-16x11-16658",
+        "source_title": "Helice Aero-naut Power Prop 16x11",
+        "transformations": [
+          "diameter and pitch parsed from the source title and multiplied by exactly 0.0254 m/in",
+          "blade count, mass, bore, and performance map remain absent until a detailed page or manufacturer data sheet states them"
+        ]
+      }
+    },
+    {
+      "id": "aeronaut-power-prop-16x10",
+      "manufacturer": "Aero-naut",
+      "model": "Power Prop 16x10",
+      "kind": "propeller",
+      "spec": {
+        "diameter_m": 0.4064,
+        "pitch_m": 0.254,
+        "blade_count": null,
+        "mass_kg": null,
+        "bore_diameter_m": null,
+        "electric_compatible": null
+      },
+      "provenance": {
+        "publisher": "RC Innovations",
+        "source_url": "https://rc-innovations.es/shop/722670-helice-aero-naut-power-prop-16x10-16657",
+        "source_title": "Helice Aero-naut Power Prop 16x10",
+        "transformations": [
+          "diameter and pitch parsed from the source title and multiplied by exactly 0.0254 m/in",
+          "blade count, mass, bore, and performance map remain absent until a detailed page or manufacturer data sheet states them"
+        ]
+      }
+    },
+    {
+      "id": "kst-x20-4208",
+      "manufacturer": "KST",
+      "model": "X20 4208 HV Servo 20mm",
+      "kind": "servo",
+      "spec": {
+        "mass_kg": 0.08,
+        "dimensions": null,
+        "operating_points": []
+      },
+      "provenance": {
+        "publisher": "RC Innovations",
+        "source_url": "https://rc-innovations.es/en/shop/x20-4208-kst-x20-4208-hv-servo-20mm-80g-46kg-12963",
+        "source_title": "KST X20 4208 HV Servo 20mm 80g",
+        "transformations": [
+          "mass parsed from the source title and divided by 1000 from g to kg",
+          "torque, speed, current, voltage range, and dimensions remain absent until a data sheet is reconciled"
+        ]
+      }
+    },
+    {
+      "id": "kst-x20-3005",
+      "manufacturer": "KST",
+      "model": "X20 3005 HV Servo 20mm",
+      "kind": "servo",
+      "spec": {
+        "mass_kg": 0.07,
+        "dimensions": null,
+        "operating_points": []
+      },
+      "provenance": {
+        "publisher": "RC Innovations",
+        "source_url": "https://rc-innovations.es/en/shop/x20-3005-kst-x20-3005-hv-servo-20mm-70g-32kg-12962",
+        "source_title": "KST X20 3005 HV Servo 20mm 70g",
+        "transformations": [
+          "mass parsed from the source title and divided by 1000 from g to kg",
+          "torque, speed, current, voltage range, and dimensions remain absent until a data sheet is reconciled"
+        ]
+      }
+    },
+    {
+      "id": "kst-x20-1806",
+      "manufacturer": "KST",
+      "model": "X20 HV Low Profile Servo 20mm",
+      "kind": "servo",
+      "spec": {
+        "mass_kg": 0.05,
+        "dimensions": null,
+        "operating_points": []
+      },
+      "provenance": {
+        "publisher": "RC Innovations",
+        "source_url": "https://rc-innovations.es/en/shop/x20-1806-kst-x20-hv-low-profile-servo-20mm-50g-18kg-12961",
+        "source_title": "KST X20 HV Low Profile Servo 20mm 50g",
+        "transformations": [
+          "mass parsed from the source title and divided by 1000 from g to kg",
+          "torque, speed, current, voltage range, and dimensions remain absent until a data sheet is reconciled"
+        ]
+      }
+    },
+    {
+      "id": "frsky-vantac-t6811",
+      "manufacturer": "FrSky",
+      "model": "VANTAC T6811 Digital 8mm",
+      "kind": "servo",
+      "spec": {
+        "mass_kg": 0.0025,
+        "dimensions": null,
+        "operating_points": []
+      },
+      "provenance": {
+        "publisher": "RC Innovations",
+        "source_url": "https://rc-innovations.es/en/shop/t6811-frsky-vantac-t6811-digital-8mm-2-5g-12935",
+        "source_title": "FrSky VANTAC T6811 Digital 8mm 2.5g",
+        "transformations": [
+          "mass parsed from the source title and divided by 1000 from g to kg",
+          "torque, speed, current, voltage range, and dimensions remain absent until a data sheet is reconciled"
+        ]
+      }
+    },
+    {
+      "id": "ditex-td1005s",
+      "manufacturer": "Hacker / Jeti",
+      "model": "DITEX TD1005S Telemetry MG HV Digital",
+      "kind": "servo",
+      "spec": {
+        "mass_kg": 0.071,
+        "dimensions": null,
+        "operating_points": []
+      },
+      "provenance": {
+        "publisher": "RC Innovations",
+        "source_url": "https://rc-innovations.es/en/shop/dts-td1005s-hacker-jeti-ditex-td1005s-telemetry-mg-hv-digital-71g-16147",
+        "source_title": "Hacker / Jeti DITEX TD1005S Telemetry MG HV Digital 71g",
+        "transformations": [
+          "mass parsed from the source title and divided by 1000 from g to kg",
+          "torque, speed, current, voltage range, and dimensions remain absent until a data sheet is reconciled"
+        ]
+      }
+    },
+    {
+      "id": "ditex-el3214s",
+      "manufacturer": "Hacker / Jeti",
+      "model": "DITEX EL3214S MG HV Digital",
+      "kind": "servo",
+      "spec": {
+        "mass_kg": 0.085,
+        "dimensions": null,
+        "operating_points": []
+      },
+      "provenance": {
+        "publisher": "RC Innovations",
+        "source_url": "https://rc-innovations.es/en/shop/ds-el3214s-hacker-jeti-ditex-el3214s-mg-hv-digital-85g-16146",
+        "source_title": "Hacker / Jeti DITEX EL3214S MG HV Digital 85g",
+        "transformations": [
+          "mass parsed from the source title and divided by 1000 from g to kg",
+          "torque, speed, current, voltage range, and dimensions remain absent until a data sheet is reconciled"
+        ]
+      }
+    },
+    {
+      "id": "ditex-el2114s",
+      "manufacturer": "Hacker / Jeti",
+      "model": "DITEX EL2114S MG HV Digital",
+      "kind": "servo",
+      "spec": {
+        "mass_kg": 0.077,
+        "dimensions": null,
+        "operating_points": []
+      },
+      "provenance": {
+        "publisher": "RC Innovations",
+        "source_url": "https://rc-innovations.es/en/shop/ds-el2114s-hacker-jeti-ditex-el2114s-mg-hv-digital-77g-16145",
+        "source_title": "Hacker / Jeti DITEX EL2114S MG HV Digital 77g",
+        "transformations": [
+          "mass parsed from the source title and divided by 1000 from g to kg",
+          "torque, speed, current, voltage range, and dimensions remain absent until a data sheet is reconciled"
+        ]
+      }
+    },
+    {
+      "id": "ditex-el0809md",
+      "manufacturer": "Hacker / Jeti",
+      "model": "DITEX EL0809MD MG HV Digital",
+      "kind": "servo",
+      "spec": {
+        "mass_kg": 0.02,
+        "dimensions": null,
+        "operating_points": []
+      },
+      "provenance": {
+        "publisher": "RC Innovations",
+        "source_url": "https://rc-innovations.es/en/shop/el0809md-hacker-jeti-ditex-el0809md-mg-hv-digital-20g-16144",
+        "source_title": "Hacker / Jeti DITEX EL0809MD MG HV Digital 20g",
+        "transformations": [
+          "mass parsed from the source title and divided by 1000 from g to kg",
+          "torque, speed, current, voltage range, and dimensions remain absent until a data sheet is reconciled"
+        ]
+      }
+    },
+    {
+      "id": "ditex-el0512w",
+      "manufacturer": "Hacker / Jeti",
+      "model": "DITEX EL0512W MG HV Digital",
+      "kind": "servo",
+      "spec": {
+        "mass_kg": 0.02,
+        "dimensions": null,
+        "operating_points": []
+      },
+      "provenance": {
+        "publisher": "RC Innovations",
+        "source_url": "https://rc-innovations.es/en/shop/el0512w-hacker-jeti-ditex-el0512w-mg-hv-digital-20g-16143",
+        "source_title": "Hacker / Jeti DITEX EL0512W MG HV Digital 20g",
+        "transformations": [
+          "mass parsed from the source title and divided by 1000 from g to kg",
+          "torque, speed, current, voltage range, and dimensions remain absent until a data sheet is reconciled"
+        ]
+      }
+    },
+    {
+      "id": "ditex-el0510m",
+      "manufacturer": "Hacker / Jeti",
+      "model": "DITEX EL0510M MG HV Digital",
+      "kind": "servo",
+      "spec": {
+        "mass_kg": 0.02,
+        "dimensions": null,
+        "operating_points": []
+      },
+      "provenance": {
+        "publisher": "RC Innovations",
+        "source_url": "https://rc-innovations.es/en/shop/el0510m-hacker-jeti-ditex-el0510m-mg-hv-digital-20g-16142",
+        "source_title": "Hacker / Jeti DITEX EL0510M MG HV Digital 20g",
+        "transformations": [
+          "mass parsed from the source title and divided by 1000 from g to kg",
+          "torque, speed, current, voltage range, and dimensions remain absent until a data sheet is reconciled"
+        ]
+      }
+    },
+    {
+      "id": "ditex-el0315m",
+      "manufacturer": "Hacker / Jeti",
+      "model": "DITEX EL0315M MG Digital",
+      "kind": "servo",
+      "spec": {
+        "mass_kg": 0.015,
+        "dimensions": null,
+        "operating_points": []
+      },
+      "provenance": {
+        "publisher": "RC Innovations",
+        "source_url": "https://rc-innovations.es/en/shop/el0315m-hacker-jeti-ditex-el0315m-mg-digital-15g-16141",
+        "source_title": "Hacker / Jeti DITEX EL0315M MG Digital 15g",
+        "transformations": [
+          "mass parsed from the source title and divided by 1000 from g to kg",
+          "torque, speed, current, voltage range, and dimensions remain absent until a data sheet is reconciled"
+        ]
+      }
+    },
+    {
+      "id": "ditex-el0106m",
+      "manufacturer": "Hacker / Jeti",
+      "model": "DITEX EL0106M MG Digital",
+      "kind": "servo",
+      "spec": {
+        "mass_kg": 0.011,
+        "dimensions": null,
+        "operating_points": []
+      },
+      "provenance": {
+        "publisher": "RC Innovations",
+        "source_url": "https://rc-innovations.es/en/shop/el0106m-hacker-jeti-ditex-el0106m-mg-digital-11g-16140",
+        "source_title": "Hacker / Jeti DITEX EL0106M MG Digital 11g",
+        "transformations": [
+          "mass parsed from the source title and divided by 1000 from g to kg",
+          "torque, speed, current, voltage range, and dimensions remain absent until a data sheet is reconciled"
+        ]
+      }
+    },
+    {
+      "id": "hobbywing-skywalker-80a-v2",
+      "manufacturer": "Hobbywing",
+      "model": "SkyWalker 80A V2 UBEC",
+      "kind": "esc",
+      "spec": {
+        "min_series_cells": null,
+        "max_series_cells": null,
+        "continuous_current_a": null,
+        "bec_min_voltage_v": null,
+        "bec_max_voltage_v": null,
+        "bec_continuous_current_a": null,
+        "bec_peak_current_a": null,
+        "mass_kg": null,
+        "dimensions": null
+      },
+      "provenance": {
+        "publisher": "RC Innovations",
+        "source_url": "https://rc-innovations.es/shop/80060440-hobbywing-skywalker-80a-v2-ubec-16400",
+        "source_title": "Hobbywing SkyWalker 80A V2 UBEC",
+        "transformations": [
+          "the controller current rating remains visible in the model and source title but is not assigned as a continuous limit without a detailed specification",
+          "cell range, BEC limits, mass, thermal derating, and dimensions remain absent until the product page or manufacturer sheet states them"
+        ]
+      }
+    },
+    {
+      "id": "hobbywing-skywalker-60a-v2",
+      "manufacturer": "Hobbywing",
+      "model": "SkyWalker 60A UBEC V2",
+      "kind": "esc",
+      "spec": {
+        "min_series_cells": null,
+        "max_series_cells": null,
+        "continuous_current_a": null,
+        "bec_min_voltage_v": null,
+        "bec_max_voltage_v": null,
+        "bec_continuous_current_a": null,
+        "bec_peak_current_a": null,
+        "mass_kg": null,
+        "dimensions": null
+      },
+      "provenance": {
+        "publisher": "RC Innovations",
+        "source_url": "https://rc-innovations.es/shop/30216101-hobbywing-skywalker-60a-ubec-v2-16399",
+        "source_title": "Hobbywing SkyWalker 60A UBEC V2",
+        "transformations": [
+          "the controller current rating remains visible in the model and source title but is not assigned as a continuous limit without a detailed specification",
+          "cell range, BEC limits, mass, thermal derating, and dimensions remain absent until the product page or manufacturer sheet states them"
+        ]
+      }
+    },
+    {
+      "id": "hobbywing-skywalker-50a-v2",
+      "manufacturer": "Hobbywing",
+      "model": "SkyWalker 50A V2 UBEC",
+      "kind": "esc",
+      "spec": {
+        "min_series_cells": null,
+        "max_series_cells": null,
+        "continuous_current_a": null,
+        "bec_min_voltage_v": null,
+        "bec_max_voltage_v": null,
+        "bec_continuous_current_a": null,
+        "bec_peak_current_a": null,
+        "mass_kg": null,
+        "dimensions": null
+      },
+      "provenance": {
+        "publisher": "RC Innovations",
+        "source_url": "https://rc-innovations.es/shop/80060442-hobbywing-skywalker-50a-v2-ubec-16398",
+        "source_title": "Hobbywing SkyWalker 50A V2 UBEC",
+        "transformations": [
+          "the controller current rating remains visible in the model and source title but is not assigned as a continuous limit without a detailed specification",
+          "cell range, BEC limits, mass, thermal derating, and dimensions remain absent until the product page or manufacturer sheet states them"
+        ]
+      }
+    },
+    {
+      "id": "hobbywing-skywalker-40a-v2",
+      "manufacturer": "Hobbywing",
+      "model": "SkyWalker 40A V2",
+      "kind": "esc",
+      "spec": {
+        "min_series_cells": null,
+        "max_series_cells": null,
+        "continuous_current_a": null,
+        "bec_min_voltage_v": null,
+        "bec_max_voltage_v": null,
+        "bec_continuous_current_a": null,
+        "bec_peak_current_a": null,
+        "mass_kg": null,
+        "dimensions": null
+      },
+      "provenance": {
+        "publisher": "RC Innovations",
+        "source_url": "https://rc-innovations.es/shop/80060022-hobbywing-skywalker-40a-v2-16397",
+        "source_title": "Hobbywing SkyWalker 40A V2",
+        "transformations": [
+          "the controller current rating remains visible in the model and source title but is not assigned as a continuous limit without a detailed specification",
+          "cell range, BEC limits, mass, thermal derating, and dimensions remain absent until the product page or manufacturer sheet states them"
+        ]
+      }
+    },
+    {
+      "id": "hobbywing-skywalker-30a-v2",
+      "manufacturer": "Hobbywing",
+      "model": "SkyWalker 30A V2",
+      "kind": "esc",
+      "spec": {
+        "min_series_cells": null,
+        "max_series_cells": null,
+        "continuous_current_a": null,
+        "bec_min_voltage_v": null,
+        "bec_max_voltage_v": null,
+        "bec_continuous_current_a": null,
+        "bec_peak_current_a": null,
+        "mass_kg": null,
+        "dimensions": null
+      },
+      "provenance": {
+        "publisher": "RC Innovations",
+        "source_url": "https://rc-innovations.es/shop/30205351-hobbywing-skywalker-30a-v2-16396",
+        "source_title": "Hobbywing SkyWalker 30A V2",
+        "transformations": [
+          "the controller current rating remains visible in the model and source title but is not assigned as a continuous limit without a detailed specification",
+          "cell range, BEC limits, mass, thermal derating, and dimensions remain absent until the product page or manufacturer sheet states them"
+        ]
+      }
+    },
+    {
+      "id": "hobbywing-skywalker-20a-v2",
+      "manufacturer": "Hobbywing",
+      "model": "SkyWalker 20A V2",
+      "kind": "esc",
+      "spec": {
+        "min_series_cells": null,
+        "max_series_cells": null,
+        "continuous_current_a": null,
+        "bec_min_voltage_v": null,
+        "bec_max_voltage_v": null,
+        "bec_continuous_current_a": null,
+        "bec_peak_current_a": null,
+        "mass_kg": null,
+        "dimensions": null
+      },
+      "provenance": {
+        "publisher": "RC Innovations",
+        "source_url": "https://rc-innovations.es/shop/30205200-hobbywing-skywalker-20a-v2-16395",
+        "source_title": "Hobbywing SkyWalker 20A V2",
+        "transformations": [
+          "the controller current rating remains visible in the model and source title but is not assigned as a continuous limit without a detailed specification",
+          "cell range, BEC limits, mass, thermal derating, and dimensions remain absent until the product page or manufacturer sheet states them"
+        ]
+      }
+    },
+    {
+      "id": "hobbywing-ubec-3a",
+      "manufacturer": "Hobbywing",
+      "model": "UBEC 3A",
+      "kind": "electronics",
+      "spec": {
+        "role": "bec",
+        "min_voltage_v": null,
+        "max_voltage_v": null,
+        "max_current_a": null,
+        "mass_kg": null,
+        "dimensions": null,
+        "protocols": []
+      },
+      "provenance": {
+        "publisher": "RC Innovations",
+        "source_url": "https://rc-innovations.es/shop/6938994400107-hobbywing-ubec-3a-16358",
+        "source_title": "HobbyWing Ubec 3A",
+        "transformations": [
+          "the BEC current rating remains visible in the model and source title but is not assigned as a continuous or peak limit without a detailed specification",
+          "electrical input and output ranges, mass, dimensions, and thermal limits remain absent"
+        ]
+      }
+    },
+    {
+      "id": "hobbywing-ubec-25a-hv",
+      "manufacturer": "Hobbywing",
+      "model": "UBEC 25A HV",
+      "kind": "electronics",
+      "spec": {
+        "role": "bec",
+        "min_voltage_v": null,
+        "max_voltage_v": null,
+        "max_current_a": null,
+        "mass_kg": null,
+        "dimensions": null,
+        "protocols": []
+      },
+      "provenance": {
+        "publisher": "RC Innovations",
+        "source_url": "https://rc-innovations.es/shop/6938994400312-hobbywing-ubec-25a-hv-16357",
+        "source_title": "HobbyWing Ubec 25A HV",
+        "transformations": [
+          "the BEC current rating remains visible in the model and source title but is not assigned as a continuous or peak limit without a detailed specification",
+          "electrical input and output ranges, mass, dimensions, and thermal limits remain absent"
+        ]
+      }
+    },
+    {
+      "id": "hobbywing-ubec-10a-hv",
+      "manufacturer": "Hobbywing",
+      "model": "UBEC 10A HV 3S-14S",
+      "kind": "electronics",
+      "spec": {
+        "role": "bec",
+        "min_voltage_v": null,
+        "max_voltage_v": null,
+        "max_current_a": null,
+        "mass_kg": null,
+        "dimensions": null,
+        "protocols": []
+      },
+      "provenance": {
+        "publisher": "RC Innovations",
+        "source_url": "https://rc-innovations.es/shop/6938994400183-hobbywing-ubec-10a-hv-3s-14s-16356",
+        "source_title": "HobbyWing Ubec 10A HV 3s - 14s",
+        "transformations": [
+          "the BEC current rating remains visible in the model and source title but is not assigned as a continuous or peak limit without a detailed specification",
+          "electrical input and output ranges, mass, dimensions, and thermal limits remain absent"
+        ]
+      }
+    },
+    {
+      "id": "frsky-td-r6",
+      "manufacturer": "FrSky",
+      "model": "TD R6 Dual 2.4GHz & 868MHz 6CH OTA",
+      "kind": "receiver",
+      "spec": {
+        "channel_count": 6,
+        "min_voltage_v": null,
+        "max_voltage_v": null,
+        "mass_kg": null,
+        "dimensions": null,
+        "protocols": [
+          "OTA"
+        ],
+        "telemetry": null
+      },
+      "provenance": {
+        "publisher": "RC Innovations",
+        "source_url": "https://rc-innovations.es/shop/03022022-frsky-td-r6-dual-2-4ghz-868mhz-6ch-ota-12924",
+        "source_title": "FrSky TD R6 Dual 2.4GHz & 868MHz 6CH OTA",
+        "transformations": [
+          "channel count and protocol names parsed from the source title",
+          "supply range, mass, dimensions, and telemetry capability remain absent until the product data sheet is reviewed"
+        ]
+      }
+    },
+    {
+      "id": "frsky-archer-plus-sr10",
+      "manufacturer": "FrSky",
+      "model": "ARCHER PLUS SR10+ ACCESS / ACCST 10 CH SBUS",
+      "kind": "receiver",
+      "spec": {
+        "channel_count": 10,
+        "min_voltage_v": null,
+        "max_voltage_v": null,
+        "mass_kg": null,
+        "dimensions": null,
+        "protocols": [
+          "ACCESS",
+          "ACCST",
+          "SBUS"
+        ],
+        "telemetry": null
+      },
+      "provenance": {
+        "publisher": "RC Innovations",
+        "source_url": "https://rc-innovations.es/shop/03020109-frsky-archer-plus-sr10-access-accst-10-ch-sbus-12922",
+        "source_title": "FrSky ARCHER PLUS SR10+ ACCESS / ACCST 10 CH SBUS",
+        "transformations": [
+          "channel count and protocol names parsed from the source title",
+          "supply range, mass, dimensions, and telemetry capability remain absent until the product data sheet is reviewed"
+        ]
+      }
+    },
+    {
+      "id": "frsky-archer-plus-r10",
+      "manufacturer": "FrSky",
+      "model": "ARCHER PLUS R10+ ACCESS / ACCST 10 CH SBUS",
+      "kind": "receiver",
+      "spec": {
+        "channel_count": 10,
+        "min_voltage_v": null,
+        "max_voltage_v": null,
+        "mass_kg": null,
+        "dimensions": null,
+        "protocols": [
+          "ACCESS",
+          "ACCST",
+          "SBUS"
+        ],
+        "telemetry": null
+      },
+      "provenance": {
+        "publisher": "RC Innovations",
+        "source_url": "https://rc-innovations.es/shop/03020110-frsky-archer-plus-r10-access-accst-10-ch-sbus-12921",
+        "source_title": "FrSky ARCHER PLUS R10+ ACCESS / ACCST 10 CH SBUS",
+        "transformations": [
+          "channel count and protocol names parsed from the source title",
+          "supply range, mass, dimensions, and telemetry capability remain absent until the product data sheet is reviewed"
+        ]
+      }
+    },
+    {
+      "id": "frsky-gps-adv",
+      "manufacturer": "FrSky",
+      "model": "Sensor GPS ADV",
+      "kind": "electronics",
+      "spec": {
+        "role": "gps_sensor",
+        "min_voltage_v": null,
+        "max_voltage_v": null,
+        "max_current_a": null,
+        "mass_kg": null,
+        "dimensions": null,
+        "protocols": [
+          "FBUS",
+          "S.Port"
+        ]
+      },
+      "provenance": {
+        "publisher": "RC Innovations",
+        "source_url": "https://rc-innovations.es/shop/03040704-frsky-sensor-gps-adv-15717",
+        "source_title": "FrSky Sensor GPS ADV",
+        "transformations": [
+          "GPS sensor role and FBUS and S.Port compatibility are stated by the reviewed product page",
+          "supply voltage, current consumption, mass, dimensions, update rate, and accuracy remain absent"
+        ]
+      }
+    },
+    {
+      "id": "tarot-x8-pro-retract",
+      "manufacturer": "Tarot",
+      "model": "Tren Retractil Electrico para Tarot X8 PRO",
+      "kind": "landing_gear",
+      "spec": {
+        "form": "retract_mechanism",
+        "mass_kg": null,
+        "max_aircraft_mass_kg": null,
+        "dimensions": null,
+        "nominal_voltage_v": null
+      },
+      "provenance": {
+        "publisher": "RC Innovations",
+        "source_url": "https://rc-innovations.es/shop/tl8x021-tren-retractil-electrico-para-tarot-x8-pro-12494",
+        "source_title": "Tren Retractil Electrico para Tarot X8 PRO",
+        "transformations": [
+          "retail form parsed from the source title",
+          "interface diameters and a product-name mass label are not treated as bounding dimensions or a certified load allowable; mass, load rating, voltage, and dimensions remain absent"
+        ]
+      }
+    },
+    {
+      "id": "tarot-650-680-retract",
+      "manufacturer": "Tarot",
+      "model": "Tren Retractil Electrico Tarot 650 - 680",
+      "kind": "landing_gear",
+      "spec": {
+        "form": "retract_mechanism",
+        "mass_kg": null,
+        "max_aircraft_mass_kg": null,
+        "dimensions": null,
+        "nominal_voltage_v": null
+      },
+      "provenance": {
+        "publisher": "RC Innovations",
+        "source_url": "https://rc-innovations.es/shop/tl65b45-tren-retractil-electrico-tarot-650-680-12493",
+        "source_title": "Tren Retractil Electrico Tarot 650 - 680",
+        "transformations": [
+          "retail form parsed from the source title",
+          "interface diameters and a product-name mass label are not treated as bounding dimensions or a certified load allowable; mass, load rating, voltage, and dimensions remain absent"
+        ]
+      }
+    },
+    {
+      "id": "tarot-25kg-90-retract",
+      "manufacturer": "Tarot",
+      "model": "Tren Retractil Electrico Tarot 25Kg 90 deg",
+      "kind": "landing_gear",
+      "spec": {
+        "form": "retract_mechanism",
+        "mass_kg": null,
+        "max_aircraft_mass_kg": null,
+        "dimensions": null,
+        "nominal_voltage_v": null
+      },
+      "provenance": {
+        "publisher": "RC Innovations",
+        "source_url": "https://rc-innovations.es/shop/tl4n003-tren-retractil-electrico-tarot-25kg-90o-12492",
+        "source_title": "Tren Retractil Electrico Tarot 25Kg 90 deg",
+        "transformations": [
+          "retail form parsed from the source title",
+          "interface diameters and a product-name mass label are not treated as bounding dimensions or a certified load allowable; mass, load rating, voltage, and dimensions remain absent"
+        ]
+      }
+    },
+    {
+      "id": "tarot-25kg-75-retract",
+      "manufacturer": "Tarot",
+      "model": "Tren Retractil Electrico Tarot 25Kg 75 deg",
+      "kind": "landing_gear",
+      "spec": {
+        "form": "retract_mechanism",
+        "mass_kg": null,
+        "max_aircraft_mass_kg": null,
+        "dimensions": null,
+        "nominal_voltage_v": null
+      },
+      "provenance": {
+        "publisher": "RC Innovations",
+        "source_url": "https://rc-innovations.es/shop/tl4n004-tren-retractil-electrico-tarot-25kg-75o-12491",
+        "source_title": "Tren Retractil Electrico Tarot 25Kg 75 deg",
+        "transformations": [
+          "retail form parsed from the source title",
+          "interface diameters and a product-name mass label are not treated as bounding dimensions or a certified load allowable; mass, load rating, voltage, and dimensions remain absent"
+        ]
+      }
+    },
+    {
+      "id": "tarot-x-skid-quick",
+      "manufacturer": "Tarot",
+      "model": "Tarot X Series Kit Patin Aterrizaje Anclaje Rapido 25mm",
+      "kind": "landing_gear",
+      "spec": {
+        "form": "fixed_skid",
+        "mass_kg": null,
+        "max_aircraft_mass_kg": null,
+        "dimensions": null,
+        "nominal_voltage_v": null
+      },
+      "provenance": {
+        "publisher": "RC Innovations",
+        "source_url": "https://rc-innovations.es/shop/tl96040-tarot-x-series-kit-patin-aterrizaje-anclaje-rapido-25mm-12111",
+        "source_title": "Tarot X Series Kit Patin Aterrizaje Anclaje Rapido 25mm",
+        "transformations": [
+          "retail form parsed from the source title",
+          "interface diameters and a product-name mass label are not treated as bounding dimensions or a certified load allowable; mass, load rating, voltage, and dimensions remain absent"
+        ]
+      }
+    },
+    {
+      "id": "tarot-x-skid",
+      "manufacturer": "Tarot",
+      "model": "Tarot X Series Kit Patin Aterrizaje 25mm",
+      "kind": "landing_gear",
+      "spec": {
+        "form": "fixed_skid",
+        "mass_kg": null,
+        "max_aircraft_mass_kg": null,
+        "dimensions": null,
+        "nominal_voltage_v": null
+      },
+      "provenance": {
+        "publisher": "RC Innovations",
+        "source_url": "https://rc-innovations.es/shop/tl96041-tarot-x-series-kit-patin-aterrizaje-25mm-12110",
+        "source_title": "Tarot X Series Kit Patin Aterrizaje 25mm",
+        "transformations": [
+          "retail form parsed from the source title",
+          "interface diameters and a product-name mass label are not treated as bounding dimensions or a certified load allowable; mass, load rating, voltage, and dimensions remain absent"
+        ]
+      }
+    },
+    {
+      "id": "carbon-tube-3k-8x6x1000-matte",
+      "manufacturer": "RCI Innovations",
+      "model": "Tubo fibra carbono 3K 8mm x6mm 1000mm Acabado mate",
+      "kind": "material_stock",
+      "spec": {
+        "form": "tube",
+        "dimensions": {
+          "length_m": 1,
+          "width_m": 0.008,
+          "height_m": 0.008
+        },
+        "mass_kg": null,
+        "youngs_modulus_pa": null,
+        "allowable_stress_pa": null
+      },
+      "provenance": {
+        "publisher": "RC Innovations",
+        "source_url": "https://rc-innovations.es/shop/tc00001224-tubo-fibra-carbono-3k-8mm-x6mm-1000mm-acabado-mate-12590",
+        "source_title": "Tubo fibra carbono 3K 8mm x6mm 1000mm Acabado mate",
+        "transformations": [
+          "length and outer diameter parsed from the source title and divided by 1000 from mm to m",
+          "axis-aligned width and height use the published outer diameter; inner diameter remains in the title evidence",
+          "mass, laminate modulus, layup allowables, joints, and knockdown factors remain absent"
+        ]
+      }
+    },
+    {
+      "id": "carbon-tube-3k-7x5x1000-matte",
+      "manufacturer": "RCI Innovations",
+      "model": "Tubo fibra carbono 3K 7mm x5mm 1000mm Acabado mate",
+      "kind": "material_stock",
+      "spec": {
+        "form": "tube",
+        "dimensions": {
+          "length_m": 1,
+          "width_m": 0.007,
+          "height_m": 0.007
+        },
+        "mass_kg": null,
+        "youngs_modulus_pa": null,
+        "allowable_stress_pa": null
+      },
+      "provenance": {
+        "publisher": "RC Innovations",
+        "source_url": "https://rc-innovations.es/shop/tc00002999-tubo-fibra-carbono-3k-7mm-x5mm-1000mm-acabado-mate-12588",
+        "source_title": "Tubo fibra carbono 3K 7mm x5mm 1000mm Acabado mate",
+        "transformations": [
+          "length and outer diameter parsed from the source title and divided by 1000 from mm to m",
+          "axis-aligned width and height use the published outer diameter; inner diameter remains in the title evidence",
+          "mass, laminate modulus, layup allowables, joints, and knockdown factors remain absent"
+        ]
+      }
+    },
+    {
+      "id": "carbon-tube-3k-6x4x1000-gloss",
+      "manufacturer": "RCI Innovations",
+      "model": "Tubo fibra carbono 3K 6mm x4mm 1000mm Acabado alto brillo",
+      "kind": "material_stock",
+      "spec": {
+        "form": "tube",
+        "dimensions": {
+          "length_m": 1,
+          "width_m": 0.006,
+          "height_m": 0.006
+        },
+        "mass_kg": null,
+        "youngs_modulus_pa": null,
+        "allowable_stress_pa": null
+      },
+      "provenance": {
+        "publisher": "RC Innovations",
+        "source_url": "https://rc-innovations.es/shop/00003001-tubo-fibra-carbono-3k-6mm-x4mm-1000mm-acabado-alto-brillo-12586",
+        "source_title": "Tubo fibra carbono 3K 6mm x4mm 1000mm Acabado alto brillo",
+        "transformations": [
+          "length and outer diameter parsed from the source title and divided by 1000 from mm to m",
+          "axis-aligned width and height use the published outer diameter; inner diameter remains in the title evidence",
+          "mass, laminate modulus, layup allowables, joints, and knockdown factors remain absent"
+        ]
+      }
+    },
+    {
+      "id": "carbon-tube-3k-32x29x1000-gloss",
+      "manufacturer": "RCI Innovations",
+      "model": "Tubo fibra carbono 3K 32mm x29mm 1000mm Acabado alto brillo",
+      "kind": "material_stock",
+      "spec": {
+        "form": "tube",
+        "dimensions": {
+          "length_m": 1,
+          "width_m": 0.032,
+          "height_m": 0.032
+        },
+        "mass_kg": null,
+        "youngs_modulus_pa": null,
+        "allowable_stress_pa": null
+      },
+      "provenance": {
+        "publisher": "RC Innovations",
+        "source_url": "https://rc-innovations.es/shop/tc00002085-tubo-fibra-carbono-3k-32mm-x29mm-1000mm-acabado-alto-brillo-12585",
+        "source_title": "Tubo fibra carbono 3K 32mm x29mm 1000mm Acabado alto brillo",
+        "transformations": [
+          "length and outer diameter parsed from the source title and divided by 1000 from mm to m",
+          "axis-aligned width and height use the published outer diameter; inner diameter remains in the title evidence",
+          "mass, laminate modulus, layup allowables, joints, and knockdown factors remain absent"
+        ]
+      }
+    },
+    {
+      "id": "carbon-tube-3k-29x27x1000-gloss",
+      "manufacturer": "RCI Innovations",
+      "model": "Tubo fibra carbono 3K 29mm x27mm 1000mm Acabado brillo",
+      "kind": "material_stock",
+      "spec": {
+        "form": "tube",
+        "dimensions": {
+          "length_m": 1,
+          "width_m": 0.029,
+          "height_m": 0.029
+        },
+        "mass_kg": null,
+        "youngs_modulus_pa": null,
+        "allowable_stress_pa": null
+      },
+      "provenance": {
+        "publisher": "RC Innovations",
+        "source_url": "https://rc-innovations.es/shop/tc00002078-tubo-fibra-carbono-3k-29mm-x-27mm-1000mm-acabado-brillo-12582",
+        "source_title": "Tubo fibra carbono 3K 29mm x27mm 1000mm Acabado brillo",
+        "transformations": [
+          "length and outer diameter parsed from the source title and divided by 1000 from mm to m",
+          "axis-aligned width and height use the published outer diameter; inner diameter remains in the title evidence",
+          "mass, laminate modulus, layup allowables, joints, and knockdown factors remain absent"
+        ]
+      }
+    },
+    {
+      "id": "carbon-tube-3k-28x25x1000-gloss",
+      "manufacturer": "RCI Innovations",
+      "model": "Tubo fibra carbono 3K 28mm x25mm 1000mm Acabado alto brillo",
+      "kind": "material_stock",
+      "spec": {
+        "form": "tube",
+        "dimensions": {
+          "length_m": 1,
+          "width_m": 0.028,
+          "height_m": 0.028
+        },
+        "mass_kg": null,
+        "youngs_modulus_pa": null,
+        "allowable_stress_pa": null
+      },
+      "provenance": {
+        "publisher": "RC Innovations",
+        "source_url": "https://rc-innovations.es/shop/tc00002081-tubo-fibra-carbono-3k-28mm-x25mm-1000mm-acabado-alto-brillo-12581",
+        "source_title": "Tubo fibra carbono 3K 28mm x25mm 1000mm Acabado alto brillo",
+        "transformations": [
+          "length and outer diameter parsed from the source title and divided by 1000 from mm to m",
+          "axis-aligned width and height use the published outer diameter; inner diameter remains in the title evidence",
+          "mass, laminate modulus, layup allowables, joints, and knockdown factors remain absent"
+        ]
+      }
+    },
+    {
+      "id": "tmotor-v13l-65kv",
+      "manufacturer": "T-Motor",
+      "model": "Tmotor V13L 65KV",
+      "kind": "motor",
+      "spec": {
+        "kv_rpm_per_v": 65,
+        "min_series_cells": null,
+        "max_series_cells": null,
+        "max_current_a": null,
+        "max_power_w": null,
+        "max_static_thrust_n": 539.3657499999999,
+        "mass_kg": null,
+        "dimensions": null,
+        "recommended_propeller_diameter_m": null,
+        "recommended_propeller_pitch_m": null
+      },
+      "provenance": {
+        "publisher": "RC Innovations",
+        "source_url": "https://rc-innovations.es/shop/tmotor-v13l-65kv-tmotor-v13l-65kv-6347",
+        "source_title": "Tmotor V13L 65KV",
+        "transformations": [
+          "55 kg maximum static thrust multiplied by standard gravity 9.80665 m/s2",
+          "mass, electrical limits, cell range, dimensions, and in-flight propeller map remain absent"
+        ]
+      }
+    },
+    {
+      "id": "tmotor-p1604-2850kv",
+      "manufacturer": "T-Motor",
+      "model": "T-motor P1604 2850KV",
+      "kind": "motor",
+      "spec": {
+        "kv_rpm_per_v": 2850,
+        "min_series_cells": null,
+        "max_series_cells": null,
+        "max_current_a": null,
+        "max_power_w": null,
+        "max_static_thrust_n": 6.0605097,
+        "mass_kg": 0.0116,
+        "dimensions": null,
+        "recommended_propeller_diameter_m": 0.08889999999999999,
+        "recommended_propeller_pitch_m": null
+      },
+      "provenance": {
+        "publisher": "RC Innovations",
+        "source_url": "https://rc-innovations.es/shop/t-motor-p1604-freestyle-sub-250g-6748",
+        "source_title": "T-motor P1604 2850KV",
+        "transformations": [
+          "2850 KV selected from the page variants",
+          "mass divided by 1000 from g to kg",
+          "618 g maximum static thrust interpreted as 0.618 kgf and multiplied by standard gravity 9.80665 m/s2",
+          "3.5 inch recommended diameter multiplied by exactly 0.0254 m/in",
+          "the page does not map its 4S and 6S statements unambiguously to each winding, so cell range remains absent"
+        ]
+      }
+    },
+    {
+      "id": "tmotor-p1604-3800kv",
+      "manufacturer": "T-Motor",
+      "model": "T-motor P1604 3800KV",
+      "kind": "motor",
+      "spec": {
+        "kv_rpm_per_v": 3800,
+        "min_series_cells": null,
+        "max_series_cells": null,
+        "max_current_a": null,
+        "max_power_w": null,
+        "max_static_thrust_n": 6.0605097,
+        "mass_kg": 0.0116,
+        "dimensions": null,
+        "recommended_propeller_diameter_m": 0.08889999999999999,
+        "recommended_propeller_pitch_m": null
+      },
+      "provenance": {
+        "publisher": "RC Innovations",
+        "source_url": "https://rc-innovations.es/shop/t-motor-p1604-freestyle-sub-250g-6748",
+        "source_title": "T-motor P1604 3800KV",
+        "transformations": [
+          "3800 KV selected from the page variants",
+          "mass divided by 1000 from g to kg",
+          "618 g maximum static thrust interpreted as 0.618 kgf and multiplied by standard gravity 9.80665 m/s2",
+          "3.5 inch recommended diameter multiplied by exactly 0.0254 m/in",
+          "the page does not map its 4S and 6S statements unambiguously to each winding, so cell range remains absent"
+        ]
+      }
+    },
+    {
+      "id": "tmotor-am30-1450kv",
+      "manufacturer": "T-Motor",
+      "model": "Tmotor AM30 1450KV",
+      "kind": "motor",
+      "spec": {
+        "kv_rpm_per_v": 1450,
+        "min_series_cells": null,
+        "max_series_cells": null,
+        "max_current_a": null,
+        "max_power_w": null,
+        "max_static_thrust_n": 6.3056759499999995,
+        "mass_kg": 0.019,
+        "dimensions": null,
+        "recommended_propeller_diameter_m": 0.2032,
+        "recommended_propeller_pitch_m": 0.1016
+      },
+      "provenance": {
+        "publisher": "RC Innovations",
+        "source_url": "https://rc-innovations.es/shop/tmotor-am30-combo-am30-am-16a-t8040-6742",
+        "source_title": "Tmotor AM30 1450KV",
+        "transformations": [
+          "1450 KV selected from the page variants",
+          "mass divided by 1000 from g to kg",
+          "643 g maximum static thrust interpreted as 0.643 kgf and multiplied by standard gravity 9.80665 m/s2",
+          "T8040 designation interpreted as 8x4 inches and multiplied by exactly 0.0254 m/in",
+          "the bundled ESC 16A rating is not assigned as the motor current limit"
+        ]
+      }
+    },
+    {
+      "id": "tmotor-am30-1750kv",
+      "manufacturer": "T-Motor",
+      "model": "Tmotor AM30 1750KV",
+      "kind": "motor",
+      "spec": {
+        "kv_rpm_per_v": 1750,
+        "min_series_cells": null,
+        "max_series_cells": null,
+        "max_current_a": null,
+        "max_power_w": null,
+        "max_static_thrust_n": 6.3056759499999995,
+        "mass_kg": 0.019,
+        "dimensions": null,
+        "recommended_propeller_diameter_m": 0.2032,
+        "recommended_propeller_pitch_m": 0.1016
+      },
+      "provenance": {
+        "publisher": "RC Innovations",
+        "source_url": "https://rc-innovations.es/shop/tmotor-am30-combo-am30-am-16a-t8040-6742",
+        "source_title": "Tmotor AM30 1750KV",
+        "transformations": [
+          "1750 KV selected from the page variants",
+          "mass divided by 1000 from g to kg",
+          "643 g maximum static thrust interpreted as 0.643 kgf and multiplied by standard gravity 9.80665 m/s2",
+          "T8040 designation interpreted as 8x4 inches and multiplied by exactly 0.0254 m/in",
+          "the bundled ESC 16A rating is not assigned as the motor current limit"
+        ]
+      }
+    },
+    {
+      "id": "tmotor-am30-2280kv",
+      "manufacturer": "T-Motor",
+      "model": "Tmotor AM30 2280KV",
+      "kind": "motor",
+      "spec": {
+        "kv_rpm_per_v": 2280,
+        "min_series_cells": null,
+        "max_series_cells": null,
+        "max_current_a": null,
+        "max_power_w": null,
+        "max_static_thrust_n": 6.3056759499999995,
+        "mass_kg": 0.019,
+        "dimensions": null,
+        "recommended_propeller_diameter_m": 0.2032,
+        "recommended_propeller_pitch_m": 0.1016
+      },
+      "provenance": {
+        "publisher": "RC Innovations",
+        "source_url": "https://rc-innovations.es/shop/tmotor-am30-combo-am30-am-16a-t8040-6742",
+        "source_title": "Tmotor AM30 2280KV",
+        "transformations": [
+          "2280 KV selected from the page variants",
+          "mass divided by 1000 from g to kg",
+          "643 g maximum static thrust interpreted as 0.643 kgf and multiplied by standard gravity 9.80665 m/s2",
+          "T8040 designation interpreted as 8x4 inches and multiplied by exactly 0.0254 m/in",
+          "the bundled ESC 16A rating is not assigned as the motor current limit"
+        ]
+      }
+    }
+  ]
+}

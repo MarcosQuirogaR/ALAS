@@ -238,4 +238,31 @@ mod tests {
         assert!(!fp.to_feasible());
         assert!(fp.to_margin_m() < 0.0);
     }
+
+    #[test]
+    fn hot_day_density_raises_every_stall_speed() {
+        let airport = sea_level();
+        let hot_airport = Airport::custom("Hot", 0.0, 3500.0, 3500.0, 25.0, 0.0, 0.0);
+        let standard = compute_v_speeds(
+            79_000.0,
+            122.0,
+            &airport,
+            1.8,
+            2.6,
+            &PerformanceConfig::default(),
+        );
+        let hot = compute_v_speeds(
+            79_000.0,
+            122.0,
+            &hot_airport,
+            1.8,
+            2.6,
+            &PerformanceConfig::default(),
+        );
+
+        assert!(hot.v_stall_to_ms > standard.v_stall_to_ms);
+        assert!(hot.v_stall_land_ms > standard.v_stall_land_ms);
+        assert!(hot.v_mc_ms > standard.v_mc_ms);
+        assert!(hot.v_app_ms > standard.v_app_ms);
+    }
 }

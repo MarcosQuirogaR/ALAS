@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-// Ported from aerosandbox/library/weights/torenbeek_weights.py
-// Upstream: AeroSandbox 4.2.8, MIT.
+// Ported from native aerodynamic model/library/weights/torenbeek_weights.py
+// Upstream: native aerodynamic model 4.2.8, MIT.
 // Reference: alas @ rust-port-baseline.
 
 //! Torenbeek's empirical wing and fuselage weight methods, from "Synthesis
 //! of Subsonic Airplane Design" (1976, Delft University Press), Chapter 8
-//! and Appendix C -- reached through AeroSandbox's translation of them,
+//! and Appendix C -- reached through native aerodynamic model's translation of them,
 //! since `alas-mass::breakdown` (`alas/physics/mass.py`, a separate,
 //! not-yet-ported module) calls exactly two of its functions: [`mass_wing`]
 //! and [`mass_fuselage_simple`].
@@ -37,8 +37,8 @@
 //! still a named local in the functions below, not folded into one
 //! expression.
 
-use alas_geom::asb::fuselage::Fuselage;
-use alas_geom::asb::wing::Wing;
+use alas_geom::aircraft::fuselage::Fuselage;
+use alas_geom::aircraft::wing::Wing;
 
 /// `mass_wing_basic_structure`'s `k_e` default -- Torenbeek's weight
 /// knockdown for a wing with no wing-mounted engines forward of the elastic
@@ -49,8 +49,8 @@ pub const DEFAULT_K_E: f64 = 0.95;
 
 /// Evenly spaced points from `start` to `stop`, inclusive -- NumPy's
 /// `linspace(start, stop, num, endpoint=True)`. Duplicated from
-/// `alas_geom::asb::spacing::linspace`, which is private to that crate's
-/// `asb` module and not reachable from here (see that module's other
+/// `alas_geom::aircraft::spacing::linspace`, which is private to that crate's
+/// aircraft module and not reachable from here (see that module's other
 /// callers, `alas-geom::airfoil_library` and `alas-geom::wing_structure`,
 /// which duplicate it for the same reason).
 fn linspace(start: f64, stop: f64, num: usize) -> Vec<f64> {
@@ -75,12 +75,12 @@ fn root_thickness_to_chord(wing: &Wing) -> f64 {
     wing.xsecs[0].airfoil.max_thickness(&sample)
 }
 
-/// The cosine of an angle given in degrees -- `aerosandbox.numpy.cosd`.
+/// The cosine of an angle given in degrees -- `native aerodynamic model.numpy.cosd`.
 fn cosd(degrees: f64) -> f64 {
     degrees.to_radians().cos()
 }
 
-/// The sine of an angle given in degrees -- `aerosandbox.numpy.sind`.
+/// The sine of an angle given in degrees -- `native aerodynamic model.numpy.sind`.
 fn sind(degrees: f64) -> f64 {
     degrees.to_radians().sin()
 }
@@ -248,7 +248,7 @@ fn mean(values: &[f64]) -> f64 {
     values.iter().sum::<f64>() / values.len() as f64
 }
 
-/// AeroSandbox's `numpy.softmax`, restricted to the `softness`-parameterized
+/// native aerodynamic model's `numpy.softmax`, restricted to the `softness`-parameterized
 /// path with two or more arguments -- the only way [`mass_fuselage_simple`],
 /// this module's one caller, ever invokes it (`hardness` is never supplied
 /// upstream, and its `n_specified_arguments` validation and the empty/
@@ -283,9 +283,9 @@ pub fn mass_fuselage_simple(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alas_geom::asb::airfoil::Airfoil;
-    use alas_geom::asb::fuselage::FuselageXSec;
-    use alas_geom::asb::wing::WingXSec;
+    use alas_geom::aircraft::airfoil::Airfoil;
+    use alas_geom::aircraft::fuselage::FuselageXSec;
+    use alas_geom::aircraft::wing::WingXSec;
 
     fn naca(name: &str) -> Airfoil {
         Airfoil::from_name(name).expect("valid 4-digit NACA name")
@@ -386,7 +386,7 @@ mod tests {
     #[test]
     fn control_surface_area_is_zero_so_high_lift_mass_is_zero() {
         // `Wing::control_surface_area` always returns 0.0 in this crate
-        // (`alas-geom::asb::wing`'s module doc), so the trailing-edge flap
+        // (`alas-geom::aircraft::wing`'s module doc), so the trailing-edge flap
         // term's leading `S_flaps` factor zeroes the whole result.
         let wing = rectangular_wing();
         assert_eq!(
@@ -469,8 +469,8 @@ mod tests {
 #[cfg(test)]
 mod parity_helpers {
     use super::*;
-    use alas_geom::asb::airfoil::Airfoil;
-    use alas_geom::asb::wing::WingXSec;
+    use alas_geom::aircraft::airfoil::Airfoil;
+    use alas_geom::aircraft::wing::WingXSec;
     use alas_testkit::{Comparison, Tier};
     use serde::Deserialize;
 
@@ -599,7 +599,7 @@ mod parity_helpers {
     }
 
     #[test]
-    fn mass_wing_high_lift_devices_matches_aerosandbox() {
+    fn mass_wing_high_lift_devices_matches_native_aerodynamic_model() {
         let fixture: Fixture = alas_testkit::load("mass", "torenbeek");
 
         let mut comparison = Comparison::new(
@@ -623,7 +623,7 @@ mod parity_helpers {
     }
 
     #[test]
-    fn mass_wing_basic_structure_matches_aerosandbox() {
+    fn mass_wing_basic_structure_matches_native_aerodynamic_model() {
         let fixture: Fixture = alas_testkit::load("mass", "torenbeek");
 
         let mut comparison = Comparison::new(
@@ -652,7 +652,7 @@ mod parity_helpers {
     }
 
     #[test]
-    fn mass_wing_spoilers_and_speedbrakes_matches_aerosandbox() {
+    fn mass_wing_spoilers_and_speedbrakes_matches_native_aerodynamic_model() {
         let fixture: Fixture = alas_testkit::load("mass", "torenbeek");
 
         let mut comparison = Comparison::new(

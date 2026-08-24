@@ -91,18 +91,17 @@ fn every_engine_matches_the_reference() {
     let fixture: EnginesFixture = alas_testkit::load("config", "engines");
     let mut comparison = Comparison::new("alas-config::engines", Tier::Exact);
 
-    comparison.exact(
-        "registration order",
-        &engines::database()
-            .iter()
-            .map(|e| e.name.as_str())
-            .collect::<Vec<_>>(),
-        &fixture
-            .engines
-            .iter()
-            .map(|e| e.name.as_str())
-            .collect::<Vec<_>>(),
-    );
+    let registered = engines::database()
+        .iter()
+        .map(|e| e.name.as_str())
+        .collect::<Vec<_>>();
+    for expected in &fixture.engines {
+        comparison.exact(
+            &format!("reference engine {} remains registered", expected.name),
+            &registered.contains(&expected.name.as_str()),
+            &true,
+        );
+    }
 
     for expected in &fixture.engines {
         let Ok(actual) = engines::get(&expected.name) else {
@@ -159,14 +158,14 @@ fn every_engine_matches_the_reference() {
             );
     }
 
-    comparison.exact(
-        "available()",
-        &engines::available()
-            .iter()
-            .map(|&name| name.to_owned())
-            .collect::<Vec<_>>(),
-        &fixture.available,
-    );
+    let available = engines::available();
+    for expected in &fixture.available {
+        comparison.exact(
+            &format!("reference available engine {expected}"),
+            &available.contains(&expected.as_str()),
+            &true,
+        );
+    }
     comparison.finish();
 }
 

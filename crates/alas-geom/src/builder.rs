@@ -7,7 +7,7 @@
 //! Turns a `(DesignVector, GeometryConfig)` pair into an [`Airplane`] --
 //! `AircraftBuilder`. This is ALAS's own assembly logic, not a translation of
 //! a third-party library, which is why it lives here rather than under
-//! `asb`: every geometry decision reads from the config objects, and the
+//! aircraft model: every geometry decision reads from the config objects, and the
 //! only literals in this module are structural (which xsec gets which
 //! offset, in what order the wings and fuselages are assembled), not tunable
 //! values.
@@ -17,8 +17,8 @@
 //! configured airfoil names (through all three of its branches on the
 //! default aircraft -- see `docs/PORTING.md`'s Geometry section),
 //! [`crate::airfoil_library::build_section`] shapes the root section from the
-//! design vector, and [`crate::asb::wing::Wing`] /
-//! [`crate::asb::fuselage::Fuselage`] loft the results into the returned
+//! design vector, and [`crate::aircraft::wing::Wing`] /
+//! [`crate::aircraft::fuselage::Fuselage`] loft the results into the returned
 //! [`Airplane`].
 //!
 //! # Engine placement's two branches
@@ -37,20 +37,20 @@
 //! # `sinspace`
 //!
 //! [`sinspace`] is duplicated here rather than shared with
-//! `asb::spacing::linspace`/`cosspace`: that module is private to `asb`, and
+//! `aircraft::spacing::linspace`/`cosspace`: that module is private to the aircraft model, and
 //! `crate::airfoil_library` and `crate::wing_structure::support` already
 //! establish the pattern of a small private copy per consumer rather than
-//! widening `asb`'s visibility for one helper (see either module's own
+//! widening the aircraft model's visibility for one helper (see either module's own
 //! `linspace` for the precedent).
 
-use alas_config::{DesignVector, GeometryConfig};
+use alas_config::{DesignVector, GeometryConfig, TransportPlanform, TransportPlanformError};
 use alas_math::CubicSplineError;
 
+use crate::aircraft::airfoil::Airfoil;
+use crate::aircraft::airplane::Airplane;
+use crate::aircraft::fuselage::{Fuselage, FuselageXSec, FuselageXSecError, DEFAULT_SHAPE};
+use crate::aircraft::wing::{SpacingFunction, SubdivideSectionsError, Wing, WingXSec};
 use crate::airfoil_library::{build_section, AirfoilLibrary};
-use crate::asb::airfoil::Airfoil;
-use crate::asb::airplane::Airplane;
-use crate::asb::fuselage::{Fuselage, FuselageXSec, FuselageXSecError, DEFAULT_SHAPE};
-use crate::asb::wing::{SubdivideSectionsError, Wing, WingXSec};
 
 /// Why [`AircraftBuilder::build`] could not assemble an [`Airplane`].
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
@@ -73,9 +73,25 @@ pub enum BuildError {
     /// A fuselage cross-section's radius/width/height combination was
     /// invalid. [`AircraftBuilder`] always supplies exactly one of the two
     /// forms, so this is not reachable from this module's own calls; see
-    /// [`crate::asb::fuselage::FuselageXSecError`].
+    /// [`crate::aircraft::fuselage::FuselageXSecError`].
     #[error(transparent)]
     FuselageXSec(#[from] FuselageXSecError),
+    /// The configured transport planform has invalid stations, chords, or
+    /// sweep angles.
+    #[error(transparent)]
+    Planform(#[from] TransportPlanformError),
+}
+
+/// Geometry behavior selected by an [`AircraftBuilder`] construction path.
+///
+/// [`Self::Product`] places an outboard nacelle on the outboard segment of a
+/// cranked wing. [`Self::ReferenceCompatibility`] retains the frozen Python
+/// inlet station, which extrapolates the inboard sweep beyond the break and
+/// is needed only when replaying reference artifacts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GeometryContract {
+    Product,
+    ReferenceCompatibility,
 }
 
 /// Builds parametric aircraft from design variables and a geometry scaffold
@@ -83,6 +99,7 @@ pub enum BuildError {
 pub struct AircraftBuilder {
     /// The geometry scaffold every build reads from.
     pub geometry: GeometryConfig,
+    geometry_contract: GeometryContract,
 }
 
 impl AircraftBuilder {
@@ -94,7 +111,32 @@ impl AircraftBuilder {
     pub fn new(geometry: Option<GeometryConfig>) -> Self {
         let mut geometry = geometry.unwrap_or_default();
         geometry.engine.apply_engine_spec();
-        Self { geometry }
+        Self {
+            geometry,
+            geometry_contract: GeometryContract::Product,
+        }
+    }
+
+    /// Construct a builder that replays frozen Python geometry artifacts.
+    ///
+    /// This restores the frozen root/break/tip planform and historical
+    /// outboard-nacelle X station. Product builders use [`Self::new`] and the
+    /// active side-of-body/kink transport planform instead.
+    pub fn new_reference_compatibility(geometry: Option<GeometryConfig>) -> Self {
+        let mut geometry = geometry.unwrap_or_default();
+        geometry.engine.apply_engine_spec();
+        // The frozen Python builder has only root/break/tip stations and
+        // derives outboard sweep from the decrement. Reference artifacts must
+        // retain that family even though product defaults use the explicit
+        // transport planform.
+        geometry.wing.side_of_body_span_fraction = None;
+        geometry.wing.side_of_body_chord_ratio = None;
+        geometry.wing.kink_span_fraction = None;
+        geometry.wing.outboard_le_sweep_deg = None;
+        Self {
+            geometry,
+            geometry_contract: GeometryContract::ReferenceCompatibility,
+        }
     }
 
     /// Assemble the full aircraft for `dv` -- `AircraftBuilder.build`.
@@ -120,9 +162,10 @@ impl AircraftBuilder {
         let root_section = build_section(dv, &root_airfoil.coordinates)?;
         let tip_airfoil = Self::resolve(&g.wing.tip_airfoil)?;
         let tail_airfoil = Self::resolve(&g.empennage.tail_airfoil)?;
+        let planform = g.wing.transport_planform(dv)?;
 
         let wings = vec![
-            self.build_main_wing(dv, &root_section, &tip_airfoil)?,
+            self.build_main_wing(dv, &planform, &root_section, &tip_airfoil)?,
             self.build_hstab(dv, &tail_airfoil)?,
             self.build_vstab(dv, &tail_airfoil)?,
         ];
@@ -136,9 +179,7 @@ impl AircraftBuilder {
         let mac = main_wing.mean_aerodynamic_chord();
         // Initial CG seed (~quarter-MAC); refined later by the autobalance step.
         let x_wing_global = g.wing.root_datum_x_m + dv.wing_x_shift_m;
-        let sweep_rad = dv.sweep_deg.to_radians();
-        let y_break = g.wing.break_span_fraction * (dv.span_m / 2.0);
-        let x_cg_seed = x_wing_global + y_break * sweep_rad.tan() + 0.25 * mac;
+        let x_cg_seed = x_wing_global + planform.kink.leading_edge_x_m + 0.25 * mac;
 
         Ok(Airplane {
             name: "ALAS Aircraft".to_owned(),
@@ -161,45 +202,65 @@ impl AircraftBuilder {
     fn build_main_wing(
         &self,
         dv: &DesignVector,
+        planform: &TransportPlanform,
         root_section: &Airfoil,
         tip_airfoil: &Airfoil,
     ) -> Result<Wing, BuildError> {
         let g = &self.geometry.wing;
-        let semi_span = dv.span_m / 2.0;
-        let y_break = g.break_span_fraction * semi_span;
-        let sweep_in = dv.sweep_deg.to_radians();
-        let sweep_out = (dv.sweep_deg - g.outboard_sweep_decrement_deg).to_radians();
-        let dx_break = y_break * sweep_in.tan();
-        let dx_tip = dx_break + (semi_span - y_break) * sweep_out.tan();
         let x_wing_global = g.root_datum_x_m + dv.wing_x_shift_m;
-
-        let wing = Wing::new(
-            "Main Wing",
-            vec![
-                WingXSec::new(
-                    [0.0, 0.0, g.root_z_m],
-                    dv.root_chord_m,
-                    g.root_twist_deg,
-                    root_section.clone(),
-                ),
-                WingXSec::new(
-                    [dx_break, y_break, g.break_z_m],
-                    dv.break_chord_m,
-                    g.break_twist_deg,
-                    root_section.clone(),
-                ),
-                WingXSec::new(
-                    [dx_tip, semi_span, g.tip_z_m],
-                    dv.tip_chord_m,
-                    dv.tip_twist_deg,
-                    tip_airfoil.clone(),
-                ),
+        let mut xsecs = vec![WingXSec::new(
+            [
+                planform.root.leading_edge_x_m,
+                planform.root.y_m,
+                g.root_z_m,
             ],
-            true,
-        );
+            planform.root.chord_m,
+            g.root_twist_deg,
+            root_section.clone(),
+        )];
+        if let Some(side_of_body) = planform
+            .side_of_body
+            .filter(|station| side_of_body_changes_loft(planform, *station))
+        {
+            let root_to_kink_fraction = side_of_body.y_m / planform.kink.y_m;
+            let side_of_body_z_m = g.root_z_m + root_to_kink_fraction * (g.break_z_m - g.root_z_m);
+            let side_of_body_twist_deg =
+                g.root_twist_deg + root_to_kink_fraction * (g.break_twist_deg - g.root_twist_deg);
+            xsecs.push(WingXSec::new(
+                [
+                    side_of_body.leading_edge_x_m,
+                    side_of_body.y_m,
+                    side_of_body_z_m,
+                ],
+                side_of_body.chord_m,
+                side_of_body_twist_deg,
+                root_section.clone(),
+            ));
+        }
+        xsecs.push(WingXSec::new(
+            [
+                planform.kink.leading_edge_x_m,
+                planform.kink.y_m,
+                g.break_z_m,
+            ],
+            planform.kink.chord_m,
+            g.break_twist_deg,
+            root_section.clone(),
+        ));
+        xsecs.push(WingXSec::new(
+            [planform.tip.leading_edge_x_m, planform.tip.y_m, g.tip_z_m],
+            planform.tip.chord_m,
+            dv.tip_twist_deg,
+            tip_airfoil.clone(),
+        ));
+
+        let wing = Wing::new("Main Wing", xsecs, true);
         let wing = wing
             .translate([x_wing_global, 0.0, 0.0])
-            .subdivide_sections(n_subdivisions_usize(g.n_subdivisions))?;
+            .subdivide_sections(
+                n_subdivisions_usize(g.n_subdivisions),
+                SpacingFunction::Linspace,
+            )?;
         Ok(wing)
     }
 
@@ -235,7 +296,10 @@ impl AircraftBuilder {
         );
         let wing = wing
             .translate([x_hstab, 0.0, g.hstab_z_m])
-            .subdivide_sections(n_subdivisions_usize(g.n_subdivisions))?;
+            .subdivide_sections(
+                n_subdivisions_usize(g.n_subdivisions),
+                SpacingFunction::Linspace,
+            )?;
         Ok(wing)
     }
 
@@ -272,7 +336,10 @@ impl AircraftBuilder {
         );
         let wing = wing
             .translate([x_vstab, 0.0, g.vstab_z_m])
-            .subdivide_sections(n_subdivisions_usize(g.n_subdivisions))?;
+            .subdivide_sections(
+                n_subdivisions_usize(g.n_subdivisions),
+                SpacingFunction::Linspace,
+            )?;
         Ok(wing)
     }
 
@@ -341,9 +408,8 @@ impl AircraftBuilder {
     fn build_engines(&self, dv: &DesignVector) -> Result<Vec<Fuselage>, BuildError> {
         let g = &self.geometry.engine;
         let x_wing_global = self.geometry.wing.root_datum_x_m + dv.wing_x_shift_m;
-        let sweep_rad = dv.sweep_deg.to_radians();
-        let semi_span = dv.span_m / 2.0;
-        let y_break = self.geometry.wing.break_span_fraction * semi_span;
+        let wing = &self.geometry.wing;
+        let planform = wing.transport_planform(dv)?;
 
         let mut nacelles = Vec::with_capacity(g.spanwise_positions_m.len());
         for &y_pos in &g.spanwise_positions_m {
@@ -361,21 +427,27 @@ impl AircraftBuilder {
                     "Nacelle L"
                 }
                 .to_owned();
-                let x_inlet = (x_wing_global + y_pos.abs() * sweep_rad.tan()) - g.inlet_x_offset_m;
+                let leading_edge_offset = match self.geometry_contract {
+                    GeometryContract::Product => planform.leading_edge_x_at(y_pos.abs())?,
+                    GeometryContract::ReferenceCompatibility => {
+                        y_pos.abs() * dv.sweep_deg.to_radians().tan()
+                    }
+                };
+                let x_inlet = x_wing_global + leading_edge_offset - g.inlet_x_offset_m;
 
                 // Interpolate the local wing Z-height for dihedral-aware
                 // placement, then apply the local Z offset relative to the
                 // wing LE. The `1e-9` denominators guard a zero-length root-
                 // or tip-side interval (`y_break == 0` or
                 // `semi_span == y_break`), not an incidental epsilon.
+                let semi_span = planform.tip.y_m;
+                let y_break = planform.kink.y_m;
                 let y_abs = y_pos.abs();
                 let z_wing = if y_abs <= y_break {
-                    self.geometry.wing.root_z_m
-                        + (self.geometry.wing.break_z_m - self.geometry.wing.root_z_m)
-                            * (y_abs / (y_break + 1e-9))
+                    wing.root_z_m + (wing.break_z_m - wing.root_z_m) * (y_abs / (y_break + 1e-9))
                 } else {
-                    self.geometry.wing.break_z_m
-                        + (self.geometry.wing.tip_z_m - self.geometry.wing.break_z_m)
+                    wing.break_z_m
+                        + (wing.tip_z_m - wing.break_z_m)
                             * ((y_abs - y_break) / (semi_span - y_break + 1e-9))
                 };
                 (name, x_inlet, z_wing + g.z_m)
@@ -397,6 +469,25 @@ impl AircraftBuilder {
     }
 }
 
+/// Whether a side-of-body station changes the physical loft rather than only
+/// naming a point on the straight root-to-kink panel.
+///
+/// Keeping a collinear bookkeeping station out of the VLM mesh avoids adding
+/// an entire extra subdivision block to every candidate and every live-preview
+/// camera update, while a genuinely cranked body fairing is still retained.
+fn side_of_body_changes_loft(
+    planform: &TransportPlanform,
+    side_of_body: alas_config::MainWingStation,
+) -> bool {
+    let fraction = side_of_body.y_m / planform.kink.y_m;
+    let interpolated_le = planform.root.leading_edge_x_m
+        + fraction * (planform.kink.leading_edge_x_m - planform.root.leading_edge_x_m);
+    let interpolated_chord =
+        planform.root.chord_m + fraction * (planform.kink.chord_m - planform.root.chord_m);
+    (side_of_body.leading_edge_x_m - interpolated_le).abs() > 1e-10
+        || (side_of_body.chord_m - interpolated_chord).abs() > 1e-10
+}
+
 /// `n_subdivisions` clamped to `usize`, so a negative or overflowing
 /// configuration value becomes `0` -- which [`Wing::subdivide_sections`]
 /// rejects with [`SubdivideSectionsError::RatioTooSmall`], the same outcome
@@ -408,7 +499,7 @@ fn n_subdivisions_usize(n: i64) -> usize {
 
 /// Evenly spaced points from `start` to `stop`, inclusive -- NumPy's
 /// `linspace(start, stop, num, endpoint=True)`. Duplicated from
-/// `asb::spacing::linspace`; see the module doc.
+/// `aircraft::spacing::linspace`; see the module doc.
 fn linspace(start: f64, stop: f64, num: usize) -> Vec<f64> {
     if num == 0 {
         return Vec::new();
@@ -424,7 +515,7 @@ fn linspace(start: f64, stop: f64, num: usize) -> Vec<f64> {
 }
 
 /// Sine-spaced points from `start` to `stop`, bunched near `start` --
-/// `aerosandbox.numpy.spacing.sinspace` at its default `reverse_spacing =
+/// `native aerodynamic model.numpy.spacing.sinspace` at its default `reverse_spacing =
 /// False`: `start + (stop - start) * (1 - cos(linspace(0, pi/2, num)))`, with
 /// both endpoints then forced exact to correct the trigonometric round trip,
 /// exactly as upstream's own endpoint fixup does.
@@ -499,6 +590,114 @@ mod tests {
         assert_eq!(nacelles.len(), 2);
         assert_eq!(nacelles[0].name, "Nacelle R");
         assert_eq!(nacelles[1].name, "Nacelle L");
+    }
+
+    #[test]
+    fn an_outboard_nacelle_follows_the_continuous_leading_edge_sweep() {
+        let mut geometry = GeometryConfig::default();
+        let dv = DesignVector::default();
+        let semi_span = dv.span_m / 2.0;
+        let y_outboard = 0.8 * semi_span;
+        geometry.engine.spanwise_positions_m = vec![y_outboard];
+        let builder = AircraftBuilder::new(Some(geometry));
+        let planform = builder
+            .geometry
+            .wing
+            .transport_planform(&dv)
+            .expect("the default planform is valid");
+
+        let nacelles = builder
+            .build_engines(&dv)
+            .expect("outboard nacelle placement is valid");
+        let expected = builder.geometry.wing.root_datum_x_m
+            + planform
+                .leading_edge_x_at(y_outboard)
+                .expect("the nacelle is inside the planform")
+            - builder.geometry.engine.inlet_x_offset_m;
+        let inboard_extrapolation = builder.geometry.wing.root_datum_x_m
+            + y_outboard * dv.sweep_deg.to_radians().tan()
+            - builder.geometry.engine.inlet_x_offset_m;
+
+        assert!(y_outboard > planform.kink.y_m);
+        assert!((nacelles[0].xsecs[0].xyz_c[0] - expected).abs() < 1e-12);
+        assert!((expected - inboard_extrapolation).abs() < 1e-12);
+    }
+
+    #[test]
+    fn explicit_side_of_body_station_is_lofted_into_the_main_wing() {
+        let mut geometry = GeometryConfig::default();
+        geometry.wing.side_of_body_span_fraction = Some(0.10);
+        geometry.wing.side_of_body_chord_ratio = Some(0.90);
+        geometry.wing.kink_span_fraction = Some(0.40);
+        geometry.wing.outboard_le_sweep_deg = Some(28.0);
+        geometry.wing.n_subdivisions = 2;
+        let builder = AircraftBuilder::new(Some(geometry));
+        let dv = DesignVector::default();
+        let planform = builder
+            .geometry
+            .wing
+            .transport_planform(&dv)
+            .expect("the transport planform is valid");
+
+        let airplane = builder
+            .build(Some(&dv), false)
+            .expect("the explicit transport planform builds");
+        let main_wing = &airplane.wings[0];
+
+        // Three original lofted panels at a subdivision ratio of two yield
+        // six sections plus the unchanged tip. The side-of-body station is
+        // the first section of the second panel.
+        assert_eq!(main_wing.xsecs.len(), 7);
+        assert!((main_wing.xsecs[2].xyz_le[1] - planform.side_of_body.unwrap().y_m).abs() < 1e-12);
+        assert!((main_wing.xsecs[2].chord - planform.side_of_body.unwrap().chord_m).abs() < 1e-12);
+        assert!((main_wing.xsecs[4].xyz_le[1] - planform.kink.y_m).abs() < 1e-12);
+        assert!(
+            (main_wing.xsecs[6].xyz_le[0]
+                - (builder.geometry.wing.root_datum_x_m + planform.tip.leading_edge_x_m))
+                .abs()
+                < 1e-12
+        );
+    }
+
+    #[test]
+    fn a_collinear_side_of_body_station_does_not_add_a_vlm_subdivision_block() {
+        let mut geometry = GeometryConfig::default();
+        geometry.wing.n_subdivisions = 2;
+        let builder = AircraftBuilder::new(Some(geometry));
+
+        let airplane = builder
+            .build(Some(&DesignVector::default()), false)
+            .expect("the default transport planform builds");
+
+        // Root/kink/tip is two physical panels. The derived side-of-body
+        // station lies on the inboard panel and therefore adds no mesh block.
+        assert_eq!(airplane.wings[0].xsecs.len(), 5);
+    }
+
+    #[test]
+    fn reference_compatibility_retains_the_frozen_nacelle_station() {
+        let dv = DesignVector {
+            span_m: 35.8,
+            root_chord_m: 6.5,
+            break_chord_m: 4.2,
+            tip_chord_m: 1.8,
+            sweep_deg: 25.0,
+            fuselage_length_m: 37.5,
+            ..DesignVector::default()
+        };
+        let reference =
+            AircraftBuilder::new_reference_compatibility(Some(GeometryConfig::default()));
+        let y_outboard = reference.geometry.engine.spanwise_positions_m[0].abs();
+        let reference_inlet = reference
+            .build_engines(&dv)
+            .expect("reference nacelles build")[0]
+            .xsecs[0]
+            .xyz_c[0];
+        let frozen_inlet = reference.geometry.wing.root_datum_x_m
+            + y_outboard * dv.sweep_deg.to_radians().tan()
+            - reference.geometry.engine.inlet_x_offset_m;
+
+        assert!((reference_inlet - frozen_inlet).abs() < 1e-12);
     }
 
     #[test]
