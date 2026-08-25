@@ -122,6 +122,13 @@ pub enum RunError {
         /// The command whose output could not be read.
         command: String,
     },
+    /// The caller supplied a non-finite, non-positive, or unrepresentable
+    /// process timeout.
+    #[error("invalid process timeout {seconds:?} s; expected a finite positive value")]
+    InvalidTimeout {
+        /// The invalid timeout in seconds.
+        seconds: f64,
+    },
 }
 
 /// Run `exe` with `args` in `cwd`, feeding `stdin_input` and capturing output,
@@ -137,6 +144,15 @@ pub fn run_tool(
     stdin_input: &str,
     timeout_seconds: f64,
 ) -> Result<ToolRun, RunError> {
+    let timeout =
+        Duration::try_from_secs_f64(timeout_seconds).map_err(|_| RunError::InvalidTimeout {
+            seconds: timeout_seconds,
+        })?;
+    if timeout_seconds <= 0.0 {
+        return Err(RunError::InvalidTimeout {
+            seconds: timeout_seconds,
+        });
+    }
     let command = exe.display().to_string();
     let mut child = Command::new(exe)
         .args(args)
@@ -188,7 +204,7 @@ pub fn run_tool(
         buffer
     });
 
-    let deadline = Instant::now() + Duration::from_secs_f64(timeout_seconds);
+    let deadline = Instant::now() + timeout;
     let status = loop {
         match child.try_wait().map_err(|source| RunError::Io {
             command: command.clone(),
@@ -242,7 +258,7 @@ fn normalize_newlines(text: String) -> String {
 // These tests drive a real subprocess they build here, so a failed unwrap is
 // the spawn/timeout behaviour failing in the test environment, not a library
 // invariant being broken.
-#[allow(clippy::unwrap_used)]
+#[allow(clippy::expect_used, clippy::unwrap_used)]
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -280,5 +296,21 @@ mod tests {
         let cwd = std::env::temp_dir();
         let error = run_tool(Path::new(program), &args, &cwd, "", 0.3).unwrap_err();
         assert!(matches!(error, RunError::Timeout { .. }));
+    }
+
+    #[test]
+    fn invalid_timeouts_are_rejected_before_process_launch() {
+        let cwd = std::env::temp_dir();
+        for seconds in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+            let error = run_tool(
+                Path::new("this-program-must-not-launch"),
+                &[],
+                &cwd,
+                "",
+                seconds,
+            )
+            .expect_err("invalid timeout must be rejected");
+            assert!(matches!(error, RunError::InvalidTimeout { .. }));
+        }
     }
 }

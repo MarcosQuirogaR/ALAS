@@ -62,6 +62,16 @@ const CG_SETTLED_M: f64 = 0.05;
 /// Total-mass error the loop treats as loaded.
 const MASS_CONVERGED_KG: f64 = 10.0;
 
+/// Which payload role a cargo request represents at the solver boundary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CargoMassSemantics {
+    /// The product contract: requested and converged cargo exclude ULD tare.
+    Net,
+    /// The frozen Python reference contract: the correction loop converges on
+    /// gross loaded mass even though each slot's initial fill is net cargo.
+    ReferenceGross,
+}
+
 /// Builds the loading positions from a fuselage and solves the load across
 /// them.
 pub struct CargoLoadManager<'g> {
@@ -227,16 +237,18 @@ impl<'g> CargoLoadManager<'g> {
         }
     }
 
-    /// Distribute `target_mass` of cargo, trimming toward `target_cg`.
+    /// Distribute `target_mass` of net cargo, trimming toward `target_cg`.
     ///
     /// `priority` ranks the positions, smallest loaded first. `fill_full` loads
     /// each position to its limit in that order; the alternative spreads the
     /// load evenly over every position regardless of the ranking, which is what
     /// the uniform strategy asks for.
     ///
-    /// More payload than the positions can hold is clamped to their capacity
-    /// rather than refused: the caller reports the shortfall, and a freighter
-    /// asked for more than it can carry still has a load plan for what it can.
+    /// More net payload than the positions can hold is clamped to their net
+    /// capacity rather than refused: the caller reports the shortfall, and a
+    /// freighter asked for more than it can carry still has a load plan for
+    /// what it can. ULD tare is retained in [`Self::mass_props`] for CG and
+    /// aircraft mass, but never deducted from this requested net load.
     pub fn solve(
         &mut self,
         target_mass: f64,
@@ -244,15 +256,55 @@ impl<'g> CargoLoadManager<'g> {
         priority: &dyn Fn(&CargoSlot) -> f64,
         fill_full: bool,
     ) {
+        self.solve_with_mass_semantics(
+            target_mass,
+            target_cg,
+            priority,
+            fill_full,
+            CargoMassSemantics::Net,
+        );
+    }
+
+    /// Reproduce the frozen loader's gross-target correction for parity
+    /// fixtures. Product analyses must use [`Self::solve`], whose request is a
+    /// net-cargo quantity.
+    pub(crate) fn solve_reference_compatibility(
+        &mut self,
+        target_mass: f64,
+        target_cg: f64,
+        priority: &dyn Fn(&CargoSlot) -> f64,
+        fill_full: bool,
+    ) {
+        self.solve_with_mass_semantics(
+            target_mass,
+            target_cg,
+            priority,
+            fill_full,
+            CargoMassSemantics::ReferenceGross,
+        );
+    }
+
+    fn solve_with_mass_semantics(
+        &mut self,
+        target_mass: f64,
+        target_cg: f64,
+        priority: &dyn Fn(&CargoSlot) -> f64,
+        fill_full: bool,
+        semantics: CargoMassSemantics,
+    ) {
         self.clear();
         if self.slots.is_empty() {
             return;
         }
         let by_priority = self.ranked(priority);
-        let target_mass = target_mass.min(self.total_capacity());
+        let target_net_mass = target_mass.max(0.0).min(self.total_capacity());
+        let target_closure_mass = match semantics {
+            CargoMassSemantics::Net => target_net_mass,
+            CargoMassSemantics::ReferenceGross => target_mass.max(0.0).min(self.total_capacity()),
+        };
 
         if fill_full {
-            let mut remaining = target_mass;
+            let mut remaining = target_net_mass;
             for &i in &by_priority {
                 if remaining <= 0.0 {
                     break;
@@ -262,7 +314,7 @@ impl<'g> CargoLoadManager<'g> {
                 remaining -= add;
             }
         } else {
-            let per_slot = target_mass / self.slots.len() as f64;
+            let per_slot = target_net_mass / self.slots.len() as f64;
             for slot in &mut self.slots {
                 slot.payload = per_slot.min(slot.uld.max_net());
             }
@@ -270,11 +322,19 @@ impl<'g> CargoLoadManager<'g> {
 
         let step = self.config.cg_trim_step_kg;
         for _ in 0..self.config.cg_trim_max_iterations.max(0) {
-            let (current_mass, current_cg, _) = self.mass_props();
-            self.correct_total(target_mass - current_mass, current_cg - target_cg);
+            let (current_gross_mass, current_cg, _) = self.mass_props();
+            let current_closure_mass = match semantics {
+                CargoMassSemantics::Net => self.net_payload_mass(),
+                CargoMassSemantics::ReferenceGross => current_gross_mass,
+            };
+            self.correct_total(
+                target_closure_mass - current_closure_mass,
+                current_cg - target_cg,
+            );
 
             let error = current_cg - target_cg;
-            if error.abs() < CG_SETTLED_M && (target_mass - current_mass).abs() < MASS_CONVERGED_KG
+            if error.abs() < CG_SETTLED_M
+                && (target_closure_mass - current_closure_mass).abs() < MASS_CONVERGED_KG
             {
                 break;
             }
@@ -282,6 +342,15 @@ impl<'g> CargoLoadManager<'g> {
                 break;
             }
         }
+    }
+
+    /// Net cargo currently carried by loaded positions, excluding ULD tare.
+    fn net_payload_mass(&self) -> f64 {
+        self.slots
+            .iter()
+            .filter(|slot| slot.payload > super::MIN_LOADED_KG)
+            .map(|slot| slot.payload)
+            .sum()
     }
 
     /// Position indices ranked by `priority`, best first.

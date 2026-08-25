@@ -181,7 +181,17 @@ fn run_optimizer(
     config.optimizer.solver.seed_near_initial_design = true;
     config.optimizer.weights.transport_shape_priors_enabled = shape_priors;
     let mut optimizer = DesignOptimizer::new(config);
-    let result = optimizer.run(Some(bounds), Some(initial), None);
+    let result = match optimizer.run(Some(bounds), Some(initial), None) {
+        Ok(result) => result,
+        Err(error) => {
+            return serde_json::json!({
+                "method": method,
+                "shape_priors_enabled": shape_priors,
+                "root_and_break_incidence_offset_deg": incidence_offset_deg,
+                "error": error.to_string(),
+            })
+        }
+    };
     let best_index = result
         .history
         .design_vectors

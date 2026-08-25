@@ -206,6 +206,25 @@ pub fn run_structural_analysis_with_environment(
         cap_mat,
     );
 
+    // Sizing output is a physical acceptance result, not merely evidence
+    // that the numerical stage executed. Never continue to mesh/deck/export
+    // a wingbox with an over-wide rib layout or a negative/non-finite
+    // strength margin.
+    if let Some(detail) = sizing_failure_detail(&sizing) {
+        return StructuralAnalysisResult {
+            status: "error".to_owned(),
+            error: Some(detail),
+            wsg: Some(wsg),
+            sizing: Some(sizing),
+            mesh_health: None,
+            analysis: Some(analytical_report),
+            nastran: None,
+            nastran95: None,
+            patran: None,
+            torenbeek_wing_mass_kg: torenbeek_mass,
+        };
+    }
+
     let (mesh_deck, mesh_health, node_index) = match build_wing_mesh_bdf(
         &wsg,
         &sizing,
@@ -305,6 +324,26 @@ pub fn run_structural_analysis_with_environment(
     }
 }
 
+fn sizing_failure_detail(sizing: &WingboxSizing) -> Option<String> {
+    let mut failures = Vec::new();
+    if !sizing.rib_spacing_pass() {
+        failures.push(format!(
+            "installed rib spacing {:.6} m exceeds allowable {:.6} m",
+            sizing.installed_rib_spacing_m(),
+            sizing.rib_spacing_m
+        ));
+    }
+    if !sizing.strength_margins_pass() {
+        let minimum = sizing.minimum_margin_of_safety();
+        failures.push(if minimum.is_finite() {
+            format!("wingbox strength sizing is infeasible (minimum margin {minimum:.6})")
+        } else {
+            "wingbox strength sizing produced a non-finite margin".to_owned()
+        });
+    }
+    (!failures.is_empty()).then(|| failures.join("; "))
+}
+
 fn missing_patran_result(configured: &str) -> PatranExportResult {
     let detail = if configured.trim().is_empty() {
         "Patran executable absent: configure it under Setup > External Tools".to_owned()
@@ -341,7 +380,48 @@ fn structural_error(msg: String, torenbeek: f64) -> StructuralAnalysisResult {
 
 #[cfg(test)]
 mod tests {
-    use super::missing_patran_result;
+    use super::{missing_patran_result, sizing_failure_detail};
+    use alas_struct::sizing::{MassBreakdown, SparSizing, WingboxSizing};
+
+    fn sample_sizing() -> WingboxSizing {
+        WingboxSizing {
+            y_stations: vec![0.0, 10.0],
+            eta_stations: vec![0.0, 1.0],
+            chord: vec![1.0, 1.0],
+            spar_fracs: vec![0.25, 0.75],
+            spars: vec![SparSizing {
+                chord_fraction: 0.25,
+                h: vec![1.0, 1.0],
+                w_cap: vec![1.0, 1.0],
+                t_cap: vec![1.0, 1.0],
+                a_cap: vec![1.0, 1.0],
+                t_web: 0.1,
+                frac_moment: vec![1.0, 1.0],
+                margin_of_safety: vec![-0.1, 0.5],
+            }],
+            t_skin: 0.01,
+            num_ribs: 2,
+            rib_spacing_m: 4.0,
+            mass_breakdown_kg: MassBreakdown {
+                spar_caps: 0.0,
+                spar_webs: 0.0,
+                skin: 0.0,
+                ribs: 0.0,
+            },
+            total_mass_kg: 0.0,
+            sizing_load_case: "test",
+        }
+    }
+
+    #[test]
+    fn sizing_gate_rejects_overwide_ribs_and_negative_margins() {
+        let detail = match sizing_failure_detail(&sample_sizing()) {
+            Some(detail) => detail,
+            None => panic!("sizing must fail"),
+        };
+        assert!(detail.contains("installed rib spacing"));
+        assert!(detail.contains("minimum margin -0.100000"));
+    }
 
     #[test]
     fn missing_patran_configuration_is_reported_as_absent() {

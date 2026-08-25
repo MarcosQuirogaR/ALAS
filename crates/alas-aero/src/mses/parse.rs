@@ -42,6 +42,48 @@ pub fn apply_polar_replacements(raw: &str) -> String {
         .replace("at x,y", "x_ac")
 }
 
+/// Columns required to publish one MPlot polar point.
+///
+/// These are the fields exposed by [`MsesPolarResult`](super::MsesPolarResult)
+/// and compared by the MSES parity fixture.  A converged solver point without
+/// one of them is not a usable polar point: filling it with zero would invent
+/// coefficient data, while appending only the fields present in that row would
+/// misalign the accumulated columns.
+pub(crate) const POLAR_REQUIRED_COLUMNS: [&str; 8] = [
+    "alpha", "CL", "CD", "CM", "CDv", "CDw", "xtr_top", "xtr_bot",
+];
+
+/// Parse and validate one MPlot polar-summary point.
+///
+/// The low-level scanner intentionally remains permissive for parity with the
+/// reference parser.  The polar driver, however, must not publish a converged
+/// point when a required field is absent or when a malformed numeric token was
+/// converted to `NaN`; such a point cannot be aligned with the other columns.
+pub fn parse_polar_summary(raw: &str) -> Result<HashMap<String, f64>, String> {
+    let summary = parse_unformatted_data_output(&apply_polar_replacements(raw));
+    if !summary.get("alpha").is_some_and(|value| value.is_finite()) {
+        // Preserve the pre-validation public diagnostic for the one field the
+        // driver already checked before this strict schema was introduced.
+        return Err("mplot polar output did not contain a finite alpha value".to_owned());
+    }
+    for &key in &POLAR_REQUIRED_COLUMNS {
+        if key == "alpha" {
+            continue;
+        }
+        let Some(value) = summary.get(key) else {
+            return Err(format!(
+                "mplot polar output missing required column '{key}'"
+            ));
+        };
+        if !value.is_finite() {
+            return Err(format!(
+                "mplot polar column '{key}' is non-finite or malformed"
+            ));
+        }
+    }
+    Ok(summary)
+}
+
 /// Parse a block of ragged `key = value` data into a map, as
 /// `AVL.parse_unformatted_data_output` does with its default `" = "` delimiter.
 ///
@@ -97,10 +139,11 @@ pub fn parse_unformatted_data_output(input: &str) -> HashMap<String, f64> {
 /// length, Cp and local Mach, one entry per surface panel in MPlot's native
 /// order.
 ///
-/// MPlot restarts the arc-length coordinate at the leading edge for its second
-/// surface. That reset, rather than the sign of the ordinate, is the stable
-/// surface-topology boundary: a cambered section can cross the chord line near
-/// its trailing edge without ceasing to be the upper or lower surface.
+/// The reference analysis classifies these rows by the sign of the ordinate;
+/// the arc-length column is retained for diagnostics but is not a surface
+/// discriminator. This matters for exact parity because MPlot includes wake
+/// and near-leading-edge rows whose arc-length reset does not align with the
+/// reference's upper/lower split.
 pub type BlDumpColumns = (Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>);
 
 /// Parse an `mplot` boundary-layer dump into [`BlDumpColumns`].
@@ -193,6 +236,9 @@ pub fn parse_flowfield(text: &str) -> (Vec<f64>, Vec<f64>, Vec<f64>, Vec<usize>)
     (xs, ys, ms, row_offsets)
 }
 
+// Parser fixtures use `expect`/`expect_err` so malformed cases fail at the
+// assertion site; this allowance is intentionally scoped to the test module.
+#[allow(clippy::expect_used)]
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -213,6 +259,45 @@ mod tests {
         let parsed = parse_unformatted_data_output(&apply_polar_replacements(raw));
         assert_eq!(parsed["xtr_top"], 0.3669);
         assert_eq!(parsed["xtr_bot"], 0.5998);
+    }
+
+    #[test]
+    fn polar_summary_requires_every_public_column_and_accepts_zero_wave_drag() {
+        let raw = "alpha = 2.0 CL = 0.5 CD = 0.03 CM = -0.04 \
+                    CDv = 0.02 CDw = 0.0 top Xtr = 0.4 bot Xtr = 0.6";
+        let parsed = parse_polar_summary(raw).expect("complete MPlot point");
+        for &key in &POLAR_REQUIRED_COLUMNS {
+            assert!(parsed.contains_key(key), "missing parsed column {key}");
+            assert!(parsed[key].is_finite(), "non-finite parsed column {key}");
+        }
+        assert_eq!(parsed["CDw"], 0.0);
+    }
+
+    #[test]
+    fn polar_summary_rejects_a_missing_required_column() {
+        let raw = "alpha = 2.0 CL = 0.5 CD = 0.03 CM = -0.04 \
+                    CDv = 0.02 top Xtr = 0.4 bot Xtr = 0.6";
+        let error = parse_polar_summary(raw).expect_err("missing CDw must be rejected");
+        assert_eq!(error, "mplot polar output missing required column 'CDw'");
+    }
+
+    #[test]
+    fn polar_summary_keeps_the_existing_alpha_error_contract() {
+        let raw = "CL = 0.5 CD = 0.03 CM = -0.04 \
+                    CDv = 0.02 CDw = 0.0 top Xtr = 0.4 bot Xtr = 0.6";
+        let error = parse_polar_summary(raw).expect_err("missing alpha must be rejected");
+        assert_eq!(
+            error,
+            "mplot polar output did not contain a finite alpha value"
+        );
+    }
+
+    #[test]
+    fn polar_summary_rejects_a_malformed_required_value() {
+        let raw = "alpha = 2.0 CL = malformed CD = 0.03 CM = -0.04 \
+                    CDv = 0.02 CDw = 0.0 top Xtr = 0.4 bot Xtr = 0.6";
+        let error = parse_polar_summary(raw).expect_err("malformed CL must be rejected");
+        assert_eq!(error, "mplot polar column 'CL' is non-finite or malformed");
     }
 
     #[test]

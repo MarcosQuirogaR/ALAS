@@ -92,9 +92,15 @@ fn movable_surface_area(plane: &Airplane, controls: &ControlSurfacesConfig) -> O
         .find(|surface| surface.name == "Vertical Stabilizer")
         .or_else(|| plane.wings.get(2))?;
     let wing_fraction = |chord: f64, start: f64, end: f64| chord.max(0.0) * (end - start).max(0.0);
-    let wing_area = wing.area();
-    let hstab_area = hstab.area();
-    let vstab_area = vstab.area();
+    // FLOPS receives planform areas on the aircraft reference plane.  Keep
+    // control-surface fractions tied to each surface's projected reference
+    // area; the legacy unfolded area would add a dihedral-dependent bias.
+    let wing_area = wing.reference_area();
+    let hstab_area = hstab.reference_area();
+    // The fin is a vertical XZ surface; XY projection would collapse its
+    // planform. Its physical planform is the unfolded surface area, while the
+    // main-wing reference area remains the projected aircraft scale.
+    let vstab_area = vstab.unfolded_area();
     let movable = wing_area
         * (wing_fraction(
             controls.slat_chord_fraction,
@@ -352,9 +358,9 @@ pub fn evaluate_product(
         maximum_mach,
         design_range_nmi,
         design_gross_mass_kg: requirements.mtow_kg,
-        wing_area_m2: wing.area(),
+        wing_area_m2: wing.reference_area(),
         movable_surface_area_m2,
-        wing_span_m: wing.span(),
+        wing_span_m: wing.reference_span(),
         quarter_chord_sweep_deg: wing.mean_sweep_angle(0.25),
         fuselage_length_m: fuselage_length,
         fuselage_width_m: width,
@@ -484,6 +490,8 @@ mod tests {
         assert!(breakdown.systems.avionics_kg > 0.0);
         assert!(breakdown.systems.total_kg > breakdown.systems.avionics_kg);
         assert_eq!(inputs.passenger_count(), 350);
+        assert_eq!(inputs.wing_area_m2, plane.wings[0].reference_area());
+        assert_eq!(inputs.wing_span_m, plane.wings[0].reference_span());
         assert_eq!(provenance.cabin.document, "test cabin layout");
     }
 

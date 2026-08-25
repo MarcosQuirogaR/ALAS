@@ -372,6 +372,13 @@ pub struct VlmResults {
     pub distribution: VortexDistribution,
     /// One entry per input condition, in the order they were given.
     pub cases: Vec<VlmCaseResult>,
+    /// Residual and pivot-ratio evidence for each unique-Mach circulation
+    /// solve, in the order those Mach groups were assembled by [`run`].
+    ///
+    /// A single factorization serves all conditions in one Mach group, so
+    /// these diagnostics are intentionally group-level rather than repeated
+    /// once per case.
+    pub solve_diagnostics: Vec<alas_math::linalg::SolveDiagnostics>,
 }
 
 /// Why a solve could not run.
@@ -398,4 +405,13 @@ pub enum VlmError {
     /// The vehicle has no lifting surfaces, so there is nothing to solve.
     #[error("the vehicle has no wings")]
     NoWings,
+    /// The dense solve produced non-finite residual or conditioning evidence.
+    #[error("the VORLAX solve produced non-finite numerical diagnostics")]
+    NonFiniteNumericalDiagnostics,
+    /// The translated kernel is valid only for finite subsonic Mach numbers.
+    #[error("Mach {mach} is outside the translated subsonic VORLAX domain [0, 1)")]
+    MachOutsideSubsonicDomain {
+        /// Requested Mach number.
+        mach: f64,
+    },
 }

@@ -24,13 +24,10 @@
 //!
 //! # The aircraft
 //!
-//! Like `parity_analysis.rs`, this runs on the nominal aircraft
-//! `alas-geom::builder` builds -- the same object `golden/geom/builder.json`
-//! pins -- because `fuselage_cm_alpha` integrates the real fuselage area
-//! distribution and the trim solve runs VLM on the built geometry. The fixture
-//! records the aircraft's reference dimensions and names, and this test checks
-//! them first: if the two sides have stopped meaning the same aeroplane, every
-//! comparison below is answering a different question.
+//! This runs on the frozen-reference aircraft because
+//! `fuselage_cm_alpha` integrates the real fuselage area distribution and the
+//! trim solve runs VLM on the built geometry. Product geometry has a newer
+//! transport-planform default and must not be mixed into this fixture.
 //!
 //! The `no_hstab` cases and the two- and one-wing tail-volume cases are the
 //! same aircraft with wings removed, reconstructed here exactly as the
@@ -163,9 +160,16 @@ fn or_nan(value: Option<f64>) -> f64 {
 /// The nominal aircraft -- the generator's
 /// `AircraftBuilder(GeometryConfig()).build()`.
 fn build() -> Airplane {
-    AircraftBuilder::new(Some(GeometryConfig::default()))
+    let mut plane = AircraftBuilder::new_reference_compatibility(Some(GeometryConfig::default()))
         .build(None, true)
-        .expect("the default aircraft builds")
+        .expect("the default aircraft builds");
+    // Preserve the historical area scale for this frozen translation fixture;
+    // its lateral/Y b_ref was already the builder's projected value.
+    if let Some(wing) = plane.wings.first() {
+        let s_ref = wing.unfolded_area();
+        plane.s_ref = s_ref;
+    }
+    plane
 }
 
 /// The nominal aircraft with the horizontal stabilizer removed -- the
@@ -247,7 +251,7 @@ fn the_munk_and_tail_volume_correlations_match_python() {
     for name in names(&fixture.tail_volume) {
         let case = &fixture.tail_volume[name];
         let target = first_wings(&plane, case.inputs.n_wings);
-        let (vh, vv) = trim::tail_volume_coefficients(&target);
+        let (vh, vv) = trim::tail_volume_coefficients_reference_compatibility(&target);
         // Presence is discrete: `None` where the aircraft has no such tail.
         let mut presence = Comparison::new(format!("tail_volume.{name} (presence)"), Tier::Exact);
         presence.exact("vh.is_some", &vh.is_some(), &case.vh.is_some());
@@ -280,7 +284,7 @@ fn fuselage_cm_alpha_matches_python() {
         };
         comparison.scalar(
             &format!("fuselage_cm_alpha.{name}"),
-            trim::fuselage_cm_alpha(target, case.inputs.cl_alpha),
+            trim::fuselage_cm_alpha_reference_compatibility(target, case.inputs.cl_alpha),
             case.cm_alpha,
         );
     }
@@ -299,8 +303,8 @@ fn the_static_margin_and_neutral_point_match_python() {
         trim::static_margin(&plane, &analysis).expect("the nominal aircraft meshes and solves");
     comparison.scalar("static_margin", sm, fixture.static_margin.static_margin);
 
-    let (x_np, np_sm, cl_alpha) =
-        trim::neutral_point(&plane, &analysis).expect("the nominal aircraft meshes and solves");
+    let (x_np, np_sm, cl_alpha) = trim::neutral_point_reference_compatibility(&plane, &analysis)
+        .expect("the nominal aircraft meshes and solves");
     comparison.scalar("neutral_point.x_np", x_np, fixture.neutral_point.x_np);
     comparison.scalar(
         "neutral_point.static_margin",
@@ -359,7 +363,7 @@ fn stability_and_trim_matches_python() {
         } else {
             &plane_no_hstab
         };
-        let result = trim::stability_and_trim(
+        let result = trim::stability_and_trim_reference_compatibility(
             target,
             &analysis,
             case.inputs.cl_target,

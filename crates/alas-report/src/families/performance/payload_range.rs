@@ -5,7 +5,7 @@
 // alas/physics/performance.py (`payload_range_diagram`, `wing_fuel_volume_m3`).
 // Reference: alas @ rust-port-baseline.
 
-//! The A-B-C-D payload-range envelope from the analyzed aircraft.
+//! The conceptual A-B-C-D payload-range curve from the analyzed aircraft.
 //!
 //! The report crate owns this orchestration because the numerical payload-range
 //! calculation consumes both a full-analysis report and configuration. Keeping
@@ -16,6 +16,7 @@ use alas_atmo::Atmosphere;
 use alas_config::AlasConfig;
 use alas_geom::aircraft::wing::Wing;
 use alas_perf::performance::breguet_range_m;
+use alas_pipeline::feasibility::{assess_fuel_capacity, FuelCapacityEvidence};
 use alas_pipeline::full_analysis::AnalysisReport;
 
 use super::support::format_thousands;
@@ -53,8 +54,11 @@ struct PayloadRangeData {
     mtow_kg: f64,
 }
 
-/// Generate the classic payload-range diagram from the report's masses,
-/// geometry, aerodynamic point and the configuration's fuel model.
+/// Generate an idealized Breguet payload-range curve from the report's masses,
+/// aerodynamic point, and typed fuel-capacity evidence.
+///
+/// This is a conceptual model check, not an AFM/WBM operational capability
+/// envelope or a mission-certified range result.
 pub fn figure_payload_range(
     report: &AnalysisReport,
     config: &AlasConfig,
@@ -62,11 +66,12 @@ pub fn figure_payload_range(
 ) -> Scene {
     let pal = get_palette(theme);
     let Some(data) = payload_range_data(report, config) else {
-        return status_scene(
-            "Payload-Range Diagram",
-            "The analyzed report has no main wing; payload range cannot be computed.",
-            theme,
-        );
+        let message = if report.airplane.wings.is_empty() {
+            "The analyzed report has no main wing; conceptual payload range cannot be computed."
+        } else {
+            "Typed usable-fuel capacity evidence is unavailable; conceptual payload range cannot be computed."
+        };
+        return status_scene("Conceptual Payload-Range Diagram", message, theme);
     };
 
     let ranges: Vec<f64> = data.points.iter().map(|point| point.range_nm).collect();
@@ -79,8 +84,8 @@ pub fn figure_payload_range(
     let max_payload = payloads_t.iter().copied().fold(0.0, f64::max).max(1.0);
 
     let mut scene = Scene::new(700.0, 500.0, Some(Color::from_hex(pal.bg)));
-    scene.title = Some("Payload-Range Diagram".to_owned());
-    draw_title(&mut scene, "Payload-Range Diagram", pal);
+    scene.title = Some("Conceptual Payload-Range Diagram".to_owned());
+    draw_title(&mut scene, "Conceptual Payload-Range Diagram", pal);
     scene.suppress_derived_title();
     let axes = Axes2D::new(
         (85.0, 45.0, 530.0, 350.0),
@@ -179,9 +184,9 @@ pub fn figure_payload_range(
     });
     scene.add(SceneElement::Text {
         text: format!(
-            "Fuel capacity: {} kg (limited by {})   |   OEW: {} kg   |   MTOW: {} kg",
-            format_thousands(data.fuel_capacity_kg),
+            "CONCEPTUAL BREGUET RANGE ONLY; capacity evidence: {}   |   usable fuel {} kg   |   OEW {} kg   |   MTOW {} kg   |   NOT AN AFM/WBM OPERATIONAL ENVELOPE",
             data.fuel_capacity_limit,
+            format_thousands(data.fuel_capacity_kg),
             format_thousands(data.oew_kg),
             format_thousands(data.mtow_kg)
         ),
@@ -197,7 +202,7 @@ pub fn figure_payload_range(
 }
 
 fn payload_range_data(report: &AnalysisReport, config: &AlasConfig) -> Option<PayloadRangeData> {
-    let wing = report.airplane.wings.first()?;
+    report.airplane.wings.first()?;
     let masses = &report.component_masses;
     let oew_kg: f64 = OEW_KEYS
         .iter()
@@ -206,11 +211,18 @@ fn payload_range_data(report: &AnalysisReport, config: &AlasConfig) -> Option<Pa
     let max_payload_kg = masses.get("Payload").copied().unwrap_or(0.0);
     let mtow_kg = config.requirements.mtow_kg;
 
-    let tank_capacity_kg = wing_fuel_volume_m3(wing, config.mass_model.fuel_tank_usable_fraction)
-        * config.mass_model.fuel_density_kg_m3;
+    let fuel_capacity = assess_fuel_capacity(config, &report.design, report);
+    let fuel_capacity_kg = fuel_capacity
+        .capacity_kg
+        .filter(|value| value.is_finite())?;
+    let fuel_capacity_limit = match fuel_capacity.evidence {
+        FuelCapacityEvidence::PublishedPreset => "published usable capacity",
+        FuelCapacityEvidence::GeometryEstimate => "geometry-estimated capacity",
+        FuelCapacityEvidence::Unavailable => "unavailable",
+    };
     let structural_capacity_kg = (mtow_kg - oew_kg).max(0.0);
-    let (fuel_capacity_kg, fuel_capacity_limit) = if tank_capacity_kg <= structural_capacity_kg {
-        (tank_capacity_kg, "wing tank volume")
+    let (fuel_capacity_kg, fuel_capacity_limit) = if fuel_capacity_kg <= structural_capacity_kg {
+        (fuel_capacity_kg, fuel_capacity_limit)
     } else {
         (structural_capacity_kg, "MTOW budget")
     };
@@ -267,14 +279,17 @@ fn payload_range_data(report: &AnalysisReport, config: &AlasConfig) -> Option<Pa
     })
 }
 
+// Retained as an explicit compatibility/reference correlation for standalone
+// comparison tests; product capacity comes from typed feasibility evidence.
+#[allow(dead_code)]
 fn wing_fuel_volume_m3(wing: &Wing, usable_fraction: f64) -> f64 {
     if wing.xsecs.len() < 2 {
         return 0.0;
     }
     let x: Vec<f64> = (0..=100).map(|i| i as f64 / 100.0).collect();
     let t_over_c_root = wing.xsecs[0].airfoil.max_thickness(&x);
-    let area = wing.area();
-    let span = wing.span().max(1e-6);
+    let area = wing.unfolded_area();
+    let span = wing.unfolded_span().max(1e-6);
     let taper = wing.taper_ratio();
     let taper_term = (1.0 + taper + taper * taper) / (1.0 + taper).powi(2);
     let geometric_volume = 0.54 * (area * area / span) * t_over_c_root * taper_term;

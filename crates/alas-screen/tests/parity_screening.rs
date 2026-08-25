@@ -13,7 +13,9 @@ use alas_geom::airfoil_library::AirfoilLibrary;
 use alas_geom::asb::spacing::linspace;
 use alas_screen::refine::refine_candidate_3d;
 use alas_screen::runner::{blend_scores, filter_names, run_airfoil_screening};
-use alas_screen::score::{cruise_condition, score_candidate};
+use alas_screen::score::{
+    cruise_condition_reference_compatibility, score_candidate_reference_compatibility,
+};
 use alas_screen::types::{AirfoilCandidateResult, AirfoilScreeningOptions};
 use alas_testkit::{Comparison, Tier};
 use serde::Deserialize;
@@ -108,7 +110,7 @@ fn parity_screening() {
 
     // 1. Cruise condition (Closed tier)
     let (mach, reynolds, cl_target, altitude) =
-        cruise_condition(&config, &dv).expect("cruise condition");
+        cruise_condition_reference_compatibility(&config, &dv).expect("cruise condition");
     let mut comp_cruise = Comparison::new("cruise_condition", Tier::Closed);
     comp_cruise.scalar("mach", mach, fixture.cruise_condition.mach);
     comp_cruise.scalar("reynolds", reynolds, fixture.cruise_condition.reynolds);
@@ -137,7 +139,7 @@ fn parity_screening() {
     let mut comp_s1 = Comparison::new("score_candidate", Tier::Closed);
 
     for expected in &fixture.stage1_candidates {
-        let actual = score_candidate(
+        let actual = score_candidate_reference_compatibility(
             &expected.name,
             &config,
             &dv,

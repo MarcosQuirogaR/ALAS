@@ -4,7 +4,11 @@
 use alas_config::design_variables::DesignVector;
 use alas_config::AlasConfig;
 
-use super::{converged, latin_hypercube_population, scored_point, select_samples, DesignOptimizer};
+use super::{
+    candidate_is_at_least_as_good, candidate_is_better, converged, latin_hypercube_population,
+    scored_point, select_samples, DesignObjective, DesignOptimizer, OptimizationError,
+    SearchObjective,
+};
 use crate::evaluator::ObjectiveEvaluation;
 use crate::history::OptimizationHistory;
 use crate::python_rng::RandomState;
@@ -38,6 +42,257 @@ fn a_solver_failure_is_worse_than_a_recoverable_constraint_violation() {
     let recoverable_point = scored_point(&values, 2.0, &recoverable);
 
     assert!(failed_point.constraint_violation > recoverable_point.constraint_violation);
+}
+
+#[test]
+fn default_de_never_prefers_a_lower_cost_invalid_candidate_over_a_valid_one() {
+    assert!(!candidate_is_better(-100.0, false, 10.0, true, true));
+    assert!(candidate_is_better(10.0, true, -100.0, false, true));
+    assert!(candidate_is_at_least_as_good(10.0, true, 10.0, true, true));
+    assert!(!candidate_is_at_least_as_good(
+        -100.0, false, 10.0, true, true
+    ));
+    // The compatibility replay intentionally retains scalar-only ordering.
+    assert!(candidate_is_better(-100.0, false, 10.0, true, false));
+}
+
+#[test]
+fn default_de_returns_the_valid_candidate_when_invalid_is_cheaper() {
+    let mut config = AlasConfig::default();
+    config.optimizer.solver.max_iterations = 0;
+    config.optimizer.solver.population_size = 1;
+    config.optimizer.solver.seed = Some(42);
+    config.optimizer.solver.seed_near_initial_design = false;
+    let mut optimizer = DesignOptimizer::new(config);
+    let bounds = vec![(0.0, 1.0); alas_config::DESIGN_VARIABLE_SPECS.len()];
+    let mut evaluator = |design: &DesignVector| {
+        if design.span_m >= 0.5 {
+            ObjectiveEvaluation {
+                cost: 10.0,
+                valid: true,
+                l_over_d: 10.0,
+                span_m: design.span_m,
+                alpha_deg: 3.0,
+                area_m2: 20.0,
+                trim_ih_deg: 0.0,
+                reject_reason: String::new(),
+            }
+        } else {
+            ObjectiveEvaluation::rejected(-100.0, "static_margin")
+        }
+    };
+    let result = optimizer
+        .run_with_evaluator(Some(&bounds), None, &mut evaluator, None)
+        .expect("the seeded population contains a feasible candidate");
+    assert!(result.best_valid);
+    assert_eq!(result.best_cost, 10.0);
+}
+
+#[test]
+fn default_de_reports_no_feasible_design_instead_of_returning_an_invalid_one() {
+    let mut config = AlasConfig::default();
+    config.optimizer.solver.max_iterations = 1;
+    config.optimizer.solver.population_size = 1;
+    config.optimizer.solver.seed = Some(7);
+    let mut optimizer = DesignOptimizer::new(config);
+    let mut evaluator = |_design: &DesignVector| {
+        ObjectiveEvaluation::rejected(-1_000.0, "static_margin+cg_envelope")
+    };
+
+    let error = optimizer
+        .run_with_evaluator(None, None, &mut evaluator, None)
+        .expect_err("an all-invalid population must not produce a design");
+    let OptimizationError::NoFeasibleDesign(summary) = error else {
+        panic!("expected NoFeasibleDesign, got {error:?}");
+    };
+    assert!(summary.evaluated_candidates > 0);
+    assert_eq!(
+        summary.rejection_reason_counts["static_margin"],
+        summary.evaluated_candidates
+    );
+    assert_eq!(
+        summary.rejection_reason_counts["cg_envelope"],
+        summary.evaluated_candidates
+    );
+}
+
+#[test]
+fn default_de_accepts_exact_and_near_bound_designs_for_every_seeded_strategy() {
+    let nominal = DesignVector::default();
+    let exact_bounds: Vec<(f64, f64)> = nominal
+        .to_array()
+        .into_iter()
+        .map(|value| (value, value))
+        .collect();
+    let near_bounds: Vec<(f64, f64)> = nominal
+        .to_array()
+        .into_iter()
+        .map(|value| (value - 1.0e-12, value + 1.0e-12))
+        .collect();
+
+    for strategy in [
+        "best1bin",
+        "best1exp",
+        "rand1bin",
+        "rand1exp",
+        "best2bin",
+        "best2exp",
+        "rand2bin",
+        "rand2exp",
+        "randtobest1bin",
+        "randtobest1exp",
+        "currenttobest1bin",
+        "currenttobest1exp",
+    ] {
+        for (seed, bounds) in [
+            (0_i64, exact_bounds.as_slice()),
+            (42, near_bounds.as_slice()),
+        ] {
+            let mut config = AlasConfig::default();
+            config.optimizer.solver.max_iterations = 1;
+            config.optimizer.solver.population_size = 1;
+            config.optimizer.solver.seed = Some(seed);
+            config.optimizer.solver.strategy = strategy.to_owned();
+            let mut optimizer = DesignOptimizer::new(config);
+            let mut evaluator = |design: &DesignVector| ObjectiveEvaluation {
+                cost: design.to_array().iter().map(|value| value * value).sum(),
+                valid: true,
+                l_over_d: 10.0,
+                span_m: design.span_m,
+                alpha_deg: 3.0,
+                area_m2: 20.0,
+                trim_ih_deg: 0.0,
+                reject_reason: String::new(),
+            };
+            let result = optimizer
+                .run_with_evaluator(Some(bounds), Some(&nominal), &mut evaluator, None)
+                .unwrap_or_else(|error| panic!("strategy={strategy} seed={seed}: {error}"));
+            assert!(result.best_valid, "strategy={strategy} seed={seed}");
+            assert!(result
+                .best_design
+                .to_array()
+                .iter()
+                .zip(bounds)
+                .all(|(value, &(lower, upper))| *value >= lower && *value <= upper));
+        }
+    }
+}
+
+#[test]
+fn configured_methods_and_seeds_keep_boundary_results_typed_and_feasible() {
+    let nominal = DesignVector::default();
+    let exact_bounds: Vec<(f64, f64)> = nominal
+        .to_array()
+        .into_iter()
+        .map(|value| (value, value))
+        .collect();
+    let near_bounds: Vec<(f64, f64)> = nominal
+        .to_array()
+        .into_iter()
+        .map(|value| (value - 1.0e-12, value + 1.0e-12))
+        .collect();
+
+    for method in [
+        "differential_evolution",
+        "feasibility_first_de",
+        "nsga2",
+        "turbo_1",
+        "cma_es",
+    ] {
+        for seed in [0_i64, 42_i64] {
+            for bounds in [exact_bounds.as_slice(), near_bounds.as_slice()] {
+                let mut config = AlasConfig::default();
+                config.optimizer.solver.method = method.to_owned();
+                config.optimizer.solver.max_iterations = 0;
+                config.optimizer.solver.population_size = 1;
+                config.optimizer.solver.seed = Some(seed);
+                config.optimizer.solver.strategy = "best1bin".to_owned();
+                let mut optimizer = DesignOptimizer::new(config);
+                let mut evaluator = |design: &DesignVector| ObjectiveEvaluation {
+                    cost: design.to_array().iter().map(|value| value * value).sum(),
+                    valid: true,
+                    l_over_d: 10.0,
+                    span_m: design.span_m,
+                    alpha_deg: 3.0,
+                    area_m2: 20.0,
+                    trim_ih_deg: 0.0,
+                    reject_reason: String::new(),
+                };
+                let result = optimizer
+                    .run_with_evaluator(Some(bounds), Some(&nominal), &mut evaluator, None)
+                    .unwrap_or_else(|error| {
+                        panic!("method={method} seed={seed} boundary search failed: {error}")
+                    });
+                assert!(result.best_valid, "method={method} seed={seed}");
+                assert!(result
+                    .best_design
+                    .to_array()
+                    .iter()
+                    .zip(bounds)
+                    .all(|(value, &(lower, upper))| *value >= lower && *value <= upper));
+            }
+
+            let mut config = AlasConfig::default();
+            config.optimizer.solver.method = method.to_owned();
+            config.optimizer.solver.max_iterations = 0;
+            config.optimizer.solver.population_size = 1;
+            config.optimizer.solver.seed = Some(seed);
+            let mut optimizer = DesignOptimizer::new(config);
+            let mut evaluator = |_design: &DesignVector| {
+                ObjectiveEvaluation::rejected(-1_000.0, "static_margin+cg_envelope")
+            };
+            let error = optimizer
+                .run_with_evaluator(Some(&exact_bounds), Some(&nominal), &mut evaluator, None)
+                .expect_err("an all-invalid configured method must not publish a design");
+            let OptimizationError::NoFeasibleDesign(summary) = error else {
+                panic!("method={method} seed={seed} returned {error:?}");
+            };
+            assert!(
+                summary.evaluated_candidates > 0,
+                "method={method} seed={seed}"
+            );
+        }
+    }
+}
+
+#[test]
+fn unknown_optimizer_tokens_do_not_start_a_fallback_search() {
+    let mut config = AlasConfig::default();
+    config.optimizer.solver.method = "differential_evoluton".to_owned();
+    let mut optimizer = DesignOptimizer::new(config);
+    let mut calls = 0;
+    let mut evaluator = |_design: &DesignVector| {
+        calls += 1;
+        ObjectiveEvaluation::rejected(0.0, "should_not_run")
+    };
+    let error = optimizer
+        .run_with_evaluator(None, None, &mut evaluator, None)
+        .expect_err("an unknown method must fail before evaluating candidates");
+    assert_eq!(calls, 0);
+    assert!(matches!(
+        error,
+        OptimizationError::InvalidConfiguration(reason) if reason.contains("unknown optimizer method")
+    ));
+}
+
+#[test]
+fn unknown_strategy_does_not_fall_back_to_best1() {
+    let mut config = AlasConfig::default();
+    config.optimizer.solver.strategy = "best1bni".to_owned();
+    let mut optimizer = DesignOptimizer::new(config);
+    let mut calls = 0;
+    let mut evaluator = |_design: &DesignVector| {
+        calls += 1;
+        ObjectiveEvaluation::rejected(0.0, "should_not_run")
+    };
+    let error = optimizer
+        .run_with_evaluator(None, None, &mut evaluator, None)
+        .expect_err("an unknown strategy must fail before evaluating candidates");
+    assert_eq!(calls, 0);
+    assert!(matches!(
+        error,
+        OptimizationError::InvalidConfiguration(reason) if reason.contains("unknown optimizer strategy")
+    ));
 }
 
 #[test]
@@ -96,12 +351,29 @@ fn delegated_objective_keeps_the_optimizer_history_contract() {
             reject_reason: String::new(),
         }
     };
-    let result =
-        optimizer.run_with_evaluator(None, Some(&DesignVector::default()), &mut evaluator, None);
+    let result = optimizer
+        .run_with_evaluator(None, Some(&DesignVector::default()), &mut evaluator, None)
+        .expect("the delegated objective accepts every candidate");
 
     assert_eq!(calls, result.history.n_evaluations());
     assert_eq!(calls, result.history.design_vectors.len());
     assert!(result.history.valid.iter().all(|valid| *valid));
+}
+
+#[test]
+fn native_worker_batches_merge_history_in_candidate_order() {
+    let mut objective = DesignObjective::new(AlasConfig::default());
+    let candidates = vec![Vec::new(), Vec::new(), Vec::new(), Vec::new()];
+
+    let evaluations = objective.evaluate_batch(&candidates, 2);
+
+    assert_eq!(evaluations.len(), candidates.len());
+    assert_eq!(objective.history.n_evaluations(), candidates.len());
+    assert!(objective
+        .history
+        .reject_reason
+        .iter()
+        .all(|reason| reason == "geometry_build"));
 }
 
 #[test]
@@ -128,12 +400,9 @@ fn every_native_method_dispatches_through_the_shared_evaluator_contract() {
             }
         };
 
-        let result = optimizer.run_with_evaluator(
-            None,
-            Some(&DesignVector::default()),
-            &mut evaluator,
-            None,
-        );
+        let result = optimizer
+            .run_with_evaluator(None, Some(&DesignVector::default()), &mut evaluator, None)
+            .expect("the test objective accepts every candidate");
 
         assert_eq!(result.method, method);
         assert!(result.best_cost.is_finite(), "{method}");

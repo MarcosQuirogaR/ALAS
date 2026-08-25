@@ -50,13 +50,15 @@ fn parity_optimizer() {
 
     let mut opt = DesignOptimizer::new_reference_compatibility(config);
     let mut progress_messages = Vec::new();
-    let result = opt.run(
-        None,
-        Some(&dv_init),
-        Some(&mut |msg| {
-            progress_messages.push(msg.to_string());
-        }),
-    );
+    let result = opt
+        .run(
+            None,
+            Some(&dv_init),
+            Some(&mut |msg| {
+                progress_messages.push(msg.to_string());
+            }),
+        )
+        .expect("the frozen reference population contains feasible candidates");
 
     // Verify optimizer improved or maintained cost relative to initial design
     assert!(
@@ -91,7 +93,9 @@ fn zero_max_iterations_records_the_initial_population_and_its_feasibility() {
 
     let initial = DesignVector::default();
     let mut optimizer = DesignOptimizer::new(config);
-    let result = optimizer.run(None, Some(&initial), None);
+    let result = optimizer
+        .run(None, Some(&initial), None)
+        .expect("the default design is feasible");
 
     assert_eq!(result.history.n_evaluations(), DesignVector::bounds().len());
     assert_eq!(result.history.valid.len(), result.history.n_evaluations());
@@ -116,7 +120,9 @@ fn a_short_product_search_reaches_the_cruise_body_angle_window() {
 
     let initial = DesignVector::default();
     let mut optimizer = DesignOptimizer::new(config);
-    let result = optimizer.run(None, Some(&initial), None);
+    let result = optimizer
+        .run(None, Some(&initial), None)
+        .expect("the seeded product search contains a feasible candidate");
     let best_index = result
         .history
         .cost
@@ -141,7 +147,9 @@ fn seeded_example_replays_the_python_winner() {
 
     let initial = DesignVector::default();
     let mut optimizer = DesignOptimizer::new_reference_compatibility(config);
-    let result = optimizer.run(None, Some(&initial), None);
+    let result = optimizer
+        .run(None, Some(&initial), None)
+        .expect("the frozen reference population contains feasible candidates");
     let expected = [
         77.26310883297792,
         16.033742604077958,

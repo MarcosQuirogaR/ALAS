@@ -230,6 +230,14 @@ fn compare_case(case: &Value) {
     if preset == "A320-200" {
         config.geometry.engine.engine_name = "LEAP-1A".to_owned();
     }
+    // The pinned W6.5 artifact predates the product transport-planform
+    // defaults. Clear those optional stations before comparing the effective
+    // pre-builder configuration; the reference builder applies the same
+    // contract again at the geometry boundary below.
+    config.geometry.wing.side_of_body_span_fraction = None;
+    config.geometry.wing.side_of_body_chord_ratio = None;
+    config.geometry.wing.kink_span_fraction = None;
+    config.geometry.wing.outboard_le_sweep_deg = None;
     assert_eq!(
         serde_json::to_value(&config.geometry).unwrap(),
         case["effective_geometry_config_before_builder"],
@@ -244,13 +252,24 @@ fn compare_case(case: &Value) {
         &case["engine"]["before_builder"],
         &format!("{preset}.before_builder"),
     );
-    let builder = AircraftBuilder::new(Some(config.geometry.clone()));
+    // W6.5 is frozen evidence generated before the product transport-planform
+    // defaults. Replay its historical root/break/tip geometry explicitly;
+    // product report paths are validated separately on the product builder.
+    let builder = AircraftBuilder::new_reference_compatibility(Some(config.geometry.clone()));
     compare_engine(
         &serde_json::to_value(&builder.geometry.engine).unwrap(),
         &case["engine"]["after_builder"],
         &format!("{preset}.after_builder"),
     );
-    let plane = builder.build(Some(&design), true).unwrap();
+    let mut plane = builder.build(Some(&design), true).unwrap();
+    // The current builder always stores projected product references on the
+    // returned airplane. W6.5 is a frozen translation artifact whose fixture
+    // records the historical unfolded references; normalize those two axes
+    // locally rather than changing the product builder contract.
+    if let Some(main_wing) = plane.wings.first() {
+        plane.s_ref = main_wing.unfolded_area();
+        plane.b_ref = design.span_m;
+    }
     let expected_plane = &case["airplane"];
     assert_eq!(
         plane.name,

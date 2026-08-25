@@ -26,11 +26,15 @@ pub mod isa;
 mod us1976;
 
 pub use atmosphere::{
-    Atmosphere, DensityAltitudeError, DensityAltitudeMethod, Method, STANDARD_GRAVITY,
+    Atmosphere, AtmosphereError, DensityAltitudeError, DensityAltitudeMethod, Method,
+    STANDARD_GRAVITY,
 };
 pub use differentiable::{altitude_knots_m, pressure_differentiable, temperature_differentiable};
 pub use isa::{
     pressure_isa, temperature_isa, BAROMETRIC_GRAVITY, GAS_CONSTANT_AIR, GAS_CONSTANT_UNIVERSAL,
     MOLECULAR_MASS_AIR,
 };
-pub use us1976::{compute_values as us1976_compute_values, Values as Us1976Values};
+pub use us1976::{
+    compute_values as us1976_compute_values, try_compute_values as us1976_try_compute_values,
+    Us1976Error, Values as Us1976Values,
+};

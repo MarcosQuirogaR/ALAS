@@ -12,7 +12,7 @@ use alas_config::AlasConfig;
 use alas_geom::asb::airfoil::Airfoil;
 use alas_geom::asb::airplane::Airplane;
 use alas_geom::asb::wing::{Wing, WingXSec};
-use alas_pipeline::full_analysis::{AnalysisReport, DesignPoint, PolarFit};
+use alas_pipeline::full_analysis::{AnalysisReport, DesignPoint, PolarFit, PolarFitStatus};
 use alas_report::families::performance;
 use alas_report::svg::render_svg;
 use std::collections::HashMap;
@@ -30,9 +30,9 @@ fn sample_report(payload_kg: f64) -> AnalysisReport {
     let airplane = Airplane {
         name: "Figure fixture".to_owned(),
         xyz_ref: [0.0, 0.0, 0.0],
-        s_ref: wing.area(),
+        s_ref: wing.reference_area(),
         c_ref: wing.mean_aerodynamic_chord(),
-        b_ref: wing.span(),
+        b_ref: wing.reference_span(),
         wings: vec![wing],
         fuselages: Vec::new(),
     };
@@ -55,6 +55,7 @@ fn sample_report(payload_kg: f64) -> AnalysisReport {
         airplane,
         polar: PolarSweep {
             alpha_deg: Vec::new(),
+            geometric_alpha_deg: Vec::new(),
             cl: Vec::new(),
             cd: Vec::new(),
             cd_induced: Vec::new(),
@@ -74,6 +75,7 @@ fn sample_report(payload_kg: f64) -> AnalysisReport {
             k: 0.04,
             oswald_e: 0.85,
             aspect_ratio: 9.0,
+            status: PolarFitStatus::Fitted,
         },
         static_margin: 0.1,
         x_neutral_point: 5.0,
@@ -94,7 +96,9 @@ fn performance_figures_render_from_the_report_and_configuration() {
 
     let payload = render_svg(&performance::figure_payload_range(&report, &config, None));
     assert!(payload.contains("20.0 t"));
-    assert!(payload.contains("Fuel capacity:"));
+    assert!(payload.contains("CONCEPTUAL BREGUET RANGE ONLY"));
+    assert!(payload.contains("capacity evidence:"));
+    assert!(payload.contains("NOT AN AFM/WBM OPERATIONAL ENVELOPE"));
 
     let mut matching_config = config.clone();
     matching_config.performance.matching_chart_resolution = 7;
@@ -154,6 +158,17 @@ fn payload_range_changes_when_the_analyzed_payload_changes() {
 }
 
 #[test]
+fn payload_range_status_names_the_missing_physical_input() {
+    let config = AlasConfig::default();
+    let mut report = sample_report(20_000.0);
+    report.airplane.wings.clear();
+
+    let svg = render_svg(&performance::figure_payload_range(&report, &config, None));
+    assert!(svg.contains("no main wing"));
+    assert!(!svg.contains("operational envelope"));
+}
+
+#[test]
 fn performance_renderers_keep_the_w34_contract_details_visible() {
     let config = AlasConfig::default();
     let report = sample_report(20_000.0);
@@ -169,7 +184,7 @@ fn performance_renderers_keep_the_w34_contract_details_visible() {
     let payload = performance::figure_payload_range(&report, &config, Some("dark"));
     let footer = payload.elements.iter().find_map(|element| match element {
         alas_report::scene::SceneElement::Text { text, pos, .. }
-            if text.starts_with("Fuel capacity:") =>
+            if text.starts_with("CONCEPTUAL BREGUET RANGE ONLY;") =>
         {
             Some(*pos)
         }

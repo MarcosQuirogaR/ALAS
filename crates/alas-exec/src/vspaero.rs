@@ -68,9 +68,9 @@ pub struct VspaeroProcessResult {
 /// Execute native VSPAERO for an extensionless case path.
 ///
 /// The case must already have adjacent `.vspgeom`, `.vkey`, and `.vspaero`
-/// files. A
-/// stale `.polar` is removed before launch, so prior results cannot turn a
-/// failed invocation into apparent success.
+/// files. Stale `.polar` and `.history` files are removed before launch, so
+/// prior results cannot turn a failed or non-converged invocation into
+/// apparent success.
 pub fn run_vspaero(
     executable: &Path,
     case_path: &Path,
@@ -78,6 +78,7 @@ pub fn run_vspaero(
     timeout_seconds: f64,
 ) -> VspaeroProcessResult {
     let polar_path = case_path.with_extension("polar");
+    let history_path = case_path.with_extension("history");
     let stdout_path = case_path.with_extension("vspaero.stdout.txt");
     let stderr_path = case_path.with_extension("vspaero.stderr.txt");
     let mut result = VspaeroProcessResult {
@@ -114,6 +115,15 @@ pub fn run_vspaero(
             return result;
         }
     }
+    if history_path.exists() {
+        if let Err(error) = fs::remove_file(&history_path) {
+            result.error = Some(format!(
+                "cannot remove stale {}: {error}",
+                history_path.display()
+            ));
+            return result;
+        }
+    }
 
     let stdout = match File::create(&stdout_path) {
         Ok(file) => file,
@@ -129,11 +139,20 @@ pub fn run_vspaero(
             return result;
         }
     };
-    let working_directory = case_path.parent().unwrap_or_else(|| Path::new("."));
+    let working_directory = case_path
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    // VSPAERO resolves its case argument after changing into the case
+    // directory. Passing the original relative path would therefore prepend
+    // that directory twice (for example `outputs/openvsp/outputs/openvsp`),
+    // while an absolute path happens to work. The case file name is valid for
+    // both relative and absolute callers once the working directory is set.
+    let case_argument = vspaero_case_argument(case_path);
     let mut command = Command::new(executable);
     command
         .args(["-omp", &thread_count.max(1).to_string()])
-        .arg(case_path)
+        .arg(case_argument)
         .current_dir(working_directory)
         .stdin(Stdio::null())
         .stdout(Stdio::from(stdout))
@@ -219,6 +238,10 @@ fn text_tail(text: &str) -> String {
     tail.into_iter().rev().collect::<Vec<_>>().join(" | ")
 }
 
+fn vspaero_case_argument(case_path: &Path) -> &std::ffi::OsStr {
+    case_path.file_name().unwrap_or(case_path.as_os_str())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -259,5 +282,19 @@ mod tests {
             "first | second | third"
         );
         assert_eq!(text_tail(""), "<empty>");
+    }
+
+    #[test]
+    fn relative_case_arguments_are_reduced_to_the_name_inside_the_workdir() {
+        let case = Path::new("outputs/openvsp/optimized_aircraft");
+        assert_eq!(
+            vspaero_case_argument(case),
+            std::ffi::OsStr::new("optimized_aircraft")
+        );
+        let absolute = Path::new(r"C:\tmp\optimized_aircraft");
+        assert_eq!(
+            vspaero_case_argument(absolute),
+            std::ffi::OsStr::new("optimized_aircraft")
+        );
     }
 }

@@ -34,6 +34,7 @@
 //! `mission analysis model.Analyses.Stability.Fidelity_Zero` reports nothing the mission reads.
 
 use alas_aero::drag_buildup::DragBreakdown;
+use alas_aero::lift_surrogate::SurrogateDomainStatus;
 use alas_prop::mission_turbofan::ThrustOutput;
 
 /// A three-component vector in one of the mission's frames.
@@ -139,6 +140,12 @@ pub struct Conditions {
     pub wing_lift_coefficient: Vec<Vec<f64>>,
     /// Each wing's inviscid induced drag coefficient, likewise.
     pub wing_induced_drag_coefficient: Vec<Vec<f64>>,
+    /// Surrogate training-domain status for each aerodynamic evaluation.
+    ///
+    /// The mission compatibility path still uses the reference edge clamp,
+    /// but records its distance to the trained rectangle so reporting and
+    /// product policy code can reject or label those points explicitly.
+    pub surrogate_domain: Vec<SurrogateDomainStatus>,
 
     // -- propulsion -------------------------------------------------------
     /// Throttle: one of the two unknowns.
@@ -194,6 +201,7 @@ impl Conditions {
             drag_breakdown: Vec::new(),
             wing_lift_coefficient: vec![Vec::new(); points],
             wing_induced_drag_coefficient: vec![Vec::new(); points],
+            surrogate_domain: vec![SurrogateDomainStatus::default(); points],
             throttle: vec![0.0; points],
             thrust: Vec::new(),
             total_mass_kg: vec![0.0; points],

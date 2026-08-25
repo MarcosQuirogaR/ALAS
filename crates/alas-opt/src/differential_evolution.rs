@@ -6,6 +6,7 @@
 
 //! Global gradient-free design optimization using Differential Evolution.
 
+use std::collections::BTreeMap;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use alas_config::design_variables::DesignVector;
@@ -44,6 +45,12 @@ pub struct OptimizationResult {
     pub best_design: DesignVector,
     /// Objective function cost of the winning design.
     pub best_cost: f64,
+    /// Whether the winning design passed the evaluator's physical checks.
+    ///
+    /// A search with no feasible candidate is represented explicitly instead
+    /// of handing a lower-cost invalid design to the downstream pipeline.
+    #[serde(default)]
+    pub best_valid: bool,
     /// Full evaluation history collected during the run.
     pub history: OptimizationHistory,
     /// Elapsed wall-clock time in seconds.
@@ -51,13 +58,69 @@ pub struct OptimizationResult {
     /// Stable identifier of the search method that produced this result.
     #[serde(default = "default_result_method")]
     pub method: String,
+    /// Mutation/crossover strategy used by the search.
+    #[serde(default = "default_result_strategy")]
+    pub strategy: String,
     /// Final nondominated set for a multi-objective method.
     #[serde(default)]
     pub pareto_front: Vec<ParetoCandidate>,
 }
 
+/// Evidence returned when a search evaluated candidates but none passed the
+/// objective's physical validity checks.
+///
+/// Rejected candidates are deliberately not promoted to
+/// [`OptimizationResult`].  A caller that wants to inspect the failed search
+/// can use the counts below without accidentally treating a review artifact as
+/// an aircraft design.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NoFeasibleDesign {
+    /// Number of candidates evaluated before the search ended.
+    pub evaluated_candidates: usize,
+    /// Counts of the machine-readable rejection categories observed.
+    pub rejection_reason_counts: BTreeMap<String, usize>,
+}
+
+impl NoFeasibleDesign {
+    fn from_history(history: &OptimizationHistory) -> Self {
+        let mut rejection_reason_counts = BTreeMap::new();
+        for reason in &history.reject_reason {
+            for category in reason.split('+').filter(|category| !category.is_empty()) {
+                *rejection_reason_counts
+                    .entry(category.to_owned())
+                    .or_insert(0) += 1;
+            }
+        }
+        if rejection_reason_counts.is_empty() && history.n_evaluations() > 0 {
+            rejection_reason_counts.insert("unknown".to_owned(), history.n_evaluations());
+        }
+        Self {
+            evaluated_candidates: history.n_evaluations(),
+            rejection_reason_counts,
+        }
+    }
+}
+
+/// Failure from the public optimizer boundary.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum OptimizationError {
+    /// The selected method or strategy is not implemented by this build.
+    #[error("invalid optimizer configuration: {0}")]
+    InvalidConfiguration(String),
+    /// The supplied design-space bounds cannot be searched safely.
+    #[error("invalid optimizer bounds: {0}")]
+    InvalidBounds(String),
+    /// Every evaluated candidate was rejected by the physical objective.
+    #[error("no feasible design: {0:?}")]
+    NoFeasibleDesign(NoFeasibleDesign),
+}
+
 fn default_result_method() -> String {
     "differential_evolution".to_owned()
+}
+
+fn default_result_strategy() -> String {
+    "best1bin".to_owned()
 }
 
 /// Searches the aircraft design space to minimize the [`DesignObjective`].
@@ -68,313 +131,8 @@ pub struct DesignOptimizer {
     reference_mass_coordinates: bool,
 }
 
-impl DesignOptimizer {
-    /// Construct a new design optimizer with `config`.
-    pub fn new(config: AlasConfig) -> Self {
-        Self {
-            config,
-            reference_mass_coordinates: false,
-        }
-    }
-
-    /// Construct an optimizer that replays the frozen Python mass coordinate.
-    ///
-    /// Product runs use [`Self::new`]. This compatibility constructor exists
-    /// only for the differential-evolution parity fixture, so a physical
-    /// improvement does not masquerade as a translation discrepancy.
-    pub fn new_reference_compatibility(config: AlasConfig) -> Self {
-        Self {
-            config,
-            reference_mass_coordinates: true,
-        }
-    }
-
-    /// Execute the Differential Evolution optimization search.
-    pub fn run(
-        &mut self,
-        bounds: Option<&[(f64, f64)]>,
-        initial_design: Option<&DesignVector>,
-        progress_callback: Option<&mut dyn FnMut(&str)>,
-    ) -> OptimizationResult {
-        let mut objective = if self.reference_mass_coordinates {
-            DesignObjective::new_reference_compatibility(self.config.clone())
-        } else {
-            DesignObjective::new(self.config.clone())
-        };
-
-        let result = if self.reference_mass_coordinates
-            || self.config.optimizer.solver.method == "differential_evolution"
-        {
-            self.run_search(bounds, initial_design, &mut objective, progress_callback)
-        } else {
-            self.run_product_search(bounds, initial_design, &mut objective, progress_callback)
-        };
-
-        // Keep the final configuration on the same explicit payload load case
-        // used to score every candidate.
-        let _ = apply_candidate_payload_load_case(&mut self.config, &result.best_design);
-        result
-    }
-
-    /// Execute the same differential-evolution search with a caller-provided
-    /// aerodynamic objective.
-    ///
-    /// The evaluator receives a typed [`DesignVector`] and returns the same
-    /// diagnostics recorded by the native VLM objective. This is the seam used
-    /// by the pipeline's AVL adapter; it deliberately contains no process or
-    /// CPACS dependency.
-    pub fn run_with_evaluator<E: ObjectiveEvaluator + ?Sized>(
-        &mut self,
-        bounds: Option<&[(f64, f64)]>,
-        initial_design: Option<&DesignVector>,
-        evaluator: &mut E,
-        progress_callback: Option<&mut dyn FnMut(&str)>,
-    ) -> OptimizationResult {
-        let mut objective =
-            DelegatedObjective::new(evaluator, self.config.optimizer.weights.failure_cost);
-        let result = if self.reference_mass_coordinates
-            || self.config.optimizer.solver.method == "differential_evolution"
-        {
-            self.run_search(bounds, initial_design, &mut objective, progress_callback)
-        } else {
-            self.run_product_search(bounds, initial_design, &mut objective, progress_callback)
-        };
-
-        let _ = apply_candidate_payload_load_case(&mut self.config, &result.best_design);
-        result
-    }
-
-    fn run_search<E: SearchObjective>(
-        &self,
-        bounds: Option<&[(f64, f64)]>,
-        initial_design: Option<&DesignVector>,
-        objective: &mut E,
-        mut progress_callback: Option<&mut dyn FnMut(&str)>,
-    ) -> OptimizationResult {
-        let solver = self.config.optimizer.solver.clone();
-
-        let default_bounds = DesignVector::bounds();
-        let bounds_slice = bounds.unwrap_or(&default_bounds);
-        let n_dof = bounds_slice.len();
-
-        let pop_mult = solver.population_size.max(1) as usize;
-        let pop_size = pop_mult * n_dof;
-        let seed_val = solver.seed.map(|seed| seed as u64).unwrap_or_else(|| {
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .map(|duration| duration.as_nanos() as u64)
-                .unwrap_or(0)
-        });
-        // Python deliberately uses one generator for the seeded initial array
-        // and a separately seeded SciPy generator for evolution. Reusing one
-        // stream here shifts every mutation after generation zero.
-        let mut init_rng = Pcg64::seed(seed_val);
-        let mut rng = RandomState::seed(seed_val);
-
-        // Initialize population
-        let mut population: Vec<Vec<f64>> = Vec::with_capacity(pop_size);
-
-        let mut seeded = false;
-        if solver.seed_near_initial_design {
-            if let Some(x0) = initial_design {
-                let x0_arr = x0.to_array();
-                let in_bounds = x0_arr
-                    .iter()
-                    .zip(bounds_slice)
-                    .all(|(&val, &(lo, hi))| val >= lo && val <= hi);
-                if in_bounds {
-                    for _ in 0..pop_size {
-                        let mut ind = Vec::with_capacity(n_dof);
-                        for (j, &(lo, hi)) in bounds_slice.iter().enumerate() {
-                            let span = hi - lo;
-                            let jitter = init_rng.uniform(-1.0, 1.0)
-                                * span
-                                * solver.seed_perturbation_fraction;
-                            let val = (x0_arr[j] + jitter).clamp(lo, hi);
-                            ind.push(val);
-                        }
-                        population.push(ind);
-                    }
-                    // NumPy constructs the complete jitter array, then
-                    // overwrites row zero with the unperturbed design.
-                    population[0] = x0_arr.to_vec();
-                    seeded = true;
-                }
-            }
-        }
-
-        if !seeded {
-            population = latin_hypercube_population(bounds_slice, pop_size, &mut rng);
-        }
-
-        let start_time = Instant::now();
-
-        // Initial evaluation
-        let mut costs = Vec::with_capacity(pop_size);
-        for ind in &population {
-            let c = objective.evaluate(ind);
-            costs.push(c);
-        }
-
-        promote_best(&mut population, &mut costs);
-        let mut best_cost = costs[0];
-        let mut sample_indices: Vec<usize> = (0..pop_size).collect();
-
-        let cr = 0.7;
-        let max_iters = solver.max_iterations.max(0) as usize;
-
-        // Evolution loop
-        for gen in 0..max_iters {
-            // SciPy's default mutation is a per-generation dither in
-            // [0.5, 1.0), not a fixed F=0.8.
-            let f_weight = rng.uniform(0.5, 1.0);
-            for i in 0..pop_size {
-                let trial = {
-                    let mut inputs = TrialInputs {
-                        population: &population,
-                        bounds: bounds_slice,
-                        strategy: solver.strategy.as_str(),
-                        f_weight,
-                        crossover_probability: cr,
-                        sample_indices: &mut sample_indices,
-                        rng: &mut rng,
-                    };
-                    trial_vector(i, &mut inputs)
-                };
-
-                let trial_cost = objective.evaluate(&trial);
-                if trial_cost <= costs[i] {
-                    population[i] = trial;
-                    costs[i] = trial_cost;
-                    if trial_cost < costs[0] {
-                        population.swap(0, i);
-                        costs.swap(0, i);
-                    }
-                }
-            }
-
-            best_cost = costs[0];
-
-            if let Some(ref mut cb) = progress_callback {
-                let h = objective.history();
-                let max_ld = h.l_over_d.iter().copied().fold(0.0_f64, f64::max);
-                let msg = format!(
-                    "generation {}/{} | valid: {}/{} total | best L/D so far: {:.2}",
-                    gen + 1,
-                    max_iters,
-                    h.n_valid(),
-                    h.n_evaluations(),
-                    max_ld
-                );
-                cb(&msg);
-            }
-
-            // SciPy uses population standard deviation, not the max-min
-            // spread. The latter prevents convergence on a normal population
-            // with one merely average member still present.
-            if converged(&costs, solver.tolerance) {
-                break;
-            }
-        }
-
-        let wall_time_s = start_time.elapsed().as_secs_f64();
-        let best_vec = DesignVector::from_array(&population[0]).unwrap_or_default();
-
-        OptimizationResult {
-            best_design: best_vec,
-            best_cost,
-            history: objective.history().clone(),
-            wall_time_s,
-            method: "differential_evolution".to_owned(),
-            pareto_front: Vec::new(),
-        }
-    }
-
-    fn run_product_search<E: SearchObjective>(
-        &self,
-        bounds: Option<&[(f64, f64)]>,
-        initial_design: Option<&DesignVector>,
-        objective: &mut E,
-        mut progress_callback: Option<&mut dyn FnMut(&str)>,
-    ) -> OptimizationResult {
-        let solver = &self.config.optimizer.solver;
-        let default_bounds = DesignVector::bounds();
-        let bounds = bounds.unwrap_or(&default_bounds);
-        let population_size = (solver.population_size.max(1) as usize * bounds.len()).max(2);
-        let generations = solver.max_iterations.max(0) as usize;
-        let seed = solver.seed.map_or_else(runtime_seed, |value| value as u64);
-        let initial_values = initial_design.map(DesignVector::to_array);
-        let started = Instant::now();
-        let method = solver.method.as_str();
-
-        let outcome = {
-            let mut evaluate = |values: &[f64]| {
-                let cost = objective.evaluate(values);
-                scored_point(values, cost, objective.history())
-            };
-            match method {
-                "feasibility_first_de" => run_feasibility_first_de(
-                    bounds,
-                    population_size,
-                    generations,
-                    seed,
-                    initial_values.as_deref(),
-                    &mut evaluate,
-                ),
-                "nsga2" => run_nsga2(
-                    bounds,
-                    population_size,
-                    generations,
-                    seed,
-                    initial_values.as_deref(),
-                    &mut evaluate,
-                ),
-                "turbo_1" => run_turbo_1(
-                    bounds,
-                    population_size,
-                    generations,
-                    seed,
-                    initial_values.as_deref(),
-                    &mut evaluate,
-                ),
-                "cma_es" => run_cma_es(
-                    bounds,
-                    population_size,
-                    generations,
-                    seed,
-                    initial_values.as_deref(),
-                    &mut evaluate,
-                ),
-                _ => run_feasibility_first_de(
-                    bounds,
-                    population_size,
-                    generations,
-                    seed,
-                    initial_values.as_deref(),
-                    &mut evaluate,
-                ),
-            }
-        };
-
-        if let Some(callback) = progress_callback.as_mut() {
-            callback(&format!(
-                "{} complete | valid: {}/{} total | best cost: {:.4}",
-                method,
-                objective.history().n_valid(),
-                objective.history().n_evaluations(),
-                outcome.winner.cost
-            ));
-        }
-
-        result_from_method(
-            outcome,
-            method,
-            objective.history(),
-            started.elapsed().as_secs_f64(),
-        )
-    }
-}
-
+#[path = "differential_evolution_optimizer.rs"]
+mod differential_evolution_optimizer;
 fn runtime_seed() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -382,9 +140,47 @@ fn runtime_seed() -> u64 {
         .unwrap_or(0)
 }
 
+fn validate_bounds(bounds: &[(f64, f64)]) -> Result<(), OptimizationError> {
+    if bounds.len() != alas_config::DESIGN_VARIABLE_SPECS.len() {
+        return Err(OptimizationError::InvalidBounds(format!(
+            "expected {} design-variable bounds, got {}",
+            alas_config::DESIGN_VARIABLE_SPECS.len(),
+            bounds.len()
+        )));
+    }
+    for (index, &(lower, upper)) in bounds.iter().enumerate() {
+        if !lower.is_finite() || !upper.is_finite() {
+            return Err(OptimizationError::InvalidBounds(format!(
+                "bound {index} must contain finite values, got [{lower:?}, {upper:?}]"
+            )));
+        }
+        if lower > upper {
+            return Err(OptimizationError::InvalidBounds(format!(
+                "bound {index} has lower {lower} greater than upper {upper}"
+            )));
+        }
+        if !(upper - lower).is_finite() {
+            return Err(OptimizationError::InvalidBounds(format!(
+                "bound {index} has a non-finite width [{lower}, {upper}]"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn ensure_feasible(result: OptimizationResult) -> Result<OptimizationResult, OptimizationError> {
+    if result.best_valid {
+        Ok(result)
+    } else {
+        Err(OptimizationError::NoFeasibleDesign(
+            NoFeasibleDesign::from_history(&result.history),
+        ))
+    }
+}
+
 fn scored_point(values: &[f64], cost: f64, history: &OptimizationHistory) -> ScoredPoint {
     let index = history.n_evaluations().saturating_sub(1);
-    let valid = history.valid.get(index).copied().unwrap_or(false);
+    let valid = history.valid.get(index).copied().unwrap_or(false) && cost.is_finite();
     let l_over_d = history.l_over_d.get(index).copied().unwrap_or(0.0);
     let span_m = history.span_m.get(index).copied().unwrap_or(f64::INFINITY);
     let area_m2 = history.area_m2.get(index).copied().unwrap_or(f64::INFINITY);
@@ -428,6 +224,7 @@ fn scored_point(values: &[f64], cost: f64, history: &OptimizationHistory) -> Sco
 fn result_from_method(
     outcome: MethodOutcome,
     method: &str,
+    strategy: &str,
     history: &OptimizationHistory,
     wall_time_s: f64,
 ) -> OptimizationResult {
@@ -451,9 +248,11 @@ fn result_from_method(
     OptimizationResult {
         best_design,
         best_cost: winner.cost,
+        best_valid: winner.valid,
         history: history.clone(),
         wall_time_s,
         method: method.to_owned(),
+        strategy: strategy.to_owned(),
         pareto_front,
     }
 }
@@ -461,6 +260,22 @@ fn result_from_method(
 trait SearchObjective {
     fn evaluate(&mut self, design: &[f64]) -> f64;
     fn history(&self) -> &OptimizationHistory;
+
+    /// Evaluate a candidate batch and return `(cost, valid)` in input order.
+    ///
+    /// Backends with mutable external state use the serial default. The native
+    /// objective overrides this to parallelize its CPU-bound, cloned analyses.
+    fn evaluate_batch(&mut self, designs: &[Vec<f64>], _workers: usize) -> Vec<(f64, bool)> {
+        designs
+            .iter()
+            .map(|design| {
+                let cost = self.evaluate(design);
+                let valid =
+                    self.history().valid.last().copied().unwrap_or(false) && cost.is_finite();
+                (cost, valid)
+            })
+            .collect()
+    }
 }
 
 impl SearchObjective for DesignObjective {
@@ -470,6 +285,73 @@ impl SearchObjective for DesignObjective {
 
     fn history(&self) -> &OptimizationHistory {
         &self.history
+    }
+
+    fn evaluate_batch(&mut self, designs: &[Vec<f64>], workers: usize) -> Vec<(f64, bool)> {
+        if workers <= 1 || designs.len() <= 1 {
+            return designs
+                .iter()
+                .map(|design| {
+                    let cost = DesignObjective::evaluate(self, design);
+                    let valid =
+                        self.history.valid.last().copied().unwrap_or(false) && cost.is_finite();
+                    (cost, valid)
+                })
+                .collect();
+        }
+
+        let worker_count = workers.min(designs.len());
+        let chunk_size = designs.len().div_ceil(worker_count);
+        let mut baseline = self.clone();
+        // Only the new batch belongs in each worker's returned trace. The
+        // caller's prior history is merged once after all joins succeed.
+        baseline.history = OptimizationHistory::new();
+
+        let mut handles = Vec::with_capacity(worker_count);
+        for chunk in designs.chunks(chunk_size) {
+            let mut local = baseline.clone();
+            let candidates = chunk.to_vec();
+            handles.push(std::thread::spawn(move || {
+                let mut evaluations = Vec::with_capacity(candidates.len());
+                for candidate in candidates {
+                    let cost = DesignObjective::evaluate(&mut local, &candidate);
+                    let valid =
+                        local.history.valid.last().copied().unwrap_or(false) && cost.is_finite();
+                    evaluations.push((cost, valid));
+                }
+                (evaluations, local.history)
+            }));
+        }
+
+        let mut merged = Vec::with_capacity(designs.len());
+        let mut histories = Vec::with_capacity(handles.len());
+        for handle in handles {
+            match handle.join() {
+                Ok((evaluations, history)) => {
+                    merged.extend(evaluations);
+                    histories.push(history);
+                }
+                Err(_) => {
+                    // A worker panic is not allowed to lose the optimizer's
+                    // history or leave it partially merged. Re-run this batch
+                    // serially in the caller thread, where any ordinary
+                    // objective rejection remains represented as data.
+                    return designs
+                        .iter()
+                        .map(|design| {
+                            let cost = DesignObjective::evaluate(self, design);
+                            let valid = self.history.valid.last().copied().unwrap_or(false)
+                                && cost.is_finite();
+                            (cost, valid)
+                        })
+                        .collect();
+                }
+            }
+        }
+        for history in histories {
+            self.history.append(history);
+        }
+        merged
     }
 }
 
@@ -529,16 +411,103 @@ impl<E: ObjectiveEvaluator + ?Sized> SearchObjective for DelegatedObjective<'_, 
     }
 }
 
-fn promote_best(population: &mut [Vec<f64>], costs: &mut [f64]) {
-    let Some((best_index, _)) = costs
-        .iter()
-        .enumerate()
-        .min_by(|(_, left), (_, right)| left.total_cmp(right))
+fn candidate_is_better(
+    candidate_cost: f64,
+    candidate_valid: bool,
+    incumbent_cost: f64,
+    incumbent_valid: bool,
+    feasibility_first: bool,
+) -> bool {
+    if feasibility_first && candidate_valid != incumbent_valid {
+        return candidate_valid;
+    }
+    candidate_cost.total_cmp(&incumbent_cost).is_lt()
+}
+
+fn candidate_is_at_least_as_good(
+    candidate_cost: f64,
+    candidate_valid: bool,
+    incumbent_cost: f64,
+    incumbent_valid: bool,
+    feasibility_first: bool,
+) -> bool {
+    if feasibility_first && candidate_valid != incumbent_valid {
+        return candidate_valid;
+    }
+    candidate_cost <= incumbent_cost
+}
+
+struct TrialState<'a> {
+    population: &'a mut [Vec<f64>],
+    costs: &'a mut [f64],
+    validities: &'a mut [bool],
+    feasibility_first: bool,
+}
+
+impl TrialState<'_> {
+    fn apply(&mut self, index: usize, trial: Vec<f64>, trial_cost: f64, trial_valid: bool) {
+        if candidate_is_at_least_as_good(
+            trial_cost,
+            trial_valid,
+            self.costs[index],
+            self.validities[index],
+            self.feasibility_first,
+        ) {
+            self.population[index] = trial;
+            self.costs[index] = trial_cost;
+            self.validities[index] = trial_valid;
+            if candidate_is_better(
+                trial_cost,
+                trial_valid,
+                self.costs[0],
+                self.validities[0],
+                self.feasibility_first,
+            ) {
+                self.population.swap(0, index);
+                self.costs.swap(0, index);
+                self.validities.swap(0, index);
+            }
+        }
+    }
+}
+
+fn promote_best(
+    population: &mut [Vec<f64>],
+    costs: &mut [f64],
+    validities: &mut [bool],
+    feasibility_first: bool,
+) {
+    let Some((best_index, _)) =
+        costs
+            .iter()
+            .enumerate()
+            .min_by(|(left, left_cost), (right, right_cost)| {
+                if candidate_is_better(
+                    **left_cost,
+                    validities[*left],
+                    **right_cost,
+                    validities[*right],
+                    feasibility_first,
+                ) {
+                    std::cmp::Ordering::Less
+                } else if candidate_is_better(
+                    **right_cost,
+                    validities[*right],
+                    **left_cost,
+                    validities[*left],
+                    feasibility_first,
+                ) {
+                    std::cmp::Ordering::Greater
+                } else {
+                    left.cmp(right)
+                }
+            })
     else {
         return;
     };
     population.swap(0, best_index);
     costs.swap(0, best_index);
+    validities.swap(0, best_index);
 }
 
 fn latin_hypercube_population(
@@ -570,7 +539,12 @@ fn latin_hypercube_population(
             sample
                 .into_iter()
                 .zip(bounds)
-                .map(|(normalized, &(lo, hi))| lo + normalized * (hi - lo))
+                .map(|(normalized, &(lo, hi))| {
+                    // Keep the generated point closed over the configured
+                    // interval even when a floating-point product rounds one
+                    // ulp past an exact endpoint.
+                    (lo + normalized * (hi - lo)).clamp(lo, hi)
+                })
                 .collect()
         })
         .collect()
@@ -672,8 +646,8 @@ fn trial_vector(candidate: usize, inputs: &mut TrialInputs<'_>) -> Vec<f64> {
 
     // SciPy resamples out-of-range coordinates instead of clamping them.
     for (value, &(lo, hi)) in trial.iter_mut().zip(inputs.bounds) {
-        if *value < lo || *value > hi {
-            *value = inputs.rng.uniform(lo, hi);
+        if !value.is_finite() || *value < lo || *value > hi {
+            *value = inputs.rng.uniform(lo, hi).clamp(lo, hi);
         }
     }
     trial

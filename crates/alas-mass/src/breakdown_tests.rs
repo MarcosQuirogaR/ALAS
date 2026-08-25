@@ -157,6 +157,38 @@ fn no_nacelle_fuselages_leaves_the_wing_relative_propulsion_coordinate() {
 }
 
 #[test]
+fn product_wing_mass_area_comes_from_the_configured_flap_span() {
+    let wing = simple_wing("Main Wing");
+    let mut control_surfaces = ControlSurfacesConfig {
+        flap_span_start_frac: 0.10,
+        flap_span_end_frac: 0.62,
+        flap_chord_fraction: 0.25,
+        ..ControlSurfacesConfig::default()
+    };
+
+    // The simple wing has c(y) = 3 - 2*y/15 over a 15 m semi-span. The
+    // configured interval therefore integrates to 17.784 m^2 per half-wing,
+    // or 8.892 m^2 after the 25% flap-chord fraction is applied to both sides.
+    let area = configured_flap_area(&wing, &control_surfaces);
+    assert!((area - 8.892).abs() < 1e-12, "configured flap area: {area}");
+
+    control_surfaces.flap_span_end_frac = control_surfaces.flap_span_start_frac;
+    assert_eq!(configured_flap_area(&wing, &control_surfaces), 0.0);
+}
+
+#[test]
+fn main_gear_mounting_inference_distinguishes_body_only_from_transport_layouts() {
+    let mut config = LandingGearConfig::default();
+    assert!(main_gear_mounted_to_wing(&config));
+
+    config.n_mlg_struts = 1;
+    assert!(!main_gear_mounted_to_wing(&config));
+
+    config.n_mlg_struts = 3;
+    assert!(main_gear_mounted_to_wing(&config));
+}
+
+#[test]
 fn a_positive_payload_layout_replaces_the_lumped_payload_and_recomputes_fuel() {
     let geometry = GeometryConfig::default();
     let requirements = DesignRequirements::default();

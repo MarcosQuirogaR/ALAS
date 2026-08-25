@@ -160,7 +160,17 @@ fn the_solution_decks_match_python_line_for_line() {
 
     for case in &fixture.cases {
         let wsg = build_geometry(&case.spar_chord_fractions, &case.spar_full_span);
-        let cfg = structures_config_for(&case.config);
+        let mut cfg = structures_config_for(&case.config);
+        // The frozen Python generator's implicit StructuresConfig band is
+        // 500 Hz, while the product default is intentionally 60 Hz for an
+        // interactive run.  Make the reference-default cases explicit here
+        // so this deck parity test exercises the configured-band contract
+        // (including the random-only branch) instead of silently comparing
+        // two different default policies.  The dynamics/coarse-step cases
+        // already carry their explicit 120/55 Hz values.
+        if !case.config.contains_key("freq_sweep_max_hz") {
+            cfg.freq_sweep_max_hz = 500.0;
+        }
         let [skin, web, cap, rib] = materials_for(&case.materials);
         let sizing = size_wingbox(&wsg, &cfg, &req, skin, web, cap, rib);
         let (deck, _, node_index) = build_wing_mesh_bdf(

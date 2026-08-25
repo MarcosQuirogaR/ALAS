@@ -4,7 +4,7 @@
 // Ported from alas/reporting/visualization.py:figure_cg_envelope (L2354-2835)
 // Reference: alas @ rust-port-baseline.
 
-//! CG loading/operational envelope diagram: `%MAC` vs weight.
+//! Model-derived CG loading-state check: `%MAC` vs weight.
 //!
 //! The implementation is split into calculation helpers, figure rendering,
 //! and tests so the translated figure remains easy to audit.

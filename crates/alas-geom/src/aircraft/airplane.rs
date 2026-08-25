@@ -37,10 +37,10 @@ pub struct Airplane {
     /// Every fuselage-shaped body on the airplane, including podded engine
     /// nacelles.
     pub fuselages: Vec<Fuselage>,
-    /// Reference area.
+    /// Aircraft reference area, projected onto the XY reference plane.
     pub s_ref: f64,
     /// Reference chord.
     pub c_ref: f64,
-    /// Reference span.
+    /// Aircraft reference span, projected onto the lateral/Y axis.
     pub b_ref: f64,
 }

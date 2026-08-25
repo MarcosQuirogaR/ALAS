@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "catalogue_file": "multi_source_catalog.json",
-  "record_count": 120,
+  "record_count": 121,
   "category_counts": {
     "battery": 20,
     "electronics": 20,
     "esc": 11,
-    "landing_gear": 3,
+    "landing_gear": 4,
     "material_stock": 4,
     "motor": 23,
     "propeller": 16,
@@ -20,6 +20,7 @@
     "Easy Composites": 2,
     "Spektrum": 12,
     "Horizon Hobby": 3,
+    "Robart Manufacturing": 1,
     "SunnySky USA": 3,
     "Gens ace": 3,
     "Emax": 3,
@@ -139,6 +140,16 @@
         "https://www.horizonhobby.com/product/micro-profile-landing-gear-1/DUB943.html",
         "https://assets.horizonhobby.com/on/demandware.static/-/Sites-horizon-master/default/dw6debc48e/Manuals/EFLG500-Manual.pdf",
         "https://www.horizonhobby.com/on/demandware.static/-/Sites-horizon-master/default/dwb64302f4/Manuals/EFLG700-manual-MULTI.pdf"
+      ]
+    },
+    {
+      "source_id": "robart",
+      "publisher": "Robart Manufacturing",
+      "root": "https://robart.com/",
+      "scope": "manufacturer retractable landing-gear product pages and dimension drawings",
+      "engineering_pages": [
+        "https://robart.com/products/60-size-retractable-tailwheel",
+        "https://cdn.shopify.com/s/files/1/0339/0713/files/121.pdf?3638="
       ]
     },
     {
@@ -785,8 +796,42 @@
       "unit_price_minor": 4230,
       "reviewed_on_utc": "2026-08-24",
       "review_method": "manually reviewed visible Sika public price-list quote; no stock claim is inferred"
+    },
+    {
+      "component_id": "robart-121-retractable-tailwheel",
+      "source_url": "https://robart.com/products/60-size-retractable-tailwheel",
+      "source_title": "#121 .60 Size Retractable Tailwheel",
+      "currency": "USD",
+      "unit_price_minor": 3731,
+      "reviewed_on_utc": "2026-08-25",
+      "review_method": "manually reviewed visible Robart manufacturer-store price; no stock or structural certification claim is inferred"
     }
   ],
+  "landing_gear_analysis": {
+    "reviewed_on_utc": "2026-08-25",
+    "required_fields": [
+      "form",
+      "mass_kg",
+      "maximum aircraft mass/rating",
+      "positive installed assembly dimensions (length, width, height)",
+      "dated procurement price"
+    ],
+    "selectable_ids": [
+      "robart-121-retractable-tailwheel"
+    ],
+    "ineligible_ids": [
+      "dubro-micro-profile-landing-gear",
+      "eflite-eflg500-retract",
+      "eflite-eflg700-retract",
+      "tarot-x8-pro-retract",
+      "tarot-650-680-retract",
+      "tarot-25kg-90-retract",
+      "tarot-25kg-75-retract",
+      "tarot-x-skid-quick",
+      "tarot-x-skid"
+    ],
+    "admission_note": "Robart #121 is the first landing-gear record with complete source-backed form, unit mass, published 5-10 lb application rating, retracted assembly envelope from the manufacturer dimension drawing, and a dated manufacturer price. Existing records retain explicit evidence gaps because their primary sources omit one or more required fields."
+  },
   "battery_analysis": {
     "reviewed_on_utc": "2026-08-24",
     "required_fields": [

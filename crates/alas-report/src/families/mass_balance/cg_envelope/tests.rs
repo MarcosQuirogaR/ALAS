@@ -8,7 +8,7 @@ use crate::scene::SceneElement;
 use alas_config::{AlasConfig, DesignRequirements, GeometryConfig, MassModelConfig};
 use alas_geom::builder::AircraftBuilder;
 use alas_mass::breakdown::run_mass_analysis;
-use alas_pipeline::full_analysis::{AnalysisReport, DesignPoint, PolarFit};
+use alas_pipeline::full_analysis::{AnalysisReport, DesignPoint, PolarFit, PolarFitStatus};
 use std::collections::HashMap;
 /// A fully real (built, mass-analyzed) `AnalysisReport`, the same
 /// pipeline shape `full_analysis.rs` produces, minus the expensive VLM
@@ -46,6 +46,7 @@ fn sample_report() -> AnalysisReport {
         airplane: plane,
         polar: alas_aero::analysis::PolarSweep {
             alpha_deg: Vec::new(),
+            geometric_alpha_deg: Vec::new(),
             cl: Vec::new(),
             cd: Vec::new(),
             cd_induced: Vec::new(),
@@ -65,6 +66,7 @@ fn sample_report() -> AnalysisReport {
             k: 0.042,
             oswald_e: 0.86,
             aspect_ratio: 9.8,
+            status: PolarFitStatus::Fitted,
         },
         static_margin: 0.12,
         x_neutral_point: cg[0] + 0.12 * 4.0,
@@ -92,8 +94,15 @@ fn renders_a_populated_envelope_from_a_real_analysis_report() {
         .any(|e| matches!(e, SceneElement::Polygon { fill: Some(_), .. }));
     assert!(
         has_polygon,
-        "operational envelope should be a filled polygon"
+        "model loading-state check should be a filled polygon"
     );
+    assert!(scene.elements.iter().any(|element| {
+        matches!(
+            element,
+            SceneElement::Text { text, .. }
+                if text.contains("NOT AN AFM/WBM OPERATIONAL ENVELOPE")
+        )
+    }));
     let x_axis_labels = scene
         .elements
         .iter()

@@ -22,6 +22,25 @@ pub const REFERENCE_AIRFOILS: &[&str] = &[
 /// A candidate's real trimmed CL must land within this fraction of `cl_target`.
 pub const CL_FEASIBILITY_TOL: f64 = 0.02;
 
+/// Minimum NeuralFoil confidence admitted to the ranking stage.
+///
+/// NeuralFoil exposes this value as an out-of-distribution signal rather than
+/// as a universal probability.  ALAS therefore uses a deliberately
+/// conservative, model-facing floor: values below five percent are diagnostic
+/// extrapolations and cannot enter an aerodynamic ranking.  The raw minimum
+/// is retained on every successful result so a later campaign can audit the
+/// sensitivity without rerunning the model.
+pub const MIN_NEURALFOIL_ANALYSIS_CONFIDENCE: f64 = 0.05;
+
+/// Maximum absolute pitching-moment residual admitted by a 3-D screening trim.
+///
+/// Screening is a gate, not a final flight-dynamics solve.  A two-count
+/// residual accommodates the deliberately coarse 3-D probe/interpolation,
+/// while rejecting singular/fallback trims that merely happen to return
+/// finite numbers.  The value is explicit so a higher-fidelity campaign can
+/// tighten it without changing the closure logic.
+pub const TRIM_CM_RESIDUAL_TOL: f64 = 2.0e-3;
+
 /// Maximum allowed trim-alpha extrapolation outside the stability probe window.
 pub const TRIM_ALPHA_SLACK_DEG: f64 = 12.0;
 
@@ -115,6 +134,12 @@ pub struct AirfoilCandidateResult {
     /// Stage 1 angle of attack at design CL, degrees.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub alpha_deg: Option<f64>,
+    /// Minimum NeuralFoil analysis confidence over the swept alpha range.
+    ///
+    /// This is retained even though the candidate is admitted only when it
+    /// clears [`MIN_NEURALFOIL_ANALYSIS_CONFIDENCE`].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub analysis_confidence: Option<f64>,
     /// Maximum thickness-to-chord fraction.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_thickness_frac: Option<f64>,

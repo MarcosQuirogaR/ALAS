@@ -156,6 +156,7 @@ pub fn update_aerodynamics(conditions: &mut Conditions, analyses: &MissionAnalys
         ];
         conditions.wing_lift_coefficient[point] = solution.wing_lift_coefficient;
         conditions.wing_induced_drag_coefficient[point] = solution.wing_induced_drag_coefficient;
+        conditions.surrogate_domain[point] = solution.surrogate_domain;
         breakdowns.push(solution.drag);
     }
     conditions.drag_breakdown = breakdowns;

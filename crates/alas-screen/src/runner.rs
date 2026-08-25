@@ -20,7 +20,9 @@ use alas_geom::aircraft::spacing::linspace;
 use alas_geom::airfoil_library::AirfoilLibrary;
 
 use crate::refine::{refine_candidate_3d_with_mass_model, ScreeningMassModel};
-use crate::score::{cruise_condition, score_candidate};
+use crate::score::{
+    cruise_condition_with_geometry, score_candidate_with_geometry, ScreeningGeometry,
+};
 use crate::types::{
     AirfoilCandidateResult, AirfoilScreeningOptions, AirfoilScreeningResult, ScreeningFlowRegime,
     REFERENCE_AIRFOILS, TRANSONIC_MACH_CAVEAT,
@@ -206,8 +208,13 @@ fn run_airfoil_screening_with_mass_model(
     should_cancel: Option<&dyn Fn() -> bool>,
     mass_model: ScreeningMassModel,
 ) -> Result<AirfoilScreeningResult, String> {
+    let geometry = match mass_model {
+        ScreeningMassModel::ReferenceCompatibility => ScreeningGeometry::ReferenceCompatibility,
+        ScreeningMassModel::StructuralWingbox => ScreeningGeometry::Product,
+    };
     let dv_val = dv.copied().unwrap_or_default();
-    let (mach, reynolds, level_flight_cl, altitude) = cruise_condition(config, &dv_val)?;
+    let (mach, reynolds, level_flight_cl, altitude) =
+        cruise_condition_with_geometry(config, &dv_val, geometry)?;
     let section_mach = mach * dv_val.sweep_deg.to_radians().cos();
     let cl_target = options.target_cl.unwrap_or(level_flight_cl);
     if !cl_target.is_finite() || cl_target <= 0.0 {
@@ -245,7 +252,7 @@ fn run_airfoil_screening_with_mass_model(
             }
         }
 
-        let cand = score_candidate(
+        let cand = score_candidate_with_geometry(
             name,
             config,
             &dv_val,
@@ -258,6 +265,7 @@ fn run_airfoil_screening_with_mass_model(
             options.min_tc,
             options.max_tc,
             options.cl_band,
+            geometry,
         );
 
         if cand.status == "ok" {
@@ -335,6 +343,7 @@ fn run_airfoil_screening_with_mass_model(
                 cl_target,
                 options.min_static_margin,
                 mass_model,
+                geometry,
             );
 
             if results[idx].refined {

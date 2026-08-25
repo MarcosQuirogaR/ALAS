@@ -233,7 +233,11 @@ fn tank_limited_model_cg_uses_the_analyzed_fuel_and_names_the_load_case_honestly
     if let Some(mass_model) = &preset.mass_model {
         config.mass_model = mass_model.clone();
     }
-    let report = crate::full_analysis::FullAnalysis::new(config.clone())
+    // Keep this conservation regression on the frozen A320 fixture. Product
+    // high-lift/gear mass corrections are intentionally exercised by the
+    // ordinary constructor and can legitimately change the closure remainder
+    // relative to the published tank-capacity case.
+    let report = crate::full_analysis::FullAnalysis::new_reference_compatibility(config.clone())
         .run(&preset.design_vector, true)
         .expect("A320 full analysis");
     let fuel_loading = plan_fuel_loading(&config, &preset.design_vector, &report);

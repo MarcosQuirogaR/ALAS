@@ -23,8 +23,12 @@ pub(super) fn with_alpha(color: Color, a: u8) -> Color {
 ///
 /// `V = 0.54 * (S^2 / b) * (t/c)_root * (1 + lambda + lambda^2) / (1 + lambda)^2`
 pub(super) fn wing_fuel_volume_m3(wing: &Wing, usable_fraction: f64) -> f64 {
-    let s = wing.area();
-    let b = wing.span();
+    // This is the product report path: the Torenbeek correlation uses the
+    // same projected main-wing reference quantities as the rest of the
+    // performance model. The unfolded geometry remains available only to
+    // explicitly named compatibility callers.
+    let s = wing.reference_area();
+    let b = wing.reference_span();
     let taper = wing.taper_ratio();
     let sample = linspace(0.0, 1.0, 101);
     let t_over_c_root = wing.xsecs[0].airfoil.max_thickness(&sample);

@@ -174,6 +174,26 @@ pub fn build_vehicle_request(report: &ReportView, config: &AlasConfig) -> Vehicl
     }
 }
 
+/// Build the vehicle request with the frozen reference geometry schema.
+///
+/// The current product configuration carries optional transport-wing stations
+/// for the side-of-body and Yehudi kink. The historical mission subprocess
+/// request predates those fields, so its compatibility document omits them
+/// while preserving every legacy geometry value. Product callers should use
+/// [`build_vehicle_request`] and retain the configured stations.
+pub fn build_vehicle_request_reference_compatibility(
+    report: &ReportView,
+    config: &AlasConfig,
+) -> VehicleRequest {
+    let mut compatibility_config = config.clone();
+    compatibility_config
+        .geometry
+        .wing
+        .side_of_body_span_fraction = None;
+    compatibility_config.geometry.wing.kink_span_fraction = None;
+    build_vehicle_request(report, &compatibility_config)
+}
+
 // A test asserts on values it constructed here, so a failed unwrap is the
 // assertion failing rather than a library invariant being broken.
 #[allow(clippy::unwrap_used)]
@@ -236,5 +256,27 @@ mod tests {
             request.engine.n_engines,
             config.geometry.engine.spanwise_positions_m.len()
         );
+    }
+
+    #[test]
+    fn reference_vehicle_request_omits_new_transport_station_fields() {
+        let config = AlasConfig::default();
+        let view = report(Some(19.0), Some(18.0));
+
+        let product = build_vehicle_request(&view, &config);
+        let reference = build_vehicle_request_reference_compatibility(&view, &config);
+
+        assert!(product
+            .geometry_config
+            .wing
+            .side_of_body_span_fraction
+            .is_some());
+        assert!(product.geometry_config.wing.kink_span_fraction.is_some());
+        assert!(reference
+            .geometry_config
+            .wing
+            .side_of_body_span_fraction
+            .is_none());
+        assert!(reference.geometry_config.wing.kink_span_fraction.is_none());
     }
 }

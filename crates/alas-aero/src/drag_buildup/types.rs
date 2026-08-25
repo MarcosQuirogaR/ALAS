@@ -11,13 +11,13 @@
 /// The settings `mission analysis model.Analyses.Aerodynamics.Fidelity_Zero()` carries that
 /// the drag chain reads.
 ///
-/// Every field's default is that analysis's own, because
+/// The numeric fields' defaults are that analysis's own, because
 /// `mission_builder.py:85-87` -- the only place in the reference that builds
-/// one -- attaches it to a vehicle and overrides nothing. Carrying them as a
-/// struct rather than as constants is what makes that checkable: the fixture
-/// records what the analysis actually held, and `parity_drag_buildup.rs`
-/// compares this default against it before comparing a single drag
-/// coefficient.
+/// one -- attaches it to a vehicle and overrides nothing. The
+/// `area_weighted_compressibility` field is an explicit product/reference
+/// policy seam: product default is force-conserving, while
+/// `reference_compatibility()` replays the frozen direct sum. Carrying both
+/// the numeric inputs and that policy as fields makes the choice checkable.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DragSettings {
     /// `C` in the wing form factor. Upstream default 1.1.
@@ -37,6 +37,11 @@ pub struct DragSettings {
     /// A fractional lift-to-drag adjustment the total is divided through by.
     /// Upstream default 0.
     pub lift_to_drag_adjustment: f64,
+    /// Whether per-wing compressibility coefficients are converted through
+    /// their own reference areas before aircraft normalization. Product
+    /// evaluations use `true`; frozen translation fixtures may set `false`
+    /// to replay the historical direct coefficient sum explicitly.
+    pub area_weighted_compressibility: bool,
 }
 
 impl Default for DragSettings {
@@ -49,6 +54,22 @@ impl Default for DragSettings {
             drag_coefficient_increment: 0.0,
             spoiler_drag_increment: 0.0,
             lift_to_drag_adjustment: 0.0,
+            area_weighted_compressibility: true,
+        }
+    }
+}
+
+impl DragSettings {
+    /// Return the frozen translation settings before compressibility area
+    /// normalization was corrected.
+    ///
+    /// This is for historical fixtures only. Product callers should use
+    /// [`Default::default`], whose aggregation conserves drag force across
+    /// wings with different reference areas.
+    pub fn reference_compatibility() -> Self {
+        Self {
+            area_weighted_compressibility: false,
+            ..Self::default()
         }
     }
 }

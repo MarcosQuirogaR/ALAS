@@ -22,7 +22,7 @@ use super::{
     cabin_deck_segments, ceil_div, min_exit_pairs, monument_fill_order, select_exit_type,
     spread_bay_indices, stack_y, Bay, MonumentSide, MONUMENT_LEN, SEAT_BOX_H,
 };
-use crate::cargo::CargoLoadManager;
+use crate::cargo::{CargoLoadManager, CargoMassSemantics};
 use crate::geometry::CabinGeometry;
 use crate::layout::{ContainerMeta, DeckItem, ExitMeta, ItemKind, ItemMeta, LOWER};
 
@@ -266,6 +266,7 @@ pub(super) fn place_baggage(
     seated: i64,
     seat_mass: f64,
     seat_cg: f64,
+    mass_semantics: CargoMassSemantics,
 ) -> Baggage {
     let bag_mass = seated as f64 * pax.checked_bag_mass_kg;
     let belly_explicit = pax.belly_cargo_kg.max(0.0);
@@ -291,7 +292,13 @@ pub(super) fn place_baggage(
         hold_capacity = manager.total_capacity();
         belly_cargo = belly_cargo.min((hold_capacity - bag_mass).max(0.0));
         let hold_mass = (bag_mass + belly_cargo).min(hold_capacity);
-        manager.solve(hold_mass, seat_cg, &|slot| (slot.x - seat_cg).abs(), true);
+        let priority = |slot: &crate::cargo::CargoSlot| (slot.x - seat_cg).abs();
+        match mass_semantics {
+            CargoMassSemantics::Net => manager.solve(hold_mass, seat_cg, &priority, true),
+            CargoMassSemantics::ReferenceGross => {
+                manager.solve_reference_compatibility(hold_mass, seat_cg, &priority, true)
+            }
+        }
 
         let low = &g.lower_deck;
         for slot in &manager.slots {

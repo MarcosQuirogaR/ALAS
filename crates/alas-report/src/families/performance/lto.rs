@@ -9,7 +9,7 @@
 
 use alas_config::airports::Airport;
 use alas_config::AlasConfig;
-use alas_perf::performance::{compute_field_performance, FieldPerformance};
+use alas_perf::performance::{compute_field_performance_at_masses, FieldPerformance};
 use alas_pipeline::full_analysis::AnalysisReport;
 
 use crate::chart_kit::draw_title;
@@ -63,26 +63,30 @@ pub fn figure_lto_for_airport(
     role: &str,
     theme: Option<&str>,
 ) -> Scene {
-    let Some(wing) = report
+    if report
         .airplane
         .wings
         .first()
         .filter(|wing| wing.xsecs.len() >= 2)
-    else {
+        .is_none()
+    {
         return status_message_scene(
             "Landing & Take-Off",
             "The analyzed report has no main wing; field performance cannot be computed.",
             theme,
         );
-    };
+    }
     let wing_area = report
         .geometry_summary
         .get("wing_area_m2")
         .copied()
-        .unwrap_or_else(|| wing.area());
+        .unwrap_or(report.airplane.s_ref);
     let tw_sl = static_thrust_to_weight(config, 0.30);
-    let performance = compute_field_performance(
+    let landing_mass_kg = (config.requirements.mtow_kg * config.mass_model.mlw_fraction_mtow)
+        .clamp(0.0, config.requirements.mtow_kg);
+    let performance = compute_field_performance_at_masses(
         config.requirements.mtow_kg,
+        landing_mass_kg,
         wing_area,
         airport,
         config.performance.cl_max_to,
@@ -464,6 +468,7 @@ mod tests {
             bfl_m: 2400.0,
             asd_m: 2400.0,
             ldr_m: 2900.0,
+            landing_mass_kg: 72_000.0,
         }
     }
 

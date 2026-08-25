@@ -38,7 +38,10 @@ pub fn config_and_plane(input: &Value) -> (AlasConfig, Airplane, Option<DesignVe
                 .design_vector,
         )
     };
-    let builder = AircraftBuilder::new(Some(config.geometry.clone()));
+    // Payload fixtures are frozen Python translations.  Use the explicit
+    // compatibility contract so the product transport-planform correction
+    // cannot change the fixture's cabin frame implicitly.
+    let builder = AircraftBuilder::new_reference_compatibility(Some(config.geometry.clone()));
     let plane = builder
         .build(design_vector.as_ref(), false)
         .expect("the case's aircraft builds");

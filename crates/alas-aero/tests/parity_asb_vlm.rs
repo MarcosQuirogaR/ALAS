@@ -340,7 +340,7 @@ fn vortex_strengths_match_aerosandbox_for_every_case() {
 
     for (name, case) in &fixture.cases {
         let op_point = build_op_point(&case.inputs);
-        let result = asb_vlm::run(
+        let result = asb_vlm::run_reference_compatibility(
             &airplane,
             &op_point,
             case.inputs.spanwise_resolution,
@@ -364,7 +364,7 @@ fn run_matches_aerosandbox_for_every_case() {
 
     for (name, case) in &fixture.cases {
         let op_point = build_op_point(&case.inputs);
-        let result = asb_vlm::run(
+        let result = asb_vlm::run_reference_compatibility(
             &airplane,
             &op_point,
             case.inputs.spanwise_resolution,
@@ -406,7 +406,7 @@ fn run_with_stability_derivatives_matches_aerosandbox() {
     let case = &fixture.stability_derivatives;
     let op_point = build_op_point(&case.inputs);
 
-    let result = asb_vlm::run_with_stability_derivatives(
+    let result = asb_vlm::run_with_stability_derivatives_reference_compatibility(
         &airplane,
         &op_point,
         case.inputs.spanwise_resolution,

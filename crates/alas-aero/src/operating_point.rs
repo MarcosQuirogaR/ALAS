@@ -171,13 +171,32 @@ impl OperatingPoint {
     /// airflow is opposite the rotation itself, which is why upstream negates
     /// the raw cross product before returning it.
     pub fn rotation_velocity_geometry_axes(&self, points: &[[f64; 3]]) -> Vec<[f64; 3]> {
+        self.rotation_velocity_geometry_axes_about(points, [0.0; 3])
+    }
+
+    /// The rotation-induced velocity about an aircraft reference point.
+    ///
+    /// A rigid-body rate is defined about the aircraft reference origin, not
+    /// about the process/global coordinate origin.  Keeping the subtraction
+    /// here (at the kinematic boundary) makes the result invariant when the
+    /// complete geometry and its reference point are translated together.
+    pub fn rotation_velocity_geometry_axes_about(
+        &self,
+        points: &[[f64; 3]],
+        reference: [f64; 3],
+    ) -> Vec<[f64; 3]> {
         // Signs convert p, q, r from body axes to geometry axes, matching
         // upstream's `[-p, q, -r]`.
         let angular_velocity = [-self.p, self.q, -self.r];
         points
             .iter()
             .map(|&point| {
-                let raw = cross3(angular_velocity, point);
+                let relative = [
+                    point[0] - reference[0],
+                    point[1] - reference[1],
+                    point[2] - reference[2],
+                ];
+                let raw = cross3(angular_velocity, relative);
                 [-raw[0], -raw[1], -raw[2]]
             })
             .collect()

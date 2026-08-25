@@ -32,7 +32,9 @@ pub mod sampling;
 mod search_methods;
 pub mod transport_planform;
 
-pub use differential_evolution::{DesignOptimizer, OptimizationResult, ParetoCandidate};
+pub use differential_evolution::{
+    DesignOptimizer, NoFeasibleDesign, OptimizationError, OptimizationResult, ParetoCandidate,
+};
 pub use envelope::{
     assess_model_cg_envelope, check_cg_envelope, CgEnvelopeResult, ModelCgConstraint,
     ModelCgConstraintAssessment, ModelCgEnvelopeAssessment, ModelCgEnvelopeError,
@@ -40,7 +42,9 @@ pub use envelope::{
 };
 pub use evaluator::{ObjectiveEvaluation, ObjectiveEvaluator};
 pub use history::OptimizationHistory;
-pub use objective::{wing_fuel_volume_m3, DesignObjective};
+pub use objective::{
+    wing_fuel_volume_m3, wing_fuel_volume_m3_reference_compatibility, DesignObjective,
+};
 pub use sampling::{draw_one, error_issues, sample_design, widened_bounds, Rng};
 pub use transport_planform::{
     assess_transport_planform, transport_planform_penalty, TransportPlanformAssessment,

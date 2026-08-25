@@ -365,7 +365,10 @@ fn fuselage_mass_evidence_matches_in_input_and_correlation_order() {
     for case in &fixture.cases {
         let requirements = requirements_for(&case.requirements_overrides);
         let mass_model = mass_model_for(&case.mass_model_overrides);
-        let builder = AircraftBuilder::new(Some(GeometryConfig::default()));
+        // This is a frozen W6.3 translation fixture.  Keep its historical
+        // geometry explicit; product defaults use the newer transport
+        // planform and must be evidenced separately.
+        let builder = AircraftBuilder::new_reference_compatibility(Some(GeometryConfig::default()));
         let design = case.design_vector.build();
         let plane = builder
             .build(Some(&design), true)

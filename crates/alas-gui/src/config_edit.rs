@@ -11,7 +11,7 @@ use std::collections::BTreeMap;
 
 use alas_config::{
     fidelity_presets, performance_presets, presets, solver_presets, validate, DesignVariableSpec,
-    DESIGN_VARIABLE_SPECS,
+    EngineConfig, DESIGN_VARIABLE_SPECS,
 };
 use alas_exec::ToolPreferences;
 use serde_json::Value;
@@ -65,6 +65,7 @@ impl AppState {
         let mut config = self.typed_config().unwrap_or_default();
         config.preset = preset.name.to_owned();
         config.geometry = preset.geometry.clone();
+        config.geometry.engine.apply_engine_spec();
         config.requirements = preset.requirements.clone();
         config.landing_gear = preset.landing_gear.clone();
         if let Some(mm) = &preset.mass_model {
@@ -108,7 +109,13 @@ impl AppState {
             .get_mut("geometry")
             .and_then(|g| g.get_mut("engine"))
         {
-            if let Some(obj) = engine.as_object_mut() {
+            if let Ok(mut selected) = serde_json::from_value::<EngineConfig>(engine.clone()) {
+                selected.engine_name = name.to_owned();
+                selected.apply_engine_spec();
+                if let Ok(value) = serde_json::to_value(selected) {
+                    *engine = value;
+                }
+            } else if let Some(obj) = engine.as_object_mut() {
                 obj.insert("engine_name".to_owned(), Value::String(name.to_owned()));
             }
         }

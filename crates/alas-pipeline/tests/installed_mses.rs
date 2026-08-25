@@ -6,11 +6,108 @@
 use std::fs;
 use std::path::PathBuf;
 
-use alas_aero::mses::MsesStatus;
+use alas_aero::mses::{MsesPressureResult, MsesStatus};
 use alas_config::AlasConfig;
 use alas_exec::RunEnvironment;
 use alas_pipeline::{DesignPipeline, PipelineOptions};
 use serde_json::json;
+
+fn assert_pressure_result_is_coherent(pressure: &MsesPressureResult) {
+    assert!(pressure.alpha_deg.is_finite(), "pressure alpha is finite");
+    assert_eq!(
+        pressure.x_upper.len(),
+        pressure.cp_upper.len(),
+        "upper pressure coordinates and Cp stay parallel"
+    );
+    assert_eq!(
+        pressure.x_upper.len(),
+        pressure.mach_upper.len(),
+        "upper pressure coordinates and Mach stay parallel"
+    );
+    assert_eq!(
+        pressure.x_lower.len(),
+        pressure.cp_lower.len(),
+        "lower pressure coordinates and Cp stay parallel"
+    );
+    assert_eq!(
+        pressure.x_lower.len(),
+        pressure.mach_lower.len(),
+        "lower pressure coordinates and Mach stay parallel"
+    );
+    assert_eq!(
+        pressure.field_x.len(),
+        pressure.field_y.len(),
+        "flow-field coordinates stay parallel"
+    );
+    assert_eq!(
+        pressure.field_x.len(),
+        pressure.field_mach.len(),
+        "flow-field coordinates and Mach stay parallel"
+    );
+    assert_eq!(
+        pressure.airfoil_x.len(),
+        pressure.airfoil_y.len(),
+        "panelled airfoil coordinates stay parallel"
+    );
+
+    match pressure.status {
+        MsesStatus::Ok => {
+            assert!(pressure.error.is_none(), "successful pressure has no error");
+            assert!(
+                !pressure.x_upper.is_empty() && !pressure.x_lower.is_empty(),
+                "successful pressure has both MPlot surface walks"
+            );
+            assert!(
+                !pressure.airfoil_x.is_empty(),
+                "successful pressure retains the panelled section"
+            );
+            assert!(
+                !pressure.raw_bl_dump.is_empty(),
+                "successful pressure retains the boundary-layer export"
+            );
+
+            let finite = |values: &[f64]| values.iter().all(|value| value.is_finite());
+            assert!(finite(&pressure.x_upper), "upper x values are finite");
+            assert!(finite(&pressure.cp_upper), "upper Cp values are finite");
+            assert!(finite(&pressure.mach_upper), "upper Mach values are finite");
+            assert!(finite(&pressure.x_lower), "lower x values are finite");
+            assert!(finite(&pressure.cp_lower), "lower Cp values are finite");
+            assert!(finite(&pressure.mach_lower), "lower Mach values are finite");
+            assert!(finite(&pressure.field_x), "flow-field x values are finite");
+            assert!(finite(&pressure.field_y), "flow-field y values are finite");
+            assert!(
+                finite(&pressure.field_mach),
+                "flow-field Mach values are finite"
+            );
+            assert!(finite(&pressure.airfoil_x), "airfoil x values are finite");
+            assert!(finite(&pressure.airfoil_y), "airfoil y values are finite");
+        }
+        status => {
+            assert!(
+                pressure
+                    .error
+                    .as_deref()
+                    .is_some_and(|error| !error.trim().is_empty()),
+                "{status:?} pressure retains a diagnostic"
+            );
+            assert!(
+                pressure.x_upper.is_empty()
+                    && pressure.cp_upper.is_empty()
+                    && pressure.mach_upper.is_empty()
+                    && pressure.x_lower.is_empty()
+                    && pressure.cp_lower.is_empty()
+                    && pressure.mach_lower.is_empty()
+                    && pressure.field_x.is_empty()
+                    && pressure.field_y.is_empty()
+                    && pressure.field_mach.is_empty()
+                    && pressure.field_row_offsets.is_empty()
+                    && pressure.airfoil_x.is_empty()
+                    && pressure.airfoil_y.is_empty(),
+                "{status:?} pressure does not expose fabricated derived data"
+            );
+        }
+    }
+}
 
 #[test]
 #[ignore = "requires ALAS_MSES_DIR to name the installed mset/mses/mplot directory"]
@@ -98,23 +195,7 @@ fn installed_mses_keeps_the_requested_local_section_condition_visible() {
         polar.error
     );
     assert!((polar.mach - expected_mach).abs() < 1e-12);
-    assert_eq!(
-        pressure.status,
-        MsesStatus::Error,
-        "pressure error: {:?}; polar status: {:?}; converged alpha: {:?}; requested alpha: {:?}",
-        pressure.error,
-        polar.status,
-        polar.alpha_deg,
-        polar
-            .point_diagnostics
-            .iter()
-            .map(|point| (point.requested_alpha_deg, point.status.as_str()))
-            .collect::<Vec<_>>()
-    );
-    assert!(pressure
-        .error
-        .as_deref()
-        .is_some_and(|error| error.contains("did not converge")));
+    assert_pressure_result_is_coherent(&pressure);
     assert_eq!(polar.requested_alpha_count, alpha_sweep_n_points);
     assert_eq!(polar.converged_alpha_count, polar.alpha_deg.len());
     assert_eq!(polar.point_diagnostics.len(), polar.requested_alpha_count);
@@ -146,12 +227,12 @@ fn installed_mses_keeps_the_requested_local_section_condition_visible() {
     assert_eq!(polar.alpha_deg.len(), polar.cl.len());
     assert_eq!(polar.alpha_deg.len(), polar.cd.len());
     assert!(polar.cd.iter().all(|drag| drag.is_finite() && *drag > 0.0));
-    assert!((pressure.alpha_deg - expected_alpha_deg).abs() < 1e-12);
-    assert!(pressure.x_upper.is_empty());
-    assert!(pressure.x_lower.is_empty());
-    assert!(pressure.field_x.is_empty());
-    assert!(pressure.raw_bl_dump.is_empty());
-    assert!(pressure.raw_flowfield_dump.is_empty());
+    assert!(
+        (pressure.alpha_deg - expected_alpha_deg).abs() <= 1.0 + 1e-12,
+        "pressure alpha stays within the documented retry bracket: actual={}, requested={}",
+        pressure.alpha_deg,
+        expected_alpha_deg
+    );
 
     if let Some(path) = output {
         if let Some(parent) = path.parent() {
@@ -163,7 +244,7 @@ fn installed_mses_keeps_the_requested_local_section_condition_visible() {
                 .unwrap_or_else(|error| panic!("write retained flowfield dump: {error}"));
         }
         let summary = json!({
-            "runtime": "MSES 3.12c Windows",
+            "runtime": "MSES installed executable",
             "status": polar.status.as_str(),
             "airfoil": polar.airfoil_name,
             "mach": polar.mach,

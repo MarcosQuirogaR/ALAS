@@ -15,12 +15,15 @@
 //! `docs/PORTING.md` assigns this row.
 //!
 //! The freestream and the per-wing lift solution are read *out of* the fixture
-//! rather than recomputed. That is the correction that closed this row: a
-//! previous version derived the Reynolds number from AeroSandbox's ISA while
-//! the fixture had been generated against SUAVE's `US_Standard_1976`, so it
-//! was comparing two atmospheres and reporting the difference as a drag
-//! disagreement -- about `7e-5` relative on the cruise cases, growing with
-//! altitude because that is where the two density models diverge.
+//! rather than recomputed. That is the correction that closed the atmosphere
+//! side of this row: a previous version derived the Reynolds number from
+//! AeroSandbox's ISA while the fixture had been generated against SUAVE's
+//! `US_Standard_1976`, so it was comparing two atmospheres and reporting the
+//! difference as a drag disagreement. The compressibility total has a separate
+//! source correction: the historical fixture sums per-wing coefficients even
+//! though the wings have different reference areas. The fixture retains that
+//! frozen value, while this test compares the product output to an explicit
+//! area-weighted expectation and propagates the correction through totals.
 
 // This file is itself a test binary, so an unwrap or expect that fails is the
 // assertion failing.
@@ -178,6 +181,7 @@ fn the_drag_buildup_agrees_with_suave() {
         })
         .collect();
 
+    let settings = DragSettings::default();
     let mut c = Comparison::new("alas-aero::drag_buildup", Tier::Closed);
 
     for case in &fixture.cases {
@@ -231,7 +235,7 @@ fn the_drag_buildup_agrees_with_suave() {
             reynolds_number_per_m: case.freestream.reynolds_number_per_m,
         };
 
-        let result = evaluate(&DragSettings::default(), &freestream, &vehicle);
+        let result = evaluate(&settings, &freestream, &vehicle);
         let case_tag = &case.tag;
 
         for (wing, (drag, compressible)) in geometry
@@ -349,10 +353,31 @@ fn the_drag_buildup_agrees_with_suave() {
             result.induced_viscous,
             case.induced.viscous,
         );
+        // The historical SUAVE value is a direct sum of coefficients. Keep
+        // that frozen evidence visible, then compare the product policy to a
+        // force-conserving area-weighted value on the aircraft reference area.
+        let frozen_compressible_total: f64 = geometry
+            .wings
+            .iter()
+            .map(|wing| at(&case.compressible.wings, &wing.tag))
+            .sum();
         c.scalar(
-            &format!("{case_tag}.compressible.total"),
-            result.compressible_total,
+            &format!("{case_tag}.compressible.total (frozen coefficient sum)"),
+            frozen_compressible_total,
             case.compressible.total,
+        );
+        let corrected_compressible_total: f64 = geometry
+            .wings
+            .iter()
+            .map(|wing| {
+                at(&case.compressible.wings, &wing.tag) * wing.reference_area_m2
+                    / geometry.reference_area_m2
+            })
+            .sum();
+        c.scalar(
+            &format!("{case_tag}.compressible.total (area weighted)"),
+            result.compressible_total,
+            corrected_compressible_total,
         );
         c.scalar(
             &format!("{case_tag}.miscellaneous.total_wetted_area"),
@@ -364,18 +389,27 @@ fn the_drag_buildup_agrees_with_suave() {
             result.miscellaneous_total,
             case.miscellaneous.total,
         );
+        let corrected_untrimmed =
+            case.untrimmed - case.compressible.total + corrected_compressible_total;
+        let corrected_trim = settings.trim_drag_correction_factor * corrected_untrimmed;
+        let corrected_total = (corrected_trim + settings.drag_coefficient_increment + case.spoiler)
+            / (1.0 + settings.lift_to_drag_adjustment);
         c.scalar(
-            &format!("{case_tag}.untrimmed"),
+            &format!("{case_tag}.untrimmed (area weighted)"),
             result.untrimmed,
-            case.untrimmed,
+            corrected_untrimmed,
         );
         c.scalar(
-            &format!("{case_tag}.trim_corrected"),
+            &format!("{case_tag}.trim_corrected (area weighted)"),
             result.trim_corrected,
-            case.trim_corrected,
+            corrected_trim,
         );
         c.scalar(&format!("{case_tag}.spoiler"), result.spoiler, case.spoiler);
-        c.scalar(&format!("{case_tag}.total"), result.total, case.total);
+        c.scalar(
+            &format!("{case_tag}.total (area weighted)"),
+            result.total,
+            corrected_total,
+        );
     }
 
     c.finish();

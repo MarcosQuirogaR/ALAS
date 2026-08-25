@@ -32,11 +32,11 @@ use alas_config::{AlasConfig, PassengerCabinConfig, SeatClassConfig};
 use alas_geom::aircraft::airplane::Airplane;
 
 use crate::cabin::{
-    abreast, build_passenger_layout, cabin_deck_segments, ceil_div, max_certifiable_capacity,
-    min_exit_pairs, resolve_aisle_width, select_exit_type, service_reserve_len, MIN_PITCH,
-    MONUMENT_LEN,
+    abreast, build_passenger_layout, build_passenger_layout_reference_compatibility,
+    cabin_deck_segments, ceil_div, max_certifiable_capacity, min_exit_pairs, resolve_aisle_width,
+    select_exit_type, service_reserve_len, MIN_PITCH, MONUMENT_LEN,
 };
-use crate::cargo::build_cargo_layout;
+use crate::cargo::{build_cargo_layout, build_cargo_layout_reference_compatibility};
 use crate::geometry::{CabinGeometry, CabinGeometryError};
 use crate::layout::PayloadLayout;
 use crate::numeric::round_half_even;
@@ -76,25 +76,57 @@ pub fn build_payload_layout(
     oew: f64,
     x_oew: f64,
 ) -> Result<PayloadLayout, CabinGeometryError> {
+    build_payload_layout_with_mass_semantics(plane, config, oew, x_oew, false)
+}
+
+/// Build a payload layout using the frozen cargo gross-target correction used
+/// by the Python parity fixture. Product analyses should call
+/// [`build_payload_layout`].
+pub fn build_payload_layout_reference_compatibility(
+    plane: &Airplane,
+    config: &AlasConfig,
+    oew: f64,
+    x_oew: f64,
+) -> Result<PayloadLayout, CabinGeometryError> {
+    build_payload_layout_with_mass_semantics(plane, config, oew, x_oew, true)
+}
+
+fn build_payload_layout_with_mass_semantics(
+    plane: &Airplane,
+    config: &AlasConfig,
+    oew: f64,
+    x_oew: f64,
+    reference_compatibility: bool,
+) -> Result<PayloadLayout, CabinGeometryError> {
     let g = CabinGeometry::new(
         plane,
         &config.geometry,
         config.cabin.passenger.wall_thickness_m,
     )?;
     if config.requirements.aircraft_type == "cargo" {
-        Ok(build_cargo_layout(
-            &g,
-            &config.cabin.cargo,
-            &config.requirements,
-            oew,
-            x_oew,
-        ))
+        let layout = if reference_compatibility {
+            build_cargo_layout_reference_compatibility(
+                &g,
+                &config.cabin.cargo,
+                &config.requirements,
+                oew,
+                x_oew,
+            )
+        } else {
+            build_cargo_layout(&g, &config.cabin.cargo, &config.requirements, oew, x_oew)
+        };
+        Ok(layout)
     } else {
-        Ok(build_passenger_layout(
-            &g,
-            &config.cabin.passenger,
-            &config.requirements,
-        ))
+        let layout = if reference_compatibility {
+            build_passenger_layout_reference_compatibility(
+                &g,
+                &config.cabin.passenger,
+                &config.requirements,
+            )
+        } else {
+            build_passenger_layout(&g, &config.cabin.passenger, &config.requirements)
+        };
+        Ok(layout)
     }
 }
 

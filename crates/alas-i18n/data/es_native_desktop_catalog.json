@@ -169,8 +169,6 @@
   "Executable path": "Ruta del ejecutable",
   "MSC solver override": "Anulación del solucionador MSC",
   "For the split MSC Student Edition, select Patran/.../analysis.exe here. Leave blank when the launcher finds its own solver.": "Para la edición Student de MSC dividida, selecciona aquí Patran/.../analysis.exe. Déjalo vacío si el lanzador encuentra su propio solucionador.",
-  "Run a real NASTRAN solve (otherwise the analytical wingbox is used)": "Ejecutar un cálculo real de NASTRAN (de lo contrario se usa el cajón alar analítico)",
-  "Export/run Patran (requires NASTRAN above)": "Exportar o ejecutar Patran (requiere NASTRAN)",
   "Install directory": "Directorio de instalación",
   "Launcher path": "Ruta del lanzador",
   "The Windows release includes the official AVL 3.52 executable beside ALAS. Development checkouts discover external tools/avl352.exe automatically; a configured path may override it. ALAS exports an inspectable SI deck even when AVL is unavailable, and only completed compatible CL and Cm results appear in Model Comparison.": "La versión para Windows incluye el ejecutable oficial AVL 3.52 junto a ALAS. Las copias de desarrollo detectan automáticamente external tools/avl352.exe; una ruta configurada puede sustituirlo. ALAS exporta una cubierta SI inspeccionable aunque AVL no esté disponible, y en Comparación de modelos solo aparecen resultados CL y Cm compatibles y completados.",
@@ -274,7 +272,6 @@
   "Live parasite and wave-drag trends across the cruise Mach range.": "Tendencias en directo de resistencia parásita y de onda en el intervalo de Mach de crucero.",
   "Optimization History": "Historial de optimización",
   "Optimization backend": "Backend de optimización",
-  "Model details": "Detalles del modelo",
   "Show solver detail": "Mostrar detalle del solucionador",
   "ALAS VLM": "VLM de ALAS",
   "Fourier lifting-line": "Línea sustentadora de Fourier",
@@ -1178,5 +1175,14 @@
   "No airframe figure is shown because every candidate stopped before a physically complete geometry could be generated; the electrical mission above remains the valid result artifact.": "No se muestra una figura de la aeronave porque todos los candidatos se detuvieron antes de generar una geometría físicamente completa; la misión eléctrica anterior sigue siendo el artefacto de resultado válido.",
   "Preliminary optimizer and production-core verification passed": "El optimizador preliminar y la verificación del núcleo de producción fueron satisfactorios",
   "Preliminary geometry generated; production-core verification did not pass": "Geometría preliminar generada; la verificación del núcleo de producción no fue satisfactoria",
-  "Objective metrics were unavailable for this rejected candidate.": "Las métricas del objetivo no estaban disponibles para este candidato rechazado."
+  "Objective metrics were unavailable for this rejected candidate.": "Las métricas del objetivo no estaban disponibles para este candidato rechazado.",
+  "Conceptual Payload-Range": "Envolvente conceptual de carga de pago y alcance",
+  "Idealized Breguet payload-range curve using typed capacity evidence; not an AFM/WBM operational envelope.": "Curva idealizada de carga de pago y alcance de Breguet basada en evidencia tipada de capacidad; no es una envolvente operacional AFM/WBM.",
+  "Model CG Loading-State Check": "Comprobación de estados de carga del CG del modelo",
+  "Model-derived aggregate CG loading-state check; not an AFM/WBM operational envelope.": "Comprobación agregada de estados de carga del CG derivada del modelo; no es una envolvente operacional AFM/WBM.",
+  "Weight & Balance / Model CG Loading-State Check": "Pesos y centrado / comprobación de estados de carga del CG del modelo",
+  "Number of native worker threads for differential-evolution candidate batches (>1 enables parallel evaluation; non-positive values are treated as 1). External evaluator adapters remain serial because they own mutable process/session state.": "Número de hilos nativos para los lotes de candidatos de evolución diferencial (>1 activa la evaluación en paralelo; los valores no positivos se tratan como 1). Los adaptadores de evaluadores externos siguen siendo secuenciales porque gestionan su propio estado de proceso o sesión.",
+  "Relative share of the distance remaining after climb and descent legs flown on the first cruise leg. Active cruise fractions are normalized so the route closes exactly.": "Proporción relativa de la distancia restante, después de los tramos de ascenso y descenso, que se vuela en el primer tramo de crucero. Las fracciones activas de crucero se normalizan para cerrar exactamente la ruta.",
+  "Relative share of the distance remaining after profile climb and descent legs flown on the second cruise leg.": "Proporción relativa de la distancia restante, después del ascenso y descenso del perfil, que se vuela en el segundo tramo de crucero.",
+  "Relative share of the distance remaining after climb and descent legs flown on the third cruise leg. Active cruise fractions are normalized so the route closes exactly.": "Proporción relativa de la distancia restante, después de los tramos de ascenso y descenso, que se vuela en el tercer tramo de crucero. Las fracciones activas de crucero se normalizan para cerrar exactamente la ruta."
 }

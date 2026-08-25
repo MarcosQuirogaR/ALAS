@@ -119,7 +119,13 @@ fn i_section(h: &[f64], bf: &[f64], tf: &[f64], tw: f64) -> Vec<f64> {
 }
 
 /// Distributed mass per unit span, kg/m -- `_mass_per_length`.
-fn mass_per_length(sizing: &WingboxSizing, cap_rho: f64, web_rho: f64, skin_rho: f64) -> Vec<f64> {
+fn mass_per_length(
+    sizing: &WingboxSizing,
+    cap_rho: f64,
+    web_rho: f64,
+    skin_rho: f64,
+    include_ribs: bool,
+) -> Vec<f64> {
     let n = sizing.chord.len();
     let mut m_y: Vec<f64> = (0..n)
         .map(|j| 2.0 * sizing.chord[j] * sizing.t_skin * skin_rho)
@@ -127,6 +133,25 @@ fn mass_per_length(sizing: &WingboxSizing, cap_rho: f64, web_rho: f64, skin_rho:
     for s in &sizing.spars {
         for (m, (&h, &a)) in m_y.iter_mut().zip(s.h.iter().zip(&s.a_cap)) {
             *m += s.t_web * h * web_rho + 2.0 * a * cap_rho;
+        }
+    }
+    if include_ribs {
+        // Ribs are discrete in the mesh, but the analytical load/mode model
+        // uses a spanwise mass density.  Conserving the sized rib mass as a
+        // uniform density keeps both inertial relief and the Rayleigh modal
+        // denominator on the same mass basis as the sizing result.
+        let span = sizing
+            .y_stations
+            .last()
+            .copied()
+            .zip(sizing.y_stations.first().copied())
+            .map(|(last, first)| last - first)
+            .unwrap_or(0.0);
+        if span > 0.0 && sizing.mass_breakdown_kg.ribs.is_finite() {
+            let rib_density = sizing.mass_breakdown_kg.ribs / span;
+            for mass in &mut m_y {
+                *mass += rib_density;
+            }
         }
     }
     m_y
@@ -242,6 +267,48 @@ pub fn analyze_structure(
     web_mat: &MaterialSpec,
     cap_mat: &MaterialSpec,
 ) -> StructuralAnalysisReport {
+    analyze_structure_with_rib_mass(
+        wsg, sizing, cfg, req, engine_cfg, mass_cfg, skin_mat, web_mat, cap_mat, true,
+    )
+}
+
+/// Analyze the sized wingbox using the frozen reference mass convention.
+///
+/// The historical parity path omitted the explicitly sized rib mass from
+/// analytical inertial relief and modal mass. It remains available solely for
+/// replaying the old fixture; product callers should use [`analyze_structure`].
+#[allow(clippy::too_many_arguments)]
+pub fn analyze_structure_reference_compatibility(
+    wsg: &WingStructureGeometry,
+    sizing: &WingboxSizing,
+    cfg: &StructuresConfig,
+    req: &DesignRequirements,
+    engine_cfg: &EngineConfig,
+    mass_cfg: &MassModelConfig,
+    skin_mat: &MaterialSpec,
+    web_mat: &MaterialSpec,
+    cap_mat: &MaterialSpec,
+) -> StructuralAnalysisReport {
+    analyze_structure_with_rib_mass(
+        wsg, sizing, cfg, req, engine_cfg, mass_cfg, skin_mat, web_mat, cap_mat, false,
+    )
+}
+
+// The helper keeps the reference and product analyses on one explicit path;
+// each argument is a distinct geometry, material, or load-model input.
+#[allow(clippy::too_many_arguments)]
+fn analyze_structure_with_rib_mass(
+    wsg: &WingStructureGeometry,
+    sizing: &WingboxSizing,
+    cfg: &StructuresConfig,
+    req: &DesignRequirements,
+    engine_cfg: &EngineConfig,
+    mass_cfg: &MassModelConfig,
+    skin_mat: &MaterialSpec,
+    web_mat: &MaterialSpec,
+    cap_mat: &MaterialSpec,
+    include_ribs: bool,
+) -> StructuralAnalysisReport {
     let y = &sizing.y_stations;
     let n = y.len();
     let semi_span = wsg.semi_span;
@@ -253,6 +320,7 @@ pub fn analyze_structure(
         cap_mat.rho_kg_m3,
         web_mat.rho_kg_m3,
         skin_mat.rho_kg_m3,
+        include_ribs,
     );
     let engine_loads = loads::engine_point_loads_n(engine_cfg, mass_cfg, req);
 
@@ -340,5 +408,39 @@ pub fn analyze_structure(
             frequencies_hz,
             mode_shapes,
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::sizing::MassBreakdown;
+
+    #[test]
+    fn rib_mass_is_conserved_in_the_distributed_analytical_density() {
+        let sizing = WingboxSizing {
+            y_stations: vec![0.0, 5.0],
+            eta_stations: vec![0.0, 1.0],
+            chord: vec![2.0, 2.0],
+            spar_fracs: Vec::new(),
+            spars: Vec::new(),
+            t_skin: 0.1,
+            num_ribs: 6,
+            rib_spacing_m: 1.0,
+            mass_breakdown_kg: MassBreakdown {
+                spar_caps: 0.0,
+                spar_webs: 0.0,
+                skin: 1.0,
+                ribs: 10.0,
+            },
+            total_mass_kg: 11.0,
+            sizing_load_case: "probe",
+        };
+
+        let without_ribs = mass_per_length(&sizing, 1.0, 1.0, 1.0, false);
+        let with_ribs = mass_per_length(&sizing, 1.0, 1.0, 1.0, true);
+        for (&with, &without) in with_ribs.iter().zip(&without_ribs) {
+            assert!((with - without - 2.0).abs() < 1e-12);
+        }
     }
 }

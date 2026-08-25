@@ -357,10 +357,23 @@ impl Wing {
             .collect()
     }
 
-    /// The wing's span, root to tip, doubled if [`Wing::symmetric`] --
-    /// `Wing.span()` at its defaults (`type="yz"`, no centerline distance,
-    /// not sectional).
+    /// The wing's unfolded geometric span, root to tip, doubled if
+    /// [`Wing::symmetric`] -- the compatibility `Wing.span()` quantity at its
+    /// defaults (`type="yz"`, no centerline distance, not sectional).
+    ///
+    /// This is the distance along the loft's YZ quarter-chord path.  It is
+    /// retained for translation/parity callers, but it is not the aircraft
+    /// reference span.  Product/reference normalization uses
+    /// [`Self::reference_span`] instead.
     pub fn span(&self) -> f64 {
+        self.unfolded_span()
+    }
+
+    /// Unfolded span along the loft's YZ quarter-chord path.
+    ///
+    /// This named form makes the legacy compatibility quantity explicit at
+    /// call sites that intentionally replay the upstream geometry API.
+    pub fn unfolded_span(&self) -> f64 {
         let half_span: f64 = self.sectional_spans_yz().iter().sum();
         if self.symmetric {
             2.0 * half_span
@@ -372,8 +385,7 @@ impl Wing {
     /// Wing span projected onto the aircraft lateral axis.
     ///
     /// Manufacturer three-views and reference-plane definitions quote this
-    /// span, while [`Self::span`] faithfully follows reference geometry's default
-    /// `type="yz"` convention and therefore grows with dihedral.
+    /// span.  Unlike [`Self::span`], it does not grow with dihedral.
     pub fn projected_span(&self) -> f64 {
         let half_span: f64 = self
             .xsecs
@@ -387,10 +399,21 @@ impl Wing {
         }
     }
 
+    /// Authoritative aircraft reference span.
+    ///
+    /// ALAS uses the lateral (XY-plane) projected span for `Airplane::b_ref`,
+    /// aerodynamic coefficient normalization, and source/reference
+    /// comparisons.  [`Self::unfolded_span`] remains available only for the
+    /// frozen compatibility geometry path.
+    pub fn reference_span(&self) -> f64 {
+        self.projected_span()
+    }
+
     /// Reference-plane area projected onto the aircraft XY plane.
     ///
-    /// This deliberately ignores dihedral rather than changing [`Self::area`],
-    /// whose `yz` convention is pinned to the reference geometry parity fixture.
+    /// This deliberately ignores dihedral rather than changing the legacy
+    /// [`Self::area`] quantity, whose `yz` convention is pinned to the
+    /// reference geometry parity fixture.
     pub fn projected_area(&self) -> f64 {
         let half_area: f64 = self
             .xsecs
@@ -407,6 +430,16 @@ impl Wing {
         }
     }
 
+    /// Authoritative aircraft reference area.
+    ///
+    /// ALAS uses the wing planform projected onto the aircraft XY reference
+    /// plane for `Airplane::s_ref`, aerodynamic coefficient normalization, and
+    /// manufacturer/source comparisons.  [`Self::unfolded_area`] remains
+    /// available only for the frozen compatibility geometry path.
+    pub fn reference_area(&self) -> f64 {
+        self.projected_area()
+    }
+
     /// Each lofted section's planform area -- the internal
     /// `_sectional=True, type="planform"` path [`Wing::mean_aerodynamic_chord`]
     /// and [`Wing::aerodynamic_center`] both read.
@@ -420,10 +453,19 @@ impl Wing {
             .collect()
     }
 
-    /// The wing's planform area, doubled if [`Wing::symmetric`] --
-    /// `Wing.area()` at its defaults (`type="planform"`, no centerline
-    /// distance, not sectional).
+    /// The wing's unfolded planform area, doubled if [`Wing::symmetric`] --
+    /// compatibility `Wing.area()` at its defaults (`type="planform"`, no
+    /// centerline distance, not sectional).
+    ///
+    /// This integrates the YZ quarter-chord path and therefore includes the
+    /// dihedral-induced unfolding.  It is retained for translation/parity
+    /// callers; product/reference normalization uses [`Self::reference_area`].
     pub fn area(&self) -> f64 {
+        self.unfolded_area()
+    }
+
+    /// Unfolded planform area measured on the loft's YZ path.
+    pub fn unfolded_area(&self) -> f64 {
         let half_area: f64 = self.sectional_areas().iter().sum();
         if self.symmetric {
             2.0 * half_area
@@ -728,6 +770,8 @@ mod tests {
         );
         assert!((wing.projected_span() - 20.0).abs() < 1e-9);
         assert!((wing.projected_area() - 40.0).abs() < 1e-9);
+        assert_eq!(wing.reference_span(), wing.projected_span());
+        assert_eq!(wing.reference_area(), wing.projected_area());
         assert!(wing.span() > wing.projected_span());
         assert!(wing.area() > wing.projected_area());
     }

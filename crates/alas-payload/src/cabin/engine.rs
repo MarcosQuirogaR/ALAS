@@ -18,6 +18,7 @@ use alas_config::{DesignRequirements, PassengerCabinConfig};
 use super::fittings::{place_baggage, place_exits, place_monuments};
 use super::resolve_aisle_width;
 use super::seating::{place_seats, resolve_classes};
+use crate::cargo::CargoMassSemantics;
 use crate::geometry::CabinGeometry;
 use crate::layout::{
     mass_properties, ItemKind, LayoutSummary, Mode, PassengerSummary, PayloadLayout,
@@ -39,6 +40,26 @@ pub fn build_passenger_layout(
     pax: &PassengerCabinConfig,
     req: &DesignRequirements,
 ) -> PayloadLayout {
+    build_passenger_layout_with_mass_semantics(g, pax, req, CargoMassSemantics::Net)
+}
+
+/// Build a passenger layout with the frozen gross-target baggage correction
+/// used by the Python parity fixture. Product analyses should call
+/// [`build_passenger_layout`].
+pub fn build_passenger_layout_reference_compatibility(
+    g: &CabinGeometry,
+    pax: &PassengerCabinConfig,
+    req: &DesignRequirements,
+) -> PayloadLayout {
+    build_passenger_layout_with_mass_semantics(g, pax, req, CargoMassSemantics::ReferenceGross)
+}
+
+fn build_passenger_layout_with_mass_semantics(
+    g: &CabinGeometry,
+    pax: &PassengerCabinConfig,
+    req: &DesignRequirements,
+    mass_semantics: CargoMassSemantics,
+) -> PayloadLayout {
     let mut classes = resolve_classes(pax, req.num_passengers);
     let total_pax: i64 = classes.iter().map(|class| class.config.count).sum();
     let aisle_w = resolve_aisle_width(pax, total_pax);
@@ -56,13 +77,14 @@ pub fn build_passenger_layout(
     // balance. An empty cabin has none, and the middle of it is the neutral
     // answer rather than the datum.
     let (seat_mass, seat_cg) = seat_mass_and_cg(&items, g);
-    let bags = place_baggage(g, pax, req, seated, seat_mass, seat_cg);
+    let bags = place_baggage(g, pax, req, seated, seat_mass, seat_cg, mass_semantics);
     items.extend(bags.items);
 
     let (total_mass, cg_x, cg_y) = mass_properties(&items);
     let summary = PassengerSummary {
         total_pax,
         seated_pax: seated,
+        unseated_pax: (total_pax - seated).max(0),
         classes: classes
             .iter()
             .map(|class| (class.name, class.seated))

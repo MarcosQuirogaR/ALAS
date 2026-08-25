@@ -86,7 +86,7 @@ pub(super) fn lifting_line_points(report: &AnalysisReport) -> Vec<LiftingLinePoi
     };
     let alpha_rad = report
         .polar
-        .alpha_deg
+        .geometric_alpha_deg
         .iter()
         .map(|alpha| alpha.to_radians())
         .collect::<Vec<_>>();
@@ -106,7 +106,7 @@ pub(super) fn fourier_lifting_line_points(
     };
     let alpha_rad = report
         .polar
-        .alpha_deg
+        .geometric_alpha_deg
         .iter()
         .map(|alpha| alpha.to_radians())
         .collect::<Vec<_>>();
@@ -122,7 +122,7 @@ pub(super) fn helmbold_points(report: &AnalysisReport) -> Vec<(f64, f64)> {
     };
     report
         .polar
-        .alpha_deg
+        .geometric_alpha_deg
         .iter()
         .filter(|alpha| alpha.is_finite())
         .map(|&alpha| {
@@ -179,8 +179,17 @@ pub(super) fn build_solver_comparison(
         .map(|polar| polar.points.clone())
         .unwrap_or_default();
     let reference = avl.and_then(|result| result.comparison_reference.as_ref());
-    let reference_polar = reference.map_or(&report.polar, |reference| &reference.vlm_polar);
-    let paired = aligned_points(reference_polar, &avl_points);
+    let reference_polar = reference.map_or_else(
+        || report.polar.clone(),
+        |reference| {
+            let mut polar = reference.vlm_polar.clone();
+            if polar.geometric_alpha_deg.len() == reference.geometric_alpha_deg.len() {
+                polar.alpha_deg = reference.geometric_alpha_deg.clone();
+            }
+            polar
+        },
+    );
+    let paired = aligned_points(&reference_polar, &avl_points);
     let coefficient_points = paired
         .iter()
         .map(|point| {
@@ -194,7 +203,7 @@ pub(super) fn build_solver_comparison(
         })
         .collect();
     let induced = (!avl_points.is_empty())
-        .then(|| induced_comparison(report, reference_polar, &paired).ok())
+        .then(|| induced_comparison(report, &reference_polar, &paired).ok())
         .flatten();
     SolverComparison {
         coefficient_points,

@@ -97,8 +97,8 @@ pub fn stability_scalars(report: &AnalysisReport) -> Option<StabilityScalars<'_>
     };
     let x_np = x_cg_aero + sm * c_ref;
 
-    let s_wing = wing.area();
-    let s_tail = hstab.map_or(0.0, Wing::area);
+    let s_wing = wing.reference_area();
+    let s_tail = hstab.map_or(0.0, Wing::reference_area);
     let x_hstab_ac = hstab.map_or(x_np + 2.0, |h| h.aerodynamic_center(AC_CHORD_FRACTION)[0]);
     let l_t = x_hstab_ac - x_wing_ac;
     let v_h = if c_ref * s_wing > 0.0 {
@@ -135,7 +135,7 @@ mod tests {
     use super::*;
     use alas_config::design_variables::DesignVector;
     use alas_geom::aircraft::airplane::Airplane;
-    use alas_pipeline::full_analysis::{DesignPoint, PolarFit};
+    use alas_pipeline::full_analysis::{DesignPoint, PolarFit, PolarFitStatus};
     use std::collections::HashMap;
 
     // Test geometry uses a known-valid airfoil name.
@@ -171,6 +171,7 @@ mod tests {
             },
             polar: PolarSweep {
                 alpha_deg: Vec::new(),
+                geometric_alpha_deg: Vec::new(),
                 cl: Vec::new(),
                 cd: Vec::new(),
                 cd_induced: Vec::new(),
@@ -190,6 +191,7 @@ mod tests {
                 k: 0.04,
                 oswald_e: 0.85,
                 aspect_ratio: 9.0,
+                status: PolarFitStatus::Fitted,
             },
             static_margin,
             x_neutral_point: 0.0,

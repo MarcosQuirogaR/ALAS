@@ -92,6 +92,7 @@ dependencies = [
  "alas-gui",
  "alas-mission",
  "alas-pipeline",
+ "alas-report",
  "alas-route",
  "alas-struct",
  "alas-testkit",

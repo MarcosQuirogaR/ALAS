@@ -4,7 +4,7 @@
 // Ported from alas/reporting/visualization.py
 // Reference: alas @ rust-port-baseline.
 
-//! Mass breakdown, longitudinal weight distribution, CG travel envelope, and landing gear layout figures.
+//! Mass breakdown, longitudinal weight distribution, model CG check, and landing gear layout figures.
 //!
 //! `figure_cg_envelope` and `figure_mass_distribution` alone translate close
 //! to 980 lines of `visualization.py`, past what one file under this crate's
@@ -23,8 +23,10 @@ use std::collections::HashMap;
 use alas_aero::analysis::PolarSweep;
 use alas_config::{design_variables::DesignVector, AlasConfig};
 use alas_geom::aircraft::airplane::Airplane;
-use alas_mass::breakdown::{run_mass_analysis_with_model_checked, MassCoordinateModel};
-use alas_pipeline::full_analysis::{AnalysisReport, DesignPoint, PolarFit};
+use alas_mass::breakdown::{
+    run_mass_analysis_with_model_checked_product_with_gear, MassCoordinateModel,
+};
+use alas_pipeline::full_analysis::{AnalysisReport, DesignPoint, PolarFit, PolarFitStatus};
 
 pub use super::mass_balance_layout::{figure_landing_gear_planform, figure_mass_breakdown};
 pub use cg_envelope::figure_cg_envelope;
@@ -40,18 +42,20 @@ pub fn quick_preview_report(
     design: DesignVector,
 ) -> Result<AnalysisReport, String> {
     let mut geometry = config.geometry.clone();
-    geometry.engine.apply_engine_spec();
-    let (masses, coordinates, physical_cg) = run_mass_analysis_with_model_checked(
-        &airplane,
-        &config.requirements,
-        &geometry,
-        &config.cabin,
-        &config.control_surfaces,
-        Some(&config.mass_model),
-        None,
-        MassCoordinateModel::StructuralWingbox(&config.structures),
-    )
-    .map_err(|error| error.to_string())?;
+    geometry.engine.apply_engine_spec_if_uninitialized();
+    let (masses, coordinates, physical_cg) =
+        run_mass_analysis_with_model_checked_product_with_gear(
+            &airplane,
+            &config.requirements,
+            &geometry,
+            &config.cabin,
+            &config.control_surfaces,
+            Some(&config.mass_model),
+            None,
+            MassCoordinateModel::StructuralWingbox(&config.structures),
+            &config.landing_gear,
+        )
+        .map_err(|error| error.to_string())?;
     let component_masses = masses
         .as_pairs()
         .into_iter()
@@ -67,6 +71,7 @@ pub fn quick_preview_report(
         airplane,
         polar: PolarSweep {
             alpha_deg: Vec::new(),
+            geometric_alpha_deg: Vec::new(),
             cl: Vec::new(),
             cd: Vec::new(),
             cd_induced: Vec::new(),
@@ -86,6 +91,9 @@ pub fn quick_preview_report(
             k: 0.0,
             oswald_e: 0.0,
             aspect_ratio: 0.0,
+            // The preview intentionally skips aerodynamic analysis, so an
+            // empty polar cannot be reported as a successful fit.
+            status: PolarFitStatus::FallbackInsufficientPoints,
         },
         static_margin: f64::NAN,
         x_neutral_point: f64::NAN,

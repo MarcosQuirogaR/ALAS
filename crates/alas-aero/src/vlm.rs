@@ -56,11 +56,10 @@
 //! Reached only from `alas/physics/dynamics.py`'s `compute_dynamic_modes`
 //! (P7), which needs the full derivative set (`alpha, beta, p, q, r` all
 //! `true`, per that module's own doc comment). It is straightforward
-//! finite-differencing on top of [`run`] -- re-running it once per perturbed
-//! state variable and taking a forward difference -- with nothing numerically
-//! new, and lives in the [`stability_derivatives`] submodule. See
-//! `docs/PORTING.md` for why its five per-axis boolean flags are not
-//! translated as parameters.
+//! finite-differencing on top of [`run`] -- central perturbations around each
+//! state variable with an explicit step-refinement seam -- and lives in the
+//! [`stability_derivatives`] submodule. See `docs/PORTING.md` for why its five
+//! per-axis boolean flags are not translated as parameters.
 //!
 //! # Left untranslated
 //!
@@ -74,6 +73,7 @@
 use alas_geom::aircraft::airplane::Airplane;
 use alas_geom::aircraft::wing::{SpacingFunction, SubdivideSectionsError, Wing};
 use alas_math::linalg;
+use alas_math::linalg::SolveDiagnostics;
 
 use crate::operating_point::{AxisFrame, OperatingPoint};
 use crate::singularities::calculate_induced_velocity_horseshoe;
@@ -83,7 +83,8 @@ pub mod stability_derivatives;
 pub mod streamlines;
 
 pub use stability_derivatives::{
-    run_with_stability_derivatives, CoefficientDerivatives, VlmStabilityResult,
+    run_with_stability_derivatives, run_with_stability_derivatives_reference_compatibility,
+    run_with_stability_derivatives_with_steps, CoefficientDerivatives, VlmStabilityResult,
 };
 pub use streamlines::{calculate_streamlines, PanelSample};
 
@@ -115,6 +116,18 @@ pub enum VlmError {
     /// (`CONTRIBUTING.md`).
     #[error("the panel influence matrix was numerically singular at row {0}")]
     SingularAic(usize),
+    /// A finite-difference derivative step was not finite and positive.
+    #[error("stability-derivative steps must be finite and positive")]
+    InvalidDerivativeStep,
+    /// A generated panel had no usable area for a unit normal.
+    #[error("wing {wing_index} generated a degenerate zero-area panel")]
+    DegeneratePanel {
+        /// Index of the wing that produced the panel.
+        wing_index: usize,
+    },
+    /// A solve produced a non-finite force, moment, coefficient, or residual.
+    #[error("the VLM solve produced a non-finite result")]
+    NonFiniteResult,
 }
 
 /// Every field `run`'s upstream docstring lists, plus the solved circulation
@@ -183,6 +196,11 @@ pub struct VlmResult {
     /// `vortex_strengths` is not: it lives on the solved instance instead
     /// (`self.forces_geometry`).
     pub panel_forces_geometry: Vec<[f64; 3]>,
+    /// Residual and pivot-ratio evidence from the dense circulation solve.
+    ///
+    /// Keeping this alongside the aerodynamic result makes mesh/conditioning
+    /// review possible without reconstructing the AIC matrix after the solve.
+    pub solve_diagnostics: SolveDiagnostics,
 }
 
 /// One panel's four quad-mesh corners and the vortex-lattice quantities
@@ -218,11 +236,15 @@ impl Panel {
         front_right: [f64; 3],
         is_trailing_edge: bool,
         wing_index: usize,
-    ) -> Self {
+    ) -> Result<Self, VlmError> {
         let diag1 = sub3(front_right, back_left);
         let diag2 = sub3(front_left, back_right);
         let cross = cross3(diag1, diag2);
-        let normal_direction = scale3(cross, 1.0 / norm3(cross));
+        let area_normal = norm3(cross);
+        if !area_normal.is_finite() || area_normal <= f64::EPSILON {
+            return Err(VlmError::DegeneratePanel { wing_index });
+        }
+        let normal_direction = scale3(cross, 1.0 / area_normal);
 
         let left_vortex_vertex = add3(scale3(front_left, 0.75), scale3(back_left, 0.25));
         let right_vortex_vertex = add3(scale3(front_right, 0.75), scale3(back_right, 0.25));
@@ -233,7 +255,7 @@ impl Panel {
         let collocation_right = add3(scale3(front_right, 0.25), scale3(back_right, 0.75));
         let collocation_point = scale3(add3(collocation_left, collocation_right), 0.5);
 
-        Self {
+        Ok(Self {
             normal_direction,
             left_vortex_vertex,
             right_vortex_vertex,
@@ -246,7 +268,7 @@ impl Panel {
             front_right,
             is_trailing_edge,
             wing_index,
-        }
+        })
     }
 }
 
@@ -274,17 +296,17 @@ fn mesh_panels(
         // evaluated per wing (including its mirrored half, already appended
         // to `faces` by `mesh_thin_surface` when the wing is symmetric)
         // before the per-wing arrays are concatenated.
-        panels.extend(faces.iter().enumerate().map(|(i, face)| {
+        for (i, face) in faces.iter().enumerate() {
             let is_trailing_edge = (i + 1) % chordwise_resolution == 0;
-            Panel::from_quad(
+            panels.push(Panel::from_quad(
                 points[face[0]],
                 points[face[1]],
                 points[face[2]],
                 points[face[3]],
                 is_trailing_edge,
                 wing_index,
-            )
-        }));
+            )?);
+        }
     }
     Ok(panels)
 }
@@ -301,8 +323,9 @@ fn velocity_at_points(
     vortex_strengths: &[f64],
     op_point: &OperatingPoint,
     steady_freestream_velocity: [f64; 3],
+    reference: [f64; 3],
 ) -> Vec<[f64; 3]> {
-    let rotation_velocities = op_point.rotation_velocity_geometry_axes(points);
+    let rotation_velocities = op_point.rotation_velocity_geometry_axes_about(points, reference);
     points
         .iter()
         .zip(rotation_velocities)
@@ -340,13 +363,52 @@ pub fn run(
     spanwise_resolution: usize,
     chordwise_resolution: usize,
 ) -> Result<VlmResult, VlmError> {
+    run_with_rotation_reference(
+        airplane,
+        op_point,
+        spanwise_resolution,
+        chordwise_resolution,
+        airplane.xyz_ref,
+    )
+}
+
+/// Run the frozen reference VLM convention used by the AeroSandbox fixtures.
+///
+/// The translated reference solver evaluates rotation-induced velocity about
+/// the geometry origin. Product analyses use [`run`], which evaluates that
+/// velocity about `airplane.xyz_ref` so rigid-body rates remain invariant under
+/// a rigid translation. This seam is for frozen parity fixtures only; product
+/// callers must use [`run`].
+pub fn run_reference_compatibility(
+    airplane: &Airplane,
+    op_point: &OperatingPoint,
+    spanwise_resolution: usize,
+    chordwise_resolution: usize,
+) -> Result<VlmResult, VlmError> {
+    run_with_rotation_reference(
+        airplane,
+        op_point,
+        spanwise_resolution,
+        chordwise_resolution,
+        [0.0; 3],
+    )
+}
+
+fn run_with_rotation_reference(
+    airplane: &Airplane,
+    op_point: &OperatingPoint,
+    spanwise_resolution: usize,
+    chordwise_resolution: usize,
+    rotation_reference: [f64; 3],
+) -> Result<VlmResult, VlmError> {
     let panels = mesh_panels(airplane, spanwise_resolution, chordwise_resolution)?;
     let n = panels.len();
 
     let steady_freestream_velocity = op_point.freestream_velocity_geometry_axes();
 
     let collocation_points: Vec<[f64; 3]> = panels.iter().map(|p| p.collocation_point).collect();
-    let rotation_at_collocation = op_point.rotation_velocity_geometry_axes(&collocation_points);
+    let rotation_at_collocation =
+        op_point.rotation_velocity_geometry_axes_about(&collocation_points, rotation_reference);
 
     let freestream_influences: Vec<f64> = panels
         .iter()
@@ -378,7 +440,15 @@ pub fn run(
         .iter()
         .map(|&value| vec![-value])
         .collect();
-    let solved = linalg::solve(&aic, &rhs).map_err(VlmError::SingularAic)?;
+    let (solved, solve_diagnostics) =
+        linalg::solve_with_diagnostics(&aic, &rhs).map_err(VlmError::SingularAic)?;
+    if !solve_diagnostics.residual_norm.is_finite()
+        || !solve_diagnostics.normalized_residual.is_finite()
+        || !solve_diagnostics.pivot_ratio.is_finite()
+        || !solve_diagnostics.minimum_pivot.is_finite()
+    {
+        return Err(VlmError::NonFiniteResult);
+    }
     let vortex_strengths: Vec<f64> = solved.into_iter().map(|row| row[0]).collect();
 
     let vortex_centers: Vec<[f64; 3]> = panels.iter().map(|p| p.vortex_center).collect();
@@ -388,6 +458,7 @@ pub fn run(
         &vortex_strengths,
         op_point,
         steady_freestream_velocity,
+        rotation_reference,
     );
 
     let density = op_point.atmosphere.density();
@@ -451,6 +522,38 @@ pub fn run(
     let s_ref = airplane.s_ref;
     let b_ref = airplane.b_ref;
     let c_ref = airplane.c_ref;
+    let cl_lift = lift / q / s_ref;
+    let cd_drag = drag / q / s_ref;
+    let cy_side = side_force / q / s_ref;
+    let cl_roll = roll_moment / q / s_ref / b_ref;
+    let cm_pitch = pitch_moment / q / s_ref / c_ref;
+    let cn_yaw = yaw_moment / q / s_ref / b_ref;
+    let coefficient_values = [
+        lift,
+        drag,
+        side_force,
+        roll_moment,
+        pitch_moment,
+        yaw_moment,
+        cl_lift,
+        cd_drag,
+        cy_side,
+        cl_roll,
+        cm_pitch,
+        cn_yaw,
+    ];
+    if !force_geometry
+        .iter()
+        .chain(force_body.iter())
+        .chain(force_wind.iter())
+        .chain(moment_geometry.iter())
+        .chain(moment_body.iter())
+        .chain(moment_wind.iter())
+        .chain(coefficient_values.iter())
+        .all(|value| value.is_finite())
+    {
+        return Err(VlmError::NonFiniteResult);
+    }
 
     Ok(VlmResult {
         force_geometry,
@@ -465,12 +568,12 @@ pub fn run(
         roll_moment,
         pitch_moment,
         yaw_moment,
-        cl_lift: lift / q / s_ref,
-        cd_drag: drag / q / s_ref,
-        cy_side: side_force / q / s_ref,
-        cl_roll: roll_moment / q / s_ref / b_ref,
-        cm_pitch: pitch_moment / q / s_ref / c_ref,
-        cn_yaw: yaw_moment / q / s_ref / b_ref,
+        cl_lift,
+        cd_drag,
+        cy_side,
+        cl_roll,
+        cm_pitch,
+        cn_yaw,
         vortex_strengths,
         panels: panels
             .iter()
@@ -487,6 +590,7 @@ pub fn run(
             })
             .collect(),
         panel_forces_geometry,
+        solve_diagnostics,
     })
 }
 
@@ -517,8 +621,10 @@ mod tests {
 
     fn single_wing_airplane(symmetric: bool) -> Airplane {
         let wing = flat_rectangular_wing(symmetric);
-        let s_ref = wing.area();
-        let b_ref = wing.span();
+        // The probe represents a product/reference aircraft, so its
+        // coefficient scales must use the projected XY reference plane.
+        let s_ref = wing.reference_area();
+        let b_ref = wing.reference_span();
         let c_ref = wing.mean_aerodynamic_chord();
         Airplane {
             name: "Probe".to_owned(),
@@ -605,5 +711,83 @@ mod tests {
             slow_result.cl_lift,
             fast_result.cl_lift
         );
+    }
+
+    #[test]
+    fn rate_derivatives_are_invariant_to_a_rigid_translation_about_xyz_ref() {
+        let airplane = single_wing_airplane(true);
+        // A symmetric wing is mirrored about the global XZ plane, so keep the
+        // translation in the aircraft's symmetry-preserving x/z directions.
+        let translation = [37.0, 0.0, 4.5];
+        let mut translated = airplane.clone();
+        translated.xyz_ref = [
+            airplane.xyz_ref[0] + translation[0],
+            airplane.xyz_ref[1] + translation[1],
+            airplane.xyz_ref[2] + translation[2],
+        ];
+        translated.wings = airplane
+            .wings
+            .iter()
+            .map(|wing| {
+                let xsecs = wing
+                    .xsecs
+                    .iter()
+                    .map(|xsec| xsec.translate(translation))
+                    .collect();
+                Wing::new(wing.name.clone(), xsecs, wing.symmetric)
+            })
+            .collect();
+
+        let op_point =
+            OperatingPoint::new(Atmosphere::new(0.0), 50.0, 4.0, 1.0, 0.003, 0.004, 0.005);
+        let original = run_with_stability_derivatives(&airplane, &op_point, 2, 3)
+            .expect("original solve should be well posed");
+        let shifted = run_with_stability_derivatives(&translated, &op_point, 2, 3)
+            .expect("translated solve should be well posed");
+
+        let differences = [
+            ("Clp", original.d_p.cl_lift, shifted.d_p.cl_lift),
+            ("Cmp", original.d_p.cm_pitch, shifted.d_p.cm_pitch),
+            ("CLq", original.d_q.cl_lift, shifted.d_q.cl_lift),
+            ("Cmq", original.d_q.cm_pitch, shifted.d_q.cm_pitch),
+            ("CYr", original.d_r.cy_side, shifted.d_r.cy_side),
+            ("Cnr", original.d_r.cn_yaw, shifted.d_r.cn_yaw),
+        ];
+        for (name, before, after) in differences {
+            assert!(
+                (before - after).abs() < 1e-8,
+                "{name}: {before} changed to {after}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_zero_area_panel_is_rejected_before_normalization() {
+        let result = Panel::from_quad(
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            false,
+            3,
+        );
+        assert!(matches!(
+            result,
+            Err(VlmError::DegeneratePanel { wing_index: 3 })
+        ));
+    }
+
+    #[test]
+    fn nonpositive_or_nonfinite_derivative_steps_are_rejected() {
+        let airplane = single_wing_airplane(true);
+        let op_point = level_flight_point(4.0);
+        for (angle_step, rate_step) in [(0.0, 0.001), (-0.001, 0.001), (f64::NAN, 0.001)] {
+            assert_eq!(
+                run_with_stability_derivatives_with_steps(
+                    &airplane, &op_point, 2, 3, angle_step, rate_step,
+                ),
+                Err(VlmError::InvalidDerivativeStep)
+            );
+        }
     }
 }

@@ -26,7 +26,7 @@ pub use runner::{
 pub use score::{cruise_condition, score_candidate};
 pub use types::{
     AirfoilCandidateResult, AirfoilScreeningOptions, AirfoilScreeningResult, ScreeningFlowRegime,
-    ScreeningObjective, CL_FEASIBILITY_TOL, REFERENCE_AIRFOILS, TRANSONIC_MACH_CAVEAT,
-    TRIM_ALPHA_SLACK_DEG,
+    ScreeningObjective, CL_FEASIBILITY_TOL, MIN_NEURALFOIL_ANALYSIS_CONFIDENCE, REFERENCE_AIRFOILS,
+    TRANSONIC_MACH_CAVEAT, TRIM_ALPHA_SLACK_DEG, TRIM_CM_RESIDUAL_TOL,
 };
 pub use verify_mses::verify_candidate_mses;

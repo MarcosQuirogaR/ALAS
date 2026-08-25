@@ -75,13 +75,87 @@ const fn screening_descriptor(
 }
 
 const fn required_stage_for_id(id: &str) -> RequiredStage {
-    match (id.as_bytes()[0], id.as_bytes()[1]) {
-        (b'o', _) | (b'd', _) => RequiredStage::Optimization,
-        (b'm', b'i') => RequiredStage::Mission,
-        (b'm', b's') => RequiredStage::Mses,
-        (b's', _) => RequiredStage::Structures,
-        _ => RequiredStage::FullAnalysis,
+    // Stage ownership is a data contract, not a naming convention. Several
+    // aerodynamic and stability IDs begin with `d` or `s`, and their data are
+    // produced by the full analysis rather than optimization or structures.
+    // Keep the complete mapping here so a new descriptor cannot inherit an
+    // accidental stage merely because its title starts with a particular
+    // letter.
+    if any_id(
+        id,
+        &[
+            "optimization_history",
+            "design_evolution",
+            "airfoil_comparison",
+            "airfoil_evolution",
+            "polar_comparison",
+            "planform_comparison",
+            "wireframe_wing",
+            "wireframe_fuselage",
+            "wireframe_empennage",
+            "threeview",
+        ],
+    ) {
+        RequiredStage::Optimization
+    } else if any_id(id, &["mses_pressure", "mses_mach_contours"]) {
+        RequiredStage::Mses
+    } else if any_id(
+        id,
+        &[
+            "structures_sizing",
+            "structures_loads",
+            "structures_stress",
+            "structures_modes",
+            "structures_vibration",
+            "structures_patran",
+        ],
+    ) {
+        RequiredStage::Structures
+    } else if any_id(
+        id,
+        &[
+            "mission_route_2d",
+            "mission_route_3d",
+            "payload_range",
+            "mission_profile",
+            "mission_velocities",
+            "mission_flight_path",
+            "mission_aero_coefficients",
+            "mission_aero_forces",
+            "mission_drag_components",
+        ],
+    ) {
+        RequiredStage::Mission
+    } else {
+        RequiredStage::FullAnalysis
     }
+}
+
+const fn any_id(id: &str, candidates: &[&str]) -> bool {
+    let mut index = 0;
+    while index < candidates.len() {
+        if same_id(id, candidates[index]) {
+            return true;
+        }
+        index += 1;
+    }
+    false
+}
+
+const fn same_id(left: &str, right: &str) -> bool {
+    let left_bytes = left.as_bytes();
+    let right_bytes = right.as_bytes();
+    if left_bytes.len() != right_bytes.len() {
+        return false;
+    }
+    let mut index = 0;
+    while index < left_bytes.len() {
+        if left_bytes[index] != right_bytes[index] {
+            return false;
+        }
+        index += 1;
+    }
+    true
 }
 
 pub static PREVIEW_FIGURES: &[FigureDescriptor] = &[
@@ -285,9 +359,9 @@ pub static RESULT_FIGURES: &[FigureDescriptor] = &[
     ),
     descriptor(
         "cg_envelope",
-        "CG Envelope",
+        "Model CG Loading-State Check",
         "Weight & Balance",
-        "Loading and operational center-of-gravity envelope.",
+        "Model-derived aggregate CG loading-state check; not an AFM/WBM operational envelope.",
     ),
     descriptor(
         "landing_gear_planform",
@@ -390,9 +464,9 @@ pub static RESULT_FIGURES: &[FigureDescriptor] = &[
     ),
     descriptor(
         "payload_range",
-        "Payload-Range",
+        "Conceptual Payload-Range",
         "Mission",
-        "Payload versus range operational envelope.",
+        "Idealized Breguet payload-range curve using typed capacity evidence; not an AFM/WBM operational envelope.",
     ),
     descriptor(
         "mission_profile",

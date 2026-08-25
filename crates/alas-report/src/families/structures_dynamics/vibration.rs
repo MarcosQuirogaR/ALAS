@@ -65,7 +65,7 @@ fn unavailable_vibration(pal: &crate::theme::Palette, detail: &str) -> Scene {
     status_message_scene(
         TITLE,
         &format!(
-            "Requires a real NASTRAN SOL 111 sine sweep (no analytical fallback exists for this check): {detail}"
+            "Requires a real NASTRAN sine/random-vibration solve (no analytical fallback exists for this check): {detail}"
         ),
         false,
         pal,

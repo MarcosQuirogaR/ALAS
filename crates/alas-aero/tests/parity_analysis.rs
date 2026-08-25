@@ -24,15 +24,17 @@
 //! # The aircraft
 //!
 //! Unlike `parity_asb_vlm.rs`, which stands a small probe airplane in for the
-//! real geometry, this test runs on the nominal aircraft
-//! `alas-geom::builder` builds -- the same object `golden/geom/builder.json`
-//! pins. `parasite_drag` reads the fuselage's end stations, the nacelle
-//! count, every wing's area and the morphed root section's real thickness,
-//! and none of those exists on a probe. The fixture also records the
-//! aircraft's own reference dimensions, and this test checks them before
-//! anything else: if the two sides have stopped meaning the same aeroplane,
-//! every comparison below is answering a different question and should say so
-//! in one line rather than in forty.
+//! real geometry, this test runs on the frozen-reference aircraft built by
+//! `alas-geom::builder::new_reference_compatibility` -- the historical
+//! geometry pinned by `golden/geom/builder.json`. The product builder owns a
+//! newer transport-planform default and is tested on its own path. Here,
+//! `parasite_drag` reads the fuselage's end stations, the nacelle count, every
+//! wing's area and the morphed root section's real thickness, and none of
+//! those exists on a probe. The fixture also records the aircraft's own
+//! reference dimensions, and this test checks them before anything else: if
+//! the two sides have stopped meaning the same aeroplane, every comparison
+//! below is answering a different question and should say so in one line
+//! rather than in forty.
 
 // This file is itself a test binary, so an unwrap or expect that fails is
 // the assertion failing.

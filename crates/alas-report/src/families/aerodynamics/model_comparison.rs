@@ -153,7 +153,7 @@ pub fn figure_model_comparison(
         0.08,
     );
     let x_alpha = padded_range(
-        p.alpha_deg
+        p.geometric_alpha_deg
             .iter()
             .copied()
             .chain(mission_points.iter().map(|v| v.2))
@@ -226,7 +226,7 @@ pub fn figure_model_comparison(
     );
     axes[1].add_line_series(
         &mut scene,
-        &p.alpha_deg
+        &p.geometric_alpha_deg
             .iter()
             .copied()
             .zip(p.cl.iter().copied())
@@ -235,7 +235,7 @@ pub fn figure_model_comparison(
     );
     axes[2].add_line_series(
         &mut scene,
-        &p.alpha_deg
+        &p.geometric_alpha_deg
             .iter()
             .copied()
             .zip(p.cm.iter().copied())
@@ -244,7 +244,7 @@ pub fn figure_model_comparison(
     );
     axes[3].add_line_series(
         &mut scene,
-        &p.alpha_deg
+        &p.geometric_alpha_deg
             .iter()
             .copied()
             .zip(p.l_over_d.iter().copied())

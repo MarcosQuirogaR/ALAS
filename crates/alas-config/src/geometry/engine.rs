@@ -183,6 +183,29 @@ impl Default for EngineConfig {
 }
 
 impl EngineConfig {
+    /// Resolve a selected database engine only when the cycle fields still
+    /// carry the built-in, unselected defaults.
+    ///
+    /// Preset documents created before engine provenance was persisted contain
+    /// a preset-specific `engine_name` alongside the default GE9X cycle. This
+    /// one-time compatibility bridge initializes those documents while
+    /// preserving any explicit thrust/cycle edits made by a user.
+    pub fn apply_engine_spec_if_uninitialized(&mut self) {
+        let defaults = Self::default();
+        let cycle_is_uninitialized = self.radius_scale_m == defaults.radius_scale_m
+            && self.thrust_kn == defaults.thrust_kn
+            && self.bypass_ratio == defaults.bypass_ratio
+            && self.overall_pressure_ratio == defaults.overall_pressure_ratio
+            && self.fan_pressure_ratio == defaults.fan_pressure_ratio
+            && self.turbine_inlet_temp_k == defaults.turbine_inlet_temp_k
+            && self.cruise_tsfc_kg_kgf_hr == defaults.cruise_tsfc_kg_kgf_hr
+            && self.fan_diameter_m == defaults.fan_diameter_m
+            && self.nacelle_profile == defaults.nacelle_profile;
+        if cycle_is_uninitialized {
+            self.apply_engine_spec();
+        }
+    }
+
     /// Copy the entry named by [`Self::engine_name`] into every field it
     /// covers.
     ///
@@ -306,6 +329,30 @@ mod tests {
         };
         engine.apply_engine_spec();
         assert_eq!(engine.thrust_kn, 480.0);
+    }
+
+    #[test]
+    fn conditional_resolution_preserves_an_explicit_edit_to_a_known_engine() {
+        let mut engine = EngineConfig {
+            engine_name: "Trent 900".to_owned(),
+            thrust_kn: 401.0,
+            ..Default::default()
+        };
+        engine.apply_engine_spec_if_uninitialized();
+        assert_eq!(engine.thrust_kn, 401.0);
+    }
+
+    #[test]
+    fn conditional_resolution_initializes_a_name_only_engine_selection() {
+        let mut engine = EngineConfig {
+            engine_name: "Trent 900".to_owned(),
+            ..Default::default()
+        };
+        engine.apply_engine_spec_if_uninitialized();
+        assert_eq!(
+            engine.thrust_kn,
+            crate::engines::get("Trent 900").unwrap().thrust_kn
+        );
     }
 
     #[test]

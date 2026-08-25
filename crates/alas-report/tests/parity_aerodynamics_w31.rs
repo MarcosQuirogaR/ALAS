@@ -14,7 +14,7 @@ use alas_config::design_variables::DesignVector;
 use alas_geom::asb::airfoil::Airfoil;
 use alas_geom::asb::airplane::Airplane;
 use alas_geom::asb::wing::{Wing, WingXSec};
-use alas_pipeline::full_analysis::{AnalysisReport, DesignPoint, PolarFit};
+use alas_pipeline::full_analysis::{AnalysisReport, DesignPoint, PolarFit, PolarFitStatus};
 use alas_pipeline::{
     AvlAnalysisResult, AvlAnalysisStatus, AvlComparableQuantity, AvlComparisonReference,
     AvlComparisonStatus, VspaeroAnalysisResult, VspaeroAnalysisStatus, VspaeroComparableQuantity,
@@ -40,6 +40,7 @@ fn report() -> AnalysisReport {
         },
         polar: PolarSweep {
             alpha_deg: vec![-4.0, 0.0, 4.0, 8.0],
+            geometric_alpha_deg: vec![-4.0, 0.0, 4.0, 8.0],
             cl: vec![-0.2, 0.2, 0.6, 0.9],
             cd: vec![0.04, 0.025, 0.03, 0.05],
             cd_induced: vec![0.01, 0.012, 0.02, 0.035],
@@ -59,6 +60,7 @@ fn report() -> AnalysisReport {
             k: 0.05,
             oswald_e: 0.85,
             aspect_ratio: 5.0,
+            status: PolarFitStatus::Fitted,
         },
         static_margin: 0.1,
         x_neutral_point: 4.0,
@@ -116,6 +118,7 @@ fn avl_result(
             mach: 0.3,
             altitude_m: 1_500.0,
             vlm_polar: report.polar.clone(),
+            geometric_alpha_deg: report.polar.alpha_deg.clone(),
         }),
         comparison,
         error: None,
@@ -164,6 +167,7 @@ fn model_comparison_overlays_only_compatible_avl_lift_and_moment() {
             mach: 0.3,
             altitude_m: 1_500.0,
             vlm_polar: report.polar.clone(),
+            geometric_alpha_deg: report.polar.alpha_deg.clone(),
         }),
         comparison: AvlComparisonStatus::Compatible(vec![
             AvlComparableQuantity::LiftCoefficient,

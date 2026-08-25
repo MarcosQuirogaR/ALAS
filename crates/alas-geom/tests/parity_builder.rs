@@ -207,6 +207,18 @@ fn compare_airplane(
     closed.scalar(&format!("{label}.s_ref"), airplane.s_ref, expected.s_ref);
     closed.scalar(&format!("{label}.c_ref"), airplane.c_ref, expected.c_ref);
     closed.scalar(&format!("{label}.b_ref"), airplane.b_ref, expected.b_ref);
+    // Reference axes are deliberately projected even though the compatibility
+    // wing fields above retain the upstream unfolded `area()`/`span()` values.
+    closed.scalar(
+        &format!("{label}.s_ref_is_projected"),
+        airplane.s_ref,
+        airplane.wings[0].reference_area(),
+    );
+    closed.scalar(
+        &format!("{label}.b_ref_is_projected"),
+        airplane.b_ref,
+        airplane.wings[0].reference_span(),
+    );
 
     assert_eq!(airplane.wings.len(), expected.wings.len(), "{label}.wings");
     for (wing, record) in airplane.wings.iter().zip(&expected.wings) {

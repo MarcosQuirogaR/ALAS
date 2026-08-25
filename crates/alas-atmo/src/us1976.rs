@@ -234,6 +234,63 @@ pub struct Values {
     pub prandtl_number: f64,
 }
 
+/// Why a checked US Standard Atmosphere evaluation was rejected.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Us1976Error {
+    /// Geometric altitude or temperature deviation was not finite.
+    NonFiniteInput {
+        /// Geometric altitude in metres.
+        altitude_m: f64,
+        /// Temperature offset in kelvin.
+        temperature_deviation_k: f64,
+    },
+    /// Geometric-to-geopotential conversion is singular at `-R_earth`.
+    GeometricAltitudeSingularity {
+        /// Geometric altitude at the singular conversion point.
+        altitude_m: f64,
+    },
+    /// Geopotential altitude lies outside the tabulated US1976 model band.
+    AltitudeOutsideModel {
+        /// Requested geometric altitude in metres.
+        altitude_m: f64,
+        /// Lowest tabulated geopotential altitude in metres.
+        min_m: f64,
+        /// Highest tabulated geopotential altitude in metres.
+        max_m: f64,
+    },
+    /// The evaluated state contains a nonphysical or non-finite property.
+    NonPhysicalState,
+}
+
+impl std::fmt::Display for Us1976Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NonFiniteInput {
+                altitude_m,
+                temperature_deviation_k,
+            } => write!(
+                f,
+                "US1976 inputs must be finite (altitude={altitude_m:?}, temperature deviation={temperature_deviation_k:?})"
+            ),
+            Self::GeometricAltitudeSingularity { altitude_m } => write!(
+                f,
+                "US1976 geometric altitude {altitude_m} m is singular at the Earth-radius conversion"
+            ),
+            Self::AltitudeOutsideModel {
+                altitude_m,
+                min_m,
+                max_m,
+            } => write!(
+                f,
+                "US1976 altitude {altitude_m} m lies outside the tabulated geopotential model [{min_m}, {max_m}] m"
+            ),
+            Self::NonPhysicalState => f.write_str("US1976 returned a nonphysical atmospheric state"),
+        }
+    }
+}
+
+impl std::error::Error for Us1976Error {}
+
 /// Compute atmospheric values at `altitude_m` (geometric altitude above mean
 /// sea level, in metres), with an optional temperature deviation.
 ///
@@ -247,6 +304,54 @@ pub struct Values {
 pub fn compute_values(altitude_m: f64, temperature_deviation_k: f64) -> Values {
     let geopotential_altitude_m = altitude_m / (1.0 + altitude_m / MEAN_RADIUS_M);
     values_at_geopotential_altitude(geopotential_altitude_m, temperature_deviation_k)
+}
+
+/// Checked US Standard Atmosphere evaluation for product/mission boundaries.
+///
+/// [`compute_values`] preserves the source-compatible clamping behavior used
+/// by frozen parity fixtures. This entry point rejects non-finite inputs, the
+/// geometric conversion singularity, and any resulting nonphysical state.
+pub fn try_compute_values(
+    altitude_m: f64,
+    temperature_deviation_k: f64,
+) -> Result<Values, Us1976Error> {
+    if !altitude_m.is_finite() || !temperature_deviation_k.is_finite() {
+        return Err(Us1976Error::NonFiniteInput {
+            altitude_m,
+            temperature_deviation_k,
+        });
+    }
+    let denominator = 1.0 + altitude_m / MEAN_RADIUS_M;
+    if denominator.abs() <= f64::EPSILON {
+        return Err(Us1976Error::GeometricAltitudeSingularity { altitude_m });
+    }
+    let geopotential_altitude_m = altitude_m / denominator;
+    let min_m = BREAKS[0].altitude_m;
+    let max_m = BREAKS[BREAKS.len() - 1].altitude_m;
+    if geopotential_altitude_m < min_m || geopotential_altitude_m > max_m {
+        return Err(Us1976Error::AltitudeOutsideModel {
+            altitude_m,
+            min_m,
+            max_m,
+        });
+    }
+    let values = compute_values(altitude_m, temperature_deviation_k);
+    let positive_finite = [
+        values.pressure_pa,
+        values.temperature_k,
+        values.density_kg_m3,
+        values.speed_of_sound_m_s,
+        values.dynamic_viscosity_pa_s,
+        values.kinematic_viscosity_m2_s,
+        values.thermal_conductivity_w_m_k,
+        values.prandtl_number,
+    ]
+    .iter()
+    .all(|value| value.is_finite() && *value > 0.0);
+    if !positive_finite {
+        return Err(Us1976Error::NonPhysicalState);
+    }
+    Ok(values)
 }
 
 /// The part of [`compute_values`] that operates purely in geopotential
@@ -327,6 +432,27 @@ mod tests {
         let values = compute_values(0.0, 0.0);
         assert_eq!(values.pressure_pa, 101_325.0);
         assert_eq!(values.temperature_k, 288.15);
+    }
+
+    #[test]
+    fn checked_values_reject_nonfinite_and_geometric_singularity_inputs() {
+        assert!(matches!(
+            try_compute_values(f64::NAN, 0.0),
+            Err(Us1976Error::NonFiniteInput { .. })
+        ));
+        assert!(matches!(
+            try_compute_values(-MEAN_RADIUS_M, 0.0),
+            Err(Us1976Error::GeometricAltitudeSingularity { .. })
+        ));
+        assert!(matches!(
+            try_compute_values(0.0, -400.0),
+            Err(Us1976Error::NonPhysicalState)
+        ));
+        assert!(matches!(
+            try_compute_values(100_000.0, 0.0),
+            Err(Us1976Error::AltitudeOutsideModel { .. })
+        ));
+        assert!(try_compute_values(10_000.0, 0.0).is_ok());
     }
 
     #[test]

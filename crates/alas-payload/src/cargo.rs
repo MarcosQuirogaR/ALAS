@@ -33,8 +33,9 @@
 mod engine;
 mod manager;
 
-pub use engine::build_cargo_layout;
+pub use engine::{build_cargo_layout, build_cargo_layout_reference_compatibility};
 pub use manager::CargoLoadManager;
+pub use manager::CargoMassSemantics;
 
 /// One unit load device type.
 #[derive(Debug, Clone, Copy, PartialEq)]

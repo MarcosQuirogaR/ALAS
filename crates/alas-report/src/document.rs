@@ -20,7 +20,7 @@ mod tests {
     use alas_config::design_variables::DesignVector;
     use alas_config::AlasConfig;
     use alas_geom::aircraft::airplane::Airplane;
-    use alas_pipeline::full_analysis::{AnalysisReport, DesignPoint, PolarFit};
+    use alas_pipeline::full_analysis::{AnalysisReport, DesignPoint, PolarFit, PolarFitStatus};
     use std::collections::HashMap;
 
     #[test]
@@ -38,6 +38,7 @@ mod tests {
             },
             polar: PolarSweep {
                 alpha_deg: Vec::new(),
+                geometric_alpha_deg: Vec::new(),
                 cl: Vec::new(),
                 cd: Vec::new(),
                 cd_induced: Vec::new(),
@@ -57,6 +58,7 @@ mod tests {
                 k: 0.045,
                 oswald_e: 0.85,
                 aspect_ratio: 9.5,
+                status: PolarFitStatus::Fitted,
             },
             static_margin: 0.12,
             x_neutral_point: 16.2,

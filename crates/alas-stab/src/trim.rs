@@ -78,6 +78,9 @@ const DEGENERACY_FLOOR: f64 = 1e-9;
 /// trim fallback).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct StabilityTrimResult {
+    /// Whether the requested lift and pitching-moment equations were solved
+    /// with a finite, nonsingular trim Jacobian.
+    pub converged: bool,
     /// The corrected neutral-point station, in geometry axes.
     pub x_np: f64,
     /// Static margin `(x_np - x_cg) / c_bar`, measured against the real CG.
@@ -117,6 +120,23 @@ pub fn munk_apparent_mass_factor(fineness: f64) -> f64 {
 /// local-flow factor that reduces the afterbody's contribution by the wing
 /// downwash. `cl_alpha` is the wing lift-curve slope, per radian.
 pub fn fuselage_cm_alpha(airplane: &Airplane, cl_alpha: f64) -> f64 {
+    fuselage_cm_alpha_with_reference_mode(airplane, cl_alpha, false)
+}
+
+/// Frozen translation/parity form of [`fuselage_cm_alpha`].
+///
+/// The historical Python expression used the wing's unfolded YZ span and
+/// area for aspect ratio. Product callers use the aircraft's selected
+/// projected references through [`fuselage_cm_alpha`].
+pub fn fuselage_cm_alpha_reference_compatibility(airplane: &Airplane, cl_alpha: f64) -> f64 {
+    fuselage_cm_alpha_with_reference_mode(airplane, cl_alpha, true)
+}
+
+fn fuselage_cm_alpha_with_reference_mode(
+    airplane: &Airplane,
+    cl_alpha: f64,
+    reference_compatibility: bool,
+) -> f64 {
     let fus = &airplane.fuselages[0];
 
     // `np.argsort` on the station X coordinates, then applied to the widths
@@ -144,7 +164,14 @@ pub fn fuselage_cm_alpha(airplane: &Airplane, cl_alpha: f64) -> f64 {
 
     let s_ref = airplane.s_ref.max(1.0);
     let c_ref = airplane.c_ref.max(0.1);
-    let ar = wing.aspect_ratio().max(1.0);
+    // Downwash uses the aircraft reference-plane aspect ratio in the product
+    // path. The explicit parity mode retains the historical unfolded wing
+    // aspect ratio used by the translated Python correlation.
+    let ar = if reference_compatibility {
+        (wing.unfolded_span().powi(2) / wing.unfolded_area().max(1e-6)).max(1.0)
+    } else {
+        (airplane.b_ref.powi(2) / airplane.s_ref.max(1e-6)).max(1.0)
+    };
     // Downwash gradient at the tail.
     let d_eps_d_alpha = 2.0 * cl_alpha.max(0.1) / (PI * ar);
 
@@ -248,6 +275,22 @@ pub fn neutral_point(
     airplane: &Airplane,
     analysis: &AnalysisConfig,
 ) -> Result<(f64, f64, f64), VlmError> {
+    neutral_point_with_reference_mode(airplane, analysis, false)
+}
+
+/// Frozen translation/parity form of [`neutral_point`].
+pub fn neutral_point_reference_compatibility(
+    airplane: &Airplane,
+    analysis: &AnalysisConfig,
+) -> Result<(f64, f64, f64), VlmError> {
+    neutral_point_with_reference_mode(airplane, analysis, true)
+}
+
+fn neutral_point_with_reference_mode(
+    airplane: &Airplane,
+    analysis: &AnalysisConfig,
+    reference_compatibility: bool,
+) -> Result<(f64, f64, f64), VlmError> {
     let atmosphere = Atmosphere::new(0.0);
     let velocity = analysis.autobalance_velocity_m_s;
     let r_lo = probe(
@@ -284,7 +327,8 @@ pub fn neutral_point(
     let mut x_np = x_wing_ac + eta_t * (x_np_vlm - x_wing_ac);
 
     if analysis.include_fuselage_stability && cl_alpha > 0.1 {
-        let cm_a_fus = fuselage_cm_alpha(airplane, cl_alpha);
+        let cm_a_fus =
+            fuselage_cm_alpha_with_reference_mode(airplane, cl_alpha, reference_compatibility);
         x_np -= cm_a_fus * c_ref / cl_alpha;
     }
 
@@ -309,6 +353,28 @@ pub fn stability_and_trim(
     cl_target: f64,
     mach: f64,
     altitude_m: f64,
+) -> Result<StabilityTrimResult, VlmError> {
+    stability_and_trim_with_reference_mode(airplane, analysis, cl_target, mach, altitude_m, false)
+}
+
+/// Frozen translation/parity form of [`stability_and_trim`].
+pub fn stability_and_trim_reference_compatibility(
+    airplane: &Airplane,
+    analysis: &AnalysisConfig,
+    cl_target: f64,
+    mach: f64,
+    altitude_m: f64,
+) -> Result<StabilityTrimResult, VlmError> {
+    stability_and_trim_with_reference_mode(airplane, analysis, cl_target, mach, altitude_m, true)
+}
+
+fn stability_and_trim_with_reference_mode(
+    airplane: &Airplane,
+    analysis: &AnalysisConfig,
+    cl_target: f64,
+    mach: f64,
+    altitude_m: f64,
+    reference_compatibility: bool,
 ) -> Result<StabilityTrimResult, VlmError> {
     let atmosphere = Atmosphere::new(altitude_m);
     let velocity = mach * atmosphere.speed_of_sound();
@@ -344,7 +410,11 @@ pub fn stability_and_trim(
         // `cl_alpha` is per degree here; the fuselage term wants it per radian.
         let cl_alpha_per_rad = cl_alpha / 1.0_f64.to_radians();
         if analysis.include_fuselage_stability && cl_alpha_per_rad > 0.1 {
-            let cm_a_fus = fuselage_cm_alpha(airplane, cl_alpha_per_rad);
+            let cm_a_fus = fuselage_cm_alpha_with_reference_mode(
+                airplane,
+                cl_alpha_per_rad,
+                reference_compatibility,
+            );
             x_np -= cm_a_fus * c_ref / cl_alpha_per_rad;
         }
         (x_np, (x_np - x_cg) / c_ref)
@@ -361,6 +431,7 @@ pub fn stability_and_trim(
                 a_lo
             };
             return Ok(StabilityTrimResult {
+                converged: false,
                 x_np,
                 static_margin: sm,
                 cl_alpha,
@@ -382,8 +453,21 @@ pub fn stability_and_trim(
     //                       = [cl_target - CL_1, -Cm_1]  (slopes per degree).
     let jacobian = vec![vec![cl_alpha, cl_ih], vec![cm_alpha, cm_ih]];
     let rhs = vec![vec![cl_target - r1.cl_lift], vec![-r1.cm_pitch]];
-    let (d_a, d_ih) = match linalg::solve(&jacobian, &rhs) {
-        Ok(solution) => (solution[0][0], solution[1][0]),
+    let (d_a, d_ih, converged) = match linalg::solve(&jacobian, &rhs) {
+        Ok(solution)
+            if solution.len() >= 2
+                && solution[0].first().is_some_and(|value| value.is_finite())
+                && solution[1].first().is_some_and(|value| value.is_finite())
+                && jacobian
+                    .first()
+                    .and_then(|row| row.first())
+                    .zip(jacobian.get(1).and_then(|row| row.get(1)))
+                    .zip(jacobian.first().and_then(|row| row.get(1)))
+                    .zip(jacobian.get(1).and_then(|row| row.first()))
+                    .is_some_and(|(((a, d), b), c)| (a * d - b * c).abs() > DEGENERACY_FLOOR) =>
+        {
+            (solution[0][0], solution[1][0], true)
+        }
         // Upstream's `except np.linalg.LinAlgError`: a singular Jacobian falls
         // back to the pure-alpha correction with the incidence left as flown.
         Err(_) => {
@@ -392,11 +476,13 @@ pub fn stability_and_trim(
             } else {
                 0.0
             };
-            (d_a, 0.0)
+            (d_a, 0.0, false)
         }
+        Ok(_) => (0.0, 0.0, false),
     };
 
     Ok(StabilityTrimResult {
+        converged,
         x_np,
         static_margin: sm,
         cl_alpha,
@@ -414,6 +500,20 @@ pub fn stability_and_trim(
 /// two/three wings. The tails are identified by position (`wings[1]`,
 /// `wings[2]`), as upstream indexes them, not by name.
 pub fn tail_volume_coefficients(airplane: &Airplane) -> (Option<f64>, Option<f64>) {
+    tail_volume_coefficients_with_reference_mode(airplane, false)
+}
+
+/// Frozen translation/parity form of [`tail_volume_coefficients`].
+pub fn tail_volume_coefficients_reference_compatibility(
+    airplane: &Airplane,
+) -> (Option<f64>, Option<f64>) {
+    tail_volume_coefficients_with_reference_mode(airplane, true)
+}
+
+fn tail_volume_coefficients_with_reference_mode(
+    airplane: &Airplane,
+    reference_compatibility: bool,
+) -> (Option<f64>, Option<f64>) {
     let s_ref = airplane.s_ref.max(1.0);
     let c_bar = airplane.c_ref.max(0.1);
     let b_ref = airplane.b_ref.max(1.0);
@@ -422,7 +522,12 @@ pub fn tail_volume_coefficients(airplane: &Airplane) -> (Option<f64>, Option<f64
     let vh = if airplane.wings.len() > 1 {
         let hstab = &airplane.wings[1];
         let l_h = (hstab.aerodynamic_center(AC_CHORD_FRACTION)[0] - x_wing_ac).max(0.0);
-        Some(hstab.area() * l_h / (s_ref * c_bar))
+        let area = if reference_compatibility {
+            hstab.unfolded_area()
+        } else {
+            hstab.reference_area()
+        };
+        Some(area * l_h / (s_ref * c_bar))
     } else {
         None
     };
@@ -430,7 +535,11 @@ pub fn tail_volume_coefficients(airplane: &Airplane) -> (Option<f64>, Option<f64
     let vv = if airplane.wings.len() > 2 {
         let vstab = &airplane.wings[2];
         let l_v = (vstab.aerodynamic_center(AC_CHORD_FRACTION)[0] - x_wing_ac).max(0.0);
-        Some(vstab.area() * l_v / (s_ref * b_ref))
+        // A vertical fin's planform is the XZ surface, so projecting it onto
+        // the aircraft XY reference plane would collapse its area to zero.
+        // Keep its physical fin planform explicit; only the main-wing
+        // denominator and lateral arm are aircraft XY reference quantities.
+        Some(vstab.unfolded_area() * l_v / (s_ref * b_ref))
     } else {
         None
     };
@@ -548,8 +657,8 @@ mod tests {
                 true,
             ));
         }
-        let s_ref = wings[0].area();
-        let b_ref = wings[0].span();
+        let s_ref = wings[0].reference_area();
+        let b_ref = wings[0].reference_span();
         let c_ref = wings[0].mean_aerodynamic_chord();
         Airplane {
             name: "Probe".to_owned(),
@@ -685,5 +794,20 @@ mod tests {
         let (vh, vv) = tail_volume_coefficients(&with_hstab);
         assert!(vh.is_some_and(|v| v > 0.0), "Vh={vh:?}");
         assert!(vv.is_none());
+    }
+
+    #[test]
+    fn tail_volume_uses_projected_stabilizer_area() {
+        let mut plane = probe_airplane(true);
+        // Introduce a nonzero stabilizer dihedral so unfolded and reference
+        // planform areas are observably different.
+        plane.wings[1].xsecs[1].xyz_le[2] = 1.0;
+        let (vh, _) = tail_volume_coefficients(&plane);
+        let hstab = &plane.wings[1];
+        let x_wing_ac = plane.wings[0].aerodynamic_center(AC_CHORD_FRACTION)[0];
+        let l_h = (hstab.aerodynamic_center(AC_CHORD_FRACTION)[0] - x_wing_ac).max(0.0);
+        let expected = hstab.reference_area() * l_h / (plane.s_ref * plane.c_ref);
+        assert!((vh.expect("horizontal tail volume") - expected).abs() < 1e-12);
+        assert!((hstab.reference_area() - hstab.unfolded_area()).abs() > 1e-6);
     }
 }

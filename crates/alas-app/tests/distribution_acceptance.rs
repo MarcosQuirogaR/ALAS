@@ -13,11 +13,14 @@
 // packaged runtime's exact failure, rather than hiding it behind a helper.
 #![cfg_attr(test, allow(clippy::expect_used, clippy::unwrap_used))]
 
+use std::collections::BTreeSet;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+use alas_report::RESULT_FIGURES;
 
 const PRESETS: &[&str] = &[
     "AVE", "A340-300", "A380-800", "B787-9", "A320-200", "A220-300", "DC-10",
@@ -267,6 +270,95 @@ fn packaged_no_mission_runs_every_shipped_aircraft_preset() {
             output_dir.join("design_database.json").is_file(),
             "no-mission run did not export a design database for {preset}"
         );
+        let text = output_text(&output);
+        assert!(
+            !text.contains("--- MSES"),
+            "quiet run printed MSES output: {text}"
+        );
+        assert!(
+            !text.contains("--- Structural"),
+            "quiet run printed structural output: {text}"
+        );
+        assert!(
+            !text.contains("Saved "),
+            "quiet run printed plot output: {text}"
+        );
+    }
+}
+
+#[test]
+fn packaged_plot_manifest_covers_every_registered_result_figure() {
+    let package = IsolatedPackage::new();
+    let config = package.write_config("plots.json", &preset_config("AVE", false));
+    let output_dir = package.output_path("plots");
+    let output = run(
+        &package,
+        &[
+            "--config",
+            config.to_str().expect("config path is valid UTF-8"),
+            "--no-optimize",
+            "--no-baseline",
+            "--no-parallel",
+            "--no-mission",
+            "--plots",
+            "--quiet",
+            "--output",
+            output_dir.to_str().expect("output path is valid UTF-8"),
+        ],
+    );
+
+    assert!(
+        output.status.success(),
+        "packaged plot export failed: {}",
+        output_text(&output)
+    );
+    let manifest_path = output_dir.join("plots/plot_manifest.json");
+    let manifest_text = fs::read_to_string(&manifest_path).expect("plot manifest exists");
+    let manifest: Vec<serde_json::Value> =
+        serde_json::from_str(&manifest_text).expect("plot manifest is valid JSON");
+    let registry_ids = RESULT_FIGURES
+        .iter()
+        .map(|descriptor| descriptor.id)
+        .collect::<BTreeSet<_>>();
+    let manifest_ids = manifest
+        .iter()
+        .map(|entry| entry["id"].as_str().expect("manifest entry has an id"))
+        .collect::<BTreeSet<_>>();
+
+    assert_eq!(manifest.len(), RESULT_FIGURES.len());
+    assert_eq!(manifest_ids, registry_ids);
+    for entry in &manifest {
+        let id = entry["id"].as_str().expect("manifest entry has an id");
+        let descriptor = RESULT_FIGURES
+            .iter()
+            .find(|descriptor| descriptor.id == id)
+            .expect("manifest id belongs to the result registry");
+        assert_eq!(entry["title"].as_str(), Some(descriptor.title));
+        assert!(
+            entry["required_stage"]
+                .as_str()
+                .is_some_and(|stage| !stage.is_empty()),
+            "manifest entry has no required stage: {id}"
+        );
+        match entry["status"].as_str() {
+            Some("written") => {
+                let relative_path = entry["path"]
+                    .as_str()
+                    .expect("written manifest entry has a path");
+                assert!(
+                    output_dir.join("plots").join(relative_path).is_file(),
+                    "written plot is missing: {relative_path}"
+                );
+                assert!(entry["reason"].is_null());
+            }
+            Some("unavailable") => {
+                assert!(entry["path"].is_null());
+                assert!(entry["reason"]
+                    .as_str()
+                    .is_some_and(|reason| !reason.is_empty()));
+            }
+            status => panic!("unexpected plot status for {id}: {status:?}"),
+        }
     }
 }
 
@@ -336,7 +428,7 @@ fn packaged_missing_tool_path_reports_unavailability_without_aborting_the_run() 
 
     assert!(output.status.success(), "{}", output_text(&output));
     let text = output_text(&output);
-    assert!(text.contains("MSES analysis: error"), "{text}");
+    assert!(text.contains("MSES analysis: absent"), "{text}");
     assert!(text.contains("not configured"), "{text}");
 }
 

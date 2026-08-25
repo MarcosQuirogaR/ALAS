@@ -19,7 +19,7 @@ use alas_mass::breakdown::{
     FUEL, FURNISHINGS, FUSELAGE, GEAR, H_STAB, OEW_KEYS, PAYLOAD, PROPULSION, SYSTEMS, V_STAB, WING,
 };
 use alas_perf::landing_gear::size_landing_gear;
-use alas_pipeline::full_analysis::{AnalysisReport, DesignPoint, PolarFit};
+use alas_pipeline::full_analysis::{AnalysisReport, DesignPoint, PolarFit, PolarFitStatus};
 use std::collections::HashMap;
 fn test_wing(name: &str, symmetric: bool) -> Wing {
     let naca = Airfoil::from_name("naca0012").unwrap();
@@ -77,6 +77,7 @@ fn test_report(masses: HashMap<String, f64>) -> AnalysisReport {
         airplane: test_airplane(),
         polar: PolarSweep {
             alpha_deg: Vec::new(),
+            geometric_alpha_deg: Vec::new(),
             cl: Vec::new(),
             cd: Vec::new(),
             cd_induced: Vec::new(),
@@ -96,6 +97,7 @@ fn test_report(masses: HashMap<String, f64>) -> AnalysisReport {
             k: 0.04,
             oswald_e: 0.85,
             aspect_ratio: 8.5,
+            status: PolarFitStatus::Fitted,
         },
         static_margin: 0.12,
         x_neutral_point: 18.0,
@@ -314,8 +316,8 @@ fn wing_fuel_volume_matches_the_torenbeek_closed_form() {
     let wing = test_wing("Main Wing", true);
     let volume = wing_fuel_volume_m3(&wing, 0.85);
 
-    let s = wing.area();
-    let b = wing.span();
+    let s = wing.reference_area();
+    let b = wing.reference_span();
     let taper = wing.taper_ratio();
     let sample = linspace(0.0, 1.0, 101);
     let t_over_c = wing.xsecs[0].airfoil.max_thickness(&sample);

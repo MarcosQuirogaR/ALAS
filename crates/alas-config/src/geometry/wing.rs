@@ -6,8 +6,8 @@
 
 //! The parts of the main wing the optimizer is not allowed to move.
 //!
-//! The design vector owns span, area, sweep, the chords and the section
-//! morphing factors. What is left here is everything that decides which
+//! The design vector owns projected span, derived projected area, sweep, the
+//! chords and the section morphing factors. What is left here is everything that decides which
 //! *family* of wing those numbers describe: where along the fuselage the root
 //! sits, how the defining sections are stacked vertically, how they are
 //! twisted, and where the planform cranks. Two runs with different values here

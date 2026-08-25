@@ -73,7 +73,9 @@ impl MsesFailure {
         let status = match &error {
             RunError::Spawn { .. } => MsesStatus::LaunchFailure,
             RunError::Timeout { .. } => MsesStatus::Timeout,
-            RunError::Io { .. } | RunError::Reader { .. } => MsesStatus::Error,
+            RunError::Io { .. } | RunError::Reader { .. } | RunError::InvalidTimeout { .. } => {
+                MsesStatus::Error
+            }
         };
         Self { status, message }
     }
@@ -170,21 +172,19 @@ impl Mses {
         if converged == 0 {
             return result.into_error("MSES did not converge at any swept alpha".to_owned());
         }
-        let column = |key: &str| {
-            outcome
-                .accumulated
-                .get(key)
-                .cloned()
-                .unwrap_or_else(|| vec![0.0; converged])
-        };
-        result.alpha_deg = column("alpha");
-        result.cl = column("CL");
-        result.cd = column("CD");
-        result.cm = column("CM");
-        result.cdv = column("CDv");
-        result.cdw = column("CDw");
-        result.xtr_top = column("xtr_top");
-        result.xtr_bot = column("xtr_bot");
+        let [alpha_deg, cl, cd, cm, cdv, cdw, xtr_top, xtr_bot] =
+            match validated_polar_columns(&outcome.accumulated, converged) {
+                Ok(columns) => columns,
+                Err(error) => return result.into_failure(MsesStatus::ParseFailure, error),
+            };
+        result.alpha_deg = alpha_deg;
+        result.cl = cl;
+        result.cd = cd;
+        result.cm = cm;
+        result.cdv = cdv;
+        result.cdw = cdw;
+        result.xtr_top = xtr_top;
+        result.xtr_bot = xtr_bot;
         result.status = polar_completion_status(alphas.len(), converged);
         if result.status == MsesStatus::PartialConvergence {
             result.error = Some(format!(
@@ -415,14 +415,7 @@ impl Mses {
                     plot.status
                 )));
             }
-            let summary = parse::parse_unformatted_data_output(&parse::apply_polar_replacements(
-                &plot.stdout,
-            ));
-            if !summary.get("alpha").is_some_and(|value| value.is_finite()) {
-                return Err(MsesFailure::parse(
-                    "mplot polar output did not contain a finite alpha value",
-                ));
-            }
+            let summary = parse::parse_polar_summary(&plot.stdout).map_err(MsesFailure::parse)?;
             for (key, value) in summary {
                 outcome.accumulated.entry(key).or_default().push(value);
             }
@@ -450,6 +443,41 @@ impl Mses {
         }
         Ok(())
     }
+}
+
+/// Validate the accumulated MPlot polar schema before publishing it.
+///
+/// Each converged MPlot invocation must provide every public polar column.
+/// Checking both length and finiteness here keeps this boundary defensive if
+/// aggregation changes later, and prevents a missing/ragged column from being
+/// silently replaced with fabricated zeros.
+fn validated_polar_columns(
+    accumulated: &HashMap<String, Vec<f64>>,
+    expected_len: usize,
+) -> Result<[Vec<f64>; 8], String> {
+    let mut columns = Vec::with_capacity(parse::POLAR_REQUIRED_COLUMNS.len());
+    for &key in &parse::POLAR_REQUIRED_COLUMNS {
+        let Some(values) = accumulated.get(key) else {
+            return Err(format!(
+                "mplot polar output missing required column '{key}'"
+            ));
+        };
+        if values.len() != expected_len {
+            return Err(format!(
+                "mplot polar column '{key}' has {} values for {expected_len} alpha points",
+                values.len()
+            ));
+        }
+        if values.iter().any(|value| !value.is_finite()) {
+            return Err(format!(
+                "mplot polar column '{key}' is non-finite or malformed"
+            ));
+        }
+        columns.push(values.clone());
+    }
+    columns
+        .try_into()
+        .map_err(|_| "internal MPlot polar schema length mismatch".to_owned())
 }
 
 fn polar_completion_status(requested: usize, converged: usize) -> MsesStatus {
@@ -486,6 +514,9 @@ fn read_lossy(path: &Path) -> String {
     }
 }
 
+// Test fixtures use `expect`/`expect_err` so malformed cases fail at the
+// assertion site; this allowance is intentionally scoped to the test module.
+#[allow(clippy::expect_used)]
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -528,5 +559,48 @@ mod tests {
             MsesFailure::parse("bad output").status,
             MsesStatus::ParseFailure
         );
+    }
+
+    fn complete_accumulated_polar() -> HashMap<String, Vec<f64>> {
+        parse::POLAR_REQUIRED_COLUMNS
+            .into_iter()
+            .map(|key| {
+                let values = if key == "CDw" {
+                    vec![0.0, 0.0]
+                } else {
+                    vec![1.0, 2.0]
+                };
+                (key.to_owned(), values)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn validated_polar_columns_keep_zero_wave_drag() {
+        let accumulated = complete_accumulated_polar();
+        let columns = validated_polar_columns(&accumulated, 2).expect("complete polar");
+        assert_eq!(columns[0], vec![1.0, 2.0]);
+        assert_eq!(columns[5], vec![0.0, 0.0]);
+    }
+
+    #[test]
+    fn validated_polar_columns_reject_ragged_required_data() {
+        let mut accumulated = complete_accumulated_polar();
+        accumulated.insert("CD".to_owned(), vec![0.03]);
+        let error = validated_polar_columns(&accumulated, 2)
+            .expect_err("a ragged coefficient column must be rejected");
+        assert_eq!(
+            error,
+            "mplot polar column 'CD' has 1 values for 2 alpha points"
+        );
+    }
+
+    #[test]
+    fn validated_polar_columns_reject_nonfinite_required_data() {
+        let mut accumulated = complete_accumulated_polar();
+        accumulated.insert("CL".to_owned(), vec![1.0, f64::NAN]);
+        let error = validated_polar_columns(&accumulated, 2)
+            .expect_err("a non-finite coefficient column must be rejected");
+        assert_eq!(error, "mplot polar column 'CL' is non-finite or malformed");
     }
 }

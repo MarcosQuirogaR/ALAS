@@ -207,7 +207,7 @@ fn invalid_provenance_and_duplicate_ids_are_rejected() {
 #[test]
 fn the_multi_source_catalogue_keeps_manufacturer_evidence_and_unknowns_explicit() {
     let catalog = multi_source_catalog().expect("multi-source catalogue");
-    assert_eq!(catalog.records.len(), 120);
+    assert_eq!(catalog.records.len(), 121);
     assert!(catalog.records.iter().all(|record| {
         matches!(
             record.provenance.publisher.as_str(),
@@ -218,6 +218,7 @@ fn the_multi_source_catalogue_keeps_manufacturer_evidence_and_unknowns_explicit(
                 | "Easy Composites"
                 | "Spektrum"
                 | "Horizon Hobby"
+                | "Robart Manufacturing"
                 | "SunnySky USA"
                 | "Gens ace"
                 | "Emax"
@@ -367,12 +368,25 @@ fn the_multi_source_catalogue_keeps_manufacturer_evidence_and_unknowns_explicit(
     assert_eq!(spec.diameter_m, Some(0.381));
     assert_eq!(spec.pitch_m, Some(0.254));
     assert_eq!(spec.mass_kg, None);
+
+    let robart = catalog
+        .get("robart-121-retractable-tailwheel")
+        .expect("source-reviewed Robart landing gear");
+    let ComponentKind::LandingGear(spec) = &robart.kind else {
+        panic!("Robart id selected a different component family");
+    };
+    assert_eq!(spec.form, "retract_tailwheel");
+    assert_eq!(spec.mass_kg, Some(0.0226796185));
+    assert_eq!(spec.max_aircraft_mass_kg, Some(4.5359237));
+    assert_eq!(spec.dimensions.map(|d| d.length_m), Some(0.079375));
+    assert_eq!(spec.dimensions.map(|d| d.width_m), Some(0.0365125));
+    assert_eq!(spec.dimensions.map(|d| d.height_m), Some(0.0619125));
 }
 
 #[test]
 fn the_full_catalogue_merges_sources_without_duplicate_ids() {
     let catalog = full_catalog().expect("full catalogue");
-    assert_eq!(catalog.records.len(), 605);
+    assert_eq!(catalog.records.len(), 606);
     assert!(catalog.get("gens-ace-b-45c-1800-5s1p").is_some());
     assert!(catalog.get("tmotor-at1050-kv90").is_some());
     assert!(catalog.get("mateksys-f405-wing-v2").is_some());
@@ -383,6 +397,9 @@ fn the_full_catalogue_merges_sources_without_duplicate_ids() {
         .records
         .iter()
         .all(|record| { is_analysis_ready(record, 6.0) && has_reviewed_quote(&record.id) }));
+    assert!(selectable
+        .get("robart-121-retractable-tailwheel")
+        .is_some_and(|record| matches!(record.kind, ComponentKind::LandingGear(_))));
     let selectable_battery_ids: std::collections::BTreeSet<&str> = selectable
         .records
         .iter()

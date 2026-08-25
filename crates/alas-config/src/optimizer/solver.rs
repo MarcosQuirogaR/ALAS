@@ -79,10 +79,10 @@ pub struct SolverSettings {
     )]
     pub seed: Option<i64>,
 
-    /// How many candidates are evaluated at once.
+    /// How many native-objective workers evaluate a candidate batch at once.
     #[config(
         label = "Parallel worker processes",
-        help = "Number of worker processes for parallel evaluation (>1 uses multiprocessing). Requires a picklable objective -- already the case for ALAS's optimizer."
+        help = "Number of native worker threads for differential-evolution candidate batches (>1 enables parallel evaluation; non-positive values are treated as 1). External evaluator adapters remain serial because they own mutable process/session state."
     )]
     pub workers: i64,
 
@@ -122,6 +122,38 @@ impl Default for SolverSettings {
             seed_near_initial_design: true,
             seed_perturbation_fraction: 0.05,
         }
+    }
+}
+
+impl SolverSettings {
+    /// Whether `method` names an optimizer implemented by the product.
+    ///
+    /// Keep this list next to the serialized setting so configuration
+    /// validation and dispatch cannot drift into different spellings.
+    pub fn is_supported_method(method: &str) -> bool {
+        matches!(
+            method,
+            "differential_evolution" | "feasibility_first_de" | "nsga2" | "turbo_1" | "cma_es"
+        )
+    }
+
+    /// Whether `strategy` is one of the DE mutation/crossover strategies.
+    pub fn is_supported_strategy(strategy: &str) -> bool {
+        matches!(
+            strategy,
+            "best1bin"
+                | "best1exp"
+                | "rand1bin"
+                | "rand1exp"
+                | "best2bin"
+                | "best2exp"
+                | "rand2bin"
+                | "rand2exp"
+                | "randtobest1bin"
+                | "randtobest1exp"
+                | "currenttobest1bin"
+                | "currenttobest1exp"
+        )
     }
 }
 
@@ -212,5 +244,17 @@ mod tests {
             * settings.population_size
             * crate::DESIGN_VARIABLE_SPECS.len() as i64;
         assert!(evaluations < 2_000, "{evaluations} evaluations");
+    }
+
+    #[test]
+    fn optimizer_tokens_are_checked_against_the_dispatch_contract() {
+        assert!(SolverSettings::is_supported_method(
+            "differential_evolution"
+        ));
+        assert!(!SolverSettings::is_supported_method(
+            "differential_evoluton"
+        ));
+        assert!(SolverSettings::is_supported_strategy("best1bin"));
+        assert!(!SolverSettings::is_supported_strategy("best1bni"));
     }
 }

@@ -395,9 +395,9 @@ impl Default for StructuresConfig {
             run_nastran: true,
             run_sol_static: true,
             run_sol_modes: true,
-            // The RMS check still runs its bounded unit-force response below.
-            // An extended sweep is deliberately opt-in: a 500-point SOL 111
-            // deck is dominated by solver I/O on a full aircraft mesh.
+            // Keep the product default deliberately bounded for interactive
+            // runs; the NASTRAN adapter honors any explicit user/reference
+            // value rather than silently clipping it.
             run_sol_vibration_sine: false,
             // A unit force PSD makes SOL 111 immediately observable; a user
             // can replace it with the aircraft-specific excitation level.

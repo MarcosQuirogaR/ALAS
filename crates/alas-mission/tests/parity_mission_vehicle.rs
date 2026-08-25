@@ -26,7 +26,7 @@
 use std::collections::BTreeMap;
 
 use alas_config::AlasConfig;
-use alas_mission::{build_vehicle_request, ReportView};
+use alas_mission::{build_vehicle_request_reference_compatibility, ReportView};
 use alas_testkit::{load_json, Comparison, Tier};
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -202,7 +202,7 @@ fn vehicle_request_matches_the_reference() {
             component_masses: case.report_view.component_masses.clone(),
         };
 
-        let request = build_vehicle_request(&view, &config);
+        let request = build_vehicle_request_reference_compatibility(&view, &config);
         let actual = serde_json::to_value(&request).expect("the request serializes");
         compare(
             &case.preset,

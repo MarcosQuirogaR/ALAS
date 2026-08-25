@@ -201,6 +201,30 @@ impl MsesPolarResult {
     pub fn has_usable_data(&self) -> bool {
         matches!(self.status, MsesStatus::Ok | MsesStatus::PartialConvergence)
             && self.converged_alpha_count > 0
+            && self.has_valid_coefficient_schema()
+    }
+
+    /// Check the public polar schema before a consumer uses coefficient data.
+    ///
+    /// The live MPlot driver validates this schema while accumulating rows.
+    /// Keeping the same guard on the result object protects deserialized or
+    /// manually assembled results as well: a status/count pair must not make
+    /// fabricated zeros, ragged columns, or NaNs look usable.
+    fn has_valid_coefficient_schema(&self) -> bool {
+        let expected_len = self.converged_alpha_count;
+        let columns = [
+            &self.alpha_deg,
+            &self.cl,
+            &self.cd,
+            &self.cm,
+            &self.cdv,
+            &self.cdw,
+            &self.xtr_top,
+            &self.xtr_bot,
+        ];
+        columns.iter().all(|column| {
+            column.len() == expected_len && column.iter().all(|value| value.is_finite())
+        })
     }
 
     /// Whether every requested operating point converged.
@@ -208,6 +232,7 @@ impl MsesPolarResult {
         self.status == MsesStatus::Ok
             && self.requested_alpha_count > 0
             && self.converged_alpha_count == self.requested_alpha_count
+            && self.has_valid_coefficient_schema()
     }
 
     /// Requested angles at which MSES did not report tolerance convergence.
@@ -244,10 +269,10 @@ impl MsesPolarResult {
 /// flowfield Mach contour points and the panelled outline they are drawn over.
 ///
 /// The upper/lower arrays are each ordered by x/c with wake points excluded.
-/// They follow MPlot's two topological surface walks, not the sign of a point's
-/// ordinate: a cambered section may cross its chord line near the trailing
-/// edge. `airfoil_x`/`airfoil_y` are the exact panelled geometry MSES solved,
-/// so a contour plot's outline matches its flowfield.
+/// Surface assignment follows the reference MSES analysis contract exactly:
+/// points with `y >= 0` are upper-surface samples and points with `y < 0` are
+/// lower-surface samples. `airfoil_x`/`airfoil_y` are the exact panelled
+/// geometry MSES solved, so a contour plot's outline matches its flowfield.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct MsesPressureResult {
     /// Stable status string for this result.
@@ -364,32 +389,24 @@ impl MsesPressureResult {
         flowfield_dump: String,
         airfoil_coordinates: &[(f64, f64)],
     ) -> Result<Self, MsesRawExportError> {
-        let (xs, _ys, arc_lengths, cps, mes) = parse::parse_bl_dump(&bl_dump);
+        let (xs, ys, _arc_lengths, cps, mes) = parse::parse_bl_dump(&bl_dump);
         if xs.is_empty() {
             return Err(MsesRawExportError::EmptyBoundaryLayer);
         }
 
-        let mut surface_index = 0_usize;
-        let mut prior_arc_length: Option<f64> = None;
         let mut upper: Vec<(f64, f64, f64)> = Vec::new();
         let mut lower: Vec<(f64, f64, f64)> = Vec::new();
-        for ((&x, &arc_length), (&cp, &mach)) in
-            xs.iter().zip(&arc_lengths).zip(cps.iter().zip(&mes))
-        {
-            if prior_arc_length.is_some_and(|previous| arc_length < previous) {
-                surface_index += 1;
-            }
-            prior_arc_length = Some(arc_length);
+        for ((&x, &y), (&cp, &mach)) in xs.iter().zip(&ys).zip(cps.iter().zip(&mes)) {
             if !(-0.01..=1.02).contains(&x) {
                 continue;
             }
-            match surface_index {
-                0 => upper.push((x, cp, mach)),
-                1 => lower.push((x, cp, mach)),
-                _ => return Err(MsesRawExportError::MissingSurfaceTopology),
+            if y >= 0.0 {
+                upper.push((x, cp, mach));
+            } else {
+                lower.push((x, cp, mach));
             }
         }
-        if surface_index != 1 {
+        if upper.is_empty() || lower.is_empty() {
             return Err(MsesRawExportError::MissingSurfaceTopology);
         }
         upper.sort_by(|a, b| a.0.total_cmp(&b.0));
@@ -582,8 +599,7 @@ mod raw_export_tests {
     }
 
     #[test]
-    fn topology_keeps_chord_line_crossing_points_on_their_surface() -> Result<(), MsesRawExportError>
-    {
+    fn surface_assignment_matches_reference_y_sign_and_sorts_x() -> Result<(), MsesRawExportError> {
         let bl = "0.0 -0.002 0.0 0 1.2 0 0 0.1\n\
                   0.4 0.050 0.4 0 -0.9 0 0 1.2\n\
                   0.9 -0.010 0.9 0 -0.2 0 0 0.8\n\
@@ -598,10 +614,10 @@ mod raw_export_tests {
             &[(1.0, -0.01), (0.0, 0.0), (1.0, 0.02)],
         )?;
 
-        assert_eq!(result.x_upper, vec![0.0, 0.4, 0.9]);
-        assert_eq!(result.mach_upper, vec![0.1, 1.2, 0.8]);
-        assert_eq!(result.x_lower, vec![0.0, 0.4, 0.9]);
-        assert_eq!(result.mach_lower, vec![0.1, 0.7, 0.9]);
+        assert_eq!(result.x_upper, vec![0.4, 0.9]);
+        assert_eq!(result.mach_upper, vec![1.2, 0.9]);
+        assert_eq!(result.x_lower, vec![0.0, 0.0, 0.4, 0.9]);
+        assert_eq!(result.mach_lower, vec![0.1, 0.1, 0.7, 0.8]);
         Ok(())
     }
 
@@ -629,6 +645,38 @@ mod raw_export_tests {
 #[cfg(test)]
 mod polar_diagnostic_tests {
     use super::*;
+
+    fn complete_polar() -> MsesPolarResult {
+        MsesPolarResult {
+            status: MsesStatus::Ok,
+            requested_alpha_count: 1,
+            converged_alpha_count: 1,
+            alpha_deg: vec![1.0],
+            cl: vec![0.5],
+            cd: vec![0.03],
+            cm: vec![-0.02],
+            cdv: vec![0.02],
+            cdw: vec![0.01],
+            xtr_top: vec![0.4],
+            xtr_bot: vec![0.6],
+            ..MsesPolarResult::default()
+        }
+    }
+
+    #[test]
+    fn usable_polar_requires_aligned_finite_coefficient_columns() {
+        let complete = complete_polar();
+        assert!(complete.has_usable_data());
+
+        let mut ragged = complete.clone();
+        ragged.cdw.clear();
+        assert!(!ragged.has_usable_data());
+        assert!(!ragged.is_complete());
+
+        let mut nonfinite = complete;
+        nonfinite.cl[0] = f64::NAN;
+        assert!(!nonfinite.has_usable_data());
+    }
 
     #[test]
     fn partial_polar_retains_the_exact_nonconverged_requests() {

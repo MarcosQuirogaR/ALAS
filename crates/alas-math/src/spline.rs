@@ -67,6 +67,18 @@ pub enum CubicSplineError {
         /// The offending knot's value.
         value: f64,
     },
+    /// A knot, ordinate, or boundary condition was not finite.
+    #[error("{what}[{index}] dimension {dimension} ({value}) is not finite")]
+    NonFinite {
+        /// The input containing the value (`x`, `y`, or a boundary label).
+        what: &'static str,
+        /// The row/index in that input.
+        index: usize,
+        /// The vector dimension containing the value.
+        dimension: usize,
+        /// The offending value.
+        value: f64,
+    },
     /// A row of `y`, or a boundary condition's value slice, did not have the
     /// dimension the first row of `y` established.
     #[error(
@@ -126,6 +138,14 @@ impl CubicSpline {
                 actual: y.len(),
             });
         }
+        if let Some((index, &value)) = x.iter().enumerate().find(|(_, value)| !value.is_finite()) {
+            return Err(CubicSplineError::NonFinite {
+                what: "x",
+                index,
+                dimension: 0,
+                value,
+            });
+        }
         for (index, pair) in x.windows(2).enumerate() {
             if pair[1] <= pair[0] {
                 return Err(CubicSplineError::KnotsNotIncreasing {
@@ -144,6 +164,16 @@ impl CubicSpline {
                     actual: row.len(),
                 });
             }
+            if let Some((dimension, &value)) =
+                row.iter().enumerate().find(|(_, value)| !value.is_finite())
+            {
+                return Err(CubicSplineError::NonFinite {
+                    what: "y",
+                    index,
+                    dimension,
+                    value,
+                });
+            }
         }
         for (label, boundary) in [("lower boundary", lower), ("upper boundary", upper)] {
             let value = match boundary {
@@ -155,6 +185,18 @@ impl CubicSpline {
                     index: 0,
                     expected: dimension,
                     actual: value.len(),
+                });
+            }
+            if let Some((dimension, &value)) = value
+                .iter()
+                .enumerate()
+                .find(|(_, value)| !value.is_finite())
+            {
+                return Err(CubicSplineError::NonFinite {
+                    what: label,
+                    index: 0,
+                    dimension,
+                    value,
                 });
             }
         }
@@ -510,5 +552,30 @@ mod tests {
                 actual: 1,
             }
         );
+    }
+
+    #[test]
+    fn non_finite_knots_and_values_are_rejected_before_solving() {
+        let y = scalar(&[0.0, 1.0, 2.0]);
+        assert!(matches!(
+            CubicSpline::new(
+                &[0.0, f64::NAN, 2.0],
+                &y,
+                Boundary::SecondDerivative(&[0.0]),
+                Boundary::SecondDerivative(&[0.0]),
+            ),
+            Err(CubicSplineError::NonFinite { what: "x", .. })
+        ));
+
+        let y = vec![vec![0.0], vec![f64::INFINITY], vec![2.0]];
+        assert!(matches!(
+            CubicSpline::new(
+                &[0.0, 1.0, 2.0],
+                &y,
+                Boundary::SecondDerivative(&[0.0]),
+                Boundary::SecondDerivative(&[0.0]),
+            ),
+            Err(CubicSplineError::NonFinite { what: "y", .. })
+        ));
     }
 }

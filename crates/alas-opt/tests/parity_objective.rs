@@ -13,7 +13,7 @@ use alas_config::AlasConfig;
 use alas_geom::builder::AircraftBuilder;
 use alas_mass::breakdown::run_mass_analysis;
 use alas_opt::envelope::check_cg_envelope;
-use alas_opt::objective::{wing_fuel_volume_m3, DesignObjective};
+use alas_opt::objective::{wing_fuel_volume_m3_reference_compatibility, DesignObjective};
 use alas_testkit::{Comparison, Tier};
 use serde::Deserialize;
 
@@ -79,7 +79,7 @@ fn parity_objective() {
     // 1. Fuel volume tests (Closed tier)
     let mut comp_vol = Comparison::new("wing_fuel_volume_m3", Tier::Closed);
     for case in &fixture.fuel_volume_cases {
-        let actual = wing_fuel_volume_m3(wing, case.usable_fraction);
+        let actual = wing_fuel_volume_m3_reference_compatibility(wing, case.usable_fraction);
         comp_vol.scalar(
             &format!("usable_{}", case.usable_fraction),
             actual,

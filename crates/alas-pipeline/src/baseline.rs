@@ -17,9 +17,7 @@ use alas_config::design_variables::DesignVector;
 use alas_config::AlasConfig;
 use alas_geom::aircraft::airplane::Airplane;
 use alas_geom::builder::AircraftBuilder;
-use alas_mass::breakdown::{
-    run_mass_analysis_with_model_checked, MassBreakdown, MassCoordinateModel, MassCoordinates,
-};
+use alas_mass::breakdown::{MassBreakdown, MassCoordinateModel, MassCoordinates};
 use alas_payload::build::build_payload_layout;
 use alas_payload::layout::PayloadLayout;
 use alas_payload::oew::oew_and_cg;
@@ -59,7 +57,10 @@ pub struct BaselineReport {
 /// Run weight & balance and stability estimation on `design`.
 pub fn analyze_baseline(config: &AlasConfig, design: &DesignVector) -> BaselineReport {
     let mut effective_config = config.clone();
-    effective_config.geometry.engine.apply_engine_spec();
+    effective_config
+        .geometry
+        .engine
+        .apply_engine_spec_if_uninitialized();
     let req = &effective_config.requirements;
     let builder = AircraftBuilder::new(Some(effective_config.geometry.clone()));
     let mut plane = match builder.build(Some(design), true) {
@@ -84,24 +85,51 @@ pub fn analyze_baseline(config: &AlasConfig, design: &DesignVector) -> BaselineR
     };
 
     let coordinate_model = MassCoordinateModel::StructuralWingbox(&effective_config.structures);
-    let (masses_init, coords_init, _) = match run_mass_analysis_with_model_checked(
-        &plane,
-        req,
-        &effective_config.geometry,
-        &effective_config.cabin,
-        &effective_config.control_surfaces,
-        Some(&effective_config.mass_model),
-        None,
-        coordinate_model,
-    ) {
-        Ok(result) => result,
+    let (masses_init, coords_init, _) =
+        match alas_mass::breakdown::run_mass_analysis_with_model_checked_product_with_gear(
+            &plane,
+            req,
+            &effective_config.geometry,
+            &effective_config.cabin,
+            &effective_config.control_surfaces,
+            Some(&effective_config.mass_model),
+            None,
+            coordinate_model,
+            &effective_config.landing_gear,
+        ) {
+            Ok(result) => result,
+            Err(error) => {
+                return BaselineReport {
+                    design: *design,
+                    airplane: Some(plane),
+                    component_masses: HashMap::new(),
+                    mass_coordinates: HashMap::new(),
+                    physical_cg: [0.0, 0.0, 0.0],
+                    static_margin: f64::NAN,
+                    mac: 0.0,
+                    x_neutral_point: 0.0,
+                    cg_pct_mac: 0.0,
+                    np_pct_mac: 0.0,
+                    payload_layout: None,
+                    status: "error".to_owned(),
+                    error: Some(format!("failed to compute mass coordinates: {error}")),
+                };
+            }
+        };
+
+    let (oew, x_oew) = oew_and_cg(&masses_init, &coords_init);
+    let payload_layout = match build_payload_layout(&plane, &effective_config, oew, x_oew) {
+        Ok(layout) => layout,
         Err(error) => {
             return BaselineReport {
                 design: *design,
                 airplane: Some(plane),
+                // The first pass is a lumped sizing estimate.  Do not expose
+                // it as if it were a resolved baseline after detailed layout
+                // construction failed.
                 component_masses: HashMap::new(),
                 mass_coordinates: HashMap::new(),
-                physical_cg: [0.0, 0.0, 0.0],
+                physical_cg: [f64::NAN; 3],
                 static_margin: f64::NAN,
                 mac: 0.0,
                 x_neutral_point: 0.0,
@@ -109,51 +137,47 @@ pub fn analyze_baseline(config: &AlasConfig, design: &DesignVector) -> BaselineR
                 np_pct_mac: 0.0,
                 payload_layout: None,
                 status: "error".to_owned(),
-                error: Some(format!("failed to compute mass coordinates: {error}")),
+                error: Some(format!("payload layout error: {error}")),
             };
         }
     };
+    let layout_summary = Some(alas_mass::breakdown::PayloadLayoutSummary {
+        total_mass: payload_layout.total_mass,
+        cg_x: payload_layout.cg_x,
+        cg_y: payload_layout.cg_y,
+    });
 
-    let (oew, x_oew) = oew_and_cg(&masses_init, &coords_init);
-    let payload_layout = build_payload_layout(&plane, &effective_config, oew, x_oew).ok();
-    let layout_summary =
-        payload_layout
-            .as_ref()
-            .map(|l| alas_mass::breakdown::PayloadLayoutSummary {
-                total_mass: l.total_mass,
-                cg_x: l.cg_x,
-                cg_y: l.cg_y,
-            });
-
-    let (masses, coords, cg) = match run_mass_analysis_with_model_checked(
-        &plane,
-        req,
-        &effective_config.geometry,
-        &effective_config.cabin,
-        &effective_config.control_surfaces,
-        Some(&effective_config.mass_model),
-        layout_summary.as_ref(),
-        coordinate_model,
-    ) {
-        Ok(result) => result,
-        Err(error) => {
-            return BaselineReport {
-                design: *design,
-                airplane: Some(plane),
-                component_masses: HashMap::new(),
-                mass_coordinates: HashMap::new(),
-                physical_cg: [0.0, 0.0, 0.0],
-                static_margin: f64::NAN,
-                mac: 0.0,
-                x_neutral_point: 0.0,
-                cg_pct_mac: 0.0,
-                np_pct_mac: 0.0,
-                payload_layout,
-                status: "error".to_owned(),
-                error: Some(format!("failed to compute mass coordinates: {error}")),
-            };
-        }
-    };
+    let (masses, coords, cg) =
+        match alas_mass::breakdown::run_mass_analysis_with_model_checked_product_with_gear(
+            &plane,
+            req,
+            &effective_config.geometry,
+            &effective_config.cabin,
+            &effective_config.control_surfaces,
+            Some(&effective_config.mass_model),
+            layout_summary.as_ref(),
+            coordinate_model,
+            &effective_config.landing_gear,
+        ) {
+            Ok(result) => result,
+            Err(error) => {
+                return BaselineReport {
+                    design: *design,
+                    airplane: Some(plane),
+                    component_masses: HashMap::new(),
+                    mass_coordinates: HashMap::new(),
+                    physical_cg: [0.0, 0.0, 0.0],
+                    static_margin: f64::NAN,
+                    mac: 0.0,
+                    x_neutral_point: 0.0,
+                    cg_pct_mac: 0.0,
+                    np_pct_mac: 0.0,
+                    payload_layout: Some(payload_layout),
+                    status: "error".to_owned(),
+                    error: Some(format!("failed to compute mass coordinates: {error}")),
+                };
+            }
+        };
 
     plane.xyz_ref[0] = cg[0];
 
@@ -171,7 +195,7 @@ pub fn analyze_baseline(config: &AlasConfig, design: &DesignVector) -> BaselineR
                 x_neutral_point: 0.0,
                 cg_pct_mac: 0.0,
                 np_pct_mac: 0.0,
-                payload_layout,
+                payload_layout: Some(payload_layout),
                 status: "error".to_owned(),
                 error: Some(format!("failed to compute neutral point: {e:?}")),
             };
@@ -205,7 +229,7 @@ pub fn analyze_baseline(config: &AlasConfig, design: &DesignVector) -> BaselineR
         x_neutral_point: x_np,
         cg_pct_mac: to_pct(cg[0]),
         np_pct_mac: to_pct(x_np),
-        payload_layout,
+        payload_layout: Some(payload_layout),
         status: "ok".to_owned(),
         error: None,
     }

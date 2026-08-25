@@ -110,6 +110,12 @@ fn check_ascii(display: &str, lines: &[&str]) -> Vec<String> {
 }
 
 fn check_length(display: &str, lines: &[&str]) -> Vec<String> {
+    // Integration-test binaries are tests in their entirety, just like an
+    // inline `#[cfg(test)]` module. The repository policy excludes both from
+    // the production source budget.
+    if display.split('/').any(|component| component == "tests") {
+        return Vec::new();
+    }
     let counted = lines
         .iter()
         .position(|line| line.trim_start().starts_with("#[cfg(test)]"))
@@ -265,5 +271,14 @@ mod tests {
         let body = "// x\n".repeat(MAX_LINES);
         let text = format!("{HEADER}#[cfg(test)]\nmod tests {{\n{body}}}\n");
         assert!(!check(&text).iter().any(|f| f.contains("limit")));
+    }
+
+    #[test]
+    fn excludes_an_integration_test_source_from_the_length_limit() {
+        let root = PathBuf::from("/repo");
+        let body = "// x\n".repeat(MAX_LINES + 1);
+        let text = format!("{HEADER}{body}");
+        let findings = check_file(&root, &root.join("crates/a/tests/large.rs"), &text);
+        assert!(!findings.iter().any(|f| f.contains("limit")));
     }
 }

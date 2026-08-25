@@ -15,7 +15,11 @@ use alas_config::AlasConfig;
 use alas_mass::breakdown::{FUEL, OEW_KEYS, PAYLOAD};
 use alas_perf::landing_gear::size_landing_gear;
 use alas_pipeline::full_analysis::AnalysisReport;
-/// Generate the CG loading and operational envelope figure.
+/// Generate a model-derived CG loading-state check figure.
+///
+/// The figure uses aggregate OEW, payload, and fuel centroids plus modeled
+/// aerodynamic and gear limits. It is not an AFM/WBM operational envelope or
+/// evidence of certified loading-order, fuel-sequence, or mission coverage.
 pub fn figure_cg_envelope(
     report: &AnalysisReport,
     config: &AlasConfig,
@@ -23,7 +27,7 @@ pub fn figure_cg_envelope(
 ) -> Scene {
     let pal = get_palette(theme);
     let mut scene = Scene::new(700.0, 620.0, Some(Color::from_hex(pal.bg)));
-    let title = "Weight & Balance / CG Operational Envelope";
+    let title = "Weight & Balance / Model CG Loading-State Check";
     scene.title = Some(title.to_owned());
     draw_title(&mut scene, title, pal);
     scene.suppress_derived_title();
@@ -203,7 +207,7 @@ pub fn figure_cg_envelope(
         .map(|&w| to_pct(x_mlg - (load_nlg_min * wheelbase / w)))
         .collect();
 
-    // --- Operational envelope bounds -------------------------------------------
+    // --- Model loading-state bounds ---------------------------------------------
     let w_ops = linspace(oew_mass, mtow_mass, 150);
     let op_nlg_str: Vec<f64> = w_ops
         .iter()
@@ -224,7 +228,7 @@ pub fn figure_cg_envelope(
         .collect();
 
     // A strength boundary is useful only while it actually closes the
-    // operational envelope. Omitting inactive curves keeps their labels from
+    // model loading-state check. Omitting inactive curves keeps their labels from
     // floating outside the plot and makes the visible constraints truthful.
     let nlg_strength_limits = op_nlg_str
         .iter()
@@ -381,7 +385,7 @@ pub fn figure_cg_envelope(
         48.0,
     );
 
-    // --- Operational envelope fill and bold outline -------------------------
+    // --- Model loading-state fill and bold outline ---------------------------
     let mut poly_pts: Vec<Point2D> = Vec::with_capacity(w_ops.len() * 2);
     for i in 0..w_ops.len() {
         poly_pts.push(axes.map_point(
@@ -484,7 +488,7 @@ pub fn figure_cg_envelope(
     // occupies the same pixels once either string is localized.
     let mut legend_entries = vec![
         (
-            "Operational limits".to_owned(),
+            "Model state limits".to_owned(),
             LegendMarker::Line(Stroke::new(Color::from_hex("#27ae60"), 3.0)),
         ),
         (
@@ -521,6 +525,17 @@ pub fn figure_cg_envelope(
         pal,
         8.0,
     );
+
+    scene.add(SceneElement::Text {
+        text: "MODEL-DERIVED CG CHECK ONLY; NOT AN AFM/WBM OPERATIONAL ENVELOPE".to_owned(),
+        pos: [scene.width * 0.5, 607.0],
+        font_size: 7.5,
+        color: Color::from_hex(pal.tick),
+        align: TextAlign::Center,
+        baseline: TextBaseline::Bottom,
+        angle_deg: 0.0,
+        bold: false,
+    });
 
     scene
 }

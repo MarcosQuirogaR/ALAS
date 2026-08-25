@@ -184,9 +184,18 @@ impl AircraftBuilder {
         Ok(Airplane {
             name: "ALAS Aircraft".to_owned(),
             xyz_ref: [x_cg_seed, 0.0, 0.0],
-            s_ref: main_wing.area(),
+            // Aircraft reference quantities use one convention: planform and
+            // span projected onto the aircraft XY reference plane.  This is
+            // the design-vector/preset convention (published planform area
+            // calibration) and the standard reference-plane convention noted
+            // by the NASA VLM evidence in audit S-0025; audit F-0030 measures
+            // the nominal dihedral mismatch at about 0.9%.  The wing model
+            // still exposes `area()`/`span()` as named unfolded compatibility
+            // quantities for frozen translation fixtures, but they must not
+            // feed `s_ref`/`b_ref`.
+            s_ref: main_wing.reference_area(),
             c_ref: mac,
-            b_ref: dv.span_m,
+            b_ref: main_wing.reference_span(),
             wings,
             fuselages,
         })
@@ -593,6 +602,20 @@ mod tests {
     }
 
     #[test]
+    fn aircraft_reference_axes_use_the_projected_main_wing_convention() {
+        let builder = AircraftBuilder::new(Some(GeometryConfig::default()));
+        let airplane = builder
+            .build(None, false)
+            .expect("the default product aircraft builds");
+        let main_wing = &airplane.wings[0];
+
+        assert_eq!(airplane.s_ref, main_wing.reference_area());
+        assert_eq!(airplane.b_ref, main_wing.reference_span());
+        assert!((airplane.s_ref - main_wing.area()).abs() > 1.0e-6);
+        assert!((airplane.b_ref - main_wing.span()).abs() > 1.0e-6);
+    }
+
+    #[test]
     fn an_outboard_nacelle_follows_the_continuous_leading_edge_sweep() {
         let mut geometry = GeometryConfig::default();
         let dv = DesignVector::default();
@@ -698,6 +721,50 @@ mod tests {
             - reference.geometry.engine.inlet_x_offset_m;
 
         assert!((reference_inlet - frozen_inlet).abs() < 1e-12);
+    }
+
+    #[test]
+    fn product_and_reference_builders_keep_distinct_planform_contracts() {
+        let dv = DesignVector::default();
+        let product = AircraftBuilder::new(Some(GeometryConfig::default()));
+        let reference =
+            AircraftBuilder::new_reference_compatibility(Some(GeometryConfig::default()));
+
+        let product_planform = product
+            .geometry
+            .wing
+            .transport_planform(&dv)
+            .expect("the product planform is valid");
+        let reference_planform = reference
+            .geometry
+            .wing
+            .transport_planform(&dv)
+            .expect("the frozen reference planform is valid");
+        assert!(
+            (product_planform.kink.span_fraction - reference_planform.kink.span_fraction).abs()
+                > 1e-12,
+            "product and frozen reference kink stations must not be conflated"
+        );
+        assert!(
+            (product_planform.outboard_le_sweep_deg - reference_planform.outboard_le_sweep_deg)
+                .abs()
+                > 1e-12,
+            "product and frozen reference outboard sweep must remain distinct"
+        );
+
+        let product_airplane = product
+            .build(Some(&dv), false)
+            .expect("the product aircraft builds");
+        let reference_airplane = reference
+            .build(Some(&dv), false)
+            .expect("the frozen reference aircraft builds");
+        let product_wing = &product_airplane.wings[0];
+        let reference_wing = &reference_airplane.wings[0];
+        assert!(
+            (product_wing.mean_aerodynamic_chord() - reference_wing.mean_aerodynamic_chord()).abs()
+                > 1e-12,
+            "built product geometry must not silently replay the frozen reference geometry"
+        );
     }
 
     #[test]

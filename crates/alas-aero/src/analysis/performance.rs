@@ -91,9 +91,15 @@ pub struct TrimmedPerformance {
 /// schedule order.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PolarSweep {
-    /// The angle of attack axis, in degrees, after the compressibility
-    /// correction described below.
+    /// The display/reporting angle of attack axis, in degrees, after the
+    /// compressibility correction described below.
     pub alpha_deg: Vec<f64>,
+    /// The geometric angle of attack used for each VLM solve, in degrees.
+    ///
+    /// The reporting axis above may be relabeled by the Prandtl--Glauert
+    /// correction without recomputing the coefficients. External solvers and
+    /// cross-model comparisons must use this native state axis.
+    pub geometric_alpha_deg: Vec<f64>,
     /// Lift coefficient.
     pub cl: Vec<f64>,
     /// Total drag coefficient.
@@ -289,6 +295,7 @@ impl AeroAnalysis<'_> {
 
         let mut sweep = PolarSweep {
             alpha_deg: Vec::with_capacity(alphas.len()),
+            geometric_alpha_deg: alphas.clone(),
             cl: Vec::with_capacity(alphas.len()),
             cd: Vec::with_capacity(alphas.len()),
             cd_induced: Vec::with_capacity(alphas.len()),

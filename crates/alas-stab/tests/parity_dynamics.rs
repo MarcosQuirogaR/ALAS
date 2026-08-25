@@ -23,11 +23,9 @@
 //!
 //! # The aircraft
 //!
-//! Like `parity_trim.rs`, this runs on the nominal aircraft
-//! `alas-geom::builder` builds -- the same object `golden/geom/builder.json`
-//! pins -- and checks its reference dimensions and names first: if the two
-//! sides have stopped meaning the same aeroplane, every comparison below is
-//! answering a different question.
+//! This runs on the frozen-reference aircraft and checks its reference
+//! dimensions and names first: product geometry has a newer transport-planform
+//! default, so using it here would compare different aeroplanes.
 
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
@@ -96,9 +94,16 @@ struct Fixture {
 }
 
 fn build() -> Airplane {
-    AircraftBuilder::new(Some(GeometryConfig::default()))
+    let mut plane = AircraftBuilder::new_reference_compatibility(Some(GeometryConfig::default()))
         .build(None, true)
-        .expect("the default aircraft builds")
+        .expect("the default aircraft builds");
+    // Preserve the historical area scale for this frozen translation fixture;
+    // its lateral/Y b_ref was already the builder's projected value.
+    if let Some(wing) = plane.wings.first() {
+        let s_ref = wing.unfolded_area();
+        plane.s_ref = s_ref;
+    }
+    plane
 }
 
 fn names<T>(cases: &HashMap<String, T>) -> Vec<&String> {
@@ -152,7 +157,8 @@ fn estimate_inertia_matches_python() {
     let mut comparison = Comparison::new("dynamics.estimate_inertia", Tier::Linalg);
     for name in names(&fixture.estimate_inertia) {
         let case = &fixture.estimate_inertia[name];
-        let (ixx, iyy, izz) = dynamics::estimate_inertia(&plane, case.inputs.mass_kg);
+        let (ixx, iyy, izz) =
+            dynamics::estimate_inertia_reference_compatibility(&plane, case.inputs.mass_kg);
         comparison.scalar(&format!("{name}.ixx"), ixx, case.ixx);
         comparison.scalar(&format!("{name}.iyy"), iyy, case.iyy);
         comparison.scalar(&format!("{name}.izz"), izz, case.izz);
@@ -209,7 +215,8 @@ fn compute_dynamic_modes_matches_python() {
     );
     // Reproduce the production chain: the inertia fed to the mode solve comes
     // from estimate_inertia on the same aircraft.
-    let (ixx, iyy, izz) = dynamics::estimate_inertia(&plane, case.inputs.mass_kg);
+    let (ixx, iyy, izz) =
+        dynamics::estimate_inertia_reference_compatibility(&plane, case.inputs.mass_kg);
     let mass = MassProperties {
         mass: case.inputs.mass_kg,
         ixx,
@@ -217,7 +224,7 @@ fn compute_dynamic_modes_matches_python() {
         izz,
     };
 
-    let result = dynamics::compute_dynamic_modes(&plane, &op_point, &mass)
+    let result = dynamics::compute_dynamic_modes_reference_compatibility(&plane, &op_point, &mass)
         .expect("the nominal aircraft meshes and solves");
 
     let mut comparison = Comparison::new("dynamics.compute_dynamic_modes", Tier::Linalg);

@@ -38,7 +38,8 @@ use support::segments::fixture;
 fn the_analysis_settings_are_what_the_analysis_held() {
     let fixture = fixture();
     let recorded = &fixture.inputs.vehicle.drag_settings;
-    let settings = alas_aero::drag_buildup::DragSettings::default();
+    let settings = alas_aero::drag_buildup::DragSettings::reference_compatibility();
+    assert!(!settings.area_weighted_compressibility);
 
     let mut c = Comparison::new("alas-mission::segments settings", Tier::Exact);
     for (name, port, reference) in [

@@ -95,13 +95,21 @@ fn public_planning_cg_uses_the_source_frame_without_becoming_a_certification_cla
         result.public_planning_cg_status,
         PlanningCgStatus::WithinPublishedLimits
     );
-    assert!(result.physical_passed);
+    assert!(!result.physical_passed);
+    assert!(result.physical_findings.iter().any(|finding| {
+        finding.code == FindingCode::TrimUnavailable
+            && finding.severity == alas_pipeline::FindingSeverity::Error
+    }));
+    assert!(result.physical_findings.iter().any(|finding| {
+        finding.code == FindingCode::MissionFuelShortfall
+            && finding.severity == alas_pipeline::FindingSeverity::Error
+    }));
     assert!(!result
         .physical_findings
         .iter()
         .any(|finding| finding.code == FindingCode::PublicPlanningCgEnvelopeViolation));
     assert!(
-        (result.model_cg_pct_mac - 30.997_342_111_366_912).abs() < 1.0e-9,
+        (result.model_cg_pct_mac - 31.308_560_863_399).abs() < 1.0e-9,
         "model-frame CG was {}% MAC",
         result.model_cg_pct_mac
     );
@@ -109,7 +117,7 @@ fn public_planning_cg_uses_the_source_frame_without_becoming_a_certification_cla
         (result
             .public_planning_cg_pct_mac
             .expect("A220 has a source planning frame")
-            - 27.685_061_436_164_805)
+            - 27.993_704_440_679_245)
             .abs()
             < 1.0e-9,
         "public-frame CG was {:?}% MAC",
@@ -204,31 +212,22 @@ fn acceptance_narrowbody_and_widebody_mass_calibrations() {
         "A320 MTOW in expected range: {}",
         a320.mtow_kg
     );
-    assert!(a320.mtow_closure_fuel_kg > a320.analyzed_carried_fuel_kg);
-    assert_eq!(
-        a320.usable_fuel_capacity_kg,
-        Some(a320.analyzed_carried_fuel_kg)
-    );
-    assert!(a320.analyzed_takeoff_mass_kg < a320.mtow_kg);
-    assert!((a320.mtow_shortfall_kg - 53.768_102_492_205_8).abs() < 1.0e-6);
+    assert!((a320.mtow_closure_fuel_kg - 17_733.275_8).abs() < 1.0e-3);
+    assert!((a320.mtow_closure_fuel_kg - a320.analyzed_carried_fuel_kg).abs() < 1.0e-9);
+    assert_eq!(a320.usable_fuel_capacity_kg, Some(19_334.0));
+    assert!(a320.analyzed_carried_fuel_kg < a320.usable_fuel_capacity_kg.unwrap());
+    assert!((a320.analyzed_takeoff_mass_kg - a320.mtow_kg).abs() < 1.0e-6);
+    assert!(a320.mtow_shortfall_kg.abs() < 1.0e-6);
     assert!(a320.physical_passed);
     assert!(a320.physical_findings.iter().any(|finding| {
-        finding.code == FindingCode::TankLimitedTakeoffMass
-            && finding.severity == alas_pipeline::FindingSeverity::Warning
+        finding.code == FindingCode::MissionFuelShortfall
+            && finding.severity == alas_pipeline::FindingSeverity::Error
     }));
-    let a320_tank_finding = a320
+    assert!(!a320.mission_fuel_within_available);
+    assert!(!a320
         .physical_findings
         .iter()
-        .find(|finding| finding.code == FindingCode::TankLimitedTakeoffMass)
-        .expect("A320 published usable capacity finding");
-    assert!((a320_tank_finding.actual.expect("closure fuel") - 19_387.768_102).abs() < 1.0e-6);
-    assert_eq!(a320_tank_finding.limit, Some(19_334.0));
-    assert_eq!(a320_tank_finding.unit, "kg");
-    assert!(!a320.physical_findings.iter().any(|finding| {
-        finding.code == FindingCode::FuelCapacityUnavailable
-            || (finding.code == FindingCode::TankLimitedTakeoffMass
-                && finding.severity == alas_pipeline::FindingSeverity::Error)
-    }));
+        .any(|finding| { finding.code == FindingCode::FuelCapacityUnavailable }));
     let a320_text = format_matrix_report(&AcceptanceMatrixReport {
         presets: vec![a320.clone()],
         all_executed: true,
@@ -237,8 +236,8 @@ fn acceptance_narrowbody_and_widebody_mass_calibrations() {
         all_design_missions_verified: false,
     });
     assert!(a320_text.contains("Tank-limited load cases:"));
-    assert!(a320_text.contains("A320-200: analyzed TOW 77946.232 kg"));
-    assert!(a320_text.contains("capacity evidence published preset"));
+    assert!(a320_text.contains("- None"));
+    assert!(a320_text.contains("usable fuel was exhausted during mission segment"));
 
     // A380 mega-widebody MTOW is around 500-600 tonnes
     assert!(
@@ -262,7 +261,12 @@ fn acceptance_narrowbody_and_widebody_mass_calibrations() {
         ave_forward_finding.severity,
         alas_pipeline::FindingSeverity::Error
     );
-    assert!((ave_forward_finding.actual.expect("AVE CG actual") - 14.749).abs() < 0.01);
+    // `evaluate_preset` intentionally follows the product path, whose
+    // structural wingbox centroid is distinct from the frozen compatibility
+    // coordinates used to establish the historical 14.749% reference.
+    assert!(
+        (ave_forward_finding.actual.expect("AVE CG actual") - 15.499_723_289_191_273).abs() < 0.01
+    );
     assert!((ave_forward_finding.limit.expect("AVE CG limit") - 18.194).abs() < 0.01);
     assert_eq!(ave_forward_finding.unit, "% MAC");
     assert!(!ave

@@ -257,7 +257,7 @@ fn extract_structures(result: &PipelineResult) -> StructuresAudit {
         output.spar_count = Some(sizing.spars.len());
         output.spar_chord_fractions = sizing.spar_fracs.clone();
         output.rib_count = Some(sizing.num_ribs);
-        output.rib_spacing_m = Some(sizing.rib_spacing_m);
+        output.rib_spacing_m = Some(sizing.installed_rib_spacing_m());
         output.skin_thickness_m = Some(sizing.t_skin);
     }
     if let Some(analysis) = structural.analysis.as_ref() {

@@ -92,16 +92,39 @@ fn sind(degrees: f64) -> f64 {
 /// `k_f1` and `k_f2` (upstream's flap-configuration factors) are hardcoded
 /// to `1.0`, their upstream defaults: [`mass_wing`], this function's only
 /// caller, never overrides them.
+#[allow(dead_code)]
 fn mass_wing_high_lift_devices(
     wing: &Wing,
     max_airspeed_for_flaps: f64,
     flap_deflection_angle: f64,
 ) -> f64 {
+    mass_wing_high_lift_devices_with_area(
+        wing,
+        max_airspeed_for_flaps,
+        flap_deflection_angle,
+        wing.control_surface_area(),
+    )
+}
+
+/// High-lift-device mass with the configured flap planform area.
+///
+/// `Wing` deliberately has no drawing/control-surface subgeometry, so its
+/// legacy `control_surface_area()` method is always zero. Product mass
+/// analysis supplies the area derived from `ControlSurfacesConfig` through
+/// this seam instead of silently assigning zero high-lift mass.
+fn mass_wing_high_lift_devices_with_area(
+    wing: &Wing,
+    max_airspeed_for_flaps: f64,
+    flap_deflection_angle: f64,
+    s_flaps: f64,
+) -> f64 {
     let k_f1 = 1.0;
     let k_f2 = 1.0;
 
-    let s_flaps = wing.control_surface_area();
-    let span = wing.span();
+    // Torenbeek's structural correlations use the modeled wing's developed
+    // span (the historical YZ/unfolded quantity), not the aircraft reference
+    // span used for coefficient normalization.
+    let span = wing.unfolded_span();
     let sweep_half_chord = wing.mean_sweep_angle(0.5);
     let span_structural = span / cosd(sweep_half_chord);
     let root_t_over_c = root_thickness_to_chord(wing);
@@ -142,7 +165,9 @@ fn mass_wing_basic_structure(
     strut_y_location: Option<f64>,
     k_e: f64,
 ) -> f64 {
-    let span = wing.span();
+    // Preserve the translated Torenbeek structural-span convention here;
+    // `reference_span()` belongs to aircraft-level aerodynamic references.
+    let span = wing.unfolded_span();
     let sweep_half_chord = wing.mean_sweep_angle(0.5);
     let cos_sweep_half_chord = cosd(sweep_half_chord);
     let span_structural = span / cos_sweep_half_chord;
@@ -168,7 +193,7 @@ fn mass_wing_basic_structure(
     // Torenbeek Eq. C-5: bending-moment relief from a strut.
     let k_b = match strut_y_location {
         None => 1.0,
-        Some(y) => 1.0 - (y / (wing.span() / 2.0)).powi(2),
+        Some(y) => 1.0 - (y / (wing.unfolded_span() / 2.0)).powi(2),
     };
 
     4.58e-3
@@ -225,8 +250,44 @@ pub fn mass_wing(
     flap_deflection_angle: f64,
     strut_y_location: Option<f64>,
 ) -> f64 {
-    let mass_high_lift_devices =
-        mass_wing_high_lift_devices(wing, max_airspeed_for_flaps, flap_deflection_angle);
+    mass_wing_with_control_surface_area(
+        wing,
+        design_mass_togw,
+        ultimate_load_factor,
+        suspended_mass,
+        never_exceed_airspeed,
+        max_airspeed_for_flaps,
+        main_gear_mounted_to_wing,
+        flap_deflection_angle,
+        strut_y_location,
+        wing.control_surface_area(),
+    )
+}
+
+/// Mass of a wing using an explicitly configured trailing-edge flap area.
+///
+/// The ordinary [`mass_wing`] entry point remains reference-compatible. This
+/// product seam is used by the checked mass path, where control-surface
+/// configuration is available and must contribute to the high-lift mass.
+#[allow(clippy::too_many_arguments)]
+pub fn mass_wing_with_control_surface_area(
+    wing: &Wing,
+    design_mass_togw: f64,
+    ultimate_load_factor: f64,
+    suspended_mass: f64,
+    never_exceed_airspeed: f64,
+    max_airspeed_for_flaps: f64,
+    main_gear_mounted_to_wing: bool,
+    flap_deflection_angle: f64,
+    strut_y_location: Option<f64>,
+    control_surface_area_m2: f64,
+) -> f64 {
+    let mass_high_lift_devices = mass_wing_high_lift_devices_with_area(
+        wing,
+        max_airspeed_for_flaps,
+        flap_deflection_angle,
+        control_surface_area_m2.max(0.0),
+    );
 
     let mass_basic_wing = mass_wing_basic_structure(
         wing,
@@ -394,6 +455,18 @@ mod tests {
             0.0,
             "S_flaps is always zero in this crate"
         );
+    }
+
+    #[test]
+    fn configured_flap_area_adds_high_lift_mass_to_the_product_wing() {
+        let wing = rectangular_wing();
+        let legacy = mass_wing(
+            &wing, 60_000.0, 3.75, 20_000.0, 180.0, 90.0, false, 30.0, None,
+        );
+        let product = mass_wing_with_control_surface_area(
+            &wing, 60_000.0, 3.75, 20_000.0, 180.0, 90.0, false, 30.0, None, 10.0,
+        );
+        assert!(product > legacy, "product={product}, legacy={legacy}");
     }
 
     #[test]

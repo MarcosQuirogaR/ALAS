@@ -38,10 +38,16 @@ pub mod oew;
 // it, at which point it belongs in `alas-math` rather than copied.
 mod numeric;
 
-pub use build::{apply_cabin_preset, build_payload_layout, simulate_passenger_counts};
+pub use build::{
+    apply_cabin_preset, build_payload_layout, build_payload_layout_reference_compatibility,
+    simulate_passenger_counts,
+};
 pub use build::{CabinPresetError, PassengerCounts};
-pub use cabin::build_passenger_layout;
-pub use cargo::{build_cargo_layout, CargoLoadManager, CargoSlot, UldType};
+pub use cabin::{build_passenger_layout, build_passenger_layout_reference_compatibility};
+pub use cargo::{
+    build_cargo_layout, build_cargo_layout_reference_compatibility, CargoLoadManager, CargoSlot,
+    UldType,
+};
 pub use geometry::{CabinGeometry, CabinGeometryError, DeckSpec};
 pub use layout::{DeckItem, ItemKind, ItemMeta, LayoutSummary, Mode, PayloadLayout};
 pub use oew::oew_and_cg;

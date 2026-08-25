@@ -102,20 +102,27 @@ fn component_selection_exposes_source_expanded_records_without_filling_missing_d
 }
 
 #[test]
-fn automatic_sizing_never_substitutes_missing_material_or_landing_gear_evidence() {
-    let mut state = UavWorkflowState::default();
-    assert!(state.records_for(ComponentRole::Material).is_empty());
-    assert!(state.records_for(ComponentRole::LandingGear).is_empty());
-    assert!(!state.start());
-    assert!(matches!(
-        state.execution,
-        UavExecutionStatus::Failed(message) if message.contains("priced, analysis-complete")
-    ));
-    assert_eq!(state.outcome, UavWorkflowOutcome::NotRun);
+fn automatic_sizing_uses_reviewed_materials_and_selects_landing_gear() {
+    let state = UavWorkflowState::default();
+    let materials = state.records_for(ComponentRole::Material);
+    assert_eq!(materials.len(), 2);
+    assert!(materials
+        .iter()
+        .all(|record| { matches!(record.kind, alas_uav::ComponentKind::MaterialStock(_)) }));
+    let landing_gear = state.records_for(ComponentRole::LandingGear);
+    assert_eq!(landing_gear.len(), 1);
+    assert_eq!(landing_gear[0].id, "robart-121-retractable-tailwheel");
+    assert_eq!(
+        state.selections.landing_gear,
+        "robart-121-retractable-tailwheel"
+    );
+    assert!(state
+        .selected_evidence_gaps()
+        .iter()
+        .all(|gap| { !gap.contains("Landing gear") }));
 }
 
 #[test]
-#[ignore = "the complete-catalogue gate intentionally blocks before the manual map path"]
 fn advanced_manual_map_without_evidence_is_rejected_before_optimization() {
     let mut state = UavWorkflowState::default();
     state.propulsion_input_mode = PropulsionInputMode::AdvancedManual;
@@ -129,7 +136,6 @@ fn advanced_manual_map_without_evidence_is_rejected_before_optimization() {
 }
 
 #[test]
-#[ignore = "a complete material and landing-gear record has not been sourced"]
 fn automatic_solver_needs_no_manual_points_and_retains_a_multi_phase_result() {
     let mut state = runnable_state(8);
     state.propulsion_evidence.clear();
@@ -152,7 +158,6 @@ fn automatic_solver_needs_no_manual_points_and_retains_a_multi_phase_result() {
 }
 
 #[test]
-#[ignore = "a complete material and landing-gear record has not been sourced"]
 fn background_search_completes_and_reports_retail_evidence_gaps() {
     let mut state = runnable_state(8);
     assert!(state.start());
@@ -182,7 +187,7 @@ fn background_search_completes_and_reports_retail_evidence_gaps() {
             .examples
             .iter()
             .any(|example| example.kind == alas_uav::FindingKind::MissingData));
-        assert!(summary.best_evaluated.is_none());
+        assert!(summary.best_evaluated.is_some());
     }
 }
 
@@ -204,7 +209,6 @@ fn unsupported_design_conventions_explain_why_preliminary_sizing_cannot_start() 
 }
 
 #[test]
-#[ignore = "a complete material and landing-gear record has not been sourced"]
 fn active_search_cannot_be_started_twice_and_cancels_cooperatively() {
     let mut state = runnable_state(1_000_000);
     assert!(state.start());
@@ -233,7 +237,6 @@ fn active_search_cannot_be_started_twice_and_cancels_cooperatively() {
 }
 
 #[test]
-#[ignore = "a complete material and landing-gear record has not been sourced"]
 fn failed_or_cancelled_restart_retains_the_last_completed_result() {
     let mut state = runnable_state(8);
     assert!(state.start());

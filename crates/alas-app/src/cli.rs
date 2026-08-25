@@ -11,7 +11,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use alas_config::AlasConfig;
-use alas_exec::ToolLocator;
+use alas_exec::{ToolLocator, ToolPreferences};
 use alas_pipeline::{
     read_cpacs_file, AerodynamicSolverMode, DesignPipeline, OptimizationSolverMode,
     PipelineOptions, PipelineResult,
@@ -210,6 +210,32 @@ pub fn load_config(args: &CliArgs) -> Result<AlasConfig, String> {
     Ok(config)
 }
 
+/// Apply persisted machine-tool locations when no explicit config file owns
+/// those settings. A project config must remain authoritative over machine
+/// preferences, just as it is in the GUI's configuration flow.
+fn apply_cli_tool_preferences(
+    config: &mut AlasConfig,
+    preferences: &ToolPreferences,
+    use_persisted_preferences: bool,
+) {
+    if !use_persisted_preferences {
+        return;
+    }
+
+    if let Some(path) = &preferences.mses_dir {
+        config.mses.mses_dir.clone_from(path);
+    }
+    if let Some(path) = &preferences.nastran_exe {
+        config.structures.nastran_exe_path.clone_from(path);
+    }
+    if let Some(path) = &preferences.nastran_solver {
+        config.structures.nastran_solver_path.clone_from(path);
+    }
+    if let Some(path) = &preferences.patran_exe {
+        config.structures.patran_exe_path.clone_from(path);
+    }
+}
+
 /// Main application orchestration entry point.
 pub fn run_cli(args: &[String]) -> i32 {
     let cli = match parse_args(args) {
@@ -242,17 +268,7 @@ pub fn run_cli(args: &[String]) -> i32 {
     let preferences = locator.load_preferences();
     let openvsp_dir = preferences.openvsp_dir.clone();
     let avl_exe = preferences.avl_exe.clone();
-    if cli.config.is_none() {
-        if let Some(path) = preferences.mses_dir {
-            config.mses.mses_dir = path;
-        }
-        if let Some(path) = preferences.nastran_exe {
-            config.structures.nastran_exe_path = path;
-        }
-        if let Some(path) = preferences.patran_exe {
-            config.structures.patran_exe_path = path;
-        }
-    }
+    apply_cli_tool_preferences(&mut config, &preferences, cli.config.is_none());
 
     if let Some(ref save_path) = cli.save_config {
         let yaml = match serde_yaml::to_string(&config) {
@@ -367,16 +383,17 @@ fn print_cpacs_summary(result: &PipelineResult, quiet: bool) {
 }
 
 fn print_mses_summary(result: &PipelineResult, quiet: bool) {
+    if quiet {
+        return;
+    }
     let mses = match result.mses_result {
         Some(ref m) => m,
         None => return,
     };
     if !mses.has_usable_data() {
-        if !quiet {
-            println!("\n--- MSES analysis: {} ---", mses.status.as_str());
-            if let Some(ref err) = mses.error {
-                println!("  {err}");
-            }
+        println!("\n--- MSES analysis: {} ---", mses.status.as_str());
+        if let Some(ref err) = mses.error {
+            println!("  {err}");
         }
         return;
     }
@@ -415,16 +432,17 @@ fn print_mses_summary(result: &PipelineResult, quiet: bool) {
 }
 
 fn print_structural_summary(result: &PipelineResult, quiet: bool) {
+    if quiet {
+        return;
+    }
     let st = match result.structural_result {
         Some(ref s) => s,
         None => return,
     };
     if st.status.as_str() != "ok" {
-        if !quiet {
-            println!("\n--- Structural analysis: {} ---", st.status.as_str());
-            if let Some(ref err) = st.error {
-                println!("  {err}");
-            }
+        println!("\n--- Structural analysis: {} ---", st.status.as_str());
+        if let Some(ref err) = st.error {
+            println!("  {err}");
         }
         return;
     }
@@ -436,8 +454,10 @@ fn print_structural_summary(result: &PipelineResult, quiet: bool) {
             sizing.total_mass_kg, st.torenbeek_wing_mass_kg
         );
         println!(
-            "  ribs / spacing   : {} / {:.2} m",
-            sizing.num_ribs, sizing.rib_spacing_m
+            "  ribs / spacing   : {} / {:.2} m installed (max {:.2} m allowable)",
+            sizing.num_ribs,
+            sizing.installed_rib_spacing_m(),
+            sizing.rib_spacing_m
         );
         println!("  sizing load case : {}", sizing.sizing_load_case);
     }
@@ -460,29 +480,20 @@ fn print_structural_summary(result: &PipelineResult, quiet: bool) {
     }
 }
 
-/// Result figures that the GUI's public scene factory can build from a
-/// completed [`PipelineResult`]. Figures needing mission or screening data are
-/// deliberately absent: the pipeline result does not carry those datasets.
-const RESULT_PLOT_IDS: &[&str] = &[
-    "polar_comparison",
-    "model_comparison",
-    "span_loading",
-    "drag_breakdown",
-    "mass_breakdown",
-    "dynamic_modes",
-    "cg_envelope",
-    "landing_gear_planform",
-    "control_surfaces",
-    "payload_range",
-    "lto_departure",
-    "lto_arrival",
-    "matching_chart",
-    "vn_diagram",
-    "structures_sizing",
-    "structures_loads",
-    "structures_stress",
-    "optimization_history",
-];
+/// One registry entry recorded by the headless plot exporter.
+///
+/// Keeping unavailable entries in the manifest makes an incomplete export
+/// explicit instead of making a missing SVG indistinguishable from a writer
+/// failure or an unrequested figure.
+#[derive(Debug, serde::Serialize)]
+struct PlotExportEntry {
+    id: &'static str,
+    title: &'static str,
+    required_stage: String,
+    status: &'static str,
+    path: Option<String>,
+    reason: Option<String>,
+}
 
 fn plots_dir(output_dir: Option<&Path>) -> PathBuf {
     output_dir
@@ -490,14 +501,16 @@ fn plots_dir(output_dir: Option<&Path>) -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("plots"))
 }
 
-/// Build and save every result scene available for `result`.
+/// Build and save every result scene registered by [`alas_report`].
 ///
 /// The CLI already depends on `alas-gui`, whose public scene factory is the
 /// single dispatch point for report figures. Keeping this call here avoids a
 /// second id-to-family mapping while allowing headless runs to use a caller's
-/// output directory. Scene serialization is used only as the bridge to this
-/// crate's SVG writer; it preserves the report scene primitives and does not
-/// invent plot data.
+/// output directory. Every registered ID is attempted, and unavailable scenes
+/// are retained in `plot_manifest.json` with the stage metadata that explains
+/// why no SVG was emitted. Scene serialization is used only as the bridge to
+/// this crate's SVG writer; it preserves the report scene primitives and does
+/// not invent plot data.
 fn save_result_plots(result: &PipelineResult, output_dir: Option<&Path>) -> Result<usize, String> {
     let dir = plots_dir(output_dir);
     fs::create_dir_all(&dir)
@@ -509,25 +522,60 @@ fn save_result_plots(result: &PipelineResult, output_dir: Option<&Path>) -> Resu
     };
 
     let mut written = 0;
-    for id in RESULT_PLOT_IDS {
-        let Some(Some(scene)) =
-            alas_gui::scene::build_result_figure(&state, id, &result.config, "dark")
-        else {
-            continue;
+    let mut manifest = Vec::with_capacity(alas_report::RESULT_FIGURES.len());
+    for descriptor in alas_report::RESULT_FIGURES {
+        let (status, path, reason) = match alas_gui::scene::build_result_figure(
+            &state,
+            descriptor.id,
+            &result.config,
+            "dark",
+        ) {
+            Some(Some(scene)) => {
+                let svg = alas_pipeline::render_scene_svg(&scene)?;
+                let path = dir.join(format!("{}.svg", descriptor.id));
+                fs::write(&path, svg)
+                    .map_err(|e| format!("failed to write {}: {e}", path.display()))?;
+                written += 1;
+                ("written", Some(format!("{}.svg", descriptor.id)), None)
+            }
+            Some(None) => (
+                "unavailable",
+                None,
+                Some("the registered figure has no usable data for this run".to_owned()),
+            ),
+            None => (
+                "unavailable",
+                None,
+                Some("the pipeline result does not expose the required report stage".to_owned()),
+            ),
         };
-
-        let svg = alas_pipeline::render_scene_svg(&scene)?;
-        let path = dir.join(format!("{id}.svg"));
-        fs::write(&path, svg).map_err(|e| format!("failed to write {}: {e}", path.display()))?;
-        written += 1;
+        manifest.push(PlotExportEntry {
+            id: descriptor.id,
+            title: descriptor.title,
+            required_stage: format!("{:?}", descriptor.required_stage),
+            status,
+            path,
+            reason,
+        });
     }
+
+    let manifest_path = dir.join("plot_manifest.json");
+    let manifest_json = serde_json::to_vec_pretty(&manifest)
+        .map_err(|error| format!("serialize plot manifest: {error}"))?;
+    fs::write(&manifest_path, manifest_json)
+        .map_err(|error| format!("failed to write {}: {error}", manifest_path.display()))?;
 
     Ok(written)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{load_config, parse_args, AerodynamicSolverMode, CliArgs, OptimizationSolverMode};
+    use super::{
+        apply_cli_tool_preferences, load_config, parse_args, AerodynamicSolverMode, CliArgs,
+        OptimizationSolverMode,
+    };
+    use alas_config::AlasConfig;
+    use alas_exec::ToolPreferences;
 
     #[test]
     fn solver_flags_select_independent_analysis_and_optimization_backends() {
@@ -591,6 +639,29 @@ mod tests {
         let config = load_config(&args)
             .unwrap_or_else(|error| panic!("effective configuration loads: {error}"));
         assert_eq!(config.optimizer.solver.method, "cma_es");
+    }
+
+    #[test]
+    fn cli_applies_nastran_solver_preference_without_overriding_explicit_config() {
+        let preferences = ToolPreferences {
+            nastran_solver: Some("C:/MSC/analysis.exe".to_owned()),
+            ..ToolPreferences::default()
+        };
+
+        let mut default_config = AlasConfig::default();
+        apply_cli_tool_preferences(&mut default_config, &preferences, true);
+        assert_eq!(
+            default_config.structures.nastran_solver_path,
+            "C:/MSC/analysis.exe"
+        );
+
+        let mut explicit_config = AlasConfig::default();
+        explicit_config.structures.nastran_solver_path = "D:/project/analysis.exe".to_owned();
+        apply_cli_tool_preferences(&mut explicit_config, &preferences, false);
+        assert_eq!(
+            explicit_config.structures.nastran_solver_path,
+            "D:/project/analysis.exe"
+        );
     }
 
     #[test]

@@ -51,6 +51,11 @@ pub enum ChebyshevError {
     /// rather than an exception.
     #[error("N = {0}, must be > 0")]
     NonPositiveN(i64),
+    /// One point cannot define a differentiation or integration interval.
+    /// The previous formula divided by `N - 1` and returned a NaN node; the
+    /// public constructor now rejects that ambiguous contract explicitly.
+    #[error("N = {0}, must be >= 2 to define a spectral interval")]
+    TooFewNodes(i64),
     /// The `(N - 1) x (N - 1)` submatrix of `differentiation` could not be
     /// inverted. Not expected to occur for the construction above -- it is
     /// the classical, well-conditioned Chebyshev quadrature matrix -- but
@@ -72,11 +77,16 @@ pub enum ChebyshevError {
 /// # Errors
 ///
 /// Returns [`ChebyshevError::NonPositiveN`] when `n <= 0`, matching mission analysis model's
-/// guard. Returns [`ChebyshevError::SingularIntegrationOperator`] if the
-/// dense inverse the integration operator needs could not be computed.
+/// guard, or [`ChebyshevError::TooFewNodes`] for `n == 1`, which cannot define
+/// an interval or a differentiation operator. Returns
+/// [`ChebyshevError::SingularIntegrationOperator`] if the dense inverse the
+/// integration operator needs could not be computed.
 pub fn chebyshev_data(n: i64, integration: bool) -> Result<ChebyshevData, ChebyshevError> {
     if n <= 0 {
         return Err(ChebyshevError::NonPositiveN(n));
+    }
+    if n == 1 {
+        return Err(ChebyshevError::TooFewNodes(n));
     }
     // Non-negative and checked above; safe to treat as a point count.
     let n = n as usize;
@@ -237,7 +247,7 @@ mod tests {
     // covers the N values it was generated at.
     #[test]
     fn differentiating_a_constant_is_zero_for_every_n() {
-        for n in [1, 2, 3, 4, 5, 8, 16, 24] {
+        for n in [2, 3, 4, 5, 8, 16, 24] {
             let data = chebyshev_data(n, false).expect("positive n");
             for row in &data.differentiation {
                 let row_sum: f64 = row.iter().sum();
@@ -269,6 +279,15 @@ mod tests {
             chebyshev_data(-3, true),
             Err(ChebyshevError::NonPositiveN(-3))
         );
+    }
+
+    #[test]
+    fn a_one_node_grid_is_rejected_instead_of_returning_nan() {
+        assert_eq!(
+            chebyshev_data(1, false),
+            Err(ChebyshevError::TooFewNodes(1))
+        );
+        assert_eq!(chebyshev_data(1, true), Err(ChebyshevError::TooFewNodes(1)));
     }
 
     #[test]

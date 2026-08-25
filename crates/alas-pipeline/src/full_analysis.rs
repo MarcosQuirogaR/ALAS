@@ -23,15 +23,16 @@ use alas_config::design_variables::DesignVector;
 use alas_config::AlasConfig;
 use alas_geom::aircraft::airplane::Airplane;
 use alas_geom::builder::AircraftBuilder;
-use alas_mass::breakdown::{
-    run_mass_analysis_with_model_checked, MassBreakdown, MassCoordinateModel, MassCoordinates,
-};
+use alas_mass::breakdown::{MassBreakdown, MassCoordinateModel, MassCoordinates};
 use alas_math::lstsq::least_squares;
 use alas_opt::envelope::{assess_model_cg_envelope, check_cg_envelope};
-use alas_payload::build::build_payload_layout;
+use alas_payload::build::{build_payload_layout, build_payload_layout_reference_compatibility};
 use alas_payload::layout::PayloadLayout;
 use alas_payload::oew::oew_and_cg;
-use alas_stab::trim::{neutral_point, stability_and_trim};
+use alas_stab::trim::{
+    neutral_point, neutral_point_reference_compatibility, stability_and_trim,
+    stability_and_trim_reference_compatibility,
+};
 use serde::{Deserialize, Serialize};
 
 /// Operating conditions at the cruise design point.
@@ -76,6 +77,35 @@ pub struct TrimmedDesignPoint {
     pub cm_residual: f64,
 }
 
+/// Provenance of a least-squares parabolic fit of the clean polar.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PolarFitStatus {
+    /// The configured fit window produced a successful least-squares fit.
+    Fitted,
+    /// The configured window was too small, so the documented fallback
+    /// window produced the fit instead.
+    FittedFallbackWindow,
+    /// The configured and fallback windows did not contain enough points;
+    /// the historical constant coefficients were retained.
+    FallbackInsufficientPoints,
+    /// The selected points could not be solved by least squares; the
+    /// historical constant coefficients were retained.
+    FallbackLeastSquaresFailure,
+}
+
+impl PolarFitStatus {
+    /// Stable status text for reports and machine-readable exports.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Fitted => "fitted",
+            Self::FittedFallbackWindow => "fitted_fallback_window",
+            Self::FallbackInsufficientPoints => "fallback_insufficient_points",
+            Self::FallbackLeastSquaresFailure => "fallback_least_squares_failure",
+        }
+    }
+}
+
 /// Least-squares parabolic fit of the clean polar: `CD = CD0 + k * CL^2`.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct PolarFit {
@@ -87,6 +117,8 @@ pub struct PolarFit {
     pub oswald_e: f64,
     /// Wing aspect ratio.
     pub aspect_ratio: f64,
+    /// Provenance of the fit coefficients, including any retained fallback.
+    pub status: PolarFitStatus,
 }
 
 /// Complete aerodynamic, mass, and stability report of an aircraft design.
@@ -149,7 +181,7 @@ pub struct FullAnalysis {
 impl FullAnalysis {
     /// Create a new analysis orchestrator for `config`.
     pub fn new(mut config: AlasConfig) -> Self {
-        config.geometry.engine.apply_engine_spec();
+        config.geometry.engine.apply_engine_spec_if_uninitialized();
         Self {
             config,
             reference_compatibility: false,
@@ -215,47 +247,92 @@ impl FullAnalysis {
         let req = &self.config.requirements;
         let mut plane = airplane;
 
+        // The explicit compatibility constructor replays the historical
+        // unfolded wing normalization.  `AircraftBuilder` now publishes the
+        // projected XY reference by default, so restore the old normalization
+        // at this pipeline boundary instead of changing the authoritative
+        // geometry API (or silently masking the product convention).
+        if self.reference_compatibility {
+            if let Some(main_wing) = plane.wings.first() {
+                plane.s_ref = main_wing.unfolded_area();
+            }
+        }
+
         // First pass with lumped payload to determine OEW and approximate CG.
         let coordinate_model = if self.reference_compatibility {
             MassCoordinateModel::ReferenceCompatibility
         } else {
             MassCoordinateModel::StructuralWingbox(&self.config.structures)
         };
-        let (masses_init, coords_init, _cg_init) = run_mass_analysis_with_model_checked(
-            &plane,
-            req,
-            &self.config.geometry,
-            &self.config.cabin,
-            &self.config.control_surfaces,
-            Some(&self.config.mass_model),
-            None,
-            coordinate_model,
-        )
-        .map_err(|error| format!("mass-coordinate error: {error}"))?;
+        let initial_mass_result = if self.reference_compatibility {
+            alas_mass::breakdown::run_mass_analysis_with_model_checked_with_gear(
+                &plane,
+                req,
+                &self.config.geometry,
+                &self.config.cabin,
+                &self.config.control_surfaces,
+                Some(&self.config.mass_model),
+                None,
+                coordinate_model,
+                &self.config.landing_gear,
+            )
+        } else {
+            alas_mass::breakdown::run_mass_analysis_with_model_checked_product_with_gear(
+                &plane,
+                req,
+                &self.config.geometry,
+                &self.config.cabin,
+                &self.config.control_surfaces,
+                Some(&self.config.mass_model),
+                None,
+                coordinate_model,
+                &self.config.landing_gear,
+            )
+        };
+        let (masses_init, coords_init, _cg_init) =
+            initial_mass_result.map_err(|error| format!("mass-coordinate error: {error}"))?;
 
         // Second pass: build detailed interior layout and recompute mass breakdown and CG.
         let (oew, x_oew) = oew_and_cg(&masses_init, &coords_init);
-        let payload_layout = build_payload_layout(&plane, &self.config, oew, x_oew).ok();
-        let layout_summary =
-            payload_layout
-                .as_ref()
-                .map(|l| alas_mass::breakdown::PayloadLayoutSummary {
-                    total_mass: l.total_mass,
-                    cg_x: l.cg_x,
-                    cg_y: l.cg_y,
-                });
+        let payload_layout = if self.reference_compatibility {
+            build_payload_layout_reference_compatibility(&plane, &self.config, oew, x_oew)
+        } else {
+            build_payload_layout(&plane, &self.config, oew, x_oew)
+        }
+        .map_err(|error| format!("payload layout error: {error}"))?;
+        let layout_summary = Some(alas_mass::breakdown::PayloadLayoutSummary {
+            total_mass: payload_layout.total_mass,
+            cg_x: payload_layout.cg_x,
+            cg_y: payload_layout.cg_y,
+        });
 
-        let (masses, coords, cg) = run_mass_analysis_with_model_checked(
-            &plane,
-            req,
-            &self.config.geometry,
-            &self.config.cabin,
-            &self.config.control_surfaces,
-            Some(&self.config.mass_model),
-            layout_summary.as_ref(),
-            coordinate_model,
-        )
-        .map_err(|error| format!("mass-coordinate error: {error}"))?;
+        let detailed_mass_result = if self.reference_compatibility {
+            alas_mass::breakdown::run_mass_analysis_with_model_checked_with_gear(
+                &plane,
+                req,
+                &self.config.geometry,
+                &self.config.cabin,
+                &self.config.control_surfaces,
+                Some(&self.config.mass_model),
+                layout_summary.as_ref(),
+                coordinate_model,
+                &self.config.landing_gear,
+            )
+        } else {
+            alas_mass::breakdown::run_mass_analysis_with_model_checked_product_with_gear(
+                &plane,
+                req,
+                &self.config.geometry,
+                &self.config.cabin,
+                &self.config.control_surfaces,
+                Some(&self.config.mass_model),
+                layout_summary.as_ref(),
+                coordinate_model,
+                &self.config.landing_gear,
+            )
+        };
+        let (masses, coords, cg) =
+            detailed_mass_result.map_err(|error| format!("mass-coordinate error: {error}"))?;
 
         // Anchor the aerodynamic moment reference to the actual physical CG.
         plane.xyz_ref[0] = cg[0];
@@ -265,13 +342,23 @@ impl FullAnalysis {
         fine_analysis.spanwise_resolution = fine_analysis.fine_spanwise_resolution;
         fine_analysis.chordwise_resolution = fine_analysis.fine_chordwise_resolution;
 
-        let aero = AeroAnalysis::new(
-            &plane,
-            design.sweep_deg,
-            Some(self.config.geometry.clone()),
-            Some(self.config.drag_model.clone()),
-            Some(fine_analysis.clone()),
-        );
+        let aero = if self.reference_compatibility {
+            AeroAnalysis::new_reference_compatibility(
+                &plane,
+                design.sweep_deg,
+                Some(self.config.geometry.clone()),
+                Some(self.config.drag_model.clone()),
+                Some(fine_analysis.clone()),
+            )
+        } else {
+            AeroAnalysis::new(
+                &plane,
+                design.sweep_deg,
+                Some(self.config.geometry.clone()),
+                Some(self.config.drag_model.clone()),
+                Some(fine_analysis.clone()),
+            )
+        };
 
         let polar = aero
             .run_sweep(req.cruise_mach, req.cruise_altitude_m)
@@ -280,8 +367,12 @@ impl FullAnalysis {
         let design_point = self.compute_design_point(&plane, &polar);
         let polar_fit = self.fit_polar(&plane, &polar);
 
-        let (x_np, sm, _) = neutral_point(&plane, &fine_analysis)
-            .map_err(|e| format!("neutral point error: {e:?}"))?;
+        let (x_np, sm, _) = if self.reference_compatibility {
+            neutral_point_reference_compatibility(&plane, &fine_analysis)
+        } else {
+            neutral_point(&plane, &fine_analysis)
+        }
+        .map_err(|e| format!("neutral point error: {e:?}"))?;
 
         let cg_envelope_ok = if self.reference_compatibility {
             let env = check_cg_envelope(
@@ -323,7 +414,7 @@ impl FullAnalysis {
             component_masses: breakdown_to_map(&masses),
             mass_coordinates: coordinates_to_map(&coords),
             physical_cg: cg,
-            payload_layout,
+            payload_layout: Some(payload_layout),
             trimmed_design_point,
             cg_envelope_ok,
         })
@@ -359,6 +450,28 @@ impl FullAnalysis {
 
     fn fit_polar(&self, plane: &Airplane, polar: &PolarSweep) -> PolarFit {
         let cfg = &self.config.analysis;
+        let ar = if self.reference_compatibility {
+            plane
+                .wings
+                .first()
+                .map(|w| w.aspect_ratio())
+                .unwrap_or(10.0)
+        } else if plane.s_ref.is_finite() && plane.s_ref > 0.0 && plane.b_ref.is_finite() {
+            // Polar normalization follows the same projected reference
+            // quantities used by the product aircraft.  The compatibility
+            // branch above intentionally retains the legacy unfolded AR.
+            plane.b_ref * plane.b_ref / plane.s_ref
+        } else {
+            10.0
+        };
+        Self::fit_polar_values(polar, ar, cfg)
+    }
+
+    fn fit_polar_values(
+        polar: &PolarSweep,
+        ar: f64,
+        cfg: &alas_config::AnalysisConfig,
+    ) -> PolarFit {
         let mut selected_indices: Vec<usize> = polar
             .cl
             .iter()
@@ -367,7 +480,8 @@ impl FullAnalysis {
             .map(|(i, _)| i)
             .collect();
 
-        if selected_indices.len() < 3 {
+        let used_fallback_window = selected_indices.len() < 3;
+        if used_fallback_window {
             selected_indices = polar
                 .cl
                 .iter()
@@ -379,25 +493,40 @@ impl FullAnalysis {
                 .collect();
         }
 
-        let (cd0, k) = if selected_indices.len() >= 2 {
-            let a_mat: Vec<Vec<f64>> = selected_indices
+        let (cd0, k, status) = if selected_indices.len() >= 2 {
+            // Keep a non-finite selected polar point from entering the QR
+            // solve.  `least_squares` intentionally owns matrix-shape and
+            // rank errors, while this boundary owns the polar's data
+            // contract; otherwise NaN/Inf can flow through the arithmetic
+            // and look like a successful fit.
+            let selected_values_are_finite = selected_indices
                 .iter()
-                .map(|&i| vec![1.0, polar.cl[i].powi(2)])
-                .collect();
-            let b_vec: Vec<f64> = selected_indices.iter().map(|&i| polar.cd[i]).collect();
-            match least_squares(&a_mat, &b_vec) {
-                Ok(sol) => (sol[0], sol[1]),
-                Err(_) => (0.02, 0.04),
+                .all(|&i| polar.cl[i].is_finite() && polar.cd[i].is_finite());
+            if !selected_values_are_finite {
+                (0.02, 0.04, PolarFitStatus::FallbackLeastSquaresFailure)
+            } else {
+                let a_mat: Vec<Vec<f64>> = selected_indices
+                    .iter()
+                    .map(|&i| vec![1.0, polar.cl[i].powi(2)])
+                    .collect();
+                let b_vec: Vec<f64> = selected_indices.iter().map(|&i| polar.cd[i]).collect();
+                match least_squares(&a_mat, &b_vec) {
+                    Ok(sol) if sol.len() >= 2 && sol.iter().all(|value| value.is_finite()) => (
+                        sol[0],
+                        sol[1],
+                        if used_fallback_window {
+                            PolarFitStatus::FittedFallbackWindow
+                        } else {
+                            PolarFitStatus::Fitted
+                        },
+                    ),
+                    Ok(_) | Err(_) => (0.02, 0.04, PolarFitStatus::FallbackLeastSquaresFailure),
+                }
             }
         } else {
-            (0.02, 0.04)
+            (0.02, 0.04, PolarFitStatus::FallbackInsufficientPoints)
         };
 
-        let ar = plane
-            .wings
-            .first()
-            .map(|w| w.aspect_ratio())
-            .unwrap_or(10.0);
         let oswald_e = if k > 0.0 {
             1.0 / (PI * ar * k)
         } else {
@@ -409,6 +538,7 @@ impl FullAnalysis {
             k,
             oswald_e,
             aspect_ratio: ar,
+            status,
         }
     }
 
@@ -420,14 +550,27 @@ impl FullAnalysis {
     ) -> Option<TrimmedDesignPoint> {
         let req = &self.config.requirements;
         let cl_target = self.cruise_cl(plane);
-        let trim = stability_and_trim(
-            plane,
-            fine_analysis,
-            cl_target,
-            req.cruise_mach,
-            req.cruise_altitude_m,
-        )
+        let trim = if self.reference_compatibility {
+            stability_and_trim_reference_compatibility(
+                plane,
+                fine_analysis,
+                cl_target,
+                req.cruise_mach,
+                req.cruise_altitude_m,
+            )
+        } else {
+            stability_and_trim(
+                plane,
+                fine_analysis,
+                cl_target,
+                req.cruise_mach,
+                req.cruise_altitude_m,
+            )
+        }
         .ok()?;
+        if !trim.converged {
+            return None;
+        }
 
         let trim_point = TrimPoint {
             trim_alpha_deg: trim.trim_alpha_deg,
@@ -438,6 +581,9 @@ impl FullAnalysis {
         let trim_perf = aero
             .trimmed_performance(&trim_point, req.cruise_mach, req.cruise_altitude_m)
             .ok()?;
+        if !trim_perf.cm_residual.is_finite() || trim_perf.cm_residual.abs() > 1.0e-3 {
+            return None;
+        }
 
         Some(TrimmedDesignPoint {
             alpha_deg: trim_perf.alpha_deg,
@@ -453,11 +599,40 @@ impl FullAnalysis {
     fn geometry_summary(&self, plane: &Airplane, design: &DesignVector) -> HashMap<String, f64> {
         let mut map = HashMap::new();
         if let Some(wing) = plane.wings.first() {
-            map.insert("span_m".to_owned(), wing.span());
-            map.insert("wing_area_m2".to_owned(), wing.area());
+            let unfolded_span_m = wing.unfolded_span();
+            let unfolded_area_m2 = wing.unfolded_area();
+            let projected_span_m = plane.b_ref;
+            let projected_area_m2 = plane.s_ref;
+            // These two legacy keys are consumed by the mission/report
+            // boundary.  Product reports must expose the authoritative
+            // projected XY reference; only the explicit compatibility path
+            // retains the old unfolded values for frozen evidence.
+            let reference_span_m = if self.reference_compatibility {
+                unfolded_span_m
+            } else {
+                projected_span_m
+            };
+            let reference_area_m2 = if self.reference_compatibility {
+                unfolded_area_m2
+            } else {
+                projected_area_m2
+            };
+            let reference_aspect_ratio = if self.reference_compatibility {
+                wing.aspect_ratio()
+            } else if reference_area_m2.is_finite() && reference_area_m2 > 0.0 {
+                reference_span_m * reference_span_m / reference_area_m2
+            } else {
+                f64::NAN
+            };
+            map.insert("span_m".to_owned(), reference_span_m);
+            map.insert("wing_area_m2".to_owned(), reference_area_m2);
             map.insert("projected_span_m".to_owned(), wing.projected_span());
             map.insert("projected_wing_area_m2".to_owned(), wing.projected_area());
-            map.insert("aspect_ratio".to_owned(), wing.aspect_ratio());
+            map.insert("unfolded_span_m".to_owned(), unfolded_span_m);
+            map.insert("unfolded_wing_area_m2".to_owned(), unfolded_area_m2);
+            map.insert("reference_span_m".to_owned(), projected_span_m);
+            map.insert("reference_area_m2".to_owned(), projected_area_m2);
+            map.insert("aspect_ratio".to_owned(), reference_aspect_ratio);
             map.insert(
                 "mean_aerodynamic_chord_m".to_owned(),
                 wing.mean_aerodynamic_chord(),
@@ -514,10 +689,20 @@ impl FullAnalysis {
         map.insert("sweep_deg".to_owned(), design.sweep_deg);
         map.insert("fuselage_length_m".to_owned(), design.fuselage_length_m);
         if plane.wings.len() > 1 {
-            map.insert("h_stab_area_m2".to_owned(), plane.wings[1].area());
+            let area = if self.reference_compatibility {
+                plane.wings[1].unfolded_area()
+            } else {
+                plane.wings[1].reference_area()
+            };
+            map.insert("h_stab_area_m2".to_owned(), area);
         }
         if plane.wings.len() > 2 {
-            map.insert("v_stab_area_m2".to_owned(), plane.wings[2].area());
+            // `reference_area()` is the aircraft XY projection and therefore
+            // collapses a vertical tail to zero.  The vertical surface needs
+            // its own XZ planform area in both product and compatibility
+            // mission/report views.
+            let area = plane.wings[2].unfolded_area();
+            map.insert("v_stab_area_m2".to_owned(), area);
         }
         map
     }
@@ -535,4 +720,125 @@ fn coordinates_to_map(mc: &MassCoordinates) -> HashMap<String, [f64; 3]> {
         .into_iter()
         .map(|(k, v)| (k.to_owned(), v))
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{FullAnalysis, PolarFitStatus};
+    use alas_aero::analysis::PolarSweep;
+    use alas_config::design_variables::DesignVector;
+    use alas_config::{AlasConfig, AnalysisConfig};
+
+    fn sweep(cl: Vec<f64>, cd: Vec<f64>) -> PolarSweep {
+        let n = cl.len();
+        PolarSweep {
+            alpha_deg: vec![0.0; n],
+            geometric_alpha_deg: vec![0.0; n],
+            cl,
+            cd,
+            cd_induced: vec![0.0; n],
+            cd_wave: vec![0.0; n],
+            cd_parasite: vec![0.0; n],
+            cm: vec![0.0; n],
+            l_over_d: vec![0.0; n],
+        }
+    }
+
+    #[test]
+    fn degenerate_polar_fit_preserves_constants_with_explicit_status() {
+        let fit = FullAnalysis::fit_polar_values(
+            &sweep(vec![0.0], vec![0.03]),
+            10.0,
+            &AnalysisConfig::default(),
+        );
+
+        assert_eq!(fit.status, PolarFitStatus::FallbackInsufficientPoints);
+        assert_eq!(fit.status.as_str(), "fallback_insufficient_points");
+        assert_eq!(fit.cd0, 0.02);
+        assert_eq!(fit.k, 0.04);
+    }
+
+    #[test]
+    fn rank_deficient_polar_fit_preserves_constants_with_explicit_status() {
+        let fit = FullAnalysis::fit_polar_values(
+            &sweep(vec![0.4, 0.4, 0.4], vec![0.03, 0.04, 0.05]),
+            10.0,
+            &AnalysisConfig::default(),
+        );
+
+        assert_eq!(fit.status, PolarFitStatus::FallbackLeastSquaresFailure);
+        assert_eq!(fit.status.as_str(), "fallback_least_squares_failure");
+        assert_eq!(fit.cd0, 0.02);
+        assert_eq!(fit.k, 0.04);
+    }
+
+    #[test]
+    fn nonfinite_selected_polar_values_use_the_least_squares_fallback() {
+        for invalid_cd in [f64::NAN, f64::INFINITY] {
+            let fit = FullAnalysis::fit_polar_values(
+                &sweep(vec![0.35, 0.45, 0.55], vec![0.0249, invalid_cd, 0.0321]),
+                10.0,
+                &AnalysisConfig::default(),
+            );
+
+            assert_eq!(fit.status, PolarFitStatus::FallbackLeastSquaresFailure);
+            assert_eq!(fit.cd0, 0.02);
+            assert_eq!(fit.k, 0.04);
+        }
+    }
+
+    #[test]
+    fn nonfinite_least_squares_solution_uses_the_least_squares_fallback() {
+        let config = AnalysisConfig {
+            polar_fit_cl_min: 0.0,
+            polar_fit_cl_max: f64::MAX,
+            ..AnalysisConfig::default()
+        };
+
+        // These source values are finite, but CL squared overflows while building the
+        // fit matrix. The non-finite QR result must not acquire fitted status.
+        let fit = FullAnalysis::fit_polar_values(
+            &sweep(vec![1.0e200, 2.0e200, 3.0e200], vec![0.02, 0.03, 0.04]),
+            10.0,
+            &config,
+        );
+
+        assert_eq!(fit.status, PolarFitStatus::FallbackLeastSquaresFailure);
+        assert_eq!(fit.cd0, 0.02);
+        assert_eq!(fit.k, 0.04);
+    }
+
+    #[test]
+    fn successful_fits_identify_their_window_provenance() {
+        let primary = FullAnalysis::fit_polar_values(
+            &sweep(vec![0.35, 0.45, 0.55], vec![0.0249, 0.0281, 0.0321]),
+            10.0,
+            &AnalysisConfig::default(),
+        );
+        assert_eq!(primary.status, PolarFitStatus::Fitted);
+
+        let fallback_window = FullAnalysis::fit_polar_values(
+            &sweep(vec![0.2, 0.4], vec![0.0216, 0.0264]),
+            10.0,
+            &AnalysisConfig::default(),
+        );
+        assert_eq!(fallback_window.status, PolarFitStatus::FittedFallbackWindow);
+    }
+
+    #[test]
+    fn successful_full_analysis_retains_the_detailed_payload_layout() {
+        let report = FullAnalysis::new(AlasConfig::default())
+            .run(&DesignVector::default(), false)
+            .unwrap_or_else(|error| {
+                panic!("default full analysis should resolve payload: {error}")
+            });
+
+        let layout = match report.payload_layout.as_ref() {
+            Some(layout) => layout,
+            None => panic!("a successful full analysis must carry its detailed layout"),
+        };
+        assert!(layout.total_mass.is_finite());
+        assert!(layout.cg_x.is_finite());
+        assert!(layout.cg_y.is_finite());
+    }
 }

@@ -325,6 +325,7 @@ fn payload_summary_metrics(layout: &PayloadLayout) -> Vec<(&'static str, String)
                         ],
                     ),
                 ),
+                ("Unseated passengers", summary.unseated_pax.to_string()),
                 ("Cabin class mix", classes),
                 ("Passenger payload", format!("{:.1} t", summary.payload_t)),
                 (
@@ -369,6 +370,14 @@ fn payload_summary_metrics(layout: &PayloadLayout) -> Vec<(&'static str, String)
         LayoutSummary::Cargo(summary) => vec![
             ("Cargo payload", format!("{:.1} t", summary.payload_t)),
             (
+                "Net cargo / requested",
+                format!(
+                    "{:.1} / {:.1} t",
+                    summary.loaded_net_payload_t, summary.requested_net_payload_t
+                ),
+            ),
+            ("ULD tare", format!("{:.1} t", summary.tare_mass_t)),
+            (
                 "ULD loading",
                 tr_fields(
                     "{loaded} / {slots} positions",
@@ -412,6 +421,7 @@ mod tests {
             summary: LayoutSummary::Passenger(Box::new(PassengerSummary {
                 total_pax: 204,
                 seated_pax: 198,
+                unseated_pax: 6,
                 classes: vec![("Business", 18), ("Economy", 180)],
                 lavatories: 4,
                 galleys: 3,

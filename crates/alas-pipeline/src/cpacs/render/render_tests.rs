@@ -17,7 +17,7 @@ use alas_mission::segments::{Segment, SegmentKind, SegmentSpec};
 use alas_mission::{MissionResult, SegmentSolution};
 
 use crate::feasibility::{FeasibilityReport, FuelLoadingAssessment};
-use crate::full_analysis::{AnalysisReport, DesignPoint, PolarFit};
+use crate::full_analysis::{AnalysisReport, DesignPoint, PolarFit, PolarFitStatus};
 
 use super::{render_cpacs_v35, render_cpacs_v35_with_analysis};
 
@@ -152,6 +152,7 @@ fn unavailable_analysis_data_is_left_out_of_the_cpacs_document() {
     let mut report = test_report(&config);
     report.polar = PolarSweep {
         alpha_deg: Vec::new(),
+        geometric_alpha_deg: Vec::new(),
         cl: Vec::new(),
         cd: Vec::new(),
         cd_induced: Vec::new(),
@@ -218,6 +219,7 @@ fn test_report(config: &AlasConfig) -> AnalysisReport {
         airplane,
         polar: PolarSweep {
             alpha_deg: vec![-2.0, 0.0, 2.0],
+            geometric_alpha_deg: vec![-2.0, 0.0, 2.0],
             cl: vec![0.1, 0.3, 0.5],
             cd: vec![0.02, 0.03, 0.05],
             cd_induced: vec![0.001, 0.002, 0.004],
@@ -237,6 +239,7 @@ fn test_report(config: &AlasConfig) -> AnalysisReport {
             k: 0.04,
             oswald_e: 0.8,
             aspect_ratio: 9.0,
+            status: PolarFitStatus::Fitted,
         },
         static_margin: 0.1,
         x_neutral_point: 30.0,

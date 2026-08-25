@@ -85,7 +85,9 @@ pub use feasibility::{
 pub use flowunsteady::{
     run_flowunsteady_analysis, FlowUnsteadyAnalysisResult, FlowUnsteadyAnalysisStatus,
 };
-pub use full_analysis::{AnalysisReport, DesignPoint, FullAnalysis, PolarFit, TrimmedDesignPoint};
+pub use full_analysis::{
+    AnalysisReport, DesignPoint, FullAnalysis, PolarFit, PolarFitStatus, TrimmedDesignPoint,
+};
 pub use openvsp::{
     export_openvsp_script, materialize_openvsp_project, OpenVspExportResult, OpenVspExportStatus,
 };

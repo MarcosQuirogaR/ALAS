@@ -172,12 +172,15 @@ pub fn run_vspaero_analysis(
     let request = VspaeroSweepRequest {
         reference,
         mach: config.requirements.cruise_mach,
-        alpha_deg: report.polar.alpha_deg.clone(),
+        alpha_deg: report.polar.geometric_alpha_deg.clone(),
         beta_deg: 0.0,
         reynolds: atmosphere.density() * speed_m_s * reference.chord_m
             / atmosphere.dynamic_viscosity(),
         speed_m_s,
         density_kg_m3: atmosphere.density(),
+        // Keep the historical five-iteration request visible in the native
+        // setup, but admit its coefficients only when the retained history
+        // proves that the final wake change is below the gate below.
         wake_iterations: 5,
     };
     let setup = match render_setup(&request) {
@@ -251,8 +254,15 @@ pub fn run_vspaero_analysis(
             return result;
         }
     };
+    result.polar = Some(polar.clone());
+    let history_path = result.case_path.with_extension("history");
+    if let Err(reason) = assess_vspaero_wake_history(&history_path) {
+        result.status = VspaeroAnalysisStatus::CompletedNotComparable;
+        result.error = Some(reason.clone());
+        result.comparison = VspaeroComparisonStatus::Rejected(reason);
+        return result;
+    }
     let comparison = classify_vspaero_comparison(&polar, report, config);
-    result.polar = Some(polar);
     match comparison {
         VspaeroComparisonStatus::Compatible(_) => {
             result.status = VspaeroAnalysisStatus::CompletedComparable;
@@ -269,6 +279,119 @@ pub fn run_vspaero_analysis(
     }
     result.comparison = comparison;
     result
+}
+
+/// Absolute coefficient-change gate for a native VSPAERO wake history.
+///
+/// A successful process and a parseable `.polar` do not establish that the
+/// free wake reached a fixed point. The history contains one iteration table
+/// per alpha case; all three quantities used by the comparison (`CLtot`,
+/// `CDi`, and `CMytot`) must change by no more than this tolerance between the
+/// final two rows of every case.
+const VSPAERO_WAKE_COEFFICIENT_TOLERANCE: f64 = 1.0e-4;
+
+fn assess_vspaero_wake_history(path: &Path) -> Result<(), String> {
+    let text = fs::read_to_string(path).map_err(|error| {
+        format!(
+            "VSPAERO wake convergence history is unavailable at {}: {error}",
+            path.display()
+        )
+    })?;
+    assess_vspaero_wake_history_text(&text)
+}
+
+fn assess_vspaero_wake_history_text(text: &str) -> Result<(), String> {
+    let mut cases: Vec<Vec<[f64; 3]>> = Vec::new();
+    let mut current: Option<Vec<[f64; 3]>> = None;
+    let mut columns: Option<[usize; 3]> = None;
+
+    let finish_case = |current: &mut Option<Vec<[f64; 3]>>, cases: &mut Vec<Vec<[f64; 3]>>| {
+        if let Some(rows) = current.take() {
+            if !rows.is_empty() {
+                cases.push(rows);
+            }
+        }
+    };
+
+    for line in text.lines() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("Solver Case:") {
+            finish_case(&mut current, &mut cases);
+            current = Some(Vec::new());
+            columns = None;
+            continue;
+        }
+        if trimmed.starts_with("Iter ") || trimmed == "Iter" {
+            let headers = trimmed.split_whitespace().collect::<Vec<_>>();
+            let required = ["CLtot", "CDi", "CMytot"];
+            let Some(indices) = required
+                .map(|name| headers.iter().position(|header| *header == name))
+                .into_iter()
+                .collect::<Option<Vec<_>>>()
+                .and_then(|indices| indices.try_into().ok())
+            else {
+                return Err("VSPAERO wake history is missing CLtot/CDi/CMytot columns".to_owned());
+            };
+            columns = Some(indices);
+            if current.is_none() {
+                current = Some(Vec::new());
+            }
+            continue;
+        }
+        let Some(indices) = columns else {
+            continue;
+        };
+        let fields = trimmed.split_whitespace().collect::<Vec<_>>();
+        if fields
+            .first()
+            .and_then(|value| value.parse::<usize>().ok())
+            .is_none()
+        {
+            continue;
+        }
+        let mut row = [0.0; 3];
+        for (slot, &index) in indices.iter().enumerate() {
+            let Some(token) = fields.get(index) else {
+                return Err("VSPAERO wake history contains a truncated iteration row".to_owned());
+            };
+            row[slot] = token.parse::<f64>().map_err(|_| {
+                format!("VSPAERO wake history contains a malformed coefficient '{token}'")
+            })?;
+            if !row[slot].is_finite() {
+                return Err("VSPAERO wake history contains a non-finite coefficient".to_owned());
+            }
+        }
+        current.get_or_insert_with(Vec::new).push(row);
+    }
+    finish_case(&mut current, &mut cases);
+    if cases.is_empty() {
+        return Err("VSPAERO wake history contains no iteration cases".to_owned());
+    }
+    for (case_index, rows) in cases.iter().enumerate() {
+        let Some([previous, final_row]) = rows
+            .len()
+            .checked_sub(2)
+            .map(|index| [rows[index], rows[index + 1]])
+        else {
+            return Err(format!(
+                "VSPAERO wake history case {} has fewer than two iterations",
+                case_index + 1
+            ));
+        };
+        let change = previous
+            .iter()
+            .zip(final_row)
+            .map(|(left, right)| (right - left).abs())
+            .fold(0.0, f64::max);
+        if change > VSPAERO_WAKE_COEFFICIENT_TOLERANCE {
+            return Err(format!(
+                "VSPAERO wake case {} is not converged: final coefficient change {change:.6e} exceeds {:.6e}",
+                case_index + 1,
+                VSPAERO_WAKE_COEFFICIENT_TOLERANCE
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// Classify which parsed VSPAERO quantities share the report's references,
@@ -309,15 +432,15 @@ pub fn classify_vspaero_comparison(
     if polar.model != VspaeroModel::ALAS_VLM {
         mismatches.push("solver method, geometry scope, or coefficient frames differ".to_owned());
     }
-    if polar.points.len() != report.polar.alpha_deg.len() {
+    let geometric_alpha_deg = report.polar.geometric_alpha_deg.clone();
+    if polar.points.len() != geometric_alpha_deg.len() {
         mismatches.push(format!(
             "alpha schedule has {} points instead of {}",
             polar.points.len(),
-            report.polar.alpha_deg.len()
+            geometric_alpha_deg.len()
         ));
     } else {
-        for (index, (point, &alpha)) in polar.points.iter().zip(&report.polar.alpha_deg).enumerate()
-        {
+        for (index, (point, &alpha)) in polar.points.iter().zip(&geometric_alpha_deg).enumerate() {
             if !close(point.alpha_deg, alpha) {
                 mismatches.push(format!(
                     "alpha[{index}] {:.12} != {alpha:.12}",
@@ -371,5 +494,43 @@ mod tests {
             VspaeroAnalysisStatus::CompletedComparable.as_str(),
             "completed_comparable"
         );
+    }
+
+    fn history(rows: &str) -> String {
+        format!("Solver Case: 1\n  Iter Mach AoA Beta CLo CLi CLtot CDo CDi CDtot CMytot\n{rows}")
+    }
+
+    #[test]
+    fn wake_history_rejects_a_final_change_above_the_coefficient_gate() {
+        let text = history(
+            "  4 0.8 3 0 0 0 0.50 0 0.020 0 0.010\n\
+             5 0.8 3 0 0 0 0.504 0 0.0204 0 0.011\n",
+        );
+        let error = match assess_vspaero_wake_history_text(&text) {
+            Err(error) => error,
+            Ok(_) => panic!("the fifth iteration is still changing"),
+        };
+        assert!(error.contains("case 1 is not converged"), "{error}");
+    }
+
+    #[test]
+    fn wake_history_accepts_all_cases_when_final_coefficients_are_stable() {
+        let text = format!(
+            "{}\nSolver Case: 2\n  Iter Mach AoA Beta CLo CLi CLtot CDo CDi CDtot CMytot\n  1 0.8 3 0 0 0 0.50 0 0.020 0 0.010\n  2 0.8 3 0 0 0 0.50001 0 0.02001 0 0.01001\n",
+            history(
+                "  1 0.8 3 0 0 0 0.50 0 0.020 0 0.010\n\
+                 2 0.8 3 0 0 0 0.50001 0 0.02001 0 0.01001\n",
+            )
+        );
+        assert!(assess_vspaero_wake_history_text(&text).is_ok());
+    }
+
+    #[test]
+    fn wake_history_requires_a_fresh_iteration_table() {
+        let error = match assess_vspaero_wake_history_text("Solver Case: 1\n") {
+            Err(error) => error,
+            Ok(_) => panic!("a headerless history is not convergence evidence"),
+        };
+        assert!(error.contains("no iteration cases"), "{error}");
     }
 }

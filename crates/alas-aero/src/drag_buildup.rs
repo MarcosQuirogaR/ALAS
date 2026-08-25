@@ -171,7 +171,11 @@ pub fn evaluate(
         .iter()
         .map(|wing| components::compressibility_drag_wing(freestream, wing))
         .collect();
-    let compressible_total = components::compressibility_drag_total(&compressible_wings);
+    let compressible_total = if settings.area_weighted_compressibility {
+        components::compressibility_drag_total(vehicle, &compressible_wings)
+    } else {
+        components::compressibility_drag_total_unweighted(&compressible_wings)
+    };
 
     let miscellaneous = components::miscellaneous_drag_aircraft_esdu(vehicle);
 
@@ -269,6 +273,8 @@ mod tests {
         assert_eq!(settings.fuselage_parasite_drag_form_factor, 2.3);
         assert_eq!(settings.trim_drag_correction_factor, 1.02);
         assert_eq!(settings.viscous_lift_dependent_drag_factor, 0.38);
+        assert!(settings.area_weighted_compressibility);
+        assert!(!DragSettings::reference_compatibility().area_weighted_compressibility);
     }
 
     #[test]

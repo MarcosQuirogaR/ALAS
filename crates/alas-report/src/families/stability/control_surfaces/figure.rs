@@ -63,7 +63,7 @@ pub fn figure_control_surfaces(
         .draw_frame_with_labels(&mut scene, pal, "Span Y [m]", "Longitudinal X [m]");
 
     let mut legend: Vec<(String, Color)> = Vec::new();
-    let wing_semi = wing.span() / 2.0;
+    let wing_semi = wing.projected_span() / 2.0;
     draw_top_patch(
         &mut scene,
         &top_axes,
@@ -118,7 +118,7 @@ pub fn figure_control_surfaces(
         wing.symmetric,
     );
     if let Some(hstab) = hstab {
-        let hstab_semi = hstab.span() / 2.0;
+        let hstab_semi = hstab.projected_span() / 2.0;
         draw_top_patch(
             &mut scene,
             &top_axes,

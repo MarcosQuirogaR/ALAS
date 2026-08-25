@@ -28,18 +28,19 @@ pub fn figure_matching_chart(
     config: &AlasConfig,
     theme: Option<&str>,
 ) -> Scene {
-    let Some(wing) = report
+    if report
         .airplane
         .wings
         .first()
         .filter(|wing| wing.xsecs.len() >= 2)
-    else {
+        .is_none()
+    {
         return status_message_scene(
             "Matching Chart",
             "The analyzed report has no main wing; matching constraints cannot be computed.",
             theme,
         );
-    };
+    }
     let departure = match resolve_airport(&config.departure_airport) {
         Ok(airport) => airport,
         Err(_) => {
@@ -67,7 +68,7 @@ pub fn figure_matching_chart(
         .geometry_summary
         .get("wing_area_m2")
         .copied()
-        .unwrap_or_else(|| wing.area());
+        .unwrap_or(report.airplane.s_ref);
     let n_engines = config.geometry.engine.spanwise_positions_m.len() as i64;
     let oei_gradient = far25_oei_gradient(n_engines).unwrap_or(performance.oei_gradient);
     let tw_design = static_thrust_to_weight(config, 0.30);

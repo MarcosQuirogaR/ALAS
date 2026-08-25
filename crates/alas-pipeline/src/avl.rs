@@ -88,8 +88,12 @@ pub struct AvlComparisonReference {
     pub mach: f64,
     /// Geopotential altitude used by the ALAS atmosphere, in meters.
     pub altitude_m: f64,
-    /// ALAS VLM polar evaluated on the exact alpha schedule sent to AVL.
+    /// ALAS VLM polar whose coefficient rows correspond to the schedule below;
+    /// its public `alpha_deg` axis is the reporting/display axis.
     pub vlm_polar: PolarSweep,
+    /// Geometric alpha values actually sent to AVL. `vlm_polar.alpha_deg`
+    /// remains the display/reporting axis after its PG relabeling.
+    pub geometric_alpha_deg: Vec<f64>,
 }
 
 /// Files, parsed output, and status from one native AVL stage.
@@ -141,6 +145,7 @@ pub fn run_avl_analysis(
         mach: config.requirements.cruise_mach,
         altitude_m: config.requirements.cruise_altitude_m,
         vlm_polar: report.polar.clone(),
+        geometric_alpha_deg: report.polar.geometric_alpha_deg.clone(),
     };
     run_avl_analysis_with_reference(
         report,
@@ -238,7 +243,7 @@ fn run_avl_analysis_with_reference(
     let process = run_avl(
         executable,
         &geometry_path,
-        &reference.vlm_polar.alpha_deg,
+        &reference.geometric_alpha_deg,
         timeout_seconds,
     );
     result.session_path = process.session_path;
@@ -348,17 +353,17 @@ pub fn classify_avl_comparison(
     if polar.model != AvlModel::ALAS_LIFTING_SURFACES {
         mismatches.push("AVL geometry scope or coefficient frames differ".to_owned());
     }
-    if polar.points.len() != reference.vlm_polar.alpha_deg.len() {
+    if polar.points.len() != reference.geometric_alpha_deg.len() {
         mismatches.push(format!(
             "alpha schedule has {} points instead of {}",
             polar.points.len(),
-            reference.vlm_polar.alpha_deg.len()
+            reference.geometric_alpha_deg.len()
         ));
     } else {
         for (index, (point, &alpha)) in polar
             .points
             .iter()
-            .zip(&reference.vlm_polar.alpha_deg)
+            .zip(&reference.geometric_alpha_deg)
             .enumerate()
         {
             if !close(point.alpha_deg, alpha) {
@@ -429,11 +434,13 @@ fn takeoff_comparison_reference(
     )
     .run_sweep(mach, altitude_m)
     .map_err(|error| format!("takeoff-condition ALAS VLM sweep failed: {error}"))?;
+    let geometric_alpha_deg = vlm_polar.geometric_alpha_deg.clone();
     Ok(AvlComparisonReference {
         phase: "takeoff climb midpoint".to_owned(),
         mach,
         altitude_m,
         vlm_polar,
+        geometric_alpha_deg,
     })
 }
 

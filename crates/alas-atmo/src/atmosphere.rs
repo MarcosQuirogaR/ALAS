@@ -90,6 +90,70 @@ pub enum DensityAltitudeError {
     ExactNotImplemented,
 }
 
+/// Why a checked atmosphere construction was rejected.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum AtmosphereError {
+    /// Altitude or temperature deviation was not finite.
+    NonFiniteInput {
+        /// Geopotential altitude supplied by the caller.
+        altitude_m: f64,
+        /// Temperature offset supplied by the caller.
+        temperature_deviation_k: f64,
+    },
+    /// The requested altitude lies outside the checked physical atmosphere
+    /// band. The legacy differentiable fan extends farther for optimizer
+    /// robustness, but those values are not admitted at product boundaries.
+    AltitudeOutsideModel {
+        /// Requested geopotential altitude in metres.
+        altitude_m: f64,
+        /// Lowest altitude admitted by the checked physical model, in metres.
+        min_m: f64,
+        /// Highest altitude admitted by the checked physical model, in metres.
+        max_m: f64,
+    },
+    /// The resulting thermodynamic state is not physically usable.
+    NonPhysicalState {
+        /// Temperature in kelvin.
+        temperature_k: f64,
+        /// Pressure in pascals.
+        pressure_pa: f64,
+        /// Density in kg/m^3.
+        density_kg_m3: f64,
+    },
+}
+
+impl std::fmt::Display for AtmosphereError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NonFiniteInput {
+                altitude_m,
+                temperature_deviation_k,
+            } => write!(
+                f,
+                "atmosphere inputs must be finite (altitude={altitude_m:?}, temperature deviation={temperature_deviation_k:?})"
+            ),
+            Self::AltitudeOutsideModel {
+                altitude_m,
+                min_m,
+                max_m,
+            } => write!(
+                f,
+                "altitude {altitude_m} m lies outside the checked physical atmosphere band [{min_m}, {max_m}] m"
+            ),
+            Self::NonPhysicalState {
+                temperature_k,
+                pressure_pa,
+                density_kg_m3,
+            } => write!(
+                f,
+                "atmosphere returned a nonphysical state (T={temperature_k:?} K, p={pressure_pa:?} Pa, rho={density_kg_m3:?} kg/m^3)"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for AtmosphereError {}
+
 impl std::fmt::Display for DensityAltitudeError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -140,10 +204,28 @@ impl Atmosphere {
         }
     }
 
+    /// Construct an atmosphere after checking the model domain and state.
+    ///
+    /// [`Self::new`] remains infallible for reference-fixture compatibility;
+    /// new product/configuration boundaries should use this checked entry
+    /// point so invalid finite inputs cannot enter a physics solve.
+    pub fn try_new(altitude_m: f64) -> Result<Self, AtmosphereError> {
+        let atmosphere = Self::new(altitude_m);
+        atmosphere.validate()?;
+        Ok(atmosphere)
+    }
+
     /// A new atmosphere at `altitude_m` under the closed-form ISA,
     /// reproducing `Atmosphere(altitude=..., method="isa")`.
     pub fn isa(altitude_m: f64) -> Self {
         Self::new(altitude_m).with_method(Method::Isa)
+    }
+
+    /// Construct a checked closed-form ISA atmosphere.
+    pub fn try_isa(altitude_m: f64) -> Result<Self, AtmosphereError> {
+        let atmosphere = Self::isa(altitude_m);
+        atmosphere.validate()?;
+        Ok(atmosphere)
     }
 
     /// This atmosphere evaluated under `method` instead.
@@ -157,6 +239,62 @@ impl Atmosphere {
             temperature_deviation_k,
             ..self
         }
+    }
+
+    /// Apply a temperature deviation and reject non-finite/nonphysical state.
+    pub fn try_with_temperature_deviation(
+        self,
+        temperature_deviation_k: f64,
+    ) -> Result<Self, AtmosphereError> {
+        let atmosphere = self.with_temperature_deviation(temperature_deviation_k);
+        atmosphere.validate()?;
+        Ok(atmosphere)
+    }
+
+    /// Validate all primitive properties used by downstream Mach/Reynolds
+    /// and force calculations.
+    pub fn validate(&self) -> Result<(), AtmosphereError> {
+        if !self.altitude_m.is_finite() || !self.temperature_deviation_k.is_finite() {
+            return Err(AtmosphereError::NonFiniteInput {
+                altitude_m: self.altitude_m,
+                temperature_deviation_k: self.temperature_deviation_k,
+            });
+        }
+        // Keep the broad differentiable fan available through `new` for
+        // frozen reference/optimizer behavior, but make checked construction
+        // use the tabulated physical-atmosphere band shared by the mission
+        // model and the ISA layer table.
+        const MIN_PHYSICAL_ALTITUDE_M: f64 = -2_000.0;
+        const MAX_PHYSICAL_ALTITUDE_M: f64 = 84_852.0;
+        let min_m = MIN_PHYSICAL_ALTITUDE_M;
+        let max_m = MAX_PHYSICAL_ALTITUDE_M;
+        if self.altitude_m < min_m || self.altitude_m > max_m {
+            return Err(AtmosphereError::AltitudeOutsideModel {
+                altitude_m: self.altitude_m,
+                min_m,
+                max_m,
+            });
+        }
+        let pressure_pa = self.pressure();
+        let temperature_k = self.temperature();
+        let density_kg_m3 = self.density();
+        if !pressure_pa.is_finite()
+            || pressure_pa <= 0.0
+            || !temperature_k.is_finite()
+            || temperature_k <= 0.0
+            || !density_kg_m3.is_finite()
+            || density_kg_m3 <= 0.0
+            || !self.speed_of_sound().is_finite()
+            || !self.dynamic_viscosity().is_finite()
+            || self.dynamic_viscosity() <= 0.0
+        {
+            return Err(AtmosphereError::NonPhysicalState {
+                temperature_k,
+                pressure_pa,
+                density_kg_m3,
+            });
+        }
+        Ok(())
     }
 
     /// Pressure, in pascals.
@@ -355,5 +493,30 @@ mod tests {
         let atmo = Atmosphere::default();
         assert_eq!(atmo.altitude_m, 0.0);
         assert_eq!(atmo.temperature_deviation_k, 0.0);
+    }
+
+    #[test]
+    fn checked_construction_rejects_nonphysical_temperature_and_nonfinite_inputs() {
+        assert!(matches!(
+            Atmosphere::try_new(0.0).and_then(|atmo| atmo.try_with_temperature_deviation(-400.0)),
+            Err(AtmosphereError::NonPhysicalState { .. })
+        ));
+        assert!(matches!(
+            Atmosphere::try_new(f64::NAN),
+            Err(AtmosphereError::NonFiniteInput { .. })
+        ));
+        assert!(matches!(
+            Atmosphere::try_new(-10_000_000.0),
+            Err(AtmosphereError::AltitudeOutsideModel { .. })
+        ));
+        assert!(Atmosphere::try_new(84_852.0).is_ok());
+        assert!(matches!(
+            Atmosphere::try_new(84_853.0),
+            Err(AtmosphereError::AltitudeOutsideModel { .. })
+        ));
+        assert!(matches!(
+            Atmosphere::try_isa(f64::INFINITY),
+            Err(AtmosphereError::NonFiniteInput { .. })
+        ));
     }
 }

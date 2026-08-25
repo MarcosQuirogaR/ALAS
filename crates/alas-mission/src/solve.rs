@@ -125,14 +125,19 @@ pub fn converge_root(
     segment.unpack_unknowns(&solution.x);
     segment.iterate(analyses);
 
-    let converged = solution.status.is_converged();
+    let throttle_within_available_envelope =
+        !analyses.enforce_throttle_envelope
+            || segment.conditions.throttle.iter().all(|throttle| {
+                throttle.is_finite() && *throttle >= 0.0 && *throttle <= 1.0 + 1.0e-6
+            });
+    let converged = solution.status.is_converged() && throttle_within_available_envelope;
     segment.numerics.converged = Some(converged);
     if !converged {
         tracing::warn!(
             segment = %segment.spec.tag,
             status = ?solution.status,
             evaluations = solution.evaluations,
-            "segment did not converge"
+            "segment did not converge within the solver and propulsion envelopes"
         );
     }
 

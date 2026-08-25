@@ -15,6 +15,7 @@ path = "src/main.rs"
 alas-types = { path = "../alas-types" }
 alas-config = { path = "../alas-config" }
 alas-gui = { path = "../alas-gui" }
+alas-report = { path = "../alas-report" }
 alas-pipeline = { path = "../alas-pipeline" }
 alas-aero = { path = "../alas-aero" }
 alas-mission = { path = "../alas-mission" }

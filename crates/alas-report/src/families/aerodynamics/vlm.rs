@@ -125,13 +125,7 @@ pub fn figure_span_loading(report: &AnalysisReport, theme: Option<&str>) -> Scen
     if points.is_empty() {
         return status(theme, "VLM span loading unavailable");
     }
-    let span = report
-        .airplane
-        .wings
-        .first()
-        .map(|w| w.span())
-        .unwrap_or(1.0)
-        .max(1e-9);
+    let span = report.airplane.b_ref.max(1e-9);
     let semi = span * 0.5;
     let root = 4.0 * (total_wing_lift * 0.5) / (std::f64::consts::PI * semi);
     let elliptical = points

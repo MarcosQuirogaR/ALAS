@@ -187,6 +187,7 @@ fn render_run_and_routing(
     }
 }
 
+// The field-specific controls stay explicit so each phase card preserves its layout and edit wiring.
 #[allow(clippy::too_many_arguments)]
 fn render_field_card(
     ui: &mut Ui,
@@ -218,6 +219,7 @@ fn render_field_card(
     });
 }
 
+// The profile renderer receives independent phase controls to keep routing and values synchronized.
 #[allow(clippy::too_many_arguments)]
 fn render_flight_profile(
     ui: &mut Ui,
@@ -399,6 +401,7 @@ fn profile_sections(cruise_count: usize, descent_count: usize) -> Vec<PhaseSecti
     sections
 }
 
+// The phase card's inputs are intentionally separate to keep the repeated form sections readable.
 #[allow(clippy::too_many_arguments)]
 fn render_phase_card(
     ui: &mut Ui,

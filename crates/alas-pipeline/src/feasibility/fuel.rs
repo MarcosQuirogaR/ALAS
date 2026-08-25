@@ -213,7 +213,9 @@ pub(crate) fn assess_mission_fuel(
     }
 }
 
-pub(crate) fn assess_fuel_capacity(
+/// Assess usable fuel capacity with explicit provenance for downstream
+/// performance figures and feasibility consumers.
+pub fn assess_fuel_capacity(
     config: &AlasConfig,
     design: &DesignVector,
     report: &AnalysisReport,

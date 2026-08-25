@@ -65,6 +65,23 @@ impl OptimizationHistory {
         self.reject_reason.push(reason.into());
     }
 
+    /// Append another evaluation trace while preserving its evaluation order.
+    ///
+    /// The native differential-evolution objective uses this when worker
+    /// threads evaluate disjoint candidate batches. Keeping the merge here
+    /// makes it impossible to append only part of the parallel history.
+    pub(crate) fn append(&mut self, mut other: Self) {
+        self.design_vectors.append(&mut other.design_vectors);
+        self.valid.append(&mut other.valid);
+        self.cost.append(&mut other.cost);
+        self.l_over_d.append(&mut other.l_over_d);
+        self.span_m.append(&mut other.span_m);
+        self.alpha_deg.append(&mut other.alpha_deg);
+        self.area_m2.append(&mut other.area_m2);
+        self.trim_ih_deg.append(&mut other.trim_ih_deg);
+        self.reject_reason.append(&mut other.reject_reason);
+    }
+
     /// Number of total evaluations recorded.
     pub fn n_evaluations(&self) -> usize {
         self.cost.len()

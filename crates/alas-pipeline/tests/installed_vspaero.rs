@@ -61,13 +61,13 @@ fn installed_product_path_generates_parses_and_classifies_vspaero() {
         .unwrap_or_else(|| panic!("pipeline did not publish VSPAERO status"));
     assert_eq!(
         result.status,
-        VspaeroAnalysisStatus::CompletedComparable,
+        VspaeroAnalysisStatus::CompletedNotComparable,
         "{:?}",
         result.error
     );
     assert!(matches!(
-        result.comparison,
-        VspaeroComparisonStatus::Compatible(_)
+        &result.comparison,
+        VspaeroComparisonStatus::Rejected(reason) if reason.contains("not converged")
     ));
     let polar = result
         .polar
@@ -100,7 +100,8 @@ fn installed_product_path_generates_parses_and_classifies_vspaero() {
     let summary = json!({
         "runtime": "OpenVSP 3.51.2 / VSPAERO 7.2.2",
         "status": result.status.as_str(),
-        "comparison": "CL(alpha) and Cm(alpha) share lifting-surface geometry, SI references, moment origin, frames, Mach, beta, and alpha schedule",
+        "comparison": "not admitted: the fresh wake history must pass the final-iteration coefficient gate before CL/Cm overlay",
+        "comparison_reason": result.error,
         "not_compared": "VSPAERO drag is inviscid and is not overlaid on the ALAS hybrid total-drag panel",
         "runtime_executable": runtime_path,
         "geometry_path": artifact_path(&result.geometry_path),

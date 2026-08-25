@@ -102,17 +102,30 @@ pub fn compressibility_drag_wing(
     }
 }
 
-/// The wings' compressibility drag, summed.
+/// The wings' compressibility drag, reported on the aircraft reference area.
 ///
-/// Not area-weighted, unlike parasite drag: upstream adds each wing's
-/// coefficient straight into the total, so a tail's contribution is counted
-/// on the wing's reference area rather than its own. Reproduced.
-pub fn compressibility_drag_total(wings: &[WingCompressibilityDrag]) -> f64 {
-    let mut total = 0.0;
-    for wing in wings {
-        total += wing.compressibility_drag;
-    }
-    total
+/// [`compressibility_drag_wing`] returns each coefficient on that wing's own
+/// reference area.  A coefficient sum is therefore only valid when every
+/// wing uses the same area; tails do not.  Convert each term back to force
+/// (`q * S_wing * C_D,w`) and normalize the sum by the vehicle reference area
+/// so the result is a single aircraft-level coefficient.
+pub fn compressibility_drag_total(
+    vehicle: &DragVehicle<'_>,
+    wings: &[WingCompressibilityDrag],
+) -> f64 {
+    vehicle
+        .wings
+        .iter()
+        .zip(wings)
+        .map(|(wing, drag)| {
+            drag.compressibility_drag * wing.reference_area_m2 / vehicle.reference_area_m2
+        })
+        .sum()
+}
+
+/// Historical frozen-fixture aggregation before the area-reference fix.
+pub(super) fn compressibility_drag_total_unweighted(wings: &[WingCompressibilityDrag]) -> f64 {
+    wings.iter().map(|wing| wing.compressibility_drag).sum()
 }
 
 /// What the excrescence buildup reports.
@@ -211,6 +224,38 @@ mod tests {
         // zero here.
         let result = compressibility_drag_wing(&freestream(0.9), &wing(0.593, 0.12, 0.0));
         assert!(result.compressibility_drag > 0.0);
+    }
+
+    #[test]
+    fn compressibility_total_conserves_area_when_wings_use_different_references() {
+        let main = wing(0.593, 0.12, 0.63);
+        let tail = WingParams {
+            reference_area_m2: 100.0,
+            ..wing(0.593, 0.12, 0.63)
+        };
+        let wings = [main, tail];
+        let freestream = freestream(0.84);
+        let per_wing = wings
+            .iter()
+            .map(|wing| compressibility_drag_wing(&freestream, wing))
+            .collect::<Vec<_>>();
+        let vehicle = DragVehicle {
+            reference_area_m2: 529.0,
+            wings: &wings,
+            fuselages: &[],
+            nacelles: &[],
+            network_count: 1,
+        };
+
+        let expected = per_wing[0].compressibility_drag * main.reference_area_m2 / 529.0
+            + per_wing[1].compressibility_drag * tail.reference_area_m2 / 529.0;
+        let unweighted = per_wing
+            .iter()
+            .map(|drag| drag.compressibility_drag)
+            .sum::<f64>();
+
+        assert_eq!(compressibility_drag_total(&vehicle, &per_wing), expected);
+        assert_ne!(compressibility_drag_total(&vehicle, &per_wing), unweighted);
     }
 
     #[test]

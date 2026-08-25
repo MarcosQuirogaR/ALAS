@@ -16,18 +16,33 @@
 //! this follows: private code that gains a second crate as a consumer moves
 //! to `alas-math` rather than being copied.
 
-/// Solve `a * result = b` for a square `a` and a many-columned `b`, by
-/// Gaussian elimination with partial pivoting. The error is the elimination
-/// step that found no usable pivot.
-///
-/// General dense elimination, with no assumption of bandedness or a
-/// particular size -- the two conditions its first caller's collocation
-/// systems happened to satisfy, but which nothing in this implementation
-/// relies on.
-pub fn solve(a: &[Vec<f64>], b: &[Vec<f64>]) -> Result<Vec<Vec<f64>>, usize> {
+/// Diagnostics emitted by a dense elimination solve.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SolveDiagnostics {
+    /// Maximum absolute residual, `max_i |(A x - b)_i|`.
+    pub residual_norm: f64,
+    /// Residual normalized by `max(1, ||A||_infinity ||x||_infinity, ||b||_infinity)`.
+    pub normalized_residual: f64,
+    /// Pivot-ratio conditioning proxy (`max |pivot| / min |pivot|`).
+    ///
+    /// This is deliberately named a proxy: it is cheap enough for every VLM
+    /// solve, while a full singular-value condition number belongs to an
+    /// explicit mesh-study campaign.
+    pub pivot_ratio: f64,
+    /// Smallest absolute pivot encountered after partial pivoting.
+    pub minimum_pivot: f64,
+}
+
+/// Solve `a * result = b` and retain residual/conditioning evidence.
+pub fn solve_with_diagnostics(
+    a: &[Vec<f64>],
+    b: &[Vec<f64>],
+) -> Result<(Vec<Vec<f64>>, SolveDiagnostics), usize> {
     let n = a.len();
     let mut matrix: Vec<Vec<f64>> = a.to_vec();
     let mut rhs: Vec<Vec<f64>> = b.to_vec();
+    let mut max_pivot = 0.0_f64;
+    let mut min_pivot = f64::INFINITY;
 
     for column in 0..n {
         let pivot = (column..n)
@@ -44,6 +59,9 @@ pub fn solve(a: &[Vec<f64>], b: &[Vec<f64>]) -> Result<Vec<Vec<f64>>, usize> {
         let pivot_row = &eliminated[column];
         let pivot_rhs = &rhs_eliminated[column];
         let pivot_value = pivot_row[column];
+        let abs_pivot = pivot_value.abs();
+        max_pivot = max_pivot.max(abs_pivot);
+        min_pivot = min_pivot.min(abs_pivot);
 
         for (row, rhs_row) in remaining.iter_mut().zip(rhs_remaining.iter_mut()) {
             let factor = row[column] / pivot_value;
@@ -77,7 +95,60 @@ pub fn solve(a: &[Vec<f64>], b: &[Vec<f64>]) -> Result<Vec<Vec<f64>>, usize> {
         }
     }
 
-    Ok(rhs)
+    let max_a = a
+        .iter()
+        .map(|row| row.iter().map(|value| value.abs()).sum::<f64>())
+        .fold(0.0_f64, f64::max);
+    let max_x = rhs
+        .iter()
+        .flat_map(|row| row.iter().copied())
+        .map(f64::abs)
+        .fold(0.0_f64, f64::max);
+    let max_b = b
+        .iter()
+        .map(|row| row.iter().map(|value| value.abs()).sum::<f64>())
+        .fold(0.0_f64, f64::max);
+    let mut residual_norm = 0.0_f64;
+    for (row, rhs_row) in a.iter().zip(b) {
+        for column in 0..rhs_row.len() {
+            let predicted: f64 = row
+                .iter()
+                .zip(&rhs)
+                .map(|(coefficient, solution_row)| coefficient * solution_row[column])
+                .sum();
+            residual_norm = residual_norm.max((predicted - rhs_row[column]).abs());
+        }
+    }
+    let scale = (max_a * max_x).max(max_b).max(1.0);
+    let normalized_residual = residual_norm / scale;
+    let (minimum_pivot, pivot_ratio) = if n == 0 {
+        (0.0, 1.0)
+    } else if min_pivot > 0.0 {
+        (min_pivot, max_pivot / min_pivot)
+    } else {
+        (min_pivot, f64::INFINITY)
+    };
+    Ok((
+        rhs,
+        SolveDiagnostics {
+            residual_norm,
+            normalized_residual,
+            pivot_ratio,
+            minimum_pivot,
+        },
+    ))
+}
+
+/// Solve `a * result = b` for a square `a` and a many-columned `b`, by
+/// Gaussian elimination with partial pivoting. The error is the elimination
+/// step that found no usable pivot.
+///
+/// General dense elimination, with no assumption of bandedness or a
+/// particular size -- the two conditions its first caller's collocation
+/// systems happened to satisfy, but which nothing in this implementation
+/// relies on.
+pub fn solve(a: &[Vec<f64>], b: &[Vec<f64>]) -> Result<Vec<Vec<f64>>, usize> {
+    solve_with_diagnostics(a, b).map(|(solution, _)| solution)
 }
 
 // A test asserts on values it constructed here directly, so a failed unwrap
@@ -122,5 +193,15 @@ mod tests {
         let singular = vec![vec![1.0, 2.0], vec![2.0, 4.0]];
         let b = vec![vec![1.0], vec![2.0]];
         assert_eq!(solve(&singular, &b), Err(1));
+    }
+
+    #[test]
+    fn diagnostics_report_a_small_residual_and_pivot_condition_proxy() {
+        let a = vec![vec![2.0, 1.0], vec![1.0, -1.0]];
+        let b = vec![vec![5.0], vec![1.0]];
+        let (_, diagnostics) = solve_with_diagnostics(&a, &b).expect("nonsingular");
+        assert!(diagnostics.normalized_residual < 1.0e-14);
+        assert!(diagnostics.pivot_ratio.is_finite());
+        assert!(diagnostics.minimum_pivot > 0.0);
     }
 }

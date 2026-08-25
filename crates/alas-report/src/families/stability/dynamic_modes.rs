@@ -23,6 +23,7 @@
 use alas_aero::operating_point::OperatingPoint;
 use alas_atmo::Atmosphere;
 use alas_config::AlasConfig;
+use alas_geom::aircraft::airplane::Airplane;
 use alas_pipeline::full_analysis::AnalysisReport;
 use alas_stab::dynamics::{self, DynamicMode, DynamicModes};
 use alas_stab::modes::MassProperties;
@@ -45,6 +46,93 @@ const MODE_STYLE: [(&str, &str, &str); 5] = [
     ("spiral", "Spiral", "#9467bd"),
 ];
 
+/// Inputs shared by the trimmed dynamic-mode solve and its renderer.
+///
+/// Keeping this preparation separate makes it explicit that the derivatives
+/// and the closed-form mode equations consume the same trimmed aircraft,
+/// operating point, and mass closure. In particular, `Airplane::xyz_ref` is
+/// the moment reference used by the VLM derivative solve and therefore must be
+/// the report's physical CG, not a stale geometry seed.
+struct PreparedDynamicState {
+    plane: Airplane,
+    op_point: OperatingPoint,
+    mass_props: MassProperties,
+    alpha_deg: f64,
+}
+
+fn prepare_trimmed_dynamic_state(
+    report: &AnalysisReport,
+    config: &AlasConfig,
+) -> Option<PreparedDynamicState> {
+    let trimmed = report.trimmed_design_point?;
+    if !trimmed.geometric_body_alpha_deg.is_finite()
+        || !trimmed.trim_ih_deg.is_finite()
+        || !trimmed.cm_residual.is_finite()
+        || trimmed.cm_residual.abs() > 1.0e-3
+        || report.physical_cg.iter().any(|value| !value.is_finite())
+    {
+        return None;
+    }
+
+    let mass_kg = report
+        .component_masses
+        .values()
+        .try_fold(0.0, |total, &component_mass| {
+            (component_mass.is_finite() && component_mass >= 0.0).then_some(total + component_mass)
+        })?;
+    if !mass_kg.is_finite() || mass_kg <= 0.0 {
+        return None;
+    }
+
+    let mut plane = report.airplane.clone();
+    if plane.wings.is_empty() || plane.fuselages.is_empty() {
+        return None;
+    }
+    // The report plane is normally anchored to this point by FullAnalysis,
+    // but hand-built reports and legacy callers can still carry a stale seed.
+    // Dynamic rate derivatives must use the same physical reference as trim.
+    plane.xyz_ref = report.physical_cg;
+    for wing in plane
+        .wings
+        .iter_mut()
+        .filter(|wing| wing.name == "Horizontal Stabilizer")
+    {
+        for section in &mut wing.xsecs {
+            section.twist = trimmed.trim_ih_deg;
+        }
+    }
+
+    let req = &config.requirements;
+    let atmo = Atmosphere::new(req.cruise_altitude_m);
+    let velocity = req.cruise_mach * atmo.speed_of_sound();
+    if !velocity.is_finite() || velocity <= 0.0 {
+        return None;
+    }
+    let op_point = OperatingPoint::new(
+        atmo,
+        velocity,
+        trimmed.geometric_body_alpha_deg,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+    );
+    let (ixx, iyy, izz) = dynamics::estimate_inertia(&plane, mass_kg);
+    let mass_props = MassProperties {
+        mass: mass_kg,
+        ixx,
+        iyy,
+        izz,
+    };
+
+    Some(PreparedDynamicState {
+        plane,
+        op_point,
+        mass_props,
+        alpha_deg: trimmed.geometric_body_alpha_deg,
+    })
+}
+
 /// Generate dynamic stability eigenvalues / mode poles in the complex s-plane
 /// -- `figure_dynamic_modes`.
 pub fn figure_dynamic_modes(
@@ -53,38 +141,24 @@ pub fn figure_dynamic_modes(
     theme: Option<&str>,
 ) -> Scene {
     let pal = get_palette(theme);
-    let plane = &report.airplane;
-
-    if plane.wings.is_empty() || plane.fuselages.is_empty() {
+    if report.airplane.wings.is_empty() || report.airplane.fuselages.is_empty() {
         return super::status_scene(
             "Dynamic Stability Modes",
             "No wing/fuselage geometry available.",
             pal,
         );
     }
-
-    let req = &config.requirements;
-    let atmo = Atmosphere::new(req.cruise_altitude_m);
-    let v = req.cruise_mach * atmo.speed_of_sound();
-    let alpha = report
-        .trimmed_design_point
-        .map_or(report.design_point.alpha_deg, |dp| dp.alpha_deg);
-    let op_point = OperatingPoint::new(atmo, v, alpha, 0.0, 0.0, 0.0, 0.0);
-
-    // native aerodynamic model's `MassProperties` also carries `x_cg`; `alas-stab::modes`'s
-    // port has no such field because `get_modes` never reads it (see that
-    // crate's module doc), so there is nothing to compute here.
-    let mass_kg: f64 = report.component_masses.values().map(|&m| m.max(0.0)).sum();
-    let (ixx, iyy, izz) = dynamics::estimate_inertia(plane, mass_kg);
-    let mass_props = MassProperties {
-        mass: mass_kg,
-        ixx,
-        iyy,
-        izz,
+    let Some(state) = prepare_trimmed_dynamic_state(report, config) else {
+        return super::status_scene(
+            "Dynamic Stability Modes",
+            "A valid trimmed cruise state is unavailable; dynamic modes were not evaluated.",
+            pal,
+        );
     };
+    let plane = &state.plane;
 
-    match dynamics::compute_dynamic_modes(plane, &op_point, &mass_props) {
-        Ok(modes) => render(&modes, alpha, pal),
+    match dynamics::compute_dynamic_modes(plane, &state.op_point, &state.mass_props) {
+        Ok(modes) => render(&modes, state.alpha_deg, pal),
         Err(err) => super::status_scene(
             "Dynamic Stability Modes",
             &format!("Dynamic-mode analysis did not converge: {err}"),
@@ -314,6 +388,59 @@ mod tests {
             .title
             .as_deref()
             .is_some_and(|t| t.contains("Dynamic Stability")));
+    }
+
+    #[test]
+    fn prepared_state_matches_trimmed_geometry_and_physical_mass_reference() -> Result<(), String> {
+        let airplane = probe_airplane(true, false);
+        let original_twist = airplane
+            .wings
+            .iter()
+            .find(|wing| wing.name == "Horizontal Stabilizer")
+            .and_then(|wing| wing.xsecs.first())
+            .map(|section| section.twist)
+            .ok_or_else(|| "probe has a horizontal stabilizer".to_owned())?;
+        let original_reference = airplane.xyz_ref;
+        let mut report = probe_report(airplane);
+        report.physical_cg = [6.25, 0.15, -0.08];
+        let trimmed = report
+            .trimmed_design_point
+            .as_mut()
+            .ok_or_else(|| "probe has a trimmed point".to_owned())?;
+        trimmed.geometric_body_alpha_deg = 3.75;
+        trimmed.trim_ih_deg = 4.5;
+
+        let state = prepare_trimmed_dynamic_state(&report, &AlasConfig::default())
+            .ok_or_else(|| "finite trimmed probe should prepare".to_owned())?;
+        assert_eq!(state.plane.xyz_ref, report.physical_cg);
+        assert_eq!(state.op_point.alpha, 3.75);
+        assert_eq!(state.mass_props.mass, 20_000.0);
+
+        let hstab = state
+            .plane
+            .wings
+            .iter()
+            .find(|wing| wing.name == "Horizontal Stabilizer")
+            .ok_or_else(|| "prepared plane keeps the horizontal stabilizer".to_owned())?;
+        assert!(hstab
+            .xsecs
+            .iter()
+            .all(|section| (section.twist - 4.5).abs() < f64::EPSILON));
+
+        // Preparation is on a clone: the report's untrimmed geometry and
+        // reference point remain untouched.
+        assert_eq!(report.airplane.xyz_ref, original_reference);
+        let source_hstab = report
+            .airplane
+            .wings
+            .iter()
+            .find(|wing| wing.name == "Horizontal Stabilizer")
+            .ok_or_else(|| "source plane keeps the horizontal stabilizer".to_owned())?;
+        assert!(source_hstab
+            .xsecs
+            .iter()
+            .all(|section| (section.twist - original_twist).abs() < f64::EPSILON));
+        Ok(())
     }
 
     #[test]

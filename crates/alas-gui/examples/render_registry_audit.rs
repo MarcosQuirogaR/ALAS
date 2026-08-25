@@ -256,9 +256,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     result.optimization_result = Some(OptimizationResult {
         best_design: result.optimized_design.unwrap_or_default(),
         best_cost: history.cost.last().copied().unwrap_or_default(),
+        best_valid: history.valid.last().copied().unwrap_or(false),
         history,
         wall_time_s: 1.0,
         method: "differential_evolution".to_owned(),
+        strategy: "best1bin".to_owned(),
         pareto_front: Vec::new(),
     });
     state.pipeline_result = Some(result);

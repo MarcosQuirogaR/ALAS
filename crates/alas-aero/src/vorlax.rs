@@ -102,6 +102,13 @@ pub fn run(
     settings: &VlmSettings,
     conditions: &[VlmCondition],
 ) -> Result<VlmResults, VlmError> {
+    if let Some(mach) = conditions
+        .iter()
+        .map(|condition| condition.mach)
+        .find(|&mach| !mach.is_finite() || !(0.0..1.0).contains(&mach))
+    {
+        return Err(VlmError::MachOutsideSubsonicDomain { mach });
+    }
     let vd = distribution::generate(geometry, settings)?;
     let angles = rhs::TangencyAngles::compute(&vd);
     let n = vd.n_cp;
@@ -120,6 +127,7 @@ pub fn run(
     }
 
     let mut cases: Vec<Option<VlmCaseResult>> = (0..conditions.len()).map(|_| None).collect();
+    let mut solve_diagnostics = Vec::with_capacity(groups.len());
 
     for (mach, members) in groups {
         let (influence, bound) = induced::compute(&vd, mach);
@@ -153,8 +161,16 @@ pub fn run(
         let right: Vec<Vec<f64>> = (0..n)
             .map(|row| terms.iter().map(|t| t.rhs[row]).collect())
             .collect();
-        let solved = alas_math::linalg::solve(&matrix, &right)
+        let (solved, diagnostics) = alas_math::linalg::solve_with_diagnostics(&matrix, &right)
             .map_err(|step| VlmError::SingularInfluenceMatrix { step })?;
+        if !diagnostics.residual_norm.is_finite()
+            || !diagnostics.normalized_residual.is_finite()
+            || !diagnostics.pivot_ratio.is_finite()
+            || !diagnostics.minimum_pivot.is_finite()
+        {
+            return Err(VlmError::NonFiniteNumericalDiagnostics);
+        }
+        solve_diagnostics.push(diagnostics);
 
         for (column, (&index, term)) in members.iter().zip(&terms).enumerate() {
             let gamma: Vec<f64> = (0..n).map(|row| solved[row][column]).collect();
@@ -176,6 +192,7 @@ pub fn run(
     Ok(VlmResults {
         distribution: vd,
         cases: cases.into_iter().flatten().collect(),
+        solve_diagnostics,
     })
 }
 
@@ -261,6 +278,8 @@ mod tests {
             &[level(-4.0), level(0.0), level(4.0), level(8.0)],
         )
         .expect("solves");
+        assert_eq!(results.solve_diagnostics.len(), 1);
+        assert!(results.solve_diagnostics[0].normalized_residual.is_finite());
         let lifts: Vec<f64> = results.cases.iter().map(|c| c.cl).collect();
         assert!(
             lifts[0] < 0.0,
@@ -340,5 +359,18 @@ mod tests {
         let results = run(&geometry, &VlmSettings::default(), &[still]).expect("solves");
         assert!(results.cases[0].cl.is_finite());
         assert!(results.cases[0].cl > 0.0);
+    }
+
+    #[test]
+    fn nonfinite_or_supersonic_mach_is_rejected_before_the_subsonic_kernel() {
+        let geometry = probe_geometry();
+        let settings = VlmSettings::default();
+        for mach in [1.0, -0.1, f64::NAN] {
+            let condition = VlmCondition { mach, ..level(0.0) };
+            assert!(matches!(
+                run(&geometry, &settings, &[condition]),
+                Err(VlmError::MachOutsideSubsonicDomain { .. })
+            ));
+        }
     }
 }

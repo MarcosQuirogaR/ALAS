@@ -354,6 +354,8 @@ fn decks(height_m: Option<f64>, diameter_m: f64) -> (Vec<DeckSpec>, DeckSpec) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::build::build_payload_layout;
+    use alas_config::AlasConfig;
     use alas_geom::aircraft::airfoil::Airfoil;
     use alas_geom::aircraft::airplane::Airplane;
     use alas_geom::aircraft::fuselage::{Fuselage, FuselageXSec, DEFAULT_SHAPE};
@@ -420,6 +422,18 @@ mod tests {
         assert_eq!(
             CabinGeometry::new(&bare, &GeometryConfig::default(), 0.15),
             Err(CabinGeometryError::NoFuselage)
+        );
+    }
+
+    #[test]
+    fn the_public_layout_entry_point_preserves_geometry_errors() {
+        let mut bare = plane(vec![xsec(0.0, 1.0), xsec(10.0, 2.0)]);
+        bare.fuselages.clear();
+
+        assert_eq!(
+            build_payload_layout(&bare, &AlasConfig::default(), 0.0, 0.0),
+            Err(CabinGeometryError::NoFuselage),
+            "layout construction must not turn a missing cabin into an empty payload"
         );
     }
 

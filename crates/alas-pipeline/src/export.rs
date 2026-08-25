@@ -69,6 +69,7 @@ pub fn report_to_database(report: &AnalysisReport, config: &AlasConfig) -> Desig
         "k_factor": report.polar_fit.k,
         "oswald_efficiency": report.polar_fit.oswald_e,
         "aspect_ratio": report.polar_fit.aspect_ratio,
+        "polar_fit_status": report.polar_fit.status.as_str(),
         "design_point": report.design_point,
         "static_margin": report.static_margin,
         "trimmed_design_point": report.trimmed_design_point,
@@ -335,6 +336,7 @@ pub fn format_summary(report: &AnalysisReport, config: Option<&AlasConfig>) -> S
         ),
         format!("  Physical CG X    : {:6.2} m", report.physical_cg[0]),
         "  ----------------------------------------------".to_owned(),
+        format!("  Polar fit status  : {}", pf.status.as_str()),
         format!("  CD0 (clean fit)  : {:7.5}", pf.cd0),
         format!("  k factor         : {:6.4}", pf.k),
         format!("  Oswald e         : {:6.3}", pf.oswald_e),
@@ -376,4 +378,70 @@ pub fn format_summary(report: &AnalysisReport, config: Option<&AlasConfig>) -> S
     ]);
 
     lines.join("\n")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::report_to_database;
+    use crate::full_analysis::{AnalysisReport, DesignPoint, PolarFit, PolarFitStatus};
+    use alas_aero::analysis::PolarSweep;
+    use alas_config::design_variables::DesignVector;
+    use alas_config::AlasConfig;
+    use alas_geom::aircraft::airplane::Airplane;
+    use std::collections::HashMap;
+
+    #[test]
+    fn polar_fit_fallback_status_survives_json_export() {
+        let report = AnalysisReport {
+            design: DesignVector::default(),
+            airplane: Airplane {
+                name: "export fixture".to_owned(),
+                xyz_ref: [0.0, 0.0, 0.0],
+                wings: Vec::new(),
+                fuselages: Vec::new(),
+                s_ref: 1.0,
+                c_ref: 1.0,
+                b_ref: 1.0,
+            },
+            polar: PolarSweep {
+                alpha_deg: Vec::new(),
+                geometric_alpha_deg: Vec::new(),
+                cl: Vec::new(),
+                cd: Vec::new(),
+                cd_induced: Vec::new(),
+                cd_wave: Vec::new(),
+                cd_parasite: Vec::new(),
+                cm: Vec::new(),
+                l_over_d: Vec::new(),
+            },
+            design_point: DesignPoint {
+                alpha_deg: 0.0,
+                cl: 0.0,
+                cd: 0.0,
+                l_over_d: 0.0,
+            },
+            polar_fit: PolarFit {
+                cd0: 0.02,
+                k: 0.04,
+                oswald_e: 1.0 / (std::f64::consts::PI * 10.0 * 0.04),
+                aspect_ratio: 10.0,
+                status: PolarFitStatus::FallbackInsufficientPoints,
+            },
+            static_margin: 0.0,
+            x_neutral_point: 0.0,
+            geometry_summary: HashMap::new(),
+            component_masses: HashMap::new(),
+            mass_coordinates: HashMap::new(),
+            physical_cg: [0.0, 0.0, 0.0],
+            payload_layout: None,
+            trimmed_design_point: None,
+            cg_envelope_ok: None,
+        };
+
+        let database = report_to_database(&report, &AlasConfig::default());
+        assert_eq!(
+            database.aerodynamics["polar_fit_status"],
+            "fallback_insufficient_points"
+        );
+    }
 }

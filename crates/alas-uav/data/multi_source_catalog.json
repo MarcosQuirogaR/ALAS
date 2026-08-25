@@ -560,6 +560,32 @@
       }
     },
     {
+      "id": "robart-121-retractable-tailwheel",
+      "manufacturer": "Robart Manufacturing",
+      "model": "#121 .60 Size Retractable Tailwheel",
+      "kind": "landing_gear",
+      "spec": {
+        "form": "retract_tailwheel",
+        "mass_kg": 0.0226796185,
+        "max_aircraft_mass_kg": 4.5359237,
+        "dimensions": {"length_m": 0.079375, "width_m": 0.0365125, "height_m": 0.0619125},
+        "nominal_voltage_v": null
+      },
+      "provenance": {
+        "publisher": "Robart Manufacturing",
+        "source_url": "https://robart.com/products/60-size-retractable-tailwheel",
+        "source_title": "#121 .60 Size Retractable Tailwheel",
+        "transformations": [
+          "the manufacturer page identifies product number 121 and a scale steerable mechanical retractable tailwheel for 5-10 lb aircraft; the 10 lb upper application limit was converted to 4.5359237 kg",
+          "the manufacturer-stated 0.8 oz unit mass was converted to 0.0226796185 kg",
+          "the manufacturer dimension drawing https://cdn.shopify.com/s/files/1/0339/0713/files/121.pdf?3638= labels the retracted assembly envelope as 3 1/8 in length, 1 7/16 in width, and 2 7/16 in height; each was converted to metres",
+          "dimensions are the explicitly drawn retracted tailwheel assembly envelope; no wheel, air-cylinder, or installation structure is added",
+          "the 5-10 lb aircraft range is retained as the published application rating, not a separately certified structural allowable",
+          "primary manufacturer page and dimension drawing reviewed on 2026-08-25"
+        ]
+      }
+    },
+    {
       "id": "sunnysky-x2212-v3-kv980",
       "manufacturer": "SunnySky",
       "model": "X2212 V3 KV980",

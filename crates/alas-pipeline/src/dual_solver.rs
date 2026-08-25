@@ -12,6 +12,7 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+use alas_aero::avl::{AvlPolar, AvlPolarPoint};
 use alas_config::design_variables::DesignVector;
 use alas_config::AlasConfig;
 use alas_exec::RunEnvironment;
@@ -242,7 +243,16 @@ fn run_vlm_optimizer(
         Err(error) => return SolverOptimizationResult::failed(SolverKind::Vlm, output_dir, error),
     };
     let mut optimizer = DesignOptimizer::new(effective_config.clone());
-    let optimization = optimizer.run(bounds, Some(&nominal), None);
+    let optimization = match optimizer.run(bounds, Some(&nominal), None) {
+        Ok(result) => result,
+        Err(error) => {
+            return SolverOptimizationResult::failed(
+                SolverKind::Vlm,
+                output_dir,
+                format!("VLM optimization failed: {error}"),
+            )
+        }
+    };
     let design = optimization.best_design;
     let report = match FullAnalysis::new(config).run(&design, true) {
         Ok(report) => report,
@@ -299,7 +309,17 @@ fn run_avl_optimizer(
         output_root.join("evaluations"),
     );
     let mut optimizer = DesignOptimizer::new(effective_config);
-    let optimization = optimizer.run_with_evaluator(bounds, Some(&nominal), &mut objective, None);
+    let optimization =
+        match optimizer.run_with_evaluator(bounds, Some(&nominal), &mut objective, None) {
+            Ok(result) => result,
+            Err(error) => {
+                return SolverOptimizationResult::failed(
+                    SolverKind::Avl,
+                    output_dir,
+                    format!("AVL optimization failed: {error}"),
+                )
+            }
+        };
     let design = optimization.best_design;
     let report = match FullAnalysis::new(config.clone()).run(&design, true) {
         Ok(report) => report,
@@ -432,23 +452,19 @@ impl AvlObjective {
         let Some(polar) = avl.comparable_polar() else {
             return ObjectiveEvaluation::rejected(self.failure_cost(), "avl_unavailable");
         };
-        let Some(point) = polar.points.iter().min_by(|left, right| {
-            (left.alpha_deg - report.design_point.alpha_deg)
-                .abs()
-                .total_cmp(&(right.alpha_deg - report.design_point.alpha_deg).abs())
-        }) else {
-            return ObjectiveEvaluation::rejected(self.failure_cost(), "avl_output");
+        let required_cl = FullAnalysis::new(self.config.clone()).cruise_cl(&report.airplane);
+        let Some(point) = interpolate_avl_at_lift(polar, required_cl) else {
+            return ObjectiveEvaluation::rejected(
+                self.failure_cost(),
+                "avl_required_lift_out_of_range",
+            );
         };
-        if !point.lift_coefficient.is_finite()
-            || !point.induced_drag_coefficient.is_finite()
-            || point.induced_drag_coefficient <= 0.0
-        {
+        if !point.induced_drag_coefficient.is_finite() || point.induced_drag_coefficient <= 0.0 {
             return ObjectiveEvaluation::rejected(self.failure_cost(), "avl_induced_drag");
         }
-        let induced_l_over_d = point.lift_coefficient / point.induced_drag_coefficient;
-        let lift_error = (point.lift_coefficient - report.design_point.cl).abs();
+        let induced_l_over_d = required_cl / point.induced_drag_coefficient;
         let moment_penalty = point.pitching_moment_coefficient.abs();
-        let cost = -induced_l_over_d + 100.0 * lift_error + 10.0 * moment_penalty + area_penalty;
+        let cost = -induced_l_over_d + 10.0 * moment_penalty + area_penalty;
         ObjectiveEvaluation {
             cost,
             valid: true,
@@ -466,6 +482,74 @@ impl AvlObjective {
     fn failure_cost(&self) -> f64 {
         self.config.optimizer.weights.failure_cost
     }
+}
+
+/// Interpolate the AVL polar at the required cruise lift coefficient.
+///
+/// The AVL branch is an induced-drag objective at a prescribed lift state; a
+/// nearest-alpha lookup changes that state whenever the alpha grid or design
+/// lift curve moves. Only a bracketed finite pair is admitted, so an AVL run
+/// that does not cover the required lift is rejected instead of extrapolated.
+fn interpolate_avl_at_lift(polar: &AvlPolar, target_cl: f64) -> Option<AvlPolarPoint> {
+    if !target_cl.is_finite() {
+        return None;
+    }
+    for point in &polar.points {
+        if point.lift_coefficient == target_cl && finite_avl_objective_point(point) {
+            return Some(*point);
+        }
+    }
+    for pair in polar.points.windows(2) {
+        let [left, right] = pair else {
+            continue;
+        };
+        let delta_cl = right.lift_coefficient - left.lift_coefficient;
+        if !finite_avl_objective_point(left)
+            || !finite_avl_objective_point(right)
+            || !delta_cl.is_finite()
+            || delta_cl == 0.0
+            || (target_cl - left.lift_coefficient) * (target_cl - right.lift_coefficient) > 0.0
+        {
+            continue;
+        }
+        let fraction = (target_cl - left.lift_coefficient) / delta_cl;
+        let lerp = |a: f64, b: f64| a + fraction * (b - a);
+        let point = AvlPolarPoint {
+            alpha_deg: lerp(left.alpha_deg, right.alpha_deg),
+            beta_deg: lerp(left.beta_deg, right.beta_deg),
+            mach: lerp(left.mach, right.mach),
+            lift_coefficient: target_cl,
+            total_drag_coefficient: lerp(left.total_drag_coefficient, right.total_drag_coefficient),
+            induced_drag_coefficient: lerp(
+                left.induced_drag_coefficient,
+                right.induced_drag_coefficient,
+            ),
+            pitching_moment_coefficient: lerp(
+                left.pitching_moment_coefficient,
+                right.pitching_moment_coefficient,
+            ),
+            span_efficiency: match (left.span_efficiency, right.span_efficiency) {
+                (Some(a), Some(b)) if a.is_finite() && b.is_finite() => Some(lerp(a, b)),
+                _ => None,
+            },
+        };
+        return finite_avl_objective_point(&point).then_some(point);
+    }
+    None
+}
+
+fn finite_avl_objective_point(point: &AvlPolarPoint) -> bool {
+    [
+        point.alpha_deg,
+        point.beta_deg,
+        point.mach,
+        point.lift_coefficient,
+        point.total_drag_coefficient,
+        point.induced_drag_coefficient,
+        point.pitching_moment_coefficient,
+    ]
+    .iter()
+    .all(|value| value.is_finite())
 }
 
 fn wing_area_excess_penalty(
@@ -488,6 +572,40 @@ fn wing_area_excess_penalty(
 mod tests {
     use super::*;
 
+    fn polar() -> AvlPolar {
+        AvlPolar {
+            reference: alas_aero::avl::AvlReference {
+                area_m2: 100.0,
+                chord_m: 5.0,
+                span_m: 30.0,
+                moment_reference_m: [0.0; 3],
+            },
+            model: alas_aero::avl::AvlModel::ALAS_LIFTING_SURFACES,
+            points: vec![
+                AvlPolarPoint {
+                    alpha_deg: -2.0,
+                    beta_deg: 0.0,
+                    mach: 0.7,
+                    lift_coefficient: 0.2,
+                    total_drag_coefficient: 0.03,
+                    induced_drag_coefficient: 0.02,
+                    pitching_moment_coefficient: -0.04,
+                    span_efficiency: Some(0.8),
+                },
+                AvlPolarPoint {
+                    alpha_deg: 2.0,
+                    beta_deg: 0.0,
+                    mach: 0.7,
+                    lift_coefficient: 0.6,
+                    total_drag_coefficient: 0.04,
+                    induced_drag_coefficient: 0.04,
+                    pitching_moment_coefficient: -0.08,
+                    span_efficiency: Some(0.9),
+                },
+            ],
+        }
+    }
+
     #[test]
     fn avl_optimization_preserves_a_gradient_above_the_wing_area_limit() {
         assert_eq!(wing_area_excess_penalty(90.0, 100.0, 0.5), Some(0.0));
@@ -501,6 +619,31 @@ mod tests {
         assert!(slight_excess > 0.0);
         assert!(larger_excess > slight_excess);
         assert_eq!(wing_area_excess_penalty(f64::NAN, 100.0, 0.5), None);
+    }
+
+    #[test]
+    fn avl_objective_interpolates_induced_drag_at_required_lift() {
+        let point = match interpolate_avl_at_lift(&polar(), 0.4) {
+            Some(point) => point,
+            None => panic!("target is bracketed"),
+        };
+        assert!((point.alpha_deg - 0.0).abs() < 1.0e-12);
+        assert!((point.induced_drag_coefficient - 0.03).abs() < 1.0e-12);
+        assert!((point.pitching_moment_coefficient + 0.06).abs() < 1.0e-12);
+        assert!((point.lift_coefficient - 0.4).abs() < 1.0e-12);
+    }
+
+    #[test]
+    fn avl_objective_rejects_required_lift_outside_the_native_polar() {
+        assert!(interpolate_avl_at_lift(&polar(), 0.1).is_none());
+        assert!(interpolate_avl_at_lift(&polar(), 0.7).is_none());
+    }
+
+    #[test]
+    fn avl_objective_rejects_non_finite_bracket_coefficients() {
+        let mut malformed = polar();
+        malformed.points[1].pitching_moment_coefficient = f64::NAN;
+        assert!(interpolate_avl_at_lift(&malformed, 0.4).is_none());
     }
 
     #[test]
@@ -537,5 +680,33 @@ mod tests {
         };
 
         assert!(set.selected(OptimizationSolverMode::Avl).is_err());
+    }
+
+    #[test]
+    fn an_all_invalid_default_de_branch_is_reported_as_a_typed_pipeline_failure() {
+        let mut config = AlasConfig::default();
+        config.optimizer.solver.max_iterations = 0;
+        config.optimizer.solver.population_size = 1;
+        config.requirements.max_cruise_cl = 0.01;
+
+        let result = run_solver_optimizations(
+            &config,
+            OptimizationSolverMode::Vlm,
+            false,
+            Some(42),
+            &RunEnvironment::default(),
+            &DesignVector::default(),
+            None,
+            None,
+        );
+
+        assert_eq!(result.vlm.status, SolverOptimizationStatus::Failed);
+        assert!(result.vlm.design.is_none());
+        assert!(result.vlm.optimization.is_none());
+        assert!(result
+            .vlm
+            .error
+            .as_deref()
+            .is_some_and(|error| error.contains("no feasible design")));
     }
 }

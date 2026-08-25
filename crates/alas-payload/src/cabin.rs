@@ -37,7 +37,7 @@ mod engine;
 mod fittings;
 mod seating;
 
-pub use engine::build_passenger_layout;
+pub use engine::{build_passenger_layout, build_passenger_layout_reference_compatibility};
 
 use alas_config::PassengerCabinConfig;
 

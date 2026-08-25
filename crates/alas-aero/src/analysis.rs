@@ -56,6 +56,7 @@ use alas_config::physics::DragModelConfig;
 use alas_geom::aircraft::airplane::Airplane;
 use alas_geom::aircraft::fuselage::Fuselage;
 use alas_geom::aircraft::spacing::linspace;
+use alas_geom::aircraft::wing::Wing;
 
 pub use performance::{PolarSweep, QuickPerformance, TrimPoint, TrimmedPerformance};
 
@@ -151,6 +152,11 @@ pub struct AeroAnalysis<'a> {
     pub drag: DragModelConfig,
     /// Mesh resolutions and the probe and sweep angle schedules.
     pub analysis: AnalysisConfig,
+    /// Whether to replay the frozen pre-product parasite-drag convention.
+    ///
+    /// Reference fixtures used one main-wing thickness and design sweep for
+    /// every surface. Product analyses use each surface's own geometry.
+    reference_compatibility: bool,
 }
 
 impl<'a> AeroAnalysis<'a> {
@@ -169,7 +175,25 @@ impl<'a> AeroAnalysis<'a> {
             geometry: geometry.unwrap_or_default(),
             drag: drag_model.unwrap_or_default(),
             analysis: analysis.unwrap_or_default(),
+            reference_compatibility: false,
         }
+    }
+
+    /// Construct an analysis that replays the frozen reference drag buildup.
+    ///
+    /// This seam is for parity fixtures only. Product callers should use
+    /// [`Self::new`], which evaluates each wing with its own thickness and
+    /// sweep geometry.
+    pub fn new_reference_compatibility(
+        plane: &'a Airplane,
+        sweep_deg: f64,
+        geometry: Option<GeometryConfig>,
+        drag_model: Option<DragModelConfig>,
+        analysis: Option<AnalysisConfig>,
+    ) -> Self {
+        let mut result = Self::new(plane, sweep_deg, geometry, drag_model, analysis);
+        result.reference_compatibility = true;
+        result
     }
 
     /// Compressible turbulent flat-plate skin friction, Prandtl-Schlichting.
@@ -183,11 +207,35 @@ impl<'a> AeroAnalysis<'a> {
         self.plane
             .wings
             .first()
-            .and_then(|wing| wing.xsecs.first())
+            .map_or(SECTION_THICKNESS_FALLBACK, Self::wing_section_thickness)
+    }
+
+    /// The maximum thickness-to-chord of a surface's root section.
+    ///
+    /// Parasite drag is accumulated surface by surface. A tail can therefore
+    /// not inherit the main wing's section thickness merely because the
+    /// latter is the first surface in the airplane. Empty surfaces retain the
+    /// same observable fallback as [`Self::section_thickness`].
+    fn wing_section_thickness(wing: &Wing) -> f64 {
+        wing.xsecs
+            .first()
             .map_or(SECTION_THICKNESS_FALLBACK, |xsec| {
                 xsec.airfoil
                     .max_thickness(&linspace(0.0, 1.0, MAX_THICKNESS_SAMPLES))
             })
+    }
+
+    /// Sweep used by the surface parasite form factor.
+    ///
+    /// The configured sweep is the design variable for the main wing and is
+    /// retained for that surface. Tail surfaces have no corresponding design
+    /// variable, so their own quarter-chord geometry supplies the sweep.
+    fn wing_sweep_deg(&self, index: usize, wing: &Wing) -> f64 {
+        if index == 0 || wing.xsecs.len() < 2 {
+            self.sweep_deg
+        } else {
+            wing.mean_sweep_angle(0.25)
+        }
     }
 
     /// Raymer's component buildup for the total parasite drag coefficient.
@@ -226,19 +274,34 @@ impl<'a> AeroAnalysis<'a> {
         let density = atmosphere.density();
         let viscosity = atmosphere.dynamic_viscosity();
         let s_ref = self.plane.s_ref;
-        let thickness = section_thickness.unwrap_or_else(|| self.section_thickness());
+        let main_thickness = section_thickness.unwrap_or_else(|| self.section_thickness());
         let x_over_c = self.drag.max_thickness_chordwise_loc;
-        let sweep = self.sweep_deg.to_radians();
 
         let mut cd0 = 0.0;
 
-        for wing in &self.plane.wings {
+        for (index, wing) in self.plane.wings.iter().enumerate() {
             let mac = wing.mean_aerodynamic_chord();
             let reynolds = density * velocity * mac / viscosity;
             let cf = Self::turbulent_cf(reynolds, mach);
+            let thickness = if self.reference_compatibility || index == 0 {
+                main_thickness
+            } else {
+                Self::wing_section_thickness(wing)
+            };
+            let sweep_deg = if self.reference_compatibility {
+                self.sweep_deg
+            } else {
+                self.wing_sweep_deg(index, wing)
+            };
+            let sweep = sweep_deg.to_radians();
             let form_factor = (1.0 + 0.6 / x_over_c * thickness + 100.0 * thickness.powf(4.0))
                 * (1.34 * mach.powf(0.18) * sweep.cos().powf(0.28));
-            let wetted = wing.area() * self.geometry.wing_wetted_area_factor;
+            // This is a physical wetted-surface estimate, not an aircraft
+            // coefficient reference.  Keep the historical unfolded loft
+            // area explicitly: the factor is defined as exposed (both-side)
+            // area over the modeled wing surface, while `s_ref` below is the
+            // authoritative projected aircraft reference area.
+            let wetted = wing.unfolded_area() * self.geometry.wing_wetted_area_factor;
             cd0 += cf * form_factor * self.drag.interference_factor_wing * (wetted / s_ref);
         }
 
@@ -443,6 +506,44 @@ mod tests {
         assert_eq!(
             analysis.parasite_drag(0.8, 10000.0, 0.0, None, None),
             analysis.parasite_drag(0.8, 10000.0, 1.4, None, None)
+        );
+    }
+
+    fn tail(tip_x: f64, airfoil_name: &str) -> Wing {
+        let airfoil = Airfoil::from_name(airfoil_name).expect("a four-digit NACA name");
+        Wing::new(
+            "Tail",
+            vec![
+                WingXSec::new([0.0, 0.0, 0.0], 2.0, 0.0, airfoil.clone()),
+                WingXSec::new([tip_x, 12.0, 0.0], 1.0, 0.0, airfoil),
+            ],
+            true,
+        )
+    }
+
+    #[test]
+    fn each_tail_surface_uses_its_own_thickness_and_sweep() {
+        let make_plane = |tip_x: f64, airfoil_name: &str| {
+            let mut plane = probe();
+            plane.wings.push(tail(tip_x, airfoil_name));
+            plane
+        };
+        let drag = |plane: &Airplane| {
+            AeroAnalysis::new(plane, 32.0, None, None, None)
+                .parasite_drag(0.8, 10_000.0, 0.5, None, None)
+        };
+
+        let thin_unswept = drag(&make_plane(0.0, "naca0006"));
+        let thick_unswept = drag(&make_plane(0.0, "naca0018"));
+        let thin_swept = drag(&make_plane(12.0, "naca0006"));
+
+        assert!(
+            thick_unswept > thin_unswept,
+            "tail thickness must affect its parasite form factor"
+        );
+        assert!(
+            (thin_swept - thin_unswept).abs() > 1e-10,
+            "tail sweep must affect its parasite form factor"
         );
     }
 

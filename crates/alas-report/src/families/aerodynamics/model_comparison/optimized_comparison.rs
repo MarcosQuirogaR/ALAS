@@ -49,10 +49,10 @@ pub fn figure_optimized_aircraft_comparison(
     let alpha_range = padded_range(
         vlm_report
             .polar
-            .alpha_deg
+            .geometric_alpha_deg
             .iter()
             .copied()
-            .chain(avl_report.polar.alpha_deg.iter().copied()),
+            .chain(avl_report.polar.geometric_alpha_deg.iter().copied()),
         0.08,
     );
     let mut scene = Scene::new(900.0, 780.0, Some(Color::from_hex(pal.bg)));
@@ -60,42 +60,42 @@ pub fn figure_optimized_aircraft_comparison(
 
     let vlm_alpha_cl = vlm_report
         .polar
-        .alpha_deg
+        .geometric_alpha_deg
         .iter()
         .copied()
         .zip(vlm_report.polar.cl.iter().copied())
         .collect::<Vec<_>>();
     let avl_alpha_cl = avl_report
         .polar
-        .alpha_deg
+        .geometric_alpha_deg
         .iter()
         .copied()
         .zip(avl_report.polar.cl.iter().copied())
         .collect::<Vec<_>>();
     let vlm_alpha_cm = vlm_report
         .polar
-        .alpha_deg
+        .geometric_alpha_deg
         .iter()
         .copied()
         .zip(vlm_report.polar.cm.iter().copied())
         .collect::<Vec<_>>();
     let avl_alpha_cm = avl_report
         .polar
-        .alpha_deg
+        .geometric_alpha_deg
         .iter()
         .copied()
         .zip(avl_report.polar.cm.iter().copied())
         .collect::<Vec<_>>();
     let vlm_alpha_cdi = vlm_report
         .polar
-        .alpha_deg
+        .geometric_alpha_deg
         .iter()
         .copied()
         .zip(vlm_report.polar.cd_induced.iter().copied())
         .collect::<Vec<_>>();
     let avl_alpha_cdi = avl_report
         .polar
-        .alpha_deg
+        .geometric_alpha_deg
         .iter()
         .copied()
         .zip(avl_report.polar.cd_induced.iter().copied())

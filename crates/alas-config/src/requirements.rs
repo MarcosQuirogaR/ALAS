@@ -152,12 +152,12 @@ pub struct DesignRequirements {
     )]
     pub limit_load_factor_neg: f64,
 
-    /// Upper bound on wing planform area.
+    /// Upper bound on projected wing reference/planform area.
     #[config(
         advanced,
         label = "Maximum wing area",
         unit = "m^2",
-        help = "Upper bound on wing planform area; the optimizer is penalised for exceeding it."
+        help = "Upper bound on the wing planform projected onto the aircraft XY reference plane; the optimizer is penalised for exceeding it."
     )]
     pub max_wing_area_m2: f64,
 

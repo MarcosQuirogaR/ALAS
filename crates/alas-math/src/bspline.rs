@@ -71,6 +71,16 @@ pub enum CubicBSplineError {
         /// The offending value.
         value: f64,
     },
+    /// A coordinate or ordinate was not finite.
+    #[error("{what}[{index}] ({value}) is not finite")]
+    NonFinite {
+        /// The input vector containing the value (`x` or `y`).
+        what: &'static str,
+        /// The offending index.
+        index: usize,
+        /// The offending value.
+        value: f64,
+    },
     /// `y` did not have one value per point of `x`.
     #[error("x has {expected} points but y has {actual} values")]
     LengthMismatch {
@@ -119,6 +129,20 @@ impl CubicBSpline {
             return Err(CubicBSplineError::LengthMismatch {
                 expected: x.len(),
                 actual: y.len(),
+            });
+        }
+        if let Some((index, &value)) = x.iter().enumerate().find(|(_, value)| !value.is_finite()) {
+            return Err(CubicBSplineError::NonFinite {
+                what: "x",
+                index,
+                value,
+            });
+        }
+        if let Some((index, &value)) = y.iter().enumerate().find(|(_, value)| !value.is_finite()) {
+            return Err(CubicBSplineError::NonFinite {
+                what: "y",
+                index,
+                value,
             });
         }
         for (index, pair) in x.windows(2).enumerate() {
@@ -381,5 +405,17 @@ mod tests {
                 actual: 3
             }
         );
+    }
+
+    #[test]
+    fn a_non_finite_coordinate_or_value_is_an_error_not_a_nan_spline() {
+        assert!(matches!(
+            CubicBSpline::interpolate(&[0.0, 1.0, 2.0, f64::NAN], &[0.0; 4]),
+            Err(CubicBSplineError::NonFinite { what: "x", .. })
+        ));
+        assert!(matches!(
+            CubicBSpline::interpolate(&[0.0, 1.0, 2.0, 3.0], &[0.0, f64::INFINITY, 0.0, 0.0]),
+            Err(CubicBSplineError::NonFinite { what: "y", .. })
+        ));
     }
 }

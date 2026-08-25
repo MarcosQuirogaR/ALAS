@@ -42,7 +42,8 @@ pub struct MissionRequest {
     pub arrival_elevation_m: f64,
     /// The departure field's ISA temperature deviation, in Celsius.
     pub departure_isa_deviation_c: f64,
-    /// The route distance the cruise legs are split across, in metres.
+    /// The total route distance, in metres, after which the profile's climb
+    /// and descent legs leave a remainder for the cruise legs.
     pub route_distance_m: f64,
     /// The flown speed, rate and altitude schedule, carried through unchanged.
     pub profile: MissionProfileConfig,

@@ -10,6 +10,8 @@
 use alas_uav::catalog::ComponentKind;
 use alas_uav::{has_reviewed_quote, is_analysis_ready, multi_source_catalog};
 
+const MULTI_SOURCE_MANIFEST: &str = include_str!("../data/multi_source_manifest.json");
+
 #[test]
 fn primary_manual_evidence_is_normalized_without_filling_unpublished_dimensions() {
     let catalog = multi_source_catalog().expect("multi-source catalogue");
@@ -83,6 +85,43 @@ fn carbon_stock_and_gear_geometry_gaps_remain_explicit() {
         };
         assert_eq!(spec.dimensions, None);
     }
+}
+
+#[test]
+fn robart_121_tailwheel_meets_the_complete_landing_gear_gate() {
+    let catalog = multi_source_catalog().expect("multi-source catalogue");
+    let record = catalog
+        .get("robart-121-retractable-tailwheel")
+        .expect("Robart #121 record");
+    let ComponentKind::LandingGear(spec) = &record.kind else {
+        panic!("Robart #121 id selected a different component family");
+    };
+
+    assert_eq!(spec.form, "retract_tailwheel");
+    assert_eq!(spec.mass_kg, Some(0.0226796185));
+    assert_eq!(spec.max_aircraft_mass_kg, Some(4.5359237));
+    assert_eq!(
+        spec.dimensions,
+        Some(alas_uav::catalog::Dimensions {
+            length_m: 0.079375,
+            width_m: 0.0365125,
+            height_m: 0.0619125,
+        })
+    );
+    assert!(is_analysis_ready(record, 6.0));
+    assert!(has_reviewed_quote(&record.id));
+    assert!(record
+        .provenance
+        .transformations
+        .iter()
+        .any(|note| note.contains("121.pdf") && note.contains("retracted assembly envelope")));
+
+    let manifest: serde_json::Value =
+        serde_json::from_str(MULTI_SOURCE_MANIFEST).expect("multi-source manifest");
+    assert_eq!(
+        manifest["landing_gear_analysis"]["selectable_ids"],
+        serde_json::json!(["robart-121-retractable-tailwheel"])
+    );
 }
 
 #[test]

@@ -4,13 +4,14 @@
 //! Compares `alas-payload::geometry` and `::oew` against
 //! `alas.physics.payload`, via `golden/generators/gen_payload.py`.
 //!
-//! The fixture builds each case's aircraft the way every caller of
-//! `build_payload_layout` gets one -- `AircraftBuilder(config.geometry).build`
-//! on a preset's own design vector -- so what is compared here is the cabin
-//! frame of a real fuselage rather than of a synthetic probe. Four bodies are
-//! covered: the shipped default, a narrowbody, a twin-aisle widebody, and the
-//! one preset whose declared height clears 1.15 diameters and therefore
-//! reaches the double-deck branch and its second passenger deck.
+//! The fixture builds each case's frozen-reference aircraft through
+//! `AircraftBuilder::new_reference_compatibility(config.geometry).build` on a
+//! preset's own design vector -- so what is compared here is the cabin frame
+//! of a real fuselage rather than of a synthetic probe. Product geometry is a
+//! separate path. Four bodies are covered: the shipped default, a narrowbody,
+//! a twin-aisle widebody, and the one preset whose declared height clears 1.15
+//! diameters and therefore reaches the double-deck branch and its second
+//! passenger deck.
 //!
 //! Every sampler is probed two metres ahead of the nose and three metres past
 //! the tail as well as across the body, because `np.interp` clamps rather than
@@ -155,7 +156,9 @@ fn cabin_geometry_with_source_corrections(
         }
     }
 
-    let builder = AircraftBuilder::new(Some(config.geometry.clone()));
+    // This fixture replays historical Python geometry; product geometry is a
+    // separate path and must not be mixed into the parity evidence.
+    let builder = AircraftBuilder::new_reference_compatibility(Some(config.geometry.clone()));
     let plane = builder
         .build(design_vector.as_ref(), false)
         .expect("the case's aircraft builds");

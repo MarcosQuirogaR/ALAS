@@ -42,8 +42,11 @@ use alas_aero::drag_buildup::{
     DragBreakdown, DragSettings, DragVehicle, Freestream as DragFreestream, FuselageParams,
     NacelleParams, WingParams,
 };
-use alas_aero::lift_surrogate::{aircraft_lift_coefficient, LiftSurrogate};
-use alas_atmo::{us1976_compute_values, Us1976Values};
+use alas_aero::lift_surrogate::{
+    aircraft_lift_coefficient, LiftSolution, LiftSurrogate, SurrogateDomainError,
+    SurrogateDomainStatus,
+};
+use alas_atmo::{us1976_compute_values, us1976_try_compute_values, Us1976Error, Us1976Values};
 use alas_prop::mission_turbofan::{
     evaluate_thrust, freestream_from_atmosphere, ThrustOutput, TurbofanInputs, VehicleBuilderParams,
 };
@@ -58,6 +61,12 @@ pub struct AeroSolution {
     pub wing_lift_coefficient: Vec<f64>,
     /// Each wing's inviscid induced drag coefficient, likewise.
     pub wing_induced_drag_coefficient: Vec<f64>,
+    /// Whether the surrogate query was inside its trained rectangle.
+    ///
+    /// The translated mission path retains the reference edge clamp for
+    /// parity, but carries this status so callers can reject or label
+    /// out-of-domain trajectory points explicitly.
+    pub surrogate_domain: SurrogateDomainStatus,
 }
 
 /// The analysis stack, resolved onto one aircraft.
@@ -77,6 +86,18 @@ pub struct MissionAnalyses {
     /// `settings.fuselage_lift_correction`, the 1.14 the wings-only lift is
     /// multiplied by.
     pub fuselage_lift_correction: f64,
+    /// Scale applied to per-wing VLM lift and induced-drag coefficients before
+    /// the drag buildup. Product analyses may carry the fuselage correction
+    /// here when their induced-drag policy follows corrected wing loads.
+    /// Frozen SUAVE evidence leaves the VLM drag inputs unchanged and sets
+    /// this to `1.0`.
+    pub induced_drag_lift_correction: f64,
+    /// Whether a solved throttle above the available `[0, 1]` envelope marks
+    /// the segment as non-converged. Product mission runs enforce this
+    /// physical availability check; the frozen SUAVE compatibility path keeps
+    /// the reference solver's converged flag even where its historical engine
+    /// sizing produces throttle above one.
+    pub enforce_throttle_envelope: bool,
     /// The drag chain's settings.
     pub drag_settings: DragSettings,
     /// The wings. The two lift fields of each are placeholders: they are
@@ -107,13 +128,22 @@ impl MissionAnalyses {
         us1976_compute_values(altitude_m, temperature_deviation_k)
     }
 
+    /// Checked US1976 atmosphere for callers that cannot accept the legacy
+    /// edge-clamping behavior of [`Self::atmosphere`].
+    pub fn atmosphere_checked(
+        &self,
+        altitude_m: f64,
+        temperature_deviation_k: f64,
+    ) -> Result<Us1976Values, Us1976Error> {
+        us1976_try_compute_values(altitude_m, temperature_deviation_k)
+    }
+
     /// `Fidelity_Zero`'s whole `compute` chain at one flight condition.
     ///
-    /// Lift first, because the drag chain reads it: the surrogate supplies the
-    /// aircraft and per-wing inviscid coefficients, `fuselage_correction`
-    /// multiplies the aircraft one by 1.14 and `aircraft_total` returns it
-    /// unchanged, and the *uncorrected* per-wing values are what the induced
-    /// and compressibility terms consume.
+    /// Lift first, because the drag chain reads it. Aircraft lift and induced
+    /// drag use separate policy inputs: frozen SUAVE evidence corrects the
+    /// aircraft lift but consumes VLM induced drag unchanged, while product
+    /// callers can opt into a corrected induced load.
     pub fn aerodynamics(
         &self,
         angle_of_attack_rad: f64,
@@ -122,15 +152,40 @@ impl MissionAnalyses {
         reynolds_number_per_m: f64,
     ) -> AeroSolution {
         let lift = self.surrogate.evaluate(angle_of_attack_rad, mach);
+        self.aerodynamics_from_lift(lift, mach, temperature_k, reynolds_number_per_m)
+    }
 
+    /// Checked variant of [`Self::aerodynamics`] that refuses to use the
+    /// surrogate's edge-clamped value outside its trained rectangle.
+    pub fn aerodynamics_checked(
+        &self,
+        angle_of_attack_rad: f64,
+        mach: f64,
+        temperature_k: f64,
+        reynolds_number_per_m: f64,
+    ) -> Result<AeroSolution, SurrogateDomainError> {
+        let lift = self.surrogate.evaluate_checked(angle_of_attack_rad, mach)?;
+        Ok(self.aerodynamics_from_lift(lift, mach, temperature_k, reynolds_number_per_m))
+    }
+
+    fn aerodynamics_from_lift(
+        &self,
+        lift: LiftSolution,
+        mach: f64,
+        temperature_k: f64,
+        reynolds_number_per_m: f64,
+    ) -> AeroSolution {
+        let lift_scale = self.fuselage_lift_correction;
+        let drag_lift_scale = self.induced_drag_lift_correction;
+        let induced_drag_scale = drag_lift_scale * drag_lift_scale;
         let wings: Vec<WingParams> = self
             .wings
             .iter()
             .zip(&lift.wing_lift_coefficient)
             .zip(&lift.wing_induced_drag_coefficient)
             .map(|((wing, &wing_lift), &wing_drag)| WingParams {
-                inviscid_lift_coefficient: wing_lift,
-                inviscid_induced_drag_coefficient: wing_drag,
+                inviscid_lift_coefficient: wing_lift * drag_lift_scale,
+                inviscid_induced_drag_coefficient: wing_drag * induced_drag_scale,
                 ..*wing
             })
             .collect();
@@ -150,13 +205,19 @@ impl MissionAnalyses {
         let drag = alas_aero::drag_buildup::evaluate(&self.drag_settings, &freestream, &vehicle);
 
         AeroSolution {
-            lift_coefficient: aircraft_lift_coefficient(
-                lift.inviscid_lift_coefficient,
-                self.fuselage_lift_correction,
-            ),
+            lift_coefficient: aircraft_lift_coefficient(lift.inviscid_lift_coefficient, lift_scale),
             drag,
-            wing_lift_coefficient: lift.wing_lift_coefficient,
-            wing_induced_drag_coefficient: lift.wing_induced_drag_coefficient,
+            wing_lift_coefficient: lift
+                .wing_lift_coefficient
+                .into_iter()
+                .map(|value| value * drag_lift_scale)
+                .collect(),
+            wing_induced_drag_coefficient: lift
+                .wing_induced_drag_coefficient
+                .into_iter()
+                .map(|value| value * induced_drag_scale)
+                .collect(),
+            surrogate_domain: lift.domain,
         }
     }
 

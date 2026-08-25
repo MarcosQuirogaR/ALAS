@@ -31,6 +31,29 @@ fn the_script_contains_every_computed_outer_geometry_component(
 }
 
 #[test]
+fn the_script_preserves_each_section_twist_about_the_leading_edge(
+) -> Result<(), alas_geom::builder::BuildError> {
+    let config = AlasConfig::default();
+    let airplane = AircraftBuilder::new(Some(config.geometry.clone()))
+        .build(Some(&DesignVector::default()), true)?;
+    let script = render_script(&airplane, None, "aircraft.vsp3");
+
+    for (wing_index, wing) in airplane.wings.iter().enumerate() {
+        for (section_index, section) in wing.xsecs.iter().enumerate() {
+            let group = format!("XSec_{section_index}");
+            assert!(script.contains(&format!(
+                "SetParmVal( wing_{wing_index}, \"Twist_Location\", \"{group}\", 0.000000000000 );"
+            )));
+            assert!(script.contains(&format!(
+                "SetParmVal( wing_{wing_index}, \"Twist\", \"{group}\", {:.12} );",
+                section.twist
+            )));
+        }
+    }
+    Ok(())
+}
+
+#[test]
 fn non_ascii_names_cannot_break_the_generated_script() {
     assert_eq!(
         script_string("Ala \"derecha\" - n\u{00fa}mero 1"),

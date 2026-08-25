@@ -64,7 +64,7 @@ pub struct WingboxSizing {
     pub t_skin: f64,
     /// Number of ribs.
     pub num_ribs: i64,
-    /// Panel-buckling rib spacing, m.
+    /// Panel-buckling allowable rib spacing, m.
     pub rib_spacing_m: f64,
     /// Semi-wing mass by component, kg.
     pub mass_breakdown_kg: MassBreakdown,
@@ -72,6 +72,71 @@ pub struct WingboxSizing {
     pub total_mass_kg: f64,
     /// The name of the load case that sized the box.
     pub sizing_load_case: &'static str,
+}
+
+impl WingboxSizing {
+    /// Installed spanwise pitch between adjacent ribs, including the root and
+    /// tip ribs. This is distinct from [`Self::rib_spacing_m`], which is the
+    /// maximum pitch permitted by the panel-buckling calculation and may be
+    /// larger or smaller than the pitch selected by an explicit rib-count
+    /// override.
+    pub fn installed_rib_spacing_m(&self) -> f64 {
+        if self.num_ribs > 1 {
+            let first = self.y_stations.first().copied().unwrap_or(f64::NAN);
+            let last = self.y_stations.last().copied().unwrap_or(f64::NAN);
+            (last - first) / (self.num_ribs - 1) as f64
+        } else {
+            f64::NAN
+        }
+    }
+
+    /// Whether the selected rib count satisfies the panel-buckling limit.
+    ///
+    /// Automatically sized layouts obey this by construction. An explicit
+    /// rib-count override is still checked here so a diagnostic sizing result
+    /// cannot be promoted to a structural success when its installed bays
+    /// are wider than the applicable allowable spacing.
+    pub fn rib_spacing_pass(&self) -> bool {
+        let installed = self.installed_rib_spacing_m();
+        installed.is_finite() && self.rib_spacing_m.is_finite() && installed <= self.rib_spacing_m
+    }
+
+    /// The smallest strength margin found in the sized spars.
+    ///
+    /// A NaN margin is returned as `NaN` so callers cannot mistake an
+    /// incomplete sizing calculation for a successful one. Positive infinity
+    /// is a valid margin for a station whose demand is below the numerical
+    /// reporting threshold.
+    pub fn minimum_margin_of_safety(&self) -> f64 {
+        let mut minimum = f64::INFINITY;
+        let mut found = false;
+        for spar in &self.spars {
+            for &margin in &spar.margin_of_safety {
+                if margin.is_nan() {
+                    return f64::NAN;
+                }
+                minimum = minimum.min(margin);
+                found = true;
+            }
+        }
+        if found {
+            minimum
+        } else {
+            f64::NAN
+        }
+    }
+
+    /// Whether every sized spar station has a non-NaN non-negative margin.
+    pub fn strength_margins_pass(&self) -> bool {
+        !self.spars.is_empty()
+            && self.spars.iter().all(|spar| {
+                !spar.margin_of_safety.is_empty()
+                    && spar
+                        .margin_of_safety
+                        .iter()
+                        .all(|&margin| !margin.is_nan() && margin >= 0.0)
+            })
+    }
 }
 
 /// The four semi-wing mass components upstream keys by name in its
@@ -405,5 +470,72 @@ mod tests {
         assert_eq!(taper[0], 1.0);
         assert_eq!(taper[1], 1.0);
         assert!((taper[2] - 0.3).abs() < 1e-12);
+    }
+
+    #[test]
+    fn installed_rib_spacing_uses_the_selected_count_not_the_allowable_limit() {
+        let mut sizing = WingboxSizing {
+            y_stations: vec![0.0, 35.875],
+            num_ribs: 25,
+            rib_spacing_m: 0.96738451494986,
+            ..test_sizing()
+        };
+        assert!((sizing.installed_rib_spacing_m() - 35.875 / 24.0).abs() < 1e-12);
+        assert_ne!(sizing.installed_rib_spacing_m(), sizing.rib_spacing_m);
+        assert!(!sizing.rib_spacing_pass());
+        sizing.num_ribs = 39;
+        assert!(sizing.rib_spacing_pass());
+    }
+
+    #[test]
+    fn installed_rib_spacing_uses_the_station_span_when_the_grid_has_a_datum_offset() {
+        let sizing = WingboxSizing {
+            y_stations: vec![4.0, 14.0],
+            num_ribs: 6,
+            rib_spacing_m: 2.0,
+            ..test_sizing()
+        };
+        assert!((sizing.installed_rib_spacing_m() - 2.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn negative_or_non_finite_strength_margins_do_not_pass() {
+        let mut sizing = test_sizing();
+        sizing.spars = vec![SparSizing {
+            chord_fraction: 0.25,
+            h: vec![1.0],
+            w_cap: vec![1.0],
+            t_cap: vec![1.0],
+            a_cap: vec![1.0],
+            t_web: 0.1,
+            frac_moment: vec![1.0],
+            margin_of_safety: vec![-0.1],
+        }];
+        assert!(!sizing.strength_margins_pass());
+        assert_eq!(sizing.minimum_margin_of_safety(), -0.1);
+        sizing.spars[0].margin_of_safety[0] = f64::NAN;
+        assert!(!sizing.strength_margins_pass());
+        assert!(sizing.minimum_margin_of_safety().is_nan());
+    }
+
+    fn test_sizing() -> WingboxSizing {
+        WingboxSizing {
+            y_stations: vec![0.0, 35.875],
+            eta_stations: vec![0.0, 1.0],
+            chord: vec![1.0, 1.0],
+            spar_fracs: vec![0.25, 0.75],
+            spars: Vec::new(),
+            t_skin: 0.01,
+            num_ribs: 2,
+            rib_spacing_m: 1.0,
+            mass_breakdown_kg: MassBreakdown {
+                spar_caps: 0.0,
+                spar_webs: 0.0,
+                skin: 0.0,
+                ribs: 0.0,
+            },
+            total_mass_kg: 0.0,
+            sizing_load_case: "test",
+        }
     }
 }

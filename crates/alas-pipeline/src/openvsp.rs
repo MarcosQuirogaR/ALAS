@@ -28,6 +28,9 @@ use alas_perf::landing_gear::{size_landing_gear, LandingGearLayout};
 
 use crate::full_analysis::AnalysisReport;
 
+mod validation;
+use validation::validate_script;
+
 /// Evidence state of an OpenVSP export artifact.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OpenVspExportStatus {
@@ -506,7 +509,16 @@ fn emit_wing(script: &mut String, index: usize, wing: &Wing) {
         set_parm(script, &id, "Sweep", &group, sweep);
         set_parm(script, &id, "Sweep_Location", &group, 0.0);
         set_parm(script, &id, "Dihedral", &group, dihedral);
-        set_parm(script, &id, "Twist", &group, outside.twist);
+    }
+    // ALAS defines each section's twist about its leading edge.  OpenVSP
+    // stores both the root section (XSec_0) and every outboard section's
+    // twist in the section group, with a quarter-chord pivot by default.
+    // Write the complete section field set explicitly so the root is not
+    // silently left at zero and no section changes pivot on import.
+    for (section_index, section) in wing.xsecs.iter().enumerate() {
+        let group = format!("XSec_{section_index}");
+        set_parm(script, &id, "Twist_Location", &group, 0.0);
+        set_parm(script, &id, "Twist", &group, section.twist);
     }
     for (section_index, section) in wing.xsecs.iter().enumerate() {
         emit_airfoil(
@@ -659,37 +671,6 @@ fn script_string(value: &str) -> String {
             _ => '_',
         })
         .collect()
-}
-
-fn validate_script(script: &str) -> Result<(), &'static str> {
-    if !script.contains("int main()")
-        || !script.contains("WriteVSPFile(")
-        || !script.contains("VSPAEROComputeGeometry")
-        || !script.contains("ThinGeomSet")
-        || !script.contains("ALAS_OPENVSP_EXPORT_COMPLETE")
-    {
-        return Err("OpenVSP script is missing its entry point or completion contract");
-    }
-    let mut depth = 0_i64;
-    for character in script.chars() {
-        match character {
-            '{' => depth += 1,
-            '}' => {
-                depth -= 1;
-                if depth < 0 {
-                    return Err("OpenVSP script has an unmatched closing brace");
-                }
-            }
-            _ => {}
-        }
-    }
-    if depth != 0 {
-        return Err("OpenVSP script has unbalanced braces");
-    }
-    if script.contains("NaN") || script.contains("inf") {
-        return Err("OpenVSP script contains a non-finite geometry value");
-    }
-    Ok(())
 }
 
 #[cfg(test)]

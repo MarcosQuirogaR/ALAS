@@ -49,7 +49,10 @@ pub use constraints::{
     ws_landing_limit, MatchingChartData,
 };
 pub use envelope::{breguet_range_m, build_vn_diagram, VnDiagramData};
-pub use speeds::{compute_field_performance, compute_v_speeds, FieldPerformance, VSpeeds};
+pub use speeds::{
+    compute_field_performance, compute_field_performance_at_masses, compute_v_speeds,
+    compute_v_speeds_at_masses, FieldPerformance, VSpeeds,
+};
 
 use alas_atmo::Atmosphere;
 

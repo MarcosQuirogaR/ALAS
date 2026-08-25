@@ -202,12 +202,24 @@ pub fn or_nan(value: Option<f64>) -> f64 {
     value.unwrap_or(f64::NAN)
 }
 
-/// The nominal aircraft, with or without its nacelles -- the generator's
-/// `AircraftBuilder(GeometryConfig()).build(include_engines=...)`.
+/// The frozen-reference aircraft, with or without its nacelles.
+///
+/// The product builder intentionally owns a newer transport-planform default;
+/// these fixtures were generated before that product correction.  Keep the
+/// parity input explicit so a frozen translation test cannot silently compare
+/// the product geometry to the historical reference geometry.
 pub fn build(include_engines: bool) -> Airplane {
-    AircraftBuilder::new(Some(GeometryConfig::default()))
+    let mut plane = AircraftBuilder::new_reference_compatibility(Some(GeometryConfig::default()))
         .build(None, include_engines)
-        .expect("the default aircraft builds")
+        .expect("the default aircraft builds");
+    // The frozen aero fixtures predate the projected XY area contract. Restore
+    // their historical area scale only here; the builder's lateral/Y b_ref is
+    // already the value recorded by that fixture.
+    if let Some(wing) = plane.wings.first() {
+        let s_ref = wing.unfolded_area();
+        plane.s_ref = s_ref;
+    }
+    plane
 }
 
 /// The default analysis configuration at a named mesh resolution.
@@ -226,7 +238,7 @@ pub fn aero<'a>(
     fixture: &Fixture,
     analysis: AnalysisConfig,
 ) -> AeroAnalysis<'a> {
-    AeroAnalysis::new(
+    AeroAnalysis::new_reference_compatibility(
         plane,
         fixture.sweep_deg,
         Some(GeometryConfig::default()),

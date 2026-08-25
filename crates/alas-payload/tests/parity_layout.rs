@@ -43,7 +43,9 @@ mod support;
 use alas_config::presets;
 use alas_geom::builder::AircraftBuilder;
 use alas_payload::layout::{ItemMeta, LayoutSummary};
-use alas_payload::{build_payload_layout, DeckItem, PayloadLayout};
+use alas_payload::{
+    build_payload_layout, build_payload_layout_reference_compatibility, DeckItem, PayloadLayout,
+};
 use alas_testkit::{Comparison, Tier};
 use serde::Deserialize;
 use serde_json::Value;
@@ -261,6 +263,12 @@ fn compare_summary(
         LayoutSummary::Passenger(cabin) => {
             whole("total_pax", cabin.total_pax);
             whole("seated_pax", cabin.seated_pax);
+            assert_eq!(
+                cabin.unseated_pax,
+                (cabin.total_pax - cabin.seated_pax).max(0),
+                "{}: passenger count conservation",
+                at("summary")
+            );
             whole("lavatories", cabin.lavatories);
             whole("galleys", cabin.galleys);
             whole("exit_pairs", cabin.exit_pairs);
@@ -370,6 +378,13 @@ fn compare_summary(
             ] {
                 numeric.scalar(&at(&format!("summary.{key}")), value, number(expected, key));
             }
+
+            let gross_from_roles = freight.loaded_net_payload_t + freight.tare_mass_t;
+            assert!(
+                (freight.payload_t - gross_from_roles).abs() < 1e-9,
+                "{}: cargo gross/net/tare roles do not close",
+                at("summary")
+            );
         }
     }
 }
@@ -414,12 +429,13 @@ fn every_laid_out_interior_matches_python_item_for_item() {
             frozen.root_chord_m = 23.0;
             frozen.break_chord_m = 11.3;
             frozen.tip_chord_m = 3.5;
-            plane = AircraftBuilder::new(Some(config.geometry.clone()))
+            plane = AircraftBuilder::new_reference_compatibility(Some(config.geometry.clone()))
                 .build(Some(&frozen), false)
                 .expect("frozen fixture aircraft builds");
         }
-        let layout: PayloadLayout = build_payload_layout(&plane, &config, case.oew, case.x_oew)
-            .expect("a built aircraft has a cabin frame");
+        let layout: PayloadLayout =
+            build_payload_layout_reference_compatibility(&plane, &config, case.oew, case.x_oew)
+                .expect("a built aircraft has a cabin frame");
         let at = |what: &str| format!("{}: {what}", case.name);
 
         discrete
@@ -464,4 +480,38 @@ fn every_laid_out_interior_matches_python_item_for_item() {
 
     discrete.finish();
     numeric.finish();
+}
+
+#[test]
+fn product_cargo_layout_delivers_requested_net_before_uld_tare() {
+    let fixture: Fixture = alas_testkit::load("payload", "layout");
+
+    for case in fixture.layouts.iter().filter(|case| {
+        case.input
+            .pointer("/requirements/aircraft_type")
+            .and_then(Value::as_str)
+            == Some("cargo")
+    }) {
+        let (config, plane, _dv) = config_and_plane(&case.input);
+        let layout = build_payload_layout(&plane, &config, case.oew, case.x_oew)
+            .expect("a built aircraft has a cabin frame");
+        let LayoutSummary::Cargo(summary) = layout.summary else {
+            panic!("{}: cargo input produced a passenger summary", case.name);
+        };
+        let requested_net_kg = config.requirements.cargo_payload_kg;
+        let capacity_kg = summary.capacity_t * 1_000.0;
+        let expected_loaded_net_kg = requested_net_kg.min(capacity_kg);
+        let loaded_net_kg = summary.loaded_net_payload_t * 1_000.0;
+        assert!(
+            (loaded_net_kg - expected_loaded_net_kg).abs() < 1e-6,
+            "{}: requested net cargo was not delivered: requested={requested_net_kg}, loaded={loaded_net_kg}, capacity={capacity_kg}",
+            case.name
+        );
+        let gross_from_roles = summary.loaded_net_payload_t + summary.tare_mass_t;
+        assert!(
+            (summary.payload_t - gross_from_roles).abs() < 1e-9,
+            "{}: gross cargo does not close from net cargo and ULD tare",
+            case.name
+        );
+    }
 }

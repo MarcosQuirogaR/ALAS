@@ -16,7 +16,7 @@ use alas_geom::aircraft::airfoil::Airfoil;
 use alas_geom::aircraft::airplane::Airplane;
 use alas_geom::aircraft::fuselage::{Fuselage, FuselageXSec, DEFAULT_SHAPE};
 use alas_geom::aircraft::wing::{Wing, WingXSec};
-use alas_pipeline::full_analysis::{AnalysisReport, DesignPoint, PolarFit};
+use alas_pipeline::full_analysis::{AnalysisReport, DesignPoint, PolarFit, PolarFitStatus};
 
 pub fn naca(name: &str) -> Airfoil {
     Airfoil::from_name(name).expect("valid 4-digit NACA name")
@@ -72,8 +72,8 @@ pub fn probe_airplane(with_hstab: bool, with_vstab: bool) -> Airplane {
             false,
         ));
     }
-    let s_ref = wings[0].area();
-    let b_ref = wings[0].span();
+    let s_ref = wings[0].reference_area();
+    let b_ref = wings[0].reference_span();
     let c_ref = wings[0].mean_aerodynamic_chord();
     Airplane {
         name: "Probe".to_owned(),
@@ -100,6 +100,7 @@ pub fn probe_report(airplane: Airplane) -> AnalysisReport {
         physical_cg: [x_ref + 0.2, 0.0, 0.0],
         polar: PolarSweep {
             alpha_deg: vec![-2.0, 0.0, 2.0, 4.0, 6.0],
+            geometric_alpha_deg: vec![-2.0, 0.0, 2.0, 4.0, 6.0],
             cl: vec![-0.1, 0.15, 0.4, 0.65, 0.9],
             cd: vec![0.02, 0.02, 0.025, 0.03, 0.04],
             cd_induced: vec![0.001, 0.002, 0.006, 0.012, 0.02],
@@ -119,6 +120,7 @@ pub fn probe_report(airplane: Airplane) -> AnalysisReport {
             k: 0.04,
             oswald_e: 0.85,
             aspect_ratio: 9.0,
+            status: PolarFitStatus::Fitted,
         },
         static_margin: 0.10,
         x_neutral_point: x_ref + 1.0,
@@ -126,7 +128,19 @@ pub fn probe_report(airplane: Airplane) -> AnalysisReport {
         component_masses,
         mass_coordinates: HashMap::new(),
         payload_layout: None,
-        trimmed_design_point: None,
+        // Dynamic-mode figures are explicitly gated on a solved trim point.
+        // The probe is intentionally lightweight, so use a finite hand-built
+        // point here to exercise the real mode solver and leave the
+        // unavailable-trim branch to the figure's dedicated status tests.
+        trimmed_design_point: Some(alas_pipeline::full_analysis::TrimmedDesignPoint {
+            alpha_deg: 2.0,
+            geometric_body_alpha_deg: 2.0,
+            trim_ih_deg: 0.0,
+            cl: 0.4,
+            cd: 0.025,
+            l_over_d: 16.0,
+            cm_residual: 0.0,
+        }),
         cg_envelope_ok: None,
         airplane,
     }

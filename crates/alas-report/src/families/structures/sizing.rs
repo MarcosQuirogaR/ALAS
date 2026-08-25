@@ -107,11 +107,7 @@ pub fn figure_structures_sizing(
         angle_deg: 0.0,
         bold: true,
     });
-    let installed_spacing = if rib_count > 1 {
-        y_max / (rib_count - 1) as f64
-    } else {
-        f64::NAN
-    };
+    let installed_spacing = sizing.installed_rib_spacing_m();
     let rib_layout = if installed_spacing.is_finite() {
         format!(
             "Maximum buckling spacing: {:.3} m\nInstalled spacing: {:.3} m (root + tip included)",

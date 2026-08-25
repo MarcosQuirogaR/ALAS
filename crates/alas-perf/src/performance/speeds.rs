@@ -50,13 +50,38 @@ pub fn compute_v_speeds(
     cl_max_land: f64,
     perf_config: &PerformanceConfig,
 ) -> VSpeeds {
+    compute_v_speeds_at_masses(
+        mtow_kg,
+        mtow_kg,
+        wing_area_m2,
+        airport,
+        cl_max_to,
+        cl_max_land,
+        perf_config,
+    )
+}
+
+/// Compute the certified speed schedule with separate take-off and landing
+/// masses. Take-off speeds remain tied to MTOW, while stall/approach/
+/// touchdown speeds use the arrival mass.
+#[allow(clippy::too_many_arguments)]
+pub fn compute_v_speeds_at_masses(
+    mtow_kg: f64,
+    landing_mass_kg: f64,
+    wing_area_m2: f64,
+    airport: &Airport,
+    cl_max_to: f64,
+    cl_max_land: f64,
+    perf_config: &PerformanceConfig,
+) -> VSpeeds {
     let pc = perf_config;
     let sigma = density_ratio(airport.elevation_m, airport.isa_deviation_c);
     let rho = sigma * RHO_SL;
     let ws_pa = mtow_kg * G / wing_area_m2;
+    let landing_ws_pa = landing_mass_kg.max(0.0) * G / wing_area_m2;
 
     let v_stall_to = (2.0 * ws_pa / (rho * cl_max_to)).sqrt();
-    let v_stall_land = (2.0 * ws_pa / (rho * cl_max_land)).sqrt();
+    let v_stall_land = (2.0 * landing_ws_pa / (rho * cl_max_land)).sqrt();
 
     let v_mc = pc.vmc_vstall_factor * v_stall_to;
     let v_r = (pc.vr_vmc_factor * v_mc).max(pc.vr_vstall_factor * v_stall_to);
@@ -97,6 +122,8 @@ pub struct FieldPerformance {
     pub asd_m: f64,
     /// Landing distance required, m.
     pub ldr_m: f64,
+    /// Landing mass used for the landing speeds and distance, kg.
+    pub landing_mass_kg: f64,
 }
 
 impl FieldPerformance {
@@ -150,12 +177,48 @@ pub fn compute_field_performance(
     bfl_factor: f64,
     perf_config: &PerformanceConfig,
 ) -> FieldPerformance {
+    compute_field_performance_at_masses(
+        mtow_kg,
+        mtow_kg,
+        wing_area_m2,
+        airport,
+        cl_max_to,
+        cl_max_land,
+        tw_sl,
+        k_land,
+        bfl_factor,
+        perf_config,
+    )
+}
+
+/// Estimate field performance with distinct take-off and landing masses.
+///
+/// Take-off sizing uses MTOW while the landing schedule uses the supplied
+/// landing mass (normally the mission arrival mass or, absent telemetry, the
+/// configured MLW cap). Keeping these masses separate prevents an MTOW-based
+/// LDR from being presented as an arrival performance result.
+#[allow(clippy::too_many_arguments)]
+pub fn compute_field_performance_at_masses(
+    mtow_kg: f64,
+    landing_mass_kg: f64,
+    wing_area_m2: f64,
+    airport: &Airport,
+    cl_max_to: f64,
+    cl_max_land: f64,
+    tw_sl: f64,
+    k_land: f64,
+    bfl_factor: f64,
+    perf_config: &PerformanceConfig,
+) -> FieldPerformance {
     let sigma = density_ratio(airport.elevation_m, airport.isa_deviation_c);
     let ws_pa = mtow_kg * G / wing_area_m2;
+    let landing_mass_kg = landing_mass_kg.max(0.0);
+    let landing_ws_pa = landing_mass_kg * G / wing_area_m2;
     let ws_psf = ws_pa * PA_TO_PSF;
 
-    let v_speeds = compute_v_speeds(
+    let v_speeds = compute_v_speeds_at_masses(
         mtow_kg,
+        landing_mass_kg,
         wing_area_m2,
         airport,
         cl_max_to,
@@ -167,7 +230,7 @@ pub fn compute_field_performance(
     let todr_m = toda_req_ft / M_TO_FT;
     let bfl_m = todr_m * bfl_factor;
     let asd_m = bfl_m;
-    let ldr_m = ws_pa * k_land / (sigma * cl_max_land);
+    let ldr_m = landing_ws_pa * k_land / (sigma * cl_max_land);
 
     FieldPerformance {
         airport: airport.clone(),
@@ -176,6 +239,7 @@ pub fn compute_field_performance(
         bfl_m,
         asd_m,
         ldr_m,
+        landing_mass_kg,
     }
 }
 
@@ -264,5 +328,31 @@ mod tests {
         assert!(hot.v_stall_land_ms > standard.v_stall_land_ms);
         assert!(hot.v_mc_ms > standard.v_mc_ms);
         assert!(hot.v_app_ms > standard.v_app_ms);
+    }
+
+    #[test]
+    fn landing_schedule_uses_arrival_mass() {
+        let full = compute_v_speeds_at_masses(
+            100_000.0,
+            100_000.0,
+            122.0,
+            &sea_level(),
+            1.8,
+            2.6,
+            &PerformanceConfig::default(),
+        );
+        let arrival = compute_v_speeds_at_masses(
+            100_000.0,
+            80_000.0,
+            122.0,
+            &sea_level(),
+            1.8,
+            2.6,
+            &PerformanceConfig::default(),
+        );
+        assert_eq!(arrival.v_stall_to_ms, full.v_stall_to_ms);
+        assert!(arrival.v_stall_land_ms < full.v_stall_land_ms);
+        assert!(arrival.v_app_ms < full.v_app_ms);
+        assert!(arrival.v_td_ms < full.v_td_ms);
     }
 }

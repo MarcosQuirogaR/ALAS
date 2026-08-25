@@ -40,6 +40,10 @@ pub enum ModelCgLoadingState {
     OperatingEmpty,
     /// Zero-fuel load actually analyzed from OEW plus modeled payload.
     AnalyzedZeroFuel,
+    /// Mid-mission load with half of the analyzed usable fuel remaining.
+    OperationalMidMission,
+    /// Reserve/arrival loading case with ten percent of analyzed fuel remaining.
+    OperationalReserve,
     /// Takeoff load actually analyzed after any usable-fuel cap is applied.
     AnalyzedTakeoff,
 }
@@ -50,6 +54,8 @@ impl ModelCgLoadingState {
         match self {
             Self::OperatingEmpty => "OEW",
             Self::AnalyzedZeroFuel => "analyzed ZFW",
+            Self::OperationalMidMission => "operational mid-mission",
+            Self::OperationalReserve => "operational reserve",
             Self::AnalyzedTakeoff => "analyzed TOW",
         }
     }
@@ -309,7 +315,44 @@ fn loading_states(
     ]
 }
 
-/// Assess hard model constraints across OEW and the analyzed ZFW/TOW cases.
+/// Product load cases extending the reference three-point envelope with
+/// explicit mid-mission and reserve fuel states.
+fn operational_loading_states(
+    oew_mass: f64,
+    oew_cg_x: f64,
+    payload_mass: f64,
+    payload_cg_x: f64,
+    fuel_mass: f64,
+    fuel_cg_x: f64,
+    mtow_cg_x: f64,
+) -> Vec<(ModelCgLoadingState, f64, f64)> {
+    let mzfw_mass = oew_mass + payload_mass;
+    let mzfw_cg_x = (oew_mass * oew_cg_x + payload_mass * payload_cg_x) / mzfw_mass.max(1.0);
+    let with_fuel = |fraction: f64, state: ModelCgLoadingState| {
+        let fuel = fuel_mass.max(0.0) * fraction;
+        let mass = mzfw_mass + fuel;
+        let cg = if fuel > 0.0 {
+            (mzfw_mass * mzfw_cg_x + fuel * fuel_cg_x) / mass.max(1.0)
+        } else {
+            mzfw_cg_x
+        };
+        (state, cg, mass)
+    };
+    vec![
+        (ModelCgLoadingState::OperatingEmpty, oew_cg_x, oew_mass),
+        (ModelCgLoadingState::AnalyzedZeroFuel, mzfw_cg_x, mzfw_mass),
+        with_fuel(0.50, ModelCgLoadingState::OperationalMidMission),
+        with_fuel(0.10, ModelCgLoadingState::OperationalReserve),
+        (
+            ModelCgLoadingState::AnalyzedTakeoff,
+            mtow_cg_x,
+            mzfw_mass + fuel_mass.max(0.0),
+        ),
+    ]
+}
+
+/// Assess hard model constraints across OEW, analyzed ZFW/TOW, and explicit
+/// mid-mission/reserve fuel cases.
 ///
 /// The aerodynamic aft boundary uses
 /// [`alas_config::DesignRequirements::min_physical_static_margin`]. The
@@ -345,13 +388,14 @@ pub fn assess_model_cg_envelope(
         .ok_or(ModelCgEnvelopeError::MissingFuselage)?;
 
     let (oew_mass, oew_cg_x) = oew_and_cg(masses, coords);
-    let states = loading_states(
+    let states = operational_loading_states(
         oew_mass,
         oew_cg_x,
         masses.payload,
         coords.payload[0],
-        cg_x,
         masses.fuel,
+        coords.fuel[0],
+        cg_x,
     );
     let values_are_finite = [
         cg_x,
@@ -363,15 +407,16 @@ pub fn assess_model_cg_envelope(
         config.requirements.target_static_margin,
         config.requirements.cg_range_pct_mac,
         config.mass_model.pct_load_nlg_min,
+        coords.fuel[0],
     ]
     .into_iter()
     .all(f64::is_finite)
         && states
             .iter()
-            .all(|(state_cg_x, mass_kg)| state_cg_x.is_finite() && mass_kg.is_finite());
+            .all(|(_, state_cg_x, mass_kg)| state_cg_x.is_finite() && mass_kg.is_finite());
     if !values_are_finite
         || mac <= 0.0
-        || states.iter().any(|(_, mass_kg)| *mass_kg <= 0.0)
+        || states.iter().any(|(_, _, mass_kg)| *mass_kg <= 0.0)
         || fus_end_x <= fus_start_x
     {
         return Err(ModelCgEnvelopeError::InvalidInput);
@@ -399,7 +444,10 @@ pub fn assess_model_cg_envelope(
         return Err(ModelCgEnvelopeError::InvalidInput);
     }
 
-    let mtow_mass_kg = states[2].1;
+    let mtow_mass_kg = states
+        .last()
+        .map(|(_, _, mass_kg)| *mass_kg)
+        .unwrap_or_default();
     let physical_forward_x_m = x_mac_le + configured_forward_limit_pct_mac / 100.0 * mac;
     let physical_aft_x_m = x_mac_le + aerodynamic_aft_limit_pct_mac / 100.0 * mac;
     let fuselage_diameter_m = config.geometry.fuselage.diameter_m;
@@ -416,13 +464,8 @@ pub fn assess_model_cg_envelope(
     let nose_gear_capacity_kg = mtow_mass_kg * gear.pct_load_nlg_max;
     let main_gear_capacity_kg = mtow_mass_kg * gear.pct_load_mlg_max;
 
-    let state_names = [
-        ModelCgLoadingState::OperatingEmpty,
-        ModelCgLoadingState::AnalyzedZeroFuel,
-        ModelCgLoadingState::AnalyzedTakeoff,
-    ];
     let mut loading_assessments = Vec::with_capacity(states.len());
-    for (state, (state_cg_x, mass_kg)) in state_names.into_iter().zip(states) {
+    for (state, state_cg_x, mass_kg) in states {
         let nose_gear_load_kg = mass_kg * (x_main_gear - state_cg_x) / wheelbase_m;
         let main_gear_load_kg = mass_kg - nose_gear_load_kg;
         loading_assessments.push(assess_loading_constraints(LoadingConstraintInputs {
@@ -440,7 +483,11 @@ pub fn assess_model_cg_envelope(
             minimum_nose_gear_load_fraction: config.mass_model.pct_load_nlg_min,
         }));
     }
-    let mtow_static_margin = loading_assessments[2].static_margin;
+    let mtow_static_margin = loading_assessments
+        .iter()
+        .find(|assessment| assessment.state == ModelCgLoadingState::AnalyzedTakeoff)
+        .map(|assessment| assessment.static_margin)
+        .ok_or(ModelCgEnvelopeError::InvalidInput)?;
 
     Ok(ModelCgEnvelopeAssessment {
         loading_states: loading_assessments,
@@ -683,7 +730,11 @@ mod tests {
             &config,
         )
         .expect("model assessment");
-        let mtow_static_constraint = assessment.loading_states[2]
+        let mtow_static_constraint = assessment
+            .loading_states
+            .iter()
+            .find(|state| state.state == ModelCgLoadingState::AnalyzedTakeoff)
+            .expect("analyzed-TOW state")
             .constraints
             .iter()
             .find(|constraint| constraint.constraint == ModelCgConstraint::StaticStabilityFloor)

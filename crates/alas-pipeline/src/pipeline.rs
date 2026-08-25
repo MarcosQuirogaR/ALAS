@@ -17,6 +17,7 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use alas_aero::mses::{
     run_mses_polar, run_mses_pressure_distribution, MsesPolarResult, MsesPressureResult,
@@ -24,7 +25,7 @@ use alas_aero::mses::{
 use alas_config::airports::get as get_airport;
 use alas_config::design_variables::DesignVector;
 use alas_config::presets;
-use alas_config::AlasConfig;
+use alas_config::{AlasConfig, Severity};
 use alas_exec::RunEnvironment;
 use alas_geom::aircraft::airplane::Airplane;
 use alas_mission::MissionResult;
@@ -191,6 +192,10 @@ pub struct PipelineResult {
     pub baseline_report: Option<BaselineReport>,
     /// Full aerodynamic and mass report for the baseline design.
     pub baseline_analysis: Option<AnalysisReport>,
+    /// Failure detail when the optional full baseline analysis could not be
+    /// constructed.  A missing baseline report is therefore distinguishable
+    /// from a caller that did not request baseline comparison.
+    pub baseline_analysis_error: Option<String>,
     /// Lateral airway or great-circle route flown.
     pub route: Option<Route>,
     /// Observable dispatch-tier outcome and the route source ultimately used.
@@ -280,7 +285,7 @@ pub struct DesignPipeline {
 impl DesignPipeline {
     /// Create a new design pipeline with `config`.
     pub fn new(mut config: AlasConfig) -> Self {
-        config.geometry.engine.apply_engine_spec();
+        config.geometry.engine.apply_engine_spec_if_uninitialized();
         Self {
             config,
             aircraft_override: None,
@@ -382,6 +387,7 @@ impl DesignPipeline {
         initial_design: Option<DesignVector>,
         bounds: Option<&[(f64, f64)]>,
     ) -> Result<PipelineResult, String> {
+        validate_run_configuration(&self.config)?;
         if self.aircraft_override.is_some() && options.optimize {
             return Err(
                 "CPACS-backed runs currently require --no-optimize; design variables cannot replace imported geometry"
@@ -394,6 +400,19 @@ impl DesignPipeline {
                     .to_owned(),
             );
         }
+        // `output_dir` controls retention, not whether the requested physics
+        // stages run. When retention is disabled, run every writer and
+        // external adapter in an isolated temporary workspace instead of
+        // using `None` as a stage-disable signal.
+        let analysis_dir = options.output_dir.clone().unwrap_or_else(|| {
+            let nonce = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|duration| duration.as_nanos())
+                .unwrap_or_default();
+            std::env::temp_dir().join(format!("alas-analysis-{}-{nonce}", std::process::id()))
+        });
+        std::fs::create_dir_all(&analysis_dir)
+            .map_err(|error| format!("analysis workspace creation failed: {error}"))?;
         let nominal_design = initial_design.unwrap_or_else(|| self.configured_nominal_design());
 
         // Stage 0: Baseline W&B + stability estimation.
@@ -412,7 +431,7 @@ impl DesignPipeline {
                 environment,
                 &nominal_design,
                 bounds,
-                options.output_dir.as_deref(),
+                Some(analysis_dir.as_path()),
             ))
         } else {
             None
@@ -451,15 +470,11 @@ impl DesignPipeline {
         // Downstream writers consume the typed aircraft reconstructed from
         // this document, so CPACS is the non-GUI geometry boundary rather
         // than a sidecar copy of the configuration-built geometry.
-        let cpacs_export = options
-            .output_dir
-            .as_ref()
-            .map(|out_dir| {
-                let path = out_dir.join("cpacs/optimized_aircraft.cpacs.xml");
-                export_cpacs(&optimized_report, &self.config, &path)
-                    .map_err(|error| format!("CPACS export failed: {error}"))
-            })
-            .transpose()?;
+        let cpacs_path = analysis_dir.join("cpacs/optimized_aircraft.cpacs.xml");
+        let cpacs_export = Some(
+            export_cpacs(&optimized_report, &self.config, &cpacs_path)
+                .map_err(|error| format!("CPACS export failed: {error}"))?,
+        );
         if let Some(export) = cpacs_export.as_ref() {
             let document = read_cpacs_file(&export.path)
                 .map_err(|error| format!("CPACS canonicalization read failed: {error}"))?;
@@ -469,24 +484,20 @@ impl DesignPipeline {
         }
 
         // Native tool writers receive the CPACS-canonicalized report.
-        let openvsp_export = if let Some(ref out_dir) = options.output_dir {
-            let af_path = out_dir.join("airfoils/optimized_root.dat");
-            let openvsp_path = out_dir.join("openvsp/optimized_aircraft.vspscript");
+        let openvsp_export = {
+            let af_path = analysis_dir.join("airfoils/optimized_root.dat");
+            let openvsp_path = analysis_dir.join("openvsp/optimized_aircraft.vspscript");
             let _ = export_airfoil_dat(&optimized_report, &self.config, &af_path, "ALAS_Optimized");
-            let openvsp =
-                match export_openvsp_script(&optimized_report, &self.config, &openvsp_path) {
-                    Ok(export) => Some(match environment.openvsp_exe.as_deref() {
-                        Some(executable) => materialize_openvsp_project(export, executable, 120.0),
-                        None => export,
-                    }),
-                    Err(error) => {
-                        tracing::warn!(%error, "OpenVSP geometry script export failed");
-                        None
-                    }
-                };
-            openvsp
-        } else {
-            None
+            match export_openvsp_script(&optimized_report, &self.config, &openvsp_path) {
+                Ok(export) => Some(match environment.openvsp_exe.as_deref() {
+                    Some(executable) => materialize_openvsp_project(export, executable, 120.0),
+                    None => export,
+                }),
+                Err(error) => {
+                    tracing::warn!(%error, "OpenVSP geometry script export failed");
+                    None
+                }
+            }
         };
         let avl_requested = matches!(
             options.aerodynamic_solver,
@@ -507,44 +518,44 @@ impl DesignPipeline {
             if !avl_requested {
                 return None;
             }
-            options.output_dir.as_ref().map(|output_dir| {
+            Some({
                 run_avl_takeoff_comparison(
                     &optimized_report,
                     &self.config,
-                    output_dir,
+                    &analysis_dir,
                     environment.avl_exe.as_deref(),
                     300.0,
                 )
             })
         };
         let run_flowunsteady = || {
-            options.output_dir.as_ref().map(|output_dir| {
+            Some({
                 run_flowunsteady_analysis(
                     &optimized_report,
                     &self.config,
-                    output_dir,
+                    &analysis_dir,
                     environment.flowunsteady_exe.as_deref(),
                     900.0,
                 )
             })
         };
-        let run_baseline_analysis = || {
+        let run_baseline_analysis = || -> (Option<AnalysisReport>, Option<String>) {
             if !options.compare_baseline {
-                None
+                (None, None)
             } else if !options.optimize && self.aircraft_override.is_none() {
-                Some(optimized_report.clone())
+                (Some(optimized_report.clone()), None)
             } else {
-                full.run(&nominal_design, true).ok()
+                match full.run(&nominal_design, true) {
+                    Ok(report) => (Some(report), None),
+                    Err(error) => (None, Some(error)),
+                }
             }
         };
         let run_mission = || self.evaluate_active_mission(&optimized_report, dispatched_route);
         let run_mses = || self.run_mses_stage(&optimized_report, environment.mses_dir.as_deref());
         let run_structural = || {
             if self.config.structures.enabled {
-                let work_dir = options
-                    .output_dir
-                    .as_ref()
-                    .map(|dir| dir.join("structures"));
+                let work_dir = Some(analysis_dir.join("structures"));
                 Some(crate::structural::run_structural_analysis_with_environment(
                     &self.config,
                     &optimized_report,
@@ -560,6 +571,7 @@ impl DesignPipeline {
             avl_result,
             flowunsteady_result,
             baseline_analysis,
+            baseline_analysis_error,
             mission_outputs,
             mses_outputs,
             structural_result,
@@ -580,7 +592,7 @@ impl DesignPipeline {
                 let flowunsteady_result = flowunsteady
                     .join()
                     .map_err(|_| "FLOWUnsteady worker panicked".to_owned())?;
-                let baseline_analysis = baseline
+                let (baseline_analysis, baseline_analysis_error) = baseline
                     .join()
                     .map_err(|_| "baseline-analysis worker panicked".to_owned())?;
                 let mission_outputs = mission
@@ -595,6 +607,7 @@ impl DesignPipeline {
                     avl_result,
                     flowunsteady_result,
                     baseline_analysis,
+                    baseline_analysis_error,
                     mission_outputs,
                     mses_outputs,
                     structural_result,
@@ -602,11 +615,13 @@ impl DesignPipeline {
                 ))
             })?
         } else {
+            let (baseline_analysis, baseline_analysis_error) = run_baseline_analysis();
             (
                 run_vspaero(),
                 run_avl(),
                 run_flowunsteady(),
-                run_baseline_analysis(),
+                baseline_analysis,
+                baseline_analysis_error,
                 run_mission()?,
                 run_mses(),
                 run_structural(),
@@ -632,15 +647,15 @@ impl DesignPipeline {
             .map_err(|error| format!("CPACS analysis export failed: {error}"))?;
         }
         let cpacs_adapter_manifest =
-            match (options.output_dir.as_ref(), cpacs_export.as_ref()) {
-                (Some(out_dir), Some(export)) => {
+            match cpacs_export.as_ref() {
+                Some(export) => {
                     let data = CpacsAircraftData::from_report(&optimized_report, export);
-                    let path = out_dir.join("cpacs/adapter_manifest.json");
+                    let path = analysis_dir.join("cpacs/adapter_manifest.json");
                     Some(data.manifest().write_json(&path).map_err(|error| {
                         format!("CPACS adapter manifest export failed: {error}")
                     })?)
                 }
-                _ => None,
+                None => None,
             };
         let design_database = options.output_dir.as_ref().and_then(|out_dir| {
             let path = out_dir.join("design_database.json");
@@ -731,6 +746,7 @@ impl DesignPipeline {
             solver_optimizations,
             baseline_report,
             baseline_analysis,
+            baseline_analysis_error,
             route,
             route_status,
             mission_result,
@@ -921,6 +937,31 @@ impl DesignPipeline {
             None => "No analysis report available.".to_owned(),
         }
     }
+}
+
+/// Enforce the blocking cross-field configuration contract at the public
+/// execution boundary. The GUI performs the same check for button state, but
+/// library and CLI callers must receive it even when they bypass that UI.
+fn validate_run_configuration(config: &AlasConfig) -> Result<(), String> {
+    if !config.preset.is_empty() {
+        presets::get(&config.preset).map_err(|error| {
+            format!(
+                "configuration preset identity is not registered: {error}; clear the preset field or select a registered aircraft preset"
+            )
+        })?;
+    }
+    let errors = alas_config::validate(config)
+        .into_iter()
+        .filter(|issue| issue.severity == Severity::Error)
+        .map(|issue| format!("{}: {}", issue.field_path, issue.message))
+        .collect::<Vec<_>>();
+    if errors.is_empty() {
+        return Ok(());
+    }
+    Err(format!(
+        "configuration validation failed:\n- {}",
+        errors.join("\n- ")
+    ))
 }
 
 #[cfg(test)]

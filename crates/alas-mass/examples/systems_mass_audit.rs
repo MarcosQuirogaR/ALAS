@@ -128,7 +128,11 @@ fn main() -> Result<(), Box<dyn Error>> {
                 std::io::Error::other(format!("{preset_name} has no vertical stabilizer"))
             })?;
         let passengers = passenger_count(config.requirements.num_passengers, preset_name)?;
-        let tail_area_m2 = hstab.area() + vstab.area();
+        // The audit reports projected aircraft planform for the main and
+        // horizontal tail. A vertical fin lies in XZ, so its physical fin
+        // planform must remain explicit rather than collapsing under XY
+        // projection.
+        let tail_area_m2 = hstab.reference_area() + vstab.unfolded_area();
 
         let frozen_mission = estimate_systems(
             passengers,
@@ -136,7 +140,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             AccessoriesType::Other,
             airplane.s_ref,
             tail_area_m2,
-            main_wing.area(),
+            main_wing.reference_area(),
         );
         let intended_long_range = estimate_systems(
             passengers,
@@ -144,7 +148,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             AccessoriesType::LongRange,
             airplane.s_ref,
             tail_area_m2,
-            main_wing.area(),
+            main_wing.reference_area(),
         );
         let frozen_operating_items = estimate_operating_items(passengers, AccessoriesType::Other);
         let product = calculate_component_masses(
@@ -177,7 +181,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             "inputs": {
                 "mtow_kg": config.requirements.mtow_kg,
                 "passenger_count": passengers,
-                "main_wing_area_m2": main_wing.area(),
+                "main_wing_area_m2": main_wing.reference_area(),
                 "tail_area_m2": tail_area_m2,
             },
             "product_fraction_buildup": {

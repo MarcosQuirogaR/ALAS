@@ -80,23 +80,15 @@ impl Solution {
 const RANDOM_RESPONSE_NOT_REQUESTED: &str =
     "Random-vibration RMS was not requested: enable force-PSD RMS calculation to integrate the SOL 111 unit-force response";
 
-/// The default force-PSD bandwidth.  The RMS result is formed from monitor
-/// displacements only, so this retains the engineering check without making a
-/// fresh configuration pay for the optional extended sine sweep.
-const DEFAULT_FORCE_PSD_MAX_HZ: f64 = 60.0;
-
 /// Return the SOL 111 settings appropriate to the requested product.
 ///
-/// A force-PSD-only request needs the unit-force response only over the RMS
-/// band.  An explicitly enabled sine sweep keeps the configured upper limit,
-/// because its purpose is to inspect the whole response rather than to form a
-/// bounded RMS integral.
+/// A force-PSD-only request uses the configured upper frequency without
+/// rewriting it. The RMS integral is a band-limited quantity, so silently
+/// replacing a requested upper bound would discard response variance and make
+/// the retained deck disagree with the user's configuration. Callers that want
+/// a shorter engineering check should set `freq_sweep_max_hz` explicitly.
 fn sol111_config(config: &StructuresConfig) -> StructuresConfig {
-    let mut solve = config.clone();
-    if config.run_sol_vibration_random && !config.run_sol_vibration_sine {
-        solve.freq_sweep_max_hz = config.freq_sweep_max_hz.min(DEFAULT_FORCE_PSD_MAX_HZ);
-    }
-    solve
+    config.clone()
 }
 
 /// Why a solve produced nothing, when the reason is not a run outcome.
@@ -551,15 +543,17 @@ mod tests {
     }
 
     #[test]
-    fn a_force_psd_only_request_is_limited_to_the_default_rms_band() {
-        let config = StructuresConfig {
-            run_sol_vibration_sine: false,
-            run_sol_vibration_random: true,
-            freq_sweep_max_hz: 500.0,
-            ..StructuresConfig::default()
-        };
+    fn a_force_psd_only_request_honors_the_configured_rms_band() {
+        for upper_hz in [60.0, 120.0, 240.0, 500.0] {
+            let config = StructuresConfig {
+                run_sol_vibration_sine: false,
+                run_sol_vibration_random: true,
+                freq_sweep_max_hz: upper_hz,
+                ..StructuresConfig::default()
+            };
 
-        assert_eq!(sol111_config(&config).freq_sweep_max_hz, 60.0);
+            assert_eq!(sol111_config(&config).freq_sweep_max_hz, upper_hz);
+        }
     }
 
     #[test]

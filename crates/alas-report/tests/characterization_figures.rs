@@ -13,7 +13,7 @@ use alas_config::AlasConfig;
 use alas_geom::asb::airplane::Airplane;
 use alas_opt::history::OptimizationHistory;
 use alas_perf::performance::VnDiagramData;
-use alas_pipeline::full_analysis::{AnalysisReport, DesignPoint, PolarFit};
+use alas_pipeline::full_analysis::{AnalysisReport, DesignPoint, PolarFit, PolarFitStatus};
 use alas_report::families::{
     aerodynamics, geometry, mass_balance, mission, optimization, performance, propulsion,
     screening, stability, structures,
@@ -38,6 +38,7 @@ fn sample_report() -> AnalysisReport {
         },
         polar: PolarSweep {
             alpha_deg: Vec::new(),
+            geometric_alpha_deg: Vec::new(),
             cl: Vec::new(),
             cd: Vec::new(),
             cd_induced: Vec::new(),
@@ -57,6 +58,7 @@ fn sample_report() -> AnalysisReport {
             k: 0.042,
             oswald_e: 0.86,
             aspect_ratio: 9.8,
+            status: PolarFitStatus::Fitted,
         },
         static_margin: 0.125,
         x_neutral_point: 16.5,
@@ -109,6 +111,36 @@ fn registry_descriptors_name_the_stage_that_supplies_their_data() {
             .required_stage,
         alas_report::RequiredStage::Mses
     );
+    for id in [
+        "drag_breakdown",
+        "dynamic_modes",
+        "span_loading",
+        "stability_side_view",
+    ] {
+        assert_eq!(
+            alas_report::find_figure(id)
+                .expect("stage-collision figure is registered")
+                .required_stage,
+            alas_report::RequiredStage::FullAnalysis,
+            "{id} must be supplied by the full analysis stage"
+        );
+    }
+    for id in [
+        "structures_sizing",
+        "structures_loads",
+        "structures_stress",
+        "structures_modes",
+        "structures_vibration",
+        "structures_patran",
+    ] {
+        assert_eq!(
+            alas_report::find_figure(id)
+                .expect("structure figure is registered")
+                .required_stage,
+            alas_report::RequiredStage::Structures,
+            "{id} must be supplied by the structures stage"
+        );
+    }
     assert!(SCREENING_FIGURES
         .iter()
         .all(|figure| figure.required_stage == alas_report::RequiredStage::Screening));

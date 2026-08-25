@@ -201,6 +201,61 @@ fn malformed_desktop_bounds_are_rejected_before_optimization() {
 }
 
 #[test]
+fn invalid_cross_field_configuration_is_rejected_before_any_stage_runs() {
+    let mut config = AlasConfig::default();
+    config.requirements.dive_speed_m_s = 50.0;
+    config.geometry.empennage.hstab_tip_chord_m = 9.0;
+    let error = match DesignPipeline::new(config).run(
+        &PipelineOptions {
+            optimize: false,
+            compare_baseline: false,
+            parallel: false,
+            output_dir: None,
+            save_plots: false,
+            quiet: true,
+            ..PipelineOptions::default()
+        },
+        &RunEnvironment::default(),
+    ) {
+        Err(error) => error,
+        Ok(_) => panic!("blocking configuration validation must stop the public run path"),
+    };
+    assert!(error.contains("configuration validation failed"), "{error}");
+    assert!(error.contains("requirements.dive_speed_m_s"), "{error}");
+    assert!(
+        error.contains("geometry.empennage.hstab_tip_chord_m"),
+        "{error}"
+    );
+}
+
+#[test]
+fn an_unregistered_preset_identity_is_rejected_at_the_public_run_boundary() {
+    let config = AlasConfig {
+        preset: "Concorde".to_owned(),
+        ..AlasConfig::default()
+    };
+    let error = match DesignPipeline::new(config).run(
+        &PipelineOptions {
+            optimize: false,
+            compare_baseline: false,
+            parallel: false,
+            output_dir: None,
+            save_plots: false,
+            quiet: true,
+            ..PipelineOptions::default()
+        },
+        &RunEnvironment::default(),
+    ) {
+        Err(error) => error,
+        Ok(_) => panic!("an unsupported preset must not run generic defaults"),
+    };
+    assert!(
+        error.contains("preset identity is not registered"),
+        "{error}"
+    );
+}
+
+#[test]
 fn enabled_native_mission_is_present_in_a_normal_pipeline_result() {
     let config = AlasConfig::default();
     let pipeline = DesignPipeline::new(config);
@@ -334,6 +389,28 @@ fn parallel_downstream_stages_preserve_the_serial_analysis_result() {
     assert_eq!(parallel.optimized_design, serial.optimized_design);
     assert_eq!(parallel.optimized_report, serial.optimized_report);
     assert_eq!(parallel.baseline_analysis, serial.baseline_analysis);
+    assert_eq!(
+        parallel.baseline_analysis_error,
+        serial.baseline_analysis_error
+    );
+    assert!(
+        serial.baseline_analysis_error.is_none(),
+        "a completed baseline comparison must not carry a hidden layout error"
+    );
+    assert!(
+        serial
+            .baseline_analysis
+            .as_ref()
+            .is_some_and(|report| report.payload_layout.is_some()),
+        "a completed full baseline report must retain its detailed payload layout"
+    );
+    assert!(
+        serial
+            .baseline_report
+            .as_ref()
+            .is_some_and(|report| report.status == "ok" && report.payload_layout.is_some()),
+        "the fast baseline must also expose a resolved detailed payload layout"
+    );
     assert!(!serial.execution.parallel_effective);
     assert!(parallel.execution.parallel_effective);
 }

@@ -167,7 +167,7 @@ fn an_allowed_sitemap_cannot_redirect_discovery_to_another_host() {
 #[test]
 fn built_in_source_adapters_are_allow_listed_and_have_bounded_caps() {
     let sources = built_in_sources();
-    assert_eq!(sources.len(), 13);
+    assert_eq!(sources.len(), 14);
     let ids = sources
         .iter()
         .map(|source| source.source_id.as_str())
@@ -186,6 +186,15 @@ fn built_in_source_adapters_are_allow_listed_and_have_bounded_caps() {
             .strip_prefix("https://")
             .is_some_and(|url| url.starts_with(&policy.allowed_hosts[0])));
     }
+    let robart = sources
+        .iter()
+        .find(|source| source.source_id == "robart")
+        .expect("Robart source");
+    assert_eq!(robart.publisher, "Robart Manufacturing");
+    assert!(robart
+        .product_path_fragments
+        .iter()
+        .any(|fragment| fragment == "/products/"));
 }
 
 #[test]

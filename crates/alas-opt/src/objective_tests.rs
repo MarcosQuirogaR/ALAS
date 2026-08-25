@@ -4,8 +4,53 @@
 //! Unit tests for the scalar aircraft-design objective.
 
 use alas_config::{AlasConfig, DesignVector};
+use alas_geom::aircraft::airfoil::Airfoil;
+use alas_geom::aircraft::spacing::linspace;
+use alas_geom::aircraft::wing::{Wing, WingXSec};
 
-use super::{apply_candidate_payload_load_case, DesignObjective};
+use super::{
+    apply_candidate_payload_load_case, wing_fuel_volume_m3,
+    wing_fuel_volume_m3_reference_compatibility, DesignObjective,
+};
+
+fn dihedral_wing() -> Wing {
+    let airfoil = Airfoil::from_name("naca0012").expect("valid four-digit NACA section");
+    Wing::new(
+        "Reference test wing",
+        vec![
+            WingXSec::new([0.0, 0.0, 0.0], 2.0, 0.0, airfoil.clone()),
+            WingXSec::new([0.0, 10.0, 5.0], 2.0, 0.0, airfoil),
+        ],
+        true,
+    )
+}
+
+#[test]
+fn fuel_volume_uses_projected_reference_area_and_span() {
+    let wing = dihedral_wing();
+    let usable_fraction = 0.8;
+    let product = wing_fuel_volume_m3(&wing, usable_fraction);
+    let taper = wing.taper_ratio();
+    let term_taper = (1.0 + taper + taper.powi(2)) / (1.0 + taper).powi(2);
+    let root_t_over_c = wing.xsecs[0]
+        .airfoil
+        .max_thickness(&linspace(0.0, 1.0, 101));
+    let expected = 0.54
+        * (wing.reference_area().powi(2) / wing.reference_span())
+        * root_t_over_c
+        * term_taper
+        * usable_fraction;
+    assert!(
+        (product - expected).abs() < 1e-12,
+        "product={product}, expected={expected}"
+    );
+
+    let compatibility = wing_fuel_volume_m3_reference_compatibility(&wing, usable_fraction);
+    assert!(
+        (compatibility - product).abs() > 1e-6,
+        "dihedral must distinguish the explicit parity convention"
+    );
+}
 
 #[test]
 fn a_cruise_lift_above_the_configured_limit_is_rejected_before_trim() {
@@ -21,6 +66,23 @@ fn a_cruise_lift_above_the_configured_limit_is_rejected_before_trim() {
     assert_eq!(
         objective.history.reject_reason,
         vec!["stall_guard".to_owned()]
+    );
+}
+
+#[test]
+fn malformed_design_vectors_record_the_failure_cost_in_objective_history() {
+    let config = AlasConfig::default();
+    let failure_cost = config.optimizer.weights.failure_cost;
+    let mut objective = DesignObjective::new(config);
+
+    let actual = objective.evaluate(&[]);
+
+    assert_eq!(actual, failure_cost);
+    assert_eq!(objective.history.cost, vec![failure_cost]);
+    assert_eq!(objective.history.valid, vec![false]);
+    assert_eq!(
+        objective.history.reject_reason,
+        vec!["geometry_build".to_owned()]
     );
 }
 

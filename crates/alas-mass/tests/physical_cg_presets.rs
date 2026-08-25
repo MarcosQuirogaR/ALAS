@@ -57,16 +57,41 @@ fn every_preset_uses_a_finite_structural_wing_point_inside_its_wingbox() {
             assert_eq!(planning_reference.lemac_from_aircraft_nose_m, 16.535_349_2);
             assert_eq!(planning_reference.mean_aerodynamic_chord_m, 3.781_044);
             assert!(
-                (main_wing.area() - 112.3).abs() < 0.01,
-                "A220-300: built area must reproduce Airbus Sref at published precision"
+                (main_wing.reference_area() - 112.3).abs() < 0.01,
+                "A220-300: projected reference area must reproduce Airbus Sref at published precision"
             );
             assert_eq!(
                 airplane.s_ref,
-                main_wing.area(),
-                "AeroSandbox-parity s_ref remains the dihedral-inclusive planform area"
+                main_wing.reference_area(),
+                "aircraft s_ref must use the projected reference-plane area"
             );
-            assert!((main_wing.aerodynamic_center(0.0)[0] - 16.349_875_122_007_83).abs() < 1e-12);
-            assert!((main_wing.mean_aerodynamic_chord() - 3.720_242_534_584_891_3).abs() < 1e-12);
+            let reference_airplane =
+                AircraftBuilder::new_reference_compatibility(Some(config.geometry.clone()))
+                    .build(Some(&preset.design_vector), true)
+                    .expect("A220 frozen reference geometry builds");
+            let reference_wing = reference_airplane
+                .wings
+                .iter()
+                .find(|wing| wing.name == "Main Wing")
+                .expect("A220 frozen reference has a main wing");
+            let aerodynamic_center_x = reference_wing.aerodynamic_center(0.0)[0];
+            let mean_aerodynamic_chord = reference_wing.mean_aerodynamic_chord();
+            assert!(
+                (aerodynamic_center_x - 16.349_875_122_007_83).abs() < 1e-12,
+                "A220 frozen-reference aerodynamic-center x drifted: {aerodynamic_center_x:.15}"
+            );
+            assert!(
+                (mean_aerodynamic_chord - 3.720_242_534_584_891_3).abs() < 1e-12,
+                "A220 frozen-reference MAC drifted: {mean_aerodynamic_chord:.15}"
+            );
+            assert!(
+                (main_wing.aerodynamic_center(0.0)[0] - aerodynamic_center_x).abs() > 1e-6,
+                "A220 product geometry must not silently use the frozen reference planform"
+            );
+            assert!(
+                (main_wing.mean_aerodynamic_chord() - mean_aerodynamic_chord).abs() > 1e-6,
+                "A220 product MAC must remain distinct from the frozen reference MAC"
+            );
         }
         let (reference_masses, reference_coordinates, _) = run_mass_analysis(
             &airplane,

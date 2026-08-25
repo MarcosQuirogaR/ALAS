@@ -73,9 +73,27 @@ const CHORDWISE_RESOLUTION: usize = 10;
 /// approximation for transport aircraft, used before a real structural mass
 /// distribution exists -- not a substitute for a mass-properties model.
 pub fn estimate_inertia(plane: &Airplane, mass_kg: f64) -> (f64, f64, f64) {
+    // Dynamic roll inertia is an aircraft-level reference quantity.  Use the
+    // same lateral/Y span that normalizes the aerodynamic derivatives rather
+    // than the wing's legacy unfolded YZ path.
+    estimate_inertia_with_span(plane, mass_kg, plane.b_ref)
+}
+
+/// Frozen translation/parity inertia estimate using the historical unfolded
+/// main-wing span. Product dynamic analyses use [`estimate_inertia`], whose
+/// aircraft-level span is the selected lateral/Y reference.
+pub fn estimate_inertia_reference_compatibility(plane: &Airplane, mass_kg: f64) -> (f64, f64, f64) {
+    let span = plane
+        .wings
+        .first()
+        .map(|wing| wing.unfolded_span())
+        .unwrap_or(plane.b_ref);
+    estimate_inertia_with_span(plane, mass_kg, span)
+}
+
+fn estimate_inertia_with_span(plane: &Airplane, mass_kg: f64, span: f64) -> (f64, f64, f64) {
     let fus = &plane.fuselages[0];
     let fus_len = fus.xsecs[fus.xsecs.len() - 1].xyz_c[0] - fus.xsecs[0].xyz_c[0];
-    let span = plane.wings[0].span();
     let rx = RX_SPAN_FRACTION * span;
     let ry = RY_LENGTH_FRACTION * fus_len;
     let rz = RZ_LENGTH_FRACTION * fus_len;
@@ -154,8 +172,38 @@ pub fn compute_dynamic_modes(
     op_point: &OperatingPoint,
     mass_props: &MassProperties,
 ) -> Result<DynamicModes, VlmError> {
-    let derivatives =
-        vlm::run_with_stability_derivatives(plane, op_point, 1, CHORDWISE_RESOLUTION)?;
+    compute_dynamic_modes_with_reference_mode(plane, op_point, mass_props, false)
+}
+
+/// Frozen translation/parity form of [`compute_dynamic_modes`].
+///
+/// The historical fixture uses the legacy rotational-origin and forward
+/// finite-difference policy. Product callers use the projected-reference
+/// geometry and the product derivative policy through [`compute_dynamic_modes`].
+pub fn compute_dynamic_modes_reference_compatibility(
+    plane: &Airplane,
+    op_point: &OperatingPoint,
+    mass_props: &MassProperties,
+) -> Result<DynamicModes, VlmError> {
+    compute_dynamic_modes_with_reference_mode(plane, op_point, mass_props, true)
+}
+
+fn compute_dynamic_modes_with_reference_mode(
+    plane: &Airplane,
+    op_point: &OperatingPoint,
+    mass_props: &MassProperties,
+    reference_compatibility: bool,
+) -> Result<DynamicModes, VlmError> {
+    let derivatives = if reference_compatibility {
+        vlm::run_with_stability_derivatives_reference_compatibility(
+            plane,
+            op_point,
+            1,
+            CHORDWISE_RESOLUTION,
+        )?
+    } else {
+        vlm::run_with_stability_derivatives(plane, op_point, 1, CHORDWISE_RESOLUTION)?
+    };
 
     // The eleven coefficients get_modes reads, pulled out of the sweep's
     // thirty. CL/CD are the base run; the rest are the like-named derivative
@@ -215,6 +263,7 @@ mod tests {
             ],
             false,
         );
+        let b_ref = wing.reference_span();
         Airplane {
             name: "Inertia Probe".to_owned(),
             xyz_ref: [0.0, 0.0, 0.0],
@@ -222,7 +271,7 @@ mod tests {
             fuselages: vec![fuselage],
             s_ref: 1.0,
             c_ref: 1.0,
-            b_ref: 1.0,
+            b_ref,
         }
     }
 

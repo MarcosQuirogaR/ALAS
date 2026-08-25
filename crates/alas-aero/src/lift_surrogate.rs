@@ -111,6 +111,75 @@ pub struct LiftSolution {
     pub wing_lift_coefficient: Vec<f64>,
     /// Each wing's inviscid induced drag coefficient, likewise.
     pub wing_induced_drag_coefficient: Vec<f64>,
+    /// Whether either query coordinate was clamped to the training boundary.
+    ///
+    /// The legacy [`LiftSurrogate::evaluate`] operation still returns the
+    /// reference-compatible edge value, but it no longer leaves the caller
+    /// guessing whether that happened. Product callers that require an
+    /// in-domain model can use [`LiftSurrogate::evaluate_checked`].
+    pub domain: SurrogateDomainStatus,
+}
+
+/// Domain status attached to every surrogate evaluation.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SurrogateDomainStatus {
+    /// Whether angle of attack was below the first or above the last knot.
+    pub alpha_clamped: bool,
+    /// Whether Mach was below the first or above the last knot.
+    pub mach_clamped: bool,
+    /// Distance below/above the alpha training interval, in radians; zero
+    /// means the query is inside the interval.
+    pub alpha_distance_rad: f64,
+    /// Distance below/above the Mach training interval; zero means the query
+    /// is inside the interval.
+    pub mach_distance: f64,
+}
+
+impl SurrogateDomainStatus {
+    /// True when both coordinates lie inside the trained rectangle.
+    pub const fn in_domain(self) -> bool {
+        !self.alpha_clamped && !self.mach_clamped
+    }
+}
+
+impl Default for SurrogateDomainStatus {
+    fn default() -> Self {
+        Self {
+            alpha_clamped: false,
+            mach_clamped: false,
+            alpha_distance_rad: 0.0,
+            mach_distance: 0.0,
+        }
+    }
+}
+
+/// Why a checked surrogate evaluation was rejected.
+#[derive(Debug, Clone, Copy, PartialEq, thiserror::Error)]
+pub enum SurrogateDomainError {
+    /// A query coordinate was not finite.
+    #[error("surrogate query must be finite (alpha={alpha_rad:?}, Mach={mach:?})")]
+    NonFinite {
+        /// Requested angle of attack in radians.
+        alpha_rad: f64,
+        /// Requested Mach number.
+        mach: f64,
+    },
+    /// A finite query lies outside the trained rectangle.
+    #[error("surrogate query is outside the trained domain: alpha={alpha_rad:.6} rad, Mach={mach:.6}; domain alpha=[{alpha_min:.6}, {alpha_max:.6}], Mach=[{mach_min:.6}, {mach_max:.6}]")]
+    OutOfDomain {
+        /// Requested angle of attack in radians.
+        alpha_rad: f64,
+        /// Requested Mach number.
+        mach: f64,
+        /// Lowest trained angle.
+        alpha_min: f64,
+        /// Highest trained angle.
+        alpha_max: f64,
+        /// Lowest trained Mach.
+        mach_min: f64,
+        /// Highest trained Mach.
+        mach_max: f64,
+    },
 }
 
 /// Why a surrogate could not be trained.
@@ -355,6 +424,7 @@ impl LiftSurrogate {
     /// Outside the training rectangle the answer is the value on the nearest
     /// edge, not an extrapolation of it. The module doc says why.
     pub fn evaluate(&self, angle_of_attack_rad: f64, mach: f64) -> LiftSolution {
+        let domain = self.domain_status(angle_of_attack_rad, mach);
         LiftSolution {
             inviscid_lift_coefficient: self.lift.evaluate(angle_of_attack_rad, mach),
             inviscid_induced_drag_coefficient: self.drag.evaluate(angle_of_attack_rad, mach),
@@ -368,6 +438,79 @@ impl LiftSurrogate {
                 .iter()
                 .map(|spline| spline.evaluate(angle_of_attack_rad, mach))
                 .collect(),
+            domain,
+        }
+    }
+
+    /// Evaluate only when the query is inside the trained rectangle.
+    ///
+    /// [`Self::evaluate`] intentionally preserves the upstream FITPACK edge
+    /// clamp for parity. This checked entry point makes the model boundary an
+    /// explicit policy choice for mission/product callers instead of silently
+    /// freezing lift and induced drag at the last training knot.
+    pub fn evaluate_checked(
+        &self,
+        angle_of_attack_rad: f64,
+        mach: f64,
+    ) -> Result<LiftSolution, SurrogateDomainError> {
+        if !angle_of_attack_rad.is_finite() || !mach.is_finite() {
+            return Err(SurrogateDomainError::NonFinite {
+                alpha_rad: angle_of_attack_rad,
+                mach,
+            });
+        }
+        let domain = self.domain_status(angle_of_attack_rad, mach);
+        if !domain.in_domain() {
+            return Err(SurrogateDomainError::OutOfDomain {
+                alpha_rad: angle_of_attack_rad,
+                mach,
+                alpha_min: self
+                    .grid
+                    .angle_of_attack_rad
+                    .first()
+                    .copied()
+                    .unwrap_or(f64::NAN),
+                alpha_max: *self.grid.angle_of_attack_rad.last().unwrap_or(&f64::NAN),
+                mach_min: self.grid.mach.first().copied().unwrap_or(f64::NAN),
+                mach_max: *self.grid.mach.last().unwrap_or(&f64::NAN),
+            });
+        }
+        Ok(self.evaluate(angle_of_attack_rad, mach))
+    }
+
+    fn domain_status(&self, angle_of_attack_rad: f64, mach: f64) -> SurrogateDomainStatus {
+        let alpha_min = self
+            .grid
+            .angle_of_attack_rad
+            .first()
+            .copied()
+            .unwrap_or(f64::NAN);
+        let alpha_max = self
+            .grid
+            .angle_of_attack_rad
+            .last()
+            .copied()
+            .unwrap_or(f64::NAN);
+        let mach_min = self.grid.mach.first().copied().unwrap_or(f64::NAN);
+        let mach_max = self.grid.mach.last().copied().unwrap_or(f64::NAN);
+        let outside_distance = |query: f64, minimum: f64, maximum: f64| {
+            if query.is_nan() || minimum.is_nan() || maximum.is_nan() {
+                f64::NAN
+            } else if query < minimum {
+                minimum - query
+            } else if query > maximum {
+                query - maximum
+            } else {
+                0.0
+            }
+        };
+        SurrogateDomainStatus {
+            alpha_clamped: !angle_of_attack_rad.is_finite()
+                || angle_of_attack_rad < alpha_min
+                || angle_of_attack_rad > alpha_max,
+            mach_clamped: !mach.is_finite() || mach < mach_min || mach > mach_max,
+            alpha_distance_rad: outside_distance(angle_of_attack_rad, alpha_min, alpha_max),
+            mach_distance: outside_distance(mach, mach_min, mach_max),
         }
     }
 
@@ -521,6 +664,28 @@ mod tests {
         let at_floor = surrogate.evaluate(alpha, lowest).inviscid_lift_coefficient;
         let below = surrogate.evaluate(alpha, -1.0).inviscid_lift_coefficient;
         assert!((below - at_floor).abs() < 1e-12);
+    }
+
+    #[test]
+    fn outside_queries_are_reported_and_checked_evaluations_reject_them() {
+        let surrogate = trained();
+        let in_domain = surrogate.evaluate(4.0f64.to_radians(), 0.3);
+        assert!(in_domain.domain.in_domain());
+
+        let edge = surrogate.evaluate(4.0f64.to_radians(), 3.0);
+        assert!(edge.domain.mach_clamped);
+        assert!(!edge.domain.in_domain());
+        let mach_max = surrogate.grid().mach[surrogate.grid().mach.len() - 1];
+        assert!((edge.domain.mach_distance - (3.0 - mach_max)).abs() < 1e-12);
+        assert_eq!(edge.domain.alpha_distance_rad, 0.0);
+        assert!(matches!(
+            surrogate.evaluate_checked(4.0f64.to_radians(), 3.0),
+            Err(SurrogateDomainError::OutOfDomain { .. })
+        ));
+        assert!(matches!(
+            surrogate.evaluate_checked(f64::NAN, 0.3),
+            Err(SurrogateDomainError::NonFinite { .. })
+        ));
     }
 
     #[test]

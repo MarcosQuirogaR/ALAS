@@ -494,5 +494,13 @@
     "source_url": "https://svk.sika.com/dam/dms/sk01/3/Verejn%C3%BD%20Sika%202026_platn%C3%BD-od-1-7-2026_v2.pdf",
     "source_title": "Sika 2026 public price list, CarboDur S812",
     "observed_on_utc": "2026-08-24"
+  },
+  {
+    "component_id": "robart-121-retractable-tailwheel",
+    "currency": "USD",
+    "unit_price_minor": 3731,
+    "source_url": "https://robart.com/products/60-size-retractable-tailwheel",
+    "source_title": "#121 .60 Size Retractable Tailwheel",
+    "observed_on_utc": "2026-08-25"
   }
 ]
