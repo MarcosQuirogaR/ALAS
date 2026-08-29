@@ -226,28 +226,20 @@ fn fit_altitude_profile(
     arrival_elevation_m: f64,
     route_distance_m: f64,
 ) -> Result<Vec<SegmentSpec>, String> {
-    let full_profile = scaled_altitude_profile(
-        nominal,
-        departure_elevation_m,
-        arrival_elevation_m,
-        1.0,
-    );
-    let full_distance_m =
-        schedule_horizontal_distance(&full_profile, departure_elevation_m);
+    let full_profile =
+        scaled_altitude_profile(nominal, departure_elevation_m, arrival_elevation_m, 1.0);
+    let full_distance_m = schedule_horizontal_distance(&full_profile, departure_elevation_m);
     if full_distance_m.is_finite() && full_distance_m <= route_distance_m + DISTANCE_TOLERANCE_M {
         return Ok(full_profile);
     }
 
-    let minimum_profile = scaled_altitude_profile(
-        nominal,
-        departure_elevation_m,
-        arrival_elevation_m,
-        0.0,
-    );
-    let minimum_distance_m =
-        schedule_horizontal_distance(&minimum_profile, departure_elevation_m);
+    let minimum_profile =
+        scaled_altitude_profile(nominal, departure_elevation_m, arrival_elevation_m, 0.0);
+    let minimum_distance_m = schedule_horizontal_distance(&minimum_profile, departure_elevation_m);
     if !minimum_distance_m.is_finite() {
-        return Err("mission profile produces a non-finite climb/descent horizontal distance".to_owned());
+        return Err(
+            "mission profile produces a non-finite climb/descent horizontal distance".to_owned(),
+        );
     }
     if minimum_distance_m > route_distance_m + DISTANCE_TOLERANCE_M {
         return Ok(minimum_profile);
@@ -264,8 +256,7 @@ fn fit_altitude_profile(
             arrival_elevation_m,
             candidate_scale,
         );
-        let candidate_distance_m =
-            schedule_horizontal_distance(&candidate, departure_elevation_m);
+        let candidate_distance_m = schedule_horizontal_distance(&candidate, departure_elevation_m);
         if candidate_distance_m.is_finite()
             && candidate_distance_m <= route_distance_m + DISTANCE_TOLERANCE_M
         {
@@ -303,8 +294,17 @@ fn scaled_altitude_profile(
                 descent_rate_m_s.abs(),
                 segment.tag == "final_landing",
             ),
-            SegmentKind::Cruise { .. } => {
-                profile.push(segment.clone());
+            SegmentKind::Cruise {
+                distance_m,
+                altitude_m,
+            } => {
+                let mut adapted = segment.clone();
+                adapted.kind = SegmentKind::Cruise {
+                    altitude_m: altitude_m
+                        .or_else(|| profile.is_empty().then_some(current_altitude_m)),
+                    distance_m,
+                };
+                profile.push(adapted);
                 continue;
             }
         };

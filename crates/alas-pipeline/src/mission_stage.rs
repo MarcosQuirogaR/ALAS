@@ -538,22 +538,75 @@ mod tests {
     }
 
     #[test]
-    fn a_route_shorter_than_mandatory_profile_distance_is_rejected() {
+    fn a_short_route_scales_the_altitude_profile_and_closes_distance() {
         let config = AlasConfig::default();
         let origin = get_airport(&config.departure_airport)
             .unwrap_or_else(|error| panic!("default origin: {error}"));
         let destination = get_airport(&config.arrival_airport)
             .unwrap_or_else(|error| panic!("default destination: {error}"));
-        let request = build_mission_request(&config, origin, destination, 1_000.0);
-
-        let error = match build_schedule(&request) {
-            Err(error) => error,
-            Ok(_) => panic!("a short route cannot satisfy the fixed climb/descent profile"),
-        };
+        let route_distance_m = 442_000.0;
+        let request = build_mission_request(&config, origin, destination, route_distance_m);
+        let schedule = build_schedule(&request)
+            .unwrap_or_else(|error| panic!("short route schedule: {error}"));
+        let flown_distance_m =
+            schedule_horizontal_distance(&schedule, request.departure_elevation_m);
         assert!(
-            error.contains("shorter than the mandatory climb/descent distance"),
-            "unexpected route validation error: {error}"
+            (flown_distance_m - route_distance_m).abs() < 1.0e-6,
+            "schedule flew {flown_distance_m} m for a {route_distance_m} m route"
         );
+        assert!(schedule.iter().all(|segment| match segment.kind {
+            SegmentKind::Climb {
+                altitude_start_m: Some(start),
+                altitude_end_m,
+                ..
+            } => altitude_end_m > start,
+            SegmentKind::Descent {
+                altitude_start_m: Some(start),
+                altitude_end_m,
+                ..
+            } => altitude_end_m < start,
+            _ => true,
+        }));
+    }
+
+    #[test]
+    fn a_zero_route_at_one_elevation_has_no_negative_or_vertical_legs() {
+        let config = AlasConfig::default();
+        let origin = get_airport(&config.departure_airport)
+            .unwrap_or_else(|error| panic!("default origin: {error}"));
+        let destination = get_airport(&config.arrival_airport)
+            .unwrap_or_else(|error| panic!("default destination: {error}"));
+        let mut request = build_mission_request(&config, origin, destination, 0.0);
+        request.arrival_elevation_m = request.departure_elevation_m;
+
+        let schedule =
+            build_schedule(&request).unwrap_or_else(|error| panic!("zero route schedule: {error}"));
+        assert_eq!(
+            schedule_horizontal_distance(&schedule, request.departure_elevation_m),
+            0.0
+        );
+        assert!(schedule.iter().all(|segment| matches!(
+            segment.kind,
+            SegmentKind::Cruise {
+                distance_m: 0.0,
+                ..
+            }
+        )));
+    }
+
+    #[test]
+    fn an_irreducible_airport_elevation_change_reports_its_footprint() {
+        let config = AlasConfig::default();
+        let origin = get_airport(&config.departure_airport)
+            .unwrap_or_else(|error| panic!("default origin: {error}"));
+        let destination = get_airport(&config.arrival_airport)
+            .unwrap_or_else(|error| panic!("default destination: {error}"));
+        let mut request = build_mission_request(&config, origin, destination, 0.0);
+        request.arrival_elevation_m = request.departure_elevation_m + 1_000.0;
+
+        let error = build_schedule(&request)
+            .expect_err("zero horizontal distance cannot connect different elevations");
+        assert!(error.contains("connect the airport elevations"), "{error}");
     }
 
     #[test]
