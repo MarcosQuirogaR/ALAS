@@ -18,8 +18,9 @@
 //! against AVE is a decision somebody made.
 
 use crate::{
-    AircraftPreset, DesignRequirements, DesignVector, EmpennageConfig, EngineConfig,
-    FuselageConfig, GeometryConfig, WingConfig,
+    AircraftPreset, AircraftReferenceData, AircraftVariantIdentity, CgEnvelopeEvidence,
+    DesignRequirements, DesignVector, EmpennageConfig, EngineConfig, FuselageConfig,
+    GeometryConfig, LandingGearConfig, WingConfig,
 };
 
 /// The reference twin.
@@ -28,8 +29,21 @@ pub fn ave() -> AircraftPreset {
         name: "AVE",
         display_name: "AVE (Reference Twin)",
         description: "Long-range widebody twin reference aircraft based on 777X-class geometry.",
+        identity: AircraftVariantIdentity {
+            model: "AVE-v1",
+            weight_variant: "notional design requirement",
+            engine_model: "GE9X family conceptual installation",
+            modification_state: "AVE-v1 design baseline",
+            tank_configuration: "conceptual integral wing tanks",
+        },
+        reference: AircraftReferenceData {
+            cg_evidence: CgEnvelopeEvidence::DesignRequirement,
+            sources: vec!["docs/PRESET_PHYSICAL_AUDIT.md#variant-identity"],
+            ..AircraftReferenceData::default()
+        },
         engine_name: "GE9X",
         n_engines: 2,
+        landing_gear: LandingGearConfig::default(),
         design_vector: DesignVector {
             span_m: 71.75,
             root_chord_m: 16.50,
@@ -37,12 +51,14 @@ pub fn ave() -> AircraftPreset {
             tip_chord_m: 1.60,
             sweep_deg: 34.0,
             tip_twist_deg: 0.0,
-            // The compliant range for this shift is about [-1.70, 2.64]:
-            // outside it the operating-empty, zero-fuel and takeoff centres of
-            // gravity stop satisfying the nose-gear steering load limit at the
-            // auto-sized 525-seat, 65 t cabin. 0.5 m is that range's midpoint,
-            // which puts all three at about 25% of mean aerodynamic chord and
-            // leaves margin in both directions rather than only just passing.
+            // The range [-1.70, 2.64] m was established with the frozen
+            // ReferenceCompatibility mass-coordinate path: outside it the
+            // operating-empty, zero-fuel and takeoff centres of gravity stop
+            // satisfying the nose-gear steering load limit for the auto-sized
+            // 525-seat, 65 t cabin. 0.5 m is its midpoint. The product path
+            // integrates a structural wingbox centroid instead; that model is
+            // deliberately allowed to report a forward-CG finding until the
+            // notional AVE requirement is re-sized from independent evidence.
             wing_x_shift_m: 0.5,
             tail_scale: 1.0,
             fuselage_length_m: 76.72,
@@ -60,6 +76,7 @@ pub fn ave() -> AircraftPreset {
                 root_twist_deg: 4.0,
                 break_twist_deg: 2.0,
                 break_span_fraction: 0.35,
+                kink_span_fraction: Some(0.35),
                 outboard_sweep_decrement_deg: 2.0,
                 root_airfoil: "SC2-0714".to_owned(),
                 tip_airfoil: "sc20410".to_owned(),

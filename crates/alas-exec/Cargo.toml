@@ -1,0 +1,17 @@
+[package]
+name = "alas-exec"
+description = "Subprocess helpers for driving external console tools (MSES, Nastran) from a windowed application without flashing a console window."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+# Preferences are serialized here so every front end shares the same durable
+# external-tool locations instead of maintaining incompatible stores.
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[lints]
+workspace = true

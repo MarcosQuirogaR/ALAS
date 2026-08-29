@@ -1,0 +1,1062 @@
+{
+  "schema": "reference-render-w33/v1",
+  "reference": {
+    "git_commit": "7d1555c1f4db5110cf6cd187c156718e1a033b50",
+    "themes": [
+      "light",
+      "dark"
+    ],
+    "mission": "SimpleNamespace with explicit export_data columns",
+    "route": "LEMD-FIX-EGKK, source=simbrief_api"
+  },
+  "unavailable_reasons": {
+    "mission": "Representative input has mission_result=None; the registry requires native mission-stage telemetry.",
+    "route": "Representative input has route=None; the registry requires route-stage telemetry or a planned route."
+  },
+  "route_acceptance": {
+    "mass_coloring": true,
+    "legend": [
+      "Origin",
+      "Destination",
+      "Total Mass (kg)"
+    ]
+  },
+  "figures": {
+    "mission_profile:light": {
+      "available": true,
+      "theme": "light",
+      "facecolor": [
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "panel_count": 4,
+      "suptitle": "Mission Profile",
+      "axes": [
+        {
+          "title": "",
+          "title_left": "Altitude (ft)",
+          "title_right": "",
+          "xlabel": "",
+          "ylabel": "",
+          "aspect": "auto",
+          "xlim": [
+            -1.0,
+            21.0
+          ],
+          "ylim": [
+            32644.356955380576,
+            36253.280839895015
+          ],
+          "series": [
+            "_child0"
+          ],
+          "legend": [],
+          "annotations": []
+        },
+        {
+          "title": "",
+          "title_left": "Total mass (t)",
+          "title_right": "",
+          "xlabel": "",
+          "ylabel": "",
+          "aspect": "auto",
+          "xlim": [
+            -1.0,
+            21.0
+          ],
+          "ylim": [
+            67.58,
+            68.02
+          ],
+          "series": [
+            "_child0"
+          ],
+          "legend": [],
+          "annotations": []
+        },
+        {
+          "title": "",
+          "title_left": "True airspeed (kt)",
+          "title_right": "",
+          "xlabel": "",
+          "ylabel": "",
+          "aspect": "auto",
+          "xlim": [
+            -1.0,
+            21.0
+          ],
+          "ylim": [
+            446.6953512,
+            455.24826479999996
+          ],
+          "series": [
+            "_child0"
+          ],
+          "legend": [],
+          "annotations": []
+        },
+        {
+          "title": "",
+          "title_left": "SFC (kg/kgf-hr)",
+          "title_right": "",
+          "xlabel": "Time (min)",
+          "ylabel": "",
+          "aspect": "auto",
+          "xlim": [
+            -1.0,
+            21.0
+          ],
+          "ylim": [
+            9.900000000000001e-05,
+            0.000121
+          ],
+          "series": [
+            "_child0"
+          ],
+          "legend": [],
+          "annotations": []
+        }
+      ]
+    },
+    "mission_profile:dark": {
+      "available": true,
+      "theme": "dark",
+      "facecolor": [
+        0.11764705882352941,
+        0.11764705882352941,
+        0.11764705882352941,
+        1.0
+      ],
+      "panel_count": 4,
+      "suptitle": "Mission Profile",
+      "axes": [
+        {
+          "title": "",
+          "title_left": "Altitude (ft)",
+          "title_right": "",
+          "xlabel": "",
+          "ylabel": "",
+          "aspect": "auto",
+          "xlim": [
+            -1.0,
+            21.0
+          ],
+          "ylim": [
+            32644.356955380576,
+            36253.280839895015
+          ],
+          "series": [
+            "_child0"
+          ],
+          "legend": [],
+          "annotations": []
+        },
+        {
+          "title": "",
+          "title_left": "Total mass (t)",
+          "title_right": "",
+          "xlabel": "",
+          "ylabel": "",
+          "aspect": "auto",
+          "xlim": [
+            -1.0,
+            21.0
+          ],
+          "ylim": [
+            67.58,
+            68.02
+          ],
+          "series": [
+            "_child0"
+          ],
+          "legend": [],
+          "annotations": []
+        },
+        {
+          "title": "",
+          "title_left": "True airspeed (kt)",
+          "title_right": "",
+          "xlabel": "",
+          "ylabel": "",
+          "aspect": "auto",
+          "xlim": [
+            -1.0,
+            21.0
+          ],
+          "ylim": [
+            446.6953512,
+            455.24826479999996
+          ],
+          "series": [
+            "_child0"
+          ],
+          "legend": [],
+          "annotations": []
+        },
+        {
+          "title": "",
+          "title_left": "SFC (kg/kgf-hr)",
+          "title_right": "",
+          "xlabel": "Time (min)",
+          "ylabel": "",
+          "aspect": "auto",
+          "xlim": [
+            -1.0,
+            21.0
+          ],
+          "ylim": [
+            9.900000000000001e-05,
+            0.000121
+          ],
+          "series": [
+            "_child0"
+          ],
+          "legend": [],
+          "annotations": []
+        }
+      ]
+    },
+    "mission_velocities:light": {
+      "available": true,
+      "theme": "light",
+      "facecolor": [
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "panel_count": 2,
+      "suptitle": "Airspeeds",
+      "axes": [
+        {
+          "title": "",
+          "title_left": "Airspeed (kt)",
+          "title_right": "",
+          "xlabel": "",
+          "ylabel": "",
+          "aspect": "auto",
+          "xlim": [
+            -1.0,
+            21.0
+          ],
+          "ylim": [
+            252.79691219999995,
+            464.4815238
+          ],
+          "series": [
+            "TAS",
+            "EAS"
+          ],
+          "legend": [
+            "TAS",
+            "EAS"
+          ],
+          "annotations": []
+        },
+        {
+          "title": "",
+          "title_left": "Mach",
+          "title_right": "",
+          "xlabel": "Time (min)",
+          "ylabel": "",
+          "aspect": "auto",
+          "xlim": [
+            -1.0,
+            21.0
+          ],
+          "ylim": [
+            0.7795000000000001,
+            0.7905
+          ],
+          "series": [
+            "_child0"
+          ],
+          "legend": [],
+          "annotations": []
+        }
+      ]
+    },
+    "mission_velocities:dark": {
+      "available": true,
+      "theme": "dark",
+      "facecolor": [
+        0.11764705882352941,
+        0.11764705882352941,
+        0.11764705882352941,
+        1.0
+      ],
+      "panel_count": 2,
+      "suptitle": "Airspeeds",
+      "axes": [
+        {
+          "title": "",
+          "title_left": "Airspeed (kt)",
+          "title_right": "",
+          "xlabel": "",
+          "ylabel": "",
+          "aspect": "auto",
+          "xlim": [
+            -1.0,
+            21.0
+          ],
+          "ylim": [
+            252.79691219999995,
+            464.4815238
+          ],
+          "series": [
+            "TAS",
+            "EAS"
+          ],
+          "legend": [
+            "TAS",
+            "EAS"
+          ],
+          "annotations": []
+        },
+        {
+          "title": "",
+          "title_left": "Mach",
+          "title_right": "",
+          "xlabel": "Time (min)",
+          "ylabel": "",
+          "aspect": "auto",
+          "xlim": [
+            -1.0,
+            21.0
+          ],
+          "ylim": [
+            0.7795000000000001,
+            0.7905
+          ],
+          "series": [
+            "_child0"
+          ],
+          "legend": [],
+          "annotations": []
+        }
+      ]
+    },
+    "mission_flight_path:light": {
+      "available": true,
+      "theme": "light",
+      "facecolor": [
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "panel_count": 2,
+      "suptitle": "Flight Path",
+      "axes": [
+        {
+          "title": "",
+          "title_left": "Range (nm)",
+          "title_right": "",
+          "xlabel": "",
+          "ylabel": "",
+          "aspect": "auto",
+          "xlim": [
+            -1.0,
+            21.0
+          ],
+          "ylim": [
+            -7.478401727861772,
+            157.0464362850972
+          ],
+          "series": [
+            "_child0"
+          ],
+          "legend": [],
+          "annotations": []
+        },
+        {
+          "title": "",
+          "title_left": "Pitch angle (deg)",
+          "title_right": "",
+          "xlabel": "Time (min)",
+          "ylabel": "",
+          "aspect": "auto",
+          "xlim": [
+            -1.0,
+            21.0
+          ],
+          "ylim": [
+            0.99,
+            1.21
+          ],
+          "series": [
+            "_child0"
+          ],
+          "legend": [],
+          "annotations": []
+        }
+      ]
+    },
+    "mission_flight_path:dark": {
+      "available": true,
+      "theme": "dark",
+      "facecolor": [
+        0.11764705882352941,
+        0.11764705882352941,
+        0.11764705882352941,
+        1.0
+      ],
+      "panel_count": 2,
+      "suptitle": "Flight Path",
+      "axes": [
+        {
+          "title": "",
+          "title_left": "Range (nm)",
+          "title_right": "",
+          "xlabel": "",
+          "ylabel": "",
+          "aspect": "auto",
+          "xlim": [
+            -1.0,
+            21.0
+          ],
+          "ylim": [
+            -7.478401727861772,
+            157.0464362850972
+          ],
+          "series": [
+            "_child0"
+          ],
+          "legend": [],
+          "annotations": []
+        },
+        {
+          "title": "",
+          "title_left": "Pitch angle (deg)",
+          "title_right": "",
+          "xlabel": "Time (min)",
+          "ylabel": "",
+          "aspect": "auto",
+          "xlim": [
+            -1.0,
+            21.0
+          ],
+          "ylim": [
+            0.99,
+            1.21
+          ],
+          "series": [
+            "_child0"
+          ],
+          "legend": [],
+          "annotations": []
+        }
+      ]
+    },
+    "mission_aero_coefficients:light": {
+      "available": true,
+      "theme": "light",
+      "facecolor": [
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "panel_count": 4,
+      "suptitle": "Aerodynamic Coefficients",
+      "axes": [
+        {
+          "title": "",
+          "title_left": "Angle of attack (deg)",
+          "title_right": "",
+          "xlabel": "",
+          "ylabel": "",
+          "aspect": "auto",
+          "xlim": [
+            -1.0,
+            21.0
+          ],
+          "ylim": [
+            1.69,
+            1.91
+          ],
+          "series": [
+            "_child0"
+          ],
+          "legend": [],
+          "annotations": []
+        },
+        {
+          "title": "",
+          "title_left": "CL",
+          "title_right": "",
+          "xlabel": "",
+          "ylabel": "",
+          "aspect": "auto",
+          "xlim": [
+            -1.0,
+            21.0
+          ],
+          "ylim": [
+            0.499,
+            0.521
+          ],
+          "series": [
+            "_child0"
+          ],
+          "legend": [],
+          "annotations": []
+        },
+        {
+          "title": "",
+          "title_left": "CD",
+          "title_right": "",
+          "xlabel": "Time (min)",
+          "ylabel": "",
+          "aspect": "auto",
+          "xlim": [
+            -1.0,
+            21.0
+          ],
+          "ylim": [
+            0.02495,
+            0.02605
+          ],
+          "series": [
+            "_child0"
+          ],
+          "legend": [],
+          "annotations": []
+        },
+        {
+          "title": "",
+          "title_left": "L/D",
+          "title_right": "",
+          "xlabel": "Time (min)",
+          "ylabel": "",
+          "aspect": "auto",
+          "xlim": [
+            -1.0,
+            21.0
+          ],
+          "ylim": [
+            18.9,
+            21.1
+          ],
+          "series": [
+            "_child0"
+          ],
+          "legend": [],
+          "annotations": []
+        }
+      ]
+    },
+    "mission_aero_coefficients:dark": {
+      "available": true,
+      "theme": "dark",
+      "facecolor": [
+        0.11764705882352941,
+        0.11764705882352941,
+        0.11764705882352941,
+        1.0
+      ],
+      "panel_count": 4,
+      "suptitle": "Aerodynamic Coefficients",
+      "axes": [
+        {
+          "title": "",
+          "title_left": "Angle of attack (deg)",
+          "title_right": "",
+          "xlabel": "",
+          "ylabel": "",
+          "aspect": "auto",
+          "xlim": [
+            -1.0,
+            21.0
+          ],
+          "ylim": [
+            1.69,
+            1.91
+          ],
+          "series": [
+            "_child0"
+          ],
+          "legend": [],
+          "annotations": []
+        },
+        {
+          "title": "",
+          "title_left": "CL",
+          "title_right": "",
+          "xlabel": "",
+          "ylabel": "",
+          "aspect": "auto",
+          "xlim": [
+            -1.0,
+            21.0
+          ],
+          "ylim": [
+            0.499,
+            0.521
+          ],
+          "series": [
+            "_child0"
+          ],
+          "legend": [],
+          "annotations": []
+        },
+        {
+          "title": "",
+          "title_left": "CD",
+          "title_right": "",
+          "xlabel": "Time (min)",
+          "ylabel": "",
+          "aspect": "auto",
+          "xlim": [
+            -1.0,
+            21.0
+          ],
+          "ylim": [
+            0.02495,
+            0.02605
+          ],
+          "series": [
+            "_child0"
+          ],
+          "legend": [],
+          "annotations": []
+        },
+        {
+          "title": "",
+          "title_left": "L/D",
+          "title_right": "",
+          "xlabel": "Time (min)",
+          "ylabel": "",
+          "aspect": "auto",
+          "xlim": [
+            -1.0,
+            21.0
+          ],
+          "ylim": [
+            18.9,
+            21.1
+          ],
+          "series": [
+            "_child0"
+          ],
+          "legend": [],
+          "annotations": []
+        }
+      ]
+    },
+    "mission_aero_forces:light": {
+      "available": true,
+      "theme": "light",
+      "facecolor": [
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "panel_count": 4,
+      "suptitle": "Aerodynamic & Propulsive Forces",
+      "axes": [
+        {
+          "title": "",
+          "title_left": "Throttle",
+          "title_right": "",
+          "xlabel": "",
+          "ylabel": "",
+          "aspect": "auto",
+          "xlim": [
+            -1.0,
+            21.0
+          ],
+          "ylim": [
+            0.699,
+            0.721
+          ],
+          "series": [
+            "_child0"
+          ],
+          "legend": [],
+          "annotations": []
+        },
+        {
+          "title": "",
+          "title_left": "Lift (kN)",
+          "title_right": "",
+          "xlabel": "",
+          "ylabel": "",
+          "aspect": "auto",
+          "xlim": [
+            -1.0,
+            21.0
+          ],
+          "ylim": [
+            689.5,
+            700.5
+          ],
+          "series": [
+            "_child0"
+          ],
+          "legend": [],
+          "annotations": []
+        },
+        {
+          "title": "",
+          "title_left": "Thrust (kN)",
+          "title_right": "",
+          "xlabel": "Time (min)",
+          "ylabel": "",
+          "aspect": "auto",
+          "xlim": [
+            -1.0,
+            21.0
+          ],
+          "ylim": [
+            35.98,
+            36.42
+          ],
+          "series": [
+            "_child0"
+          ],
+          "legend": [],
+          "annotations": []
+        },
+        {
+          "title": "",
+          "title_left": "Drag (kN)",
+          "title_right": "",
+          "xlabel": "Time (min)",
+          "ylabel": "",
+          "aspect": "auto",
+          "xlim": [
+            -1.0,
+            21.0
+          ],
+          "ylim": [
+            34.95,
+            36.05
+          ],
+          "series": [
+            "_child0"
+          ],
+          "legend": [],
+          "annotations": []
+        }
+      ]
+    },
+    "mission_aero_forces:dark": {
+      "available": true,
+      "theme": "dark",
+      "facecolor": [
+        0.11764705882352941,
+        0.11764705882352941,
+        0.11764705882352941,
+        1.0
+      ],
+      "panel_count": 4,
+      "suptitle": "Aerodynamic & Propulsive Forces",
+      "axes": [
+        {
+          "title": "",
+          "title_left": "Throttle",
+          "title_right": "",
+          "xlabel": "",
+          "ylabel": "",
+          "aspect": "auto",
+          "xlim": [
+            -1.0,
+            21.0
+          ],
+          "ylim": [
+            0.699,
+            0.721
+          ],
+          "series": [
+            "_child0"
+          ],
+          "legend": [],
+          "annotations": []
+        },
+        {
+          "title": "",
+          "title_left": "Lift (kN)",
+          "title_right": "",
+          "xlabel": "",
+          "ylabel": "",
+          "aspect": "auto",
+          "xlim": [
+            -1.0,
+            21.0
+          ],
+          "ylim": [
+            689.5,
+            700.5
+          ],
+          "series": [
+            "_child0"
+          ],
+          "legend": [],
+          "annotations": []
+        },
+        {
+          "title": "",
+          "title_left": "Thrust (kN)",
+          "title_right": "",
+          "xlabel": "Time (min)",
+          "ylabel": "",
+          "aspect": "auto",
+          "xlim": [
+            -1.0,
+            21.0
+          ],
+          "ylim": [
+            35.98,
+            36.42
+          ],
+          "series": [
+            "_child0"
+          ],
+          "legend": [],
+          "annotations": []
+        },
+        {
+          "title": "",
+          "title_left": "Drag (kN)",
+          "title_right": "",
+          "xlabel": "Time (min)",
+          "ylabel": "",
+          "aspect": "auto",
+          "xlim": [
+            -1.0,
+            21.0
+          ],
+          "ylim": [
+            34.95,
+            36.05
+          ],
+          "series": [
+            "_child0"
+          ],
+          "legend": [],
+          "annotations": []
+        }
+      ]
+    },
+    "mission_drag_components:light": {
+      "available": true,
+      "theme": "light",
+      "facecolor": [
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "panel_count": 1,
+      "suptitle": "",
+      "axes": [
+        {
+          "title": "Drag components",
+          "title_left": "",
+          "title_right": "",
+          "xlabel": "Time (min)",
+          "ylabel": "CD",
+          "aspect": "auto",
+          "xlim": [
+            -1.0,
+            21.0
+          ],
+          "ylim": [
+            1.2500000000000141e-05,
+            0.027237499999999998
+          ],
+          "series": [
+            "CD parasite",
+            "CD induced",
+            "CD compressibility",
+            "CD miscellaneous",
+            "CD total"
+          ],
+          "legend": [
+            "CD parasite",
+            "CD induced",
+            "CD compressibility",
+            "CD miscellaneous",
+            "CD total"
+          ],
+          "annotations": []
+        }
+      ]
+    },
+    "mission_drag_components:dark": {
+      "available": true,
+      "theme": "dark",
+      "facecolor": [
+        0.11764705882352941,
+        0.11764705882352941,
+        0.11764705882352941,
+        1.0
+      ],
+      "panel_count": 1,
+      "suptitle": "",
+      "axes": [
+        {
+          "title": "Drag components",
+          "title_left": "",
+          "title_right": "",
+          "xlabel": "Time (min)",
+          "ylabel": "CD",
+          "aspect": "auto",
+          "xlim": [
+            -1.0,
+            21.0
+          ],
+          "ylim": [
+            1.2500000000000141e-05,
+            0.027237499999999998
+          ],
+          "series": [
+            "CD parasite",
+            "CD induced",
+            "CD compressibility",
+            "CD miscellaneous",
+            "CD total"
+          ],
+          "legend": [
+            "CD parasite",
+            "CD induced",
+            "CD compressibility",
+            "CD miscellaneous",
+            "CD total"
+          ],
+          "annotations": []
+        }
+      ]
+    },
+    "mission_route_2d:light": {
+      "available": true,
+      "theme": "light",
+      "facecolor": [
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "panel_count": 2,
+      "suptitle": "",
+      "axes": [
+        {
+          "title": "2D Ground Track \u2014 Route (simbrief_api)",
+          "title_left": "",
+          "title_right": "",
+          "xlabel": "Longitude [deg]",
+          "ylabel": "Latitude [deg]",
+          "aspect": "auto",
+          "xlim": [
+            -180.0,
+            180.0
+          ],
+          "ylim": [
+            -90.0,
+            90.0
+          ],
+          "series": [
+            "_child2",
+            "Origin",
+            "Destination"
+          ],
+          "legend": [
+            "Origin",
+            "Destination"
+          ],
+          "annotations": [
+            "Cruise\nAlt: 10,000 m\nMass: 67,800 kg",
+            "LEMD",
+            "EGKK"
+          ]
+        },
+        {
+          "title": "",
+          "title_left": "",
+          "title_right": "",
+          "xlabel": "",
+          "ylabel": "Total Mass (kg)",
+          "aspect": "auto",
+          "xlim": [
+            0.0,
+            1.0
+          ],
+          "ylim": [
+            67800.0,
+            68000.0
+          ],
+          "series": [],
+          "legend": [],
+          "annotations": []
+        }
+      ]
+    },
+    "mission_route_2d:dark": {
+      "available": true,
+      "theme": "dark",
+      "facecolor": [
+        0.11764705882352941,
+        0.11764705882352941,
+        0.11764705882352941,
+        1.0
+      ],
+      "panel_count": 2,
+      "suptitle": "",
+      "axes": [
+        {
+          "title": "2D Ground Track \u2014 Route (simbrief_api)",
+          "title_left": "",
+          "title_right": "",
+          "xlabel": "Longitude [deg]",
+          "ylabel": "Latitude [deg]",
+          "aspect": "auto",
+          "xlim": [
+            -180.0,
+            180.0
+          ],
+          "ylim": [
+            -90.0,
+            90.0
+          ],
+          "series": [
+            "_child2",
+            "Origin",
+            "Destination"
+          ],
+          "legend": [
+            "Origin",
+            "Destination"
+          ],
+          "annotations": [
+            "Cruise\nAlt: 10,000 m\nMass: 67,800 kg",
+            "LEMD",
+            "EGKK"
+          ]
+        },
+        {
+          "title": "",
+          "title_left": "",
+          "title_right": "",
+          "xlabel": "",
+          "ylabel": "Total Mass (kg)",
+          "aspect": "auto",
+          "xlim": [
+            0.0,
+            1.0
+          ],
+          "ylim": [
+            67800.0,
+            68000.0
+          ],
+          "series": [],
+          "legend": [],
+          "annotations": []
+        }
+      ]
+    }
+  }
+}

@@ -18,9 +18,12 @@ Cases:
 * ``with_engines``: the default build with ``include_engines=True``. Every
   wing's full structure (name, symmetric, every xsec's xyz_le/chord/twist
   and its airfoil's name + full coordinate array, plus
-  area/span/mean_aerodynamic_chord/aerodynamic_center/taper_ratio), every
-  fuselage's name and xsec list (xyz_c/width/height), and the returned
-  ``Airplane``'s name/xyz_ref/s_ref/c_ref/b_ref.
+  unfolded area/span plus mean_aerodynamic_chord/aerodynamic_center/taper_ratio),
+  every fuselage's name and xsec list (xyz_c/width/height), and the returned
+  ``Airplane``'s name/xyz_ref/s_ref/c_ref/b_ref.  The aircraft reference axes
+  are normalized to the projected planform convention selected by ALAS, so the
+  ``s_ref``/``b_ref`` records are intentionally not copied from the upstream
+  object when that object uses unfolded dihedral geometry.
 
 * ``without_engines``: the same build with ``include_engines=False``, to
   confirm the fuselage list is exactly the main fuselage.
@@ -93,12 +96,13 @@ def _fuselage_record(fuselage) -> dict:
 
 
 def _airplane_record(airplane) -> dict:
+    main_wing = airplane.wings[0]
     return {
         "name": airplane.name,
         "xyz_ref": _vec3(np.asarray(airplane.xyz_ref, dtype=float)),
-        "s_ref": float(airplane.s_ref),
+        "s_ref": float(main_wing.area(type="projected")),
         "c_ref": float(airplane.c_ref),
-        "b_ref": float(airplane.b_ref),
+        "b_ref": float(main_wing.spans.projected),
         "wings": [_wing_record(wing) for wing in airplane.wings],
         "fuselages": [_fuselage_record(fuselage) for fuselage in airplane.fuselages],
     }

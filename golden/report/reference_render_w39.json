@@ -1,0 +1,340 @@
+{
+  "schema": "reference-render-w39/v1",
+  "reference": {
+    "git_commit": "7d1555c1f4db5110cf6cd187c156718e1a033b50"
+  },
+  "figures": {
+    "optimization_history:light": {
+      "available": true,
+      "theme": "light",
+      "panel_count": 2,
+      "axes": [
+        {
+          "title": "Optimization convergence (3 valid evaluations)",
+          "xlabel": "valid evaluation #",
+          "ylabel": "L/D",
+          "legend": [
+            "evaluation",
+            "best so far"
+          ],
+          "series": [
+            "best so far"
+          ],
+          "patch_count": 0,
+          "collections": [
+            "PathCollection"
+          ],
+          "annotations": []
+        },
+        {
+          "title": "",
+          "xlabel": "",
+          "ylabel": "span [m]",
+          "legend": [],
+          "series": [],
+          "patch_count": 0,
+          "collections": [
+            "LineCollection",
+            "QuadMesh"
+          ],
+          "annotations": []
+        }
+      ]
+    },
+    "optimization_history:dark": {
+      "available": true,
+      "theme": "dark",
+      "panel_count": 2,
+      "axes": [
+        {
+          "title": "Optimization convergence (3 valid evaluations)",
+          "xlabel": "valid evaluation #",
+          "ylabel": "L/D",
+          "legend": [
+            "evaluation",
+            "best so far"
+          ],
+          "series": [
+            "best so far"
+          ],
+          "patch_count": 0,
+          "collections": [
+            "PathCollection"
+          ],
+          "annotations": []
+        },
+        {
+          "title": "",
+          "xlabel": "",
+          "ylabel": "span [m]",
+          "legend": [],
+          "series": [],
+          "patch_count": 0,
+          "collections": [
+            "LineCollection",
+            "QuadMesh"
+          ],
+          "annotations": []
+        }
+      ]
+    },
+    "trade_map:light": {
+      "available": true,
+      "theme": "light",
+      "panel_count": 2,
+      "axes": [
+        {
+          "title": "Trade map \u2014 L/D vs fuel capacity",
+          "xlabel": "Cruise L/D (3-D wing)",
+          "ylabel": "Wing fuel-tank capacity (kg)",
+          "legend": [],
+          "series": [],
+          "patch_count": 0,
+          "collections": [
+            "PathCollection",
+            "PathCollection"
+          ],
+          "annotations": [
+            "  naca0012 (best)",
+            "  naca0012 (current)"
+          ]
+        },
+        {
+          "title": "",
+          "xlabel": "",
+          "ylabel": "Section t/c (%)",
+          "legend": [],
+          "series": [],
+          "patch_count": 0,
+          "collections": [
+            "LineCollection",
+            "QuadMesh"
+          ],
+          "annotations": []
+        }
+      ]
+    },
+    "trade_map:dark": {
+      "available": true,
+      "theme": "dark",
+      "panel_count": 2,
+      "axes": [
+        {
+          "title": "Trade map \u2014 L/D vs fuel capacity",
+          "xlabel": "Cruise L/D (3-D wing)",
+          "ylabel": "Wing fuel-tank capacity (kg)",
+          "legend": [],
+          "series": [],
+          "patch_count": 0,
+          "collections": [
+            "PathCollection",
+            "PathCollection"
+          ],
+          "annotations": [
+            "  naca0012 (best)",
+            "  naca0012 (current)"
+          ]
+        },
+        {
+          "title": "",
+          "xlabel": "",
+          "ylabel": "Section t/c (%)",
+          "legend": [],
+          "series": [],
+          "patch_count": 0,
+          "collections": [
+            "LineCollection",
+            "QuadMesh"
+          ],
+          "annotations": []
+        }
+      ]
+    },
+    "rerank_2d_3d:light": {
+      "available": true,
+      "theme": "light",
+      "panel_count": 1,
+      "axes": [
+        {
+          "title": "How the 2-D shortlist reshuffles in 3-D",
+          "xlabel": "2-D proxy L/D (isolated section)",
+          "ylabel": "3-D wing L/D (this design, cruise)",
+          "legend": [
+            "2-D = 3-D"
+          ],
+          "series": [
+            "2-D = 3-D"
+          ],
+          "patch_count": 0,
+          "collections": [
+            "PathCollection"
+          ],
+          "annotations": [
+            "naca2412",
+            "naca0012 (current)"
+          ]
+        }
+      ]
+    },
+    "rerank_2d_3d:dark": {
+      "available": true,
+      "theme": "dark",
+      "panel_count": 1,
+      "axes": [
+        {
+          "title": "How the 2-D shortlist reshuffles in 3-D",
+          "xlabel": "2-D proxy L/D (isolated section)",
+          "ylabel": "3-D wing L/D (this design, cruise)",
+          "legend": [
+            "2-D = 3-D"
+          ],
+          "series": [
+            "2-D = 3-D"
+          ],
+          "patch_count": 0,
+          "collections": [
+            "PathCollection"
+          ],
+          "annotations": [
+            "naca2412",
+            "naca0012 (current)"
+          ]
+        }
+      ]
+    },
+    "ranking_bars:light": {
+      "available": true,
+      "theme": "light",
+      "panel_count": 1,
+      "axes": [
+        {
+          "title": "Top airfoils for this design  (\u2605 = real reference section)",
+          "xlabel": "Cruise L/D (3-D wing)",
+          "ylabel": "",
+          "legend": [],
+          "series": [],
+          "patch_count": 2,
+          "collections": [],
+          "annotations": [
+            "14.0",
+            "14.0"
+          ]
+        }
+      ]
+    },
+    "ranking_bars:dark": {
+      "available": true,
+      "theme": "dark",
+      "panel_count": 1,
+      "axes": [
+        {
+          "title": "Top airfoils for this design  (\u2605 = real reference section)",
+          "xlabel": "Cruise L/D (3-D wing)",
+          "ylabel": "",
+          "legend": [],
+          "series": [],
+          "patch_count": 2,
+          "collections": [],
+          "annotations": [
+            "14.0",
+            "14.0"
+          ]
+        }
+      ]
+    },
+    "section_shapes:light": {
+      "available": true,
+      "theme": "light",
+      "panel_count": 1,
+      "axes": [
+        {
+          "title": "Section shapes \u2014 top picks vs current",
+          "xlabel": "x/c",
+          "ylabel": "y/c  (sections offset vertically)",
+          "legend": [
+            "naca0012 (current)",
+            "naca2412"
+          ],
+          "series": [
+            "naca0012 (current)",
+            "_child1",
+            "naca2412",
+            "_child3"
+          ],
+          "patch_count": 0,
+          "collections": [],
+          "annotations": []
+        }
+      ]
+    },
+    "section_shapes:dark": {
+      "available": true,
+      "theme": "dark",
+      "panel_count": 1,
+      "axes": [
+        {
+          "title": "Section shapes \u2014 top picks vs current",
+          "xlabel": "x/c",
+          "ylabel": "y/c  (sections offset vertically)",
+          "legend": [
+            "naca0012 (current)",
+            "naca2412"
+          ],
+          "series": [
+            "naca0012 (current)",
+            "_child1",
+            "naca2412",
+            "_child3"
+          ],
+          "patch_count": 0,
+          "collections": [],
+          "annotations": []
+        }
+      ]
+    },
+    "mses_verification:light": {
+      "available": true,
+      "theme": "light",
+      "panel_count": 1,
+      "axes": [
+        {
+          "title": "MSES verification \u2014 real shock/viscous effects vs the VLM+Korn estimate",
+          "xlabel": "Cruise L/D",
+          "ylabel": "",
+          "legend": [
+            "VLM + Korn (Stage 2)",
+            "MSES (Stage 3, real shock/viscous)"
+          ],
+          "series": [],
+          "patch_count": 2,
+          "collections": [],
+          "annotations": [
+            "CDw=12 cts"
+          ]
+        }
+      ]
+    },
+    "mses_verification:dark": {
+      "available": true,
+      "theme": "dark",
+      "panel_count": 1,
+      "axes": [
+        {
+          "title": "MSES verification \u2014 real shock/viscous effects vs the VLM+Korn estimate",
+          "xlabel": "Cruise L/D",
+          "ylabel": "",
+          "legend": [
+            "VLM + Korn (Stage 2)",
+            "MSES (Stage 3, real shock/viscous)"
+          ],
+          "series": [],
+          "patch_count": 2,
+          "collections": [],
+          "annotations": [
+            "CDw=12 cts"
+          ]
+        }
+      ]
+    }
+  }
+}

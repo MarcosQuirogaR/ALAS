@@ -1,13 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! Repository tasks: the checks that run before a commit, and the backup.
+//! Repository tasks: the checks that run before a commit, packaging, benchmarks, and backup.
 //!
 //! These live in a crate rather than a shell script because they have to run
 //! identically from a terminal, from a hook and from an editor, on a machine
 //! where the only tool guaranteed to exist is Cargo.
 
+mod bench;
 mod checks;
+mod dist;
+mod evidence;
 mod ledger;
 
 use std::path::{Path, PathBuf};
@@ -20,7 +23,10 @@ fn main() -> ExitCode {
     let outcome = match task.as_deref() {
         Some("gate") => gate(&root),
         Some("checks") => run_checks(&root),
+        Some("evidence-audit") => run_evidence_audit(&root),
         Some("install-hooks") => install_hooks(&root),
+        Some("bench") => bench::run_benchmarks(&root),
+        Some("dist") | Some("package") => dist::create_distribution(&root),
         Some("backup") => backup(&root),
         Some(other) => {
             println!("unknown task: {other}");
@@ -48,9 +54,28 @@ fn usage() {
          \n\
          gate           formatting, lints, tests and the repository checks\n\
          checks         the repository checks alone, without invoking Cargo\n\
+         evidence-audit audit ledger, fixture and generator evidence bookkeeping\n\
          install-hooks  install the pre-commit hook that runs the gate\n\
+         bench          build and execute the release computational benchmark suite\n\
+         dist           compile release binary and assemble standalone distribution archive\n\
+         package        alias for dist\n\
          backup         write a git bundle to the synced backup directory"
     );
+}
+
+fn run_evidence_audit(root: &Path) -> Result<(), String> {
+    let findings = evidence::check(root)?;
+    println!(
+        "evidence-audit: presence and linkage only; it does not establish physical correctness"
+    );
+    if findings.is_empty() {
+        println!("evidence-audit: pass");
+        return Ok(());
+    }
+    for finding in &findings {
+        println!("{finding}");
+    }
+    Err(format!("evidence-audit: {} finding(s)", findings.len()))
 }
 
 /// The full gate, in increasing order of cost.
@@ -119,10 +144,10 @@ fn backup(root: &Path) -> Result<(), String> {
         .join("OneDrive")
         .join("Proyectos")
         .join("Universidad")
-        .join("ALAS-native-backups");
+        .join("ALAS-rust-backups");
     std::fs::create_dir_all(&dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
 
-    let target = dir.join("alas-native.bundle");
+    let target = dir.join("alas-rust.bundle");
     let status = Command::new("git")
         .current_dir(root)
         .args(["bundle", "create"])

@@ -1,0 +1,1964 @@
+{
+  "airports": {
+    "LEMD": {
+      "elevation_m": 610.0,
+      "icao": "LEMD",
+      "isa_deviation_c": 15.0,
+      "latitude_deg": 40.4719,
+      "lda_m": 4100.0,
+      "longitude_deg": -3.5626,
+      "name": "Madrid Barajas",
+      "notes": "authored for the routing parity fixture",
+      "toda_m": 4350.0
+    },
+    "LFPG": {
+      "elevation_m": 119.0,
+      "icao": "LFPG",
+      "isa_deviation_c": 15.0,
+      "latitude_deg": 49.0097,
+      "lda_m": 4200.0,
+      "longitude_deg": 2.5479,
+      "name": "Paris CDG",
+      "notes": "authored for the routing parity fixture",
+      "toda_m": 4215.0
+    },
+    "LIRF": {
+      "elevation_m": 5.0,
+      "icao": "LIRF",
+      "isa_deviation_c": 15.0,
+      "latitude_deg": 41.8003,
+      "lda_m": 3200.0,
+      "longitude_deg": 12.2389,
+      "name": "Rome Fiumicino",
+      "notes": "authored for the routing parity fixture",
+      "toda_m": 3500.0
+    },
+    "NZAA": {
+      "elevation_m": 7.0,
+      "icao": "NZAA",
+      "isa_deviation_c": 15.0,
+      "latitude_deg": -37.0082,
+      "lda_m": 3200.0,
+      "longitude_deg": 174.785,
+      "name": "Auckland",
+      "notes": "authored for the routing parity fixture",
+      "toda_m": 3500.0
+    },
+    "SCEL": {
+      "elevation_m": 474.0,
+      "icao": "SCEL",
+      "isa_deviation_c": 15.0,
+      "latitude_deg": -33.393,
+      "lda_m": 3200.0,
+      "longitude_deg": -70.7858,
+      "name": "Santiago",
+      "notes": "authored for the routing parity fixture",
+      "toda_m": 3500.0
+    },
+    "XALP": {
+      "elevation_m": 0.0,
+      "icao": "XALP",
+      "isa_deviation_c": 15.0,
+      "latitude_deg": 39.9,
+      "lda_m": 3200.0,
+      "longitude_deg": -4.5,
+      "name": "Alpha Field",
+      "notes": "authored for the routing parity fixture",
+      "toda_m": 3500.0
+    },
+    "XECH": {
+      "elevation_m": 0.0,
+      "icao": "XECH",
+      "isa_deviation_c": 15.0,
+      "latitude_deg": 44.6,
+      "lda_m": 3200.0,
+      "longitude_deg": 5.4,
+      "name": "Echo Field",
+      "notes": "authored for the routing parity fixture",
+      "toda_m": 3500.0
+    },
+    "XFOX": {
+      "elevation_m": 0.0,
+      "icao": "XFOX",
+      "isa_deviation_c": 15.0,
+      "latitude_deg": 46.1,
+      "lda_m": 3200.0,
+      "longitude_deg": 8.4,
+      "name": "Foxtrot Field",
+      "notes": "authored for the routing parity fixture",
+      "toda_m": 3500.0
+    },
+    "XLON": {
+      "elevation_m": 0.0,
+      "icao": "XLON",
+      "isa_deviation_c": 15.0,
+      "latitude_deg": 60.25,
+      "lda_m": 3200.0,
+      "longitude_deg": 30.75,
+      "name": "Loner Field",
+      "notes": "authored for the routing parity fixture",
+      "toda_m": 3500.0
+    }
+  },
+  "airways": [
+    {
+      "dest": "XFOX",
+      "name": "along_the_chain",
+      "origin": "XALP",
+      "route": {
+        "cumulative_distance_m": [
+          0.0,
+          33875.95938560097,
+          236688.19871200895,
+          489995.68382302846,
+          715009.181562746,
+          991503.2682020669,
+          1228209.2567837897,
+          1260326.9417859188
+        ],
+        "dest_airport": null,
+        "origin_airport": null,
+        "source": "navdata_graph",
+        "total_distance_m": 1260326.9417859188,
+        "waypoints": [
+          {
+            "alt_m": 0.0,
+            "ident": "XALP",
+            "lat": 39.9,
+            "lon": -4.5
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "ALPHA",
+            "lat": 40.1,
+            "lon": -4.2
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "BRAVO",
+            "lat": 41.05,
+            "lon": -2.15
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "CHRLI",
+            "lat": 42.3,
+            "lon": 0.4
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "DELTA",
+            "lat": 43.15,
+            "lon": 2.9
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "ECHOO",
+            "lat": 44.7,
+            "lon": 5.6
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "FOXTR",
+            "lat": 45.9,
+            "lon": 8.1
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "XFOX",
+            "lat": 46.1,
+            "lon": 8.4
+          }
+        ]
+      },
+      "why": "end to end, so the search crosses the branch point"
+    },
+    {
+      "dest": "XECH",
+      "name": "through_the_branch",
+      "origin": "XALP",
+      "route": {
+        "cumulative_distance_m": [
+          0.0,
+          33875.95938560097,
+          236688.19871200895,
+          489995.68382302846,
+          715009.181562746,
+          991503.2682020669,
+          1010841.0569171396
+        ],
+        "dest_airport": null,
+        "origin_airport": null,
+        "source": "navdata_graph",
+        "total_distance_m": 1010841.0569171396,
+        "waypoints": [
+          {
+            "alt_m": 0.0,
+            "ident": "XALP",
+            "lat": 39.9,
+            "lon": -4.5
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "ALPHA",
+            "lat": 40.1,
+            "lon": -4.2
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "BRAVO",
+            "lat": 41.05,
+            "lon": -2.15
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "CHRLI",
+            "lat": 42.3,
+            "lon": 0.4
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "DELTA",
+            "lat": 43.15,
+            "lon": 2.9
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "ECHOO",
+            "lat": 44.7,
+            "lon": 5.6
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "XECH",
+            "lat": 44.6,
+            "lon": 5.4
+          }
+        ]
+      },
+      "why": "the pair with two paths between them, within a tenth of a percent of each other in length"
+    },
+    {
+      "dest": "XALP",
+      "name": "reversed",
+      "origin": "XFOX",
+      "route": {
+        "cumulative_distance_m": [
+          0.0,
+          32117.6850021291,
+          268823.673583852,
+          545317.7602231731,
+          770331.2579628907,
+          1023638.7430739102,
+          1226450.9824003181,
+          1260326.941785919
+        ],
+        "dest_airport": null,
+        "origin_airport": null,
+        "source": "navdata_graph",
+        "total_distance_m": 1260326.941785919,
+        "waypoints": [
+          {
+            "alt_m": 0.0,
+            "ident": "XFOX",
+            "lat": 46.1,
+            "lon": 8.4
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "FOXTR",
+            "lat": 45.9,
+            "lon": 8.1
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "ECHOO",
+            "lat": 44.7,
+            "lon": 5.6
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "DELTA",
+            "lat": 43.15,
+            "lon": 2.9
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "CHRLI",
+            "lat": 42.3,
+            "lon": 0.4
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "BRAVO",
+            "lat": 41.05,
+            "lon": -2.15
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "ALPHA",
+            "lat": 40.1,
+            "lon": -4.2
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "XALP",
+            "lat": 39.9,
+            "lon": -4.5
+          }
+        ]
+      },
+      "why": "the same route flown the other way, which must be the same path"
+    },
+    {
+      "dest": "XLON",
+      "name": "unreachable_airport",
+      "origin": "XALP",
+      "route": null,
+      "why": "an airport beyond the transition limit from every connected fix"
+    },
+    {
+      "dest": "XALP",
+      "name": "both_ends_the_same_fix",
+      "origin": "XALP",
+      "route": {
+        "cumulative_distance_m": [
+          0.0,
+          33875.95938560097,
+          67751.91877120193
+        ],
+        "dest_airport": null,
+        "origin_airport": null,
+        "source": "navdata_graph",
+        "total_distance_m": 67751.91877120193,
+        "waypoints": [
+          {
+            "alt_m": 0.0,
+            "ident": "XALP",
+            "lat": 39.9,
+            "lon": -4.5
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "ALPHA",
+            "lat": 40.1,
+            "lon": -4.2
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "XALP",
+            "lat": 39.9,
+            "lon": -4.5
+          }
+        ]
+      },
+      "why": "an airport routed to itself, a zero-length path"
+    }
+  ],
+  "assets": {
+    "min_bytes": {
+      "earth_awy.dat": 1000000,
+      "earth_fix.dat": 1000000,
+      "earth_nav.dat": 500000
+    },
+    "min_texture_bytes": 200000,
+    "navdata_base_url": "https://raw.githubusercontent.com/mcantsin/x-plane-navdata/master",
+    "navdata_files": [
+      "earth_fix.dat",
+      "earth_awy.dat",
+      "earth_nav.dat"
+    ],
+    "navdata_rel": "alas/data/navdata",
+    "status_absent": false,
+    "status_partial": false,
+    "texture_absent": false,
+    "texture_rel": "alas/data/textures/earth_blue_marble.jpg",
+    "texture_url": "https://upload.wikimedia.org/wikipedia/commons/c/c4/Land_shallow_topo_2048.jpg"
+  },
+  "distances": [
+    {
+      "distance_m": 0.0,
+      "from": [
+        40.0,
+        -3.0
+      ],
+      "name": "zero",
+      "to": [
+        40.0,
+        -3.0
+      ],
+      "why": "a leg of no length, where the arcsine's argument is zero"
+    },
+    {
+      "distance_m": 253307.48511101952,
+      "from": [
+        41.05,
+        -2.15
+      ],
+      "name": "short_leg",
+      "to": [
+        42.3,
+        0.4
+      ],
+      "why": "an airway leg, which is what the graph weights are"
+    },
+    {
+      "distance_m": 1064138.635242968,
+      "from": [
+        40.4719,
+        -3.5626
+      ],
+      "name": "madrid_paris",
+      "to": [
+        49.0097,
+        2.5479
+      ],
+      "why": "a short-haul sector"
+    },
+    {
+      "distance_m": 19604163.971819792,
+      "from": [
+        40.4719,
+        -3.5626
+      ],
+      "name": "madrid_auckland",
+      "to": [
+        -37.0082,
+        174.785
+      ],
+      "why": "close to antipodal, where the argument rounds toward one"
+    },
+    {
+      "distance_m": 20015086.79602057,
+      "from": [
+        0.0,
+        0.0
+      ],
+      "name": "antipodal",
+      "to": [
+        0.0,
+        180.0
+      ],
+      "why": "exactly antipodal, which is where the clamp fires"
+    },
+    {
+      "distance_m": 20015086.79602057,
+      "from": [
+        90.0,
+        0.0
+      ],
+      "name": "pole_to_pole",
+      "to": [
+        -90.0,
+        0.0
+      ],
+      "why": "over both poles, where the longitudes mean nothing"
+    },
+    {
+      "distance_m": 91085.1711250165,
+      "from": [
+        35.0,
+        179.5
+      ],
+      "name": "date_line",
+      "to": [
+        35.0,
+        -179.5
+      ],
+      "why": "across the date line, a short leg written as a 359-degree change"
+    },
+    {
+      "distance_m": 10007543.398010287,
+      "from": [
+        0.0,
+        0.0
+      ],
+      "name": "equator_quarter",
+      "to": [
+        0.0,
+        90.0
+      ],
+      "why": "a quarter of the equator, which has a closed-form answer"
+    }
+  ],
+  "graph": {
+    "connected": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7
+    ],
+    "edges": {
+      "0": [
+        [
+          1,
+          202812.239326408
+        ]
+      ],
+      "1": [
+        [
+          0,
+          202812.239326408
+        ],
+        [
+          2,
+          253307.48511101952
+        ],
+        [
+          6,
+          128782.84970140494
+        ]
+      ],
+      "2": [
+        [
+          1,
+          253307.48511101952
+        ],
+        [
+          3,
+          225013.49773971754
+        ]
+      ],
+      "3": [
+        [
+          2,
+          225013.49773971754
+        ],
+        [
+          4,
+          276494.086639321
+        ]
+      ],
+      "4": [
+        [
+          3,
+          276494.086639321
+        ],
+        [
+          5,
+          236705.98858172292
+        ],
+        [
+          7,
+          343525.65299300145
+        ]
+      ],
+      "5": [
+        [
+          4,
+          236705.98858172292
+        ]
+      ],
+      "6": [
+        [
+          1,
+          128782.84970140494
+        ],
+        [
+          7,
+          283273.3596833497
+        ]
+      ],
+      "7": [
+        [
+          6,
+          283273.3596833497
+        ],
+        [
+          4,
+          343525.65299300145
+        ]
+      ]
+    },
+    "fixes": [
+      {
+        "ident": "ALPHA",
+        "lat": 40.1,
+        "lon": -4.2
+      },
+      {
+        "ident": "BRAVO",
+        "lat": 41.05,
+        "lon": -2.15
+      },
+      {
+        "ident": "CHRLI",
+        "lat": 42.3,
+        "lon": 0.4
+      },
+      {
+        "ident": "DELTA",
+        "lat": 43.15,
+        "lon": 2.9
+      },
+      {
+        "ident": "ECHOO",
+        "lat": 44.7,
+        "lon": 5.6
+      },
+      {
+        "ident": "FOXTR",
+        "lat": 45.9,
+        "lon": 8.1
+      },
+      {
+        "ident": "GOLFF",
+        "lat": 41.9,
+        "lon": -1.1
+      },
+      {
+        "ident": "HOTEL",
+        "lat": 43.4,
+        "lon": 1.7
+      },
+      {
+        "ident": "LONER",
+        "lat": 60.25,
+        "lon": 30.75
+      },
+      {
+        "ident": "BRAVO",
+        "lat": -18.4,
+        "lon": 158.2
+      }
+    ]
+  },
+  "great_circles": [
+    {
+      "dest": "LFPG",
+      "n": 50,
+      "name": "madrid_paris_50",
+      "origin": "LEMD",
+      "route": {
+        "cumulative_distance_m": [
+          0.0,
+          21282.772704860097,
+          42565.5454097193,
+          63848.31811457808,
+          85131.09081943863,
+          106413.86352429657,
+          127696.63622915655,
+          148979.40893401543,
+          170262.18163887478,
+          191544.9543437343,
+          212827.72704859322,
+          234110.49975345292,
+          255393.2724583125,
+          276676.0451631718,
+          297958.8178680314,
+          319241.5905728911,
+          340524.36327775,
+          361807.1359826091,
+          383089.9086874688,
+          404372.6813923287,
+          425655.4540971881,
+          446938.2268020469,
+          468220.999506906,
+          489503.7722117656,
+          510786.54491662467,
+          532069.3176214839,
+          553352.0903263431,
+          574634.8630312029,
+          595917.6357360627,
+          617200.4084409212,
+          638483.1811457813,
+          659765.9538506404,
+          681048.7265554994,
+          702331.499260359,
+          723614.2719652193,
+          744897.0446700787,
+          766179.8173749375,
+          787462.5900797971,
+          808745.3627846567,
+          830028.1354895158,
+          851310.9081943748,
+          872593.6808992346,
+          893876.4536040934,
+          915159.2263089528,
+          936441.999013812,
+          957724.771718672,
+          979007.5444235307,
+          1000290.3171283909,
+          1021573.0898332506,
+          1042855.8625381093,
+          1064138.6352429683
+        ],
+        "dest_airport": null,
+        "origin_airport": null,
+        "source": "great_circle",
+        "total_distance_m": 1064138.6352429683,
+        "waypoints": [
+          {
+            "alt_m": 0.0,
+            "ident": "LEMD",
+            "lat": 40.4719,
+            "lon": -3.5626
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": 40.64555489346077,
+            "lon": -3.4566596564940766
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": 40.81911246887599,
+            "lon": -3.3501667288775843
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": 40.99257161606855,
+            "lon": -3.2431152285106006
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": 41.16593121019223,
+            "lon": -3.1354990943006
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": 41.33919011149002,
+            "lon": -3.027312191647309
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": 41.51234716504819,
+            "lon": -2.9185483113719064
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": 41.68540120054555,
+            "lon": -2.8092011686303744
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": 41.85835103199833,
+            "lon": -2.69926440181078
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": 42.03119545750027,
+            "lon": -2.5887315714143004
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": 42.20393325895785,
+            "lon": -2.477596158919783
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": 42.376563201820815,
+            "lon": -2.365851565631631
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": 42.54908403480742,
+            "lon": -2.2534911115108383
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": 42.721494489624874,
+            "lon": -2.1405080339889344
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": 42.8937932806844,
+            "lon": -2.026895486764681
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": 43.06597910481106,
+            "lon": -1.9126465385832905
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": 43.23805064094821,
+            "lon": -1.7977541719979813
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": 43.41000654985636,
+            "lon": -1.682211282113686
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": 43.58184547380651,
+            "lon": -1.5660106753126928
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": 43.75356603626766,
+            "lon": -1.4491450679620563
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": 43.92516684158854,
+            "lon": -1.3316070851025739
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": 44.09664647467338,
+            "lon": -1.2133892591191437
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": 44.268003500651524,
+            "lon": -1.0944840283923316
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": 44.43923646454093,
+            "lon": -0.9748837359309552
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": 44.61034389090529,
+            "lon": -0.854580627985526
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": 44.7813242835047,
+            "lon": -0.7335668526423634
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": 44.95217612493978,
+            "lon": -0.6118344583982323
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": 45.12289787628907,
+            "lon": -0.4893753927153351
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": 45.29348797673957,
+            "lon": -0.3661815005565047
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": 45.46394484321028,
+            "lon": -0.24224452290045995
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": 45.63426686996876,
+            "lon": -0.11755609523696985
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": 45.804452428240204,
+            "lon": 0.007892253958186263
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": 45.97449986580933,
+            "lon": 0.13410910476860805
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": 46.14440750661462,
+            "lon": 0.2611031474031139
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": 46.31417365033488,
+            "lon": 0.38888318378213677
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": 46.483796571967936,
+            "lon": 0.5174581291447864
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": 46.65327452140144,
+            "lon": 0.6468370136766414
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": 46.82260572297542,
+            "lon": 0.7770289841583591
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": 46.9917883750365,
+            "lon": 0.9080433056351578
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": 47.160820649483775,
+            "lon": 1.0398893631072224
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": 47.32970069130595,
+            "lon": 1.1725766632410566
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": 47.498426618109725,
+            "lon": 1.3061148361018105
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": 47.66699651963916,
+            "lon": 1.440513636906575
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": 47.83540845728598,
+            "lon": 1.5757829477986312
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": 48.00366046359047,
+            "lon": 1.7119327796426176
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": 48.17175054173299,
+            "lon": 1.8489732738405584
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": 48.33967666501567,
+            "lon": 1.9869147041686863
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": 48.507436776334444,
+            "lon": 2.1257674786349456
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": 48.675028787640805,
+            "lon": 2.265542141357071
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": 48.84245057939355,
+            "lon": 2.4062493744610753
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "LFPG",
+            "lat": 49.0097,
+            "lon": 2.5479
+          }
+        ]
+      },
+      "why": "the default sampling on a short sector"
+    },
+    {
+      "dest": "NZAA",
+      "n": 50,
+      "name": "madrid_auckland_50",
+      "origin": "LEMD",
+      "route": {
+        "cumulative_distance_m": [
+          0.0,
+          392083.27943640464,
+          784166.558872808,
+          1176249.8383092107,
+          1568333.1177456127,
+          1960416.3971820143,
+          2352499.676618415,
+          2744582.956054814,
+          3136666.235491218,
+          3528749.514927637,
+          3920832.7943640393,
+          4312916.073800426,
+          4704999.3532368075,
+          5097082.6326732,
+          5489165.912109606,
+          5881249.191545978,
+          6273332.470982378,
+          6665415.750418765,
+          7057499.029855179,
+          7449582.309291551,
+          7841665.588727966,
+          8233748.868164333,
+          8625832.147600718,
+          9017915.427037114,
+          9409998.706473498,
+          9802081.985909881,
+          10194165.265346283,
+          10586248.544782666,
+          10978331.824219063,
+          11370415.10365544,
+          11762498.38309183,
+          12154581.662528219,
+          12546664.9419646,
+          12938748.221401002,
+          13330831.500837388,
+          13722914.7802738,
+          14114998.059710186,
+          14507081.339146586,
+          14899164.618582966,
+          15291247.898019353,
+          15683331.17745575,
+          16075414.456892163,
+          16467497.736328565,
+          16859581.015764963,
+          17251664.29520136,
+          17643747.574637767,
+          18035830.854074165,
+          18427914.133510564,
+          18819997.412946966,
+          19212080.692383375,
+          19604163.971819777
+        ],
+        "dest_airport": null,
+        "origin_airport": null,
+        "source": "great_circle",
+        "total_distance_m": 19604163.971819777,
+        "waypoints": [
+          {
+            "alt_m": 0.0,
+            "ident": "LEMD",
+            "lat": 40.4719,
+            "lon": -3.5626
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": 43.75256998568089,
+            "lon": -1.8194635964764216
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": 47.003683070519784,
+            "lon": 0.12509798072761702
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": 50.21762563556809,
+            "lon": 2.320368285730719
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": 53.38425839814616,
+            "lon": 4.830539585758342
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": 56.48983193311862,
+            "lon": 7.7401791355768355
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": 59.515359543760056,
+            "lon": 11.161629104460141
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": 62.434166711246625,
+            "lon": 15.2444726429055
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": 65.20824193670629,
+            "lon": 20.18596012560594
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": 67.78303338650962,
+            "lon": 26.237500406817674
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": 70.08086403734646,
+            "lon": 33.692842461313965
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": 71.99516458576525,
+            "lon": 42.8257848947133
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": 73.39260162443979,
+            "lon": 53.7321296293866
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": 74.13587387537672,
+            "lon": 66.0855829464112
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": 74.13272482349724,
+            "lon": 79.00888340478458
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": 73.38357906911985,
+            "lon": 91.35328996460392
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": 71.98129642119036,
+            "lon": 102.24559830073659
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": 70.06331684106766,
+            "lon": 111.36391480354061
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": 67.76280850536342,
+            "lon": 118.80645779079946
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": 65.18609265019039,
+            "lon": 124.84767887826067
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": 62.410627856530496,
+            "lon": 129.7811323687087
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": 59.49080391064186,
+            "lon": 133.85778763100888
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": 56.46451983571509,
+            "lon": 137.27446388902206
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": 53.358373763977355,
+            "lon": 140.1803941239604
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": 50.19130055109709,
+            "lon": 142.68765540143372
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": 46.977014108794904,
+            "lon": 144.88061960385065
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": 43.72562905182369,
+            "lon": 146.82333609144894
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": 40.44474159715404,
+            "lon": 148.56498369150432
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": 37.14015810229466,
+            "lon": 150.1438130148251
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": 33.816393333403674,
+            "lon": 151.5899836457711
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": 30.47701679383874,
+            "lon": 152.92761343567165
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": 27.12489751833208,
+            "lon": 154.17627097349322
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": 23.762380080999716,
+            "lon": 155.3520746149045
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": 20.39141337414693,
+            "lon": 156.4685124376704
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": 17.0136465640999,
+            "lon": 157.53706321095925
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": 13.630502012992366,
+            "lon": 158.56767483737002
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": 10.24323194166617,
+            "lon": 159.56914052812817
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": 6.8529636237828395,
+            "lon": 160.54940189223484
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": 3.4607365877482064,
+            "lon": 161.5158005706002
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": 0.0675344380548445,
+            "lon": 162.4752949604174
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": -3.325686647874443,
+            "lon": 163.4346552526004
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": -6.7179710225107065,
+            "lon": 164.40064800025908
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": -10.108336701745102,
+            "lon": 165.3802204860187
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": -13.495746963124208,
+            "lon": 166.38069513785325
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": -16.87907869328741,
+            "lon": 167.409985154657
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": -20.257085445576,
+            "lon": 168.47684446166133
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": -23.628352623518715,
+            "lon": 169.5911683786723
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": -26.99124135545687,
+            "lon": 170.76436638829287
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": -30.34381633349081,
+            "lon": 172.00983582546553
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": -33.68375093733214,
+            "lon": 173.34357622254103
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "NZAA",
+            "lat": -37.0082,
+            "lon": 174.785
+          }
+        ]
+      },
+      "why": "a near-antipodal arc at the default sampling"
+    },
+    {
+      "dest": "SCEL",
+      "n": 8,
+      "name": "madrid_santiago_8",
+      "origin": "LEMD",
+      "route": {
+        "cumulative_distance_m": [
+          0.0,
+          1339801.5106695448,
+          2679603.0213390915,
+          4019404.5320086367,
+          5359206.042678183,
+          6699007.553347728,
+          8038809.0640172735,
+          9378610.57468682,
+          10718412.085356366
+        ],
+        "dest_airport": null,
+        "origin_airport": null,
+        "source": "great_circle",
+        "total_distance_m": 10718412.085356366,
+        "waypoints": [
+          {
+            "alt_m": 0.0,
+            "ident": "LEMD",
+            "lat": 40.4719,
+            "lon": -3.5626
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": 32.299570180970974,
+            "lon": -14.591529719733414
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": 23.332886446745654,
+            "lon": -23.71088733607804
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": 13.907047104252719,
+            "lon": -31.643780952890108
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": 4.245609168004153,
+            "lon": -38.944384654525656
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": -5.4827062768142385,
+            "lon": -46.06260340626528
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": -15.124228742920547,
+            "lon": -53.4172716895073
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": -24.505705798705772,
+            "lon": -61.46744059841336
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "SCEL",
+            "lat": -33.393,
+            "lon": -70.7858
+          }
+        ]
+      },
+      "why": "a coarse sampling, where each waypoint carries more of the arc"
+    },
+    {
+      "dest": "LFPG",
+      "n": 2,
+      "name": "rome_paris_2",
+      "origin": "LIRF",
+      "route": {
+        "cumulative_distance_m": [
+          0.0,
+          550284.5143664667,
+          1100569.028732934
+        ],
+        "dest_airport": null,
+        "origin_airport": null,
+        "source": "great_circle",
+        "total_distance_m": 1100569.028732934,
+        "waypoints": [
+          {
+            "alt_m": 0.0,
+            "ident": "LIRF",
+            "lat": 41.8003,
+            "lon": 12.2389
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "",
+            "lat": 45.507135024462286,
+            "lon": 7.703735440226154
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "LFPG",
+            "lat": 49.0097,
+            "lon": 2.5479
+          }
+        ]
+      },
+      "why": "the fewest intervals that interpolate anything at all"
+    },
+    {
+      "dest": "LEMD",
+      "n": 50,
+      "name": "same_airport",
+      "origin": "LEMD",
+      "route": {
+        "cumulative_distance_m": [
+          0.0,
+          0.0
+        ],
+        "dest_airport": null,
+        "origin_airport": null,
+        "source": "great_circle",
+        "total_distance_m": 0.0,
+        "waypoints": [
+          {
+            "alt_m": 0.0,
+            "ident": "LEMD",
+            "lat": 40.4719,
+            "lon": -3.5626
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "LEMD",
+            "lat": 40.4719,
+            "lon": -3.5626
+          }
+        ]
+      },
+      "why": "both endpoints identical, so the interpolation is skipped entirely"
+    }
+  ],
+  "kml": {
+    "cumulative_distance_m": [
+      0.0,
+      135226.84006722056,
+      388534.3251782401,
+      550369.3280673532,
+      1165425.2113614422
+    ],
+    "dest_airport": null,
+    "origin_airport": null,
+    "source": "simbrief_kml",
+    "total_distance_m": 1165425.2113614422,
+    "waypoints": [
+      {
+        "alt_m": 610.0,
+        "ident": "",
+        "lat": 40.4719,
+        "lon": -3.5626
+      },
+      {
+        "alt_m": 9500.0,
+        "ident": "",
+        "lat": 41.05,
+        "lon": -2.15
+      },
+      {
+        "alt_m": 11500.0,
+        "ident": "",
+        "lat": 42.3,
+        "lon": 0.4
+      },
+      {
+        "alt_m": 0.0,
+        "ident": "",
+        "lat": 43.4,
+        "lon": 1.7
+      },
+      {
+        "alt_m": 119.0,
+        "ident": "",
+        "lat": 48.9,
+        "lon": 2.55
+      }
+    ]
+  },
+  "ofp": [
+    {
+      "allow_mismatch": false,
+      "dest": "LFPG",
+      "document": {
+        "destination": {
+          "elevation": "392",
+          "icao_code": "LFPG",
+          "name": "Paris Charles De Gaulle",
+          "plan_rwy_length": "13829",
+          "pos_lat": "49.0097",
+          "pos_long": "2.5479"
+        },
+        "navlog": {
+          "fix": [
+            {
+              "ident": "BARDI",
+              "pos_lat": "40.9500",
+              "pos_long": "-3.2000"
+            },
+            {
+              "ident": "PINAR",
+              "pos_lat": "42.1000",
+              "pos_long": "-2.4000"
+            },
+            {
+              "ident": "LOMAS",
+              "pos_lat": "44.3000",
+              "pos_long": "-0.8000"
+            },
+            {
+              "ident": "TUDRA",
+              "pos_lat": "47.2000",
+              "pos_long": "1.1000"
+            }
+          ]
+        },
+        "origin": {
+          "elevation": "1998",
+          "icao_code": "LEMD",
+          "name": "Madrid Barajas",
+          "plan_rwy_length": "13448",
+          "pos_lat": "40.4719",
+          "pos_long": "-3.5626"
+        }
+      },
+      "name": "matching_pair",
+      "origin": "LEMD",
+      "route": {
+        "cumulative_distance_m": [
+          0.0,
+          61321.051822252,
+          205496.67285380996,
+          482363.57932122954,
+          836901.1732131499,
+          1065039.025707766
+        ],
+        "dest_airport": {
+          "elevation_m": 119.0,
+          "icao": "LFPG",
+          "isa_deviation_c": 15.0,
+          "latitude_deg": 49.0097,
+          "lda_m": 4200.0,
+          "longitude_deg": 2.5479,
+          "name": "Paris CDG",
+          "notes": "authored for the routing parity fixture",
+          "toda_m": 4215.0
+        },
+        "origin_airport": {
+          "elevation_m": 610.0,
+          "icao": "LEMD",
+          "isa_deviation_c": 15.0,
+          "latitude_deg": 40.4719,
+          "lda_m": 4100.0,
+          "longitude_deg": -3.5626,
+          "name": "Madrid Barajas",
+          "notes": "authored for the routing parity fixture",
+          "toda_m": 4350.0
+        },
+        "source": "simbrief_api",
+        "total_distance_m": 1065039.025707766,
+        "waypoints": [
+          {
+            "alt_m": 0.0,
+            "ident": "LEMD",
+            "lat": 40.4719,
+            "lon": -3.5626
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "BARDI",
+            "lat": 40.95,
+            "lon": -3.2
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "PINAR",
+            "lat": 42.1,
+            "lon": -2.4
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "LOMAS",
+            "lat": 44.3,
+            "lon": -0.8
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "TUDRA",
+            "lat": 47.2,
+            "lon": 1.1
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "LFPG",
+            "lat": 49.0097,
+            "lon": 2.5479
+          }
+        ]
+      },
+      "why": "the plan is for the pair that was asked for"
+    },
+    {
+      "allow_mismatch": false,
+      "dest": "LFPG",
+      "document": {
+        "destination": {
+          "elevation": "392",
+          "icao_code": "LFPG",
+          "name": "Paris Charles De Gaulle",
+          "plan_rwy_length": "13829",
+          "pos_lat": "49.0097",
+          "pos_long": "2.5479"
+        },
+        "navlog": {
+          "fix": [
+            {
+              "ident": "BARDI",
+              "pos_lat": "40.9500",
+              "pos_long": "-3.2000"
+            },
+            {
+              "ident": "PINAR",
+              "pos_lat": "42.1000",
+              "pos_long": "-2.4000"
+            },
+            {
+              "ident": "LOMAS",
+              "pos_lat": "44.3000",
+              "pos_long": "-0.8000"
+            },
+            {
+              "ident": "TUDRA",
+              "pos_lat": "47.2000",
+              "pos_long": "1.1000"
+            }
+          ]
+        },
+        "origin": {
+          "elevation": "1998",
+          "icao_code": "LEMD",
+          "name": "Madrid Barajas",
+          "plan_rwy_length": "13448",
+          "pos_lat": "40.4719",
+          "pos_long": "-3.5626"
+        }
+      },
+      "name": "mismatch_refused",
+      "origin": "LIRF",
+      "route": null,
+      "why": "a plan for somewhere else, with the override off"
+    },
+    {
+      "allow_mismatch": true,
+      "dest": "LFPG",
+      "document": {
+        "destination": {
+          "elevation": "392",
+          "icao_code": "LFPG",
+          "name": "Paris Charles De Gaulle",
+          "plan_rwy_length": "13829",
+          "pos_lat": "49.0097",
+          "pos_long": "2.5479"
+        },
+        "navlog": {
+          "fix": [
+            {
+              "ident": "BARDI",
+              "pos_lat": "40.9500",
+              "pos_long": "-3.2000"
+            },
+            {
+              "ident": "PINAR",
+              "pos_lat": "42.1000",
+              "pos_long": "-2.4000"
+            },
+            {
+              "ident": "LOMAS",
+              "pos_lat": "44.3000",
+              "pos_long": "-0.8000"
+            },
+            {
+              "ident": "TUDRA",
+              "pos_lat": "47.2000",
+              "pos_long": "1.1000"
+            }
+          ]
+        },
+        "origin": {
+          "elevation": "1998",
+          "icao_code": "LEMD",
+          "name": "Madrid Barajas",
+          "plan_rwy_length": "13448",
+          "pos_lat": "40.4719",
+          "pos_long": "-3.5626"
+        }
+      },
+      "name": "mismatch_allowed",
+      "origin": "LIRF",
+      "route": {
+        "cumulative_distance_m": [
+          0.0,
+          61321.051822252,
+          205496.67285380996,
+          482363.57932122954,
+          836901.1732131499,
+          1065039.025707766
+        ],
+        "dest_airport": {
+          "elevation_m": 119.4816,
+          "icao": "LFPG",
+          "isa_deviation_c": 15.0,
+          "latitude_deg": 49.0097,
+          "lda_m": 4215.0792,
+          "longitude_deg": 2.5479,
+          "name": "Paris Charles De Gaulle (LFPG)",
+          "notes": "From SimBrief OFP",
+          "toda_m": 4215.0792
+        },
+        "origin_airport": {
+          "elevation_m": 608.9904,
+          "icao": "LEMD",
+          "isa_deviation_c": 15.0,
+          "latitude_deg": 40.4719,
+          "lda_m": 4098.950400000001,
+          "longitude_deg": -3.5626,
+          "name": "Madrid Barajas (LEMD)",
+          "notes": "From SimBrief OFP",
+          "toda_m": 4098.950400000001
+        },
+        "source": "simbrief_api",
+        "total_distance_m": 1065039.025707766,
+        "waypoints": [
+          {
+            "alt_m": 0.0,
+            "ident": "LEMD",
+            "lat": 40.4719,
+            "lon": -3.5626
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "BARDI",
+            "lat": 40.95,
+            "lon": -3.2
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "PINAR",
+            "lat": 42.1,
+            "lon": -2.4
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "LOMAS",
+            "lat": 44.3,
+            "lon": -0.8
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "TUDRA",
+            "lat": 47.2,
+            "lon": 1.1
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "LFPG",
+            "lat": 49.0097,
+            "lon": 2.5479
+          }
+        ]
+      },
+      "why": "the same, with the override on, so the plan's own airports win"
+    },
+    {
+      "allow_mismatch": false,
+      "dest": "LFPG",
+      "document": {
+        "destination": {
+          "elevation": "392",
+          "icao_code": "LFPG",
+          "name": "Paris Charles De Gaulle",
+          "plan_rwy_length": "13829",
+          "pos_lat": "49.0097",
+          "pos_long": "2.5479"
+        },
+        "navlog": {
+          "fix": {
+            "ident": "SOLO1",
+            "pos_lat": "43.0",
+            "pos_long": "-1.0"
+          }
+        },
+        "origin": {
+          "elevation": "1998",
+          "icao_code": "LEMD",
+          "name": "Madrid Barajas",
+          "plan_rwy_length": "13448",
+          "pos_lat": "40.4719",
+          "pos_long": "-3.5626"
+        }
+      },
+      "name": "single_fix",
+      "origin": "LEMD",
+      "route": {
+        "cumulative_distance_m": [
+          0.0,
+          352432.96378585993,
+          1074473.1729806336
+        ],
+        "dest_airport": {
+          "elevation_m": 119.0,
+          "icao": "LFPG",
+          "isa_deviation_c": 15.0,
+          "latitude_deg": 49.0097,
+          "lda_m": 4200.0,
+          "longitude_deg": 2.5479,
+          "name": "Paris CDG",
+          "notes": "authored for the routing parity fixture",
+          "toda_m": 4215.0
+        },
+        "origin_airport": {
+          "elevation_m": 610.0,
+          "icao": "LEMD",
+          "isa_deviation_c": 15.0,
+          "latitude_deg": 40.4719,
+          "lda_m": 4100.0,
+          "longitude_deg": -3.5626,
+          "name": "Madrid Barajas",
+          "notes": "authored for the routing parity fixture",
+          "toda_m": 4350.0
+        },
+        "source": "simbrief_api",
+        "total_distance_m": 1074473.1729806336,
+        "waypoints": [
+          {
+            "alt_m": 0.0,
+            "ident": "LEMD",
+            "lat": 40.4719,
+            "lon": -3.5626
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "SOLO1",
+            "lat": 43.0,
+            "lon": -1.0
+          },
+          {
+            "alt_m": 0.0,
+            "ident": "LFPG",
+            "lat": 49.0097,
+            "lon": 2.5479
+          }
+        ]
+      },
+      "why": "a one-entry navigation log, which arrives as a bare object"
+    },
+    {
+      "allow_mismatch": true,
+      "dest": "LFPG",
+      "document": {
+        "fetch": {
+          "status": "Error: Unknown UserID"
+        }
+      },
+      "name": "unparseable",
+      "origin": "LEMD",
+      "route": null,
+      "why": "a response of the wrong shape"
+    }
+  ]
+}

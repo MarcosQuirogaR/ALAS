@@ -1,20 +1,60 @@
 {
-  "alas_commit": "7d1555c1f4db5110cf6cd187c156718e1a033b50",
-  "environment": {
-    "aerosandbox": "4.2.8",
-    "numpy": "2.5.1",
-    "platform": "Windows-11-10.0.26200-SP0",
-    "python": "3.13.13",
-    "scipy": "1.17.1"
-  },
   "fixtures": {
     "breakdown": {
       "description": "alas.physics.mass.run_mass_analysis on the nominal AircraftBuilder(GeometryConfig()).build aircraft (with engines), across DesignRequirements/MassModelConfig overrides and the payload-layout branch -- component masses, coordinates and global CG",
-      "generator": "gen_mass_breakdown.py"
+      "generator": "gen_mass_breakdown.py",
+      "runtime": "alas",
+      "alas_commit": "7d1555c1f4db5110cf6cd187c156718e1a033b50",
+      "environment": {
+        "numpy": "2.5.1",
+        "aerosandbox": "4.2.8",
+        "platform": "Windows-11-10.0.26200-SP0",
+        "scipy": "1.17.1",
+        "python": "3.13.13"
+      }
+    },
+    "fuselage_evidence": {
+      "description": "Causal fuselage-mass evidence across all presets: effective requirements, built fuselage geometry, every Torenbeek mass_fuselage_simple input, reference outputs, and the declared Rust source corrections.",
+      "generator": "gen_mass_fuselage_evidence.py",
+      "runtime": "alas",
+      "alas_commit": "7d1555c1f4db5110cf6cd187c156718e1a033b50",
+      "environment": {
+        "numpy": "2.5.1",
+        "aerosandbox": "4.2.8",
+        "platform": "Windows-11-10.0.26200-SP0",
+        "scipy": "1.17.1",
+        "python": "3.13.13"
+      }
+    },
+    "suave_transport": {
+      "description": "SUAVE.Analyses.Weights.Weights_Transport.evaluate() (method_type='New SUAVE', the only value ever reached) on the default AVE design's sized base config: the full weight_breakdown, every intermediate correlation term, and vehicle.mass_properties.operating_empty after evaluate()",
+      "generator": "gen_mass_suave_transport.py",
+      "runtime": "suave",
+      "alas_commit": "7d1555c1f4db5110cf6cd187c156718e1a033b50",
+      "environment": {
+        "suave": {
+          "version": "2.5.2",
+          "tree": "external tools/SUAVE-2.5.2/trunk"
+        },
+        "scipy": "1.11.4",
+        "platform": "Windows-10-10.0.26200-SP0",
+        "aerosandbox": "absent",
+        "python": "3.10.20",
+        "numpy": "1.26.4"
+      }
     },
     "torenbeek": {
       "description": "aerosandbox.library.weights.torenbeek_weights: mass_wing (and its three private helpers) and mass_fuselage_simple, on wings/fuselages shaped like aircraft_builder.py's main wing, hstab, vstab and fuselage, across a spread of load factor, TOGW, airspeeds, flap angle, strut location and main-gear-mounting parameters",
-      "generator": "gen_mass_torenbeek.py"
+      "generator": "gen_mass_torenbeek.py",
+      "runtime": "alas",
+      "alas_commit": "7d1555c1f4db5110cf6cd187c156718e1a033b50",
+      "environment": {
+        "numpy": "2.5.1",
+        "aerosandbox": "4.2.8",
+        "platform": "Windows-11-10.0.26200-SP0",
+        "scipy": "1.17.1",
+        "python": "3.13.13"
+      }
     }
   }
 }

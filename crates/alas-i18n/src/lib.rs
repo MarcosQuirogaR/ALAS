@@ -110,6 +110,23 @@ fn registry() -> &'static Mutex<HashMap<String, HashMap<String, String>>> {
     REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+#[cfg(test)]
+pub(crate) fn registry_test_guard() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    match LOCK.get_or_init(|| Mutex::new(())).lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn reset_registry_for_test() {
+    match registry().lock() {
+        Ok(mut catalogs) => catalogs.clear(),
+        Err(poisoned) => poisoned.into_inner().clear(),
+    }
+}
+
 /// Install `entries` as the string table for `lang`, replacing whatever was
 /// registered for it before.
 ///
@@ -126,6 +143,24 @@ where
     // than propagating that panic into an unrelated caller.
     if let Ok(mut catalogs) = registry().lock() {
         catalogs.insert(lang.to_string(), table);
+    }
+}
+
+/// Add entries to an installed language catalog without discarding its
+/// source-parity base table.
+///
+/// Desktop-only strings live in a separate reference catalog from the Python
+/// application strings. Keeping extension explicit lets each source retain
+/// its own provenance and parity checks while presenting one lookup table.
+pub fn extend_catalog<I>(lang: &str, entries: I)
+where
+    I: IntoIterator<Item = (String, String)>,
+{
+    if let Ok(mut catalogs) = registry().lock() {
+        catalogs
+            .entry(lang.to_string())
+            .or_default()
+            .extend(entries);
     }
 }
 
@@ -213,10 +248,8 @@ mod tests {
 
     #[test]
     fn t_falls_back_to_english_until_a_catalog_is_registered_for_the_language() {
-        // No test above or below this one registers a catalog for "es", so
-        // this is the one place in the crate that owns that global state --
-        // ordering everything through a single test avoids racing another
-        // test that assumes the catalog is still absent.
+        let _registry_guard = registry_test_guard();
+        reset_registry_for_test();
         assert_eq!(t(Some("Wing area"), Some("es")), "Wing area");
 
         register_catalog(

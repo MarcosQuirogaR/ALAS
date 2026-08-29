@@ -4,8 +4,8 @@
 // Ported from alas/config/optimizer_config.py (`SolverSettings`)
 // Reference: alas @ rust-port-baseline.
 
-//! How the differential-evolution search is run: how long, how wide, and
-//! from where.
+//! How the aircraft-design search is run: which algorithm, how long, how wide,
+//! and from where.
 //!
 //! These settings decide how many aircraft get built and analysed, and each
 //! evaluation is a full geometry build, mass breakdown and vortex-lattice
@@ -34,6 +34,15 @@ use crate::ConfigNode;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ConfigNode)]
 #[serde(deny_unknown_fields)]
 pub struct SolverSettings {
+    /// Top-level optimizer selected for product searches.
+    #[serde(default = "default_optimizer_method")]
+    #[config(
+        options = OptimizerMethod,
+        label = "Optimization method",
+        help = "Select the search algorithm. Differential evolution preserves the historical scalar search; feasibility-first DE gives physical validity priority; NSGA-II retains a Pareto set; TuRBO-1 uses a local trust-region surrogate for expensive evaluations; CMA-ES adapts correlated continuous design steps."
+    )]
+    pub method: String,
+
     /// How new candidates are generated from the population.
     #[config(
         options = Strategy,
@@ -70,10 +79,10 @@ pub struct SolverSettings {
     )]
     pub seed: Option<i64>,
 
-    /// How many candidates are evaluated at once.
+    /// How many native-objective workers evaluate a candidate batch at once.
     #[config(
         label = "Parallel worker processes",
-        help = "Number of worker processes for parallel evaluation (>1 uses multiprocessing). Requires a picklable objective -- already the case for ALAS's optimizer."
+        help = "Number of native worker threads for differential-evolution candidate batches (>1 enables parallel evaluation; non-positive values are treated as 1). External evaluator adapters remain serial because they own mutable process/session state."
     )]
     pub workers: i64,
 
@@ -102,6 +111,7 @@ pub struct SolverSettings {
 impl Default for SolverSettings {
     fn default() -> Self {
         Self {
+            method: default_optimizer_method(),
             strategy: "best1bin".to_owned(),
             max_iterations: 15,
             population_size: 6,
@@ -113,6 +123,42 @@ impl Default for SolverSettings {
             seed_perturbation_fraction: 0.05,
         }
     }
+}
+
+impl SolverSettings {
+    /// Whether `method` names an optimizer implemented by the product.
+    ///
+    /// Keep this list next to the serialized setting so configuration
+    /// validation and dispatch cannot drift into different spellings.
+    pub fn is_supported_method(method: &str) -> bool {
+        matches!(
+            method,
+            "differential_evolution" | "feasibility_first_de" | "nsga2" | "turbo_1" | "cma_es"
+        )
+    }
+
+    /// Whether `strategy` is one of the DE mutation/crossover strategies.
+    pub fn is_supported_strategy(strategy: &str) -> bool {
+        matches!(
+            strategy,
+            "best1bin"
+                | "best1exp"
+                | "rand1bin"
+                | "rand1exp"
+                | "best2bin"
+                | "best2exp"
+                | "rand2bin"
+                | "rand2exp"
+                | "randtobest1bin"
+                | "randtobest1exp"
+                | "currenttobest1bin"
+                | "currenttobest1exp"
+        )
+    }
+}
+
+fn default_optimizer_method() -> String {
+    "differential_evolution".to_owned()
 }
 
 // A test asserts on values it constructed here directly, so a failed unwrap
@@ -141,6 +187,18 @@ mod tests {
         assert!(!OptionSource::Strategy.editable());
         let accepted = OptionSource::Strategy.options().unwrap();
         assert!(accepted.contains(&settings.strategy.as_str()));
+    }
+
+    #[test]
+    fn every_product_optimizer_method_is_a_strict_gui_choice() {
+        let settings = SolverSettings::default();
+        let method = leaf("method", &settings);
+        assert_eq!(method.options, Some(OptionSource::OptimizerMethod));
+        assert!(!OptionSource::OptimizerMethod.editable());
+        assert!(OptionSource::OptimizerMethod
+            .options()
+            .unwrap()
+            .contains(&settings.method.as_str()));
     }
 
     #[test]
@@ -186,5 +244,17 @@ mod tests {
             * settings.population_size
             * crate::DESIGN_VARIABLE_SPECS.len() as i64;
         assert!(evaluations < 2_000, "{evaluations} evaluations");
+    }
+
+    #[test]
+    fn optimizer_tokens_are_checked_against_the_dispatch_contract() {
+        assert!(SolverSettings::is_supported_method(
+            "differential_evolution"
+        ));
+        assert!(!SolverSettings::is_supported_method(
+            "differential_evoluton"
+        ));
+        assert!(SolverSettings::is_supported_strategy("best1bin"));
+        assert!(!SolverSettings::is_supported_strategy("best1bni"));
     }
 }

@@ -18,6 +18,10 @@ alas-config = { path = "../alas-config" }
 # doc names as the single canonical definition every other consumer imports
 # rather than redefining. Upstream's `payload.py` takes the same import.
 alas-mass = { path = "../alas-mass" }
+# `numeric::interp` is NumPy's `np.interp`, which lived here until
+# `alas-aero::analysis` became its second consumer and it moved to
+# `alas-math`; this crate takes it from there rather than keeping a copy.
+alas-math = { path = "../alas-math" }
 thiserror = { workspace = true }
 
 [dev-dependencies]

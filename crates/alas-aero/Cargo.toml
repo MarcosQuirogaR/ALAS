@@ -1,0 +1,42 @@
+[package]
+name = "alas-aero"
+description = "Aerodynamic analysis: the vortex-lattice methods, the airfoil and lift surrogates, and the flight-condition machinery they share."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# An `OperatingPoint` holds an `Atmosphere` and reads its density; nothing
+# else about the atmosphere model is this crate's concern.
+alas-atmo = { path = "../alas-atmo" }
+# `analysis` reads its empirical coefficients, its wetted-area factors and its
+# mesh and probe schedules from `DragModelConfig`/`GeometryConfig`/
+# `AnalysisConfig`, exactly as `alas/physics/aerodynamics.py` does. The other
+# modules here take no configuration.
+alas-config = { path = "../alas-config" }
+# The in-process VLM panels an `alas-geom::aircraft::airplane::Airplane`'s wings directly --
+# `Wing::mesh_thin_surface`/`subdivide_sections` are the meshing this solver
+# runs on every call, not duplicated here.
+alas-geom = { path = "../alas-geom" }
+# The AIC matrix's dense solve is `alas-math::linalg::solve`, the same
+# Gaussian elimination the spline modules use, moved there once this crate
+# became its second caller.
+alas-math = { path = "../alas-math" }
+# `mses` spawns the external mset/mses/mplot binaries through this crate's
+# windowless-spawn helper -- the subprocess foundation the ledger sets aside for
+# exactly this row and `alas-struct::nastran`.
+alas-exec = { path = "../alas-exec" }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+alas-testkit = { path = "../alas-testkit" }
+# Only the parity test's fixture structs derive `Deserialize`; `OperatingPoint`
+# itself carries no serde dependency, the same split `alas-atmo`'s `Atmosphere`
+# makes.
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[lints]
+workspace = true

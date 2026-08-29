@@ -1,0 +1,118 @@
+{
+  "cases": {
+    "b737": {
+      "aero": {
+        "cd": 0.13037,
+        "cl": 1.83443,
+        "clb": -0.374933,
+        "clp": -0.449404,
+        "clr": 0.364638,
+        "cma": -2.044696,
+        "cmq": -74.997742,
+        "cnb": 0.239877,
+        "cnr": -0.43441,
+        "cyb": -1.103873,
+        "cyr": 0.796001
+      },
+      "airplane": {
+        "b_ref": 34.44239999999999,
+        "c_ref": 3.3527999999999993,
+        "s_ref": 117.05783039999997
+      },
+      "mass": {
+        "ixx": 706684.0,
+        "iyy": 2708240.0,
+        "izz": 3307630.0,
+        "mass": 77146.0
+      },
+      "modes": {
+        "dutch_roll": {
+          "damping_ratio": 0.3718747380614514,
+          "eigenvalue_imag": 1.0227735067082597,
+          "eigenvalue_real": -0.4097281354540308
+        },
+        "phugoid": {
+          "damping_ratio": 0.05025300851547999,
+          "eigenvalue_imag": 0.16178931929057772,
+          "eigenvalue_real": -0.00814068563859414
+        },
+        "roll_subsidence": {
+          "damping_ratio": 1.0,
+          "eigenvalue_imag": 0.0,
+          "eigenvalue_real": -1.8170430772023243
+        },
+        "short_period": {
+          "damping_ratio": 0.36685738908781407,
+          "eigenvalue_imag": 0.9506664748171321,
+          "eigenvalue_real": -0.37489795882075716
+        },
+        "spiral": {
+          "damping_ratio": 1.0,
+          "eigenvalue_imag": 0.0,
+          "eigenvalue_real": -0.1737364818117154
+        }
+      },
+      "op_point": {
+        "altitude_m": 2438.399975619396,
+        "velocity": 85.64176936131635
+      }
+    },
+    "unstable": {
+      "aero": {
+        "cd": 0.028,
+        "cl": 0.45,
+        "clb": -0.18,
+        "clp": -0.52,
+        "clr": 0.09,
+        "cma": 0.6,
+        "cmq": -18.0,
+        "cnb": -0.05,
+        "cnr": -0.21,
+        "cyb": -0.9,
+        "cyr": 0.55
+      },
+      "airplane": {
+        "b_ref": 34.0,
+        "c_ref": 4.2,
+        "s_ref": 120.0
+      },
+      "mass": {
+        "ixx": 1200000.0,
+        "iyy": 3000000.0,
+        "izz": 3800000.0,
+        "mass": 60000.0
+      },
+      "modes": {
+        "dutch_roll": {
+          "damping_ratio": -1.0,
+          "eigenvalue_imag": 0.0,
+          "eigenvalue_real": 0.43969138730367435
+        },
+        "phugoid": {
+          "damping_ratio": 0.03903109788966334,
+          "eigenvalue_imag": 0.06832201836886669,
+          "eigenvalue_real": -0.0026687169589741165
+        },
+        "roll_subsidence": {
+          "damping_ratio": 1.0,
+          "eigenvalue_imag": 0.0,
+          "eigenvalue_real": -1.432338516409394
+        },
+        "short_period": {
+          "damping_ratio": -1.0,
+          "eigenvalue_imag": 0.0,
+          "eigenvalue_real": 0.7907882557383707
+        },
+        "spiral": {
+          "damping_ratio": 1.0,
+          "eigenvalue_imag": 0.0,
+          "eigenvalue_real": -0.2044126830098426
+        }
+      },
+      "op_point": {
+        "altitude_m": 8000.0,
+        "velocity": 180.0
+      }
+    }
+  }
+}

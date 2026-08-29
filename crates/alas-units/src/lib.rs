@@ -5,7 +5,7 @@
 //!
 //! Every value here is the number of base SI units in one of something else:
 //! `FOOT` is 0.3048 because a foot is 0.3048 metres. Multiplying converts into
-//! SI, dividing converts out of it, which is the same convention SUAVE's unit
+//! SI, dividing converts out of it, which is the same convention mission analysis model's unit
 //! table uses and therefore the same one the translated correlations read as.
 //!
 //! This crate exists because the transport weight correlations are written in
@@ -18,13 +18,13 @@
 //!
 //! The values are the exact legal definitions -- the international yard and
 //! pound agreement of 1959 for length and mass, the standard gravity of
-//! 9.80665 m/s^2 for force -- rather than transcriptions of what SUAVE's unit
+//! 9.80665 m/s^2 for force -- rather than transcriptions of what mission analysis model's unit
 //! library happens to compute. Derived units are written as their definitions
 //! (`PSI` is a pound-force over a square inch) so the source of each is on the
 //! page.
 //!
-//! That choice makes a handful of these differ from SUAVE in the last bit or
-//! two, because SUAVE reaches some of them by division: its inch is a twelfth
+//! That choice makes a handful of these differ from mission analysis model in the last bit or
+//! two, because mission analysis model reaches some of them by division: its inch is a twelfth
 //! of its foot, which is not exactly 0.0254. The parity test allows that, and
 //! `docs/PORTING.md` records why. Transcribing the artifact instead would mean
 //! writing 0.025400000000000002 into a file that claims to define an inch.
@@ -53,7 +53,7 @@ pub const NAUTICAL_MILE: f64 = 1852.0;
 pub const KILOGRAM: f64 = 1.0;
 /// Kilograms in a gram.
 ///
-/// Present because SUAVE's unit table reads the name `g` as a gram. Nothing on
+/// Present because mission analysis model's unit table reads the name `g` as a gram. Nothing on
 /// this program's path asks it for gravity, but a reader who assumes otherwise
 /// would be wrong by four orders of magnitude, so the name is spelled out.
 pub const GRAM: f64 = 0.001;
@@ -110,9 +110,9 @@ pub const KILOWATT: f64 = 1000.0;
 /// Watts in a mechanical horsepower: 550 foot-pounds-force per second.
 pub const HORSEPOWER: f64 = 550.0 * FOOT * POUND_FORCE;
 
-/// The factor for a unit named the way SUAVE's table names it.
+/// The factor for a unit named the way mission analysis model's table names it.
 ///
-/// The spellings are SUAVE's, including its several synonyms for the same
+/// The spellings are mission analysis model's, including its several synonyms for the same
 /// unit, because the translated correlations were read against them and the
 /// parity test walks this function to prove none was missed.
 ///

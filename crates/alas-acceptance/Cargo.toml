@@ -1,0 +1,41 @@
+[package]
+name = "alas-acceptance"
+description = "End-to-end acceptance matrix, multi-preset validation, and benchmark suite."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "alas-bench"
+path = "src/bin/benchmark.rs"
+
+[dependencies]
+alas-types = { path = "../alas-types" }
+alas-config = { path = "../alas-config" }
+alas-geom = { path = "../alas-geom" }
+alas-atmo = { path = "../alas-atmo" }
+alas-aero = { path = "../alas-aero" }
+alas-prop = { path = "../alas-prop" }
+alas-mass = { path = "../alas-mass" }
+alas-payload = { path = "../alas-payload" }
+alas-perf = { path = "../alas-perf" }
+alas-stab = { path = "../alas-stab" }
+alas-mission = { path = "../alas-mission" }
+alas-struct = { path = "../alas-struct" }
+alas-opt = { path = "../alas-opt" }
+alas-screen = { path = "../alas-screen" }
+alas-route = { path = "../alas-route" }
+alas-report = { path = "../alas-report" }
+alas-viz = { path = "../alas-viz" }
+alas-pipeline = { path = "../alas-pipeline" }
+alas-app = { path = "../alas-app" }
+alas-testkit = { path = "../alas-testkit" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
+tracing = { workspace = true }
+
+[lints]
+workspace = true

@@ -103,12 +103,13 @@ they are the ones a reader is most likely to question:
     it -- this program links translated SUAVE code directly, so the combination
     rests on licence compatibility alone.
 
-  * External solvers -- MSES, MSC Nastran, AVL, NASTRAN-95 -- are not
-    distributed with this program and are not covered by this licence. They are
-    separate executables, supplied and licensed by the user, which the program
-    invokes if present. The program is fully functional without them, reporting
-    the affected analyses as unavailable rather than substituting a silent
-    approximation.
+  * External solvers -- MSES, MSC Nastran, AVL, NASTRAN-95 -- are separate
+    executables and are not covered by this licence. The Windows release
+    carries the unmodified GPL AVL 3.52 executable as an adjacent child
+    program, with its own GPL text and corresponding source archive; the other
+    solvers are supplied and licensed by the user. ALAS invokes each through a
+    process boundary and reports the affected analysis as unavailable when it
+    is absent rather than substituting a silent approximation.
 
 Every translated module names its origin, the upstream licence and the source
 revision in a provenance header. THIRD-PARTY-NOTICES.md lists the components

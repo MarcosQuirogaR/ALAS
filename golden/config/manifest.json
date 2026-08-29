@@ -1,48 +1,121 @@
 {
-  "alas_commit": "7d1555c1f4db5110cf6cd187c156718e1a033b50",
-  "environment": {
-    "aerosandbox": "4.2.8",
-    "numpy": "2.5.1",
-    "platform": "Windows-11-10.0.26200-SP0",
-    "python": "3.13.13",
-    "scipy": "1.17.1"
-  },
   "fixtures": {
     "aircraft_presets": {
       "description": "alas.config.presets: every registered aircraft preset in registration order, as a complete design -- design vector, geometry scaffold, requirements, engine, and any per-aircraft mass-model and performance calibration",
-      "generator": "gen_config_aircraft.py"
+      "generator": "gen_config_aircraft.py",
+      "runtime": "alas",
+      "alas_commit": "7d1555c1f4db5110cf6cd187c156718e1a033b50",
+      "environment": {
+        "numpy": "2.5.1",
+        "aerosandbox": "4.2.8",
+        "platform": "Windows-11-10.0.26200-SP0",
+        "scipy": "1.17.1",
+        "python": "3.13.13"
+      }
     },
     "airports": {
       "description": "alas.config.airports.AIRPORTS: every curated aerodrome, in the order the database lists them",
-      "generator": "gen_config_databases.py"
+      "generator": "gen_config_databases.py",
+      "runtime": "alas",
+      "alas_commit": "7d1555c1f4db5110cf6cd187c156718e1a033b50",
+      "environment": {
+        "numpy": "2.5.1",
+        "aerosandbox": "4.2.8",
+        "platform": "Windows-11-10.0.26200-SP0",
+        "scipy": "1.17.1",
+        "python": "3.13.13"
+      }
     },
     "defaults": {
       "description": "every configuration dataclass as freshly constructed: its default values, the form description alas.sidecar.schema derives from it, and which fields stated their own label and help",
-      "generator": "gen_config.py"
+      "generator": "gen_config.py",
+      "runtime": "alas",
+      "alas_commit": "7d1555c1f4db5110cf6cd187c156718e1a033b50",
+      "environment": {
+        "numpy": "2.5.1",
+        "aerosandbox": "4.2.8",
+        "platform": "Windows-11-10.0.26200-SP0",
+        "scipy": "1.17.1",
+        "python": "3.13.13"
+      }
     },
     "design_variables": {
       "description": "alas.config.design_variables: the ordered design space, the nominal design vector, and the bounds list handed to the optimizer",
-      "generator": "gen_config_databases.py"
+      "generator": "gen_config_databases.py",
+      "runtime": "alas",
+      "alas_commit": "7d1555c1f4db5110cf6cd187c156718e1a033b50",
+      "environment": {
+        "numpy": "2.5.1",
+        "aerosandbox": "4.2.8",
+        "platform": "Windows-11-10.0.26200-SP0",
+        "scipy": "1.17.1",
+        "python": "3.13.13"
+      }
     },
     "engines": {
       "description": "alas.config.engines.ENGINE_DATABASE: every registered turbofan, in registration order, with the sorted name list `available_engines` returns and each one's derived nacelle profile",
-      "generator": "gen_config_databases.py"
+      "generator": "gen_config_databases.py",
+      "runtime": "alas",
+      "alas_commit": "7d1555c1f4db5110cf6cd187c156718e1a033b50",
+      "environment": {
+        "numpy": "2.5.1",
+        "aerosandbox": "4.2.8",
+        "platform": "Windows-11-10.0.26200-SP0",
+        "scipy": "1.17.1",
+        "python": "3.13.13"
+      }
     },
     "materials": {
       "description": "alas.config.materials.MATERIAL_DATABASE: every registered structural material, in registration order, with the sorted name list `available_materials` returns",
-      "generator": "gen_config_databases.py"
+      "generator": "gen_config_databases.py",
+      "runtime": "alas",
+      "alas_commit": "7d1555c1f4db5110cf6cd187c156718e1a033b50",
+      "environment": {
+        "numpy": "2.5.1",
+        "aerosandbox": "4.2.8",
+        "platform": "Windows-11-10.0.26200-SP0",
+        "scipy": "1.17.1",
+        "python": "3.13.13"
+      }
     },
     "presets": {
       "description": "alas.config.{solver,performance,fidelity}_presets: every registered preset in registration order, with the complete configuration each one produces",
-      "generator": "gen_config_presets.py"
+      "generator": "gen_config_presets.py",
+      "runtime": "alas",
+      "alas_commit": "7d1555c1f4db5110cf6cd187c156718e1a033b50",
+      "environment": {
+        "numpy": "2.5.1",
+        "aerosandbox": "4.2.8",
+        "platform": "Windows-11-10.0.26200-SP0",
+        "scipy": "1.17.1",
+        "python": "3.13.13"
+      }
     },
     "settings": {
       "description": "alas.config.settings.ALASConfig.from_dict: the configuration each saved-file case produces, including the ones that are rejected, and every aircraft preset applied through the same path",
-      "generator": "gen_config_settings.py"
+      "generator": "gen_config_settings.py",
+      "runtime": "alas",
+      "alas_commit": "7d1555c1f4db5110cf6cd187c156718e1a033b50",
+      "environment": {
+        "numpy": "2.5.1",
+        "aerosandbox": "4.2.8",
+        "platform": "Windows-11-10.0.26200-SP0",
+        "scipy": "1.17.1",
+        "python": "3.13.13"
+      }
     },
     "validation": {
       "description": "alas.validation.validate: the issues each configuration produces, with the field each one points at and the severity that decides whether it blocks the run",
-      "generator": "gen_validation.py"
+      "generator": "gen_validation.py",
+      "runtime": "alas",
+      "alas_commit": "7d1555c1f4db5110cf6cd187c156718e1a033b50",
+      "environment": {
+        "numpy": "2.5.1",
+        "aerosandbox": "4.2.8",
+        "platform": "Windows-11-10.0.26200-SP0",
+        "scipy": "1.17.1",
+        "python": "3.13.13"
+      }
     }
   }
 }

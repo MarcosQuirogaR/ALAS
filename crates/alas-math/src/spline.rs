@@ -6,7 +6,7 @@
 //!
 //! `docs/PORTING.md` carries this row with no third-party provenance: nothing
 //! here is translated from a specific file. It exists because the future
-//! `alas-geom::asb::airfoil` repanel needs the same construction SciPy's
+//! `alas-geom::aircraft::airfoil` repanel needs the same construction SciPy's
 //! `CubicSpline` provides -- resampling an airfoil's coordinates onto new
 //! stations while pinning the leading-edge tangent and leaving the trailing
 //! edge's curvature free -- and that construction has one mathematically
@@ -51,12 +51,32 @@ pub enum CubicSplineError {
     /// Fewer than two knots were given; a spline needs at least one segment.
     #[error("a cubic spline needs at least 2 points, got {0}")]
     TooFewPoints(usize),
+    /// `y` did not have one value per knot in `x`.
+    #[error("x has {expected} points but y has {actual} values")]
+    LengthMismatch {
+        /// Number of knots in `x`.
+        expected: usize,
+        /// Number of value rows in `y`.
+        actual: usize,
+    },
     /// `x` was not strictly increasing.
     #[error("knot {index} ({value}) is not strictly greater than the previous knot")]
     KnotsNotIncreasing {
         /// The offending knot's index.
         index: usize,
         /// The offending knot's value.
+        value: f64,
+    },
+    /// A knot, ordinate, or boundary condition was not finite.
+    #[error("{what}[{index}] dimension {dimension} ({value}) is not finite")]
+    NonFinite {
+        /// The input containing the value (`x`, `y`, or a boundary label).
+        what: &'static str,
+        /// The row/index in that input.
+        index: usize,
+        /// The vector dimension containing the value.
+        dimension: usize,
+        /// The offending value.
         value: f64,
     },
     /// A row of `y`, or a boundary condition's value slice, did not have the
@@ -112,6 +132,20 @@ impl CubicSpline {
         if n_points < 2 {
             return Err(CubicSplineError::TooFewPoints(n_points));
         }
+        if y.len() != n_points {
+            return Err(CubicSplineError::LengthMismatch {
+                expected: n_points,
+                actual: y.len(),
+            });
+        }
+        if let Some((index, &value)) = x.iter().enumerate().find(|(_, value)| !value.is_finite()) {
+            return Err(CubicSplineError::NonFinite {
+                what: "x",
+                index,
+                dimension: 0,
+                value,
+            });
+        }
         for (index, pair) in x.windows(2).enumerate() {
             if pair[1] <= pair[0] {
                 return Err(CubicSplineError::KnotsNotIncreasing {
@@ -130,6 +164,16 @@ impl CubicSpline {
                     actual: row.len(),
                 });
             }
+            if let Some((dimension, &value)) =
+                row.iter().enumerate().find(|(_, value)| !value.is_finite())
+            {
+                return Err(CubicSplineError::NonFinite {
+                    what: "y",
+                    index,
+                    dimension,
+                    value,
+                });
+            }
         }
         for (label, boundary) in [("lower boundary", lower), ("upper boundary", upper)] {
             let value = match boundary {
@@ -141,6 +185,18 @@ impl CubicSpline {
                     index: 0,
                     expected: dimension,
                     actual: value.len(),
+                });
+            }
+            if let Some((dimension, &value)) = value
+                .iter()
+                .enumerate()
+                .find(|(_, value)| !value.is_finite())
+            {
+                return Err(CubicSplineError::NonFinite {
+                    what: label,
+                    index: 0,
+                    dimension,
+                    value,
                 });
             }
         }
@@ -445,6 +501,23 @@ mod tests {
     }
 
     #[test]
+    fn a_value_vector_with_no_rows_is_an_error_not_a_panic() {
+        assert_eq!(
+            CubicSpline::new(
+                &[0.0, 1.0],
+                &[],
+                Boundary::SecondDerivative(&[0.0]),
+                Boundary::SecondDerivative(&[0.0]),
+            )
+            .unwrap_err(),
+            CubicSplineError::LengthMismatch {
+                expected: 2,
+                actual: 0,
+            }
+        );
+    }
+
+    #[test]
     fn non_increasing_knots_are_an_error_not_a_panic() {
         assert_eq!(
             CubicSpline::new(
@@ -479,5 +552,30 @@ mod tests {
                 actual: 1,
             }
         );
+    }
+
+    #[test]
+    fn non_finite_knots_and_values_are_rejected_before_solving() {
+        let y = scalar(&[0.0, 1.0, 2.0]);
+        assert!(matches!(
+            CubicSpline::new(
+                &[0.0, f64::NAN, 2.0],
+                &y,
+                Boundary::SecondDerivative(&[0.0]),
+                Boundary::SecondDerivative(&[0.0]),
+            ),
+            Err(CubicSplineError::NonFinite { what: "x", .. })
+        ));
+
+        let y = vec![vec![0.0], vec![f64::INFINITY], vec![2.0]];
+        assert!(matches!(
+            CubicSpline::new(
+                &[0.0, 1.0, 2.0],
+                &y,
+                Boundary::SecondDerivative(&[0.0]),
+                Boundary::SecondDerivative(&[0.0]),
+            ),
+            Err(CubicSplineError::NonFinite { what: "y", .. })
+        ));
     }
 }

@@ -40,14 +40,31 @@ Cases:
   name and coordinate array -- ``alas-geom::asb::wing``'s
   ``subdivide_sections`` is this method's only caller in this program, always
   at the default ``n_points_per_side=100``.
+
+* ``normalize(return_dict=True)`` -- the frame every airfoil-surrogate query
+  starts in, and this row's newest scope. ``alas-aero::neuralfoil`` is its
+  only caller, and it uses all four reported numbers, not just the moved
+  section: the translation corrects the moment coefficient, the scale divides
+  the Reynolds number, and the rotation offsets the angle of attack. The
+  cases are chosen so that each of the four is driven away from identity by
+  something, because a port that returned the section and forgot one of the
+  numbers would agree with a fixture built only from sections that are
+  already normalized -- which is most of them. ``_assert_normalize_branches``
+  refuses to write a fixture in which that has stopped being true.
 """
 
 from __future__ import annotations
 
 import _framework
 import numpy as np
-from aerosandbox.geometry.airfoil.airfoil import Airfoil
-from aerosandbox.geometry.airfoil.airfoil_families import get_NACA_coordinates
+
+_framework.add_alas_to_path()
+
+from aerosandbox.geometry.airfoil.airfoil import Airfoil  # noqa: E402
+from aerosandbox.geometry.airfoil.airfoil_families import (  # noqa: E402
+    get_NACA_coordinates,
+)
+from alas.geometry.airfoils import AirfoilLibrary  # noqa: E402
 
 NACA_CASES = [
     ("naca0012", 200),
@@ -64,6 +81,52 @@ DEFAULT_MAX_THICKNESS_SAMPLE = np.linspace(0, 1, 101)
 
 def _coords_to_list(coordinates: np.ndarray) -> list[list[float]]:
     return [[float(x), float(y)] for x, y in coordinates.tolist()]
+
+
+# Sections whose stored coordinates are *not* already in the standard frame,
+# so that normalizing them actually has work to do. Every one is a section
+# some part of this program can hand to the airfoil surrogate:
+# `SC2-0714` is the default aircraft's root, the next four are database
+# entries an airfoil sweep walks over, and `30p-30n` is the extreme case --
+# a three-element high-lift deck whose chord is 1.51 and whose stored
+# incidence is nearly three degrees.
+NORMALIZE_CASES = ["SC2-0714", "e63", "sd7037", "s9104", "goe775", "30p-30n"]
+
+
+def _source_for_normalize(name: str) -> Airfoil:
+    """The section as this program would hand it over.
+
+    ``AirfoilLibrary.get`` is the accessor every ``alas`` call site uses, and
+    it resolves through the Selig archive, the built-in named coordinates and
+    AeroSandbox's NACA generator in that order -- so a case named here is the
+    coordinates the surrogate would actually see, not a re-parse of one file.
+    """
+    return AirfoilLibrary.get(name)
+
+
+def _assert_normalize_branches(cases: dict) -> None:
+    """Refuse a fixture in which normalization is indistinguishable from a copy.
+
+    ``normalize`` reports four numbers and moves the section, and on a section
+    that is already in the standard frame all four are zero or one and the
+    coordinates come back unchanged. A fixture built only from such sections
+    -- which is most of the NACA family, and a good deal of the database --
+    would pass against a port that had forgotten the rotation, or the scaling,
+    or that reported the translation with the wrong sign.
+    """
+    for field, identity in (
+        ("x_translation", 0.0),
+        ("y_translation", 0.0),
+        ("scale_factor", 1.0),
+        ("rotation_angle", 0.0),
+    ):
+        reached = [n for n, c in cases.items() if c[field] != identity]
+        if not reached:
+            raise SystemExit(
+                f"no normalize case moves {field} off its identity value "
+                f"({identity}); the fixture cannot tell a port that dropped it "
+                "from one that did not"
+            )
 
 
 def main() -> None:
@@ -125,6 +188,20 @@ def main() -> None:
             "coordinates": _coords_to_list(blended.coordinates),
         }
 
+    normalize = {}
+    for name in NORMALIZE_CASES:
+        source = _source_for_normalize(name)
+        result = source.normalize(return_dict=True)
+        normalize[name] = {
+            "input": _coords_to_list(source.coordinates),
+            "coordinates": _coords_to_list(result["airfoil"].coordinates),
+            "x_translation": float(result["x_translation"]),
+            "y_translation": float(result["y_translation"]),
+            "scale_factor": float(result["scale_factor"]),
+            "rotation_angle": float(result["rotation_angle"]),
+        }
+    _assert_normalize_branches(normalize)
+
     _framework.write(
         "geom",
         "asb_airfoil",
@@ -134,12 +211,14 @@ def main() -> None:
             "thickness": thickness,
             "repanel": repanel,
             "blends": blends,
+            "normalize": normalize,
         },
         description=(
             "aerosandbox.geometry.airfoil.Airfoil, scoped to NACA "
             "generation, upper/lower surface split, repanel (through "
-            "scipy.interpolate.CubicSpline), local/max thickness, and "
-            "blend_with_another_airfoil"
+            "scipy.interpolate.CubicSpline), local/max thickness, "
+            "blend_with_another_airfoil, and normalize(return_dict=True) on "
+            "six sections that are not already in the standard frame"
         ),
     )
 

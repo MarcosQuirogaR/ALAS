@@ -22,13 +22,7 @@ tracing = { workspace = true }
 
 [dev-dependencies]
 alas-testkit = { path = "../alas-testkit" }
-# `tests/parity_selig.rs` checks resolved coordinates at `exact` tier, bit for
-# bit against Python's `float()`. serde_json's default float parser is fast
-# but not always correctly rounded (its own documentation names this
-# trade-off); `float_roundtrip` selects the correctly-rounded path instead,
-# adding no new crate to the dependency graph -- it only changes which
-# parsing routine already inside serde_json runs.
-serde_json = { workspace = true, features = ["float_roundtrip"] }
+serde_json = { workspace = true }
 
 [lints]
 workspace = true

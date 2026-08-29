@@ -62,11 +62,16 @@ fn every_solver_preset_matches_the_reference() {
         &solver_presets::registry()
             .iter()
             .map(|preset| {
+                let mut settings = to_value(&preset.settings);
+                // The product search-method selector has no Python field.
+                // Solver presets preserve the selected method while changing
+                // only the historical effort/budget settings.
+                settings.remove("method");
                 (
                     preset.name,
                     preset.display_name,
                     preset.description,
-                    to_value(&preset.settings),
+                    settings,
                 )
             })
             .collect::<Vec<_>>(),

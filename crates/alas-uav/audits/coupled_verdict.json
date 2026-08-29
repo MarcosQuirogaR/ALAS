@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "seed": 1592642302,
+  "evaluation_index": 244,
+  "without_control_authority": "unverified",
+  "with_evidenced_tail_authority": "accepted",
+  "loaded_cg_x_m": 0.695443166344,
+  "lower_alpha_deg": 3.500000000000,
+  "upper_alpha_deg": 4.500000000000,
+  "dcm_dcl": -0.254225229808,
+  "trim_incidence_deg": -3.778643970477,
+  "trim_cm_residual": -6.062120e-9,
+  "required_lift_coefficient": 0.239653197789,
+  "trimmed_lift_coefficient": 0.460522758490,
+  "trimmed_lift_margin_n": 49.456230847168,
+  "authority_evidence": "bench-qualified all-moving tail travel report HT-01"
+}

@@ -99,7 +99,7 @@ pub struct MsesConfig {
     /// How many points the polar sweep has.
     #[config(
         label = "Alpha sweep point count",
-        help = "Number of alpha points in the MSES polar sweep. Kept small relative to AeroSandbox's own VLM sweep (analysis.sweep_n_points) since each MSES point is a real viscous-compressible solve (~1-2s) rather than a linear-algebra VLM solve."
+        help = "Number of alpha points in the MSES polar sweep. Kept small relative to the native VLM sweep (analysis.sweep_n_points) since each MSES point is a real viscous-compressible solve (~1-2s) rather than a linear-algebra VLM solve."
     )]
     pub alpha_sweep_n_points: i64,
 

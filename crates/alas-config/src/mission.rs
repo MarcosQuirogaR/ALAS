@@ -4,7 +4,7 @@
 // Ported from alas/config/mission_config.py
 // Reference: alas @ rust-port-baseline.
 
-//! Whether a run flies its mission, and where the things it needs live.
+//! Whether a run flies its mission, and how its native mission is configured.
 //!
 //! The mission analysis integrates the design along a real trajectory rather
 //! than evaluating it at a single cruise point, which is what turns a lift-to-
@@ -39,18 +39,6 @@ pub struct MissionConfig {
         help = "Time limit for one mission analysis. A mission that has not converged by here is reported as such rather than left running."
     )]
     pub timeout_s: f64,
-
-    /// Where the isolated environment the mission solver runs in lives.
-    #[config(
-        help = "Directory holding the isolated environment the mission solver runs in. Repo-root-relative so a saved configuration stays portable between machines."
-    )]
-    pub suave_venv_dir: String,
-
-    /// Where the mission runner lives.
-    #[config(
-        help = "Directory holding the mission runner. Resolved against a user-provisioned copy first, then a bundled runtime, then this default; set an absolute path to pin one location."
-    )]
-    pub suave_runner_dir: String,
 
     /// Where the navigation data lives.
     #[config(
@@ -108,8 +96,6 @@ impl Default for MissionConfig {
         Self {
             enabled: true,
             timeout_s: 900.0,
-            suave_venv_dir: ".suave-venv".to_owned(),
-            suave_runner_dir: "external tools/suave_runner".to_owned(),
             navdata_dir: "alas/data/navdata".to_owned(),
             texture_path: "alas/data/textures/earth_blue_marble.jpg".to_owned(),
             routes_dir: "alas/data/routes".to_owned(),

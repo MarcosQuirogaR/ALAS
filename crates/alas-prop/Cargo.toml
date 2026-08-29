@@ -9,8 +9,7 @@ rust-version.workspace = true
 
 [dependencies]
 # Every cycle evaluation reads the ambient state from `Atmosphere::new`, the
-# fitted "differentiable" model, exactly as `alas/physics/propulsion.py`'s
-# `asb.Atmosphere(altitude=...)` does.
+# fitted "differentiable" model used by the propulsion physics.
 alas-atmo = { path = "../alas-atmo" }
 # `compute_turbofan_cycle` reads a `PropulsionCycleConfig` for every component
 # efficiency and pressure loss, exactly as the reference module does.

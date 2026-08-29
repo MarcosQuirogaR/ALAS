@@ -1,0 +1,37 @@
+[package]
+name = "alas-pipeline"
+description = "Core pipeline orchestration, full analysis, baseline validation, and run persistence."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+alas-types = { path = "../alas-types" }
+alas-config = { path = "../alas-config" }
+alas-geom = { path = "../alas-geom" }
+alas-atmo = { path = "../alas-atmo" }
+alas-mass = { path = "../alas-mass" }
+alas-payload = { path = "../alas-payload" }
+alas-perf = { path = "../alas-perf" }
+alas-aero = { path = "../alas-aero" }
+alas-stab = { path = "../alas-stab" }
+alas-opt = { path = "../alas-opt" }
+alas-struct = { path = "../alas-struct" }
+alas-mission = { path = "../alas-mission" }
+alas-prop = { path = "../alas-prop" }
+alas-route = { path = "../alas-route" }
+alas-math = { path = "../alas-math" }
+alas-exec = { path = "../alas-exec" }
+tracing = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+roxmltree = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+alas-testkit = { path = "../alas-testkit" }
+
+[lints]
+workspace = true

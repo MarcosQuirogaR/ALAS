@@ -1,12 +1,15 @@
 {
   "available": [
     "CF6-50",
+    "CFM56-5B4/3",
     "CFM56-5C",
+    "CFM56-5C3/F",
     "GE9X",
     "GEnx-1B",
     "LEAP-1A",
     "PW1500G",
-    "Trent 900"
+    "Trent 900",
+    "Trent 970-84"
   ],
   "engines": [
     {
@@ -23,6 +26,19 @@
       "turbine_inlet_temp_k": 1670.0
     },
     {
+      "bypass_ratio": 5.5,
+      "cruise_tsfc_kg_kgf_hr": 0.6,
+      "fan_diameter_m": 1.735,
+      "fan_pressure_ratio": 1.6,
+      "manufacturer": "CFM International",
+      "nacelle_length_m": 3.3,
+      "nacelle_max_radius_m": 1.0,
+      "name": "CFM56-5B4/3",
+      "overall_pressure_ratio": 32.6,
+      "thrust_kn": 117.77,
+      "turbine_inlet_temp_k": 1600.0
+    },
+    {
       "bypass_ratio": 6.6,
       "cruise_tsfc_kg_kgf_hr": 0.58,
       "fan_diameter_m": 1.836,
@@ -36,6 +52,19 @@
       "turbine_inlet_temp_k": 1600.0
     },
     {
+      "bypass_ratio": 6.6,
+      "cruise_tsfc_kg_kgf_hr": 0.58,
+      "fan_diameter_m": 1.836,
+      "fan_pressure_ratio": 1.65,
+      "manufacturer": "CFM International",
+      "nacelle_length_m": 4.0,
+      "nacelle_max_radius_m": 1.1,
+      "name": "CFM56-5C3/F",
+      "overall_pressure_ratio": 38.0,
+      "thrust_kn": 144.56,
+      "turbine_inlet_temp_k": 1600.0
+    },
+    {
       "bypass_ratio": 8.5,
       "cruise_tsfc_kg_kgf_hr": 0.54,
       "fan_diameter_m": 2.946,
@@ -46,6 +75,19 @@
       "name": "Trent 900",
       "overall_pressure_ratio": 39.0,
       "thrust_kn": 374.0,
+      "turbine_inlet_temp_k": 1650.0
+    },
+    {
+      "bypass_ratio": 8.5,
+      "cruise_tsfc_kg_kgf_hr": 0.54,
+      "fan_diameter_m": 2.946,
+      "fan_pressure_ratio": 1.55,
+      "manufacturer": "Rolls-Royce",
+      "nacelle_length_m": 6.8,
+      "nacelle_max_radius_m": 1.8,
+      "name": "Trent 970-84",
+      "overall_pressure_ratio": 39.0,
+      "thrust_kn": 334.29,
       "turbine_inlet_temp_k": 1650.0
     },
     {

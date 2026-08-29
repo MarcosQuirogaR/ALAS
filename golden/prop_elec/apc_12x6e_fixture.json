@@ -1,0 +1,2816 @@
+{
+  "schema_version": 1,
+  "source": {
+    "legacy_file": "golden/prop_elec/Script Python/Data/PER3_12x6E.dat",
+    "propeller_id": "apc-12x6e",
+    "diameter_m": 0.3048,
+    "reference_density_kg_m3": 1.225,
+    "normalization": [
+      "speed multiplied by 0.44704 from mph to m/s",
+      "Ct and Cp copied from columns 4 and 5 of the supplied table",
+      "the fixture keeps the table's dimensionless coefficients so the native solver can scale thrust and torque by density"
+    ]
+  },
+  "curves": [
+    {
+      "rpm": 1000,
+      "points": [
+        {
+          "speed_m_s": 0.0,
+          "thrust_coefficient": 0.0913,
+          "power_coefficient": 0.0398
+        },
+        {
+          "speed_m_s": 0.11176,
+          "thrust_coefficient": 0.0897,
+          "power_coefficient": 0.04
+        },
+        {
+          "speed_m_s": 0.22352,
+          "thrust_coefficient": 0.0881,
+          "power_coefficient": 0.0402
+        },
+        {
+          "speed_m_s": 0.33528,
+          "thrust_coefficient": 0.0863,
+          "power_coefficient": 0.0403
+        },
+        {
+          "speed_m_s": 0.4425696,
+          "thrust_coefficient": 0.0845,
+          "power_coefficient": 0.0404
+        },
+        {
+          "speed_m_s": 0.5543296,
+          "thrust_coefficient": 0.0825,
+          "power_coefficient": 0.0405
+        },
+        {
+          "speed_m_s": 0.6660896,
+          "thrust_coefficient": 0.0804,
+          "power_coefficient": 0.0405
+        },
+        {
+          "speed_m_s": 0.7778496,
+          "thrust_coefficient": 0.0781,
+          "power_coefficient": 0.0404
+        },
+        {
+          "speed_m_s": 0.8896096,
+          "thrust_coefficient": 0.0757,
+          "power_coefficient": 0.0403
+        },
+        {
+          "speed_m_s": 1.0013696,
+          "thrust_coefficient": 0.0732,
+          "power_coefficient": 0.0401
+        },
+        {
+          "speed_m_s": 1.1131296000000002,
+          "thrust_coefficient": 0.0706,
+          "power_coefficient": 0.0398
+        },
+        {
+          "speed_m_s": 1.2204192,
+          "thrust_coefficient": 0.0678,
+          "power_coefficient": 0.0394
+        },
+        {
+          "speed_m_s": 1.3321792,
+          "thrust_coefficient": 0.0648,
+          "power_coefficient": 0.039
+        },
+        {
+          "speed_m_s": 1.4439392,
+          "thrust_coefficient": 0.0618,
+          "power_coefficient": 0.0384
+        },
+        {
+          "speed_m_s": 1.5556992,
+          "thrust_coefficient": 0.0586,
+          "power_coefficient": 0.0378
+        },
+        {
+          "speed_m_s": 1.6674592,
+          "thrust_coefficient": 0.0552,
+          "power_coefficient": 0.0371
+        },
+        {
+          "speed_m_s": 1.7792192,
+          "thrust_coefficient": 0.0518,
+          "power_coefficient": 0.0362
+        },
+        {
+          "speed_m_s": 1.8865087999999999,
+          "thrust_coefficient": 0.0482,
+          "power_coefficient": 0.0353
+        },
+        {
+          "speed_m_s": 1.9982688,
+          "thrust_coefficient": 0.0445,
+          "power_coefficient": 0.0343
+        },
+        {
+          "speed_m_s": 2.1100288,
+          "thrust_coefficient": 0.0407,
+          "power_coefficient": 0.0332
+        },
+        {
+          "speed_m_s": 2.2217887999999997,
+          "thrust_coefficient": 0.0368,
+          "power_coefficient": 0.0321
+        },
+        {
+          "speed_m_s": 2.3335488,
+          "thrust_coefficient": 0.0328,
+          "power_coefficient": 0.0308
+        },
+        {
+          "speed_m_s": 2.4453088,
+          "thrust_coefficient": 0.0288,
+          "power_coefficient": 0.0295
+        },
+        {
+          "speed_m_s": 2.5570687999999997,
+          "thrust_coefficient": 0.0247,
+          "power_coefficient": 0.0281
+        },
+        {
+          "speed_m_s": 2.6643584,
+          "thrust_coefficient": 0.0206,
+          "power_coefficient": 0.0266
+        },
+        {
+          "speed_m_s": 2.7761184,
+          "thrust_coefficient": 0.0164,
+          "power_coefficient": 0.0251
+        },
+        {
+          "speed_m_s": 2.8878784,
+          "thrust_coefficient": 0.0123,
+          "power_coefficient": 0.0235
+        },
+        {
+          "speed_m_s": 2.9996384,
+          "thrust_coefficient": 0.0082,
+          "power_coefficient": 0.0219
+        },
+        {
+          "speed_m_s": 3.1113984,
+          "thrust_coefficient": 0.0041,
+          "power_coefficient": 0.0202
+        },
+        {
+          "speed_m_s": 3.2231584,
+          "thrust_coefficient": 0.0,
+          "power_coefficient": 0.0184
+        }
+      ]
+    },
+    {
+      "rpm": 2000,
+      "points": [
+        {
+          "speed_m_s": 0.0,
+          "thrust_coefficient": 0.0916,
+          "power_coefficient": 0.0358
+        },
+        {
+          "speed_m_s": 0.22352,
+          "thrust_coefficient": 0.0901,
+          "power_coefficient": 0.0361
+        },
+        {
+          "speed_m_s": 0.44704,
+          "thrust_coefficient": 0.0884,
+          "power_coefficient": 0.0363
+        },
+        {
+          "speed_m_s": 0.67056,
+          "thrust_coefficient": 0.0867,
+          "power_coefficient": 0.0365
+        },
+        {
+          "speed_m_s": 0.89408,
+          "thrust_coefficient": 0.0848,
+          "power_coefficient": 0.0366
+        },
+        {
+          "speed_m_s": 1.1176,
+          "thrust_coefficient": 0.0828,
+          "power_coefficient": 0.0367
+        },
+        {
+          "speed_m_s": 1.34112,
+          "thrust_coefficient": 0.0806,
+          "power_coefficient": 0.0368
+        },
+        {
+          "speed_m_s": 1.56464,
+          "thrust_coefficient": 0.0784,
+          "power_coefficient": 0.0368
+        },
+        {
+          "speed_m_s": 1.78816,
+          "thrust_coefficient": 0.076,
+          "power_coefficient": 0.0367
+        },
+        {
+          "speed_m_s": 2.01168,
+          "thrust_coefficient": 0.0735,
+          "power_coefficient": 0.0365
+        },
+        {
+          "speed_m_s": 2.2352,
+          "thrust_coefficient": 0.0708,
+          "power_coefficient": 0.0362
+        },
+        {
+          "speed_m_s": 2.45872,
+          "thrust_coefficient": 0.068,
+          "power_coefficient": 0.0359
+        },
+        {
+          "speed_m_s": 2.68224,
+          "thrust_coefficient": 0.065,
+          "power_coefficient": 0.0354
+        },
+        {
+          "speed_m_s": 2.90576,
+          "thrust_coefficient": 0.0619,
+          "power_coefficient": 0.0349
+        },
+        {
+          "speed_m_s": 3.12928,
+          "thrust_coefficient": 0.0587,
+          "power_coefficient": 0.0343
+        },
+        {
+          "speed_m_s": 3.3528,
+          "thrust_coefficient": 0.0553,
+          "power_coefficient": 0.0335
+        },
+        {
+          "speed_m_s": 3.57632,
+          "thrust_coefficient": 0.0518,
+          "power_coefficient": 0.0327
+        },
+        {
+          "speed_m_s": 3.79984,
+          "thrust_coefficient": 0.0482,
+          "power_coefficient": 0.0317
+        },
+        {
+          "speed_m_s": 4.02336,
+          "thrust_coefficient": 0.0445,
+          "power_coefficient": 0.0307
+        },
+        {
+          "speed_m_s": 4.24688,
+          "thrust_coefficient": 0.0406,
+          "power_coefficient": 0.0295
+        },
+        {
+          "speed_m_s": 4.4704,
+          "thrust_coefficient": 0.0367,
+          "power_coefficient": 0.0283
+        },
+        {
+          "speed_m_s": 4.69392,
+          "thrust_coefficient": 0.0328,
+          "power_coefficient": 0.027
+        },
+        {
+          "speed_m_s": 4.91744,
+          "thrust_coefficient": 0.0287,
+          "power_coefficient": 0.0255
+        },
+        {
+          "speed_m_s": 5.14096,
+          "thrust_coefficient": 0.0246,
+          "power_coefficient": 0.024
+        },
+        {
+          "speed_m_s": 5.36448,
+          "thrust_coefficient": 0.0205,
+          "power_coefficient": 0.0224
+        },
+        {
+          "speed_m_s": 5.588,
+          "thrust_coefficient": 0.0164,
+          "power_coefficient": 0.0208
+        },
+        {
+          "speed_m_s": 5.81152,
+          "thrust_coefficient": 0.0123,
+          "power_coefficient": 0.019
+        },
+        {
+          "speed_m_s": 6.0350399999999995,
+          "thrust_coefficient": 0.0082,
+          "power_coefficient": 0.0172
+        },
+        {
+          "speed_m_s": 6.25856,
+          "thrust_coefficient": 0.0041,
+          "power_coefficient": 0.0153
+        },
+        {
+          "speed_m_s": 6.48208,
+          "thrust_coefficient": 0.0001,
+          "power_coefficient": 0.0134
+        }
+      ]
+    },
+    {
+      "rpm": 3000,
+      "points": [
+        {
+          "speed_m_s": 0.0,
+          "thrust_coefficient": 0.0919,
+          "power_coefficient": 0.0341
+        },
+        {
+          "speed_m_s": 0.3397504,
+          "thrust_coefficient": 0.0903,
+          "power_coefficient": 0.0344
+        },
+        {
+          "speed_m_s": 0.6839712,
+          "thrust_coefficient": 0.0886,
+          "power_coefficient": 0.0346
+        },
+        {
+          "speed_m_s": 1.0237216,
+          "thrust_coefficient": 0.0868,
+          "power_coefficient": 0.0348
+        },
+        {
+          "speed_m_s": 1.3634719999999998,
+          "thrust_coefficient": 0.0849,
+          "power_coefficient": 0.035
+        },
+        {
+          "speed_m_s": 1.7076928,
+          "thrust_coefficient": 0.0828,
+          "power_coefficient": 0.0351
+        },
+        {
+          "speed_m_s": 2.0474432,
+          "thrust_coefficient": 0.0807,
+          "power_coefficient": 0.0352
+        },
+        {
+          "speed_m_s": 2.3871936,
+          "thrust_coefficient": 0.0783,
+          "power_coefficient": 0.0352
+        },
+        {
+          "speed_m_s": 2.7314144000000002,
+          "thrust_coefficient": 0.0759,
+          "power_coefficient": 0.0351
+        },
+        {
+          "speed_m_s": 3.0711648,
+          "thrust_coefficient": 0.0733,
+          "power_coefficient": 0.0349
+        },
+        {
+          "speed_m_s": 3.4153856,
+          "thrust_coefficient": 0.0705,
+          "power_coefficient": 0.0346
+        },
+        {
+          "speed_m_s": 3.7551360000000003,
+          "thrust_coefficient": 0.0676,
+          "power_coefficient": 0.0343
+        },
+        {
+          "speed_m_s": 4.0948864,
+          "thrust_coefficient": 0.0646,
+          "power_coefficient": 0.0338
+        },
+        {
+          "speed_m_s": 4.4391072,
+          "thrust_coefficient": 0.0614,
+          "power_coefficient": 0.0333
+        },
+        {
+          "speed_m_s": 4.778857599999999,
+          "thrust_coefficient": 0.0581,
+          "power_coefficient": 0.0326
+        },
+        {
+          "speed_m_s": 5.118607999999999,
+          "thrust_coefficient": 0.0546,
+          "power_coefficient": 0.0318
+        },
+        {
+          "speed_m_s": 5.4628288000000005,
+          "thrust_coefficient": 0.051,
+          "power_coefficient": 0.0309
+        },
+        {
+          "speed_m_s": 5.8025792,
+          "thrust_coefficient": 0.0473,
+          "power_coefficient": 0.0299
+        },
+        {
+          "speed_m_s": 6.1423296,
+          "thrust_coefficient": 0.0435,
+          "power_coefficient": 0.0288
+        },
+        {
+          "speed_m_s": 6.4865504,
+          "thrust_coefficient": 0.0396,
+          "power_coefficient": 0.0276
+        },
+        {
+          "speed_m_s": 6.826300799999999,
+          "thrust_coefficient": 0.0356,
+          "power_coefficient": 0.0262
+        },
+        {
+          "speed_m_s": 7.1660512,
+          "thrust_coefficient": 0.0315,
+          "power_coefficient": 0.0248
+        },
+        {
+          "speed_m_s": 7.5102720000000005,
+          "thrust_coefficient": 0.0274,
+          "power_coefficient": 0.0233
+        },
+        {
+          "speed_m_s": 7.850022399999999,
+          "thrust_coefficient": 0.0232,
+          "power_coefficient": 0.0216
+        },
+        {
+          "speed_m_s": 8.194243199999999,
+          "thrust_coefficient": 0.019,
+          "power_coefficient": 0.0199
+        },
+        {
+          "speed_m_s": 8.5339936,
+          "thrust_coefficient": 0.0148,
+          "power_coefficient": 0.0181
+        },
+        {
+          "speed_m_s": 8.873744,
+          "thrust_coefficient": 0.0106,
+          "power_coefficient": 0.0163
+        },
+        {
+          "speed_m_s": 9.2179648,
+          "thrust_coefficient": 0.0065,
+          "power_coefficient": 0.0143
+        },
+        {
+          "speed_m_s": 9.557715199999999,
+          "thrust_coefficient": 0.0024,
+          "power_coefficient": 0.0123
+        }
+      ]
+    },
+    {
+      "rpm": 4000,
+      "points": [
+        {
+          "speed_m_s": 0.0,
+          "thrust_coefficient": 0.0921,
+          "power_coefficient": 0.0331
+        },
+        {
+          "speed_m_s": 0.4515104,
+          "thrust_coefficient": 0.0906,
+          "power_coefficient": 0.0334
+        },
+        {
+          "speed_m_s": 0.8985503999999999,
+          "thrust_coefficient": 0.0889,
+          "power_coefficient": 0.0337
+        },
+        {
+          "speed_m_s": 1.3500608,
+          "thrust_coefficient": 0.0871,
+          "power_coefficient": 0.0339
+        },
+        {
+          "speed_m_s": 1.7971007999999997,
+          "thrust_coefficient": 0.0852,
+          "power_coefficient": 0.0341
+        },
+        {
+          "speed_m_s": 2.2486112,
+          "thrust_coefficient": 0.0832,
+          "power_coefficient": 0.0342
+        },
+        {
+          "speed_m_s": 2.7001216,
+          "thrust_coefficient": 0.0811,
+          "power_coefficient": 0.0343
+        },
+        {
+          "speed_m_s": 3.1471616,
+          "thrust_coefficient": 0.0788,
+          "power_coefficient": 0.0343
+        },
+        {
+          "speed_m_s": 3.598672,
+          "thrust_coefficient": 0.0764,
+          "power_coefficient": 0.0342
+        },
+        {
+          "speed_m_s": 4.045712,
+          "thrust_coefficient": 0.0738,
+          "power_coefficient": 0.034
+        },
+        {
+          "speed_m_s": 4.4972224,
+          "thrust_coefficient": 0.0711,
+          "power_coefficient": 0.0338
+        },
+        {
+          "speed_m_s": 4.9487328,
+          "thrust_coefficient": 0.0683,
+          "power_coefficient": 0.0335
+        },
+        {
+          "speed_m_s": 5.3957728000000005,
+          "thrust_coefficient": 0.0653,
+          "power_coefficient": 0.033
+        },
+        {
+          "speed_m_s": 5.8472832,
+          "thrust_coefficient": 0.0621,
+          "power_coefficient": 0.0325
+        },
+        {
+          "speed_m_s": 6.2943232,
+          "thrust_coefficient": 0.0589,
+          "power_coefficient": 0.0319
+        },
+        {
+          "speed_m_s": 6.7458336,
+          "thrust_coefficient": 0.0555,
+          "power_coefficient": 0.0311
+        },
+        {
+          "speed_m_s": 7.197344,
+          "thrust_coefficient": 0.0519,
+          "power_coefficient": 0.0302
+        },
+        {
+          "speed_m_s": 7.6443840000000005,
+          "thrust_coefficient": 0.0483,
+          "power_coefficient": 0.0292
+        },
+        {
+          "speed_m_s": 8.095894399999999,
+          "thrust_coefficient": 0.0445,
+          "power_coefficient": 0.0281
+        },
+        {
+          "speed_m_s": 8.5429344,
+          "thrust_coefficient": 0.0406,
+          "power_coefficient": 0.0269
+        },
+        {
+          "speed_m_s": 8.9944448,
+          "thrust_coefficient": 0.0367,
+          "power_coefficient": 0.0256
+        },
+        {
+          "speed_m_s": 9.4414848,
+          "thrust_coefficient": 0.0327,
+          "power_coefficient": 0.0242
+        },
+        {
+          "speed_m_s": 9.8929952,
+          "thrust_coefficient": 0.0286,
+          "power_coefficient": 0.0227
+        },
+        {
+          "speed_m_s": 10.3445056,
+          "thrust_coefficient": 0.0245,
+          "power_coefficient": 0.0211
+        },
+        {
+          "speed_m_s": 10.791545600000001,
+          "thrust_coefficient": 0.0204,
+          "power_coefficient": 0.0194
+        },
+        {
+          "speed_m_s": 11.243056,
+          "thrust_coefficient": 0.0163,
+          "power_coefficient": 0.0176
+        },
+        {
+          "speed_m_s": 11.690095999999999,
+          "thrust_coefficient": 0.0121,
+          "power_coefficient": 0.0157
+        },
+        {
+          "speed_m_s": 12.1416064,
+          "thrust_coefficient": 0.008,
+          "power_coefficient": 0.0138
+        },
+        {
+          "speed_m_s": 12.5931168,
+          "thrust_coefficient": 0.004,
+          "power_coefficient": 0.0118
+        },
+        {
+          "speed_m_s": 13.0401568,
+          "thrust_coefficient": 0.0,
+          "power_coefficient": 0.0097
+        }
+      ]
+    },
+    {
+      "rpm": 5000,
+      "points": [
+        {
+          "speed_m_s": 0.0,
+          "thrust_coefficient": 0.0924,
+          "power_coefficient": 0.0325
+        },
+        {
+          "speed_m_s": 0.5632704,
+          "thrust_coefficient": 0.0908,
+          "power_coefficient": 0.0328
+        },
+        {
+          "speed_m_s": 1.1265408,
+          "thrust_coefficient": 0.0892,
+          "power_coefficient": 0.033
+        },
+        {
+          "speed_m_s": 1.6898111999999998,
+          "thrust_coefficient": 0.0874,
+          "power_coefficient": 0.0333
+        },
+        {
+          "speed_m_s": 2.2486112,
+          "thrust_coefficient": 0.0855,
+          "power_coefficient": 0.0335
+        },
+        {
+          "speed_m_s": 2.8118816,
+          "thrust_coefficient": 0.0835,
+          "power_coefficient": 0.0336
+        },
+        {
+          "speed_m_s": 3.375152,
+          "thrust_coefficient": 0.0813,
+          "power_coefficient": 0.0337
+        },
+        {
+          "speed_m_s": 3.9384224000000003,
+          "thrust_coefficient": 0.079,
+          "power_coefficient": 0.0337
+        },
+        {
+          "speed_m_s": 4.5016928,
+          "thrust_coefficient": 0.0766,
+          "power_coefficient": 0.0336
+        },
+        {
+          "speed_m_s": 5.0649632,
+          "thrust_coefficient": 0.074,
+          "power_coefficient": 0.0335
+        },
+        {
+          "speed_m_s": 5.6282336,
+          "thrust_coefficient": 0.0713,
+          "power_coefficient": 0.0333
+        },
+        {
+          "speed_m_s": 6.191504,
+          "thrust_coefficient": 0.0685,
+          "power_coefficient": 0.0329
+        },
+        {
+          "speed_m_s": 6.750304,
+          "thrust_coefficient": 0.0655,
+          "power_coefficient": 0.0325
+        },
+        {
+          "speed_m_s": 7.313574399999999,
+          "thrust_coefficient": 0.0623,
+          "power_coefficient": 0.0319
+        },
+        {
+          "speed_m_s": 7.876844800000001,
+          "thrust_coefficient": 0.0591,
+          "power_coefficient": 0.0313
+        },
+        {
+          "speed_m_s": 8.4401152,
+          "thrust_coefficient": 0.0556,
+          "power_coefficient": 0.0305
+        },
+        {
+          "speed_m_s": 9.0033856,
+          "thrust_coefficient": 0.0521,
+          "power_coefficient": 0.0297
+        },
+        {
+          "speed_m_s": 9.566656,
+          "thrust_coefficient": 0.0484,
+          "power_coefficient": 0.0287
+        },
+        {
+          "speed_m_s": 10.1299264,
+          "thrust_coefficient": 0.0446,
+          "power_coefficient": 0.0275
+        },
+        {
+          "speed_m_s": 10.6887264,
+          "thrust_coefficient": 0.0408,
+          "power_coefficient": 0.0263
+        },
+        {
+          "speed_m_s": 11.2519968,
+          "thrust_coefficient": 0.0368,
+          "power_coefficient": 0.025
+        },
+        {
+          "speed_m_s": 11.8152672,
+          "thrust_coefficient": 0.0328,
+          "power_coefficient": 0.0235
+        },
+        {
+          "speed_m_s": 12.3785376,
+          "thrust_coefficient": 0.0287,
+          "power_coefficient": 0.022
+        },
+        {
+          "speed_m_s": 12.941808,
+          "thrust_coefficient": 0.0246,
+          "power_coefficient": 0.0204
+        },
+        {
+          "speed_m_s": 13.5050784,
+          "thrust_coefficient": 0.0205,
+          "power_coefficient": 0.0186
+        },
+        {
+          "speed_m_s": 14.068348799999999,
+          "thrust_coefficient": 0.0163,
+          "power_coefficient": 0.0168
+        },
+        {
+          "speed_m_s": 14.631619199999998,
+          "thrust_coefficient": 0.0122,
+          "power_coefficient": 0.0149
+        },
+        {
+          "speed_m_s": 15.1904192,
+          "thrust_coefficient": 0.008,
+          "power_coefficient": 0.0129
+        },
+        {
+          "speed_m_s": 15.753689600000001,
+          "thrust_coefficient": 0.004,
+          "power_coefficient": 0.0109
+        },
+        {
+          "speed_m_s": 16.316959999999998,
+          "thrust_coefficient": 0.0,
+          "power_coefficient": 0.0088
+        }
+      ]
+    },
+    {
+      "rpm": 6000,
+      "points": [
+        {
+          "speed_m_s": 0.0,
+          "thrust_coefficient": 0.0927,
+          "power_coefficient": 0.0321
+        },
+        {
+          "speed_m_s": 0.6839712,
+          "thrust_coefficient": 0.0911,
+          "power_coefficient": 0.0324
+        },
+        {
+          "speed_m_s": 1.3679424,
+          "thrust_coefficient": 0.0894,
+          "power_coefficient": 0.0327
+        },
+        {
+          "speed_m_s": 2.0519136,
+          "thrust_coefficient": 0.0876,
+          "power_coefficient": 0.0329
+        },
+        {
+          "speed_m_s": 2.7358848,
+          "thrust_coefficient": 0.0857,
+          "power_coefficient": 0.0331
+        },
+        {
+          "speed_m_s": 3.4198560000000002,
+          "thrust_coefficient": 0.0836,
+          "power_coefficient": 0.0332
+        },
+        {
+          "speed_m_s": 4.108297599999999,
+          "thrust_coefficient": 0.0815,
+          "power_coefficient": 0.0333
+        },
+        {
+          "speed_m_s": 4.7922688,
+          "thrust_coefficient": 0.0791,
+          "power_coefficient": 0.0333
+        },
+        {
+          "speed_m_s": 5.47624,
+          "thrust_coefficient": 0.0766,
+          "power_coefficient": 0.0333
+        },
+        {
+          "speed_m_s": 6.1602112,
+          "thrust_coefficient": 0.074,
+          "power_coefficient": 0.0331
+        },
+        {
+          "speed_m_s": 6.8441824,
+          "thrust_coefficient": 0.0712,
+          "power_coefficient": 0.0329
+        },
+        {
+          "speed_m_s": 7.5281536,
+          "thrust_coefficient": 0.0683,
+          "power_coefficient": 0.0325
+        },
+        {
+          "speed_m_s": 8.2121248,
+          "thrust_coefficient": 0.0652,
+          "power_coefficient": 0.0321
+        },
+        {
+          "speed_m_s": 8.896096,
+          "thrust_coefficient": 0.062,
+          "power_coefficient": 0.0315
+        },
+        {
+          "speed_m_s": 9.5800672,
+          "thrust_coefficient": 0.0587,
+          "power_coefficient": 0.0308
+        },
+        {
+          "speed_m_s": 10.2640384,
+          "thrust_coefficient": 0.0552,
+          "power_coefficient": 0.03
+        },
+        {
+          "speed_m_s": 10.948009599999999,
+          "thrust_coefficient": 0.0515,
+          "power_coefficient": 0.0291
+        },
+        {
+          "speed_m_s": 11.6364512,
+          "thrust_coefficient": 0.0478,
+          "power_coefficient": 0.028
+        },
+        {
+          "speed_m_s": 12.3204224,
+          "thrust_coefficient": 0.0439,
+          "power_coefficient": 0.0269
+        },
+        {
+          "speed_m_s": 13.0043936,
+          "thrust_coefficient": 0.0399,
+          "power_coefficient": 0.0256
+        },
+        {
+          "speed_m_s": 13.6883648,
+          "thrust_coefficient": 0.0359,
+          "power_coefficient": 0.0242
+        },
+        {
+          "speed_m_s": 14.372335999999999,
+          "thrust_coefficient": 0.0318,
+          "power_coefficient": 0.0227
+        },
+        {
+          "speed_m_s": 15.0563072,
+          "thrust_coefficient": 0.0276,
+          "power_coefficient": 0.0211
+        },
+        {
+          "speed_m_s": 15.7402784,
+          "thrust_coefficient": 0.0235,
+          "power_coefficient": 0.0193
+        },
+        {
+          "speed_m_s": 16.4242496,
+          "thrust_coefficient": 0.0192,
+          "power_coefficient": 0.0175
+        },
+        {
+          "speed_m_s": 17.1082208,
+          "thrust_coefficient": 0.015,
+          "power_coefficient": 0.0156
+        },
+        {
+          "speed_m_s": 17.792192,
+          "thrust_coefficient": 0.0108,
+          "power_coefficient": 0.0136
+        },
+        {
+          "speed_m_s": 18.4806336,
+          "thrust_coefficient": 0.0066,
+          "power_coefficient": 0.0116
+        },
+        {
+          "speed_m_s": 19.1646048,
+          "thrust_coefficient": 0.0025,
+          "power_coefficient": 0.0095
+        }
+      ]
+    },
+    {
+      "rpm": 7000,
+      "points": [
+        {
+          "speed_m_s": 0.0,
+          "thrust_coefficient": 0.0931,
+          "power_coefficient": 0.0318
+        },
+        {
+          "speed_m_s": 0.7957312,
+          "thrust_coefficient": 0.0915,
+          "power_coefficient": 0.0321
+        },
+        {
+          "speed_m_s": 1.5959328,
+          "thrust_coefficient": 0.0898,
+          "power_coefficient": 0.0324
+        },
+        {
+          "speed_m_s": 2.391664,
+          "thrust_coefficient": 0.088,
+          "power_coefficient": 0.0327
+        },
+        {
+          "speed_m_s": 3.1918656,
+          "thrust_coefficient": 0.0861,
+          "power_coefficient": 0.0329
+        },
+        {
+          "speed_m_s": 3.9875968,
+          "thrust_coefficient": 0.084,
+          "power_coefficient": 0.033
+        },
+        {
+          "speed_m_s": 4.787798400000001,
+          "thrust_coefficient": 0.0818,
+          "power_coefficient": 0.0331
+        },
+        {
+          "speed_m_s": 5.5835296,
+          "thrust_coefficient": 0.0795,
+          "power_coefficient": 0.0331
+        },
+        {
+          "speed_m_s": 6.3837312,
+          "thrust_coefficient": 0.077,
+          "power_coefficient": 0.033
+        },
+        {
+          "speed_m_s": 7.179462399999999,
+          "thrust_coefficient": 0.0744,
+          "power_coefficient": 0.0329
+        },
+        {
+          "speed_m_s": 7.9751936,
+          "thrust_coefficient": 0.0716,
+          "power_coefficient": 0.0326
+        },
+        {
+          "speed_m_s": 8.7753952,
+          "thrust_coefficient": 0.0687,
+          "power_coefficient": 0.0323
+        },
+        {
+          "speed_m_s": 9.5711264,
+          "thrust_coefficient": 0.0656,
+          "power_coefficient": 0.0318
+        },
+        {
+          "speed_m_s": 10.371328,
+          "thrust_coefficient": 0.0624,
+          "power_coefficient": 0.0313
+        },
+        {
+          "speed_m_s": 11.1670592,
+          "thrust_coefficient": 0.059,
+          "power_coefficient": 0.0306
+        },
+        {
+          "speed_m_s": 11.9672608,
+          "thrust_coefficient": 0.0555,
+          "power_coefficient": 0.0298
+        },
+        {
+          "speed_m_s": 12.762992,
+          "thrust_coefficient": 0.0518,
+          "power_coefficient": 0.0288
+        },
+        {
+          "speed_m_s": 13.5631936,
+          "thrust_coefficient": 0.0481,
+          "power_coefficient": 0.0278
+        },
+        {
+          "speed_m_s": 14.358924799999999,
+          "thrust_coefficient": 0.0442,
+          "power_coefficient": 0.0266
+        },
+        {
+          "speed_m_s": 15.154656,
+          "thrust_coefficient": 0.0402,
+          "power_coefficient": 0.0253
+        },
+        {
+          "speed_m_s": 15.954857599999999,
+          "thrust_coefficient": 0.0362,
+          "power_coefficient": 0.0239
+        },
+        {
+          "speed_m_s": 16.7505888,
+          "thrust_coefficient": 0.0321,
+          "power_coefficient": 0.0224
+        },
+        {
+          "speed_m_s": 17.5507904,
+          "thrust_coefficient": 0.0279,
+          "power_coefficient": 0.0208
+        },
+        {
+          "speed_m_s": 18.3465216,
+          "thrust_coefficient": 0.0237,
+          "power_coefficient": 0.019
+        },
+        {
+          "speed_m_s": 19.1467232,
+          "thrust_coefficient": 0.0195,
+          "power_coefficient": 0.0172
+        },
+        {
+          "speed_m_s": 19.9424544,
+          "thrust_coefficient": 0.0152,
+          "power_coefficient": 0.0153
+        },
+        {
+          "speed_m_s": 20.742656,
+          "thrust_coefficient": 0.011,
+          "power_coefficient": 0.0132
+        },
+        {
+          "speed_m_s": 21.5383872,
+          "thrust_coefficient": 0.0068,
+          "power_coefficient": 0.0112
+        },
+        {
+          "speed_m_s": 22.3341184,
+          "thrust_coefficient": 0.0027,
+          "power_coefficient": 0.009
+        }
+      ]
+    },
+    {
+      "rpm": 8000,
+      "points": [
+        {
+          "speed_m_s": 0.0,
+          "thrust_coefficient": 0.0935,
+          "power_coefficient": 0.0317
+        },
+        {
+          "speed_m_s": 0.9030208,
+          "thrust_coefficient": 0.0919,
+          "power_coefficient": 0.032
+        },
+        {
+          "speed_m_s": 1.8015712000000002,
+          "thrust_coefficient": 0.0903,
+          "power_coefficient": 0.0323
+        },
+        {
+          "speed_m_s": 2.704592,
+          "thrust_coefficient": 0.0885,
+          "power_coefficient": 0.0325
+        },
+        {
+          "speed_m_s": 3.6031424000000003,
+          "thrust_coefficient": 0.0866,
+          "power_coefficient": 0.0327
+        },
+        {
+          "speed_m_s": 4.5061632,
+          "thrust_coefficient": 0.0845,
+          "power_coefficient": 0.0329
+        },
+        {
+          "speed_m_s": 5.409184,
+          "thrust_coefficient": 0.0824,
+          "power_coefficient": 0.033
+        },
+        {
+          "speed_m_s": 6.307734399999999,
+          "thrust_coefficient": 0.0801,
+          "power_coefficient": 0.033
+        },
+        {
+          "speed_m_s": 7.2107551999999995,
+          "thrust_coefficient": 0.0776,
+          "power_coefficient": 0.0329
+        },
+        {
+          "speed_m_s": 8.113776,
+          "thrust_coefficient": 0.075,
+          "power_coefficient": 0.0328
+        },
+        {
+          "speed_m_s": 9.0123264,
+          "thrust_coefficient": 0.0723,
+          "power_coefficient": 0.0326
+        },
+        {
+          "speed_m_s": 9.9153472,
+          "thrust_coefficient": 0.0694,
+          "power_coefficient": 0.0322
+        },
+        {
+          "speed_m_s": 10.8138976,
+          "thrust_coefficient": 0.0664,
+          "power_coefficient": 0.0318
+        },
+        {
+          "speed_m_s": 11.7169184,
+          "thrust_coefficient": 0.0632,
+          "power_coefficient": 0.0312
+        },
+        {
+          "speed_m_s": 12.6199392,
+          "thrust_coefficient": 0.0599,
+          "power_coefficient": 0.0306
+        },
+        {
+          "speed_m_s": 13.518489599999999,
+          "thrust_coefficient": 0.0564,
+          "power_coefficient": 0.0298
+        },
+        {
+          "speed_m_s": 14.421510399999999,
+          "thrust_coefficient": 0.0528,
+          "power_coefficient": 0.0289
+        },
+        {
+          "speed_m_s": 15.320060800000002,
+          "thrust_coefficient": 0.0491,
+          "power_coefficient": 0.0278
+        },
+        {
+          "speed_m_s": 16.2230816,
+          "thrust_coefficient": 0.0452,
+          "power_coefficient": 0.0267
+        },
+        {
+          "speed_m_s": 17.1261024,
+          "thrust_coefficient": 0.0413,
+          "power_coefficient": 0.0254
+        },
+        {
+          "speed_m_s": 18.0246528,
+          "thrust_coefficient": 0.0373,
+          "power_coefficient": 0.024
+        },
+        {
+          "speed_m_s": 18.927673600000002,
+          "thrust_coefficient": 0.0332,
+          "power_coefficient": 0.0225
+        },
+        {
+          "speed_m_s": 19.8306944,
+          "thrust_coefficient": 0.0291,
+          "power_coefficient": 0.0209
+        },
+        {
+          "speed_m_s": 20.7292448,
+          "thrust_coefficient": 0.0249,
+          "power_coefficient": 0.0192
+        },
+        {
+          "speed_m_s": 21.6322656,
+          "thrust_coefficient": 0.0207,
+          "power_coefficient": 0.0174
+        },
+        {
+          "speed_m_s": 22.530815999999998,
+          "thrust_coefficient": 0.0165,
+          "power_coefficient": 0.0155
+        },
+        {
+          "speed_m_s": 23.4338368,
+          "thrust_coefficient": 0.0123,
+          "power_coefficient": 0.0135
+        },
+        {
+          "speed_m_s": 24.3368576,
+          "thrust_coefficient": 0.0082,
+          "power_coefficient": 0.0114
+        },
+        {
+          "speed_m_s": 25.235408,
+          "thrust_coefficient": 0.0041,
+          "power_coefficient": 0.0093
+        },
+        {
+          "speed_m_s": 26.1384288,
+          "thrust_coefficient": 0.0,
+          "power_coefficient": 0.0071
+        }
+      ]
+    },
+    {
+      "rpm": 9000,
+      "points": [
+        {
+          "speed_m_s": 0.0,
+          "thrust_coefficient": 0.094,
+          "power_coefficient": 0.0316
+        },
+        {
+          "speed_m_s": 1.0147808,
+          "thrust_coefficient": 0.0924,
+          "power_coefficient": 0.0319
+        },
+        {
+          "speed_m_s": 2.0295616,
+          "thrust_coefficient": 0.0908,
+          "power_coefficient": 0.0322
+        },
+        {
+          "speed_m_s": 3.0443423999999997,
+          "thrust_coefficient": 0.089,
+          "power_coefficient": 0.0325
+        },
+        {
+          "speed_m_s": 4.0591232,
+          "thrust_coefficient": 0.0871,
+          "power_coefficient": 0.0327
+        },
+        {
+          "speed_m_s": 5.073904,
+          "thrust_coefficient": 0.085,
+          "power_coefficient": 0.0328
+        },
+        {
+          "speed_m_s": 6.088684799999999,
+          "thrust_coefficient": 0.0828,
+          "power_coefficient": 0.0329
+        },
+        {
+          "speed_m_s": 7.1034656,
+          "thrust_coefficient": 0.0805,
+          "power_coefficient": 0.033
+        },
+        {
+          "speed_m_s": 8.1182464,
+          "thrust_coefficient": 0.0781,
+          "power_coefficient": 0.0329
+        },
+        {
+          "speed_m_s": 9.133027199999999,
+          "thrust_coefficient": 0.0754,
+          "power_coefficient": 0.0327
+        },
+        {
+          "speed_m_s": 10.147808,
+          "thrust_coefficient": 0.0727,
+          "power_coefficient": 0.0325
+        },
+        {
+          "speed_m_s": 11.1625888,
+          "thrust_coefficient": 0.0698,
+          "power_coefficient": 0.0322
+        },
+        {
+          "speed_m_s": 12.177369599999999,
+          "thrust_coefficient": 0.0667,
+          "power_coefficient": 0.0317
+        },
+        {
+          "speed_m_s": 13.192150400000001,
+          "thrust_coefficient": 0.0635,
+          "power_coefficient": 0.0312
+        },
+        {
+          "speed_m_s": 14.2069312,
+          "thrust_coefficient": 0.0602,
+          "power_coefficient": 0.0305
+        },
+        {
+          "speed_m_s": 15.221711999999998,
+          "thrust_coefficient": 0.0567,
+          "power_coefficient": 0.0297
+        },
+        {
+          "speed_m_s": 16.2320224,
+          "thrust_coefficient": 0.0531,
+          "power_coefficient": 0.0288
+        },
+        {
+          "speed_m_s": 17.2468032,
+          "thrust_coefficient": 0.0493,
+          "power_coefficient": 0.0277
+        },
+        {
+          "speed_m_s": 18.261584,
+          "thrust_coefficient": 0.0455,
+          "power_coefficient": 0.0266
+        },
+        {
+          "speed_m_s": 19.2763648,
+          "thrust_coefficient": 0.0415,
+          "power_coefficient": 0.0253
+        },
+        {
+          "speed_m_s": 20.2911456,
+          "thrust_coefficient": 0.0375,
+          "power_coefficient": 0.0239
+        },
+        {
+          "speed_m_s": 21.305926399999997,
+          "thrust_coefficient": 0.0334,
+          "power_coefficient": 0.0223
+        },
+        {
+          "speed_m_s": 22.3207072,
+          "thrust_coefficient": 0.0292,
+          "power_coefficient": 0.0207
+        },
+        {
+          "speed_m_s": 23.335488,
+          "thrust_coefficient": 0.025,
+          "power_coefficient": 0.019
+        },
+        {
+          "speed_m_s": 24.3502688,
+          "thrust_coefficient": 0.0208,
+          "power_coefficient": 0.0171
+        },
+        {
+          "speed_m_s": 25.3650496,
+          "thrust_coefficient": 0.0166,
+          "power_coefficient": 0.0152
+        },
+        {
+          "speed_m_s": 26.3798304,
+          "thrust_coefficient": 0.0123,
+          "power_coefficient": 0.0132
+        },
+        {
+          "speed_m_s": 27.3946112,
+          "thrust_coefficient": 0.0082,
+          "power_coefficient": 0.0111
+        },
+        {
+          "speed_m_s": 28.409391999999997,
+          "thrust_coefficient": 0.004,
+          "power_coefficient": 0.0089
+        },
+        {
+          "speed_m_s": 29.424172799999997,
+          "thrust_coefficient": -0.0001,
+          "power_coefficient": 0.0067
+        }
+      ]
+    },
+    {
+      "rpm": 10000,
+      "points": [
+        {
+          "speed_m_s": 0.0,
+          "thrust_coefficient": 0.0945,
+          "power_coefficient": 0.0316
+        },
+        {
+          "speed_m_s": 1.1265408,
+          "thrust_coefficient": 0.093,
+          "power_coefficient": 0.0319
+        },
+        {
+          "speed_m_s": 2.2530816,
+          "thrust_coefficient": 0.0913,
+          "power_coefficient": 0.0322
+        },
+        {
+          "speed_m_s": 3.3840928,
+          "thrust_coefficient": 0.0895,
+          "power_coefficient": 0.0325
+        },
+        {
+          "speed_m_s": 4.5106336,
+          "thrust_coefficient": 0.0876,
+          "power_coefficient": 0.0327
+        },
+        {
+          "speed_m_s": 5.637174399999999,
+          "thrust_coefficient": 0.0855,
+          "power_coefficient": 0.0329
+        },
+        {
+          "speed_m_s": 6.7637152,
+          "thrust_coefficient": 0.0834,
+          "power_coefficient": 0.033
+        },
+        {
+          "speed_m_s": 7.8947264,
+          "thrust_coefficient": 0.081,
+          "power_coefficient": 0.033
+        },
+        {
+          "speed_m_s": 9.0212672,
+          "thrust_coefficient": 0.0786,
+          "power_coefficient": 0.0329
+        },
+        {
+          "speed_m_s": 10.147808,
+          "thrust_coefficient": 0.0759,
+          "power_coefficient": 0.0328
+        },
+        {
+          "speed_m_s": 11.274348799999999,
+          "thrust_coefficient": 0.0732,
+          "power_coefficient": 0.0325
+        },
+        {
+          "speed_m_s": 12.40536,
+          "thrust_coefficient": 0.0703,
+          "power_coefficient": 0.0322
+        },
+        {
+          "speed_m_s": 13.531900799999999,
+          "thrust_coefficient": 0.0672,
+          "power_coefficient": 0.0317
+        },
+        {
+          "speed_m_s": 14.6584416,
+          "thrust_coefficient": 0.064,
+          "power_coefficient": 0.0312
+        },
+        {
+          "speed_m_s": 15.7849824,
+          "thrust_coefficient": 0.0606,
+          "power_coefficient": 0.0305
+        },
+        {
+          "speed_m_s": 16.9159936,
+          "thrust_coefficient": 0.0571,
+          "power_coefficient": 0.0297
+        },
+        {
+          "speed_m_s": 18.0425344,
+          "thrust_coefficient": 0.0534,
+          "power_coefficient": 0.0288
+        },
+        {
+          "speed_m_s": 19.1690752,
+          "thrust_coefficient": 0.0497,
+          "power_coefficient": 0.0277
+        },
+        {
+          "speed_m_s": 20.295616,
+          "thrust_coefficient": 0.0458,
+          "power_coefficient": 0.0265
+        },
+        {
+          "speed_m_s": 21.4221568,
+          "thrust_coefficient": 0.0418,
+          "power_coefficient": 0.0252
+        },
+        {
+          "speed_m_s": 22.553168,
+          "thrust_coefficient": 0.0377,
+          "power_coefficient": 0.0238
+        },
+        {
+          "speed_m_s": 23.6797088,
+          "thrust_coefficient": 0.0336,
+          "power_coefficient": 0.0222
+        },
+        {
+          "speed_m_s": 24.8062496,
+          "thrust_coefficient": 0.0294,
+          "power_coefficient": 0.0206
+        },
+        {
+          "speed_m_s": 25.9327904,
+          "thrust_coefficient": 0.0252,
+          "power_coefficient": 0.0188
+        },
+        {
+          "speed_m_s": 27.063801599999998,
+          "thrust_coefficient": 0.0209,
+          "power_coefficient": 0.017
+        },
+        {
+          "speed_m_s": 28.190342400000002,
+          "thrust_coefficient": 0.0167,
+          "power_coefficient": 0.015
+        },
+        {
+          "speed_m_s": 29.3168832,
+          "thrust_coefficient": 0.0124,
+          "power_coefficient": 0.0129
+        },
+        {
+          "speed_m_s": 30.443423999999997,
+          "thrust_coefficient": 0.0082,
+          "power_coefficient": 0.0108
+        },
+        {
+          "speed_m_s": 31.574435199999996,
+          "thrust_coefficient": 0.004,
+          "power_coefficient": 0.0086
+        },
+        {
+          "speed_m_s": 32.700976000000004,
+          "thrust_coefficient": -0.0001,
+          "power_coefficient": 0.0064
+        }
+      ]
+    },
+    {
+      "rpm": 11000,
+      "points": [
+        {
+          "speed_m_s": 0.0,
+          "thrust_coefficient": 0.0952,
+          "power_coefficient": 0.0317
+        },
+        {
+          "speed_m_s": 1.2561824,
+          "thrust_coefficient": 0.0936,
+          "power_coefficient": 0.032
+        },
+        {
+          "speed_m_s": 2.5123648,
+          "thrust_coefficient": 0.0919,
+          "power_coefficient": 0.0324
+        },
+        {
+          "speed_m_s": 3.7640768,
+          "thrust_coefficient": 0.0901,
+          "power_coefficient": 0.0326
+        },
+        {
+          "speed_m_s": 5.0202592,
+          "thrust_coefficient": 0.0881,
+          "power_coefficient": 0.0328
+        },
+        {
+          "speed_m_s": 6.276441599999999,
+          "thrust_coefficient": 0.086,
+          "power_coefficient": 0.033
+        },
+        {
+          "speed_m_s": 7.532624,
+          "thrust_coefficient": 0.0838,
+          "power_coefficient": 0.0331
+        },
+        {
+          "speed_m_s": 8.784336,
+          "thrust_coefficient": 0.0814,
+          "power_coefficient": 0.0331
+        },
+        {
+          "speed_m_s": 10.0405184,
+          "thrust_coefficient": 0.0789,
+          "power_coefficient": 0.033
+        },
+        {
+          "speed_m_s": 11.2967008,
+          "thrust_coefficient": 0.0762,
+          "power_coefficient": 0.0329
+        },
+        {
+          "speed_m_s": 12.552883199999998,
+          "thrust_coefficient": 0.0734,
+          "power_coefficient": 0.0326
+        },
+        {
+          "speed_m_s": 13.8090656,
+          "thrust_coefficient": 0.0704,
+          "power_coefficient": 0.0322
+        },
+        {
+          "speed_m_s": 15.060777599999998,
+          "thrust_coefficient": 0.0672,
+          "power_coefficient": 0.0318
+        },
+        {
+          "speed_m_s": 16.316959999999998,
+          "thrust_coefficient": 0.0639,
+          "power_coefficient": 0.0312
+        },
+        {
+          "speed_m_s": 17.573142400000002,
+          "thrust_coefficient": 0.0605,
+          "power_coefficient": 0.0304
+        },
+        {
+          "speed_m_s": 18.8293248,
+          "thrust_coefficient": 0.0569,
+          "power_coefficient": 0.0296
+        },
+        {
+          "speed_m_s": 20.0810368,
+          "thrust_coefficient": 0.0531,
+          "power_coefficient": 0.0286
+        },
+        {
+          "speed_m_s": 21.3372192,
+          "thrust_coefficient": 0.0493,
+          "power_coefficient": 0.0275
+        },
+        {
+          "speed_m_s": 22.5934016,
+          "thrust_coefficient": 0.0453,
+          "power_coefficient": 0.0262
+        },
+        {
+          "speed_m_s": 23.849584,
+          "thrust_coefficient": 0.0412,
+          "power_coefficient": 0.0249
+        },
+        {
+          "speed_m_s": 25.101295999999998,
+          "thrust_coefficient": 0.037,
+          "power_coefficient": 0.0234
+        },
+        {
+          "speed_m_s": 26.3574784,
+          "thrust_coefficient": 0.0328,
+          "power_coefficient": 0.0218
+        },
+        {
+          "speed_m_s": 27.6136608,
+          "thrust_coefficient": 0.0285,
+          "power_coefficient": 0.02
+        },
+        {
+          "speed_m_s": 28.8698432,
+          "thrust_coefficient": 0.0242,
+          "power_coefficient": 0.0182
+        },
+        {
+          "speed_m_s": 30.1260256,
+          "thrust_coefficient": 0.0199,
+          "power_coefficient": 0.0163
+        },
+        {
+          "speed_m_s": 31.3777376,
+          "thrust_coefficient": 0.0155,
+          "power_coefficient": 0.0142
+        },
+        {
+          "speed_m_s": 32.633919999999996,
+          "thrust_coefficient": 0.0112,
+          "power_coefficient": 0.0121
+        },
+        {
+          "speed_m_s": 33.8901024,
+          "thrust_coefficient": 0.0069,
+          "power_coefficient": 0.0099
+        },
+        {
+          "speed_m_s": 35.146284800000004,
+          "thrust_coefficient": 0.0026,
+          "power_coefficient": 0.0076
+        }
+      ]
+    },
+    {
+      "rpm": 12000,
+      "points": [
+        {
+          "speed_m_s": 0.0,
+          "thrust_coefficient": 0.0959,
+          "power_coefficient": 0.0319
+        },
+        {
+          "speed_m_s": 1.3500608,
+          "thrust_coefficient": 0.0943,
+          "power_coefficient": 0.0322
+        },
+        {
+          "speed_m_s": 2.704592,
+          "thrust_coefficient": 0.0926,
+          "power_coefficient": 0.0325
+        },
+        {
+          "speed_m_s": 4.0546528,
+          "thrust_coefficient": 0.0908,
+          "power_coefficient": 0.0328
+        },
+        {
+          "speed_m_s": 5.409184,
+          "thrust_coefficient": 0.0889,
+          "power_coefficient": 0.033
+        },
+        {
+          "speed_m_s": 6.759244799999999,
+          "thrust_coefficient": 0.0869,
+          "power_coefficient": 0.0332
+        },
+        {
+          "speed_m_s": 8.113776,
+          "thrust_coefficient": 0.0847,
+          "power_coefficient": 0.0333
+        },
+        {
+          "speed_m_s": 9.463836800000001,
+          "thrust_coefficient": 0.0823,
+          "power_coefficient": 0.0333
+        },
+        {
+          "speed_m_s": 10.818368,
+          "thrust_coefficient": 0.0798,
+          "power_coefficient": 0.0332
+        },
+        {
+          "speed_m_s": 12.1684288,
+          "thrust_coefficient": 0.0772,
+          "power_coefficient": 0.0331
+        },
+        {
+          "speed_m_s": 13.52296,
+          "thrust_coefficient": 0.0744,
+          "power_coefficient": 0.0328
+        },
+        {
+          "speed_m_s": 14.8730208,
+          "thrust_coefficient": 0.0714,
+          "power_coefficient": 0.0325
+        },
+        {
+          "speed_m_s": 16.227552,
+          "thrust_coefficient": 0.0683,
+          "power_coefficient": 0.032
+        },
+        {
+          "speed_m_s": 17.5776128,
+          "thrust_coefficient": 0.065,
+          "power_coefficient": 0.0314
+        },
+        {
+          "speed_m_s": 18.932144,
+          "thrust_coefficient": 0.0616,
+          "power_coefficient": 0.0307
+        },
+        {
+          "speed_m_s": 20.2822048,
+          "thrust_coefficient": 0.0581,
+          "power_coefficient": 0.0299
+        },
+        {
+          "speed_m_s": 21.636736,
+          "thrust_coefficient": 0.0544,
+          "power_coefficient": 0.0289
+        },
+        {
+          "speed_m_s": 22.9867968,
+          "thrust_coefficient": 0.0505,
+          "power_coefficient": 0.0278
+        },
+        {
+          "speed_m_s": 24.341328,
+          "thrust_coefficient": 0.0466,
+          "power_coefficient": 0.0266
+        },
+        {
+          "speed_m_s": 25.6913888,
+          "thrust_coefficient": 0.0425,
+          "power_coefficient": 0.0252
+        },
+        {
+          "speed_m_s": 27.04592,
+          "thrust_coefficient": 0.0384,
+          "power_coefficient": 0.0238
+        },
+        {
+          "speed_m_s": 28.3959808,
+          "thrust_coefficient": 0.0342,
+          "power_coefficient": 0.0222
+        },
+        {
+          "speed_m_s": 29.750511999999997,
+          "thrust_coefficient": 0.03,
+          "power_coefficient": 0.0205
+        },
+        {
+          "speed_m_s": 31.100572799999995,
+          "thrust_coefficient": 0.0257,
+          "power_coefficient": 0.0187
+        },
+        {
+          "speed_m_s": 32.455104,
+          "thrust_coefficient": 0.0213,
+          "power_coefficient": 0.0168
+        },
+        {
+          "speed_m_s": 33.8051648,
+          "thrust_coefficient": 0.017,
+          "power_coefficient": 0.0147
+        },
+        {
+          "speed_m_s": 35.159696000000004,
+          "thrust_coefficient": 0.0127,
+          "power_coefficient": 0.0126
+        },
+        {
+          "speed_m_s": 36.5097568,
+          "thrust_coefficient": 0.0084,
+          "power_coefficient": 0.0104
+        },
+        {
+          "speed_m_s": 37.864288,
+          "thrust_coefficient": 0.0041,
+          "power_coefficient": 0.0082
+        },
+        {
+          "speed_m_s": 39.214348799999996,
+          "thrust_coefficient": -0.0001,
+          "power_coefficient": 0.0058
+        }
+      ]
+    },
+    {
+      "rpm": 13000,
+      "points": [
+        {
+          "speed_m_s": 0.0,
+          "thrust_coefficient": 0.0967,
+          "power_coefficient": 0.0321
+        },
+        {
+          "speed_m_s": 1.4707616,
+          "thrust_coefficient": 0.0951,
+          "power_coefficient": 0.0324
+        },
+        {
+          "speed_m_s": 2.9459936,
+          "thrust_coefficient": 0.0934,
+          "power_coefficient": 0.0328
+        },
+        {
+          "speed_m_s": 4.4167552,
+          "thrust_coefficient": 0.0916,
+          "power_coefficient": 0.033
+        },
+        {
+          "speed_m_s": 5.8875168,
+          "thrust_coefficient": 0.0897,
+          "power_coefficient": 0.0332
+        },
+        {
+          "speed_m_s": 7.3582784000000006,
+          "thrust_coefficient": 0.0876,
+          "power_coefficient": 0.0334
+        },
+        {
+          "speed_m_s": 8.8335104,
+          "thrust_coefficient": 0.0854,
+          "power_coefficient": 0.0335
+        },
+        {
+          "speed_m_s": 10.304272000000001,
+          "thrust_coefficient": 0.083,
+          "power_coefficient": 0.0335
+        },
+        {
+          "speed_m_s": 11.7750336,
+          "thrust_coefficient": 0.0805,
+          "power_coefficient": 0.0335
+        },
+        {
+          "speed_m_s": 13.2502656,
+          "thrust_coefficient": 0.0778,
+          "power_coefficient": 0.0333
+        },
+        {
+          "speed_m_s": 14.7210272,
+          "thrust_coefficient": 0.0749,
+          "power_coefficient": 0.033
+        },
+        {
+          "speed_m_s": 16.191788799999998,
+          "thrust_coefficient": 0.0719,
+          "power_coefficient": 0.0327
+        },
+        {
+          "speed_m_s": 17.6670208,
+          "thrust_coefficient": 0.0688,
+          "power_coefficient": 0.0322
+        },
+        {
+          "speed_m_s": 19.1377824,
+          "thrust_coefficient": 0.0655,
+          "power_coefficient": 0.0316
+        },
+        {
+          "speed_m_s": 20.608544000000002,
+          "thrust_coefficient": 0.062,
+          "power_coefficient": 0.0308
+        },
+        {
+          "speed_m_s": 22.0793056,
+          "thrust_coefficient": 0.0584,
+          "power_coefficient": 0.03
+        },
+        {
+          "speed_m_s": 23.5545376,
+          "thrust_coefficient": 0.0546,
+          "power_coefficient": 0.029
+        },
+        {
+          "speed_m_s": 25.0252992,
+          "thrust_coefficient": 0.0507,
+          "power_coefficient": 0.0278
+        },
+        {
+          "speed_m_s": 26.496060800000002,
+          "thrust_coefficient": 0.0467,
+          "power_coefficient": 0.0266
+        },
+        {
+          "speed_m_s": 27.9712928,
+          "thrust_coefficient": 0.0426,
+          "power_coefficient": 0.0252
+        },
+        {
+          "speed_m_s": 29.4420544,
+          "thrust_coefficient": 0.0384,
+          "power_coefficient": 0.0237
+        },
+        {
+          "speed_m_s": 30.912816000000003,
+          "thrust_coefficient": 0.0341,
+          "power_coefficient": 0.0221
+        },
+        {
+          "speed_m_s": 32.383577599999995,
+          "thrust_coefficient": 0.0298,
+          "power_coefficient": 0.0203
+        },
+        {
+          "speed_m_s": 33.8588096,
+          "thrust_coefficient": 0.0254,
+          "power_coefficient": 0.0184
+        },
+        {
+          "speed_m_s": 35.3295712,
+          "thrust_coefficient": 0.021,
+          "power_coefficient": 0.0165
+        },
+        {
+          "speed_m_s": 36.8003328,
+          "thrust_coefficient": 0.0166,
+          "power_coefficient": 0.0144
+        },
+        {
+          "speed_m_s": 38.2755648,
+          "thrust_coefficient": 0.0122,
+          "power_coefficient": 0.0122
+        },
+        {
+          "speed_m_s": 39.7463264,
+          "thrust_coefficient": 0.0078,
+          "power_coefficient": 0.01
+        },
+        {
+          "speed_m_s": 41.217088000000004,
+          "thrust_coefficient": 0.0035,
+          "power_coefficient": 0.0076
+        }
+      ]
+    },
+    {
+      "rpm": 14000,
+      "points": [
+        {
+          "speed_m_s": 0.0,
+          "thrust_coefficient": 0.0976,
+          "power_coefficient": 0.0324
+        },
+        {
+          "speed_m_s": 1.586992,
+          "thrust_coefficient": 0.096,
+          "power_coefficient": 0.0327
+        },
+        {
+          "speed_m_s": 3.173984,
+          "thrust_coefficient": 0.0943,
+          "power_coefficient": 0.0331
+        },
+        {
+          "speed_m_s": 4.7654464,
+          "thrust_coefficient": 0.0925,
+          "power_coefficient": 0.0333
+        },
+        {
+          "speed_m_s": 6.3524384000000005,
+          "thrust_coefficient": 0.0906,
+          "power_coefficient": 0.0336
+        },
+        {
+          "speed_m_s": 7.939430400000001,
+          "thrust_coefficient": 0.0885,
+          "power_coefficient": 0.0337
+        },
+        {
+          "speed_m_s": 9.5264224,
+          "thrust_coefficient": 0.0862,
+          "power_coefficient": 0.0338
+        },
+        {
+          "speed_m_s": 11.1134144,
+          "thrust_coefficient": 0.0838,
+          "power_coefficient": 0.0338
+        },
+        {
+          "speed_m_s": 12.7004064,
+          "thrust_coefficient": 0.0813,
+          "power_coefficient": 0.0338
+        },
+        {
+          "speed_m_s": 14.2918688,
+          "thrust_coefficient": 0.0786,
+          "power_coefficient": 0.0336
+        },
+        {
+          "speed_m_s": 15.878860800000002,
+          "thrust_coefficient": 0.0757,
+          "power_coefficient": 0.0333
+        },
+        {
+          "speed_m_s": 17.4658528,
+          "thrust_coefficient": 0.0727,
+          "power_coefficient": 0.0329
+        },
+        {
+          "speed_m_s": 19.0528448,
+          "thrust_coefficient": 0.0695,
+          "power_coefficient": 0.0324
+        },
+        {
+          "speed_m_s": 20.6398368,
+          "thrust_coefficient": 0.0661,
+          "power_coefficient": 0.0318
+        },
+        {
+          "speed_m_s": 22.2268288,
+          "thrust_coefficient": 0.0626,
+          "power_coefficient": 0.0311
+        },
+        {
+          "speed_m_s": 23.8182912,
+          "thrust_coefficient": 0.0589,
+          "power_coefficient": 0.0302
+        },
+        {
+          "speed_m_s": 25.4052832,
+          "thrust_coefficient": 0.0551,
+          "power_coefficient": 0.0292
+        },
+        {
+          "speed_m_s": 26.9922752,
+          "thrust_coefficient": 0.0512,
+          "power_coefficient": 0.028
+        },
+        {
+          "speed_m_s": 28.5792672,
+          "thrust_coefficient": 0.0471,
+          "power_coefficient": 0.0267
+        },
+        {
+          "speed_m_s": 30.166259200000002,
+          "thrust_coefficient": 0.0429,
+          "power_coefficient": 0.0253
+        },
+        {
+          "speed_m_s": 31.757721600000004,
+          "thrust_coefficient": 0.0387,
+          "power_coefficient": 0.0237
+        },
+        {
+          "speed_m_s": 33.3447136,
+          "thrust_coefficient": 0.0343,
+          "power_coefficient": 0.0221
+        },
+        {
+          "speed_m_s": 34.9317056,
+          "thrust_coefficient": 0.0299,
+          "power_coefficient": 0.0203
+        },
+        {
+          "speed_m_s": 36.518697599999996,
+          "thrust_coefficient": 0.0255,
+          "power_coefficient": 0.0184
+        },
+        {
+          "speed_m_s": 38.1056896,
+          "thrust_coefficient": 0.021,
+          "power_coefficient": 0.0164
+        },
+        {
+          "speed_m_s": 39.6926816,
+          "thrust_coefficient": 0.0166,
+          "power_coefficient": 0.0142
+        },
+        {
+          "speed_m_s": 41.284144,
+          "thrust_coefficient": 0.0121,
+          "power_coefficient": 0.012
+        },
+        {
+          "speed_m_s": 42.871136,
+          "thrust_coefficient": 0.0077,
+          "power_coefficient": 0.0097
+        },
+        {
+          "speed_m_s": 44.458128,
+          "thrust_coefficient": 0.0033,
+          "power_coefficient": 0.0073
+        }
+      ]
+    },
+    {
+      "rpm": 15000,
+      "points": [
+        {
+          "speed_m_s": 0.0,
+          "thrust_coefficient": 0.0986,
+          "power_coefficient": 0.0328
+        },
+        {
+          "speed_m_s": 1.6987519999999998,
+          "thrust_coefficient": 0.097,
+          "power_coefficient": 0.0331
+        },
+        {
+          "speed_m_s": 3.3975039999999996,
+          "thrust_coefficient": 0.0954,
+          "power_coefficient": 0.0335
+        },
+        {
+          "speed_m_s": 5.1007264,
+          "thrust_coefficient": 0.0935,
+          "power_coefficient": 0.0337
+        },
+        {
+          "speed_m_s": 6.7994784,
+          "thrust_coefficient": 0.0916,
+          "power_coefficient": 0.034
+        },
+        {
+          "speed_m_s": 8.4982304,
+          "thrust_coefficient": 0.0895,
+          "power_coefficient": 0.0341
+        },
+        {
+          "speed_m_s": 10.1969824,
+          "thrust_coefficient": 0.0872,
+          "power_coefficient": 0.0342
+        },
+        {
+          "speed_m_s": 11.8957344,
+          "thrust_coefficient": 0.0848,
+          "power_coefficient": 0.0342
+        },
+        {
+          "speed_m_s": 13.5944864,
+          "thrust_coefficient": 0.0823,
+          "power_coefficient": 0.0342
+        },
+        {
+          "speed_m_s": 15.297708799999999,
+          "thrust_coefficient": 0.0795,
+          "power_coefficient": 0.034
+        },
+        {
+          "speed_m_s": 16.9964608,
+          "thrust_coefficient": 0.0766,
+          "power_coefficient": 0.0337
+        },
+        {
+          "speed_m_s": 18.6952128,
+          "thrust_coefficient": 0.0736,
+          "power_coefficient": 0.0333
+        },
+        {
+          "speed_m_s": 20.3939648,
+          "thrust_coefficient": 0.0704,
+          "power_coefficient": 0.0328
+        },
+        {
+          "speed_m_s": 22.0927168,
+          "thrust_coefficient": 0.067,
+          "power_coefficient": 0.0322
+        },
+        {
+          "speed_m_s": 23.7914688,
+          "thrust_coefficient": 0.0634,
+          "power_coefficient": 0.0314
+        },
+        {
+          "speed_m_s": 25.4946912,
+          "thrust_coefficient": 0.0597,
+          "power_coefficient": 0.0305
+        },
+        {
+          "speed_m_s": 27.193443199999997,
+          "thrust_coefficient": 0.0559,
+          "power_coefficient": 0.0295
+        },
+        {
+          "speed_m_s": 28.892195199999996,
+          "thrust_coefficient": 0.0519,
+          "power_coefficient": 0.0283
+        },
+        {
+          "speed_m_s": 30.590947200000002,
+          "thrust_coefficient": 0.0478,
+          "power_coefficient": 0.027
+        },
+        {
+          "speed_m_s": 32.2896992,
+          "thrust_coefficient": 0.0435,
+          "power_coefficient": 0.0255
+        },
+        {
+          "speed_m_s": 33.9884512,
+          "thrust_coefficient": 0.0392,
+          "power_coefficient": 0.0239
+        },
+        {
+          "speed_m_s": 35.6916736,
+          "thrust_coefficient": 0.0349,
+          "power_coefficient": 0.0222
+        },
+        {
+          "speed_m_s": 37.3904256,
+          "thrust_coefficient": 0.0304,
+          "power_coefficient": 0.0204
+        },
+        {
+          "speed_m_s": 39.0891776,
+          "thrust_coefficient": 0.0259,
+          "power_coefficient": 0.0185
+        },
+        {
+          "speed_m_s": 40.7879296,
+          "thrust_coefficient": 0.0214,
+          "power_coefficient": 0.0164
+        },
+        {
+          "speed_m_s": 42.486681600000004,
+          "thrust_coefficient": 0.0168,
+          "power_coefficient": 0.0143
+        },
+        {
+          "speed_m_s": 44.1854336,
+          "thrust_coefficient": 0.0123,
+          "power_coefficient": 0.012
+        },
+        {
+          "speed_m_s": 45.888656000000005,
+          "thrust_coefficient": 0.0078,
+          "power_coefficient": 0.0097
+        },
+        {
+          "speed_m_s": 47.587408,
+          "thrust_coefficient": 0.0034,
+          "power_coefficient": 0.0073
+        }
+      ]
+    },
+    {
+      "rpm": 16000,
+      "points": [
+        {
+          "speed_m_s": 0.0,
+          "thrust_coefficient": 0.0998,
+          "power_coefficient": 0.0335
+        },
+        {
+          "speed_m_s": 1.8060416,
+          "thrust_coefficient": 0.0982,
+          "power_coefficient": 0.0338
+        },
+        {
+          "speed_m_s": 3.6165536,
+          "thrust_coefficient": 0.0965,
+          "power_coefficient": 0.0341
+        },
+        {
+          "speed_m_s": 5.4225952,
+          "thrust_coefficient": 0.0947,
+          "power_coefficient": 0.0344
+        },
+        {
+          "speed_m_s": 7.2286368,
+          "thrust_coefficient": 0.0928,
+          "power_coefficient": 0.0346
+        },
+        {
+          "speed_m_s": 9.0346784,
+          "thrust_coefficient": 0.0907,
+          "power_coefficient": 0.0347
+        },
+        {
+          "speed_m_s": 10.8451904,
+          "thrust_coefficient": 0.0884,
+          "power_coefficient": 0.0348
+        },
+        {
+          "speed_m_s": 12.651232,
+          "thrust_coefficient": 0.086,
+          "power_coefficient": 0.0348
+        },
+        {
+          "speed_m_s": 14.4572736,
+          "thrust_coefficient": 0.0834,
+          "power_coefficient": 0.0347
+        },
+        {
+          "speed_m_s": 16.2677856,
+          "thrust_coefficient": 0.0807,
+          "power_coefficient": 0.0345
+        },
+        {
+          "speed_m_s": 18.0738272,
+          "thrust_coefficient": 0.0778,
+          "power_coefficient": 0.0342
+        },
+        {
+          "speed_m_s": 19.8798688,
+          "thrust_coefficient": 0.0747,
+          "power_coefficient": 0.0338
+        },
+        {
+          "speed_m_s": 21.6903808,
+          "thrust_coefficient": 0.0715,
+          "power_coefficient": 0.0333
+        },
+        {
+          "speed_m_s": 23.4964224,
+          "thrust_coefficient": 0.0681,
+          "power_coefficient": 0.0326
+        },
+        {
+          "speed_m_s": 25.302464,
+          "thrust_coefficient": 0.0645,
+          "power_coefficient": 0.0319
+        },
+        {
+          "speed_m_s": 27.1085056,
+          "thrust_coefficient": 0.0608,
+          "power_coefficient": 0.0309
+        },
+        {
+          "speed_m_s": 28.9190176,
+          "thrust_coefficient": 0.0569,
+          "power_coefficient": 0.0299
+        },
+        {
+          "speed_m_s": 30.7250592,
+          "thrust_coefficient": 0.0528,
+          "power_coefficient": 0.0287
+        },
+        {
+          "speed_m_s": 32.5311008,
+          "thrust_coefficient": 0.0487,
+          "power_coefficient": 0.0273
+        },
+        {
+          "speed_m_s": 34.34161279999999,
+          "thrust_coefficient": 0.0444,
+          "power_coefficient": 0.0259
+        },
+        {
+          "speed_m_s": 36.1476544,
+          "thrust_coefficient": 0.0401,
+          "power_coefficient": 0.0243
+        },
+        {
+          "speed_m_s": 37.953696,
+          "thrust_coefficient": 0.0356,
+          "power_coefficient": 0.0225
+        },
+        {
+          "speed_m_s": 39.764208,
+          "thrust_coefficient": 0.0311,
+          "power_coefficient": 0.0207
+        },
+        {
+          "speed_m_s": 41.5702496,
+          "thrust_coefficient": 0.0266,
+          "power_coefficient": 0.0187
+        },
+        {
+          "speed_m_s": 43.3762912,
+          "thrust_coefficient": 0.022,
+          "power_coefficient": 0.0167
+        },
+        {
+          "speed_m_s": 45.1823328,
+          "thrust_coefficient": 0.0174,
+          "power_coefficient": 0.0145
+        },
+        {
+          "speed_m_s": 46.9928448,
+          "thrust_coefficient": 0.0128,
+          "power_coefficient": 0.0123
+        },
+        {
+          "speed_m_s": 48.7988864,
+          "thrust_coefficient": 0.0082,
+          "power_coefficient": 0.01
+        },
+        {
+          "speed_m_s": 50.604928,
+          "thrust_coefficient": 0.0037,
+          "power_coefficient": 0.0077
+        }
+      ]
+    },
+    {
+      "rpm": 17000,
+      "points": [
+        {
+          "speed_m_s": 0.0,
+          "thrust_coefficient": 0.101,
+          "power_coefficient": 0.035
+        },
+        {
+          "speed_m_s": 1.9088607999999998,
+          "thrust_coefficient": 0.0995,
+          "power_coefficient": 0.0352
+        },
+        {
+          "speed_m_s": 3.8132512,
+          "thrust_coefficient": 0.0979,
+          "power_coefficient": 0.0355
+        },
+        {
+          "speed_m_s": 5.722112,
+          "thrust_coefficient": 0.0961,
+          "power_coefficient": 0.0356
+        },
+        {
+          "speed_m_s": 7.6309728,
+          "thrust_coefficient": 0.0941,
+          "power_coefficient": 0.0357
+        },
+        {
+          "speed_m_s": 9.535363199999999,
+          "thrust_coefficient": 0.092,
+          "power_coefficient": 0.0358
+        },
+        {
+          "speed_m_s": 11.444224,
+          "thrust_coefficient": 0.0898,
+          "power_coefficient": 0.0358
+        },
+        {
+          "speed_m_s": 13.348614399999999,
+          "thrust_coefficient": 0.0874,
+          "power_coefficient": 0.0357
+        },
+        {
+          "speed_m_s": 15.2574752,
+          "thrust_coefficient": 0.0848,
+          "power_coefficient": 0.0356
+        },
+        {
+          "speed_m_s": 17.166335999999998,
+          "thrust_coefficient": 0.0821,
+          "power_coefficient": 0.0353
+        },
+        {
+          "speed_m_s": 19.070726399999998,
+          "thrust_coefficient": 0.0792,
+          "power_coefficient": 0.035
+        },
+        {
+          "speed_m_s": 20.9795872,
+          "thrust_coefficient": 0.0761,
+          "power_coefficient": 0.0345
+        },
+        {
+          "speed_m_s": 22.888448,
+          "thrust_coefficient": 0.0729,
+          "power_coefficient": 0.034
+        },
+        {
+          "speed_m_s": 24.7928384,
+          "thrust_coefficient": 0.0695,
+          "power_coefficient": 0.0333
+        },
+        {
+          "speed_m_s": 26.701699199999997,
+          "thrust_coefficient": 0.0659,
+          "power_coefficient": 0.0325
+        },
+        {
+          "speed_m_s": 28.61056,
+          "thrust_coefficient": 0.0621,
+          "power_coefficient": 0.0315
+        },
+        {
+          "speed_m_s": 30.5149504,
+          "thrust_coefficient": 0.0582,
+          "power_coefficient": 0.0305
+        },
+        {
+          "speed_m_s": 32.4238112,
+          "thrust_coefficient": 0.0542,
+          "power_coefficient": 0.0293
+        },
+        {
+          "speed_m_s": 34.332671999999995,
+          "thrust_coefficient": 0.05,
+          "power_coefficient": 0.0279
+        },
+        {
+          "speed_m_s": 36.2370624,
+          "thrust_coefficient": 0.0457,
+          "power_coefficient": 0.0265
+        },
+        {
+          "speed_m_s": 38.1459232,
+          "thrust_coefficient": 0.0413,
+          "power_coefficient": 0.0249
+        },
+        {
+          "speed_m_s": 40.0503136,
+          "thrust_coefficient": 0.0368,
+          "power_coefficient": 0.0232
+        },
+        {
+          "speed_m_s": 41.9591744,
+          "thrust_coefficient": 0.0323,
+          "power_coefficient": 0.0214
+        },
+        {
+          "speed_m_s": 43.868035199999994,
+          "thrust_coefficient": 0.0277,
+          "power_coefficient": 0.0195
+        },
+        {
+          "speed_m_s": 45.7724256,
+          "thrust_coefficient": 0.0231,
+          "power_coefficient": 0.0175
+        },
+        {
+          "speed_m_s": 47.6812864,
+          "thrust_coefficient": 0.0184,
+          "power_coefficient": 0.0154
+        },
+        {
+          "speed_m_s": 49.590147200000004,
+          "thrust_coefficient": 0.0137,
+          "power_coefficient": 0.0133
+        },
+        {
+          "speed_m_s": 51.4945376,
+          "thrust_coefficient": 0.0091,
+          "power_coefficient": 0.0111
+        },
+        {
+          "speed_m_s": 53.40339839999999,
+          "thrust_coefficient": 0.0045,
+          "power_coefficient": 0.0089
+        },
+        {
+          "speed_m_s": 55.3122592,
+          "thrust_coefficient": 0.0,
+          "power_coefficient": 0.0067
+        }
+      ]
+    },
+    {
+      "rpm": 18000,
+      "points": [
+        {
+          "speed_m_s": 0.0,
+          "thrust_coefficient": 0.1024,
+          "power_coefficient": 0.0379
+        },
+        {
+          "speed_m_s": 2.0206207999999997,
+          "thrust_coefficient": 0.1009,
+          "power_coefficient": 0.038
+        },
+        {
+          "speed_m_s": 4.041241599999999,
+          "thrust_coefficient": 0.0993,
+          "power_coefficient": 0.0381
+        },
+        {
+          "speed_m_s": 6.0663328,
+          "thrust_coefficient": 0.0975,
+          "power_coefficient": 0.0381
+        },
+        {
+          "speed_m_s": 8.0869536,
+          "thrust_coefficient": 0.0956,
+          "power_coefficient": 0.038
+        },
+        {
+          "speed_m_s": 10.107574399999999,
+          "thrust_coefficient": 0.0935,
+          "power_coefficient": 0.0379
+        },
+        {
+          "speed_m_s": 12.128195199999999,
+          "thrust_coefficient": 0.0912,
+          "power_coefficient": 0.0378
+        },
+        {
+          "speed_m_s": 14.1532864,
+          "thrust_coefficient": 0.0888,
+          "power_coefficient": 0.0376
+        },
+        {
+          "speed_m_s": 16.1739072,
+          "thrust_coefficient": 0.0862,
+          "power_coefficient": 0.0373
+        },
+        {
+          "speed_m_s": 18.194528000000002,
+          "thrust_coefficient": 0.0835,
+          "power_coefficient": 0.0369
+        },
+        {
+          "speed_m_s": 20.215148799999998,
+          "thrust_coefficient": 0.0806,
+          "power_coefficient": 0.0364
+        },
+        {
+          "speed_m_s": 22.24024,
+          "thrust_coefficient": 0.0775,
+          "power_coefficient": 0.0358
+        },
+        {
+          "speed_m_s": 24.2608608,
+          "thrust_coefficient": 0.0742,
+          "power_coefficient": 0.0351
+        },
+        {
+          "speed_m_s": 26.2814816,
+          "thrust_coefficient": 0.0707,
+          "power_coefficient": 0.0343
+        },
+        {
+          "speed_m_s": 28.3021024,
+          "thrust_coefficient": 0.0671,
+          "power_coefficient": 0.0334
+        },
+        {
+          "speed_m_s": 30.3271936,
+          "thrust_coefficient": 0.0633,
+          "power_coefficient": 0.0324
+        },
+        {
+          "speed_m_s": 32.3478144,
+          "thrust_coefficient": 0.0593,
+          "power_coefficient": 0.0312
+        },
+        {
+          "speed_m_s": 34.3684352,
+          "thrust_coefficient": 0.0552,
+          "power_coefficient": 0.03
+        },
+        {
+          "speed_m_s": 36.389056000000004,
+          "thrust_coefficient": 0.0509,
+          "power_coefficient": 0.0286
+        },
+        {
+          "speed_m_s": 38.4141472,
+          "thrust_coefficient": 0.0466,
+          "power_coefficient": 0.0272
+        },
+        {
+          "speed_m_s": 40.434768,
+          "thrust_coefficient": 0.0421,
+          "power_coefficient": 0.0256
+        },
+        {
+          "speed_m_s": 42.4553888,
+          "thrust_coefficient": 0.0375,
+          "power_coefficient": 0.024
+        },
+        {
+          "speed_m_s": 44.4760096,
+          "thrust_coefficient": 0.0329,
+          "power_coefficient": 0.0222
+        },
+        {
+          "speed_m_s": 46.501100799999996,
+          "thrust_coefficient": 0.0282,
+          "power_coefficient": 0.0204
+        },
+        {
+          "speed_m_s": 48.5217216,
+          "thrust_coefficient": 0.0235,
+          "power_coefficient": 0.0185
+        },
+        {
+          "speed_m_s": 50.5423424,
+          "thrust_coefficient": 0.0187,
+          "power_coefficient": 0.0166
+        },
+        {
+          "speed_m_s": 52.5629632,
+          "thrust_coefficient": 0.0139,
+          "power_coefficient": 0.0146
+        },
+        {
+          "speed_m_s": 54.5880544,
+          "thrust_coefficient": 0.0092,
+          "power_coefficient": 0.0126
+        },
+        {
+          "speed_m_s": 56.6086752,
+          "thrust_coefficient": 0.0046,
+          "power_coefficient": 0.0107
+        },
+        {
+          "speed_m_s": 58.629296000000004,
+          "thrust_coefficient": 0.0,
+          "power_coefficient": 0.0087
+        }
+      ]
+    }
+  ],
+  "legacy_ideal_cases": [
+    {
+      "name": "legacy static full throttle",
+      "speed_m_s": 0.0,
+      "battery_voltage_v": 11.4,
+      "throttle": 1.0,
+      "motor_kv_rpm_per_v": 900.0,
+      "motor_resistance_ohm": 0.082,
+      "motor_no_load_current_a": 0.0,
+      "expected": {
+        "rpm": 8166.224464194234,
+        "motor_current_a": 28.370942219590308,
+        "thrust_n": 18.32877960519321,
+        "shaft_power_w": 257.4260915842883,
+        "battery_power_w": 323.4287413033295
+      }
+    },
+    {
+      "name": "legacy climb full throttle",
+      "speed_m_s": 10.0,
+      "battery_voltage_v": 11.4,
+      "throttle": 1.0,
+      "motor_kv_rpm_per_v": 900.0,
+      "motor_resistance_ohm": 0.082,
+      "motor_no_load_current_a": 0.0,
+      "expected": {
+        "rpm": 8143.129199704781,
+        "motor_current_a": 28.683886182862057,
+        "thrust_n": 13.571390414143924,
+        "shaft_power_w": 259.52954570741394,
+        "battery_power_w": 326.99630248462745
+      }
+    },
+    {
+      "name": "legacy cruise full throttle",
+      "speed_m_s": 20.0,
+      "battery_voltage_v": 11.4,
+      "throttle": 1.0,
+      "motor_kv_rpm_per_v": 900.0,
+      "motor_resistance_ohm": 0.082,
+      "motor_no_load_current_a": 0.0,
+      "expected": {
+        "rpm": 8592.783206195265,
+        "motor_current_a": 22.591013466188812,
+        "thrust_n": 7.4677820692191155,
+        "shaft_power_w": 215.68853458133148,
+        "battery_power_w": 257.5375535145525
+      }
+    }
+  ]
+}

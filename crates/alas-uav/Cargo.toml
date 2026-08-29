@@ -1,0 +1,25 @@
+[package]
+name = "alas-uav"
+description = "Source-provenanced component selection and feasibility physics for fixed-wing electric UAVs."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# Generated UAV geometry is converted into the production Airplane primitives
+# before any shared aerodynamic model is invoked.
+alas-geom = { path = "../alas-geom" }
+# The adapter runs the established native aerodynamic model-parity VLM implementation; it
+# does not duplicate or simplify that solver inside the UAV crate.
+alas-aero = { path = "../alas-aero" }
+# VLM operating points use the production atmosphere model at the user-set
+# altitude rather than accepting an unrelated density approximation.
+alas-atmo = { path = "../alas-atmo" }
+# Component records cross the scraper/reviewer boundary as stable typed JSON.
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[lints]
+workspace = true

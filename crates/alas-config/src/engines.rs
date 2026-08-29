@@ -157,9 +157,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_embedded_table_parses_into_the_engines_the_reference_registers() {
-        assert_eq!(database().len(), 7);
+    fn the_embedded_table_keeps_the_reference_engines_and_adds_certified_preset_variants() {
+        assert_eq!(database().len(), 10);
         assert!(get("GE9X").is_ok());
+        assert!(get("CFM56-5B4/3").is_ok());
+        assert!(get("CFM56-5C3/F").is_ok());
+        assert!(get("Trent 970-84").is_ok());
     }
 
     #[test]

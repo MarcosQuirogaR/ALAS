@@ -37,7 +37,7 @@
 //! builder additionally needs a fully constructed aeroplane for its stall
 //! terms, which is far too expensive to build on every validation tick. It
 //! evaluates the atmosphere through the closed-form ISA where upstream uses
-//! AeroSandbox's fitted default; the two agree to about 1e-11 and every number
+//! native aerodynamic model's fitted default; the two agree to about 1e-11 and every number
 //! the rule prints is rounded to the nearest whole metre per second.
 
 use serde::{Deserialize, Serialize};
@@ -86,8 +86,73 @@ pub struct ValidationIssue {
 /// list, and because two issues are often one cause.
 pub fn validate(config: &AlasConfig) -> Vec<ValidationIssue> {
     let mut issues = cruise_point_inside_the_flight_envelope(config);
+    issues.extend(atmosphere_domain_is_physical(config));
     issues.extend(empennage_tapers_toward_its_tips(config));
+    issues.extend(mses_timeouts_are_positive_and_finite(config));
+    issues.extend(optimizer_tokens_are_supported(config));
     issues
+}
+
+/// Reject finite-but-out-of-model cruise altitudes before any Mach, Reynolds,
+/// or force calculation can consume a NaN atmosphere state.
+fn atmosphere_domain_is_physical(config: &AlasConfig) -> Vec<ValidationIssue> {
+    match alas_atmo::Atmosphere::try_new(config.requirements.cruise_altitude_m) {
+        Ok(_) => Vec::new(),
+        Err(error) => vec![ValidationIssue {
+            field_path: "requirements.cruise_altitude_m".to_owned(),
+            message: format!("Cruise atmosphere is outside its physical model domain: {error}"),
+            severity: Severity::Error,
+        }],
+    }
+}
+
+/// Optimizer names are serialized strings for compatibility with the settings
+/// file, but dispatch only has a finite set of implementations. Reject a typo
+/// at the configuration boundary instead of silently running a different
+/// algorithm while retaining the requested (and therefore misleading) token.
+fn optimizer_tokens_are_supported(config: &AlasConfig) -> Vec<ValidationIssue> {
+    let solver = &config.optimizer.solver;
+    let mut issues = Vec::new();
+    if !crate::SolverSettings::is_supported_method(&solver.method) {
+        issues.push(ValidationIssue {
+            field_path: "optimizer.solver.method".to_owned(),
+            message: format!(
+                "Unknown optimizer method {:?}; choose one of the registered optimizer methods.",
+                solver.method
+            ),
+            severity: Severity::Error,
+        });
+    }
+    if !crate::SolverSettings::is_supported_strategy(&solver.strategy) {
+        issues.push(ValidationIssue {
+            field_path: "optimizer.solver.strategy".to_owned(),
+            message: format!(
+                "Unknown differential-evolution strategy {:?}; choose one of the registered strategies.",
+                solver.strategy
+            ),
+            severity: Severity::Error,
+        });
+    }
+    issues
+}
+
+/// MSES uses these values to construct process deadlines. Rejecting invalid
+/// values here keeps a malformed configuration from reaching
+/// `Duration::try_from_secs_f64` (or a worker thread) and makes the error
+/// visible at every run boundary, including when MSES is currently optional.
+fn mses_timeouts_are_positive_and_finite(config: &AlasConfig) -> Vec<ValidationIssue> {
+    [
+        ("mses.timeout_mset_s", config.mses.timeout_mset_s, "MSET"),
+        ("mses.timeout_mses_s", config.mses.timeout_mses_s, "MSES"),
+    ]
+    .into_iter()
+    .filter(|(_, seconds, _)| !seconds.is_finite() || *seconds <= 0.0)
+    .map(|(field_path, seconds, tool)| ValidationIssue {
+        field_path: field_path.to_owned(),
+        message: format!("{tool} timeout ({seconds:?} s) must be finite and greater than zero.",),
+        severity: Severity::Error,
+    })
+    .collect()
 }
 
 /// The cruise design point must sit inside the V-n envelope.
@@ -267,6 +332,63 @@ mod tests {
         config.requirements.dive_speed_m_s = 100.0;
         config.geometry.empennage.vstab_tip_chord_m = 10.0;
         assert_eq!(validate(&config).len(), 2);
+    }
+
+    #[test]
+    fn invalid_mses_timeouts_are_blocking_configuration_errors() {
+        let mut config = AlasConfig::default();
+        config.mses.timeout_mset_s = 0.0;
+        config.mses.timeout_mses_s = f64::NAN;
+        let issues = validate(&config);
+        assert_eq!(issues.len(), 2);
+        assert!(issues.iter().all(|issue| issue.severity == Severity::Error));
+        assert!(issues
+            .iter()
+            .any(|issue| issue.field_path == "mses.timeout_mset_s"));
+        assert!(issues
+            .iter()
+            .any(|issue| issue.field_path == "mses.timeout_mses_s"));
+    }
+
+    #[test]
+    fn nonphysical_cruise_altitude_is_a_blocking_atmosphere_error() {
+        let mut config = AlasConfig::default();
+        config.requirements.cruise_altitude_m = f64::NAN;
+        let issues = validate(&config);
+        assert!(issues.iter().any(|issue| {
+            issue.field_path == "requirements.cruise_altitude_m"
+                && issue.severity == Severity::Error
+        }));
+    }
+
+    #[test]
+    fn finite_cruise_altitudes_outside_the_atmosphere_table_are_blocked() {
+        for altitude_m in [-2_001.0, 84_853.0] {
+            let mut config = AlasConfig::default();
+            config.requirements.cruise_altitude_m = altitude_m;
+            let issues = validate(&config);
+            assert!(
+                issues.iter().any(|issue| {
+                    issue.field_path == "requirements.cruise_altitude_m"
+                        && issue.severity == Severity::Error
+                }),
+                "altitude {altitude_m} m must be rejected: {issues:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn unknown_optimizer_tokens_are_blocking_configuration_errors() {
+        let mut config = AlasConfig::default();
+        config.optimizer.solver.method = "differential_evoluton".to_owned();
+        config.optimizer.solver.strategy = "best1bni".to_owned();
+        let issues = validate(&config);
+        assert!(issues.iter().any(|issue| {
+            issue.field_path == "optimizer.solver.method" && issue.severity == Severity::Error
+        }));
+        assert!(issues.iter().any(|issue| {
+            issue.field_path == "optimizer.solver.strategy" && issue.severity == Severity::Error
+        }));
     }
 
     #[test]

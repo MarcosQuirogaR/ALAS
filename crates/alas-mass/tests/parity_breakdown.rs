@@ -4,10 +4,10 @@
 //! Compares `alas-mass::breakdown` against `alas.physics.mass`, via
 //! `golden/generators/gen_mass_breakdown.py`.
 //!
-//! The fixture runs `run_mass_analysis` on the nominal
-//! `AircraftBuilder(GeometryConfig()).build` aircraft (with engines, so the
-//! nacelle branch of `define_mass_coordinates` is reached), so comparing
-//! against it exercises `calculate_component_masses`,
+//! The fixture runs `run_mass_analysis` on the frozen-reference
+//! `AircraftBuilder::new_reference_compatibility(GeometryConfig()).build`
+//! aircraft (with engines, so the nacelle branch of `define_mass_coordinates`
+//! is reached), so comparing against it exercises `calculate_component_masses`,
 //! `define_mass_coordinates` and `calculate_physical_cg` together on the real
 //! built plane rather than a synthetic probe. Each case spreads the buildup
 //! over `DesignRequirements`/`MassModelConfig` overrides and the
@@ -91,11 +91,10 @@ fn mass_model_for(overrides: &Map<String, Value>) -> MassModelConfig {
 fn run_mass_analysis_matches_python_across_requirements_and_layout_overrides() {
     let fixture: Fixture = alas_testkit::load("mass", "breakdown");
 
-    // The nominal aircraft, built once. `new(None)` applies the engine spec in
-    // its constructor exactly as `AircraftBuilder(GeometryConfig())` does, and
-    // the mass functions read `builder.geometry` for the engine/fuselage/
-    // empennage layout, so the same value is threaded through here.
-    let builder = AircraftBuilder::new(Some(GeometryConfig::default()));
+    // The frozen parity aircraft, built once.  The product builder owns a
+    // newer transport-planform default; this fixture must replay the geometry
+    // used by the Python evidence rather than silently comparing two aircraft.
+    let builder = AircraftBuilder::new_reference_compatibility(Some(GeometryConfig::default()));
     let plane = builder
         .build(None, true)
         .expect("the nominal aircraft builds");

@@ -15946,7 +15946,1273 @@
       },
       "name": "belly_overflow",
       "oew": 0.0,
-      "why": "a belly load past what the holds can hold, so the bulk-overflow guard places the leftover as a loose block at the aft hold",
+      "why": "a belly load past what the holds can hold, so the freight is clamped to the capacity the checked bags leave rather than overflowing",
+      "x_oew": 0.0
+    },
+    {
+      "input": {
+        "cabin": {
+          "passenger": {
+            "checked_bag_mass_kg": 120.0,
+            "economy": {
+              "count": 180
+            }
+          }
+        },
+        "preset": "A320-200"
+      },
+      "layout": {
+        "cg_x": 20.339475490196072,
+        "cg_y": 0.0,
+        "decks": [
+          "main",
+          "lower"
+        ],
+        "items": [
+          {
+            "deck": "main",
+            "height": 1.25,
+            "kind": "seat_row",
+            "label": "Economy",
+            "length": 0.79,
+            "mass": 504.0,
+            "meta": {
+              "abreast": 6,
+              "aisle_w": 0.51,
+              "aisles": 1,
+              "blocks": [
+                3,
+                3
+              ],
+              "cls": "Economy",
+              "deck": "main",
+              "filled": 6,
+              "seat_w": 0.46
+            },
+            "width": 3.5405,
+            "x": 5.345000000000001,
+            "y": 0.0,
+            "z": 0.39649999999999996
+          },
+          {
+            "deck": "main",
+            "height": 1.25,
+            "kind": "seat_row",
+            "label": "Economy",
+            "length": 0.79,
+            "mass": 504.0,
+            "meta": {
+              "abreast": 6,
+              "aisle_w": 0.51,
+              "aisles": 1,
+              "blocks": [
+                3,
+                3
+              ],
+              "cls": "Economy",
+              "deck": "main",
+              "filled": 6,
+              "seat_w": 0.46
+            },
+            "width": 3.5405,
+            "x": 6.135,
+            "y": 0.0,
+            "z": 0.39649999999999996
+          },
+          {
+            "deck": "main",
+            "height": 1.25,
+            "kind": "seat_row",
+            "label": "Economy",
+            "length": 0.79,
+            "mass": 504.0,
+            "meta": {
+              "abreast": 6,
+              "aisle_w": 0.51,
+              "aisles": 1,
+              "blocks": [
+                3,
+                3
+              ],
+              "cls": "Economy",
+              "deck": "main",
+              "filled": 6,
+              "seat_w": 0.46
+            },
+            "width": 3.5405,
+            "x": 6.925000000000001,
+            "y": 0.0,
+            "z": 0.39649999999999996
+          },
+          {
+            "deck": "main",
+            "height": 1.25,
+            "kind": "seat_row",
+            "label": "Economy",
+            "length": 0.79,
+            "mass": 504.0,
+            "meta": {
+              "abreast": 6,
+              "aisle_w": 0.51,
+              "aisles": 1,
+              "blocks": [
+                3,
+                3
+              ],
+              "cls": "Economy",
+              "deck": "main",
+              "filled": 6,
+              "seat_w": 0.46
+            },
+            "width": 3.5405,
+            "x": 7.715,
+            "y": 0.0,
+            "z": 0.39649999999999996
+          },
+          {
+            "deck": "main",
+            "height": 1.25,
+            "kind": "seat_row",
+            "label": "Economy",
+            "length": 0.79,
+            "mass": 504.0,
+            "meta": {
+              "abreast": 6,
+              "aisle_w": 0.51,
+              "aisles": 1,
+              "blocks": [
+                3,
+                3
+              ],
+              "cls": "Economy",
+              "deck": "main",
+              "filled": 6,
+              "seat_w": 0.46
+            },
+            "width": 3.5405,
+            "x": 8.504999999999999,
+            "y": 0.0,
+            "z": 0.39649999999999996
+          },
+          {
+            "deck": "main",
+            "height": 1.25,
+            "kind": "seat_row",
+            "label": "Economy",
+            "length": 0.79,
+            "mass": 504.0,
+            "meta": {
+              "abreast": 6,
+              "aisle_w": 0.51,
+              "aisles": 1,
+              "blocks": [
+                3,
+                3
+              ],
+              "cls": "Economy",
+              "deck": "main",
+              "filled": 6,
+              "seat_w": 0.46
+            },
+            "width": 3.5405,
+            "x": 9.294999999999998,
+            "y": 0.0,
+            "z": 0.39649999999999996
+          },
+          {
+            "deck": "main",
+            "height": 1.25,
+            "kind": "seat_row",
+            "label": "Economy",
+            "length": 0.79,
+            "mass": 504.0,
+            "meta": {
+              "abreast": 6,
+              "aisle_w": 0.51,
+              "aisles": 1,
+              "blocks": [
+                3,
+                3
+              ],
+              "cls": "Economy",
+              "deck": "main",
+              "filled": 6,
+              "seat_w": 0.46
+            },
+            "width": 3.5405,
+            "x": 10.084999999999997,
+            "y": 0.0,
+            "z": 0.39649999999999996
+          },
+          {
+            "deck": "main",
+            "height": 1.25,
+            "kind": "seat_row",
+            "label": "Economy",
+            "length": 0.79,
+            "mass": 504.0,
+            "meta": {
+              "abreast": 6,
+              "aisle_w": 0.51,
+              "aisles": 1,
+              "blocks": [
+                3,
+                3
+              ],
+              "cls": "Economy",
+              "deck": "main",
+              "filled": 6,
+              "seat_w": 0.46
+            },
+            "width": 3.5405,
+            "x": 10.874999999999996,
+            "y": 0.0,
+            "z": 0.39649999999999996
+          },
+          {
+            "deck": "main",
+            "height": 1.25,
+            "kind": "seat_row",
+            "label": "Economy",
+            "length": 0.79,
+            "mass": 504.0,
+            "meta": {
+              "abreast": 6,
+              "aisle_w": 0.51,
+              "aisles": 1,
+              "blocks": [
+                3,
+                3
+              ],
+              "cls": "Economy",
+              "deck": "main",
+              "filled": 6,
+              "seat_w": 0.46
+            },
+            "width": 3.5405,
+            "x": 11.664999999999996,
+            "y": 0.0,
+            "z": 0.39649999999999996
+          },
+          {
+            "deck": "main",
+            "height": 1.25,
+            "kind": "seat_row",
+            "label": "Economy",
+            "length": 0.79,
+            "mass": 504.0,
+            "meta": {
+              "abreast": 6,
+              "aisle_w": 0.51,
+              "aisles": 1,
+              "blocks": [
+                3,
+                3
+              ],
+              "cls": "Economy",
+              "deck": "main",
+              "filled": 6,
+              "seat_w": 0.46
+            },
+            "width": 3.5405,
+            "x": 13.404999999999994,
+            "y": 0.0,
+            "z": 0.39649999999999996
+          },
+          {
+            "deck": "main",
+            "height": 1.25,
+            "kind": "seat_row",
+            "label": "Economy",
+            "length": 0.79,
+            "mass": 504.0,
+            "meta": {
+              "abreast": 6,
+              "aisle_w": 0.51,
+              "aisles": 1,
+              "blocks": [
+                3,
+                3
+              ],
+              "cls": "Economy",
+              "deck": "main",
+              "filled": 6,
+              "seat_w": 0.46
+            },
+            "width": 3.5405,
+            "x": 14.194999999999993,
+            "y": 0.0,
+            "z": 0.39649999999999996
+          },
+          {
+            "deck": "main",
+            "height": 1.25,
+            "kind": "seat_row",
+            "label": "Economy",
+            "length": 0.79,
+            "mass": 504.0,
+            "meta": {
+              "abreast": 6,
+              "aisle_w": 0.51,
+              "aisles": 1,
+              "blocks": [
+                3,
+                3
+              ],
+              "cls": "Economy",
+              "deck": "main",
+              "filled": 6,
+              "seat_w": 0.46
+            },
+            "width": 3.5405,
+            "x": 14.984999999999992,
+            "y": 0.0,
+            "z": 0.39649999999999996
+          },
+          {
+            "deck": "main",
+            "height": 1.25,
+            "kind": "seat_row",
+            "label": "Economy",
+            "length": 0.79,
+            "mass": 504.0,
+            "meta": {
+              "abreast": 6,
+              "aisle_w": 0.51,
+              "aisles": 1,
+              "blocks": [
+                3,
+                3
+              ],
+              "cls": "Economy",
+              "deck": "main",
+              "filled": 6,
+              "seat_w": 0.46
+            },
+            "width": 3.5405,
+            "x": 15.774999999999991,
+            "y": 0.0,
+            "z": 0.39649999999999996
+          },
+          {
+            "deck": "main",
+            "height": 1.25,
+            "kind": "seat_row",
+            "label": "Economy",
+            "length": 0.79,
+            "mass": 504.0,
+            "meta": {
+              "abreast": 6,
+              "aisle_w": 0.51,
+              "aisles": 1,
+              "blocks": [
+                3,
+                3
+              ],
+              "cls": "Economy",
+              "deck": "main",
+              "filled": 6,
+              "seat_w": 0.46
+            },
+            "width": 3.5405,
+            "x": 16.56499999999999,
+            "y": 0.0,
+            "z": 0.39649999999999996
+          },
+          {
+            "deck": "main",
+            "height": 1.25,
+            "kind": "seat_row",
+            "label": "Economy",
+            "length": 0.79,
+            "mass": 504.0,
+            "meta": {
+              "abreast": 6,
+              "aisle_w": 0.51,
+              "aisles": 1,
+              "blocks": [
+                3,
+                3
+              ],
+              "cls": "Economy",
+              "deck": "main",
+              "filled": 6,
+              "seat_w": 0.46
+            },
+            "width": 3.5405,
+            "x": 17.35499999999999,
+            "y": 0.0,
+            "z": 0.39649999999999996
+          },
+          {
+            "deck": "main",
+            "height": 1.25,
+            "kind": "seat_row",
+            "label": "Economy",
+            "length": 0.79,
+            "mass": 504.0,
+            "meta": {
+              "abreast": 6,
+              "aisle_w": 0.51,
+              "aisles": 1,
+              "blocks": [
+                3,
+                3
+              ],
+              "cls": "Economy",
+              "deck": "main",
+              "filled": 6,
+              "seat_w": 0.46
+            },
+            "width": 3.5405,
+            "x": 18.14499999999999,
+            "y": 0.0,
+            "z": 0.39649999999999996
+          },
+          {
+            "deck": "main",
+            "height": 1.25,
+            "kind": "seat_row",
+            "label": "Economy",
+            "length": 0.79,
+            "mass": 504.0,
+            "meta": {
+              "abreast": 6,
+              "aisle_w": 0.51,
+              "aisles": 1,
+              "blocks": [
+                3,
+                3
+              ],
+              "cls": "Economy",
+              "deck": "main",
+              "filled": 6,
+              "seat_w": 0.46
+            },
+            "width": 3.5405,
+            "x": 19.884999999999987,
+            "y": 0.0,
+            "z": 0.39649999999999996
+          },
+          {
+            "deck": "main",
+            "height": 1.25,
+            "kind": "seat_row",
+            "label": "Economy",
+            "length": 0.79,
+            "mass": 504.0,
+            "meta": {
+              "abreast": 6,
+              "aisle_w": 0.51,
+              "aisles": 1,
+              "blocks": [
+                3,
+                3
+              ],
+              "cls": "Economy",
+              "deck": "main",
+              "filled": 6,
+              "seat_w": 0.46
+            },
+            "width": 3.5405,
+            "x": 20.674999999999986,
+            "y": 0.0,
+            "z": 0.39649999999999996
+          },
+          {
+            "deck": "main",
+            "height": 1.25,
+            "kind": "seat_row",
+            "label": "Economy",
+            "length": 0.79,
+            "mass": 504.0,
+            "meta": {
+              "abreast": 6,
+              "aisle_w": 0.51,
+              "aisles": 1,
+              "blocks": [
+                3,
+                3
+              ],
+              "cls": "Economy",
+              "deck": "main",
+              "filled": 6,
+              "seat_w": 0.46
+            },
+            "width": 3.5405,
+            "x": 21.464999999999986,
+            "y": 0.0,
+            "z": 0.39649999999999996
+          },
+          {
+            "deck": "main",
+            "height": 1.25,
+            "kind": "seat_row",
+            "label": "Economy",
+            "length": 0.79,
+            "mass": 504.0,
+            "meta": {
+              "abreast": 6,
+              "aisle_w": 0.51,
+              "aisles": 1,
+              "blocks": [
+                3,
+                3
+              ],
+              "cls": "Economy",
+              "deck": "main",
+              "filled": 6,
+              "seat_w": 0.46
+            },
+            "width": 3.5405,
+            "x": 22.254999999999985,
+            "y": 0.0,
+            "z": 0.39649999999999996
+          },
+          {
+            "deck": "main",
+            "height": 1.25,
+            "kind": "seat_row",
+            "label": "Economy",
+            "length": 0.79,
+            "mass": 504.0,
+            "meta": {
+              "abreast": 6,
+              "aisle_w": 0.51,
+              "aisles": 1,
+              "blocks": [
+                3,
+                3
+              ],
+              "cls": "Economy",
+              "deck": "main",
+              "filled": 6,
+              "seat_w": 0.46
+            },
+            "width": 3.5405,
+            "x": 23.044999999999984,
+            "y": 0.0,
+            "z": 0.39649999999999996
+          },
+          {
+            "deck": "main",
+            "height": 1.25,
+            "kind": "seat_row",
+            "label": "Economy",
+            "length": 0.79,
+            "mass": 504.0,
+            "meta": {
+              "abreast": 6,
+              "aisle_w": 0.51,
+              "aisles": 1,
+              "blocks": [
+                3,
+                3
+              ],
+              "cls": "Economy",
+              "deck": "main",
+              "filled": 6,
+              "seat_w": 0.46
+            },
+            "width": 3.5405,
+            "x": 23.834999999999983,
+            "y": 0.0,
+            "z": 0.39649999999999996
+          },
+          {
+            "deck": "main",
+            "height": 1.25,
+            "kind": "seat_row",
+            "label": "Economy",
+            "length": 0.79,
+            "mass": 504.0,
+            "meta": {
+              "abreast": 6,
+              "aisle_w": 0.51,
+              "aisles": 1,
+              "blocks": [
+                3,
+                3
+              ],
+              "cls": "Economy",
+              "deck": "main",
+              "filled": 6,
+              "seat_w": 0.46
+            },
+            "width": 3.5405,
+            "x": 24.624999999999982,
+            "y": 0.0,
+            "z": 0.39649999999999996
+          },
+          {
+            "deck": "main",
+            "height": 1.25,
+            "kind": "seat_row",
+            "label": "Economy",
+            "length": 0.79,
+            "mass": 504.0,
+            "meta": {
+              "abreast": 6,
+              "aisle_w": 0.51,
+              "aisles": 1,
+              "blocks": [
+                3,
+                3
+              ],
+              "cls": "Economy",
+              "deck": "main",
+              "filled": 6,
+              "seat_w": 0.46
+            },
+            "width": 3.5405,
+            "x": 26.36499999999998,
+            "y": 0.0,
+            "z": 0.39649999999999996
+          },
+          {
+            "deck": "main",
+            "height": 1.25,
+            "kind": "seat_row",
+            "label": "Economy",
+            "length": 0.79,
+            "mass": 504.0,
+            "meta": {
+              "abreast": 6,
+              "aisle_w": 0.51,
+              "aisles": 1,
+              "blocks": [
+                3,
+                3
+              ],
+              "cls": "Economy",
+              "deck": "main",
+              "filled": 6,
+              "seat_w": 0.46
+            },
+            "width": 3.5405,
+            "x": 27.15499999999998,
+            "y": 0.0,
+            "z": 0.39649999999999996
+          },
+          {
+            "deck": "main",
+            "height": 1.25,
+            "kind": "seat_row",
+            "label": "Economy",
+            "length": 0.79,
+            "mass": 504.0,
+            "meta": {
+              "abreast": 6,
+              "aisle_w": 0.51,
+              "aisles": 1,
+              "blocks": [
+                3,
+                3
+              ],
+              "cls": "Economy",
+              "deck": "main",
+              "filled": 6,
+              "seat_w": 0.46
+            },
+            "width": 3.5405,
+            "x": 27.94499999999998,
+            "y": 0.0,
+            "z": 0.39649999999999996
+          },
+          {
+            "deck": "main",
+            "height": 1.25,
+            "kind": "seat_row",
+            "label": "Economy",
+            "length": 0.79,
+            "mass": 504.0,
+            "meta": {
+              "abreast": 6,
+              "aisle_w": 0.51,
+              "aisles": 1,
+              "blocks": [
+                3,
+                3
+              ],
+              "cls": "Economy",
+              "deck": "main",
+              "filled": 6,
+              "seat_w": 0.46
+            },
+            "width": 3.5405,
+            "x": 28.734999999999978,
+            "y": 0.0,
+            "z": 0.39649999999999996
+          },
+          {
+            "deck": "main",
+            "height": 1.25,
+            "kind": "seat_row",
+            "label": "Economy",
+            "length": 0.79,
+            "mass": 504.0,
+            "meta": {
+              "abreast": 6,
+              "aisle_w": 0.51,
+              "aisles": 1,
+              "blocks": [
+                3,
+                3
+              ],
+              "cls": "Economy",
+              "deck": "main",
+              "filled": 6,
+              "seat_w": 0.46
+            },
+            "width": 3.5405,
+            "x": 29.524999999999977,
+            "y": 0.0,
+            "z": 0.39649999999999996
+          },
+          {
+            "deck": "main",
+            "height": 1.25,
+            "kind": "seat_row",
+            "label": "Economy",
+            "length": 0.79,
+            "mass": 504.0,
+            "meta": {
+              "abreast": 6,
+              "aisle_w": 0.51,
+              "aisles": 1,
+              "blocks": [
+                3,
+                3
+              ],
+              "cls": "Economy",
+              "deck": "main",
+              "filled": 6,
+              "seat_w": 0.46
+            },
+            "width": 3.5405,
+            "x": 30.314999999999976,
+            "y": 0.0,
+            "z": 0.39649999999999996
+          },
+          {
+            "deck": "main",
+            "height": 1.25,
+            "kind": "seat_row",
+            "label": "Economy",
+            "length": 0.79,
+            "mass": 504.0,
+            "meta": {
+              "abreast": 6,
+              "aisle_w": 0.51,
+              "aisles": 1,
+              "blocks": [
+                3,
+                3
+              ],
+              "cls": "Economy",
+              "deck": "main",
+              "filled": 6,
+              "seat_w": 0.46
+            },
+            "width": 3.4315151111111155,
+            "x": 31.104999999999976,
+            "y": 0.0,
+            "z": 0.4322119999999987
+          },
+          {
+            "deck": "main",
+            "height": 1.25,
+            "kind": "galley",
+            "label": "Galley",
+            "length": 0.95,
+            "mass": 0.0,
+            "meta": {},
+            "width": 0.85,
+            "x": 4.475,
+            "y": 1.34525,
+            "z": 0.39649999999999996
+          },
+          {
+            "deck": "main",
+            "height": 1.25,
+            "kind": "galley",
+            "label": "Galley",
+            "length": 0.95,
+            "mass": 0.0,
+            "meta": {},
+            "width": 0.85,
+            "x": 31.47,
+            "y": 1.2600255918864602,
+            "z": 0.5008148656844743
+          },
+          {
+            "deck": "main",
+            "height": 1.25,
+            "kind": "galley",
+            "label": "Galley",
+            "length": 0.95,
+            "mass": 0.0,
+            "meta": {},
+            "width": 0.85,
+            "x": 12.534999999999995,
+            "y": 1.34525,
+            "z": 0.39649999999999996
+          },
+          {
+            "deck": "main",
+            "height": 1.25,
+            "kind": "lav",
+            "label": "Lav",
+            "length": 0.95,
+            "mass": 0.0,
+            "meta": {},
+            "width": 0.9,
+            "x": 4.475,
+            "y": -1.3202500000000001,
+            "z": 0.39649999999999996
+          },
+          {
+            "deck": "main",
+            "height": 1.25,
+            "kind": "lav",
+            "label": "Lav",
+            "length": 0.95,
+            "mass": 0.0,
+            "meta": {},
+            "width": 0.9,
+            "x": 31.47,
+            "y": -1.2350255918864603,
+            "z": 0.5008148656844743
+          },
+          {
+            "deck": "main",
+            "height": 1.25,
+            "kind": "lav",
+            "label": "Lav",
+            "length": 0.95,
+            "mass": 0.0,
+            "meta": {},
+            "width": 0.9,
+            "x": 12.534999999999995,
+            "y": -1.3202500000000001,
+            "z": 0.39649999999999996
+          },
+          {
+            "deck": "main",
+            "height": 1.25,
+            "kind": "lav",
+            "label": "Lav",
+            "length": 0.95,
+            "mass": 0.0,
+            "meta": {},
+            "width": 0.9,
+            "x": 25.494999999999983,
+            "y": -1.3202500000000001,
+            "z": 0.39649999999999996
+          },
+          {
+            "deck": "main",
+            "height": 1.22,
+            "kind": "exit",
+            "label": "Type C",
+            "length": 0.76,
+            "mass": 0.0,
+            "meta": {
+              "door_h": 1.22,
+              "door_w": 0.76,
+              "type": "C"
+            },
+            "width": 0.25,
+            "x": 4.475,
+            "y": -1.92025,
+            "z": 0.38149999999999995
+          },
+          {
+            "deck": "main",
+            "height": 1.22,
+            "kind": "exit",
+            "label": "Type C",
+            "length": 0.76,
+            "mass": 0.0,
+            "meta": {
+              "door_h": 1.22,
+              "door_w": 0.76,
+              "type": "C"
+            },
+            "width": 0.25,
+            "x": 4.475,
+            "y": 1.92025,
+            "z": 0.38149999999999995
+          },
+          {
+            "deck": "main",
+            "height": 1.22,
+            "kind": "exit",
+            "label": "Type C",
+            "length": 0.76,
+            "mass": 0.0,
+            "meta": {
+              "door_h": 1.22,
+              "door_w": 0.76,
+              "type": "C"
+            },
+            "width": 0.25,
+            "x": 12.534999999999995,
+            "y": -1.92025,
+            "z": 0.38149999999999995
+          },
+          {
+            "deck": "main",
+            "height": 1.22,
+            "kind": "exit",
+            "label": "Type C",
+            "length": 0.76,
+            "mass": 0.0,
+            "meta": {
+              "door_h": 1.22,
+              "door_w": 0.76,
+              "type": "C"
+            },
+            "width": 0.25,
+            "x": 12.534999999999995,
+            "y": 1.92025,
+            "z": 0.38149999999999995
+          },
+          {
+            "deck": "main",
+            "height": 1.22,
+            "kind": "exit",
+            "label": "Type C",
+            "length": 0.76,
+            "mass": 0.0,
+            "meta": {
+              "door_h": 1.22,
+              "door_w": 0.76,
+              "type": "C"
+            },
+            "width": 0.25,
+            "x": 25.494999999999983,
+            "y": -1.92025,
+            "z": 0.38149999999999995
+          },
+          {
+            "deck": "main",
+            "height": 1.22,
+            "kind": "exit",
+            "label": "Type C",
+            "length": 0.76,
+            "mass": 0.0,
+            "meta": {
+              "door_h": 1.22,
+              "door_w": 0.76,
+              "type": "C"
+            },
+            "width": 0.25,
+            "x": 25.494999999999983,
+            "y": 1.92025,
+            "z": 0.38149999999999995
+          },
+          {
+            "deck": "main",
+            "height": 1.22,
+            "kind": "exit",
+            "label": "Type C",
+            "length": 0.76,
+            "mass": 0.0,
+            "meta": {
+              "door_h": 1.22,
+              "door_w": 0.76,
+              "type": "C"
+            },
+            "width": 0.25,
+            "x": 31.47,
+            "y": -1.7610773963082185,
+            "z": 0.4858148656844743
+          },
+          {
+            "deck": "main",
+            "height": 1.22,
+            "kind": "exit",
+            "label": "Type C",
+            "length": 0.76,
+            "mass": 0.0,
+            "meta": {
+              "door_h": 1.22,
+              "door_w": 0.76,
+              "type": "C"
+            },
+            "width": 0.25,
+            "x": 31.47,
+            "y": 1.7610773963082185,
+            "z": 0.4858148656844743
+          },
+          {
+            "deck": "lower",
+            "height": 1.14,
+            "kind": "bag",
+            "label": "AKH 1134 kg",
+            "length": 1.56,
+            "mass": 1134,
+            "meta": {
+              "bags": true,
+              "color": "#e57373",
+              "fill": 1.0,
+              "uld": "AKH"
+            },
+            "width": 1.53,
+            "x": 5.08,
+            "y": 0.0,
+            "z": -1.0637500000000002
+          },
+          {
+            "deck": "lower",
+            "height": 1.14,
+            "kind": "bag",
+            "label": "AKH 1134 kg",
+            "length": 1.56,
+            "mass": 1134,
+            "meta": {
+              "bags": true,
+              "color": "#e57373",
+              "fill": 1.0,
+              "uld": "AKH"
+            },
+            "width": 1.53,
+            "x": 6.720000000000001,
+            "y": 0.0,
+            "z": -1.0637500000000002
+          },
+          {
+            "deck": "lower",
+            "height": 1.14,
+            "kind": "bag",
+            "label": "AKH 1134 kg",
+            "length": 1.56,
+            "mass": 1134,
+            "meta": {
+              "bags": true,
+              "color": "#e57373",
+              "fill": 1.0,
+              "uld": "AKH"
+            },
+            "width": 1.53,
+            "x": 8.360000000000001,
+            "y": 0.0,
+            "z": -1.0637500000000002
+          },
+          {
+            "deck": "lower",
+            "height": 1.14,
+            "kind": "bag",
+            "label": "AKH 1134 kg",
+            "length": 1.56,
+            "mass": 1134,
+            "meta": {
+              "bags": true,
+              "color": "#e57373",
+              "fill": 1.0,
+              "uld": "AKH"
+            },
+            "width": 1.53,
+            "x": 10.000000000000002,
+            "y": 0.0,
+            "z": -1.0637500000000002
+          },
+          {
+            "deck": "lower",
+            "height": 1.14,
+            "kind": "bag",
+            "label": "AKH 1134 kg",
+            "length": 1.56,
+            "mass": 1134,
+            "meta": {
+              "bags": true,
+              "color": "#e57373",
+              "fill": 1.0,
+              "uld": "AKH"
+            },
+            "width": 1.53,
+            "x": 11.640000000000002,
+            "y": 0.0,
+            "z": -1.0637500000000002
+          },
+          {
+            "deck": "lower",
+            "height": 1.14,
+            "kind": "bag",
+            "label": "AKH 1134 kg",
+            "length": 1.56,
+            "mass": 1134,
+            "meta": {
+              "bags": true,
+              "color": "#e57373",
+              "fill": 1.0,
+              "uld": "AKH"
+            },
+            "width": 1.53,
+            "x": 19.98,
+            "y": 0.0,
+            "z": -1.0637500000000002
+          },
+          {
+            "deck": "lower",
+            "height": 1.14,
+            "kind": "bag",
+            "label": "AKH 1134 kg",
+            "length": 1.56,
+            "mass": 1134,
+            "meta": {
+              "bags": true,
+              "color": "#e57373",
+              "fill": 1.0,
+              "uld": "AKH"
+            },
+            "width": 1.53,
+            "x": 21.62,
+            "y": 0.0,
+            "z": -1.0637500000000002
+          },
+          {
+            "deck": "lower",
+            "height": 1.14,
+            "kind": "bag",
+            "label": "AKH 1134 kg",
+            "length": 1.56,
+            "mass": 1134,
+            "meta": {
+              "bags": true,
+              "color": "#e57373",
+              "fill": 1.0,
+              "uld": "AKH"
+            },
+            "width": 1.53,
+            "x": 23.26,
+            "y": 0.0,
+            "z": -1.0637500000000002
+          },
+          {
+            "deck": "lower",
+            "height": 1.14,
+            "kind": "bag",
+            "label": "AKH 1134 kg",
+            "length": 1.56,
+            "mass": 1134,
+            "meta": {
+              "bags": true,
+              "color": "#e57373",
+              "fill": 1.0,
+              "uld": "AKH"
+            },
+            "width": 1.53,
+            "x": 24.900000000000002,
+            "y": 0.0,
+            "z": -1.0637500000000002
+          },
+          {
+            "deck": "lower",
+            "height": 1.14,
+            "kind": "bag",
+            "label": "AKH 1134 kg",
+            "length": 1.56,
+            "mass": 1134,
+            "meta": {
+              "bags": true,
+              "color": "#e57373",
+              "fill": 1.0,
+              "uld": "AKH"
+            },
+            "width": 1.53,
+            "x": 26.540000000000003,
+            "y": 0.0,
+            "z": -1.0637500000000002
+          },
+          {
+            "deck": "lower",
+            "height": 1.14,
+            "kind": "bag",
+            "label": "AKH 1134 kg",
+            "length": 1.56,
+            "mass": 1134,
+            "meta": {
+              "bags": true,
+              "color": "#e57373",
+              "fill": 1.0,
+              "uld": "AKH"
+            },
+            "width": 1.53,
+            "x": 28.180000000000003,
+            "y": 0.0,
+            "z": -1.0637500000000002
+          },
+          {
+            "deck": "lower",
+            "height": 1.3687500000000001,
+            "kind": "bag",
+            "label": "BLK 1098 kg",
+            "length": 1.5,
+            "mass": 1098.0,
+            "meta": {
+              "bags": true,
+              "color": "#95a5a6",
+              "fill": 0.549,
+              "uld": "BLK"
+            },
+            "width": 2.0,
+            "x": 29.27,
+            "y": 0.0,
+            "z": -0.949375
+          },
+          {
+            "deck": "lower",
+            "height": 1.3687500000000001,
+            "kind": "bag",
+            "label": "Bulk overflow",
+            "length": 2.0,
+            "mass": 8028.0,
+            "meta": {
+              "bags": true
+            },
+            "width": 2.19,
+            "x": 28.57,
+            "y": 0.0,
+            "z": -0.949375
+          }
+        ],
+        "mode": "passenger",
+        "summary": {
+          "aisle_width_m": 0.51,
+          "bag_mass_t": 21.6,
+          "belly_cargo_t": 0.0,
+          "cg_pct_mac": 108.54806604631628,
+          "classes": {
+            "Economy": 180
+          },
+          "deck_utilization": {
+            "main": 100.0
+          },
+          "double_deck": false,
+          "exit_capacity": 440,
+          "exit_pairs": 4,
+          "exit_type": "C",
+          "galleys": 3,
+          "hold_capacity_t": 13.572,
+          "hold_ulds": 12,
+          "hold_used_t": 21.6,
+          "lavatories": 4,
+          "max_abreast": 6,
+          "max_certifiable_capacity": 220,
+          "mode": "passenger",
+          "n_aisles": 1,
+          "payload_t": 36.72,
+          "seat_mass_t": 15.12,
+          "seated_pax": 180,
+          "total_pax": 180
+        },
+        "total_mass": 36720.0
+      },
+      "name": "bag_overflow",
+      "oew": 0.0,
+      "why": "checked baggage alone past the holds' capacity, which is the only way to reach the bulk-overflow guard: the belly freight is clamped to what the bags leave, and the bags themselves are not",
       "x_oew": 0.0
     },
     {

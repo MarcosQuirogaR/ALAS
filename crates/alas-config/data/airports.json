@@ -219,6 +219,94 @@
       "name": "Lukla Tenzing-Hillary (VNLK)",
       "notes": "Extreme mountain strip \u2014 reference edge case only",
       "toda_m": 527
+    },
+    {
+      "elevation_m": 11,
+      "icao": "EVRA",
+      "isa_deviation_c": 0.0,
+      "latitude_deg": 56.9236,
+      "lda_m": 3200,
+      "longitude_deg": 23.9711,
+      "name": "Riga (EVRA)",
+      "notes": "airBaltic A220 hub; longest runway",
+      "toda_m": 3200
+    },
+    {
+      "elevation_m": 42,
+      "icao": "ESSA",
+      "isa_deviation_c": 0.0,
+      "latitude_deg": 59.6519,
+      "lda_m": 3301,
+      "longitude_deg": 17.9186,
+      "name": "Stockholm Arlanda (ESSA)",
+      "notes": "Principal Stockholm international airport; longest runway",
+      "toda_m": 3301
+    },
+    {
+      "elevation_m": 8,
+      "icao": "LEPA",
+      "isa_deviation_c": 8.0,
+      "latitude_deg": 39.5517,
+      "lda_m": 3270,
+      "longitude_deg": 2.7388,
+      "name": "Palma de Mallorca (LEPA)",
+      "notes": "High-volume Spanish leisure airport; longest runway",
+      "toda_m": 3270
+    },
+    {
+      "elevation_m": 6,
+      "icao": "KBOS",
+      "isa_deviation_c": 0.0,
+      "latitude_deg": 42.3656,
+      "lda_m": 3073,
+      "longitude_deg": -71.0096,
+      "name": "Boston Logan (KBOS)",
+      "notes": "North Atlantic destination; longest runway",
+      "toda_m": 3073
+    },
+    {
+      "elevation_m": 6,
+      "icao": "RJTT",
+      "isa_deviation_c": 5.0,
+      "latitude_deg": 35.5494,
+      "lda_m": 3360,
+      "longitude_deg": 139.7798,
+      "name": "Tokyo Haneda (RJTT)",
+      "notes": "High-demand Japanese hub; longest runway",
+      "toda_m": 3360
+    },
+    {
+      "elevation_m": 6,
+      "icao": "YSSY",
+      "isa_deviation_c": 5.0,
+      "latitude_deg": -33.9399,
+      "lda_m": 3962,
+      "longitude_deg": 151.1753,
+      "name": "Sydney (YSSY)",
+      "notes": "Long-haul Australian hub; longest runway",
+      "toda_m": 3962
+    },
+    {
+      "elevation_m": 5,
+      "icao": "RJBB",
+      "isa_deviation_c": 5.0,
+      "latitude_deg": 34.4347,
+      "lda_m": 4000,
+      "longitude_deg": 135.2441,
+      "name": "Osaka Kansai (RJBB)",
+      "notes": "Historical Northwest DC-10 route endpoint; longest runway",
+      "toda_m": 4000
+    },
+    {
+      "elevation_m": 4,
+      "icao": "PHNL",
+      "isa_deviation_c": 8.0,
+      "latitude_deg": 21.3187,
+      "lda_m": 3749,
+      "longitude_deg": -157.9225,
+      "name": "Honolulu (PHNL)",
+      "notes": "Historical trans-Pacific DC-10 destination; longest runway",
+      "toda_m": 3749
     }
   ]
 }

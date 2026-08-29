@@ -1,0 +1,107 @@
+{
+  "fixtures": {
+    "mission": {
+      "description": "End-to-end SUAVE mission: default AVE aircraft, LEMD to HKJK at 6500 km, twelve segments of sixteen control points, with the resolved vehicle, the trained vortex-lattice tables and the segment schedule recorded as inputs",
+      "generator": "gen_mission.py",
+      "runtime": "suave",
+      "alas_commit": "7d1555c1f4db5110cf6cd187c156718e1a033b50",
+      "environment": {
+        "suave": {
+          "version": "2.5.2",
+          "tree": "external tools/SUAVE-2.5.2/trunk"
+        },
+        "scipy": "1.11.4",
+        "platform": "Windows-10-10.0.26200-SP0",
+        "aerosandbox": "absent",
+        "python": "3.10.20",
+        "numpy": "1.26.4"
+      }
+    },
+    "mission_segments": {
+      "description": "One iteration of a climb, a cruise and a descent segment at a fixed, unsolved unknown vector, recording every update method's output separately so a wrong step names itself",
+      "generator": "gen_mission.py",
+      "runtime": "suave",
+      "alas_commit": "7d1555c1f4db5110cf6cd187c156718e1a033b50",
+      "environment": {
+        "suave": {
+          "version": "2.5.2",
+          "tree": "external tools/SUAVE-2.5.2/trunk"
+        },
+        "scipy": "1.11.4",
+        "platform": "Windows-10-10.0.26200-SP0",
+        "aerosandbox": "absent",
+        "python": "3.10.20",
+        "numpy": "1.26.4"
+      }
+    },
+    "numerics": {
+      "description": "SUAVE Numerics defaults and the Chebyshev differentiation/integration operators, dimensionless and rescaled onto two segment durations.",
+      "generator": "gen_mission_numerics.py",
+      "runtime": "suave",
+      "alas_commit": "7d1555c1f4db5110cf6cd187c156718e1a033b50",
+      "environment": {
+        "suave": {
+          "version": "2.5.2",
+          "tree": "external tools/SUAVE-2.5.2/trunk"
+        },
+        "scipy": "1.11.4",
+        "platform": "Windows-10-10.0.26200-SP0",
+        "aerosandbox": "absent",
+        "python": "3.10.20",
+        "numpy": "1.26.4"
+      }
+    },
+    "profile": {
+      "description": "build_mission_request over four preset/route pairs: the mission half of the SUAVE mission request, checking field routing and the origin-to-destination tag.",
+      "generator": "gen_mission_profile.py",
+      "runtime": "alas",
+      "alas_commit": "7d1555c1f4db5110cf6cd187c156718e1a033b50",
+      "environment": {
+        "numpy": "2.5.1",
+        "aerosandbox": "4.2.8",
+        "platform": "Windows-11-10.0.26200-SP0",
+        "scipy": "1.17.1",
+        "python": "3.13.13"
+      }
+    },
+    "vehicle": {
+      "description": "build_vehicle_request over two presets' full-analysis reports: the vehicle half of the SUAVE mission request, checking the cruise-thrust derivation, the engine/requirements blocks and the geometry and report passthroughs.",
+      "generator": "gen_mission_vehicle.py",
+      "runtime": "alas",
+      "alas_commit": "7d1555c1f4db5110cf6cd187c156718e1a033b50",
+      "environment": {
+        "numpy": "2.5.1",
+        "aerosandbox": "4.2.8",
+        "platform": "Windows-11-10.0.26200-SP0",
+        "scipy": "1.17.1",
+        "python": "3.13.13"
+      }
+    },
+    "w64_provenance": {
+      "description": "W6.4 dual-runtime provenance and comparison checkpoints: the frozen Python reference-compatible mass coordinates feed the ALAS report/request, followed by the real SUAVE vehicle, mission solve, solver contract, inputs, geometry, and segment-level outputs. Product structural-wingbox CG corrections are tested separately without rewriting this reference evidence.",
+      "generator": "gen_w64_mission_provenance.py --stage=build, then --stage=solve",
+      "runtime": "suave",
+      "alas_commit": "7d1555c1f4db5110cf6cd187c156718e1a033b50",
+      "environment": {
+        "alas": {
+          "numpy": "2.5.1",
+          "aerosandbox": "4.2.8",
+          "platform": "Windows-11-10.0.26200-SP0",
+          "scipy": "1.17.1",
+          "python": "3.13.13"
+        },
+        "suave": {
+          "numpy": "1.26.4",
+          "aerosandbox": "absent",
+          "platform": "Windows-10-10.0.26200-SP0",
+          "scipy": "1.11.4",
+          "python": "3.10.20",
+          "suave": {
+            "version": "2.5.2",
+            "tree": "external tools/SUAVE-2.5.2/trunk"
+          }
+        }
+      }
+    }
+  }
+}

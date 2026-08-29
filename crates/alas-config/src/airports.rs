@@ -131,7 +131,7 @@ mod tests {
 
     #[test]
     fn the_embedded_table_parses_into_the_curated_aerodromes() {
-        assert_eq!(database().len(), 20);
+        assert_eq!(database().len(), 28);
     }
 
     #[test]

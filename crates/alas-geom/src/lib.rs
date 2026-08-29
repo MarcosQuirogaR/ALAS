@@ -15,12 +15,11 @@
 //!
 //! # What lives here, and what does not
 //!
-//! Two provenances share the crate. `alas/geometry/` is this program's own
-//! code -- the airfoil library, the parametric shaping, the builder, the
-//! wingbox. The `asb` module is translated from AeroSandbox's geometry model,
-//! whose `Airfoil`, `Wing` and `Fuselage` the reference uses as its data
-//! structures rather than defining its own; a translation that replaced them
-//! with something better shaped would have nothing left to compare against.
+//! Two layers share the crate. `alas/geometry/` is this program's own code --
+//! the airfoil library, the parametric shaping, the builder, the wingbox. The
+//! `aircraft` facade exposes the common aircraft data model used by production
+//! consumers; its compatibility implementation remains private to that
+//! migration boundary so all disciplines share one set of shapes.
 //!
 //! The structural *mesh* is not here. It belongs to `alas-struct`, because it
 //! exists to be handed to a finite-element solver and its cards are that
@@ -38,9 +37,12 @@
 // controls, so a failed unwrap there is the assertion failing.
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
+pub mod aircraft;
 pub mod airfoil_data;
 pub mod airfoil_library;
-pub mod asb;
+/// Compatibility alias for older solver and unpublished parity callers.
+#[doc(hidden)]
+pub use aircraft as asb;
 pub mod builder;
 pub mod selig;
 pub mod wing_structure;

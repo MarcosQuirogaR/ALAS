@@ -1,0 +1,53 @@
+[package]
+name = "alas-mission"
+description = "The mission analysis model mission request and its pseudospectral discretization: the mission half of the mission builder, and the Chebyshev numerics container the segment solver runs on."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# The segment chain evaluates `Fidelity_Zero` once per control point: the
+# vortex-lattice lift surrogate and the whole drag buildup, both green.
+alas-aero = { path = "../alas-aero" }
+# `update_atmosphere` is mission analysis model's own `US_Standard_1976`, not native aerodynamic model's ISA.
+alas-atmo = { path = "../alas-atmo" }
+# `mission_mission.py` reads the cruise targets, airports and mission profile
+# straight off `ALASConfig`, and every field name already matches what the
+# mission analysis model runner expects.
+alas-config = { path = "../alas-config" }
+# `numerics` builds its differentiation and integration operators with the
+# Chebyshev pseudospectral kernel `alas-math` already exposes as green, and
+# `solve` drives each segment through the MINPACK `hybrd` in the same crate.
+alas-math = { path = "../alas-math" }
+# `update_thrust` walks the turbofan network once per control point, at the
+# segment's own freestream and the throttle it is solving for.
+alas-prop = { path = "../alas-prop" }
+# Segment and mission setup report rather than panic, as library code here must.
+thiserror = { workspace = true }
+# The reached branches of the segment chain are narrow, and a segment that took
+# an unreached one should say so rather than fail a number.
+tracing = { workspace = true }
+# The mission request is a JSON document upstream (it crossed a subprocess
+# boundary as one), so the type that stands in for it serializes.
+serde = { workspace = true }
+# The vehicle request carries three P10 report outputs -- the design vector, the
+# geometry summary and the component masses -- that have no native type yet, so
+# they pass through as `serde_json::Value` until P10 gives them one.
+serde_json = { workspace = true }
+
+[dev-dependencies]
+alas-testkit = { path = "../alas-testkit" }
+# The two mission parity tests check the port's own analysis settings and
+# engine constants against the fixture before comparing a number, so they name
+# the crates those constants live in.
+alas-aero = { path = "../alas-aero" }
+alas-prop = { path = "../alas-prop" }
+# The parity test walks the request as JSON so one comparison covers the whole
+# document, numbers at their tier and strings exactly.
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[lints]
+workspace = true

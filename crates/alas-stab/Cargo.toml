@@ -1,0 +1,39 @@
+[package]
+name = "alas-stab"
+description = "Longitudinal stability and balance: static margin, neutral point, the cruise-condition trim solve, and the tail and Munk correlations underneath them."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# `stability.py` constructs operating points and atmospheres and runs a
+# vortex-lattice solve; `alas-aero::vlm::run` and
+# `operating_point::OperatingPoint` are that solve and that flight state.
+alas-aero = { path = "../alas-aero" }
+# The static-margin, neutral-point and trim probes read `AnalysisConfig`'s
+# probe schedule, mesh resolutions, tail efficiency and fuselage-stability
+# switch, exactly as `stability.py` does.
+alas-config = { path = "../alas-config" }
+# Every geometry query -- `Airplane`, each `Wing`'s `aerodynamic_center`/
+# `area`/`aspect_ratio`, the `Fuselage` cross-section area distribution the
+# Munk/Multhopp integral runs on -- is an `alas-geom::aircraft` type.
+alas-geom = { path = "../alas-geom" }
+# The atmosphere model for the cruise trim condition, and the
+# sea-level default for the low-speed probes.
+alas-atmo = { path = "../alas-atmo" }
+# `munk_apparent_mass_factor` is `np.interp` over a published table, and the
+# 2x2 alpha/incidence trim is `np.linalg.solve` -- the two primitives
+# `alas-math` already exposes for exactly these.
+alas-math = { path = "../alas-math" }
+
+[dev-dependencies]
+alas-testkit = { path = "../alas-testkit" }
+# Only the parity test's fixture structs derive `Deserialize`; the library
+# types carry no serde dependency, the same split `alas-aero` makes.
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[lints]
+workspace = true
