@@ -50,9 +50,6 @@ pub(super) fn resolved_options(field: &Field, values: &Value) -> Option<Vec<Stri
         Some(source) => source
             .options()
             .map(|options| options.iter().map(|option| (*option).to_owned()).collect())?,
-        None if field.name == "class_mix_mode" => {
-            vec!["percent".to_owned(), "count".to_owned()]
-        }
         None => return None,
     };
 
@@ -78,16 +75,20 @@ pub(super) fn readonly_unless(
     ancestors: &[Value],
     condition: alas_config::ReadonlyUnless,
 ) -> bool {
-    values
-        .get(condition.field)
+    value_at_path(values, condition.field)
         .or_else(|| {
             ancestors
                 .iter()
-                .find_map(|ancestor| ancestor.get(condition.field))
+                .find_map(|ancestor| value_at_path(ancestor, condition.field))
         })
         .and_then(value_as_str)
         .map(|value| value != condition.value)
         .unwrap_or(true)
+}
+
+fn value_at_path<'a>(values: &'a Value, path: &str) -> Option<&'a Value> {
+    path.split('.')
+        .try_fold(values, |current, segment| current.get(segment))
 }
 
 pub(super) fn is_editable(field: &Field) -> bool {

@@ -329,7 +329,7 @@ impl DesignPipeline {
         options: &PipelineOptions,
         environment: &RunEnvironment,
     ) -> Result<PipelineResult, String> {
-        self.run_inner(options, environment, None, None, None)
+        self.run_inner(options, environment, None, None, None, None)
     }
 
     /// Execute a run using the one resolved external-tool environment shared
@@ -353,7 +353,7 @@ impl DesignPipeline {
         environment: &RunEnvironment,
         dispatched_route: Option<Route>,
     ) -> Result<PipelineResult, String> {
-        self.run_inner(options, environment, dispatched_route, None, None)
+        self.run_inner(options, environment, dispatched_route, None, None, None)
     }
 
     /// Execute a desktop run at the design point and bounds currently shown
@@ -376,6 +376,30 @@ impl DesignPipeline {
             None,
             Some(*initial_design),
             Some(bounds),
+            None,
+        )
+    }
+
+    /// Execute a desktop-style design-space run while reporting coarse-grained
+    /// stage progress. The callback is deliberately synchronous and textual:
+    /// callers can forward it across their own worker boundary without the
+    /// pipeline depending on a GUI or logging implementation.
+    pub fn run_with_design_space_and_progress(
+        &self,
+        options: &PipelineOptions,
+        environment: &RunEnvironment,
+        initial_design: &DesignVector,
+        bounds: &[(f64, f64)],
+        progress: &(dyn Fn(&str) + Sync),
+    ) -> Result<PipelineResult, String> {
+        validate_bounds(bounds)?;
+        self.run_inner(
+            options,
+            environment,
+            None,
+            Some(*initial_design),
+            Some(bounds),
+            Some(progress),
         )
     }
 
@@ -386,7 +410,14 @@ impl DesignPipeline {
         dispatched_route: Option<Route>,
         initial_design: Option<DesignVector>,
         bounds: Option<&[(f64, f64)]>,
+        progress: Option<&(dyn Fn(&str) + Sync)>,
     ) -> Result<PipelineResult, String> {
+        let report = |message: &str| {
+            if let Some(callback) = progress {
+                callback(message);
+            }
+        };
+        report("Validating run configuration");
         validate_run_configuration(&self.config)?;
         if self.aircraft_override.is_some() && options.optimize {
             return Err(
@@ -413,15 +444,22 @@ impl DesignPipeline {
         });
         std::fs::create_dir_all(&analysis_dir)
             .map_err(|error| format!("analysis workspace creation failed: {error}"))?;
+        report("Analysis workspace ready");
         let nominal_design = initial_design.unwrap_or_else(|| self.configured_nominal_design());
 
         // Stage 0: Baseline W&B + stability estimation.
+        report("Stage 1/7: baseline weight, balance, and stability");
         let baseline_report = self
             .aircraft_override
             .is_none()
             .then(|| analyze_baseline(&self.config, &nominal_design));
 
         // Stage 1: Design space optimization.
+        report(if options.optimize {
+            "Stage 2/7: design-space optimization"
+        } else {
+            "Stage 2/7: optimization skipped"
+        });
         let solver_optimizations = if options.optimize {
             Some(run_solver_optimizations(
                 &self.config,
@@ -452,6 +490,7 @@ impl DesignPipeline {
             };
 
         // Stage 2: Full analysis on optimized design.
+        report("Stage 3/7: full aircraft analysis");
         let full = if self.aircraft_override.is_some() {
             FullAnalysis::new_preserving_engine_config(self.config.clone())
         } else {
@@ -470,6 +509,7 @@ impl DesignPipeline {
         // Downstream writers consume the typed aircraft reconstructed from
         // this document, so CPACS is the non-GUI geometry boundary rather
         // than a sidecar copy of the configuration-built geometry.
+        report("Stage 4/7: CPACS export and geometry canonicalization");
         let cpacs_path = analysis_dir.join("cpacs/optimized_aircraft.cpacs.xml");
         let cpacs_export = Some(
             export_cpacs(&optimized_report, &self.config, &cpacs_path)
@@ -566,6 +606,11 @@ impl DesignPipeline {
                 None
             }
         };
+        report(if options.parallel {
+            "Stage 5/7: downstream analyses (parallel)"
+        } else {
+            "Stage 5/7: downstream analyses (sequential)"
+        });
         let (
             vspaero_result,
             avl_result,
@@ -630,6 +675,7 @@ impl DesignPipeline {
         };
         let (route, route_status, mission_result) = mission_outputs;
         let (mses_result, mses_pressure) = mses_outputs;
+        report("Stage 6/7: physical feasibility assessment");
         let feasibility = assess_physical_feasibility(
             &self.config,
             &optimized_design,
@@ -708,6 +754,7 @@ impl DesignPipeline {
             }
         }
 
+        report("Stage 7/7: finalizing artifacts and run manifest");
         let cpacs_manifest = match (options.output_dir.as_ref(), cpacs_export.as_ref()) {
             (Some(out_dir), Some(export)) => {
                 let mut stages = BTreeMap::new();

@@ -19,8 +19,14 @@ pub(super) fn draw_main_deck_services(
     final_segment: bool,
 ) {
     for item in layout.by_deck("main") {
-        if !matches!(item.kind, ItemKind::Galley | ItemKind::Lav | ItemKind::Exit)
-            || item.x < lo
+        if !matches!(
+            item.kind,
+            ItemKind::Galley
+                | ItemKind::Lav
+                | ItemKind::AccessibleLav
+                | ItemKind::WheelchairStowage
+                | ItemKind::Exit
+        ) || item.x < lo
             || (item.x >= hi && !final_segment)
         {
             continue;
@@ -39,10 +45,11 @@ pub(super) fn draw_main_deck_services(
                 stroke: Stroke::new(Color::from_hex("#e74c3c"), 2.0),
             });
         } else {
-            let (color, label) = if item.kind == ItemKind::Galley {
-                (Color::from_hex("#e67e22"), "G")
-            } else {
-                (Color::from_hex("#5dade2"), "L")
+            let (color, label) = match item.kind {
+                ItemKind::Galley => (Color::from_hex("#e67e22"), "G"),
+                ItemKind::WheelchairStowage => (Color::from_hex("#f1c40f"), "W"),
+                ItemKind::AccessibleLav => (Color::from_hex("#2471a3"), "AL"),
+                _ => (Color::from_hex("#5dade2"), "L"),
             };
             let left = p0[0].min(p1[0]).clamp(left_edge, right_edge);
             let right = p0[0].max(p1[0]).clamp(left_edge, right_edge);

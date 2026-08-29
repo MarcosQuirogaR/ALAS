@@ -78,6 +78,34 @@ impl AppState {
         if !self.run_options.write_outputs {
             options.output_dir = None;
         }
+        self.log(
+            format!(
+                "Run #{} | mode={} | optimizer={} | baseline={} | downstream={} | outputs={}",
+                self.run_identity,
+                if baseline_only { "baseline" } else { "full" },
+                if options.optimize {
+                    "enabled"
+                } else {
+                    "disabled"
+                },
+                if options.compare_baseline {
+                    "enabled"
+                } else {
+                    "disabled"
+                },
+                if options.parallel {
+                    "parallel"
+                } else {
+                    "sequential"
+                },
+                if options.output_dir.is_some() {
+                    "retained"
+                } else {
+                    "temporary"
+                },
+            ),
+            LogKind::Info,
+        );
 
         let (tx, rx): (Sender<WorkerMessage>, Receiver<WorkerMessage>) = channel();
         self.worker_rx = Some(rx);
@@ -92,15 +120,23 @@ impl AppState {
 
         thread::spawn(move || {
             let pipeline = DesignPipeline::new(config);
-            let _ = tx.send(WorkerMessage::Progress("Evaluating stages...".to_owned()));
             if cancel.load(Ordering::Relaxed) {
                 let _ = tx.send(WorkerMessage::Finished(Box::new(Err(
                     "Cancelled".to_owned()
                 ))));
                 return;
             }
-            let result =
-                pipeline.run_with_design_space(&options, &environment, &initial_design, &bounds);
+            let progress_tx = tx.clone();
+            let report = move |message: &str| {
+                let _ = progress_tx.send(WorkerMessage::Progress(message.to_owned()));
+            };
+            let result = pipeline.run_with_design_space_and_progress(
+                &options,
+                &environment,
+                &initial_design,
+                &bounds,
+                &report,
+            );
             let _ = tx.send(WorkerMessage::Finished(Box::new(result)));
         });
     }
@@ -125,13 +161,29 @@ impl AppState {
         }
 
         if let Some(res) = completed {
+            self.worker_rx = None;
             self.is_running = false;
-            self.run_started = None;
             self.stage.clear();
             match res {
                 Ok(result) => {
                     self.status_message = "Done.".to_owned();
-                    self.log(tr("Run finished (status=ok)."), LogKind::Info);
+                    self.log(
+                        format!(
+                            "Run finished successfully | findings={} | mission={} | structures={}",
+                            result.feasibility.findings.len(),
+                            if result.mission_result.is_some() {
+                                "available"
+                            } else {
+                                "none"
+                            },
+                            if result.structural_result.is_some() {
+                                "available"
+                            } else {
+                                "none"
+                            },
+                        ),
+                        LogKind::Info,
+                    );
                     if let Some(cpacs) = &result.cpacs_export {
                         self.log(
                             format!("CPACS {}: {}", cpacs.cpacs_version, cpacs.path.display()),
@@ -150,6 +202,7 @@ impl AppState {
                     );
                 }
             }
+            self.run_started = None;
         }
     }
 }

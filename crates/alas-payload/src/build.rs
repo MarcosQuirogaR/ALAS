@@ -26,7 +26,9 @@
 
 mod presets;
 
-pub use presets::{apply_cabin_preset, CabinPresetError};
+pub use presets::{
+    apply_cabin_preset, apply_cabin_preset_reference_compatibility, CabinPresetError,
+};
 
 use alas_config::{AlasConfig, PassengerCabinConfig, SeatClassConfig};
 use alas_geom::aircraft::airplane::Airplane;
@@ -103,6 +105,15 @@ fn build_payload_layout_with_mass_semantics(
         &config.geometry,
         config.cabin.passenger.wall_thickness_m,
     )?;
+    let mut effective = config.clone();
+    if !reference_compatibility {
+        presets::apply_cabin_preset_to_geometry(&mut effective, &g);
+    }
+    let config = if reference_compatibility {
+        config
+    } else {
+        &effective
+    };
     if config.requirements.aircraft_type == "cargo" {
         let layout = if reference_compatibility {
             build_cargo_layout_reference_compatibility(
@@ -230,6 +241,78 @@ pub fn simulate_passenger_counts(
     counts
 }
 
+/// Convert a requested *seat-count* mix into the floor-length mix the row
+/// packer needs, then return the capacity of this particular shell.
+///
+/// Airlines publish seats by class, while floor length is an internal packing
+/// quantity.  Premium seats consume more pitch and fewer fit abreast, so using
+/// the published percentages directly as length percentages would materially
+/// overstate their passenger share.  This small deterministic inverse solve
+/// closes that mismatch while whole rows and exit/service reserves remain in
+/// the forward simulation.
+pub fn simulate_passenger_counts_for_seat_mix(
+    g: &CabinGeometry,
+    pax: &PassengerCabinConfig,
+    target_mix: &[(&str, f64)],
+) -> PassengerCounts {
+    let length_mix = length_mix_for_seat_targets(g, pax, target_mix);
+    simulate_passenger_counts(g, pax, &length_mix)
+}
+
+fn length_mix_for_seat_targets<'a>(
+    g: &CabinGeometry,
+    pax: &PassengerCabinConfig,
+    target_mix: &[(&'a str, f64)],
+) -> Vec<(&'a str, f64)> {
+    let mut weights = target_mix
+        .iter()
+        .filter(|(_, share)| share.is_finite() && *share > 0.0)
+        .map(|&(name, share)| {
+            let class = class_config(pax, name);
+            let deck = &g.passenger_decks[0];
+            let x = 0.5 * (g.cabin_start_x + g.cabin_end_x);
+            let seats_abreast = abreast(class, deck, g, resolve_aisle_width(pax, 20), x).max(1);
+            (
+                name,
+                share * class.pitch_m.max(MIN_PITCH) / seats_abreast as f64,
+            )
+        })
+        .collect::<Vec<_>>();
+    normalize_mix(&mut weights);
+
+    // Row rounding makes the inverse discontinuous, so a damped multiplicative
+    // correction is both more stable and more honest than pretending there is
+    // a closed form. Twenty passes is tiny beside one geometry build.
+    for _ in 0..20 {
+        let counts = simulate_passenger_counts(g, pax, &weights);
+        let total = counts.total().max(1) as f64;
+        for (name, weight) in &mut weights {
+            let target = target_mix
+                .iter()
+                .find(|(other, _)| other == name)
+                .map_or(0.0, |(_, share)| *share);
+            let achieved = counts.for_class(name) as f64 / total;
+            let correction = if achieved > 0.0 {
+                (target / achieved).clamp(0.25, 4.0).powf(0.65)
+            } else {
+                2.0
+            };
+            *weight *= correction;
+        }
+        normalize_mix(&mut weights);
+    }
+    weights
+}
+
+fn normalize_mix(mix: &mut [(&str, f64)]) {
+    let total = mix.iter().map(|(_, share)| *share).sum::<f64>();
+    if total > 0.0 && total.is_finite() {
+        for (_, share) in mix {
+            *share /= total;
+        }
+    }
+}
+
 /// One deck stretch, as the counting pass reads it.
 struct Deck<'a> {
     geometry: &'a CabinGeometry,
@@ -304,5 +387,41 @@ fn class_config<'a>(pax: &'a PassengerCabinConfig, name: &str) -> &'a SeatClassC
         "Business" => &pax.business,
         "Premium" => &pax.premium,
         _ => &pax.economy,
+    }
+}
+
+// These are assertions over fixtures constructed in the test itself; a failed
+// unwrap or expect is the assertion failing, not a library invariant.
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+#[cfg(test)]
+mod product_tests {
+    use super::*;
+    use alas_config::GeometryConfig;
+    use alas_geom::builder::AircraftBuilder;
+
+    fn geometry() -> CabinGeometry {
+        let builder = AircraftBuilder::new(Some(GeometryConfig::default()));
+        let plane = builder.build(None, false).expect("default aircraft builds");
+        CabinGeometry::new(&plane, &builder.geometry, 0.15).expect("default cabin samples")
+    }
+
+    #[test]
+    fn published_seat_shares_are_not_used_as_floor_length_shares() {
+        let g = geometry();
+        let mut pax = PassengerCabinConfig::default();
+        pax.first.abreast = 4;
+        pax.business.abreast = 4;
+        let target = [
+            ("First", 14.0 / 519.0),
+            ("Business", 76.0 / 519.0),
+            ("Economy", 429.0 / 519.0),
+        ];
+        let direct = simulate_passenger_counts(&g, &pax, &target);
+        let solved = simulate_passenger_counts_for_seat_mix(&g, &pax, &target);
+
+        assert_ne!(direct, solved);
+        let total = solved.total() as f64;
+        assert!((solved.first as f64 / total - target[0].1).abs() < 0.04);
+        assert!((solved.business as f64 / total - target[1].1).abs() < 0.04);
     }
 }

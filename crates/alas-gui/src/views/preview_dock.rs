@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! The right-side vertical "3D Live Preview" dock: Exterior 3D / Cabin-Payload
-//! sub-tabs, rendered live from the current configuration with drag-to-rotate
-//! and scroll-to-zoom. A port of the reference desktop app's `PreviewDock` +
+//! The right-side unified aircraft viewer, rendered live from the current
+//! configuration with exterior/interior visibility, drag-to-orbit, and true
+//! camera zoom. A port of the reference desktop app's `PreviewDock` +
 //! `Preview3D`; closable from here or from View > 3D Live Preview.
 
 use alas_report::scene::Scene;
@@ -12,6 +12,9 @@ use egui::{vec2, Align, Area, Color32, Frame, Id, Key, Layout, Order, RichText, 
 
 use crate::state::{AppState, PreviewCamera, PreviewTab};
 use crate::views::tr;
+
+const AIRCRAFT_CAMERA_ID: &str = "aircraft_3d";
+const AIRCRAFT_VIEW_KEY: &str = "preview_dock::aircraft_3d";
 
 /// Render the preview dock's contents into the given side panel.
 pub fn show_preview_dock(state: &mut AppState, ui: &mut Ui) {
@@ -31,45 +34,11 @@ pub fn show_preview_dock(state: &mut AppState, ui: &mut Ui) {
         });
     });
     ui.label(RichText::new(&state.active_preset).weak().small());
-    ui.add_space(2.0);
-
-    ui.horizontal(|ui| {
-        if ui
-            .selectable_label(state.preview_tab == PreviewTab::Exterior, tr("Exterior 3D"))
-            .clicked()
-        {
-            state.preview_tab = PreviewTab::Exterior;
-            state.update_preview_scene();
-        }
-        if ui
-            .selectable_label(
-                state.preview_tab == PreviewTab::Cabin,
-                tr("Cabin / Payload"),
-            )
-            .clicked()
-        {
-            state.preview_tab = PreviewTab::Cabin;
-            state.update_preview_scene();
-        }
-    });
     ui.add_space(4.0);
 
-    let active_camera_id = match state.preview_tab {
-        PreviewTab::Exterior => state.selected_preview_id.clone(),
-        PreviewTab::Cabin => "cabin_3d".to_owned(),
-    };
-    let view_key = match state.preview_tab {
-        PreviewTab::Exterior => {
-            format!("preview_dock::exterior::{}", state.selected_preview_id)
-        }
-        PreviewTab::Cabin => "preview_dock::cabin".to_owned(),
-    };
-
-    let mut camera_changed = show_camera_controls(state, ui, &active_camera_id, &view_key);
-    if camera_changed {
-        state.update_preview_scene();
-    }
-    ui.add_space(4.0);
+    let active_camera_id = AIRCRAFT_CAMERA_ID.to_owned();
+    let view_key = AIRCRAFT_VIEW_KEY.to_owned();
+    let mut camera_changed = false;
 
     match &state.preview_scene {
         Some(scene) => {
@@ -84,11 +53,18 @@ pub fn show_preview_dock(state: &mut AppState, ui: &mut Ui) {
                 SceneView::new(&scene, state.view_state_mut(&view_key))
                     .desired_size(vec2(width, height))
                     .orbit_only()
-                    .wheel_zoom(true)
-                    .show_toolbar(false),
+                    .show_toolbar(false)
+                    .cache_key(&view_key),
             );
             let response = response.on_hover_text(tr("Drag to orbit the camera; scroll to zoom"));
             camera_changed |= handle_camera_response(state, &response, &active_camera_id);
+            camera_changed |= show_aircraft_viewer_controls(
+                state,
+                ui,
+                response.rect,
+                &active_camera_id,
+                &view_key,
+            );
             if response.double_clicked() {
                 open_fullscreen_preview(state, ui.ctx(), &view_key, &active_camera_id);
             }
@@ -114,34 +90,60 @@ pub fn show_preview_dock(state: &mut AppState, ui: &mut Ui) {
     }
 }
 
-/// Show the one explicit recovery action for both preview tabs.
-///
-/// Camera movement is deliberately gesture-driven: dragging orbits the
-/// projection and the viewport's wheel zooms it. Keeping reset here also
-/// resets the 2-D viewport state used to rasterize the projected scene.
-fn show_camera_controls(
+/// Place visibility and recovery actions over the aircraft canvas.
+fn show_aircraft_viewer_controls(
     state: &mut AppState,
     ui: &mut Ui,
+    viewport: egui::Rect,
     camera_id: &str,
     view_key: &str,
 ) -> bool {
-    let mut changed = false;
-    ui.horizontal_wrapped(|ui| {
-        if ui
-            .button(tr("Reset"))
-            .on_hover_text(tr("Restore the default isometric camera and framing"))
-            .clicked()
-        {
-            reset_camera(state, camera_id, view_key);
-            changed = true;
-        }
-        ui.label(
-            RichText::new(tr("Drag to orbit; scroll to zoom"))
-                .weak()
-                .small(),
-        );
+    let current = state.preview_tab;
+    let mut requested = current;
+    let mut reset = false;
+    let controls = egui::Rect::from_min_size(
+        viewport.min + vec2(8.0, 8.0),
+        vec2((viewport.width() - 16.0).max(180.0), 30.0),
+    );
+    ui.allocate_new_ui(egui::UiBuilder::new().max_rect(controls), |ui| {
+        Frame::default()
+            .fill(Color32::from_black_alpha(180))
+            .corner_radius(5.0)
+            .inner_margin(egui::Margin::symmetric(4.0, 2.0))
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    if ui
+                        .selectable_label(current == PreviewTab::Exterior, tr("Exterior"))
+                        .on_hover_text(tr("Show the complete aircraft exterior"))
+                        .clicked()
+                    {
+                        requested = PreviewTab::Exterior;
+                    }
+                    if ui
+                        .selectable_label(current == PreviewTab::Cabin, tr("Interior"))
+                        .on_hover_text(tr("Reveal the cabin and payload layout"))
+                        .clicked()
+                    {
+                        requested = PreviewTab::Cabin;
+                    }
+                    if ui
+                        .small_button(tr("Reset"))
+                        .on_hover_text(tr("Restore the default isometric camera and framing"))
+                        .clicked()
+                    {
+                        reset = true;
+                    }
+                });
+            });
     });
-    changed
+
+    if requested != current {
+        state.preview_tab = requested;
+    }
+    if reset {
+        reset_camera(state, camera_id, view_key);
+    }
+    requested != current || reset
 }
 
 fn reset_camera(state: &mut AppState, camera_id: &str, view_key: &str) {
@@ -149,9 +151,10 @@ fn reset_camera(state: &mut AppState, camera_id: &str, view_key: &str) {
     state.view_state_mut(view_key).reset();
 }
 
-/// Apply orbit input to the 3-D camera only. The SceneView's 2-D pan state is
-/// deliberately not touched, which keeps fullscreen and dock gestures on the
-/// same independent camera state.
+/// Apply orbit and zoom input to the 3-D camera only.
+///
+/// Keeping the SceneView at fit-to-view means the raster and its annotations
+/// never pan or scale independently from the physical projection.
 fn handle_camera_response(
     state: &mut AppState,
     response: &egui::Response,
@@ -172,6 +175,16 @@ fn handle_camera_response(
             .preview_camera_mut(camera_id)
             .apply_orbit_motion(delta);
         changed = delta.is_finite();
+    }
+    if response.hovered() {
+        let scroll_y = response.ctx.input(|input| input.smooth_scroll_delta.y);
+        if scroll_y.abs() > f32::EPSILON {
+            let factor = f64::from((1.0 + scroll_y * 0.0015).clamp(0.5, 1.5));
+            state
+                .preview_camera_mut(camera_id)
+                .apply_zoom_factor(factor);
+            changed = true;
+        }
     }
     changed
 }
@@ -233,8 +246,12 @@ fn show_fullscreen_preview(
     let fullscreen_view = fullscreen_view_key(view_key);
     let fullscreen_camera = fullscreen_camera_key(camera_id);
     let camera = (*state.preview_camera_mut(&fullscreen_camera)).into();
+    let figure_id = match state.preview_tab {
+        PreviewTab::Exterior => state.selected_preview_id.as_str(),
+        PreviewTab::Cabin => "cabin_3d",
+    };
     let fullscreen_scene =
-        crate::scene::build_page_preview_with_camera(state, camera_id, Some(camera));
+        crate::scene::build_page_preview_with_camera(state, figure_id, Some(camera));
     let active_scene = fullscreen_scene.as_ref().unwrap_or(scene);
     let screen = ctx.screen_rect();
     let screen_size = screen.size();
@@ -262,24 +279,27 @@ fn show_fullscreen_preview(
                             }
                         });
                     });
-                    let changed =
-                        show_camera_controls(state, ui, &fullscreen_camera, &fullscreen_view);
-                    // Leave room for the footer so the scene stays within
-                    // the inset frame instead of reaching the lower edge.
                     let available = ui.available_size();
-                    let available = vec2(available.x.max(320.0), (available.y - 28.0).max(180.0));
+                    let available = vec2(available.x.max(320.0), available.y.max(180.0));
                     let response = ui.add(
                         SceneView::new(active_scene, state.view_state_mut(fullscreen_view.clone()))
                             .desired_size(available)
                             .orbit_only()
-                            .wheel_zoom(true)
-                            .show_toolbar(false),
+                            .show_toolbar(false)
+                            .cache_key(&fullscreen_view),
                     );
                     let response =
                         response.on_hover_text(tr("Drag to orbit the camera; scroll to zoom"));
-                    let changed =
-                        changed || handle_camera_response(state, &response, &fullscreen_camera);
+                    let changed = handle_camera_response(state, &response, &fullscreen_camera)
+                        || show_aircraft_viewer_controls(
+                            state,
+                            ui,
+                            response.rect,
+                            &fullscreen_camera,
+                            &fullscreen_view,
+                        );
                     if changed {
+                        state.update_preview_scene();
                         ctx.request_repaint();
                     }
                 });
@@ -302,23 +322,19 @@ fn close_fullscreen_preview(
 #[cfg(test)]
 mod tests {
     use super::{
-        fullscreen_camera_key, fullscreen_id, fullscreen_open, fullscreen_view_key,
-        open_fullscreen_preview, reset_camera, set_fullscreen,
+        fullscreen_camera_key, fullscreen_open, fullscreen_view_key, open_fullscreen_preview,
+        reset_camera, set_fullscreen, AIRCRAFT_CAMERA_ID, AIRCRAFT_VIEW_KEY,
     };
     use crate::state::{AppState, PreviewCamera};
     use egui::Context;
 
     #[test]
-    fn fullscreen_state_is_independent_for_each_preview_figure() {
+    fn exterior_and_interior_share_one_fullscreen_slot() {
         let ctx = Context::default();
-        set_fullscreen(&ctx, "preview_dock::exterior::exterior_3d", true);
+        set_fullscreen(&ctx, AIRCRAFT_VIEW_KEY, true);
 
-        assert!(fullscreen_open(&ctx, "preview_dock::exterior::exterior_3d"));
+        assert!(fullscreen_open(&ctx, AIRCRAFT_VIEW_KEY));
         assert!(!fullscreen_open(&ctx, "preview_dock::cabin"));
-        assert_ne!(
-            fullscreen_id("preview_dock::exterior::exterior_3d"),
-            fullscreen_id("preview_dock::cabin")
-        );
     }
 
     #[test]
@@ -334,8 +350,8 @@ mod tests {
     fn fullscreen_preview_keeps_the_dock_camera_and_viewport_unchanged() {
         let ctx = Context::default();
         let mut state = AppState::default();
-        let view_key = "preview_dock::exterior::exterior_3d";
-        let camera_id = "exterior_3d";
+        let view_key = AIRCRAFT_VIEW_KEY;
+        let camera_id = AIRCRAFT_CAMERA_ID;
         state.view_state_mut(view_key).pan = egui::vec2(-6.0, 9.0);
         *state.preview_camera_mut(camera_id) = PreviewCamera::side();
 
@@ -355,8 +371,8 @@ mod tests {
     #[test]
     fn reset_returns_camera_and_raster_view_to_default_isometric() {
         let mut state = AppState::default();
-        let camera_id = "exterior_3d";
-        let view_key = "preview_dock::exterior::exterior_3d";
+        let camera_id = AIRCRAFT_CAMERA_ID;
+        let view_key = AIRCRAFT_VIEW_KEY;
         *state.preview_camera_mut(camera_id) = PreviewCamera::top();
         let view = state.view_state_mut(view_key);
         view.pan = egui::vec2(24.0, -12.0);

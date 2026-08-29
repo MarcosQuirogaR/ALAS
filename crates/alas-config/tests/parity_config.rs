@@ -353,10 +353,9 @@ fn compare_node(
     let expected_fields: Vec<&Value> = expected_fields
         .iter()
         .filter(|field| {
-            !matches!(
-                field.get("name").and_then(Value::as_str),
-                Some("suave_venv_dir" | "suave_runner_dir")
-            )
+            let name = field.get("name").and_then(Value::as_str);
+            !matches!(name, Some("suave_venv_dir" | "suave_runner_dir"))
+                && !name.is_some_and(|name| product_hidden_cabin_field(node.type_name, name))
         })
         .collect();
     let expected_names: Vec<&str> = expected_fields
@@ -395,6 +394,34 @@ fn is_transport_planform_field_name(type_name: &str, name: &str) -> bool {
         && TRANSPORT_PLANFORM_FIELDS
             .iter()
             .any(|field| field.name == name)
+}
+
+/// Product cabin configuration deliberately exposes only the three target
+/// seat shares. The frozen fields remain serialized for compatibility, while
+/// this parity comparison continues to check every field that is still part
+/// of the user-facing schema.
+fn product_hidden_cabin_field(type_name: &str, name: &str) -> bool {
+    match type_name {
+        "DesignRequirements" => name == "num_passengers",
+        "PassengerCabinConfig" => matches!(
+            name,
+            "class_mix_mode"
+                | "premium"
+                | "aisle_width_m"
+                | "galley_count"
+                | "lavatory_count"
+                | "checked_bag_mass_kg"
+                | "belly_cargo_kg"
+                | "wall_thickness_m"
+                | "min_exit_pair_spacing_m"
+                | "exit_capacity_realism_factor"
+        ),
+        "SeatClassConfig" => matches!(
+            name,
+            "count" | "abreast" | "pitch_m" | "width_m" | "mass_per_pax_kg"
+        ),
+        _ => false,
+    }
 }
 
 fn compare_transport_planform_schema(
@@ -500,11 +527,22 @@ fn compare_transport_planform_schema(
             &to_value(leaf.columns),
             &Option::<Value>::None,
         );
-        comparison.exact(
-            &format!("{label}.{}.readonly_unless", expected_field.name),
-            &to_value(leaf.readonly_unless),
-            &Option::<Value>::None,
-        );
+        if expected_field.name == "share_pct" {
+            comparison.exact(
+                &format!("{label}.{}.readonly_unless", expected_field.name),
+                &to_value(leaf.readonly_unless),
+                &Some(serde_json::json!({
+                    "field": "requirements.cabin_preset",
+                    "value": "Custom"
+                })),
+            );
+        } else {
+            comparison.exact(
+                &format!("{label}.{}.readonly_unless", expected_field.name),
+                &to_value(leaf.readonly_unless),
+                &Option::<Value>::None,
+            );
+        }
         comparison.exact(
             &format!("{label}.{}: has no option list", expected_field.name),
             &leaf.options.is_none(),
@@ -553,7 +591,18 @@ fn compare_field(
 ) {
     let declaration = declared.get(path);
 
-    if is_random_response_correction(label) {
+    if label.ends_with(".share_pct") {
+        comparison.exact(
+            &format!("{label}.label: product seat-share semantics"),
+            &field.label,
+            &"Target passenger share [%]",
+        );
+        comparison.exact(
+            &format!("{label}.label: frozen floor-share semantics"),
+            &expected.get("label").and_then(Value::as_str).unwrap_or(""),
+            &"Share of cabin length [%]",
+        );
+    } else if is_random_response_correction(label) {
         comparison.exact(
             &format!("{label}.label: source-corrected Rust value"),
             &field.label,
@@ -603,7 +652,18 @@ fn compare_field(
     // Where upstream declared no explanation it emits an empty string, and
     // this port supplies one. Comparing those would fail on prose the port is
     // required to add, so what is checked instead is that it was added.
-    if is_random_response_correction(label) {
+    if label.ends_with(".share_pct") {
+        comparison.exact(
+            &format!("{label}.help: product seat-share semantics"),
+            &field.help,
+            &"Target percentage of passenger seats assigned to this class. The layout solver converts the target mix into floor-length allocations using each class's configured seat geometry, then fills the available cabin. Shares are normalised, so they need not add up to exactly 100. Set the class to 0 to remove it. Only editable with the Custom cabin preset.",
+        );
+        comparison.exact(
+            &format!("{label}.help: frozen floor-share semantics"),
+            &expected.get("help").and_then(Value::as_str).unwrap_or(""),
+            &"Percentage of usable cabin floor length allocated to this class. Seat count is derived from it using this class's pitch/abreast and the real fuselage geometry. Shares are normalised, so they need not add up to exactly 100. Set the class to 0 to remove it. Only used when Class mix mode is 'percent'.",
+        );
+    } else if is_random_response_correction(label) {
         comparison.exact(
             &format!("{label}.help: source-corrected Rust value"),
             &field.help,
@@ -785,13 +845,33 @@ fn compare_leaf(comparison: &mut Comparison, path: &str, leaf: &LeafField, expec
         to_value(leaf.columns),
         expected,
     );
-    compare_optional(
-        comparison,
-        path,
-        "readonly_unless",
-        to_value(leaf.readonly_unless),
-        expected,
-    );
+    if path.ends_with(".share_pct") {
+        comparison.exact(
+            &format!("{path}.readonly_unless: product Custom-only semantics"),
+            &to_value(leaf.readonly_unless),
+            &Some(serde_json::json!({
+                "field": "requirements.cabin_preset",
+                "value": "Custom"
+            })),
+        );
+        let frozen_readonly = expected
+            .get("readonly_unless")
+            .cloned()
+            .unwrap_or(Value::Null);
+        comparison.exact(
+            &format!("{path}.readonly_unless: frozen Python value"),
+            &frozen_readonly,
+            &Value::Null,
+        );
+    } else {
+        compare_optional(
+            comparison,
+            path,
+            "readonly_unless",
+            to_value(leaf.readonly_unless),
+            expected,
+        );
+    }
 
     // A string field whose accepted values are owned by a crate above this
     // one names the list instead of holding it. Where this crate can resolve

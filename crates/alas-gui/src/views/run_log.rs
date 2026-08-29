@@ -60,7 +60,24 @@ pub fn show_run_log(state: &AppState, ui: &mut Ui) {
                         LogKind::Warn => Some(ui.visuals().warn_fg_color),
                         LogKind::Error => Some(ui.visuals().error_fg_color),
                     };
-                    let mut text = RichText::new(localize_log_text(&line.text)).size(12.5);
+                    let severity = match line.kind {
+                        LogKind::Info => "INFO ",
+                        LogKind::Warn => "WARN ",
+                        LogKind::Error => "ERROR",
+                    };
+                    let context = match line.elapsed {
+                        Some(elapsed) => format!(
+                            "run {:03} +{:02}:{:02}.{:03}",
+                            line.run_id,
+                            elapsed.as_secs() / 60,
+                            elapsed.as_secs() % 60,
+                            elapsed.subsec_millis()
+                        ),
+                        None => "system            ".to_owned(),
+                    };
+                    let rendered =
+                        format!("[{context}] [{severity}] {}", localize_log_text(&line.text));
+                    let mut text = RichText::new(rendered).monospace().size(12.0);
                     if let Some(c) = color {
                         text = text.color(c);
                     }

@@ -221,6 +221,7 @@ impl AlasConfig {
         if let Some(name) = data.get("preset").and_then(serde_json::Value::as_str) {
             match crate::presets::get(name) {
                 Ok(preset) => {
+                    let operational = preset.operational_mission_defaults();
                     instance.preset = name.to_owned();
                     instance.geometry = preset.geometry.clone();
                     instance.requirements = preset.requirements.clone();
@@ -231,6 +232,9 @@ impl AlasConfig {
                     if let Some(performance) = &preset.performance {
                         instance.performance = performance.clone();
                     }
+                    instance.departure_airport = operational.departure_airport.to_owned();
+                    instance.arrival_airport = operational.arrival_airport.to_owned();
+                    instance.mission.profile = operational.profile;
                 }
                 Err(error) => {
                     tracing::debug!(%error, "configuration names an unregistered preset");
@@ -280,13 +284,33 @@ mod tests {
     }
 
     #[test]
-    fn selecting_a_preset_does_not_relabel_the_interactive_default_route() {
-        let default_route = AlasConfig::default();
-        for name in ["A220-300", "A320-200"] {
-            let config = AlasConfig::from_value(&json!({"preset": name})).unwrap();
-            assert_eq!(config.departure_airport, default_route.departure_airport);
-            assert_eq!(config.arrival_airport, default_route.arrival_airport);
-        }
+    fn selecting_a_preset_loads_its_operational_route_and_cruise_schedule() {
+        let config = AlasConfig::from_value(&json!({"preset": "A220-300"})).unwrap();
+        let preset = crate::presets::get("A220-300").unwrap();
+        assert_eq!(config.departure_airport, "Riga (EVRA)");
+        assert_eq!(config.arrival_airport, "Stockholm Arlanda (ESSA)");
+        let atmosphere = alas_atmo::Atmosphere::new(config.requirements.cruise_altitude_m);
+        let expected = config.requirements.cruise_mach * atmosphere.speed_of_sound();
+        assert!((config.mission.profile.cruise_1_air_speed_m_s - expected).abs() < 1e-9);
+        assert_ne!(
+            config.mission.profile.cruise_1_air_speed_m_s,
+            crate::MissionProfileConfig::default().cruise_1_air_speed_m_s
+        );
+        assert_eq!(config.requirements, preset.requirements);
+    }
+
+    #[test]
+    fn saved_route_and_profile_values_override_the_preset_defaults() {
+        let config = AlasConfig::from_value(&json!({
+            "preset": "A220-300",
+            "departure_airport": "Paris CDG (LFPG)",
+            "arrival_airport": "Frankfurt (EDDF)",
+            "mission": {"profile": {"cruise_1_air_speed_m_s": 219.0}}
+        }))
+        .unwrap();
+        assert_eq!(config.departure_airport, "Paris CDG (LFPG)");
+        assert_eq!(config.arrival_airport, "Frankfurt (EDDF)");
+        assert_eq!(config.mission.profile.cruise_1_air_speed_m_s, 219.0);
     }
 
     #[test]

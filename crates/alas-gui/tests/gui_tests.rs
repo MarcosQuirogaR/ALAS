@@ -66,10 +66,16 @@ fn preset_switching_updates_the_json_configuration_and_scene() {
     let config = state.typed_config().unwrap();
     assert!(config.requirements.mtow_kg > 400_000.0);
     assert!(config.geometry.fuselage.diameter_m > 6.0);
+    assert_eq!(config.departure_airport, "Dubai (OMDB)");
+    assert_eq!(config.arrival_airport, "London Heathrow (EGLL)");
 
     state.load_preset("A220-300");
     assert_eq!(state.active_preset, "A220-300");
-    assert!(state.typed_config().unwrap().requirements.mtow_kg < 80_000.0);
+    let config = state.typed_config().unwrap();
+    assert!(config.requirements.mtow_kg < 80_000.0);
+    assert_eq!(config.departure_airport, "Riga (EVRA)");
+    assert_eq!(config.arrival_airport, "Stockholm Arlanda (ESSA)");
+    assert!(config.mission.profile.cruise_1_air_speed_m_s < 240.0);
 }
 
 #[test]
@@ -590,19 +596,15 @@ fn interactive_canvases_keep_independent_viewport_state() {
 }
 
 #[test]
-fn three_dimensional_previews_keep_independent_orbit_cameras() {
+fn exterior_and_interior_share_the_unified_aircraft_camera() {
     let mut state = AppState::default();
-    state.preview_camera_mut("exterior_3d").yaw_deg = 120.0;
-    state.preview_camera_mut("exterior_3d").pitch_deg = 10.0;
-    state.preview_camera_mut("cabin_3d").yaw_deg = 210.0;
+    state.preview_camera_mut("aircraft_3d").yaw_deg = 120.0;
+    state.preview_camera_mut("aircraft_3d").pitch_deg = 10.0;
 
-    let exterior = *state.preview_camera_mut("exterior_3d");
-    let cabin = *state.preview_camera_mut("cabin_3d");
-    assert_eq!(exterior.yaw_deg, 120.0);
-    assert_eq!(exterior.pitch_deg, 10.0);
-    assert_eq!(exterior.zoom, 1.0);
-    assert_eq!(cabin.yaw_deg, 210.0);
-    assert_eq!(cabin.pitch_deg, 22.0);
+    let exterior = state.active_preview_camera();
+    state.preview_tab = alas_gui::state::PreviewTab::Cabin;
+    let interior = state.active_preview_camera();
+    assert_eq!(exterior, interior);
 }
 
 #[test]
@@ -631,15 +633,13 @@ fn result_orbit_cameras_are_independent_from_previews_and_other_runs() {
 }
 
 #[test]
-fn three_dimensional_fit_changes_only_the_active_orbit_view() {
+fn three_dimensional_fit_changes_the_unified_aircraft_view() {
     let mut state = AppState::default();
-    state.preview_camera_mut("exterior_3d").zoom = 3.0;
-    state.preview_camera_mut("cabin_3d").zoom = 2.0;
+    state.preview_camera_mut("aircraft_3d").zoom = 3.0;
 
-    state.preview_camera_mut("exterior_3d").fit();
+    state.preview_camera_mut("aircraft_3d").fit();
 
-    assert_eq!(state.preview_camera_mut("exterior_3d").zoom, 1.0);
-    assert_eq!(state.preview_camera_mut("cabin_3d").zoom, 2.0);
+    assert_eq!(state.preview_camera_mut("aircraft_3d").zoom, 1.0);
 }
 
 #[test]

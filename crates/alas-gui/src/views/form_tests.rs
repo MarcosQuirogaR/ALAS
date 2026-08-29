@@ -16,7 +16,7 @@ fn visit_fields(fields: &[alas_config::Field], values: &Value, names: &mut Vec<S
                 }
             }
             Entry::Leaf(leaf) => {
-                if leaf.options.is_some() || field.name == "class_mix_mode" {
+                if leaf.options.is_some() {
                     let options = resolved_options(field, values).expect("option source resolves");
                     assert!(!options.is_empty(), "{} has no options", field.name);
                     names.push(field.name.to_owned());
@@ -41,7 +41,6 @@ fn every_declared_option_source_resolves_to_a_nonempty_form_list() {
         "strategy",
         "aircraft_type",
         "cabin_preset",
-        "class_mix_mode",
     ] {
         assert!(
             names.iter().any(|name| name == expected),
@@ -51,7 +50,7 @@ fn every_declared_option_source_resolves_to_a_nonempty_form_list() {
 }
 
 #[test]
-fn tire_and_class_mix_lists_include_the_declared_values() {
+fn tire_and_cabin_preset_lists_include_the_declared_values() {
     let config = AlasConfig::default();
     let values = serde_json::to_value(&config).expect("default config serializes");
     let schema = config.schema();
@@ -81,13 +80,6 @@ fn tire_and_class_mix_lists_include_the_declared_values() {
         vec!["Max payload", "Dense payload", "Custom"]
     );
 
-    let class_mix = alas_config::PassengerCabinConfig::default().schema();
-    let class_mix = class_mix.field("class_mix_mode").expect("class mix mode");
-    assert_eq!(
-        resolved_options(class_mix, &Value::Null).expect("class mix options"),
-        vec!["percent", "count"]
-    );
-
     let engine = alas_config::EngineConfig::default().schema();
     let engine = engine.field("engine_name").expect("engine field");
     assert!(!resolved_options(engine, &Value::Null)
@@ -96,20 +88,21 @@ fn tire_and_class_mix_lists_include_the_declared_values() {
 }
 
 #[test]
-fn nested_readonly_conditions_can_use_the_parent_class_mix_mode() {
-    let condition = alas_config::ReadonlyUnless {
-        field: "class_mix_mode",
-        value: "count",
+fn nested_readonly_conditions_can_use_a_dotted_path_from_an_ancestor() {
+    let class = alas_config::SeatClassConfig::default().schema();
+    let Entry::Leaf(share) = &class.field("share_pct").expect("class share").entry else {
+        panic!("class share is a leaf");
     };
-    let parent = json!({"class_mix_mode": "count"});
+    let condition = share.readonly_unless.expect("custom preset condition");
+    let root = json!({"requirements": {"cabin_preset": "Custom"}});
     assert!(!readonly_unless(
-        &json!({"count": 42}),
-        &[parent],
+        &json!({"share_pct": 20.0}),
+        &[root],
         condition
     ));
     assert!(readonly_unless(
-        &json!({"count": 42}),
-        &[json!({"class_mix_mode": "percent"})],
+        &json!({"share_pct": 20.0}),
+        &[json!({"requirements": {"cabin_preset": "Iberia"}})],
         condition
     ));
 }

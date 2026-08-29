@@ -163,7 +163,7 @@ pub fn a320_200() -> AircraftPreset {
             max_wing_area_m2: 130.0,
             min_wing_loading_kg_m2: 500.0,
             cabin_preset: "Custom".to_owned(),
-            optimize_passenger_capacity: false,
+            optimize_passenger_capacity: true,
             num_passengers: 150,
             cargo_payload_kg: 18_000.0,
             // Maximum zero-fuel weight 62.5 t less an operating empty weight
@@ -325,7 +325,7 @@ pub fn a220_300() -> AircraftPreset {
             max_wing_area_m2: 120.0,
             min_wing_loading_kg_m2: 480.0,
             cabin_preset: "Custom".to_owned(),
-            optimize_passenger_capacity: false,
+            optimize_passenger_capacity: true,
             num_passengers: 130,
             cargo_payload_kg: 15_000.0,
             // The same published planning configuration gives MZFW 55,792 kg

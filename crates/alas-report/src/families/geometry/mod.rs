@@ -22,6 +22,7 @@
 
 mod airfoil;
 mod cabin;
+mod cabin_3d;
 mod cabin_seat_map;
 mod planform;
 mod shared;
@@ -31,7 +32,8 @@ mod wireframe;
 pub(crate) use wireframe::{draw_fuselage_wireframe, draw_wing_wireframe};
 
 pub use airfoil::figure_airfoil_evolution;
-pub use cabin::{figure_cabin_payload, figure_cabin_payload_3d, figure_main_deck_seat_map};
+pub use cabin::{figure_cabin_payload, figure_main_deck_seat_map};
+pub use cabin_3d::figure_cabin_payload_3d;
 pub use planform::{figure_design_evolution, figure_geometry, figure_planform_comparison};
 #[doc(hidden)]
 pub use threeview::figure_asb_threeview;

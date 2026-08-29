@@ -348,10 +348,84 @@ pub struct AircraftPreset {
     pub performance: Option<PerformanceConfig>,
 }
 
+/// Representative operating defaults used when an aircraft is selected.
+///
+/// These are high-demand or historically representative city pairs, not
+/// source-backed aircraft design missions.  Keeping them outside
+/// [`AircraftReferenceData`] prevents an interactive example from being
+/// mistaken for payload/range validation evidence.
+#[derive(Debug, Clone, PartialEq)]
+pub struct OperationalMissionDefaults {
+    /// Departure airport display name, resolvable through the airport registry.
+    pub departure_airport: &'static str,
+    /// Arrival airport display name, resolvable through the airport registry.
+    pub arrival_airport: &'static str,
+    /// Aircraft-appropriate mission schedule for the representative route.
+    pub profile: crate::MissionProfileConfig,
+    /// Why this city pair is representative and where that claim came from.
+    pub provenance: &'static str,
+}
+
 impl AircraftPreset {
     /// Where each engine hangs along the span, in metres from the centerline.
     pub fn engine_spanwise_positions(&self) -> &[f64] {
         &self.geometry.engine.spanwise_positions_m
+    }
+
+    /// Representative route and speed schedule loaded by interactive clients.
+    pub fn operational_mission_defaults(&self) -> OperationalMissionDefaults {
+        let (departure_airport, arrival_airport, provenance) = match self.name {
+            "A220-300" => (
+                "Riga (EVRA)",
+                "Stockholm Arlanda (ESSA)",
+                "airBaltic 30-year route history: Stockholm is one of its most popular Riga routes; airBaltic operates an all-A220-300 fleet (accessed 2026-08-29)",
+            ),
+            "A320-200" => (
+                "Madrid Barajas (LEMD)",
+                "Palma de Mallorca (LEPA)",
+                "Aena 2025 traffic reporting identifies Madrid among Palma's principal connections; representative A320-family short-haul pairing (accessed 2026-08-29)",
+            ),
+            "A340-300" => (
+                "Frankfurt (EDDF)",
+                "Boston Logan (KBOS)",
+                "Lufthansa 2026 timetable publishes ten weekly Frankfurt-Boston flights and 5,889 km route distance; representative remaining A340-300 operation (accessed 2026-08-29)",
+            ),
+            "A380-800" => (
+                "Dubai (OMDB)",
+                "London Heathrow (EGLL)",
+                "Emirates identifies Dubai-London Heathrow as a high-frequency A380 market (accessed 2026-08-29)",
+            ),
+            "B787-9" => (
+                "Tokyo Haneda (RJTT)",
+                "Sydney (YSSY)",
+                "ANA lists Sydney among the principal Haneda routes for its Boeing 787-9 (accessed 2026-08-29)",
+            ),
+            "DC-10" => (
+                "Osaka Kansai (RJBB)",
+                "Honolulu (PHNL)",
+                "Northwest Airlines 1996-10-27 timetable explicitly assigns DC-10 equipment to Osaka-Honolulu; historical because scheduled passenger DC-10 service has ended",
+            ),
+            // AVE is a synthetic reference aircraft and has no real demand history.
+            _ => (
+                "London Heathrow (EGLL)",
+                "Dubai (OMDB)",
+                "Synthetic AVE reference route; no real-world subtype demand claim",
+            ),
+        };
+
+        let mut profile = crate::MissionProfileConfig::default();
+        let atmosphere = alas_atmo::Atmosphere::new(self.requirements.cruise_altitude_m);
+        let cruise_tas_m_s = self.requirements.cruise_mach * atmosphere.speed_of_sound();
+        profile.cruise_1_air_speed_m_s = cruise_tas_m_s;
+        profile.cruise_2_air_speed_m_s = cruise_tas_m_s;
+        profile.cruise_3_air_speed_m_s = cruise_tas_m_s;
+
+        OperationalMissionDefaults {
+            departure_airport,
+            arrival_airport,
+            profile,
+            provenance,
+        }
     }
 }
 
@@ -471,6 +545,32 @@ mod tests {
     }
 
     #[test]
+    fn every_operational_default_uses_two_registered_airports() {
+        for preset in registry() {
+            let defaults = preset.operational_mission_defaults();
+            assert_ne!(
+                defaults.departure_airport, defaults.arrival_airport,
+                "{}",
+                preset.name
+            );
+            assert!(
+                crate::airports::get(defaults.departure_airport).is_ok(),
+                "{}: unknown departure {}",
+                preset.name,
+                defaults.departure_airport
+            );
+            assert!(
+                crate::airports::get(defaults.arrival_airport).is_ok(),
+                "{}: unknown arrival {}",
+                preset.name,
+                defaults.arrival_airport
+            );
+            assert!(defaults.profile.cruise_1_air_speed_m_s.is_finite());
+            assert!(!defaults.provenance.is_empty());
+        }
+    }
+
+    #[test]
     fn a_preset_mounts_exactly_as_many_engines_as_it_claims_to_have() {
         for preset in registry() {
             assert_eq!(
@@ -539,7 +639,7 @@ mod tests {
     }
 
     #[test]
-    fn real_presets_keep_their_stated_passenger_target_as_the_load_case() {
+    fn every_passenger_preset_uses_candidate_geometry_for_capacity() {
         for preset in registry().iter().filter(|preset| preset.name != "AVE") {
             assert_eq!(
                 preset.requirements.cabin_preset, "Custom",
@@ -547,8 +647,8 @@ mod tests {
                 preset.name
             );
             assert!(
-                !preset.requirements.optimize_passenger_capacity,
-                "{} must preserve its selected passenger target",
+                preset.requirements.optimize_passenger_capacity,
+                "{}",
                 preset.name
             );
         }

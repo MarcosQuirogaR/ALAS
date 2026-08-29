@@ -364,6 +364,13 @@ fn payload_summary_metrics(layout: &PayloadLayout) -> Vec<(&'static str, String)
                         summary.galleys, summary.lavatories, summary.exit_pairs
                     ),
                 ),
+                (
+                    "Accessibility provisions",
+                    format!(
+                        "{} accessible lavatory / {} wheelchair stowage",
+                        summary.accessible_lavatories, summary.wheelchair_stowages
+                    ),
+                ),
                 ("Payload CG", format!("{:.1}% MAC", summary.cg_pct_mac)),
             ]
         }
@@ -425,6 +432,8 @@ mod tests {
                 classes: vec![("Business", 18), ("Economy", 180)],
                 lavatories: 4,
                 galleys: 3,
+                accessible_lavatories: 1,
+                wheelchair_stowages: 1,
                 exit_type: "A",
                 exit_pairs: 4,
                 exit_capacity: 220,
@@ -454,6 +463,9 @@ mod tests {
         assert!(metrics
             .iter()
             .any(|(label, value)| *label == "Hold loading" && value.contains("3.5 / 8.0 t")));
+        assert!(metrics.iter().any(|(label, value)| {
+            *label == "Accessibility provisions" && value.contains("1 accessible lavatory")
+        }));
     }
 
     #[test]

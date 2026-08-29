@@ -4,6 +4,7 @@
 /.landmark-backups/
 /exports/
 /.codex/
+/.agent/
 /.codex-metadata.json
 /.alas-onboarding-seen
 /.claude/

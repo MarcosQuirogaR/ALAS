@@ -12,16 +12,14 @@ use alas_geom::aircraft::airplane::Airplane;
 use alas_payload::geometry::CabinGeometry;
 use alas_payload::layout::{DeckItem, ItemKind, ItemMeta, LayoutSummary, PayloadLayout, SeatMeta};
 
-use crate::chart_kit::{draw_horizontal_legend, draw_legend, LegendMarker};
+use crate::chart_kit::{draw_horizontal_legend, LegendMarker};
 use crate::scene::Axes2D;
-use crate::scene::{Camera3D, Color, Fill, Scene, SceneElement, Stroke, TextAlign, TextBaseline};
+use crate::scene::{Color, Fill, Scene, SceneElement, Stroke, TextAlign, TextBaseline};
 use crate::theme::get_palette;
 
 use super::cabin_seat_map::draw_main_deck_services;
 use super::shared::equal_aspect_ranges;
-use super::wireframe::{draw_fuselage_wireframe, framing};
-
-fn item_color(item: &DeckItem) -> Color {
+pub(super) fn item_color(item: &DeckItem) -> Color {
     match item.kind {
         ItemKind::SeatRow => match &item.meta {
             ItemMeta::Seat(meta) => Color::from_hex(match meta.cls {
@@ -38,6 +36,9 @@ fn item_color(item: &DeckItem) -> Color {
         },
         ItemKind::Galley => Color::from_hex("#e67e22"),
         ItemKind::Lav => Color::from_hex("#5dade2"),
+        ItemKind::AccessibleLav => Color::from_hex("#2471a3"),
+        ItemKind::WheelchairStowage => Color::from_hex("#f4d03f"),
+        ItemKind::OverheadBin => Color::from_hex("#566573"),
         ItemKind::Exit => Color::from_hex("#e74c3c"),
         ItemKind::Bag => Color::from_hex("#95a5a6"),
     }
@@ -148,7 +149,7 @@ fn centered_text(
     });
 }
 
-fn empty(theme: Option<&str>, message: &str) -> Scene {
+pub(super) fn empty(theme: Option<&str>, message: &str) -> Scene {
     let pal = get_palette(theme);
     let mut scene = Scene::new(800.0, 500.0, Some(Color::from_hex(pal.bg)));
     scene.add(SceneElement::Text {
@@ -286,6 +287,18 @@ pub fn figure_cabin_payload(
                     p1: [p0[0], (p0[1] + p1[1]) * 0.5],
                     p2: [p1[0], (p0[1] + p1[1]) * 0.5],
                     stroke: Stroke::new(color, 2.0),
+                });
+            } else if item.kind == ItemKind::OverheadBin {
+                // The bin footprint overlaps the seats by design. A faint
+                // outline communicates its envelope without hiding the map.
+                scene.add(SceneElement::Rect {
+                    x: p0[0].min(p1[0]),
+                    y: p0[1].min(p1[1]),
+                    width: (p1[0] - p0[0]).abs().max(1.0),
+                    height: (p1[1] - p0[1]).abs().max(1.0),
+                    rx: 1.0,
+                    fill: None,
+                    stroke: Some(Stroke::dashed(color, 0.55, 2.0, 1.5)),
                 });
             } else {
                 scene.add(SceneElement::Rect {
@@ -543,118 +556,6 @@ pub fn figure_main_deck_seat_map(
         [55.0, 734.0],
         pal,
         9.0,
-    );
-    scene
-}
-
-/// Project the same payload items into a 3D-style cabin preview.
-pub fn figure_cabin_payload_3d(
-    layout: &PayloadLayout,
-    plane: &Airplane,
-    config: &AlasConfig,
-    camera: Option<Camera3D>,
-    theme: Option<&str>,
-) -> Scene {
-    let pal = get_palette(theme);
-    if layout.items.is_empty() {
-        return empty(theme, "No payload layout available");
-    }
-    let Ok(_cabin) = CabinGeometry::new(
-        plane,
-        &config.geometry,
-        config.cabin.passenger.wall_thickness_m,
-    ) else {
-        return empty(theme, "Cabin geometry unavailable");
-    };
-    let mut scene = Scene::new(800.0, 520.0, Some(Color::from_hex(pal.bg)));
-    scene.title = Some("Cabin / Payload - 3D".to_owned());
-    let camera = camera.unwrap_or_default();
-    let (x0, x1, y0, y1, z0, z1) = super::shared::airplane_bbox(plane);
-    let (center, _) = framing(x0, x1, y0, y1, z0, z1);
-    let viewport = (20.0, 25.0, 760.0, 410.0);
-    let mut fit_points = layout
-        .items
-        .iter()
-        .map(|item| [item.x, item.y, item.z])
-        .collect::<Vec<_>>();
-    if let Some(fuselage) = plane.fuselages.first() {
-        for section in &fuselage.xsecs {
-            for index in 0..8 {
-                let theta = std::f64::consts::TAU * index as f64 / 8.0;
-                fit_points.push([
-                    section.xyz_c[0],
-                    section.xyz_c[1] + section.width * 0.5 * theta.cos(),
-                    section.xyz_c[2] + section.height * 0.5 * theta.sin(),
-                ]);
-            }
-        }
-    }
-    let max_span = camera.fit_span_to_points(&fit_points, viewport, 0.08);
-    if let Some(fus) = plane.fuselages.first() {
-        draw_fuselage_wireframe(
-            &mut scene,
-            &camera,
-            center,
-            max_span,
-            viewport,
-            fus,
-            Color::from_hex("#7f8c8d"),
-        );
-    }
-    if let Ok(cabin) = CabinGeometry::new(
-        plane,
-        &config.geometry,
-        config.cabin.passenger.wall_thickness_m,
-    ) {
-        for deck in cabin
-            .passenger_decks
-            .iter()
-            .chain(std::iter::once(&cabin.lower_deck))
-        {
-            if layout.by_deck(deck.name).is_empty() {
-                continue;
-            }
-            let points = (0..32)
-                .map(|i| {
-                    let x = cabin.x_min + (cabin.x_max - cabin.x_min) * i as f64 / 31.0;
-                    camera.project([x, 0.0, cabin.floor_z(deck, x)], center, max_span, viewport)
-                })
-                .collect::<Vec<_>>();
-            scene.add(SceneElement::Polyline {
-                points,
-                stroke: Stroke::dashed(Color::from_hex("#3498db"), 0.8, 3.0, 2.0),
-            });
-        }
-    }
-    for item in &layout.items {
-        let p = camera.project([item.x, item.y, item.z], center, max_span, viewport);
-        let color = item_color(item);
-        scene.add(SceneElement::Circle {
-            center: p,
-            radius: (item.mass.sqrt() * 0.025).clamp(2.0, 12.0),
-            fill: Some(Fill::new(color)),
-            stroke: Some(Stroke::new(Color::from_hex(pal.title), 0.5)),
-        });
-    }
-    draw_legend(
-        &mut scene,
-        [560.0, 458.0],
-        &[
-            (
-                "Fuselage".to_owned(),
-                LegendMarker::Line(Stroke::new(Color::from_hex("#7f8c8d"), 1.2)),
-            ),
-            (
-                "Deck floor".to_owned(),
-                LegendMarker::Line(Stroke::dashed(Color::from_hex("#3498db"), 1.0, 3.0, 2.0)),
-            ),
-            (
-                "Payload item".to_owned(),
-                LegendMarker::Circle(Color::from_hex("#27ae60")),
-            ),
-        ],
-        pal,
-        8.0,
     );
     scene
 }

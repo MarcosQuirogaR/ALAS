@@ -422,8 +422,7 @@ impl DesignObjective {
                 shortfall_pct = (self.target_cargo_payload_kg - req.cargo_payload_kg)
                     / self.target_cargo_payload_kg.max(1.0);
             }
-        } else if req.optimize_passenger_capacity && req.num_passengers < self.target_num_passengers
-        {
+        } else if req.num_passengers < self.target_num_passengers {
             shortfall_pct = (self.target_num_passengers - req.num_passengers) as f64
                 / (self.target_num_passengers as f64).max(1.0);
         }

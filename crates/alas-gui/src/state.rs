@@ -20,7 +20,7 @@ use std::collections::BTreeMap;
 use std::sync::atomic::AtomicBool;
 use std::sync::mpsc::Receiver;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use crate::feedback::ParameterFeedback;
 use crate::path_picker::PathPicker;
@@ -65,14 +65,17 @@ impl Language {
     }
 }
 
-/// The two sub-tabs of the live-preview dock.
+/// The two visibility modes of the unified aircraft viewer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PreviewTab {
-    /// The exterior wireframe / three-view.
+    /// The complete aircraft exterior.
     Exterior,
-    /// The cabin and payload layout.
+    /// The interior cabin and payload cutaway.
     Cabin,
 }
+
+/// Camera identity shared by the exterior and interior viewer modes.
+pub const AIRCRAFT_PREVIEW_CAMERA_ID: &str = "aircraft_3d";
 
 /// One run-log line, coloured by severity in the log panel.
 #[derive(Debug, Clone)]
@@ -81,6 +84,10 @@ pub struct LogLine {
     pub text: String,
     /// Its severity, which decides its colour.
     pub kind: LogKind,
+    /// Time since the active run began, when this line belongs to a run.
+    pub elapsed: Option<Duration>,
+    /// Monotonic run identity, or zero for application-level messages.
+    pub run_id: u64,
 }
 
 /// A run-log line's severity.
@@ -168,7 +175,7 @@ pub struct AppState {
     /// Whether zoom follows the current window size until the user chooses a
     /// manual View > Zoom command.
     pub zoom_auto: bool,
-    /// Which sub-tab the preview dock shows.
+    /// Whether the unified aircraft viewer shows its exterior or interior.
     pub preview_tab: PreviewTab,
     /// Per-preview orbit state. A preview must not move another preview's
     /// aircraft when users drag or select a camera preset.
@@ -340,6 +347,8 @@ impl Default for AppState {
             logs: vec![LogLine {
                 text: "ALAS initialized.".to_owned(),
                 kind: LogKind::Info,
+                elapsed: None,
+                run_id: 0,
             }],
             run_log_height: 220.0,
             validation_findings: findings,
@@ -523,13 +532,12 @@ impl AppState {
         self.result_cameras.entry(id.into()).or_default()
     }
 
-    /// Return the camera currently selected in the live preview dock.
+    /// Return the camera shared by both modes of the unified aircraft viewer.
     pub fn active_preview_camera(&self) -> PreviewCamera {
-        let id = match self.preview_tab {
-            PreviewTab::Exterior => self.selected_preview_id.as_str(),
-            PreviewTab::Cabin => "cabin_3d",
-        };
-        self.preview_cameras.get(id).copied().unwrap_or_default()
+        self.preview_cameras
+            .get(AIRCRAFT_PREVIEW_CAMERA_ID)
+            .copied()
+            .unwrap_or_default()
     }
 
     /// Return the persistent state belonging to one interactive canvas.
@@ -563,9 +571,16 @@ impl AppState {
 
     /// Append a run-log line, trimming the oldest once the cap is reached.
     pub fn log(&mut self, text: impl Into<String>, kind: LogKind) {
+        let elapsed = self.run_started.map(|started| started.elapsed());
         self.logs.push(LogLine {
             text: text.into(),
             kind,
+            elapsed,
+            run_id: if elapsed.is_some() {
+                self.run_identity
+            } else {
+                0
+            },
         });
         if self.logs.len() > MAX_LOG_LINES {
             let overflow = self.logs.len() - MAX_LOG_LINES;

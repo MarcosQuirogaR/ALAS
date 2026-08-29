@@ -139,6 +139,7 @@ fn a_named_preset_is_the_public_nominal_design() {
 
 #[test]
 fn an_explicit_design_and_bounds_reach_the_desktop_pipeline() {
+    let progress = std::sync::Mutex::new(Vec::new());
     let mut config = AlasConfig::default();
     config.mission.enabled = false;
     config.structures.enabled = false;
@@ -161,8 +162,24 @@ fn an_explicit_design_and_bounds_reach_the_desktop_pipeline() {
     };
 
     let result = DesignPipeline::new(config)
-        .run_with_design_space(&options, &RunEnvironment::default(), &design, &bounds)
+        .run_with_design_space_and_progress(
+            &options,
+            &RunEnvironment::default(),
+            &design,
+            &bounds,
+            &|message| progress.lock().unwrap().push(message.to_owned()),
+        )
         .unwrap_or_else(|error| panic!("desktop pipeline run: {error}"));
+
+    let progress = progress.lock().unwrap();
+    assert!(progress.starts_with(&[
+        "Validating run configuration".to_owned(),
+        "Analysis workspace ready".to_owned(),
+    ]));
+    assert_eq!(
+        progress.last().map(String::as_str),
+        Some("Stage 7/7: finalizing artifacts and run manifest")
+    );
 
     assert_eq!(result.optimized_design, Some(design));
     assert_eq!(

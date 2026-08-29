@@ -46,6 +46,13 @@ impl PreviewCamera {
         self.zoom = 1.0;
     }
 
+    /// Magnify the projected aircraft while keeping screen-space annotations fixed.
+    pub fn apply_zoom_factor(&mut self, factor: f64) {
+        if factor.is_finite() && factor > 0.0 {
+            self.zoom = (self.zoom * factor).clamp(0.15, 8.0);
+        }
+    }
+
     /// Apply one frame of pointer motion without replaying the gesture total.
     pub fn apply_orbit_motion(&mut self, delta: egui::Vec2) {
         if delta.is_finite() {
@@ -102,5 +109,18 @@ mod tests {
         assert_eq!(report_camera.elev_deg, 31.0);
         assert_eq!(report_camera.azim_deg, -72.0);
         assert_eq!(report_camera.zoom, 1.8);
+    }
+
+    #[test]
+    fn camera_zoom_is_bounded_and_ignores_invalid_input() {
+        let mut camera = PreviewCamera::isometric();
+        camera.apply_zoom_factor(100.0);
+        assert_eq!(camera.zoom, 8.0);
+
+        camera.apply_zoom_factor(0.0001);
+        assert_eq!(camera.zoom, 0.15);
+
+        camera.apply_zoom_factor(f64::NAN);
+        assert_eq!(camera.zoom, 0.15);
     }
 }

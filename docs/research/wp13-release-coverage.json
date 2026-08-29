@@ -1,0 +1,261 @@
+{
+  "schema_version": "alas.wp13.release-coverage.v1",
+  "release_id": "alas-development-wp13-foundation",
+  "release_status": "DevelopmentEvidenceIncomplete",
+  "claims": [
+    {
+      "claim_id": "claim.readme",
+      "statement": "The README.md implementation slice has typed conceptual contracts or bookkeeping in the current worktree.",
+      "ledger_ids": [
+        "research.readme.EV-001",
+        "research.readme.EV-002",
+        "research.readme.EV-003"
+      ],
+      "model_card_id": "model-card.alas-conceptual-aircraft",
+      "status": "NotReleaseVerified",
+      "evidence_ids": [],
+      "rationale": "At least one implementation is unverified and the fresh WP-13 campaign is NotEvaluated."
+    },
+    {
+      "claim_id": "claim.aircraft-design-doctrine",
+      "statement": "The AIRCRAFT_DESIGN_DOCTRINE.md implementation slice has typed conceptual contracts or bookkeeping in the current worktree.",
+      "ledger_ids": [
+        "research.aircraft-design-doctrine.DO-001",
+        "research.aircraft-design-doctrine.DO-002",
+        "research.aircraft-design-doctrine.DO-003"
+      ],
+      "model_card_id": "model-card.alas-conceptual-aircraft",
+      "status": "NotReleaseVerified",
+      "evidence_ids": [],
+      "rationale": "At least one implementation is unverified and the fresh WP-13 campaign is NotEvaluated."
+    },
+    {
+      "claim_id": "claim.requirements-systems",
+      "statement": "The requirements-systems.md implementation slice has typed conceptual contracts or bookkeeping in the current worktree.",
+      "ledger_ids": [
+        "research.requirements-systems.RQ-001",
+        "research.requirements-systems.RQ-002",
+        "research.requirements-systems.RQ-003"
+      ],
+      "model_card_id": "model-card.alas-conceptual-aircraft",
+      "status": "NotReleaseVerified",
+      "evidence_ids": [],
+      "rationale": "At least one implementation is unverified and the fresh WP-13 campaign is NotEvaluated."
+    },
+    {
+      "claim_id": "claim.mission-sizing",
+      "statement": "The mission-sizing.md implementation slice has typed conceptual contracts or bookkeeping in the current worktree.",
+      "ledger_ids": [
+        "research.mission-sizing.MS-001",
+        "research.mission-sizing.MS-002",
+        "research.mission-sizing.MS-003"
+      ],
+      "model_card_id": "model-card.alas-conceptual-aircraft",
+      "status": "NotReleaseVerified",
+      "evidence_ids": [],
+      "rationale": "At least one implementation is unverified and the fresh WP-13 campaign is NotEvaluated."
+    },
+    {
+      "claim_id": "claim.cabin-interiors-cargo",
+      "statement": "The cabin-interiors-cargo.md implementation slice has typed conceptual contracts or bookkeeping in the current worktree.",
+      "ledger_ids": [
+        "research.cabin-interiors-cargo.CB-001",
+        "research.cabin-interiors-cargo.CB-002",
+        "research.cabin-interiors-cargo.CB-003"
+      ],
+      "model_card_id": "model-card.alas-conceptual-aircraft",
+      "status": "NotReleaseVerified",
+      "evidence_ids": [],
+      "rationale": "At least one implementation is unverified and the fresh WP-13 campaign is NotEvaluated."
+    },
+    {
+      "claim_id": "claim.geometry-configuration",
+      "statement": "The geometry-configuration.md implementation slice has typed conceptual contracts or bookkeeping in the current worktree.",
+      "ledger_ids": [
+        "research.geometry-configuration.GE-001",
+        "research.geometry-configuration.GE-002",
+        "research.geometry-configuration.GE-003"
+      ],
+      "model_card_id": "model-card.alas-conceptual-aircraft",
+      "status": "NotReleaseVerified",
+      "evidence_ids": [],
+      "rationale": "At least one implementation is unverified and the fresh WP-13 campaign is NotEvaluated."
+    },
+    {
+      "claim_id": "claim.aerodynamics",
+      "statement": "The aerodynamics.md implementation slice has typed conceptual contracts or bookkeeping in the current worktree.",
+      "ledger_ids": [
+        "research.aerodynamics.AE-001",
+        "research.aerodynamics.AE-002",
+        "research.aerodynamics.AE-003"
+      ],
+      "model_card_id": "model-card.alas-conceptual-aircraft",
+      "status": "NotReleaseVerified",
+      "evidence_ids": [],
+      "rationale": "At least one implementation is unverified and the fresh WP-13 campaign is NotEvaluated."
+    },
+    {
+      "claim_id": "claim.propulsion-energy",
+      "statement": "The propulsion-energy.md implementation slice has typed conceptual contracts or bookkeeping in the current worktree.",
+      "ledger_ids": [
+        "research.propulsion-energy.PE-001",
+        "research.propulsion-energy.PE-002",
+        "research.propulsion-energy.PE-003"
+      ],
+      "model_card_id": "model-card.alas-conceptual-aircraft",
+      "status": "NotReleaseVerified",
+      "evidence_ids": [],
+      "rationale": "At least one implementation is unverified and the fresh WP-13 campaign is NotEvaluated."
+    },
+    {
+      "claim_id": "claim.aircraft-systems",
+      "statement": "The aircraft-systems.md implementation slice has typed conceptual contracts or bookkeeping in the current worktree.",
+      "ledger_ids": [
+        "research.aircraft-systems.SY-001",
+        "research.aircraft-systems.SY-002",
+        "research.aircraft-systems.SY-003"
+      ],
+      "model_card_id": "model-card.alas-conceptual-aircraft",
+      "status": "NotReleaseVerified",
+      "evidence_ids": [],
+      "rationale": "At least one implementation is unverified and the fresh WP-13 campaign is NotEvaluated."
+    },
+    {
+      "claim_id": "claim.mass-balance",
+      "statement": "The mass-balance.md implementation slice has typed conceptual contracts or bookkeeping in the current worktree.",
+      "ledger_ids": [
+        "research.mass-balance.MB-001",
+        "research.mass-balance.MB-002",
+        "research.mass-balance.MB-003"
+      ],
+      "model_card_id": "model-card.alas-conceptual-aircraft",
+      "status": "NotReleaseVerified",
+      "evidence_ids": [],
+      "rationale": "At least one implementation is unverified and the fresh WP-13 campaign is NotEvaluated."
+    },
+    {
+      "claim_id": "claim.stability-control",
+      "statement": "The stability-control.md implementation slice has typed conceptual contracts or bookkeeping in the current worktree.",
+      "ledger_ids": [
+        "research.stability-control.SC-001",
+        "research.stability-control.SC-002",
+        "research.stability-control.SC-003"
+      ],
+      "model_card_id": "model-card.alas-conceptual-aircraft",
+      "status": "NotReleaseVerified",
+      "evidence_ids": [],
+      "rationale": "At least one implementation is unverified and the fresh WP-13 campaign is NotEvaluated."
+    },
+    {
+      "claim_id": "claim.performance-airport",
+      "statement": "The performance-airport.md implementation slice has typed conceptual contracts or bookkeeping in the current worktree.",
+      "ledger_ids": [
+        "research.performance-airport.PF-001",
+        "research.performance-airport.PF-002",
+        "research.performance-airport.PF-003"
+      ],
+      "model_card_id": "model-card.alas-conceptual-aircraft",
+      "status": "NotReleaseVerified",
+      "evidence_ids": [],
+      "rationale": "At least one implementation is unverified and the fresh WP-13 campaign is NotEvaluated."
+    },
+    {
+      "claim_id": "claim.structures-aeroelasticity",
+      "statement": "The structures-aeroelasticity.md implementation slice has typed conceptual contracts or bookkeeping in the current worktree.",
+      "ledger_ids": [
+        "research.structures-aeroelasticity.ST-001",
+        "research.structures-aeroelasticity.ST-002",
+        "research.structures-aeroelasticity.ST-003"
+      ],
+      "model_card_id": "model-card.alas-conceptual-aircraft",
+      "status": "NotReleaseVerified",
+      "evidence_ids": [],
+      "rationale": "At least one implementation is unverified and the fresh WP-13 campaign is NotEvaluated."
+    },
+    {
+      "claim_id": "claim.optimization-mdo",
+      "statement": "The optimization-mdo.md implementation slice has typed conceptual contracts or bookkeeping in the current worktree.",
+      "ledger_ids": [
+        "research.optimization-mdo.OP-001",
+        "research.optimization-mdo.OP-002",
+        "research.optimization-mdo.OP-003"
+      ],
+      "model_card_id": "model-card.alas-conceptual-aircraft",
+      "status": "NotReleaseVerified",
+      "evidence_ids": [],
+      "rationale": "At least one implementation is unverified and the fresh WP-13 campaign is NotEvaluated."
+    },
+    {
+      "claim_id": "claim.digital-thread",
+      "statement": "The digital-thread.md implementation slice has typed conceptual contracts or bookkeeping in the current worktree.",
+      "ledger_ids": [
+        "research.digital-thread.DT-001",
+        "research.digital-thread.DT-002",
+        "research.digital-thread.DT-003"
+      ],
+      "model_card_id": "model-card.alas-conceptual-aircraft",
+      "status": "NotReleaseVerified",
+      "evidence_ids": [],
+      "rationale": "At least one implementation is unverified and the fresh WP-13 campaign is NotEvaluated."
+    },
+    {
+      "claim_id": "claim.certification-safety",
+      "statement": "The certification-safety.md implementation slice has typed conceptual contracts or bookkeeping in the current worktree.",
+      "ledger_ids": [
+        "research.certification-safety.SA-001",
+        "research.certification-safety.SA-002",
+        "research.certification-safety.SA-003"
+      ],
+      "model_card_id": "model-card.alas-conceptual-aircraft",
+      "status": "NotReleaseVerified",
+      "evidence_ids": [],
+      "rationale": "At least one implementation is unverified and the fresh WP-13 campaign is NotEvaluated."
+    },
+    {
+      "claim_id": "claim.environment-lifecycle",
+      "statement": "The environment-lifecycle.md implementation slice has typed conceptual contracts or bookkeeping in the current worktree.",
+      "ledger_ids": [
+        "research.environment-lifecycle.EN-001",
+        "research.environment-lifecycle.EN-002",
+        "research.environment-lifecycle.EN-003"
+      ],
+      "model_card_id": "model-card.alas-conceptual-aircraft",
+      "status": "NotReleaseVerified",
+      "evidence_ids": [],
+      "rationale": "At least one implementation is unverified and the fresh WP-13 campaign is NotEvaluated."
+    },
+    {
+      "claim_id": "claim.operations-economics",
+      "statement": "The operations-economics.md implementation slice has typed conceptual contracts or bookkeeping in the current worktree.",
+      "ledger_ids": [
+        "research.operations-economics.OE-001",
+        "research.operations-economics.OE-002",
+        "research.operations-economics.OE-003"
+      ],
+      "model_card_id": "model-card.alas-conceptual-aircraft",
+      "status": "NotReleaseVerified",
+      "evidence_ids": [],
+      "rationale": "At least one implementation is unverified and the fresh WP-13 campaign is NotEvaluated."
+    },
+    {
+      "claim_id": "claim.integration-plan",
+      "statement": "The INTEGRATION_PLAN.md implementation slice has typed conceptual contracts or bookkeeping in the current worktree.",
+      "ledger_ids": [
+        "research.integration-plan.IP-001",
+        "research.integration-plan.IP-002",
+        "research.integration-plan.IP-003"
+      ],
+      "model_card_id": "model-card.alas-conceptual-aircraft",
+      "status": "NotReleaseVerified",
+      "evidence_ids": [],
+      "rationale": "At least one implementation is unverified and the fresh WP-13 campaign is NotEvaluated."
+    }
+  ],
+  "release_rule": "ReleaseVerified requires every supporting ledger row to be Verified and every evidence ID to resolve to a retained hash-checked artifact.",
+  "global_blockers": [
+    "fresh unified conventional-aircraft replay not executed",
+    "independent second-environment reproduction not retained",
+    "default frozen hard-requirement review contains NotEvaluated and blocked requirements",
+    "external solver, experimental, supplier, legal, operator, lifecycle, climate, and acoustic data gaps remain"
+  ]
+}

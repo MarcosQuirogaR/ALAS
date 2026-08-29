@@ -63,6 +63,7 @@ impl AppState {
         };
 
         let mut config = self.typed_config().unwrap_or_default();
+        let operational = preset.operational_mission_defaults();
         config.preset = preset.name.to_owned();
         config.geometry = preset.geometry.clone();
         config.geometry.engine.apply_engine_spec();
@@ -74,6 +75,9 @@ impl AppState {
         if let Some(perf) = &preset.performance {
             config.performance = perf.clone();
         }
+        config.departure_airport = operational.departure_airport.to_owned();
+        config.arrival_airport = operational.arrival_airport.to_owned();
+        config.mission.profile = operational.profile;
 
         self.config_values = serde_json::to_value(&config).unwrap_or(Value::Null);
         self.active_preset = preset.name.to_owned();

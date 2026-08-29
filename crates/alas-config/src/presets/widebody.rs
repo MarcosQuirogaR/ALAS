@@ -176,7 +176,7 @@ pub fn a340_300() -> AircraftPreset {
             max_wing_area_m2: 370.0,
             min_wing_loading_kg_m2: 500.0,
             cabin_preset: "Custom".to_owned(),
-            optimize_passenger_capacity: false,
+            optimize_passenger_capacity: true,
             num_passengers: 290,
             cargo_payload_kg: 45_000.0,
             // Maximum zero-fuel weight 178.0 t less an operating empty weight
@@ -336,7 +336,7 @@ pub fn a380_800() -> AircraftPreset {
             max_wing_area_m2: 845.0,
             min_wing_loading_kg_m2: 450.0,
             cabin_preset: "Custom".to_owned(),
-            optimize_passenger_capacity: false,
+            optimize_passenger_capacity: true,
             num_passengers: 525,
             cargo_payload_kg: 150_000.0,
             // Maximum zero-fuel weight about 361 t less an operating empty
@@ -481,7 +481,7 @@ pub fn b787_9() -> AircraftPreset {
             max_wing_area_m2: 385.0,
             min_wing_loading_kg_m2: 480.0,
             cabin_preset: "Custom".to_owned(),
-            optimize_passenger_capacity: false,
+            optimize_passenger_capacity: true,
             num_passengers: 290,
             cargo_payload_kg: 55_000.0,
             // Maximum zero-fuel weight 181.4 t less an operating empty weight
@@ -617,7 +617,7 @@ pub fn dc_10() -> AircraftPreset {
             max_wing_area_m2: 338.84,
             min_wing_loading_kg_m2: 500.0,
             cabin_preset: "Custom".to_owned(),
-            optimize_passenger_capacity: false,
+            optimize_passenger_capacity: true,
             num_passengers: 250,
             cargo_payload_kg: 65_000.0,
             // ACAP 572k planning option: MZFW 166,922 kg less OEW 120,914 kg.

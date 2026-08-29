@@ -230,7 +230,7 @@ fn reference_compatibility_restores_the_legacy_three_station_planform() {
 }
 
 #[test]
-fn a_real_preset_keeps_its_passenger_target_during_candidate_preparation() {
+fn a_real_preset_recomputes_capacity_during_candidate_preparation() {
     let mut config = AlasConfig::from_value(&serde_json::json!({"preset": "A220-300"}))
         .expect("the registered preset loads");
     let target = config.requirements.num_passengers;
@@ -239,13 +239,13 @@ fn a_real_preset_keeps_its_passenger_target_during_candidate_preparation() {
         .expect("a fixed load case needs no geometry-derived capacity");
 
     assert_eq!(target, 130);
-    assert_eq!(config.requirements.num_passengers, target);
+    assert_ne!(config.requirements.num_passengers, target);
+    assert!(config.requirements.num_passengers > 0);
     assert_eq!(config.requirements.cabin_preset, "Custom");
-    assert!(!config.requirements.optimize_passenger_capacity);
 }
 
 #[test]
-fn passenger_capacity_is_recomputed_only_after_explicit_opt_in() {
+fn passenger_capacity_is_recomputed_without_an_opt_in_switch() {
     let mut config = AlasConfig::from_value(&serde_json::json!({"preset": "A220-300"}))
         .expect("the registered preset loads");
     let design = alas_config::presets::get("A220-300")
@@ -253,7 +253,7 @@ fn passenger_capacity_is_recomputed_only_after_explicit_opt_in() {
         .design_vector;
     let target = config.requirements.num_passengers;
     config.requirements.cabin_preset = "Ryanair".to_owned();
-    config.requirements.optimize_passenger_capacity = true;
+    config.requirements.optimize_passenger_capacity = false;
 
     apply_candidate_payload_load_case(&mut config, &design)
         .expect("the capacity load case resolves");

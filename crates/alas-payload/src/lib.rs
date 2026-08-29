@@ -40,7 +40,7 @@ mod numeric;
 
 pub use build::{
     apply_cabin_preset, build_payload_layout, build_payload_layout_reference_compatibility,
-    simulate_passenger_counts,
+    simulate_passenger_counts, simulate_passenger_counts_for_seat_mix,
 };
 pub use build::{CabinPresetError, PassengerCounts};
 pub use cabin::{build_passenger_layout, build_passenger_layout_reference_compatibility};

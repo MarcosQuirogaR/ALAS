@@ -155,13 +155,13 @@ fn build_structures_preview(
     ))
 }
 
-/// The live-preview scene for the dock's current sub-tab.
+/// The live-preview scene for the unified aircraft viewer's current mode.
 pub fn build_preview_scene(state: &AppState) -> Option<Scene> {
     let id = match state.preview_tab {
         PreviewTab::Cabin => "cabin_3d",
         PreviewTab::Exterior => state.selected_preview_id.as_str(),
     };
-    build_page_preview(state, id)
+    build_page_preview_with_camera(state, id, Some(state.active_preview_camera().into()))
 }
 
 /// A preview figure built live from the current configuration, by id.
