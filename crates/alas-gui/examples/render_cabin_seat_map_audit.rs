@@ -11,6 +11,7 @@ use alas_geom::builder::AircraftBuilder;
 use alas_gui::scene::localize_scene_for_display;
 use alas_payload::build::build_payload_layout;
 use alas_report::families::geometry::{figure_cabin_payload, figure_main_deck_seat_map};
+use alas_report::families::mass_balance_layout::figure_cabin_cross_section;
 use alas_report::render_svg;
 
 fn write_scene(
@@ -48,6 +49,16 @@ fn render_preset(directory: &std::path::Path, name: &str) -> Result<(), Box<dyn 
         directory,
         &format!("{stem}_cabin_payload_es_dark"),
         &localize_scene_for_display(figure_cabin_payload(
+            &layout,
+            &aircraft,
+            &config,
+            Some("dark-accessible"),
+        )),
+    )?;
+    write_scene(
+        directory,
+        &format!("{stem}_cabin_section_es_dark"),
+        &localize_scene_for_display(figure_cabin_cross_section(
             &layout,
             &aircraft,
             &config,

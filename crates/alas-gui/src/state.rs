@@ -33,7 +33,7 @@ use alas_config::{
     ValidationIssue, DESIGN_VARIABLE_SPECS,
 };
 use alas_exec::{ToolLocator, ToolPreferences};
-use alas_pipeline::{PipelineOptions, PipelineResult};
+use alas_pipeline::{PipelineOptions, PipelineResult, RunEvent};
 use alas_report::scene::Scene;
 use alas_viz::SceneViewState;
 use serde_json::Value;
@@ -128,8 +128,8 @@ impl Default for RunOptions {
 
 /// Messages emitted from the background pipeline thread.
 pub enum WorkerMessage {
-    /// A progress line.
-    Progress(String),
+    /// A typed pipeline lifecycle event.
+    Event(RunEvent),
     /// The finished result, or the error that ended the run.
     Finished(Box<Result<PipelineResult, String>>),
 }
@@ -206,8 +206,20 @@ pub struct AppState {
     pub worker_rx: Option<Receiver<WorkerMessage>>,
     /// The flag that asks a running pipeline to stop.
     pub cancel_flag: Arc<AtomicBool>,
+    /// Whether the user has already requested cancellation for this run.
+    pub cancellation_requested: bool,
+    /// Typed lifecycle events for the active or most recently completed run.
+    pub run_events: Vec<RunEvent>,
     /// The run log.
     pub logs: Vec<LogLine>,
+    /// Case-insensitive text filter applied by the run-log toolbar.
+    pub run_log_search: String,
+    /// Severity visibility toggles for the run-log toolbar.
+    pub run_log_show_info: bool,
+    pub run_log_show_warn: bool,
+    pub run_log_show_error: bool,
+    /// Feedback from the most recent run-log export.
+    pub run_log_export_status: Option<String>,
     /// The run-log dock height in points, retained while the app is open.
     pub run_log_height: f32,
     /// The current validation findings.
@@ -216,6 +228,8 @@ pub struct AppState {
     pub selected_preview_id: String,
     /// The rendered preview scene.
     pub preview_scene: Option<Scene>,
+    /// Monotonic generation of the live preview scene and camera projection.
+    pub preview_scene_revision: u64,
     /// The active discipline tab in the results gallery ("summary" or a
     /// `results_view::TABS` id).
     pub results_tab: String,
@@ -344,16 +358,24 @@ impl Default for AppState {
             run_identity: 0,
             worker_rx: None,
             cancel_flag: Arc::new(AtomicBool::new(false)),
+            cancellation_requested: false,
+            run_events: Vec::new(),
             logs: vec![LogLine {
                 text: "ALAS initialized.".to_owned(),
                 kind: LogKind::Info,
                 elapsed: None,
                 run_id: 0,
             }],
+            run_log_search: String::new(),
+            run_log_show_info: true,
+            run_log_show_warn: true,
+            run_log_show_error: true,
+            run_log_export_status: None,
             run_log_height: 220.0,
             validation_findings: findings,
             selected_preview_id: "exterior_3d".to_owned(),
             preview_scene: None,
+            preview_scene_revision: 0,
             results_tab: "summary".to_owned(),
             selected_solver_view: SolverResultView::Vlm,
             selected_result_id: "polar_comparison".to_owned(),
@@ -604,6 +626,7 @@ impl AppState {
     /// Update the live-preview scene from the current geometry and dock tab.
     pub fn update_preview_scene(&mut self) {
         self.preview_scene = crate::scene::build_preview_scene(self);
+        self.preview_scene_revision = self.preview_scene_revision.wrapping_add(1);
     }
 
     /// Update the results-gallery scene from the current result and selection.

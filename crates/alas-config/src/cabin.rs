@@ -11,15 +11,11 @@
 //! that the centre of gravity checked against the envelope is the one the
 //! real seating and loading produce rather than a lumped estimate.
 //!
-//! # Four fixed classes rather than a list
+//! # Three product classes
 //!
-//! The passenger cabin has exactly four class slots: first, business,
-//! premium and economy. A class with no seats is simply absent. A
-//! variable-length list would be more general and would need per-field
-//! interface code to render, which is the whole thing the generated settings
-//! form exists to avoid; four slots cover every transport cabin anyone
-//! configures here. If every class is empty the layout falls back to a single
-//! economy cabin sized to the requested passenger count.
+//! First, business and economy are the three supported product classes. The
+//! former premium-economy slot remains in serialized files for compatibility,
+//! but is hidden and excluded from all product allocation calculations.
 
 mod cargo;
 mod seat_class;
@@ -31,19 +27,16 @@ use serde::{Deserialize, Serialize};
 
 use crate::ConfigNode;
 
-/// The four class slots, forward to aft. Naming them once keeps the layout
+/// The three product class slots, forward to aft. Naming them once keeps the layout
 /// order and the share mix from disagreeing about which cabin comes first.
-const CLASS_NAMES: [&str; 4] = ["First", "Business", "Premium", "Economy"];
+const CLASS_NAMES: [&str; 3] = ["First", "Business", "Economy"];
 
 /// Passenger cabin: the class mix, the monuments, and the baggage.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ConfigNode)]
 #[serde(deny_unknown_fields)]
 pub struct PassengerCabinConfig {
     /// Whether the class mix is given as shares of length or as seat counts.
-    #[config(
-        label = "Class mix mode",
-        help = "'percent': give each class a share of cabin length and let the layout solve the seat counts (recommended -- counts depend on pitch, abreast and fuselage shape). 'count': type exact per-class seat numbers instead."
-    )]
+    #[config(skip)]
     pub class_mix_mode: String,
 
     /// The first-class cabin.
@@ -58,10 +51,7 @@ pub struct PassengerCabinConfig {
     pub business: SeatClassConfig,
 
     /// The premium-economy cabin.
-    #[config(
-        nested,
-        help = "Premium economy: a wider seat at a longer pitch than economy, typically two-four-two abreast."
-    )]
+    #[config(skip)]
     pub premium: SeatClassConfig,
 
     /// The economy cabin.
@@ -72,51 +62,35 @@ pub struct PassengerCabinConfig {
     pub economy: SeatClassConfig,
 
     /// Aisle width, or zero to take it from the regulation.
-    #[config(
-        help = "Width of the cabin aisle, or 0 to take the certified minimum for the passenger count: 0.30 m up to 19 passengers, and 0.51 m above that, which is the upper-body clearance that governs at seat and armrest level. Set it explicitly for a wider premium aisle."
-    )]
+    #[config(skip)]
     pub aisle_width_m: f64,
 
     /// Galleys, or zero to derive from the passenger count.
-    #[config(
-        help = "Number of galleys, or 0 to derive it from the passenger count at the standard provisioning ratio of roughly one per hundred passengers plus one."
-    )]
+    #[config(skip)]
     pub galley_count: i64,
 
     /// Lavatories, or zero to derive from the passenger count.
-    #[config(
-        help = "Number of lavatories, or 0 to derive it from the passenger count at the standard provisioning ratio of roughly one per forty-five passengers."
-    )]
+    #[config(skip)]
     pub lavatory_count: i64,
 
     /// Checked baggage per passenger.
-    #[config(
-        help = "Checked baggage mass per passenger, containerised into real lower-deck positions and trimmed toward the seating centre of gravity, as airlines trim bags. Separate from the seated mass on each class, which covers the occupant and their carry-on."
-    )]
+    #[config(skip)]
     pub checked_bag_mass_kg: f64,
 
     /// Revenue freight in whatever hold capacity the bags leave.
-    #[config(
-        help = "Revenue freight loaded into the lower-deck capacity remaining after checked bags (0 = none). Real passenger aircraft rarely fly with empty bellies. Capped at what the holds can still take, and it counts toward payload, so it trades against fuel within the takeoff weight."
-    )]
+    #[config(skip)]
     pub belly_cargo_kg: f64,
 
     /// How far in from the skin the usable cabin starts.
-    #[config(
-        help = "Inset per side from the outer skin to the usable cabin wall: frames and stringers, at least an inch of insulation, the standoff drain gap, and trim panels. 0.15 m is typical for a narrowbody."
-    )]
+    #[config(skip)]
     pub wall_thickness_m: f64,
 
     /// Closest two emergency-exit pairs can realistically be installed.
-    #[config(
-        help = "Minimum longitudinal spacing between adjacent emergency-exit pairs on a deck. This is what caps how many legally evacuable passengers a deck can hold: without it, the layout would fill the whole floor with seats regardless of whether enough exits could physically be fitted to evacuate them."
-    )]
+    #[config(skip)]
     pub min_exit_pair_spacing_m: f64,
 
     /// How much of a large exit's rated capacity is realistically achievable.
-    #[config(
-        help = "Derates the theoretical rating of Type-A exits alone when computing the aircraft's realistic capacity ceiling. A real certified capacity comes from a full evacuation demonstration, which for a widebody with several large doors lands well below the sum of each door's individual rating, because aisle throughput rather than door count becomes the limit. Smaller exit types track their nominal rating in practice and are left undiscounted, and this does not change how many exits are actually installed."
-    )]
+    #[config(skip)]
     pub exit_capacity_realism_factor: f64,
 }
 
@@ -144,13 +118,12 @@ impl Default for PassengerCabinConfig {
 }
 
 impl PassengerCabinConfig {
-    /// Every class slot with its name, forward to aft, present or not.
-    pub fn all_classes(&self) -> [(&'static str, &SeatClassConfig); 4] {
+    /// Every product class slot with its name, forward to aft, present or not.
+    pub fn all_classes(&self) -> [(&'static str, &SeatClassConfig); 3] {
         [
             (CLASS_NAMES[0], &self.first),
             (CLASS_NAMES[1], &self.business),
-            (CLASS_NAMES[2], &self.premium),
-            (CLASS_NAMES[3], &self.economy),
+            (CLASS_NAMES[2], &self.economy),
         ]
     }
 
@@ -193,13 +166,11 @@ impl PassengerCabinConfig {
         let counts = [
             self.first.count.max(0) as f64,
             self.business.count.max(0) as f64,
-            self.premium.count.max(0) as f64,
             self.economy.count.max(0) as f64,
         ];
         let shares = [
             self.first.share_pct,
             self.business.share_pct,
-            self.premium.share_pct,
             self.economy.share_pct,
         ];
         let count_total: f64 = counts.iter().sum();
@@ -212,13 +183,13 @@ impl PassengerCabinConfig {
         {
             shares
         } else {
-            [0.0, 0.0, 0.0, 1.0]
+            [0.0, 0.0, 1.0]
         };
         let allocated = proportional_integer_allocation(target, weights);
         self.first.count = allocated[0];
         self.business.count = allocated[1];
-        self.premium.count = allocated[2];
-        self.economy.count = allocated[3];
+        self.premium.count = 0;
+        self.economy.count = allocated[2];
     }
 
     /// The class mix as normalized fractions of cabin length, forward to aft.
@@ -260,22 +231,22 @@ impl PassengerCabinConfig {
         };
         self.first.share_pct = share_of(CLASS_NAMES[0]);
         self.business.share_pct = share_of(CLASS_NAMES[1]);
-        self.premium.share_pct = share_of(CLASS_NAMES[2]);
-        self.economy.share_pct = share_of(CLASS_NAMES[3]);
+        self.premium.share_pct = 0.0;
+        self.economy.share_pct = share_of(CLASS_NAMES[2]);
     }
 }
 
-fn proportional_integer_allocation(target: i64, weights: [f64; 4]) -> [i64; 4] {
+fn proportional_integer_allocation(target: i64, weights: [f64; 3]) -> [i64; 3] {
     if target <= 0 {
-        return [0; 4];
+        return [0; 3];
     }
     let total: f64 = weights.iter().sum();
     if !total.is_finite() || total <= 0.0 {
-        return [0, 0, 0, target];
+        return [0, 0, target];
     }
 
-    let mut allocation = [0_i64; 4];
-    let mut fractional = [0.0_f64; 4];
+    let mut allocation = [0_i64; 3];
+    let mut fractional = [0.0_f64; 3];
     let mut assigned = 0_i64;
     for (index, weight) in weights.into_iter().enumerate() {
         let raw = target as f64 * weight / total;
@@ -285,7 +256,7 @@ fn proportional_integer_allocation(target: i64, weights: [f64; 4]) -> [i64; 4] {
         assigned += whole;
     }
 
-    // At most three seats remain after flooring four class allocations. The
+    // At most two seats remain after flooring three class allocations. The
     // stable index tie-break keeps saved runs reproducible.
     let mut remaining = (target - assigned).max(0);
     while remaining > 0 {
@@ -296,7 +267,7 @@ fn proportional_integer_allocation(target: i64, weights: [f64; 4]) -> [i64; 4] {
                 left.total_cmp(right)
                     .then_with(|| right_index.cmp(left_index))
             })
-            .map_or(3, |(index, _)| index);
+            .map_or(2, |(index, _)| index);
         allocation[index] += 1;
         fractional[index] = f64::NEG_INFINITY;
         remaining -= 1;
@@ -415,21 +386,17 @@ mod tests {
     #[test]
     fn fixed_passenger_count_has_a_stable_largest_remainder_tie_break() {
         let mut cabin = PassengerCabinConfig::default();
-        cabin.first.share_pct = 25.0;
-        cabin.business.share_pct = 25.0;
-        cabin.premium.share_pct = 25.0;
-        cabin.economy.share_pct = 25.0;
+        cabin.first.share_pct = 1.0;
+        cabin.business.share_pct = 1.0;
+        cabin.economy.share_pct = 1.0;
 
         cabin.set_fixed_passenger_count(2);
 
-        assert_eq!(
-            cabin.all_classes().map(|(_, class)| class.count),
-            [1, 1, 0, 0]
-        );
+        assert_eq!(cabin.all_classes().map(|(_, class)| class.count), [1, 1, 0]);
     }
 
     #[test]
-    fn the_classes_reach_the_form_as_four_groups_in_cabin_order() {
+    fn the_form_exposes_only_the_three_product_classes_in_cabin_order() {
         let schema = CabinConfig::default().schema();
         let crate::Entry::Node(passenger) = &schema.field("passenger").unwrap().entry else {
             panic!("the passenger cabin is a group");
@@ -440,6 +407,6 @@ mod tests {
             .filter(|field| matches!(field.entry, crate::Entry::Node(_)))
             .map(|field| field.name)
             .collect();
-        assert_eq!(names, vec!["first", "business", "premium", "economy"]);
+        assert_eq!(names, vec!["first", "business", "economy"]);
     }
 }

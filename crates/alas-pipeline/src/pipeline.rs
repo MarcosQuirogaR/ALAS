@@ -17,7 +17,8 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use alas_aero::mses::{
     run_mses_polar, run_mses_pressure_distribution, MsesPolarResult, MsesPressureResult,
@@ -52,6 +53,7 @@ use crate::flowunsteady::{run_flowunsteady_analysis, FlowUnsteadyAnalysisResult}
 use crate::full_analysis::{AnalysisReport, FullAnalysis};
 use crate::mission_stage;
 use crate::openvsp::{export_openvsp_script, materialize_openvsp_project, OpenVspExportResult};
+use crate::runs::{RunEvent, RunEventKind, RunEventSeverity};
 use crate::solver_mode::{AerodynamicSolverMode, OptimizationSolverMode};
 use crate::structural::StructuralAnalysisResult;
 use crate::vspaero::{run_vspaero_analysis, VspaeroAnalysisResult};
@@ -78,6 +80,175 @@ struct MsesSectionCondition {
     mach: f64,
     reynolds: f64,
     alpha_deg: f64,
+}
+
+const PIPELINE_STAGE_COUNT: u8 = 7;
+
+fn check_cancelled(cancel: Option<&AtomicBool>) -> Result<(), String> {
+    if cancel.is_some_and(|flag| flag.load(Ordering::Relaxed)) {
+        Err("Cancelled safely at a pipeline stage boundary".to_owned())
+    } else {
+        Ok(())
+    }
+}
+
+fn emit_event(events: Option<&(dyn Fn(RunEvent) + Sync)>, run_clock: Instant, event: RunEvent) {
+    if let Some(callback) = events {
+        callback(RunEvent {
+            elapsed_ms: run_clock.elapsed().as_millis() as u64,
+            ..event
+        });
+    }
+}
+
+fn begin_stage(
+    events: Option<&(dyn Fn(RunEvent) + Sync)>,
+    run_clock: Instant,
+    index: u8,
+    stage: &str,
+    message: &str,
+) -> Instant {
+    emit_event(
+        events,
+        run_clock,
+        RunEvent {
+            stage: stage.to_owned(),
+            message: message.to_owned(),
+            fraction: Some(0.0),
+            kind: RunEventKind::StageStarted,
+            severity: RunEventSeverity::Info,
+            stage_index: Some(index),
+            stage_count: Some(PIPELINE_STAGE_COUNT),
+            elapsed_ms: 0,
+            duration_ms: None,
+        },
+    );
+    Instant::now()
+}
+
+fn finish_stage(
+    events: Option<&(dyn Fn(RunEvent) + Sync)>,
+    run_clock: Instant,
+    stage_clock: Instant,
+    index: u8,
+    stage: &str,
+) {
+    let duration_ms = stage_clock.elapsed().as_millis() as u64;
+    emit_event(
+        events,
+        run_clock,
+        RunEvent {
+            stage: stage.to_owned(),
+            message: format!("Completed in {:.3} s", duration_ms as f64 / 1_000.0),
+            fraction: Some(1.0),
+            kind: RunEventKind::StageCompleted,
+            severity: RunEventSeverity::Info,
+            stage_index: Some(index),
+            stage_count: Some(PIPELINE_STAGE_COUNT),
+            elapsed_ms: 0,
+            duration_ms: Some(duration_ms),
+        },
+    );
+}
+
+fn emit_diagnostic(
+    events: Option<&(dyn Fn(RunEvent) + Sync)>,
+    run_clock: Instant,
+    stage: &str,
+    message: &str,
+) {
+    emit_diagnostic_with_severity(events, run_clock, stage, message, RunEventSeverity::Info);
+}
+
+fn emit_diagnostic_with_severity(
+    events: Option<&(dyn Fn(RunEvent) + Sync)>,
+    run_clock: Instant,
+    stage: &str,
+    message: &str,
+    severity: RunEventSeverity,
+) {
+    emit_event(
+        events,
+        run_clock,
+        RunEvent {
+            stage: stage.to_owned(),
+            message: message.to_owned(),
+            fraction: None,
+            kind: RunEventKind::Diagnostic,
+            severity,
+            stage_index: None,
+            stage_count: Some(PIPELINE_STAGE_COUNT),
+            elapsed_ms: 0,
+            duration_ms: None,
+        },
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn emit_tool_diagnostics(
+    events: Option<&(dyn Fn(RunEvent) + Sync)>,
+    run_clock: Instant,
+    environment: &RunEnvironment,
+    openvsp: Option<&OpenVspExportResult>,
+    vspaero: Option<&VspaeroAnalysisResult>,
+    avl: Option<&AvlAnalysisResult>,
+    flowunsteady: Option<&FlowUnsteadyAnalysisResult>,
+    structures: Option<&StructuralAnalysisResult>,
+    mses: Option<&MsesPolarResult>,
+) {
+    let configured = [
+        ("OpenVSP", environment.openvsp_exe.as_deref()),
+        ("VSPAERO", environment.vspaero_exe.as_deref()),
+        ("AVL", environment.avl_exe.as_deref()),
+        ("FLOWUnsteady", environment.flowunsteady_exe.as_deref()),
+        ("MSES", environment.mses_dir.as_deref()),
+        ("Nastran", environment.nastran_exe.as_deref()),
+        ("Patran", environment.patran_exe.as_deref()),
+    ];
+    for (tool, path) in configured {
+        let message = path.map_or_else(
+            || format!("{tool}: not configured"),
+            |path| format!("{tool}: resolved {}", path.display()),
+        );
+        emit_diagnostic_with_severity(
+            events,
+            run_clock,
+            "external_tools",
+            &message,
+            if path.is_some() {
+                RunEventSeverity::Info
+            } else {
+                RunEventSeverity::Warning
+            },
+        );
+    }
+    for (tool, status) in [
+        (
+            "OpenVSP",
+            openvsp.map(|value| format!("{:?}", value.status)),
+        ),
+        (
+            "VSPAERO",
+            vspaero.map(|value| format!("{:?}", value.status)),
+        ),
+        ("AVL", avl.map(|value| format!("{:?}", value.status))),
+        (
+            "FLOWUnsteady",
+            flowunsteady.map(|value| format!("{:?}", value.status)),
+        ),
+        ("Structures", structures.map(|value| value.status.clone())),
+        ("MSES", mses.map(|value| format!("{:?}", value.status))),
+    ] {
+        emit_diagnostic(
+            events,
+            run_clock,
+            "external_tools",
+            &format!(
+                "{tool}: {}",
+                status.unwrap_or_else(|| "not requested".to_owned())
+            ),
+        );
+    }
 }
 
 fn mses_section_condition(config: &AlasConfig, report: &AnalysisReport) -> MsesSectionCondition {
@@ -329,7 +500,7 @@ impl DesignPipeline {
         options: &PipelineOptions,
         environment: &RunEnvironment,
     ) -> Result<PipelineResult, String> {
-        self.run_inner(options, environment, None, None, None, None)
+        self.run_inner(options, environment, None, None, None, None, None, None)
     }
 
     /// Execute a run using the one resolved external-tool environment shared
@@ -353,7 +524,16 @@ impl DesignPipeline {
         environment: &RunEnvironment,
         dispatched_route: Option<Route>,
     ) -> Result<PipelineResult, String> {
-        self.run_inner(options, environment, dispatched_route, None, None, None)
+        self.run_inner(
+            options,
+            environment,
+            dispatched_route,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
     }
 
     /// Execute a desktop run at the design point and bounds currently shown
@@ -376,6 +556,8 @@ impl DesignPipeline {
             None,
             Some(*initial_design),
             Some(bounds),
+            None,
+            None,
             None,
         )
     }
@@ -400,9 +582,37 @@ impl DesignPipeline {
             Some(*initial_design),
             Some(bounds),
             Some(progress),
+            None,
+            None,
         )
     }
 
+    /// Execute a design-space run with typed lifecycle events and cooperative
+    /// cancellation. Cancellation is observed only at safe stage boundaries;
+    /// an active external process is allowed to finish its supervised call.
+    pub fn run_with_design_space_events(
+        &self,
+        options: &PipelineOptions,
+        environment: &RunEnvironment,
+        initial_design: &DesignVector,
+        bounds: &[(f64, f64)],
+        events: &(dyn Fn(RunEvent) + Sync),
+        cancel: &AtomicBool,
+    ) -> Result<PipelineResult, String> {
+        validate_bounds(bounds)?;
+        self.run_inner(
+            options,
+            environment,
+            None,
+            Some(*initial_design),
+            Some(bounds),
+            None,
+            Some(events),
+            Some(cancel),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
     fn run_inner(
         &self,
         options: &PipelineOptions,
@@ -411,13 +621,17 @@ impl DesignPipeline {
         initial_design: Option<DesignVector>,
         bounds: Option<&[(f64, f64)]>,
         progress: Option<&(dyn Fn(&str) + Sync)>,
+        events: Option<&(dyn Fn(RunEvent) + Sync)>,
+        cancel: Option<&AtomicBool>,
     ) -> Result<PipelineResult, String> {
+        let run_clock = Instant::now();
         let report = |message: &str| {
             if let Some(callback) = progress {
                 callback(message);
             }
         };
         report("Validating run configuration");
+        check_cancelled(cancel)?;
         validate_run_configuration(&self.config)?;
         if self.aircraft_override.is_some() && options.optimize {
             return Err(
@@ -445,14 +659,24 @@ impl DesignPipeline {
         std::fs::create_dir_all(&analysis_dir)
             .map_err(|error| format!("analysis workspace creation failed: {error}"))?;
         report("Analysis workspace ready");
+        emit_diagnostic(events, run_clock, "setup", "Analysis workspace ready");
         let nominal_design = initial_design.unwrap_or_else(|| self.configured_nominal_design());
 
         // Stage 0: Baseline W&B + stability estimation.
         report("Stage 1/7: baseline weight, balance, and stability");
+        let mut stage_clock = begin_stage(
+            events,
+            run_clock,
+            1,
+            "baseline",
+            "Baseline weight, balance, and stability",
+        );
         let baseline_report = self
             .aircraft_override
             .is_none()
             .then(|| analyze_baseline(&self.config, &nominal_design));
+        finish_stage(events, run_clock, stage_clock, 1, "baseline");
+        check_cancelled(cancel)?;
 
         // Stage 1: Design space optimization.
         report(if options.optimize {
@@ -460,6 +684,17 @@ impl DesignPipeline {
         } else {
             "Stage 2/7: optimization skipped"
         });
+        stage_clock = begin_stage(
+            events,
+            run_clock,
+            2,
+            "optimization",
+            if options.optimize {
+                "Design-space optimization"
+            } else {
+                "Optimization skipped"
+            },
+        );
         let solver_optimizations = if options.optimize {
             Some(run_solver_optimizations(
                 &self.config,
@@ -488,9 +723,18 @@ impl DesignPipeline {
             } else {
                 (nominal_design, None, None)
             };
+        finish_stage(events, run_clock, stage_clock, 2, "optimization");
+        check_cancelled(cancel)?;
 
         // Stage 2: Full analysis on optimized design.
         report("Stage 3/7: full aircraft analysis");
+        stage_clock = begin_stage(
+            events,
+            run_clock,
+            3,
+            "full_analysis",
+            "Full aircraft analysis",
+        );
         let full = if self.aircraft_override.is_some() {
             FullAnalysis::new_preserving_engine_config(self.config.clone())
         } else {
@@ -503,6 +747,8 @@ impl DesignPipeline {
                 None => full.run(&optimized_design, true)?,
             },
         };
+        finish_stage(events, run_clock, stage_clock, 3, "full_analysis");
+        check_cancelled(cancel)?;
 
         // Stage 3: CPACS geometry export and canonicalization.
         //
@@ -510,6 +756,13 @@ impl DesignPipeline {
         // this document, so CPACS is the non-GUI geometry boundary rather
         // than a sidecar copy of the configuration-built geometry.
         report("Stage 4/7: CPACS export and geometry canonicalization");
+        stage_clock = begin_stage(
+            events,
+            run_clock,
+            4,
+            "geometry_export",
+            "CPACS export and geometry canonicalization",
+        );
         let cpacs_path = analysis_dir.join("cpacs/optimized_aircraft.cpacs.xml");
         let cpacs_export = Some(
             export_cpacs(&optimized_report, &self.config, &cpacs_path)
@@ -522,6 +775,8 @@ impl DesignPipeline {
                 .to_airplane()
                 .map_err(|error| format!("CPACS canonicalization failed: {error}"))?;
         }
+        finish_stage(events, run_clock, stage_clock, 4, "geometry_export");
+        check_cancelled(cancel)?;
 
         // Native tool writers receive the CPACS-canonicalized report.
         let openvsp_export = {
@@ -611,6 +866,17 @@ impl DesignPipeline {
         } else {
             "Stage 5/7: downstream analyses (sequential)"
         });
+        stage_clock = begin_stage(
+            events,
+            run_clock,
+            5,
+            "downstream",
+            if options.parallel {
+                "Downstream analyses (parallel)"
+            } else {
+                "Downstream analyses (sequential)"
+            },
+        );
         let (
             vspaero_result,
             avl_result,
@@ -675,13 +941,35 @@ impl DesignPipeline {
         };
         let (route, route_status, mission_result) = mission_outputs;
         let (mses_result, mses_pressure) = mses_outputs;
+        finish_stage(events, run_clock, stage_clock, 5, "downstream");
+        emit_tool_diagnostics(
+            events,
+            run_clock,
+            environment,
+            openvsp_export.as_ref(),
+            vspaero_result.as_ref(),
+            avl_result.as_ref(),
+            flowunsteady_result.as_ref(),
+            structural_result.as_ref(),
+            mses_result.as_ref(),
+        );
+        check_cancelled(cancel)?;
         report("Stage 6/7: physical feasibility assessment");
+        stage_clock = begin_stage(
+            events,
+            run_clock,
+            6,
+            "feasibility",
+            "Physical feasibility assessment",
+        );
         let feasibility = assess_physical_feasibility(
             &self.config,
             &optimized_design,
             &optimized_report,
             mission_result.as_ref(),
         );
+        finish_stage(events, run_clock, stage_clock, 6, "feasibility");
+        check_cancelled(cancel)?;
         if let Some(export) = cpacs_export.as_ref() {
             export_cpacs_with_analysis(
                 &optimized_report,
@@ -755,6 +1043,13 @@ impl DesignPipeline {
         }
 
         report("Stage 7/7: finalizing artifacts and run manifest");
+        stage_clock = begin_stage(
+            events,
+            run_clock,
+            7,
+            "finalization",
+            "Finalizing artifacts and run manifest",
+        );
         let cpacs_manifest = match (options.output_dir.as_ref(), cpacs_export.as_ref()) {
             (Some(out_dir), Some(export)) => {
                 let mut stages = BTreeMap::new();
@@ -785,6 +1080,8 @@ impl DesignPipeline {
             _ => None,
         };
 
+        finish_stage(events, run_clock, stage_clock, 7, "finalization");
+        check_cancelled(cancel)?;
         Ok(PipelineResult {
             config: self.config.clone(),
             optimized_design: Some(optimized_design),

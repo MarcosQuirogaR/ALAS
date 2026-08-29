@@ -139,7 +139,8 @@ fn a_named_preset_is_the_public_nominal_design() {
 
 #[test]
 fn an_explicit_design_and_bounds_reach_the_desktop_pipeline() {
-    let progress = std::sync::Mutex::new(Vec::new());
+    let events = std::sync::Mutex::new(Vec::new());
+    let cancel = std::sync::atomic::AtomicBool::new(false);
     let mut config = AlasConfig::default();
     config.mission.enabled = false;
     config.structures.enabled = false;
@@ -162,24 +163,36 @@ fn an_explicit_design_and_bounds_reach_the_desktop_pipeline() {
     };
 
     let result = DesignPipeline::new(config)
-        .run_with_design_space_and_progress(
+        .run_with_design_space_events(
             &options,
             &RunEnvironment::default(),
             &design,
             &bounds,
-            &|message| progress.lock().unwrap().push(message.to_owned()),
+            &|event| events.lock().unwrap().push(event),
+            &cancel,
         )
         .unwrap_or_else(|error| panic!("desktop pipeline run: {error}"));
 
-    let progress = progress.lock().unwrap();
-    assert!(progress.starts_with(&[
-        "Validating run configuration".to_owned(),
-        "Analysis workspace ready".to_owned(),
-    ]));
+    let events = events.lock().unwrap();
+    let starts = events
+        .iter()
+        .filter(|event| event.kind == crate::RunEventKind::StageStarted)
+        .count();
+    let finishes = events
+        .iter()
+        .filter(|event| event.kind == crate::RunEventKind::StageCompleted)
+        .count();
+    assert_eq!(starts, 7);
+    assert_eq!(finishes, 7);
     assert_eq!(
-        progress.last().map(String::as_str),
-        Some("Stage 7/7: finalizing artifacts and run manifest")
+        events
+            .last()
+            .map(|event| (event.stage.as_str(), event.fraction)),
+        Some(("finalization", Some(1.0)))
     );
+    assert!(events
+        .iter()
+        .all(|event| event.fraction.is_none_or(|f| (0.0..=1.0).contains(&f))));
 
     assert_eq!(result.optimized_design, Some(design));
     assert_eq!(
@@ -200,6 +213,26 @@ fn an_explicit_design_and_bounds_reach_the_desktop_pipeline() {
     assert_eq!(
         loading.analyzed_takeoff_mass_kg,
         loading.zero_fuel_mass_kg + expected_carried_kg
+    );
+}
+
+#[test]
+fn a_desktop_cancellation_stops_at_the_first_safe_boundary() {
+    let cancel = std::sync::atomic::AtomicBool::new(true);
+    let design = DesignVector::default();
+    let bounds = DesignVector::bounds();
+    let result = DesignPipeline::new(AlasConfig::default()).run_with_design_space_events(
+        &PipelineOptions::default(),
+        &RunEnvironment::default(),
+        &design,
+        &bounds,
+        &|_| {},
+        &cancel,
+    );
+
+    assert_eq!(
+        result.unwrap_err(),
+        "Cancelled safely at a pipeline stage boundary"
     );
 }
 

@@ -15,7 +15,7 @@
 
 use alas_config::{DesignRequirements, PassengerCabinConfig};
 
-use super::fittings::{place_baggage, place_exits, place_monuments};
+use super::fittings::{place_baggage, place_exits, place_monuments, place_overhead_bins};
 use super::resolve_aisle_width;
 use super::seating::{place_seats, resolve_classes};
 use crate::cargo::CargoMassSemantics;
@@ -40,7 +40,7 @@ pub fn build_passenger_layout(
     pax: &PassengerCabinConfig,
     req: &DesignRequirements,
 ) -> PayloadLayout {
-    build_passenger_layout_with_mass_semantics(g, pax, req, CargoMassSemantics::Net)
+    build_passenger_layout_with_mass_semantics(g, pax, req, CargoMassSemantics::Net, true)
 }
 
 /// Build a passenger layout with the frozen gross-target baggage correction
@@ -51,7 +51,13 @@ pub fn build_passenger_layout_reference_compatibility(
     pax: &PassengerCabinConfig,
     req: &DesignRequirements,
 ) -> PayloadLayout {
-    build_passenger_layout_with_mass_semantics(g, pax, req, CargoMassSemantics::ReferenceGross)
+    build_passenger_layout_with_mass_semantics(
+        g,
+        pax,
+        req,
+        CargoMassSemantics::ReferenceGross,
+        false,
+    )
 }
 
 fn build_passenger_layout_with_mass_semantics(
@@ -59,6 +65,7 @@ fn build_passenger_layout_with_mass_semantics(
     pax: &PassengerCabinConfig,
     req: &DesignRequirements,
     mass_semantics: CargoMassSemantics,
+    product_interior: bool,
 ) -> PayloadLayout {
     let mut classes = resolve_classes(pax, req.num_passengers);
     let total_pax: i64 = classes.iter().map(|class| class.config.count).sum();
@@ -68,7 +75,18 @@ fn build_passenger_layout_with_mass_semantics(
     let seated: i64 = classes.iter().map(|class| class.seated).sum();
 
     let mut items = std::mem::take(&mut seating.items);
-    let (monuments, monument_counts) = place_monuments(g, pax, &mut seating.bays, total_pax);
+    if product_interior {
+        let overhead_bins = place_overhead_bins(g, &items);
+        items.extend(overhead_bins);
+    }
+    let (monuments, monument_counts) = place_monuments(
+        g,
+        pax,
+        &mut seating.bays,
+        total_pax,
+        seating.max_aisles,
+        product_interior,
+    );
     items.extend(monuments);
     let exits = place_exits(g, &seating);
     items.extend(exits.items);
@@ -91,6 +109,8 @@ fn build_passenger_layout_with_mass_semantics(
             .collect(),
         lavatories: monument_counts.lavatories,
         galleys: monument_counts.galleys,
+        accessible_lavatories: monument_counts.accessible_lavatories,
+        wheelchair_stowages: monument_counts.wheelchair_stowages,
         exit_type: exits.exit_type,
         exit_pairs: exits.pairs,
         exit_capacity: exits.pairs * exits.capacity_per_side * 2,
@@ -140,5 +160,46 @@ fn seat_mass_and_cg(items: &[crate::layout::DeckItem], g: &CabinGeometry) -> (f6
         (mass, moment / mass)
     } else {
         (mass, 0.5 * (g.cabin_start_x + g.cabin_end_x))
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used)]
+mod product_tests {
+    use super::*;
+    use crate::build::build_payload_layout;
+    use crate::layout::{ItemMeta, OverheadBinType};
+    use alas_config::{presets, AlasConfig};
+    use alas_geom::builder::AircraftBuilder;
+
+    #[test]
+    fn widebody_product_layout_has_side_and_center_bins_and_accessibility_items() {
+        let config = AlasConfig::from_value(&serde_json::json!({ "preset": "A380-800" }))
+            .expect("the registered A380 preset loads");
+        let preset = presets::get("A380-800").expect("the registered A380 preset resolves");
+        let plane = AircraftBuilder::new(Some(config.geometry.clone()))
+            .build(Some(&preset.design_vector), true)
+            .expect("the A380 geometry builds");
+        let layout = build_payload_layout(&plane, &config, 0.0, 0.0)
+            .expect("the A380 passenger layout builds");
+
+        let bin_types: Vec<OverheadBinType> = layout
+            .items
+            .iter()
+            .filter_map(|item| match &item.meta {
+                ItemMeta::OverheadBin(meta) => Some(meta.bin_type),
+                _ => None,
+            })
+            .collect();
+        assert!(bin_types.contains(&OverheadBinType::Sidewall));
+        assert!(bin_types.contains(&OverheadBinType::Center));
+        assert!(layout
+            .items
+            .iter()
+            .any(|item| item.kind == ItemKind::AccessibleLav));
+        assert!(layout
+            .items
+            .iter()
+            .any(|item| item.kind == ItemKind::WheelchairStowage));
     }
 }

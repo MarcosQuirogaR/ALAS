@@ -24,7 +24,9 @@ use super::{
 };
 use crate::cargo::{CargoLoadManager, CargoMassSemantics};
 use crate::geometry::CabinGeometry;
-use crate::layout::{ContainerMeta, DeckItem, ExitMeta, ItemKind, ItemMeta, LOWER};
+use crate::layout::{
+    ContainerMeta, DeckItem, ExitMeta, ItemKind, ItemMeta, OverheadBinMeta, OverheadBinType, LOWER,
+};
 
 /// Lateral footprint of a galley bay.
 const GALLEY_WIDTH_M: f64 = 0.85;
@@ -35,6 +37,19 @@ const PAX_PER_LAV: i64 = 45;
 /// Passengers per galley at the same ratio, before the extra one every cabin
 /// carries whatever its size.
 const PAX_PER_GALLEY: i64 = 100;
+/// Sidewall bins sit over seats rather than the aisle and may hang lower.
+const SIDE_BIN_BOTTOM_M: f64 = 1.55;
+/// Centre bins sit over a seat block between aisles, retaining more clearance.
+const CENTER_BIN_BOTTOM_M: f64 = 1.72;
+/// Sidewall pivot-bin depth and height.
+const SIDE_BIN_DEPTH_M: f64 = 0.50;
+const SIDE_BIN_HEIGHT_M: f64 = 0.40;
+/// Centre hinge-bin height; width follows the centre seat block.
+const CENTER_BIN_HEIGHT_M: f64 = 0.34;
+/// Number of seat rows represented by one preview/layout bin segment.
+const BIN_ROWS_PER_SEGMENT: usize = 6;
+/// Dedicated wheelchair-stowage footprint.
+const WHEELCHAIR_STOWAGE_WIDTH_M: f64 = 0.55;
 
 /// Longitudinal extent of the loose bulk block the overflow guard places.
 const BULK_BLOCK_LEN_M: f64 = 2.0;
@@ -52,6 +67,10 @@ pub(super) struct MonumentCounts {
     pub galleys: i64,
     /// Lavatories installed.
     pub lavatories: i64,
+    /// Accessible lavatories installed.
+    pub accessible_lavatories: i64,
+    /// Wheelchair stowage positions installed.
+    pub wheelchair_stowages: i64,
 }
 
 /// Distribute the galleys and lavatories across every bay.
@@ -65,6 +84,8 @@ pub(super) fn place_monuments(
     pax: &PassengerCabinConfig,
     bays: &mut [Bay],
     total_pax: i64,
+    max_aisles: i64,
+    enable_accessibility: bool,
 ) -> (Vec<DeckItem>, MonumentCounts) {
     let lavatories = if pax.lavatory_count != 0 {
         pax.lavatory_count
@@ -84,6 +105,8 @@ pub(super) fn place_monuments(
             MonumentCounts {
                 galleys,
                 lavatories,
+                accessible_lavatories: 0,
+                wheelchair_stowages: 0,
             },
         );
     }
@@ -135,13 +158,142 @@ pub(super) fn place_monuments(
             });
         }
     }
+    let mut accessible_lavatories = 0;
+    if enable_accessibility && max_aisles >= 2 {
+        if let Some(lav) = items.iter_mut().find(|item| item.kind == ItemKind::Lav) {
+            lav.kind = ItemKind::AccessibleLav;
+            lav.label = "Accessible lav".to_owned();
+            if let Some(deck) = g.passenger_decks.iter().find(|deck| deck.name == lav.deck) {
+                lav.width = lav.width.max(1.45).min(g.usable_width(deck, lav.x) * 0.5);
+                accessible_lavatories = 1;
+            }
+        }
+    }
+
+    let mut wheelchair_stowages = 0;
+    if enable_accessibility && total_pax >= 100 {
+        if let Some(bay) = bays.iter_mut().max_by(|a, b| {
+            let available = |candidate: &Bay| {
+                candidate.width * 0.5 - candidate.galley_depth.min(candidate.width * 0.5)
+            };
+            available(a).total_cmp(&available(b))
+        }) {
+            if let Some(deck) = g.passenger_decks.iter().find(|deck| deck.name == bay.deck) {
+                let (offset, width) =
+                    stack_y(bay, MonumentSide::Galley, WHEELCHAIR_STOWAGE_WIDTH_M);
+                if width > 0.2 {
+                    items.push(DeckItem {
+                        kind: ItemKind::WheelchairStowage,
+                        deck: bay.deck,
+                        x: bay.x,
+                        y: offset,
+                        z: g.item_z(deck, bay.x, 1.05),
+                        length: MONUMENT_LEN,
+                        width,
+                        mass: 0.0,
+                        height: g.clamp_height(deck, bay.x, 1.05),
+                        label: "Wheelchair stowage".to_owned(),
+                        meta: ItemMeta::None,
+                    });
+                    wheelchair_stowages = 1;
+                }
+            }
+        }
+    }
+
     (
         items,
         MonumentCounts {
             galleys,
             lavatories,
+            accessible_lavatories,
+            wheelchair_stowages,
         },
     )
+}
+
+/// Build longitudinally merged sidewall and centre overhead-bin runs.
+///
+/// One bin object per row makes a widebody preview need hundreds of extra
+/// solids. Six-row segments preserve the visible breaks while keeping the
+/// interactive scene small enough to orbit smoothly.
+pub(super) fn place_overhead_bins(g: &CabinGeometry, seats: &[DeckItem]) -> Vec<DeckItem> {
+    let mut bins = Vec::new();
+    for deck in &g.passenger_decks {
+        let mut rows: Vec<&DeckItem> = seats
+            .iter()
+            .filter(|item| item.kind == ItemKind::SeatRow && item.deck == deck.name)
+            .collect();
+        rows.sort_by(|a, b| a.x.total_cmp(&b.x));
+        for segment in rows.chunks(BIN_ROWS_PER_SEGMENT) {
+            let (Some(first), Some(last)) = (segment.first(), segment.last()) else {
+                continue;
+            };
+            let x0 = first.x - first.length * 0.5;
+            let x1 = last.x + last.length * 0.5;
+            let x = 0.5 * (x0 + x1);
+            let floor = g.floor_z(deck, x);
+            let ceiling = g.ceil_z(deck, x);
+            let available_height = ceiling - floor;
+            let side_height =
+                SIDE_BIN_HEIGHT_M.min((available_height - SIDE_BIN_BOTTOM_M).max(0.0));
+            if side_height < 0.18 {
+                continue;
+            }
+            let side_z = floor + SIDE_BIN_BOTTOM_M + side_height * 0.5;
+            let crown_width = g.usable_width_at_z(x, side_z);
+            if crown_width > 2.0 * SIDE_BIN_DEPTH_M {
+                let side_y = (crown_width - SIDE_BIN_DEPTH_M) * 0.5;
+                for sign in [-1.0, 1.0] {
+                    bins.push(DeckItem {
+                        kind: ItemKind::OverheadBin,
+                        deck: deck.name,
+                        x,
+                        y: sign * side_y,
+                        z: side_z,
+                        length: (x1 - x0).max(0.2),
+                        width: SIDE_BIN_DEPTH_M,
+                        mass: 0.0,
+                        height: side_height,
+                        label: "Sidewall pivot bin".to_owned(),
+                        meta: ItemMeta::OverheadBin(OverheadBinMeta {
+                            bin_type: OverheadBinType::Sidewall,
+                        }),
+                    });
+                }
+            }
+
+            let center_meta = segment.iter().find_map(|row| match &row.meta {
+                ItemMeta::Seat(meta) if meta.aisles >= 2 && meta.blocks.len() >= 3 => Some(meta),
+                _ => None,
+            });
+            if let Some(meta) = center_meta {
+                let center_width = (meta.blocks[1].max(1) as f64 * meta.seat_w * 0.72)
+                    .clamp(0.65, 1.80)
+                    .min((crown_width - 2.0 * SIDE_BIN_DEPTH_M).max(0.0));
+                let center_height =
+                    CENTER_BIN_HEIGHT_M.min((available_height - CENTER_BIN_BOTTOM_M).max(0.0));
+                if center_width > 0.5 && center_height >= 0.16 {
+                    bins.push(DeckItem {
+                        kind: ItemKind::OverheadBin,
+                        deck: deck.name,
+                        x,
+                        y: 0.0,
+                        z: floor + CENTER_BIN_BOTTOM_M + center_height * 0.5,
+                        length: (x1 - x0).max(0.2),
+                        width: center_width,
+                        mass: 0.0,
+                        height: center_height,
+                        label: "Center hinge bin".to_owned(),
+                        meta: ItemMeta::OverheadBin(OverheadBinMeta {
+                            bin_type: OverheadBinType::Center,
+                        }),
+                    });
+                }
+            }
+        }
+    }
+    bins
 }
 
 /// The emergency exits, and how many pairs were installed.

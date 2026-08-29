@@ -95,7 +95,7 @@ pub use pipeline::{
     DesignPipeline, PipelineExecutionStatus, PipelineOptions, PipelineResult, RoutePlanningStatus,
 };
 pub use plot::render_scene_svg;
-pub use runs::{RunEvent, RunRegistry, RunState};
+pub use runs::{RunEvent, RunEventKind, RunEventSeverity, RunRegistry, RunState};
 pub use solver_mode::{AerodynamicSolverMode, OptimizationSolverMode, SolverKind};
 pub use structural::{run_structural_analysis, StructuralAnalysisResult};
 pub use vspaero::{

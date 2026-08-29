@@ -53,6 +53,7 @@ pub const RESULT_DISPATCH_IDS: &[&str] = &[
     "control_surfaces",
     "stability_side_view",
     "cabin_payload",
+    "cabin_section",
     "payload_range",
     "lto_departure",
     "lto_arrival",
