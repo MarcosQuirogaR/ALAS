@@ -1,0 +1,20 @@
+{
+  "reference": {
+    "method": "Prandtl odd-Fourier lifting-line collocation",
+    "equations": "MIT 16.100 Lectures 17-18 (2005)",
+    "exact_case": "elliptic chord distribution with constant incidence and a0"
+  },
+  "span_m": 10.0,
+  "area_m2": 10.0,
+  "section_lift_slope_per_rad": 6.283185307179586,
+  "alpha_deg": 5.0,
+  "harmonic_count": 8,
+  "expected": {
+    "lift_curve_slope_per_rad": 5.235987755982989,
+    "lift_coefficient": 0.45692612968006285,
+    "induced_drag_coefficient": 0.0066457211677597335,
+    "first_fourier_coefficient": 0.01454441043328608,
+    "span_efficiency": 1.0
+  },
+  "naca2412_zero_lift_angle_rad": -0.036254684421031275
+}

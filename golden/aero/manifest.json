@@ -1,0 +1,156 @@
+{
+  "fixtures": {
+    "analysis": {
+      "description": "alas.physics.aerodynamics on the nominal AircraftBuilder aircraft: swept_pg_beta, compressible_report_alpha, parasite_drag, wave_drag, drag_components, quick_performance, trimmed_performance and run_sweep, with cases chosen to reach the Prandtl-Glauert clamp, all three wave-drag exits, the wingless thickness fallback and the single-point sweep",
+      "generator": "gen_aero_analysis.py",
+      "runtime": "alas",
+      "alas_commit": "7d1555c1f4db5110cf6cd187c156718e1a033b50",
+      "environment": {
+        "numpy": "2.5.1",
+        "aerosandbox": "4.2.8",
+        "platform": "Windows-11-10.0.26200-SP0",
+        "scipy": "1.17.1",
+        "python": "3.13.13"
+      }
+    },
+    "asb_vlm": {
+      "description": "aerosandbox.aerodynamics.aero_3D.vortex_lattice_method.VortexLatticeMethod.run() on a small hand-built 3-wing airplane, across five operating points -- one of them at spanwise_resolution=2 to exercise Wing.subdivide_sections' cosspace branch -- recording the full result dict plus the solved vortex_strengths, plus one run_with_stability_derivatives sweep recording every force/moment coefficient derivative and both neutral points",
+      "generator": "gen_aero_vlm.py",
+      "runtime": "alas",
+      "alas_commit": "7d1555c1f4db5110cf6cd187c156718e1a033b50",
+      "environment": {
+        "numpy": "2.5.1",
+        "aerosandbox": "4.2.8",
+        "platform": "Windows-11-10.0.26200-SP0",
+        "scipy": "1.17.1",
+        "python": "3.13.13"
+      }
+    },
+    "drag_buildup": {
+      "description": "SUAVE Fidelity_Zero drag buildup on the default AVE vehicle: parasite (wings, fuselage, nacelles, pylon), induced, compressibility, miscellaneous, and the untrimmed/trim/total chain, with the freestream and the vortex-lattice lift solution recorded as inputs",
+      "generator": "gen_aero_drag_buildup.py",
+      "runtime": "suave",
+      "alas_commit": "7d1555c1f4db5110cf6cd187c156718e1a033b50",
+      "environment": {
+        "suave": {
+          "version": "2.5.2",
+          "tree": "external tools/SUAVE-2.5.2/trunk"
+        },
+        "scipy": "1.11.4",
+        "platform": "Windows-10-10.0.26200-SP0",
+        "aerosandbox": "absent",
+        "python": "3.10.20",
+        "numpy": "1.26.4"
+      }
+    },
+    "fourier_lifting_line": {
+      "description": "Independent exact elliptic-wing evidence for the native Prandtl odd-Fourier lifting-line model, with the analytic lift curve, induced drag, first Fourier coefficient and unit span efficiency, plus the NACA 2412 thin-airfoil zero-lift-angle reference; this is a native analytic fixture, not a Python reference capture",
+      "generator": "fourier_lifting_line.rs (native analytic fixture)",
+      "runtime": "alas",
+      "alas_commit": "7d1555c1f4db5110cf6cd187c156718e1a033b50",
+      "environment": {
+        "rust": "native test harness",
+        "platform": "Windows-11-10.0.26200-SP0"
+      }
+    },
+    "kulfan": {
+      "description": "aerosandbox.geometry.airfoil.airfoil_families.get_kulfan_parameters (method='least_squares', normalize_coordinates=False on already-normalized coordinates, as both reached call sites pass it) and the KulfanAirfoil forward map (upper_coordinates/lower_coordinates/to_airfoil), over nine sections reaching both trailing-edge branches and a non-default n_weights_per_side",
+      "generator": "gen_aero_kulfan.py",
+      "runtime": "alas",
+      "alas_commit": "7d1555c1f4db5110cf6cd187c156718e1a033b50",
+      "environment": {
+        "numpy": "2.5.1",
+        "aerosandbox": "4.2.8",
+        "platform": "Windows-11-10.0.26200-SP0",
+        "scipy": "1.17.1",
+        "python": "3.13.13"
+      }
+    },
+    "lift_surrogate": {
+      "description": "SUAVE's Vortex_Lattice lift and induced-drag surrogate on the default ALAS aircraft: the ten-by-eight training tables, the eight fitted bicubic surfaces with their knots and coefficients, and thirteen evaluations including four outside the training rectangle.",
+      "generator": "gen_aero_lift_surrogate.py",
+      "runtime": "suave",
+      "alas_commit": "7d1555c1f4db5110cf6cd187c156718e1a033b50",
+      "environment": {
+        "suave": {
+          "version": "2.5.2",
+          "tree": "external tools/SUAVE-2.5.2/trunk"
+        },
+        "scipy": "1.11.4",
+        "platform": "Windows-10-10.0.26200-SP0",
+        "aerosandbox": "absent",
+        "python": "3.10.20",
+        "numpy": "1.26.4"
+      }
+    },
+    "mses": {
+      "description": "alas.physics.mses_analysis: run_mses_polar (naca2412 and symmetric naca0012) and run_mses_pressure_distribution (naca2412), driven through AeroSandbox's MSES wrapper onto the real mset/mses/mplot binaries; records post-repanel coordinates, the exact deck bytes, the parsed results and per-binary FNV-1a digests",
+      "generator": "gen_aero_mses.py",
+      "runtime": "alas",
+      "alas_commit": "7d1555c1f4db5110cf6cd187c156718e1a033b50",
+      "environment": {
+        "numpy": "2.5.1",
+        "aerosandbox": "4.2.8",
+        "platform": "Windows-11-10.0.26200-SP0",
+        "scipy": "1.17.1",
+        "python": "3.13.13"
+      }
+    },
+    "neuralfoil": {
+      "description": "NeuralFoil's airfoil surrogate: FNV-1a digests of the five exported parameter blobs (proving crates/alas-aero/data/ against the installed package), the raw network's 198 outputs, KulfanAirfoil.get_aero_from_neuralfoil across the wave-drag schedule and the post-stall blend, and both reached entry points -- Airfoil.get_aero_from_neuralfoil and neuralfoil.get_aero_from_coordinates",
+      "generator": "gen_aero_neuralfoil.py",
+      "runtime": "alas",
+      "alas_commit": "7d1555c1f4db5110cf6cd187c156718e1a033b50",
+      "environment": {
+        "numpy": "2.5.1",
+        "aerosandbox": "4.2.8",
+        "platform": "Windows-11-10.0.26200-SP0",
+        "scipy": "1.17.1",
+        "python": "3.13.13"
+      }
+    },
+    "operating_point": {
+      "description": "aerosandbox.performance.OperatingPoint, scoped to dynamic_pressure, compute_freestream_velocity_geometry_axes, compute_rotation_velocity_geometry_axes and convert_axes (geometry->body, body->wind) across four flight conditions",
+      "generator": "gen_aero_operating_point.py",
+      "runtime": "alas",
+      "alas_commit": "7d1555c1f4db5110cf6cd187c156718e1a033b50",
+      "environment": {
+        "numpy": "2.5.1",
+        "aerosandbox": "4.2.8",
+        "platform": "Windows-11-10.0.26200-SP0",
+        "scipy": "1.17.1",
+        "python": "3.13.13"
+      }
+    },
+    "singularities": {
+      "description": "aerosandbox.aerodynamics.aero_3D.singularities.uniform_strength_horseshoe_singularities.calculate_induced_velocity_horseshoe at vortex_core_radius=1e-8, single-vortex cases probing each smoothed term plus a multi-vortex broadcast-and-sum case",
+      "generator": "gen_aero_singularities.py",
+      "runtime": "alas",
+      "alas_commit": "7d1555c1f4db5110cf6cd187c156718e1a033b50",
+      "environment": {
+        "numpy": "2.5.1",
+        "aerosandbox": "4.2.8",
+        "platform": "Windows-11-10.0.26200-SP0",
+        "scipy": "1.17.1",
+        "python": "3.13.13"
+      }
+    },
+    "vorlax": {
+      "description": "SUAVE's VORLAX-derived vortex lattice on the default ALAS aircraft: the whole vortex distribution, eight single-condition solves with their intermediates, and the ten-by-eight training grid Fidelity_Zero's lift surrogate is built from.",
+      "generator": "gen_aero_vorlax.py",
+      "runtime": "suave",
+      "alas_commit": "7d1555c1f4db5110cf6cd187c156718e1a033b50",
+      "environment": {
+        "suave": {
+          "version": "2.5.2",
+          "tree": "external tools/SUAVE-2.5.2/trunk"
+        },
+        "scipy": "1.11.4",
+        "platform": "Windows-10-10.0.26200-SP0",
+        "aerosandbox": "absent",
+        "python": "3.10.20",
+        "numpy": "1.26.4"
+      }
+    }
+  }
+}

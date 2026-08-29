@@ -144,7 +144,7 @@ macro_rules! design_space {
 }
 
 design_space! {
-    span_m: 71.75, 60.0, 80.0, "m", 2, "Full wingspan (tip to tip)";
+    span_m: 71.75, 60.0, 80.0, "m", 2, "Full projected wingspan (tip to tip)";
     root_chord_m: 16.50, 12.0, 19.0, "m", 2, "Chord at the wing root";
     break_chord_m: 7.80, 6.0, 10.0, "m", 2, "Chord at the trailing-edge break (yehudi)";
     tip_chord_m: 1.60, 1.0, 3.0, "m", 2, "Chord at the wingtip";

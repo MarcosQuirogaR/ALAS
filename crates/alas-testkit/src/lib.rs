@@ -320,4 +320,26 @@ mod tests {
     fn the_golden_directory_resolves() {
         assert!(golden_dir().ends_with("golden"));
     }
+
+    #[test]
+    fn a_fixture_double_is_recovered_bit_for_bit() {
+        // Both loaders parse through serde_json, whose default float parser is
+        // fast rather than correctly rounded. That costs up to one ulp, which is
+        // invisible at every tier except the one where it matters most: an
+        // `exact` comparison against a value the reference wrote is then
+        // unwinnable. `float_roundtrip` in the workspace manifest buys the
+        // correctly-rounded path, and this is what says so out loud -- it fails
+        // if that feature is ever dropped.
+        //
+        // The literal is Python's repr of an f32-derived double, the shape every
+        // fixture that records single-precision reference output is full of.
+        let text = "1.0019999742507935";
+        let widened = f64::from(1.002_f32);
+        assert_eq!(serde_json::from_str::<f64>(text).unwrap(), widened);
+
+        // `load` goes through a `Value` before it reaches the target type, so
+        // the round trip has to hold across that step too.
+        let value: serde_json::Value = serde_json::from_str(text).unwrap();
+        assert_eq!(serde_json::from_value::<f64>(value).unwrap(), widened);
+    }
 }

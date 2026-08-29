@@ -55,6 +55,7 @@ pub mod requirements;
 pub mod settings;
 pub mod solver_presets;
 pub mod structures;
+pub mod systems_mass;
 pub mod validation;
 
 pub use alas_config_derive::ConfigNode;
@@ -72,7 +73,11 @@ pub use design_variables::{
     DesignVariableSpec, DesignVector, DesignVectorError, SPECS as DESIGN_VARIABLE_SPECS,
 };
 pub use fidelity_presets::{FidelityPreset, UnknownFidelityPreset};
-pub use geometry::{EmpennageConfig, EngineConfig, FuselageConfig, GeometryConfig, WingConfig};
+pub use geometry::{
+    EmpennageConfig, EngineConfig, FuselageConfig, GeometryConfig, InboardAerodynamicStation,
+    MainWingPanel, MainWingStation, MainWingStationKind, TransportPlanform, TransportPlanformError,
+    WingConfig,
+};
 pub use landing_gear::LandingGearConfig;
 pub use mass::MassModelConfig;
 pub use mission::{MissionConfig, MissionProfileConfig};
@@ -81,12 +86,22 @@ pub use optimizer::{ObjectiveWeights, OptimizerConfig, SolverSettings};
 pub use performance::PerformanceConfig;
 pub use performance_presets::{PerformancePreset, UnknownPerformancePreset};
 pub use physics::DragModelConfig;
-pub use presets::{AircraftPreset, UnknownAircraftPreset};
+pub use presets::{
+    AircraftPreset, AircraftReferenceData, AircraftVariantIdentity, CgEnvelopeCondition,
+    CgEnvelopeEvidence, CgEnvelopeSource, CgEnvelopeVertex, CgLimits, DesignMissionEvidence,
+    DesignMissionReference, MissingDesignMissionDatum, MissionEvidenceApplicability,
+    PartialDesignMissionEvidence, PartialMissionEvidenceKind, PlanningCgEnvelope,
+    PlanningMacReference, PublishedMissionLoadCase, PublishedRange, PublishedReserveContract,
+    UnknownAircraftPreset,
+};
 pub use propulsion::PropulsionCycleConfig;
 pub use requirements::{DesignRequirements, RequirementsError};
 pub use settings::AlasConfig;
 pub use solver_presets::{SolverPreset, UnknownSolverPreset};
 pub use structures::StructuresConfig;
+pub use systems_mass::{
+    FlopsInputProvenance, FlopsTransportConfig, FlopsTransportProvenance, SystemsMassMethod,
+};
 pub use validation::{validate, Severity, ValidationIssue};
 
 /// A configuration struct that can describe its own fields.

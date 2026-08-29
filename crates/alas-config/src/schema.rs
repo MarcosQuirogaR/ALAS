@@ -181,10 +181,14 @@ pub enum OptionSource {
     TeRibMode,
     /// The differential-evolution strategy names.
     Strategy,
+    /// The top-level aircraft optimization algorithms.
+    OptimizerMethod,
     /// Whether the aircraft carries passengers or freight.
     AircraftType,
     /// The cabin layout presets, which differ by aircraft type.
     CabinPreset,
+    /// Versioned systems-and-equipment mass method.
+    SystemsMassMethod,
 }
 
 impl OptionSource {
@@ -209,7 +213,17 @@ impl OptionSource {
                 "currenttobest1bin",
                 "currenttobest1exp",
             ]),
+            Self::OptimizerMethod => Some(&[
+                "differential_evolution",
+                "feasibility_first_de",
+                "nsga2",
+                "turbo_1",
+                "cma_es",
+            ]),
             Self::AircraftType => Some(&["passenger", "cargo"]),
+            Self::SystemsMassMethod => {
+                Some(&["reference_compatible_fractions", "flops_transport_v1"])
+            }
             _ => None,
         }
     }

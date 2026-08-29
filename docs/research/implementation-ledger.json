@@ -1,0 +1,1349 @@
+{
+  "schema_version": "alas.research.implementation-ledger.v1",
+  "entries": [
+    {
+      "id": "research.readme.EV-001",
+      "memo": "README.md",
+      "section": "Evidence boundary",
+      "finding": "Retain source identity, access, rights, local path, and content hash without treating the research archive as certification evidence.",
+      "work_packages": [
+        "WP-01",
+        "WP-13"
+      ],
+      "owners": [
+        "research ledger",
+        "xtask"
+      ],
+      "planned_fidelity": "F0 evidence bookkeeping",
+      "requirement_ids": [],
+      "case_ids": [],
+      "implementation_revision": "worktree:WP-13-evidence-foundation",
+      "evidence_ids": [],
+      "status": "ImplementedUnverified",
+      "data_gap": null,
+      "disposition": "Evidence contracts exist, but the release audit and immutable revision are not yet retained."
+    },
+    {
+      "id": "research.readme.EV-002",
+      "memo": "README.md",
+      "section": "Evidence boundary",
+      "finding": "Exclude the two known failed PDF acquisitions from physical or regulatory claims while retaining their failure records.",
+      "work_packages": [
+        "WP-01",
+        "WP-13"
+      ],
+      "owners": [
+        "research ledger",
+        "xtask"
+      ],
+      "planned_fidelity": "F0 evidence exclusion",
+      "requirement_ids": [],
+      "case_ids": [],
+      "implementation_revision": "worktree:WP-13-evidence-foundation",
+      "evidence_ids": [],
+      "status": "ImplementedUnverified",
+      "data_gap": null,
+      "disposition": "The exclusions are documented; replay and release evidence are still pending."
+    },
+    {
+      "id": "research.readme.EV-003",
+      "memo": "README.md",
+      "section": "Review rule",
+      "finding": "Require every design decision to name the memo/source, fidelity, policy role, and evidence gap.",
+      "work_packages": [
+        "WP-02",
+        "WP-13"
+      ],
+      "owners": [
+        "research ledger",
+        "report"
+      ],
+      "planned_fidelity": "F0 trace review",
+      "requirement_ids": [],
+      "case_ids": [],
+      "implementation_revision": null,
+      "evidence_ids": [],
+      "status": "DeferredWithRationale",
+      "data_gap": "Cross-report enforcement is not integrated.",
+      "disposition": "Retained as a mandatory review rule; report integration is deferred to the cross-crate checkpoint."
+    },
+    {
+      "id": "research.aircraft-design-doctrine.DO-001",
+      "memo": "AIRCRAFT_DESIGN_DOCTRINE.md",
+      "section": "Executive decision",
+      "finding": "Use one requirements-first study model with frozen cases, typed evidence, strict status, and explicit fidelity.",
+      "work_packages": [
+        "WP-01",
+        "WP-02"
+      ],
+      "owners": [
+        "alas-types",
+        "alas-config",
+        "alas-pipeline"
+      ],
+      "planned_fidelity": "F0-F2 typed contracts",
+      "requirement_ids": [],
+      "case_ids": [],
+      "implementation_revision": "worktree:WP-02-canonical-requirements",
+      "evidence_ids": [],
+      "status": "ImplementedUnverified",
+      "data_gap": null,
+      "disposition": "Core contracts exist, but a unified replay has not verified the end-to-end claim."
+    },
+    {
+      "id": "research.aircraft-design-doctrine.DO-002",
+      "memo": "AIRCRAFT_DESIGN_DOCTRINE.md",
+      "section": "Executive decision",
+      "finding": "Close geometry, payload, mass, propulsion, systems, aero, performance, stability, structures, mission, and objectives in dependency order.",
+      "work_packages": [
+        "WP-04",
+        "WP-12"
+      ],
+      "owners": [
+        "alas-pipeline",
+        "discipline crates"
+      ],
+      "planned_fidelity": "F2 coupled conceptual analysis",
+      "requirement_ids": [],
+      "case_ids": [],
+      "implementation_revision": "worktree:WP-04-WP-12-domain-foundations",
+      "evidence_ids": [],
+      "status": "ImplementedUnverified",
+      "data_gap": null,
+      "disposition": "Discipline foundations exist; complete coupled convergence evidence is not retained."
+    },
+    {
+      "id": "research.aircraft-design-doctrine.DO-003",
+      "memo": "AIRCRAFT_DESIGN_DOCTRINE.md",
+      "section": "Executive decision",
+      "finding": "Limit claims to the weakest applicable evidence and never convert a missing evaluator into acceptance.",
+      "work_packages": [
+        "WP-02",
+        "WP-13"
+      ],
+      "owners": [
+        "alas-acceptance",
+        "xtask",
+        "report"
+      ],
+      "planned_fidelity": "F0 release policy",
+      "requirement_ids": [],
+      "case_ids": [],
+      "implementation_revision": null,
+      "evidence_ids": [],
+      "status": "DeferredWithRationale",
+      "data_gap": "Release/report integration and independent campaign review remain incomplete.",
+      "disposition": "Policy is frozen here and in the release model card; enforcement beyond xtask is deferred."
+    },
+    {
+      "id": "research.requirements-systems.RQ-001",
+      "memo": "requirements-systems.md",
+      "section": "Executive conclusion",
+      "finding": "Represent TLARs, derived requirements, applicability, source, policy, fidelity, and verification method as typed canonical records.",
+      "work_packages": [
+        "WP-01",
+        "WP-02"
+      ],
+      "owners": [
+        "alas-config",
+        "alas-types",
+        "alas-acceptance"
+      ],
+      "planned_fidelity": "F0-F2 requirements contract",
+      "requirement_ids": [
+        "REQ.MISSION.RANGE"
+      ],
+      "case_ids": [
+        "mission.design"
+      ],
+      "implementation_revision": "worktree:WP-02-canonical-requirements",
+      "evidence_ids": [],
+      "status": "ImplementedUnverified",
+      "data_gap": null,
+      "disposition": "Implemented contract requires retained replay evidence."
+    },
+    {
+      "id": "research.requirements-systems.RQ-002",
+      "memo": "requirements-systems.md",
+      "section": "Executive conclusion",
+      "finding": "Freeze ConOps, semantic load cases, evaluator registrations, lint findings, and blockers before authoritative execution.",
+      "work_packages": [
+        "WP-01",
+        "WP-02"
+      ],
+      "owners": [
+        "alas-config",
+        "alas-app"
+      ],
+      "planned_fidelity": "F0 prelaunch verification matrix",
+      "requirement_ids": [],
+      "case_ids": [],
+      "implementation_revision": "worktree:WP-02-requirements-inspection",
+      "evidence_ids": [],
+      "status": "ImplementedUnverified",
+      "data_gap": null,
+      "disposition": "CLI inspection exists; second-environment and release replay are pending."
+    },
+    {
+      "id": "research.requirements-systems.RQ-003",
+      "memo": "requirements-systems.md",
+      "section": "Executive conclusion",
+      "finding": "Keep conceptual verification distinct from compliance findings and approved assurance evidence.",
+      "work_packages": [
+        "WP-02",
+        "WP-10",
+        "WP-13"
+      ],
+      "owners": [
+        "alas-safety",
+        "alas-acceptance",
+        "report"
+      ],
+      "planned_fidelity": "F5 authority evidence",
+      "requirement_ids": [],
+      "case_ids": [],
+      "implementation_revision": null,
+      "evidence_ids": [],
+      "status": "BlockedByData",
+      "data_gap": "No authority-approved compliance programme or controlled conformity evidence is available.",
+      "disposition": "Conceptual outputs remain non-certification diagnostics."
+    },
+    {
+      "id": "research.mission-sizing.MS-001",
+      "memo": "mission-sizing.md",
+      "section": "Executive findings",
+      "finding": "Model mission segments, reserve convention, payload-range cases, and landing-fuel floors explicitly.",
+      "work_packages": [
+        "WP-06"
+      ],
+      "owners": [
+        "alas-mission",
+        "alas-mass",
+        "alas-prop"
+      ],
+      "planned_fidelity": "F2 native mission integration",
+      "requirement_ids": [
+        "REQ.MISSION.RANGE",
+        "REQ.MISSION.RESERVE",
+        "REQ.MISSION.MIN_LANDING_FUEL"
+      ],
+      "case_ids": [
+        "mission.design"
+      ],
+      "implementation_revision": "worktree:WP-06-mission-foundation",
+      "evidence_ids": [],
+      "status": "ImplementedUnverified",
+      "data_gap": null,
+      "disposition": "Native contracts/tests exist; unified reference replay is pending."
+    },
+    {
+      "id": "research.mission-sizing.MS-002",
+      "memo": "mission-sizing.md",
+      "section": "Executive findings",
+      "finding": "Iterate mass, fuel, propulsion, and mission state to closure with typed residual and non-convergence history.",
+      "work_packages": [
+        "WP-06",
+        "WP-12"
+      ],
+      "owners": [
+        "alas-mission",
+        "alas-mass",
+        "alas-pipeline"
+      ],
+      "planned_fidelity": "F2 coupled closure",
+      "requirement_ids": [
+        "REQ.MISSION.PAYLOAD"
+      ],
+      "case_ids": [
+        "mission.design",
+        "accommodation.design"
+      ],
+      "implementation_revision": "worktree:WP-06-mass-mission-closure",
+      "evidence_ids": [],
+      "status": "ImplementedUnverified",
+      "data_gap": null,
+      "disposition": "Foundation exists without retained coupled finalist campaign."
+    },
+    {
+      "id": "research.mission-sizing.MS-003",
+      "memo": "mission-sizing.md",
+      "section": "Executive findings",
+      "finding": "Use payload-range, hot/high, reserve, and uncertainty tails instead of a nominal scalar range check.",
+      "work_packages": [
+        "WP-06",
+        "WP-12",
+        "WP-13"
+      ],
+      "owners": [
+        "alas-mission",
+        "alas-opt"
+      ],
+      "planned_fidelity": "F2-F4 robust campaign",
+      "requirement_ids": [
+        "REQ.MISSION.RANGE"
+      ],
+      "case_ids": [
+        "mission.design",
+        "takeoff.mtow.hot_high"
+      ],
+      "implementation_revision": null,
+      "evidence_ids": [],
+      "status": "DeferredWithRationale",
+      "data_gap": "Robust scenario campaign and independent comparison have not been executed.",
+      "disposition": "Deferred until WP-12 results and WP-13 campaign resources are available."
+    },
+    {
+      "id": "research.cabin-interiors-cargo.CB-001",
+      "memo": "cabin-interiors-cargo.md",
+      "section": "Bottom line",
+      "finding": "Represent decks, seats, aisles, monuments, doors, holds, ULD positions, baggage, and cargo as physical accommodation geometry.",
+      "work_packages": [
+        "WP-04"
+      ],
+      "owners": [
+        "alas-payload",
+        "alas-geom"
+      ],
+      "planned_fidelity": "F1-F2 geometric accommodation",
+      "requirement_ids": [
+        "REQ.ACCOM.MAX_PASSENGERS",
+        "REQ.ACCOM.MAX_CARGO",
+        "REQ.ACCOM.LD3_45"
+      ],
+      "case_ids": [
+        "accommodation.design",
+        "accommodation.maximum_cargo"
+      ],
+      "implementation_revision": "worktree:WP-04-payload-geometry",
+      "evidence_ids": [],
+      "status": "ImplementedUnverified",
+      "data_gap": null,
+      "disposition": "Typed layout foundation lacks unified reference-aircraft replay."
+    },
+    {
+      "id": "research.cabin-interiors-cargo.CB-002",
+      "memo": "cabin-interiors-cargo.md",
+      "section": "Bottom line",
+      "finding": "Propagate passenger, cargo, baggage, fuel, and service sequences into mass/CG and turnaround cases.",
+      "work_packages": [
+        "WP-06",
+        "WP-11"
+      ],
+      "owners": [
+        "alas-payload",
+        "alas-mass",
+        "alas-ops"
+      ],
+      "planned_fidelity": "F2 loading and operations",
+      "requirement_ids": [
+        "REQ.MISSION.PAYLOAD"
+      ],
+      "case_ids": [
+        "accommodation.design",
+        "scenario.operations"
+      ],
+      "implementation_revision": "worktree:WP-06-WP-11-loading-operations",
+      "evidence_ids": [],
+      "status": "ImplementedUnverified",
+      "data_gap": null,
+      "disposition": "Independent operator/aircraft calibration is absent."
+    },
+    {
+      "id": "research.cabin-interiors-cargo.CB-003",
+      "memo": "cabin-interiors-cargo.md",
+      "section": "Bottom line",
+      "finding": "Treat evacuation, accessibility, crew workload, and current legal applicability as evidence-gated requirements.",
+      "work_packages": [
+        "WP-10",
+        "WP-13"
+      ],
+      "owners": [
+        "alas-safety",
+        "alas-payload"
+      ],
+      "planned_fidelity": "F5 controlled demonstration",
+      "requirement_ids": [
+        "REQ.ACCOM.MAX_PASSENGERS"
+      ],
+      "case_ids": [
+        "accommodation.evacuation"
+      ],
+      "implementation_revision": null,
+      "evidence_ids": [],
+      "status": "BlockedByData",
+      "data_gap": "No current legal review, full evacuation simulation, or controlled demonstration evidence is retained.",
+      "disposition": "No evacuation or accessibility compliance claim is permitted."
+    },
+    {
+      "id": "research.geometry-configuration.GE-001",
+      "memo": "geometry-configuration.md",
+      "section": "Executive recommendation",
+      "finding": "Use one authoritative parameterized master geometry with stable component UIDs, frames, datums, and derived measures.",
+      "work_packages": [
+        "WP-04"
+      ],
+      "owners": [
+        "alas-geom",
+        "alas-types"
+      ],
+      "planned_fidelity": "F1-F2 master geometry",
+      "requirement_ids": [],
+      "case_ids": [],
+      "implementation_revision": "worktree:WP-04-geometry-foundation",
+      "evidence_ids": [],
+      "status": "ImplementedUnverified",
+      "data_gap": null,
+      "disposition": "Geometry contracts/tests exist without full CPACS round-trip campaign."
+    },
+    {
+      "id": "research.geometry-configuration.GE-002",
+      "memo": "geometry-configuration.md",
+      "section": "Executive recommendation",
+      "finding": "Enumerate supported topology families and close cabin, tanks, gear, engines, controls, high lift, and structural envelopes.",
+      "work_packages": [
+        "WP-04",
+        "WP-12"
+      ],
+      "owners": [
+        "alas-geom",
+        "alas-payload",
+        "alas-opt"
+      ],
+      "planned_fidelity": "F1-F2 mixed configuration",
+      "requirement_ids": [
+        "REQ.PERF.SPAN_LIMIT"
+      ],
+      "case_ids": [
+        "airport.gate_span"
+      ],
+      "implementation_revision": "worktree:WP-04-physical-integration",
+      "evidence_ids": [],
+      "status": "ImplementedUnverified",
+      "data_gap": null,
+      "disposition": "Architecture-wide coupled replay is pending."
+    },
+    {
+      "id": "research.geometry-configuration.GE-003",
+      "memo": "geometry-configuration.md",
+      "section": "Executive recommendation",
+      "finding": "Retain CPACS/OpenVSP decks and validate section/mesh convergence and round-trip invariants.",
+      "work_packages": [
+        "WP-03",
+        "WP-04",
+        "WP-13"
+      ],
+      "owners": [
+        "alas-geom",
+        "alas-exec"
+      ],
+      "planned_fidelity": "F3 external geometry evidence",
+      "requirement_ids": [],
+      "case_ids": [],
+      "implementation_revision": null,
+      "evidence_ids": [],
+      "status": "DeferredWithRationale",
+      "data_gap": "Matching external-tool installations and retained convergence artifacts are not available in this campaign.",
+      "disposition": "External geometry substantiation is deferred, not inferred from native geometry."
+    },
+    {
+      "id": "research.aerodynamics.AE-001",
+      "memo": "aerodynamics.md",
+      "section": "Executive conclusions",
+      "finding": "Evaluate decomposed parasite, induced, wave, trim, interference, and configuration drag at typed cases and validity domains.",
+      "work_packages": [
+        "WP-07"
+      ],
+      "owners": [
+        "alas-aero",
+        "alas-perf"
+      ],
+      "planned_fidelity": "F1-F2 native aerodynamics",
+      "requirement_ids": [
+        "REQ.PERF.CRUISE_MACH",
+        "REQ.PERF.MMO"
+      ],
+      "case_ids": [
+        "cruise.maximum_payload",
+        "envelope.mmo_aft_cg"
+      ],
+      "implementation_revision": "worktree:WP-07-aerodynamics-foundation",
+      "evidence_ids": [],
+      "status": "ImplementedUnverified",
+      "data_gap": null,
+      "disposition": "Native verification exists without unified aircraft validation replay."
+    },
+    {
+      "id": "research.aerodynamics.AE-002",
+      "memo": "aerodynamics.md",
+      "section": "Executive conclusions",
+      "finding": "Model section polars, finite-wing lift, high lift, powered interaction, stall limits, and uncertainty as separate fidelity stages.",
+      "work_packages": [
+        "WP-07",
+        "WP-09"
+      ],
+      "owners": [
+        "alas-aero",
+        "alas-stab"
+      ],
+      "planned_fidelity": "F1-F3 staged aero",
+      "requirement_ids": [
+        "REQ.PERF.APPROACH_SPEED"
+      ],
+      "case_ids": [
+        "approach.mlw"
+      ],
+      "implementation_revision": "worktree:WP-07-high-lift-foundation",
+      "evidence_ids": [],
+      "status": "ImplementedUnverified",
+      "data_gap": null,
+      "disposition": "External high-lift comparison and mesh sensitivity are not retained."
+    },
+    {
+      "id": "research.aerodynamics.AE-003",
+      "memo": "aerodynamics.md",
+      "section": "Executive conclusions",
+      "finding": "Promote CFD only with decks, grids, convergence, model sensitivity, experimental comparison, and signed discrepancy.",
+      "work_packages": [
+        "WP-13"
+      ],
+      "owners": [
+        "alas-aero",
+        "alas-exec"
+      ],
+      "planned_fidelity": "F4 CFD validation",
+      "requirement_ids": [],
+      "case_ids": [],
+      "implementation_revision": null,
+      "evidence_ids": [],
+      "status": "BlockedByData",
+      "data_gap": "No legally retained matching CFD/experimental campaign for the selected reference aircraft exists.",
+      "disposition": "CFD and experimental accuracy claims remain blocked."
+    },
+    {
+      "id": "research.propulsion-energy.PE-001",
+      "memo": "propulsion-energy.md",
+      "section": "Executive conclusion",
+      "finding": "Separate architecture, installed engine/propulsor deck, off-design lapse, fuel/power flow, installation losses, and OEI cases.",
+      "work_packages": [
+        "WP-05",
+        "WP-07"
+      ],
+      "owners": [
+        "alas-prop",
+        "alas-perf"
+      ],
+      "planned_fidelity": "F1-F3 propulsion deck",
+      "requirement_ids": [
+        "REQ.PERF.OEI_CEILING",
+        "REQ.PERF.TOFL"
+      ],
+      "case_ids": [
+        "climb.oei_ceiling",
+        "takeoff.accelerate_go_oei"
+      ],
+      "implementation_revision": "worktree:WP-05-propulsion-foundation",
+      "evidence_ids": [],
+      "status": "ImplementedUnverified",
+      "data_gap": null,
+      "disposition": "Typed evaluator exists without finalist deck correlation evidence."
+    },
+    {
+      "id": "research.propulsion-energy.PE-002",
+      "memo": "propulsion-energy.md",
+      "section": "Executive conclusion",
+      "finding": "Close alternative-carrier stored energy, mass, volume, power, thermal rejection, safety, and infrastructure constraints.",
+      "work_packages": [
+        "WP-05",
+        "WP-10",
+        "WP-11"
+      ],
+      "owners": [
+        "alas-prop",
+        "alas-systems",
+        "alas-environment"
+      ],
+      "planned_fidelity": "F1-F2 carrier closure",
+      "requirement_ids": [],
+      "case_ids": [
+        "scenario.environment",
+        "scenario.systems"
+      ],
+      "implementation_revision": "worktree:WP-11-carrier-closure",
+      "evidence_ids": [],
+      "status": "ImplementedUnverified",
+      "data_gap": null,
+      "disposition": "Physical contracts pass analytic tests; calibrated installation data are absent."
+    },
+    {
+      "id": "research.propulsion-energy.PE-003",
+      "memo": "propulsion-energy.md",
+      "section": "Executive conclusion",
+      "finding": "Use supplier, test, or approved deck data for release-level installed performance and operability claims.",
+      "work_packages": [
+        "WP-13"
+      ],
+      "owners": [
+        "alas-prop",
+        "alas-exec"
+      ],
+      "planned_fidelity": "F3-F5 controlled deck evidence",
+      "requirement_ids": [],
+      "case_ids": [],
+      "implementation_revision": null,
+      "evidence_ids": [],
+      "status": "BlockedByData",
+      "data_gap": "Proprietary supplier decks, operability maps, and approved installation data are unavailable.",
+      "disposition": "Release-level propulsion substantiation is blocked by legal and supplier data."
+    },
+    {
+      "id": "research.aircraft-systems.SY-001",
+      "memo": "aircraft-systems.md",
+      "section": "Executive conclusions",
+      "finding": "Represent electrical, hydraulic, pneumatic, ECS, thermal, APU, ice/fire, and water/waste as conserved resource networks.",
+      "work_packages": [
+        "WP-05",
+        "WP-10"
+      ],
+      "owners": [
+        "alas-systems"
+      ],
+      "planned_fidelity": "F1-F2 systems network",
+      "requirement_ids": [],
+      "case_ids": [
+        "scenario.systems"
+      ],
+      "implementation_revision": "worktree:WP-10-systems-foundation",
+      "evidence_ids": [],
+      "status": "ImplementedUnverified",
+      "data_gap": null,
+      "disposition": "Network foundations lack unified aircraft resource closure replay."
+    },
+    {
+      "id": "research.aircraft-systems.SY-002",
+      "memo": "aircraft-systems.md",
+      "section": "Executive conclusions",
+      "finding": "Evaluate normal, dispatch, degraded, and single-failure schedules with loads, capacities, transients, and safety effects.",
+      "work_packages": [
+        "WP-10"
+      ],
+      "owners": [
+        "alas-systems",
+        "alas-safety"
+      ],
+      "planned_fidelity": "F1-F3 failure schedules",
+      "requirement_ids": [],
+      "case_ids": [
+        "scenario.systems"
+      ],
+      "implementation_revision": "worktree:WP-10-systems-safety",
+      "evidence_ids": [],
+      "status": "ImplementedUnverified",
+      "data_gap": null,
+      "disposition": "Analytic failure tests exist without representative supplier calibration."
+    },
+    {
+      "id": "research.aircraft-systems.SY-003",
+      "memo": "aircraft-systems.md",
+      "section": "Executive conclusions",
+      "finding": "Require supplier curves, thermal rigs, fault-response data, and installation evidence before availability or compliance claims.",
+      "work_packages": [
+        "WP-13"
+      ],
+      "owners": [
+        "alas-systems",
+        "alas-safety"
+      ],
+      "planned_fidelity": "F3-F5 external systems evidence",
+      "requirement_ids": [],
+      "case_ids": [],
+      "implementation_revision": null,
+      "evidence_ids": [],
+      "status": "BlockedByData",
+      "data_gap": "Supplier performance curves, rig results, and approved safety evidence are not legally available.",
+      "disposition": "Systems release claims remain conceptual."
+    },
+    {
+      "id": "research.mass-balance.MB-001",
+      "memo": "mass-balance.md",
+      "section": "Executive conclusions",
+      "finding": "Maintain a component mass ledger with provenance, uncertainty, datum, CG, and full inertia tensor for every mass state.",
+      "work_packages": [
+        "WP-06",
+        "WP-08"
+      ],
+      "owners": [
+        "alas-mass",
+        "alas-struct"
+      ],
+      "planned_fidelity": "F1-F2 mass properties",
+      "requirement_ids": [],
+      "case_ids": [
+        "scenario.loading",
+        "scenario.structural"
+      ],
+      "implementation_revision": "worktree:WP-06-mass-ledger",
+      "evidence_ids": [],
+      "status": "ImplementedUnverified",
+      "data_gap": null,
+      "disposition": "Analytic ledger tests exist; full reference-aircraft correlation is pending."
+    },
+    {
+      "id": "research.mass-balance.MB-002",
+      "memo": "mass-balance.md",
+      "section": "Executive conclusions",
+      "finding": "Close fuel tanks, feed order, retained fluids, payload/loading sequences, landing states, and mass-property continuity.",
+      "work_packages": [
+        "WP-06"
+      ],
+      "owners": [
+        "alas-mass",
+        "alas-mission",
+        "alas-payload"
+      ],
+      "planned_fidelity": "F2 stateful mass closure",
+      "requirement_ids": [
+        "REQ.MISSION.MIN_LANDING_FUEL",
+        "REQ.MISSION.PAYLOAD"
+      ],
+      "case_ids": [
+        "mission.design",
+        "accommodation.design"
+      ],
+      "implementation_revision": "worktree:WP-06-fuel-loading-closure",
+      "evidence_ids": [],
+      "status": "ImplementedUnverified",
+      "data_gap": null,
+      "disposition": "Coupled replay and measurement correlation are not retained."
+    },
+    {
+      "id": "research.mass-balance.MB-003",
+      "memo": "mass-balance.md",
+      "section": "Executive conclusions",
+      "finding": "Calibrate component methods and uncertainty against traceable weighed aircraft or compatible open reference data.",
+      "work_packages": [
+        "WP-13"
+      ],
+      "owners": [
+        "alas-mass"
+      ],
+      "planned_fidelity": "F3-F5 validation data",
+      "requirement_ids": [],
+      "case_ids": [],
+      "implementation_revision": null,
+      "evidence_ids": [],
+      "status": "BlockedByData",
+      "data_gap": "No complete legally usable component mass/CG/inertia reference dataset matches the campaign aircraft.",
+      "disposition": "Absolute mass accuracy claims remain blocked."
+    },
+    {
+      "id": "research.stability-control.SC-001",
+      "memo": "stability-control.md",
+      "section": "1. Decision summary",
+      "finding": "Evaluate trim, static stability, control authority, OEI, crosswind, icing, ground effect, actuator, and failure cases over mass/CG/envelope.",
+      "work_packages": [
+        "WP-09"
+      ],
+      "owners": [
+        "alas-stab",
+        "alas-systems"
+      ],
+      "planned_fidelity": "F1-F2 stability/control matrix",
+      "requirement_ids": [],
+      "case_ids": [
+        "scenario.loading",
+        "scenario.departure",
+        "scenario.arrival"
+      ],
+      "implementation_revision": "worktree:WP-09-stability-foundation",
+      "evidence_ids": [],
+      "status": "ImplementedUnverified",
+      "data_gap": null,
+      "disposition": "Analytic/sign tests exist without unified candidate case coverage."
+    },
+    {
+      "id": "research.stability-control.SC-002",
+      "memo": "stability-control.md",
+      "section": "1. Decision summary",
+      "finding": "Retain derivative provenance, linear modes, nonlinear six-DOF integration, controls, saturation, and rigid/flexible distinction.",
+      "work_packages": [
+        "WP-09"
+      ],
+      "owners": [
+        "alas-stab",
+        "alas-aero",
+        "alas-struct"
+      ],
+      "planned_fidelity": "F2-F3 dynamics",
+      "requirement_ids": [],
+      "case_ids": [],
+      "implementation_revision": "worktree:WP-09-dynamics-foundation",
+      "evidence_ids": [],
+      "status": "ImplementedUnverified",
+      "data_gap": null,
+      "disposition": "No external simulator or flight-data comparison is retained."
+    },
+    {
+      "id": "research.stability-control.SC-003",
+      "memo": "stability-control.md",
+      "section": "1. Decision summary",
+      "finding": "Require wind-tunnel, flight-test, or independently calibrated derivative/mode evidence for handling-quality claims.",
+      "work_packages": [
+        "WP-13"
+      ],
+      "owners": [
+        "alas-stab"
+      ],
+      "planned_fidelity": "F4-F5 validation",
+      "requirement_ids": [],
+      "case_ids": [],
+      "implementation_revision": null,
+      "evidence_ids": [],
+      "status": "BlockedByData",
+      "data_gap": "Matching derivative, handling-quality, and flight-test data are unavailable.",
+      "disposition": "No handling-quality or certification claim is released."
+    },
+    {
+      "id": "research.performance-airport.PF-001",
+      "memo": "performance-airport.md",
+      "section": "Executive conclusion",
+      "finding": "Use typed takeoff, landing, climb, ceiling, time-to-climb, approach, runway, atmosphere, and airport cases.",
+      "work_packages": [
+        "WP-07"
+      ],
+      "owners": [
+        "alas-perf",
+        "alas-prop"
+      ],
+      "planned_fidelity": "F2 trajectory performance",
+      "requirement_ids": [
+        "REQ.PERF.TOFL",
+        "REQ.PERF.LANDING_DISTANCE",
+        "REQ.PERF.TTC"
+      ],
+      "case_ids": [
+        "takeoff.mtow.standard",
+        "landing.mlw",
+        "climb.time_to_climb"
+      ],
+      "implementation_revision": "worktree:WP-07-performance-foundation",
+      "evidence_ids": [],
+      "status": "ImplementedUnverified",
+      "data_gap": null,
+      "disposition": "Trajectory contracts/tests exist without unified airport campaign."
+    },
+    {
+      "id": "research.performance-airport.PF-002",
+      "memo": "performance-airport.md",
+      "section": "Executive conclusion",
+      "finding": "Solve independent accelerate-stop/go, V1, OEI climb, brake/tyre limits, runway state, and pavement-method compatibility.",
+      "work_packages": [
+        "WP-07",
+        "WP-11"
+      ],
+      "owners": [
+        "alas-perf",
+        "alas-ops"
+      ],
+      "planned_fidelity": "F2-F3 field performance",
+      "requirement_ids": [
+        "REQ.PERF.TOFL",
+        "REQ.PERF.ACN"
+      ],
+      "case_ids": [
+        "takeoff.accelerate_stop",
+        "takeoff.accelerate_go_oei",
+        "landing.mlw"
+      ],
+      "implementation_revision": "worktree:WP-07-WP-11-airport-foundation",
+      "evidence_ids": [],
+      "status": "ImplementedUnverified",
+      "data_gap": null,
+      "disposition": "External aircraft/airport correlation data are pending."
+    },
+    {
+      "id": "research.performance-airport.PF-003",
+      "memo": "performance-airport.md",
+      "section": "Executive conclusion",
+      "finding": "Validate field trajectories and margins against matching flight-test, AFM, or independent solver evidence.",
+      "work_packages": [
+        "WP-13"
+      ],
+      "owners": [
+        "alas-perf",
+        "alas-exec"
+      ],
+      "planned_fidelity": "F3-F5 field validation",
+      "requirement_ids": [],
+      "case_ids": [],
+      "implementation_revision": null,
+      "evidence_ids": [],
+      "status": "BlockedByData",
+      "data_gap": "Comparable AFM/flight-test trajectories and legal redistribution rights are unavailable.",
+      "disposition": "Field-performance accuracy and compliance claims remain blocked."
+    },
+    {
+      "id": "research.structures-aeroelasticity.ST-001",
+      "memo": "structures-aeroelasticity.md",
+      "section": "Executive conclusion",
+      "finding": "Build named maneuver, gust, landing, pressurization, engine, tank, payload, gear, and failure load paths with equilibrium checks.",
+      "work_packages": [
+        "WP-08"
+      ],
+      "owners": [
+        "alas-struct"
+      ],
+      "planned_fidelity": "F1-F2 structural loads",
+      "requirement_ids": [],
+      "case_ids": [
+        "scenario.structural"
+      ],
+      "implementation_revision": "worktree:WP-08-structures-foundation",
+      "evidence_ids": [],
+      "status": "ImplementedUnverified",
+      "data_gap": null,
+      "disposition": "Analytic equilibrium tests exist without unified aircraft load campaign."
+    },
+    {
+      "id": "research.structures-aeroelasticity.ST-002",
+      "memo": "structures-aeroelasticity.md",
+      "section": "Executive conclusion",
+      "finding": "Stage beam, wingbox, panel/shell, buckling, fatigue, joints, modal, divergence, flutter, reversal, and structural feedback.",
+      "work_packages": [
+        "WP-08"
+      ],
+      "owners": [
+        "alas-struct",
+        "alas-aero",
+        "alas-mass"
+      ],
+      "planned_fidelity": "F1-F3 structural/aeroelastic",
+      "requirement_ids": [],
+      "case_ids": [
+        "scenario.structural"
+      ],
+      "implementation_revision": "worktree:WP-08-aeroelastic-foundation",
+      "evidence_ids": [],
+      "status": "ImplementedUnverified",
+      "data_gap": null,
+      "disposition": "Reduced models lack external FEA/aeroelastic correlation."
+    },
+    {
+      "id": "research.structures-aeroelasticity.ST-003",
+      "memo": "structures-aeroelasticity.md",
+      "section": "Executive conclusion",
+      "finding": "Promote strength, fatigue, damage tolerance, flutter, and aeroelastic claims only with allowable provenance, refinement, external decks, and test comparison.",
+      "work_packages": [
+        "WP-13"
+      ],
+      "owners": [
+        "alas-struct",
+        "alas-exec"
+      ],
+      "planned_fidelity": "F4-F5 substantiation",
+      "requirement_ids": [],
+      "case_ids": [],
+      "implementation_revision": null,
+      "evidence_ids": [],
+      "status": "BlockedByData",
+      "data_gap": "Qualified material allowables, matching NASTRAN decks, tests, and approval evidence are unavailable.",
+      "disposition": "Structural and flutter substantiation remains blocked."
+    },
+    {
+      "id": "research.optimization-mdo.OP-001",
+      "memo": "optimization-mdo.md",
+      "section": "Executive decision",
+      "finding": "Use content-addressed candidate identity, complete stage history, feasibility-first ranking, deterministic cache, and bounded retries.",
+      "work_packages": [
+        "WP-03",
+        "WP-12"
+      ],
+      "owners": [
+        "alas-opt",
+        "alas-pipeline",
+        "alas-exec"
+      ],
+      "planned_fidelity": "F0-F2 deterministic MDO",
+      "requirement_ids": [],
+      "case_ids": [],
+      "implementation_revision": "worktree:WP-03-WP-12-mdo-foundation",
+      "evidence_ids": [],
+      "status": "ImplementedUnverified",
+      "data_gap": null,
+      "disposition": "Implementation is active and lacks retained finalist campaign replay."
+    },
+    {
+      "id": "research.optimization-mdo.OP-002",
+      "memo": "optimization-mdo.md",
+      "section": "Executive decision",
+      "finding": "Enumerate discrete architectures outside continuous search and retain Pareto, DOE, surrogate, robust-tail, and promotion evidence.",
+      "work_packages": [
+        "WP-12"
+      ],
+      "owners": [
+        "alas-opt",
+        "alas-pipeline"
+      ],
+      "planned_fidelity": "F2-F4 mixed robust MDO",
+      "requirement_ids": [],
+      "case_ids": [],
+      "implementation_revision": "worktree:WP-12-mixed-mdo",
+      "evidence_ids": [],
+      "status": "ImplementedUnverified",
+      "data_gap": null,
+      "disposition": "WP-12 implementation has not yet been checkpointed with campaign evidence."
+    },
+    {
+      "id": "research.optimization-mdo.OP-003",
+      "memo": "optimization-mdo.md",
+      "section": "Executive decision",
+      "finding": "Compare algorithms under identical budgets and promote finalists using paired low/high-fidelity discrepancy and uncertainty.",
+      "work_packages": [
+        "WP-12",
+        "WP-13"
+      ],
+      "owners": [
+        "alas-opt",
+        "alas-exec"
+      ],
+      "planned_fidelity": "F3-F4 promotion campaign",
+      "requirement_ids": [],
+      "case_ids": [],
+      "implementation_revision": null,
+      "evidence_ids": [],
+      "status": "DeferredWithRationale",
+      "data_gap": "Fresh equal-budget and external high-fidelity campaigns have not run.",
+      "disposition": "Deferred until WP-12 checkpoint and external-tool resources are available."
+    },
+    {
+      "id": "research.digital-thread.DT-001",
+      "memo": "digital-thread.md",
+      "section": "Executive decision",
+      "finding": "Freeze schema/version/unit/frame identities and retain manifests linking requirements, cases, evaluators, tools, artifacts, hashes, and status.",
+      "work_packages": [
+        "WP-01",
+        "WP-03"
+      ],
+      "owners": [
+        "alas-types",
+        "alas-pipeline",
+        "alas-exec"
+      ],
+      "planned_fidelity": "F0 provenance graph",
+      "requirement_ids": [],
+      "case_ids": [],
+      "implementation_revision": "worktree:WP-01-WP-03-digital-thread",
+      "evidence_ids": [],
+      "status": "ImplementedUnverified",
+      "data_gap": null,
+      "disposition": "Manifest contracts exist without full report-to-artifact release audit."
+    },
+    {
+      "id": "research.digital-thread.DT-002",
+      "memo": "digital-thread.md",
+      "section": "Executive decision",
+      "finding": "Use content hashes for cache identity, verify artifacts on hits, and retain failures, retries, resources, and scheduler evidence.",
+      "work_packages": [
+        "WP-03"
+      ],
+      "owners": [
+        "alas-exec",
+        "alas-pipeline"
+      ],
+      "planned_fidelity": "F0 deterministic execution",
+      "requirement_ids": [],
+      "case_ids": [],
+      "implementation_revision": "worktree:WP-03-cache-retry",
+      "evidence_ids": [],
+      "status": "ImplementedUnverified",
+      "data_gap": null,
+      "disposition": "Focused equivalence tests exist; independent replay is pending."
+    },
+    {
+      "id": "research.digital-thread.DT-003",
+      "memo": "digital-thread.md",
+      "section": "Executive decision",
+      "finding": "Retain every external input/deck, tool/environment identity, transcript, output, parser, transform, comparison contract, and rights limitation.",
+      "work_packages": [
+        "WP-03",
+        "WP-13"
+      ],
+      "owners": [
+        "alas-exec",
+        "xtask"
+      ],
+      "planned_fidelity": "F3 reproducible external evidence",
+      "requirement_ids": [],
+      "case_ids": [],
+      "implementation_revision": null,
+      "evidence_ids": [],
+      "status": "BlockedByData",
+      "data_gap": "No complete external-tool run exists on two supported environments with redistributable artifacts.",
+      "disposition": "External reproducibility claim remains blocked."
+    },
+    {
+      "id": "research.certification-safety.SA-001",
+      "memo": "certification-safety.md",
+      "section": "Executive conclusion",
+      "finding": "Freeze certification/operational profile, applicability, hazards, failure conditions, assumptions, requirements, and evidence status.",
+      "work_packages": [
+        "WP-10"
+      ],
+      "owners": [
+        "alas-safety",
+        "alas-config"
+      ],
+      "planned_fidelity": "F0-F2 safety screening",
+      "requirement_ids": [],
+      "case_ids": [
+        "scenario.systems"
+      ],
+      "implementation_revision": "worktree:WP-10-safety-foundation",
+      "evidence_ids": [],
+      "status": "ImplementedUnverified",
+      "data_gap": null,
+      "disposition": "Typed safety screening exists without programme-level review."
+    },
+    {
+      "id": "research.certification-safety.SA-002",
+      "memo": "certification-safety.md",
+      "section": "Executive conclusion",
+      "finding": "Connect FHA/PSSA-style allocations, independence/common cause, failure schedules, and architecture feedback without calling the screen compliance.",
+      "work_packages": [
+        "WP-10"
+      ],
+      "owners": [
+        "alas-safety",
+        "alas-systems"
+      ],
+      "planned_fidelity": "F1-F3 safety architecture",
+      "requirement_ids": [],
+      "case_ids": [
+        "scenario.systems"
+      ],
+      "implementation_revision": "worktree:WP-10-safety-systems",
+      "evidence_ids": [],
+      "status": "ImplementedUnverified",
+      "data_gap": null,
+      "disposition": "External safety assessment and supplier failure data are absent."
+    },
+    {
+      "id": "research.certification-safety.SA-003",
+      "memo": "certification-safety.md",
+      "section": "Executive conclusion",
+      "finding": "Require authority-approved methods, conformity, test/inspection, and findings before certification or airworthiness claims.",
+      "work_packages": [
+        "WP-13"
+      ],
+      "owners": [
+        "alas-safety",
+        "report"
+      ],
+      "planned_fidelity": "F5 authority finding",
+      "requirement_ids": [],
+      "case_ids": [],
+      "implementation_revision": null,
+      "evidence_ids": [],
+      "status": "BlockedByData",
+      "data_gap": "No certification programme, applicant data, conformity, DER/DOA review, or authority finding exists.",
+      "disposition": "Certification and airworthiness claims are prohibited."
+    },
+    {
+      "id": "research.environment-lifecycle.EN-001",
+      "memo": "environment-lifecycle.md",
+      "section": "Executive conclusion",
+      "finding": "Close mission fuel/energy/species/LAQ inventories and staged lifecycle/manufacturing/MRO/end-of-life/carrier boundaries without double counting.",
+      "work_packages": [
+        "WP-11"
+      ],
+      "owners": [
+        "alas-environment"
+      ],
+      "planned_fidelity": "F0-F2 environmental bookkeeping",
+      "requirement_ids": [],
+      "case_ids": [
+        "scenario.environment"
+      ],
+      "implementation_revision": "worktree:WP-11-environment-foundation",
+      "evidence_ids": [],
+      "status": "ImplementedUnverified",
+      "data_gap": null,
+      "disposition": "Analytic tests exist; calibrated campaign data and pipeline integration are pending."
+    },
+    {
+      "id": "research.environment-lifecycle.EN-002",
+      "memo": "environment-lifecycle.md",
+      "section": "Executive conclusion",
+      "finding": "Keep non-CO2 trajectory/weather opportunity and noise source/procedure metrics diagnostic until matching calibrated evidence exists.",
+      "work_packages": [
+        "WP-11",
+        "WP-13"
+      ],
+      "owners": [
+        "alas-environment"
+      ],
+      "planned_fidelity": "F2-F4 climate/noise evidence",
+      "requirement_ids": [],
+      "case_ids": [
+        "scenario.environment"
+      ],
+      "implementation_revision": null,
+      "evidence_ids": [],
+      "status": "BlockedByData",
+      "data_gap": "No matching weather ensemble, climate response, acoustic calibration, traffic, or population dataset is retained.",
+      "disposition": "No generic non-CO2 multiplier, airport contour, or certification-noise claim is allowed."
+    },
+    {
+      "id": "research.environment-lifecycle.EN-003",
+      "memo": "environment-lifecycle.md",
+      "section": "Executive conclusion",
+      "finding": "Use geography/year/allocation/functional-unit-specific LCI factors, uncertainty, qualified credits, and carrier infrastructure data.",
+      "work_packages": [
+        "WP-11",
+        "WP-13"
+      ],
+      "owners": [
+        "alas-environment"
+      ],
+      "planned_fidelity": "F2-F4 lifecycle data",
+      "requirement_ids": [],
+      "case_ids": [
+        "scenario.environment"
+      ],
+      "implementation_revision": null,
+      "evidence_ids": [],
+      "status": "BlockedByData",
+      "data_gap": "Licensed LCI databases, regional pathway data, and airport carrier infrastructure calibration are unavailable.",
+      "disposition": "Lifecycle totals remain data-domain diagnostics."
+    },
+    {
+      "id": "research.operations-economics.OE-001",
+      "memo": "operations-economics.md",
+      "section": "Bottom line",
+      "finding": "Retain weighted operator/network scenarios, adverse tails, deterministic resource DAGs, and calibrated passenger/cargo/turnaround P50/P90.",
+      "work_packages": [
+        "WP-11"
+      ],
+      "owners": [
+        "alas-ops"
+      ],
+      "planned_fidelity": "F1-F2 operations model",
+      "requirement_ids": [],
+      "case_ids": [
+        "scenario.operations"
+      ],
+      "implementation_revision": "worktree:WP-11-operations-foundation",
+      "evidence_ids": [],
+      "status": "ImplementedUnverified",
+      "data_gap": null,
+      "disposition": "Analytic tests exist; operator/station calibration and pipeline integration are pending."
+    },
+    {
+      "id": "research.operations-economics.OE-002",
+      "memo": "operations-economics.md",
+      "section": "Bottom line",
+      "finding": "Separate maintainability/component proxies from operator dispatch evidence and keep DOC/LCC currency, year, price, accounting, and utilization bases explicit.",
+      "work_packages": [
+        "WP-11"
+      ],
+      "owners": [
+        "alas-ops"
+      ],
+      "planned_fidelity": "F1-F3 reliability/economics",
+      "requirement_ids": [],
+      "case_ids": [
+        "scenario.operations"
+      ],
+      "implementation_revision": "worktree:WP-11-operations-economics",
+      "evidence_ids": [],
+      "status": "ImplementedUnverified",
+      "data_gap": null,
+      "disposition": "Evidence gates exist without representative airline datasets."
+    },
+    {
+      "id": "research.operations-economics.OE-003",
+      "memo": "operations-economics.md",
+      "section": "Bottom line",
+      "finding": "Require operator reliability, maintenance, airport/GSE, tariff, price-index, and disruption data before operational ranking outside the declared domain.",
+      "work_packages": [
+        "WP-11",
+        "WP-13"
+      ],
+      "owners": [
+        "alas-ops"
+      ],
+      "planned_fidelity": "F3 empirical operations",
+      "requirement_ids": [],
+      "case_ids": [
+        "scenario.operations"
+      ],
+      "implementation_revision": null,
+      "evidence_ids": [],
+      "status": "BlockedByData",
+      "data_gap": "No licensed operator fleet, station, reliability, maintenance, and cost dataset is available.",
+      "disposition": "Operational and economic validation claims remain blocked."
+    },
+    {
+      "id": "research.integration-plan.IP-001",
+      "memo": "INTEGRATION_PLAN.md",
+      "section": "1. Current baseline and truth boundary",
+      "finding": "Track every research finding with stable ownership, fidelity, requirement/case identity, revision, evidence, status, gap, and disposition.",
+      "work_packages": [
+        "WP-13"
+      ],
+      "owners": [
+        "research ledger",
+        "xtask"
+      ],
+      "planned_fidelity": "F0 implementation ledger",
+      "requirement_ids": [],
+      "case_ids": [],
+      "implementation_revision": "worktree:WP-13-evidence-foundation",
+      "evidence_ids": [],
+      "status": "ImplementedUnverified",
+      "data_gap": null,
+      "disposition": "The ledger is populated but not yet checkpointed or independently audited."
+    },
+    {
+      "id": "research.integration-plan.IP-002",
+      "memo": "INTEGRATION_PLAN.md",
+      "section": "1. Current baseline and truth boundary",
+      "finding": "Run one unified conventional-aircraft reference campaign plus separate discipline benchmark families without allowing compensating aggregate errors.",
+      "work_packages": [
+        "WP-13"
+      ],
+      "owners": [
+        "all discipline owners",
+        "xtask"
+      ],
+      "planned_fidelity": "F2-F4 unified campaign",
+      "requirement_ids": [],
+      "case_ids": [],
+      "implementation_revision": null,
+      "evidence_ids": [],
+      "status": "DeferredWithRationale",
+      "data_gap": "WP-12 is not checkpointed and the external benchmark/tool/data set is incomplete.",
+      "disposition": "A NotEvaluated replay contract is retained; execution is deferred."
+    },
+    {
+      "id": "research.integration-plan.IP-003",
+      "memo": "INTEGRATION_PLAN.md",
+      "section": "1. Current baseline and truth boundary",
+      "finding": "Release only claims whose ledger rows are Verified and whose model cards, artifacts, replay, hashes, limitations, and hard-requirement review are complete.",
+      "work_packages": [
+        "WP-13"
+      ],
+      "owners": [
+        "xtask",
+        "report"
+      ],
+      "planned_fidelity": "F0-F5 release gate",
+      "requirement_ids": [],
+      "case_ids": [],
+      "implementation_revision": null,
+      "evidence_ids": [],
+      "status": "BlockedByData",
+      "data_gap": "No fresh unified replay or independent second-environment reproduction exists.",
+      "disposition": "The release coverage matrix intentionally contains no release-verified physical claim."
+    }
+  ]
+}

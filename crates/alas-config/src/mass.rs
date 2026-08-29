@@ -22,12 +22,34 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::ConfigNode;
+use crate::{ConfigNode, FlopsTransportConfig, SystemsMassMethod};
 
 /// Tunable mass fractions and structural parameters.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ConfigNode)]
 #[serde(deny_unknown_fields)]
 pub struct MassModelConfig {
+    /// Method used for systems, equipment, and operating-item mass.
+    #[serde(
+        default,
+        skip_serializing_if = "SystemsMassMethod::is_reference_compatible"
+    )]
+    #[config(
+        advanced,
+        options = SystemsMassMethod,
+        label = "Systems mass method",
+        help = "Versioned systems-mass method: frozen Python-compatible MTOW fractions or the NASA FLOPS transport component buildup."
+    )]
+    pub systems_mass_method: SystemsMassMethod,
+
+    /// Physical architecture required by the FLOPS transport method.
+    #[serde(default, skip_serializing_if = "FlopsTransportConfig::is_unspecified")]
+    #[config(
+        nested,
+        advanced,
+        help = "Declared range, crew, cabin, hydraulic, engine-mounting, and fuel-system inputs required by FLOPS transport mass correlations."
+    )]
+    pub flops_transport: FlopsTransportConfig,
+
     /// Share of maximum takeoff weight the wing structure must carry.
     #[config(
         label = "Wing suspended-mass fraction",
@@ -165,6 +187,8 @@ pub struct MassModelConfig {
 impl Default for MassModelConfig {
     fn default() -> Self {
         Self {
+            systems_mass_method: SystemsMassMethod::ReferenceCompatibleFractions,
+            flops_transport: FlopsTransportConfig::default(),
             suspended_mass_fraction: 0.75,
             max_airspeed_for_flaps_ms: 90.0,
             flap_deflection_angle_deg: 40.0,

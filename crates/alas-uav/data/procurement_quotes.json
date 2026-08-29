@@ -1,0 +1,506 @@
+[
+  {
+    "component_id": "tmotor-at2814-900kv",
+    "currency": "USD",
+    "unit_price_minor": 4999,
+    "source_url": "https://store.tmotor.com/product/at2814-long-shaft-fixed-wing-motor.html",
+    "source_title": "AT2814 Long Shaft Fixed-Wing Motor",
+    "observed_on_utc": "2026-08-23"
+  },
+  {
+    "component_id": "hobbywing-skywalker-30a-v2-mini",
+    "currency": "USD",
+    "unit_price_minor": 1999,
+    "source_url": "https://www.hobbywingdirect.com/collections/skywalker-esc/mini",
+    "source_title": "Skywalker 30A V2 ESC [Mini]",
+    "observed_on_utc": "2026-08-24"
+  },
+  {
+    "component_id": "apc-12x6e",
+    "currency": "USD",
+    "unit_price_minor": 487,
+    "source_url": "https://www.apcprop.com/product/12x6e/",
+    "source_title": "12x6E Thin Electric Propeller",
+    "observed_on_utc": "2026-08-24"
+  },
+  {
+    "component_id": "unmannedtech-gensace-gtech-2200-3s-45c-xt60",
+    "currency": "GBP",
+    "unit_price_minor": 2474,
+    "source_url": "https://www.unmannedtechshop.co.uk/products/gensace-g-tech-2200mah-11-1v-45c-3s1p-lipo-battery-pack-with-xt60-plug",
+    "source_title": "Gens ace G-Tech 2200mAh 11.1V 45C 3S1P LiPo Battery Pack with XT60 Plug",
+    "observed_on_utc": "2026-08-23"
+  },
+  {
+    "component_id": "unmannedtech-cnhl-black-2000-3s-100c-xt60",
+    "currency": "GBP",
+    "unit_price_minor": 1699,
+    "source_url": "https://www.unmannedtechshop.co.uk/products/cnhl-black-series-2000mah-11-1v-3s-100c-lipo-battery",
+    "source_title": "CNHL Black Series 2000mAh 11.1V 3S 100C LiPo Battery",
+    "observed_on_utc": "2026-08-23"
+  },
+  {
+    "component_id": "gens-ace-b-45c-1800-5s1p",
+    "currency": "EUR",
+    "unit_price_minor": 4000,
+    "source_url": "https://rc-innovations.es/shop/6928493362549-bateria-lipo-gens-ace-5s-18-5v-1800mah-45c-7704",
+    "source_title": "Bateria LiPo Gens Ace 5s 18.5V 1800mAh 45C",
+    "observed_on_utc": "2026-08-24"
+  },
+  {
+    "component_id": "gens-ace-b-45c-1800-3s1p",
+    "currency": "EUR",
+    "unit_price_minor": 2525,
+    "source_url": "https://rc-innovations.es/shop/gea183s45x6gt-bateria-lipo-gens-ace-g-tech-3s-11-1v-1800mah-45c-7700",
+    "source_title": "Bateria LiPo Gens Ace G-Tech 3s 11.1V 1800mAh 45C",
+    "observed_on_utc": "2026-08-24"
+  },
+  {
+    "component_id": "gens-ace-6800-3s-120c-ec5",
+    "currency": "EUR",
+    "unit_price_minor": 8500,
+    "source_url": "https://rc-innovations.es/shop/gea68003s12e5-gens-ace-3s-11-1v-6800mah-120c-bashing-series-ec5-6809",
+    "source_title": "Gens ACE 3s 11.1V 6800mAh 120C - Bashing Series - EC5",
+    "observed_on_utc": "2026-08-24"
+  },
+  {
+    "component_id": "spektrum-smart-6s-5000-50c",
+    "currency": "USD",
+    "unit_price_minor": 14999,
+    "source_url": "https://www.spektrumrc.com/product/spektrum-accessories-22.2v-5000mah-6s-50c-smart-lipo-battery-ic5/SPMX50006S50.html",
+    "source_title": "Spektrum Accessories 22.2V 5000mAh 6S 50C Smart LiPo Battery: IC5",
+    "observed_on_utc": "2026-08-24"
+  },
+  {
+    "component_id": "spektrum-smart-4s-5000-50c-hardcase",
+    "currency": "USD",
+    "unit_price_minor": 9999,
+    "source_url": "https://my.spektrumrc.com/Products/Default.aspx?ProdID=SPMX50004S50H5",
+    "source_title": "5000mAh 4S 14.8V 50C Smart LiPo Hardcase; IC5",
+    "observed_on_utc": "2026-08-24"
+  },
+  {
+    "component_id": "spektrum-smart-3s-3200-30c",
+    "currency": "USD",
+    "unit_price_minor": 4499,
+    "source_url": "https://my.spektrumrc.com/Products/Default.aspx?ProdID=SPMX32003S30",
+    "source_title": "3200mAh 3S 11.1V Smart LiPo 30C; IC3",
+    "observed_on_utc": "2026-08-24"
+  },
+  {
+    "component_id": "gens-ace-soaring-2200mah-3s-20c",
+    "currency": "EUR",
+    "unit_price_minor": 1699,
+    "source_url": "https://gensace.de/products/6928493305614",
+    "source_title": "Gens ace Soaring 2200mAh 3S 20C 11.1V LiPo Akku mit XT60 Stecker",
+    "observed_on_utc": "2026-08-24"
+  },
+  {
+    "component_id": "tattu-plus-22000-6s-25c",
+    "currency": "USD",
+    "unit_price_minor": 48699,
+    "source_url": "https://www.genstattu.com/tattu-plus-25c-22000mah-6s1p-xt90-smart-lipo-battery.html",
+    "source_title": "Tattu Plus 22000mAh 6s 25C 22.2V Lipo Smart Battery Pack with XT90-S Plug (New Version)",
+    "observed_on_utc": "2026-08-24"
+  },
+  {
+    "component_id": "tattu-plus-22000-12s-25c",
+    "currency": "USD",
+    "unit_price_minor": 86999,
+    "source_url": "https://www.genstattu.com/tattu-plus-22000mah-44-4v-25c-12s1p-lipo-smart-battery-pack-with-as150-plug/",
+    "source_title": "Tattu Plus 22000mAh 44.4V 25C 12S1P Lipo Smart Battery Pack with AS150 Plug",
+    "observed_on_utc": "2026-08-24"
+  },
+  {
+    "component_id": "tattu-gtech-22000-4s",
+    "currency": "USD",
+    "unit_price_minor": 35499,
+    "source_url": "https://genstattu.com/tattu-g-tech-4s-22000mah-14-8v-25c-lipo-battery-with-xt90-s-plug-for-uav/",
+    "source_title": "Tattu G-Tech 4S 22000mAh 14.8V 25C Lipo Battery with XT90-S Plug for UAV",
+    "observed_on_utc": "2026-08-24"
+  },
+  {
+    "component_id": "hitec-hs5565mh",
+    "currency": "USD",
+    "unit_price_minor": 7299,
+    "source_url": "https://www.hiteccs.com/actuators/product-details/HS-5565MH",
+    "source_title": "HS-5565MH Digital Metal Gear Servo",
+    "observed_on_utc": "2026-08-24"
+  },
+  {
+    "component_id": "radiomaster-er6-elrs-pwm",
+    "currency": "USD",
+    "unit_price_minor": 2499,
+    "source_url": "https://www.radiomasterrc.com/products/er6-2-4ghz-elrs-pwm-receiver",
+    "source_title": "ER6 2.4GHz ELRS PWM Receiver",
+    "observed_on_utc": "2026-08-24"
+  },
+  {
+    "component_id": "holybro-h-rtk-neo-f9p-uart",
+    "currency": "USD",
+    "unit_price_minor": 20600,
+    "source_url": "https://holybro.com/products/h-rtk-neo-f9p-module",
+    "source_title": "H-RTK NEO-F9P GNSS Module",
+    "observed_on_utc": "2026-08-24"
+  },
+  {
+    "component_id": "hobbywing-skywalker-15a-v2",
+    "currency": "USD",
+    "unit_price_minor": 1499,
+    "source_url": "https://www.hobbywingdirect.com/collections/skywalker-esc",
+    "source_title": "Skywalker 15A V2 ESC",
+    "observed_on_utc": "2026-08-24"
+  },
+  {
+    "component_id": "hobbywing-skywalker-40a-v2-na",
+    "currency": "USD",
+    "unit_price_minor": 1999,
+    "source_url": "https://www.hobbywingdirect.com/collections/skywalker-esc",
+    "source_title": "Skywalker 40A V2 ESC",
+    "observed_on_utc": "2026-08-24"
+  },
+  {
+    "component_id": "hobbywing-skywalker-60a-v2-na",
+    "currency": "USD",
+    "unit_price_minor": 2999,
+    "source_url": "https://www.hobbywingdirect.com/collections/skywalker-esc",
+    "source_title": "Skywalker 60A V2 ESC",
+    "observed_on_utc": "2026-08-24"
+  },
+  {
+    "component_id": "hobbywing-skywalker-80a-v2-na",
+    "currency": "USD",
+    "unit_price_minor": 3999,
+    "source_url": "https://www.hobbywingdirect.com/collections/skywalker-esc",
+    "source_title": "Skywalker 80A V2 ESC",
+    "observed_on_utc": "2026-08-24"
+  },
+  {
+    "component_id": "hobbywing-skywalker-2814-sl-kv1000",
+    "currency": "USD",
+    "unit_price_minor": 3499,
+    "source_url": "https://www.hobbywingdirect.com/collections/skywalker-2800-bl-motor-series",
+    "source_title": "Skywalker 2814 SL 1000KV Motor",
+    "observed_on_utc": "2026-08-24"
+  },
+  {
+    "component_id": "hobbywing-skywalker-2814-sl-kv1250",
+    "currency": "USD",
+    "unit_price_minor": 3499,
+    "source_url": "https://www.hobbywingdirect.com/collections/skywalker-2800-bl-motor-series",
+    "source_title": "Skywalker 2814 SL 1250KV Motor",
+    "observed_on_utc": "2026-08-24"
+  },
+  {
+    "component_id": "hobbywing-skywalker-2814-sl-kv1400",
+    "currency": "USD",
+    "unit_price_minor": 3499,
+    "source_url": "https://www.hobbywingdirect.com/collections/skywalker-2800-bl-motor-series",
+    "source_title": "Skywalker 2814 SL 1400KV Motor",
+    "observed_on_utc": "2026-08-24"
+  },
+  {
+    "component_id": "tattu-gtech-10000-6s-30c-ec5",
+    "currency": "USD",
+    "unit_price_minor": 21699,
+    "source_url": "https://genstattu.com/ta-30c-10000-6s1p-ec5.html",
+    "source_title": "Tattu G-Tech 6S 10000mAh 30C 22.2V LiPo Battery Pack with EC5 Plug",
+    "observed_on_utc": "2026-08-24"
+  },
+  {
+    "component_id": "tattu-gtech-16000-6s-30c-xt90s",
+    "currency": "USD",
+    "unit_price_minor": 33599,
+    "source_url": "https://genstattu.com/ta-30c-16000-6s1p-xt90.html",
+    "source_title": "Tattu G-Tech 16000mAh 6S 30C 22.2V LiPo Battery Pack with XT90-S Plug",
+    "observed_on_utc": "2026-08-24"
+  },
+  {
+    "component_id": "tattu-16000-6s-30c-as150",
+    "currency": "USD",
+    "unit_price_minor": 33599,
+    "source_url": "https://genstattu.com/ta-30c-16000-6s1p-as-as150.html",
+    "source_title": "Tattu 16000mAh 6S 30C 22.2V LiPo Battery Pack with AS150+AS150 Plug",
+    "observed_on_utc": "2026-08-24"
+  },
+  {
+    "component_id": "tattu-plus-compact-10000-12s-15c-as150u",
+    "currency": "USD",
+    "unit_price_minor": 54999,
+    "source_url": "https://genstattu.com/tattu-plus-1-0-compact-version-10000mah-44-4v-15c-12s1p-lipo-smart-battery-pack-with-as150uplug/",
+    "source_title": "Tattu Plus 1.0 Compact Version 10000mAh 44.4V 15C 12S1P LiPo Smart Battery Pack with AS150U Plug",
+    "observed_on_utc": "2026-08-24"
+  },
+  {
+    "component_id": "tattu-gtech-10000-12s-30c-as150u",
+    "currency": "USD",
+    "unit_price_minor": 46762,
+    "source_url": "https://genstattu.com/ta-30c-10000-12s1p-as150u.html",
+    "source_title": "Tattu 44.4V 30C 12S 10000mAh LiPo Battery Pack with AS150U Plug",
+    "observed_on_utc": "2026-08-24"
+  },
+  {
+    "component_id": "tattu-pro-22000-14s-25c-as150uf",
+    "currency": "USD",
+    "unit_price_minor": 111399,
+    "source_url": "https://genstattu.com/tattu-pro-22000mah-51-8v-25c-14s-1p-lipo-smart-battery-pack-with-as150u-f-plug/",
+    "source_title": "Tattu Pro 22000mAh 51.8V 25C 14S1P LiPo Smart Battery Pack with AS150U-F Plug",
+    "observed_on_utc": "2026-08-24"
+  },
+  {
+    "component_id": "tattu-semisolid-30000-6s-3c-xt90s",
+    "currency": "USD",
+    "unit_price_minor": 60478,
+    "source_url": "https://genstattu.com/tattu-semi-solid-state-30000mah-22-2v-5c-6s1p-g-tech-lipo-battery-pack-with-xt90-s-plug/",
+    "source_title": "Tattu Semi Solid 30000mAh 22.2V 5C 6S1P G-Tech LiPo Battery Pack with XT90-S Plug",
+    "observed_on_utc": "2026-08-24"
+  },
+  {
+    "component_id": "gens-ace-550mah-3s-80c-xt30",
+    "currency": "EUR",
+    "unit_price_minor": 1499,
+    "source_url": "https://gensace.de/collections/3s-lipo-battery/products/gens-ace-550mah-11-1v-80c-3s1p-lipo-battery-pack-with-xt30-plug",
+    "source_title": "Gens ace 550mAh 11.1V 80C 3S1P LiPo Battery Pack with XT30 Plug",
+    "observed_on_utc": "2026-08-24"
+  },
+  {
+    "component_id": "gens-ace-gtech-2200-3s-45c-deans",
+    "currency": "USD",
+    "unit_price_minor": 3509,
+    "source_url": "https://genstattu.com/gens-ace-2200mah-3s-45c-11-1v-g-tech-lipo-battery-pack-with-deans-plug/",
+    "source_title": "Gens ace 2200mAh 3S 45C 11.1V G-Tech LiPo Battery Pack with Deans Plug",
+    "observed_on_utc": "2026-08-24"
+  },
+  {
+    "component_id": "apc-8x6e",
+    "currency": "USD",
+    "unit_price_minor": 292,
+    "source_url": "https://www.apcprop.com/product/8x6e/",
+    "source_title": "8x6E Thin Electric Propeller",
+    "observed_on_utc": "2026-08-24"
+  },
+  {
+    "component_id": "apc-9x6e",
+    "currency": "USD",
+    "unit_price_minor": 322,
+    "source_url": "https://www.apcprop.com/product/9x6e/",
+    "source_title": "9x6E Thin Electric Propeller",
+    "observed_on_utc": "2026-08-24"
+  },
+  {
+    "component_id": "apc-10x5e",
+    "currency": "USD",
+    "unit_price_minor": 364,
+    "source_url": "https://www.apcprop.com/product/10x5e/",
+    "source_title": "10x5E Thin Electric Propeller",
+    "observed_on_utc": "2026-08-24"
+  },
+  {
+    "component_id": "hitec-hs311",
+    "currency": "USD",
+    "unit_price_minor": 1699,
+    "source_url": "https://www.hiteccs.com/actuators/product-details/HS-311",
+    "source_title": "HS-311 Standard Voltage Servo Actuator",
+    "observed_on_utc": "2026-08-24"
+  },
+  {
+    "component_id": "hitec-hs5085mg",
+    "currency": "USD",
+    "unit_price_minor": 4499,
+    "source_url": "https://www.hiteccs.com/actuators/product-details/HS-5085MG",
+    "source_title": "HS-5085MG Metal Gear Servo",
+    "observed_on_utc": "2026-08-24"
+  },
+  {
+    "component_id": "hitec-hs5065mg",
+    "currency": "USD",
+    "unit_price_minor": 4499,
+    "source_url": "https://www.hiteccs.com/actuators/product-details/HS-5065MG",
+    "source_title": "HS-5065MG High Torque Metal Gear Servo",
+    "observed_on_utc": "2026-08-24"
+  },
+  {
+    "component_id": "hitec-hs225bb",
+    "currency": "USD",
+    "unit_price_minor": 2399,
+    "source_url": "https://www.hiteccs.com/actuators/product-details/HS-225BB",
+    "source_title": "HS-225BB Standard Voltage Servo Actuator",
+    "observed_on_utc": "2026-08-24"
+  },
+  {
+    "component_id": "hitec-hs5086wp",
+    "currency": "USD",
+    "unit_price_minor": 5099,
+    "source_url": "https://www.hiteccs.com/actuators/product-details/HS-5086WP",
+    "source_title": "HS-5086WP Waterproof Servo Actuator",
+    "observed_on_utc": "2026-08-24"
+  },
+  {
+    "component_id": "hitec-hs646wp",
+    "currency": "USD",
+    "unit_price_minor": 5399,
+    "source_url": "https://www.hiteccs.com/actuators/product-details/HS-646WP",
+    "source_title": "HS-646WP Waterproof Servo Actuator",
+    "observed_on_utc": "2026-08-24"
+  },
+  {
+    "component_id": "hitec-hs7115th",
+    "currency": "USD",
+    "unit_price_minor": 10499,
+    "source_url": "https://www.hiteccs.com/actuators/product-details/HS-7115TH",
+    "source_title": "HS-7115TH High Voltage Titanium Gear Servo",
+    "observed_on_utc": "2026-08-24"
+  },
+  {
+    "component_id": "holybro-sik-v3-100mw-air-radio",
+    "currency": "USD",
+    "unit_price_minor": 5899,
+    "source_url": "https://holybro.com/products/sik-telemetry-radio-v3",
+    "source_title": "SiK Telemetry Radio V3 100mW",
+    "observed_on_utc": "2026-08-24"
+  },
+  {
+    "component_id": "holybro-sik-v3-1w-air-radio",
+    "currency": "USD",
+    "unit_price_minor": 8900,
+    "source_url": "https://holybro.com/collections/telemetry-radios/products/sik-telemetry-radio-1w",
+    "source_title": "SiK Telemetry Radio - Long Range 1W 915MHz",
+    "observed_on_utc": "2026-08-24"
+  },
+  {
+    "component_id": "holybro-micro-m9n-gps",
+    "currency": "USD",
+    "unit_price_minor": 3899,
+    "source_url": "https://holybro.com/products/micro-m9n-gps",
+    "source_title": "Micro M9N GPS with case",
+    "observed_on_utc": "2026-08-24"
+  },
+  {
+    "component_id": "holybro-m10-gps-v2-standard",
+    "currency": "USD",
+    "unit_price_minor": 4399,
+    "source_url": "https://holybro.com/products/m9n-m10-gps-v2",
+    "source_title": "M10 GPS V2 IP67 Standard 10-Pin",
+    "observed_on_utc": "2026-08-24"
+  },
+  {
+    "component_id": "holybro-pm08-can-14s-200a",
+    "currency": "USD",
+    "unit_price_minor": 8500,
+    "source_url": "https://holybro.com/products/dronecan-pm08-power-module-14s-200a",
+    "source_title": "PM08-CAN Power Module 14S, 200A",
+    "observed_on_utc": "2026-08-24"
+  },
+  {
+    "component_id": "frsky-archer-plus-sr10-stabilized",
+    "currency": "USD",
+    "unit_price_minor": 5499,
+    "source_url": "https://frskyna.com/products/frsky-access-accst-archer-plus-sr10-stabilized-receiver",
+    "source_title": "FrSky ACCESS Archer Plus SR10+ Stabilized Receiver with 10 Channel Ports",
+    "observed_on_utc": "2026-08-24"
+  },
+  {
+    "component_id": "tmotor-ax435-a-kv220",
+    "currency": "USD",
+    "unit_price_minor": 12900,
+    "source_url": "https://store.tmotor.com/product/ax435-a-kv220-fixed-wing-motor.html",
+    "source_title": "AX435-A Fixed-Wing Motor",
+    "observed_on_utc": "2026-08-24"
+  },
+  {
+    "component_id": "tmotor-ax435-a-kv250",
+    "currency": "USD",
+    "unit_price_minor": 12900,
+    "source_url": "https://store.tmotor.com/product/ax435-a-kv220-fixed-wing-motor.html",
+    "source_title": "AX435-A Fixed-Wing Motor KV250",
+    "observed_on_utc": "2026-08-24"
+  },
+  {
+    "component_id": "tmotor-ax435-b-kv220",
+    "currency": "USD",
+    "unit_price_minor": 12900,
+    "source_url": "https://store.tmotor.com/product/ax435-b-kv220-fixed-wing-motor.html",
+    "source_title": "AX435-B Fixed-Wing Motor",
+    "observed_on_utc": "2026-08-24"
+  },
+  {
+    "component_id": "tmotor-ax435-b-kv250",
+    "currency": "USD",
+    "unit_price_minor": 12900,
+    "source_url": "https://store.tmotor.com/product/ax435-b-kv220-fixed-wing-motor.html",
+    "source_title": "AX435-B Fixed-Wing Motor KV250",
+    "observed_on_utc": "2026-08-24"
+  },
+  {
+    "component_id": "tmotor-ax525-a-kv250",
+    "currency": "USD",
+    "unit_price_minor": 15900,
+    "source_url": "https://store.tmotor.com/product/ax525-a-kv250-fixed-wing-motor.html",
+    "source_title": "AX525-A Fixed-Wing Motor",
+    "observed_on_utc": "2026-08-24"
+  },
+  {
+    "component_id": "tmotor-ax525-b-kv250",
+    "currency": "USD",
+    "unit_price_minor": 15900,
+    "source_url": "https://store.tmotor.com/product/ax525-b-kv250-fixed-wing-motor.html",
+    "source_title": "AX525-B Fixed-Wing Motor",
+    "observed_on_utc": "2026-08-24"
+  },
+  {
+    "component_id": "tmotor-ax530-a-kv260",
+    "currency": "USD",
+    "unit_price_minor": 19900,
+    "source_url": "https://store.tmotor.com/product/ax530-a-kv260-fixed-wing-motor.html",
+    "source_title": "AX530-A Fixed-Wing Motor",
+    "observed_on_utc": "2026-08-24"
+  },
+  {
+    "component_id": "tmotor-ax530-b-kv260",
+    "currency": "USD",
+    "unit_price_minor": 19900,
+    "source_url": "https://store.tmotor.com/product/ax530-b-kv260-fixed-wing-motor.html",
+    "source_title": "AX530-B Fixed-Wing Motor",
+    "observed_on_utc": "2026-08-24"
+  },
+  {
+    "component_id": "hobbywing-platinum-hv-180a-v5",
+    "currency": "USD",
+    "unit_price_minor": 33999,
+    "source_url": "https://www.hobbywingdirect.com/collections/aircraft",
+    "source_title": "Platinum 180A V5 ESC - HV Series (6-14S)",
+    "observed_on_utc": "2026-08-24"
+  },
+  {
+    "component_id": "hobbywing-platinum-hv-260a-v5",
+    "currency": "USD",
+    "unit_price_minor": 45999,
+    "source_url": "https://www.hobbywingdirect.com/collections/platinum-260a-esc-v5",
+    "source_title": "Platinum 260A V5 ESC - HV Series (6-14S)",
+    "observed_on_utc": "2026-08-24"
+  },
+  {
+    "component_id": "sika-carbodur-s512-1m",
+    "currency": "EUR",
+    "unit_price_minor": 2410,
+    "source_url": "https://svk.sika.com/dam/dms/sk01/3/Verejn%C3%BD%20Sika%202026_platn%C3%BD-od-1-7-2026_v2.pdf",
+    "source_title": "Sika 2026 public price list, CarboDur S512",
+    "observed_on_utc": "2026-08-24"
+  },
+  {
+    "component_id": "sika-carbodur-s812-1m",
+    "currency": "EUR",
+    "unit_price_minor": 4230,
+    "source_url": "https://svk.sika.com/dam/dms/sk01/3/Verejn%C3%BD%20Sika%202026_platn%C3%BD-od-1-7-2026_v2.pdf",
+    "source_title": "Sika 2026 public price list, CarboDur S812",
+    "observed_on_utc": "2026-08-24"
+  },
+  {
+    "component_id": "robart-121-retractable-tailwheel",
+    "currency": "USD",
+    "unit_price_minor": 3731,
+    "source_url": "https://robart.com/products/60-size-retractable-tailwheel",
+    "source_title": "#121 .60 Size Retractable Tailwheel",
+    "observed_on_utc": "2026-08-25"
+  }
+]

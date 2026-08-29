@@ -1,0 +1,222 @@
+{
+  "schema_version": 1,
+  "records": [
+    {
+      "id": "gens-ace-b-45c-1800-5s1p",
+      "manufacturer": "Gens Ace",
+      "model": "B-45C-1800-5S1P",
+      "kind": "battery",
+      "spec": {
+        "chemistry": "LiPo",
+        "series_cells": 5,
+        "nominal_voltage_v": 18.5,
+        "capacity_ah": 1.8,
+        "discharge_rating_c": 45.0,
+        "mass_kg": 0.23,
+        "dimensions": {
+          "length_m": 0.1,
+          "width_m": 0.033,
+          "height_m": 0.031
+        },
+        "connector": "XT60"
+      },
+      "provenance": {
+        "publisher": "RC Innovations",
+        "source_url": "https://rc-innovations.es/shop/6928493362549-bateria-lipo-gens-ace-5s-18-5v-1800mah-45c-7704",
+        "source_title": "Bateria LiPo Gens Ace 5s 18.5V 1800mAh 45C",
+        "transformations": [
+          "capacity divided by 1000 from mAh to Ah",
+          "mass divided by 1000 from g to kg",
+          "dimensions divided by 1000 from mm to m"
+        ]
+      }
+    },
+    {
+      "id": "frsky-neuron-ii-60",
+      "manufacturer": "FrSky",
+      "model": "Neuron II 60",
+      "kind": "esc",
+      "spec": {
+        "min_series_cells": 3,
+        "max_series_cells": 6,
+        "continuous_current_a": 60.0,
+        "bec_min_voltage_v": 5.0,
+        "bec_max_voltage_v": 8.4,
+        "bec_continuous_current_a": null,
+        "bec_peak_current_a": null,
+        "mass_kg": 0.075,
+        "dimensions": {
+          "length_m": 0.059,
+          "width_m": 0.034,
+          "height_m": 0.0152
+        }
+      },
+      "provenance": {
+        "publisher": "RC Innovations",
+        "source_url": "https://rc-innovations.es/shop/03111407-fr-sky-neuron-ii-60a-telemetria-s-port-fport-15662",
+        "source_title": "Fr-Sky Neuron II 60A Telemetria S.Port / FPORT",
+        "transformations": [
+          "mass divided by 1000 from g to kg",
+          "dimensions divided by 1000 from mm to m",
+          "the page states 5A@5-8.4V and 10A without identifying continuous and peak ratings unambiguously; both BEC current limits therefore remain absent"
+        ]
+      }
+    },
+    {
+      "id": "tmotor-at2317-880kv",
+      "manufacturer": "T-Motor",
+      "model": "AT2317 880KV",
+      "kind": "motor",
+      "spec": {
+        "kv_rpm_per_v": 880.0,
+        "min_series_cells": 2,
+        "max_series_cells": 4,
+        "max_current_a": null,
+        "max_power_w": 700.0,
+        "max_static_thrust_n": 16.671305,
+        "mass_kg": null,
+        "dimensions": null,
+        "recommended_propeller_diameter_m": 0.3048,
+        "recommended_propeller_pitch_m": 0.1524
+      },
+      "provenance": {
+        "publisher": "RC Innovations",
+        "source_url": "https://rc-innovations.es/shop/t-motor-at2317-19851",
+        "source_title": "T-motor AT2317",
+        "transformations": [
+          "880 KV selected from the page's 880, 1250, and 1400 KV variants",
+          "1.7 kgf maximum static thrust multiplied by standard gravity 9.80665 m/s2",
+          "recommended 12x6 inch propeller dimensions multiplied by exactly 0.0254 m/in"
+        ]
+      }
+    },
+    {
+      "id": "tmotor-as2306-1500kv",
+      "manufacturer": "T-Motor",
+      "model": "AS2306 1500KV",
+      "kind": "motor",
+      "spec": {
+        "kv_rpm_per_v": 1500.0,
+        "min_series_cells": null,
+        "max_series_cells": null,
+        "max_current_a": 16.0,
+        "max_power_w": 170.0,
+        "max_static_thrust_n": 7.71883355,
+        "mass_kg": 0.0276,
+        "dimensions": null,
+        "recommended_propeller_diameter_m": null,
+        "recommended_propeller_pitch_m": null
+      },
+      "provenance": {
+        "publisher": "RC Innovations",
+        "source_url": "https://rc-innovations.es/shop/6971360352105-t-motor-as2306-1500kv-11897",
+        "source_title": "T-motor AS2306 1500KV",
+        "transformations": [
+          "787 g maximum static thrust interpreted as 0.787 kgf and multiplied by standard gravity 9.80665 m/s2",
+          "mass divided by 1000 from g to kg"
+        ]
+      }
+    },
+    {
+      "id": "kst-ds315mg-v8",
+      "manufacturer": "KST",
+      "model": "DS315MG V8.0",
+      "kind": "servo",
+      "spec": {
+        "mass_kg": 0.02,
+        "dimensions": {
+          "length_m": 0.023,
+          "width_m": 0.012,
+          "height_m": 0.0275
+        },
+        "operating_points": [
+          {
+            "voltage_v": 4.8,
+            "stall_torque_nm": 0.2353596,
+            "seconds_per_60_deg": 0.1,
+            "stall_current_a": null
+          },
+          {
+            "voltage_v": 6.0,
+            "stall_torque_nm": 0.2941995,
+            "seconds_per_60_deg": 0.09,
+            "stall_current_a": null
+          },
+          {
+            "voltage_v": 7.2,
+            "stall_torque_nm": 0.42168595,
+            "seconds_per_60_deg": 0.08,
+            "stall_current_a": null
+          },
+          {
+            "voltage_v": 8.4,
+            "stall_torque_nm": 0.4707192,
+            "seconds_per_60_deg": 0.07,
+            "stall_current_a": null
+          }
+        ]
+      },
+      "provenance": {
+        "publisher": "RC Innovations",
+        "source_url": "https://rc-innovations.es/shop/4897073540061-kst-ds315mg-v8-0-12mm-20g-4-8kg-10585",
+        "source_title": "KST DS315MG V8.0 12mm 20g 4.8Kg",
+        "transformations": [
+          "torque multiplied by 0.0980665 from kgf cm to N m",
+          "mass divided by 1000 from g to kg",
+          "dimensions divided by 1000 from mm to m",
+          "the page publishes no servo current, so stall current remains absent"
+        ]
+      }
+    },
+    {
+      "id": "aeronaut-power-prop-14x7",
+      "manufacturer": "Aero-naut",
+      "model": "Power Prop 14x7",
+      "kind": "propeller",
+      "spec": {
+        "diameter_m": 0.3556,
+        "pitch_m": 0.1778,
+        "blade_count": 2,
+        "mass_kg": null,
+        "bore_diameter_m": 0.01,
+        "electric_compatible": true
+      },
+      "provenance": {
+        "publisher": "RC Innovations",
+        "source_url": "https://rc-innovations.es/shop/722649-helice-aero-naut-power-prop-14x7-16646",
+        "source_title": "Helice Aero-naut Power Prop 14x7",
+        "transformations": [
+          "14x7 inch dimensions multiplied by exactly 0.0254 m/in",
+          "the page publishes no propeller mass, so mass remains absent"
+        ]
+      }
+    },
+    {
+      "id": "carbon-sheet-3k-500x400x1p5-matte",
+      "manufacturer": "RC Innovations",
+      "model": "Carbon 3K sheet 500x400x1.5 mm matte",
+      "kind": "material_stock",
+      "spec": {
+        "form": "sheet",
+        "dimensions": {
+          "length_m": 0.5,
+          "width_m": 0.4,
+          "height_m": 0.0015
+        },
+        "mass_kg": 0.5,
+        "youngs_modulus_pa": null,
+        "allowable_stress_pa": null
+      },
+      "provenance": {
+        "publisher": "RC Innovations",
+        "source_url": "https://rc-innovations.es/shop/plc00001204-plancha-fibra-carbono-3k-500x400-1-5mm-acabado-mate-11186",
+        "source_title": "Plancha fibra carbono 3K 500x400 1.5mm acabado mate",
+        "transformations": [
+          "mass divided by 1000 from approximate g to kg",
+          "dimensions divided by 1000 from mm to m",
+          "the retail page supplies no laminate modulus, layup allowables, or knockdown factors; structural properties remain absent"
+        ]
+      }
+    }
+  ]
+}

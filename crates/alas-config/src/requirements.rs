@@ -16,10 +16,14 @@
 //! implementation was tuned against, so the program produces a real aircraft
 //! before anything has been configured.
 //!
-//! Two fields are only editable while the cabin preset is set to `Custom`:
-//! a preset computes the passenger count and the cargo capacity from the
-//! layout, and letting both be edited would leave the two disagreeing with no
-//! indication of which one the run used.
+//! Passenger capacity is always recomputed for each candidate shell. A saved
+//! `optimize_passenger_capacity` value is still accepted for compatibility,
+//! but no longer changes product behavior.
+//!
+//! Passenger and cargo targets are editable while the cabin preset is set to
+//! `Custom`. A named preset computes its payload from geometry, and letting
+//! both be edited would leave the two disagreeing with no indication of which
+//! one the run used.
 
 use serde::{Deserialize, Serialize};
 
@@ -86,10 +90,14 @@ pub struct DesignRequirements {
     )]
     pub cabin_preset: String,
 
-    /// How many passengers the aircraft is sized for.
+    /// Legacy passenger load-case switch, retained for saved-file compatibility.
+    #[serde(default = "default_optimize_passenger_capacity", skip_serializing)]
+    #[config(skip)]
+    pub optimize_passenger_capacity: bool,
+
+    /// Derived passenger capacity, retained in the serialized model.
     #[config(
-        label = "Passenger count",
-        readonly_unless(field = "cabin_preset", value = "Custom"),
+        hidden,
         help = "Target passenger count (if aircraft_type is 'passenger'). Auto-recomputed when a cabin preset is active -- only editable with cabin_preset set to 'Custom'."
     )]
     pub num_passengers: i64,
@@ -137,12 +145,12 @@ pub struct DesignRequirements {
     )]
     pub limit_load_factor_neg: f64,
 
-    /// Upper bound on wing planform area.
+    /// Upper bound on projected wing reference/planform area.
     #[config(
         advanced,
         label = "Maximum wing area",
         unit = "m^2",
-        help = "Upper bound on wing planform area; the optimizer is penalised for exceeding it."
+        help = "Upper bound on the wing planform projected onto the aircraft XY reference plane; the optimizer is penalised for exceeding it."
     )]
     pub max_wing_area_m2: f64,
 
@@ -217,6 +225,7 @@ impl Default for DesignRequirements {
             mtow_kg: 358_670.0,
             aircraft_type: "passenger".to_owned(),
             cabin_preset: "Ryanair".to_owned(),
+            optimize_passenger_capacity: true,
             num_passengers: 350,
             cargo_payload_kg: 102_100.0,
             max_structural_payload_kg: 0.0,
@@ -235,7 +244,20 @@ impl Default for DesignRequirements {
     }
 }
 
+const fn default_optimize_passenger_capacity() -> bool {
+    true
+}
+
 impl DesignRequirements {
+    /// Whether the payload target is recomputed from each candidate's cabin.
+    ///
+    /// This is unconditional in the product model. The legacy serialized
+    /// switch is deliberately ignored so an old file cannot restore partial
+    /// floor use.
+    pub fn resolves_payload_from_candidate_geometry(&self) -> bool {
+        true
+    }
+
     /// Reject an unknown aircraft type, and bring the cabin preset into line
     /// with the type.
     ///
@@ -351,6 +373,65 @@ mod tests {
     }
 
     #[test]
+    fn candidate_geometry_always_resolves_payload_capacity() {
+        let fixed = DesignRequirements {
+            cabin_preset: "Custom".to_owned(),
+            optimize_passenger_capacity: false,
+            num_passengers: 130,
+            ..Default::default()
+        };
+        let capacity = DesignRequirements {
+            optimize_passenger_capacity: true,
+            ..fixed.clone()
+        };
+
+        assert!(!fixed.optimize_passenger_capacity);
+        assert_eq!(fixed.num_passengers, 130);
+        assert!(fixed.resolves_payload_from_candidate_geometry());
+        assert!(capacity.resolves_payload_from_candidate_geometry());
+
+        let cargo = DesignRequirements {
+            aircraft_type: "cargo".to_owned(),
+            optimize_passenger_capacity: false,
+            ..fixed
+        };
+        assert!(cargo.resolves_payload_from_candidate_geometry());
+    }
+
+    #[test]
+    fn historical_files_without_the_load_case_flag_keep_the_reference_default() {
+        let value = serde_json::to_value(DesignRequirements::default()).unwrap();
+        assert!(value.get("optimize_passenger_capacity").is_none());
+        let requirements: DesignRequirements = serde_json::from_value(value).unwrap();
+
+        assert!(requirements.optimize_passenger_capacity);
+    }
+
+    #[test]
+    fn a_legacy_false_capacity_flag_loads_but_is_ignored_and_not_saved_again() {
+        let mut value = serde_json::to_value(DesignRequirements::default()).unwrap();
+        value
+            .as_object_mut()
+            .unwrap()
+            .insert("optimize_passenger_capacity".to_owned(), false.into());
+
+        let requirements: DesignRequirements = serde_json::from_value(value).unwrap();
+        assert!(!requirements.optimize_passenger_capacity);
+        assert!(requirements.resolves_payload_from_candidate_geometry());
+        assert!(serde_json::to_value(requirements)
+            .unwrap()
+            .get("optimize_passenger_capacity")
+            .is_none());
+    }
+
+    #[test]
+    fn the_legacy_load_case_choice_is_absent_from_the_settings_schema() {
+        let schema = DesignRequirements::default().schema();
+        assert!(schema.field("optimize_passenger_capacity").is_none());
+        assert!(schema.field("num_passengers").is_none());
+    }
+
+    #[test]
     fn the_required_lift_coefficient_falls_with_speed_and_with_wing_area() {
         let requirements = DesignRequirements::default();
         let base = requirements.required_cruise_cl(15_000.0, 500.0);
@@ -363,9 +444,9 @@ mod tests {
     }
 
     #[test]
-    fn a_preset_driven_field_is_marked_read_only_against_its_sibling() {
+    fn cargo_payload_remains_editable_only_for_a_custom_preset() {
         let schema = DesignRequirements::default().schema();
-        match &schema.field("num_passengers").unwrap().entry {
+        match &schema.field("cargo_payload_kg").unwrap().entry {
             crate::Entry::Leaf(leaf) => {
                 let condition = leaf.readonly_unless.unwrap();
                 assert_eq!(condition.field, "cabin_preset");

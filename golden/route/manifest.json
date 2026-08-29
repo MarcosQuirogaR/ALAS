@@ -1,0 +1,69 @@
+{
+  "fixtures": {
+    "inputs/earth_awy.dat": {
+      "description": "Authored airway records consumed by the Rust route parity tests through their shared golden input-directory helper.",
+      "generator": "gen_route.py",
+      "runtime": "alas",
+      "alas_commit": "7d1555c1f4db5110cf6cd187c156718e1a033b50",
+      "environment": {
+        "numpy": "2.5.1",
+        "aerosandbox": "4.2.8",
+        "platform": "Windows-11-10.0.26200-SP0",
+        "scipy": "1.17.1",
+        "python": "3.13.13"
+      }
+    },
+    "inputs/earth_fix.dat": {
+      "description": "Authored duplicate-identifier fix records consumed by the Rust route parity tests through their shared golden input-directory helper.",
+      "generator": "gen_route.py",
+      "runtime": "alas",
+      "alas_commit": "7d1555c1f4db5110cf6cd187c156718e1a033b50",
+      "environment": {
+        "numpy": "2.5.1",
+        "aerosandbox": "4.2.8",
+        "platform": "Windows-11-10.0.26200-SP0",
+        "scipy": "1.17.1",
+        "python": "3.13.13"
+      }
+    },
+    "inputs/ofp": {
+      "description": "Authored multi-fix and single-fix dispatch documents shipped in the shared golden route input corpus.",
+      "generator": "gen_route.py",
+      "runtime": "alas",
+      "alas_commit": "7d1555c1f4db5110cf6cd187c156718e1a033b50",
+      "environment": {
+        "numpy": "2.5.1",
+        "aerosandbox": "4.2.8",
+        "platform": "Windows-11-10.0.26200-SP0",
+        "scipy": "1.17.1",
+        "python": "3.13.13"
+      }
+    },
+    "inputs/route.kml": {
+      "description": "Authored malformed-token KML export consumed by the Rust route parity tests through their shared golden input-directory helper.",
+      "generator": "gen_route.py",
+      "runtime": "alas",
+      "alas_commit": "7d1555c1f4db5110cf6cd187c156718e1a033b50",
+      "environment": {
+        "numpy": "2.5.1",
+        "aerosandbox": "4.2.8",
+        "platform": "Windows-11-10.0.26200-SP0",
+        "scipy": "1.17.1",
+        "python": "3.13.13"
+      }
+    },
+    "route": {
+      "description": "alas.routing: haversine distances, Route.great_circle, the parsed airway graph and find_airway_route over an authored navdata set, route_from_kml, and fetch_simbrief_route against a canned dispatch response",
+      "generator": "gen_route.py",
+      "runtime": "alas",
+      "alas_commit": "7d1555c1f4db5110cf6cd187c156718e1a033b50",
+      "environment": {
+        "numpy": "2.5.1",
+        "aerosandbox": "4.2.8",
+        "platform": "Windows-11-10.0.26200-SP0",
+        "scipy": "1.17.1",
+        "python": "3.13.13"
+      }
+    }
+  }
+}

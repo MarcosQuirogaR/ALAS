@@ -22,7 +22,7 @@
 use std::collections::HashMap;
 
 use alas_geom::asb::airfoil::Airfoil;
-use alas_geom::asb::wing::{Wing, WingXSec};
+use alas_geom::asb::wing::{SpacingFunction, Wing, WingXSec};
 use alas_testkit::{Comparison, Tier};
 use serde::Deserialize;
 
@@ -246,7 +246,7 @@ fn subdivide_sections_matches_aerosandbox() {
     let case = &fixture.subdivide_sections;
 
     let subdivided = build_main_wing()
-        .subdivide_sections(case.ratio)
+        .subdivide_sections(case.ratio, SpacingFunction::Linspace)
         .expect("ratio=8 is valid and every blend repanels cleanly");
 
     let mut comparison = Comparison::new("alas-geom::asb::wing (subdivide_sections)", Tier::Closed);

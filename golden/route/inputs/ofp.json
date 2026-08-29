@@ -1,0 +1,69 @@
+{
+  "multi_fix": {
+    "destination": {
+      "elevation": "392",
+      "icao_code": "LFPG",
+      "name": "Paris Charles De Gaulle",
+      "plan_rwy_length": "13829",
+      "pos_lat": "49.0097",
+      "pos_long": "2.5479"
+    },
+    "navlog": {
+      "fix": [
+        {
+          "ident": "BARDI",
+          "pos_lat": "40.9500",
+          "pos_long": "-3.2000"
+        },
+        {
+          "ident": "PINAR",
+          "pos_lat": "42.1000",
+          "pos_long": "-2.4000"
+        },
+        {
+          "ident": "LOMAS",
+          "pos_lat": "44.3000",
+          "pos_long": "-0.8000"
+        },
+        {
+          "ident": "TUDRA",
+          "pos_lat": "47.2000",
+          "pos_long": "1.1000"
+        }
+      ]
+    },
+    "origin": {
+      "elevation": "1998",
+      "icao_code": "LEMD",
+      "name": "Madrid Barajas",
+      "plan_rwy_length": "13448",
+      "pos_lat": "40.4719",
+      "pos_long": "-3.5626"
+    }
+  },
+  "single_fix": {
+    "destination": {
+      "elevation": "392",
+      "icao_code": "LFPG",
+      "name": "Paris Charles De Gaulle",
+      "plan_rwy_length": "13829",
+      "pos_lat": "49.0097",
+      "pos_long": "2.5479"
+    },
+    "navlog": {
+      "fix": {
+        "ident": "SOLO1",
+        "pos_lat": "43.0",
+        "pos_long": "-1.0"
+      }
+    },
+    "origin": {
+      "elevation": "1998",
+      "icao_code": "LEMD",
+      "name": "Madrid Barajas",
+      "plan_rwy_length": "13448",
+      "pos_lat": "40.4719",
+      "pos_long": "-3.5626"
+    }
+  }
+}

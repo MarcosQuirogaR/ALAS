@@ -1,0 +1,28 @@
+[package]
+name = "alas-screen"
+description = "Airfoil-database batch screening: 2-D surrogate scoring, 3-D trim re-simulation, MSES verification, and multi-criteria ranking."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+alas-types = { path = "../alas-types" }
+alas-config = { path = "../alas-config" }
+alas-geom = { path = "../alas-geom" }
+alas-atmo = { path = "../alas-atmo" }
+alas-mass = { path = "../alas-mass" }
+alas-aero = { path = "../alas-aero" }
+alas-stab = { path = "../alas-stab" }
+alas-opt = { path = "../alas-opt" }
+tracing = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+alas-testkit = { path = "../alas-testkit" }
+serde_json = { workspace = true }
+
+[lints]
+workspace = true

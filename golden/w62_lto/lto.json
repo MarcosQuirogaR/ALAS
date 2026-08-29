@@ -1,0 +1,283 @@
+{
+  "cases": [
+    {
+      "airport": {
+        "atmosphere": {
+          "base_temperature_k": 287.99187681262174,
+          "effective_density_kg_m3": 1.2220554810171427,
+          "effective_temperature_k": 287.99187681262174,
+          "pressure_pa": 101024.96589664619,
+          "sigma": 0.9975963110344022
+        },
+        "configured": "London Heathrow (EGLL)",
+        "elevation_m": 25.0,
+        "icao": "EGLL",
+        "isa_deviation_c": 0.0,
+        "lda_m": 3902.0,
+        "name": "London Heathrow (EGLL)",
+        "toda_m": 3902.0
+      },
+      "distances": {
+        "ASD_m": 3850.85936968602,
+        "BFL_m": 3850.85936968602,
+        "LDA_m": 3902.0,
+        "LDR_m": 1538.5168727604046,
+        "TODA_m": 3902.0,
+        "TODR_m": 3348.5733649443655,
+        "landing_feasible": true,
+        "landing_margin_m": 2363.4831272395954,
+        "takeoff_feasible": true,
+        "takeoff_margin_m": 553.4266350556345
+      },
+      "inputs": {
+        "configured_airport": "London Heathrow (EGLL)",
+        "engine_count": 2,
+        "mtow_kg": 358670.0,
+        "thrust_per_engine_kn": 467.0,
+        "total_thrust_kn": 934.0,
+        "tw_sl": 0.26545005280153966,
+        "weight_n": 3518552.7,
+        "wing_area_m2": 529.035559696941
+      },
+      "performance_limits": {
+        "bfl_factor": 1.15,
+        "cl_max_land": 2.6,
+        "cl_max_to": 1.8,
+        "k_land": 0.6
+      },
+      "renderer_inputs": {
+        "bars": {
+          "available_m": [
+            3902.0,
+            3902.0,
+            3902.0,
+            3902.0
+          ],
+          "feasible": [
+            true,
+            true,
+            true,
+            true
+          ],
+          "labels": [
+            "TODR",
+            "BFL",
+            "ASD",
+            "LDR"
+          ],
+          "required_m": [
+            3348.5733649443655,
+            3850.85936968602,
+            3850.85936968602,
+            1538.5168727604046
+          ],
+          "y_max_m": 4682.4
+        },
+        "runway_panel": {
+          "lda_m": 3902.0,
+          "runway_height_m": 234.12,
+          "toda_m": 3902.0,
+          "x_limits_m": [
+            -195.10000000000002,
+            4097.1
+          ],
+          "y_limits_m": [
+            -1006.716,
+            1217.424
+          ]
+        },
+        "v_markers": {
+          "V1": {
+            "position_m": 2226.97569255076,
+            "speed_kt": 170.8094285196979,
+            "speed_ms": 87.87216464302509
+          },
+          "V2": {
+            "position_m": 2511.4300237082743,
+            "speed_kt": 181.39054356074115,
+            "speed_ms": 93.31557307223905
+          },
+          "VR": {
+            "position_m": 2455.2407010372126,
+            "speed_kt": 179.34989994568278,
+            "speed_ms": 92.26577287517634
+          }
+        }
+      },
+      "role": "departure",
+      "v_speeds": {
+        "kt": {
+          "V1": 170.8094285196979,
+          "V2": 181.39054356074115,
+          "VAPP": 163.50322642313415,
+          "VR": 179.34989994568278,
+          "VTD": 144.6374695281571,
+          "Vmc": 170.8094285196979,
+          "Vstall_TO": 151.15878630061763,
+          "Vstall_land": 125.77171263318012
+        },
+        "ms": {
+          "V1": 87.87216464302509,
+          "V2": 93.31557307223905,
+          "VAPP": 84.11352087781616,
+          "VR": 92.26577287517634,
+          "VTD": 74.40811462268351,
+          "Vmc": 87.87216464302509,
+          "Vstall_TO": 77.7629775601992,
+          "Vstall_land": 64.70270836755088
+        }
+      }
+    },
+    {
+      "airport": {
+        "atmosphere": {
+          "base_temperature_k": 288.029819640198,
+          "effective_density_kg_m3": 1.1622376915849557,
+          "effective_temperature_k": 303.029819640198,
+          "pressure_pa": 101096.9082371314,
+          "sigma": 0.9487654625183312
+        },
+        "configured": "Dubai (OMDB)",
+        "elevation_m": 19.0,
+        "icao": "OMDB",
+        "isa_deviation_c": 15.0,
+        "lda_m": 4000.0,
+        "name": "Dubai (OMDB)",
+        "toda_m": 4000.0
+      },
+      "distances": {
+        "ASD_m": 4049.054538003709,
+        "BFL_m": 4049.054538003709,
+        "LDA_m": 4000.0,
+        "LDR_m": 1617.7009148879197,
+        "TODA_m": 4000.0,
+        "TODR_m": 3520.9169895684427,
+        "landing_feasible": true,
+        "landing_margin_m": 2382.2990851120803,
+        "takeoff_feasible": true,
+        "takeoff_margin_m": 479.08301043155734
+      },
+      "inputs": {
+        "configured_airport": "Dubai (OMDB)",
+        "engine_count": 2,
+        "mtow_kg": 358670.0,
+        "thrust_per_engine_kn": 467.0,
+        "total_thrust_kn": 934.0,
+        "tw_sl": 0.26545005280153966,
+        "weight_n": 3518552.7,
+        "wing_area_m2": 529.035559696941
+      },
+      "performance_limits": {
+        "bfl_factor": 1.15,
+        "cl_max_land": 2.6,
+        "cl_max_to": 1.8,
+        "k_land": 0.6
+      },
+      "renderer_inputs": {
+        "bars": {
+          "available_m": [
+            4000.0,
+            4000.0,
+            4000.0,
+            4000.0
+          ],
+          "feasible": [
+            true,
+            false,
+            false,
+            true
+          ],
+          "labels": [
+            "TODR",
+            "BFL",
+            "ASD",
+            "LDR"
+          ],
+          "required_m": [
+            3520.9169895684427,
+            4049.054538003709,
+            4049.054538003709,
+            1617.7009148879197
+          ],
+          "y_max_m": 4800.0
+        },
+        "runway_panel": {
+          "lda_m": 4000.0,
+          "runway_height_m": 240.0,
+          "toda_m": 4000.0,
+          "x_limits_m": [
+            -200.0,
+            4200.0
+          ],
+          "y_limits_m": [
+            -1032.0,
+            1248.0
+          ]
+        },
+        "v_markers": {
+          "V1": {
+            "position_m": 2341.5931791562207,
+            "speed_kt": 175.14987168066585,
+            "speed_ms": 90.10508667414285
+          },
+          "V2": {
+            "position_m": 2640.687742176332,
+            "speed_kt": 185.99986373168056,
+            "speed_ms": 95.68681770705437
+          },
+          "VR": {
+            "position_m": 2581.6064800197328,
+            "speed_kt": 183.90736526469914,
+            "speed_ms": 94.61034100785
+          }
+        }
+      },
+      "role": "arrival",
+      "v_speeds": {
+        "kt": {
+          "V1": 175.14987168066585,
+          "V2": 185.99986373168056,
+          "VAPP": 167.6580114784723,
+          "VR": 183.90736526469914,
+          "VTD": 148.31285630787934,
+          "Vmc": 175.14987168066585,
+          "Vstall_TO": 154.99988644306714,
+          "Vstall_land": 128.96770113728638
+        },
+        "ms": {
+          "V1": 90.10508667414285,
+          "V2": 95.68681770705437,
+          "VAPP": 86.25093190719005,
+          "VR": 94.61034100785,
+          "VTD": 76.29890130251427,
+          "Vmc": 90.10508667414285,
+          "Vstall_TO": 79.73901475587864,
+          "Vstall_land": 66.3468706978385
+        }
+      }
+    }
+  ],
+  "config": {
+    "arrival_airport": "Dubai (OMDB)",
+    "departure_airport": "London Heathrow (EGLL)",
+    "mtow_kg": 358670.0,
+    "preset": "",
+    "wing_area_m2": 529.035559696941
+  },
+  "provenance": {
+    "inputs": "ALASConfig() with its default route and default DesignVector wing area",
+    "reference_commit": "7d1555c1f4db5110cf6cd187c156718e1a033b50",
+    "reference_source": [
+      "alas/physics/performance.py",
+      "alas/config/airports.py",
+      "alas/sidecar/figures_extra.py"
+    ],
+    "runtime": {
+      "aerosandbox": "4.2.8",
+      "numpy": "2.5.1",
+      "platform": "Windows-11-10.0.26200-SP0",
+      "python": "3.13.13",
+      "scipy": "1.17.1"
+    }
+  }
+}

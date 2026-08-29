@@ -32,12 +32,12 @@
 //!
 //! `_xsec_width` and `_xsec_height` do not survive the translation. Upstream
 //! keeps them in `stability.py` to read a cross-section that may carry either
-//! a `radius` or a `width`/`height` pair; `alas-geom::asb::fuselage`'s
+//! a `radius` or a `width`/`height` pair; `alas-geom::aircraft::fuselage`'s
 //! `FuselageXSec` resolves that in its constructor, so both accessors are the
 //! fields themselves here.
 
 use alas_config::GeometryConfig;
-use alas_geom::asb::airplane::Airplane;
+use alas_geom::aircraft::airplane::Airplane;
 
 use crate::numeric::interp;
 
@@ -354,10 +354,12 @@ fn decks(height_m: Option<f64>, diameter_m: f64) -> (Vec<DeckSpec>, DeckSpec) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alas_geom::asb::airfoil::Airfoil;
-    use alas_geom::asb::airplane::Airplane;
-    use alas_geom::asb::fuselage::{Fuselage, FuselageXSec, DEFAULT_SHAPE};
-    use alas_geom::asb::wing::{Wing, WingXSec};
+    use crate::build::build_payload_layout;
+    use alas_config::AlasConfig;
+    use alas_geom::aircraft::airfoil::Airfoil;
+    use alas_geom::aircraft::airplane::Airplane;
+    use alas_geom::aircraft::fuselage::{Fuselage, FuselageXSec, DEFAULT_SHAPE};
+    use alas_geom::aircraft::wing::{Wing, WingXSec};
 
     fn xsec(x: f64, radius: f64) -> FuselageXSec {
         FuselageXSec::new([x, 0.0, 0.0], Some(radius), None, None, DEFAULT_SHAPE)
@@ -420,6 +422,18 @@ mod tests {
         assert_eq!(
             CabinGeometry::new(&bare, &GeometryConfig::default(), 0.15),
             Err(CabinGeometryError::NoFuselage)
+        );
+    }
+
+    #[test]
+    fn the_public_layout_entry_point_preserves_geometry_errors() {
+        let mut bare = plane(vec![xsec(0.0, 1.0), xsec(10.0, 2.0)]);
+        bare.fuselages.clear();
+
+        assert_eq!(
+            build_payload_layout(&bare, &AlasConfig::default(), 0.0, 0.0),
+            Err(CabinGeometryError::NoFuselage),
+            "layout construction must not turn a missing cabin into an empty payload"
         );
     }
 

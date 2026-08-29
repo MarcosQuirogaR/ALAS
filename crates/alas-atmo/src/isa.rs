@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-// Ported from aerosandbox/atmosphere/_isa_atmo_functions.py
-// Upstream: AeroSandbox 4.2.8, MIT.
+// Ported from native aerodynamic model/atmosphere/_isa_atmo_functions.py
+// Upstream: native aerodynamic model 4.2.8, MIT.
 // Reference: alas @ rust-port-baseline.
 
 //! The closed-form International Standard Atmosphere: pressure and
@@ -32,7 +32,7 @@ use std::sync::LazyLock;
 /// Universal gas constant, in J/(mol*K).
 ///
 /// From `_isa_atmo_functions.py` and `atmosphere.py`, which both define it
-/// with this value (a pre-1986 CODATA figure AeroSandbox carries rather than
+/// with this value (a pre-1986 CODATA figure native aerodynamic model carries rather than
 /// the current 8.31446 J/(mol*K); reproduced as written).
 pub const GAS_CONSTANT_UNIVERSAL: f64 = 8.31432;
 
@@ -57,7 +57,7 @@ const CELSIUS_TO_KELVIN: f64 = 273.15;
 const SEA_LEVEL_PRESSURE_PA: f64 = 101_325.0;
 
 /// The ISA table's eight layers, exactly as
-/// `aerosandbox/atmosphere/isa_data/isa_table.csv` lists them: base
+/// `native aerodynamic model/atmosphere/isa_data/isa_table.csv` lists them: base
 /// altitude in metres, lapse rate in K/km, base temperature in Celsius.
 ///
 /// Troposphere through the first mesospheric layer, per ICAO Doc 7488.

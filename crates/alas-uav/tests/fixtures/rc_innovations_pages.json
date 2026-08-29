@@ -1,0 +1,14 @@
+{
+  "https://rc-innovations.es/shop/test-bateria-lipo-3s": "<html><h1>Bateria LiPo 3S 2200mAh 30C</h1><p>Peso: 180 g</p><p>Voltaje: 11.1 V</p><p>19,90 EUR</p><p>En stock</p></html>",
+  "https://rc-innovations.es/shop/test-motor-900kv": "<html><h1>Motor fixed wing 900KV</h1><p>Peso: 75 g</p><p>Empuje maximo: 2 kg</p></html>",
+  "https://rc-innovations.es/shop/test-esc-40a": "<html><h1>ESC avion 40A BEC</h1><p>Corriente continua: 40 A</p><p>Sin stock</p></html>",
+  "https://rc-innovations.es/shop/test-helice-12x6": "<html><h1>Helice Power Prop 12x6</h1><p>Diametro: 12 pulgadas</p><p>Paso: 6 pulgadas</p></html>",
+  "https://rc-innovations.es/shop/test-servo-20g": "<html><h1>Servo digital 20g</h1><p>Torque: 4.8 kg cm</p><p>Voltaje: 7.4 V</p></html>",
+  "https://rc-innovations.es/shop/test-receptor-6ch": "<html><h1>Receptor 6CH</h1><p>Protocolo: ACCESS SBUS</p><p>Frecuencia: 2.4 GHz</p></html>",
+  "https://rc-innovations.es/shop/test-fibra-carbono": "<html><h1>Tubo fibra carbono 8x6x1000 mm</h1><p>Diametro exterior: 8 mm</p><p>Diametro interior: 6 mm</p></html>",
+  "https://rc-innovations.es/shop/test-tren-aterrizaje": "<html><h1>Tren retractil electrico</h1><p>Voltaje: 7.4 V</p></html>",
+  "https://rc-innovations.es/shop/test-autopiloto": "<html><h1>Autopiloto ala fija</h1><p>Voltaje: 5 V</p><p>Protocolos: CAN UART</p></html>",
+  "https://rc-innovations.es/shop/category/test-components": "<html><a href='/shop/test-bateria-lipo-3s'>duplicate</a><a href='/shop/category/test-components/page/2'>next</a></html>",
+  "https://rc-innovations.es/shop/category/test-components/page/2": "<html><a href='https://rc-innovations.es/shop/test-bec-8a?category=99'>BEC</a></html>",
+  "https://rc-innovations.es/shop/test-bec-8a": "<html><h1>SBEC 8A Telemetria</h1><p>Voltaje salida: 5-8.4 V</p></html>"
+}

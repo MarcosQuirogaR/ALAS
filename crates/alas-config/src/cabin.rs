@@ -167,6 +167,60 @@ impl PassengerCabinConfig {
         self.classes().iter().map(|(_, class)| class.count).sum()
     }
 
+    /// Set the same per-passenger mass on every class slot.
+    ///
+    /// A requirements-first passenger mass is a single load-case authority,
+    /// even when a named cabin preset supplies the class geometry. Keeping
+    /// this operation on the cabin type lets callers restore that authority
+    /// after materialising a preset without duplicating field-by-field writes.
+    pub fn set_passenger_mass_kg(&mut self, mass_per_passenger_kg: f64) {
+        self.first.mass_per_pax_kg = mass_per_passenger_kg;
+        self.business.mass_per_pax_kg = mass_per_passenger_kg;
+        self.premium.mass_per_pax_kg = mass_per_passenger_kg;
+        self.economy.mass_per_pax_kg = mass_per_passenger_kg;
+    }
+
+    /// Fix the total number of seats for a transient requirements load case.
+    ///
+    /// The class geometry remains the selected cabin seed, while the
+    /// canonical brief owns the total passenger count. Existing class counts
+    /// are preserved proportionally when available; otherwise the declared
+    /// length shares provide the deterministic allocation. This keeps a named
+    /// preset from replacing a brief passenger target with its own geometric
+    /// capacity during preview or solver projection.
+    pub fn set_fixed_passenger_count(&mut self, target: i64) {
+        let target = target.max(0);
+        let counts = [
+            self.first.count.max(0) as f64,
+            self.business.count.max(0) as f64,
+            self.premium.count.max(0) as f64,
+            self.economy.count.max(0) as f64,
+        ];
+        let shares = [
+            self.first.share_pct,
+            self.business.share_pct,
+            self.premium.share_pct,
+            self.economy.share_pct,
+        ];
+        let count_total: f64 = counts.iter().sum();
+        let weights = if count_total.is_finite() && count_total > 0.0 {
+            counts
+        } else if shares
+            .iter()
+            .all(|share| share.is_finite() && *share >= 0.0)
+            && shares.iter().sum::<f64>() > 0.0
+        {
+            shares
+        } else {
+            [0.0, 0.0, 0.0, 1.0]
+        };
+        let allocated = proportional_integer_allocation(target, weights);
+        self.first.count = allocated[0];
+        self.business.count = allocated[1];
+        self.premium.count = allocated[2];
+        self.economy.count = allocated[3];
+    }
+
     /// The class mix as normalized fractions of cabin length, forward to aft.
     ///
     /// Classes with no positive share are omitted. The shares are normalized,
@@ -209,6 +263,45 @@ impl PassengerCabinConfig {
         self.premium.share_pct = share_of(CLASS_NAMES[2]);
         self.economy.share_pct = share_of(CLASS_NAMES[3]);
     }
+}
+
+fn proportional_integer_allocation(target: i64, weights: [f64; 4]) -> [i64; 4] {
+    if target <= 0 {
+        return [0; 4];
+    }
+    let total: f64 = weights.iter().sum();
+    if !total.is_finite() || total <= 0.0 {
+        return [0, 0, 0, target];
+    }
+
+    let mut allocation = [0_i64; 4];
+    let mut fractional = [0.0_f64; 4];
+    let mut assigned = 0_i64;
+    for (index, weight) in weights.into_iter().enumerate() {
+        let raw = target as f64 * weight / total;
+        let whole = raw.floor() as i64;
+        allocation[index] = whole;
+        fractional[index] = raw - whole as f64;
+        assigned += whole;
+    }
+
+    // At most three seats remain after flooring four class allocations. The
+    // stable index tie-break keeps saved runs reproducible.
+    let mut remaining = (target - assigned).max(0);
+    while remaining > 0 {
+        let index = fractional
+            .iter()
+            .enumerate()
+            .max_by(|(left_index, left), (right_index, right)| {
+                left.total_cmp(right)
+                    .then_with(|| right_index.cmp(left_index))
+            })
+            .map_or(3, |(index, _)| index);
+        allocation[index] += 1;
+        fractional[index] = f64::NEG_INFINITY;
+        remaining -= 1;
+    }
+    allocation
 }
 
 /// The composed cabin and payload configuration.
@@ -293,6 +386,46 @@ mod tests {
         cabin.economy.count = 150;
         assert_eq!(cabin.classes().len(), 2);
         assert_eq!(cabin.total_seats(), 170);
+    }
+
+    #[test]
+    fn fixed_passenger_count_preserves_existing_class_proportions() {
+        let mut cabin = PassengerCabinConfig::default();
+        cabin.business.count = 15;
+        cabin.economy.count = 85;
+
+        cabin.set_fixed_passenger_count(80);
+
+        assert_eq!(cabin.total_seats(), 80);
+        assert_eq!(cabin.business.count, 12);
+        assert_eq!(cabin.economy.count, 68);
+    }
+
+    #[test]
+    fn fixed_passenger_count_uses_shares_when_no_counts_are_present() {
+        let mut cabin = PassengerCabinConfig::default();
+
+        cabin.set_fixed_passenger_count(80);
+
+        assert_eq!(cabin.total_seats(), 80);
+        assert_eq!(cabin.business.count, 12);
+        assert_eq!(cabin.economy.count, 68);
+    }
+
+    #[test]
+    fn fixed_passenger_count_has_a_stable_largest_remainder_tie_break() {
+        let mut cabin = PassengerCabinConfig::default();
+        cabin.first.share_pct = 25.0;
+        cabin.business.share_pct = 25.0;
+        cabin.premium.share_pct = 25.0;
+        cabin.economy.share_pct = 25.0;
+
+        cabin.set_fixed_passenger_count(2);
+
+        assert_eq!(
+            cabin.all_classes().map(|(_, class)| class.count),
+            [1, 1, 0, 0]
+        );
     }
 
     #[test]

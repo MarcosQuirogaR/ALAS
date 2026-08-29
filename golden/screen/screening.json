@@ -1,0 +1,244 @@
+{
+  "blended_stage1": [
+    {
+      "name": "sc20714",
+      "score": 0.3833233990220464
+    },
+    {
+      "name": "rae2822",
+      "score": 0.17053907292018636
+    },
+    {
+      "name": "whitcomb",
+      "score": 0.1271803387365879
+    },
+    {
+      "name": "naca0012",
+      "score": 0.10438689610219083
+    },
+    {
+      "name": "clarky",
+      "score": 0.8747024468996507
+    }
+  ],
+  "blended_stage2": [
+    {
+      "name": "sc20714",
+      "score_3d": 0.31489984463614706
+    },
+    {
+      "name": "rae2822",
+      "score_3d": 0.7361058742642689
+    },
+    {
+      "name": "whitcomb",
+      "score_3d": 0.7040620230177163
+    },
+    {
+      "name": "naca0012",
+      "score_3d": 0.7343351907343645
+    },
+    {
+      "name": "clarky",
+      "score_3d": 0.8348781589736214
+    }
+  ],
+  "cruise_condition": {
+    "altitude_m": 11887.2,
+    "cl_target": 0.6841059250330846,
+    "mach": 0.84,
+    "reynolds": 52699207.21195352
+  },
+  "filter_cases": [
+    {
+      "expected_count": 1666,
+      "pattern": ""
+    },
+    {
+      "expected_names": [
+        "sc20714"
+      ],
+      "pattern": "sc20714"
+    },
+    {
+      "expected_names": [
+        "rae2822",
+        "whitcomb"
+      ],
+      "pattern": "whitcomb, rae2822"
+    },
+    {
+      "expected_names": [
+        "sc20706",
+        "sc20710",
+        "sc20712",
+        "sc20714"
+      ],
+      "pattern": "sc207*"
+    }
+  ],
+  "full_sweep": {
+    "baseline_airfoil": "SC2-0714",
+    "candidates": [
+      {
+        "is_reference": true,
+        "l_over_d": 4.384447129994861,
+        "l_over_d_3d": 19.507189342801958,
+        "name": "rae2822",
+        "refined": true,
+        "score": 0.11507572135954204,
+        "score_3d": 0.7340083386806309,
+        "status": "ok"
+      },
+      {
+        "is_reference": true,
+        "l_over_d": 4.849238676164826,
+        "l_over_d_3d": 19.59469910344895,
+        "name": "whitcomb",
+        "refined": true,
+        "score": 0.7,
+        "score_3d": 0.7,
+        "status": "ok"
+      },
+      {
+        "is_reference": true,
+        "l_over_d": 4.48478345547126,
+        "l_over_d_3d": 18.839070508709213,
+        "name": "sc20714",
+        "refined": true,
+        "score": 0.45111167234482286,
+        "score_3d": 0.3,
+        "status": "ok"
+      }
+    ],
+    "cl_target": 0.6841059250330846,
+    "cruise_altitude_m": 11887.2,
+    "cruise_mach": 0.84,
+    "cruise_reynolds": 52699207.21195352,
+    "n_error": 0,
+    "n_ok": 3,
+    "n_refined": 3,
+    "n_total": 3,
+    "refined_3d": true,
+    "transonic_caveat": true
+  },
+  "stage1_candidates": [
+    {
+      "alpha_deg": 3.490033036223714,
+      "cd": 0.152539343722048,
+      "cl": 0.6841059250330846,
+      "error": null,
+      "l_over_d": 4.48478345547126,
+      "max_thickness_frac": 0.13954979044789245,
+      "name": "sc20714",
+      "robustness": 1.0102769737047361,
+      "status": "ok",
+      "tank_capacity_kg": 183182.72397933016,
+      "tank_volume_m3": 227.8392089295151
+    },
+    {
+      "alpha_deg": 7.243124614596465,
+      "cd": 0.15603014581997857,
+      "cl": 0.6841059250330846,
+      "error": null,
+      "l_over_d": 4.384447129994861,
+      "max_thickness_frac": 0.12108960914579626,
+      "name": "rae2822",
+      "robustness": 1.0029320652388714,
+      "status": "ok",
+      "tank_capacity_kg": 158950.61094485768,
+      "tank_volume_m3": 197.69976485678816
+    },
+    {
+      "alpha_deg": 4.78706306721307,
+      "cd": 0.14107491313958823,
+      "cl": 0.6841059250330846,
+      "error": null,
+      "l_over_d": 4.849238676164826,
+      "max_thickness_frac": 0.10960210358198175,
+      "name": "whitcomb",
+      "robustness": 1.0040591260156786,
+      "status": "ok",
+      "tank_capacity_kg": 143871.3152027906,
+      "tank_volume_m3": 178.94442189401818
+    },
+    {
+      "alpha_deg": 9.072279175906974,
+      "cd": 0.16980190152853872,
+      "cl": 0.6841059250330846,
+      "error": null,
+      "l_over_d": 4.028847255977911,
+      "max_thickness_frac": 0.12002259050655761,
+      "name": "naca0012",
+      "robustness": 1.001728672413208,
+      "status": "ok",
+      "tank_capacity_kg": 157549.9683480819,
+      "tank_volume_m3": 195.95767207472872
+    },
+    {
+      "alpha_deg": 5.7040366107331675,
+      "cd": 0.07869387760239716,
+      "cl": 0.6841059250330846,
+      "error": null,
+      "l_over_d": 8.693254747078896,
+      "max_thickness_frac": 0.11705932187487528,
+      "name": "clarky",
+      "robustness": 1.0591004202419736,
+      "status": "ok",
+      "tank_capacity_kg": 153660.17662505698,
+      "tank_volume_m3": 191.1196226679813
+    }
+  ],
+  "stage2_candidates": [
+    {
+      "alpha_3d_deg": 4.267112615722793,
+      "cd_3d": 0.03624927194351595,
+      "cm_residual_3d": -0.0009160584957404468,
+      "l_over_d_3d": 18.839070508709213,
+      "name": "sc20714",
+      "refine_error": null,
+      "refined": true,
+      "static_margin_3d": 0.36781107269874747
+    },
+    {
+      "alpha_3d_deg": 4.933719368244744,
+      "cd_3d": 0.03499650111973648,
+      "cm_residual_3d": -0.001265837993690332,
+      "l_over_d_3d": 19.507189342801958,
+      "name": "rae2822",
+      "refine_error": null,
+      "refined": true,
+      "static_margin_3d": 0.36622099726379453
+    },
+    {
+      "alpha_3d_deg": 4.86971210788652,
+      "cd_3d": 0.03484116986265706,
+      "cm_residual_3d": -0.001231581924963947,
+      "l_over_d_3d": 19.59469910344895,
+      "name": "whitcomb",
+      "refine_error": null,
+      "refined": true,
+      "static_margin_3d": 0.3624979465047555
+    },
+    {
+      "alpha_3d_deg": 4.932915095177264,
+      "cd_3d": 0.03497519296363258,
+      "cm_residual_3d": -0.001265479341516241,
+      "l_over_d_3d": 19.519080429611503,
+      "name": "naca0012",
+      "refine_error": null,
+      "refined": true,
+      "static_margin_3d": 0.36592691159847596
+    },
+    {
+      "alpha_3d_deg": 4.930587403527608,
+      "cd_3d": 0.034916857511762385,
+      "cm_residual_3d": -0.0012644432033912373,
+      "l_over_d_3d": 19.55171000241744,
+      "name": "clarky",
+      "refine_error": null,
+      "refined": true,
+      "static_margin_3d": 0.3650757821749124
+    }
+  ]
+}

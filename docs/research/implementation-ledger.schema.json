@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://alas.local/schemas/research-implementation-ledger-v1.json",
+  "title": "ALAS research implementation ledger",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "entries"],
+  "properties": {
+    "schema_version": {
+      "const": "alas.research.implementation-ledger.v1"
+    },
+    "entries": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/entry" }
+    }
+  },
+  "$defs": {
+    "non_empty_string": {
+      "type": "string",
+      "minLength": 1
+    },
+    "string_set": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/non_empty_string" },
+      "uniqueItems": true
+    },
+    "entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "memo",
+        "section",
+        "finding",
+        "work_packages",
+        "owners",
+        "planned_fidelity",
+        "requirement_ids",
+        "case_ids",
+        "implementation_revision",
+        "evidence_ids",
+        "status",
+        "data_gap",
+        "disposition"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^research\\.[a-z0-9-]+\\.[A-Z]{2,8}-[0-9]{3}$"
+        },
+        "memo": { "$ref": "#/$defs/non_empty_string" },
+        "section": { "$ref": "#/$defs/non_empty_string" },
+        "finding": { "$ref": "#/$defs/non_empty_string" },
+        "work_packages": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^WP-(0[0-9]|1[0-3])$"
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "owners": { "$ref": "#/$defs/string_set" },
+        "planned_fidelity": { "$ref": "#/$defs/non_empty_string" },
+        "requirement_ids": { "$ref": "#/$defs/string_set" },
+        "case_ids": { "$ref": "#/$defs/string_set" },
+        "implementation_revision": {
+          "type": ["string", "null"],
+          "minLength": 1
+        },
+        "evidence_ids": { "$ref": "#/$defs/string_set" },
+        "status": {
+          "enum": [
+            "Planned",
+            "ImplementedUnverified",
+            "Verified",
+            "DeferredWithRationale",
+            "BlockedByData",
+            "NotApplicableWithRationale"
+          ]
+        },
+        "data_gap": {
+          "type": ["string", "null"],
+          "minLength": 1
+        },
+        "disposition": { "$ref": "#/$defs/non_empty_string" }
+      }
+    }
+  }
+}

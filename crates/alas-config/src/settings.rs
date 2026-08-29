@@ -151,7 +151,7 @@ pub struct AlasConfig {
     /// The wing box, and how it is sized and meshed.
     #[config(
         nested,
-        help = "Structural sizing and meshing: the spar and rib layout, the materials, the minimum gauges, and the finite-element model built from them."
+        help = "Structural sizing and meshing: the spar and rib layout, the materials, the minimum gauges, the main-wing structural mass centroid, and the finite-element model built from them."
     )]
     pub structures: StructuresConfig,
 
@@ -221,15 +221,20 @@ impl AlasConfig {
         if let Some(name) = data.get("preset").and_then(serde_json::Value::as_str) {
             match crate::presets::get(name) {
                 Ok(preset) => {
+                    let operational = preset.operational_mission_defaults();
                     instance.preset = name.to_owned();
                     instance.geometry = preset.geometry.clone();
                     instance.requirements = preset.requirements.clone();
+                    instance.landing_gear = preset.landing_gear.clone();
                     if let Some(mass_model) = &preset.mass_model {
                         instance.mass_model = mass_model.clone();
                     }
                     if let Some(performance) = &preset.performance {
                         instance.performance = performance.clone();
                     }
+                    instance.departure_airport = operational.departure_airport.to_owned();
+                    instance.arrival_airport = operational.arrival_airport.to_owned();
+                    instance.mission.profile = operational.profile;
                 }
                 Err(error) => {
                     tracing::debug!(%error, "configuration names an unregistered preset");
@@ -263,6 +268,7 @@ mod tests {
         let preset = crate::presets::get("A380-800").unwrap();
         assert_eq!(config.geometry, preset.geometry);
         assert_eq!(config.requirements, preset.requirements);
+        assert_eq!(config.landing_gear, preset.landing_gear);
         assert_eq!(config.preset, "A380-800");
     }
 
@@ -275,6 +281,36 @@ mod tests {
         assert_eq!(config.mass_model.systems_mass_fraction, 0.13);
         assert_eq!(config.mass_model.furnishings_mass_fraction, 0.12);
         assert_eq!(config.performance.cl_max_to, 2.10);
+    }
+
+    #[test]
+    fn selecting_a_preset_loads_its_operational_route_and_cruise_schedule() {
+        let config = AlasConfig::from_value(&json!({"preset": "A220-300"})).unwrap();
+        let preset = crate::presets::get("A220-300").unwrap();
+        assert_eq!(config.departure_airport, "Riga (EVRA)");
+        assert_eq!(config.arrival_airport, "Stockholm Arlanda (ESSA)");
+        let atmosphere = alas_atmo::Atmosphere::new(config.requirements.cruise_altitude_m);
+        let expected = config.requirements.cruise_mach * atmosphere.speed_of_sound();
+        assert!((config.mission.profile.cruise_1_air_speed_m_s - expected).abs() < 1e-9);
+        assert_ne!(
+            config.mission.profile.cruise_1_air_speed_m_s,
+            crate::MissionProfileConfig::default().cruise_1_air_speed_m_s
+        );
+        assert_eq!(config.requirements, preset.requirements);
+    }
+
+    #[test]
+    fn saved_route_and_profile_values_override_the_preset_defaults() {
+        let config = AlasConfig::from_value(&json!({
+            "preset": "A220-300",
+            "departure_airport": "Paris CDG (LFPG)",
+            "arrival_airport": "Frankfurt (EDDF)",
+            "mission": {"profile": {"cruise_1_air_speed_m_s": 219.0}}
+        }))
+        .unwrap();
+        assert_eq!(config.departure_airport, "Paris CDG (LFPG)");
+        assert_eq!(config.arrival_airport, "Frankfurt (EDDF)");
+        assert_eq!(config.mission.profile.cruise_1_air_speed_m_s, 219.0);
     }
 
     #[test]
@@ -314,6 +350,19 @@ mod tests {
         let config = AlasConfig::from_value(&json!({"preset": "DC-10"})).unwrap();
         let text = serde_json::to_string(&config).unwrap();
         assert_eq!(serde_json::from_str::<AlasConfig>(&text).unwrap(), config);
+    }
+
+    #[test]
+    fn removed_runtime_keys_are_rejected_as_unknown_settings() {
+        let config = AlasConfig::from_value(&json!({
+            "mission": {
+                "suave_venv_dir": "old-venv",
+                "suave_runner_dir": "old-runner"
+            }
+        }))
+        .expect_err("removed external-runtime settings must not remain accepted");
+        let message = format!("{config}");
+        assert!(message.contains("suave_venv_dir") || message.contains("suave_runner_dir"));
     }
 
     #[test]

@@ -1,0 +1,60 @@
+{
+  "fixtures": {
+    "dynamics": {
+      "description": "alas.physics.dynamics on the nominal AircraftBuilder aircraft: estimate_inertia at two masses (closed-form), and compute_dynamic_modes at a Mach 0.82 / 11 km cruise point -- a run_with_stability_derivatives sweep fed to get_modes, wrapped with each mode's period and stability flag",
+      "generator": "gen_stab_dynamics.py",
+      "runtime": "alas",
+      "alas_commit": "7d1555c1f4db5110cf6cd187c156718e1a033b50",
+      "environment": {
+        "numpy": "2.5.1",
+        "aerosandbox": "4.2.8",
+        "platform": "Windows-11-10.0.26200-SP0",
+        "scipy": "1.17.1",
+        "python": "3.13.13"
+      }
+    },
+    "modes": {
+      "description": "aerosandbox.dynamics.flight_dynamics.airplane.get_modes on fixed stability-derivative sets -- the Boeing 737-800 from its own __main__ (all oscillatory modes) and a statically/directionally unstable variant that drives short-period and dutch-roll to the aperiodic branch of get_mode_info",
+      "generator": "gen_stab_modes.py",
+      "runtime": "alas",
+      "alas_commit": "7d1555c1f4db5110cf6cd187c156718e1a033b50",
+      "environment": {
+        "numpy": "2.5.1",
+        "aerosandbox": "4.2.8",
+        "platform": "Windows-11-10.0.26200-SP0",
+        "scipy": "1.17.1",
+        "python": "3.13.13"
+      }
+    },
+    "suave_static": {
+      "description": "SUAVE.Analyses.Stability.Fidelity_Zero, static branch only, on the vehicle vehicle_builder.build_vehicle constructs for the default ALAS design: datcom lift-curve slopes, taw_cmalpha, taw_cnbeta, the resulting static margin and neutral point, across a spread of Mach numbers and angles of attack",
+      "generator": "gen_stab_suave_static.py",
+      "runtime": "suave",
+      "alas_commit": "7d1555c1f4db5110cf6cd187c156718e1a033b50",
+      "environment": {
+        "suave": {
+          "version": "2.5.2",
+          "tree": "external tools/SUAVE-2.5.2/trunk"
+        },
+        "scipy": "1.11.4",
+        "platform": "Windows-10-10.0.26200-SP0",
+        "aerosandbox": "absent",
+        "python": "3.10.20",
+        "numpy": "1.26.4"
+      }
+    },
+    "trim": {
+      "description": "alas.physics.stability on the nominal AircraftBuilder aircraft: munk_apparent_mass_factor, fuselage_cm_alpha, static_margin, neutral_point, autobalance, stability_and_trim and tail_volume_coefficients, with cases chosen to reach both Munk clamps, the downwash floor, the no-horizontal-stabilizer trim and fuselage fallbacks, and all three tail-volume exits",
+      "generator": "gen_stab_trim.py",
+      "runtime": "alas",
+      "alas_commit": "7d1555c1f4db5110cf6cd187c156718e1a033b50",
+      "environment": {
+        "numpy": "2.5.1",
+        "aerosandbox": "4.2.8",
+        "platform": "Windows-11-10.0.26200-SP0",
+        "scipy": "1.17.1",
+        "python": "3.13.13"
+      }
+    }
+  }
+}

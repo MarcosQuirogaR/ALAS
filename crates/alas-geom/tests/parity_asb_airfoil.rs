@@ -58,12 +58,23 @@ struct BlendCase {
 }
 
 #[derive(Debug, Deserialize)]
+struct NormalizeCase {
+    input: Vec<(f64, f64)>,
+    coordinates: Vec<(f64, f64)>,
+    x_translation: f64,
+    y_translation: f64,
+    scale_factor: f64,
+    rotation_angle: f64,
+}
+
+#[derive(Debug, Deserialize)]
 struct Fixture {
     naca: HashMap<String, NacaCase>,
     surfaces: HashMap<String, SurfacePair>,
     thickness: HashMap<String, ThicknessCase>,
     repanel: HashMap<String, RepanelCase>,
     blends: HashMap<String, BlendCase>,
+    normalize: HashMap<String, NormalizeCase>,
 }
 
 fn compare_points(
@@ -218,6 +229,74 @@ fn blend_with_another_airfoil_matches_aerosandbox() {
         );
     }
     comparison.finish();
+}
+
+#[test]
+fn normalize_matches_aerosandbox_in_both_the_section_and_the_transform() {
+    // The four reported numbers matter as much as the moved section:
+    // `alas-aero::neuralfoil` corrects its moment coefficient with the
+    // translation, divides its Reynolds number by the scale and offsets its
+    // angle of attack by the rotation. A port that moved the section
+    // correctly and reported the rotation with the wrong sign would produce a
+    // polar shifted by up to three degrees on the sections in this fixture.
+    let fixture: Fixture = alas_testkit::load("geom", "asb_airfoil");
+    let mut comparison = Comparison::new("alas-geom::asb::airfoil (normalize)", Tier::Linalg);
+
+    for (name, case) in &fixture.normalize {
+        let source = Airfoil::from_coordinates(name.clone(), case.input.clone());
+        let normalized = source.normalize();
+        comparison.scalar(
+            &format!("{name}.x_translation"),
+            normalized.x_translation,
+            case.x_translation,
+        );
+        comparison.scalar(
+            &format!("{name}.y_translation"),
+            normalized.y_translation,
+            case.y_translation,
+        );
+        comparison.scalar(
+            &format!("{name}.scale_factor"),
+            normalized.scale_factor,
+            case.scale_factor,
+        );
+        comparison.scalar(
+            &format!("{name}.rotation_angle_deg"),
+            normalized.rotation_angle_deg,
+            case.rotation_angle,
+        );
+        compare_points(
+            &mut comparison,
+            &format!("{name}.coordinates"),
+            &normalized.airfoil.coordinates,
+            &case.coordinates,
+        );
+    }
+    comparison.finish();
+}
+
+#[test]
+fn every_normalize_case_is_a_section_that_was_not_already_in_the_standard_frame() {
+    // `gen_geom_asb_airfoil.py` refuses to write a fixture in which no case
+    // moves each of the four numbers; this states the same property from the
+    // side that would otherwise silently pass.
+    let fixture: Fixture = alas_testkit::load("geom", "asb_airfoil");
+    assert!(fixture
+        .normalize
+        .values()
+        .any(|case| case.x_translation != 0.0));
+    assert!(fixture
+        .normalize
+        .values()
+        .any(|case| case.y_translation != 0.0));
+    assert!(fixture
+        .normalize
+        .values()
+        .any(|case| case.scale_factor != 1.0));
+    assert!(fixture
+        .normalize
+        .values()
+        .any(|case| case.rotation_angle != 0.0));
 }
 
 #[test]

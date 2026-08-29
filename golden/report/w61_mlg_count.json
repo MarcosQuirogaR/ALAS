@@ -1,0 +1,1619 @@
+{
+  "computed_gear": {
+    "mlg_tire": {
+      "code": "widebody",
+      "diameter_m": 1.32,
+      "name": "Widebody (~52x21 class, 787/A330)",
+      "rated_load_kg": 24000.0,
+      "width_m": 0.53
+    },
+    "n_mlg_struts": 4,
+    "n_nlg_wheels": 2,
+    "nlg_tire": {
+      "code": "widebody",
+      "diameter_m": 1.32,
+      "name": "Widebody (~52x21 class, 787/A330)",
+      "rated_load_kg": 24000.0,
+      "width_m": 0.53
+    },
+    "pct_load_mlg_max": 1.0706220202414476,
+    "pct_load_nlg_max": 0.13382775253018095,
+    "r_mlg_total_design_kg": 349667.2270510893,
+    "r_nlg_design_kg": 41932.69360068065,
+    "strut_material": "300M high-strength steel",
+    "track_width_m": 11.67,
+    "turnover_angle_deg": 53.39219998767941,
+    "turnover_ok": true,
+    "wheelbase_m": 31.461062501921628,
+    "wheels": [
+      {
+        "diameter_m": 1.32,
+        "group": "NLG",
+        "strut_label": "NLG",
+        "width_m": 0.53,
+        "x": 7.672000000000001,
+        "y": -0.42400000000000004
+      },
+      {
+        "diameter_m": 1.32,
+        "group": "NLG",
+        "strut_label": "NLG",
+        "width_m": 0.53,
+        "x": 7.672000000000001,
+        "y": 0.42400000000000004
+      },
+      {
+        "diameter_m": 1.32,
+        "group": "MLG",
+        "strut_label": "MLG-L",
+        "width_m": 0.53,
+        "x": 38.27506250192163,
+        "y": -6.259
+      },
+      {
+        "diameter_m": 1.32,
+        "group": "MLG",
+        "strut_label": "MLG-L",
+        "width_m": 0.53,
+        "x": 38.27506250192163,
+        "y": -5.411
+      },
+      {
+        "diameter_m": 1.32,
+        "group": "MLG",
+        "strut_label": "MLG-L",
+        "width_m": 0.53,
+        "x": 39.991062501921625,
+        "y": -6.259
+      },
+      {
+        "diameter_m": 1.32,
+        "group": "MLG",
+        "strut_label": "MLG-L",
+        "width_m": 0.53,
+        "x": 39.991062501921625,
+        "y": -5.411
+      },
+      {
+        "diameter_m": 1.32,
+        "group": "MLG",
+        "strut_label": "MLG-R",
+        "width_m": 0.53,
+        "x": 38.27506250192163,
+        "y": 5.411
+      },
+      {
+        "diameter_m": 1.32,
+        "group": "MLG",
+        "strut_label": "MLG-R",
+        "width_m": 0.53,
+        "x": 38.27506250192163,
+        "y": 6.259
+      },
+      {
+        "diameter_m": 1.32,
+        "group": "MLG",
+        "strut_label": "MLG-R",
+        "width_m": 0.53,
+        "x": 39.991062501921625,
+        "y": 5.411
+      },
+      {
+        "diameter_m": 1.32,
+        "group": "MLG",
+        "strut_label": "MLG-R",
+        "width_m": 0.53,
+        "x": 39.991062501921625,
+        "y": 6.259
+      },
+      {
+        "diameter_m": 1.32,
+        "group": "MLG",
+        "strut_label": "MLG-Body-L",
+        "width_m": 0.53,
+        "x": 38.27506250192163,
+        "y": -3.04975
+      },
+      {
+        "diameter_m": 1.32,
+        "group": "MLG",
+        "strut_label": "MLG-Body-L",
+        "width_m": 0.53,
+        "x": 38.27506250192163,
+        "y": -2.20175
+      },
+      {
+        "diameter_m": 1.32,
+        "group": "MLG",
+        "strut_label": "MLG-Body-L",
+        "width_m": 0.53,
+        "x": 39.991062501921625,
+        "y": -3.04975
+      },
+      {
+        "diameter_m": 1.32,
+        "group": "MLG",
+        "strut_label": "MLG-Body-L",
+        "width_m": 0.53,
+        "x": 39.991062501921625,
+        "y": -2.20175
+      },
+      {
+        "diameter_m": 1.32,
+        "group": "MLG",
+        "strut_label": "MLG-Body-R",
+        "width_m": 0.53,
+        "x": 38.27506250192163,
+        "y": 2.20175
+      },
+      {
+        "diameter_m": 1.32,
+        "group": "MLG",
+        "strut_label": "MLG-Body-R",
+        "width_m": 0.53,
+        "x": 38.27506250192163,
+        "y": 3.04975
+      },
+      {
+        "diameter_m": 1.32,
+        "group": "MLG",
+        "strut_label": "MLG-Body-R",
+        "width_m": 0.53,
+        "x": 39.991062501921625,
+        "y": 2.20175
+      },
+      {
+        "diameter_m": 1.32,
+        "group": "MLG",
+        "strut_label": "MLG-Body-R",
+        "width_m": 0.53,
+        "x": 39.991062501921625,
+        "y": 3.04975
+      }
+    ],
+    "wheels_per_mlg_strut": 4,
+    "x_mlg": 39.13306250192163,
+    "x_nlg": 7.672000000000001
+  },
+  "effective_config": {
+    "analysis": {
+      "autobalance_alpha_high_deg": 2.0,
+      "autobalance_alpha_low_deg": 0.0,
+      "autobalance_velocity_m_s": 250.0,
+      "chordwise_resolution": 1,
+      "fine_chordwise_resolution": 8,
+      "fine_spanwise_resolution": 2,
+      "include_fuselage_stability": true,
+      "polar_fit_cl_max": 0.6,
+      "polar_fit_cl_max_fallback": 0.8,
+      "polar_fit_cl_min": 0.3,
+      "polar_fit_cl_min_fallback": 0.1,
+      "probe_alpha_high_deg": 3.0,
+      "probe_alpha_low_deg": 2.0,
+      "spanwise_resolution": 1,
+      "sweep_alpha_max_deg": 10.0,
+      "sweep_alpha_min_deg": -4.0,
+      "sweep_n_points": 15,
+      "tail_efficiency": 0.9,
+      "trim_incidence_probe_delta_deg": 1.0
+    },
+    "arrival_airport": "Dubai (OMDB)",
+    "cabin": {
+      "cargo": {
+        "aft_door_x_m": 0.0,
+        "cg_trim_max_iterations": 2000,
+        "cg_trim_step_kg": 50.0,
+        "fwd_door_x_m": 0.0,
+        "loading_strategy": "target_cg",
+        "lower_deck_uld": "LD3",
+        "main_deck_uld": "PMC",
+        "main_door_x_m": 0.0,
+        "target_cg_pct_mac": 25.0,
+        "use_main_deck": true
+      },
+      "passenger": {
+        "aisle_width_m": 0.0,
+        "belly_cargo_kg": 0.0,
+        "business": {
+          "abreast": 0,
+          "count": 0,
+          "mass_per_pax_kg": 90.0,
+          "pitch_m": 1.55,
+          "share_pct": 15.0,
+          "width_m": 0.7
+        },
+        "checked_bag_mass_kg": 16.0,
+        "class_mix_mode": "percent",
+        "economy": {
+          "abreast": 0,
+          "count": 0,
+          "mass_per_pax_kg": 84.0,
+          "pitch_m": 0.79,
+          "share_pct": 85.0,
+          "width_m": 0.46
+        },
+        "exit_capacity_realism_factor": 0.478,
+        "first": {
+          "abreast": 0,
+          "count": 0,
+          "mass_per_pax_kg": 96.0,
+          "pitch_m": 1.93,
+          "share_pct": 0.0,
+          "width_m": 0.95
+        },
+        "galley_count": 0,
+        "lavatory_count": 0,
+        "min_exit_pair_spacing_m": 11.0,
+        "premium": {
+          "abreast": 0,
+          "count": 0,
+          "mass_per_pax_kg": 86.0,
+          "pitch_m": 0.97,
+          "share_pct": 0.0,
+          "width_m": 0.52
+        },
+        "wall_thickness_m": 0.15
+      }
+    },
+    "control_surfaces": {
+      "aileron_chord_fraction": 0.2,
+      "aileron_span_end_frac": 0.95,
+      "aileron_span_start_frac": 0.66,
+      "elevator_chord_fraction": 0.35,
+      "elevator_span_end_frac": 0.95,
+      "elevator_span_start_frac": 0.05,
+      "flap_chord_fraction": 0.25,
+      "flap_span_end_frac": 0.62,
+      "flap_span_start_frac": 0.1,
+      "rudder_chord_fraction": 0.35,
+      "rudder_span_end_frac": 0.9,
+      "rudder_span_start_frac": 0.1,
+      "slat_chord_fraction": 0.15,
+      "slat_span_end_frac": 0.95,
+      "slat_span_start_frac": 0.08,
+      "spoiler_chord_fraction": 0.1,
+      "spoiler_span_end_frac": 0.64,
+      "spoiler_span_start_frac": 0.1
+    },
+    "departure_airport": "London Heathrow (EGLL)",
+    "drag_model": {
+      "interference_factor_fuselage": 1.25,
+      "interference_factor_nacelle": 1.3,
+      "interference_factor_wing": 1.0,
+      "korn_technology_factor": 0.95,
+      "max_thickness_chordwise_loc": 0.35,
+      "viscous_margin": 1.1,
+      "wave_drag_coefficient": 20.0,
+      "wave_drag_onset_mach": 0.6
+    },
+    "geometry": {
+      "empennage": {
+        "hstab_offset_from_tail_m": 10.7,
+        "hstab_root_chord_m": 8.0,
+        "hstab_root_twist_deg": -2.0,
+        "hstab_tip_chord_m": 2.2,
+        "hstab_tip_le_m": [
+          7.5,
+          11.0,
+          1.0
+        ],
+        "hstab_tip_twist_deg": -2.0,
+        "hstab_z_m": 1.2,
+        "n_subdivisions": 6,
+        "tail_airfoil": "naca0012",
+        "vstab_offset_from_tail_m": 12.2,
+        "vstab_root_chord_m": 9.5,
+        "vstab_tip_chord_m": 3.2,
+        "vstab_tip_le_m": [
+          9.0,
+          0.0,
+          9.8
+        ],
+        "vstab_z_m": 2.0
+      },
+      "engine": {
+        "bypass_ratio": 10.0,
+        "cruise_tsfc_kg_kgf_hr": 0.5,
+        "engine_name": "GE9X",
+        "fan_diameter_m": 3.4,
+        "fan_pressure_ratio": 1.45,
+        "inlet_x_offset_m": 4.2,
+        "nacelle_profile": [
+          [
+            0.0,
+            0.4
+          ],
+          [
+            0.624,
+            0.92
+          ],
+          [
+            1.17,
+            1.0
+          ],
+          [
+            4.29,
+            1.0
+          ],
+          [
+            5.85,
+            0.82
+          ],
+          [
+            7.8,
+            0.45
+          ]
+        ],
+        "overall_pressure_ratio": 60.0,
+        "radius_scale_m": 2.1,
+        "spanwise_positions_m": [
+          9.8,
+          -9.8
+        ],
+        "thrust_kn": 467.0,
+        "turbine_inlet_temp_k": 1670.0,
+        "z_m": -2.9
+      },
+      "fuselage": {
+        "cabin_start_x_m": 6.0,
+        "cabin_z_m": 0.2,
+        "diameter_m": 6.2,
+        "height_m": null,
+        "n_subdivisions": 12,
+        "nose_z_m": -0.5,
+        "tail_z_m": 1.8,
+        "tailcone_length_m": 14.0
+      },
+      "fuselage_wetted_factor": 0.9,
+      "wing": {
+        "break_span_fraction": 0.35,
+        "break_twist_deg": 2.0,
+        "break_z_m": -0.3,
+        "n_subdivisions": 8,
+        "outboard_sweep_decrement_deg": 2.0,
+        "root_airfoil": "SC2-0714",
+        "root_datum_x_m": 26.24,
+        "root_twist_deg": 4.0,
+        "root_z_m": -2.1,
+        "tip_airfoil": "naca2410",
+        "tip_z_m": 2.5
+      },
+      "wing_wetted_area_factor": 2.05
+    },
+    "landing_gear": {
+      "mlg_body_gear_mtow_kg": 300000.0,
+      "n_mlg_struts": 0,
+      "n_nlg_wheels": 0,
+      "nlg_dual_wheel_mtow_kg": 15000.0,
+      "strut_material": "auto",
+      "tire_class": "auto",
+      "tire_safety_factor": 1.07,
+      "track_diameter_factor": 1.85,
+      "turnover_angle_limit_deg": 63.0,
+      "wheels_per_mlg_strut": 0
+    },
+    "mass_model": {
+      "cabin_payload_density_kg_m": 800.0,
+      "flap_deflection_angle_deg": 40.0,
+      "fuel_density_kg_m3": 804.0,
+      "fuel_tank_usable_fraction": 0.85,
+      "furnishings_mass_fraction": 0.1,
+      "landing_gear_mass_fraction": 0.04,
+      "max_airspeed_for_flaps_ms": 90.0,
+      "mlg_x_fraction_mac": 0.5,
+      "mlw_fraction_mtow": 0.92,
+      "nlg_x_fraction": 0.1,
+      "pct_load_mlg_max": 0.93,
+      "pct_load_nlg_max": 0.1,
+      "pct_load_nlg_min": 0.02,
+      "propulsion_installation_factor": 1.3,
+      "propulsion_mass_fallback_fraction": 0.07,
+      "propulsion_twr_factor": 6.0,
+      "suspended_mass_fraction": 0.75,
+      "systems_mass_fraction": 0.11
+    },
+    "mission": {
+      "enabled": true,
+      "great_circle_points": 50,
+      "navdata_dir": "alas/data/navdata",
+      "profile": {
+        "cruise_1_air_speed_m_s": 253.5,
+        "cruise_1_distance_fraction": 0.28169,
+        "cruise_2_air_speed_m_s": 249.4,
+        "cruise_2_distance_fraction": 0.33803,
+        "cruise_3_air_speed_m_s": 247.8,
+        "cruise_3_distance_fraction": 0.38028,
+        "descent_1_air_speed_m_s": 220.0,
+        "descent_1_altitude_ft": 30000.0,
+        "descent_1_rate_m_s": 4.5,
+        "descent_2_air_speed_m_s": 195.0,
+        "descent_2_altitude_ft": 17000.0,
+        "descent_2_rate_m_s": 5.0,
+        "descent_3_air_speed_m_s": 170.0,
+        "descent_3_altitude_ft": 10000.0,
+        "descent_3_rate_m_s": 5.0,
+        "descent_4_air_speed_m_s": 150.0,
+        "descent_4_altitude_ft": 6500.0,
+        "descent_4_rate_m_s": 5.0,
+        "initial_climb_air_speed_m_s": 170.0,
+        "initial_climb_altitude_fraction": 0.795,
+        "initial_climb_rate_m_s": 12.0,
+        "landing_air_speed_m_s": 83.6,
+        "landing_descent_rate_m_s": 3.0,
+        "step_climb_1_air_speed_m_s": 250.0,
+        "step_climb_1_altitude_fraction": 0.897,
+        "step_climb_1_rate_m_s": 3.0,
+        "step_climb_2_air_speed_m_s": 248.0,
+        "step_climb_2_rate_m_s": 2.5,
+        "takeoff_air_speed_m_s": 128.6,
+        "takeoff_altitude_gain_m": 3048.0,
+        "takeoff_climb_rate_m_s": 10.0
+      },
+      "routes_dir": "alas/data/routes",
+      "simbrief_overrides_airports": true,
+      "simbrief_timeout_s": 15.0,
+      "simbrief_username": "",
+      "suave_runner_dir": "external tools/suave_runner",
+      "suave_venv_dir": ".suave-venv",
+      "texture_path": "alas/data/textures/earth_blue_marble.jpg",
+      "timeout_s": 900.0
+    },
+    "mses": {
+      "alpha_sweep_halfwidth_deg": 3.0,
+      "alpha_sweep_n_points": 7,
+      "enabled": true,
+      "max_iterations": 100,
+      "mses_dir": "external tools/MSES",
+      "mset_e": 0.4,
+      "mset_n": 141,
+      "n_crit": 9.0,
+      "timeout_mses_s": 60.0,
+      "timeout_mset_s": 30.0,
+      "xtr_lower": 1.0,
+      "xtr_upper": 1.0
+    },
+    "optimizer": {
+      "solver": {
+        "display_progress": true,
+        "max_iterations": 15,
+        "population_size": 6,
+        "seed": null,
+        "seed_near_initial_design": true,
+        "seed_perturbation_fraction": 0.05,
+        "strategy": "best1bin",
+        "tolerance": 0.01,
+        "workers": 1
+      },
+      "weights": {
+        "alpha_max_penalty_deg": 10.0,
+        "alpha_min_penalty_deg": 0.0,
+        "alpha_penalty_scale": 5.0,
+        "area_penalty_scale": 0.5,
+        "cd0_penalty_scale": 50.0,
+        "cg_envelope_penalty_scale": 400000.0,
+        "cg_envelope_reward": 5.0,
+        "cg_penalty_scale": 200.0,
+        "failure_cost": 1000.0,
+        "fineness_ratio_max": 15.0,
+        "fineness_ratio_penalty_scale": 500.0,
+        "fuel_penalty_scale": 50.0,
+        "fuel_volume_penalty_scale": 300.0,
+        "fuselage_floor_m": 60.0,
+        "fuselage_penalty_scale": 5.0,
+        "instability_failure_cost": 1000.0,
+        "ld_weight": 1.0,
+        "max_break_root_chord_ratio": 0.65,
+        "max_hstab_volume_coef": 1.25,
+        "max_vstab_volume_coef": 0.13,
+        "min_hstab_area_fraction": 0.15,
+        "min_hstab_volume_coef": 0.75,
+        "min_vstab_area_fraction": 0.07,
+        "min_vstab_volume_coef": 0.06,
+        "min_wing_position_fraction": 0.27,
+        "payload_shortfall_penalty_scale": 1000.0,
+        "span_penalty_per_m": 0.02,
+        "static_margin_penalty_scale": 20.0,
+        "tail_area_penalty_scale": 150.0,
+        "tail_volume_penalty_scale": 200.0,
+        "taper_realism_penalty_scale": 250.0,
+        "te_root_angle_penalty_scale": 100.0,
+        "thickness_floor": 0.9,
+        "thickness_penalty_scale": 20.0,
+        "wing_loading_penalty_scale": 0.005,
+        "wing_position_penalty_scale": 300.0
+      }
+    },
+    "performance": {
+      "bfl_factor": 1.15,
+      "cl_max_clean": 1.5,
+      "cl_max_land": 2.6,
+      "cl_max_to": 1.8,
+      "cl_min_clean": -1.0,
+      "k_land": 0.6,
+      "matching_chart_resolution": 150,
+      "oei_climb_cl": 1.2,
+      "oei_climb_delta_cd": 0.025,
+      "oei_gradient": 0.024,
+      "thrust_lapse": 0.235,
+      "v1_vr_factor": 0.95,
+      "v2_vstall_factor": 1.2,
+      "vapp_vstall_land_factor": 1.3,
+      "vmc_vstall_factor": 1.13,
+      "vr_vmc_factor": 1.05,
+      "vr_vstall_factor": 1.1,
+      "vtd_vstall_land_factor": 1.15,
+      "ws_max_pa": 10000.0,
+      "ws_min_pa": 2000.0
+    },
+    "preset": "",
+    "propulsion_cycle": {
+      "combustor_efficiency": 0.99,
+      "combustor_pressure_ratio": 0.95,
+      "core_nozzle_efficiency": 0.95,
+      "core_nozzle_pressure_ratio": 0.99,
+      "cp_cold_j_kgk": 1004.5,
+      "cp_hot_j_kgk": 1156.9,
+      "fan_face_mach": 0.55,
+      "fan_nozzle_efficiency": 0.95,
+      "fan_nozzle_pressure_ratio": 0.99,
+      "fan_polytropic_efficiency": 0.93,
+      "fuel_heating_value_kj_kg": 42800.0,
+      "gamma_cold": 1.4,
+      "gamma_hot": 1.33,
+      "hpc_polytropic_efficiency": 0.93,
+      "hpt_polytropic_efficiency": 0.95,
+      "inlet_pressure_recovery": 0.98,
+      "lpc_polytropic_efficiency": 0.91,
+      "lpc_pressure_ratio_split": 1.2,
+      "lpt_polytropic_efficiency": 0.95,
+      "turbine_mechanical_efficiency": 0.99
+    },
+    "requirements": {
+      "aircraft_type": "passenger",
+      "cabin_preset": "Ryanair",
+      "cargo_payload_kg": 102100.0,
+      "cg_range_pct_mac": 30.0,
+      "cruise_altitude_m": 11887.2,
+      "cruise_mach": 0.84,
+      "dive_speed_m_s": 220.0,
+      "gravity_m_s2": 9.81,
+      "limit_load_factor_neg": -1.0,
+      "max_cruise_cl": 0.95,
+      "max_structural_payload_kg": 0.0,
+      "max_wing_area_m2": 535.0,
+      "min_physical_static_margin": 0.05,
+      "min_wing_loading_kg_m2": 485.0,
+      "mtow_kg": 358670.0,
+      "num_passengers": 350,
+      "passenger_mass_kg": 100.0,
+      "target_static_margin": 0.1,
+      "ultimate_load_factor": 3.75
+    },
+    "structures": {
+      "additional_safety_factor": 1.0,
+      "cap_taper_eta_lock": 0.4,
+      "cap_taper_tip_fraction": 0.2,
+      "center_spar_chord_fraction": 0.5,
+      "center_spar_enabled": false,
+      "enabled": true,
+      "freq_step_hz": 1.0,
+      "freq_sweep_max_hz": 500.0,
+      "mesh_chordwise_points": 50,
+      "modal_damping_ratio": 0.02,
+      "n_modes": 30,
+      "nastran_exe_path": "",
+      "num_ribs_override": null,
+      "patran_exe_path": "",
+      "psd_base_g2_per_hz": 0.01,
+      "rib_buckling_coeff": 1.5,
+      "rib_material": "Al 7075-T6",
+      "rib_radius_of_gyration_m": 0.03,
+      "run_nastran": true,
+      "run_patran_export": true,
+      "run_sol_modes": true,
+      "run_sol_static": true,
+      "run_sol_vibration_random": true,
+      "run_sol_vibration_sine": true,
+      "skin_material": "Al 7075-T6",
+      "spanwise_stations": 200,
+      "spar_cap_material": "CFRP UD",
+      "spar_chord_fractions": [
+        0.25,
+        0.7
+      ],
+      "spar_web_material": "Al 7075-T6",
+      "t_rib_m": 0.004,
+      "t_skin_min_m": 0.006,
+      "t_te_strip_m": 0.002,
+      "t_web_min_m": 0.002,
+      "te_rib_mode": "all",
+      "timeout_s": 3600.0
+    }
+  },
+  "figures": {
+    "dark": {
+      "axes": {
+        "aspect": "1.0",
+        "legend": [
+          "NLG",
+          "MLG-L",
+          "MLG-R",
+          "MLG-Body-L",
+          "MLG-Body-R"
+        ],
+        "patches": [
+          {
+            "center": null,
+            "facecolor": [
+              0.12156862745098039,
+              0.4666666666666667,
+              0.7058823529411765,
+              0.25
+            ],
+            "height": null,
+            "kind": "Polygon",
+            "label": null,
+            "width": null
+          },
+          {
+            "center": null,
+            "facecolor": [
+              0.12156862745098039,
+              0.4666666666666667,
+              0.7058823529411765,
+              0.25
+            ],
+            "height": null,
+            "kind": "Polygon",
+            "label": null,
+            "width": null
+          },
+          {
+            "center": null,
+            "facecolor": [
+              0.12156862745098039,
+              0.4666666666666667,
+              0.7058823529411765,
+              0.25
+            ],
+            "height": null,
+            "kind": "Polygon",
+            "label": null,
+            "width": null
+          },
+          {
+            "center": null,
+            "facecolor": [
+              0.12156862745098039,
+              0.4666666666666667,
+              0.7058823529411765,
+              0.25
+            ],
+            "height": null,
+            "kind": "Polygon",
+            "label": null,
+            "width": null
+          },
+          {
+            "center": null,
+            "facecolor": [
+              0.12156862745098039,
+              0.4666666666666667,
+              0.7058823529411765,
+              0.25
+            ],
+            "height": null,
+            "kind": "Polygon",
+            "label": null,
+            "width": null
+          },
+          {
+            "center": null,
+            "facecolor": [
+              0.4980392156862745,
+              0.4980392156862745,
+              0.4980392156862745,
+              0.35
+            ],
+            "height": null,
+            "kind": "Polygon",
+            "label": null,
+            "width": null
+          },
+          {
+            "center": [
+              -0.42400000000000004,
+              7.672000000000001
+            ],
+            "facecolor": [
+              0.1803921568627451,
+              0.8,
+              0.44313725490196076,
+              0.9
+            ],
+            "height": 1.32,
+            "kind": "Ellipse",
+            "label": "NLG",
+            "width": 0.53
+          },
+          {
+            "center": [
+              0.42400000000000004,
+              7.672000000000001
+            ],
+            "facecolor": [
+              0.1803921568627451,
+              0.8,
+              0.44313725490196076,
+              0.9
+            ],
+            "height": 1.32,
+            "kind": "Ellipse",
+            "label": null,
+            "width": 0.53
+          },
+          {
+            "center": [
+              -6.259,
+              38.27506250192163
+            ],
+            "facecolor": [
+              0.9058823529411765,
+              0.2980392156862745,
+              0.23529411764705882,
+              0.9
+            ],
+            "height": 1.32,
+            "kind": "Ellipse",
+            "label": "MLG-L",
+            "width": 0.53
+          },
+          {
+            "center": [
+              -5.411,
+              38.27506250192163
+            ],
+            "facecolor": [
+              0.9058823529411765,
+              0.2980392156862745,
+              0.23529411764705882,
+              0.9
+            ],
+            "height": 1.32,
+            "kind": "Ellipse",
+            "label": null,
+            "width": 0.53
+          },
+          {
+            "center": [
+              -6.259,
+              39.991062501921625
+            ],
+            "facecolor": [
+              0.9058823529411765,
+              0.2980392156862745,
+              0.23529411764705882,
+              0.9
+            ],
+            "height": 1.32,
+            "kind": "Ellipse",
+            "label": null,
+            "width": 0.53
+          },
+          {
+            "center": [
+              -5.411,
+              39.991062501921625
+            ],
+            "facecolor": [
+              0.9058823529411765,
+              0.2980392156862745,
+              0.23529411764705882,
+              0.9
+            ],
+            "height": 1.32,
+            "kind": "Ellipse",
+            "label": null,
+            "width": 0.53
+          },
+          {
+            "center": [
+              5.411,
+              38.27506250192163
+            ],
+            "facecolor": [
+              0.9058823529411765,
+              0.2980392156862745,
+              0.23529411764705882,
+              0.9
+            ],
+            "height": 1.32,
+            "kind": "Ellipse",
+            "label": "MLG-R",
+            "width": 0.53
+          },
+          {
+            "center": [
+              6.259,
+              38.27506250192163
+            ],
+            "facecolor": [
+              0.9058823529411765,
+              0.2980392156862745,
+              0.23529411764705882,
+              0.9
+            ],
+            "height": 1.32,
+            "kind": "Ellipse",
+            "label": null,
+            "width": 0.53
+          },
+          {
+            "center": [
+              5.411,
+              39.991062501921625
+            ],
+            "facecolor": [
+              0.9058823529411765,
+              0.2980392156862745,
+              0.23529411764705882,
+              0.9
+            ],
+            "height": 1.32,
+            "kind": "Ellipse",
+            "label": null,
+            "width": 0.53
+          },
+          {
+            "center": [
+              6.259,
+              39.991062501921625
+            ],
+            "facecolor": [
+              0.9058823529411765,
+              0.2980392156862745,
+              0.23529411764705882,
+              0.9
+            ],
+            "height": 1.32,
+            "kind": "Ellipse",
+            "label": null,
+            "width": 0.53
+          },
+          {
+            "center": [
+              -3.04975,
+              38.27506250192163
+            ],
+            "facecolor": [
+              0.9529411764705882,
+              0.611764705882353,
+              0.07058823529411765,
+              0.9
+            ],
+            "height": 1.32,
+            "kind": "Ellipse",
+            "label": "MLG-Body-L",
+            "width": 0.53
+          },
+          {
+            "center": [
+              -2.20175,
+              38.27506250192163
+            ],
+            "facecolor": [
+              0.9529411764705882,
+              0.611764705882353,
+              0.07058823529411765,
+              0.9
+            ],
+            "height": 1.32,
+            "kind": "Ellipse",
+            "label": null,
+            "width": 0.53
+          },
+          {
+            "center": [
+              -3.04975,
+              39.991062501921625
+            ],
+            "facecolor": [
+              0.9529411764705882,
+              0.611764705882353,
+              0.07058823529411765,
+              0.9
+            ],
+            "height": 1.32,
+            "kind": "Ellipse",
+            "label": null,
+            "width": 0.53
+          },
+          {
+            "center": [
+              -2.20175,
+              39.991062501921625
+            ],
+            "facecolor": [
+              0.9529411764705882,
+              0.611764705882353,
+              0.07058823529411765,
+              0.9
+            ],
+            "height": 1.32,
+            "kind": "Ellipse",
+            "label": null,
+            "width": 0.53
+          },
+          {
+            "center": [
+              2.20175,
+              38.27506250192163
+            ],
+            "facecolor": [
+              0.9529411764705882,
+              0.611764705882353,
+              0.07058823529411765,
+              0.9
+            ],
+            "height": 1.32,
+            "kind": "Ellipse",
+            "label": "MLG-Body-R",
+            "width": 0.53
+          },
+          {
+            "center": [
+              3.04975,
+              38.27506250192163
+            ],
+            "facecolor": [
+              0.9529411764705882,
+              0.611764705882353,
+              0.07058823529411765,
+              0.9
+            ],
+            "height": 1.32,
+            "kind": "Ellipse",
+            "label": null,
+            "width": 0.53
+          },
+          {
+            "center": [
+              2.20175,
+              39.991062501921625
+            ],
+            "facecolor": [
+              0.9529411764705882,
+              0.611764705882353,
+              0.07058823529411765,
+              0.9
+            ],
+            "height": 1.32,
+            "kind": "Ellipse",
+            "label": null,
+            "width": 0.53
+          },
+          {
+            "center": [
+              3.04975,
+              39.991062501921625
+            ],
+            "facecolor": [
+              0.9529411764705882,
+              0.611764705882353,
+              0.07058823529411765,
+              0.9
+            ],
+            "height": 1.32,
+            "kind": "Ellipse",
+            "label": null,
+            "width": 0.53
+          }
+        ],
+        "title": "Strut: 300M high-strength steel   |   Track: 11.67 m   |   Wheelbase: 31.46 m   |   Turnover angle: 53 deg (OK)",
+        "xlabel": "Y [m]",
+        "xlim": [
+          -39.4625,
+          39.4625
+        ],
+        "xticks": [
+          -40.0,
+          -30.0,
+          -20.0,
+          -10.0,
+          0.0,
+          10.0,
+          20.0,
+          30.0,
+          40.0
+        ],
+        "ylabel": "X [m] (fuselage station)",
+        "ylim": [
+          87.52546594982078,
+          -10.805465949820793
+        ],
+        "yticks": [
+          -20.0,
+          0.0,
+          20.0,
+          40.0,
+          60.0,
+          80.0,
+          100.0
+        ]
+      },
+      "dpi": 100.0,
+      "image": "reference_figures/w61/landing_gear_planform__dark.png",
+      "panel_count": 1,
+      "size_inches": [
+        9.0,
+        11.0
+      ],
+      "suptitle": "Landing Gear Planform  --  NLG: 2xWidebody   MLG: 4 strut(s) x 4w Widebody",
+      "theme": "dark"
+    },
+    "light": {
+      "axes": {
+        "aspect": "1.0",
+        "legend": [
+          "NLG",
+          "MLG-L",
+          "MLG-R",
+          "MLG-Body-L",
+          "MLG-Body-R"
+        ],
+        "patches": [
+          {
+            "center": null,
+            "facecolor": [
+              0.12156862745098039,
+              0.4666666666666667,
+              0.7058823529411765,
+              0.25
+            ],
+            "height": null,
+            "kind": "Polygon",
+            "label": null,
+            "width": null
+          },
+          {
+            "center": null,
+            "facecolor": [
+              0.12156862745098039,
+              0.4666666666666667,
+              0.7058823529411765,
+              0.25
+            ],
+            "height": null,
+            "kind": "Polygon",
+            "label": null,
+            "width": null
+          },
+          {
+            "center": null,
+            "facecolor": [
+              0.12156862745098039,
+              0.4666666666666667,
+              0.7058823529411765,
+              0.25
+            ],
+            "height": null,
+            "kind": "Polygon",
+            "label": null,
+            "width": null
+          },
+          {
+            "center": null,
+            "facecolor": [
+              0.12156862745098039,
+              0.4666666666666667,
+              0.7058823529411765,
+              0.25
+            ],
+            "height": null,
+            "kind": "Polygon",
+            "label": null,
+            "width": null
+          },
+          {
+            "center": null,
+            "facecolor": [
+              0.12156862745098039,
+              0.4666666666666667,
+              0.7058823529411765,
+              0.25
+            ],
+            "height": null,
+            "kind": "Polygon",
+            "label": null,
+            "width": null
+          },
+          {
+            "center": null,
+            "facecolor": [
+              0.4980392156862745,
+              0.4980392156862745,
+              0.4980392156862745,
+              0.35
+            ],
+            "height": null,
+            "kind": "Polygon",
+            "label": null,
+            "width": null
+          },
+          {
+            "center": [
+              -0.42400000000000004,
+              7.672000000000001
+            ],
+            "facecolor": [
+              0.1803921568627451,
+              0.8,
+              0.44313725490196076,
+              0.9
+            ],
+            "height": 1.32,
+            "kind": "Ellipse",
+            "label": "NLG",
+            "width": 0.53
+          },
+          {
+            "center": [
+              0.42400000000000004,
+              7.672000000000001
+            ],
+            "facecolor": [
+              0.1803921568627451,
+              0.8,
+              0.44313725490196076,
+              0.9
+            ],
+            "height": 1.32,
+            "kind": "Ellipse",
+            "label": null,
+            "width": 0.53
+          },
+          {
+            "center": [
+              -6.259,
+              38.27506250192163
+            ],
+            "facecolor": [
+              0.9058823529411765,
+              0.2980392156862745,
+              0.23529411764705882,
+              0.9
+            ],
+            "height": 1.32,
+            "kind": "Ellipse",
+            "label": "MLG-L",
+            "width": 0.53
+          },
+          {
+            "center": [
+              -5.411,
+              38.27506250192163
+            ],
+            "facecolor": [
+              0.9058823529411765,
+              0.2980392156862745,
+              0.23529411764705882,
+              0.9
+            ],
+            "height": 1.32,
+            "kind": "Ellipse",
+            "label": null,
+            "width": 0.53
+          },
+          {
+            "center": [
+              -6.259,
+              39.991062501921625
+            ],
+            "facecolor": [
+              0.9058823529411765,
+              0.2980392156862745,
+              0.23529411764705882,
+              0.9
+            ],
+            "height": 1.32,
+            "kind": "Ellipse",
+            "label": null,
+            "width": 0.53
+          },
+          {
+            "center": [
+              -5.411,
+              39.991062501921625
+            ],
+            "facecolor": [
+              0.9058823529411765,
+              0.2980392156862745,
+              0.23529411764705882,
+              0.9
+            ],
+            "height": 1.32,
+            "kind": "Ellipse",
+            "label": null,
+            "width": 0.53
+          },
+          {
+            "center": [
+              5.411,
+              38.27506250192163
+            ],
+            "facecolor": [
+              0.9058823529411765,
+              0.2980392156862745,
+              0.23529411764705882,
+              0.9
+            ],
+            "height": 1.32,
+            "kind": "Ellipse",
+            "label": "MLG-R",
+            "width": 0.53
+          },
+          {
+            "center": [
+              6.259,
+              38.27506250192163
+            ],
+            "facecolor": [
+              0.9058823529411765,
+              0.2980392156862745,
+              0.23529411764705882,
+              0.9
+            ],
+            "height": 1.32,
+            "kind": "Ellipse",
+            "label": null,
+            "width": 0.53
+          },
+          {
+            "center": [
+              5.411,
+              39.991062501921625
+            ],
+            "facecolor": [
+              0.9058823529411765,
+              0.2980392156862745,
+              0.23529411764705882,
+              0.9
+            ],
+            "height": 1.32,
+            "kind": "Ellipse",
+            "label": null,
+            "width": 0.53
+          },
+          {
+            "center": [
+              6.259,
+              39.991062501921625
+            ],
+            "facecolor": [
+              0.9058823529411765,
+              0.2980392156862745,
+              0.23529411764705882,
+              0.9
+            ],
+            "height": 1.32,
+            "kind": "Ellipse",
+            "label": null,
+            "width": 0.53
+          },
+          {
+            "center": [
+              -3.04975,
+              38.27506250192163
+            ],
+            "facecolor": [
+              0.9529411764705882,
+              0.611764705882353,
+              0.07058823529411765,
+              0.9
+            ],
+            "height": 1.32,
+            "kind": "Ellipse",
+            "label": "MLG-Body-L",
+            "width": 0.53
+          },
+          {
+            "center": [
+              -2.20175,
+              38.27506250192163
+            ],
+            "facecolor": [
+              0.9529411764705882,
+              0.611764705882353,
+              0.07058823529411765,
+              0.9
+            ],
+            "height": 1.32,
+            "kind": "Ellipse",
+            "label": null,
+            "width": 0.53
+          },
+          {
+            "center": [
+              -3.04975,
+              39.991062501921625
+            ],
+            "facecolor": [
+              0.9529411764705882,
+              0.611764705882353,
+              0.07058823529411765,
+              0.9
+            ],
+            "height": 1.32,
+            "kind": "Ellipse",
+            "label": null,
+            "width": 0.53
+          },
+          {
+            "center": [
+              -2.20175,
+              39.991062501921625
+            ],
+            "facecolor": [
+              0.9529411764705882,
+              0.611764705882353,
+              0.07058823529411765,
+              0.9
+            ],
+            "height": 1.32,
+            "kind": "Ellipse",
+            "label": null,
+            "width": 0.53
+          },
+          {
+            "center": [
+              2.20175,
+              38.27506250192163
+            ],
+            "facecolor": [
+              0.9529411764705882,
+              0.611764705882353,
+              0.07058823529411765,
+              0.9
+            ],
+            "height": 1.32,
+            "kind": "Ellipse",
+            "label": "MLG-Body-R",
+            "width": 0.53
+          },
+          {
+            "center": [
+              3.04975,
+              38.27506250192163
+            ],
+            "facecolor": [
+              0.9529411764705882,
+              0.611764705882353,
+              0.07058823529411765,
+              0.9
+            ],
+            "height": 1.32,
+            "kind": "Ellipse",
+            "label": null,
+            "width": 0.53
+          },
+          {
+            "center": [
+              2.20175,
+              39.991062501921625
+            ],
+            "facecolor": [
+              0.9529411764705882,
+              0.611764705882353,
+              0.07058823529411765,
+              0.9
+            ],
+            "height": 1.32,
+            "kind": "Ellipse",
+            "label": null,
+            "width": 0.53
+          },
+          {
+            "center": [
+              3.04975,
+              39.991062501921625
+            ],
+            "facecolor": [
+              0.9529411764705882,
+              0.611764705882353,
+              0.07058823529411765,
+              0.9
+            ],
+            "height": 1.32,
+            "kind": "Ellipse",
+            "label": null,
+            "width": 0.53
+          }
+        ],
+        "title": "Strut: 300M high-strength steel   |   Track: 11.67 m   |   Wheelbase: 31.46 m   |   Turnover angle: 53 deg (OK)",
+        "xlabel": "Y [m]",
+        "xlim": [
+          -39.4625,
+          39.4625
+        ],
+        "xticks": [
+          -40.0,
+          -30.0,
+          -20.0,
+          -10.0,
+          0.0,
+          10.0,
+          20.0,
+          30.0,
+          40.0
+        ],
+        "ylabel": "X [m] (fuselage station)",
+        "ylim": [
+          87.52546594982078,
+          -10.805465949820793
+        ],
+        "yticks": [
+          -20.0,
+          0.0,
+          20.0,
+          40.0,
+          60.0,
+          80.0,
+          100.0
+        ]
+      },
+      "dpi": 100.0,
+      "image": "reference_figures/w61/landing_gear_planform__light.png",
+      "panel_count": 1,
+      "size_inches": [
+        9.0,
+        11.0
+      ],
+      "suptitle": "Landing Gear Planform  --  NLG: 2xWidebody   MLG: 4 strut(s) x 4w Widebody",
+      "theme": "light"
+    }
+  },
+  "reference": {
+    "environment": {
+      "aerosandbox": "4.2.8",
+      "numpy": "2.5.1",
+      "platform": "Windows-11-10.0.26200-SP0",
+      "python": "3.13.13",
+      "scipy": "1.17.1"
+    },
+    "git_commit": "7d1555c1f4db5110cf6cd187c156718e1a033b50",
+    "input": "ALASConfig() + FullAnalysis(ALASConfig()).run(DesignVector(), include_engines=True)"
+  },
+  "renderer_calls": [
+    {
+      "aero_aft_lim_x_m": 38.343376153924055,
+      "aero_fwd_lim_x_m": 35.4548984674472,
+      "cg_height_estimate_m": 6.820000000000001,
+      "fuselage_diameter_m": 6.2,
+      "landing_gear_config": {
+        "mlg_body_gear_mtow_kg": 300000.0,
+        "n_mlg_struts": 0,
+        "n_nlg_wheels": 0,
+        "nlg_dual_wheel_mtow_kg": 15000.0,
+        "strut_material": "auto",
+        "tire_class": "auto",
+        "tire_safety_factor": 1.07,
+        "track_diameter_factor": 1.85,
+        "turnover_angle_limit_deg": 63.0,
+        "wheels_per_mlg_strut": 0
+      },
+      "mtow_kg": 358670.0,
+      "x_mlg_m": 39.13306250192163,
+      "x_nlg_m": 7.672000000000001
+    },
+    {
+      "aero_aft_lim_x_m": 38.343376153924055,
+      "aero_fwd_lim_x_m": 35.4548984674472,
+      "cg_height_estimate_m": 6.820000000000001,
+      "fuselage_diameter_m": 6.2,
+      "landing_gear_config": {
+        "mlg_body_gear_mtow_kg": 300000.0,
+        "n_mlg_struts": 0,
+        "n_nlg_wheels": 0,
+        "nlg_dual_wheel_mtow_kg": 15000.0,
+        "strut_material": "auto",
+        "tire_class": "auto",
+        "tire_safety_factor": 1.07,
+        "track_diameter_factor": 1.85,
+        "turnover_angle_limit_deg": 63.0,
+        "wheels_per_mlg_strut": 0
+      },
+      "mtow_kg": 358670.0,
+      "x_mlg_m": 39.13306250192163,
+      "x_nlg_m": 7.672000000000001
+    }
+  ],
+  "renderer_inputs": {
+    "airplane": {
+      "c_ref_m": 9.62825895492285,
+      "fuselage_diameter_m": 6.2,
+      "fuselage_end_x_m": 76.72,
+      "fuselage_start_x_m": 0.0,
+      "name": "ALAS Aircraft",
+      "x_mac_le_m": 34.3189330244602,
+      "x_wing_ac_m": 36.72599776319091,
+      "xyz_ref": [
+        36.26947779278297,
+        0.0,
+        0.0
+      ]
+    },
+    "cg": {
+      "aero_aft_lim_x_m": 38.343376153924055,
+      "aero_fwd_lim_x_m": 35.4548984674472,
+      "cg_range_pct_mac": 30.0,
+      "np_pct_mac": 51.79824356932352,
+      "physical_cg_m": [
+        36.26947779278297,
+        -0.0021177684222265587,
+        -1.6171506206827155
+      ],
+      "static_margin": 0.31539702773373346,
+      "target_static_margin": 0.1,
+      "x_neutral_point_m": 39.30620204941634,
+      "x_np_used_m": 39.30620204941634
+    },
+    "gear_sizing": {
+      "aero_aft_lim_x_m": 38.343376153924055,
+      "aero_fwd_lim_x_m": 35.4548984674472,
+      "cg_height_estimate_m": 6.820000000000001,
+      "fuselage_diameter_m": 6.2,
+      "landing_gear_config": {
+        "mlg_body_gear_mtow_kg": 300000.0,
+        "n_mlg_struts": 0,
+        "n_nlg_wheels": 0,
+        "nlg_dual_wheel_mtow_kg": 15000.0,
+        "strut_material": "auto",
+        "tire_class": "auto",
+        "tire_safety_factor": 1.07,
+        "track_diameter_factor": 1.85,
+        "turnover_angle_limit_deg": 63.0,
+        "wheels_per_mlg_strut": 0
+      },
+      "mtow_kg": 358670.0,
+      "x_mlg_m": 39.13306250192163,
+      "x_nlg_m": 7.672000000000001
+    },
+    "masses_kg": {
+      "fuel": 135256.8916457732,
+      "mtow": 358670.0,
+      "oew_components": {
+        "Furnishings": 35867.0,
+        "Fuselage": 32301.302354432533,
+        "Gear": 14346.800000000001,
+        "H-Stab": 2982.400820055463,
+        "Propulsion": 20628.610261637783,
+        "Systems": 39453.7,
+        "V-Stab": 937.7080122549855,
+        "Wing": 41913.58690584603
+      },
+      "payload": 34982.0
+    }
+  },
+  "report": {
+    "component_masses_kg": {
+      "Fuel": 135256.8916457732,
+      "Furnishings": 35867.0,
+      "Fuselage": 32301.302354432533,
+      "Gear": 14346.800000000001,
+      "H-Stab": 2982.400820055463,
+      "Payload": 34982.0,
+      "Propulsion": 20628.610261637783,
+      "Systems": 39453.7,
+      "V-Stab": 937.7080122549855,
+      "Wing": 41913.58690584603
+    },
+    "physical_cg_m": [
+      36.26947779278297,
+      -0.0021177684222265587,
+      -1.6171506206827155
+    ],
+    "static_margin": 0.31539702773373346,
+    "x_neutral_point_m": 39.30620204941634
+  },
+  "schema": "w61-mlg-count-evidence/v1"
+}

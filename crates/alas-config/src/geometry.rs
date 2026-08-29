@@ -27,7 +27,10 @@ mod wing;
 pub use empennage::EmpennageConfig;
 pub use engine::EngineConfig;
 pub use fuselage::FuselageConfig;
-pub use wing::WingConfig;
+pub use wing::{
+    InboardAerodynamicStation, MainWingPanel, MainWingStation, MainWingStationKind,
+    TransportPlanform, TransportPlanformError, WingConfig,
+};
 
 use serde::{Deserialize, Serialize};
 

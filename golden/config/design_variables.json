@@ -87,7 +87,7 @@
     {
       "decimals": 2,
       "default": 71.75,
-      "description": "Full wingspan (tip to tip)",
+      "description": "Full projected wingspan (tip to tip)",
       "lower": 60.0,
       "name": "span_m",
       "unit": "m",
