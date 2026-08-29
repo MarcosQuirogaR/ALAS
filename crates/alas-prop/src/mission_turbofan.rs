@@ -343,6 +343,50 @@ pub fn size_turbofan(
     }
 }
 
+/// Calibrate the installed engine to a declared sea-level-static thrust rating.
+///
+/// [`size_turbofan`] reproduces the historical SUAVE convention: its
+/// `design_thrust_total_n` input is the thrust required at the cruise design
+/// point. Published civil-engine thrust values instead normally identify the
+/// rated take-off thrust at sea-level-static ISA conditions. Passing that
+/// rating to the cruise-sizing convention makes the subsequent static replay
+/// exceed the declared rating.
+///
+/// This entry point preserves the component-network lapse physics but rescales
+/// its core-flow capacity so that throttle `1.0` reproduces the declared
+/// all-engine static rating. The resulting cruise thrust is therefore an
+/// off-design output of the cycle rather than a second interpretation of the
+/// same input. The scaling is exact because this model's dimensional thrust,
+/// fuel flow, and design mass flow are linear in the core-flow scale factor.
+///
+/// This remains a conceptual-design model: fixed pressure ratios, fixed
+/// turbine-inlet temperature, and the absence of compressor maps mean it does
+/// not reproduce a FADEC flat-rating schedule or installation/bleed losses.
+pub fn size_turbofan_to_static_rating(
+    inputs: &TurbofanInputs,
+    params: &VehicleBuilderParams,
+) -> TurbofanSizingResult {
+    let mut result = size_turbofan(inputs, params);
+    let predicted_static_thrust_n = result.sea_level_static_thrust_force_n;
+    let capacity_scale = inputs.design_thrust_total_n / predicted_static_thrust_n;
+
+    result.mass_flow_rate_design_kg_s *= capacity_scale;
+    result.compressor_nondimensional_massflow *= capacity_scale;
+    result.sea_level_static.thrust = evaluate_thrust(
+        &result.sea_level_static.freestream,
+        inputs,
+        params,
+        result.compressor_nondimensional_massflow,
+        SIZING_THROTTLE,
+    );
+    result.sea_level_static_thrust_force_n = result.sea_level_static.thrust.thrust_n;
+    result.sea_level_static_vehicle_mass_rate_kg_s =
+        result.sea_level_static.thrust.fuel_flow_rate_kg_s;
+    result.sealevel_static_thrust_n_per_engine =
+        result.sea_level_static_thrust_force_n / inputs.number_of_engines;
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -443,6 +487,54 @@ mod tests {
             replay.fuel_flow_rate_kg_s,
             sized.sea_level_static_vehicle_mass_rate_kg_s
         );
+    }
+
+    #[test]
+    fn static_rating_calibration_does_not_treat_takeoff_thrust_as_cruise_thrust() {
+        let inputs = ave_inputs();
+        let params = VehicleBuilderParams::default();
+        let sized = size_turbofan_to_static_rating(&inputs, &params);
+        let tolerance_n = inputs.design_thrust_total_n * 1.0e-12;
+
+        assert!(
+            (sized.sea_level_static_thrust_force_n - inputs.design_thrust_total_n).abs()
+                <= tolerance_n
+        );
+
+        let cruise_available = evaluate_thrust(
+            &sized.cruise.freestream,
+            &inputs,
+            &params,
+            sized.compressor_nondimensional_massflow,
+            1.0,
+        );
+        assert!(cruise_available.thrust_n > 0.0);
+        assert!(cruise_available.thrust_n < inputs.design_thrust_total_n);
+    }
+
+    #[test]
+    fn static_rating_calibration_retains_altitude_and_mach_lapse() {
+        let inputs = ave_inputs();
+        let params = VehicleBuilderParams::default();
+        let sized = size_turbofan_to_static_rating(&inputs, &params);
+        let static_available = evaluate_thrust(
+            &sized.sea_level_static.freestream,
+            &inputs,
+            &params,
+            sized.compressor_nondimensional_massflow,
+            1.0,
+        );
+        let cruise_available = evaluate_thrust(
+            &sized.cruise.freestream,
+            &inputs,
+            &params,
+            sized.compressor_nondimensional_massflow,
+            1.0,
+        );
+
+        assert!(cruise_available.thrust_n / static_available.thrust_n < 1.0);
+        assert!(cruise_available.fuel_flow_rate_kg_s.is_finite());
+        assert!(cruise_available.fuel_flow_rate_kg_s > 0.0);
     }
 
     // Throttle multiplies the dimensional thrust and leaves every specific

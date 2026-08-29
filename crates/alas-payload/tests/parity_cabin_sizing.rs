@@ -102,7 +102,7 @@ fn the_seat_count_auto_sizer_matches_python_on_every_shipped_mix() {
 
     for case in &fixture.simulations {
         let (config, plane, _dv) = config_and_plane(&case.input);
-        let g = CabinGeometry::new(
+        let g = CabinGeometry::new_reference_compatibility(
             &plane,
             &config.geometry,
             config.cabin.passenger.wall_thickness_m,

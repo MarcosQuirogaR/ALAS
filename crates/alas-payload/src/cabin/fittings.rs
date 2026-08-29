@@ -38,14 +38,18 @@ const PAX_PER_LAV: i64 = 45;
 /// carries whatever its size.
 const PAX_PER_GALLEY: i64 = 100;
 /// Sidewall bins sit over seats rather than the aisle and may hang lower.
-const SIDE_BIN_BOTTOM_M: f64 = 1.55;
+const SIDE_BIN_BOTTOM_M: f64 = 1.42;
 /// Centre bins sit over a seat block between aisles, retaining more clearance.
-const CENTER_BIN_BOTTOM_M: f64 = 1.72;
+const CENTER_BIN_BOTTOM_M: f64 = 1.55;
 /// Sidewall pivot-bin depth and height.
 const SIDE_BIN_DEPTH_M: f64 = 0.50;
 const SIDE_BIN_HEIGHT_M: f64 = 0.40;
 /// Centre hinge-bin height; width follows the centre seat block.
 const CENTER_BIN_HEIGHT_M: f64 = 0.34;
+/// Installation gap retained between a bin crown and the cabin lining.
+const BIN_CROWN_CLEARANCE_M: f64 = 0.12;
+/// Lateral installation gap between sidewall bins and the cabin lining.
+const BIN_SIDE_CLEARANCE_M: f64 = 0.04;
 /// Number of seat rows represented by one preview/layout bin segment.
 const BIN_ROWS_PER_SEGMENT: usize = 6;
 /// Dedicated wheelchair-stowage footprint.
@@ -233,25 +237,49 @@ pub(super) fn place_overhead_bins(g: &CabinGeometry, seats: &[DeckItem]) -> Vec<
             let x1 = last.x + last.length * 0.5;
             let x = 0.5 * (x0 + x1);
             let floor = g.floor_z(deck, x);
-            let ceiling = g.ceil_z(deck, x);
-            let available_height = ceiling - floor;
-            let side_height =
-                SIDE_BIN_HEIGHT_M.min((available_height - SIDE_BIN_BOTTOM_M).max(0.0));
+            let length = (x1 - x0).max(0.2);
+            let ceiling = [x0, x, x1]
+                .into_iter()
+                .map(|sample_x| g.ceil_z(deck, sample_x))
+                .fold(f64::INFINITY, f64::min);
+            let bin_top = ceiling - BIN_CROWN_CLEARANCE_M;
+            let side_height = SIDE_BIN_HEIGHT_M.min((bin_top - floor - SIDE_BIN_BOTTOM_M).max(0.0));
             if side_height < 0.18 {
                 continue;
             }
-            let side_z = floor + SIDE_BIN_BOTTOM_M + side_height * 0.5;
-            let crown_width = g.usable_width_at_z(x, side_z);
-            if crown_width > 2.0 * SIDE_BIN_DEPTH_M {
-                let side_y = (crown_width - SIDE_BIN_DEPTH_M) * 0.5;
+            let side_bottom = bin_top - side_height;
+            let side_z = side_bottom + side_height * 0.5;
+            let crown_width = [x0, x, x1]
+                .into_iter()
+                .flat_map(|sample_x| {
+                    [side_bottom, bin_top]
+                        .into_iter()
+                        .map(move |z| g.usable_width_at_z(sample_x, z))
+                })
+                .fold(f64::INFINITY, f64::min);
+            if crown_width > SIDE_BIN_DEPTH_M + 2.0 * BIN_SIDE_CLEARANCE_M {
+                let side_y = (crown_width - SIDE_BIN_DEPTH_M) * 0.5 - BIN_SIDE_CLEARANCE_M;
                 for sign in [-1.0, 1.0] {
+                    let y = sign * side_y;
+                    if g.check_rectangular_prism(
+                        x,
+                        length,
+                        y,
+                        SIDE_BIN_DEPTH_M,
+                        side_bottom,
+                        side_height,
+                    )
+                    .is_err()
+                    {
+                        continue;
+                    }
                     bins.push(DeckItem {
                         kind: ItemKind::OverheadBin,
                         deck: deck.name,
                         x,
-                        y: sign * side_y,
+                        y,
                         z: side_z,
-                        length: (x1 - x0).max(0.2),
+                        length,
                         width: SIDE_BIN_DEPTH_M,
                         mass: 0.0,
                         height: side_height,
@@ -272,15 +300,27 @@ pub(super) fn place_overhead_bins(g: &CabinGeometry, seats: &[DeckItem]) -> Vec<
                     .clamp(0.65, 1.80)
                     .min((crown_width - 2.0 * SIDE_BIN_DEPTH_M).max(0.0));
                 let center_height =
-                    CENTER_BIN_HEIGHT_M.min((available_height - CENTER_BIN_BOTTOM_M).max(0.0));
-                if center_width > 0.5 && center_height >= 0.16 {
+                    CENTER_BIN_HEIGHT_M.min((bin_top - floor - CENTER_BIN_BOTTOM_M).max(0.0));
+                let center_bottom = bin_top - center_height;
+                if center_width > 0.5
+                    && center_height >= 0.16
+                    && g.check_rectangular_prism(
+                        x,
+                        length,
+                        0.0,
+                        center_width,
+                        center_bottom,
+                        center_height,
+                    )
+                    .is_ok()
+                {
                     bins.push(DeckItem {
                         kind: ItemKind::OverheadBin,
                         deck: deck.name,
                         x,
                         y: 0.0,
-                        z: floor + CENTER_BIN_BOTTOM_M + center_height * 0.5,
-                        length: (x1 - x0).max(0.2),
+                        z: center_bottom + center_height * 0.5,
+                        length,
                         width: center_width,
                         mass: 0.0,
                         height: center_height,
@@ -491,20 +531,35 @@ pub(super) fn place_baggage(
         let leftover = (bag_mass + belly_cargo) - hold_used;
         if leftover > MIN_PLACED_MASS_KG {
             let xx = g.cabin_end_x - BULK_BLOCK_INSET_M;
-            items.push(DeckItem {
-                kind: ItemKind::Bag,
-                deck: LOWER,
-                x: xx,
-                y: 0.0,
-                z: g.item_z(low, xx, BULK_BLOCK_HEIGHT_M),
-                length: BULK_BLOCK_LEN_M,
-                width: g.usable_width(low, xx),
-                mass: leftover,
-                height: g.clamp_height(low, xx, BULK_BLOCK_HEIGHT_M),
-                label: "Bulk overflow".to_owned(),
-                meta: ItemMeta::BulkBag,
-            });
-            hold_used += leftover;
+            let height = g.clamp_height(low, xx, BULK_BLOCK_HEIGHT_M);
+            let bottom = g.floor_z(low, xx);
+            let width = if g.enforces_physical_envelope() {
+                [bottom, bottom + height]
+                    .into_iter()
+                    .map(|z| g.usable_width_at_z(xx, z))
+                    .fold(f64::INFINITY, f64::min)
+                    * low.width_factor
+            } else {
+                g.usable_width(low, xx)
+            };
+            if g.check_rectangular_prism(xx, BULK_BLOCK_LEN_M, 0.0, width, bottom, height)
+                .is_ok()
+            {
+                items.push(DeckItem {
+                    kind: ItemKind::Bag,
+                    deck: LOWER,
+                    x: xx,
+                    y: 0.0,
+                    z: bottom + height * 0.5,
+                    length: BULK_BLOCK_LEN_M,
+                    width,
+                    mass: leftover,
+                    height,
+                    label: "Bulk overflow".to_owned(),
+                    meta: ItemMeta::BulkBag,
+                });
+                hold_used += leftover;
+            }
         }
     }
 

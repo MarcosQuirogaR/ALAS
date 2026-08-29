@@ -34,6 +34,8 @@ use crate::numeric::floor_div;
 
 /// Lateral clearance between two containers standing side by side.
 const SLOT_GAP_M: f64 = 0.05;
+/// Numerical tolerance for a row whose dimensions close exactly.
+const SLOT_FIT_TOLERANCE_M: f64 = 1e-9;
 /// Longitudinal clearance between two rows in a lower hold.
 const LOWER_ROW_GAP_M: f64 = 0.08;
 /// The same on a main deck, where the handling system needs more room.
@@ -52,6 +54,18 @@ const MAX_ACROSS: i64 = 3;
 const MAX_LOWER_ROWS: usize = 40;
 /// The same for a main deck.
 const MAX_MAIN_ROWS: usize = 60;
+
+/// Equally spaced slot centres for one transverse row.
+fn transverse_centers(usable_width: f64, container_width: f64) -> Vec<f64> {
+    let count = (((usable_width + SLOT_GAP_M + SLOT_FIT_TOLERANCE_M)
+        / (container_width + SLOT_GAP_M))
+        .floor() as i64)
+        .clamp(0, MAX_ACROSS);
+    let pitch = container_width + SLOT_GAP_M;
+    (0..count)
+        .map(|index| (index as f64 - (count - 1) as f64 * 0.5) * pitch)
+        .collect()
+}
 
 /// Total-mass error the trim loop will correct for before shifting load.
 const MASS_CORRECTION_KG: f64 = 5.0;
@@ -104,21 +118,23 @@ impl<'g> CargoLoadManager<'g> {
     /// width or in height gets no positions at all.
     fn row(&mut self, sid_prefix: &str, deck: &DeckSpec, x: f64, uld: &'static UldType) -> usize {
         let usable = self.geometry.usable_width(deck, x);
-        if self.geometry.deck_height(deck, x) < uld.height {
-            return 0;
-        }
-        let n_across = floor_div(usable, uld.width) as i64;
-        if n_across <= 0 {
-            return 0;
-        }
-        let ys: Vec<f64> = match n_across.min(MAX_ACROSS) {
-            1 => vec![0.0],
-            2 => vec![
-                -(uld.width / 2.0 + SLOT_GAP_M),
-                uld.width / 2.0 + SLOT_GAP_M,
-            ],
-            _ => vec![-(uld.width + SLOT_GAP_M), 0.0, uld.width + SLOT_GAP_M],
+        let candidates = if self.geometry.enforces_physical_envelope() {
+            transverse_centers(usable, uld.width)
+        } else {
+            match (floor_div(usable, uld.width) as i64).clamp(0, MAX_ACROSS) {
+                0 => Vec::new(),
+                1 => vec![0.0],
+                2 => vec![
+                    -(uld.width / 2.0 + SLOT_GAP_M),
+                    uld.width / 2.0 + SLOT_GAP_M,
+                ],
+                _ => vec![-(uld.width + SLOT_GAP_M), 0.0, uld.width + SLOT_GAP_M],
+            }
         };
+        let ys: Vec<f64> = candidates
+            .into_iter()
+            .filter(|&y| self.uld_fits(deck, x, y, uld))
+            .collect();
         for (i, y) in ys.iter().enumerate() {
             self.slots.push(CargoSlot {
                 sid: format!("{sid_prefix}{}", i + 1),
@@ -130,6 +146,28 @@ impl<'g> CargoLoadManager<'g> {
             });
         }
         ys.len()
+    }
+
+    /// Whether the complete rigid ULD envelope stays inside both its deck and
+    /// the fuselage lining over the full longitudinal footprint.
+    fn uld_fits(&self, deck: &DeckSpec, x: f64, y: f64, uld: &UldType) -> bool {
+        if !self.geometry.enforces_physical_envelope() {
+            return self.geometry.deck_height(deck, x) >= uld.height;
+        }
+        let z_bottom = self.geometry.floor_z(deck, x);
+        let half_length = uld.length * 0.5;
+        let deck_clear = [x - half_length, x, x + half_length]
+            .into_iter()
+            .all(|sample_x| {
+                z_bottom >= self.geometry.floor_z(deck, sample_x)
+                    && z_bottom + uld.height <= self.geometry.ceil_z(deck, sample_x)
+            });
+
+        deck_clear
+            && self
+                .geometry
+                .check_rectangular_prism(x, uld.length, y, uld.width, z_bottom, uld.height)
+                .is_ok()
     }
 
     /// Fill the forward and aft lower holds with rows of one container type,
@@ -198,14 +236,17 @@ impl<'g> CargoLoadManager<'g> {
             }
         }
 
-        self.slots.push(CargoSlot {
-            sid: "BULK".to_owned(),
-            deck: g.lower_deck.name,
-            x: g.cabin_end_x - BULK_INSET_M,
-            y: 0.0,
-            uld: BULK,
-            payload: 0.0,
-        });
+        let bulk_x = g.cabin_end_x - BULK_INSET_M;
+        if self.uld_fits(&g.lower_deck, bulk_x, 0.0, BULK) {
+            self.slots.push(CargoSlot {
+                sid: "BULK".to_owned(),
+                deck: g.lower_deck.name,
+                x: bulk_x,
+                y: 0.0,
+                uld: BULK,
+                payload: 0.0,
+            });
+        }
     }
 
     /// Loaded mass, its longitudinal centre, and how many positions carry it.
@@ -480,5 +521,30 @@ impl<'g> CargoLoadManager<'g> {
         self.slots[from].payload -= amount;
         self.slots[to].payload += amount;
         true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn transverse_slots_include_exactly_one_gap_between_adjacent_containers() {
+        let container_width = 1.53;
+        let required_width = 2.0 * container_width + SLOT_GAP_M;
+        let centers = transverse_centers(required_width, container_width);
+
+        assert_eq!(centers.len(), 2);
+        assert!((centers[1] - centers[0] - container_width - SLOT_GAP_M).abs() < 1e-12);
+        assert!((centers[0] + centers[1]).abs() < 1e-12);
+    }
+
+    #[test]
+    fn transverse_slots_do_not_count_a_gap_outside_the_row() {
+        let container_width = 1.53;
+        let centers =
+            transverse_centers(2.0 * container_width + SLOT_GAP_M - 1e-6, container_width);
+
+        assert_eq!(centers, vec![0.0]);
     }
 }

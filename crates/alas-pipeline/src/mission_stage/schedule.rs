@@ -8,6 +8,9 @@ use alas_mission::MissionRequest;
 
 const CONTROL_POINTS: usize = 16;
 const METRES_PER_FOOT: f64 = 0.3048;
+const DISTANCE_TOLERANCE_M: f64 = 1.0e-6;
+const ALTITUDE_TOLERANCE_M: f64 = 1.0e-9;
+const PROFILE_SCALE_ITERATIONS: usize = 64;
 
 pub(super) fn build_schedule(request: &MissionRequest) -> Result<Vec<SegmentSpec>, String> {
     let p = &request.profile;
@@ -35,7 +38,6 @@ pub(super) fn build_schedule(request: &MissionRequest) -> Result<Vec<SegmentSpec
         (cruise_altitude * p.step_climb_1_altitude_fraction).max(first_level + 300.0);
     let temperature_deviation_k = request.departure_isa_deviation_c;
     let mut schedule = Vec::with_capacity(12);
-    let mut cruise_indices = Vec::with_capacity(3);
 
     schedule.push(climb(
         "takeoff",
@@ -59,7 +61,6 @@ pub(super) fn build_schedule(request: &MissionRequest) -> Result<Vec<SegmentSpec
         p.cruise_3_distance_fraction > 0.0,
     ];
     if active_cruise[0] {
-        cruise_indices.push((schedule.len(), p.cruise_1_distance_fraction));
         schedule.push(cruise(
             "cruise_step_1",
             None,
@@ -77,7 +78,6 @@ pub(super) fn build_schedule(request: &MissionRequest) -> Result<Vec<SegmentSpec
             p.step_climb_1_rate_m_s,
             temperature_deviation_k,
         ));
-        cruise_indices.push((schedule.len(), p.cruise_2_distance_fraction));
         schedule.push(cruise(
             "cruise_step_2",
             None,
@@ -95,7 +95,6 @@ pub(super) fn build_schedule(request: &MissionRequest) -> Result<Vec<SegmentSpec
             p.step_climb_2_rate_m_s,
             temperature_deviation_k,
         ));
-        cruise_indices.push((schedule.len(), p.cruise_3_distance_fraction));
         schedule.push(cruise(
             "cruise_step_3",
             None,
@@ -149,12 +148,17 @@ pub(super) fn build_schedule(request: &MissionRequest) -> Result<Vec<SegmentSpec
         temperature_deviation_k,
     ));
 
-    // Climb and descent legs already cover horizontal distance while meeting
-    // their altitude/rate constraints. Allocate cruise only what remains of
-    // the requested route, preserving the configured relative split between
-    // active cruise legs. The old schedule assigned every cruise fraction
-    // against the full route and therefore counted the non-cruise distance a
-    // second time.
+    // Preserve the full configured altitude profile when it fits. For a short
+    // route, reduce its altitude excursion continuously while keeping both
+    // airport elevations fixed. This is a profile adaptation, not a minimum
+    // route-length rule: climb/descent footprint depends on the selected
+    // altitudes, rates and speeds.
+    schedule = fit_altitude_profile(
+        &schedule,
+        request.departure_elevation_m,
+        request.arrival_elevation_m,
+        request.route_distance_m,
+    )?;
     let non_cruise_distance_m =
         schedule_horizontal_distance(&schedule, request.departure_elevation_m);
     if !non_cruise_distance_m.is_finite() {
@@ -162,14 +166,23 @@ pub(super) fn build_schedule(request: &MissionRequest) -> Result<Vec<SegmentSpec
             "mission profile produces a non-finite climb/descent horizontal distance".to_owned(),
         );
     }
-    if request.route_distance_m < non_cruise_distance_m {
+    if request.route_distance_m + DISTANCE_TOLERANCE_M < non_cruise_distance_m {
         return Err(format!(
-            "mission route distance {:.3} m is shorter than the mandatory climb/descent distance {:.3} m",
+            "mission route distance {:.3} m cannot accommodate the {:.3} m horizontal footprint required to connect the airport elevations",
             request.route_distance_m, non_cruise_distance_m
         ));
     }
-    let cruise_remainder_m = request.route_distance_m - non_cruise_distance_m;
-    let fraction_total: f64 = cruise_indices.iter().map(|(_, fraction)| *fraction).sum();
+    let cruise_remainder_m = (request.route_distance_m - non_cruise_distance_m).max(0.0);
+    let cruise_shares = [
+        ("cruise_step_1", p.cruise_1_distance_fraction),
+        ("cruise_step_2", p.cruise_2_distance_fraction),
+        ("cruise_step_3", p.cruise_3_distance_fraction),
+    ];
+    let fraction_total: f64 = cruise_shares
+        .iter()
+        .filter(|(tag, _)| schedule.iter().any(|segment| segment.tag == *tag))
+        .map(|(_, fraction)| *fraction)
+        .sum();
     if !fraction_total.is_finite() {
         return Err("mission cruise distance fractions sum to a non-finite value".to_owned());
     }
@@ -180,15 +193,18 @@ pub(super) fn build_schedule(request: &MissionRequest) -> Result<Vec<SegmentSpec
         );
     }
     if fraction_total > 0.0 {
-        for (index, fraction) in cruise_indices {
-            if let SegmentKind::Cruise { distance_m, .. } = &mut schedule[index].kind {
-                *distance_m = cruise_remainder_m * fraction / fraction_total;
+        for (tag, fraction) in cruise_shares {
+            if let Some(segment) = schedule.iter_mut().find(|segment| segment.tag == tag) {
+                if let SegmentKind::Cruise { distance_m, .. } = &mut segment.kind {
+                    *distance_m = cruise_remainder_m * fraction / fraction_total;
+                }
             }
         }
     }
 
     let flown_distance_m = schedule_horizontal_distance(&schedule, request.departure_elevation_m);
-    if !flown_distance_m.is_finite() || (flown_distance_m - request.route_distance_m).abs() > 1.0e-6
+    if !flown_distance_m.is_finite()
+        || (flown_distance_m - request.route_distance_m).abs() > DISTANCE_TOLERANCE_M
     {
         return Err(format!(
             "mission schedule does not close route distance: requested {:.6} m, scheduled {:.6} m",
@@ -197,6 +213,134 @@ pub(super) fn build_schedule(request: &MissionRequest) -> Result<Vec<SegmentSpec
     }
 
     Ok(schedule)
+}
+
+/// Return the highest-altitude version of `nominal` whose non-cruise legs fit
+/// the route. Intermediate climb altitudes scale from the departure elevation;
+/// descent altitudes scale from the arrival elevation. Thus a scale of zero is
+/// the irreducible direct elevation transition and a scale of one is the
+/// configured profile.
+fn fit_altitude_profile(
+    nominal: &[SegmentSpec],
+    departure_elevation_m: f64,
+    arrival_elevation_m: f64,
+    route_distance_m: f64,
+) -> Result<Vec<SegmentSpec>, String> {
+    let full_profile = scaled_altitude_profile(
+        nominal,
+        departure_elevation_m,
+        arrival_elevation_m,
+        1.0,
+    );
+    let full_distance_m =
+        schedule_horizontal_distance(&full_profile, departure_elevation_m);
+    if full_distance_m.is_finite() && full_distance_m <= route_distance_m + DISTANCE_TOLERANCE_M {
+        return Ok(full_profile);
+    }
+
+    let minimum_profile = scaled_altitude_profile(
+        nominal,
+        departure_elevation_m,
+        arrival_elevation_m,
+        0.0,
+    );
+    let minimum_distance_m =
+        schedule_horizontal_distance(&minimum_profile, departure_elevation_m);
+    if !minimum_distance_m.is_finite() {
+        return Err("mission profile produces a non-finite climb/descent horizontal distance".to_owned());
+    }
+    if minimum_distance_m > route_distance_m + DISTANCE_TOLERANCE_M {
+        return Ok(minimum_profile);
+    }
+
+    let mut lower_scale = 0.0;
+    let mut upper_scale = 1.0;
+    let mut best_profile = minimum_profile;
+    for _ in 0..PROFILE_SCALE_ITERATIONS {
+        let candidate_scale = 0.5 * (lower_scale + upper_scale);
+        let candidate = scaled_altitude_profile(
+            nominal,
+            departure_elevation_m,
+            arrival_elevation_m,
+            candidate_scale,
+        );
+        let candidate_distance_m =
+            schedule_horizontal_distance(&candidate, departure_elevation_m);
+        if candidate_distance_m.is_finite()
+            && candidate_distance_m <= route_distance_m + DISTANCE_TOLERANCE_M
+        {
+            lower_scale = candidate_scale;
+            best_profile = candidate;
+        } else {
+            upper_scale = candidate_scale;
+        }
+    }
+    Ok(best_profile)
+}
+
+fn scaled_altitude_profile(
+    nominal: &[SegmentSpec],
+    departure_elevation_m: f64,
+    arrival_elevation_m: f64,
+    scale: f64,
+) -> Vec<SegmentSpec> {
+    let mut profile = Vec::with_capacity(nominal.len());
+    let mut current_altitude_m = departure_elevation_m;
+
+    for segment in nominal {
+        let (nominal_end_m, vertical_rate_m_s, is_final) = match segment.kind {
+            SegmentKind::Climb {
+                altitude_end_m,
+                climb_rate_m_s,
+                ..
+            } => (altitude_end_m, climb_rate_m_s.abs(), false),
+            SegmentKind::Descent {
+                altitude_end_m,
+                descent_rate_m_s,
+                ..
+            } => (
+                altitude_end_m,
+                descent_rate_m_s.abs(),
+                segment.tag == "final_landing",
+            ),
+            SegmentKind::Cruise { .. } => {
+                profile.push(segment.clone());
+                continue;
+            }
+        };
+        let anchor_m = if matches!(segment.kind, SegmentKind::Climb { .. }) {
+            departure_elevation_m
+        } else {
+            arrival_elevation_m
+        };
+        let altitude_end_m = if is_final {
+            arrival_elevation_m
+        } else {
+            anchor_m + scale * (nominal_end_m - anchor_m)
+        };
+        let altitude_change_m = altitude_end_m - current_altitude_m;
+        if altitude_change_m.abs() <= ALTITUDE_TOLERANCE_M {
+            continue;
+        }
+
+        let mut adapted = segment.clone();
+        adapted.kind = if altitude_change_m > 0.0 {
+            SegmentKind::Climb {
+                altitude_start_m: Some(current_altitude_m),
+                altitude_end_m,
+                climb_rate_m_s: vertical_rate_m_s,
+            }
+        } else {
+            SegmentKind::Descent {
+                altitude_start_m: Some(current_altitude_m),
+                altitude_end_m,
+                descent_rate_m_s: vertical_rate_m_s,
+            }
+        };
+        profile.push(adapted);
+        current_altitude_m = altitude_end_m;
+    }
+    profile
 }
 
 /// Horizontal distance covered by the profile legs in `schedule`.

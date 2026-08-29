@@ -359,11 +359,19 @@ fn cabin_geometry(
         AircraftBuilder::new(Some(config.geometry.clone()))
     };
     let plane = builder.build(design_vector, false)?;
-    Ok(CabinGeometry::new(
-        &plane,
-        &builder.geometry,
-        config.cabin.passenger.wall_thickness_m,
-    )?)
+    Ok(if semantics.uses_reference_geometry() {
+        CabinGeometry::new_reference_compatibility(
+            &plane,
+            &builder.geometry,
+            config.cabin.passenger.wall_thickness_m,
+        )?
+    } else {
+        CabinGeometry::new(
+            &plane,
+            &builder.geometry,
+            config.cabin.passenger.wall_thickness_m,
+        )?
+    })
 }
 
 // These are assertions over fixtures constructed in the test itself; a failed

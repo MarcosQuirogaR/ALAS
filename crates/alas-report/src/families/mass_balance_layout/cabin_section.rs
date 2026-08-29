@@ -190,24 +190,32 @@ fn nearest_seat_row<'a>(layout: &'a PayloadLayout, deck: &str, x: f64) -> Option
     layout
         .items
         .iter()
-        .filter(|item| item.kind == ItemKind::SeatRow && item.deck == deck)
+        .filter(|item| {
+            item.kind == ItemKind::SeatRow && item.deck == deck && intersects_station(item, x)
+        })
         .min_by(|a, b| (a.x - x).abs().total_cmp(&(b.x - x).abs()))
 }
 
+fn intersects_station(item: &DeckItem, station: f64) -> bool {
+    (station - item.x).abs() <= item.length.max(0.0) * 0.5 + 1e-9
+}
+
+fn envelope_half_width(cabin: &CabinGeometry, station: f64, z0: f64, z1: f64) -> f64 {
+    0.5 * cabin
+        .usable_width_at_z(station, z0)
+        .min(cabin.usable_width_at_z(station, z1))
+}
+
 fn draw_bins(scene: &mut Scene, map: SectionMap, layout: &PayloadLayout, deck: &DeckSpec, x: f64) {
-    let mut bins: Vec<&DeckItem> = layout
+    let bins: Vec<&DeckItem> = layout
         .items
         .iter()
-        .filter(|item| item.kind == ItemKind::OverheadBin && item.deck == deck.name)
+        .filter(|item| {
+            item.kind == ItemKind::OverheadBin
+                && item.deck == deck.name
+                && intersects_station(item, x)
+        })
         .collect();
-    if bins.is_empty() {
-        return;
-    }
-    let nearest = bins
-        .iter()
-        .map(|item| (item.x - x).abs())
-        .fold(f64::INFINITY, f64::min);
-    bins.retain(|item| (item.x - x).abs() <= nearest + 1e-6);
     for bin in bins {
         let kind = match &bin.meta {
             ItemMeta::OverheadBin(meta) => meta.bin_type,
@@ -252,7 +260,7 @@ fn draw_deck(
     label_color: Color,
 ) {
     let floor = cabin.floor_z(deck, station);
-    let half_width = cabin.usable_width(deck, station) * 0.5;
+    let half_width = envelope_half_width(cabin, station, floor - 0.06, floor + 0.06);
     rect_physical(
         scene,
         map,
@@ -300,34 +308,47 @@ fn draw_hold(
     let deck = &cabin.lower_deck;
     let floor = cabin.floor_z(deck, station);
     let ceiling = cabin.ceil_z(deck, station);
-    let half_width = cabin.usable_width(deck, station) * 0.5;
-    rect_physical(
+    let floor_half_width = cabin.usable_width_at_z(station, floor) * 0.5;
+    let ceiling_half_width = cabin.usable_width_at_z(station, ceiling) * 0.5;
+    polygon(
         scene,
-        map,
-        -half_width,
-        half_width,
-        floor,
-        ceiling,
+        vec![
+            map.point(-floor_half_width, floor),
+            map.point(floor_half_width, floor),
+            map.point(ceiling_half_width, ceiling),
+            map.point(-ceiling_half_width, ceiling),
+        ],
         Color::rgba(127, 140, 141, 42),
         Color::from_hex("#7f8c8d"),
-        2.0,
     );
-    let mut cargo: Vec<&DeckItem> = layout
+    let cargo: Vec<&DeckItem> = layout
         .items
         .iter()
-        .filter(|item| item.deck == LOWER && matches!(item.kind, ItemKind::Bag | ItemKind::Uld))
+        .filter(|item| {
+            item.deck == LOWER
+                && matches!(item.kind, ItemKind::Bag | ItemKind::Uld)
+                && intersects_station(item, station)
+        })
         .collect();
-    cargo.sort_by(|a, b| (a.x - station).abs().total_cmp(&(b.x - station).abs()));
-    for item in cargo.into_iter().take(3) {
-        let half = item.width.min(half_width * 0.95) * 0.5;
-        let height = item.height.min((ceiling - floor) * 0.82);
+    for item in cargo {
+        let z0 = (item.z - item.height * 0.5).max(floor);
+        let z1 = (item.z + item.height * 0.5).min(ceiling);
+        if z1 <= z0 {
+            continue;
+        }
+        let envelope_half = envelope_half_width(cabin, station, z0, z1);
+        let y0 = (item.y - item.width * 0.5).max(-envelope_half);
+        let y1 = (item.y + item.width * 0.5).min(envelope_half);
+        if y1 <= y0 {
+            continue;
+        }
         rect_physical(
             scene,
             map,
-            (item.y - half).max(-half_width),
-            (item.y + half).min(half_width),
-            floor + 0.05,
-            floor + height,
+            y0,
+            y1,
+            z0,
+            z1,
             Color::from_hex("#9b9bd0"),
             Color::from_hex("#5b5b91"),
             2.0,
@@ -458,5 +479,65 @@ mod tests {
             .elements
             .iter()
             .any(|element| matches!(element, SceneElement::Polygon { .. })));
+    }
+
+    #[test]
+    fn section_does_not_draw_non_intersecting_bins_or_cargo() {
+        let config = AlasConfig::default();
+        let plane = AircraftBuilder::new(Some(config.geometry.clone()))
+            .build(None, true)
+            .expect("default aircraft builds");
+        let mut layout = build_payload_layout(&plane, &config, 0.0, 0.0)
+            .expect("default passenger layout builds");
+        let cabin = CabinGeometry::new(
+            &plane,
+            &config.geometry,
+            config.cabin.passenger.wall_thickness_m,
+        )
+        .expect("default cabin geometry builds");
+        let midpoint = 0.5 * (cabin.cabin_start_x + cabin.cabin_end_x);
+        let station = layout
+            .items
+            .iter()
+            .filter(|item| item.kind == ItemKind::SeatRow)
+            .min_by(|a, b| (a.x - midpoint).abs().total_cmp(&(b.x - midpoint).abs()))
+            .map_or(midpoint, |item| item.x);
+
+        for item in &mut layout.items {
+            if item.kind == ItemKind::OverheadBin
+                || matches!(item.kind, ItemKind::Bag | ItemKind::Uld)
+            {
+                item.x = station + 10.0;
+                item.length = 0.1;
+            }
+        }
+        let scene = figure_cabin_cross_section(&layout, &plane, &config, Some("dark"));
+        let bin_colors = [Color::from_hex("#566573"), Color::from_hex("#7b8790")];
+        let cargo_color = Color::from_hex("#9b9bd0");
+
+        assert!(!scene.elements.iter().any(|element| matches!(
+            element,
+            SceneElement::Polygon { fill: Some(fill), .. } if bin_colors.contains(&fill.color)
+        )));
+        assert!(!scene.elements.iter().any(|element| matches!(
+            element,
+            SceneElement::Rect { fill: Some(fill), .. } if fill.color == cargo_color
+        )));
+    }
+
+    #[test]
+    fn longitudinal_span_intersection_includes_edges_only() {
+        let config = AlasConfig::default();
+        let plane = AircraftBuilder::new(Some(config.geometry.clone()))
+            .build(None, true)
+            .expect("default aircraft builds");
+        let layout = build_payload_layout(&plane, &config, 0.0, 0.0)
+            .expect("default passenger layout builds");
+        let item = layout.items.first().expect("layout has physical items");
+        let half_length = item.length.max(0.0) * 0.5;
+
+        assert!(intersects_station(item, item.x));
+        assert!(intersects_station(item, item.x + half_length));
+        assert!(!intersects_station(item, item.x + half_length + 1e-6));
     }
 }

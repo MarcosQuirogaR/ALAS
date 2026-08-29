@@ -23,7 +23,9 @@ use alas_mission::segments::MissionAnalyses;
 #[cfg(test)]
 use alas_mission::segments::SegmentKind;
 use alas_mission::{build_mission_request, Mission, MissionResult};
-use alas_prop::mission_turbofan::{size_turbofan, TurbofanInputs, VehicleBuilderParams};
+use alas_prop::mission_turbofan::{
+    size_turbofan, size_turbofan_to_static_rating, TurbofanInputs, VehicleBuilderParams,
+};
 
 use crate::feasibility::plan_fuel_loading;
 use crate::full_analysis::AnalysisReport;
@@ -131,7 +133,15 @@ fn build_analyses_with_mode(
         // the old cruise-required sizing used by the frozen fixture.
         design_thrust_total_n,
     };
-    let sized_engine = size_turbofan(&engine_inputs, &VehicleBuilderParams::default());
+    let turbofan_params = VehicleBuilderParams::default();
+    let sized_engine = match reference_mode {
+        MissionReferenceMode::Product => {
+            size_turbofan_to_static_rating(&engine_inputs, &turbofan_params)
+        }
+        MissionReferenceMode::ReferenceCompatibility => {
+            size_turbofan(&engine_inputs, &turbofan_params)
+        }
+    };
 
     let fuel_loading = plan_fuel_loading(config, &report.design, report);
 
@@ -167,7 +177,7 @@ fn build_analyses_with_mode(
         network_count: 1,
         surrogate,
         turbofan: engine_inputs,
-        turbofan_params: VehicleBuilderParams::default(),
+        turbofan_params,
         compressor_nondimensional_massflow: sized_engine.compressor_nondimensional_massflow,
     })
 }
