@@ -1,0 +1,36 @@
+{
+  "find_tool_dir": {
+    "": null,
+    "   ": null,
+    "C:\\Users\\Marcos\\AppData\\Local\\Temp\\tmpke9c0tt3\\data": "data",
+    "data/airports.json": "data/airports.json",
+    "external tools/MSES": "external tools/MSES",
+    "external tools/suave_runner": "external tools/suave_runner",
+    "nonexistent/folder/here": null
+  },
+  "resolve_data_path": {
+    "": ".",
+    "   ": "   ",
+    "C:\\Users\\Marcos\\AppData\\Local\\Temp\\tmpke9c0tt3\\data": "data",
+    "data/airports.json": "data/airports.json",
+    "external tools/MSES": "external tools/MSES",
+    "external tools/suave_runner": "external tools/suave_runner",
+    "nonexistent/folder/here": "nonexistent/folder/here"
+  },
+  "resolve_tool_dir": {
+    "": ".",
+    "   ": ".",
+    "C:\\Users\\Marcos\\AppData\\Local\\Temp\\tmpke9c0tt3\\data": "data",
+    "data/airports.json": "data/airports.json",
+    "external tools/MSES": "external tools/MSES",
+    "external tools/suave_runner": "external tools/suave_runner",
+    "nonexistent/folder/here": "nonexistent/folder/here"
+  },
+  "resolve_tool_exe": {
+    "": null,
+    "   ": null,
+    "external tools/MSES": null,
+    "external tools/MSES/mses.exe": "external tools/MSES/mses.exe",
+    "nonexistent/file.exe": null
+  }
+}

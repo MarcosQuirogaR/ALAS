@@ -13,22 +13,22 @@
 //! the optimizer evaluates, not only on the final design, and its answer is
 //! the one every caller keeps.
 //!
-//! # What is here so far
+//! # What is here
 //!
 //! [`geometry`] samples the built fuselage into one cabin frame that every
 //! other part of the interior reads, so that the seating and the hold cannot
 //! disagree about where the floor is or how wide it is. [`layout`] is the item
-//! and summary vocabulary both layout engines produce. [`oew`] is the
+//! and summary vocabulary both layout engines produce. [`cabin`] is the
+//! passenger engine -- seats, monuments, CS-25 exits and checked baggage --
+//! and [`cargo`] is the freighter one, containers and the trim solver that
+//! distributes a load across them. [`build`] is the dispatcher every consumer
+//! actually calls, together with the fast auto-sizer that turns a class mix
+//! into seat counts and the named cabin presets built on it. [`oew`] is the
 //! empty-aircraft mass and balance the cargo trim solves against.
-//!
-//! The two layout engines themselves -- the passenger cabin
-//! (`alas/physics/cabin_layout.py`) and the ULD cargo loader
-//! (`alas/physics/cargo_loader.py`) -- and the dispatcher and preset sizing
-//! that sit on top of them are not translated yet. `docs/PORTING.md` carries
-//! the row. `golden/payload/layout.json` already records what the reference
-//! produces for all three, including the full item sequence of every case, so
-//! the engines land against a fixture rather than against a description.
 
+pub mod build;
+pub mod cabin;
+pub mod cargo;
 pub mod geometry;
 pub mod layout;
 pub mod oew;
@@ -36,9 +36,18 @@ pub mod oew;
 // Reproduces CPython's and NumPy's own numerics, which decide whole seats and
 // whole containers rather than last digits. Private until a second crate needs
 // it, at which point it belongs in `alas-math` rather than copied.
-#[allow(dead_code)]
 mod numeric;
 
+pub use build::{
+    apply_cabin_preset, build_payload_layout, build_payload_layout_reference_compatibility,
+    simulate_passenger_counts, simulate_passenger_counts_for_seat_mix,
+};
+pub use build::{CabinPresetError, PassengerCounts};
+pub use cabin::{build_passenger_layout, build_passenger_layout_reference_compatibility};
+pub use cargo::{
+    build_cargo_layout, build_cargo_layout_reference_compatibility, CargoLoadManager, CargoSlot,
+    UldType,
+};
 pub use geometry::{CabinGeometry, CabinGeometryError, DeckSpec};
 pub use layout::{DeckItem, ItemKind, ItemMeta, LayoutSummary, Mode, PayloadLayout};
 pub use oew::oew_and_cg;

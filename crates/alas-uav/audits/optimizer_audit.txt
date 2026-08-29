@@ -1,0 +1,27 @@
+ALAS fixed-wing UAV mixed optimizer audit
+command: cargo run -p alas-uav --example optimizer_audit
+
+The accepted case uses only the synthetic, explicitly evidence-complete
+catalogue in examples/data/optimizer_audit_catalog.json. Its numbers are a
+deterministic physics-contract exercise, not claims about retail hardware.
+
+case: synthetic evidence-complete design
+verified_feasible: true
+seed: 1592642302
+evaluation: 839
+takeoff_mass_kg: 5.403272
+mission_energy_wh: 180.729167
+propulsive_efficiency: 0.230330
+wing_area_m2: 0.902099
+wing_span_m: 2.780087
+fuselage_length_m: 1.835805
+findings: 0
+
+The rejected case uses the embedded RC Innovations seed unchanged. Missing
+ratings, component families, and performance maps remain missing; the search
+does not replace them with plausible values.
+
+case: embedded retail seed without inferred data
+verified_feasible: false
+evaluated_candidates: 16
+rejection: MissingData candidates=16

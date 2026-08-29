@@ -1,0 +1,58 @@
+{
+  "figures": {
+    "structures_loads": {
+      "axis_labels": [
+        "Spanwise position Y [m]",
+        "Bending stiffness EI [GN.m^2]",
+        "Bending moment M [MN.m]",
+        "Deflection delta [m]"
+      ]
+    },
+    "structures_modes": {
+      "axis_labels": [
+        "Mode",
+        "Frequency [Hz]",
+        "Spanwise position Y [m]",
+        "Normalized mode shape"
+      ]
+    },
+    "structures_patran": {
+      "external_result": true,
+      "ordered_images": true
+    },
+    "structures_sizing": {
+      "axis_labels": [
+        "Spanwise position Y [m]",
+        "Chordwise position X [m]",
+        "Estimate",
+        "Mass [kg]"
+      ],
+      "bars": 2
+    },
+    "structures_stress": {
+      "axis_labels": [
+        "Spanwise position Y [m]",
+        "Margin of safety [-]"
+      ]
+    },
+    "structures_vibration": {
+      "axis_labels": [
+        "Frequency [Hz]",
+        "|H(f)| [m/N]",
+        "Monitor grid",
+        "RMS displacement [m]"
+      ]
+    }
+  },
+  "reference": {
+    "git_commit": "7d1555c1f4db5110cf6cd187c156718e1a033b50",
+    "note": "Axis and external-result contracts are source-derived from alas.reporting.visualization; delta and squared units are normalized to ASCII. The explicit missing-SOL-103 reason is native because the reference exposes only an unavailable panel."
+  },
+  "schema": "reference-render-w38/v1",
+  "unavailable_reasons": {
+    "modes_nastran": "NASTRAN SOL 103 was not run for this design",
+    "patran": "Not run for this design",
+    "structural": "Structural analysis was not run for this design",
+    "vibration": "Requires a real NASTRAN sine/random-vibration solve"
+  }
+}

@@ -1,0 +1,440 @@
+{
+  "cases": [
+    {
+      "bypass_ratio": 10.0,
+      "compressor_nondimensional_massflow": 188.1823994574022,
+      "cruise": {
+        "combustor": {
+          "fuel_to_air_ratio": 0.019725371432445418,
+          "stagnation_enthalpy": 1682444.145014257,
+          "stagnation_pressure": 1751518.0355084504,
+          "stagnation_temperature": 1670.0
+        },
+        "core_nozzle": {
+          "area_ratio": 0.56403589888186,
+          "density": 0.27751967031368086,
+          "mach_number": 1.0,
+          "stagnation_enthalpy": 760893.0528159586,
+          "stagnation_pressure": 94894.91965902603,
+          "stagnation_temperature": 755.2651313674862,
+          "static_enthalpy": 633671.8840652724,
+          "static_pressure": 50106.71423030632,
+          "static_temperature": 628.9849499758802,
+          "velocity": 504.4227765489703
+        },
+        "fan": {
+          "stagnation_enthalpy": 277758.0948688889,
+          "stagnation_pressure": 44556.16055240796,
+          "stagnation_temperature": 275.7036658872938,
+          "work_done": 30041.3094957188
+        },
+        "fan_nozzle": {
+          "area_ratio": 0.7321234487542441,
+          "density": 0.35435505883017326,
+          "mach_number": 1.0,
+          "stagnation_enthalpy": 276999.3467934485,
+          "stagnation_pressure": 44110.598946883874,
+          "stagnation_temperature": 274.95052986804444,
+          "static_enthalpy": 230685.11049989823,
+          "static_pressure": 23291.41732666963,
+          "static_temperature": 228.97885536138585,
+          "velocity": 304.3492608617615
+        },
+        "freestream": {
+          "Cp": 1007.4515838408724,
+          "R": 287.0528742,
+          "altitude": 11887.2,
+          "density": 0.31751336549163667,
+          "dynamic_viscosity": 1.4216130796413357e-05,
+          "gravity": 9.770157091532289,
+          "isentropic_expansion_factor": 1.4015364164005784,
+          "mach_number": 0.84,
+          "pressure": 19746.15784954335,
+          "speed_of_sound": 295.0694956677189,
+          "stagnation_pressure": 31355.4965182322,
+          "stagnation_temperature": 247.3410826355318,
+          "temperature": 216.65,
+          "velocity": 247.85837636088388
+        },
+        "high_pressure_compressor": {
+          "stagnation_enthalpy": 875531.3564554423,
+          "stagnation_pressure": 1843703.1952720531,
+          "stagnation_temperature": 869.0555164125217,
+          "work_done": 613179.4392222352
+        },
+        "high_pressure_turbine": {
+          "stagnation_enthalpy": 1075052.0095596937,
+          "stagnation_pressure": 337872.678013738,
+          "stagnation_temperature": 1067.1004213037188
+        },
+        "inlet_nozzle": {
+          "mach_number": 0.8202326916311694,
+          "stagnation_enthalpy": 247716.7853731701,
+          "stagnation_pressure": 30728.386587867557,
+          "stagnation_temperature": 245.88455598904207,
+          "static_enthalpy": 218238.60514294036,
+          "static_temperature": 216.62441018844166,
+          "velocity": 242.80930884226717
+        },
+        "low_pressure_compressor": {
+          "stagnation_enthalpy": 262351.917233207,
+          "stagnation_pressure": 36874.063905441064,
+          "stagnation_temperature": 260.4114395582166,
+          "work_done": 14635.131860036869
+        },
+        "low_pressure_turbine": {
+          "stagnation_enthalpy": 762977.2676205176,
+          "stagnation_pressure": 95853.4542010364,
+          "stagnation_temperature": 757.3339303430291
+        },
+        "ram": {
+          "gas_specific_constant": 287.0528742,
+          "isentropic_expansion_factor": 1.4015364164005784,
+          "specific_heat_at_constant_pressure": 1007.4515838408724,
+          "stagnation_pressure": 31355.4965182322,
+          "stagnation_temperature": 247.3410826355318
+        },
+        "thrust": {
+          "core_mass_flow_rate": 0.0,
+          "fuel_flow_rate": 0.0,
+          "non_dimensional_thrust": 0.4215590391751747,
+          "power": 0.0,
+          "specific_impulse": 7099.841755245033,
+          "thrust": 0.0,
+          "thrust_specific_fuel_consumption": 0.5070535547275384
+        }
+      },
+      "cruise_altitude_m": 11887.2,
+      "cruise_mach": 0.84,
+      "design_thrust_n": 197136.97010079,
+      "fan_pressure_ratio": 1.45,
+      "label": "AVE",
+      "mass_flow_rate_design_kg_s": 72.03817072302142,
+      "n_engines": 2.0,
+      "overall_pressure_ratio": 60.0,
+      "sea_level_static": {
+        "combustor": {
+          "fuel_to_air_ratio": 0.016180341720118223,
+          "stagnation_enthalpy": 1677957.9017308059,
+          "stagnation_pressure": 5775525.0,
+          "stagnation_temperature": 1670.0
+        },
+        "core_nozzle": {
+          "area_ratio": 0.02085351686912197,
+          "density": 0.637232807701219,
+          "mach_number": 0.6648744944863867,
+          "stagnation_enthalpy": 605897.9894556099,
+          "stagnation_pressure": 136322.87154257402,
+          "stagnation_temperature": 603.0244509395321,
+          "static_enthalpy": 556571.7704503911,
+          "static_pressure": 101325.0,
+          "static_temperature": 553.9321670069339,
+          "velocity": 314.08985658635595
+        },
+        "fan": {
+          "stagnation_enthalpy": 322693.6191571543,
+          "stagnation_pressure": 146921.25,
+          "stagnation_temperature": 321.16320882459354,
+          "work_done": 34867.95446380839
+        },
+        "fan_nozzle": {
+          "area_ratio": 0.013576833468882341,
+          "density": 1.2222247213727335,
+          "mach_number": 0.737384528981044,
+          "stagnation_enthalpy": 321813.0142885269,
+          "stagnation_pressure": 145452.0375,
+          "stagnation_temperature": 320.28678032237025,
+          "static_enthalpy": 290180.50917265087,
+          "static_pressure": 101325.0,
+          "static_temperature": 288.80429587563714,
+          "velocity": 251.52536697468918
+        },
+        "freestream": {
+          "Cp": 1004.7652106172491,
+          "R": 287.0528742,
+          "altitude": 0.0,
+          "density": 1.2250000002007604,
+          "dynamic_viscosity": 1.789380278077583e-05,
+          "gravity": 9.80665,
+          "isentropic_expansion_factor": 1.4009657721330457,
+          "mach_number": 0.01,
+          "pressure": 101325.0,
+          "speed_of_sound": 340.29399051558636,
+          "stagnation_pressure": 101332.0978202859,
+          "stagnation_temperature": 288.155776914362,
+          "temperature": 288.15,
+          "velocity": 3.4029399051558635
+        },
+        "high_pressure_compressor": {
+          "stagnation_enthalpy": 1015990.3161812918,
+          "stagnation_pressure": 6079500.0,
+          "stagnation_temperature": 1011.1718692540588,
+          "work_done": 711177.6322028742
+        },
+        "high_pressure_turbine": {
+          "stagnation_enthalpy": 971034.9126151371,
+          "stagnation_pressure": 772550.4976431882,
+          "stagnation_temperature": 966.4296716828096
+        },
+        "inlet_nozzle": {
+          "mach_number": 0.0,
+          "stagnation_enthalpy": 287825.6646933459,
+          "stagnation_pressure": 101325.0,
+          "stagnation_temperature": 286.4606195078434,
+          "static_enthalpy": 287825.6646933459,
+          "static_temperature": 286.4606195078434,
+          "velocity": 0.0
+        },
+        "low_pressure_compressor": {
+          "stagnation_enthalpy": 304812.6839784177,
+          "stagnation_pressure": 121590.0,
+          "stagnation_temperature": 303.3670759670955,
+          "work_done": 16987.019285071816
+        },
+        "low_pressure_turbine": {
+          "stagnation_enthalpy": 607555.9606864682,
+          "stagnation_pressure": 137699.87024502427,
+          "stagnation_temperature": 604.6745590576662
+        },
+        "ram": {
+          "gas_specific_constant": 287.0528742,
+          "isentropic_expansion_factor": 1.4009657721330457,
+          "specific_heat_at_constant_pressure": 1004.7652106172491,
+          "stagnation_pressure": 101332.0978202859,
+          "stagnation_temperature": 288.155776914362
+        },
+        "thrust": {
+          "core_mass_flow_rate": 220.08241196352944,
+          "fuel_flow_rate": 7.122017264315483,
+          "non_dimensional_thrust": 0.7458553927407545,
+          "power": 4181876.579788164,
+          "specific_impulse": 17595.160548571585,
+          "thrust": 1228901.096211578,
+          "thrust_specific_fuel_consumption": 0.20460171363950733
+        }
+      },
+      "sea_level_static_thrust_force_n": 1228901.096211578,
+      "sea_level_static_vehicle_mass_rate_kg_s": 7.122017264315483,
+      "sealevel_static_thrust_n_per_engine": 614450.548105789,
+      "turbine_inlet_temperature_k": 1670.0
+    },
+    {
+      "bypass_ratio": 11.0,
+      "compressor_nondimensional_massflow": 37.15239204533083,
+      "cruise": {
+        "combustor": {
+          "fuel_to_air_ratio": 0.022057998616159567,
+          "stagnation_enthalpy": 1662295.1133374395,
+          "stagnation_pressure": 1209920.5943460704,
+          "stagnation_temperature": 1650.0
+        },
+        "core_nozzle": {
+          "area_ratio": 0.5394896612847829,
+          "density": 0.27874072004297207,
+          "mach_number": 1.0,
+          "stagnation_enthalpy": 860846.3270226719,
+          "stagnation_pressure": 107832.98342526799,
+          "stagnation_temperature": 854.4791043364354,
+          "static_enthalpy": 716912.9904870717,
+          "static_pressure": 56938.31139228257,
+          "static_temperature": 711.6103661814368,
+          "velocity": 536.532080188315
+        },
+        "fan": {
+          "stagnation_enthalpy": 270074.8917960869,
+          "stagnation_pressure": 44576.02189696048,
+          "stagnation_temperature": 268.0772913835087,
+          "work_done": 26592.381609142176
+        },
+        "fan_nozzle": {
+          "area_ratio": 0.737366740962645,
+          "density": 0.36459835008578695,
+          "mach_number": 1.0,
+          "stagnation_enthalpy": 269337.1318237923,
+          "stagnation_pressure": 44130.26167799088,
+          "stagnation_temperature": 267.34498822956266,
+          "static_enthalpy": 224304.0163658852,
+          "static_pressure": 23301.79970385174,
+          "static_temperature": 222.64495878872344,
+          "velocity": 300.11036455913046
+        },
+        "freestream": {
+          "Cp": 1007.4515838408724,
+          "R": 287.0528742,
+          "altitude": 11278.0,
+          "density": 0.3494062969352107,
+          "dynamic_viscosity": 1.4216130796413357e-05,
+          "gravity": 9.772022338945137,
+          "isentropic_expansion_factor": 1.4015364164005784,
+          "mach_number": 0.78,
+          "pressure": 21729.579421716713,
+          "speed_of_sound": 295.0694956677189,
+          "stagnation_pressure": 32489.811878251083,
+          "stagnation_temperature": 243.113229415331,
+          "temperature": 216.65,
+          "velocity": 230.15420662082076
+        },
+        "high_pressure_compressor": {
+          "stagnation_enthalpy": 759516.2671845729,
+          "stagnation_pressure": 1273600.6256274427,
+          "stagnation_temperature": 753.8985290875664,
+          "work_done": 501648.78652891057
+        },
+        "high_pressure_turbine": {
+          "stagnation_enthalpy": 1166515.0825809862,
+          "stagnation_pressure": 329312.83961389394,
+          "stagnation_temperature": 1157.886990592332
+        },
+        "inlet_nozzle": {
+          "mach_number": 0.7590406043647216,
+          "stagnation_enthalpy": 243482.51018694474,
+          "stagnation_pressure": 31840.015640686062,
+          "stagnation_temperature": 241.68159948558178,
+          "static_enthalpy": 218238.60514294042,
+          "static_temperature": 216.62441018844171,
+          "velocity": 224.69492670732163
+        },
+        "low_pressure_compressor": {
+          "stagnation_enthalpy": 257867.4806556623,
+          "stagnation_pressure": 38208.018768823276,
+          "stagnation_temperature": 255.9601719742719,
+          "work_done": 14384.970468717569
+        },
+        "low_pressure_turbine": {
+          "stagnation_enthalpy": 863204.3307560361,
+          "stagnation_pressure": 108922.20548006867,
+          "stagnation_temperature": 856.8196671696134
+        },
+        "ram": {
+          "gas_specific_constant": 287.0528742,
+          "isentropic_expansion_factor": 1.4015364164005784,
+          "specific_heat_at_constant_pressure": 1007.4515838408724,
+          "stagnation_pressure": 32489.811878251083,
+          "stagnation_temperature": 243.113229415331
+        },
+        "thrust": {
+          "core_mass_flow_rate": 0.0,
+          "fuel_flow_rate": 0.0,
+          "non_dimensional_thrust": 0.41522475841460704,
+          "power": 0.0,
+          "specific_impulse": 6820.846016805509,
+          "thrust": 0.0,
+          "thrust_specific_fuel_consumption": 0.527793765044711
+        }
+      },
+      "cruise_altitude_m": 11278.0,
+      "cruise_mach": 0.78,
+      "design_thrust_n": 43708.57014181505,
+      "fan_pressure_ratio": 1.4,
+      "label": "A320-200",
+      "mass_flow_rate_design_kg_s": 14.864414327982766,
+      "n_engines": 2.0,
+      "overall_pressure_ratio": 40.0,
+      "sea_level_static": {
+        "combustor": {
+          "fuel_to_air_ratio": 0.01859326573779063,
+          "stagnation_enthalpy": 1657862.597518461,
+          "stagnation_pressure": 3850350.0000000005,
+          "stagnation_temperature": 1650.0
+        },
+        "core_nozzle": {
+          "area_ratio": 0.01631965239617173,
+          "density": 0.5794486325389655,
+          "mach_number": 0.8909424852203797,
+          "stagnation_enthalpy": 709479.5480199754,
+          "stagnation_pressure": 169748.0292321039,
+          "stagnation_temperature": 706.1147624569194,
+          "static_enthalpy": 612074.6034334481,
+          "static_pressure": 101325.0,
+          "static_temperature": 609.1717716395032,
+          "velocity": 441.37273270225313
+        },
+        "fan": {
+          "stagnation_enthalpy": 319227.4961138664,
+          "stagnation_pressure": 141855.0,
+          "stagnation_temperature": 317.7135242548436,
+          "work_done": 31401.831420520495
+        },
+        "fan_nozzle": {
+          "area_ratio": 0.014319080123403131,
+          "density": 1.2231490146571518,
+          "mach_number": 0.6988971029831643,
+          "stagnation_enthalpy": 318356.35001555854,
+          "stagnation_pressure": 140436.45,
+          "stagnation_temperature": 316.84650966367093,
+          "static_enthalpy": 289961.22935254447,
+          "static_pressure": 101325.0,
+          "static_temperature": 288.58605601443446,
+          "velocity": 238.30703163362205
+        },
+        "freestream": {
+          "Cp": 1004.7652106172491,
+          "R": 287.0528742,
+          "altitude": 0.0,
+          "density": 1.2250000002007604,
+          "dynamic_viscosity": 1.789380278077583e-05,
+          "gravity": 9.80665,
+          "isentropic_expansion_factor": 1.4009657721330457,
+          "mach_number": 0.01,
+          "pressure": 101325.0,
+          "speed_of_sound": 340.29399051558636,
+          "stagnation_pressure": 101332.0978202859,
+          "stagnation_temperature": 288.155776914362,
+          "temperature": 288.15,
+          "velocity": 3.4029399051558635
+        },
+        "high_pressure_compressor": {
+          "stagnation_enthalpy": 896804.2082315102,
+          "stagnation_pressure": 4053000.0000000005,
+          "stagnation_temperature": 892.5510146600159,
+          "work_done": 591991.5242530925
+        },
+        "high_pressure_turbine": {
+          "stagnation_enthalpy": 1070806.6481683922,
+          "stagnation_pressure": 771440.1945969296,
+          "stagnation_temperature": 1065.7282286978989
+        },
+        "inlet_nozzle": {
+          "mach_number": 0.0,
+          "stagnation_enthalpy": 287825.6646933459,
+          "stagnation_pressure": 101325.0,
+          "stagnation_temperature": 286.4606195078434,
+          "static_enthalpy": 287825.6646933459,
+          "static_temperature": 286.4606195078434,
+          "velocity": 0.0
+        },
+        "low_pressure_compressor": {
+          "stagnation_enthalpy": 304812.6839784177,
+          "stagnation_pressure": 121590.0,
+          "stagnation_temperature": 303.3670759670955,
+          "work_done": 16987.019285071816
+        },
+        "low_pressure_turbine": {
+          "stagnation_enthalpy": 711420.9584553463,
+          "stagnation_pressure": 171462.65579000395,
+          "stagnation_temperature": 708.0469655376553
+        },
+        "ram": {
+          "gas_specific_constant": 287.0528742,
+          "isentropic_expansion_factor": 1.4009657721330457,
+          "specific_heat_at_constant_pressure": 1004.7652106172491,
+          "stagnation_pressure": 101332.0978202859,
+          "stagnation_temperature": 288.155776914362
+        },
+        "thrust": {
+          "core_mass_flow_rate": 43.45033369288047,
+          "fuel_flow_rate": 1.6157672014948086,
+          "non_dimensional_thrust": 0.740025508833225,
+          "power": 893633.8423524601,
+          "specific_impulse": 16573.180640239872,
+          "thrust": 262606.4130602181,
+          "thrust_specific_fuel_consumption": 0.21721841317888968
+        }
+      },
+      "sea_level_static_thrust_force_n": 262606.4130602181,
+      "sea_level_static_vehicle_mass_rate_kg_s": 1.6157672014948086,
+      "sealevel_static_thrust_n_per_engine": 131303.20653010905,
+      "turbine_inlet_temperature_k": 1650.0
+    }
+  ]
+}

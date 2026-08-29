@@ -84,7 +84,7 @@ impl WingStructureGeometry {
     /// `AircraftBuilder` reusing the same morphed root section for both the
     /// root and break wing cross-sections -- no interpolation needed
     /// inboard. `eta > break_eta` linearly blends toward the tip section,
-    /// matching AeroSandbox's own linear interpolation between the break and
+    /// matching native aerodynamic model's own linear interpolation between the break and
     /// tip cross-sections.
     pub fn airfoil_zu_zl(&self, eta: f64, xc_frac: f64) -> (f64, f64) {
         let xc = xc_frac.clamp(0.0, 1.0);

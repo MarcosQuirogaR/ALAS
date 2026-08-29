@@ -1,0 +1,160 @@
+{
+  "cases": {
+    "case_0": {
+      "cl_alpha": 4.512302880454283,
+      "cm": 0.2769756479032227,
+      "cm0": 0.2769756479032227,
+      "cm_alpha": -9.666203607373209,
+      "cn_beta": 0.18098549588676255,
+      "inputs": {
+        "alpha_rad": 0.0,
+        "cg_x_m": 0.0,
+        "density_kg_m3": 1.2250000002007604,
+        "dynamic_viscosity_pa_s": 1.789380278077583e-05,
+        "mach": 0.2,
+        "velocity_m_s": 68.05879810311727
+      },
+      "neutral_point": 20.625546180851412,
+      "static_margin": 2.1421885594701147
+    },
+    "case_1": {
+      "cl_alpha": 4.6950275292790975,
+      "cm": 0.11215435028147588,
+      "cm0": 0.2842516253388223,
+      "cm_alpha": -9.860447526488002,
+      "cn_beta": 0.18567564813740872,
+      "inputs": {
+        "alpha_rad": 0.017453292519943295,
+        "cg_x_m": 0.0,
+        "density_kg_m3": 0.9092540409740743,
+        "dynamic_viscosity_pa_s": 1.69376451433092e-05,
+        "mach": 0.4,
+        "velocity_m_s": 131.4334172904831
+      },
+      "neutral_point": 20.221168375349755,
+      "static_margin": 2.1001895015516627
+    },
+    "case_2": {
+      "cl_alpha": 5.060215982666882,
+      "cm": -0.058512425364892984,
+      "cm0": 0.2977395325463156,
+      "cm_alpha": -10.205866815792245,
+      "cn_beta": 0.18847488390080774,
+      "inputs": {
+        "alpha_rad": 0.03490658503988659,
+        "cg_x_m": 0.0,
+        "density_kg_m3": 0.6601103927204219,
+        "dynamic_viscosity_pa_s": 1.5949283730345458e-05,
+        "mach": 0.6,
+        "velocity_m_s": 189.8710021120521
+      },
+      "neutral_point": 19.419077940248954,
+      "static_margin": 2.0168836371315226
+    },
+    "case_3": {
+      "cl_alpha": 5.6733204690398304,
+      "cm": -0.1480126141850252,
+      "cm0": 0.3171523953200468,
+      "cm_alpha": -10.66079672872138,
+      "cn_beta": 0.18950256148360897,
+      "inputs": {
+        "alpha_rad": 0.04363323129985824,
+        "cg_x_m": 0.0,
+        "density_kg_m3": 0.4135085364597749,
+        "dynamic_viscosity_pa_s": 1.4576612556053215e-05,
+        "mach": 0.78,
+        "velocity_m_s": 233.63457754975028
+      },
+      "neutral_point": 18.092563628314792,
+      "static_margin": 1.8791106173005672
+    },
+    "case_4": {
+      "cl_alpha": 5.8745114261155855,
+      "cm": -0.24165072985803598,
+      "cm0": 0.3226210725744821,
+      "cm_alpha": -10.776797592541033,
+      "cn_beta": 0.18962323560242417,
+      "inputs": {
+        "alpha_rad": 0.05235987755982989,
+        "cg_x_m": 0.0,
+        "density_kg_m3": 0.36479946651226547,
+        "dynamic_viscosity_pa_s": 1.4222902986279585e-05,
+        "mach": 0.82,
+        "velocity_m_s": 242.0257929777813
+      },
+      "neutral_point": 17.6630515117382,
+      "static_margin": 1.834501086274505
+    },
+    "case_5": {
+      "cl_alpha": 6.049224274648733,
+      "cm": 0.5166231541273311,
+      "cm0": 0.3270026204213018,
+      "cm_alpha": -10.864456290373646,
+      "cn_beta": 0.19049799481130916,
+      "inputs": {
+        "alpha_rad": -0.017453292519943295,
+        "cg_x_m": 0.0,
+        "density_kg_m3": 0.36479946651226547,
+        "dynamic_viscosity_pa_s": 1.4222902986279585e-05,
+        "mach": 0.85,
+        "velocity_m_s": 250.88039515989524
+      },
+      "neutral_point": 17.292431858832384,
+      "static_margin": 1.7960081817274869
+    }
+  },
+  "geometry": {
+    "fuselage": {
+      "height_at_quarter_length_m": 6.2,
+      "height_at_three_quarters_length_m": 5.766000000000001,
+      "height_at_wing_root_quarter_chord_m": 6.2,
+      "height_max_m": 6.2,
+      "length_m": 76.72,
+      "side_projected_area_m2": 428.0976,
+      "width_m": 6.2
+    },
+    "horizontal_stabilizer": {
+      "area_ref_m2": 112.66386476957366,
+      "aspect_ratio": 4.331559583605293,
+      "dynamic_pressure_ratio": 0.9,
+      "origin_x_m": 36.94,
+      "sweep_quarter_chord_rad": 0.5984188934785372,
+      "taper": 0.275,
+      "twist_root_rad": -0.03490658503988659,
+      "twist_tip_rad": -0.03490658503988659,
+      "vertical": false
+    },
+    "main_wing": {
+      "area_ref_m2": 529.035559696941,
+      "aspect_ratio": 9.89249607855954,
+      "chord_root_m": 16.5,
+      "dynamic_pressure_ratio": 1.0,
+      "mac_m": 9.62825895492285,
+      "origin_x_m": 26.24,
+      "origin_z_m": -2.1,
+      "span_m": 71.75,
+      "sweep_quarter_chord_rad": 0.5934119456780721,
+      "taper": 0.09696969696969697,
+      "twist_root_rad": 0.06981317007977318,
+      "twist_tip_rad": 0.0,
+      "vertical": false
+    },
+    "reference_area_m2": 529.035559696941,
+    "vertical_stabilizer": {
+      "area_ref_m2": 62.23000000000002,
+      "aspect_ratio": 1.543307086614174,
+      "chord_root_m": 9.5,
+      "chord_tip_m": 3.2,
+      "dynamic_pressure_ratio": 1.0,
+      "origin_x_m": 38.44,
+      "origin_z_m": 2.0,
+      "span_m": 9.800000000000004,
+      "sweep_quarter_chord_rad": 0.7428706287776641,
+      "symmetric": false,
+      "taper": 0.3368421052631579,
+      "twist_root_rad": 0.0,
+      "twist_tip_rad": 0.0,
+      "vertical": true
+    }
+  }
+}

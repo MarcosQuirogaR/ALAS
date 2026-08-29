@@ -1,0 +1,36 @@
+[package]
+name = "alas-gui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+alas-config = { path = "../alas-config" }
+alas-exec = { path = "../alas-exec" }
+alas-geom = { path = "../alas-geom" }
+alas-i18n = { path = "../alas-i18n" }
+alas-mission = { path = "../alas-mission" }
+alas-opt = { path = "../alas-opt" }
+alas-payload = { path = "../alas-payload" }
+alas-perf = { path = "../alas-perf" }
+alas-pipeline = { path = "../alas-pipeline" }
+alas-report = { path = "../alas-report" }
+alas-route = { path = "../alas-route" }
+alas-screen = { path = "../alas-screen" }
+alas-struct = { path = "../alas-struct" }
+alas-types = { path = "../alas-types" }
+# The desktop UAV page owns only interaction state; selection, optimization,
+# geometry conversion, and shared-core verification remain in `alas-uav`.
+alas-uav = { path = "../alas-uav" }
+alas-viz = { path = "../alas-viz" }
+eframe = { workspace = true }
+egui = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+alas-testkit = { path = "../alas-testkit" }

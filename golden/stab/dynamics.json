@@ -1,0 +1,80 @@
+{
+  "airplane": {
+    "b_ref": 71.75,
+    "c_ref": 9.62825895492285,
+    "fuselage_names": [
+      "Fuselage",
+      "Nacelle R",
+      "Nacelle L"
+    ],
+    "s_ref": 529.035559696941,
+    "wing_names": [
+      "Main Wing",
+      "Horizontal Stabilizer",
+      "Vertical Stabilizer"
+    ]
+  },
+  "compute_dynamic_modes": {
+    "inputs": {
+      "alpha": 2.0,
+      "altitude_m": 11000.0,
+      "mass_kg": 250000.0,
+      "velocity": 243.72880813678327
+    },
+    "modes": {
+      "dutch_roll": {
+        "damping_ratio": 0.17232711102993217,
+        "eigenvalue_imag": 0.4150533576305866,
+        "eigenvalue_real": -0.07261122601013623,
+        "period_s": 14.911787495515169,
+        "stable": true
+      },
+      "phugoid": {
+        "damping_ratio": 0.022250734924977634,
+        "eigenvalue_imag": 0.06603425255083177,
+        "eigenvalue_real": -0.0014696745089203473,
+        "period_s": 95.12683924637918,
+        "stable": true
+      },
+      "roll_subsidence": {
+        "damping_ratio": 1.0,
+        "eigenvalue_imag": 0.0,
+        "eigenvalue_real": -0.29044884626018297,
+        "period_s": 21.632674352409488,
+        "stable": true
+      },
+      "short_period": {
+        "damping_ratio": 0.13739980401556076,
+        "eigenvalue_imag": 0.7226655537476246,
+        "eigenvalue_real": -0.10024486072579322,
+        "period_s": 8.611996899884913,
+        "stable": true
+      },
+      "spiral": {
+        "damping_ratio": 1.0,
+        "eigenvalue_imag": 0.0,
+        "eigenvalue_real": -0.013345342548751617,
+        "period_s": 470.81483927644433,
+        "stable": true
+      }
+    }
+  },
+  "estimate_inertia": {
+    "heavy": {
+      "inputs": {
+        "mass_kg": 250000.0
+      },
+      "ixx": 81773159.37063345,
+      "iyy": 212483098.24,
+      "izz": 235438336.00000006
+    },
+    "light": {
+      "inputs": {
+        "mass_kg": 180000.0
+      },
+      "ixx": 58876674.746856086,
+      "iyy": 152987830.7328,
+      "izz": 169515601.92000005
+    }
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "source": {
+    "publisher": "University of Illinois Urbana-Champaign",
+    "source_url": "https://m-selig.ae.illinois.edu/props/volume-4/data/apce_12x6_static_0629od.txt",
+    "source_title": "UIUC Propeller Database Volume 4, APC 12x6 Thin Electric static data",
+    "method": "Independent wind-tunnel static characterization; Ct and Cp are dimensionless measured coefficients."
+  },
+  "comparison": {
+    "maximum_relative_ct_error": 0.20,
+    "maximum_relative_cp_error": 0.20,
+    "boundary": "This is a characterization regression test, not an airworthiness or product-certification finding. APC source tables are analytical and the UIUC values are wind-tunnel measurements."
+  },
+  "samples": [
+    {"rpm": 1980.0, "thrust_coefficient": 0.092560, "power_coefficient": 0.032209},
+    {"rpm": 3960.0, "thrust_coefficient": 0.099843, "power_coefficient": 0.031623},
+    {"rpm": 6000.0, "thrust_coefficient": 0.102003, "power_coefficient": 0.032672},
+    {"rpm": 6966.667, "thrust_coefficient": 0.104323, "power_coefficient": 0.033306}
+  ]
+}

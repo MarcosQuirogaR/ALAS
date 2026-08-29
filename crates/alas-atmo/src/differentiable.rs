@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-// Ported from aerosandbox/atmosphere/_diff_atmo_functions.py
-// Upstream: AeroSandbox 4.2.8, MIT.
+// Ported from native aerodynamic model/atmosphere/_diff_atmo_functions.py
+// Upstream: native aerodynamic model 4.2.8, MIT.
 // Reference: alas @ 7d1555c1f4db5110cf6cd187c156718e1a033b50.
 
-//! AeroSandbox's differentiable atmosphere: a cubic B-spline fitted through
+//! native aerodynamic model's differentiable atmosphere: a cubic B-spline fitted through
 //! the ISA at thirty-eight altitudes.
 //!
-//! This is the model `asb.Atmosphere(altitude=...)` uses when no `method` is
+//! This is the model `Atmosphere(altitude=...)` uses when no `method` is
 //! named, which is how every module in the reference implementation but one
 //! constructs it -- the turbofan cycle, the performance envelope, the
 //! aerodynamic analysis, stability, the full analysis. It exists so that a
@@ -17,7 +17,7 @@
 //! closed form: it disagrees with the ISA by up to 1.1% in temperature and
 //! 0.4% in density over the altitudes this program flies at. A port that
 //! reached for [`crate::pressure_isa`] wherever upstream wrote
-//! `asb.Atmosphere(...)` would be wrong by four thousand times the `closed`
+//! `Atmosphere(...)` would be wrong by four thousand times the `closed`
 //! tier before evaluating any physics, so the fit is reproduced rather than
 //! approximated.
 //!

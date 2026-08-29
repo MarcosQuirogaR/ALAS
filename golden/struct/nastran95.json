@@ -1,0 +1,32 @@
+{
+  "solver_note": "NASTRAN-95 (Foadsf fork, gfortran -O0 -fno-automatic) cross-checked against MSC Nastran Student Edition 2026.1; peak vertical deflection of subcase 1 (pull-up), metres.",
+  "refinements": [
+    {
+      "num_ribs": 5,
+      "chordwise": 6,
+      "grids": 50,
+      "peak_grid": 41,
+      "n95_peak_t3": 2.7575560000,
+      "msc_peak_t3": 2.9750200000,
+      "rel_diff": -0.0730966515
+    },
+    {
+      "num_ribs": 9,
+      "chordwise": 10,
+      "grids": 154,
+      "peak_grid": 137,
+      "n95_peak_t3": 4.0297180000,
+      "msc_peak_t3": 4.1677020000,
+      "rel_diff": -0.0331079333
+    },
+    {
+      "num_ribs": 16,
+      "chordwise": 20,
+      "grids": 568,
+      "peak_grid": 531,
+      "n95_peak_t3": 4.1591220000,
+      "msc_peak_t3": 4.2506920000,
+      "rel_diff": -0.0215423747
+    }
+  ]
+}

@@ -11,10 +11,16 @@ rust-version.workspace = true
 # `load_cases`/`engine_point_loads_n` read directly off `DesignRequirements`,
 # `EngineConfig` and `MassModelConfig`, exactly as the reference does.
 alas-config = { path = "../alas-config" }
+# `nastran::run` spawns the solver through the same windowless-spawn and
+# process-tree-kill primitives `alas-aero::mses` drives its own binaries with.
+alas-exec = { path = "../alas-exec" }
 # `sizing` reads the wingbox geometry (spar heights, local chord, airfoil
 # surface) off `WingStructureGeometry`, exactly as
 # `alas/physics/structural_sizing.py` does.
 alas-geom = { path = "../alas-geom" }
+# `mesh` reports the two mesh defects that make a deck unsolvable as an error
+# enum, the same way every other fallible constructor in the workspace does.
+thiserror = { workspace = true }
 
 [dev-dependencies]
 alas-testkit = { path = "../alas-testkit" }

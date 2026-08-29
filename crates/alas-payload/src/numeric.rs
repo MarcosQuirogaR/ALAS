@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! The three reference-library primitives the layout engines depend on for
-//! their exact answers: CPython's `//` and `round`, and NumPy's `interp`.
+//! The reference-library primitives the layout engines depend on for their
+//! exact answers: CPython's `//` and `round`, plus NumPy's `interp`, which
+//! this module now re-exports from `alas-math` rather than holding.
 //!
 //! None of these is arithmetic Rust spells the same way, and each of them
 //! decides a whole seat, a whole container or a whole exit rather than a last
@@ -25,11 +26,15 @@
 //!   decimal conversion out and back rather than a scale-round-unscale.
 //! * [`interp`] is NumPy's `compiled_interp` together with the
 //!   `binary_search_with_guess` that locates the interval, including its
-//!   clamping at both ends and its NaN retry.
+//!   clamping at both ends and its NaN retry. It lived here first, and moved
+//!   to `alas-math` when `alas-aero::analysis` became its second consumer --
+//!   which is exactly what the paragraph below says should happen.
 //!
-//! These are private to this crate because it is the first thing in the port
-//! to need them. If a second module does, they belong in `alas-math` beside
-//! the other numerical primitives, not copied.
+//! The two CPython reproductions are private to this crate because it is the
+//! only thing in the port that needs them. If a second crate does, they belong
+//! in `alas-math` beside the other numerical primitives, not copied.
+
+pub(crate) use alas_math::interp;
 
 /// Python's `a // b` for floats -- CPython's `float_divmod`, whose quotient
 /// comes from `fmod` and is then snapped to the nearest integral value.
@@ -93,67 +98,6 @@ pub(crate) fn round_to_digit(x: f64, ndigits: usize) -> f64 {
     format!("{x:.ndigits$}").parse().unwrap_or(x)
 }
 
-/// NumPy's `np.interp(x, xp, fp)` for one query point: piecewise-linear
-/// interpolation, clamped to the end values outside `xp`.
-///
-/// `xp` must be ascending, which is what the caller's sort guarantees. The
-/// interval search, the exact-hit shortcut and the NaN retry all follow
-/// NumPy's `compiled_interp`; the retry matters because it is the only reason
-/// an infinite ordinate does not poison a query that lands on a station.
-pub(crate) fn interp(x: f64, xp: &[f64], fp: &[f64]) -> f64 {
-    let n = xp.len();
-    if n == 0 || fp.len() != n {
-        return f64::NAN;
-    }
-    if x.is_nan() {
-        return x;
-    }
-    // NumPy's one-station branch answers with that station's value on either
-    // side of it, since the left and right fill values both default to it.
-    if n == 1 {
-        return fp[0];
-    }
-    // Outside the data, `interp` returns the end value rather than
-    // extrapolating: the fuselage does not continue past its last station.
-    if x > xp[n - 1] {
-        return fp[n - 1];
-    }
-    if x < xp[0] {
-        return fp[0];
-    }
-
-    // The last index whose station is at or before `x`, as
-    // `binary_search_with_guess` returns it.
-    let mut low = 0usize;
-    let mut high = n;
-    while low < high {
-        let mid = low + ((high - low) >> 1);
-        if x >= xp[mid] {
-            low = mid + 1;
-        } else {
-            high = mid;
-        }
-    }
-    let j = low.saturating_sub(1);
-
-    if j == n - 1 {
-        return fp[n - 1];
-    }
-    if xp[j] == x {
-        return fp[j];
-    }
-
-    let slope = (fp[j + 1] - fp[j]) / (xp[j + 1] - xp[j]);
-    let mut result = slope * (x - xp[j]) + fp[j];
-    if result.is_nan() {
-        result = slope * (x - xp[j + 1]) + fp[j + 1];
-        if result.is_nan() && fp[j] == fp[j + 1] {
-            result = fp[j];
-        }
-    }
-    result
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -212,39 +156,14 @@ mod tests {
         assert_eq!(round_to_digit(0.25, 1), 0.2);
     }
 
+    // `interp` itself is tested in `alas-math`, where it now lives; what this
+    // crate still needs to know is that the name it uses resolves to that
+    // implementation and not to a second one.
     #[test]
-    fn interp_returns_the_end_values_outside_the_data() {
-        let xp = [0.0, 1.0, 2.0];
-        let fp = [10.0, 20.0, 40.0];
-        assert_eq!(interp(-5.0, &xp, &fp), 10.0);
-        assert_eq!(interp(9.0, &xp, &fp), 40.0);
-    }
-
-    #[test]
-    fn interp_is_exact_on_the_stations_themselves() {
-        let xp = [0.0, 1.0, 2.0];
-        let fp = [10.0, 20.0, 40.0];
-        for (x, expected) in xp.iter().zip(fp) {
-            assert_eq!(interp(*x, &xp, &fp), expected);
-        }
-    }
-
-    #[test]
-    fn interp_is_linear_between_stations() {
+    fn the_re_exported_interp_is_the_clamping_piecewise_linear_one() {
         let xp = [0.0, 1.0, 2.0];
         let fp = [10.0, 20.0, 40.0];
         assert_eq!(interp(0.5, &xp, &fp), 15.0);
-        assert_eq!(interp(1.25, &xp, &fp), 25.0);
-    }
-
-    #[test]
-    fn a_single_station_answers_with_itself_everywhere() {
-        assert_eq!(interp(-3.0, &[4.0], &[7.0]), 7.0);
-        assert_eq!(interp(99.0, &[4.0], &[7.0]), 7.0);
-    }
-
-    #[test]
-    fn interp_of_an_undefined_station_is_undefined() {
-        assert!(interp(f64::NAN, &[0.0, 1.0], &[2.0, 3.0]).is_nan());
+        assert_eq!(interp(-5.0, &xp, &fp), 10.0);
     }
 }

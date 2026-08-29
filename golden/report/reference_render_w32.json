@@ -1,0 +1,5220 @@
+{
+  "schema": "reference-render-w32/v1",
+  "reference": {
+    "git_commit": "7d1555c1f4db5110cf6cd187c156718e1a033b50"
+  },
+  "figures": {
+    "airfoil_evolution:light": {
+      "available": true,
+      "theme": "light",
+      "facecolor": [
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "panel_count": 2,
+      "suptitle": "",
+      "annotations": [],
+      "axes": [
+        {
+          "kind": "Axes",
+          "title": "Wing cross-sections \u2014 17 stations (root \u2192 tip)",
+          "xlabel": "x/c [-]",
+          "ylabel": "y/c [-]",
+          "aspect": "1.0",
+          "xlim": [
+            -0.05,
+            1.05
+          ],
+          "ylim": [
+            -0.0766869235489572,
+            0.07688365913630202
+          ],
+          "legend": [],
+          "series": [
+            "_child0",
+            "_child1",
+            "_child2",
+            "_child3",
+            "_child4",
+            "_child5",
+            "_child6",
+            "_child7",
+            "_child8",
+            "_child9",
+            "_child10",
+            "_child11",
+            "_child12",
+            "_child13",
+            "_child14",
+            "_child15",
+            "_child16"
+          ],
+          "patches": [],
+          "annotations": [],
+          "texts": []
+        },
+        {
+          "kind": "Axes",
+          "title": "",
+          "xlabel": "",
+          "ylabel": "Spanwise station y [m]",
+          "aspect": "auto",
+          "xlim": [
+            0.0,
+            1.0
+          ],
+          "ylim": [
+            0.0,
+            35.875
+          ],
+          "legend": [],
+          "series": [],
+          "patches": [],
+          "annotations": [],
+          "texts": []
+        }
+      ]
+    },
+    "airfoil_evolution:dark": {
+      "available": true,
+      "theme": "dark",
+      "facecolor": [
+        0.11764705882352941,
+        0.11764705882352941,
+        0.11764705882352941,
+        1.0
+      ],
+      "panel_count": 2,
+      "suptitle": "",
+      "annotations": [],
+      "axes": [
+        {
+          "kind": "Axes",
+          "title": "Wing cross-sections \u2014 17 stations (root \u2192 tip)",
+          "xlabel": "x/c [-]",
+          "ylabel": "y/c [-]",
+          "aspect": "1.0",
+          "xlim": [
+            -0.05,
+            1.05
+          ],
+          "ylim": [
+            -0.0766869235489572,
+            0.07688365913630202
+          ],
+          "legend": [],
+          "series": [
+            "_child0",
+            "_child1",
+            "_child2",
+            "_child3",
+            "_child4",
+            "_child5",
+            "_child6",
+            "_child7",
+            "_child8",
+            "_child9",
+            "_child10",
+            "_child11",
+            "_child12",
+            "_child13",
+            "_child14",
+            "_child15",
+            "_child16"
+          ],
+          "patches": [],
+          "annotations": [],
+          "texts": []
+        },
+        {
+          "kind": "Axes",
+          "title": "",
+          "xlabel": "",
+          "ylabel": "Spanwise station y [m]",
+          "aspect": "auto",
+          "xlim": [
+            0.0,
+            1.0
+          ],
+          "ylim": [
+            0.0,
+            35.875
+          ],
+          "legend": [],
+          "series": [],
+          "patches": [],
+          "annotations": [],
+          "texts": []
+        }
+      ]
+    },
+    "threeview:light": {
+      "available": true,
+      "theme": "light",
+      "facecolor": [
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "panel_count": 4,
+      "suptitle": "",
+      "annotations": [],
+      "axes": [
+        {
+          "kind": "Axes3D",
+          "title": "",
+          "xlabel": "",
+          "ylabel": "",
+          "aspect": "auto",
+          "xlim": [
+            0.0,
+            76.72
+          ],
+          "ylim": [
+            -38.36,
+            38.36
+          ],
+          "legend": [],
+          "series": [],
+          "patches": [],
+          "annotations": [],
+          "texts": []
+        },
+        {
+          "kind": "Axes3D",
+          "title": "",
+          "xlabel": "",
+          "ylabel": "",
+          "aspect": "auto",
+          "xlim": [
+            0.0,
+            76.72
+          ],
+          "ylim": [
+            -38.36,
+            38.36
+          ],
+          "legend": [],
+          "series": [],
+          "patches": [],
+          "annotations": [],
+          "texts": []
+        },
+        {
+          "kind": "Axes3D",
+          "title": "",
+          "xlabel": "$x_g$ [m]",
+          "ylabel": "$y_g$ [m]",
+          "aspect": "auto",
+          "xlim": [
+            0.0,
+            76.72
+          ],
+          "ylim": [
+            -38.36,
+            38.36
+          ],
+          "legend": [],
+          "series": [],
+          "patches": [],
+          "annotations": [],
+          "texts": []
+        },
+        {
+          "kind": "Axes3D",
+          "title": "",
+          "xlabel": "",
+          "ylabel": "",
+          "aspect": "auto",
+          "xlim": [
+            0.0,
+            76.72
+          ],
+          "ylim": [
+            -38.36,
+            38.36
+          ],
+          "legend": [],
+          "series": [],
+          "patches": [],
+          "annotations": [],
+          "texts": []
+        }
+      ]
+    },
+    "threeview:dark": {
+      "available": true,
+      "theme": "dark",
+      "facecolor": [
+        0.11764705882352941,
+        0.11764705882352941,
+        0.11764705882352941,
+        1.0
+      ],
+      "panel_count": 4,
+      "suptitle": "",
+      "annotations": [],
+      "axes": [
+        {
+          "kind": "Axes3D",
+          "title": "",
+          "xlabel": "",
+          "ylabel": "",
+          "aspect": "auto",
+          "xlim": [
+            0.0,
+            76.72
+          ],
+          "ylim": [
+            -38.36,
+            38.36
+          ],
+          "legend": [],
+          "series": [],
+          "patches": [],
+          "annotations": [],
+          "texts": []
+        },
+        {
+          "kind": "Axes3D",
+          "title": "",
+          "xlabel": "",
+          "ylabel": "",
+          "aspect": "auto",
+          "xlim": [
+            0.0,
+            76.72
+          ],
+          "ylim": [
+            -38.36,
+            38.36
+          ],
+          "legend": [],
+          "series": [],
+          "patches": [],
+          "annotations": [],
+          "texts": []
+        },
+        {
+          "kind": "Axes3D",
+          "title": "",
+          "xlabel": "$x_g$ [m]",
+          "ylabel": "$y_g$ [m]",
+          "aspect": "auto",
+          "xlim": [
+            0.0,
+            76.72
+          ],
+          "ylim": [
+            -38.36,
+            38.36
+          ],
+          "legend": [],
+          "series": [],
+          "patches": [],
+          "annotations": [],
+          "texts": []
+        },
+        {
+          "kind": "Axes3D",
+          "title": "",
+          "xlabel": "",
+          "ylabel": "",
+          "aspect": "auto",
+          "xlim": [
+            0.0,
+            76.72
+          ],
+          "ylim": [
+            -38.36,
+            38.36
+          ],
+          "legend": [],
+          "series": [],
+          "patches": [],
+          "annotations": [],
+          "texts": []
+        }
+      ]
+    },
+    "design_evolution:light": {
+      "available": true,
+      "theme": "light",
+      "facecolor": [
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "panel_count": 1,
+      "suptitle": "",
+      "annotations": [],
+      "axes": [
+        {
+          "kind": "Axes",
+          "title": "Design evolution (planform)",
+          "xlabel": "span Y [m]",
+          "ylabel": "longitudinal X [m]",
+          "aspect": "1.0",
+          "xlim": [
+            -39.4625,
+            39.4625
+          ],
+          "ylim": [
+            79.244,
+            23.715999999999998
+          ],
+          "legend": [],
+          "series": [],
+          "patches": [
+            {
+              "kind": "Polygon",
+              "label": null
+            },
+            {
+              "kind": "Polygon",
+              "label": null
+            },
+            {
+              "kind": "Polygon",
+              "label": null
+            },
+            {
+              "kind": "Polygon",
+              "label": null
+            },
+            {
+              "kind": "Polygon",
+              "label": null
+            },
+            {
+              "kind": "Polygon",
+              "label": null
+            },
+            {
+              "kind": "Polygon",
+              "label": null
+            },
+            {
+              "kind": "Polygon",
+              "label": null
+            },
+            {
+              "kind": "Polygon",
+              "label": null
+            },
+            {
+              "kind": "Polygon",
+              "label": null
+            },
+            {
+              "kind": "Polygon",
+              "label": null
+            },
+            {
+              "kind": "Polygon",
+              "label": null
+            },
+            {
+              "kind": "Polygon",
+              "label": null
+            },
+            {
+              "kind": "Polygon",
+              "label": null
+            },
+            {
+              "kind": "Polygon",
+              "label": null
+            },
+            {
+              "kind": "Polygon",
+              "label": null
+            },
+            {
+              "kind": "Polygon",
+              "label": null
+            },
+            {
+              "kind": "Polygon",
+              "label": null
+            },
+            {
+              "kind": "Polygon",
+              "label": null
+            },
+            {
+              "kind": "Polygon",
+              "label": null
+            }
+          ],
+          "annotations": [],
+          "texts": []
+        }
+      ]
+    },
+    "design_evolution:dark": {
+      "available": true,
+      "theme": "dark",
+      "facecolor": [
+        0.11764705882352941,
+        0.11764705882352941,
+        0.11764705882352941,
+        1.0
+      ],
+      "panel_count": 1,
+      "suptitle": "",
+      "annotations": [],
+      "axes": [
+        {
+          "kind": "Axes",
+          "title": "Design evolution (planform)",
+          "xlabel": "span Y [m]",
+          "ylabel": "longitudinal X [m]",
+          "aspect": "1.0",
+          "xlim": [
+            -39.4625,
+            39.4625
+          ],
+          "ylim": [
+            79.244,
+            23.715999999999998
+          ],
+          "legend": [],
+          "series": [],
+          "patches": [
+            {
+              "kind": "Polygon",
+              "label": null
+            },
+            {
+              "kind": "Polygon",
+              "label": null
+            },
+            {
+              "kind": "Polygon",
+              "label": null
+            },
+            {
+              "kind": "Polygon",
+              "label": null
+            },
+            {
+              "kind": "Polygon",
+              "label": null
+            },
+            {
+              "kind": "Polygon",
+              "label": null
+            },
+            {
+              "kind": "Polygon",
+              "label": null
+            },
+            {
+              "kind": "Polygon",
+              "label": null
+            },
+            {
+              "kind": "Polygon",
+              "label": null
+            },
+            {
+              "kind": "Polygon",
+              "label": null
+            },
+            {
+              "kind": "Polygon",
+              "label": null
+            },
+            {
+              "kind": "Polygon",
+              "label": null
+            },
+            {
+              "kind": "Polygon",
+              "label": null
+            },
+            {
+              "kind": "Polygon",
+              "label": null
+            },
+            {
+              "kind": "Polygon",
+              "label": null
+            },
+            {
+              "kind": "Polygon",
+              "label": null
+            },
+            {
+              "kind": "Polygon",
+              "label": null
+            },
+            {
+              "kind": "Polygon",
+              "label": null
+            },
+            {
+              "kind": "Polygon",
+              "label": null
+            },
+            {
+              "kind": "Polygon",
+              "label": null
+            }
+          ],
+          "annotations": [],
+          "texts": []
+        }
+      ]
+    },
+    "planform_comparison:light": {
+      "available": true,
+      "theme": "light",
+      "facecolor": [
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "panel_count": 1,
+      "suptitle": "",
+      "annotations": [],
+      "axes": [
+        {
+          "kind": "Axes",
+          "title": "Planform",
+          "xlabel": "span Y [m]",
+          "ylabel": "longitudinal X [m]",
+          "aspect": "1.0",
+          "xlim": [
+            -39.4625,
+            39.4625
+          ],
+          "ylim": [
+            79.244,
+            23.715999999999998
+          ],
+          "legend": [
+            "baseline",
+            "optimized"
+          ],
+          "series": [
+            "baseline",
+            "_child1",
+            "_child2",
+            "_child3",
+            "_child4",
+            "optimized",
+            "_child6",
+            "_child7",
+            "_child8",
+            "_child9"
+          ],
+          "patches": [],
+          "annotations": [],
+          "texts": []
+        }
+      ]
+    },
+    "planform_comparison:dark": {
+      "available": true,
+      "theme": "dark",
+      "facecolor": [
+        0.11764705882352941,
+        0.11764705882352941,
+        0.11764705882352941,
+        1.0
+      ],
+      "panel_count": 1,
+      "suptitle": "",
+      "annotations": [],
+      "axes": [
+        {
+          "kind": "Axes",
+          "title": "Planform",
+          "xlabel": "span Y [m]",
+          "ylabel": "longitudinal X [m]",
+          "aspect": "1.0",
+          "xlim": [
+            -39.4625,
+            39.4625
+          ],
+          "ylim": [
+            79.244,
+            23.715999999999998
+          ],
+          "legend": [
+            "baseline",
+            "optimized"
+          ],
+          "series": [
+            "baseline",
+            "_child1",
+            "_child2",
+            "_child3",
+            "_child4",
+            "optimized",
+            "_child6",
+            "_child7",
+            "_child8",
+            "_child9"
+          ],
+          "patches": [],
+          "annotations": [],
+          "texts": []
+        }
+      ]
+    },
+    "wireframe_wing:light": {
+      "available": true,
+      "theme": "light",
+      "facecolor": [
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "panel_count": 1,
+      "suptitle": "",
+      "annotations": [],
+      "axes": [
+        {
+          "kind": "Axes3D",
+          "title": "Wing Wireframe",
+          "xlabel": "",
+          "ylabel": "",
+          "aspect": "auto",
+          "xlim": [
+            2.678454802830487,
+            74.44094902908212
+          ],
+          "ylim": [
+            -35.881247113125816,
+            35.881247113125816
+          ],
+          "legend": [],
+          "series": [
+            "_child0",
+            "_child1",
+            "_child2",
+            "_child3",
+            "_child4",
+            "_child5",
+            "_child6",
+            "_child7",
+            "_child8",
+            "_child9",
+            "_child10",
+            "_child11",
+            "_child12",
+            "_child13",
+            "_child14",
+            "_child15",
+            "_child16",
+            "_child17",
+            "_child18",
+            "_child19",
+            "_child20",
+            "_child21",
+            "_child22",
+            "_child23",
+            "_child24",
+            "_child25",
+            "_child26",
+            "_child27",
+            "_child28",
+            "_child29",
+            "_child30",
+            "_child31",
+            "_child32",
+            "_child33",
+            "_child34",
+            "_child35",
+            "_child36",
+            "_child37"
+          ],
+          "patches": [],
+          "annotations": [],
+          "texts": []
+        }
+      ]
+    },
+    "wireframe_wing:dark": {
+      "available": true,
+      "theme": "dark",
+      "facecolor": [
+        0.11764705882352941,
+        0.11764705882352941,
+        0.11764705882352941,
+        1.0
+      ],
+      "panel_count": 1,
+      "suptitle": "",
+      "annotations": [],
+      "axes": [
+        {
+          "kind": "Axes3D",
+          "title": "Wing Wireframe",
+          "xlabel": "",
+          "ylabel": "",
+          "aspect": "auto",
+          "xlim": [
+            2.678454802830487,
+            74.44094902908212
+          ],
+          "ylim": [
+            -35.881247113125816,
+            35.881247113125816
+          ],
+          "legend": [],
+          "series": [
+            "_child0",
+            "_child1",
+            "_child2",
+            "_child3",
+            "_child4",
+            "_child5",
+            "_child6",
+            "_child7",
+            "_child8",
+            "_child9",
+            "_child10",
+            "_child11",
+            "_child12",
+            "_child13",
+            "_child14",
+            "_child15",
+            "_child16",
+            "_child17",
+            "_child18",
+            "_child19",
+            "_child20",
+            "_child21",
+            "_child22",
+            "_child23",
+            "_child24",
+            "_child25",
+            "_child26",
+            "_child27",
+            "_child28",
+            "_child29",
+            "_child30",
+            "_child31",
+            "_child32",
+            "_child33",
+            "_child34",
+            "_child35",
+            "_child36",
+            "_child37"
+          ],
+          "patches": [],
+          "annotations": [],
+          "texts": []
+        }
+      ]
+    },
+    "wireframe_fuselage:light": {
+      "available": true,
+      "theme": "light",
+      "facecolor": [
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "panel_count": 1,
+      "suptitle": "",
+      "annotations": [],
+      "axes": [
+        {
+          "kind": "Axes3D",
+          "title": "Fuselage Wireframe",
+          "xlabel": "",
+          "ylabel": "",
+          "aspect": "auto",
+          "xlim": [
+            0.0,
+            76.72
+          ],
+          "ylim": [
+            -38.36,
+            38.36
+          ],
+          "legend": [],
+          "series": [
+            "_child0",
+            "_child1",
+            "_child2",
+            "_child3",
+            "_child4",
+            "_child5",
+            "_child6",
+            "_child7",
+            "_child8",
+            "_child9",
+            "_child10",
+            "_child11",
+            "_child12",
+            "_child13",
+            "_child14",
+            "_child15",
+            "_child16",
+            "_child17",
+            "_child18",
+            "_child19",
+            "_child20",
+            "_child21",
+            "_child22",
+            "_child23",
+            "_child24",
+            "_child25",
+            "_child26",
+            "_child27",
+            "_child28"
+          ],
+          "patches": [],
+          "annotations": [],
+          "texts": []
+        }
+      ]
+    },
+    "wireframe_fuselage:dark": {
+      "available": true,
+      "theme": "dark",
+      "facecolor": [
+        0.11764705882352941,
+        0.11764705882352941,
+        0.11764705882352941,
+        1.0
+      ],
+      "panel_count": 1,
+      "suptitle": "",
+      "annotations": [],
+      "axes": [
+        {
+          "kind": "Axes3D",
+          "title": "Fuselage Wireframe",
+          "xlabel": "",
+          "ylabel": "",
+          "aspect": "auto",
+          "xlim": [
+            0.0,
+            76.72
+          ],
+          "ylim": [
+            -38.36,
+            38.36
+          ],
+          "legend": [],
+          "series": [
+            "_child0",
+            "_child1",
+            "_child2",
+            "_child3",
+            "_child4",
+            "_child5",
+            "_child6",
+            "_child7",
+            "_child8",
+            "_child9",
+            "_child10",
+            "_child11",
+            "_child12",
+            "_child13",
+            "_child14",
+            "_child15",
+            "_child16",
+            "_child17",
+            "_child18",
+            "_child19",
+            "_child20",
+            "_child21",
+            "_child22",
+            "_child23",
+            "_child24",
+            "_child25",
+            "_child26",
+            "_child27",
+            "_child28"
+          ],
+          "patches": [],
+          "annotations": [],
+          "texts": []
+        }
+      ]
+    },
+    "wireframe_empennage:light": {
+      "available": true,
+      "theme": "light",
+      "facecolor": [
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "panel_count": 1,
+      "suptitle": "",
+      "annotations": [],
+      "axes": [
+        {
+          "kind": "Axes3D",
+          "title": "Empennage Wireframe (H-Stab & V-Stab)",
+          "xlabel": "",
+          "ylabel": "",
+          "aspect": "auto",
+          "xlim": [
+            64.52000000000001,
+            76.72
+          ],
+          "ylim": [
+            -6.100000000000001,
+            6.100000000000001
+          ],
+          "legend": [],
+          "series": [
+            "_child0",
+            "_child1",
+            "_child2",
+            "_child3",
+            "_child4",
+            "_child5",
+            "_child6",
+            "_child7",
+            "_child8",
+            "_child9",
+            "_child10",
+            "_child11",
+            "_child12",
+            "_child13",
+            "_child14",
+            "_child15",
+            "_child16",
+            "_child17",
+            "_child18",
+            "_child19",
+            "_child20",
+            "_child21",
+            "_child22",
+            "_child23",
+            "_child24",
+            "_child25",
+            "_child26",
+            "_child27",
+            "_child28",
+            "_child29",
+            "_child30",
+            "_child31",
+            "_child32",
+            "_child33",
+            "_child34",
+            "_child35"
+          ],
+          "patches": [],
+          "annotations": [],
+          "texts": []
+        }
+      ]
+    },
+    "wireframe_empennage:dark": {
+      "available": true,
+      "theme": "dark",
+      "facecolor": [
+        0.11764705882352941,
+        0.11764705882352941,
+        0.11764705882352941,
+        1.0
+      ],
+      "panel_count": 1,
+      "suptitle": "",
+      "annotations": [],
+      "axes": [
+        {
+          "kind": "Axes3D",
+          "title": "Empennage Wireframe (H-Stab & V-Stab)",
+          "xlabel": "",
+          "ylabel": "",
+          "aspect": "auto",
+          "xlim": [
+            64.52000000000001,
+            76.72
+          ],
+          "ylim": [
+            -6.100000000000001,
+            6.100000000000001
+          ],
+          "legend": [],
+          "series": [
+            "_child0",
+            "_child1",
+            "_child2",
+            "_child3",
+            "_child4",
+            "_child5",
+            "_child6",
+            "_child7",
+            "_child8",
+            "_child9",
+            "_child10",
+            "_child11",
+            "_child12",
+            "_child13",
+            "_child14",
+            "_child15",
+            "_child16",
+            "_child17",
+            "_child18",
+            "_child19",
+            "_child20",
+            "_child21",
+            "_child22",
+            "_child23",
+            "_child24",
+            "_child25",
+            "_child26",
+            "_child27",
+            "_child28",
+            "_child29",
+            "_child30",
+            "_child31",
+            "_child32",
+            "_child33",
+            "_child34",
+            "_child35"
+          ],
+          "patches": [],
+          "annotations": [],
+          "texts": []
+        }
+      ]
+    },
+    "geometry:light": {
+      "available": true,
+      "theme": "light",
+      "facecolor": [
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "panel_count": 3,
+      "suptitle": "",
+      "annotations": [],
+      "axes": [
+        {
+          "kind": "Axes",
+          "title": "top",
+          "xlabel": "Y [m]",
+          "ylabel": "X [m]",
+          "aspect": "1.0",
+          "xlim": [
+            -39.4625,
+            39.4625
+          ],
+          "ylim": [
+            80.556,
+            -3.8360000000000003
+          ],
+          "legend": [],
+          "series": [],
+          "patches": [
+            {
+              "kind": "Polygon",
+              "label": null
+            },
+            {
+              "kind": "Polygon",
+              "label": null
+            },
+            {
+              "kind": "Polygon",
+              "label": null
+            },
+            {
+              "kind": "Polygon",
+              "label": null
+            },
+            {
+              "kind": "Polygon",
+              "label": null
+            },
+            {
+              "kind": "Polygon",
+              "label": null
+            },
+            {
+              "kind": "Polygon",
+              "label": null
+            },
+            {
+              "kind": "Polygon",
+              "label": null
+            }
+          ],
+          "annotations": [],
+          "texts": []
+        },
+        {
+          "kind": "Axes",
+          "title": "side",
+          "xlabel": "X [m]",
+          "ylabel": "Z [m]",
+          "aspect": "1.0",
+          "xlim": [
+            -3.8360000000000003,
+            80.556
+          ],
+          "ylim": [
+            -6.569878048897968,
+            12.67475609756657
+          ],
+          "legend": [],
+          "series": [],
+          "patches": [
+            {
+              "kind": "Polygon",
+              "label": null
+            },
+            {
+              "kind": "Polygon",
+              "label": null
+            },
+            {
+              "kind": "Polygon",
+              "label": null
+            },
+            {
+              "kind": "Polygon",
+              "label": null
+            },
+            {
+              "kind": "Polygon",
+              "label": null
+            },
+            {
+              "kind": "Polygon",
+              "label": null
+            },
+            {
+              "kind": "Polygon",
+              "label": null
+            },
+            {
+              "kind": "Polygon",
+              "label": null
+            }
+          ],
+          "annotations": [],
+          "texts": []
+        },
+        {
+          "kind": "Axes",
+          "title": "front",
+          "xlabel": "Y [m]",
+          "ylabel": "Z [m]",
+          "aspect": "1.0",
+          "xlim": [
+            -39.4625,
+            39.4625
+          ],
+          "ylim": [
+            -6.569878048897968,
+            12.67475609756657
+          ],
+          "legend": [],
+          "series": [],
+          "patches": [
+            {
+              "kind": "Polygon",
+              "label": null
+            },
+            {
+              "kind": "Polygon",
+              "label": null
+            },
+            {
+              "kind": "Polygon",
+              "label": null
+            },
+            {
+              "kind": "Polygon",
+              "label": null
+            },
+            {
+              "kind": "Polygon",
+              "label": null
+            },
+            {
+              "kind": "Polygon",
+              "label": null
+            },
+            {
+              "kind": "Polygon",
+              "label": null
+            },
+            {
+              "kind": "Polygon",
+              "label": null
+            }
+          ],
+          "annotations": [],
+          "texts": []
+        }
+      ]
+    },
+    "geometry:dark": {
+      "available": true,
+      "theme": "dark",
+      "facecolor": [
+        0.11764705882352941,
+        0.11764705882352941,
+        0.11764705882352941,
+        1.0
+      ],
+      "panel_count": 3,
+      "suptitle": "",
+      "annotations": [],
+      "axes": [
+        {
+          "kind": "Axes",
+          "title": "top",
+          "xlabel": "Y [m]",
+          "ylabel": "X [m]",
+          "aspect": "1.0",
+          "xlim": [
+            -39.4625,
+            39.4625
+          ],
+          "ylim": [
+            80.556,
+            -3.8360000000000003
+          ],
+          "legend": [],
+          "series": [],
+          "patches": [
+            {
+              "kind": "Polygon",
+              "label": null
+            },
+            {
+              "kind": "Polygon",
+              "label": null
+            },
+            {
+              "kind": "Polygon",
+              "label": null
+            },
+            {
+              "kind": "Polygon",
+              "label": null
+            },
+            {
+              "kind": "Polygon",
+              "label": null
+            },
+            {
+              "kind": "Polygon",
+              "label": null
+            },
+            {
+              "kind": "Polygon",
+              "label": null
+            },
+            {
+              "kind": "Polygon",
+              "label": null
+            }
+          ],
+          "annotations": [],
+          "texts": []
+        },
+        {
+          "kind": "Axes",
+          "title": "side",
+          "xlabel": "X [m]",
+          "ylabel": "Z [m]",
+          "aspect": "1.0",
+          "xlim": [
+            -3.8360000000000003,
+            80.556
+          ],
+          "ylim": [
+            -6.569878048897968,
+            12.67475609756657
+          ],
+          "legend": [],
+          "series": [],
+          "patches": [
+            {
+              "kind": "Polygon",
+              "label": null
+            },
+            {
+              "kind": "Polygon",
+              "label": null
+            },
+            {
+              "kind": "Polygon",
+              "label": null
+            },
+            {
+              "kind": "Polygon",
+              "label": null
+            },
+            {
+              "kind": "Polygon",
+              "label": null
+            },
+            {
+              "kind": "Polygon",
+              "label": null
+            },
+            {
+              "kind": "Polygon",
+              "label": null
+            },
+            {
+              "kind": "Polygon",
+              "label": null
+            }
+          ],
+          "annotations": [],
+          "texts": []
+        },
+        {
+          "kind": "Axes",
+          "title": "front",
+          "xlabel": "Y [m]",
+          "ylabel": "Z [m]",
+          "aspect": "1.0",
+          "xlim": [
+            -39.4625,
+            39.4625
+          ],
+          "ylim": [
+            -6.569878048897968,
+            12.67475609756657
+          ],
+          "legend": [],
+          "series": [],
+          "patches": [
+            {
+              "kind": "Polygon",
+              "label": null
+            },
+            {
+              "kind": "Polygon",
+              "label": null
+            },
+            {
+              "kind": "Polygon",
+              "label": null
+            },
+            {
+              "kind": "Polygon",
+              "label": null
+            },
+            {
+              "kind": "Polygon",
+              "label": null
+            },
+            {
+              "kind": "Polygon",
+              "label": null
+            },
+            {
+              "kind": "Polygon",
+              "label": null
+            },
+            {
+              "kind": "Polygon",
+              "label": null
+            }
+          ],
+          "annotations": [],
+          "texts": []
+        }
+      ]
+    },
+    "cabin_payload:light": {
+      "available": true,
+      "theme": "light",
+      "facecolor": [
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "panel_count": 3,
+      "suptitle": "Passenger cabin \u2014 349 seats [E349]  (10-abreast, 2 aisles \u00d7 51 cm)\n4\u00d7 Type A exit pairs   |   5 galleys / 8 lavs   |   5.6 t bags in 7 ULDs   |   CG 20.7% MAC",
+      "annotations": [
+        "Passenger cabin \u2014 349 seats [E349]  (10-abreast, 2 aisles \u00d7 51 cm)\n4\u00d7 Type A exit pairs   |   5 galleys / 8 lavs   |   5.6 t bags in 7 ULDs   |   CG 20.7% MAC"
+      ],
+      "axes": [
+        {
+          "kind": "Axes",
+          "title": "",
+          "xlabel": "",
+          "ylabel": "",
+          "aspect": "1.0",
+          "xlim": [
+            6.0,
+            66.92
+          ],
+          "ylim": [
+            -3.576875,
+            3.576875
+          ],
+          "legend": [],
+          "series": [
+            "_child1",
+            "_child2",
+            "_child381"
+          ],
+          "patches": [
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            }
+          ],
+          "annotations": [
+            "A",
+            "A",
+            "A",
+            "A",
+            "A",
+            "A",
+            "A",
+            "A"
+          ],
+          "texts": [
+            "A",
+            "A",
+            "A",
+            "A",
+            "A",
+            "A",
+            "A",
+            "A"
+          ]
+        },
+        {
+          "kind": "Axes",
+          "title": "",
+          "xlabel": "",
+          "ylabel": "",
+          "aspect": "1.0",
+          "xlim": [
+            6.0,
+            66.92
+          ],
+          "ylim": [
+            -2.2125,
+            2.2125
+          ],
+          "legend": [],
+          "series": [
+            "_child1",
+            "_child2",
+            "_child12"
+          ],
+          "patches": [
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            }
+          ],
+          "annotations": [
+            "wing box"
+          ],
+          "texts": [
+            "wing box"
+          ]
+        },
+        {
+          "kind": "Axes",
+          "title": "",
+          "xlabel": "x [m]",
+          "ylabel": "",
+          "aspect": "1.0",
+          "xlim": [
+            0.0,
+            76.72
+          ],
+          "ylim": [
+            -3.21,
+            3.6100000000000003
+          ],
+          "legend": [
+            "Payload CG  20.7% MAC"
+          ],
+          "series": [
+            "_child1",
+            "_child2",
+            "Payload CG  20.7% MAC"
+          ],
+          "patches": [
+            {
+              "kind": "Polygon",
+              "label": null
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            }
+          ],
+          "annotations": [],
+          "texts": []
+        }
+      ]
+    },
+    "cabin_payload:dark": {
+      "available": true,
+      "theme": "dark",
+      "facecolor": [
+        0.11764705882352941,
+        0.11764705882352941,
+        0.11764705882352941,
+        1.0
+      ],
+      "panel_count": 3,
+      "suptitle": "Passenger cabin \u2014 349 seats [E349]  (10-abreast, 2 aisles \u00d7 51 cm)\n4\u00d7 Type A exit pairs   |   5 galleys / 8 lavs   |   5.6 t bags in 7 ULDs   |   CG 20.7% MAC",
+      "annotations": [
+        "Passenger cabin \u2014 349 seats [E349]  (10-abreast, 2 aisles \u00d7 51 cm)\n4\u00d7 Type A exit pairs   |   5 galleys / 8 lavs   |   5.6 t bags in 7 ULDs   |   CG 20.7% MAC"
+      ],
+      "axes": [
+        {
+          "kind": "Axes",
+          "title": "",
+          "xlabel": "",
+          "ylabel": "",
+          "aspect": "1.0",
+          "xlim": [
+            6.0,
+            66.92
+          ],
+          "ylim": [
+            -3.576875,
+            3.576875
+          ],
+          "legend": [],
+          "series": [
+            "_child1",
+            "_child2",
+            "_child381"
+          ],
+          "patches": [
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            }
+          ],
+          "annotations": [
+            "A",
+            "A",
+            "A",
+            "A",
+            "A",
+            "A",
+            "A",
+            "A"
+          ],
+          "texts": [
+            "A",
+            "A",
+            "A",
+            "A",
+            "A",
+            "A",
+            "A",
+            "A"
+          ]
+        },
+        {
+          "kind": "Axes",
+          "title": "",
+          "xlabel": "",
+          "ylabel": "",
+          "aspect": "1.0",
+          "xlim": [
+            6.0,
+            66.92
+          ],
+          "ylim": [
+            -2.2125,
+            2.2125
+          ],
+          "legend": [],
+          "series": [
+            "_child1",
+            "_child2",
+            "_child12"
+          ],
+          "patches": [
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            }
+          ],
+          "annotations": [
+            "wing box"
+          ],
+          "texts": [
+            "wing box"
+          ]
+        },
+        {
+          "kind": "Axes",
+          "title": "",
+          "xlabel": "x [m]",
+          "ylabel": "",
+          "aspect": "1.0",
+          "xlim": [
+            0.0,
+            76.72
+          ],
+          "ylim": [
+            -3.21,
+            3.6100000000000003
+          ],
+          "legend": [
+            "Payload CG  20.7% MAC"
+          ],
+          "series": [
+            "_child1",
+            "_child2",
+            "Payload CG  20.7% MAC"
+          ],
+          "patches": [
+            {
+              "kind": "Polygon",
+              "label": null
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            },
+            {
+              "kind": "Rectangle",
+              "label": ""
+            }
+          ],
+          "annotations": [],
+          "texts": []
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,92 @@
+{
+  "constants": {
+    "baseline_color": "tab:blue",
+    "default_theme": "dark",
+    "ghost_color": "#999999",
+    "optimized_color": "tab:red"
+  },
+  "palettes": {
+    "dark": {
+      "accent": "#4f8cff",
+      "bg": "#1e1e1e",
+      "border": "#363b44",
+      "name": "dark",
+      "panel": "#262a31",
+      "spine": "#555555",
+      "tick": "#cccccc",
+      "title": "#ffffff"
+    },
+    "grey": {
+      "accent": "#6aa2ff",
+      "bg": "#3a3a3a",
+      "border": "#565b63",
+      "name": "grey",
+      "panel": "#41454c",
+      "spine": "#777777",
+      "tick": "#dddddd",
+      "title": "#ffffff"
+    },
+    "light": {
+      "accent": "#2563eb",
+      "bg": "#ffffff",
+      "border": "#dfe2e8",
+      "name": "light",
+      "panel": "#f4f5f7",
+      "spine": "#333333",
+      "tick": "#333333",
+      "title": "#000000"
+    }
+  },
+  "resolved": {
+    "dark": {
+      "accent": "#4f8cff",
+      "bg": "#1e1e1e",
+      "border": "#363b44",
+      "name": "dark",
+      "panel": "#262a31",
+      "spine": "#555555",
+      "tick": "#cccccc",
+      "title": "#ffffff"
+    },
+    "grey": {
+      "accent": "#6aa2ff",
+      "bg": "#3a3a3a",
+      "border": "#565b63",
+      "name": "grey",
+      "panel": "#41454c",
+      "spine": "#777777",
+      "tick": "#dddddd",
+      "title": "#ffffff"
+    },
+    "light": {
+      "accent": "#2563eb",
+      "bg": "#ffffff",
+      "border": "#dfe2e8",
+      "name": "light",
+      "panel": "#f4f5f7",
+      "spine": "#333333",
+      "tick": "#333333",
+      "title": "#000000"
+    },
+    "none": {
+      "accent": "#2563eb",
+      "bg": "#ffffff",
+      "border": "#dfe2e8",
+      "name": "light",
+      "panel": "#f4f5f7",
+      "spine": "#333333",
+      "tick": "#333333",
+      "title": "#000000"
+    },
+    "unknown": {
+      "accent": "#2563eb",
+      "bg": "#ffffff",
+      "border": "#dfe2e8",
+      "name": "light",
+      "panel": "#f4f5f7",
+      "spine": "#333333",
+      "tick": "#333333",
+      "title": "#000000"
+    }
+  }
+}

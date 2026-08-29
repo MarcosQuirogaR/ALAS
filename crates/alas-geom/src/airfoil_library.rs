@@ -8,8 +8,8 @@
 //!
 //! [`AirfoilLibrary::get`] is `AirfoilLibrary.get`: resolve a name through
 //! the Selig zip corpus ([`crate::selig`]), then the built-in reference
-//! sections ([`crate::airfoil_data`]), then AeroSandbox's NACA fallback
-//! ([`crate::asb::airfoil::Airfoil::from_name`]), normalizing whichever one
+//! sections ([`crate::airfoil_data`]), then native aerodynamic model's NACA fallback
+//! ([`crate::aircraft::airfoil::Airfoil::from_name`]), normalizing whichever one
 //! answers. [`apply_bumps`] adds four localized Hicks-Henne-style
 //! perturbations; [`morph_airfoil`] scales thickness and camber
 //! independently; [`build_section`] is the pipeline the wing root and break
@@ -25,8 +25,8 @@
 //! same guarantee (the corpus is fully built before any reader can observe
 //! it) without a caller-visible lock.
 
+use crate::aircraft::airfoil::Airfoil;
 use crate::airfoil_data;
-use crate::asb::airfoil::Airfoil;
 use crate::selig;
 use alas_config::DesignVector;
 use alas_math::CubicSplineError;
@@ -58,20 +58,20 @@ pub const DEFAULT_APPLY_BUMPS_N_POINTS_PER_SIDE: usize = 120;
 pub const DEFAULT_MORPH_N_POINTS: usize = 150;
 
 /// Resolves airfoil names into [`Airfoil`]s, trying ALAS's own corpora
-/// before AeroSandbox's name resolution.
+/// before native aerodynamic model's name resolution.
 pub struct AirfoilLibrary;
 
 impl AirfoilLibrary {
     /// Return an airfoil by name -- `AirfoilLibrary.get`.
     ///
     /// Tries, in order: the Selig zip corpus (case-insensitive), the
-    /// built-in named reference sections (exact case), and AeroSandbox's
+    /// built-in named reference sections (exact case), and native aerodynamic model's
     /// NACA-only fallback. Each hit is normalized with
     /// [`normalize_coordinates`] before being returned.
     ///
     /// Returns `None` when none of the three resolve `name`. Upstream's
     /// third branch does not raise on an unresolved name either --
-    /// `asb.Airfoil(name)` there constructs an `Airfoil` whose
+    /// The reference `Airfoil(name)` constructor there constructs an `Airfoil` whose
     /// `coordinates` is `None` -- but this crate's scoped
     /// [`Airfoil::from_name`] already collapses that outcome to `None`
     /// rather than a placeholder object, so propagating it here is the
@@ -98,6 +98,16 @@ impl AirfoilLibrary {
             return Some(Airfoil::from_coordinates(airfoil.name, normalized));
         }
         None
+    }
+
+    /// Return the list of all available airfoil names in the Selig corpus and named registry.
+    pub fn get_available_airfoils() -> Vec<&'static str> {
+        let mut names = Vec::with_capacity(selig::stems().len() + airfoil_data::names().len());
+        names.extend(selig::stems());
+        names.extend_from_slice(airfoil_data::names());
+        names.sort_unstable();
+        names.dedup();
+        names
     }
 }
 
@@ -137,7 +147,7 @@ fn sorted_ascending_by_x(points: &[(f64, f64)]) -> Vec<(f64, f64)> {
 /// default behaviour: `xp` assumed sorted ascending, `x` outside
 /// `[xp[0], xp[-1]]` clamped to the nearest endpoint's `fp` value.
 ///
-/// Duplicated from the equivalent helper in `asb::airfoil` rather than
+/// Duplicated from the equivalent helper in `aircraft::airfoil` rather than
 /// reused, since that module's helper is private and out of scope for this
 /// module to touch.
 fn numpy_interp(x: f64, xp: &[f64], fp: &[f64]) -> f64 {
@@ -166,7 +176,7 @@ fn numpy_interp(x: f64, xp: &[f64], fp: &[f64]) -> f64 {
 
 /// Evenly spaced points from `start` to `stop`, inclusive -- NumPy's
 /// `linspace(start, stop, num, endpoint=True)`. Duplicated from
-/// `asb::spacing::linspace`, which is private to the `asb` module and not
+/// `aircraft::spacing::linspace`, which is private to the aircraft module and not
 /// reachable from here.
 fn linspace(start: f64, stop: f64, num: usize) -> Vec<f64> {
     if num == 0 {
@@ -296,7 +306,7 @@ pub fn apply_bumps(
 
     let mut x_up: Vec<f64> = repaneled.upper_coordinates().iter().map(|p| p.0).collect();
     let mut y_up: Vec<f64> = repaneled.upper_coordinates().iter().map(|p| p.1).collect();
-    // AeroSandbox returns the upper surface LE->TE or TE->LE depending on
+    // native aerodynamic model returns the upper surface LE->TE or TE->LE depending on
     // version; normalise to ascending-x for the bump math, then restore
     // orientation before rebuilding the coordinate loop.
     let flip_up =
@@ -441,7 +451,7 @@ mod tests {
         // Built-in named coordinates (exact case).
         let root = AirfoilLibrary::get("SC2-0714").expect("SC2-0714 is a named section");
         assert_eq!(root.name, "SC2-0714");
-        // AeroSandbox NACA fallback.
+        // native aerodynamic model NACA fallback.
         let tail = AirfoilLibrary::get("naca0012").expect("naca0012 parses as 4-digit NACA");
         assert_eq!(tail.name, "naca0012");
     }

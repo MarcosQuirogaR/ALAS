@@ -35,7 +35,7 @@ pub struct PropulsionCycleConfig {
     #[config(
         label = "Inlet pressure recovery",
         unit = "-",
-        help = "Total-pressure recovery through the inlet (ram + duct losses). Matches SUAVE's inlet_nozzle.pressure_ratio."
+        help = "Total-pressure recovery through the inlet (ram + duct losses). Matches the mission inlet_nozzle.pressure_ratio convention."
     )]
     pub inlet_pressure_recovery: f64,
 
@@ -43,7 +43,7 @@ pub struct PropulsionCycleConfig {
     #[config(
         label = "LPC pressure-ratio split",
         unit = "-",
-        help = "Fixed low-pressure-compressor (booster) pressure ratio; the high-pressure compressor makes up the rest of the overall (core) pressure ratio (HPC = OPR / this value). Matches SUAVE's fixed LPC split."
+        help = "Fixed low-pressure-compressor (booster) pressure ratio; the high-pressure compressor makes up the rest of the overall (core) pressure ratio (HPC = OPR / this value). Matches the fixed mission LPC split."
     )]
     pub lpc_pressure_ratio_split: f64,
 

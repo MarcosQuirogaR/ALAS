@@ -188,6 +188,8 @@ pub struct PassengerSummary {
     pub total_pax: i64,
     /// Seats the layout could actually place.
     pub seated_pax: i64,
+    /// Requested passengers that have no seat in this layout.
+    pub unseated_pax: i64,
     /// Seats placed per class, in cabin order.
     pub classes: Vec<(&'static str, i64)>,
     /// Lavatories installed.
@@ -233,8 +235,14 @@ pub struct PassengerSummary {
 /// The freighter deck's summary line.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CargoSummary {
-    /// Total payload, tonnes.
+    /// Gross carried cargo mass, tonnes, including ULD tare.
     pub payload_t: f64,
+    /// Net cargo requested by the load case, tonnes, excluding ULD tare.
+    pub requested_net_payload_t: f64,
+    /// Net cargo actually loaded, tonnes, excluding ULD tare.
+    pub loaded_net_payload_t: f64,
+    /// Tare mass of the loaded ULDs, tonnes.
+    pub tare_mass_t: f64,
     /// Containers loaded.
     pub n_ulds: i64,
     /// How many of them are on the main deck.
@@ -403,6 +411,9 @@ mod tests {
             cg_y: 0.0,
             summary: LayoutSummary::Cargo(Box::new(CargoSummary {
                 payload_t: 0.0,
+                requested_net_payload_t: 0.0,
+                loaded_net_payload_t: 0.0,
+                tare_mass_t: 0.0,
                 n_ulds: 0,
                 n_main_deck: 0,
                 n_lower_deck: 0,

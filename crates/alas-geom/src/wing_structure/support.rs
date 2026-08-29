@@ -6,10 +6,10 @@
 //! kept apart from the wingbox logic that calls them since none of them is
 //! specific to a wing.
 
-use crate::asb::airfoil::Airfoil;
+use crate::aircraft::airfoil::Airfoil;
 
 /// `(x_upper, z_upper, x_lower, z_lower)`, each ascending in `x` and
-/// normalized to unit chord -- AeroSandbox's own coordinate orientation
+/// normalized to unit chord -- native aerodynamic model's own coordinate orientation
 /// isn't guaranteed leading-to-trailing edge, so this sorts explicitly
 /// rather than assume it.
 pub(super) fn airfoil_surfaces(airfoil: &Airfoil) -> (Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>) {
@@ -65,7 +65,7 @@ pub(super) fn intersect_line_ray(
 /// default clamp behaviour: `x` outside `[xp[0], xp[-1]]` clamps to the
 /// nearest endpoint's `fp` value rather than extrapolating.
 ///
-/// Duplicated from the equivalent helper in `asb::airfoil` and
+/// Duplicated from the equivalent helper in `aircraft::airfoil` and
 /// `airfoil_library` rather than shared, since both of those are out of
 /// scope for this module to touch (see `docs/PORTING.md`).
 pub(super) fn clamped_interp(x: f64, xp: &[f64], fp: &[f64]) -> f64 {
@@ -94,7 +94,7 @@ pub(super) fn clamped_interp(x: f64, xp: &[f64], fp: &[f64]) -> f64 {
 
 /// Evenly spaced points from `start` to `stop`, inclusive -- NumPy's
 /// `linspace(start, stop, num, endpoint=True)`. Duplicated from
-/// `asb::spacing::linspace`, which is private to the `asb` module.
+/// `aircraft::spacing::linspace`, which is private to the aircraft module.
 pub(super) fn linspace(start: f64, stop: f64, num: usize) -> Vec<f64> {
     if num == 0 {
         return Vec::new();

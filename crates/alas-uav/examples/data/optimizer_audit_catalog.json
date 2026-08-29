@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "records": [
+    {
+      "id": "battery-reviewed", "manufacturer": "Synthetic audit", "model": "6S 20Ah",
+      "kind": "battery", "spec": {"chemistry":"LiPo","series_cells":6,"nominal_voltage_v":22.2,"capacity_ah":20.0,"discharge_rating_c":30.0,"mass_kg":1.5,"dimensions":{"length_m":0.2,"width_m":0.08,"height_m":0.06},"connector":"AS150"},
+      "provenance": {"publisher":"Synthetic optimizer audit","source_url":"https://example.invalid/battery","source_title":"Synthetic complete battery evidence","transformations":[]}
+    },
+    {
+      "id": "motor-reviewed", "manufacturer": "Synthetic audit", "model": "500 Kv",
+      "kind": "motor", "spec": {"kv_rpm_per_v":500.0,"min_series_cells":6,"max_series_cells":6,"max_current_a":80.0,"max_power_w":1500.0,"max_static_thrust_n":120.0,"mass_kg":0.3,"dimensions":{"length_m":0.06,"width_m":0.05,"height_m":0.05},"recommended_propeller_diameter_m":0.3556,"recommended_propeller_pitch_m":0.1778},
+      "provenance": {"publisher":"Synthetic optimizer audit","source_url":"https://example.invalid/motor","source_title":"Synthetic complete motor evidence","transformations":[]}
+    },
+    {
+      "id": "esc-reviewed", "manufacturer": "Synthetic audit", "model": "100 A ESC",
+      "kind": "esc", "spec": {"min_series_cells":6,"max_series_cells":6,"continuous_current_a":100.0,"bec_min_voltage_v":5.0,"bec_max_voltage_v":8.4,"bec_continuous_current_a":10.0,"bec_peak_current_a":20.0,"mass_kg":0.12,"dimensions":{"length_m":0.08,"width_m":0.04,"height_m":0.025}},
+      "provenance": {"publisher":"Synthetic optimizer audit","source_url":"https://example.invalid/esc","source_title":"Synthetic complete ESC evidence","transformations":[]}
+    },
+    {
+      "id": "propeller-reviewed", "manufacturer": "Synthetic audit", "model": "14x7",
+      "kind": "propeller", "spec": {"diameter_m":0.3556,"pitch_m":0.1778,"blade_count":2,"mass_kg":0.05,"bore_diameter_m":0.008,"electric_compatible":true},
+      "provenance": {"publisher":"Synthetic optimizer audit","source_url":"https://example.invalid/propeller","source_title":"Synthetic complete propeller evidence","transformations":[]}
+    },
+    {
+      "id": "servo-reviewed", "manufacturer": "Synthetic audit", "model": "2 Nm servo",
+      "kind": "servo", "spec": {"mass_kg":0.04,"dimensions":{"length_m":0.04,"width_m":0.02,"height_m":0.035},"operating_points":[{"voltage_v":6.0,"stall_torque_nm":2.0,"seconds_per_60_deg":0.12,"stall_current_a":1.5}]},
+      "provenance": {"publisher":"Synthetic optimizer audit","source_url":"https://example.invalid/servo","source_title":"Synthetic complete servo evidence","transformations":[]}
+    },
+    {
+      "id": "material-reviewed", "manufacturer": "Synthetic audit", "model": "CFRP sheet",
+      "kind": "material_stock", "spec": {"form":"sheet","dimensions":{"length_m":1.0,"width_m":1.0,"height_m":0.0004},"mass_kg":0.64,"youngs_modulus_pa":70000000000.0,"allowable_stress_pa":400000000.0},
+      "provenance": {"publisher":"Synthetic optimizer audit","source_url":"https://example.invalid/material","source_title":"Synthetic complete laminate evidence","transformations":[]}
+    },
+    {
+      "id": "receiver-reviewed", "manufacturer": "Synthetic audit", "model": "8 channel receiver",
+      "kind": "receiver", "spec": {"channel_count":8,"min_voltage_v":4.5,"max_voltage_v":8.4,"mass_kg":0.02,"dimensions":{"length_m":0.04,"width_m":0.025,"height_m":0.012},"protocols":["SBUS"],"telemetry":true},
+      "provenance": {"publisher":"Synthetic optimizer audit","source_url":"https://example.invalid/receiver","source_title":"Synthetic complete receiver evidence","transformations":[]}
+    },
+    {
+      "id": "gps-reviewed", "manufacturer": "Synthetic audit", "model": "GPS sensor",
+      "kind": "electronics", "spec": {"role":"gps_sensor","min_voltage_v":5.0,"max_voltage_v":8.4,"max_current_a":0.5,"mass_kg":0.03,"dimensions":{"length_m":0.035,"width_m":0.035,"height_m":0.012},"protocols":["UART"]},
+      "provenance": {"publisher":"Synthetic optimizer audit","source_url":"https://example.invalid/gps","source_title":"Synthetic complete GPS evidence","transformations":[]}
+    },
+    {
+      "id": "gear-reviewed", "manufacturer": "Synthetic audit", "model": "Fixed tricycle gear",
+      "kind": "landing_gear", "spec": {"form":"fixed_tricycle","mass_kg":0.25,"max_aircraft_mass_kg":20.0,"dimensions":{"length_m":0.35,"width_m":0.3,"height_m":0.25},"nominal_voltage_v":null},
+      "provenance": {"publisher":"Synthetic optimizer audit","source_url":"https://example.invalid/gear","source_title":"Synthetic complete landing-gear evidence","transformations":[]}
+    }
+  ]
+}

@@ -7,10 +7,11 @@
 //! The weights and thresholds shaping the cost the optimizer minimises.
 //!
 //! The objective is a lift-to-drag reward plus a stack of soft, continuous
-//! penalties: an angle-of-attack window, a span cost, parasite drag, wing area
-//! and loading bounds, the static margin, the centre-of-gravity envelope, the
+//! penalties: an angle-of-attack window, a span cost, parasite drag, wing
+//! loading bounds, the static margin, the centre-of-gravity envelope, the
 //! fuel budget and tank volume, tail area and volume coefficients, taper
-//! realism, wing position, fineness ratio and payload shortfall.
+//! realism, wingbox/high-lift accommodation, wing position, fineness ratio
+//! and payload shortfall.
 //!
 //! # Why almost everything here is soft
 //!
@@ -70,6 +71,133 @@ pub struct ObjectiveWeights {
     )]
     pub alpha_max_penalty_deg: f64,
 
+    /// Whether the native transport-planform constraints shape product searches.
+    #[serde(default)]
+    #[config(
+        label = "Enable transport-planform constraints",
+        help = "Apply consequence-based transport checks for geometric body angle of attack and usable wing-tank volume. Airliner-shape preferences are controlled separately by Enable transport shape priors. Disable only to reproduce the legacy product objective; this does not alter the built geometry."
+    )]
+    pub transport_planform_constraints_enabled: bool,
+
+    /// Whether subjective transport-shape preferences contribute to cost.
+    #[serde(default)]
+    #[config(
+        label = "Enable transport shape priors",
+        help = "Opt in to heuristic chord-ratio, wingbox-size, flap-footprint, trailing-edge-sweep and bending-slenderness penalties. These are preliminary airliner-shape preferences, not universal physical laws; they are off by default so the optimizer can discover unconventional feasible designs."
+    )]
+    pub transport_shape_priors_enabled: bool,
+
+    /// Bottom of the physical body-incidence window at trimmed cruise.
+    #[serde(default)]
+    #[config(
+        label = "Geometric body-AoA window: minimum",
+        unit = "deg",
+        help = "Lower bound for the uncorrected geometric body angle of attack after force and moment trim at the nominated cruise point. This is not the Prandtl-Glauert display alpha or a local wing-section incidence."
+    )]
+    pub geometric_body_alpha_min_deg: f64,
+
+    /// Top of the physical body-incidence window at trimmed cruise.
+    #[serde(default)]
+    #[config(
+        label = "Geometric body-AoA window: maximum",
+        unit = "deg",
+        help = "Upper bound for the uncorrected geometric body angle of attack after force and moment trim at the nominated cruise point. A conventional passenger-transport target is commonly specified as a body-attitude requirement around 2-4 deg, not as a universal local-section limit."
+    )]
+    pub geometric_body_alpha_max_deg: f64,
+
+    /// Cost of leaving the physical body-incidence window.
+    #[serde(default)]
+    #[config(
+        label = "Geometric body-AoA penalty weight",
+        help = "Quadratic penalty on trimmed geometric body angle of attack outside the transport body-AoA window. Kept high enough that L/D cannot buy an implausible cruise attitude, while preserving a gradient back toward compliance."
+    )]
+    pub geometric_body_alpha_penalty_scale: f64,
+
+    /// Minimum usable depth at the inboard root wingbox.
+    #[serde(default)]
+    #[config(
+        label = "Minimum root wingbox depth",
+        unit = "m",
+        help = "Minimum available structural depth in the root spar box, estimated from the local airfoil thickness between the configured front and rear spars. This is a preliminary packaging guard for carry-through structure and systems, not a stress calculation."
+    )]
+    pub min_root_wingbox_depth_m: f64,
+
+    /// Minimum usable depth at the kink wingbox.
+    #[serde(default)]
+    #[config(
+        label = "Minimum kink wingbox depth",
+        unit = "m",
+        help = "Minimum available structural depth at the cranked/kink station, estimated from the local airfoil thickness between the configured spars. It prevents an optimizer from retaining area while collapsing the inboard volume that feeds the outer panel."
+    )]
+    pub min_break_wingbox_depth_m: f64,
+
+    /// Minimum chordwise width of the kink wingbox.
+    #[serde(default)]
+    #[config(
+        label = "Minimum kink wingbox width",
+        unit = "m",
+        help = "Minimum front-to-rear spar separation at the kink station. It is a preliminary proxy for main-gear, flap-mechanism and fuel-system packaging; detailed gear retraction geometry remains a later design step."
+    )]
+    pub min_break_wingbox_width_m: f64,
+
+    /// Cost of violating any inboard wingbox dimensional reserve.
+    #[serde(default)]
+    #[config(
+        label = "Wingbox packaging penalty weight",
+        help = "Quadratic penalty for insufficient root/kink wingbox depth or kink spar-box width. The three deficits are normalized by their configured minimums before being summed."
+    )]
+    pub wingbox_packaging_penalty_scale: f64,
+
+    /// Minimum physical flap area relative to the reference wing area.
+    #[serde(default)]
+    #[config(
+        label = "Minimum flap-area fraction",
+        help = "Minimum physical trailing-edge flap area divided by wing planform area, computed from the configured flap chord and span run. It reserves a credible high-lift-device footprint even though the in-loop aerodynamic model is clean-wing."
+    )]
+    pub min_flap_area_fraction: f64,
+
+    /// Cost of falling below the flap-area reserve.
+    #[serde(default)]
+    #[config(
+        label = "High-lift area penalty weight",
+        help = "Quadratic penalty for a configured flap footprint smaller than the transport high-lift reserve."
+    )]
+    pub flap_area_penalty_scale: f64,
+
+    /// Maximum geometric bending slenderness of the root spar box.
+    #[serde(default)]
+    #[config(
+        label = "Maximum root bending-box slenderness",
+        help = "Upper bound on projected-span squared divided by root wingbox width times depth. This is a dimensionless preliminary bending-capacity proxy: it prevents span growth and root-box collapse from appearing structurally free, but does not replace the wingbox structural sizing analysis."
+    )]
+    pub max_root_bending_box_slenderness: f64,
+
+    /// Cost of exceeding the root bending slenderness guard.
+    #[serde(default)]
+    #[config(
+        label = "Root bending-slenderness penalty weight",
+        help = "Quadratic penalty for exceeding the root bending-box slenderness guard."
+    )]
+    pub bending_slenderness_penalty_scale: f64,
+
+    /// Inboard edge of the tankable semispan interval.
+    #[serde(default)]
+    #[config(
+        label = "Tankable span start",
+        unit = "fraction of semi-span",
+        help = "Inboard boundary of the wingbox interval credited as fuel volume. The omitted center region represents carry-through structure, fuselage fairing and non-tankable installation volume."
+    )]
+    pub tankable_span_start_fraction: f64,
+
+    /// Outboard edge of the tankable semispan interval.
+    #[serde(default)]
+    #[config(
+        label = "Tankable span end",
+        unit = "fraction of semi-span",
+        help = "Outboard boundary of the wingbox interval credited as fuel volume. The omitted outer region reserves space for ailerons, wingtip structure and systems rather than treating every thin outboard bay as fuel tank."
+    )]
+    pub tankable_span_end_fraction: f64,
+
     /// Linear cost per metre of span, standing in for structural weight.
     #[config(
         label = "Wingspan penalty (per metre)",
@@ -84,7 +212,7 @@ pub struct ObjectiveWeights {
     )]
     pub cd0_penalty_scale: f64,
 
-    /// Cost of exceeding the wing-area bound.
+    /// Cost of exceeding the wing-area bound while retaining a search gradient.
     #[config(
         label = "Max wing-area penalty weight",
         help = "Penalty per m^2 the wing area exceeds requirements.max_wing_area_m2."
@@ -232,6 +360,22 @@ pub struct ObjectiveWeights {
     )]
     pub max_break_root_chord_ratio: f64,
 
+    /// How much the inboard panel must retain chord at the kink.
+    #[serde(default)]
+    #[config(
+        label = "Min break/root chord ratio",
+        help = "Lower bound on break_chord_m / root_chord_m. A transport kink needs retained inboard chord for a deep wing box, fuel, high-lift devices and pylon/gear installation; below this ratio the inboard panel becomes an implausibly abrupt taper."
+    )]
+    pub min_break_root_chord_ratio: f64,
+
+    /// How much chord the tip must retain relative to the root.
+    #[serde(default)]
+    #[config(
+        label = "Min tip/root chord ratio",
+        help = "Lower bound on tip_chord_m / root_chord_m. It prevents a mathematically efficient but impractically pinched tip, retaining volume for tip structure, ailerons and a manufacturable trailing edge."
+    )]
+    pub min_tip_root_chord_ratio: f64,
+
     /// Cost of a wing that tapers too little.
     #[config(
         label = "Break-chord taper-realism penalty weight",
@@ -245,6 +389,24 @@ pub struct ObjectiveWeights {
         help = "Penalizes the wing's root-to-break trailing edge (seen in planform) making an angle greater than 90 deg with the fuselage centerline -- i.e. the break station's trailing edge sitting forward of the root's. That creates a reflex (concave) corner at the wing-fuselage junction: a severe stress concentration no real transport-category wing root has, caused by a short root chord combined with a comparatively long break chord and/or too little sweep. Quadratic on the angle exceedance beyond 90 deg."
     )]
     pub te_root_angle_penalty_scale: f64,
+
+    /// Most forward-swept admissible inboard trailing edge.
+    #[serde(default)]
+    #[config(
+        label = "Minimum inboard trailing-edge sweep",
+        unit = "deg",
+        help = "Lowest admissible exposed side-of-body-to-kink trailing-edge sweep. Zero prevents the edge from running forward outboard, which would make its angle with the fuselage exceed 90 degrees and create a reflex corner."
+    )]
+    pub min_inboard_te_sweep_deg: f64,
+
+    /// Most aft-swept admissible inboard trailing edge.
+    #[serde(default)]
+    #[config(
+        label = "Maximum inboard trailing-edge sweep",
+        unit = "deg",
+        help = "Largest admissible root-to-kink trailing-edge sweep. Transport trailing edges are normally appreciably less swept than leading edges because the inboard chord is retained for structure and high-lift devices."
+    )]
+    pub max_inboard_te_sweep_deg: f64,
 
     /// How far aft the wing must sit.
     #[config(
@@ -303,6 +465,21 @@ impl Default for ObjectiveWeights {
             alpha_penalty_scale: 5.0,
             alpha_min_penalty_deg: 0.0,
             alpha_max_penalty_deg: 10.0,
+            transport_planform_constraints_enabled: true,
+            transport_shape_priors_enabled: false,
+            geometric_body_alpha_min_deg: 2.0,
+            geometric_body_alpha_max_deg: 4.0,
+            geometric_body_alpha_penalty_scale: 200.0,
+            min_root_wingbox_depth_m: 1.20,
+            min_break_wingbox_depth_m: 0.65,
+            min_break_wingbox_width_m: 2.50,
+            wingbox_packaging_penalty_scale: 250.0,
+            min_flap_area_fraction: 0.11,
+            flap_area_penalty_scale: 250.0,
+            max_root_bending_box_slenderness: 700.0,
+            bending_slenderness_penalty_scale: 150.0,
+            tankable_span_start_fraction: 0.10,
+            tankable_span_end_fraction: 0.75,
             span_penalty_per_m: 0.02,
             cd0_penalty_scale: 50.0,
             area_penalty_scale: 0.5,
@@ -326,8 +503,12 @@ impl Default for ObjectiveWeights {
             max_vstab_volume_coef: 0.13,
             tail_volume_penalty_scale: 200.0,
             max_break_root_chord_ratio: 0.65,
+            min_break_root_chord_ratio: 0.40,
+            min_tip_root_chord_ratio: 0.16,
             taper_realism_penalty_scale: 250.0,
             te_root_angle_penalty_scale: 100.0,
+            min_inboard_te_sweep_deg: 0.0,
+            max_inboard_te_sweep_deg: 22.0,
             min_wing_position_fraction: 0.27,
             wing_position_penalty_scale: 300.0,
             payload_shortfall_penalty_scale: 1000.0,
@@ -376,6 +557,8 @@ mod tests {
     #[test]
     fn a_bound_that_is_not_named_as_a_weight_stays_a_number() {
         assert_eq!(kind_of("alpha_min_penalty_deg"), Kind::Float);
+        assert_eq!(kind_of("geometric_body_alpha_min_deg"), Kind::Float);
+        assert_eq!(kind_of("min_break_wingbox_depth_m"), Kind::Float);
         assert_eq!(kind_of("min_hstab_volume_coef"), Kind::Float);
         assert_eq!(kind_of("cg_envelope_reward"), Kind::Float);
     }
@@ -384,8 +567,21 @@ mod tests {
     fn every_min_max_pair_leaves_a_usable_range() {
         let weights = ObjectiveWeights::default();
         assert!(weights.alpha_min_penalty_deg < weights.alpha_max_penalty_deg);
+        assert!(weights.geometric_body_alpha_min_deg < weights.geometric_body_alpha_max_deg);
+        assert!(weights.tankable_span_start_fraction < weights.tankable_span_end_fraction);
+        assert!(weights.min_inboard_te_sweep_deg < weights.max_inboard_te_sweep_deg);
         assert!(weights.min_hstab_volume_coef < weights.max_hstab_volume_coef);
         assert!(weights.min_vstab_volume_coef < weights.max_vstab_volume_coef);
+    }
+
+    #[test]
+    fn transport_constraints_are_on_by_default_but_remain_explicitly_switchable() {
+        let weights = ObjectiveWeights::default();
+
+        assert!(weights.transport_planform_constraints_enabled);
+        assert!(!weights.transport_shape_priors_enabled);
+        assert_eq!(weights.geometric_body_alpha_min_deg, 2.0);
+        assert_eq!(weights.geometric_body_alpha_max_deg, 4.0);
     }
 
     #[test]

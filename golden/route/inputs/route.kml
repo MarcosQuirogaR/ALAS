@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2"><Document>
+  <Placemark><name>LEMD-LFPG</name><LineString><coordinates>
+    -3.5626,40.4719,610 -2.1500,41.0500,9500 0.4000,42.3000,11500
+    1.7000,43.4000 notacoordinate 2.5500,48.9000,119
+  </coordinates></LineString></Placemark>
+</Document></kml>

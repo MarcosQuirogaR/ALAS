@@ -10,8 +10,8 @@
 //! [`crate::torenbeek`]'s empirical methods and mass fractions from
 //! [`MassModelConfig`]; [`define_mass_coordinates`] places each centroid;
 //! [`calculate_physical_cg`] combines them into a mass-weighted CG; and
-//! [`run_mass_analysis`] orchestrates all three, with an optional detailed
-//! payload-layout override.
+//! [`run_mass_analysis`] orchestrates all three, with an optional payload
+//! layout override.
 //!
 //! [`WING`] through [`FUEL`] are the ten names upstream's `Dict[str, float]`
 //! masses and `Dict[str, List[float]]` coordinates use as keys. Both become a
@@ -23,17 +23,29 @@
 //! redefines, so it is `pub` here too.
 //!
 //! [`PayloadLayoutSummary`] is the seam to the not-yet-ported
-//! `alas/physics/payload.py`: upstream's `run_mass_analysis` takes an optional
-//! `PayloadLayout` and reads only `.total_mass`/`.cg_x`/`.cg_y` off it, so this
-//! reproduces that duck-typed usage concretely rather than depending on the
-//! unported crate. When `alas-payload::payload` lands its layout type can
-//! convert into this one.
+//! `alas/physics/payload.py`; it reproduces the three fields read upstream.
 
-use alas_config::{DesignRequirements, GeometryConfig, MassModelConfig};
-use alas_geom::asb::airplane::Airplane;
-use alas_geom::asb::wing::Wing;
+use alas_config::{
+    CabinConfig, ControlSurfacesConfig, DesignRequirements, GeometryConfig, LandingGearConfig,
+    MassModelConfig, StructuresConfig,
+};
+use alas_geom::aircraft::airplane::Airplane;
+use alas_geom::aircraft::wing::Wing;
 
-use crate::torenbeek::{mass_fuselage_simple, mass_wing};
+use crate::flops_transport::{
+    evaluate_product, FlopsTransportEvaluation, FlopsTransportUnverifiedReason,
+    PartialFlopsTransportBreakdown,
+};
+use crate::torenbeek::{mass_fuselage_simple, mass_wing, mass_wing_with_control_surface_area};
+use crate::wing_centroid::WingCentroidError;
+
+mod coordinates;
+pub use coordinates::{
+    calculate_physical_cg, define_mass_coordinates, define_mass_coordinates_with_model,
+    run_mass_analysis, run_mass_analysis_checked, run_mass_analysis_with_model,
+    run_mass_analysis_with_model_checked, run_mass_analysis_with_model_checked_product_with_gear,
+    run_mass_analysis_with_model_checked_with_gear,
+};
 
 /// The wing structure.
 pub const WING: &str = "Wing";
@@ -72,10 +84,46 @@ pub const OEW_KEYS: [&str; 8] = [
     FURNISHINGS,
 ];
 
-/// Every AeroSandbox `Wing::aerodynamic_center` call in this module reads the
+/// Failure returned when a selected physical mass method cannot be verified.
+///
+/// The frozen compatibility method never returns this error. FLOPS does when
+/// a required range, cabin, or installed-architecture datum is absent, so a
+/// caller cannot mistake a missing physical input for a valid mass buildup.
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
+pub enum ComponentMassError {
+    /// The selected structural coordinate model could not be resolved.
+    #[error("mass-coordinate geometry could not be resolved: {0}")]
+    Geometry(#[source] WingCentroidError),
+    /// NASA FLOPS inputs are incomplete or internally inconsistent.
+    #[error("FLOPS transport mass method is unverified")]
+    FlopsUnverified {
+        /// Stable blockers that must be resolved before using the mass.
+        reasons: Vec<FlopsTransportUnverifiedReason>,
+        /// Independently available component projections, never a replacement
+        /// for the complete verified buildup.
+        partial: Box<PartialFlopsTransportBreakdown>,
+    },
+}
+
+/// Every native aerodynamic model `Wing::aerodynamic_center` call in this module reads the
 /// quarter-chord point -- upstream's `mass.py` never passes a
-/// `chord_fraction` of its own, and AeroSandbox's own default is 0.25.
+/// `chord_fraction` of its own, and native aerodynamic model's own default is 0.25.
 const AERODYNAMIC_CENTER_CHORD_FRACTION: f64 = 0.25;
+
+/// Which main-wing mass-coordinate model an analysis uses.
+///
+/// [`Self::ReferenceCompatibility`] is the translated Python coordinate and
+/// remains available so the frozen parity fixture keeps testing the reference
+/// implementation rather than an improvement. [`Self::StructuralWingbox`]
+/// replaces only the main-wing point with a first moment integrated from the
+/// configured spars, skins, ribs, materials, and ultimate maneuver load.
+#[derive(Debug, Clone, Copy)]
+pub enum MassCoordinateModel<'a> {
+    /// Exact `alas/physics/mass.py` coordinate behavior.
+    ReferenceCompatibility,
+    /// Geometry- and structure-derived main-wing mass coordinate.
+    StructuralWingbox(&'a StructuresConfig),
+}
 
 /// The mass of each primary component, in kg -- upstream's `Dict[str, float]`
 /// with one field per canonical component name (see the module doc).
@@ -203,6 +251,108 @@ fn wing_named_or_first<'a>(wings: &'a [Wing], name: &str) -> &'a Wing {
         .unwrap_or(&wings[0])
 }
 
+/// Planform area occupied by the configured trailing-edge flap run.
+///
+/// `Wing` intentionally carries no control-surface subgeometry, so deriving
+/// this at the mass boundary keeps drawing inputs and structural mass inputs
+/// consistent without changing the geometry/parity type. Chord is integrated
+/// over the configured semi-span interval rather than approximated from the
+/// total wing area, which handles tapered and multi-station wings.
+fn configured_flap_area(wing: &Wing, control_surfaces: &ControlSurfacesConfig) -> f64 {
+    if wing.xsecs.len() < 2 {
+        return 0.0;
+    }
+    let start = control_surfaces.flap_span_start_frac.clamp(0.0, 1.0);
+    let end = control_surfaces.flap_span_end_frac.clamp(0.0, 1.0);
+    let chord_fraction = control_surfaces.flap_chord_fraction.clamp(0.0, 1.0);
+    if end <= start || chord_fraction <= 0.0 {
+        return 0.0;
+    }
+
+    let section_lengths: Vec<f64> = wing
+        .xsecs
+        .windows(2)
+        .map(|pair| {
+            let dy = pair[1].xyz_le[1] - pair[0].xyz_le[1];
+            let dz = pair[1].xyz_le[2] - pair[0].xyz_le[2];
+            (dy * dy + dz * dz).sqrt()
+        })
+        .collect();
+    let half_span: f64 = section_lengths.iter().sum();
+    if !half_span.is_finite() || half_span <= 0.0 {
+        return 0.0;
+    }
+
+    let mut area = 0.0;
+    let mut station_start = 0.0;
+    for (pair, segment_length) in wing.xsecs.windows(2).zip(section_lengths) {
+        let station_end = station_start + segment_length / half_span;
+        let overlap_start = start.max(station_start);
+        let overlap_end = end.min(station_end);
+        if overlap_end > overlap_start && station_end > station_start {
+            let at = |fraction: f64| {
+                let t = (fraction - station_start) / (station_end - station_start);
+                pair[0].chord + t * (pair[1].chord - pair[0].chord)
+            };
+            let chord_start = at(overlap_start);
+            let chord_end = at(overlap_end);
+            area += half_span * (overlap_end - overlap_start) * (chord_start + chord_end) * 0.5;
+        }
+        station_start = station_end;
+    }
+    area * if wing.symmetric { 2.0 } else { 1.0 } * chord_fraction
+}
+
+/// Resolve whether the main gear has a wing attachment for the Torenbeek
+/// wing-structure knockdown. One explicitly configured strut denotes
+/// centreline/body gear; zero is the normal auto-sized transport layout,
+/// which includes the left/right wing gear legs.
+fn main_gear_mounted_to_wing(landing_gear: &LandingGearConfig) -> bool {
+    landing_gear.n_mlg_struts == 0 || landing_gear.n_mlg_struts >= 2
+}
+
+/// Product mass buildup with the configured flap geometry and gear layout.
+///
+/// The public `calculate_component_masses` function remains the frozen
+/// reference-compatible entry point. Checked product analyses call this seam
+/// so the user-selected control surfaces and landing-gear architecture are
+/// reflected in the physical wing mass.
+fn calculate_component_masses_with_product_configuration(
+    plane: &Airplane,
+    requirements: &DesignRequirements,
+    geometry_config: &GeometryConfig,
+    mass_model: Option<&MassModelConfig>,
+    control_surfaces: &ControlSurfacesConfig,
+    landing_gear: &LandingGearConfig,
+) -> MassBreakdown {
+    let mut masses = calculate_component_masses(plane, requirements, geometry_config, mass_model);
+    let default_mass_model = MassModelConfig::default();
+    let mm = mass_model.unwrap_or(&default_mass_model);
+    let wing = wing_named_or_first(&plane.wings, "Main Wing");
+    masses.wing = mass_wing_with_control_surface_area(
+        wing,
+        requirements.mtow_kg,
+        requirements.ultimate_load_factor,
+        requirements.mtow_kg * mm.suspended_mass_fraction,
+        requirements.dive_speed_m_s,
+        mm.max_airspeed_for_flaps_ms,
+        main_gear_mounted_to_wing(landing_gear),
+        mm.flap_deflection_angle_deg,
+        None,
+        configured_flap_area(wing, control_surfaces),
+    );
+    let oew_without_fuel = masses.wing
+        + masses.h_stab
+        + masses.v_stab
+        + masses.fuselage
+        + masses.gear
+        + masses.propulsion
+        + masses.systems
+        + masses.furnishings;
+    masses.fuel = requirements.mtow_kg - oew_without_fuel - masses.payload;
+    masses
+}
+
 fn mean(values: &[f64]) -> f64 {
     values.iter().sum::<f64>() / values.len() as f64
 }
@@ -323,378 +473,121 @@ pub fn calculate_component_masses(
     }
 }
 
-/// Determine the X, Y, Z physical locations of the centroid of each component
-/// -- `define_mass_coordinates`.
+/// Calculate component masses with the selected systems-mass method.
 ///
-/// Payload is placed at the centre of the *occupied* cabin length (payload
-/// mass / `mass_model.cabin_payload_density_kg_m`, capped at the full
-/// available cabin) rather than always the full available cabin. This means
-/// that stretching the fuselage beyond what the required payload physically
-/// needs does NOT shift the payload CG aft for free -- the optimizer must pay
-/// a CG-mismatch penalty for unrealistic stretch.
-pub fn define_mass_coordinates(
-    plane: &Airplane,
-    geometry_config: &GeometryConfig,
-    requirements: Option<&DesignRequirements>,
-    mass_model: Option<&MassModelConfig>,
-) -> MassCoordinates {
-    let default_mass_model = MassModelConfig::default();
-    let mm = mass_model.unwrap_or(&default_mass_model);
-    let default_requirements = DesignRequirements::default();
-    let req = requirements.unwrap_or(&default_requirements);
-
-    let wing = wing_named_or_first(&plane.wings, "Main Wing");
-    let fus = &plane.fuselages[0];
-
-    let last_xsec = fus.xsecs.len() - 1;
-    let fus_len = fus.xsecs[last_xsec].xyz_c[0] - fus.xsecs[0].xyz_c[0];
-    let fus_z = fus.xsecs[0].xyz_c[2];
-
-    let w_ac = wing.aerodynamic_center(AERODYNAMIC_CENTER_CHORD_FRACTION);
-    let w_root_z = wing.xsecs[0].xyz_le[2];
-
-    let cabin_start = geometry_config.fuselage.cabin_start_x_m;
-    let tailcone_len = geometry_config.fuselage.tailcone_length_m;
-    let cabin_len = (fus_len - cabin_start - tailcone_len).max(1.0);
-
-    // Occupied cabin length: how much of the available cabin the PAYLOAD
-    // actually needs at the configured linear density, capped at what's
-    // physically available. A fuselage stretched beyond that need does not
-    // move the payload centroid (and therefore the CG) aft "for free". This
-    // must stay scoped to Payload only -- Systems and Furnishings are OEW
-    // (installed-equipment) components below and use the full cabin_len
-    // instead: they are physically present over the whole installed cabin
-    // regardless of how many of those seats a particular run happens to book,
-    // so their position must NOT move when only num_passengers/payload_kg
-    // changes (e.g. switching a cabin preset from all-economy to a lower-
-    // density 3-class at the SAME fuselage length). Tying OEW-component
-    // position to occupied_len instead would drag the entire OEW-component CG
-    // forward whenever a preset books fewer passengers, purely as an artifact
-    // of the shorter occupied length rather than any real change to where the
-    // installed equipment sits, corrupting CG-envelope compliance for an
-    // otherwise correct lower-density 3-class config.
-    let occupied_len = cabin_len.min(req.payload_kg() / mm.cabin_payload_density_kg_m.max(1e-6));
-
-    // Systems (avionics, ECS, APU) are concentrated in the forward equipment
-    // bay and central cabin zone, including APU. Scaled with the full
-    // installed cabin length (NOT occupied_len -- see note above).
-    let x_systems = cabin_start + 0.45 * cabin_len;
-    // Furnishings (seats, galleys, etc.) and operational items -- also
-    // installed over the full cabin, not the currently-booked payload.
-    let x_furn = cabin_start + 0.50 * cabin_len;
-    // Payload CG at the centre of the occupied cabin section (the one place
-    // occupied_len is the physically correct choice).
-    let x_payload = cabin_start + 0.50 * occupied_len;
-
-    let mut coords = MassCoordinates {
-        fuselage: [fus_len * 0.46, 0.0, fus_z],
-        wing: [w_ac[0] + wing.xsecs[0].chord * 0.2, 0.0, w_root_z],
-        h_stab: [
-            fus_len - geometry_config.empennage.hstab_offset_from_tail_m / 2.0,
-            0.0,
-            fus_z + geometry_config.empennage.hstab_z_m,
-        ],
-        v_stab: [
-            fus_len - geometry_config.empennage.vstab_offset_from_tail_m / 2.0,
-            0.0,
-            fus_z + geometry_config.empennage.vstab_z_m,
-        ],
-        gear: [w_ac[0], 0.0, w_root_z - 2.5],
-        propulsion: [w_ac[0], 0.0, w_root_z - 1.0],
-        systems: [x_systems, 0.0, fus_z],
-        furnishings: [x_furn, 0.0, fus_z],
-        payload: [x_payload, 0.0, fus_z],
-        fuel: [w_ac[0], 0.0, w_root_z],
-    };
-
-    // Upstream wraps this block in a bare `try/except Exception: pass`. Every
-    // step here (filtering by substring, indexing the first/last xsec of a
-    // non-empty nacelle) is bounds-respecting once the `!nacelles.is_empty()`
-    // guard has been checked, so nothing in a direct translation can panic
-    // and there is no Rust equivalent of the swallowed exception to write.
-    let nacelles: Vec<&_> = plane
-        .fuselages
-        .iter()
-        .filter(|f| f.name.contains("Nacelle"))
-        .collect();
-    if !nacelles.is_empty() {
-        let mut x_engines = Vec::with_capacity(nacelles.len());
-        let mut y_engines = Vec::with_capacity(nacelles.len());
-        let mut z_engines = Vec::with_capacity(nacelles.len());
-        for nacelle in &nacelles {
-            let last = nacelle.xsecs.len() - 1;
-            let x_start = nacelle.xsecs[0].xyz_c[0];
-            let length = nacelle.xsecs[last].xyz_c[0] - x_start;
-            x_engines.push(x_start + length * 0.5);
-            y_engines.push(nacelle.xsecs[0].xyz_c[1]);
-            z_engines.push(nacelle.xsecs[0].xyz_c[2]);
-        }
-        coords.propulsion = [mean(&x_engines), mean(&y_engines), mean(&z_engines)];
-    }
-
-    coords
-}
-
-/// Calculate the global center of gravity location `[X, Y, Z]` in meters --
-/// `calculate_physical_cg`.
-pub fn calculate_physical_cg(masses: &MassBreakdown, coords: &MassCoordinates) -> [f64; 3] {
-    let mut moment = [0.0; 3];
-    let mut total_mass = 0.0;
-    for ((_, mass), (_, xyz)) in masses.as_pairs().into_iter().zip(coords.as_pairs()) {
-        let mass = mass.max(0.0);
-        for axis in 0..3 {
-            moment[axis] += mass * xyz[axis];
-        }
-        total_mass += mass;
-    }
-    if total_mass == 0.0 {
-        return [0.0, 0.0, 0.0];
-    }
-    [
-        moment[0] / total_mass,
-        moment[1] / total_mass,
-        moment[2] / total_mass,
-    ]
-}
-
-/// Execute the full weight and balance analysis -- `run_mass_analysis`.
-///
-/// `payload_layout`, when given with a positive `total_mass`, replaces the
-/// lumped [`PAYLOAD`] mass/coordinate with the layout's true mass and centre
-/// of gravity, and recomputes the [`FUEL`] remainder. Every caller (the
-/// optimizer loop included) calls this function twice per evaluation: once
-/// without `payload_layout` to get a cheap OEW/x_oew estimate, then again
-/// with the detailed layout built from that estimate, so the CG this function
-/// returns always reflects the real cabin/cargo layout rather than the lumped
-/// `cabin_payload_density_kg_m` estimate, which only ever seeds that first
-/// pass.
-pub fn run_mass_analysis(
+/// The reference-compatible fraction path remains available through
+/// [`calculate_component_masses`]. A selected FLOPS method is evaluated only
+/// when all of its architecture inputs are declared; an incomplete method is
+/// returned as an error instead of silently reverting to the fractions.
+pub fn calculate_component_masses_checked(
     plane: &Airplane,
     requirements: &DesignRequirements,
     geometry_config: &GeometryConfig,
+    cabin_config: &CabinConfig,
+    control_surfaces: &ControlSurfacesConfig,
     mass_model: Option<&MassModelConfig>,
-    payload_layout: Option<&PayloadLayoutSummary>,
-) -> (MassBreakdown, MassCoordinates, [f64; 3]) {
-    let mut masses = calculate_component_masses(plane, requirements, geometry_config, mass_model);
-    let mut coords =
-        define_mass_coordinates(plane, geometry_config, Some(requirements), mass_model);
+) -> Result<MassBreakdown, ComponentMassError> {
+    calculate_component_masses_checked_with_gear(
+        plane,
+        requirements,
+        geometry_config,
+        cabin_config,
+        control_surfaces,
+        mass_model,
+        &LandingGearConfig::default(),
+    )
+}
 
-    if let Some(layout) = payload_layout {
-        if layout.total_mass > 0.0 {
-            let m_oew: f64 = OEW_KEYS
-                .iter()
-                .map(|&key| masses.get(key).unwrap_or(0.0))
-                .sum();
-            masses.payload = layout.total_mass;
-            masses.fuel = requirements.mtow_kg - (m_oew + masses.payload);
-            let z_payload = coords.payload[2];
-            coords.payload = [layout.cg_x, layout.cg_y, z_payload];
-        }
+/// Checked mass buildup with the selected landing-gear architecture.
+#[allow(clippy::too_many_arguments)]
+pub fn calculate_component_masses_checked_with_gear(
+    plane: &Airplane,
+    requirements: &DesignRequirements,
+    geometry_config: &GeometryConfig,
+    _cabin_config: &CabinConfig,
+    control_surfaces: &ControlSurfacesConfig,
+    mass_model: Option<&MassModelConfig>,
+    landing_gear: &LandingGearConfig,
+) -> Result<MassBreakdown, ComponentMassError> {
+    let default_mass_model = MassModelConfig::default();
+    let mm = mass_model.unwrap_or(&default_mass_model);
+    if mm.systems_mass_method.is_reference_compatible() {
+        return Ok(calculate_component_masses(
+            plane,
+            requirements,
+            geometry_config,
+            mass_model,
+        ));
     }
 
-    let cg = calculate_physical_cg(&masses, &coords);
-    (masses, coords, cg)
+    calculate_component_masses_checked_product_with_gear(
+        plane,
+        requirements,
+        geometry_config,
+        control_surfaces,
+        mass_model,
+        landing_gear,
+        _cabin_config,
+    )
+}
+
+/// Product mass buildup with configured flap area and gear architecture,
+/// retaining the selected systems-mass method's validation semantics.
+///
+/// This is separate from [`calculate_component_masses_checked_with_gear`] so
+/// the latter can remain the explicit reference-compatible API when the
+/// frozen fraction method is selected. Product analyses opt into this seam
+/// even when they intentionally retain those historical systems fractions.
+#[allow(clippy::too_many_arguments)]
+pub fn calculate_component_masses_checked_product_with_gear(
+    plane: &Airplane,
+    requirements: &DesignRequirements,
+    geometry_config: &GeometryConfig,
+    control_surfaces: &ControlSurfacesConfig,
+    mass_model: Option<&MassModelConfig>,
+    landing_gear: &LandingGearConfig,
+    _cabin_config: &CabinConfig,
+) -> Result<MassBreakdown, ComponentMassError> {
+    let default_mass_model = MassModelConfig::default();
+    let mm = mass_model.unwrap_or(&default_mass_model);
+
+    let mut masses = calculate_component_masses_with_product_configuration(
+        plane,
+        requirements,
+        geometry_config,
+        mass_model,
+        control_surfaces,
+        landing_gear,
+    );
+    if mm.systems_mass_method.is_reference_compatible() {
+        return Ok(masses);
+    }
+    let evaluation = evaluate_product(
+        plane,
+        requirements,
+        geometry_config,
+        control_surfaces,
+        &mm.flops_transport,
+    );
+    let breakdown = match evaluation {
+        FlopsTransportEvaluation::Verified { breakdown, .. } => breakdown,
+        FlopsTransportEvaluation::Unverified { reasons, partial } => {
+            return Err(ComponentMassError::FlopsUnverified {
+                reasons,
+                partial: Box::new(partial),
+            });
+        }
+    };
+    masses.systems = breakdown.systems.total_kg;
+    masses.furnishings = breakdown.systems.furnishings_kg + breakdown.operating_items.total_kg;
+    let oew = OEW_KEYS
+        .iter()
+        .filter_map(|name| masses.get(name))
+        .sum::<f64>();
+    masses.fuel = requirements.mtow_kg - oew - masses.payload;
+    Ok(masses)
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use alas_geom::asb::airfoil::Airfoil;
-    use alas_geom::asb::fuselage::{Fuselage, FuselageXSec};
-    use alas_geom::asb::wing::WingXSec;
-
-    fn naca(name: &str) -> Airfoil {
-        Airfoil::from_name(name).expect("valid 4-digit NACA name")
-    }
-
-    fn simple_wing(name: &str) -> Wing {
-        Wing::new(
-            name,
-            vec![
-                WingXSec::new([0.0, 0.0, 0.0], 3.0, 0.0, naca("naca2412")),
-                WingXSec::new([1.0, 15.0, 0.0], 1.0, 0.0, naca("naca2412")),
-            ],
-            true,
-        )
-    }
-
-    fn simple_fuselage(name: &str, x0: f64, x1: f64) -> Fuselage {
-        Fuselage::new(
-            name,
-            vec![
-                FuselageXSec::new([x0, 0.0, 0.0], Some(1.0), None, None, 2.0)
-                    .expect("radius alone is valid"),
-                FuselageXSec::new([x1, 0.0, 0.0], Some(0.5), None, None, 2.0)
-                    .expect("radius alone is valid"),
-            ],
-        )
-    }
-
-    fn all_zero_breakdown() -> MassBreakdown {
-        MassBreakdown {
-            wing: 0.0,
-            h_stab: 0.0,
-            v_stab: 0.0,
-            fuselage: 0.0,
-            gear: 0.0,
-            propulsion: 0.0,
-            systems: 0.0,
-            furnishings: 0.0,
-            payload: 0.0,
-            fuel: 0.0,
-        }
-    }
-
-    fn all_zero_coordinates() -> MassCoordinates {
-        MassCoordinates {
-            wing: [1.0, 2.0, 3.0],
-            h_stab: [4.0, 5.0, 6.0],
-            v_stab: [7.0, 8.0, 9.0],
-            fuselage: [10.0, 11.0, 12.0],
-            gear: [13.0, 14.0, 15.0],
-            propulsion: [16.0, 17.0, 18.0],
-            systems: [19.0, 20.0, 21.0],
-            furnishings: [22.0, 23.0, 24.0],
-            payload: [25.0, 26.0, 27.0],
-            fuel: [28.0, 29.0, 30.0],
-        }
-    }
-
-    #[test]
-    fn an_all_zero_mass_input_returns_the_origin_rather_than_dividing_by_zero() {
-        let cg = calculate_physical_cg(&all_zero_breakdown(), &all_zero_coordinates());
-        assert_eq!(cg, [0.0, 0.0, 0.0]);
-    }
-
-    #[test]
-    fn a_negative_mass_is_clamped_to_zero_rather_than_pulling_the_cg_the_wrong_way() {
-        let mut masses = all_zero_breakdown();
-        masses.wing = -1000.0;
-        masses.fuselage = 100.0;
-        let coords = all_zero_coordinates();
-        let cg = calculate_physical_cg(&masses, &coords);
-        // Only the fuselage mass (positive) should contribute; the negative
-        // wing mass is dropped rather than subtracted.
-        assert_eq!(cg, coords.fuselage);
-    }
-
-    #[test]
-    fn the_cg_of_one_component_is_that_components_own_coordinate() {
-        let mut masses = all_zero_breakdown();
-        masses.gear = 500.0;
-        let coords = all_zero_coordinates();
-        let cg = calculate_physical_cg(&masses, &coords);
-        assert_eq!(cg, coords.gear);
-    }
-
-    #[test]
-    fn get_resolves_every_canonical_name_and_nothing_else() {
-        let masses = MassBreakdown {
-            wing: 1.0,
-            h_stab: 2.0,
-            v_stab: 3.0,
-            fuselage: 4.0,
-            gear: 5.0,
-            propulsion: 6.0,
-            systems: 7.0,
-            furnishings: 8.0,
-            payload: 9.0,
-            fuel: 10.0,
-        };
-        assert_eq!(masses.get(WING), Some(1.0));
-        assert_eq!(masses.get(FUEL), Some(10.0));
-        assert_eq!(masses.get("Not a component"), None);
-    }
-
-    #[test]
-    fn oew_keys_excludes_exactly_payload_and_fuel() {
-        assert!(!OEW_KEYS.contains(&PAYLOAD));
-        assert!(!OEW_KEYS.contains(&FUEL));
-        assert_eq!(OEW_KEYS.len(), 8);
-    }
-
-    fn plane_with_fuselages(fuselages: Vec<Fuselage>) -> Airplane {
-        Airplane {
-            name: "Probe".to_owned(),
-            xyz_ref: [0.0, 0.0, 0.0],
-            wings: vec![simple_wing("Main Wing")],
-            fuselages,
-            s_ref: 100.0,
-            c_ref: 5.0,
-            b_ref: 30.0,
-        }
-    }
-
-    #[test]
-    fn nacelle_fuselages_overwrite_the_propulsion_coordinate_with_their_mean_position() {
-        let geometry = GeometryConfig::default();
-        let plane = plane_with_fuselages(vec![
-            simple_fuselage("Fuselage", 0.0, 76.72),
-            simple_fuselage("Nacelle L", 10.0, 18.0).translate([0.0, -9.8, -2.0]),
-            simple_fuselage("Nacelle R", 10.0, 18.0).translate([0.0, 9.8, -2.0]),
-        ]);
-        let coords = define_mass_coordinates(&plane, &geometry, None, None);
-        // Mean X of the two nacelles' (start + half length): both at
-        // x_start=10, length=8, so midpoint 14 for each -- mean is 14.
-        assert!((coords.propulsion[0] - 14.0).abs() < 1e-9);
-        assert!((coords.propulsion[1] - 0.0).abs() < 1e-9); // symmetric L/R
-        assert!((coords.propulsion[2] - (-2.0)).abs() < 1e-9);
-    }
-
-    #[test]
-    fn no_nacelle_fuselages_leaves_the_wing_relative_propulsion_coordinate() {
-        let geometry = GeometryConfig::default();
-        let plane = plane_with_fuselages(vec![simple_fuselage("Fuselage", 0.0, 76.72)]);
-        let coords = define_mass_coordinates(&plane, &geometry, None, None);
-        let wing = &plane.wings[0];
-        let w_ac = wing.aerodynamic_center(AERODYNAMIC_CENTER_CHORD_FRACTION);
-        let w_root_z = wing.xsecs[0].xyz_le[2];
-        assert_eq!(coords.propulsion, [w_ac[0], 0.0, w_root_z - 1.0]);
-    }
-
-    #[test]
-    fn a_positive_payload_layout_replaces_the_lumped_payload_and_recomputes_fuel() {
-        let geometry = GeometryConfig::default();
-        let requirements = DesignRequirements::default();
-        let plane = plane_with_fuselages(vec![simple_fuselage("Fuselage", 0.0, 76.72)]);
-
-        let (baseline_masses, _, _) =
-            run_mass_analysis(&plane, &requirements, &geometry, None, None);
-
-        let layout = PayloadLayoutSummary {
-            total_mass: 40_000.0,
-            cg_x: 33.0,
-            cg_y: 0.5,
-        };
-        let (masses, coords, _) =
-            run_mass_analysis(&plane, &requirements, &geometry, None, Some(&layout));
-
-        assert_eq!(masses.payload, 40_000.0);
-        assert_eq!(coords.payload[0], 33.0);
-        assert_eq!(coords.payload[1], 0.5);
-
-        let m_oew: f64 = OEW_KEYS
-            .iter()
-            .map(|&key| baseline_masses.get(key).unwrap_or(0.0))
-            .sum();
-        let expected_fuel = requirements.mtow_kg - (m_oew + 40_000.0);
-        assert!((masses.fuel - expected_fuel).abs() < 1e-9);
-    }
-
-    #[test]
-    fn a_zero_mass_payload_layout_is_ignored_like_the_python_falsy_check() {
-        let geometry = GeometryConfig::default();
-        let requirements = DesignRequirements::default();
-        let plane = plane_with_fuselages(vec![simple_fuselage("Fuselage", 0.0, 76.72)]);
-
-        let (without, _, _) = run_mass_analysis(&plane, &requirements, &geometry, None, None);
-        let layout = PayloadLayoutSummary {
-            total_mass: 0.0,
-            cg_x: 99.0,
-            cg_y: 99.0,
-        };
-        let (with_zero_layout, _, _) =
-            run_mass_analysis(&plane, &requirements, &geometry, None, Some(&layout));
-        assert_eq!(without, with_zero_layout);
-    }
-}
+#[path = "breakdown_tests.rs"]
+mod tests;

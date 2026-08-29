@@ -1,0 +1,17 @@
+{
+  "fixtures": {
+    "lto": {
+      "description": "W6.2 application-facing landing-and-take-off evidence: resolved airports, atmosphere, weight and thrust inputs, high-lift limits, field distances, V-speeds, and runway/bar annotations.",
+      "generator": "gen_w62_lto.py",
+      "runtime": "alas",
+      "alas_commit": "7d1555c1f4db5110cf6cd187c156718e1a033b50",
+      "environment": {
+        "numpy": "2.5.1",
+        "aerosandbox": "4.2.8",
+        "platform": "Windows-11-10.0.26200-SP0",
+        "scipy": "1.17.1",
+        "python": "3.13.13"
+      }
+    }
+  }
+}

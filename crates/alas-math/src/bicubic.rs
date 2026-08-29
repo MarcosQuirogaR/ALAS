@@ -4,7 +4,7 @@
 //! An interpolating bicubic spline over a rectangular grid, laid out the way
 //! FITPACK lays one out.
 //!
-//! SUAVE builds its lift and induced-drag surrogates by handing a table of
+//! mission analysis model builds its lift and induced-drag surrogates by handing a table of
 //! vortex-lattice results to `scipy.interpolate.RectBivariateSpline` with its
 //! defaults, and the mission then flies against the surrogate rather than
 //! against the table. Every mission number therefore depends on this surface,
@@ -34,7 +34,8 @@
 //! range instead; the knot rule, the basis recurrence and the solve are the
 //! same construction and live there.
 
-use crate::bspline::{collocation, knot_vector, solve, span_and_basis, DEGREE, ORDER};
+use crate::bspline::{collocation, knot_vector, span_and_basis, DEGREE, ORDER};
+use crate::linalg::solve;
 
 /// Which axis a construction error refers to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -77,6 +78,16 @@ pub enum BicubicSplineError {
         /// The offending value.
         value: f64,
     },
+    /// An axis coordinate was not finite.
+    #[error("{axis}[{index}] ({value}) is not finite")]
+    NonFiniteAxis {
+        /// The offending axis.
+        axis: Axis,
+        /// The offending coordinate's index.
+        index: usize,
+        /// The offending value.
+        value: f64,
+    },
     /// `z` was not `x.len()` rows of `y.len()` values.
     #[error("z has {actual} values in row {row}, but the {axis} axis has {expected} points")]
     ShapeMismatch {
@@ -88,6 +99,16 @@ pub enum BicubicSplineError {
         expected: usize,
         /// How long the row was.
         actual: usize,
+    },
+    /// A grid ordinate was not finite.
+    #[error("z[{row}][{column}] ({value}) is not finite")]
+    NonFiniteValue {
+        /// The offending grid row.
+        row: usize,
+        /// The offending grid column.
+        column: usize,
+        /// The offending value.
+        value: f64,
     },
     /// The collocation matrix could not be factored.
     ///
@@ -144,6 +165,13 @@ impl BicubicSpline {
                     expected: y.len(),
                     actual: values.len(),
                 });
+            }
+            if let Some((column, &value)) = values
+                .iter()
+                .enumerate()
+                .find(|(_, value)| !value.is_finite())
+            {
+                return Err(BicubicSplineError::NonFiniteValue { row, column, value });
             }
         }
 
@@ -211,6 +239,13 @@ fn check_axis(axis: Axis, values: &[f64]) -> Result<(), BicubicSplineError> {
             axis,
             count: values.len(),
         });
+    }
+    if let Some((index, &value)) = values
+        .iter()
+        .enumerate()
+        .find(|(_, value)| !value.is_finite())
+    {
+        return Err(BicubicSplineError::NonFiniteAxis { axis, index, value });
     }
     for (index, pair) in values.windows(2).enumerate() {
         if pair[1] <= pair[0] {
@@ -345,5 +380,29 @@ mod tests {
                 actual: 3
             }
         );
+    }
+
+    #[test]
+    fn non_finite_axes_and_grid_values_are_rejected_before_solving() {
+        let x = [0.0, 1.0, 2.0, f64::NAN];
+        let y = [0.0, 1.0, 2.0, 3.0];
+        let z = grid(&x, &y, |a, b| a + b);
+        assert!(matches!(
+            BicubicSpline::interpolate(&x, &y, &z),
+            Err(BicubicSplineError::NonFiniteAxis { axis: Axis::X, .. })
+        ));
+
+        let x = [0.0, 1.0, 2.0, 3.0];
+        let y = [0.0, 1.0, 2.0, 3.0];
+        let mut z = grid(&x, &y, |a, b| a + b);
+        z[2][1] = f64::NEG_INFINITY;
+        assert!(matches!(
+            BicubicSpline::interpolate(&x, &y, &z),
+            Err(BicubicSplineError::NonFiniteValue {
+                row: 2,
+                column: 1,
+                ..
+            })
+        ));
     }
 }

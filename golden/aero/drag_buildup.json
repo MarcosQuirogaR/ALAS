@@ -1,0 +1,1233 @@
+{
+  "cases": [
+    {
+      "altitude_m": 0.0,
+      "angle_of_attack_deg": 4.0,
+      "compressible": {
+        "crest_critical": {
+          "horizontal_stabilizer": 1.053582021786275,
+          "main_wing": 0.7462035265822367,
+          "vertical_stabilizer": 1.087419154444535
+        },
+        "divergence_mach": {
+          "horizontal_stabilizer": 1.0893003620216803,
+          "main_wing": 0.7713334184156805,
+          "vertical_stabilizer": 1.1320877332091936
+        },
+        "total": 4.637851038611237e-12,
+        "wings": {
+          "horizontal_stabilizer": 2.9143729435195206e-14,
+          "main_wing": 4.595711098924489e-12,
+          "vertical_stabilizer": 1.2996210251552791e-14
+        }
+      },
+      "freestream": {
+        "density_kg_m3": 1.2250000002007604,
+        "dynamic_viscosity_pa_s": 1.789380278077583e-05,
+        "reynolds_number_per_m": 4659268.27915823,
+        "speed_of_sound_m_s": 340.29399051558636,
+        "temperature_k": 288.15,
+        "velocity_m_s": 68.05879810311727
+      },
+      "induced": {
+        "total": 0.02566086253419969,
+        "viscous": 0.0008930379591322627,
+        "viscous_wings": {
+          "horizontal_stabilizer": 2.157152469372215e-05,
+          "main_wing": 0.0008884440688040601,
+          "vertical_stabilizer": 2.4668911124115787e-36
+        }
+      },
+      "lift": {
+        "compressible_wings": {
+          "horizontal_stabilizer": -0.20636026394516166,
+          "main_wing": 0.6300623037661215,
+          "vertical_stabilizer": -9.829616360573534e-17
+        },
+        "inviscid_induced_wings": {
+          "horizontal_stabilizer": -0.013984832398018253,
+          "main_wing": 0.027746046430358336,
+          "vertical_stabilizer": -7.712412979303872e-17
+        },
+        "inviscid_wings": {
+          "horizontal_stabilizer": -0.20636026394516166,
+          "main_wing": 0.6300623037661215,
+          "vertical_stabilizer": -9.829616360573534e-17
+        },
+        "total": 0.6681718360460448
+      },
+      "mach": 0.2,
+      "miscellaneous": {
+        "total": 0.00021320390168864177,
+        "total_wetted_area_m2": 3480.200585249316
+      },
+      "parasite": {
+        "components": {
+          "fuselage": 0.005370052220461198,
+          "horizontal_stabilizer": 0.001333045878573374,
+          "main_wing": 0.0058895145917193656,
+          "nacelle_1": 0.0006221987509979097,
+          "nacelle_2": 0.0006221987509979097,
+          "pylon": 0.0002488795003991639,
+          "vertical_stabilizer": 0.0006718823731058808
+        },
+        "compressibility_factor": {
+          "fuselage": 0.995417099673105,
+          "horizontal_stabilizer": 0.995417099673105,
+          "main_wing": 0.995417099673105,
+          "nacelle_1": 0.995417099673105,
+          "nacelle_2": 0.995417099673105,
+          "pylon": 1.99083419934621,
+          "vertical_stabilizer": 0.995417099673105
+        },
+        "form_factor": {
+          "fuselage": 1.068362815430458,
+          "horizontal_stabilizer": 1.1710154072159795,
+          "main_wing": 1.2113107874670441,
+          "nacelle_1": 1.1884615384615385,
+          "nacelle_2": 1.1884615384615385,
+          "pylon": 2.376923076923077,
+          "vertical_stabilizer": 1.1044995561669686
+        },
+        "reynolds_factor": {
+          "fuselage": 0.9980981829420842,
+          "horizontal_stabilizer": 0.9980981829420842,
+          "main_wing": 0.9980981829420842,
+          "nacelle_1": 0.9980981829420842,
+          "nacelle_2": 0.9980981829420842,
+          "pylon": 1.9961963658841684,
+          "vertical_stabilizer": 0.9980981829420842
+        },
+        "skin_friction": {
+          "fuselage": 0.0017794854989814474,
+          "horizontal_stabilizer": 0.0026075271907688665,
+          "main_wing": 0.00237175626346706,
+          "nacelle_1": 0.002446484210372442,
+          "nacelle_2": 0.002446484210372442,
+          "pylon": 0.004892968420744884,
+          "vertical_stabilizer": 0.0025226610652094947
+        },
+        "total": 0.014757772066254803
+      },
+      "spoiler": 0.0,
+      "tag": "sea_level_low_speed",
+      "total": 0.04144447527691661,
+      "trim_corrected": 0.04144447527691661,
+      "untrimmed": 0.04063183850678099
+    },
+    {
+      "altitude_m": 3000.0,
+      "angle_of_attack_deg": 3.0,
+      "compressible": {
+        "crest_critical": {
+          "horizontal_stabilizer": 1.0758107965428307,
+          "main_wing": 0.7564795642507866,
+          "vertical_stabilizer": 1.0874191544445355
+        },
+        "divergence_mach": {
+          "horizontal_stabilizer": 1.1122827325338136,
+          "main_wing": 0.7819555221451479,
+          "vertical_stabilizer": 1.132087733209194
+        },
+        "total": 9.699013194491209e-08,
+        "wings": {
+          "horizontal_stabilizer": 5.484882581588798e-10,
+          "main_wing": 9.610959872475703e-08,
+          "vertical_stabilizer": 3.320449619961633e-10
+        }
+      },
+      "freestream": {
+        "density_kg_m3": 0.9092540409740743,
+        "dynamic_viscosity_pa_s": 1.69376451433092e-05,
+        "reynolds_number_per_m": 7055665.931082017,
+        "speed_of_sound_m_s": 328.5835432262078,
+        "temperature_k": 268.65917791026044,
+        "velocity_m_s": 131.4334172904831
+      },
+      "induced": {
+        "total": 0.019307662754389245,
+        "viscous": 0.0006634632845383019,
+        "viscous_wings": {
+          "horizontal_stabilizer": 2.876662052368575e-05,
+          "main_wing": 0.0006573371204550883,
+          "vertical_stabilizer": 1.758512918451802e-34
+        }
+      },
+      "lift": {
+        "compressible_wings": {
+          "horizontal_stabilizer": -0.24731605940660503,
+          "main_wing": 0.5613668237464184,
+          "vertical_stabilizer": -8.625709351877702e-16
+        },
+        "inviscid_induced_wings": {
+          "horizontal_stabilizer": -0.013450340315872326,
+          "main_wing": 0.021508595434689814,
+          "vertical_stabilizer": -1.2128917801330333e-16
+        },
+        "inviscid_wings": {
+          "horizontal_stabilizer": -0.24731605940660503,
+          "main_wing": 0.5613668237464184,
+          "vertical_stabilizer": -8.625709351877702e-16
+        },
+        "total": 0.5799159302650857
+      },
+      "mach": 0.4,
+      "miscellaneous": {
+        "total": 0.00021320390168864177,
+        "total_wetted_area_m2": 3480.200585249316
+      },
+      "parasite": {
+        "components": {
+          "fuselage": 0.00497901918996608,
+          "horizontal_stabilizer": 0.0012376578808997705,
+          "main_wing": 0.005489225549149627,
+          "nacelle_1": 0.0005743410804587148,
+          "nacelle_2": 0.0005743410804587148,
+          "pylon": 0.00022973643218348588,
+          "vertical_stabilizer": 0.0006219741366773934
+        },
+        "compressibility_factor": {
+          "fuselage": 0.9819170162291244,
+          "horizontal_stabilizer": 0.9819170162291244,
+          "main_wing": 0.9819170162291244,
+          "nacelle_1": 0.9819170162291244,
+          "nacelle_2": 0.9819170162291244,
+          "pylon": 1.9638340324582488,
+          "vertical_stabilizer": 0.9819170162291244
+        },
+        "form_factor": {
+          "fuselage": 1.0656414807278454,
+          "horizontal_stabilizer": 1.179586582933517,
+          "main_wing": 1.2221783303313518,
+          "nacelle_1": 1.1884615384615385,
+          "nacelle_2": 1.1884615384615385,
+          "pylon": 2.376923076923077,
+          "vertical_stabilizer": 1.108449020569759
+        },
+        "reynolds_factor": {
+          "fuselage": 0.9925222125161325,
+          "horizontal_stabilizer": 0.9925222125161325,
+          "main_wing": 0.9925222125161324,
+          "nacelle_1": 0.9925222125161324,
+          "nacelle_2": 0.9925222125161324,
+          "pylon": 1.9850444250322647,
+          "vertical_stabilizer": 0.9925222125161325
+        },
+        "skin_friction": {
+          "fuselage": 0.001654121440805045,
+          "horizontal_stabilizer": 0.002403350687931793,
+          "main_wing": 0.002190900405556385,
+          "nacelle_1": 0.00225830794815468,
+          "nacelle_2": 0.00225830794815468,
+          "pylon": 0.00451661589630936,
+          "vertical_stabilizer": 0.0023269540344798903
+        },
+        "total": 0.013706295349793786
+      },
+      "spoiler": 0.0,
+      "tag": "climb_low",
+      "total": 0.0338918041759237,
+      "trim_corrected": 0.0338918041759237,
+      "untrimmed": 0.03322725899600362
+    },
+    {
+      "altitude_m": 6000.0,
+      "angle_of_attack_deg": 2.5,
+      "compressible": {
+        "crest_critical": {
+          "horizontal_stabilizer": 1.0997486581663596,
+          "main_wing": 0.7575296844779003,
+          "vertical_stabilizer": 1.0874191544445355
+        },
+        "divergence_mach": {
+          "horizontal_stabilizer": 1.1370321310555591,
+          "main_wing": 0.7830410072650548,
+          "vertical_stabilizer": 1.132087733209194
+        },
+        "total": 3.592933785723309e-05,
+        "wings": {
+          "horizontal_stabilizer": 1.5044836812634117e-07,
+          "main_wing": 3.565318551181041e-05,
+          "vertical_stabilizer": 1.2570397729634352e-07
+        }
+      },
+      "freestream": {
+        "density_kg_m3": 0.6601103927204219,
+        "dynamic_viscosity_pa_s": 1.5949283730345458e-05,
+        "reynolds_number_per_m": 7858398.150629178,
+        "speed_of_sound_m_s": 316.4516701867535,
+        "temperature_k": 249.18669437039358,
+        "velocity_m_s": 189.8710021120521
+      },
+      "induced": {
+        "total": 0.017620835811693623,
+        "viscous": 0.0006325908145499671,
+        "viscous_wings": {
+          "horizontal_stabilizer": 3.826540710403579e-05,
+          "main_wing": 0.000624441780761404,
+          "vertical_stabilizer": 1.0954884317070763e-34
+        }
+      },
+      "lift": {
+        "compressible_wings": {
+          "horizontal_stabilizer": -0.2899298490946616,
+          "main_wing": 0.555053932856941,
+          "vertical_stabilizer": -6.946499242053565e-16
+        },
+        "inviscid_induced_wings": {
+          "horizontal_stabilizer": -0.014005087271410855,
+          "main_wing": 0.019970780347576808,
+          "vertical_stabilizer": -8.783888356355508e-17
+        },
+        "inviscid_wings": {
+          "horizontal_stabilizer": -0.2899298490946616,
+          "main_wing": 0.555053932856941,
+          "vertical_stabilizer": -6.946499242053565e-16
+        },
+        "total": 0.5623736559242142
+      },
+      "mach": 0.6,
+      "miscellaneous": {
+        "total": 0.00021320390168864177,
+        "total_wetted_area_m2": 3480.200585249316
+      },
+      "parasite": {
+        "components": {
+          "fuselage": 0.004735247237887342,
+          "horizontal_stabilizer": 0.0011979450091536268,
+          "main_wing": 0.0053338154929515515,
+          "nacelle_1": 0.000547989439166091,
+          "nacelle_2": 0.000547989439166091,
+          "pylon": 0.0002191957756664364,
+          "vertical_stabilizer": 0.0005974371353199215
+        },
+        "compressibility_factor": {
+          "fuselage": 0.9602126294846733,
+          "horizontal_stabilizer": 0.9602126294846733,
+          "main_wing": 0.9602126294846733,
+          "nacelle_1": 0.9602126294846733,
+          "nacelle_2": 0.9602126294846733,
+          "pylon": 1.9204252589693467,
+          "vertical_stabilizer": 0.9602126294846733
+        },
+        "form_factor": {
+          "fuselage": 1.0603322845775902,
+          "horizontal_stabilizer": 1.1970938577728145,
+          "main_wing": 1.244458904766036,
+          "nacelle_1": 1.1884615384615385,
+          "nacelle_2": 1.1884615384615385,
+          "pylon": 2.376923076923077,
+          "vertical_stabilizer": 1.116122603643708
+        },
+        "reynolds_factor": {
+          "fuselage": 0.9835657241711475,
+          "horizontal_stabilizer": 0.9835657241711475,
+          "main_wing": 0.9835657241711475,
+          "nacelle_1": 0.9835657241711475,
+          "nacelle_2": 0.9835657241711475,
+          "pylon": 1.967131448342295,
+          "vertical_stabilizer": 0.9835657241711475
+        },
+        "skin_friction": {
+          "fuselage": 0.001581012788324128,
+          "horizontal_stabilizer": 0.002292213355455042,
+          "main_wing": 0.0020907570399547183,
+          "nacelle_1": 0.0021546933487418644,
+          "nacelle_2": 0.0021546933487418644,
+          "pylon": 0.004309386697483729,
+          "vertical_stabilizer": 0.0022197880693725926
+        },
+        "total": 0.01317961952931106
+      },
+      "spoiler": 0.0,
+      "tag": "climb_mid",
+      "total": 0.03167058035216157,
+      "trim_corrected": 0.03167058035216157,
+      "untrimmed": 0.03104958858055056
+    },
+    {
+      "altitude_m": 9000.0,
+      "angle_of_attack_deg": 2.5,
+      "compressible": {
+        "crest_critical": {
+          "horizontal_stabilizer": 1.1140001305569964,
+          "main_wing": 0.7519900671125883,
+          "vertical_stabilizer": 1.0874191544445355
+        },
+        "divergence_mach": {
+          "horizontal_stabilizer": 1.1517667541921066,
+          "main_wing": 0.7773148322378853,
+          "vertical_stabilizer": 1.132087733209194
+        },
+        "total": 0.00038164972649731534,
+        "wings": {
+          "horizontal_stabilizer": 1.1903806817223198e-06,
+          "main_wing": 0.0003792584178283404,
+          "vertical_stabilizer": 1.200927987252606e-06
+        }
+      },
+      "freestream": {
+        "density_kg_m3": 0.46706136815788357,
+        "dynamic_viscosity_pa_s": 1.4925987978094181e-05,
+        "reynolds_number_per_m": 6655567.754441984,
+        "speed_of_sound_m_s": 303.8478791096968,
+        "temperature_k": 229.7325235109718,
+        "velocity_m_s": 212.69351537678776
+      },
+      "induced": {
+        "total": 0.018993416159878686,
+        "viscous": 0.0007276978199247468,
+        "viscous_wings": {
+          "horizontal_stabilizer": 4.5819669622961555e-05,
+          "main_wing": 0.0007179400239362407,
+          "vertical_stabilizer": 1.667377216398667e-34
+        }
+      },
+      "lift": {
+        "compressible_wings": {
+          "horizontal_stabilizer": -0.3146276141630045,
+          "main_wing": 0.5896717906770436,
+          "vertical_stabilizer": -8.528483282983683e-16
+        },
+        "inviscid_induced_wings": {
+          "horizontal_stabilizer": -0.015429953650494559,
+          "main_wing": 0.021551694451797845,
+          "vertical_stabilizer": -1.4190729015327485e-16
+        },
+        "inviscid_wings": {
+          "horizontal_stabilizer": -0.3146276141630045,
+          "main_wing": 0.5896717906770436,
+          "vertical_stabilizer": -8.528483282983683e-16
+        },
+        "total": 0.59584200468898
+      },
+      "mach": 0.7,
+      "miscellaneous": {
+        "total": 0.00021320390168864177,
+        "total_wetted_area_m2": 3480.200585249316
+      },
+      "parasite": {
+        "components": {
+          "fuselage": 0.004723147415512338,
+          "horizontal_stabilizer": 0.0012180768316055748,
+          "main_wing": 0.005433552460188729,
+          "nacelle_1": 0.0005502569994922108,
+          "nacelle_2": 0.0005502569994922108,
+          "pylon": 0.00022010279979688433,
+          "vertical_stabilizer": 0.0006032629607016274
+        },
+        "compressibility_factor": {
+          "fuselage": 0.9466120282203977,
+          "horizontal_stabilizer": 0.9466120282203977,
+          "main_wing": 0.9466120282203977,
+          "nacelle_1": 0.9466120282203977,
+          "nacelle_2": 0.9466120282203977,
+          "pylon": 1.8932240564407954,
+          "vertical_stabilizer": 0.9466120282203977
+        },
+        "form_factor": {
+          "fuselage": 1.0561402868052672,
+          "horizontal_stabilizer": 1.2114856690016704,
+          "main_wing": 1.262858423374584,
+          "nacelle_1": 1.1884615384615385,
+          "nacelle_2": 1.1884615384615385,
+          "pylon": 2.376923076923077,
+          "vertical_stabilizer": 1.1220478568252812
+        },
+        "reynolds_factor": {
+          "fuselage": 0.978053847686678,
+          "horizontal_stabilizer": 0.978053847686678,
+          "main_wing": 0.9780538476866779,
+          "nacelle_1": 0.978053847686678,
+          "nacelle_2": 0.978053847686678,
+          "pylon": 1.956107695373356,
+          "vertical_stabilizer": 0.978053847686678
+        },
+        "skin_friction": {
+          "fuselage": 0.0015832321476629732,
+          "horizontal_stabilizer": 0.002303046783567786,
+          "main_wing": 0.002098820696093048,
+          "nacelle_1": 0.002163609391284576,
+          "nacelle_2": 0.002163609391284576,
+          "pylon": 0.004327218782569152,
+          "vertical_stabilizer": 0.002229597574272238
+        },
+        "total": 0.013298656466789575
+      },
+      "spoiler": 0.0,
+      "tag": "climb_high",
+      "total": 0.03354466477995131,
+      "trim_corrected": 0.03354466477995131,
+      "untrimmed": 0.032886926254854225
+    },
+    {
+      "altitude_m": 11000.0,
+      "angle_of_attack_deg": 1.5,
+      "compressible": {
+        "crest_critical": {
+          "horizontal_stabilizer": 1.153567721558299,
+          "main_wing": 0.7628856582152687,
+          "vertical_stabilizer": 1.0874191544445369
+        },
+        "divergence_mach": {
+          "horizontal_stabilizer": 1.1926757582475953,
+          "main_wing": 0.7885773540988883,
+          "vertical_stabilizer": 1.1320877332091956
+        },
+        "total": 0.0021838688165495106,
+        "wings": {
+          "horizontal_stabilizer": 5.04451979740503e-06,
+          "main_wing": 0.002170340757731655,
+          "vertical_stabilizer": 8.483539020450917e-06
+        }
+      },
+      "freestream": {
+        "density_kg_m3": 0.36479946651226547,
+        "dynamic_viscosity_pa_s": 1.4222902986279585e-05,
+        "reynolds_number_per_m": 6056249.145629496,
+        "speed_of_sound_m_s": 295.153406070465,
+        "temperature_k": 216.77323722970857,
+        "velocity_m_s": 236.122724856372
+      },
+      "induced": {
+        "total": 0.01402983552461153,
+        "viscous": 0.0005891152457899038,
+        "viscous_wings": {
+          "horizontal_stabilizer": 6.77159872683718e-05,
+          "main_wing": 0.0005746943912887198,
+          "vertical_stabilizer": 2.100719167646817e-33
+        }
+      },
+      "lift": {
+        "compressible_wings": {
+          "horizontal_stabilizer": -0.3808285097747017,
+          "main_wing": 0.5243797312851132,
+          "vertical_stabilizer": -3.029495991103489e-15
+        },
+        "inviscid_induced_wings": {
+          "horizontal_stabilizer": -0.013348063047083976,
+          "main_wing": 0.01628333518911976,
+          "vertical_stabilizer": -4.875179826540484e-16
+        },
+        "inviscid_wings": {
+          "horizontal_stabilizer": -0.3808285097747017,
+          "main_wing": 0.5243797312851132,
+          "vertical_stabilizer": -3.029495991103489e-15
+        },
+        "total": 0.505337109794344
+      },
+      "mach": 0.8,
+      "miscellaneous": {
+        "total": 0.00021320390168864177,
+        "total_wetted_area_m2": 3480.200585249316
+      },
+      "parasite": {
+        "components": {
+          "fuselage": 0.00464761254650812,
+          "horizontal_stabilizer": 0.0012287080721815665,
+          "main_wing": 0.005499985806232588,
+          "nacelle_1": 0.0005454089049710451,
+          "nacelle_2": 0.0005454089049710451,
+          "pylon": 0.000218163561988418,
+          "vertical_stabilizer": 0.0006023426804000475
+        },
+        "compressibility_factor": {
+          "fuselage": 0.9313900810681928,
+          "horizontal_stabilizer": 0.9313900810681928,
+          "main_wing": 0.9313900810681928,
+          "nacelle_1": 0.9313900810681928,
+          "nacelle_2": 0.9313900810681928,
+          "pylon": 1.8627801621363855,
+          "vertical_stabilizer": 0.9313900810681928
+        },
+        "form_factor": {
+          "fuselage": 1.0501355093638793,
+          "horizontal_stabilizer": 1.2325059943650591,
+          "main_wing": 1.2898696160189276,
+          "nacelle_1": 1.1884615384615385,
+          "nacelle_2": 1.1884615384615385,
+          "pylon": 2.376923076923077,
+          "vertical_stabilizer": 1.1301123551285535
+        },
+        "reynolds_factor": {
+          "fuselage": 0.9718344527963281,
+          "horizontal_stabilizer": 0.9718344527963281,
+          "main_wing": 0.9718344527963281,
+          "nacelle_1": 0.9718344527963281,
+          "nacelle_2": 0.9718344527963281,
+          "pylon": 1.9436689055926561,
+          "vertical_stabilizer": 0.9718344527963281
+        },
+        "skin_friction": {
+          "fuselage": 0.001566820624588028,
+          "horizontal_stabilizer": 0.002283526362853643,
+          "main_wing": 0.0020799931033028862,
+          "nacelle_1": 0.0021445466935896633,
+          "nacelle_2": 0.0021445466935896633,
+          "pylon": 0.004289093387179327,
+          "vertical_stabilizer": 0.0022103101438916252
+        },
+        "total": 0.01328763047725283
+      },
+      "spoiler": 0.0,
+      "tag": "cruise_light",
+      "total": 0.030308829494504565,
+      "trim_corrected": 0.030308829494504565,
+      "untrimmed": 0.029714538720102514
+    },
+    {
+      "altitude_m": 11000.0,
+      "angle_of_attack_deg": 2.5,
+      "compressible": {
+        "crest_critical": {
+          "horizontal_stabilizer": 1.1414175139144163,
+          "main_wing": 0.7431158777110282,
+          "vertical_stabilizer": 1.0874191544445369
+        },
+        "divergence_mach": {
+          "horizontal_stabilizer": 1.1801136365414175,
+          "main_wing": 0.7681417868113583,
+          "vertical_stabilizer": 1.1320877332091956
+        },
+        "total": 0.004596634346597639,
+        "wings": {
+          "horizontal_stabilizer": 8.455815710463657e-06,
+          "main_wing": 0.004576000272761873,
+          "vertical_stabilizer": 1.217825812530228e-05
+        }
+      },
+      "freestream": {
+        "density_kg_m3": 0.36479946651226547,
+        "dynamic_viscosity_pa_s": 1.4222902986279585e-05,
+        "reynolds_number_per_m": 6207655.374270234,
+        "speed_of_sound_m_s": 295.153406070465,
+        "temperature_k": 216.77323722970857,
+        "velocity_m_s": 242.0257929777813
+      },
+      "induced": {
+        "total": 0.021605785803395845,
+        "viscous": 0.0009041278058785544,
+        "viscous_wings": {
+          "horizontal_stabilizer": 6.054249385003192e-05,
+          "main_wing": 0.0008912346246643462,
+          "vertical_stabilizer": 2.0408645808629306e-33
+        }
+      },
+      "lift": {
+        "compressible_wings": {
+          "horizontal_stabilizer": -0.3608509546215012,
+          "main_wing": 0.6540180533163467,
+          "vertical_stabilizer": -2.9961725597764067e-15
+        },
+        "inviscid_induced_wings": {
+          "horizontal_stabilizer": -0.018112350654592806,
+          "main_wing": 0.02455887966703444,
+          "vertical_stabilizer": -5.173152750283339e-16
+        },
+        "inviscid_wings": {
+          "horizontal_stabilizer": -0.3608509546215012,
+          "main_wing": 0.6540180533163467,
+          "vertical_stabilizer": -2.9961725597764067e-15
+        },
+        "total": 0.6579748553328391
+      },
+      "mach": 0.82,
+      "miscellaneous": {
+        "total": 0.00021320390168864177,
+        "total_wetted_area_m2": 3480.200585249316
+      },
+      "parasite": {
+        "components": {
+          "fuselage": 0.0046035611501735255,
+          "horizontal_stabilizer": 0.0012235479468762373,
+          "main_wing": 0.005483135529932923,
+          "nacelle_1": 0.0005408086668665279,
+          "nacelle_2": 0.0005408086668665279,
+          "pylon": 0.00021632346674661115,
+          "vertical_stabilizer": 0.0005982696164851784
+        },
+        "compressibility_factor": {
+          "fuselage": 0.9281662097675683,
+          "horizontal_stabilizer": 0.9281662097675683,
+          "main_wing": 0.9281662097675683,
+          "nacelle_1": 0.9281662097675683,
+          "nacelle_2": 0.9281662097675683,
+          "pylon": 1.8563324195351365,
+          "vertical_stabilizer": 0.9281662097675683
+        },
+        "form_factor": {
+          "fuselage": 1.0485974779238352,
+          "horizontal_stabilizer": 1.2378796488547705,
+          "main_wing": 1.296801168274156,
+          "nacelle_1": 1.1884615384615385,
+          "nacelle_2": 1.1884615384615385,
+          "pylon": 2.376923076923077,
+          "vertical_stabilizer": 1.132066468637241
+        },
+        "reynolds_factor": {
+          "fuselage": 0.9704746621287287,
+          "horizontal_stabilizer": 0.9704746621287287,
+          "main_wing": 0.9704746621287287,
+          "nacelle_1": 0.9704746621287287,
+          "nacelle_2": 0.9704746621287287,
+          "pylon": 1.9409493242574574,
+          "vertical_stabilizer": 0.9704746621287287
+        },
+        "skin_friction": {
+          "fuselage": 0.0015542462055405611,
+          "horizontal_stabilizer": 0.002264065193206657,
+          "main_wing": 0.002062536897667575,
+          "nacelle_1": 0.002126458566815695,
+          "nacelle_2": 0.002126458566815695,
+          "pylon": 0.00425291713363139,
+          "vertical_stabilizer": 0.002191574421761391
+        },
+        "total": 0.01320645504394753
+      },
+      "spoiler": 0.0,
+      "tag": "cruise_nominal",
+      "total": 0.040414520677542254,
+      "trim_corrected": 0.040414520677542254,
+      "untrimmed": 0.03962207909562966
+    },
+    {
+      "altitude_m": 11000.0,
+      "angle_of_attack_deg": 3.5,
+      "compressible": {
+        "crest_critical": {
+          "horizontal_stabilizer": 1.132996321974517,
+          "main_wing": 0.7299139781703384,
+          "vertical_stabilizer": 1.087419154444537
+        },
+        "divergence_mach": {
+          "horizontal_stabilizer": 1.1714069509307103,
+          "main_wing": 0.7544952869764658,
+          "vertical_stabilizer": 1.1320877332091959
+        },
+        "total": 0.01010443803468324,
+        "wings": {
+          "horizontal_stabilizer": 1.594833366337167e-05,
+          "main_wing": 0.010067880599736994,
+          "vertical_stabilizer": 2.0609101282874078e-05
+        }
+      },
+      "freestream": {
+        "density_kg_m3": 0.36479946651226547,
+        "dynamic_viscosity_pa_s": 1.4222902986279585e-05,
+        "reynolds_number_per_m": 6434764.717231341,
+        "speed_of_sound_m_s": 295.153406070465,
+        "temperature_k": 216.77323722970857,
+        "velocity_m_s": 250.88039515989524
+      },
+      "induced": {
+        "total": 0.03203185117422451,
+        "viscous": 0.0013363860104324634,
+        "viscous_wings": {
+          "horizontal_stabilizer": 5.5617244491065705e-05,
+          "main_wing": 0.0013245417145295807,
+          "vertical_stabilizer": 2.169507996855382e-33
+        }
+      },
+      "lift": {
+        "compressible_wings": {
+          "horizontal_stabilizer": -0.3468265435476511,
+          "main_wing": 0.7987792837242563,
+          "vertical_stabilizer": -3.104597896747221e-15
+        },
+        "inviscid_induced_wings": {
+          "horizontal_stabilizer": -0.022775834129129043,
+          "main_wing": 0.03554582625824932,
+          "vertical_stabilizer": -5.7763255810997665e-16
+        },
+        "inviscid_wings": {
+          "horizontal_stabilizer": -0.3468265435476511,
+          "main_wing": 0.7987792837242563,
+          "vertical_stabilizer": -3.104597896747221e-15
+        },
+        "total": 0.8264074396407135
+      },
+      "mach": 0.85,
+      "miscellaneous": {
+        "total": 0.00021320390168864177,
+        "total_wetted_area_m2": 3480.200585249316
+      },
+      "parasite": {
+        "components": {
+          "fuselage": 0.00453670589475759,
+          "horizontal_stabilizer": 0.0012167496112089476,
+          "main_wing": 0.005462965499496044,
+          "nacelle_1": 0.0005339686869815182,
+          "nacelle_2": 0.0005339686869815182,
+          "pylon": 0.00021358747479260728,
+          "vertical_stabilizer": 0.0005923343804313265
+        },
+        "compressibility_factor": {
+          "fuselage": 0.9232248521051489,
+          "horizontal_stabilizer": 0.9232248521051489,
+          "main_wing": 0.9232248521051489,
+          "nacelle_1": 0.9232248521051489,
+          "nacelle_2": 0.9232248521051489,
+          "pylon": 1.8464497042102979,
+          "vertical_stabilizer": 0.9232248521051489
+        },
+        "form_factor": {
+          "fuselage": 1.0459804429386925,
+          "horizontal_stabilizer": 1.2469308190646353,
+          "main_wing": 1.3085008825630386,
+          "nacelle_1": 1.1884615384615385,
+          "nacelle_2": 1.1884615384615385,
+          "pylon": 2.376923076923077,
+          "vertical_stabilizer": 1.1352629747362837
+        },
+        "reynolds_factor": {
+          "fuselage": 0.9683838433091089,
+          "horizontal_stabilizer": 0.9683838433091088,
+          "main_wing": 0.9683838433091088,
+          "nacelle_1": 0.9683838433091088,
+          "nacelle_2": 0.9683838433091088,
+          "pylon": 1.9367676866182175,
+          "vertical_stabilizer": 0.9683838433091088
+        },
+        "skin_friction": {
+          "fuselage": 0.0015355068901271455,
+          "horizontal_stabilizer": 0.0022351424954499257,
+          "main_wing": 0.002036575790492812,
+          "nacelle_1": 0.002099563779963258,
+          "nacelle_2": 0.002099563779963258,
+          "pylon": 0.004199127559926516,
+          "vertical_stabilizer": 0.00216372303835793
+        },
+        "total": 0.01309028023464955
+      },
+      "spoiler": 0.0,
+      "tag": "cruise_heavy",
+      "total": 0.05654856881215087,
+      "trim_corrected": 0.05654856881215087,
+      "untrimmed": 0.05543977334524595
+    },
+    {
+      "altitude_m": 11000.0,
+      "angle_of_attack_deg": 2.5,
+      "compressible": {
+        "crest_critical": {
+          "horizontal_stabilizer": 1.1733310436216045,
+          "main_wing": 0.7353958580290136,
+          "vertical_stabilizer": 1.0874191544445377
+        },
+        "divergence_mach": {
+          "horizontal_stabilizer": 1.2131090927513581,
+          "main_wing": 0.7601617800713226,
+          "vertical_stabilizer": 1.1320877332091965
+        },
+        "total": 0.020905169470190593,
+        "wings": {
+          "horizontal_stabilizer": 2.2066346531458817e-05,
+          "main_wing": 0.020835514719326407,
+          "vertical_stabilizer": 4.7588404332729366e-05
+        }
+      },
+      "freestream": {
+        "density_kg_m3": 0.36479946651226547,
+        "dynamic_viscosity_pa_s": 1.4222902986279585e-05,
+        "reynolds_number_per_m": 6813280.288833183,
+        "speed_of_sound_m_s": 295.153406070465,
+        "temperature_k": 216.77323722970857,
+        "velocity_m_s": 265.6380654634185
+      },
+      "induced": {
+        "total": 0.024659811596860738,
+        "viscous": 0.0011069918336701142,
+        "viscous_wings": {
+          "horizontal_stabilizer": 7.821834472507562e-05,
+          "main_wing": 0.001090334388152361,
+          "vertical_stabilizer": 3.8048984787726734e-33
+        }
+      },
+      "lift": {
+        "compressible_wings": {
+          "horizontal_stabilizer": -0.41270607573183754,
+          "main_wing": 0.7258366070204556,
+          "vertical_stabilizer": -4.144451495300937e-15
+        },
+        "inviscid_induced_wings": {
+          "horizontal_stabilizer": -0.021140673959790624,
+          "main_wing": 0.028054955751002034,
+          "vertical_stabilizer": -8.207209780306977e-16
+        },
+        "inviscid_wings": {
+          "horizontal_stabilizer": -0.41270607573183754,
+          "main_wing": 0.7258366070204556,
+          "vertical_stabilizer": -4.144451495300937e-15
+        },
+        "total": 0.7272588601368326
+      },
+      "mach": 0.9,
+      "miscellaneous": {
+        "total": 0.00021320390168864177,
+        "total_wetted_area_m2": 3480.200585249316
+      },
+      "parasite": {
+        "components": {
+          "fuselage": 0.004421695878237076,
+          "horizontal_stabilizer": 0.0012084906635050038,
+          "main_wing": 0.005446260089202526,
+          "nacelle_1": 0.0005227147533735216,
+          "nacelle_2": 0.0005227147533735216,
+          "pylon": 0.00020908590134940865,
+          "vertical_stabilizer": 0.0005829420105116863
+        },
+        "compressibility_factor": {
+          "fuselage": 0.9147197618801515,
+          "horizontal_stabilizer": 0.9147197618801515,
+          "main_wing": 0.9147197618801515,
+          "nacelle_1": 0.9147197618801515,
+          "nacelle_2": 0.9147197618801515,
+          "pylon": 1.829439523760303,
+          "vertical_stabilizer": 0.9147197618801515
+        },
+        "form_factor": {
+          "fuselage": 1.0404269529522783,
+          "horizontal_stabilizer": 1.265388436185652,
+          "main_wing": 1.332455501967947,
+          "nacelle_1": 1.1884615384615385,
+          "nacelle_2": 1.1884615384615385,
+          "pylon": 2.376923076923077,
+          "vertical_stabilizer": 1.1414270749675945
+        },
+        "reynolds_factor": {
+          "fuselage": 0.964766187702905,
+          "horizontal_stabilizer": 0.964766187702905,
+          "main_wing": 0.964766187702905,
+          "nacelle_1": 0.964766187702905,
+          "nacelle_2": 0.964766187702905,
+          "pylon": 1.92953237540581,
+          "vertical_stabilizer": 0.964766187702905
+        },
+        "skin_friction": {
+          "fuselage": 0.0015045685607286009,
+          "horizontal_stabilizer": 0.002187589331495128,
+          "main_wing": 0.0019938468749700036,
+          "nacelle_1": 0.0020553133361422356,
+          "nacelle_2": 0.0020553133361422356,
+          "pylon": 0.004110626672284471,
+          "vertical_stabilizer": 0.0021179143215143206
+        },
+        "total": 0.012913904049552744
+      },
+      "spoiler": 0.0,
+      "tag": "transonic",
+      "total": 0.05986593079865858,
+      "trim_corrected": 0.05986593079865858,
+      "untrimmed": 0.058692089018292724
+    },
+    {
+      "altitude_m": 11000.0,
+      "angle_of_attack_deg": 2.5,
+      "compressible": {
+        "crest_critical": {
+          "horizontal_stabilizer": 1.1733310436216045,
+          "main_wing": 0.7353958580290136,
+          "vertical_stabilizer": 1.0874191544445377
+        },
+        "divergence_mach": {
+          "horizontal_stabilizer": 1.2131090927513581,
+          "main_wing": 0.7601617800713226,
+          "vertical_stabilizer": 1.1320877332091965
+        },
+        "total": 0.06259131462185911,
+        "wings": {
+          "horizontal_stabilizer": 6.606794746509736e-05,
+          "main_wing": 0.06238276417540307,
+          "vertical_stabilizer": 0.00014248249899095195
+        }
+      },
+      "freestream": {
+        "density_kg_m3": 0.36479946651226547,
+        "dynamic_viscosity_pa_s": 1.4222902986279585e-05,
+        "reynolds_number_per_m": 7343202.089075765,
+        "speed_of_sound_m_s": 295.153406070465,
+        "temperature_k": 216.77323722970857,
+        "velocity_m_s": 286.298803888351
+      },
+      "induced": {
+        "total": 0.024558020975024027,
+        "viscous": 0.0010052012118334027,
+        "viscous_wings": {
+          "horizontal_stabilizer": 7.170456879113835e-05,
+          "main_wing": 0.0009899309456035236,
+          "vertical_stabilizer": 3.5536587947834895e-33
+        }
+      },
+      "lift": {
+        "compressible_wings": {
+          "horizontal_stabilizer": -0.41270607573183754,
+          "main_wing": 0.7258366070204556,
+          "vertical_stabilizer": -4.144451495300937e-15
+        },
+        "inviscid_induced_wings": {
+          "horizontal_stabilizer": -0.021140673959790624,
+          "main_wing": 0.028054955751002034,
+          "vertical_stabilizer": -8.207209780306977e-16
+        },
+        "inviscid_wings": {
+          "horizontal_stabilizer": -0.41270607573183754,
+          "main_wing": 0.7258366070204556,
+          "vertical_stabilizer": -4.144451495300937e-15
+        },
+        "total": 0.7272588601368326
+      },
+      "mach": 0.97,
+      "miscellaneous": {
+        "total": 0.00021320390168864177,
+        "total_wetted_area_m2": 3480.200585249316
+      },
+      "parasite": {
+        "components": {
+          "fuselage": 0.0044148446982661335,
+          "horizontal_stabilizer": 0.0011078513898410702,
+          "main_wing": 0.004944741226811239,
+          "nacelle_1": 0.000507229975185823,
+          "nacelle_2": 0.000507229975185823,
+          "pylon": 0.00020289199007432924,
+          "vertical_stabilizer": 0.0005444500067638706
+        },
+        "compressibility_factor": {
+          "fuselage": 0.9022847374413221,
+          "horizontal_stabilizer": 0.9022847374413221,
+          "main_wing": 0.9022847374413221,
+          "nacelle_1": 0.9022847374413221,
+          "nacelle_2": 0.9022847374413221,
+          "pylon": 1.8045694748826442,
+          "vertical_stabilizer": 0.9022847374413221
+        },
+        "form_factor": {
+          "fuselage": 1.0692096259747341,
+          "horizontal_stabilizer": 1.1957403184800492,
+          "main_wing": 1.246530145543403,
+          "nacelle_1": 1.1884615384615385,
+          "nacelle_2": 1.1884615384615385,
+          "pylon": 2.376923076923077,
+          "vertical_stabilizer": 1.0987417425848656
+        },
+        "reynolds_factor": {
+          "fuselage": 0.9594331691073463,
+          "horizontal_stabilizer": 0.9594331691073463,
+          "main_wing": 0.9594331691073463,
+          "nacelle_1": 0.9594331691073463,
+          "nacelle_2": 0.9594331691073463,
+          "pylon": 1.9188663382146927,
+          "vertical_stabilizer": 0.9594331691073463
+        },
+        "skin_friction": {
+          "fuselage": 0.0014617977166024422,
+          "horizontal_stabilizer": 0.00212222287891358,
+          "main_wing": 0.0019350265212205796,
+          "nacelle_1": 0.001994427220127754,
+          "nacelle_2": 0.001994427220127754,
+          "pylon": 0.003988854440255508,
+          "vertical_stabilizer": 0.0020549136919027827
+        },
+        "total": 0.012229239262128289
+      },
+      "spoiler": 0.0,
+      "tag": "blend_band",
+      "total": 0.10158361433591406,
+      "trim_corrected": 0.10158361433591406,
+      "untrimmed": 0.09959177876070006
+    },
+    {
+      "altitude_m": 11000.0,
+      "angle_of_attack_deg": 2.5,
+      "compressible": {
+        "crest_critical": {
+          "horizontal_stabilizer": 1.1733310436216045,
+          "main_wing": 0.7353958580290136,
+          "vertical_stabilizer": 1.0874191544445377
+        },
+        "divergence_mach": {
+          "horizontal_stabilizer": 1.2131090927513581,
+          "main_wing": 0.7601617800713226,
+          "vertical_stabilizer": 1.1320877332091965
+        },
+        "total": 0.09776628477993796,
+        "wings": {
+          "horizontal_stabilizer": 0.00010319671036982657,
+          "main_wing": 0.09744053347622457,
+          "vertical_stabilizer": 0.000222554593343559
+        }
+      },
+      "freestream": {
+        "density_kg_m3": 0.36479946651226547,
+        "dynamic_viscosity_pa_s": 1.4222902986279585e-05,
+        "reynolds_number_per_m": 7570311.432036871,
+        "speed_of_sound_m_s": 295.153406070465,
+        "temperature_k": 216.77323722970857,
+        "velocity_m_s": 295.153406070465
+      },
+      "induced": {
+        "total": 0.024349359864389138,
+        "viscous": 0.0007965401011985123,
+        "viscous_wings": {
+          "horizontal_stabilizer": 5.918608808682532e-05,
+          "main_wing": 0.000783935781314469,
+          "vertical_stabilizer": 3.192376005282397e-33
+        }
+      },
+      "lift": {
+        "compressible_wings": {
+          "horizontal_stabilizer": -0.41270607573183754,
+          "main_wing": 0.7258366070204556,
+          "vertical_stabilizer": -4.144451495300937e-15
+        },
+        "inviscid_induced_wings": {
+          "horizontal_stabilizer": -0.021140673959790624,
+          "main_wing": 0.028054955751002034,
+          "vertical_stabilizer": -8.207209780306977e-16
+        },
+        "inviscid_wings": {
+          "horizontal_stabilizer": -0.41270607573183754,
+          "main_wing": 0.7258366070204556,
+          "vertical_stabilizer": -4.144451495300937e-15
+        },
+        "total": 0.7272588601368326
+      },
+      "mach": 1.0,
+      "miscellaneous": {
+        "total": 0.00021320390168864177,
+        "total_wetted_area_m2": 3480.200585249316
+      },
+      "parasite": {
+        "components": {
+          "fuselage": 0.004360015098396803,
+          "horizontal_stabilizer": 0.000914438104177664,
+          "main_wing": 0.00391578785798525,
+          "nacelle_1": 0.0005006809426229346,
+          "nacelle_2": 0.0005006809426229346,
+          "pylon": 0.00020027237704917382,
+          "vertical_stabilizer": 0.0004890984863882281
+        },
+        "compressibility_factor": {
+          "fuselage": 0.896780557797507,
+          "horizontal_stabilizer": 0.896780557797507,
+          "main_wing": 0.896780557797507,
+          "nacelle_1": 0.896780557797507,
+          "nacelle_2": 0.896780557797507,
+          "pylon": 1.793561115595014,
+          "vertical_stabilizer": 0.896780557797507
+        },
+        "form_factor": {
+          "fuselage": 1.0692096259747341,
+          "horizontal_stabilizer": 1.0,
+          "main_wing": 1.0,
+          "nacelle_1": 1.1884615384615385,
+          "nacelle_2": 1.1884615384615385,
+          "pylon": 2.376923076923077,
+          "vertical_stabilizer": 1.0
+        },
+        "reynolds_factor": {
+          "fuselage": 0.9570557316620442,
+          "horizontal_stabilizer": 0.9570557316620442,
+          "main_wing": 0.9570557316620442,
+          "nacelle_1": 0.9570557316620442,
+          "nacelle_2": 0.9570557316620442,
+          "pylon": 1.9141114633240883,
+          "vertical_stabilizer": 0.9570557316620442
+        },
+        "skin_friction": {
+          "fuselage": 0.0014436431065608497,
+          "horizontal_stabilizer": 0.002094597945114829,
+          "main_wing": 0.0019101404185293905,
+          "nacelle_1": 0.0019686764375480325,
+          "nacelle_2": 0.0019686764375480325,
+          "pylon": 0.003937352875096065,
+          "vertical_stabilizer": 0.0020282781929609897
+        },
+        "total": 0.010880973809242987
+      },
+      "spoiler": 0.0,
+      "tag": "sonic",
+      "total": 0.13587401880236388,
+      "trim_corrected": 0.13587401880236388,
+      "untrimmed": 0.13320982235525872
+    }
+  ],
+  "geometry": {
+    "fuselages": [
+      {
+        "effective_diameter_m": 6.2,
+        "front_projected_area_m2": 30.190705400997917,
+        "length_m": 76.72,
+        "tag": "fuselage",
+        "wetted_area_m2": 1494.3425279771354
+      }
+    ],
+    "nacelles": [
+      {
+        "diameter_m": 4.2,
+        "length_m": 7.8,
+        "origin_count": 1,
+        "tag": "nacelle_1",
+        "wetted_area_m2": 113.21043286476181
+      },
+      {
+        "diameter_m": 4.2,
+        "length_m": 7.8,
+        "origin_count": 1,
+        "tag": "nacelle_2",
+        "wetted_area_m2": 113.21043286476181
+      }
+    ],
+    "network_count": 1,
+    "reference_area_m2": 529.035559696941,
+    "wings": [
+      {
+        "aspect_ratio": 9.89249607855954,
+        "mean_aerodynamic_chord_m": 9.62825895492285,
+        "quarter_chord_sweep_rad": 0.5934119456780721,
+        "reference_area_m2": 529.035559696941,
+        "segment_count": 0,
+        "tag": "main_wing",
+        "thickness_to_chord": 0.12,
+        "transition_x_lower": 0.0,
+        "transition_x_upper": 0.0,
+        "wetted_area_m2": 1084.522897378729
+      },
+      {
+        "aspect_ratio": 4.331559583605293,
+        "mean_aerodynamic_chord_m": 5.1,
+        "quarter_chord_sweep_rad": 0.5984188934785372,
+        "reference_area_m2": 112.66386476957366,
+        "segment_count": 0,
+        "tag": "horizontal_stabilizer",
+        "thickness_to_chord": 0.1,
+        "transition_x_lower": 0.0,
+        "transition_x_upper": 0.0,
+        "wetted_area_m2": 230.960922777626
+      },
+      {
+        "aspect_ratio": 1.543307086614174,
+        "mean_aerodynamic_chord_m": 6.35,
+        "quarter_chord_sweep_rad": 0.7428706287776641,
+        "reference_area_m2": 62.23000000000002,
+        "segment_count": 0,
+        "tag": "vertical_stabilizer",
+        "thickness_to_chord": 0.08,
+        "transition_x_lower": 0.0,
+        "transition_x_upper": 0.0,
+        "wetted_area_m2": 127.57150000000003
+      }
+    ]
+  },
+  "settings": {
+    "drag_coefficient_increment": 0.0,
+    "fuselage_parasite_drag_form_factor": 2.3,
+    "lift_to_drag_adjustment": 0.0,
+    "oswald_efficiency_factor": null,
+    "recalculate_total_wetted_area": false,
+    "span_efficiency": null,
+    "spoiler_drag_increment": 0.0,
+    "trim_drag_correction_factor": 1.02,
+    "viscous_lift_dependent_drag_factor": 0.38,
+    "wing_parasite_drag_form_factor": 1.1
+  }
+}

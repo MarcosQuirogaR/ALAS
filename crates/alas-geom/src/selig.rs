@@ -170,7 +170,7 @@ mod tests {
     fn get_returns_none_for_a_name_the_corpus_does_not_have() {
         // The reference archive spells the NACA 0012 stem "n0012"; the
         // canonical name is not in it, and this module reports that rather
-        // than guessing -- AeroSandbox's NACA generator is a later branch of
+        // than guessing -- native aerodynamic model's NACA generator is a later branch of
         // `AirfoilLibrary.get`, not this module's concern.
         assert!(get("naca0012").is_none());
         assert!(get("not-a-real-airfoil-stem").is_none());

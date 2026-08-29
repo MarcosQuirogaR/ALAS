@@ -1,0 +1,149 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- Copyright (C) 2026 Marcos Quiroga Rodriguez -->
+<!--
+  CPACS 3.5 toolspecific extension for source-bounded UAV electrical results.
+  CPACS 3.5 delegates toolspecific payloads to a separate namespace; this is
+  the matching local schema for the payload rendered by alas-uav.
+-->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           targetNamespace="https://alas.local/cpacs/uav-electrical/1"
+           xmlns="https://alas.local/cpacs/uav-electrical/1"
+           elementFormDefault="qualified">
+  <xs:element name="uavElectrical" type="uavElectricalType"/>
+
+  <xs:complexType name="uavElectricalType">
+    <xs:sequence>
+      <xs:element name="schemaVersion" type="xs:string"/>
+      <xs:element name="selection" type="selectionType"/>
+      <xs:element name="operatingPoint" type="operatingPointType"/>
+      <xs:element name="mission" type="missionType" minOccurs="0"/>
+      <xs:element name="checks" type="checksType" minOccurs="0"/>
+      <xs:element name="assumptions" type="assumptionsType" minOccurs="0"/>
+      <xs:element name="procurement" type="procurementType" minOccurs="0"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="selectionType">
+    <xs:sequence>
+      <xs:element name="batteryId" type="xs:string"/>
+      <xs:element name="motorId" type="xs:string"/>
+      <xs:element name="escId" type="xs:string"/>
+      <xs:element name="propellerId" type="xs:string"/>
+      <xs:element name="motorCount" type="xs:positiveInteger"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="operatingPointType">
+    <xs:sequence>
+      <xs:element name="speedMps" type="xs:double"/>
+      <xs:element name="densityKgM3" type="xs:double"/>
+      <xs:element name="throttle" type="xs:double"/>
+      <xs:element name="rpm" type="xs:double"/>
+      <xs:element name="perMotorThrustN" type="xs:double"/>
+      <xs:element name="perMotorShaftPowerW" type="xs:double"/>
+      <xs:element name="perMotorCurrentA" type="xs:double"/>
+      <xs:element name="perMotorElectricalPowerW" type="xs:double"/>
+      <xs:element name="batteryVoltageV" type="xs:double"/>
+      <xs:element name="batteryCurrentA" type="xs:double"/>
+      <xs:element name="batteryPowerW" type="xs:double"/>
+      <xs:element name="totalThrustN" type="xs:double"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="missionType">
+    <xs:sequence>
+      <xs:element name="evidence" type="xs:string"/>
+      <xs:element name="totalDurationS" type="xs:double"/>
+      <xs:element name="totalDistanceM" type="xs:double"/>
+      <xs:element name="propulsionEnergyWh" type="xs:double"/>
+      <xs:element name="maximumBatteryCurrentA" type="xs:double"/>
+      <xs:element name="maximumBatteryPowerW" type="xs:double"/>
+      <xs:element name="phase" type="missionPhaseType" minOccurs="1" maxOccurs="unbounded"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="missionPhaseType">
+    <xs:sequence>
+      <xs:element name="name" type="xs:string"/>
+      <xs:element name="durationS" type="xs:double"/>
+      <xs:element name="speedMps" type="xs:double"/>
+      <xs:element name="densityKgM3" type="xs:double"/>
+      <xs:element name="throttle" type="xs:double"/>
+      <xs:element name="totalThrustN" type="xs:double"/>
+      <xs:element name="perMotorCurrentA" type="xs:double"/>
+      <xs:element name="perMotorElectricalPowerW" type="xs:double"/>
+      <xs:element name="batteryCurrentA" type="xs:double"/>
+      <xs:element name="batteryPowerW" type="xs:double"/>
+      <xs:element name="distanceM" type="xs:double"/>
+      <xs:element name="propulsionEnergyWh" type="xs:double"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="checksType">
+    <xs:sequence>
+      <xs:element name="check" type="checkType" maxOccurs="unbounded"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="checkType">
+    <xs:sequence>
+      <xs:element name="componentId" type="xs:string"/>
+      <xs:choice>
+        <xs:sequence>
+          <xs:element name="actual" type="xs:double"/>
+          <xs:element name="limit" type="xs:double"/>
+        </xs:sequence>
+        <xs:element name="field" type="xs:string"/>
+      </xs:choice>
+    </xs:sequence>
+    <xs:attribute name="kind" use="required">
+      <xs:simpleType>
+        <xs:restriction base="xs:string">
+          <xs:enumeration value="current_overload"/>
+          <xs:enumeration value="power_overload"/>
+          <xs:enumeration value="unverified"/>
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+  </xs:complexType>
+
+  <xs:complexType name="assumptionsType">
+    <xs:sequence>
+      <xs:element name="assumption" type="xs:string" maxOccurs="unbounded"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="procurementType">
+    <xs:sequence>
+      <xs:element name="item" type="itemType" minOccurs="0" maxOccurs="unbounded"/>
+      <xs:element name="subtotal" type="subtotalType" minOccurs="0" maxOccurs="unbounded"/>
+    </xs:sequence>
+    <xs:attribute name="complete" type="xs:boolean" use="required"/>
+  </xs:complexType>
+
+  <xs:complexType name="itemType">
+    <xs:sequence>
+      <xs:element name="componentId" type="xs:string"/>
+      <xs:element name="quote" type="quoteType" minOccurs="0"/>
+    </xs:sequence>
+    <xs:attribute name="quantity" type="xs:nonNegativeInteger" use="required"/>
+  </xs:complexType>
+
+  <xs:complexType name="quoteType">
+    <xs:sequence>
+      <xs:element name="unitPriceMinor" type="xs:nonNegativeInteger"/>
+      <xs:element name="sourceUrl" type="xs:anyURI"/>
+      <xs:element name="observedOnUtc" type="xs:date"/>
+    </xs:sequence>
+    <xs:attribute name="currency" type="xs:string" use="required"/>
+  </xs:complexType>
+
+  <xs:complexType name="subtotalType">
+    <xs:simpleContent>
+      <xs:extension base="xs:nonNegativeInteger">
+        <xs:attribute name="currency" type="xs:string" use="required"/>
+      </xs:extension>
+    </xs:simpleContent>
+  </xs:complexType>
+</xs:schema>

@@ -1,44 +1,121 @@
 {
-  "alas_commit": "7d1555c1f4db5110cf6cd187c156718e1a033b50",
-  "environment": {
-    "aerosandbox": "4.2.8",
-    "numpy": "2.5.1",
-    "platform": "Windows-11-10.0.26200-SP0",
-    "python": "3.13.13",
-    "scipy": "1.17.1"
-  },
   "fixtures": {
     "airfoil_data": {
       "description": "Every name in alas.data.airfoil_data.NAMED_COORDINATES and its full (x, y) coordinate array, in file order",
-      "generator": "gen_geom_airfoil_data.py"
+      "generator": "gen_geom_airfoil_data.py",
+      "runtime": "alas",
+      "alas_commit": "7d1555c1f4db5110cf6cd187c156718e1a033b50",
+      "environment": {
+        "numpy": "2.5.1",
+        "aerosandbox": "4.2.8",
+        "platform": "Windows-11-10.0.26200-SP0",
+        "scipy": "1.17.1",
+        "python": "3.13.13"
+      }
     },
     "airfoil_library": {
       "description": "alas.geometry.airfoils.AirfoilLibrary.get (all three resolution branches), .normalize_coordinates, apply_bumps, morph_airfoil and build_section",
-      "generator": "gen_geom_airfoil_library.py"
+      "generator": "gen_geom_airfoil_library.py",
+      "runtime": "alas",
+      "alas_commit": "7d1555c1f4db5110cf6cd187c156718e1a033b50",
+      "environment": {
+        "numpy": "2.5.1",
+        "aerosandbox": "4.2.8",
+        "platform": "Windows-11-10.0.26200-SP0",
+        "scipy": "1.17.1",
+        "python": "3.13.13"
+      }
     },
     "asb_airfoil": {
-      "description": "aerosandbox.geometry.airfoil.Airfoil, scoped to NACA generation, upper/lower surface split, repanel (through scipy.interpolate.CubicSpline), local/max thickness, and blend_with_another_airfoil",
-      "generator": "gen_geom_asb_airfoil.py"
+      "description": "aerosandbox.geometry.airfoil.Airfoil, scoped to NACA generation, upper/lower surface split, repanel (through scipy.interpolate.CubicSpline), local/max thickness, blend_with_another_airfoil, and normalize(return_dict=True) on six sections that are not already in the standard frame",
+      "generator": "gen_geom_asb_airfoil.py",
+      "runtime": "alas",
+      "alas_commit": "7d1555c1f4db5110cf6cd187c156718e1a033b50",
+      "environment": {
+        "numpy": "2.5.1",
+        "aerosandbox": "4.2.8",
+        "platform": "Windows-11-10.0.26200-SP0",
+        "scipy": "1.17.1",
+        "python": "3.13.13"
+      }
     },
     "asb_fuselage": {
       "description": "aerosandbox.geometry.fuselage.Fuselage/FuselageXSec, scoped to construction from radius or width/height and translate, on stations shaped like aircraft_builder.py's _build_fuselage (circular and ovoid branches) and _build_engines",
-      "generator": "gen_geom_asb_fuselage.py"
+      "generator": "gen_geom_asb_fuselage.py",
+      "runtime": "alas",
+      "alas_commit": "7d1555c1f4db5110cf6cd187c156718e1a033b50",
+      "environment": {
+        "numpy": "2.5.1",
+        "aerosandbox": "4.2.8",
+        "platform": "Windows-11-10.0.26200-SP0",
+        "scipy": "1.17.1",
+        "python": "3.13.13"
+      }
+    },
+    "asb_mesh": {
+      "description": "aerosandbox.geometry.wing.Wing.mesh_thin_surface (method='quad', add_camber=True) and Wing.mesh_line, on the same main_wing/vstab geometry gen_geom_asb_wing.py builds -- the meshing VortexLatticeMethod.run() performs on every wing, every VLM solve",
+      "generator": "gen_geom_asb_mesh.py",
+      "runtime": "alas",
+      "alas_commit": "7d1555c1f4db5110cf6cd187c156718e1a033b50",
+      "environment": {
+        "numpy": "2.5.1",
+        "aerosandbox": "4.2.8",
+        "platform": "Windows-11-10.0.26200-SP0",
+        "scipy": "1.17.1",
+        "python": "3.13.13"
+      }
     },
     "asb_wing": {
       "description": "aerosandbox.geometry.wing.Wing/WingXSec, scoped to translate, subdivide_sections, span, area, mean_aerodynamic_chord, aerodynamic_center and taper_ratio at their defaults, on geometry shaped like aircraft_builder.py's main wing, hstab and vstab",
-      "generator": "gen_geom_asb_wing.py"
+      "generator": "gen_geom_asb_wing.py",
+      "runtime": "alas",
+      "alas_commit": "7d1555c1f4db5110cf6cd187c156718e1a033b50",
+      "environment": {
+        "numpy": "2.5.1",
+        "aerosandbox": "4.2.8",
+        "platform": "Windows-11-10.0.26200-SP0",
+        "scipy": "1.17.1",
+        "python": "3.13.13"
+      }
     },
     "builder": {
       "description": "alas.geometry.aircraft_builder.AircraftBuilder(GeometryConfig()).build(dv=None, include_engines=...) -- the actual nominal aircraft, with every wing's full xsec/airfoil structure, every fuselage's xsec list, and the returned Airplane's reference quantities, for both include_engines=True and False",
-      "generator": "gen_geom_builder.py"
+      "generator": "gen_geom_builder.py",
+      "runtime": "alas",
+      "alas_commit": "7d1555c1f4db5110cf6cd187c156718e1a033b50",
+      "environment": {
+        "numpy": "2.5.1",
+        "aerosandbox": "4.2.8",
+        "platform": "Windows-11-10.0.26200-SP0",
+        "scipy": "1.17.1",
+        "python": "3.13.13"
+      }
     },
     "selig": {
       "description": "FNV-1a 64-bit digest of every Selig corpus entry's stored bytes, keyed by stem (proves crates/alas-geom/data/selig.txt against the archive), plus resolved (x, y) coordinates for a representative sample of entries",
-      "generator": "gen_geom_selig.py"
+      "generator": "gen_geom_selig.py",
+      "runtime": "alas",
+      "alas_commit": "7d1555c1f4db5110cf6cd187c156718e1a033b50",
+      "environment": {
+        "numpy": "2.5.1",
+        "aerosandbox": "4.2.8",
+        "platform": "Windows-11-10.0.26200-SP0",
+        "scipy": "1.17.1",
+        "python": "3.13.13"
+      }
     },
     "wing_structure": {
       "description": "alas.geometry.wing_structure.WingStructureGeometry on the default DesignVector/WingConfig/StructuresConfig, root section built via build_section and tip via AirfoilLibrary.get exactly as pipeline.py's structural-analysis stage does: planform (local_chord/x_le/z_le/rib_vector/le_direction), airfoil_zu_zl, get_rib_lengths/compute_spar_intersections, and get_rib_stations end to end at the real sizing-derived num_ribs",
-      "generator": "gen_geom_wing_structure.py"
+      "generator": "gen_geom_wing_structure.py",
+      "runtime": "alas",
+      "alas_commit": "7d1555c1f4db5110cf6cd187c156718e1a033b50",
+      "environment": {
+        "numpy": "2.5.1",
+        "aerosandbox": "4.2.8",
+        "platform": "Windows-11-10.0.26200-SP0",
+        "scipy": "1.17.1",
+        "python": "3.13.13"
+      }
     }
   }
 }

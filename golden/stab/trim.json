@@ -1,0 +1,187 @@
+{
+  "airplane": {
+    "b_ref": 71.75,
+    "c_ref": 9.62825895492285,
+    "fuselage_names": [
+      "Fuselage",
+      "Nacelle R",
+      "Nacelle L"
+    ],
+    "s_ref": 529.035559696941,
+    "wing_names": [
+      "Main Wing",
+      "Horizontal Stabilizer",
+      "Vertical Stabilizer"
+    ],
+    "xyz_ref": [
+      37.116362303333425,
+      0.0,
+      0.0
+    ]
+  },
+  "autobalance": {
+    "target_05pct": {
+      "inputs": {
+        "target_static_margin": 0.05
+      },
+      "sm_before": 0.41257898993575404,
+      "xyz_ref_x_after": 40.607366710049234,
+      "xyz_ref_x_before": 37.116362303333425
+    },
+    "target_10pct": {
+      "inputs": {
+        "target_static_margin": 0.1
+      },
+      "sm_before": 0.41257898993575404,
+      "xyz_ref_x_after": 40.12595376230309,
+      "xyz_ref_x_before": 37.116362303333425
+    }
+  },
+  "fuselage_cm_alpha": {
+    "low_cl_alpha": {
+      "cm_alpha": 0.7585193048213092,
+      "inputs": {
+        "cl_alpha": 0.05,
+        "has_hstab": true
+      }
+    },
+    "no_hstab": {
+      "cm_alpha": 0.7381350289011281,
+      "inputs": {
+        "cl_alpha": 5.5,
+        "has_hstab": false
+      }
+    },
+    "shallow": {
+      "cm_alpha": 0.7432484579048991,
+      "inputs": {
+        "cl_alpha": 4.0,
+        "has_hstab": true
+      }
+    },
+    "steep": {
+      "cm_alpha": 0.7315016525845837,
+      "inputs": {
+        "cl_alpha": 7.0,
+        "has_hstab": true
+      }
+    },
+    "typical": {
+      "cm_alpha": 0.7373750552447415,
+      "inputs": {
+        "cl_alpha": 5.5,
+        "has_hstab": true
+      }
+    }
+  },
+  "munk": {
+    "above_clamp": {
+      "factor": 0.98,
+      "inputs": {
+        "fineness": 25.0
+      }
+    },
+    "at_high_endpoint": {
+      "factor": 0.98,
+      "inputs": {
+        "fineness": 20.0
+      }
+    },
+    "at_low_endpoint": {
+      "factor": 0.77,
+      "inputs": {
+        "fineness": 4.0
+      }
+    },
+    "below_clamp": {
+      "factor": 0.77,
+      "inputs": {
+        "fineness": 2.0
+      }
+    },
+    "interior": {
+      "factor": 0.925,
+      "inputs": {
+        "fineness": 9.0
+      }
+    }
+  },
+  "neutral_point": {
+    "cl_alpha": 4.913785277741771,
+    "static_margin": 0.21673706590171732,
+    "x_np": 39.20316289896534
+  },
+  "stability_and_trim": {
+    "climb": {
+      "cl_alpha": 0.08566167384954276,
+      "cl_ih": 0.01501615512777793,
+      "cm_ih": -0.050263122474583616,
+      "inputs": {
+        "altitude": 6000.0,
+        "cl_target": 0.75,
+        "has_hstab": true,
+        "mach": 0.6
+      },
+      "static_margin": 0.2195285608147321,
+      "trim_alpha_deg": 6.992128760719987,
+      "trim_ih_deg": -2.6978594072601205,
+      "x_np": 39.230040134859195
+    },
+    "cruise": {
+      "cl_alpha": 0.08566167384954249,
+      "cl_ih": 0.015016155127777708,
+      "cm_ih": -0.05026312247458359,
+      "inputs": {
+        "altitude": 11000.0,
+        "cl_target": 0.5,
+        "has_hstab": true,
+        "mach": 0.82
+      },
+      "static_margin": 0.21952856081473432,
+      "trim_alpha_deg": 3.6596241282756936,
+      "trim_ih_deg": -0.33587495619893804,
+      "x_np": 39.230040134859216
+    },
+    "no_hstab": {
+      "cl_alpha": 0.07665843001026257,
+      "cl_ih": 0.0,
+      "cm_ih": 0.0,
+      "inputs": {
+        "altitude": 11000.0,
+        "cl_target": 0.5,
+        "has_hstab": false,
+        "mach": 0.82
+      },
+      "static_margin": -0.10792645999163854,
+      "trim_alpha_deg": 3.6562620199401854,
+      "trim_ih_deg": null,
+      "x_np": 36.07721839844581
+    }
+  },
+  "static_margin": {
+    "static_margin": 0.41257898993575404
+  },
+  "tail_volume": {
+    "one_wing": {
+      "inputs": {
+        "n_wings": 1
+      },
+      "vh": null,
+      "vv": null
+    },
+    "three_wings": {
+      "inputs": {
+        "n_wings": 3
+      },
+      "vh": 0.7463965763817496,
+      "vv": 0.05453996049323676
+    },
+    "two_wings": {
+      "inputs": {
+        "n_wings": 2
+      },
+      "vh": 0.7463965763817496,
+      "vv": null
+    }
+  }
+}

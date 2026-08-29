@@ -1767,7 +1767,7 @@
               },
               {
                 "advanced": true,
-                "help": "Upper bound on wing planform area; the optimizer is penalised for exceeding it.",
+                "help": "Upper bound on the wing planform projected onto the aircraft XY reference plane; the optimizer is penalised for exceeding it.",
                 "kind": "float",
                 "label": "Maximum wing area",
                 "name": "max_wing_area_m2",
@@ -11557,7 +11557,7 @@
           },
           {
             "advanced": true,
-            "help": "Upper bound on wing planform area; the optimizer is penalised for exceeding it.",
+            "help": "Upper bound on the wing planform projected onto the aircraft XY reference plane; the optimizer is penalised for exceeding it.",
             "kind": "float",
             "label": "Maximum wing area",
             "name": "max_wing_area_m2",

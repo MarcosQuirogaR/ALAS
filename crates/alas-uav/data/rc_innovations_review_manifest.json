@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "reviewed_on_utc": "2026-08-17",
+  "source_root": "https://rc-innovations.es/",
+  "catalogue_file": "rc_innovations_reviewed.json",
+  "record_count": 64,
+  "category_counts": {
+    "battery": 3,
+    "electronics": 4,
+    "esc": 7,
+    "landing_gear": 6,
+    "material_stock": 7,
+    "motor": 8,
+    "propeller": 13,
+    "receiver": 3,
+    "servo": 13
+  },
+  "evidence_basis": [
+    "current product pages spot-checked through independent web access",
+    "current category indexes used to discover additional variants",
+    "saved sitemap and HTML fixtures used to verify collector behavior"
+  ],
+  "direct_spot_checks": [
+    "gens-ace-b-45c-1800-5s1p",
+    "kst-ds315mg-v8",
+    "tmotor-at2317-880kv"
+  ],
+  "local_live_collection": {
+    "completed": false,
+    "transport": "system curl using Windows Schannel",
+    "failure": "SEC_E_NO_CREDENTIALS before an HTTP response",
+    "claim_limit": "No local live full-crawl success is claimed."
+  }
+}

@@ -308,7 +308,7 @@
       }
     ],
     "name": "ALAS Aircraft",
-    "s_ref": 529.035559696941,
+    "s_ref": 524.313125,
     "wings": [
       {
         "aerodynamic_center": [
@@ -39745,7 +39745,7 @@
       }
     ],
     "name": "ALAS Aircraft",
-    "s_ref": 529.035559696941,
+    "s_ref": 524.313125,
     "wings": [
       {
         "aerodynamic_center": [

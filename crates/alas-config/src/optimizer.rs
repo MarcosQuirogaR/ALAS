@@ -44,7 +44,7 @@ pub struct OptimizerConfig {
     /// How the search is run.
     #[config(
         nested,
-        help = "How long the differential-evolution search runs, how wide its population is, and where in the design space it starts."
+        help = "Which optimization method runs, how long and wide its population is, and where in the design space it starts."
     )]
     pub solver: SolverSettings,
 }

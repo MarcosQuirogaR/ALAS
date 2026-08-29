@@ -34,6 +34,14 @@ ALAS_ROOT = Path(
     r"C:\Users\Marcos\OneDrive\Proyectos\Universidad\ALAS"
 )
 
+# The reference uses two virtual environments. A family manifest used to put
+# this fact at family scope, which made a later SUAVE fixture overwrite the
+# environment of an earlier AeroSandbox fixture. Keep the active runtime in
+# this process so each write records the fixture that actually ran.
+_ACTIVE_RUNTIME = "alas"
+_SUAVE_VERSION = "2.5.2"
+_SUAVE_TREE = "external tools/SUAVE-2.5.2/trunk"
+
 
 def alas_baseline() -> str:
     """The reference implementation commit these fixtures describe.
@@ -59,7 +67,7 @@ def alas_baseline() -> str:
     return git("rev-parse", "HEAD")
 
 
-def environment() -> dict[str, str]:
+def environment() -> dict[str, Any]:
     """Versions that could plausibly move a number."""
     versions = {"python": sys.version.split()[0], "platform": platform.platform()}
     for module in ("numpy", "scipy", "aerosandbox"):
@@ -67,6 +75,16 @@ def environment() -> dict[str, str]:
             versions[module] = __import__(module).__version__
         except Exception:  # noqa: BLE001 - absence is the information wanted
             versions[module] = "absent"
+    return versions
+
+
+def _fixture_environment(runtime: str) -> dict[str, Any]:
+    """Return environment metadata, including the selected runtime identity."""
+    if runtime not in {"alas", "suave"}:
+        raise ValueError(f"unknown generator runtime: {runtime}")
+    versions = environment()
+    if runtime == "suave":
+        versions["suave"] = {"version": _SUAVE_VERSION, "tree": _SUAVE_TREE}
     return versions
 
 
@@ -85,11 +103,17 @@ def write(family: str, name: str, payload: Any, *, description: str) -> Path:
     if manifest_path.exists():
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
 
-    manifest["alas_commit"] = alas_baseline()
-    manifest["environment"] = environment()
+    # Family-level provenance was ambiguous when one directory mixed the two
+    # virtual environments. Remove those legacy fields as each family is
+    # migrated, and keep the claim beside the fixture it describes.
+    manifest.pop("alas_commit", None)
+    manifest.pop("environment", None)
     manifest.setdefault("fixtures", {})[name] = {
         "generator": Path(sys.argv[0]).name,
         "description": description,
+        "runtime": _ACTIVE_RUNTIME,
+        "alas_commit": alas_baseline(),
+        "environment": _fixture_environment(_ACTIVE_RUNTIME),
     }
 
     with manifest_path.open("w", encoding="utf-8", newline="\n") as handle:
@@ -113,6 +137,8 @@ def add_suave_to_path() -> None:
     Must therefore run under the interpreter in ``.suave-venv``, which is where
     the pinned numpy and setuptools live.
     """
+    global _ACTIVE_RUNTIME
+    _ACTIVE_RUNTIME = "suave"
     runner = ALAS_ROOT / "external tools" / "suave_runner"
     if str(runner) not in sys.path:
         sys.path.insert(0, str(runner))
@@ -122,5 +148,7 @@ def add_suave_to_path() -> None:
 
 def add_alas_to_path() -> None:
     """Put the reference implementation on ``sys.path``."""
+    global _ACTIVE_RUNTIME
+    _ACTIVE_RUNTIME = "alas"
     if str(ALAS_ROOT) not in sys.path:
         sys.path.insert(0, str(ALAS_ROOT))

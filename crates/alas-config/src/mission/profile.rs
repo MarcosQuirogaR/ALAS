@@ -15,9 +15,9 @@
 //! Two of the quantities are fractions rather than absolutes, and that is
 //! deliberate. The step-climb altitudes are fractions of the cruise altitude,
 //! so raising the cruise level moves the steps with it instead of leaving
-//! them stranded below. The cruise legs' distances are fractions of the
-//! actual route distance, so a shorter route shortens all three legs in
-//! proportion rather than overrunning on the last one.
+//! them stranded below. The cruise legs' distances are relative shares of the
+//! route left after the climb and descent profile legs; active shares are
+//! normalized so the schedule closes on the requested route.
 //!
 //! A descent rung whose altitude is below the arrival field's elevation is
 //! skipped rather than flown into the ground.
@@ -96,9 +96,9 @@ pub struct MissionProfileConfig {
     #[config(help = "Airspeed flown on the first cruise leg.")]
     pub cruise_1_air_speed_m_s: f64,
 
-    /// Share of the route flown on the first cruise leg.
+    /// Relative share of the cruise remainder flown on the first cruise leg.
     #[config(
-        help = "Share of the route's total distance flown on the first cruise leg. The three cruise fractions split the actual route rather than a fixed distance, so a shorter route shortens all three in proportion."
+        help = "Relative share of the distance remaining after climb and descent legs flown on the first cruise leg. Active cruise fractions are normalized so the route closes exactly."
     )]
     pub cruise_1_distance_fraction: f64,
 
@@ -108,17 +108,19 @@ pub struct MissionProfileConfig {
     )]
     pub cruise_2_air_speed_m_s: f64,
 
-    /// Share of the route flown on the second cruise leg.
-    #[config(help = "Share of the route's total distance flown on the second cruise leg.")]
+    /// Relative share of the cruise remainder flown on the second cruise leg.
+    #[config(
+        help = "Relative share of the distance remaining after profile climb and descent legs flown on the second cruise leg."
+    )]
     pub cruise_2_distance_fraction: f64,
 
     /// Airspeed flown on the third cruise leg.
     #[config(help = "Airspeed flown on the third and final cruise leg.")]
     pub cruise_3_air_speed_m_s: f64,
 
-    /// Share of the route flown on the third cruise leg.
+    /// Relative share of the cruise remainder flown on the third cruise leg.
     #[config(
-        help = "Share of the route's total distance flown on the third cruise leg. The three fractions are expected to sum to one; a shortfall simply means the descent starts earlier."
+        help = "Relative share of the distance remaining after climb and descent legs flown on the third cruise leg. Active cruise fractions are normalized so the route closes exactly."
     )]
     pub cruise_3_distance_fraction: f64,
 
@@ -233,10 +235,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_cruise_legs_split_the_whole_route_between_them() {
-        // The three fractions are what the route distance is divided by, so
-        // a set that does not sum to one silently flies a different distance
-        // than the route asked for.
+    fn the_cruise_legs_provide_relative_weights() {
+        // The defaults provide the relative weights used to split the cruise
+        // remainder; the mission scheduler normalizes active weights.
         let profile = MissionProfileConfig::default();
         let total = profile.cruise_1_distance_fraction
             + profile.cruise_2_distance_fraction

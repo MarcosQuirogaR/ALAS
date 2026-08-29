@@ -1,0 +1,110 @@
+{
+  "inputs": {
+    "accessories_type": "long range",
+    "cargo_kg": 0.0,
+    "control_type": "fully powered",
+    "engine_count": 2.0,
+    "fuselage": {
+      "area_wetted_m2": 1494.3425279771354,
+      "differential_pressure_pa": 58000.0,
+      "height_max_m": 6.2,
+      "length_total_m": 76.72,
+      "width_m": 6.2
+    },
+    "horizontal_tail": {
+      "aerodynamic_center_x_m": 0.0,
+      "area_exposed_m2": 196.3167843609821,
+      "area_m2": 112.66386476957366,
+      "area_wetted_m2": 230.960922777626,
+      "mean_aerodynamic_chord_m": 5.1,
+      "origin_x_m": 36.94,
+      "root_chord_m": 8.0,
+      "span_m": 22.090953876386994,
+      "sweep_quarter_chord_rad": 0.5984188934785372,
+      "taper_ratio": 0.275,
+      "thickness_to_chord": 0.1
+    },
+    "limit_load_factor": 2.5,
+    "main_wing": {
+      "aerodynamic_center_x_m": 0.0,
+      "area_exposed_m2": 921.8444627719197,
+      "area_m2": 529.035559696941,
+      "area_wetted_m2": 1084.522897378729,
+      "mean_aerodynamic_chord_m": 9.62825895492285,
+      "origin_x_m": 26.24,
+      "root_chord_m": 16.5,
+      "span_m": 71.75,
+      "sweep_quarter_chord_rad": 0.5934119456780721,
+      "taper_ratio": 0.09696969696969697,
+      "thickness_to_chord": 0.12
+    },
+    "max_zero_fuel_kg": 261829.1,
+    "mtow_kg": 358670.0,
+    "passenger_count": 350.0,
+    "reference_area_m2": 529.035559696941,
+    "sealevel_static_thrust_per_engine_n": 613645.9050053362,
+    "ultimate_load_factor": 3.75,
+    "vertical_tail": {
+      "aerodynamic_center_x_m": 0.0,
+      "area_exposed_m2": 108.43577500000002,
+      "area_m2": 62.23000000000002,
+      "area_wetted_m2": 127.57150000000003,
+      "mean_aerodynamic_chord_m": 6.35,
+      "origin_x_m": 38.44,
+      "root_chord_m": 9.5,
+      "span_m": 9.800000000000004,
+      "sweep_quarter_chord_rad": 0.7428706287776641,
+      "taper_ratio": 0.3368421052631579,
+      "thickness_to_chord": 0.08
+    }
+  },
+  "vehicle_mass_properties_operating_empty": 196675.18686624782,
+  "weight_breakdown": {
+    "empty": 196675.18686624782,
+    "fuel": 120645.33268455218,
+    "max_takeoff": 358670.0,
+    "operating_empty": 202304.26817794782,
+    "operational_items": {
+      "flight_attendants": 857.2895793,
+      "flight_crew": 326.5865064,
+      "operating_items_less_crew": 4445.205226,
+      "total": 5629.0813117
+    },
+    "payload_breakdown": {
+      "baggage": 4762.719885,
+      "cargo": 0.0,
+      "passengers": 30957.679252500002,
+      "total": 35720.399137500004
+    },
+    "propulsion_breakdown": {
+      "engines": 0.0,
+      "fuel_system": 0.0,
+      "miscellaneous": 0.0,
+      "thrust_reversers": 0.0,
+      "total": 33614.0542317371
+    },
+    "structures": {
+      "fuselage": 47302.02172143426,
+      "horizontal_tail": 6993.085140399826,
+      "main_landing_gear": 12912.12,
+      "nacelle": 0.0,
+      "nose_landing_gear": 1434.6800000000003,
+      "paint": 0.0,
+      "total": 139587.584144323,
+      "vertical_tail": 3004.8207900527646,
+      "wing": 67940.85649243614
+    },
+    "systems_breakdown": {
+      "air_conditioner": 2381.3599425,
+      "apu": 1111.3013065,
+      "avionics": 408.233133,
+      "control_systems": 2988.6732357468222,
+      "electrical": 2063.8452835000003,
+      "furnish": 12478.326098700001,
+      "hydraulics": 1678.9355942409184,
+      "instruments": 362.873896,
+      "total": 23473.548490187743
+    },
+    "zero_fuel_weight": 238024.66731544782
+  }
+}

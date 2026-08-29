@@ -1,0 +1,444 @@
+{
+  "schema_version": "q0007-open-benchmarks-2",
+  "package_status": "additive_provenance_only",
+  "generated_on": "2026-08-25",
+  "canonical_units": "SI (m, m2, kg, N, kg m2, s, K); source units are retained only as provenance metadata",
+  "not_product_truth": true,
+  "not_used_by_product": true,
+  "selection_rule": "No values are composed across benchmark families, variants, revisions, scales, or source states. A value marked derived is only a unit conversion or the explicit TCM geometric scale stated by its source.",
+  "availability_gate": {
+    "status": "blocked_by_evidence",
+    "product_integration_allowed": false,
+    "aircraft_specific_physical_claims_allowed": false,
+    "compatible_complete_package_found": false,
+    "enablement_rule": "A benchmark may be admitted to product execution or used for an aircraft-specific physical claim only when every required domain is present for the same aircraft, variant, state, revision, and installation, with an immutable source digest, legally usable terms, and independent validation evidence reviewed by an authorized owner.",
+    "allowed_scope": [
+      "provenance_metadata",
+      "source_parameter_record",
+      "unit_conversion_only"
+    ],
+    "forbidden_scope": [
+      "product_preset_substitution",
+      "cross_source_aircraft_composition",
+      "installed_engine_deck_promotion",
+      "aircraft_specific_mass_or_cg_claim",
+      "aircraft_or_operator_mission_claim",
+      "certification_or_validation_claim"
+    ],
+    "required_domains": [
+      {
+        "id": "geometry",
+        "status": "missing",
+        "required_evidence": "Revision-matched external and internal geometry, airfoils, installation coordinates, and explicit frame/datum."
+      },
+      {
+        "id": "installed_engine_deck",
+        "status": "missing",
+        "required_evidence": "Legally usable installed deck with altitude/Mach/throttle axes, thrust and fuel-flow/TSFC semantics, variant/installation identity, and uncertainty or test provenance."
+      },
+      {
+        "id": "component_mass_and_cg",
+        "status": "missing",
+        "required_evidence": "Aircraft-specific component masses and centroids for structure, systems, engines, tanks, payload, and loading states, including moments/inertias where claimed."
+      },
+      {
+        "id": "mission_and_operational_rules",
+        "status": "missing",
+        "required_evidence": "Aircraft/operator mission, reserve, alternate, wind, loading, AFM/WBM/TCDS limits, and dispatch rules for the same revision and configuration."
+      },
+      {
+        "id": "independent_validation",
+        "status": "missing",
+        "required_evidence": "Independent wind-tunnel, flight-test, or certified performance records at declared matched states before any aircraft-level validation claim."
+      }
+    ],
+    "owner_authorization_required": true,
+    "owner_authorization_artifact": "A source package whose files, hashes, license terms, aircraft/variant/state identity, and validation records are reviewed and explicitly authorized for ALAS use."
+  },
+  "benchmarks": [
+    {
+      "id": "nasa_crm_high_speed",
+      "name": "NASA Common Research Model (CRM), high-speed transport geometry",
+      "authority": "NASA",
+      "revision": {
+        "source_revision": "NASA CRM geometry pages as accessed 2026-08-25",
+        "file_digest": null,
+        "revision_limit": "The inspected page exposes model-specific downloads but no immutable file release identifier; a downloaded geometry file and digest are required before a fixture can pin it."
+      },
+      "source": {
+        "geometry_page": "https://commonresearchmodel.larc.nasa.gov/geometry/",
+        "high_lift_geometry_page": "https://commonresearchmodel.larc.nasa.gov/high-lift-crm/high-lift-crm-geometry/",
+        "public_description": "https://ntrs.nasa.gov/api/citations/20190025462/downloads/20190025462.pdf"
+      },
+      "license_and_distribution": {
+        "classification": "NASA publication describes the CRM as publicly available and otherwise unrestricted for worldwide distribution",
+        "terms_url": "https://ntrs.nasa.gov/api/citations/20190025462/downloads/20190025462.pdf",
+        "redistribution_note": "This package stores provenance only; it does not redistribute CRM geometry or test files. Recheck the applicable NASA notice before bundling files."
+      },
+      "coverage": {
+        "geometry": "available_open_source_candidate",
+        "aerodynamics_and_test_data": "available_for_selected_CRM_configurations",
+        "engine_deck": "not_available",
+        "component_mass_and_cg": "not_available",
+        "mission_and_operational_rules": "not_available"
+      },
+      "source_parameters": [
+        {
+          "name": "design_mach",
+          "value_si": 0.85,
+          "unit": "1",
+          "value_status": "source_direct",
+          "source_locator": "NASA CRM geometry page"
+        },
+        {
+          "name": "nominal_lift_coefficient",
+          "value_si": 0.5,
+          "unit": "1",
+          "value_status": "source_direct",
+          "source_locator": "NASA CRM geometry page"
+        },
+        {
+          "name": "reference_reynolds_number",
+          "value_si": 40000000,
+          "unit": "1",
+          "value_status": "source_direct",
+          "source_locator": "NASA CRM geometry page; based on reference chord"
+        },
+        {
+          "name": "wing_aspect_ratio",
+          "value_si": 9.0,
+          "unit": "1",
+          "value_status": "source_direct",
+          "source_locator": "NASA CRM geometry page"
+        },
+        {
+          "name": "wing_taper_ratio",
+          "value_si": 0.275,
+          "unit": "1",
+          "value_status": "source_direct",
+          "source_locator": "NASA CRM geometry page"
+        }
+      ],
+      "limitations": [
+        "This is a geometry/aerodynamic research benchmark, not a type-certified aircraft.",
+        "No compatible engine cycle or cruise TSFC deck, component mass build-up, AFM/WBM CG envelope, airline loading sequence, or dispatch/reserve rule was found in the CRM source set.",
+        "The source page's model-specific downloads must be pinned by file digest before any numerical fixture is created."
+      ]
+    },
+    {
+      "id": "nasa_gtm_designsim_t2",
+      "name": "NASA Generic Transport Model (GTM) DesignSim, T2 subscale state",
+      "authority": "NASA",
+      "revision": {
+        "repository_commit": "9717143270144aca1f5d38d7c24c0fce678d1589",
+        "commit_date": "2019-08-22T10:39:30-04:00",
+        "catalog_identifier": "LAR-17625-1",
+        "source_revision": "Repository commit above; source files AC_baseparams_T2.m and AC_calcparams_T2.m"
+      },
+      "source": {
+        "repository": "https://github.com/nasa/GTM_DesignSim",
+        "software_catalog": "https://software.nasa.gov/software/LAR-17625-1",
+        "base_parameters": "https://github.com/nasa/GTM_DesignSim/blob/9717143270144aca1f5d38d7c24c0fce678d1589/gtm_design/config/AC_baseparams_T2.m",
+        "calculated_parameters": "https://github.com/nasa/GTM_DesignSim/blob/9717143270144aca1f5d38d7c24c0fce678d1589/gtm_design/config/AC_calcparams_T2.m"
+      },
+      "license_and_distribution": {
+        "classification": "NASA Software Catalog labels LAR-17625-1 Open Source",
+        "terms_url": "https://github.com/nasa/GTM_DesignSim/blob/9717143270144aca1f5d38d7c24c0fce678d1589/LicenseAgreement.pdf",
+        "redistribution_note": "The upstream repository contains the governing LicenseAgreement.pdf. This package does not copy the model, MATLAB files, binary aerodynamic database, or license text."
+      },
+      "state_and_frame": {
+        "scale": "5.5% generic transport wind-tunnel model",
+        "frame_name": "Aircraft Reference System (ARS)",
+        "axis_convention": "x forward, y toward the right wing, z down",
+        "datum_description": "ARS datum is 8.745 in forward of the nose, on centerline, and 16.86 in below the top of fuselage; retained as source description, not used as a product transform",
+        "source_units": "ft, ft2, lb, slug-ft2, deg, RPM"
+      },
+      "parameters_si": {
+        "reference_wing_area_m2": {
+          "value": 0.548295161472,
+          "value_status": "derived_unit_conversion",
+          "source_value": 5.9018,
+          "source_unit": "ft2"
+        },
+        "mean_aerodynamic_chord_m": {
+          "value": 0.27898344,
+          "value_status": "derived_unit_conversion",
+          "source_value": 0.9153,
+          "source_unit": "ft"
+        },
+        "wing_span_m": {
+          "value": 2.08751424,
+          "value_status": "derived_unit_conversion",
+          "source_value": 6.8488,
+          "source_unit": "ft"
+        },
+        "leading_edge_mac_x_m": {
+          "value": 1.38568176,
+          "value_status": "derived_unit_conversion",
+          "source_value": 4.5462,
+          "source_unit": "ft"
+        },
+        "initial_cg_ars_m": {
+          "value": [-1.447030218456, -0.00359664, -0.29751528],
+          "unit": "m",
+          "value_status": "derived_unit_conversion",
+          "source_value": [-4.74747447, -0.0118, -0.9761],
+          "source_unit": "ft",
+          "source_note": "Source labels this as initial CG, 21.99% MAC, gear up."
+        },
+        "reference_cg_ars_m": {
+          "value": [-1.45542762, 0.0, -0.28654248],
+          "unit": "m",
+          "value_status": "derived_unit_conversion",
+          "source_value": [-4.775025, 0.0, -0.9401],
+          "source_unit": "ft",
+          "source_note": "Source labels this as reference CG, 25% MAC."
+        },
+        "initial_cg_percent_mac": {
+          "value": 21.99,
+          "unit": "%MAC",
+          "value_status": "source_direct"
+        },
+        "reference_cg_percent_mac": {
+          "value": 25.0,
+          "unit": "%MAC",
+          "value_status": "source_direct"
+        },
+        "full_fuel_inertia_kg_m2": {
+          "value": {
+            "Ixx": 1.655453714913,
+            "Iyy": 6.311332549483,
+            "Izz": 7.574954877328,
+            "Ixz": 0.371494117843,
+            "Iyz": 0.0,
+            "Ixy": 0.00813490769
+          },
+          "unit": "kg m2",
+          "value_status": "derived_unit_conversion",
+          "source_value": {
+            "Ixx": 1.221,
+            "Iyy": 4.655,
+            "Izz": 5.587,
+            "Ixz": 0.274,
+            "Iyz": 0.0,
+            "Ixy": 0.006
+          },
+          "source_unit": "slug-ft2",
+          "source_note": "Source says Ixx was not measured and cross-inertias were Pro-E estimates."
+        },
+        "fuel_tank_positions_ars_m": {
+          "value": {
+            "forward": [-1.357122, 0.0, -0.3528768],
+            "aft": [-1.58242, 0.0, -0.3528768]
+          },
+          "unit": "m",
+          "value_status": "derived_unit_conversion",
+          "source_value": {
+            "forward": [-4.4525, 0.0, -1.155],
+            "aft": [-5.191666666667, 0.0, -1.155]
+          },
+          "source_unit": "ft"
+        },
+        "engine_positions_ars_m": {
+          "value": {
+            "source_label_engl": [-1.3183362, -0.36068, -0.195834],
+            "source_label_engr": [-1.3183362, 0.36068, -0.195834]
+          },
+          "unit": "m",
+          "value_status": "derived_unit_conversion",
+          "source_value": {
+            "source_label_engl": [-4.32525, -1.183333333333, -0.6425],
+            "source_label_engr": [-4.32525, 1.183333333333, -0.6425]
+          },
+          "source_unit": "ft",
+          "source_note": "The source comments conflict on left/right labels; this package preserves the source labels and does not infer an assignment."
+        }
+      },
+      "engine_model_metadata": {
+        "deck_status": "source_model_only_not_transport_deck",
+        "source_description": "AC_calcparams_T2 contains a preliminary JetCat P70 bench thrust table versus throttle/RPM and a reduced-RPM fuel-flow polynomial.",
+        "source_axes": ["throttle percent", "reference RPM percent"],
+        "missing_axes": ["altitude", "Mach", "ram drag installation state", "continuous cycle stations", "cruise TSFC validation"],
+        "source_units": ["lb (source text; lbf/lbm not disambiguated)", "lb/min", "RPM"],
+        "promotion_status": "not promoted to SI engine-deck values; preliminary and semantically incomplete"
+      },
+      "coverage": {
+        "geometry": "reference_planform_scalars_and_frame_available",
+        "aerodynamics_and_dynamics": "model/database_available_upstream_but_not_repackaged_here",
+        "engine_deck": "limited_preliminary_subscale_bench_model_only",
+        "component_mass_and_cg": "CG_and_inertia_state_available; component_mass_breakdown_not_available",
+        "mission_and_operational_rules": "not_available"
+      },
+      "limitations": [
+        "The benchmark is a 5.5% experimental subscale generic transport, not a full-scale or type-certified aircraft.",
+        "The source has no component mass breakdown for engines, tanks, structure, payload, or landing gear; fuel and engine positions do not establish their masses.",
+        "The preliminary JetCat P70 table has no altitude/Mach axis and cannot validate the product transport turbofan cycle or TSFC.",
+        "The upstream aerodynamic database/model is deliberately not copied into this additive package."
+      ]
+    },
+    {
+      "id": "nasa_tcm_full_scale_scaling",
+      "name": "NASA Transport Class Model (TCM), full-scale representative scaling",
+      "authority": "NASA",
+      "revision": {
+        "report": "NASA/TM-2011-217169",
+        "publication_date": "2011-08-01",
+        "source_revision": "Hueschen, Development of the Transport Class Model (TCM) Aircraft Simulation From a Sub-Scale Generic Transport Model (GTM) Simulation"
+      },
+      "source": {
+        "report_pdf": "https://ntrs.nasa.gov/api/citations/20110014509/downloads/20110014509.pdf",
+        "report_record": "https://ntrs.nasa.gov/archive/nasa/casi.ntrs.nasa.gov/20110014509.pdf"
+      },
+      "license_and_distribution": {
+        "classification": "NASA technical memorandum; public U.S. Government work",
+        "terms_url": "https://ntrs.nasa.gov/api/citations/20110014509/downloads/20110014509.pdf",
+        "redistribution_note": "Only source-derived scalars and citations are recorded here; the TCM simulation implementation and source tables are not redistributed."
+      },
+      "state_and_scale": {
+        "subscale_fraction": 0.055,
+        "full_scale_length_factor": 18.1818181818182,
+        "full_scale_area_factor": 330.578512396694,
+        "source_note": "The report describes the GTM as a 5.5% model of a full-scale midsize single-aisle generic transport and explicitly scales length and area."
+      },
+      "parameters_si": {
+        "reference_wing_area_m2": {
+          "value": 181.254598833719,
+          "value_status": "derived_source_scale_and_unit_conversion",
+          "source_value": 5.9018,
+          "source_unit": "ft2_subscale",
+          "source_formula": "5.9018 ft2 / 0.055^2"
+        },
+        "mean_aerodynamic_chord_m": {
+          "value": 5.072426181818,
+          "value_status": "derived_source_scale_and_unit_conversion",
+          "source_value": 0.9153,
+          "source_unit": "ft_subscale",
+          "source_formula": "0.9153 ft / 0.055"
+        },
+        "wing_span_m": {
+          "value": 37.954804363636,
+          "value_status": "derived_source_scale_and_unit_conversion",
+          "source_value": 6.8488,
+          "source_unit": "ft_subscale",
+          "source_formula": "6.8488 ft / 0.055"
+        },
+        "reference_weight_n": {
+          "value": 822920.998823,
+          "value_status": "derived_unit_conversion",
+          "source_value": 185000,
+          "source_unit": "lbf",
+          "source_note": "Report describes a 185,000 lb full-scale reference weight; lbf interpretation is explicit here for SI force conversion and is not a product mass input."
+        },
+        "reference_inertia_kg_m2": {
+          "value": {
+            "Ixx": 2399797.768547,
+            "Iyy": 7701045.946522,
+            "Izz": 9856796.484369,
+            "Ixz": 216930.871733
+          },
+          "unit": "kg m2",
+          "value_status": "derived_unit_conversion",
+          "source_value": {
+            "Ixx": 1770000,
+            "Iyy": 5680000,
+            "Izz": 7270000,
+            "Ixz": 160000
+          },
+          "source_unit": "slug-ft2",
+          "source_note": "Representative full-scale inertias stated by the TCM report; no component mass build-up is provided."
+        },
+        "reference_cg_percent_mac": {
+          "value": 25.0,
+          "unit": "%MAC",
+          "value_status": "source_direct"
+        },
+        "nominal_engine_static_thrust_n_per_engine": {
+          "value": 177928.86461,
+          "unit": "N",
+          "value_status": "derived_unit_conversion_from_approximate_source",
+          "source_value": 40000,
+          "source_unit": "lbf",
+          "source_note": "Report describes two generic wing-mounted engines of approximately 40,000 lbf each at sea level; this is not a certified rating or a complete deck."
+        },
+        "nominal_total_static_thrust_n": {
+          "value": 355857.729221,
+          "unit": "N",
+          "value_status": "derived_unit_conversion_from_approximate_source",
+          "source_formula": "2 * approximately 40,000 lbf"
+        }
+      },
+      "engine_model_metadata": {
+        "deck_status": "generic_simplified_dynamic_model_not_full_cycle_deck",
+        "source_description": "The report describes a Simp2/C-MAPSS40k-derived simplified engine model with fan-speed dynamics and thrust lookup/scaling.",
+        "available_outputs": ["sea-level thrust", "net thrust", "fan speed", "corrected fan speed"],
+        "not_available_or_not_modeled": ["continuous published cycle map", "validated cruise TSFC", "component deterioration", "bleed/installation certification data"],
+        "source_note": "The report notes that some fuel-flow/EPR/EGT outputs are not computed in the simplified block; the numerical Simulink table is not copied here."
+      },
+      "coverage": {
+        "geometry": "full_scale_representative_scalars_by_explicit_TCM_scaling",
+        "aerodynamics_and_dynamics": "generic_simulation_reference",
+        "engine_deck": "generic_simplified_model_semantics_and_approximate_static_thrust_only",
+        "component_mass_and_cg": "reference_weight_inertias_and_25_percent_mac_cg; component_breakdown_not_available",
+        "mission_and_operational_rules": "not_available"
+      },
+      "limitations": [
+        "TCM is explicitly non-proprietary and generic; it is not an aircraft type, AFM/WBM, or airline operations source.",
+        "Scaling a 5.5% model does not create a validated full-scale geometry, loads, component mass distribution, or engine deck.",
+        "The report's representative weight, inertias, CG, and engine thrust are not aircraft-specific truth and must not replace current product presets."
+      ]
+    },
+    {
+      "id": "faa_ac_120_27f_operational_boundary",
+      "name": "FAA AC 120-27F aircraft weight-and-balance operational source rule",
+      "authority": "FAA",
+      "revision": {
+        "document": "AC 120-27F",
+        "issue_date": "2019-05-06",
+        "status_checked": "2026-08-25"
+      },
+      "source": {
+        "active_record": "https://www.faa.gov/regulations_policies/advisory_circulars/index.cfm/go/document.information/documentID/1035868?pubDate=20260114",
+        "pdf": "https://www.faa.gov/documentLibrary/media/Advisory_Circular/AC_120-27F.pdf"
+      },
+      "license_and_distribution": {
+        "classification": "FAA public advisory circular",
+        "terms_url": "https://www.faa.gov/documentLibrary/media/Advisory_Circular/AC_120-27F.pdf"
+      },
+      "coverage": {
+        "geometry": "not_a_geometry_source",
+        "engine_deck": "not_an_engine_source",
+        "component_mass_and_cg": "defines_required_aircraft_specific_source_and_program_controls; supplies no generic benchmark values",
+        "mission_and_operational_rules": "weight_and_balance program guidance; not an airline-specific dispatch/reserve rule set"
+      },
+      "source_rules": [
+        "Aircraft-specific AFM/WBM/TCDS data establish the certificated weight and CG limits.",
+        "Takeoff weight accounting uses basic empty weight plus passengers, cargo, and fuel under the operator program.",
+        "Loading schedules must demonstrate compliance with AFM/RFM/TCDS/WBM limits.",
+        "MAC and the applicable CG envelope are manufacturer/type-specific; AC 120-27F does not fill those values for a generic transport."
+      ],
+      "limitations": [
+        "This source closes the provenance rule (where operational truth must come from), not the missing aircraft data.",
+        "No generic component mass table, loading sequence, AFM/WBM envelope, airline reserve policy, or mission profile is inferred from this advisory circular."
+      ]
+    }
+  ],
+  "screened_out_sources": [
+    {
+      "source": "EASA engine emissions databank",
+      "url": "https://www.easa.europa.eu/en/domains/environment/easa-engine-emissions-databank",
+      "reason_not_benchmark": "Authoritative certification/emissions data are LTO/static-cycle oriented and do not provide the required cruise engine cycle/TSFC deck, airframe geometry, component mass/CG, or mission rules."
+    },
+    {
+      "source": "Open manufacturer aircraft-characteristics planning documents reviewed in the audit",
+      "url": null,
+      "reason_not_benchmark": "They provide selected planning dimensions, limits, or payload-range information for particular revisions/variants, but not a complete compatible geometry, engine deck, component mass/CG, and operational rule set. See audit/AUDIT_FINDINGS.md research ledger S-0001-S-0008."
+    }
+  ],
+  "owner_authorized_data_required": [
+    "A revision-matched aircraft geometry package with internal airfoils, installation coordinates, and an explicit frame/datum.",
+    "A legally usable installed engine deck with altitude/Mach/throttle axes, thrust and fuel-flow/TSFC semantics, variant/installation identity, and uncertainty or test provenance.",
+    "A component mass and center-of-gravity build-up including payload, fuel tanks, engines, systems, structure, and loading states.",
+    "Aircraft-specific AFM/WBM/TCDS weight and CG limits plus the operator/airline mission, reserve, alternate, wind, and loading rules.",
+    "Independent validation data at declared states (wind-tunnel, flight-test, or certified performance records) before any T4/T5 aircraft-truth claim."
+  ]
+}

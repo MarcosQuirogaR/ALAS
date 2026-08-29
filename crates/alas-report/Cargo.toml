@@ -1,0 +1,40 @@
+[package]
+name = "alas-report"
+description = "Figure scene generation, styling, SVG rendering, and design report exports."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+alas-types = { path = "../alas-types" }
+alas-units = { path = "../alas-units" }
+alas-math = { path = "../alas-math" }
+alas-config = { path = "../alas-config" }
+alas-geom = { path = "../alas-geom" }
+alas-atmo = { path = "../alas-atmo" }
+alas-aero = { path = "../alas-aero" }
+alas-prop = { path = "../alas-prop" }
+alas-mass = { path = "../alas-mass" }
+alas-stab = { path = "../alas-stab" }
+alas-perf = { path = "../alas-perf" }
+alas-payload = { path = "../alas-payload" }
+alas-route = { path = "../alas-route" }
+alas-mission = { path = "../alas-mission" }
+alas-struct = { path = "../alas-struct" }
+alas-opt = { path = "../alas-opt" }
+alas-screen = { path = "../alas-screen" }
+alas-pipeline = { path = "../alas-pipeline" }
+tracing = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+plotters = { workspace = true }
+plotters-backend = { workspace = true }
+
+[dev-dependencies]
+alas-testkit = { path = "../alas-testkit" }
+
+[lints]
+workspace = true

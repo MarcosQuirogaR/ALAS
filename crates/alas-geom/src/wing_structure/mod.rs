@@ -28,7 +28,7 @@
 //!   does. Generalizing it to every spar is what lets `spar_chord_fractions`
 //!   be an arbitrary-length list instead of a fixed front/rear pair.
 //!
-//! Coordinate convention matches AeroSandbox's airplane frame: X = chordwise
+//! Coordinate convention matches native aerodynamic model's airplane frame: X = chordwise
 //! (aft-positive), Y = spanwise (outboard-positive, root = 0), Z = up
 //! (including dihedral). Twist (washout) is **not** applied to the FEM
 //! cross-sections -- a documented simplification matching the reference
@@ -58,7 +58,7 @@ mod types;
 
 use alas_config::{DesignVector, WingConfig};
 
-use crate::asb::airfoil::Airfoil;
+use crate::aircraft::airfoil::Airfoil;
 use support::airfoil_surfaces;
 use types::SparReferenceLine;
 

@@ -29,9 +29,10 @@ Four sections, and what each is here to pin down:
     *sequence*, and two implementations that place the same items in a
     different order have not agreed. Cases cover single- and multi-class
     cabins, the double deck, monument counts past the bay count (the
-    ``_stack_y`` narrowing), the structural-payload belly fill, all four cargo
-    loading strategies, and a narrowbody freighter whose holds fail the LD3 fit
-    check and degrade through ``LOWER_HOLD_FALLBACKS``.
+    ``_stack_y`` narrowing), the structural-payload belly fill, the
+    bulk-overflow guard, all four cargo loading strategies, and a narrowbody
+    freighter whose holds fail the LD3 fit check and degrade through
+    ``LOWER_HOLD_FALLBACKS``.
 
 ``simulations``
     ``simulate_passenger_counts`` on its own, which is what drives
@@ -195,8 +196,22 @@ LAYOUT_CASES = [
         },
         0.0,
         0.0,
-        "a belly load past what the holds can hold, so the bulk-overflow guard "
-        "places the leftover as a loose block at the aft hold",
+        "a belly load past what the holds can hold, so the freight is clamped "
+        "to the capacity the checked bags leave rather than overflowing",
+    ),
+    (
+        "bag_overflow",
+        {
+            "preset": "A320-200",
+            "cabin": {
+                "passenger": {"economy": {"count": 180}, "checked_bag_mass_kg": 120.0}
+            },
+        },
+        0.0,
+        0.0,
+        "checked baggage alone past the holds' capacity, which is the only way "
+        "to reach the bulk-overflow guard: the belly freight is clamped to what "
+        "the bags leave, and the bags themselves are not",
     ),
     (
         "no_structural_cap",
@@ -680,6 +695,19 @@ def main() -> None:
         raise SystemExit(
             "no geometry case reached the double-deck branch; the two-deck "
             "DeckSpec pair would go unchecked"
+        )
+
+    overflowed = [
+        c
+        for c in payload["layouts"]
+        for item in c["layout"]["items"]
+        if item["label"] == "Bulk overflow"
+    ]
+    if not overflowed:
+        raise SystemExit(
+            "no layout case placed a loose bulk block; the overflow guard "
+            "would go unchecked, and it is only reachable when the checked "
+            "baggage alone exceeds the holds"
         )
 
     _framework.write(
