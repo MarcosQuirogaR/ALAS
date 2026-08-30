@@ -41,8 +41,7 @@ pub fn quick_preview_report(
     config: &AlasConfig,
     design: DesignVector,
 ) -> Result<AnalysisReport, String> {
-    let mut geometry = config.geometry.clone();
-    geometry.engine.apply_engine_spec_if_uninitialized();
+    let geometry = config.geometry.clone();
     let (masses, coordinates, physical_cg) =
         run_mass_analysis_with_model_checked_product_with_gear(
             &airplane,

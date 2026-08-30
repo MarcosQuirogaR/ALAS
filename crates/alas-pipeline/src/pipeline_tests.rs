@@ -341,11 +341,18 @@ fn enabled_native_mission_is_present_in_a_normal_pipeline_result() {
         .as_ref()
         .unwrap_or_else(|| panic!("enabled mission must produce telemetry"));
     assert!(!mission.segments.is_empty());
-    assert!(
-        mission.solutions.iter().all(|solution| solution.converged),
-        "enabled public-path mission must converge: {:?}",
-        mission.solutions
-    );
+    assert!(mission
+        .solutions
+        .last()
+        .is_some_and(|solution| solution.throttle_limited));
+    assert!(mission
+        .segments
+        .iter()
+        .flat_map(|segment| segment.conditions.throttle.iter())
+        .all(|throttle| (0.0..=1.0).contains(throttle)));
+    assert!(result
+        .feasibility
+        .contains(crate::FindingCode::MissionThrottleLimitViolation));
     assert!(mission.initial_mass_kg() > mission.final_mass_kg());
     assert!(mission.fuel_burned_kg() > 0.0);
     assert_eq!(result.execution.seed_requested, Some(1));

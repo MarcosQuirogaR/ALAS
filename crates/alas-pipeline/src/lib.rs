@@ -26,6 +26,7 @@
 
 pub mod avl;
 pub mod baseline;
+pub mod cabin_scene;
 pub mod cpacs;
 #[path = "cpacs/adapters.rs"]
 pub mod cpacs_adapters;
@@ -37,6 +38,7 @@ pub mod full_analysis;
 mod mission_stage;
 pub mod openvsp;
 mod patran;
+pub mod payload_layout_export;
 pub mod pipeline;
 pub mod plot;
 pub mod runs;
@@ -55,6 +57,7 @@ pub use avl::{
     AvlAnalysisStatus, AvlComparableQuantity, AvlComparisonReference, AvlComparisonStatus,
 };
 pub use baseline::{analyze_baseline, BaselineReport};
+pub use cabin_scene::{export_cabin_scene, CabinScene, CABIN_SCENE_SCHEMA_VERSION};
 pub use cpacs::{
     export_cpacs, export_cpacs_with_analysis, read_cpacs, read_cpacs_file, render_cpacs_v35,
     write_cpacs_run_manifest, CpacsAircraft, CpacsAircraftError, CpacsDocument, CpacsEngine,
@@ -90,6 +93,9 @@ pub use full_analysis::{
 };
 pub use openvsp::{
     export_openvsp_script, materialize_openvsp_project, OpenVspExportResult, OpenVspExportStatus,
+};
+pub use payload_layout_export::{
+    export_payload_layout_artifact, PayloadLayoutArtifact, PAYLOAD_LAYOUT_SCHEMA_VERSION,
 };
 pub use pipeline::{
     DesignPipeline, PipelineExecutionStatus, PipelineOptions, PipelineResult, RoutePlanningStatus,

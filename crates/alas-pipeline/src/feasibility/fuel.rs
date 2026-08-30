@@ -103,6 +103,11 @@ pub struct FuelLoadingAssessment {
     pub zero_fuel_mass_kg: f64,
     /// Takeoff mass actually analyzed, in kilograms.
     pub analyzed_takeoff_mass_kg: f64,
+    /// Landing mass reached by a complete mission, when available, in kilograms.
+    ///
+    /// This is an analyzed state, not the maximum-landing-mass limit or the
+    /// fallback fraction used by preliminary field-performance screening.
+    pub analyzed_landing_mass_kg: Option<f64>,
     /// Difference between configured MTOW and analyzed takeoff mass, in kilograms.
     pub mtow_shortfall_kg: f64,
     /// Mission burn/requirement result for the analyzed load case.
@@ -118,6 +123,7 @@ impl Default for FuelLoadingAssessment {
             carried_fuel_basis: CarriedFuelBasis::CapacityUnverified,
             zero_fuel_mass_kg: f64::NAN,
             analyzed_takeoff_mass_kg: f64::NAN,
+            analyzed_landing_mass_kg: None,
             mtow_shortfall_kg: f64::NAN,
             mission: MissionFuelAssessment::default(),
         }
@@ -171,6 +177,7 @@ pub(super) fn plan_from_values(
         carried_fuel_basis,
         zero_fuel_mass_kg,
         analyzed_takeoff_mass_kg,
+        analyzed_landing_mass_kg: None,
         mtow_shortfall_kg: (mtow_kg - analyzed_takeoff_mass_kg).max(0.0),
         mission: MissionFuelAssessment::default(),
     }
@@ -199,17 +206,17 @@ pub(crate) fn assess_mission_fuel(
     }
 
     let burned_fuel_kg = result.fuel_burned_kg();
-    if result.solutions.is_empty() || result.solutions.iter().any(|solution| !solution.converged) {
+    let Some(summary) = result.completed_summary() else {
         return MissionFuelAssessment {
             status: MissionFuelStatus::NotConverged,
             burned_fuel_kg: burned_fuel_kg.is_finite().then_some(burned_fuel_kg),
             required_trip_fuel_kg: None,
         };
-    }
+    };
     MissionFuelAssessment {
         status: MissionFuelStatus::Completed,
-        burned_fuel_kg: Some(burned_fuel_kg),
-        required_trip_fuel_kg: Some(burned_fuel_kg),
+        burned_fuel_kg: Some(summary.trip_fuel_kg),
+        required_trip_fuel_kg: Some(summary.trip_fuel_kg),
     }
 }
 
@@ -231,9 +238,11 @@ pub fn assess_fuel_capacity(
         }
     }
 
-    let capacity_kg = report.airplane.wings.first().map(|wing| {
-        wing_fuel_volume_m3(wing, config.mass_model.fuel_tank_usable_fraction)
-            * config.mass_model.fuel_density_kg_m3
+    let capacity_kg = report.airplane.wings.first().and_then(|wing| {
+        valid_positive_capacity(
+            wing_fuel_volume_m3(wing, config.mass_model.fuel_tank_usable_fraction)
+                * config.mass_model.fuel_density_kg_m3,
+        )
     });
     FuelCapacityAssessment {
         capacity_kg,
@@ -243,6 +252,12 @@ pub fn assess_fuel_capacity(
             FuelCapacityEvidence::Unavailable
         },
     }
+}
+
+/// Reject malformed derived evidence rather than allowing NaN, infinity, zero,
+/// or negative tank masses to masquerade as a geometric capacity.
+fn valid_positive_capacity(capacity_kg: f64) -> Option<f64> {
+    (capacity_kg.is_finite() && capacity_kg > 0.0).then_some(capacity_kg)
 }
 
 pub(super) fn findings(mtow_kg: f64, fuel_loading: &FuelLoadingAssessment) -> Vec<PhysicalFinding> {
@@ -262,6 +277,7 @@ pub(super) fn findings(mtow_kg: f64, fuel_loading: &FuelLoadingAssessment) -> Ve
     match fuel_loading.usable_capacity.capacity_kg {
         Some(capacity)
             if capacity.is_finite()
+                && capacity > 0.0
                 && mtow_closure_fuel_kg.is_finite()
                 && mtow_closure_fuel_kg > capacity =>
         {
@@ -281,6 +297,17 @@ pub(super) fn findings(mtow_kg: f64, fuel_loading: &FuelLoadingAssessment) -> Ve
                 limit: Some(capacity),
                 unit: "kg",
             });
+        }
+        Some(capacity) if !capacity.is_finite() || capacity <= 0.0 => {
+            findings.push(PhysicalFinding {
+                code: FindingCode::FuelCapacityUnavailable,
+                severity: FindingSeverity::Error,
+                message: "usable-fuel capacity cannot be established for the analyzed aircraft"
+                    .to_owned(),
+                actual: None,
+                limit: None,
+                unit: "kg",
+            })
         }
         None => findings.push(PhysicalFinding {
             code: FindingCode::FuelCapacityUnavailable,
@@ -351,5 +378,46 @@ mod tests {
         assert_eq!(loading.analyzed_carried_fuel_kg, 240.0);
         assert_eq!(loading.analyzed_takeoff_mass_kg, 940.0);
         assert_eq!(loading.mtow_shortfall_kg, 60.0);
+    }
+
+    #[test]
+    fn malformed_derived_capacities_are_unavailable() {
+        for capacity_kg in [0.0, -1.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert_eq!(valid_positive_capacity(capacity_kg), None);
+        }
+        assert_eq!(valid_positive_capacity(1.0), Some(1.0));
+    }
+
+    #[test]
+    fn malformed_capacity_evidence_produces_an_unavailable_finding() {
+        for capacity_kg in [0.0, -1.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let loading = plan_from_values(
+                1_000.0,
+                300.0,
+                FuelCapacityAssessment {
+                    capacity_kg: Some(capacity_kg),
+                    evidence: FuelCapacityEvidence::GeometryEstimate,
+                },
+            );
+            assert!(findings(1_000.0, &loading).iter().any(|finding| {
+                finding.code == FindingCode::FuelCapacityUnavailable
+                    && finding.severity == FindingSeverity::Error
+            }));
+        }
+    }
+
+    #[test]
+    fn partial_mission_telemetry_does_not_establish_required_trip_fuel() {
+        let mission = MissionResult {
+            segments: Vec::new(),
+            solutions: Vec::new(),
+            scheduled_segment_count: 1,
+            fuel_exhaustion: None,
+        };
+
+        let assessment = assess_mission_fuel(true, Some(&mission));
+
+        assert_eq!(assessment.status, MissionFuelStatus::NotConverged);
+        assert_eq!(assessment.required_trip_fuel_kg, None);
     }
 }

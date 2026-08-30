@@ -45,7 +45,8 @@ pub use segments::{
     Conditions, Initials, MissionAnalyses, Segment, SegmentError, SegmentKind, SegmentSpec,
 };
 pub use solve::{
-    converge_root, FuelExhaustion, Mission, MissionError, MissionResult, SegmentSolution,
+    converge_root, CompletedMissionSummary, FuelExhaustion, Mission, MissionError, MissionResult,
+    SegmentSolution,
 };
 pub use vehicle::{
     build_vehicle_request, build_vehicle_request_reference_compatibility, ReportView,

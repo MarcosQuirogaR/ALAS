@@ -15,9 +15,10 @@ use std::path::Path;
 
 use alas_config::{DesignRequirements, StructuresConfig};
 
+use super::deck::build_modes_deck_for_nodes;
 use super::{
-    build_modes_deck, build_static_deck, displacement_of, read_displacement_tables,
-    read_eigenvalues, read_eigenvector_tables, run_nastran95, Dialect, Nastran95Solver, RunOutcome,
+    build_static_deck, displacement_of, read_displacement_tables, read_eigenvalues,
+    read_eigenvector_tables, run_nastran95, Dialect, Nastran95Solver, RunOutcome,
 };
 use crate::loads;
 use crate::mesh::{Deck, MeshNodeIndex};
@@ -58,7 +59,12 @@ pub fn run_nastran95_analysis(
     }
 
     if config.run_sol_modes {
-        let text = build_modes_deck(deck, config, Dialect::Nastran95);
+        let output_nodes = node_index
+            .spar_upper_nids
+            .first()
+            .map(Vec::as_slice)
+            .unwrap_or_default();
+        let text = build_modes_deck_for_nodes(deck, config, Dialect::Nastran95, output_nodes);
         results.modes = match solve_and_retain(solver, work_dir, SOL103, &text, config) {
             Ok(print) => read_modes_print(&print, deck, node_index, config.n_modes),
             Err(detail) => ModesResult {
@@ -227,7 +233,7 @@ pub fn run_nastran95_from_config_or_env(
     let rf_stage = nonempty_path(&config.nastran95_rf_stage_path);
     let open_core_words = nonempty_text(&config.nastran95_open_core_words);
     let solver = if dir.as_os_str().is_empty() {
-        Nastran95Solver::from_env()
+        Nastran95Solver::from_env().or_else(Nastran95Solver::from_adjacent_bundle)
     } else {
         Nastran95Solver::from_paths(
             dir,

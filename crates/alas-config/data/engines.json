@@ -15,6 +15,8 @@
     {
       "bypass_ratio": 10.0,
       "cruise_tsfc_kg_kgf_hr": 0.5,
+      "part_power_fuel_flow_ratios": [0.08257870, 0.25328704, 0.815, 1.0],
+      "part_power_source": "ICAO EEDB 03/2026 family proxy: 07P27GE235 GEnx-1B74/75/P2",
       "fan_diameter_m": 3.4,
       "fan_pressure_ratio": 1.45,
       "manufacturer": "GE Aerospace",
@@ -28,6 +30,8 @@
     {
       "bypass_ratio": 5.5,
       "cruise_tsfc_kg_kgf_hr": 0.6,
+      "part_power_fuel_flow_ratios": [0.08931699, 0.27670753, 0.82224168, 1.0],
+      "part_power_source": "ICAO EEDB 03/2026: 01P08CM105 CFM56-5B4/3",
       "fan_diameter_m": 1.735,
       "fan_pressure_ratio": 1.6,
       "manufacturer": "CFM International",
@@ -41,6 +45,8 @@
     {
       "bypass_ratio": 6.6,
       "cruise_tsfc_kg_kgf_hr": 0.58,
+      "part_power_fuel_flow_ratios": [0.08516484, 0.26510989, 0.82074176, 1.0],
+      "part_power_source": "ICAO EEDB 03/2026: 2CM015 CFM56-5C4 rating proxy for generic CFM56-5C",
       "fan_diameter_m": 1.836,
       "fan_pressure_ratio": 1.65,
       "manufacturer": "CFM International",
@@ -54,6 +60,8 @@
     {
       "bypass_ratio": 6.6,
       "cruise_tsfc_kg_kgf_hr": 0.58,
+      "part_power_fuel_flow_ratios": [0.08761835, 0.26948288, 0.82374363, 1.0],
+      "part_power_source": "ICAO EEDB 03/2026: 1CM011 CFM56-5C3",
       "fan_diameter_m": 1.836,
       "fan_pressure_ratio": 1.65,
       "manufacturer": "CFM International",
@@ -67,6 +75,8 @@
     {
       "bypass_ratio": 8.5,
       "cruise_tsfc_kg_kgf_hr": 0.54,
+      "part_power_fuel_flow_ratios": [0.09788868, 0.27639155, 0.82802303, 1.0],
+      "part_power_source": "ICAO EEDB 03/2026 family match: 18RR081 Trent 970-84",
       "fan_diameter_m": 2.946,
       "fan_pressure_ratio": 1.55,
       "manufacturer": "Rolls-Royce",
@@ -80,6 +90,8 @@
     {
       "bypass_ratio": 8.5,
       "cruise_tsfc_kg_kgf_hr": 0.54,
+      "part_power_fuel_flow_ratios": [0.09788868, 0.27639155, 0.82802303, 1.0],
+      "part_power_source": "ICAO EEDB 03/2026: 18RR081 Trent 970-84",
       "fan_diameter_m": 2.946,
       "fan_pressure_ratio": 1.55,
       "manufacturer": "Rolls-Royce",
@@ -93,6 +105,8 @@
     {
       "bypass_ratio": 9.6,
       "cruise_tsfc_kg_kgf_hr": 0.52,
+      "part_power_fuel_flow_ratios": [0.08257870, 0.25328704, 0.815, 1.0],
+      "part_power_source": "ICAO EEDB 03/2026: 07P27GE235 GEnx-1B74/75/P2",
       "fan_diameter_m": 2.822,
       "fan_pressure_ratio": 1.5,
       "manufacturer": "GE Aerospace",
@@ -106,6 +120,8 @@
     {
       "bypass_ratio": 11.0,
       "cruise_tsfc_kg_kgf_hr": 0.52,
+      "part_power_fuel_flow_ratios": [0.10146136, 0.28385529, 0.82549079, 1.0],
+      "part_power_source": "ICAO EEDB 03/2026: 08P28CM155 LEAP-1A26/26E1",
       "fan_diameter_m": 1.981,
       "fan_pressure_ratio": 1.4,
       "manufacturer": "CFM International",
@@ -119,6 +135,8 @@
     {
       "bypass_ratio": 12.0,
       "cruise_tsfc_kg_kgf_hr": 0.5,
+      "part_power_fuel_flow_ratios": [0.10126582, 0.29113924, 0.82278481, 1.0],
+      "part_power_source": "ICAO EEDB 03/2026: 04P20PW195 PW1525G",
       "fan_diameter_m": 1.854,
       "fan_pressure_ratio": 1.35,
       "manufacturer": "Pratt & Whitney",
@@ -132,6 +150,8 @@
     {
       "bypass_ratio": 4.4,
       "cruise_tsfc_kg_kgf_hr": 0.63,
+      "part_power_fuel_flow_ratios": [0.07145989, 0.28101710, 0.82200789, 1.0],
+      "part_power_source": "ICAO EEDB 03/2026: 3GE070 CF6-50C",
       "fan_diameter_m": 2.19,
       "fan_pressure_ratio": 1.7,
       "manufacturer": "GE Aerospace",

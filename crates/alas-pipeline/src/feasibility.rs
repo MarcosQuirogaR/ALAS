@@ -190,6 +190,9 @@ pub fn assess_physical_feasibility(
     }
 
     let mut fuel_loading = plan_fuel_loading(config, design, report);
+    fuel_loading.analyzed_landing_mass_kg = mission
+        .and_then(MissionResult::completed_summary)
+        .map(|summary| summary.landing_mass_kg);
     let cruise_equilibrium = mission.map(assess_cruise_equilibrium);
     if let Some(assessment) = &cruise_equilibrium {
         if !assessment.is_finite() {
@@ -331,16 +334,27 @@ pub fn assess_physical_feasibility(
         .unwrap_or(f64::NAN);
     let n_engines = config.geometry.engine.spanwise_positions_m.len() as f64;
     let mtow_kg = config.requirements.mtow_kg;
+    let takeoff_mass_kg = fuel_loading.analyzed_takeoff_mass_kg;
+    let gravity_m_s2 = config.requirements.gravity_m_s2;
     let static_thrust_n = n_engines * config.geometry.engine.thrust_kn * 1000.0;
-    let static_tw = static_thrust_n / (mtow_kg * 9.81);
-    let landing_mass_kg = mission
-        .and_then(|result| {
-            let mass = result.final_mass_kg();
-            (mass.is_finite() && mass > 0.0).then_some(mass)
-        })
-        .unwrap_or(mtow_kg * config.mass_model.mlw_fraction_mtow)
-        .clamp(0.0, mtow_kg);
-    let wing_loading_pa = mtow_kg * 9.81 / wing_area_m2;
+    let static_tw = static_thrust_n / (takeoff_mass_kg * gravity_m_s2);
+    let mlw_limit_kg = mtow_kg * config.mass_model.mlw_fraction_mtow;
+    let landing_mass_kg = fuel_loading
+        .analyzed_landing_mass_kg
+        .unwrap_or(mlw_limit_kg.min(takeoff_mass_kg));
+    if fuel_loading
+        .analyzed_landing_mass_kg
+        .is_some_and(|mass_kg| mass_kg > mlw_limit_kg)
+    {
+        findings.push(error(
+            FindingCode::LandingMassLimitViolation,
+            "analyzed arrival mass exceeds the configured maximum landing mass",
+            Some(landing_mass_kg),
+            Some(mlw_limit_kg),
+            "kg",
+        ));
+    }
+    let wing_loading_pa = takeoff_mass_kg * gravity_m_s2 / wing_area_m2;
     let matching_inputs_are_finite = wing_loading_pa.is_finite()
         && wing_loading_pa > 0.0
         && report.polar_fit.cd0.is_finite()
@@ -427,8 +441,8 @@ pub fn assess_physical_feasibility(
         };
         if !wing_area_m2.is_finite()
             || wing_area_m2 <= 0.0
-            || !mtow_kg.is_finite()
-            || mtow_kg <= 0.0
+            || !takeoff_mass_kg.is_finite()
+            || takeoff_mass_kg <= 0.0
             || (role == "departure" && (!static_tw.is_finite() || static_tw <= 0.0))
         {
             findings.push(error(
@@ -441,7 +455,7 @@ pub fn assess_physical_feasibility(
             continue;
         }
         let field = compute_field_performance_at_masses(
-            mtow_kg,
+            takeoff_mass_kg,
             landing_mass_kg,
             wing_area_m2,
             airport,
@@ -490,7 +504,7 @@ pub fn assess_physical_feasibility(
                 ));
             }
         } else {
-            let landing_wing_loading_pa = landing_mass_kg * 9.81 / wing_area_m2;
+            let landing_wing_loading_pa = landing_mass_kg * gravity_m_s2 / wing_area_m2;
             let landing_limit_pa = ws_landing_limit(
                 airport.lda_m,
                 sigma,
@@ -563,20 +577,15 @@ pub fn assess_physical_feasibility(
                         "",
                     ));
                 }
-                let throttle_violation = result
-                    .segments
+                if result
+                    .solutions
                     .iter()
-                    .flat_map(|segment| segment.conditions.throttle.iter().copied())
-                    .filter(|throttle| throttle.is_finite() && *throttle > 1.0 + 1.0e-6)
-                    .max_by(f64::total_cmp);
-                if let Some(max_throttle) = throttle_violation {
+                    .any(|solution| solution.throttle_limited)
+                {
                     findings.push(error(
                         FindingCode::MissionThrottleLimitViolation,
-                        format!(
-                            "mission requires {:.3} throttle, above the available 1.000 envelope",
-                            max_throttle
-                        ),
-                        Some(max_throttle),
+                        "mission reached the available 1.000 throttle boundary before force balance converged",
+                        Some(1.0),
                         Some(1.0),
                         "fraction",
                     ));

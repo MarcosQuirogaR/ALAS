@@ -149,6 +149,22 @@ pub struct EngineConfig {
         help = "Fan face diameter -- informational/reference only (does not currently size the nacelle profile, which comes from radius_scale_m/nacelle_profile above)."
     )]
     pub fan_diameter_m: f64,
+
+    /// Normalized fuel flow at ICAO LTO thrust fractions 7%, 30%, 85%, 100%.
+    #[config(
+        advanced,
+        label = "Part-power fuel-flow ratios",
+        help = "Fuel flow divided by take-off fuel flow at 7%, 30%, 85%, and 100% rated net thrust. Sea-level-static ICAO/EASA anchors; altitude use is an explicitly empirical Level-1 approximation."
+    )]
+    pub part_power_fuel_flow_ratios: Vec<f64>,
+
+    /// Provenance for the part-power schedule.
+    #[config(
+        advanced,
+        label = "Part-power schedule source",
+        help = "ICAO Engine Emissions Databank UID/variant, or a clearly identified family proxy when an exact entry is unavailable."
+    )]
+    pub part_power_source: String,
 }
 
 impl Default for EngineConfig {
@@ -178,6 +194,12 @@ impl Default for EngineConfig {
             turbine_inlet_temp_k: 1670.0,
             cruise_tsfc_kg_kgf_hr: 0.50,
             fan_diameter_m: 3.40,
+            // GE9X is not present in the March 2026 EEDB release. Until a
+            // manufacturer deck is available, retain an explicit GEnx family
+            // proxy rather than pretending the old linear law is measured.
+            part_power_fuel_flow_ratios: vec![0.082_578_70, 0.253_287_04, 0.815, 1.0],
+            part_power_source: "ICAO EEDB 03/2026 family proxy: 07P27GE235 GEnx-1B74/75/P2"
+                .to_owned(),
         }
     }
 }
@@ -200,6 +222,8 @@ impl EngineConfig {
             && self.turbine_inlet_temp_k == defaults.turbine_inlet_temp_k
             && self.cruise_tsfc_kg_kgf_hr == defaults.cruise_tsfc_kg_kgf_hr
             && self.fan_diameter_m == defaults.fan_diameter_m
+            && self.part_power_fuel_flow_ratios == defaults.part_power_fuel_flow_ratios
+            && self.part_power_source == defaults.part_power_source
             && self.nacelle_profile == defaults.nacelle_profile;
         if cycle_is_uninitialized {
             self.apply_engine_spec();
@@ -237,6 +261,8 @@ impl EngineConfig {
         self.turbine_inlet_temp_k = spec.turbine_inlet_temp_k;
         self.cruise_tsfc_kg_kgf_hr = spec.cruise_tsfc_kg_kgf_hr;
         self.fan_diameter_m = spec.fan_diameter_m;
+        self.part_power_fuel_flow_ratios = spec.part_power_fuel_flow_ratios.to_vec();
+        self.part_power_source = spec.part_power_source.clone();
     }
 
     /// Nacelle length, read off the aft-most profile station.

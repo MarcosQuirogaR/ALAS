@@ -65,7 +65,10 @@ pub const SYSTEMS: &str = "Systems";
 pub const FURNISHINGS: &str = "Furnishings";
 /// Passengers and/or cargo.
 pub const PAYLOAD: &str = "Payload";
-/// The fuel remainder: `MTOW - MZFW`.
+/// The signed fuel-closure remainder: `MTOW - MZFW`.
+///
+/// A negative value diagnoses an overweight zero-fuel configuration; it is
+/// not a physical negative fuel load.
 pub const FUEL: &str = "Fuel";
 
 /// The components that make up the Operating Empty Weight -- everything
@@ -147,11 +150,35 @@ pub struct MassBreakdown {
     pub furnishings: f64,
     /// [`PAYLOAD`]'s mass.
     pub payload: f64,
-    /// [`FUEL`]'s mass.
+    /// Signed [`FUEL`] closure, `MTOW - MZFW`, in kg.
+    ///
+    /// Negative values are retained so sizing and optimization callers can
+    /// diagnose an overweight candidate. Use
+    /// [`Self::physical_fuel_mass_kg`] before treating this value as a load or
+    /// forming a mass moment.
     pub fuel: f64,
 }
 
 impl MassBreakdown {
+    /// Signed MTOW-closure remainder, in kg.
+    ///
+    /// This diagnostic preserves negative closure for callers that must
+    /// detect `MZFW > MTOW`; it does not assert that the value is a physical
+    /// fuel load.
+    pub fn signed_fuel_closure_kg(&self) -> f64 {
+        self.fuel
+    }
+
+    /// Physically admissible fuel load, in kg.
+    ///
+    /// A finite, nonnegative closure is a usable mass value. Negative and
+    /// non-finite closures return `None` so they cannot silently become a
+    /// negative fuel mass or moment while remaining available through
+    /// [`Self::signed_fuel_closure_kg`] for diagnostics.
+    pub fn physical_fuel_mass_kg(&self) -> Option<f64> {
+        (self.fuel.is_finite() && self.fuel >= 0.0).then_some(self.fuel)
+    }
+
     /// Every component paired with its canonical name, in the order upstream's
     /// dict literal writes them -- the generic iteration
     /// [`calculate_physical_cg`] and [`OEW_KEYS`]'s summation need.

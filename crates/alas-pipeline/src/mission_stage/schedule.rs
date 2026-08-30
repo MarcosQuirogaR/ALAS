@@ -229,7 +229,7 @@ fn fit_altitude_profile(
     let full_profile =
         scaled_altitude_profile(nominal, departure_elevation_m, arrival_elevation_m, 1.0);
     let full_distance_m = schedule_horizontal_distance(&full_profile, departure_elevation_m);
-    if full_distance_m.is_finite() && full_distance_m <= route_distance_m + DISTANCE_TOLERANCE_M {
+    if full_distance_m.is_finite() && full_distance_m <= route_distance_m {
         return Ok(full_profile);
     }
 
@@ -257,9 +257,7 @@ fn fit_altitude_profile(
             candidate_scale,
         );
         let candidate_distance_m = schedule_horizontal_distance(&candidate, departure_elevation_m);
-        if candidate_distance_m.is_finite()
-            && candidate_distance_m <= route_distance_m + DISTANCE_TOLERANCE_M
-        {
+        if candidate_distance_m.is_finite() && candidate_distance_m <= route_distance_m {
             lower_scale = candidate_scale;
             best_profile = candidate;
         } else {

@@ -191,6 +191,22 @@ impl CpacsDocument {
 
         if !engine.name.is_empty() {
             config.geometry.engine.engine_name = engine.name.clone();
+            if alas_config::engines::get(&engine.name).is_ok() {
+                // A known identity intentionally resolves its complete engine
+                // record once; CPACS values below remain authoritative and
+                // overwrite any differing fields from that baseline.
+                config.geometry.engine.apply_engine_spec();
+            } else {
+                // CPACS 3.5 does not provide a part-power fuel deck. Retaining
+                // the caller/default schedule here would attach false engine
+                // provenance, so product mission construction must stop until
+                // a schedule is supplied explicitly.
+                config.geometry.engine.part_power_fuel_flow_ratios.clear();
+                config.geometry.engine.part_power_source = format!(
+                    "unavailable: CPACS engine '{}' has no matched ICAO/EASA part-power schedule",
+                    engine.name
+                );
+            }
         }
         if let Some(value) = engine.thrust00_n {
             require_engine_value("thrust00", value, |value| value > 0.0)?;

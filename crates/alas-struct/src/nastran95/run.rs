@@ -132,6 +132,21 @@ impl Nastran95Solver {
         )
     }
 
+    /// Discover the compliance-complete NASTRAN-95 bundle beside the ALAS
+    /// executable. Explicit configuration and environment variables remain
+    /// higher-priority choices at the call site.
+    pub fn from_adjacent_bundle() -> Option<Self> {
+        let app_dir = std::env::current_exe().ok()?.parent()?.to_path_buf();
+        let solver_dir = app_dir.join("external tools").join("NASTRAN-95");
+        let runtime = solver_dir.join("runtime");
+        Self::from_paths(
+            &solver_dir,
+            runtime.is_dir().then_some(runtime.as_path()),
+            None,
+            None,
+        )
+    }
+
     /// Return a short transient run directory when a short rigid-format stage
     /// is configured, keeping the long user-facing artifact directory free to
     /// retain the BDF and F06 after the solver exits.

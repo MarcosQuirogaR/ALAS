@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://alas.local/schemas/alas.cabin-scene.v2.schema.json",
+  "title": "ALAS resolved cabin scene v2",
+  "type": "object",
+  "required": ["schema_version", "units", "frame", "provenance", "stations", "recommended_sections", "decks", "seat_rows", "seats", "windows", "overhead", "cargo", "missing_inputs"],
+  "properties": {
+    "schema_version": { "const": "alas.cabin-scene/v2" },
+    "units": {
+      "type": "object", "required": ["length", "mass", "angle"],
+      "properties": { "length": { "const": "m" }, "mass": { "const": "kg" }, "angle": { "const": "rad" } }
+    },
+    "frame": { "type": "object", "required": ["origin", "x", "y", "z", "handedness"] },
+    "provenance": { "type": "object", "required": ["producer", "source", "cabin_preset", "optimized_design"] },
+    "stations": { "type": "array", "items": { "$ref": "#/$defs/station" } },
+    "recommended_sections": { "type": "array", "items": { "type": "object", "required": ["station_id", "purpose", "deck_id", "x_m", "intersects", "selection"] } },
+    "decks": { "type": "array", "items": { "type": "object", "required": ["id", "floor_z_m", "ceiling_z_m", "usable_width_m", "station_x_m", "passenger", "fidelity", "source"] } },
+    "seat_rows": { "type": "array", "items": { "type": "object", "required": ["id", "deck_id", "envelope", "class", "abreast", "filled", "blocks", "aisle_width_m", "fidelity", "source"] } },
+    "seats": { "type": "array", "items": { "type": "object", "required": ["id", "row_id", "deck_id", "center_x_m", "center_y_m", "center_z_m", "width_m", "occupied", "fidelity", "source"], "properties": { "occupied": { "type": ["boolean", "null"], "description": "null when a partly filled row does not retain seat-level assignments" } } } },
+    "windows": { "type": "object", "required": ["apertures", "status", "source", "missing"] },
+    "overhead": { "type": "object", "required": ["runs", "topology", "missing"] },
+    "cargo": { "type": "object", "required": ["slots", "items", "empty_slot_inventory"] },
+    "missing_inputs": { "type": "array", "items": { "$ref": "#/$defs/missing" } }
+  },
+  "$defs": {
+    "point": { "type": "object", "required": ["y", "z"], "properties": { "y": { "type": "number" }, "z": { "type": "number" } } },
+    "contour": { "type": "object", "required": ["points_yz_m", "fidelity", "source"], "properties": { "points_yz_m": { "type": "array", "minItems": 3, "items": { "$ref": "#/$defs/point" } }, "fidelity": { "type": "string" }, "source": { "type": "string" } } },
+    "station": { "type": "object", "required": ["id", "x_m", "outer", "inner", "liner", "hold"], "properties": { "id": { "type": "string" }, "x_m": { "type": "number" }, "outer": { "$ref": "#/$defs/contour" }, "inner": { "anyOf": [{ "$ref": "#/$defs/contour" }, { "type": "null" }] }, "liner": { "anyOf": [{ "$ref": "#/$defs/contour" }, { "type": "null" }] }, "hold": { "anyOf": [{ "$ref": "#/$defs/contour" }, { "type": "null" }] } } },
+    "missing": { "type": "object", "required": ["field", "reason", "required_source"] }
+  }
+}

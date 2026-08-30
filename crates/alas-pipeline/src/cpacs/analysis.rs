@@ -349,47 +349,13 @@ fn finite_mass_case(mass_kg: f64, cg_m: [f64; 3]) -> Option<MassCase> {
 }
 
 fn complete_mission_summary(mission: &MissionResult) -> Option<(f64, f64, f64)> {
-    if mission.segments.is_empty()
-        || mission.fuel_exhaustion.is_some()
-        || mission.solutions.is_empty()
-        || mission.solutions.len() != mission.segments.len()
-        || mission.solutions.iter().any(|solution| !solution.converged)
-        || mission.segments.iter().any(|segment| {
-            segment.conditions.total_mass_kg.len() < 2
-                || segment.conditions.time_s.len() < 2
-                || segment.conditions.aircraft_range_m.is_empty()
-                || segment
-                    .conditions
-                    .total_mass_kg
-                    .iter()
-                    .any(|value| !value.is_finite())
-                || segment
-                    .conditions
-                    .time_s
-                    .iter()
-                    .any(|value| !value.is_finite())
-                || segment
-                    .conditions
-                    .aircraft_range_m
-                    .iter()
-                    .any(|value| !value.is_finite())
-        })
-    {
-        return None;
-    }
-    let fuel_mass_kg = mission.fuel_burned_kg();
-    let block_time_s = mission.block_time_s();
-    let distance_m = mission
-        .segments
-        .last()
-        .and_then(|segment| segment.conditions.aircraft_range_m.last().copied())?;
-    (fuel_mass_kg.is_finite()
-        && fuel_mass_kg >= 0.0
-        && block_time_s.is_finite()
-        && block_time_s >= 0.0
-        && distance_m.is_finite()
-        && distance_m >= 0.0)
-        .then_some((fuel_mass_kg, block_time_s, distance_m))
+    mission.completed_summary().map(|summary| {
+        (
+            summary.trip_fuel_kg,
+            summary.block_time_s,
+            summary.distance_flown_m,
+        )
+    })
 }
 
 fn write_trajectory(xml: &mut String, fuel_mass_kg: f64, block_time_s: f64, distance_m: f64) {

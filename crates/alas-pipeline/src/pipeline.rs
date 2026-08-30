@@ -38,6 +38,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::avl::{run_avl_takeoff_comparison, AvlAnalysisResult};
 use crate::baseline::{analyze_baseline, BaselineReport};
+use crate::cabin_scene::export_cabin_scene;
 use crate::cpacs::{
     export_cpacs, export_cpacs_with_analysis, read_cpacs_file, write_cpacs_run_manifest,
     CpacsDocument, CpacsExportResult,
@@ -53,6 +54,7 @@ use crate::flowunsteady::{run_flowunsteady_analysis, FlowUnsteadyAnalysisResult}
 use crate::full_analysis::{AnalysisReport, FullAnalysis};
 use crate::mission_stage;
 use crate::openvsp::{export_openvsp_script, materialize_openvsp_project, OpenVspExportResult};
+use crate::payload_layout_export::export_payload_layout_artifact;
 use crate::runs::{RunEvent, RunEventKind, RunEventSeverity};
 use crate::solver_mode::{AerodynamicSolverMode, OptimizationSolverMode};
 use crate::structural::StructuralAnalysisResult;
@@ -455,8 +457,7 @@ pub struct DesignPipeline {
 
 impl DesignPipeline {
     /// Create a new design pipeline with `config`.
-    pub fn new(mut config: AlasConfig) -> Self {
-        config.geometry.engine.apply_engine_spec_if_uninitialized();
+    pub fn new(config: AlasConfig) -> Self {
         Self {
             config,
             aircraft_override: None,
@@ -1030,6 +1031,27 @@ impl DesignPipeline {
                 }
             }
         });
+        let payload_layout_artifact = options.output_dir.as_ref().and_then(|out_dir| {
+            let layout = optimized_report.payload_layout.as_ref()?;
+            let path = out_dir.join("payload_layout.json");
+            match export_payload_layout_artifact(&self.config, optimized_design, layout, &path) {
+                Ok(_) => Some(path),
+                Err(error) => {
+                    tracing::warn!(%error, "payload-layout render artifact export failed");
+                    None
+                }
+            }
+        });
+        let cabin_scene_artifact = options.output_dir.as_ref().and_then(|out_dir| {
+            let path = out_dir.join("cabin_scene_v2.json");
+            match export_cabin_scene(&self.config, &optimized_report, &path) {
+                Ok(_) => Some(path),
+                Err(error) => {
+                    tracing::warn!(%error, "cabin-scene v2 export failed");
+                    None
+                }
+            }
+        });
 
         if let (Some(out_dir), Some(polar)) = (options.output_dir.as_deref(), &mses_result) {
             if let Err(error) = persist_mses_polar_diagnostics(polar, out_dir) {
@@ -1070,6 +1092,12 @@ impl DesignPipeline {
                 add_manifest_artifact(&mut artifacts, out_dir, "cpacs_input", &export.path);
                 if let Some(path) = cpacs_adapter_manifest.as_ref() {
                     add_manifest_artifact(&mut artifacts, out_dir, "cpacs_adapter_manifest", path);
+                }
+                if let Some(path) = payload_layout_artifact.as_ref() {
+                    add_manifest_artifact(&mut artifacts, out_dir, "payload_layout", path);
+                }
+                if let Some(path) = cabin_scene_artifact.as_ref() {
+                    add_manifest_artifact(&mut artifacts, out_dir, "cabin_scene_v2", path);
                 }
                 let manifest_path = out_dir.join("cpacs/run_manifest.json");
                 Some(

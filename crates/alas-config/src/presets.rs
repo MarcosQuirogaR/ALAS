@@ -28,15 +28,11 @@
 //!
 //! # What a preset does not settle
 //!
-//! The first is the engine cycle. A preset names its engine and does not copy
-//! the table entry in, so every one of them carries [`crate::EngineConfig`]'s
-//! fallback cycle -- the GE9X's -- until something calls
-//! [`crate::EngineConfig::apply_engine_spec`]. Upstream's geometry builder does
-//! that as its first step, so nothing that goes through it ever sees the
-//! stale numbers; anything that reads an unbuilt preset's thrust does. The
-//! port reproduces that rather than resolving the spec at registration, since
-//! resolving it here would make a preset disagree with the same preset loaded
-//! from a saved file.
+//! The registry records the engine name but retains the historical fallback
+//! cycle so its raw entries remain reference-compatible. The configuration
+//! loading boundary resolves an intentional preset selection before applying
+//! saved or user-provided overrides; downstream product solvers then consume
+//! those live fields without another database lookup.
 //!
 //! Nor does a preset fit the design space it is offered in. The bounds in
 //! [`crate::design_variables`] are one global set describing AVE's family, so
@@ -590,17 +586,9 @@ mod tests {
     }
 
     #[test]
-    fn a_preset_still_carries_the_fallback_cycle_until_the_builder_resolves_it() {
-        // Nothing applies the engine table at registration, so an A320's
-        // thrust reads as a GE9X's until the geometry builder runs. Stated as
-        // a test because it is surprising and load-bearing: a consumer that
-        // reads an unbuilt preset's thrust gets a widebody's.
+    fn a_preset_still_carries_the_fallback_cycle_until_configuration_loading() {
         let a320 = get("A320-200").unwrap();
         assert_eq!(a320.geometry.engine.thrust_kn, 467.0);
-
-        let mut resolved = a320.geometry.engine.clone();
-        resolved.apply_engine_spec();
-        assert!(resolved.thrust_kn < 200.0, "{}", resolved.thrust_kn);
     }
 
     #[test]

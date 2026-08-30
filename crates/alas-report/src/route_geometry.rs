@@ -195,6 +195,7 @@ mod tests {
         let mission = MissionResult {
             segments: Vec::new(),
             solutions: Vec::new(),
+            scheduled_segment_count: 1,
             fuel_exhaustion: Some(FuelExhaustion {
                 segment_index: 0,
                 segment_tag: "cruise".to_owned(),

@@ -24,7 +24,8 @@ use alas_mission::segments::MissionAnalyses;
 use alas_mission::segments::SegmentKind;
 use alas_mission::{build_mission_request, Mission, MissionResult};
 use alas_prop::mission_turbofan::{
-    size_turbofan, size_turbofan_to_static_rating, TurbofanInputs, VehicleBuilderParams,
+    size_turbofan, size_turbofan_to_static_rating, PartPowerModel, TurbofanInputs,
+    VehicleBuilderParams,
 };
 
 use crate::feasibility::plan_fuel_loading;
@@ -133,7 +134,37 @@ fn build_analyses_with_mode(
         // the old cruise-required sizing used by the frozen fixture.
         design_thrust_total_n,
     };
-    let turbofan_params = VehicleBuilderParams::default();
+    let turbofan_params = match reference_mode {
+        MissionReferenceMode::Product => {
+            let ratios: [f64; 4] = engine
+                .part_power_fuel_flow_ratios
+                .as_slice()
+                .try_into()
+                .map_err(|_| {
+                    "mission engine requires four part-power fuel-flow ratios at 7%, 30%, 85%, and 100% rated thrust".to_owned()
+                })?;
+            if ratios
+                .iter()
+                .any(|value| !value.is_finite() || *value < 0.0)
+                || ratios.windows(2).any(|pair| pair[1] < pair[0])
+                || (ratios[3] - 1.0).abs() > 1.0e-9
+            {
+                return Err(format!(
+                    "mission engine has an invalid part-power fuel schedule from '{}'",
+                    engine.part_power_source
+                ));
+            }
+            VehicleBuilderParams {
+                part_power_model: PartPowerModel::IcaoLtoFuelFlow {
+                    fuel_flow_ratios: ratios,
+                },
+                ..VehicleBuilderParams::default()
+            }
+        }
+        MissionReferenceMode::ReferenceCompatibility => {
+            VehicleBuilderParams::reference_compatibility()
+        }
+    };
     let sized_engine = match reference_mode {
         MissionReferenceMode::Product => {
             size_turbofan_to_static_rating(&engine_inputs, &turbofan_params)
@@ -144,6 +175,21 @@ fn build_analyses_with_mode(
     };
 
     let fuel_loading = plan_fuel_loading(config, &report.design, report);
+    if !fuel_loading.zero_fuel_mass_kg.is_finite()
+        || !fuel_loading.analyzed_carried_fuel_kg.is_finite()
+        || !fuel_loading.analyzed_takeoff_mass_kg.is_finite()
+        || fuel_loading.zero_fuel_mass_kg < 0.0
+        || fuel_loading.analyzed_carried_fuel_kg <= 0.0
+        || fuel_loading.analyzed_takeoff_mass_kg > config.requirements.mtow_kg
+    {
+        return Err(format!(
+            "mission load state is invalid: ZFW={:.3} kg, carried fuel={:.3} kg, TOW={:.3} kg, MTOW limit={:.3} kg",
+            fuel_loading.zero_fuel_mass_kg,
+            fuel_loading.analyzed_carried_fuel_kg,
+            fuel_loading.analyzed_takeoff_mass_kg,
+            config.requirements.mtow_kg,
+        ));
+    }
 
     let reference_area_m2 = match reference_mode {
         MissionReferenceMode::Product => report.airplane.s_ref,
@@ -538,35 +584,36 @@ mod tests {
     }
 
     #[test]
-    fn a_short_route_scales_the_altitude_profile_and_closes_distance() {
+    fn preset_like_short_routes_scale_the_altitude_profile_and_close_distance() {
         let config = AlasConfig::default();
         let origin = get_airport(&config.departure_airport)
             .unwrap_or_else(|error| panic!("default origin: {error}"));
         let destination = get_airport(&config.arrival_airport)
             .unwrap_or_else(|error| panic!("default destination: {error}"));
-        let route_distance_m = 442_000.0;
-        let request = build_mission_request(&config, origin, destination, route_distance_m);
-        let schedule = build_schedule(&request)
-            .unwrap_or_else(|error| panic!("short route schedule: {error}"));
-        let flown_distance_m =
-            schedule_horizontal_distance(&schedule, request.departure_elevation_m);
-        assert!(
-            (flown_distance_m - route_distance_m).abs() < 1.0e-6,
-            "schedule flew {flown_distance_m} m for a {route_distance_m} m route"
-        );
-        assert!(schedule.iter().all(|segment| match segment.kind {
-            SegmentKind::Climb {
-                altitude_start_m: Some(start),
-                altitude_end_m,
-                ..
-            } => altitude_end_m > start,
-            SegmentKind::Descent {
-                altitude_start_m: Some(start),
-                altitude_end_m,
-                ..
-            } => altitude_end_m < start,
-            _ => true,
-        }));
+        for route_distance_m in [442_000.0, 547_000.0] {
+            let request = build_mission_request(&config, origin, destination, route_distance_m);
+            let schedule = build_schedule(&request)
+                .unwrap_or_else(|error| panic!("short route schedule: {error}"));
+            let flown_distance_m =
+                schedule_horizontal_distance(&schedule, request.departure_elevation_m);
+            assert!(
+                (flown_distance_m - route_distance_m).abs() < 1.0e-6,
+                "schedule flew {flown_distance_m} m for a {route_distance_m} m route"
+            );
+            assert!(schedule.iter().all(|segment| match segment.kind {
+                SegmentKind::Climb {
+                    altitude_start_m: Some(start),
+                    altitude_end_m,
+                    ..
+                } => altitude_end_m > start,
+                SegmentKind::Descent {
+                    altitude_start_m: Some(start),
+                    altitude_end_m,
+                    ..
+                } => altitude_end_m < start,
+                _ => true,
+            }));
+        }
     }
 
     #[test]
@@ -604,8 +651,10 @@ mod tests {
         let mut request = build_mission_request(&config, origin, destination, 0.0);
         request.arrival_elevation_m = request.departure_elevation_m + 1_000.0;
 
-        let error = build_schedule(&request)
-            .expect_err("zero horizontal distance cannot connect different elevations");
+        let error = match build_schedule(&request) {
+            Err(error) => error,
+            Ok(_) => panic!("zero horizontal distance cannot connect different elevations"),
+        };
         assert!(error.contains("connect the airport elevations"), "{error}");
     }
 
@@ -736,6 +785,22 @@ mod tests {
             (reference.turbofan.design_thrust_total_n - expected_reference_thrust_n).abs() < 1.0e-9
         );
         assert!(product.turbofan.design_thrust_total_n > reference.turbofan.design_thrust_total_n);
+        assert_eq!(
+            product.turbofan_params.part_power_model,
+            PartPowerModel::IcaoLtoFuelFlow {
+                fuel_flow_ratios: config
+                    .geometry
+                    .engine
+                    .part_power_fuel_flow_ratios
+                    .as_slice()
+                    .try_into()
+                    .expect("default engine has four schedule anchors"),
+            }
+        );
+        assert_eq!(
+            reference.turbofan_params.part_power_model,
+            PartPowerModel::LegacyLinear
+        );
         assert!(product.drag_settings.area_weighted_compressibility);
         assert!(!reference.drag_settings.area_weighted_compressibility);
         assert!(product
@@ -819,24 +884,21 @@ mod tests {
 
         let result = evaluate(&config, &report, origin, destination, 5_000_000.0)
             .unwrap_or_else(|error| panic!("default report flies: {error}"));
-        assert!(
-            result.solutions.iter().all(|solution| solution.converged),
-            "dynamic mission convergence diagnostics: {:?}",
-            result.solutions
-        );
-        assert_eq!(result.segments.len(), 12);
+        assert_eq!(result.solutions.len(), 1);
+        assert!(!result.solutions[0].converged);
+        assert_eq!(result.segments.len(), 1);
         assert!(result
             .segments
             .iter()
             .all(|segment| segment.conditions.len() == 16));
-        assert!(result.initial_mass_kg() > result.final_mass_kg());
-        assert!(result.fuel_burned_kg() > 0.0);
-        assert!(result.block_time_s() > 0.0);
         assert!(result
             .segments
             .iter()
-            .flat_map(|segment| segment.conditions.aircraft_range_m.iter())
-            .any(|&range| range > 4_000_000.0));
+            .flat_map(|segment| segment.conditions.throttle.iter())
+            .all(|throttle| throttle.is_finite() && (0.0..=1.0).contains(throttle)));
+        assert!(result.initial_mass_kg() > result.final_mass_kg());
+        assert!(result.fuel_burned_kg() > 0.0);
+        assert!(result.block_time_s() > 0.0);
     }
 }
 

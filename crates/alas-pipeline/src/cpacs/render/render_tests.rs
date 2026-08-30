@@ -131,7 +131,9 @@ fn a_complete_mission_is_exported_as_a_cpacs_trajectory_summary() {
             converged: true,
             status: Status::Converged,
             evaluations: 0,
+            throttle_limited: false,
         }],
+        scheduled_segment_count: 1,
         fuel_exhaustion: None,
     };
 

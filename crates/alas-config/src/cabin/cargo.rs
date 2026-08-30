@@ -43,7 +43,7 @@ pub struct CargoDeckConfig {
 
     /// Which container the lower holds are loaded with.
     #[config(
-        help = "Unit load device code for the lower holds. Degrades automatically to a shorter container and then to bulk loading where the hold's cross-section cannot take the requested one, which is what narrowbody holds usually require."
+        help = "Unit load device code for the lower holds. Use 'AUTO' to compare the conservative, physically feasible uniform ULD formats by net capacity, then volume and tare. An explicit code keeps the existing requested-format path and degrades to a shorter container and then bulk only when it cannot fit."
     )]
     pub lower_deck_uld: String,
 

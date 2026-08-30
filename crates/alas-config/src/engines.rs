@@ -82,6 +82,22 @@ pub struct EngineSpec {
     /// Cruise thrust-specific fuel consumption, in kilograms of fuel per
     /// kilogram-force of thrust per hour. Estimated; see the module doc.
     pub cruise_tsfc_kg_kgf_hr: f64,
+    /// Normalized fuel flow at 7%, 30%, 85%, and 100% rated net thrust.
+    /// Values are from, or explicitly proxied to, the ICAO Engine Emissions
+    /// Databank's sea-level-static LTO points.
+    #[serde(default = "default_part_power_fuel_flow_ratios")]
+    pub part_power_fuel_flow_ratios: [f64; 4],
+    /// Databank UID/variant or an explicit family-proxy statement.
+    #[serde(default = "default_part_power_source")]
+    pub part_power_source: String,
+}
+
+fn default_part_power_fuel_flow_ratios() -> [f64; 4] {
+    [0.089, 0.275, 0.822, 1.0]
+}
+
+fn default_part_power_source() -> String {
+    "uncalibrated representative ICAO-LTO schedule".to_owned()
 }
 
 impl EngineSpec {

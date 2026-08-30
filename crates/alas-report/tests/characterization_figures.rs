@@ -330,6 +330,7 @@ fn figures_render_to_valid_svg_across_families() {
     let mission_res = alas_mission::solve::MissionResult {
         segments: Vec::new(),
         solutions: Vec::new(),
+        scheduled_segment_count: 0,
         fuel_exhaustion: None,
     };
     let sc_miss = mission::figure_mission_drag_components(&mission_res, Some("dark"));

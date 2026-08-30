@@ -254,10 +254,10 @@ pub struct ObjectiveWeights {
     )]
     pub fuel_penalty_scale: f64,
 
-    /// Cost of a wing too small to hold the fuel it needs.
+    /// Retained serialized field from the former MTOW-closure tank penalty.
     #[config(
-        label = "Insufficient wing fuel-volume penalty weight",
-        help = "Penalizes the wing's physical usable fuel-tank volume (physics.performance.wing_fuel_volume_m3, Torenbeek geometric estimate) being too small to hold the fuel mass the weight & balance analysis says this design actually needs -- a wing that's too thin/small/tapered to carry its own required fuel is not a buildable aircraft, independent of whether the MTOW fuel-mass budget itself closes. Quadratic on the fractional shortfall (required_fuel - tank_capacity) / required_fuel."
+        label = "Legacy fuel-volume penalty weight (unused)",
+        help = "Deprecated compatibility field. MTOW minus zero-fuel mass is a mass allowance, not mission-required fuel, so it is no longer used by the optimizer. Tank capacity will be constrained against mission fuel plus the selected reserve policy."
     )]
     pub fuel_volume_penalty_scale: f64,
 

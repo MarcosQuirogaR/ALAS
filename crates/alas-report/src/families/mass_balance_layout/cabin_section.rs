@@ -1,362 +1,548 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright (C) 2026 Marcos Quiroga Rodriguez
+//! Detailed, physically derived transverse cabin section.
 
-//! Representative transverse cabin section derived from the shared payload layout.
-
+use super::cabin_section_detail as art;
+use crate::families::geometry::cabin_assets::asset_for_item;
+use crate::scene::{Color, Fill, Scene, SceneElement, Stroke, TextAlign, TextBaseline};
+use crate::theme::get_palette;
 use alas_config::AlasConfig;
 use alas_geom::aircraft::airplane::Airplane;
+use alas_payload::cargo::{uld_by_code, ContourFidelity};
 use alas_payload::geometry::{CabinGeometry, DeckSpec};
 use alas_payload::layout::{
     DeckItem, ItemKind, ItemMeta, OverheadBinType, PayloadLayout, SeatMeta, LOWER,
 };
 
-use crate::scene::{Color, Fill, Scene, SceneElement, Stroke, TextAlign, TextBaseline};
-use crate::theme::get_palette;
-
-const WIDTH: f64 = 760.0;
-const HEIGHT: f64 = 720.0;
+const WIDTH: f64 = 900.0;
+const HEIGHT: f64 = 760.0;
 
 #[derive(Clone, Copy)]
-struct SectionMap {
+pub(super) struct SectionMap {
     center: [f64; 2],
-    scale: f64,
+    pub(super) scale: f64,
     z_center: f64,
 }
-
 impl SectionMap {
-    fn point(self, y: f64, z: f64) -> [f64; 2] {
+    pub(super) fn point(self, y: f64, z: f64) -> [f64; 2] {
         [
             self.center[0] + y * self.scale,
             self.center[1] - (z - self.z_center) * self.scale,
         ]
     }
 }
-
-fn ellipse(map: SectionMap, width: f64, height: f64, zc: f64) -> Vec<[f64; 2]> {
-    (0..=96)
-        .map(|index| {
-            let theta = std::f64::consts::TAU * index as f64 / 96.0;
-            map.point(width * 0.5 * theta.cos(), zc + height * 0.5 * theta.sin())
-        })
-        .collect()
-}
-
-fn polygon(scene: &mut Scene, points: Vec<[f64; 2]>, fill: Color, stroke: Color) {
-    scene.add(SceneElement::Polygon {
-        points,
-        fill: Some(Fill::new(fill)),
-        stroke: Some(Stroke::new(stroke, 1.2)),
-    });
-}
-
-fn text(scene: &mut Scene, value: impl Into<String>, pos: [f64; 2], color: Color, size: f64) {
-    scene.add(SceneElement::Text {
+fn text(
+    s: &mut Scene,
+    value: impl Into<String>,
+    pos: [f64; 2],
+    color: Color,
+    size: f64,
+    align: TextAlign,
+) {
+    s.add(SceneElement::Text {
         text: value.into(),
         pos,
         font_size: size,
         color,
-        align: TextAlign::Center,
+        align,
         baseline: TextBaseline::Middle,
         angle_deg: 0.0,
         bold: false,
     });
 }
-
-#[allow(clippy::too_many_arguments)]
-fn rect_physical(
-    scene: &mut Scene,
-    map: SectionMap,
-    y0: f64,
-    y1: f64,
-    z0: f64,
-    z1: f64,
-    fill: Color,
-    outline: Color,
-    radius: f64,
-) {
-    let top_left = map.point(y0, z1);
-    let bottom_right = map.point(y1, z0);
-    scene.add(SceneElement::Rect {
-        x: top_left[0],
-        y: top_left[1],
-        width: bottom_right[0] - top_left[0],
-        height: bottom_right[1] - top_left[1],
-        rx: radius,
-        fill: Some(Fill::new(fill)),
-        stroke: Some(Stroke::new(outline, 1.0)),
-    });
+fn intersects(i: &DeckItem, x: f64) -> bool {
+    (x - i.x).abs() <= i.length.max(0.0) * 0.5 + 1e-9
 }
-
-fn seat_and_aisle_centers(meta: &SeatMeta) -> (Vec<f64>, Vec<f64>) {
-    let blocks = if meta.blocks.is_empty() {
-        vec![meta.abreast.max(0)]
-    } else {
-        meta.blocks.clone()
-    };
-    let total_width = blocks.iter().sum::<i64>() as f64 * meta.seat_w
-        + blocks.len().saturating_sub(1) as f64 * meta.aisle_w;
-    let mut cursor = -total_width * 0.5;
-    let mut seats = Vec::new();
-    let mut aisles = Vec::new();
-    let mut remaining = meta.filled.max(0);
-    for (block_index, &block) in blocks.iter().enumerate() {
-        for _ in 0..block.max(0) {
-            if remaining > 0 {
-                seats.push(cursor + meta.seat_w * 0.5);
-                remaining -= 1;
-            }
-            cursor += meta.seat_w;
-        }
-        if block_index + 1 < blocks.len() {
-            aisles.push(cursor + meta.aisle_w * 0.5);
-            cursor += meta.aisle_w;
-        }
-    }
-    (seats, aisles)
-}
-
-fn seat_color(meta: &SeatMeta) -> Color {
-    Color::from_hex(match meta.cls {
-        "First" => "#8e44ad",
-        "Business" => "#2980b9",
-        _ => "#27ae60",
-    })
-}
-
-fn draw_seat(scene: &mut Scene, map: SectionMap, y: f64, floor: f64, width: f64, color: Color) {
-    let half = width * 0.40;
-    let outline = Color::from_hex("#334155");
-    rect_physical(
-        scene,
-        map,
-        y - half,
-        y + half,
-        floor + 0.28,
-        floor + 1.08,
-        color,
-        outline,
-        5.0,
-    );
-    rect_physical(
-        scene,
-        map,
-        y - half * 1.05,
-        y + half * 1.05,
-        floor + 0.24,
-        floor + 0.43,
-        Color::rgba(color.r, color.g, color.b, 245),
-        outline,
-        3.0,
-    );
-    for leg_y in [y - half * 0.65, y + half * 0.65] {
-        scene.add(SceneElement::Line {
-            p1: map.point(leg_y, floor),
-            p2: map.point(leg_y, floor + 0.25),
-            stroke: Stroke::new(Color::from_hex("#7f8c8d"), 2.0),
-        });
-    }
-}
-
-fn draw_person(scene: &mut Scene, map: SectionMap, y: f64, floor: f64, height: f64) {
-    let grey = Color::from_hex("#95a5a6");
-    let head = map.point(y, floor + height * 0.89);
-    scene.add(SceneElement::Circle {
-        center: head,
-        radius: height * map.scale * 0.075,
-        fill: Some(Fill::new(grey)),
-        stroke: None,
-    });
-    polygon(
-        scene,
-        vec![
-            map.point(y - height * 0.12, floor + height * 0.70),
-            map.point(y + height * 0.12, floor + height * 0.70),
-            map.point(y + height * 0.09, floor + height * 0.35),
-            map.point(y - height * 0.09, floor + height * 0.35),
-        ],
-        grey,
-        grey,
-    );
-    for offset in [-0.055, 0.055] {
-        scene.add(SceneElement::Line {
-            p1: map.point(y + height * offset, floor),
-            p2: map.point(y + height * offset * 0.8, floor + height * 0.38),
-            stroke: Stroke::new(grey, 5.0),
-        });
-    }
-}
-
-fn nearest_seat_row<'a>(layout: &'a PayloadLayout, deck: &str, x: f64) -> Option<&'a DeckItem> {
-    layout
-        .items
+fn row<'a>(l: &'a PayloadLayout, d: &str, x: f64) -> Option<&'a DeckItem> {
+    l.items
         .iter()
-        .filter(|item| {
-            item.kind == ItemKind::SeatRow && item.deck == deck && intersects_station(item, x)
-        })
+        .filter(|i| i.kind == ItemKind::SeatRow && i.deck == d && intersects(i, x))
         .min_by(|a, b| (a.x - x).abs().total_cmp(&(b.x - x).abs()))
 }
-
-fn intersects_station(item: &DeckItem, station: f64) -> bool {
-    (station - item.x).abs() <= item.length.max(0.0) * 0.5 + 1e-9
-}
-
-fn envelope_half_width(cabin: &CabinGeometry, station: f64, z0: f64, z1: f64) -> f64 {
-    0.5 * cabin
-        .usable_width_at_z(station, z0)
-        .min(cabin.usable_width_at_z(station, z1))
-}
-
-fn draw_bins(scene: &mut Scene, map: SectionMap, layout: &PayloadLayout, deck: &DeckSpec, x: f64) {
-    let bins: Vec<&DeckItem> = layout
+fn hold_station(l: &PayloadLayout, fallback: f64) -> f64 {
+    let cargo: Vec<_> = l
         .items
         .iter()
-        .filter(|item| {
-            item.kind == ItemKind::OverheadBin
-                && item.deck == deck.name
-                && intersects_station(item, x)
-        })
+        .filter(|i| i.deck == LOWER && matches!(i.kind, ItemKind::Bag | ItemKind::Uld))
         .collect();
-    for bin in bins {
-        let kind = match &bin.meta {
-            ItemMeta::OverheadBin(meta) => meta.bin_type,
-            _ => OverheadBinType::Sidewall,
-        };
-        let half = bin.width * 0.5;
-        let bottom = bin.z - bin.height * 0.5;
-        let top = bin.z + bin.height * 0.5;
-        let color = Color::from_hex(match kind {
-            OverheadBinType::Sidewall => "#566573",
-            OverheadBinType::Center => "#7b8790",
+    cargo
+        .iter()
+        .map(|candidate| candidate.x)
+        .max_by(|a, b| {
+            let count = |x: f64| cargo.iter().filter(|i| intersects(i, x)).count();
+            count(*a)
+                .cmp(&count(*b))
+                .then_with(|| (b - fallback).abs().total_cmp(&(a - fallback).abs()))
+        })
+        .unwrap_or(fallback)
+}
+fn representative_cabin_station(l: &PayloadLayout, midpoint: f64) -> f64 {
+    let rows: Vec<_> = l
+        .items
+        .iter()
+        .filter(|i| i.kind == ItemKind::SeatRow)
+        .collect();
+    let mut candidates: Vec<f64> = rows.iter().map(|row| row.x).collect();
+    for row in &rows {
+        for bin in l.items.iter().filter(|i| {
+            i.kind == ItemKind::OverheadBin && i.deck == row.deck && asset_for_item(i).is_some()
+        }) {
+            let lo = (row.x - row.length * 0.5).max(bin.x - bin.length * 0.5);
+            let hi = (row.x + row.length * 0.5).min(bin.x + bin.length * 0.5);
+            if lo <= hi {
+                candidates.push((lo + hi) * 0.5);
+            }
+        }
+    }
+    candidates
+        .into_iter()
+        .max_by(|a, b| {
+            let score = |x: f64| {
+                l.items
+                    .iter()
+                    .filter(|i| {
+                        i.kind == ItemKind::OverheadBin
+                            && asset_for_item(i).is_some_and(|asset| asset.intersects(x))
+                            && rows
+                                .iter()
+                                .any(|row| row.deck == i.deck && intersects(row, x))
+                    })
+                    .count()
+            };
+            score(*a)
+                .cmp(&score(*b))
+                .then_with(|| (b - midpoint).abs().total_cmp(&(a - midpoint).abs()))
+        })
+        .unwrap_or(midpoint)
+}
+#[derive(Debug)]
+struct SeatPlacement {
+    seats: Vec<f64>,
+    aisles: Vec<f64>,
+    side_gap: f64,
+    seat_width: f64,
+    preserved: bool,
+}
+
+fn constrained_centers(m: &SeatMeta, available_half_width: f64) -> SeatPlacement {
+    let blocks = if m.blocks.is_empty() {
+        vec![m.abreast.max(0)]
+    } else {
+        m.blocks.clone()
+    };
+    let nominal_width = blocks.iter().sum::<i64>() as f64 * m.seat_w
+        + blocks.len().saturating_sub(1) as f64 * m.aisle_w;
+    let asset_half = m.seat_w * 0.504;
+    let nominal_gap = (available_half_width - nominal_width * 0.5).clamp(0.05, 0.20);
+    let usable = (2.0 * (available_half_width - nominal_gap)).max(0.0);
+    let seat_total = blocks.iter().sum::<i64>().max(0) as f64 * m.seat_w;
+    let aisle_count = blocks.len().saturating_sub(1);
+    let aisle = if aisle_count == 0 {
+        0.0
+    } else {
+        ((usable - seat_total) / aisle_count as f64).max(m.aisle_w)
+    };
+    let actual_width = seat_total + aisle_count as f64 * aisle;
+    let asset_overhang = (asset_half - m.seat_w * 0.5).max(0.0);
+    let rendered_half = actual_width * 0.5 + asset_overhang;
+    let scale = ((available_half_width - 0.025) / rendered_half.max(1e-9)).clamp(0.0, 1.0);
+    // Draw installed seats rather than asymmetric occupancy in a partial row.
+    let (mut cur, mut left) = (-actual_width * scale / 2.0, m.abreast.max(0));
+    let (mut seats, mut aisles) = (vec![], vec![]);
+    for (i, b) in blocks.iter().enumerate() {
+        for _ in 0..(*b).max(0) {
+            if left > 0 {
+                seats.push(cur + m.seat_w * scale / 2.0);
+                left -= 1;
+            }
+            cur += m.seat_w * scale;
+        }
+        if i + 1 < blocks.len() {
+            aisles.push(cur + aisle * scale / 2.0);
+            cur += aisle * scale;
+        }
+    }
+    let outer = seats
+        .iter()
+        .map(|y| y.abs() + asset_half * scale)
+        .fold(0.0, f64::max);
+    SeatPlacement {
+        seats,
+        aisles,
+        side_gap: available_half_width - outer,
+        seat_width: m.seat_w * scale,
+        preserved: (scale - 1.0).abs() < 1e-9,
+    }
+}
+fn seat_color(m: &SeatMeta) -> Color {
+    Color::from_hex(match m.cls {
+        "First" => "#9b6fc2",
+        "Business" => "#4b91c7",
+        _ => "#39a86b",
+    })
+}
+fn half_width(c: &CabinGeometry, x: f64, z0: f64, z1: f64) -> f64 {
+    0.5 * c.usable_width_at_z(x, z0).min(c.usable_width_at_z(x, z1))
+}
+
+fn ellipse_roof(width: f64, height: f64, zc: f64, y: f64, inset: f64) -> f64 {
+    let a = (width * 0.5 - inset).max(0.1);
+    let b = (height * 0.5 - inset).max(0.1);
+    zc + b * (1.0 - (y / a).powi(2)).max(0.0).sqrt()
+}
+
+fn draw_bin(
+    s: &mut Scene,
+    map: SectionMap,
+    item: &DeckItem,
+    kind: OverheadBinType,
+    _shell: [f64; 3],
+    _floor: f64,
+) {
+    let Some(a) = asset_for_item(item) else {
+        return;
+    };
+    let (body, face) = match kind {
+        OverheadBinType::Sidewall => ("#596873", "#87949d"),
+        OverheadBinType::Center => ("#74818a", "#aab4ba"),
+    };
+    let min_y = a
+        .profile_yz
+        .iter()
+        .map(|p| p[0])
+        .fold(f64::INFINITY, f64::min);
+    let max_y = a
+        .profile_yz
+        .iter()
+        .map(|p| p[0])
+        .fold(f64::NEG_INFINITY, f64::max);
+    let p: Vec<_> = a.profile_yz.iter().map(|p| map.point(p[0], p[1])).collect();
+    art::polygon(
+        s,
+        p.clone(),
+        Color::from_hex(body),
+        Color::from_hex("#dce3e7"),
+        1.0,
+    );
+    if p.len() >= 6 {
+        art::line(s, p[4], p[5], Color::from_hex(face), 3.0);
+        let h = [(p[4][0] + p[5][0]) / 2.0, (p[4][1] + p[5][1]) / 2.0];
+        s.add(SceneElement::Circle {
+            center: h,
+            radius: 2.2,
+            fill: Some(Fill::new(Color::from_hex("#d8b45f"))),
+            stroke: Some(Stroke::new(Color::from_hex("#303940"), 0.7)),
         });
-        let points = match kind {
-            OverheadBinType::Sidewall => vec![
-                map.point(bin.y - half, bottom + bin.height * 0.22),
-                map.point(bin.y - half * 0.75, top),
-                map.point(bin.y + half * 0.75, top),
-                map.point(bin.y + half, bottom + bin.height * 0.22),
-                map.point(bin.y + half * 0.55, bottom),
-                map.point(bin.y - half * 0.55, bottom),
-            ],
-            OverheadBinType::Center => vec![
-                map.point(bin.y - half, top),
-                map.point(bin.y + half, top),
-                map.point(bin.y + half * 0.80, bottom + bin.height * 0.18),
-                map.point(bin.y + half * 0.34, bottom),
-                map.point(bin.y - half * 0.34, bottom),
-                map.point(bin.y - half * 0.80, bottom + bin.height * 0.18),
-            ],
-        };
-        polygon(scene, points, color, Color::from_hex("#d5d8dc"));
-    }
-}
-
-fn draw_deck(
-    scene: &mut Scene,
-    map: SectionMap,
-    cabin: &CabinGeometry,
-    layout: &PayloadLayout,
-    deck: &DeckSpec,
-    station: f64,
-    label_color: Color,
-) {
-    let floor = cabin.floor_z(deck, station);
-    let half_width = envelope_half_width(cabin, station, floor - 0.06, floor + 0.06);
-    rect_physical(
-        scene,
-        map,
-        -half_width,
-        half_width,
-        floor - 0.06,
-        floor + 0.06,
-        Color::from_hex("#7f8c8d"),
-        Color::from_hex("#d5d8dc"),
-        0.0,
-    );
-    if let Some(row) = nearest_seat_row(layout, deck.name, station) {
-        if let ItemMeta::Seat(meta) = &row.meta {
-            let (seats, aisles) = seat_and_aisle_centers(meta);
-            let color = seat_color(meta);
-            for y in seats {
-                draw_seat(scene, map, y, floor, meta.seat_w, color);
-            }
-            if let Some(&aisle) = aisles.first() {
-                let standing_height = cabin.deck_height(deck, station).min(1.75);
-                draw_person(scene, map, aisle, floor, standing_height);
-            }
+        for q in [p[1], p[2]] {
+            art::line(s, q, [q[0], q[1] - 9.0], Color::from_hex("#9da9b0"), 1.5);
         }
     }
-    draw_bins(scene, map, layout, deck, station);
-    text(
-        scene,
-        match deck.name {
-            "upper" => "Upper deck",
-            _ => "Main deck",
-        },
-        map.point(-half_width + 0.08, floor + 0.15),
-        label_color,
-        9.0,
-    );
-}
-
-fn draw_hold(
-    scene: &mut Scene,
-    map: SectionMap,
-    cabin: &CabinGeometry,
-    layout: &PayloadLayout,
-    station: f64,
-) {
-    let deck = &cabin.lower_deck;
-    let floor = cabin.floor_z(deck, station);
-    let ceiling = cabin.ceil_z(deck, station);
-    let floor_half_width = cabin.usable_width_at_z(station, floor) * 0.5;
-    let ceiling_half_width = cabin.usable_width_at_z(station, ceiling) * 0.5;
-    polygon(
-        scene,
-        vec![
-            map.point(-floor_half_width, floor),
-            map.point(floor_half_width, floor),
-            map.point(ceiling_half_width, ceiling),
-            map.point(-ceiling_half_width, ceiling),
-        ],
-        Color::rgba(127, 140, 141, 42),
-        Color::from_hex("#7f8c8d"),
-    );
-    let cargo: Vec<&DeckItem> = layout
-        .items
+    // Passenger-service-unit strip: continuous visual datum below the bin.
+    let psu_z = a
+        .profile_yz
         .iter()
-        .filter(|item| {
-            item.deck == LOWER
-                && matches!(item.kind, ItemKind::Bag | ItemKind::Uld)
-                && intersects_station(item, station)
-        })
-        .collect();
-    for item in cargo {
-        let z0 = (item.z - item.height * 0.5).max(floor);
-        let z1 = (item.z + item.height * 0.5).min(ceiling);
-        if z1 <= z0 {
-            continue;
-        }
-        let envelope_half = envelope_half_width(cabin, station, z0, z1);
-        let y0 = (item.y - item.width * 0.5).max(-envelope_half);
-        let y1 = (item.y + item.width * 0.5).min(envelope_half);
-        if y1 <= y0 {
-            continue;
-        }
-        rect_physical(
-            scene,
-            map,
-            y0,
-            y1,
-            z0,
-            z1,
-            Color::from_hex("#9b9bd0"),
-            Color::from_hex("#5b5b91"),
-            2.0,
+        .map(|p| p[1])
+        .fold(f64::INFINITY, f64::min)
+        - 0.055;
+    art::line(
+        s,
+        map.point(min_y + 0.03, psu_z),
+        map.point(max_y - 0.03, psu_z),
+        Color::from_hex("#d7dde1"),
+        2.5,
+    );
+    for f in [0.25, 0.5, 0.75] {
+        let y = min_y + (max_y - min_y) * f;
+        s.add(SceneElement::Circle {
+            center: map.point(y, psu_z),
+            radius: 1.25,
+            fill: Some(Fill::new(Color::from_hex(if f == 0.5 {
+                "#f2d36c"
+            } else {
+                "#91bfd0"
+            }))),
+            stroke: None,
+        });
+    }
+}
+
+fn draw_continuous_lining(
+    s: &mut Scene,
+    map: SectionMap,
+    c: &CabinGeometry,
+    bins: &[&DeckItem],
+    x: f64,
+    floor: f64,
+) {
+    if bins.is_empty() {
+        return;
+    }
+    let profiles: Vec<_> = bins.iter().filter_map(|i| asset_for_item(i)).collect();
+    let min_y = profiles
+        .iter()
+        .flat_map(|a| a.profile_yz.iter())
+        .map(|p| p[0])
+        .fold(f64::INFINITY, f64::min);
+    let max_y = profiles
+        .iter()
+        .flat_map(|a| a.profile_yz.iter())
+        .map(|p| p[0])
+        .fold(f64::NEG_INFINITY, f64::max);
+    let bin_top = profiles
+        .iter()
+        .flat_map(|a| a.profile_yz.iter())
+        .map(|p| p[1])
+        .fold(f64::NEG_INFINITY, f64::max);
+    let wall_half = half_width(c, x, floor + 1.45, floor + 1.75);
+    let left = min_y.min(-wall_half + 0.04);
+    let right = max_y.max(wall_half - 0.04);
+    // The continuous centre panel meets the cassette crowns; never place it
+    // above the available liner roof in a crown-constrained narrowbody.
+    let ceiling = bin_top;
+    let mut p = Vec::new();
+    for k in 0..=32 {
+        let y = left + (right - left) * k as f64 / 32.0;
+        p.push(map.point(
+            y,
+            ellipse_roof(c.width_at(x), c.height_at(x), c.zc_at(x), y, c.wall),
+        ));
+    }
+    p.extend([map.point(right, ceiling), map.point(left, ceiling)]);
+    art::polygon(
+        s,
+        p,
+        Color::from_hex("#343f48"),
+        Color::from_hex("#c4cdd2"),
+        0.9,
+    );
+    art::line(
+        s,
+        map.point(left, ceiling),
+        map.point(right, ceiling),
+        Color::from_hex("#d7dde1"),
+        1.4,
+    );
+    // Subdued rails are structural cues, not separate visible roof towers.
+    for y in [min_y, max_y] {
+        art::line(
+            s,
+            map.point(y, bin_top),
+            map.point(y, bin_top + 0.08),
+            Color::from_hex("#75828a"),
+            0.7,
         );
     }
 }
+fn draw_bins(
+    s: &mut Scene,
+    map: SectionMap,
+    c: &CabinGeometry,
+    l: &PayloadLayout,
+    d: &DeckSpec,
+    x: f64,
+    floor: f64,
+) {
+    let mut bins: Vec<_> = l
+        .items
+        .iter()
+        .filter(|i| {
+            i.kind == ItemKind::OverheadBin
+                && i.deck == d.name
+                && asset_for_item(i).is_some_and(|a| a.intersects(x))
+        })
+        .collect();
+    bins.sort_by(|a, b| a.y.total_cmp(&b.y));
+    draw_continuous_lining(s, map, c, &bins, x, floor);
+    for i in bins {
+        let k = match &i.meta {
+            ItemMeta::OverheadBin(m) => m.bin_type,
+            _ => OverheadBinType::Sidewall,
+        };
+        draw_bin(
+            s,
+            map,
+            i,
+            k,
+            [c.width_at(x), c.height_at(x), c.zc_at(x)],
+            floor,
+        );
+    }
+}
+fn draw_deck(
+    s: &mut Scene,
+    map: SectionMap,
+    c: &CabinGeometry,
+    l: &PayloadLayout,
+    d: &DeckSpec,
+    x: f64,
+    label: Color,
+) {
+    let floor = c.floor_z(d, x);
+    let span = half_width(c, x, floor - 0.08, floor + 0.08);
+    art::floor(s, map, span, floor);
+    art::windows(s, map, c.width_at(x), c.height_at(x), c.zc_at(x), floor);
+    if let Some(r) = row(l, d.name, x) {
+        if let ItemMeta::Seat(m) = &r.meta {
+            let clearance_half = [floor + 0.59, floor + 1.10]
+                .into_iter()
+                .map(|z| half_width(c, x, z, z) - 0.025)
+                .fold(f64::INFINITY, f64::min);
+            let placement = constrained_centers(m, clearance_half);
+            for &y in &placement.seats {
+                art::seat(s, map, y, floor, placement.seat_width, seat_color(m));
+            }
+            if let Some(y) = placement.aisles.first() {
+                art::person(s, map, *y, floor, c.deck_height(d, x).min(1.78));
+            }
+            // Retain the diagnostic for future metadata, not overlaid text.
+            let _seat_geometry_preserved = placement.preserved;
+            let _verified_side_gap_m = placement.side_gap;
+        }
+    }
+    draw_bins(s, map, c, l, d, x, floor);
+    text(
+        s,
+        if d.name == "upper" {
+            "UPPER DECK"
+        } else {
+            "MAIN DECK"
+        },
+        map.point(-span + 0.05, floor + 0.13),
+        label,
+        8.0,
+        TextAlign::Left,
+    );
+}
+fn draw_hold(s: &mut Scene, map: SectionMap, c: &CabinGeometry, l: &PayloadLayout, x: f64) {
+    let d = &c.lower_deck;
+    let (floor, ceil) = (c.floor_z(d, x), c.ceil_z(d, x));
+    let bottom = c.usable_width_at_z(x, floor) * d.width_factor * 0.5;
+    let top = c.usable_width_at_z(x, ceil) * d.width_factor * 0.5;
+    art::polygon(
+        s,
+        [[-bottom, floor], [bottom, floor], [top, ceil], [-top, ceil]]
+            .into_iter()
+            .map(|p| map.point(p[0], p[1])),
+        Color::from_hex("#252d33"),
+        Color::from_hex("#7f8c94"),
+        1.0,
+    );
+    art::floor(s, map, bottom, floor);
+    for i in l.items.iter().filter(|i| {
+        i.deck == LOWER
+            && matches!(i.kind, ItemKind::Bag | ItemKind::Uld)
+            && asset_for_item(i).map_or_else(|| intersects(i, x), |a| a.intersects(x))
+    }) {
+        let profile = if let Some(a) = asset_for_item(i) {
+            a.profile_yz
+        } else if matches!(i.meta, ItemMeta::BulkBag) {
+            let (hy, hz) = (i.width * 0.5, i.height * 0.5);
+            vec![
+                [i.y - hy, i.z - hz],
+                [i.y + hy, i.z - hz],
+                [i.y + hy, i.z + hz],
+                [i.y - hy, i.z + hz],
+            ]
+        } else {
+            continue;
+        };
+        let cy = profile.iter().map(|p| p[0]).sum::<f64>() / profile.len() as f64;
+        let outline: Vec<_> = profile.iter().map(|p| map.point(p[0], p[1])).collect();
+        art::polygon(
+            s,
+            outline,
+            Color::from_hex("#8b90c9"),
+            Color::from_hex("#d7daf4"),
+            1.4,
+        );
+        let miny = profile.iter().map(|p| p[0]).fold(f64::INFINITY, f64::min);
+        let maxy = profile
+            .iter()
+            .map(|p| p[0])
+            .fold(f64::NEG_INFINITY, f64::max);
+        let minz = profile.iter().map(|p| p[1]).fold(f64::INFINITY, f64::min);
+        for f in [0.25, 0.5, 0.75] {
+            art::line(
+                s,
+                map.point(miny + (maxy - miny) * f, minz + 0.04),
+                map.point(miny + (maxy - miny) * f, ceil - 0.05),
+                Color::from_hex("#b9bddf"),
+                0.6,
+            );
+        }
+        // Diagonal cargo net, corner frame and the actual IATA ULD model.
+        art::line(
+            s,
+            map.point(miny + 0.04, minz + 0.08),
+            map.point(maxy - 0.04, ceil - 0.08),
+            Color::from_hex("#e4c36b"),
+            0.75,
+        );
+        art::line(
+            s,
+            map.point(maxy - 0.04, minz + 0.08),
+            map.point(miny + 0.04, ceil - 0.08),
+            Color::from_hex("#e4c36b"),
+            0.75,
+        );
+        if let ItemMeta::Container(meta) = &i.meta {
+            art::label(s, meta.uld, map.point(cy, minz + (ceil - minz) * 0.55), 7.0);
+            art::label(
+                s,
+                format!("{:>3.0}%", meta.fill.clamp(0.0, 1.0) * 100.0),
+                map.point(cy, minz + (ceil - minz) * 0.39),
+                5.2,
+            );
+            if let Some(uld) = uld_by_code(meta.uld) {
+                let fidelity = match uld.contour.fidelity {
+                    ContourFidelity::Authoritative => "approved contour",
+                    ContourFidelity::ConservativeEnvelope => "conservative envelope",
+                    ContourFidelity::VisualizationOnly => "visual contour",
+                };
+                art::label(
+                    s,
+                    format!(
+                        "{} · {:.2}×{:.2}×{:.2} m",
+                        uld.name, uld.length, uld.width, uld.height
+                    ),
+                    map.point(cy, minz + 0.16),
+                    4.4,
+                );
+                art::label(s, fidelity, map.point(cy, minz + 0.09), 3.8);
+            }
+        } else if matches!(i.meta, ItemMeta::BulkBag) {
+            art::label(
+                s,
+                "BULK / LOOSE BAGS",
+                map.point(cy, minz + (ceil - minz) * 0.52),
+                5.4,
+            );
+        }
+        for f in [0.18, 0.5, 0.82] {
+            s.add(SceneElement::Circle {
+                center: map.point(miny + (maxy - miny) * f, minz - 0.025),
+                radius: 2.0,
+                fill: Some(Fill::new(Color::from_hex("#c3cbd0"))),
+                stroke: None,
+            });
+        }
+        // Floor locks at both envelope shoulders.
+        for y in [miny + 0.04, maxy - 0.04] {
+            art::polygon(
+                s,
+                [
+                    map.point(y - 0.025, minz),
+                    map.point(y + 0.025, minz),
+                    map.point(y, minz + 0.07),
+                ],
+                Color::from_hex("#d9a73f"),
+                Color::from_hex("#332b1d"),
+                0.6,
+            );
+        }
+    }
+}
 
-/// Draw a representative, dimensioned transverse section of the analyzed cabin.
+/// Draw a detailed, dimensioned representative transverse section.
 pub fn figure_cabin_cross_section(
     layout: &PayloadLayout,
     plane: &Airplane,
@@ -364,93 +550,73 @@ pub fn figure_cabin_cross_section(
     theme: Option<&str>,
 ) -> Scene {
     let pal = get_palette(theme);
-    let mut scene = Scene::new(WIDTH, HEIGHT, Some(Color::from_hex(pal.bg)));
-    scene.title = Some("Cabin Cross-Section".to_owned());
-    let Ok(cabin) = CabinGeometry::new(
+    let mut s = Scene::new(WIDTH, HEIGHT, Some(Color::from_hex(pal.bg)));
+    s.title = Some("Cabin Cross-Section".into());
+    let Ok(c) = CabinGeometry::new(
         plane,
         &config.geometry,
         config.cabin.passenger.wall_thickness_m,
     ) else {
         text(
-            &mut scene,
+            &mut s,
             "Cabin geometry unavailable",
-            [WIDTH * 0.5, HEIGHT * 0.5],
+            [WIDTH / 2.0, HEIGHT / 2.0],
             Color::from_hex(pal.title),
             13.0,
+            TextAlign::Center,
         );
-        return scene;
+        return s;
     };
-    let midpoint = 0.5 * (cabin.cabin_start_x + cabin.cabin_end_x);
-    let station = layout
-        .items
-        .iter()
-        .filter(|item| item.kind == ItemKind::SeatRow)
-        .min_by(|a, b| (a.x - midpoint).abs().total_cmp(&(b.x - midpoint).abs()))
-        .map_or(midpoint, |item| item.x);
-    let width = cabin.width_at(station).max(1.0);
-    let height = cabin.height_at(station).max(1.0);
-    let zc = cabin.zc_at(station);
+    let mid = (c.cabin_start_x + c.cabin_end_x) / 2.0;
+    let x = representative_cabin_station(layout, mid);
+    let (w, h, zc) = (c.width_at(x).max(1.0), c.height_at(x).max(1.0), c.zc_at(x));
     let map = SectionMap {
-        center: [WIDTH * 0.5, 360.0],
-        scale: (610.0 / width).min(550.0 / height),
+        center: [WIDTH / 2.0, 390.0],
+        scale: (790.0 / w).min(610.0 / h),
         z_center: zc,
     };
-    let outline = Color::from_hex(pal.spine);
-    polygon(
-        &mut scene,
-        ellipse(map, width, height, zc),
-        Color::from_hex("#aeb6bf"),
-        outline,
-    );
-    polygon(
-        &mut scene,
-        ellipse(
-            map,
-            (width - 2.0 * cabin.wall).max(0.2),
-            (height - 2.0 * cabin.wall).max(0.2),
-            zc,
-        ),
-        Color::from_hex(pal.bg),
-        Color::from_hex("#7f8c8d"),
-    );
-
-    for deck in &cabin.passenger_decks {
-        draw_deck(
-            &mut scene,
-            map,
-            &cabin,
-            layout,
-            deck,
-            station,
-            Color::from_hex(pal.title),
-        );
+    art::shell(&mut s, map, w, h, zc, c.wall.max(0.035));
+    for d in &c.passenger_decks {
+        draw_deck(&mut s, map, &c, layout, d, x, Color::from_hex(pal.tick));
     }
-    draw_hold(&mut scene, map, &cabin, layout, station);
-
+    let hold_x = hold_station(layout, x);
+    draw_hold(&mut s, map, &c, layout, hold_x);
     text(
-        &mut scene,
-        "Cabin Cross-Section",
-        [WIDTH * 0.5, 28.0],
+        &mut s,
+        "CABIN CROSS-SECTION",
+        [WIDTH / 2.0, 27.0],
         Color::from_hex(pal.title),
-        16.0,
+        17.0,
+        TextAlign::Center,
     );
     text(
-        &mut scene,
+        &mut s,
+        format!("LOWER-HOLD REFERENCE STATION x = {hold_x:.1} m"),
+        [WIDTH / 2.0, HEIGHT - 39.0],
+        Color::from_hex(pal.tick),
+        6.8,
+        TextAlign::Center,
+    );
+    text(
+        &mut s,
         format!(
-            "Representative station x = {station:.1} m | outer section {width:.2} x {height:.2} m"
+            "x = {x:.1} m   •   outer {w:.2} × {h:.2} m   •   liner clearance {:.0} mm",
+            c.wall * 1000.0
         ),
-        [WIDTH * 0.5, 50.0],
+        [WIDTH / 2.0, 50.0],
         Color::from_hex(pal.tick),
         9.5,
+        TextAlign::Center,
     );
     text(
-        &mut scene,
-        "Seat color = class | dark bins = sidewall pivot | light bins = center hinge",
-        [WIDTH * 0.5, HEIGHT - 20.0],
+        &mut s,
+        "STRUCTURAL SKIN / INSULATION / LINER    ·    ULD CONTOUR FIDELITY SHOWN PER UNIT",
+        [WIDTH / 2.0, HEIGHT - 19.0],
         Color::from_hex(pal.tick),
-        9.5,
+        8.0,
+        TextAlign::Center,
     );
-    scene
+    s
 }
 
 #[cfg(test)]
@@ -459,85 +625,74 @@ mod tests {
     use super::*;
     use alas_geom::builder::AircraftBuilder;
     use alas_payload::build::build_payload_layout;
+    #[test]
+    fn intersection_includes_edges_only() {
+        let i = DeckItem {
+            kind: ItemKind::Bag,
+            deck: "lower",
+            x: 2.0,
+            y: 0.0,
+            z: 0.0,
+            length: 1.0,
+            width: 1.0,
+            height: 1.0,
+            mass: 1.0,
+            label: String::new(),
+            meta: ItemMeta::None,
+        };
+        assert!(intersects(&i, 2.5));
+        assert!(!intersects(&i, 2.500_001));
+    }
 
     #[test]
-    fn section_contains_shell_seats_floors_and_labels() {
-        let config = AlasConfig::default();
-        let plane = AircraftBuilder::new(Some(config.geometry.clone()))
+    fn hold_reference_prefers_a_true_colocated_pair() {
+        let base = |x, y| DeckItem {
+            kind: ItemKind::Bag,
+            deck: LOWER,
+            x,
+            y,
+            z: 0.0,
+            length: 1.2,
+            width: 1.0,
+            height: 1.0,
+            mass: 1.0,
+            label: String::new(),
+            meta: ItemMeta::BulkBag,
+        };
+        let c = AlasConfig::default();
+        let p = AircraftBuilder::new(Some(c.geometry.clone()))
             .build(None, true)
-            .expect("default aircraft builds");
-        let layout = build_payload_layout(&plane, &config, 0.0, 0.0)
-            .expect("default passenger layout builds");
-        let scene = figure_cabin_cross_section(&layout, &plane, &config, Some("dark"));
+            .expect("aircraft");
+        let mut l = build_payload_layout(&p, &c, 0.0, 0.0).expect("layout");
+        l.items.retain(|i| i.deck != LOWER);
+        l.items
+            .extend([base(4.0, -0.6), base(4.0, 0.6), base(12.0, 0.0)]);
+        assert_eq!(hold_station(&l, 10.0), 4.0);
+    }
 
-        assert!(scene.elements.len() > 20);
-        assert!(scene.elements.iter().any(|element| matches!(
-            element,
-            SceneElement::Text { text, .. } if text == "Cabin Cross-Section"
-        )));
-        assert!(scene
+    #[test]
+    fn cargo_render_identifies_uld_and_contour_fidelity() {
+        let c = AlasConfig::default();
+        let p = AircraftBuilder::new(Some(c.geometry.clone()))
+            .build(None, true)
+            .expect("aircraft");
+        let l = build_payload_layout(&p, &c, 0.0, 1_000.0).expect("layout");
+        let s = figure_cabin_cross_section(&l, &p, &c, Some("dark"));
+        let labels: Vec<_> = s
             .elements
             .iter()
-            .any(|element| matches!(element, SceneElement::Polygon { .. })));
-    }
-
-    #[test]
-    fn section_does_not_draw_non_intersecting_bins_or_cargo() {
-        let config = AlasConfig::default();
-        let plane = AircraftBuilder::new(Some(config.geometry.clone()))
-            .build(None, true)
-            .expect("default aircraft builds");
-        let mut layout = build_payload_layout(&plane, &config, 0.0, 0.0)
-            .expect("default passenger layout builds");
-        let cabin = CabinGeometry::new(
-            &plane,
-            &config.geometry,
-            config.cabin.passenger.wall_thickness_m,
-        )
-        .expect("default cabin geometry builds");
-        let midpoint = 0.5 * (cabin.cabin_start_x + cabin.cabin_end_x);
-        let station = layout
-            .items
+            .filter_map(|e| match e {
+                SceneElement::Text { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert!(labels.iter().any(|v| uld_by_code(v).is_some()));
+        assert!(labels
             .iter()
-            .filter(|item| item.kind == ItemKind::SeatRow)
-            .min_by(|a, b| (a.x - midpoint).abs().total_cmp(&(b.x - midpoint).abs()))
-            .map_or(midpoint, |item| item.x);
-
-        for item in &mut layout.items {
-            if item.kind == ItemKind::OverheadBin
-                || matches!(item.kind, ItemKind::Bag | ItemKind::Uld)
-            {
-                item.x = station + 10.0;
-                item.length = 0.1;
-            }
-        }
-        let scene = figure_cabin_cross_section(&layout, &plane, &config, Some("dark"));
-        let bin_colors = [Color::from_hex("#566573"), Color::from_hex("#7b8790")];
-        let cargo_color = Color::from_hex("#9b9bd0");
-
-        assert!(!scene.elements.iter().any(|element| matches!(
-            element,
-            SceneElement::Polygon { fill: Some(fill), .. } if bin_colors.contains(&fill.color)
-        )));
-        assert!(!scene.elements.iter().any(|element| matches!(
-            element,
-            SceneElement::Rect { fill: Some(fill), .. } if fill.color == cargo_color
-        )));
-    }
-
-    #[test]
-    fn longitudinal_span_intersection_includes_edges_only() {
-        let config = AlasConfig::default();
-        let plane = AircraftBuilder::new(Some(config.geometry.clone()))
-            .build(None, true)
-            .expect("default aircraft builds");
-        let layout = build_payload_layout(&plane, &config, 0.0, 0.0)
-            .expect("default passenger layout builds");
-        let item = layout.items.first().expect("layout has physical items");
-        let half_length = item.length.max(0.0) * 0.5;
-
-        assert!(intersects_station(item, item.x));
-        assert!(intersects_station(item, item.x + half_length));
-        assert!(!intersects_station(item, item.x + half_length + 1e-6));
+            .any(|v| v.contains("envelope") || v.contains("contour")));
     }
 }
+
+#[cfg(test)]
+#[path = "cabin_section_regression.rs"]
+mod regression;

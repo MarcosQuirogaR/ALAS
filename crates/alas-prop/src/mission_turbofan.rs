@@ -129,10 +129,31 @@ pub struct VehicleBuilderParams {
     pub fan_nozzle_pressure_ratio: f64,
     /// `fan_nozzle.polytropic_efficiency = 0.95`.
     pub fan_nozzle_polytropic_efficiency: f64,
+    /// How a mission command below maximum rating is converted into thrust
+    /// and fuel flow.
+    pub part_power_model: PartPowerModel,
+}
+
+/// Mission part-power policy.
+///
+/// Product missions use the ICAO-LTO schedule. The legacy variant exists only
+/// to reproduce frozen predecessor evidence and must not be used as an engine
+/// deck: it makes thrust and fuel exactly proportional and leaves TSFC fixed.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum PartPowerModel {
+    /// Frozen predecessor behavior for parity evidence.
+    LegacyLinear,
+    /// Empirical fuel-flow schedule at normalized net-thrust requests
+    /// `[0, 0.07, 0.30, 0.85, 1.0]`.
+    IcaoLtoFuelFlow {
+        /// Fuel-flow ratios at 7%, 30%, 85%, and 100% rated thrust.
+        fuel_flow_ratios: [f64; 4],
+    },
 }
 
 impl Default for VehicleBuilderParams {
-    /// The exact values `vehicle_builder.build_vehicle` sets on the network.
+    /// Component values from `vehicle_builder.build_vehicle`, with a bounded
+    /// representative ICAO-LTO fuel schedule for product-style use.
     fn default() -> Self {
         Self {
             inlet_pressure_ratio: 0.98,
@@ -150,6 +171,22 @@ impl Default for VehicleBuilderParams {
             core_nozzle_polytropic_efficiency: 0.95,
             fan_nozzle_pressure_ratio: 0.99,
             fan_nozzle_polytropic_efficiency: 0.95,
+            // Mean normalized schedule of the transport engines currently
+            // represented in the EASA-hosted ICAO EEDB (March 2026). Product
+            // construction replaces this with the selected engine's anchors.
+            part_power_model: PartPowerModel::IcaoLtoFuelFlow {
+                fuel_flow_ratios: [0.089, 0.275, 0.822, 1.0],
+            },
+        }
+    }
+}
+
+impl VehicleBuilderParams {
+    /// Exact predecessor behavior for frozen Python/SUAVE parity only.
+    pub fn reference_compatibility() -> Self {
+        Self {
+            part_power_model: PartPowerModel::LegacyLinear,
+            ..Self::default()
         }
     }
 }
@@ -216,6 +253,7 @@ pub fn evaluate_thrust(
         inputs.number_of_engines,
         compressor_nondimensional_massflow,
         throttle,
+        params.part_power_model,
     )
 }
 
@@ -260,6 +298,7 @@ pub fn size_turbofan(
         inputs.number_of_engines,
         0.0,
         SIZING_THROTTLE,
+        params.part_power_model,
     );
     let (mass_flow_rate_design_kg_s, compressor_nondimensional_massflow) =
         components::size_core_flow(
@@ -314,6 +353,7 @@ pub fn size_turbofan(
         inputs.number_of_engines,
         compressor_nondimensional_massflow,
         SIZING_THROTTLE,
+        params.part_power_model,
     );
 
     let sea_level_static = StationSet {
@@ -537,10 +577,8 @@ mod tests {
         assert!(cruise_available.fuel_flow_rate_kg_s > 0.0);
     }
 
-    // Throttle multiplies the dimensional thrust and leaves every specific
-    // quantity alone, which is the whole of what the segment unknown does.
     #[test]
-    fn throttle_scales_the_dimensional_thrust_and_not_the_specific_quantities() {
+    fn product_part_power_is_bounded_monotone_and_not_linear_fuel_scaling() {
         let inputs = ave_inputs();
         let params = VehicleBuilderParams::default();
         let sized = size_turbofan(&inputs, &params);
@@ -548,12 +586,51 @@ mod tests {
         let full = evaluate_thrust(&sized.cruise.freestream, &inputs, &params, mdhc, 1.0);
         let half = evaluate_thrust(&sized.cruise.freestream, &inputs, &params, mdhc, 0.5);
         assert_eq!(half.thrust_n, full.thrust_n * 0.5);
+        assert_ne!(half.fuel_flow_rate_kg_s, full.fuel_flow_rate_kg_s * 0.5);
+        assert_ne!(
+            half.thrust_specific_fuel_consumption,
+            full.thrust_specific_fuel_consumption
+        );
+        assert_eq!(
+            half.non_dimensional_thrust,
+            full.non_dimensional_thrust * 0.5
+        );
+        assert_eq!(half.core_mass_flow_rate_kg_s, full.core_mass_flow_rate_kg_s);
+
+        let mut previous_thrust = 0.0;
+        let mut previous_fuel = 0.0;
+        for command in [0.0, 0.07, 0.30, 0.50, 0.85, 1.0] {
+            let point = evaluate_thrust(&sized.cruise.freestream, &inputs, &params, mdhc, command);
+            assert!(point.thrust_n.is_finite() && point.thrust_n >= previous_thrust);
+            assert!(point.fuel_flow_rate_kg_s.is_finite());
+            assert!(point.fuel_flow_rate_kg_s >= previous_fuel);
+            previous_thrust = point.thrust_n;
+            previous_fuel = point.fuel_flow_rate_kg_s;
+        }
+        let PartPowerModel::IcaoLtoFuelFlow { fuel_flow_ratios } = params.part_power_model else {
+            panic!("product default must carry an ICAO-LTO schedule");
+        };
+        for (command, expected_ratio) in [0.07, 0.30, 0.85, 1.0].into_iter().zip(fuel_flow_ratios) {
+            let point = evaluate_thrust(&sized.cruise.freestream, &inputs, &params, mdhc, command);
+            let got_ratio = point.fuel_flow_rate_kg_s / full.fuel_flow_rate_kg_s;
+            assert!((got_ratio - expected_ratio).abs() < 1.0e-12);
+        }
+    }
+
+    #[test]
+    fn reference_compatibility_retains_the_frozen_linear_law() {
+        let inputs = ave_inputs();
+        let params = VehicleBuilderParams::reference_compatibility();
+        let sized = size_turbofan(&inputs, &params);
+        let mdhc = sized.compressor_nondimensional_massflow;
+        let full = evaluate_thrust(&sized.cruise.freestream, &inputs, &params, mdhc, 1.0);
+        let half = evaluate_thrust(&sized.cruise.freestream, &inputs, &params, mdhc, 0.5);
+        assert_eq!(half.thrust_n, full.thrust_n * 0.5);
+        assert_eq!(half.fuel_flow_rate_kg_s, full.fuel_flow_rate_kg_s * 0.5);
         assert_eq!(
             half.thrust_specific_fuel_consumption,
             full.thrust_specific_fuel_consumption
         );
-        assert_eq!(half.non_dimensional_thrust, full.non_dimensional_thrust);
-        assert_eq!(half.core_mass_flow_rate_kg_s, full.core_mass_flow_rate_kg_s);
     }
 
     #[test]

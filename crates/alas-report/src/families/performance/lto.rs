@@ -63,6 +63,35 @@ pub fn figure_lto_for_airport(
     role: &str,
     theme: Option<&str>,
 ) -> Scene {
+    let takeoff_mass_kg = config.requirements.mtow_kg;
+    let landing_mass_kg =
+        (takeoff_mass_kg * config.mass_model.mlw_fraction_mtow).clamp(0.0, takeoff_mass_kg);
+    figure_lto_for_airport_at_masses(
+        report,
+        config,
+        airport,
+        role,
+        takeoff_mass_kg,
+        landing_mass_kg,
+        theme,
+    )
+}
+
+/// Generate field-performance evidence for explicit analyzed masses.
+///
+/// Pipeline and GUI callers should use this entry point so a tank-limited
+/// takeoff or mission-derived arrival is not silently redrawn at configured
+/// MTOW/MLW. The legacy wrapper remains for standalone report construction
+/// where no completed load state exists.
+pub fn figure_lto_for_airport_at_masses(
+    report: &AnalysisReport,
+    config: &AlasConfig,
+    airport: &Airport,
+    role: &str,
+    takeoff_mass_kg: f64,
+    landing_mass_kg: f64,
+    theme: Option<&str>,
+) -> Scene {
     if report
         .airplane
         .wings
@@ -81,11 +110,17 @@ pub fn figure_lto_for_airport(
         .get("wing_area_m2")
         .copied()
         .unwrap_or(report.airplane.s_ref);
-    let tw_sl = static_thrust_to_weight(config, 0.30);
-    let landing_mass_kg = (config.requirements.mtow_kg * config.mass_model.mlw_fraction_mtow)
-        .clamp(0.0, config.requirements.mtow_kg);
+    let rated_thrust_n = config.geometry.engine.spanwise_positions_m.len() as f64
+        * config.geometry.engine.thrust_kn
+        * 1000.0;
+    let takeoff_weight_n = takeoff_mass_kg * config.requirements.gravity_m_s2;
+    let tw_sl = if takeoff_weight_n.is_finite() && takeoff_weight_n > 0.0 {
+        rated_thrust_n / takeoff_weight_n
+    } else {
+        static_thrust_to_weight(config, 0.30)
+    };
     let performance = compute_field_performance_at_masses(
-        config.requirements.mtow_kg,
+        takeoff_mass_kg,
         landing_mass_kg,
         wing_area,
         airport,

@@ -272,7 +272,7 @@ pub fn analyses(vehicle: &Vehicle, training: &SurrogateTraining) -> MissionAnaly
             cruise_altitude_m: 0.0,
             design_thrust_total_n: vehicle.turbofan.design_thrust_total_n,
         },
-        turbofan_params: VehicleBuilderParams::default(),
+        turbofan_params: VehicleBuilderParams::reference_compatibility(),
         compressor_nondimensional_massflow: vehicle.turbofan.compressor_nondimensional_massflow,
     }
 }

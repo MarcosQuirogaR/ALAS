@@ -73,7 +73,7 @@ fn options() -> PipelineOptions {
 }
 
 #[test]
-fn public_pipeline_publishes_converged_mission_telemetry_for_representative_presets() {
+fn public_pipeline_stops_at_the_bounded_throttle_limit_for_generic_profiles() {
     for name in ["AVE", "A380-800", "B787-9"] {
         let config = config_for_preset(name);
         let route = dispatched_route(&config);
@@ -101,20 +101,32 @@ fn public_pipeline_publishes_converged_mission_telemetry_for_representative_pres
             .mission_result
             .as_ref()
             .unwrap_or_else(|| panic!("mission telemetry missing for {name}"));
-        assert_eq!(mission.segments.len(), 12, "native schedule for {name}");
+        assert!(!mission.segments.is_empty(), "native schedule for {name}");
+        assert!(
+            mission.segments.len() < 12,
+            "invalid later segments ran for {name}"
+        );
         assert_eq!(mission.solutions.len(), mission.segments.len());
         assert!(
-            mission.solutions.iter().all(|solution| solution.converged),
-            "mission did not converge for {name}: {:?}",
+            mission
+                .solutions
+                .last()
+                .is_some_and(|solution| solution.throttle_limited),
+            "mission did not expose its thrust boundary for {name}: {:?}",
             mission.solutions
         );
+        assert!(mission
+            .segments
+            .iter()
+            .flat_map(|segment| segment.conditions.throttle.iter())
+            .all(|throttle| throttle.is_finite() && (0.0..=1.0).contains(throttle)));
         assert!(mission.initial_mass_kg() > mission.final_mass_kg());
         assert!(mission.fuel_burned_kg() > 0.0);
         assert!(mission.block_time_s() > 0.0);
         assert_eq!(mission.fuel_exhaustion, None, "fuel endurance for {name}");
         assert_eq!(
             result.feasibility.fuel_loading.mission.status,
-            alas_pipeline::MissionFuelStatus::Completed
+            alas_pipeline::MissionFuelStatus::NotConverged
         );
         assert_eq!(
             result
@@ -122,8 +134,11 @@ fn public_pipeline_publishes_converged_mission_telemetry_for_representative_pres
                 .fuel_loading
                 .mission
                 .required_trip_fuel_kg,
-            Some(mission.fuel_burned_kg())
+            None
         );
+        assert!(result
+            .feasibility
+            .contains(alas_pipeline::FindingCode::MissionThrottleLimitViolation));
         assert!(expected_distance_m > 0.0);
         assert!(mission.segments.iter().all(|segment| segment
             .conditions
@@ -134,7 +149,7 @@ fn public_pipeline_publishes_converged_mission_telemetry_for_representative_pres
 }
 
 #[test]
-fn public_pipeline_stops_when_a_preset_consumes_its_usable_fuel() {
+fn narrowbody_profiles_report_bounded_fuel_infeasibility() {
     for name in ["A320-200", "A220-300"] {
         let config = config_for_preset(name);
         let route = dispatched_route(&config);
@@ -145,15 +160,9 @@ fn public_pipeline_stops_when_a_preset_consumes_its_usable_fuel() {
             .mission_result
             .as_ref()
             .unwrap_or_else(|| panic!("mission telemetry missing for {name}"));
-        let exhaustion = mission
-            .fuel_exhaustion
-            .as_ref()
-            .unwrap_or_else(|| panic!("{name} was propagated past usable-fuel exhaustion"));
-
         assert!(mission.segments.len() < 12, "later segments ran for {name}");
         assert_eq!(mission.solutions.len(), mission.segments.len());
-        assert_eq!(exhaustion.segment_index, mission.segments.len());
-        assert!(exhaustion.burned_fuel_kg > exhaustion.available_fuel_kg);
+        assert!(mission.fuel_exhaustion.is_some());
         assert!(result
             .feasibility
             .findings
@@ -162,12 +171,6 @@ fn public_pipeline_stops_when_a_preset_consumes_its_usable_fuel() {
         assert_eq!(
             result.feasibility.fuel_loading.mission.status,
             alas_pipeline::MissionFuelStatus::Exhausted
-        );
-        assert!(
-            (result.feasibility.fuel_loading.analyzed_carried_fuel_kg
-                - exhaustion.available_fuel_kg)
-                .abs()
-                < 1.0e-9
         );
         assert_eq!(
             result

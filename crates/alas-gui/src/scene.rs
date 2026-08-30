@@ -31,7 +31,7 @@ use alas_report::families::mass_balance::{
     figure_mass_distribution,
 };
 use alas_report::families::mass_balance_layout::{
-    figure_cabin_cross_section, figure_fuel_volume_check,
+    figure_cabin_cross_section, figure_fuel_volume_check_for_loading,
 };
 use alas_report::families::mission::{
     figure_mission_aero_coefficients, figure_mission_aero_forces, figure_mission_drag_components,
@@ -41,8 +41,8 @@ use alas_report::families::mission::{
 use alas_report::families::optimization::figure_airfoil_comparison;
 use alas_report::families::optimization::figure_optimization_history;
 use alas_report::families::performance::{
-    figure_lto_arrival, figure_lto_departure, figure_lto_for_airport, figure_matching_chart,
-    figure_payload_range, figure_vn_diagram,
+    figure_lto_for_airport_at_masses, figure_matching_chart, figure_payload_range,
+    figure_vn_diagram,
 };
 use alas_report::families::propulsion::{
     figure_propulsion_altitude_sweep, figure_propulsion_bpr_sensitivity,
@@ -454,7 +454,9 @@ pub fn build_result_figure_with_camera(
             figure_mses_mach_contours(result.mses_pressure.as_ref()?, Some(&airfoil), Some(theme))
         }
         "mass_breakdown" => figure_mass_breakdown(report, Some(theme)),
-        "fuel_volume_check" => figure_fuel_volume_check(report, config, Some(theme)),
+        "fuel_volume_check" => {
+            figure_fuel_volume_check_for_loading(&result.feasibility.fuel_loading, Some(theme))
+        }
         "mass_distribution" => figure_mass_distribution(report, Some(theme)),
         "dynamic_modes" => figure_dynamic_modes(report, config, Some(theme)),
         "cg_envelope" => figure_cg_envelope(report, config, Some(theme)),
@@ -475,20 +477,42 @@ pub fn build_result_figure_with_camera(
             figure_cabin_cross_section(layout, &report.airplane, config, Some(theme))
         }
         "payload_range" => figure_payload_range(report, config, Some(theme)),
-        "lto_departure" => result
-            .route
-            .as_ref()
-            .and_then(|route| route.origin_airport.as_ref())
-            .map(|airport| {
-                figure_lto_for_airport(report, config, airport, "Departure", Some(theme))
-            })
-            .unwrap_or_else(|| figure_lto_departure(report, config, Some(theme))),
-        "lto_arrival" => result
-            .route
-            .as_ref()
-            .and_then(|route| route.dest_airport.as_ref())
-            .map(|airport| figure_lto_for_airport(report, config, airport, "Arrival", Some(theme)))
-            .unwrap_or_else(|| figure_lto_arrival(report, config, Some(theme))),
+        "lto_departure" | "lto_arrival" => {
+            let departure = id == "lto_departure";
+            let airport = result
+                .route
+                .as_ref()
+                .and_then(|route| {
+                    if departure {
+                        route.origin_airport.as_ref()
+                    } else {
+                        route.dest_airport.as_ref()
+                    }
+                })
+                .or_else(|| {
+                    alas_config::airports::get(if departure {
+                        &config.departure_airport
+                    } else {
+                        &config.arrival_airport
+                    })
+                    .ok()
+                })?;
+            let fuel = &result.feasibility.fuel_loading;
+            let takeoff_mass_kg = fuel.analyzed_takeoff_mass_kg;
+            let mlw_limit_kg = config.requirements.mtow_kg * config.mass_model.mlw_fraction_mtow;
+            let landing_mass_kg = fuel
+                .analyzed_landing_mass_kg
+                .unwrap_or(mlw_limit_kg.min(takeoff_mass_kg));
+            figure_lto_for_airport_at_masses(
+                report,
+                config,
+                airport,
+                if departure { "Departure" } else { "Arrival" },
+                takeoff_mass_kg,
+                landing_mass_kg,
+                Some(theme),
+            )
+        }
         "mission_profile" => figure_mission_profile(result.mission_result.as_ref()?, Some(theme)),
         "mission_velocities" => {
             figure_mission_velocities(result.mission_result.as_ref()?, Some(theme))

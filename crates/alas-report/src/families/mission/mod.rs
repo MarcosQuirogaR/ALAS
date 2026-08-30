@@ -328,6 +328,7 @@ mod test_support {
         MissionResult {
             segments: vec![first, second],
             solutions: Vec::new(),
+            scheduled_segment_count: 2,
             fuel_exhaustion: None,
         }
     }

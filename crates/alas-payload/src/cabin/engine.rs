@@ -202,4 +202,28 @@ mod product_tests {
             .iter()
             .any(|item| item.kind == ItemKind::WheelchairStowage));
     }
+
+    #[test]
+    fn seated_aircraft_presets_have_sidewall_bin_runs() {
+        for name in presets::available() {
+            let config = AlasConfig::from_value(&serde_json::json!({ "preset": name }))
+                .expect("preset config");
+            let preset = presets::get(name).expect("registered preset");
+            let plane = AircraftBuilder::new(Some(config.geometry.clone()))
+                .build(Some(&preset.design_vector), true)
+                .expect("preset geometry");
+            let layout = build_payload_layout(&plane, &config, 0.0, 0.0).expect("layout");
+            if layout
+                .items
+                .iter()
+                .any(|item| item.kind == ItemKind::SeatRow)
+            {
+                assert!(
+                    layout.items.iter().any(|item| matches!(item.meta,
+                    ItemMeta::OverheadBin(meta) if meta.bin_type == OverheadBinType::Sidewall)),
+                    "{name} has seated rows but no feasible sidewall bin run"
+                );
+            }
+        }
+    }
 }

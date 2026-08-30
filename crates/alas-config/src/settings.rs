@@ -224,6 +224,11 @@ impl AlasConfig {
                     let operational = preset.operational_mission_defaults();
                     instance.preset = name.to_owned();
                     instance.geometry = preset.geometry.clone();
+                    // A preset selection is the one product boundary where
+                    // an engine name intentionally loads database values.
+                    // The overlay below then applies saved/live edits, which
+                    // every downstream solver must preserve verbatim.
+                    instance.geometry.engine.apply_engine_spec();
                     instance.requirements = preset.requirements.clone();
                     instance.landing_gear = preset.landing_gear.clone();
                     if let Some(mass_model) = &preset.mass_model {
@@ -266,7 +271,9 @@ mod tests {
     fn a_preset_replaces_the_geometry_and_the_requirements() {
         let config = AlasConfig::from_value(&json!({"preset": "A380-800"})).unwrap();
         let preset = crate::presets::get("A380-800").unwrap();
-        assert_eq!(config.geometry, preset.geometry);
+        let mut expected_geometry = preset.geometry.clone();
+        expected_geometry.engine.apply_engine_spec();
+        assert_eq!(config.geometry, expected_geometry);
         assert_eq!(config.requirements, preset.requirements);
         assert_eq!(config.landing_gear, preset.landing_gear);
         assert_eq!(config.preset, "A380-800");

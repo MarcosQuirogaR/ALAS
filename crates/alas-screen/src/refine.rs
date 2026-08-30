@@ -95,8 +95,6 @@ pub(crate) fn refine_candidate_3d_with_mass_model(
     cfg2.geometry.wing.root_airfoil = candidate.name.clone();
     if matches!(geometry, ScreeningGeometry::ReferenceCompatibility) {
         cfg2.geometry.engine.apply_engine_spec();
-    } else {
-        cfg2.geometry.engine.apply_engine_spec_if_uninitialized();
     }
 
     let builder = match geometry {

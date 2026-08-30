@@ -39,6 +39,10 @@ const PAX_PER_LAV: i64 = 45;
 const PAX_PER_GALLEY: i64 = 100;
 /// Sidewall bins sit over seats rather than the aisle and may hang lower.
 const SIDE_BIN_BOTTOM_M: f64 = 1.42;
+/// Lowest allowed bin underside, retaining 0.10 m above the 1.10 m seat asset.
+const MIN_SIDE_BIN_BOTTOM_M: f64 = 1.20;
+/// Small crown-constrained pivot-bin cassette; below this it is not useful.
+const MIN_SIDE_BIN_HEIGHT_M: f64 = 0.18;
 /// Centre bins sit over a seat block between aisles, retaining more clearance.
 const CENTER_BIN_BOTTOM_M: f64 = 1.55;
 /// Sidewall pivot-bin depth and height.
@@ -243,11 +247,16 @@ pub(super) fn place_overhead_bins(g: &CabinGeometry, seats: &[DeckItem]) -> Vec<
                 .map(|sample_x| g.ceil_z(deck, sample_x))
                 .fold(f64::INFINITY, f64::min);
             let bin_top = ceiling - BIN_CROWN_CLEARANCE_M;
-            let side_height = SIDE_BIN_HEIGHT_M.min((bin_top - floor - SIDE_BIN_BOTTOM_M).max(0.0));
-            if side_height < 0.18 {
+            let available_above_floor = bin_top - floor;
+            let side_bottom_above_floor = SIDE_BIN_BOTTOM_M
+                .min(available_above_floor - MIN_SIDE_BIN_HEIGHT_M)
+                .max(MIN_SIDE_BIN_BOTTOM_M);
+            let side_height =
+                SIDE_BIN_HEIGHT_M.min((available_above_floor - side_bottom_above_floor).max(0.0));
+            if side_height + 1e-9 < MIN_SIDE_BIN_HEIGHT_M {
                 continue;
             }
-            let side_bottom = bin_top - side_height;
+            let side_bottom = floor + side_bottom_above_floor;
             let side_z = side_bottom + side_height * 0.5;
             let crown_width = [x0, x, x1]
                 .into_iter()
@@ -261,16 +270,15 @@ pub(super) fn place_overhead_bins(g: &CabinGeometry, seats: &[DeckItem]) -> Vec<
                 let side_y = (crown_width - SIDE_BIN_DEPTH_M) * 0.5 - BIN_SIDE_CLEARANCE_M;
                 for sign in [-1.0, 1.0] {
                     let y = sign * side_y;
-                    if g.check_rectangular_prism(
+                    let result = g.check_rectangular_prism(
                         x,
                         length,
                         y,
                         SIDE_BIN_DEPTH_M,
                         side_bottom,
                         side_height,
-                    )
-                    .is_err()
-                    {
+                    );
+                    if result.is_err() {
                         continue;
                     }
                     bins.push(DeckItem {
