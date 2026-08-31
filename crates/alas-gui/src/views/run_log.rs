@@ -3,7 +3,7 @@
 
 //! Searchable, colour-coded diagnostics emitted by an analysis run.
 
-use crate::state::{AppState, LogKind, LogLine};
+use crate::state::{AppState, LogKind, LogLine, RunLogTab};
 use crate::views::{tr, tr_fields};
 use alas_pipeline::{RunEvent, RunEventKind};
 use egui::{RichText, ScrollArea, TextEdit, Ui};
@@ -18,7 +18,6 @@ pub fn show_run_log(state: &mut AppState, ui: &mut Ui) {
         ui,
         crate::layout_debug::RegionKind::RunLog,
     );
-    let visible = rendered_visible_lines(state);
     ui.horizontal(|ui| {
         ui.label(
             RichText::new(tr("Run Log"))
@@ -38,62 +37,56 @@ pub fn show_run_log(state: &mut AppState, ui: &mut Ui) {
             "Drag the panel edge to resize; the scrollbar stays available for history.",
         ));
         ui.separator();
-        ui.add(
-            TextEdit::singleline(&mut state.run_log_search)
-                .hint_text(tr("Search log"))
-                .desired_width(180.0),
-        );
-        ui.toggle_value(&mut state.run_log_show_info, tr("Info"));
-        ui.toggle_value(&mut state.run_log_show_warn, tr("Warnings"));
-        ui.toggle_value(&mut state.run_log_show_error, tr("Errors"));
-        ui.separator();
-        if ui.button(tr("Copy all")).clicked() {
-            ui.ctx().copy_text(rendered_all_lines(state).join("\n"));
+        if !state.is_running {
+            ui.selectable_value(&mut state.run_log_tab, RunLogTab::Console, tr("Console"));
+            ui.selectable_value(&mut state.run_log_tab, RunLogTab::Timings, tr("Timings"));
+            ui.separator();
         }
-        if ui.button(tr("Export...")).clicked() {
-            state.run_log_export_status = Some(export_log(state));
+        if state.is_running || state.run_log_tab == RunLogTab::Console {
+            ui.add(
+                TextEdit::singleline(&mut state.run_log_search)
+                    .hint_text(tr("Search log"))
+                    .desired_width(180.0),
+            );
+            ui.toggle_value(&mut state.run_log_show_info, tr("Info"));
+            ui.toggle_value(&mut state.run_log_show_warn, tr("Warnings"));
+            ui.toggle_value(&mut state.run_log_show_error, tr("Errors"));
+            ui.separator();
+            if ui.button(tr("Copy all")).clicked() {
+                ui.ctx().copy_text(rendered_all_lines(state).join("\n"));
+            }
+            if ui.button(tr("Export...")).clicked() {
+                state.run_log_export_status = Some(export_log(state));
+            }
         }
     });
     if let Some(status) = &state.run_log_export_status {
         ui.label(RichText::new(status).weak().small());
     }
 
-    let card = crate::theme::card_frame(ui).show(ui, |ui| {
-        ui.set_min_width(ui.available_width());
-        ui.set_min_height(ui.available_height());
-        ScrollArea::vertical()
-            .id_salt("run_log_scroll")
-            .auto_shrink([false, false])
-            .max_height(ui.available_height())
-            .stick_to_bottom(true)
-            .show(ui, |ui| {
-                #[cfg(debug_assertions)]
-                crate::layout_debug::record_ui(
-                    ui.ctx(),
-                    "run log scroll",
-                    ui,
-                    crate::layout_debug::RegionKind::Scroll,
-                );
-                show_stage_progress(&state.run_events, ui);
-                if !state.run_events.is_empty() {
-                    ui.add_space(3.0);
-                    ui.separator();
-                    ui.add_space(3.0);
-                }
-                for (rendered, kind) in &visible {
-                    let color = match kind {
-                        LogKind::Info => None,
-                        LogKind::Warn => Some(ui.visuals().warn_fg_color),
-                        LogKind::Error => Some(ui.visuals().error_fg_color),
-                    };
-                    let mut text = RichText::new(rendered).monospace().size(12.0);
-                    if let Some(color) = color {
-                        text = text.color(color);
-                    }
-                    ui.label(text);
-                }
+    let visible = rendered_visible_lines(state);
+    let elapsed_ms = state.elapsed_ms().min(u64::MAX as u128) as u64;
+    let card = if state.is_running {
+        crate::theme::card_frame(ui).show(ui, |ui| {
+            ui.set_min_width(ui.available_width());
+            ui.set_min_height(ui.available_height());
+            ui.columns(2, |columns| {
+                columns[0].label(RichText::new(tr("Console")).strong().small());
+                show_console(&visible, &mut columns[0]);
+                columns[1].label(RichText::new(tr("Timings")).strong().small());
+                show_timings(&state.run_events, elapsed_ms, &mut columns[1]);
             });
-    });
+        })
+    } else {
+        crate::theme::card_frame(ui).show(ui, |ui| {
+            ui.set_min_width(ui.available_width());
+            ui.set_min_height(ui.available_height());
+            match state.run_log_tab {
+                RunLogTab::Console => show_console(&visible, ui),
+                RunLogTab::Timings => show_timings(&state.run_events, elapsed_ms, ui),
+            }
+        })
+    };
     #[cfg(debug_assertions)]
     crate::layout_debug::record(
         ui.ctx(),
@@ -105,7 +98,65 @@ pub fn show_run_log(state: &mut AppState, ui: &mut Ui) {
     let _ = card;
 }
 
-fn show_stage_progress(events: &[RunEvent], ui: &mut Ui) {
+fn show_console(lines: &[RenderedLine], ui: &mut Ui) {
+    ScrollArea::vertical()
+        .id_salt("run_log_console_scroll")
+        .auto_shrink([false, false])
+        .max_height(ui.available_height())
+        .stick_to_bottom(true)
+        .show(ui, |ui| {
+            #[cfg(debug_assertions)]
+            crate::layout_debug::record_ui(
+                ui.ctx(),
+                "run log scroll",
+                ui,
+                crate::layout_debug::RegionKind::Scroll,
+            );
+            egui::Grid::new("run_log_rows")
+                .num_columns(4)
+                .striped(true)
+                .spacing([8.0, 3.0])
+                .show(ui, |ui| {
+                    for line in lines {
+                        ui.label(RichText::new(&line.context).monospace().small().strong());
+                        ui.label(RichText::new(&line.timing).monospace().small().weak());
+                        let color = match line.kind {
+                            LogKind::Info => ui.visuals().weak_text_color(),
+                            LogKind::Warn => ui.visuals().warn_fg_color,
+                            LogKind::Error => ui.visuals().error_fg_color,
+                        };
+                        ui.label(
+                            RichText::new(line.severity)
+                                .monospace()
+                                .small()
+                                .strong()
+                                .color(color),
+                        );
+                        ui.add(
+                            egui::Label::new(RichText::new(&line.message).monospace().size(12.0))
+                                .wrap(),
+                        );
+                        ui.end_row();
+                    }
+                });
+        });
+}
+
+fn show_timings(events: &[RunEvent], elapsed_ms: u64, ui: &mut Ui) {
+    let estimate = timing_estimate(events, elapsed_ms);
+    ui.horizontal(|ui| {
+        ui.label(RichText::new(tr("Estimated remaining")).weak().small());
+        ui.label(RichText::new(estimate).monospace().strong());
+    });
+    ui.separator();
+    ScrollArea::vertical()
+        .id_salt("run_log_timings_scroll")
+        .auto_shrink([false, false])
+        .max_height(ui.available_height())
+        .show(ui, |ui| show_stage_progress(events, elapsed_ms, ui));
+}
+
+fn show_stage_progress(events: &[RunEvent], elapsed_ms: u64, ui: &mut Ui) {
     let mut stages: Vec<(&RunEvent, &RunEvent)> = Vec::new();
     for event in events {
         if matches!(event.kind, RunEventKind::Diagnostic) {
@@ -131,7 +182,7 @@ fn show_stage_progress(events: &[RunEvent], ui: &mut Ui) {
         };
         let timing_ms = event
             .duration_ms
-            .unwrap_or_else(|| event.elapsed_ms.saturating_sub(first.elapsed_ms));
+            .unwrap_or_else(|| elapsed_ms.saturating_sub(first.elapsed_ms));
         let timing = format_duration(timing_ms);
         let stage_name = event.stage.replace('_', " ");
         let stage_number = match (event.stage_index, event.stage_count) {
@@ -171,7 +222,16 @@ fn format_duration(milliseconds: u64) -> String {
     }
 }
 
-fn rendered_visible_lines(state: &AppState) -> Vec<(String, LogKind)> {
+struct RenderedLine {
+    context: String,
+    timing: String,
+    severity: &'static str,
+    message: String,
+    kind: LogKind,
+    plaintext: String,
+}
+
+fn rendered_visible_lines(state: &AppState) -> Vec<RenderedLine> {
     let query = state.run_log_search.trim().to_lowercase();
     state
         .logs
@@ -183,33 +243,89 @@ fn rendered_visible_lines(state: &AppState) -> Vec<(String, LogKind)> {
         })
         .filter_map(|line| {
             let rendered = render_line(line);
-            (query.is_empty() || rendered.to_lowercase().contains(&query))
-                .then_some((rendered, line.kind))
+            (query.is_empty() || rendered.plaintext.to_lowercase().contains(&query))
+                .then_some(rendered)
         })
         .collect()
 }
 
 fn rendered_all_lines(state: &AppState) -> Vec<String> {
-    state.logs.iter().map(render_line).collect()
+    state
+        .logs
+        .iter()
+        .map(|line| render_line(line).plaintext)
+        .collect()
 }
 
-fn render_line(line: &LogLine) -> String {
+fn render_line(line: &LogLine) -> RenderedLine {
     let severity = match line.kind {
-        LogKind::Info => "INFO ",
-        LogKind::Warn => "WARN ",
+        LogKind::Info => "INFO",
+        LogKind::Warn => "WARN",
         LogKind::Error => "ERROR",
     };
-    let context = match line.elapsed {
-        Some(elapsed) => format!(
-            "run {:03} +{:02}:{:02}.{:03}",
-            line.run_id,
-            elapsed.as_secs() / 60,
-            elapsed.as_secs() % 60,
-            elapsed.subsec_millis()
+    let (context, timing) = match line.elapsed {
+        Some(elapsed) => (
+            format!("RUN {:03}", line.run_id),
+            format!(
+                "+{:02}:{:02}.{:03}",
+                elapsed.as_secs() / 60,
+                elapsed.as_secs() % 60,
+                elapsed.subsec_millis()
+            ),
         ),
-        None => "system            ".to_owned(),
+        None => ("SYSTEM".to_owned(), String::new()),
     };
-    format!("[{context}] [{severity}] {}", localize_log_text(&line.text))
+    let message = localize_log_text(&line.text);
+    let plaintext = if timing.is_empty() {
+        format!("{context} {severity} {message}")
+    } else {
+        format!("{context} {timing} {severity} {message}")
+    };
+    RenderedLine {
+        context,
+        timing,
+        severity,
+        message,
+        kind: line.kind,
+        plaintext,
+    }
+}
+
+fn timing_estimate(events: &[RunEvent], elapsed_ms: u64) -> String {
+    let mut completed_durations = Vec::new();
+    let mut active_started = None;
+    let mut stage_count = None;
+    let mut completed_count = 0_u64;
+    for event in events {
+        stage_count = event.stage_count.or(stage_count);
+        match event.kind {
+            RunEventKind::StageStarted => active_started = Some(event.elapsed_ms),
+            RunEventKind::StageCompleted => {
+                completed_count += 1;
+                if let Some(duration) = event.duration_ms {
+                    completed_durations.push(duration);
+                }
+                active_started = None;
+            }
+            RunEventKind::Progress | RunEventKind::Diagnostic => {}
+        }
+    }
+    let Some(total) = stage_count.map(u64::from) else {
+        return tr("No timing data");
+    };
+    if completed_count >= total {
+        return tr("Complete");
+    }
+    if completed_durations.is_empty() {
+        return tr("Calculating...");
+    }
+    let mean_ms = completed_durations.iter().sum::<u64>() / completed_durations.len() as u64;
+    let future_stages = total.saturating_sub(completed_count + u64::from(active_started.is_some()));
+    let active_remaining = active_started
+        .map(|started| mean_ms.saturating_sub(elapsed_ms.saturating_sub(started)))
+        .unwrap_or(0);
+    let remaining_ms = active_remaining.saturating_add(future_stages.saturating_mul(mean_ms));
+    format!("~{}", format_duration(remaining_ms))
 }
 
 fn export_log(state: &AppState) -> String {
@@ -278,7 +394,54 @@ fn localize_log_text(text: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::localize_log_text;
+    use std::time::Duration;
+
+    use alas_pipeline::{RunEvent, RunEventKind, RunEventSeverity};
+
+    use super::{localize_log_text, render_line, timing_estimate};
+    use crate::state::{LogKind, LogLine};
+
+    #[test]
+    fn console_rows_do_not_use_space_padding_for_alignment() {
+        let system = render_line(&LogLine {
+            text: "Ready.".to_owned(),
+            kind: LogKind::Info,
+            elapsed: None,
+            run_id: 0,
+        });
+        assert_eq!(system.plaintext, "SYSTEM INFO Ready.");
+        assert!(!system.plaintext.contains("["));
+
+        let run = render_line(&LogLine {
+            text: "Working".to_owned(),
+            kind: LogKind::Warn,
+            elapsed: Some(Duration::from_millis(19)),
+            run_id: 1,
+        });
+        assert_eq!(run.plaintext, "RUN 001 +00:00.019 WARN Working");
+    }
+
+    #[test]
+    fn timing_estimate_uses_completed_stages_and_active_elapsed_time() {
+        let event = |kind, elapsed_ms, duration_ms| RunEvent {
+            stage: "stage".to_owned(),
+            message: String::new(),
+            fraction: None,
+            kind,
+            severity: RunEventSeverity::Info,
+            stage_index: Some(1),
+            stage_count: Some(3),
+            elapsed_ms,
+            duration_ms,
+        };
+        let events = vec![
+            event(RunEventKind::StageStarted, 0, None),
+            event(RunEventKind::StageCompleted, 1_000, Some(1_000)),
+            event(RunEventKind::StageStarted, 1_000, None),
+        ];
+        assert_eq!(timing_estimate(&events, 1_250), "~1.75 s");
+    }
+
     #[test]
     fn dynamic_log_lines_follow_a_language_change() {
         alas_i18n::es::install();

@@ -231,6 +231,68 @@ pub struct FuelExhaustion {
 }
 
 impl MissionResult {
+    /// Whether every field consumed by the mission figures is present and
+    /// finite for a completed mission.
+    ///
+    /// `completed_summary` intentionally validates only scalar mission totals.
+    /// The figure family also indexes drag breakdowns and force/aero columns,
+    /// so it needs this stricter boundary before flattening conditions.
+    pub fn figure_data_ready(&self) -> bool {
+        self.completed_summary().is_some()
+            && self.segments.iter().all(|segment| {
+                let c = &segment.conditions;
+                let n = c.len();
+                c.time_s.len() == n
+                    && c.altitude_m.len() == n
+                    && c.total_mass_kg.len() == n
+                    && c.velocity_m_s.len() == n
+                    && c.density_kg_m3.len() == n
+                    && c.mach.len() == n
+                    && c.vehicle_mass_rate_kg_s.len() == n
+                    && c.aircraft_range_m.len() == n
+                    && c.angle_of_attack_rad.len() == n
+                    && c.lift_coefficient.len() == n
+                    && c.drag_coefficient.len() == n
+                    && c.throttle.len() == n
+                    && c.body_inertial_rotations_rad.len() == n
+                    && c.wind_lift_force_vector_n.len() == n
+                    && c.wind_drag_force_vector_n.len() == n
+                    && c.thrust_force_vector_n.len() == n
+                    && c.drag_breakdown.len() == n
+                    && c.time_s
+                        .iter()
+                        .chain(&c.altitude_m)
+                        .chain(&c.total_mass_kg)
+                        .chain(&c.velocity_m_s)
+                        .chain(&c.density_kg_m3)
+                        .chain(&c.mach)
+                        .chain(&c.vehicle_mass_rate_kg_s)
+                        .chain(&c.aircraft_range_m)
+                        .chain(&c.angle_of_attack_rad)
+                        .chain(&c.lift_coefficient)
+                        .chain(&c.drag_coefficient)
+                        .chain(&c.throttle)
+                        .all(|value| value.is_finite())
+                    && c.body_inertial_rotations_rad
+                        .iter()
+                        .chain(&c.wind_lift_force_vector_n)
+                        .chain(&c.wind_drag_force_vector_n)
+                        .chain(&c.thrust_force_vector_n)
+                        .all(|vector| vector.iter().all(|value| value.is_finite()))
+                    && c.drag_breakdown.iter().all(|drag| {
+                        [
+                            drag.parasite_total,
+                            drag.induced_total,
+                            drag.compressible_total,
+                            drag.miscellaneous_total,
+                            drag.total,
+                        ]
+                        .iter()
+                        .all(|value| value.is_finite())
+                    })
+            })
+    }
+
     /// Return scalar mission results only when all requested segments completed.
     ///
     /// Partial, exhausted, unconverged, throttle-limited, or non-finite

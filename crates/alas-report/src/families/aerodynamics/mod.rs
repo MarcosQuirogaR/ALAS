@@ -10,7 +10,7 @@
 //!
 //! Split into topical submodules, following the pattern
 //! `crates/alas-geom/src/aircraft/airfoil/` already set, so no single file grows
-//! past this crate's 700-line limit: [`polar`] for the report-fed polar
+//! past this crate's 500-line limit: [`polar`] for the report-fed polar
 //! panels (`figure_aero_panel`, `figure_polar_comparison`,
 //! `figure_drag_breakdown`), [`model_comparison`] for the native-model/MSES
 //! overlay, [`mses`] for the two section-level MSES figures, [`vlm`] for

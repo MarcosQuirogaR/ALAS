@@ -998,7 +998,7 @@
   "planned lateral route; flown profile incomplete or unavailable": "ruta lateral planificada; perfil volado incompleto o no disponible",
   "{waypoints} waypoints | {distance_km} km | flown profile: {start_mass} kg to {end_mass} kg, {start_altitude} to {end_altitude} m": "{waypoints} puntos de ruta | {distance_km} km | perfil volado: de {start_mass} kg a {end_mass} kg, de {start_altitude} a {end_altitude} m",
   "{waypoints} waypoints | {distance_km} km | lateral route only (mission telemetry unavailable)": "{waypoints} puntos de ruta | {distance_km} km | solo ruta lateral (telemetría de misión no disponible)",
-  "{waypoints} waypoints | {distance_km} km | {profile_note} | orthographic globe; drag to orbit; scroll to zoom": "{waypoints} puntos de ruta | {distance_km} km | {profile_note} | globo ortográfico; arrastre para orbitar; desplaza para ampliar",
+  "{waypoints} waypoints | {distance_km} km | {profile_note} | orthographic globe; drag to orbit; wheel zoom in fullscreen": "{waypoints} puntos de ruta | {distance_km} km | {profile_note} | globo ortográfico; arrastre para orbitar; use la rueda para ampliar en pantalla completa",
   "Cruise L/D (3-D wing)": "L/D de crucero (ala 3-D)",
   "Spar caps": "Tapas de larguero",
   "Spar webs": "Almas de larguero",

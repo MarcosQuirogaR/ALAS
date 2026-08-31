@@ -243,7 +243,6 @@ pub fn analyses(vehicle: &Vehicle, training: &SurrogateTraining) -> MissionAnaly
         )
         .expect("the frozen fixture has a representable propulsion installation"),
     );
-
     MissionAnalyses {
         reference_area_m2: vehicle.reference_area_m2,
         maximum_lift_coefficient: vehicle.maximum_lift_coefficient,

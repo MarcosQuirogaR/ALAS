@@ -50,7 +50,7 @@ pub mod common;
 pub mod conditions;
 pub mod frames;
 
-pub use analyses::{AeroSolution, MissionAnalyses};
+pub use analyses::{AeroSolution, LegacyTurbofanCompatibility, MissionAnalyses};
 pub use conditions::{Conditions, Initials, Matrix3, Vector3};
 
 use crate::numerics::Numerics;

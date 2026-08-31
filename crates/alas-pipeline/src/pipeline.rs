@@ -54,6 +54,7 @@ use crate::flowunsteady::{run_flowunsteady_analysis, FlowUnsteadyAnalysisResult}
 use crate::full_analysis::{AnalysisReport, FullAnalysis};
 use crate::mission_stage;
 use crate::openvsp::{export_openvsp_script, materialize_openvsp_project, OpenVspExportResult};
+use crate::payload_layout_export::export_payload_layout_artifact;
 use crate::runs::{RunEvent, RunEventKind, RunEventSeverity};
 use crate::solver_mode::{AerodynamicSolverMode, OptimizationSolverMode};
 use crate::structural::StructuralAnalysisResult;

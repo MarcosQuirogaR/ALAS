@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 /// a finite window. The reference implementation has a 5,600-line figure module
 /// that has to be read in fragments; the limit exists so that nothing here
 /// becomes its equivalent.
-const MAX_LINES: usize = 700;
+const MAX_LINES: usize = 500;
 
 /// The SPDX and copyright lines every file opens with.
 const HEADER_LINES: usize = 2;
@@ -271,6 +271,13 @@ mod tests {
         let body = "// x\n".repeat(MAX_LINES);
         let text = format!("{HEADER}#[cfg(test)]\nmod tests {{\n{body}}}\n");
         assert!(!check(&text).iter().any(|f| f.contains("limit")));
+    }
+
+    #[test]
+    fn rejects_a_production_file_over_the_limit() {
+        let body = "// x\n".repeat(MAX_LINES + 1);
+        let text = format!("{HEADER}{body}");
+        assert!(check(&text).iter().any(|f| f.contains("limit is 500")));
     }
 
     #[test]

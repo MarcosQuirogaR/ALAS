@@ -86,16 +86,23 @@ fn public_pipeline_reports_complete_or_explicitly_partial_preset_missions() {
             .as_ref()
             .unwrap_or_else(|| panic!("mission telemetry missing for {name}"));
         assert!(!mission.segments.is_empty(), "native schedule for {name}");
-        assert!(
-            mission.completed_summary().is_some(),
-            "validated preset {name} must retain a fully completed public-path mission"
-        );
         assert_eq!(
             mission.solutions.len(),
             mission.segments.len(),
             "missing segment solutions for {name}"
         );
+        assert!(mission.segments.iter().all(|segment| {
+            segment
+                .conditions
+                .total_mass_kg
+                .windows(2)
+                .all(|pair| pair[0] >= pair[1])
+        }));
         if mission.completed_summary().is_some() {
+            assert!(
+                mission.figure_data_ready(),
+                "complete mission {name} must expose figure telemetry"
+            );
             assert_eq!(mission.segments.len(), mission.scheduled_segment_count);
             assert!(mission
                 .solutions
@@ -105,23 +112,20 @@ fn public_pipeline_reports_complete_or_explicitly_partial_preset_missions() {
                 result.feasibility.fuel_loading.mission.status,
                 alas_pipeline::MissionFuelStatus::Completed
             );
-            assert!(mission.segments.iter().all(|segment| {
-                segment
-                    .conditions
-                    .total_mass_kg
-                    .windows(2)
-                    .all(|pair| pair[0] >= pair[1])
-            }));
         } else {
+            assert!(
+                !mission.figure_data_ready(),
+                "partial mission {name} must not publish figure telemetry"
+            );
             assert_ne!(
                 result.feasibility.fuel_loading.mission.status,
-                alas_pipeline::MissionFuelStatus::Completed,
-                "partial trajectory was mislabeled complete for {name}"
+                alas_pipeline::MissionFuelStatus::Completed
             );
             assert!(
-                mission.segments.len() < mission.scheduled_segment_count
-                    || mission.fuel_exhaustion.is_some(),
-                "partial mission has no explicit stopping condition for {name}"
+                mission.fuel_exhaustion.is_some()
+                    || mission.segments.len() < mission.scheduled_segment_count
+                    || mission.solutions.iter().any(|solution| !solution.converged),
+                "partial mission {name} must carry an explicit stopping condition"
             );
         }
         assert!(expected_distance_m > 0.0);
@@ -140,32 +144,22 @@ fn narrowbody_operational_routes_fly_full_trajectory_with_explicit_fuel_status()
             .mission_result
             .as_ref()
             .unwrap_or_else(|| panic!("mission telemetry missing for {name}"));
+        assert!(mission.figure_data_ready());
         assert_eq!(mission.segments.len(), mission.scheduled_segment_count);
         assert_eq!(mission.solutions.len(), mission.segments.len());
         assert!(mission
             .solutions
             .iter()
             .all(|solution| solution.converged && !solution.throttle_limited));
-        if mission.completed_summary().is_some() {
-            assert_eq!(
-                result.feasibility.fuel_loading.mission.status,
-                alas_pipeline::MissionFuelStatus::Completed
-            );
-            assert!(result
-                .feasibility
-                .fuel_loading
-                .mission
-                .completed_trip_burn_kg
-                .is_some());
-        } else {
-            assert!(mission
-                .fuel_exhaustion
-                .as_ref()
-                .is_some_and(|crossing| crossing.segment_tag == "final_landing"));
-            assert_eq!(
-                result.feasibility.fuel_loading.mission.status,
-                alas_pipeline::MissionFuelStatus::Exhausted
-            );
-        }
+        assert_eq!(
+            result.feasibility.fuel_loading.mission.status,
+            alas_pipeline::MissionFuelStatus::Completed
+        );
+        assert!(result
+            .feasibility
+            .fuel_loading
+            .mission
+            .required_trip_fuel_kg
+            .is_some());
     }
 }

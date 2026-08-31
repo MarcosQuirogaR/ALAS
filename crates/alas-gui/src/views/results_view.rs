@@ -304,6 +304,7 @@ fn figure_tile(
                             &camera_key,
                             &view_key,
                             vec2(canvas_width, canvas_height),
+                            false,
                         );
                         if interaction.double_clicked {
                             open_fullscreen_result(
@@ -512,6 +513,7 @@ fn show_fullscreen_result(state: &mut AppState, ctx: &egui::Context, figure: Ful
                             &fullscreen_camera,
                             &fullscreen_view,
                             vec2(available.x, available.y.max(180.0)),
+                            true,
                         );
                         if interaction.camera_changed {
                             result_3d::rebuild_scene(
@@ -564,9 +566,12 @@ fn unavailable_reason(state: &AppState, id: &str) -> String {
     } else if matches!(id, "mission_route_2d" | "mission_route_3d") && result.route.is_none() {
         tr("Not available: route planning did not produce a route.")
     } else if required_stage == Some(alas_report::RequiredStage::Mission)
-        && result.mission_result.is_none()
+        && result
+            .mission_result
+            .as_ref()
+            .map_or(true, |mission| !mission.figure_data_ready())
     {
-        tr("Not available: mission was disabled or did not produce telemetry.")
+        tr("Not available: mission was disabled, incomplete, or did not produce valid figure telemetry.")
     } else if required_stage == Some(alas_report::RequiredStage::Mses) {
         let detail = result
             .mses_pressure

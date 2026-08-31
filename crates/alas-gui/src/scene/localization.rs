@@ -147,11 +147,11 @@ fn localize_route_footer(text: &str) -> Option<String> {
         );
     }
     let (profile_note, orbit_note) = description.rsplit_once(" | ")?;
-    if orbit_note != "orthographic globe; drag to orbit; scroll to zoom" {
+    if orbit_note != "orthographic globe; drag to orbit; wheel zoom in fullscreen" {
         return None;
     }
     Some(
-        alas_i18n::t(Some("{waypoints} waypoints | {distance_km} km | {profile_note} | orthographic globe; drag to orbit; scroll to zoom"), None)
+        alas_i18n::t(Some("{waypoints} waypoints | {distance_km} km | {profile_note} | orthographic globe; drag to orbit; wheel zoom in fullscreen"), None)
             .replace("{waypoints}", waypoints)
             .replace("{distance_km}", distance_km)
             .replace("{profile_note}", &alas_i18n::t(Some(profile_note), None)),

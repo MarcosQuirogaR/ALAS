@@ -305,7 +305,26 @@ impl MissionAnalyses {
                     specific_impulse_s: f64::NAN,
                 };
             }
-            Err(error) => panic!("mission propulsion evaluation failed: {error}"),
+            Err(error) => {
+                // A typed model-domain rejection can occur at a nonlinear
+                // solver trial point. The mission API predates the neutral
+                // Result boundary, so encode the rejected point as a
+                // non-finite residual input and let the root solver report a
+                // controlled non-convergence instead of panicking the GUI.
+                tracing::warn!(
+                    error = %error,
+                    "mission propulsion rejected a trial operating point"
+                );
+                return ThrustOutput {
+                    thrust_n: f64::NAN,
+                    thrust_specific_fuel_consumption: f64::NAN,
+                    non_dimensional_thrust: f64::NAN,
+                    core_mass_flow_rate_kg_s: f64::NAN,
+                    fuel_flow_rate_kg_s: f64::NAN,
+                    power_w: f64::NAN,
+                    specific_impulse_s: f64::NAN,
+                };
+            }
         };
 
         // Mission's historical output uses positive fuel consumption in

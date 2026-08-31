@@ -83,9 +83,7 @@ pub use geometry::{
 };
 pub use landing_gear::LandingGearConfig;
 pub use mass::MassModelConfig;
-pub use mission::{
-    FuelPolicy, MissionConfig, MissionModel, MissionProfileConfig, TotalEnergyMissionConfig,
-};
+pub use mission::{MissionConfig, MissionProfileConfig};
 pub use mses::MsesConfig;
 pub use optimizer::{ObjectiveWeights, OptimizerConfig, SolverSettings};
 pub use performance::PerformanceConfig;

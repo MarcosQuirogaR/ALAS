@@ -34,7 +34,7 @@
 //! rather than merely constructed.
 
 pub mod numerics;
-pub mod product;
+pub mod operating;
 pub mod profile;
 pub mod segments;
 pub mod solve;
@@ -53,7 +53,3 @@ pub use vehicle::{
     build_vehicle_request, build_vehicle_request_reference_compatibility, ReportView,
     VehicleRequest, VehicleRequestError,
 };
-pub mod airdata;
-pub mod operating;
-pub mod total_energy;
-pub mod trajectory;

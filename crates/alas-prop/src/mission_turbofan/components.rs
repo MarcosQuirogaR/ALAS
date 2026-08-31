@@ -339,7 +339,17 @@ pub(super) fn compute_thrust(
         * (total_pressure_reference_pa / REFERENCE_PRESSURE_PA);
     let full_thrust = fsp * a0 * (1.0 + bypass_ratio) * mdot_core * number_of_engines;
     let full_fuel_flow = (full_thrust * full_tsfc / g).max(0.0) / SECONDS_PER_HOUR;
-    let command = throttle.clamp(0.0, 1.0);
+    // The frozen SUAVE compatibility path deliberately leaves the scalar
+    // solver variable unbounded: SciPy/MINPACK is allowed to evaluate a
+    // mathematical root above one and the fixture records that command. The
+    // product path is the physical bounded command and clamps it at the
+    // propulsion boundary. Keeping the choice here, where the two historical
+    // semantics actually diverge, preserves parity without exposing an
+    // impossible product-engine operating point.
+    let command = match part_power_model {
+        PartPowerModel::LegacyLinear => throttle,
+        PartPowerModel::IcaoLtoFuelFlow { .. } => throttle.clamp(0.0, 1.0),
+    };
     let (thrust_fraction, fuel_fraction) = match part_power_model {
         PartPowerModel::LegacyLinear => (command, command),
         PartPowerModel::IcaoLtoFuelFlow { fuel_flow_ratios } => {

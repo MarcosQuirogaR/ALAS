@@ -10,7 +10,7 @@
 //!
 //! Split into topical submodules, following the pattern
 //! `crates/alas-geom/src/aircraft/airfoil/` already set, so no single file grows
-//! past this crate's 700-line limit: [`planform`] for the top-view overlays
+//! past this crate's 500-line limit: [`planform`] for the top-view overlays
 //! (`figure_geometry`, `figure_planform_comparison`, `figure_design_evolution`),
 //! [`threeview`] for the four-panel orthographic/isometric projection,
 //! [`wireframe`] for the isolated-component 3D wireframes and the exterior

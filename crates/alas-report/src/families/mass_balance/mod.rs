@@ -8,7 +8,7 @@
 //!
 //! `figure_cg_envelope` and `figure_mass_distribution` alone translate close
 //! to 980 lines of `visualization.py`, past what one file under this crate's
-//! 700-line limit can hold, so this became a directory module -- the same
+//! 500-line limit can hold, so this became a directory module -- the same
 //! split `alas-geom::aircraft::airfoil` already uses. [`cg_envelope`] and
 //! [`mass_distribution`] hold those two.
 //!
