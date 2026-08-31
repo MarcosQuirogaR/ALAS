@@ -40,7 +40,32 @@ pub fn build_passenger_layout(
     pax: &PassengerCabinConfig,
     req: &DesignRequirements,
 ) -> PayloadLayout {
-    build_passenger_layout_with_mass_semantics(g, pax, req, CargoMassSemantics::Net, true)
+    build_passenger_layout_with_mass_semantics(g, pax, req, CargoMassSemantics::Net, true, None)
+}
+
+/// Build a product passenger layout while balancing the payload against the
+/// operating-empty aircraft supplied by the caller.
+///
+/// The public layout-only entry point above has no empty-aircraft mass and
+/// therefore retains its seat-centred baggage placement. Full mass analyses
+/// do have that information. Passing it here lets the loader solve the
+/// longitudinal moment balance instead of accepting an aft passenger load
+/// that makes the zero-fuel aircraft unstable or unloads the nose gear.
+pub(crate) fn build_passenger_layout_with_aircraft_cg_target(
+    g: &CabinGeometry,
+    pax: &PassengerCabinConfig,
+    req: &DesignRequirements,
+    oew: f64,
+    x_oew: f64,
+) -> PayloadLayout {
+    build_passenger_layout_with_mass_semantics(
+        g,
+        pax,
+        req,
+        CargoMassSemantics::Net,
+        true,
+        Some((oew, x_oew)),
+    )
 }
 
 /// Build a passenger layout with the frozen gross-target baggage correction
@@ -57,6 +82,7 @@ pub fn build_passenger_layout_reference_compatibility(
         req,
         CargoMassSemantics::ReferenceGross,
         false,
+        None,
     )
 }
 
@@ -66,12 +92,13 @@ fn build_passenger_layout_with_mass_semantics(
     req: &DesignRequirements,
     mass_semantics: CargoMassSemantics,
     product_interior: bool,
+    aircraft_cg_target: Option<(f64, f64)>,
 ) -> PayloadLayout {
     let mut classes = resolve_classes(pax, req.num_passengers);
     let total_pax: i64 = classes.iter().map(|class| class.config.count).sum();
     let aisle_w = resolve_aisle_width(pax, total_pax);
 
-    let mut seating = place_seats(g, pax, &mut classes, aisle_w);
+    let mut seating = place_seats(g, pax, &mut classes, aisle_w, product_interior);
     let seated: i64 = classes.iter().map(|class| class.seated).sum();
 
     let mut items = std::mem::take(&mut seating.items);
@@ -88,14 +115,23 @@ fn build_passenger_layout_with_mass_semantics(
         product_interior,
     );
     items.extend(monuments);
-    let exits = place_exits(g, &seating);
+    let exits = place_exits(g, &seating, product_interior);
     items.extend(exits.items);
 
     // The bags follow the passengers, so the trim target is the seating's own
     // balance. An empty cabin has none, and the middle of it is the neutral
     // answer rather than the datum.
     let (seat_mass, seat_cg) = seat_mass_and_cg(&items, g);
-    let bags = place_baggage(g, pax, req, seated, seat_mass, seat_cg, mass_semantics);
+    let bags = place_baggage(
+        g,
+        pax,
+        req,
+        seated,
+        seat_mass,
+        seat_cg,
+        mass_semantics,
+        aircraft_cg_target,
+    );
     items.extend(bags.items);
 
     let (total_mass, cg_x, cg_y) = mass_properties(&items);

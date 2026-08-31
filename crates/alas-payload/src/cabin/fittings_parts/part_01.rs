@@ -301,8 +301,17 @@ pub(super) struct Exits {
 /// passengers actually seated on it after the capacity cap -- never from the
 /// raw requested total, which is what a deck that could not seat them all would
 /// otherwise be given doors for.
-pub(super) fn place_exits(g: &CabinGeometry, seating: &Seating) -> Exits {
+pub(super) fn place_exits(
+    g: &CabinGeometry,
+    seating: &Seating,
+    product_exit_capacity: bool,
+) -> Exits {
     let spec = select_exit_type(g.diameter_m);
+    let capacity_per_pair = if product_exit_capacity {
+        spec.capacity_per_side * 2
+    } else {
+        spec.capacity_per_side
+    };
     let mut items = Vec::new();
     let mut pairs = 0i64;
 
@@ -312,7 +321,7 @@ pub(super) fn place_exits(g: &CabinGeometry, seating: &Seating) -> Exits {
         if deck_pax <= 0 {
             continue;
         }
-        let n_pairs = min_exit_pairs(deck_pax).max(ceil_div(deck_pax, spec.capacity_per_side));
+        let n_pairs = min_exit_pairs(deck_pax).max(ceil_div(deck_pax, capacity_per_pair));
 
         let mut deck_bays: Vec<&Bay> = seating
             .bays

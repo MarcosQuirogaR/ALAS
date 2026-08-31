@@ -378,9 +378,16 @@ fn build_analyses_with_mode(
         minimum_mass_kg: Some(fuel_loading.zero_fuel_mass_kg),
         fuselage_lift_correction: alas_aero::lift_surrogate::FUSELAGE_LIFT_CORRECTION,
         induced_drag_lift_correction: match reference_mode {
-            MissionReferenceMode::Product => alas_aero::lift_surrogate::FUSELAGE_LIFT_CORRECTION,
+            // SUAVE's Fidelity_Zero `fuselage_lift_correction` multiplies the
+            // aircraft lift used for force balance. It does not say to scale
+            // each VLM wing's induced drag, and `MissionAnalyses` squares this
+            // field before the drag buildup. Keeping this at unity avoids an
+            // unsupported CDi bias; a future calibrated wing-load model can
+            // opt in explicitly at this boundary.
+            MissionReferenceMode::Product => 1.0,
             MissionReferenceMode::ReferenceCompatibility => 1.0,
         },
+        signed_cruise_force_residual: matches!(reference_mode, MissionReferenceMode::Product),
         enforce_throttle_envelope: matches!(reference_mode, MissionReferenceMode::Product),
         drag_settings,
         wings,
@@ -620,6 +627,14 @@ fn vlm_geometry(
     let wing_x = wing.root_datum_x_m + design.wing_x_shift_m;
     let hstab_span = 2.0 * hstab_area / (tail.hstab_root_chord_m + tail.hstab_tip_chord_m);
     let vstab_span = 2.0 * vstab_area / (tail.vstab_root_chord_m + tail.vstab_tip_chord_m);
+    let mission_hstab_incidence_deg = match reference_mode {
+        MissionReferenceMode::Product => report
+            .trimmed_design_point
+            .map(|point| point.trim_ih_deg)
+            .filter(|incidence| incidence.is_finite())
+            .unwrap_or(tail.hstab_root_twist_deg),
+        MissionReferenceMode::ReferenceCompatibility => tail.hstab_root_twist_deg,
+    };
 
     let main = VlmWing {
         tag: "main_wing".to_owned(),
@@ -661,8 +676,13 @@ fn vlm_geometry(
         aspect_ratio: hstab_span * hstab_span / hstab_area,
         sweep_quarter_chord_rad: tail.hstab_tip_le_m.0.atan2(tail.hstab_tip_le_m.1),
         sweep_leading_edge_rad: None,
-        twist_root_rad: tail.hstab_root_twist_deg.to_radians(),
-        twist_tip_rad: tail.hstab_tip_twist_deg.to_radians(),
+        // The full analysis solves the cruise pitching-moment trim before the
+        // mission surrogate is trained. A fixed trimmed incidence is the
+        // closest available cruise surrogate; the point-mass mission itself
+        // has no elevator or Cm residual, so phase-specific trim remains a
+        // declared fidelity limit rather than being implied here.
+        twist_root_rad: mission_hstab_incidence_deg.to_radians(),
+        twist_tip_rad: mission_hstab_incidence_deg.to_radians(),
         dihedral_rad: 0.0,
         area_reference_m2: hstab_area,
         origin_m: [

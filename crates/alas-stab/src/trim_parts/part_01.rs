@@ -44,6 +44,11 @@ pub struct StabilityTrimResult {
     /// Lift-curve slope `dCL/dalpha`, *per degree* (the probe delta is in
     /// degrees), as the two alpha probes measured it.
     pub cl_alpha: f64,
+    /// Pitching-moment slope `dCm/dalpha`, per degree, as the same two alpha
+    /// probes measured it. Exposing this keeps a failed trim Jacobian
+    /// diagnosable at the pipeline boundary instead of collapsing it to a
+    /// Boolean `converged` flag.
+    pub cm_alpha: f64,
     /// The angle of attack that trims `CL = cl_target`, degrees.
     pub trim_alpha_deg: f64,
     /// The horizontal-stabilizer incidence that trims `Cm = 0`, degrees; NaN
@@ -391,6 +396,7 @@ fn stability_and_trim_with_reference_mode(
                 x_np,
                 static_margin: sm,
                 cl_alpha,
+                cm_alpha,
                 trim_alpha_deg: trim_alpha,
                 trim_ih_deg: f64::NAN,
                 cl_ih: 0.0,
@@ -437,13 +443,36 @@ fn stability_and_trim_with_reference_mode(
         Ok(_) => (0.0, 0.0, false),
     };
 
+    // The closed-form result is the same local linear estimate used by the
+    // historical translation. Product analyses, however, immediately feed
+    // the answer into a finer VLM mesh and then use its actual trim drag. A
+    // single linear step can leave a materially non-zero Cm on swept,
+    // cambered transport geometries (the B787-9 is one example). Refine the
+    // product answer against the actual VLM residuals; compatibility mode
+    // deliberately retains the frozen one-shot result for parity fixtures.
+    let (trim_alpha_deg, trim_ih_deg, converged) = if !reference_compatibility && converged {
+        let (alpha, incidence, refined) = refine_trim(
+            airplane,
+            analysis,
+            cl_target,
+            atmosphere,
+            velocity,
+            a_lo + d_a,
+            i_h0 + d_ih,
+        )?;
+        (alpha, incidence, refined)
+    } else {
+        (a_lo + d_a, i_h0 + d_ih, converged)
+    };
+
     Ok(StabilityTrimResult {
         converged,
         x_np,
         static_margin: sm,
         cl_alpha,
-        trim_alpha_deg: a_lo + d_a,
-        trim_ih_deg: i_h0 + d_ih,
+        cm_alpha,
+        trim_alpha_deg,
+        trim_ih_deg,
         cl_ih,
         cm_ih,
     })

@@ -118,10 +118,16 @@ pub(super) fn place_seats(
     pax: &PassengerCabinConfig,
     classes: &mut [CabinClass],
     aisle_w: f64,
+    product_exit_capacity: bool,
 ) -> Seating {
     let deck_caps = max_certifiable_capacity(g, pax);
     let segments = cabin_deck_segments(g);
-    let est_cap = select_exit_type(g.diameter_m).capacity_per_side;
+    let exit_spec = select_exit_type(g.diameter_m);
+    let est_cap = if product_exit_capacity {
+        exit_spec.capacity_per_side * 2
+    } else {
+        exit_spec.capacity_per_side
+    };
 
     let mut items = Vec::new();
     let mut bays = Vec::new();

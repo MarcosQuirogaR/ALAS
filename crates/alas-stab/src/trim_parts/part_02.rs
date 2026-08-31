@@ -110,6 +110,101 @@ fn with_hstab_twist(airplane: &Airplane, twist_deg: f64) -> Airplane {
     plane
 }
 
+/// Refine the closed-form trim estimate against the nonlinear VLM residuals.
+///
+/// The geometry solver is linear in circulation but the stabilizer incidence
+/// changes the mesh geometry, so the two-point Jacobian is only a local model.
+/// This Newton refinement is intentionally product-only; the explicit
+/// compatibility API keeps the historical one-shot result and its fixtures.
+fn refine_trim(
+    airplane: &Airplane,
+    analysis: &AnalysisConfig,
+    cl_target: f64,
+    atmosphere: Atmosphere,
+    velocity: f64,
+    mut alpha_deg: f64,
+    mut incidence_deg: f64,
+) -> Result<(f64, f64, bool), VlmError> {
+    const MAX_ITERATIONS: usize = 8;
+    const RESIDUAL_TOLERANCE: f64 = 1.0e-7;
+    const ALPHA_STEP_DEG: f64 = 0.1;
+    const INCIDENCE_STEP_DEG: f64 = 0.1;
+    const MAX_UPDATE_DEG: f64 = 5.0;
+
+    if !alpha_deg.is_finite() || !incidence_deg.is_finite() || !cl_target.is_finite() {
+        return Ok((alpha_deg, incidence_deg, false));
+    }
+
+    for _ in 0..MAX_ITERATIONS {
+        let at_incidence = with_hstab_twist(airplane, incidence_deg);
+        let base = probe(
+            &at_incidence,
+            analysis,
+            atmosphere,
+            velocity,
+            alpha_deg,
+        )?;
+        let residual_cl = base.cl_lift - cl_target;
+        let residual_cm = base.cm_pitch;
+        if residual_cl.is_finite()
+            && residual_cm.is_finite()
+            && residual_cl.abs().max(residual_cm.abs()) <= RESIDUAL_TOLERANCE
+        {
+            return Ok((alpha_deg, incidence_deg, true));
+        }
+
+        let alpha_probe = probe(
+            &at_incidence,
+            analysis,
+            atmosphere,
+            velocity,
+            alpha_deg + ALPHA_STEP_DEG,
+        )?;
+        let incidence_probe = with_hstab_twist(airplane, incidence_deg + INCIDENCE_STEP_DEG);
+        let incidence_probe = probe(
+            &incidence_probe,
+            analysis,
+            atmosphere,
+            velocity,
+            alpha_deg,
+        )?;
+        let jacobian = vec![
+            vec![
+                (alpha_probe.cl_lift - base.cl_lift) / ALPHA_STEP_DEG,
+                (incidence_probe.cl_lift - base.cl_lift) / INCIDENCE_STEP_DEG,
+            ],
+            vec![
+                (alpha_probe.cm_pitch - base.cm_pitch) / ALPHA_STEP_DEG,
+                (incidence_probe.cm_pitch - base.cm_pitch) / INCIDENCE_STEP_DEG,
+            ],
+        ];
+        let rhs = vec![vec![residual_cl], vec![residual_cm]];
+        let Ok(update) = linalg::solve(&jacobian, &rhs) else {
+            return Ok((alpha_deg, incidence_deg, false));
+        };
+        let Some(delta_alpha) = update.first().and_then(|row| row.first()).copied() else {
+            return Ok((alpha_deg, incidence_deg, false));
+        };
+        let Some(delta_incidence) = update.get(1).and_then(|row| row.first()).copied() else {
+            return Ok((alpha_deg, incidence_deg, false));
+        };
+        if !delta_alpha.is_finite() || !delta_incidence.is_finite() {
+            return Ok((alpha_deg, incidence_deg, false));
+        }
+
+        let scale = 1.0_f64
+            .min(MAX_UPDATE_DEG / delta_alpha.abs().max(1.0e-12))
+            .min(MAX_UPDATE_DEG / delta_incidence.abs().max(1.0e-12));
+        alpha_deg -= scale * delta_alpha;
+        incidence_deg -= scale * delta_incidence;
+        if !alpha_deg.is_finite() || !incidence_deg.is_finite() {
+            return Ok((alpha_deg, incidence_deg, false));
+        }
+    }
+
+    Ok((alpha_deg, incidence_deg, false))
+}
+
 // A test asserts on values it constructed here directly, so a failed unwrap or
 // expect is the assertion failing, not a library invariant being broken.
 #[allow(clippy::unwrap_used, clippy::expect_used)]
@@ -320,4 +415,3 @@ mod tests {
         assert!((hstab.reference_area() - hstab.unfolded_area()).abs() > 1e-6);
     }
 }
-

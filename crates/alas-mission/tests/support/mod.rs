@@ -250,6 +250,7 @@ pub fn analyses(vehicle: &Vehicle, training: &SurrogateTraining) -> MissionAnaly
         minimum_mass_kg: None,
         fuselage_lift_correction: vehicle.fuselage_lift_correction,
         induced_drag_lift_correction: 1.0,
+        signed_cruise_force_residual: false,
         enforce_throttle_envelope: false,
         // The mission fixture is frozen SUAVE evidence. Its historical drag
         // total directly summed per-wing compressibility coefficients; keep

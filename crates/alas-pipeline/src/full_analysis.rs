@@ -20,7 +20,7 @@ use std::f64::consts::PI;
 use alas_aero::analysis::{AeroAnalysis, PolarSweep, TrimPoint};
 use alas_atmo::Atmosphere;
 use alas_config::design_variables::DesignVector;
-use alas_config::AlasConfig;
+use alas_config::{presets, AlasConfig};
 use alas_geom::aircraft::airplane::Airplane;
 use alas_geom::builder::AircraftBuilder;
 use alas_mass::breakdown::{MassBreakdown, MassCoordinateModel, MassCoordinates};

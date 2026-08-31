@@ -35,6 +35,8 @@ fn finding_title(code: FindingCode) -> String {
         }
         FindingCode::PassengerCapacityShortfall => "Passenger seating shortfall",
         FindingCode::CargoCapacityShortfall => "Cargo capacity shortfall",
+        FindingCode::MaximumZeroFuelWeightViolation => "Maximum zero-fuel weight exceeded",
+        FindingCode::StructuralPayloadLimitViolation => "Structural payload limit exceeded",
     })
 }
 
@@ -67,6 +69,8 @@ fn finding_meaning(code: FindingCode) -> String {
         FindingCode::MissionThrottleLimitViolation => "At least one mission control point requires a throttle command above the modeled full-throttle limit of 1.0.",
         FindingCode::PassengerCapacityShortfall => "The generated cabin placed fewer passenger seats than the requested passenger count.",
         FindingCode::CargoCapacityShortfall => "The generated ULD layout delivered less net cargo than requested.",
+        FindingCode::MaximumZeroFuelWeightViolation => "The modeled zero-fuel mass exceeds the published maximum zero-fuel weight for this unchanged preset.",
+        FindingCode::StructuralPayloadLimitViolation => "The modeled payload exceeds the configured structural payload limit.",
     })
 }
 
@@ -102,6 +106,8 @@ fn finding_next_step(code: FindingCode) -> String {
         FindingCode::PassengerCapacityShortfall | FindingCode::CargoCapacityShortfall => {
             "Weight & Balance payload layout"
         }
+        FindingCode::MaximumZeroFuelWeightViolation => "Weight & Balance and Payload",
+        FindingCode::StructuralPayloadLimitViolation => "Structures and Weight & Balance",
     })
 }
 
@@ -137,6 +143,10 @@ fn affected_disciplines(code: FindingCode) -> String {
         FindingCode::PassengerCapacityShortfall | FindingCode::CargoCapacityShortfall => {
             "Payload layout | Weight & balance"
         }
+        FindingCode::MaximumZeroFuelWeightViolation => "Weight & balance | Mass properties | Payload",
+        FindingCode::StructuralPayloadLimitViolation => {
+            "Structures | Payload layout | Weight & balance"
+        }
     })
 }
 
@@ -149,6 +159,8 @@ fn actual_label(code: FindingCode) -> String {
         FindingCode::FieldLandingDistanceViolation => "Required value",
         FindingCode::MissionThrottleLimitViolation => "Maximum throttle",
         FindingCode::TankLimitedTakeoffMass => "MTOW-closure fuel",
+        FindingCode::MaximumZeroFuelWeightViolation => "Calculated zero-fuel mass",
+        FindingCode::StructuralPayloadLimitViolation => "Modeled payload",
         _ => "Calculated",
     })
 }
@@ -162,6 +174,8 @@ fn limit_label(code: FindingCode) -> String {
         FindingCode::FieldLandingDistanceViolation => "Available / limiting value",
         FindingCode::MissionThrottleLimitViolation => "Full-throttle limit",
         FindingCode::TankLimitedTakeoffMass => "Usable tank capacity",
+        FindingCode::MaximumZeroFuelWeightViolation => "Published MZFW",
+        FindingCode::StructuralPayloadLimitViolation => "Structural payload limit",
         _ => "Limit",
     })
 }
@@ -173,7 +187,9 @@ fn finding_margin(code: FindingCode, actual: f64, limit: f64) -> f64 {
         | FindingCode::ThrustMarginViolation
         | FindingCode::MinimumNoseGearLoadViolation
         | FindingCode::PassengerCapacityShortfall
-        | FindingCode::CargoCapacityShortfall => actual - limit,
+        | FindingCode::CargoCapacityShortfall
+        | FindingCode::MaximumZeroFuelWeightViolation
+        | FindingCode::StructuralPayloadLimitViolation => actual - limit,
         _ => limit - actual,
     }
 }

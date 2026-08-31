@@ -65,6 +65,11 @@ pub enum FindingCode {
     PassengerCapacityShortfall,
     /// The requested net cargo exceeds the net load the ULD layout placed.
     CargoCapacityShortfall,
+    /// The modeled zero-fuel mass exceeds the published maximum zero-fuel
+    /// weight for an unchanged registered preset.
+    MaximumZeroFuelWeightViolation,
+    /// The modeled payload exceeds the configured structural payload cap.
+    StructuralPayloadLimitViolation,
 }
 
 /// Severity of a physical finding.

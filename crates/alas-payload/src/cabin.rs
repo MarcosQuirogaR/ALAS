@@ -37,6 +37,7 @@ mod engine;
 mod fittings;
 mod seating;
 
+pub(crate) use engine::build_passenger_layout_with_aircraft_cg_target;
 pub use engine::{build_passenger_layout, build_passenger_layout_reference_compatibility};
 
 use alas_config::PassengerCabinConfig;

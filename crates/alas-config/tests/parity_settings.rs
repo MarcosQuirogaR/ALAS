@@ -427,6 +427,7 @@ fn preset_source_corrections() -> BTreeMap<String, SourceCorrection> {
             "A220-300", "A320-200", "A340-300", "A380-800", "AVE", "B787-9", "DC-10",
         ],
     );
+    add_planning_cabin_corrections(&mut corrections, &["A220-300", "A320-200", "A340-300"]);
     for (case, kink_fraction) in [
         ("A340-300", 0.362_094_754_983_253_8),
         ("A380-800", 0.359_236_516_064_625_5),
@@ -520,6 +521,7 @@ fn saved_file_source_corrections() -> BTreeMap<String, SourceCorrection> {
             "deep_partial",
         ],
     );
+    add_planning_cabin_corrections(&mut corrections, &["preset_only"]);
     corrections.insert(
         "preset_then_field.geometry.wing.kink_span_fraction".to_owned(),
         SourceCorrection {
@@ -571,6 +573,32 @@ fn saved_file_source_corrections() -> BTreeMap<String, SourceCorrection> {
         ],
     );
     corrections
+}
+
+/// The product presets now load an explicit, physically representable generic
+/// planning cabin instead of inheriting the old widebody business block. The
+/// saved Python fixture remains frozen; these leaves document the deliberate
+/// source correction rather than making the parity test silently accept drift.
+fn add_planning_cabin_corrections(
+    corrections: &mut BTreeMap<String, SourceCorrection>,
+    cases: &[&str],
+) {
+    for case in cases {
+        corrections.insert(
+            format!("{case}.cabin.passenger.business.share_pct"),
+            SourceCorrection {
+                upstream: Value::from(15.0),
+                corrected: Value::from(0.0),
+            },
+        );
+        corrections.insert(
+            format!("{case}.cabin.passenger.economy.share_pct"),
+            SourceCorrection {
+                upstream: Value::from(85.0),
+                corrected: Value::from(100.0),
+            },
+        );
+    }
 }
 
 fn add_optimizer_method_corrections(

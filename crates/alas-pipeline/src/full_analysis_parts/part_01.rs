@@ -115,10 +115,16 @@ impl FullAnalysis {
 
         // Second pass: build detailed interior layout and recompute mass breakdown and CG.
         let (oew, x_oew) = oew_and_cg(&masses_init, &coords_init);
+        let effective_structural_payload_limit_kg =
+            effective_structural_payload_limit_kg(&self.config, design, oew);
+        let mut payload_config = self.config.clone();
+        if let Some(limit_kg) = effective_structural_payload_limit_kg {
+            payload_config.requirements.max_structural_payload_kg = limit_kg;
+        }
         let payload_layout = if self.reference_compatibility {
             build_payload_layout_reference_compatibility(&plane, &self.config, oew, x_oew)
         } else {
-            build_payload_layout(&plane, &self.config, oew, x_oew)
+            build_payload_layout(&plane, &payload_config, oew, x_oew)
         }
         .map_err(|error| format!("payload layout error: {error}"))?;
         let layout_summary = Some(alas_mass::breakdown::PayloadLayoutSummary {
@@ -223,6 +229,14 @@ impl FullAnalysis {
         // Trimmed cruise operating point.
         let trimmed_design_point = self.compute_trimmed_design_point(&plane, &aero, &fine_analysis);
 
+        let mut geometry_summary = self.geometry_summary(&plane, design);
+        if let Some(limit_kg) = effective_structural_payload_limit_kg {
+            geometry_summary.insert(
+                "effective_structural_payload_limit_kg".to_owned(),
+                limit_kg,
+            );
+        }
+
         Ok(AnalysisReport {
             design: *design,
             airplane: plane.clone(),
@@ -231,7 +245,7 @@ impl FullAnalysis {
             polar_fit,
             static_margin: sm,
             x_neutral_point: x_np,
-            geometry_summary: self.geometry_summary(&plane, design),
+            geometry_summary,
             component_masses: breakdown_to_map(&masses),
             mass_coordinates: coordinates_to_map(&coords),
             physical_cg: cg,
@@ -241,4 +255,35 @@ impl FullAnalysis {
         })
     }
 
+}
+
+/// Resolve the structural payload bound for an unchanged registered preset.
+///
+/// The configuration cap is normally the published `MZFW - OEW` value. The
+/// product mass method is an estimate, however, and its modeled OEW can be
+/// heavier than the source OEW. In that case the safe payload bound is the
+/// smaller of the configured cap and `MZFW - modeled OEW`; otherwise the
+/// detailed layout would appear to respect the payload cap while still
+/// producing an overweight zero-fuel mass. Modified/notional designs do not
+/// inherit a published MZFW from a preset.
+fn effective_structural_payload_limit_kg(
+    config: &AlasConfig,
+    design: &DesignVector,
+    modeled_oew_kg: f64,
+) -> Option<f64> {
+    let preset = presets::get(&config.preset).ok()?;
+    if *design != preset.design_vector {
+        return None;
+    }
+    let mzfw_kg = preset.reference.mzfw_kg?;
+    let available_payload_kg = mzfw_kg - modeled_oew_kg;
+    if !mzfw_kg.is_finite() || !modeled_oew_kg.is_finite() || available_payload_kg <= 0.0 {
+        return None;
+    }
+    let configured_limit_kg = config.requirements.max_structural_payload_kg;
+    Some(if configured_limit_kg.is_finite() && configured_limit_kg > 0.0 {
+        configured_limit_kg.min(available_payload_kg)
+    } else {
+        available_payload_kg
+    })
 }

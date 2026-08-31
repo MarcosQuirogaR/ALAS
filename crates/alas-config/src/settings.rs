@@ -230,6 +230,12 @@ impl AlasConfig {
                     // every downstream solver must preserve verbatim.
                     instance.geometry.engine.apply_engine_spec();
                     instance.requirements = preset.requirements.clone();
+                    // A preset's published passenger target is a load-case
+                    // input, not an operator LOPA. Seed the generic cabin
+                    // with the profile that can physically represent that
+                    // target; the file overlay below remains authoritative
+                    // for deliberate cabin edits.
+                    instance.cabin = preset.planning_cabin_config();
                     instance.landing_gear = preset.landing_gear.clone();
                     if let Some(mass_model) = &preset.mass_model {
                         instance.mass_model = mass_model.clone();
@@ -277,6 +283,22 @@ mod tests {
         assert_eq!(config.requirements, preset.requirements);
         assert_eq!(config.landing_gear, preset.landing_gear);
         assert_eq!(config.preset, "A380-800");
+    }
+
+    #[test]
+    fn a_preset_loads_a_representable_planning_cabin_without_changing_the_brief() {
+        let narrowbody = AlasConfig::from_value(&json!({"preset": "A320-200"})).unwrap();
+        assert_eq!(narrowbody.requirements.num_passengers, 150);
+        assert_eq!(narrowbody.cabin.passenger.business.share_pct, 0.0);
+        assert_eq!(narrowbody.cabin.passenger.economy.share_pct, 100.0);
+
+        let widebody = AlasConfig::from_value(&json!({"preset": "B787-9"})).unwrap();
+        assert_eq!(widebody.cabin.passenger.business.share_pct, 15.0);
+        assert_eq!(widebody.cabin.passenger.economy.share_pct, 85.0);
+
+        let regional = AlasConfig::from_value(&json!({"preset": "ATR72-600"})).unwrap();
+        assert_eq!(regional.requirements.num_passengers, 72);
+        assert_eq!(regional.cabin.passenger.min_exit_pair_spacing_m, 9.5);
     }
 
     #[test]

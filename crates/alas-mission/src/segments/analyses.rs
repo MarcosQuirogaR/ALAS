@@ -105,11 +105,18 @@ pub struct MissionAnalyses {
     /// multiplied by.
     pub fuselage_lift_correction: f64,
     /// Scale applied to per-wing VLM lift and induced-drag coefficients before
-    /// the drag buildup. Product analyses may carry the fuselage correction
-    /// here when their induced-drag policy follows corrected wing loads.
-    /// Frozen SUAVE evidence leaves the VLM drag inputs unchanged and sets
-    /// this to `1.0`.
+    /// the drag buildup. The product currently leaves this at `1.0`: the
+    /// SUAVE Fidelity-Zero fuselage correction belongs to the aircraft lift
+    /// balance, and must not be squared into VLM induced drag without a
+    /// separately calibrated load model. Frozen compatibility also sets this
+    /// to `1.0`.
     pub induced_drag_lift_correction: f64,
+    /// Whether the product solver uses the signed longitudinal force residual
+    /// for cruise. The frozen compatibility path retains SUAVE's historical
+    /// horizontal-force magnitude residual so its golden fixture remains
+    /// reproducible; product missions must preserve the sign so a thrust
+    /// deficit cannot look identical to a thrust surplus to the root finder.
+    pub signed_cruise_force_residual: bool,
     /// Whether a solved throttle above the available `[0, 1]` envelope marks
     /// the segment as non-converged. Product mission runs enforce this
     /// physical availability check; the frozen SUAVE compatibility path keeps

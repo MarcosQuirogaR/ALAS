@@ -326,6 +326,37 @@ pub struct OperationalMissionDefaults {
 }
 
 impl AircraftPreset {
+    /// Cabin seed used for the registered aircraft's generic planning load
+    /// case.
+    ///
+    /// The registry does not claim an operator-specific LOPA: the real
+    /// aircraft may be delivered with several cabin mixes, and the AFM/WBM
+    /// remains the authority for an actual dispatch load sheet. These seeds
+    /// only make the published passenger target representable by the common
+    /// geometry engine. A single-class economy seed is deliberately used for
+    /// the narrowbody, regional, and A340 targets because the generic
+    /// widebody lie-flat business block is not a valid default for those
+    /// bodies. Users can still edit the target shares while the cabin preset
+    /// is `Custom`.
+    pub fn planning_cabin_config(&self) -> crate::CabinConfig {
+        let mut cabin = crate::CabinConfig::default();
+        match self.name {
+            "A220-300" | "A320-200" | "A340-300" | "ATR72-600" => {
+                cabin.passenger.set_length_share_mix(&[("Economy", 1.0)]);
+            }
+            _ => {}
+        }
+        if self.name == "ATR72-600" {
+            // The official ATR 72-600 72-seat layout uses two Type-III exit
+            // pairs. The generic spacing proxy otherwise floors the 19.166 m
+            // passenger stretch to one pair (70 seats). 9.5 m is the smallest
+            // transparent spacing that represents two pairs in this
+            // preliminary geometry model; it is not a certification value.
+            cabin.passenger.min_exit_pair_spacing_m = 9.5;
+        }
+        cabin
+    }
+
     /// Where each engine hangs along the span, in metres from the centerline.
     pub fn engine_spanwise_positions(&self) -> &[f64] {
         &self.geometry.engine.spanwise_positions_m

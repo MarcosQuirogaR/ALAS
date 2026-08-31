@@ -34,9 +34,10 @@
 //! `Descent.Constant_Speed_Constant_Rate`, over the `Unknown_Throttle` process
 //! chain the first and third share and the second reproduces almost exactly.
 //! The one structural difference between them, beyond which `initialize`
-//! runs, is that a cruise segment's iterate chain omits `update_acceleration`
-//! and forms its horizontal residual from the *magnitude* of the horizontal
-//! force rather than from its `x` component; both are reproduced.
+//! runs, is that a cruise segment's iterate chain omits `update_acceleration`.
+//! The frozen compatibility path also retains the historical horizontal-force
+//! magnitude residual, while product missions use the signed longitudinal
+//! component so the root finder can distinguish thrust surplus from deficit.
 //!
 //! Untranslated because unreachable: `Energy.initialize_battery` (there is no
 //! battery behind a turbofan), `Weights.update_weights`' additional-fuel
@@ -365,18 +366,17 @@ impl Segment {
             self.spec.true_course_rad,
         );
 
-        self.update_residuals();
+        self.update_residuals(analyses.signed_cruise_force_residual);
     }
 
     /// The force that did not balance, per unit mass.
     ///
     /// A climb or descent compares the `x` and `z` forces against the
     /// accelerations the trajectory implies. A cruise has no acceleration term
-    /// -- its chain never computed one -- and takes the *magnitude* of the
-    /// horizontal force instead of its `x` component, which makes its
-    /// horizontal residual one-sided: a thrust deficit and a thrust surplus
-    /// both read positive.
-    fn update_residuals(&mut self) {
+    /// -- its chain never computed one. Product analyses use the signed `x`
+    /// component; the frozen compatibility path retains the historical
+    /// horizontal-force magnitude residual.
+    fn update_residuals(&mut self, signed_cruise_force_residual: bool) {
         for point in 0..self.conditions.len() {
             let force = self.conditions.total_force_vector_n[point];
             let mass = self.conditions.total_mass_kg[point];
@@ -384,7 +384,11 @@ impl Segment {
 
             self.residuals[point] = match self.spec.kind {
                 SegmentKind::Cruise { .. } => [
-                    (force[0] * force[0] + force[1] * force[1]).sqrt() / mass,
+                    if signed_cruise_force_residual {
+                        force[0] / mass - acceleration[0]
+                    } else {
+                        (force[0] * force[0] + force[1] * force[1]).sqrt() / mass
+                    },
                     force[2] / mass,
                 ],
                 _ => [
@@ -623,5 +627,29 @@ mod tests {
         assert_eq!(climb.body_angle_rad[0], INITIAL_CLIMB_BODY_ANGLE_RAD);
         assert_eq!(cruise.body_angle_rad[0], INITIAL_CRUISE_BODY_ANGLE_RAD);
         assert_ne!(climb.body_angle_rad[0], cruise.body_angle_rad[0]);
+    }
+
+    #[test]
+    fn product_cruise_residual_preserves_the_sign_of_a_thrust_deficit() {
+        let spec = SegmentSpec {
+            tag: "cruise_sign_probe".to_owned(),
+            kind: SegmentKind::Cruise {
+                altitude_m: Some(10_000.0),
+                distance_m: 1_000.0,
+            },
+            air_speed_m_s: 250.0,
+            true_course_rad: 0.0,
+            temperature_deviation_k: 0.0,
+            number_control_points: 2,
+        };
+        let mut segment = Segment::new(spec, None).expect("declared cruise altitude");
+        segment.conditions.total_force_vector_n[0] = [-100.0, 0.0, 0.0];
+        segment.conditions.total_mass_kg[0] = 10.0;
+
+        segment.update_residuals(true);
+        assert_eq!(segment.residuals[0][0], -10.0);
+
+        segment.update_residuals(false);
+        assert_eq!(segment.residuals[0][0], 10.0);
     }
 }

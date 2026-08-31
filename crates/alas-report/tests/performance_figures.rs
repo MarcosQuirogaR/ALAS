@@ -158,6 +158,20 @@ fn payload_range_changes_when_the_analyzed_payload_changes() {
 }
 
 #[test]
+fn payload_range_uses_a_registered_structural_payload_cap() {
+    let mut config = AlasConfig::default();
+    config.requirements.max_structural_payload_kg = 30_000.0;
+    let svg = render_svg(&performance::figure_payload_range(
+        &sample_report(20_000.0),
+        &config,
+        None,
+    ));
+
+    assert!(svg.contains("30.0 t"));
+    assert!(svg.contains("configured structural payload cap"));
+}
+
+#[test]
 fn payload_range_status_names_the_missing_physical_input() {
     let config = AlasConfig::default();
     let mut report = sample_report(20_000.0);
