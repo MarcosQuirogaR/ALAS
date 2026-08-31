@@ -381,6 +381,12 @@ pub static RESULT_FIGURES: &[FigureDescriptor] = &[
         "Weight & Balance",
         "Passenger, cargo, cabin, and payload layout.",
     ),
+    descriptor(
+        "cabin_section",
+        "Cabin Cross-Section",
+        "Weight & Balance",
+        "Representative transverse section showing decks, seats, aisles, overhead bins, and lower-hold loading.",
+    ),
     // Propulsion
     descriptor(
         "propulsion_cycle_summary",

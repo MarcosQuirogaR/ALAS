@@ -27,6 +27,8 @@ use crate::full_analysis::AnalysisReport;
 
 mod cruise_equilibrium;
 mod fuel;
+mod fuel_plan;
+mod payload;
 mod planning;
 mod report_format;
 mod types;
@@ -38,6 +40,11 @@ pub use fuel::{
     assess_fuel_capacity, CarriedFuelBasis, FuelCapacityAssessment, FuelCapacityEvidence,
     FuelLoadingAssessment, MissionFuelAssessment, MissionFuelStatus,
 };
+pub use fuel_plan::{
+    assess_mission_fuel_plan, FuelComponentAssessment, FuelComponentBasis, FuelComponentStatus,
+    FuelPlanStatus, FuelUnresolvedReason, MissionFuelPlan,
+};
+pub use payload::assess_payload;
 use planning::assess_public_cg_reference;
 #[cfg(test)]
 use planning::{assess_reference_limits, planning_cg_pct_mac};
@@ -190,6 +197,7 @@ pub fn assess_physical_feasibility(
     }
 
     let mut fuel_loading = plan_fuel_loading(config, design, report);
+    fuel::apply_completed_mission_load(&mut fuel_loading, mission, config.requirements.mtow_kg);
     let cruise_equilibrium = mission.map(assess_cruise_equilibrium);
     if let Some(assessment) = &cruise_equilibrium {
         if !assessment.is_finite() {
@@ -210,6 +218,9 @@ pub fn assess_physical_feasibility(
         assess_public_cg_reference(config, report, fuel_loading.analyzed_carried_fuel_kg);
     fuel_loading.mission = fuel::assess_mission_fuel(config.mission.enabled, mission);
     findings.extend(fuel::findings(config.requirements.mtow_kg, &fuel_loading));
+    let mission_fuel_plan =
+        fuel_plan::assess_mission_fuel_plan(&config.mission.fuel_policy, &fuel_loading);
+    findings.extend(fuel_plan::findings(&mission_fuel_plan));
 
     let model_cg = match model_cg_assessment(config, report, &fuel_loading) {
         Ok(assessment) => {
@@ -228,43 +239,8 @@ pub fn assess_physical_feasibility(
         }
     };
 
-    if let Some(alas_payload::layout::LayoutSummary::Passenger(summary)) =
-        report.payload_layout.as_ref().map(|layout| &layout.summary)
-    {
-        if summary.unseated_pax > 0 {
-            findings.push(error(
-                FindingCode::PassengerCapacityShortfall,
-                format!(
-                    "passenger payload leaves {} requested passengers without seats",
-                    summary.unseated_pax
-                ),
-                Some(summary.seated_pax as f64),
-                Some(summary.total_pax as f64),
-                "passengers",
-            ));
-        }
-    }
-    if let Some(alas_payload::layout::LayoutSummary::Cargo(summary)) =
-        report.payload_layout.as_ref().map(|layout| &layout.summary)
-    {
-        let requested_net_kg = summary.requested_net_payload_t * 1_000.0;
-        let loaded_net_kg = summary.loaded_net_payload_t * 1_000.0;
-        if requested_net_kg.is_finite()
-            && loaded_net_kg.is_finite()
-            && loaded_net_kg + 1.0e-6 < requested_net_kg
-        {
-            findings.push(error(
-                FindingCode::CargoCapacityShortfall,
-                format!(
-                    "cargo layout delivers {:.1} kg net against {:.1} kg requested",
-                    loaded_net_kg, requested_net_kg
-                ),
-                Some(loaded_net_kg),
-                Some(requested_net_kg),
-                "kg net",
-            ));
-        }
-    }
+    let payload = payload::assess_payload(config, report.payload_layout.as_ref());
+    findings.extend(payload::capacity_findings(&payload));
 
     if matches!(
         cg_envelope.planning_status,
@@ -331,16 +307,44 @@ pub fn assess_physical_feasibility(
         .unwrap_or(f64::NAN);
     let n_engines = config.geometry.engine.spanwise_positions_m.len() as f64;
     let mtow_kg = config.requirements.mtow_kg;
-    let static_thrust_n = n_engines * config.geometry.engine.thrust_kn * 1000.0;
-    let static_tw = static_thrust_n / (mtow_kg * 9.81);
-    let landing_mass_kg = mission
-        .and_then(|result| {
-            let mass = result.final_mass_kg();
-            (mass.is_finite() && mass > 0.0).then_some(mass)
-        })
-        .unwrap_or(mtow_kg * config.mass_model.mlw_fraction_mtow)
-        .clamp(0.0, mtow_kg);
-    let wing_loading_pa = mtow_kg * 9.81 / wing_area_m2;
+    let takeoff_mass_kg = fuel_loading.analyzed_takeoff_mass_kg;
+    let gravity_m_s2 = config.requirements.gravity_m_s2;
+    let active_propulsion = config.geometry.engine.active_model().ok();
+    let turbofan = match active_propulsion {
+        Some(alas_config::ActiveEngineModel::Turbofan(spec)) => Some(spec),
+        _ => None,
+    };
+    let is_turbofan = turbofan.is_some();
+    let static_thrust_n = turbofan
+        .map(|spec| n_engines * spec.rated_thrust_kn * 1000.0)
+        .unwrap_or(f64::NAN);
+    let static_tw = static_thrust_n / (takeoff_mass_kg * gravity_m_s2);
+    if !is_turbofan {
+        findings.push(error(
+            FindingCode::FieldPerformanceUnavailable,
+            "turboprop matching, take-off and OEI constraints require propeller force capability at the evaluated speed; the jet static-T/W correlations are intentionally not applied",
+            None,
+            None,
+            "",
+        ));
+    }
+    let mlw_limit_kg = mtow_kg * config.mass_model.mlw_fraction_mtow;
+    let landing_mass_kg = fuel_loading
+        .analyzed_landing_mass_kg
+        .unwrap_or(mlw_limit_kg.min(takeoff_mass_kg));
+    if fuel_loading
+        .analyzed_landing_mass_kg
+        .is_some_and(|mass_kg| mass_kg > mlw_limit_kg)
+    {
+        findings.push(error(
+            FindingCode::LandingMassLimitViolation,
+            "analyzed arrival mass exceeds the configured maximum landing mass",
+            Some(landing_mass_kg),
+            Some(mlw_limit_kg),
+            "kg",
+        ));
+    }
+    let wing_loading_pa = takeoff_mass_kg * gravity_m_s2 / wing_area_m2;
     let matching_inputs_are_finite = wing_loading_pa.is_finite()
         && wing_loading_pa > 0.0
         && report.polar_fit.cd0.is_finite()
@@ -427,8 +431,8 @@ pub fn assess_physical_feasibility(
         };
         if !wing_area_m2.is_finite()
             || wing_area_m2 <= 0.0
-            || !mtow_kg.is_finite()
-            || mtow_kg <= 0.0
+            || !takeoff_mass_kg.is_finite()
+            || takeoff_mass_kg <= 0.0
             || (role == "departure" && (!static_tw.is_finite() || static_tw <= 0.0))
         {
             findings.push(error(
@@ -441,7 +445,7 @@ pub fn assess_physical_feasibility(
             continue;
         }
         let field = compute_field_performance_at_masses(
-            mtow_kg,
+            takeoff_mass_kg,
             landing_mass_kg,
             wing_area_m2,
             airport,
@@ -490,7 +494,7 @@ pub fn assess_physical_feasibility(
                 ));
             }
         } else {
-            let landing_wing_loading_pa = landing_mass_kg * 9.81 / wing_area_m2;
+            let landing_wing_loading_pa = landing_mass_kg * gravity_m_s2 / wing_area_m2;
             let landing_limit_pa = ws_landing_limit(
                 airport.lda_m,
                 sigma,
@@ -563,20 +567,15 @@ pub fn assess_physical_feasibility(
                         "",
                     ));
                 }
-                let throttle_violation = result
-                    .segments
+                if result
+                    .solutions
                     .iter()
-                    .flat_map(|segment| segment.conditions.throttle.iter().copied())
-                    .filter(|throttle| throttle.is_finite() && *throttle > 1.0 + 1.0e-6)
-                    .max_by(f64::total_cmp);
-                if let Some(max_throttle) = throttle_violation {
+                    .any(|solution| solution.throttle_limited)
+                {
                     findings.push(error(
                         FindingCode::MissionThrottleLimitViolation,
-                        format!(
-                            "mission requires {:.3} throttle, above the available 1.000 envelope",
-                            max_throttle
-                        ),
-                        Some(max_throttle),
+                        "mission reached the available 1.000 throttle boundary before force balance converged",
+                        Some(1.0),
                         Some(1.0),
                         "fraction",
                     ));
@@ -613,7 +612,9 @@ pub fn assess_physical_feasibility(
         findings,
         cg_envelope,
         model_cg,
+        payload,
         fuel_loading,
+        mission_fuel_plan,
         cruise_equilibrium,
     }
 }

@@ -137,6 +137,10 @@ pub struct TransportVehicle {
     /// not yet translated), taken here as plain data exactly as
     /// [`super::torenbeek`]'s `mass_wing` takes `design_mass_togw`.
     pub sealevel_static_thrust_per_engine_n: f64,
+    /// Technology-specific basis for propulsion mass. The turbofan variant
+    /// preserves the translated reference correlation; turboprops use rated
+    /// shaft power and never reinterpret the compatibility thrust field.
+    pub propulsion_mass_basis: TransportPropulsionMassBasis,
     /// The `Main_Wing`.
     pub main_wing: MainWing,
     /// The `Horizontal_Tail`.
@@ -145,6 +149,18 @@ pub struct TransportVehicle {
     pub vertical_tail: VerticalTail,
     /// The single fuselage.
     pub fuselage: Fuselage,
+}
+
+/// Physical rating used to estimate installed propulsion mass.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum TransportPropulsionMassBasis {
+    /// Historical jet-engine sea-level-static thrust correlation.
+    TurbofanThrust,
+    /// Turboprop takeoff shaft power per engine, kW.
+    TurbopropShaftPower {
+        /// Rated takeoff shaft power per engine, kW.
+        takeoff_power_kw: f64,
+    },
 }
 
 /// `output.structures` -- the airframe's structural mass, kg.
@@ -268,14 +284,25 @@ pub struct WeightBreakdown {
 /// `mission reference.Methods.Weights.Correlations.Common.empty_weight`, scoped to
 /// `method_type="New mission reference"`; see the module doc.
 pub fn empty_weight(vehicle: &TransportVehicle) -> WeightBreakdown {
-    let wt_engine_jet = propulsion::engine_jet(vehicle.sealevel_static_thrust_per_engine_n);
-    // Upstream's `if num_eng == 0.: wt_prop = 0.` guard, kept faithfully even
-    // though every vehicle this program's bridge builds carries at least one
-    // engine.
-    let wt_prop_total = if vehicle.engine_count == 0 {
-        0.0
-    } else {
-        propulsion::integrated_propulsion(wt_engine_jet, f64::from(vehicle.engine_count))
+    let turboprop_estimate = match vehicle.propulsion_mass_basis {
+        TransportPropulsionMassBasis::TurbofanThrust => None,
+        TransportPropulsionMassBasis::TurbopropShaftPower { takeoff_power_kw } => {
+            crate::propulsion_mass::turboprop_installed_mass_from_power(
+                takeoff_power_kw,
+                vehicle.engine_count as usize,
+            )
+        }
+    };
+    // Preserve the upstream jet operation order and its zero-engine guard.
+    let wt_prop_total = match vehicle.propulsion_mass_basis {
+        TransportPropulsionMassBasis::TurbofanThrust if vehicle.engine_count == 0 => 0.0,
+        TransportPropulsionMassBasis::TurbofanThrust => propulsion::integrated_propulsion(
+            propulsion::engine_jet(vehicle.sealevel_static_thrust_per_engine_n),
+            f64::from(vehicle.engine_count),
+        ),
+        TransportPropulsionMassBasis::TurbopropShaftPower { .. } => {
+            turboprop_estimate.map_or(0.0, |estimate| estimate.total_kg)
+        }
     };
 
     let payload = payload::payload(f64::from(vehicle.passenger_count), vehicle.cargo_kg);
@@ -343,9 +370,11 @@ pub fn empty_weight(vehicle: &TransportVehicle) -> WeightBreakdown {
     };
 
     let propulsion = PropulsionBreakdown {
-        engines_kg: 0.0,
+        engines_kg: turboprop_estimate.map_or(0.0, |estimate| estimate.dry_engines_kg),
         thrust_reversers_kg: 0.0,
-        miscellaneous_kg: 0.0,
+        miscellaneous_kg: turboprop_estimate.map_or(0.0, |estimate| {
+            estimate.propellers_kg + estimate.installation_kg
+        }),
         fuel_system_kg: 0.0,
         total_kg: wt_prop_total,
     };

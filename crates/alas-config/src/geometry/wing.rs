@@ -161,22 +161,6 @@ pub enum TransportPlanformError {
         /// Invalid value.
         value: f64,
     },
-    /// The exposed trailing edge runs forward from the body to the kink, or
-    /// from the kink to the tip. That makes the included angle with the
-    /// fuselage exceed 90 degrees and produces a reflex planform corner.
-    #[error(
-        "main-wing trailing edge must not run forward outboard; {inboard:?} trailing edge is at {inboard_x_m} m and {outboard:?} is at {outboard_x_m} m"
-    )]
-    ForwardSweptTrailingEdge {
-        /// Inboard station at the invalid panel.
-        inboard: MainWingStationKind,
-        /// Outboard station at the invalid panel.
-        outboard: MainWingStationKind,
-        /// Inboard trailing-edge X coordinate, in metres.
-        inboard_x_m: f64,
-        /// Outboard trailing-edge X coordinate, in metres.
-        outboard_x_m: f64,
-    },
 }
 
 impl TransportPlanform {
@@ -533,7 +517,6 @@ impl WingConfig {
         if let Some(side_of_body) = planform.side_of_body {
             validate_positive("side-of-body chord", side_of_body.chord_m)?;
         }
-        validate_exposed_trailing_edge(&planform)?;
         Ok(planform)
     }
 
@@ -589,31 +572,6 @@ fn validate_sweep(field: &'static str, value: f64) -> Result<(), TransportPlanfo
     } else {
         Err(TransportPlanformError::InvalidSweep { field, value })
     }
-}
-
-fn validate_exposed_trailing_edge(
-    planform: &TransportPlanform,
-) -> Result<(), TransportPlanformError> {
-    // The centreline-to-side-of-body carry-through lies inside the fuselage.
-    // The exposed wing begins at side-of-body when that station is present.
-    // A missing side-of-body identifies the frozen legacy geometry contract,
-    // whose exact root/kink/tip algebra must remain reproducible.
-    let Some(exposed_root) = planform.side_of_body else {
-        return Ok(());
-    };
-    for (inboard, outboard) in [(exposed_root, planform.kink), (planform.kink, planform.tip)] {
-        let inboard_x_m = inboard.leading_edge_x_m + inboard.chord_m;
-        let outboard_x_m = outboard.leading_edge_x_m + outboard.chord_m;
-        if outboard_x_m + 1e-10 < inboard_x_m {
-            return Err(TransportPlanformError::ForwardSweptTrailingEdge {
-                inboard: inboard.kind,
-                outboard: outboard.kind,
-                inboard_x_m,
-                outboard_x_m,
-            });
-        }
-    }
-    Ok(())
 }
 
 // A test asserts on values it constructed here directly, so a failed unwrap
@@ -774,20 +732,13 @@ mod tests {
     }
 
     #[test]
-    fn an_exposed_trailing_edge_over_ninety_degrees_to_the_fuselage_is_rejected() {
+    fn a_forward_swept_trailing_edge_is_a_valid_tapered_wing() {
         let wing = WingConfig {
             side_of_body_chord_ratio: Some(1.0),
             ..WingConfig::default()
         };
 
-        assert!(matches!(
-            wing.transport_planform(&DesignVector::default()),
-            Err(TransportPlanformError::ForwardSweptTrailingEdge {
-                inboard: MainWingStationKind::SideOfBody,
-                outboard: MainWingStationKind::Kink,
-                ..
-            })
-        ));
+        assert!(wing.transport_planform(&DesignVector::default()).is_ok());
     }
 
     #[test]

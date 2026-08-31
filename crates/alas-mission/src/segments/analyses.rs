@@ -50,6 +50,13 @@ use alas_atmo::{us1976_compute_values, us1976_try_compute_values, Us1976Error, U
 use alas_prop::mission_turbofan::{
     evaluate_thrust, freestream_from_atmosphere, ThrustOutput, TurbofanInputs, VehicleBuilderParams,
 };
+use alas_prop::system::{
+    FailureState, OperatingMode, PropulsionDemand, PropulsionError, PropulsionLoads,
+    PropulsionOrchestrator, PropulsionRating, PropulsionRequest, PropulsionResult, PropulsionState,
+    ResourceKind, TechnologyTrace,
+};
+
+use crate::operating::ThrustRating;
 
 /// What one call to the aerodynamics analysis produces.
 pub struct AeroSolution {
@@ -67,6 +74,17 @@ pub struct AeroSolution {
     /// parity, but carries this status so callers can reject or label
     /// out-of-domain trajectory points explicitly.
     pub surrogate_domain: SurrogateDomainStatus,
+}
+
+/// Inputs retained solely for the frozen turbofan solver's rejected-iterate
+/// compatibility path. Non-turbofan systems never carry this state.
+pub struct LegacyTurbofanCompatibility {
+    /// Legacy network inputs.
+    pub inputs: TurbofanInputs,
+    /// Legacy component and part-power parameters.
+    pub params: VehicleBuilderParams,
+    /// Sized core-flow scale.
+    pub compressor_nondimensional_massflow: f64,
 }
 
 /// The analysis stack, resolved onto one aircraft.
@@ -113,16 +131,22 @@ pub struct MissionAnalyses {
     pub network_count: usize,
     /// The trained vortex-lattice surrogate.
     pub surrogate: LiftSurrogate,
-    /// The engine's variable inputs.
-    pub turbofan: TurbofanInputs,
-    /// The engine's fixed component efficiencies and losses.
-    pub turbofan_params: VehicleBuilderParams,
-    /// The core-flow scale factor `turbofan_sizing` solved. The engine is
-    /// already sized by the time a mission flies it.
-    pub compressor_nondimensional_massflow: f64,
+    /// Rejected-iterate fallback state carried only by legacy turbofans.
+    /// Turboprops and future technologies leave this absent.
+    pub legacy_turbofan: Option<LegacyTurbofanCompatibility>,
+    /// Immutable technology-neutral propulsion boundary used by every mission
+    /// operating-point evaluation. The optional compatibility state is not a
+    /// second product model; it only preserves historical nonlinear-solver
+    /// behavior when the strict boundary rejects a turbofan probe.
+    pub propulsion: PropulsionOrchestrator,
 }
 
 impl MissionAnalyses {
+    /// Whether named ratings still need the historical scalar schedule.
+    pub(crate) fn uses_legacy_propulsion_schedule(&self) -> bool {
+        self.legacy_turbofan.is_some()
+    }
+
     /// `US_Standard_1976.compute_values` at one altitude.
     pub fn atmosphere(&self, altitude_m: f64, temperature_deviation_k: f64) -> Us1976Values {
         us1976_compute_values(altitude_m, temperature_deviation_k)
@@ -238,12 +262,177 @@ impl MissionAnalyses {
     ) -> ThrustOutput {
         let freestream =
             freestream_from_atmosphere(atmosphere, altitude_m, velocity_m_s, mach, gravity_m_s2);
-        evaluate_thrust(
-            &freestream,
-            &self.turbofan,
-            &self.turbofan_params,
-            self.compressor_nondimensional_massflow,
-            throttle,
-        )
+        let request = PropulsionRequest {
+            flight: (&freestream).into(),
+            demand: PropulsionDemand::NormalizedForce(throttle),
+            mode: OperatingMode::Normal,
+            failure: FailureState::None,
+            loads: PropulsionLoads::default(),
+            state: PropulsionState::default(),
+            time_step_s: None,
+        };
+        let result = match self.propulsion.evaluate(&request) {
+            Ok(result) => result,
+            Err(PropulsionError::InvalidInput { .. } | PropulsionError::NonFiniteOutput(_))
+                if self.legacy_turbofan.is_some() =>
+            {
+                // MINPACK can probe non-finite iterates before returning to
+                // the physical solution. The neutral boundary intentionally
+                // rejects those points; preserve the frozen solver's NaN
+                // propagation only for such rejected compatibility probes.
+                let Some(legacy) = self.legacy_turbofan.as_ref() else {
+                    unreachable!("guarded by the compatibility-state check");
+                };
+                return evaluate_thrust(
+                    &freestream,
+                    &legacy.inputs,
+                    &legacy.params,
+                    legacy.compressor_nondimensional_massflow,
+                    throttle,
+                );
+            }
+            Err(PropulsionError::InvalidInput { .. } | PropulsionError::NonFiniteOutput(_)) => {
+                // Nonlinear root solvers may probe outside a typed model's
+                // validity domain. Return a rejected numerical point, never
+                // a result from another propulsion technology.
+                return ThrustOutput {
+                    thrust_n: f64::NAN,
+                    thrust_specific_fuel_consumption: f64::NAN,
+                    non_dimensional_thrust: f64::NAN,
+                    core_mass_flow_rate_kg_s: f64::NAN,
+                    fuel_flow_rate_kg_s: f64::NAN,
+                    power_w: f64::NAN,
+                    specific_impulse_s: f64::NAN,
+                };
+            }
+            Err(error) => panic!("mission propulsion evaluation failed: {error}"),
+        };
+
+        // Mission's historical output uses positive fuel consumption in
+        // kg/s, while the neutral state derivative is negative store change.
+        // Project the explicit positive Jet-A resource flow and the +X body
+        // force without changing that established mission convention.
+        let fuel_flow_rate_kg_s = result
+            .resource_flows
+            .iter()
+            .find(|flow| flow.resource == ResourceKind::JetA)
+            .and_then(|flow| flow.mass_flow_kg_s)
+            .unwrap_or_else(|| panic!("mission propulsion result has no Jet-A mass flow"));
+        match result.trace {
+            Some(TechnologyTrace::LegacyTurbofan(mut output)) => {
+                output.thrust_n = result.body_force_n[0];
+                output.fuel_flow_rate_kg_s = fuel_flow_rate_kg_s;
+                output
+            }
+            None => {
+                let thrust_n = result.body_force_n[0];
+                let tsfc = if thrust_n > 0.0 {
+                    fuel_flow_rate_kg_s * gravity_m_s2 * 3_600.0 / thrust_n
+                } else {
+                    0.0
+                };
+                let specific_impulse_s = if fuel_flow_rate_kg_s > 0.0 {
+                    thrust_n / (fuel_flow_rate_kg_s * gravity_m_s2)
+                } else {
+                    0.0
+                };
+                ThrustOutput {
+                    thrust_n,
+                    thrust_specific_fuel_consumption: tsfc,
+                    non_dimensional_thrust: 0.0,
+                    core_mass_flow_rate_kg_s: 0.0,
+                    fuel_flow_rate_kg_s,
+                    power_w: thrust_n * velocity_m_s,
+                    specific_impulse_s,
+                }
+            }
+        }
+    }
+
+    /// Evaluate a phase rating through the technology-neutral model.
+    ///
+    /// Legacy turbofans have no named schedules, so their established rating
+    /// fraction is supplied explicitly by the mission configuration. Typed
+    /// technologies receive the named rating without reinterpretation.
+    #[allow(clippy::too_many_arguments)] // mirrors the existing mission thrust boundary plus rating
+    pub fn thrust_for_rating(
+        &self,
+        atmosphere: &Us1976Values,
+        altitude_m: f64,
+        velocity_m_s: f64,
+        mach: f64,
+        gravity_m_s2: f64,
+        rating: ThrustRating,
+        legacy_rating_fraction: f64,
+    ) -> Result<ThrustOutput, PropulsionError> {
+        let freestream =
+            freestream_from_atmosphere(atmosphere, altitude_m, velocity_m_s, mach, gravity_m_s2);
+        let demand = if self.uses_legacy_propulsion_schedule() {
+            PropulsionDemand::NormalizedForce(legacy_rating_fraction)
+        } else {
+            PropulsionDemand::RatedFraction {
+                rating: match rating {
+                    ThrustRating::TakeoffGoAround => PropulsionRating::TakeoffGoAround,
+                    ThrustRating::MaximumClimb => PropulsionRating::MaximumClimb,
+                    ThrustRating::MaximumContinuous => PropulsionRating::MaximumContinuous,
+                    ThrustRating::FlightIdle => PropulsionRating::FlightIdle,
+                    ThrustRating::Cruise => PropulsionRating::Cruise,
+                },
+                fraction: legacy_rating_fraction,
+            }
+        };
+        let result = self.propulsion.evaluate(&PropulsionRequest {
+            flight: (&freestream).into(),
+            demand,
+            mode: OperatingMode::Normal,
+            failure: FailureState::None,
+            loads: PropulsionLoads::default(),
+            state: PropulsionState::default(),
+            time_step_s: None,
+        })?;
+        self.project_propulsion_result(result, velocity_m_s, gravity_m_s2)
+    }
+
+    fn project_propulsion_result(
+        &self,
+        result: PropulsionResult,
+        velocity_m_s: f64,
+        gravity_m_s2: f64,
+    ) -> Result<ThrustOutput, PropulsionError> {
+        let fuel_flow_rate_kg_s = result
+            .resource_flows
+            .iter()
+            .find(|flow| flow.resource == ResourceKind::JetA)
+            .and_then(|flow| flow.mass_flow_kg_s)
+            .ok_or(PropulsionError::UnsupportedDemand(
+                "mission requires a Jet-A mass-flow result",
+            ))?;
+        match result.trace {
+            Some(TechnologyTrace::LegacyTurbofan(mut output)) => {
+                output.thrust_n = result.body_force_n[0];
+                output.fuel_flow_rate_kg_s = fuel_flow_rate_kg_s;
+                Ok(output)
+            }
+            None => {
+                let thrust_n = result.body_force_n[0];
+                Ok(ThrustOutput {
+                    thrust_n,
+                    thrust_specific_fuel_consumption: if thrust_n > 0.0 {
+                        fuel_flow_rate_kg_s * gravity_m_s2 * 3_600.0 / thrust_n
+                    } else {
+                        0.0
+                    },
+                    non_dimensional_thrust: 0.0,
+                    core_mass_flow_rate_kg_s: 0.0,
+                    fuel_flow_rate_kg_s,
+                    power_w: thrust_n * velocity_m_s,
+                    specific_impulse_s: if fuel_flow_rate_kg_s > 0.0 {
+                        thrust_n / (fuel_flow_rate_kg_s * gravity_m_s2)
+                    } else {
+                        0.0
+                    },
+                })
+            }
+        }
     }
 }

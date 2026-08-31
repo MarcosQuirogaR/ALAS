@@ -216,6 +216,9 @@ pub enum FlopsTransportUnverifiedReason {
     CabinProvenance,
     /// Installed-architecture provenance was absent or incomplete.
     ArchitectureProvenance,
+    /// The translated thrust-based FLOPS operating-item equations do not
+    /// cover the selected propulsion technology.
+    UnsupportedPropulsionTechnology,
     /// Containerized cargo mass was absent or negative.
     ContainerizedCargo,
     /// A resolved scalar was nonfinite, nonpositive, or internally inconsistent.
@@ -243,6 +246,7 @@ impl FlopsTransportUnverifiedReason {
             Self::MaximumFuelCapacity => "maximum_fuel_capacity",
             Self::CabinProvenance => "cabin_provenance",
             Self::ArchitectureProvenance => "architecture_provenance",
+            Self::UnsupportedPropulsionTechnology => "unsupported_propulsion_technology",
             Self::ContainerizedCargo => "containerized_cargo",
             Self::InvalidResolvedInput => "invalid_resolved_input",
         }

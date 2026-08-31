@@ -224,6 +224,14 @@ fn current_cpacs35_output_round_trips_into_native_aircraft_geometry() {
     assert_eq!(imported_config.geometry.engine.bypass_ratio, 10.0);
     assert_eq!(imported_config.geometry.engine.overall_pressure_ratio, 60.0);
     assert_eq!(imported_config.geometry.engine.fan_pressure_ratio, 1.45);
+    assert_eq!(
+        imported_config.geometry.engine.part_power_fuel_flow_ratios,
+        config.geometry.engine.part_power_fuel_flow_ratios
+    );
+    assert_eq!(
+        imported_config.geometry.engine.part_power_source,
+        config.geometry.engine.part_power_source
+    );
     assert_eq!(imported.wings.len(), airplane.wings.len());
     for (imported_wing, source_wing) in imported.wings.iter().zip(&airplane.wings) {
         assert_eq!(imported_wing.name, source_wing.name);

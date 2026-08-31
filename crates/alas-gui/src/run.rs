@@ -15,6 +15,7 @@ use std::path::Path;
 
 use crate::state::{AppState, LogKind, WorkerMessage};
 use crate::views::{tr, tr_fields};
+use alas_pipeline::{RunEventKind, RunEventSeverity};
 
 impl AppState {
     /// Launch a full or baseline-only pipeline run in the background.
@@ -61,6 +62,8 @@ impl AppState {
         self.pipeline_result = None;
         self.selected_solver_view = crate::views::results_view::SolverResultView::Vlm;
         self.cancel_flag.store(false, Ordering::Relaxed);
+        self.cancellation_requested = false;
+        self.run_events.clear();
         self.log(
             if baseline_only {
                 tr("Analyzing baseline (weight & balance + stability)...")
@@ -126,16 +129,17 @@ impl AppState {
                 ))));
                 return;
             }
-            let progress_tx = tx.clone();
-            let report = move |message: &str| {
-                let _ = progress_tx.send(WorkerMessage::Progress(message.to_owned()));
+            let event_tx = tx.clone();
+            let report = move |event| {
+                let _ = event_tx.send(WorkerMessage::Event(event));
             };
-            let result = pipeline.run_with_design_space_and_progress(
+            let result = pipeline.run_with_design_space_events(
                 &options,
                 &environment,
                 &initial_design,
                 &bounds,
                 &report,
+                &cancel,
             );
             let _ = tx.send(WorkerMessage::Finished(Box::new(result)));
         });
@@ -144,20 +148,34 @@ impl AppState {
     /// Drain any pending progress and update the UI when a run finishes.
     pub fn poll_worker(&mut self) {
         let mut completed = None;
-        let mut progress = Vec::new();
+        let mut events = Vec::new();
         if let Some(rx) = &self.worker_rx {
             while let Ok(msg) = rx.try_recv() {
                 match msg {
-                    WorkerMessage::Progress(p) => progress.push(p),
+                    WorkerMessage::Event(event) => events.push(event),
                     WorkerMessage::Finished(res) => completed = Some(*res),
                 }
             }
         }
 
-        for p in progress {
-            self.stage = p.clone();
-            self.status_message = p.clone();
-            self.log(p, LogKind::Info);
+        for event in events {
+            if matches!(
+                event.kind,
+                RunEventKind::StageStarted | RunEventKind::Progress
+            ) {
+                self.stage = event.message.clone();
+                self.status_message = event.message.clone();
+            }
+            let kind = match event.severity {
+                RunEventSeverity::Info => LogKind::Info,
+                RunEventSeverity::Warning => LogKind::Warn,
+                RunEventSeverity::Error => LogKind::Error,
+            };
+            if !matches!(event.kind, RunEventKind::Progress) {
+                let label = event.stage.replace('_', " ");
+                self.log(format!("{label}: {}", event.message), kind);
+            }
+            self.run_events.push(event);
         }
 
         if let Some(res) = completed {
@@ -195,14 +213,35 @@ impl AppState {
                     self.active_page = "results".to_owned();
                 }
                 Err(e) => {
-                    self.status_message = "Failed.".to_owned();
-                    self.log(
-                        tr_fields("Run failed: {error}", &[("error", e)]),
-                        LogKind::Error,
-                    );
+                    if e.starts_with("Cancelled safely") {
+                        self.status_message = "Cancelled.".to_owned();
+                        self.log("Run cancelled safely.", LogKind::Warn);
+                    } else {
+                        self.status_message = "Failed.".to_owned();
+                        self.log(
+                            tr_fields("Run failed: {error}", &[("error", e)]),
+                            LogKind::Error,
+                        );
+                    }
                 }
             }
             self.run_started = None;
+            self.cancellation_requested = false;
         }
+    }
+
+    /// Request cancellation once and wait for the worker to reach a safe
+    /// boundary before reporting the run as cancelled.
+    pub fn request_pipeline_cancel(&mut self) {
+        if !self.is_running || self.cancellation_requested {
+            return;
+        }
+        self.cancellation_requested = true;
+        self.cancel_flag.store(true, Ordering::Relaxed);
+        self.status_message = "Cancellation requested; finishing current safe unit...".to_owned();
+        self.log(
+            "Cancellation requested; the active stage or supervised external tool will finish first.",
+            LogKind::Warn,
+        );
     }
 }

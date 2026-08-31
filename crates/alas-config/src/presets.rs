@@ -28,15 +28,11 @@
 //!
 //! # What a preset does not settle
 //!
-//! The first is the engine cycle. A preset names its engine and does not copy
-//! the table entry in, so every one of them carries [`crate::EngineConfig`]'s
-//! fallback cycle -- the GE9X's -- until something calls
-//! [`crate::EngineConfig::apply_engine_spec`]. Upstream's geometry builder does
-//! that as its first step, so nothing that goes through it ever sees the
-//! stale numbers; anything that reads an unbuilt preset's thrust does. The
-//! port reproduces that rather than resolving the spec at registration, since
-//! resolving it here would make a preset disagree with the same preset loaded
-//! from a saved file.
+//! The registry records the engine name but retains the historical fallback
+//! cycle so its raw entries remain reference-compatible. The configuration
+//! loading boundary resolves an intentional preset selection before applying
+//! saved or user-provided overrides; downstream product solvers then consume
+//! those live fields without another database lookup.
 //!
 //! Nor does a preset fit the design space it is offered in. The bounds in
 //! [`crate::design_variables`] are one global set describing AVE's family, so
@@ -55,8 +51,10 @@
 //! widebody-calibrated mass fractions its entry exists to correct.
 
 mod cg_envelope;
+mod mission;
 mod narrowbody;
 mod reference;
+mod regional;
 mod widebody;
 
 pub use cg_envelope::{
@@ -360,6 +358,12 @@ pub struct OperationalMissionDefaults {
     pub departure_airport: &'static str,
     /// Arrival airport display name, resolvable through the airport registry.
     pub arrival_airport: &'static str,
+    /// Route-appropriate requested final cruise altitude, in metres MSL.
+    pub cruise_altitude_m: f64,
+    /// Route-appropriate cruise Mach command.
+    pub cruise_mach: f64,
+    /// Representative gross route payload when the route requires a payload/fuel trade.
+    pub route_payload_kg: Option<f64>,
     /// Aircraft-appropriate mission schedule for the representative route.
     pub profile: crate::MissionProfileConfig,
     /// Why this city pair is representative and where that claim came from.
@@ -372,50 +376,87 @@ impl AircraftPreset {
         &self.geometry.engine.spanwise_positions_m
     }
 
+    /// Sourced product-mission calibration for this exact preset identity.
+    ///
+    /// `None` deliberately retains the legacy mission backend: a generic
+    /// polar must not be presented as validation evidence for an aircraft
+    /// whose mission aerodynamics have not been sourced.
+    pub fn product_mission_calibration(&self) -> Option<crate::TotalEnergyMissionConfig> {
+        mission::product_mission_calibration(self.name)
+    }
+
+    /// Whether this preset has passed its evidence-authorized propagated-mission gate.
+    /// Real aircraft require independent flight evidence; the synthetic AVE
+    /// reference instead requires its explicit design-route contract.
+    pub fn product_mission_is_validated(&self) -> bool {
+        mission::product_mission_is_validated(self.name)
+    }
+
     /// Representative route and speed schedule loaded by interactive clients.
     pub fn operational_mission_defaults(&self) -> OperationalMissionDefaults {
-        let (departure_airport, arrival_airport, provenance) = match self.name {
+        let (departure_airport, arrival_airport, cruise_altitude_m, cruise_mach, provenance) = match self.name {
             "A220-300" => (
                 "Riga (EVRA)",
                 "Stockholm Arlanda (ESSA)",
+                25_000.0 * 0.3048,
+                0.74,
                 "airBaltic 30-year route history: Stockholm is one of its most popular Riga routes; airBaltic operates an all-A220-300 fleet (accessed 2026-08-29)",
+            ),
+            "ATR72-600" => (
+                "Madrid Barajas (LEMD)",
+                "Palma de Mallorca (LEPA)",
+                17_000.0 * 0.3048,
+                0.40,
+                "Representative European regional-sector default; operational example only, not an ATR design-mission claim",
             ),
             "A320-200" => (
                 "Madrid Barajas (LEMD)",
                 "Palma de Mallorca (LEPA)",
+                28_000.0 * 0.3048,
+                0.74,
                 "Aena 2025 traffic reporting identifies Madrid among Palma's principal connections; representative A320-family short-haul pairing (accessed 2026-08-29)",
             ),
             "A340-300" => (
                 "Frankfurt (EDDF)",
                 "Boston Logan (KBOS)",
+                39_000.0 * 0.3048,
+                0.82,
                 "Lufthansa 2026 timetable publishes ten weekly Frankfurt-Boston flights and 5,889 km route distance; representative remaining A340-300 operation (accessed 2026-08-29)",
             ),
             "A380-800" => (
                 "Dubai (OMDB)",
                 "London Heathrow (EGLL)",
+                39_000.0 * 0.3048,
+                0.83,
                 "Emirates identifies Dubai-London Heathrow as a high-frequency A380 market (accessed 2026-08-29)",
             ),
             "B787-9" => (
                 "Tokyo Haneda (RJTT)",
                 "Sydney (YSSY)",
+                41_000.0 * 0.3048,
+                0.85,
                 "ANA lists Sydney among the principal Haneda routes for its Boeing 787-9 (accessed 2026-08-29)",
             ),
             "DC-10" => (
                 "Osaka Kansai (RJBB)",
                 "Honolulu (PHNL)",
+                37_000.0 * 0.3048,
+                0.82,
                 "Northwest Airlines 1996-10-27 timetable explicitly assigns DC-10 equipment to Osaka-Honolulu; historical because scheduled passenger DC-10 service has ended",
             ),
             // AVE is a synthetic reference aircraft and has no real demand history.
             _ => (
                 "London Heathrow (EGLL)",
                 "Dubai (OMDB)",
+                39_000.0 * 0.3048,
+                0.84,
                 "Synthetic AVE reference route; no real-world subtype demand claim",
             ),
         };
 
         let mut profile = crate::MissionProfileConfig::default();
-        let atmosphere = alas_atmo::Atmosphere::new(self.requirements.cruise_altitude_m);
-        let cruise_tas_m_s = self.requirements.cruise_mach * atmosphere.speed_of_sound();
+        let atmosphere = alas_atmo::Atmosphere::new(cruise_altitude_m);
+        let cruise_tas_m_s = cruise_mach * atmosphere.speed_of_sound();
         profile.cruise_1_air_speed_m_s = cruise_tas_m_s;
         profile.cruise_2_air_speed_m_s = cruise_tas_m_s;
         profile.cruise_3_air_speed_m_s = cruise_tas_m_s;
@@ -423,6 +464,12 @@ impl AircraftPreset {
         OperationalMissionDefaults {
             departure_airport,
             arrival_airport,
+            cruise_altitude_m,
+            cruise_mach,
+            // 250 occupied seats at a transparent preliminary 100 kg per
+            // passenger including baggage. This is a representative dispatch
+            // load, not a claim about the historical flight's actual load sheet.
+            route_payload_kg: (self.name == "DC-10").then_some(25_000.0),
             profile,
             provenance,
         }
@@ -497,6 +544,7 @@ fn build() -> Vec<AircraftPreset> {
         widebody::b787_9(),
         narrowbody::a320_200(),
         narrowbody::a220_300(),
+        regional::atr72_600(),
         widebody::dc_10(),
     ];
 
@@ -520,7 +568,16 @@ mod tests {
     fn the_dropdown_lists_the_aircraft_in_registration_order() {
         assert_eq!(
             available(),
-            vec!["AVE", "A340-300", "A380-800", "B787-9", "A320-200", "A220-300", "DC-10",]
+            vec![
+                "AVE",
+                "A340-300",
+                "A380-800",
+                "B787-9",
+                "A320-200",
+                "A220-300",
+                "ATR72-600",
+                "DC-10",
+            ]
         );
     }
 
@@ -590,24 +647,17 @@ mod tests {
     }
 
     #[test]
-    fn a_preset_still_carries_the_fallback_cycle_until_the_builder_resolves_it() {
-        // Nothing applies the engine table at registration, so an A320's
-        // thrust reads as a GE9X's until the geometry builder runs. Stated as
-        // a test because it is surprising and load-bearing: a consumer that
-        // reads an unbuilt preset's thrust gets a widebody's.
+    fn a_preset_still_carries_the_fallback_cycle_until_configuration_loading() {
         let a320 = get("A320-200").unwrap();
         assert_eq!(a320.geometry.engine.thrust_kn, 467.0);
-
-        let mut resolved = a320.geometry.engine.clone();
-        resolved.apply_engine_spec();
-        assert!(resolved.thrust_kn < 200.0, "{}", resolved.thrust_kn);
     }
 
     #[test]
     fn every_engine_the_presets_name_is_one_the_table_carries() {
         // The name is a selector, and one the table does not carry leaves the
         // GE9X fallback in place for good -- a silent widebody engine on
-        // whatever type mistyped it.
+        // whatever type mistyped it. Every technology now has a typed binding;
+        // no preset may rely on a different engine's fallback physics.
         for preset in registry() {
             assert!(
                 crate::engines::get(preset.engine_name).is_ok(),
@@ -708,6 +758,64 @@ mod tests {
             .map(|preset| preset.name)
             .collect();
         assert_eq!(fitting, vec!["AVE"]);
+    }
+
+    #[test]
+    fn every_preset_baseline_lies_inside_the_cross_preset_guardrails() {
+        // `lower`/`upper` define the AVE clean-sheet family. Preset-centred
+        // redesigns need broader safety guardrails so an A320, regional jet,
+        // or widebody remains centred on its own baseline instead of being
+        // projected into the AVE family before optimization starts.
+        for preset in registry() {
+            for (value, spec) in preset
+                .design_vector
+                .to_array()
+                .iter()
+                .zip(crate::DESIGN_VARIABLE_SPECS)
+            {
+                assert!(
+                    *value >= spec.preset_lower && *value <= spec.preset_upper,
+                    "{} {}={} lies outside cross-preset guardrails [{}, {}]",
+                    preset.name,
+                    spec.name,
+                    value,
+                    spec.preset_lower,
+                    spec.preset_upper
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn every_preset_supports_an_unclipped_default_ten_percent_local_sweep() {
+        // Guardrails are safety envelopes, not the requested search width.
+        // Keep the default preset study symmetric around the exact baseline;
+        // otherwise clipping silently moves the midpoint and changes the
+        // user's requested +10% side into a smaller perturbation.
+        for preset in registry() {
+            for (value, spec) in preset
+                .design_vector
+                .to_array()
+                .iter()
+                .zip(crate::DESIGN_VARIABLE_SPECS)
+            {
+                let reference = if value.abs() < f64::EPSILON {
+                    spec.preset_local_scale
+                } else {
+                    value.abs()
+                };
+                let lower = value - 0.10 * reference;
+                let upper = value + 0.10 * reference;
+                assert!(
+                    lower >= spec.preset_lower && upper <= spec.preset_upper,
+                    "{} {} raw +/-10% interval [{lower}, {upper}] exceeds guardrails [{}, {}]",
+                    preset.name,
+                    spec.name,
+                    spec.preset_lower,
+                    spec.preset_upper
+                );
+            }
+        }
     }
 
     #[test]

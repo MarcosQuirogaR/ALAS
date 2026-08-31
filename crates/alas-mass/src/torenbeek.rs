@@ -27,7 +27,9 @@
 //!   which the function ever assigns. Not a `deviation-candidate`; there is
 //!   no behaviour here to reproduce, faithfully or otherwise, since the
 //!   function cannot run to completion.
-//! - `mass_propeller`: unused; this program's engines are turbofans.
+//! - `mass_propeller`: unused by the translated wing/fuselage path. Turboprop
+//!   propulsion mass is now owned by [`crate::propulsion_mass`], where engine,
+//!   propeller and installation evidence remain explicit.
 //!
 //! `mass_wing`'s and `mass_wing_basic_structure`'s `return_dict: bool` is
 //! narrowed to the `float`-returning path: `mass.py` never passes

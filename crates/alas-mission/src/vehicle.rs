@@ -25,7 +25,7 @@
 //! pass through as [`serde_json::Value`] unchanged, exactly as the reference
 //! carries them through unread.
 
-use alas_config::AlasConfig;
+use alas_config::{ActiveEngineModel, AlasConfig, EngineBindingError};
 use serde::Serialize;
 use serde_json::Value;
 
@@ -112,6 +112,18 @@ pub struct VehicleRequest {
     pub requirements: RequirementsRequest,
 }
 
+/// Why the legacy turbofan-shaped vehicle document cannot represent a live
+/// propulsion configuration.
+#[derive(Debug, thiserror::Error)]
+pub enum VehicleRequestError {
+    /// Selector, technology and typed payload are not coherent.
+    #[error(transparent)]
+    InvalidEngineBinding(#[from] EngineBindingError),
+    /// The historical request schema has no shaft-power/propeller fields.
+    #[error("the legacy vehicle request cannot represent {0:?} propulsion")]
+    UnsupportedTechnology(alas_config::PropulsionTechnology),
+}
+
 /// Per-engine thrust at the cruise design point, in kilonewtons.
 ///
 /// Thrust required in steady level flight is drag, which is weight over
@@ -133,13 +145,12 @@ fn cruise_thrust_kn_per_engine(report: &ReportView, config: &AlasConfig) -> Opti
     Some(thrust_required_n / n_engines as f64 / 1000.0)
 }
 
-/// Build the vehicle half of the request from a design's analysis report.
-pub fn build_vehicle_request(report: &ReportView, config: &AlasConfig) -> VehicleRequest {
+fn assemble_vehicle_request(
+    report: &ReportView,
+    config: &AlasConfig,
+    engine_request: EngineRequest,
+) -> VehicleRequest {
     let req = &config.requirements;
-    let engine = &config.geometry.engine;
-    let n_engines = engine.spanwise_positions_m.len();
-    let cruise_thrust_kn = cruise_thrust_kn_per_engine(report, config);
-
     let name = if config.preset.is_empty() {
         "ALAS_Design".to_owned()
     } else {
@@ -153,17 +164,7 @@ pub fn build_vehicle_request(report: &ReportView, config: &AlasConfig) -> Vehicl
         geometry_config: config.geometry.clone(),
         mtow_kg: req.mtow_kg,
         component_masses_kg: report.component_masses.clone(),
-        engine: EngineRequest {
-            n_engines,
-            thrust_kn: engine.thrust_kn,
-            cruise_thrust_kn,
-            bypass_ratio: engine.bypass_ratio,
-            nacelle_length_m: engine.nacelle_length_m(),
-            nacelle_max_radius_m: engine.radius_scale_m,
-            overall_pressure_ratio: engine.overall_pressure_ratio,
-            turbine_inlet_temp_k: engine.turbine_inlet_temp_k,
-            fan_pressure_ratio: engine.fan_pressure_ratio,
-        },
+        engine: engine_request,
         requirements: RequirementsRequest {
             aircraft_type: req.aircraft_type.clone(),
             num_passengers: req.num_passengers,
@@ -172,6 +173,37 @@ pub fn build_vehicle_request(report: &ReportView, config: &AlasConfig) -> Vehicl
             ultimate_load_factor: req.ultimate_load_factor,
         },
     }
+}
+
+/// Build the historical turbofan-shaped vehicle document from the validated
+/// typed engine payload. New product mission code uses the propulsion
+/// orchestrator directly; this API remains for external legacy consumers and
+/// fails explicitly when their schema cannot represent the active technology.
+pub fn build_vehicle_request(
+    report: &ReportView,
+    config: &AlasConfig,
+) -> Result<VehicleRequest, VehicleRequestError> {
+    let engine = &config.geometry.engine;
+    let ActiveEngineModel::Turbofan(spec) = engine.active_model()? else {
+        return Err(VehicleRequestError::UnsupportedTechnology(
+            engine.propulsion_technology,
+        ));
+    };
+    Ok(assemble_vehicle_request(
+        report,
+        config,
+        EngineRequest {
+            n_engines: engine.spanwise_positions_m.len(),
+            thrust_kn: spec.rated_thrust_kn,
+            cruise_thrust_kn: cruise_thrust_kn_per_engine(report, config),
+            bypass_ratio: spec.bypass_ratio,
+            nacelle_length_m: engine.nacelle_length_m(),
+            nacelle_max_radius_m: engine.radius_scale_m,
+            overall_pressure_ratio: spec.overall_pressure_ratio,
+            turbine_inlet_temp_k: spec.turbine_inlet_temp_k,
+            fan_pressure_ratio: spec.fan_pressure_ratio,
+        },
+    ))
 }
 
 /// Build the vehicle request with the frozen reference geometry schema.
@@ -191,7 +223,34 @@ pub fn build_vehicle_request_reference_compatibility(
         .wing
         .side_of_body_span_fraction = None;
     compatibility_config.geometry.wing.kink_span_fraction = None;
-    build_vehicle_request(report, &compatibility_config)
+    compatibility_config.geometry.engine.turbofan = None;
+    compatibility_config.geometry.engine.turboprop = None;
+    compatibility_config
+        .geometry
+        .engine
+        .part_power_fuel_flow_ratios
+        .clear();
+    compatibility_config
+        .geometry
+        .engine
+        .part_power_source
+        .clear();
+    let engine = &compatibility_config.geometry.engine;
+    assemble_vehicle_request(
+        report,
+        &compatibility_config,
+        EngineRequest {
+            n_engines: engine.spanwise_positions_m.len(),
+            thrust_kn: engine.thrust_kn,
+            cruise_thrust_kn: cruise_thrust_kn_per_engine(report, &compatibility_config),
+            bypass_ratio: engine.bypass_ratio,
+            nacelle_length_m: engine.nacelle_length_m(),
+            nacelle_max_radius_m: engine.radius_scale_m,
+            overall_pressure_ratio: engine.overall_pressure_ratio,
+            turbine_inlet_temp_k: engine.turbine_inlet_temp_k,
+            fan_pressure_ratio: engine.fan_pressure_ratio,
+        },
+    )
 }
 
 // A test asserts on values it constructed here, so a failed unwrap is the
@@ -248,7 +307,7 @@ mod tests {
             geometry_summary: json!({"span_m": 60.0}),
             component_masses: json!({"wing": 12000.0}),
         };
-        let request = build_vehicle_request(&view, &config);
+        let request = build_vehicle_request(&view, &config).unwrap();
         assert_eq!(request.name, "ALAS_Design");
         assert_eq!(request.design_vector, json!({"sweep_deg": 25.0}));
         assert_eq!(request.component_masses_kg, json!({"wing": 12000.0}));
@@ -263,7 +322,7 @@ mod tests {
         let config = AlasConfig::default();
         let view = report(Some(19.0), Some(18.0));
 
-        let product = build_vehicle_request(&view, &config);
+        let product = build_vehicle_request(&view, &config).unwrap();
         let reference = build_vehicle_request_reference_compatibility(&view, &config);
 
         assert!(product
@@ -278,5 +337,29 @@ mod tests {
             .side_of_body_span_fraction
             .is_none());
         assert!(reference.geometry_config.wing.kink_span_fraction.is_none());
+    }
+
+    #[test]
+    fn product_vehicle_request_uses_typed_engine_data_not_the_flat_mirror() {
+        let mut config = AlasConfig::default();
+        config.geometry.engine.thrust_kn = 1.0;
+        config.geometry.engine.bypass_ratio = 0.0;
+        let request = build_vehicle_request(&report(Some(19.0), None), &config).unwrap();
+        let spec = config.geometry.engine.turbofan.as_ref().unwrap();
+        assert_eq!(request.engine.thrust_kn, spec.rated_thrust_kn);
+        assert_eq!(request.engine.bypass_ratio, spec.bypass_ratio);
+    }
+
+    #[test]
+    fn turboprop_is_rejected_instead_of_serialized_as_a_zero_thrust_jet() {
+        let mut config = AlasConfig::default();
+        config.geometry.engine.engine_name = "PW127M".to_owned();
+        config.geometry.engine.apply_engine_spec();
+        assert!(matches!(
+            build_vehicle_request(&report(Some(19.0), None), &config),
+            Err(VehicleRequestError::UnsupportedTechnology(
+                alas_config::PropulsionTechnology::Turboprop
+            ))
+        ));
     }
 }

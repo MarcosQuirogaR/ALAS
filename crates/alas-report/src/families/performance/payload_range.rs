@@ -13,7 +13,7 @@
 //! transport-sized set of points when the aircraft or its fuel model changes.
 
 use alas_atmo::Atmosphere;
-use alas_config::AlasConfig;
+use alas_config::{ActiveEngineModel, AlasConfig};
 use alas_geom::aircraft::wing::Wing;
 use alas_perf::performance::breguet_range_m;
 use alas_pipeline::feasibility::{assess_fuel_capacity, FuelCapacityEvidence};
@@ -52,6 +52,7 @@ struct PayloadRangeData {
     fuel_capacity_limit: &'static str,
     oew_kg: f64,
     mtow_kg: f64,
+    method_note: String,
 }
 
 /// Generate an idealized Breguet payload-range curve from the report's masses,
@@ -184,7 +185,8 @@ pub fn figure_payload_range(
     });
     scene.add(SceneElement::Text {
         text: format!(
-            "CONCEPTUAL BREGUET RANGE ONLY; capacity evidence: {}   |   usable fuel {} kg   |   OEW {} kg   |   MTOW {} kg   |   NOT AN AFM/WBM OPERATIONAL ENVELOPE",
+            "{}; capacity evidence: {}   |   usable fuel {} kg   |   OEW {} kg   |   MTOW {} kg   |   NOT AN AFM/WBM OPERATIONAL ENVELOPE",
+            data.method_note,
             data.fuel_capacity_limit,
             format_thousands(data.fuel_capacity_kg),
             format_thousands(data.oew_kg),
@@ -234,9 +236,24 @@ fn payload_range_data(report: &AnalysisReport, config: &AlasConfig) -> Option<Pa
         .unwrap_or(report.design_point.l_over_d);
     let atmo = Atmosphere::new(config.requirements.cruise_altitude_m);
     let tas_m_s = config.requirements.cruise_mach * atmo.speed_of_sound();
-    let tsfc_si = config.geometry.engine.cruise_tsfc_kg_kgf_hr / (G * 3600.0);
-    let range_nm = |start_kg: f64, end_kg: f64| {
-        breguet_range_m(tas_m_s, l_over_d, tsfc_si, start_kg, end_kg) / M_TO_NM
+    let active_model = config.geometry.engine.active_model().ok()?;
+    let (range_nm, method_note): (Box<dyn Fn(f64, f64) -> f64>, String) = match active_model {
+        ActiveEngineModel::Turbofan(spec) => {
+            let tsfc_si = spec.cruise_tsfc_kg_kgf_hr / (G * 3600.0);
+            (
+                Box::new(move |start_kg, end_kg| {
+                    breguet_range_m(tas_m_s, l_over_d, tsfc_si, start_kg, end_kg) / M_TO_NM
+                }),
+                "CONCEPTUAL TURBOFAN BREGUET RANGE ONLY".to_owned(),
+            )
+        }
+        ActiveEngineModel::Turboprop(spec) => {
+            let fuel_flow_kg_h = spec.maximum_cruise_fuel_flow_kg_h;
+            if !fuel_flow_kg_h.is_finite() || fuel_flow_kg_h <= 0.0 {
+                return None;
+            }
+            (Box::new(move |start_kg, end_kg| tas_m_s * 3600.0 * (start_kg - end_kg).max(0.0) / fuel_flow_kg_h / M_TO_NM), format!("CONCEPTUAL TURBOPROP CONSTANT-FLOW RANGE AT MAX-CRUISE ANCHOR ({fuel_flow_kg_h:.0} kg/h TOTAL); NO OFF-DESIGN DECK"))
+        }
     };
 
     let fuel_b = fuel_capacity_kg
@@ -276,6 +293,7 @@ fn payload_range_data(report: &AnalysisReport, config: &AlasConfig) -> Option<Pa
         fuel_capacity_limit,
         oew_kg,
         mtow_kg,
+        method_note,
     })
 }
 

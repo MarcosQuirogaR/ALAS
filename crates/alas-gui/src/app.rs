@@ -193,7 +193,7 @@ impl App for AlasApp {
                 }),
             )
             .show(ctx, |ui| {
-                crate::views::show_run_log(&self.state, ui);
+                crate::views::show_run_log(&mut self.state, ui);
             });
         self.state.run_log_height = log_panel
             .response

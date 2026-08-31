@@ -18,7 +18,7 @@
 //! see an edit.
 //!
 //! So the name is a *selector*, not a reference: choosing one copies the
-//! table's values into the fields below once, through
+//! table's values and tagged physics payload into the fields below once, through
 //! [`EngineConfig::apply_engine_spec`], and everything downstream reads those
 //! fields. After that the design's engine can be modified freely -- a
 //! hypothetical derivative, a re-rated variant -- and every discipline sees
@@ -30,7 +30,45 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::engines::{PropulsionTechnology, TurbofanEngineSpec, TurbopropEngineSpec};
 use crate::ConfigNode;
+
+fn is_default_propulsion_technology(value: &PropulsionTechnology) -> bool {
+    *value == PropulsionTechnology::default()
+}
+
+/// Why a selected engine cannot be exposed to a propulsion solver.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum EngineBindingError {
+    /// The selector is not a canonical catalogue name or alias.
+    #[error(transparent)]
+    Unknown(#[from] crate::engines::UnknownEngine),
+    /// Selector, technology tag and typed payload do not describe one model.
+    #[error("engine '{engine_name}' has no coherent {technology:?} physics binding")]
+    MismatchedBinding {
+        /// Selected catalogue key.
+        engine_name: String,
+        /// Technology claimed by the live configuration.
+        technology: PropulsionTechnology,
+    },
+    /// The active technology payload contains a nonphysical value.
+    #[error("engine '{engine_name}' has invalid physics: {reason}")]
+    InvalidPayload {
+        /// Selected catalogue key.
+        engine_name: String,
+        /// Stable, actionable validation explanation.
+        reason: &'static str,
+    },
+}
+
+/// A validated, technology-specific view of the live engine configuration.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ActiveEngineModel<'a> {
+    /// A thrust-producing gas turbine.
+    Turbofan(&'a TurbofanEngineSpec),
+    /// A shaft-power gas turbine and propeller installation.
+    Turboprop(&'a TurbopropEngineSpec),
+}
 
 /// Podded engine placement, nacelle shape, and the live cycle parameters.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ConfigNode)]
@@ -43,6 +81,23 @@ pub struct EngineConfig {
         help = "Name from the built-in engine database (see the Engine selector on the Inputs tab) -- drives thrust, mass, and the default nacelle profile."
     )]
     pub engine_name: String,
+
+    /// Technology discriminator used by the propulsion orchestrator. Hidden
+    /// until the dedicated propulsion editor can present tagged payloads.
+    #[serde(default, skip_serializing_if = "is_default_propulsion_technology")]
+    #[config(skip)]
+    pub propulsion_technology: PropulsionTechnology,
+
+    /// Typed turbofan physics payload. The flat fields below remain a
+    /// deprecated compatibility mirror for existing consumers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[config(skip)]
+    pub turbofan: Option<TurbofanEngineSpec>,
+
+    /// Typed turboprop physics payload; never inferred from turbofan fields.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[config(skip)]
+    pub turboprop: Option<TurbopropEngineSpec>,
 
     /// The nacelle silhouette, as station and radius-fraction pairs.
     #[config(
@@ -89,7 +144,8 @@ pub struct EngineConfig {
     )]
     pub inlet_x_offset_m: f64,
 
-    /// Sea-level static takeoff thrust, per engine.
+    /// Deprecated turbofan compatibility mirror: sea-level static takeoff
+    /// thrust, per engine. Zero for non-thrust-rated technologies.
     #[config(
         decimals = 2,
         label = "Rated thrust per engine",
@@ -98,7 +154,7 @@ pub struct EngineConfig {
     )]
     pub thrust_kn: f64,
 
-    /// Bypass flow over core flow.
+    /// Deprecated turbofan compatibility mirror: bypass flow over core flow.
     #[config(
         label = "Bypass ratio (BPR)",
         unit = "-",
@@ -149,6 +205,24 @@ pub struct EngineConfig {
         help = "Fan face diameter -- informational/reference only (does not currently size the nacelle profile, which comes from radius_scale_m/nacelle_profile above)."
     )]
     pub fan_diameter_m: f64,
+
+    /// Normalized fuel flow at ICAO LTO thrust fractions 7%, 30%, 85%, 100%.
+    #[config(
+        advanced,
+        label = "Part-power fuel-flow ratios",
+        help = "Fuel flow divided by take-off fuel flow at 7%, 30%, 85%, and 100% rated net thrust. Sea-level-static ICAO/EASA anchors; altitude use is an explicitly empirical Level-1 approximation."
+    )]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub part_power_fuel_flow_ratios: Vec<f64>,
+
+    /// Provenance for the part-power schedule.
+    #[config(
+        advanced,
+        label = "Part-power schedule source",
+        help = "ICAO Engine Emissions Databank UID/variant, or a clearly identified family proxy when an exact entry is unavailable."
+    )]
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub part_power_source: String,
 }
 
 impl Default for EngineConfig {
@@ -159,6 +233,11 @@ impl Default for EngineConfig {
         // the time something asks it for thrust.
         Self {
             engine_name: "GE9X".to_owned(),
+            propulsion_technology: PropulsionTechnology::Turbofan,
+            turbofan: crate::engines::get("GE9X")
+                .ok()
+                .and_then(crate::engines::EngineSpec::turbofan_spec),
+            turboprop: None,
             nacelle_profile: vec![
                 (0.0, 0.40),
                 (0.6, 0.92),
@@ -178,6 +257,12 @@ impl Default for EngineConfig {
             turbine_inlet_temp_k: 1670.0,
             cruise_tsfc_kg_kgf_hr: 0.50,
             fan_diameter_m: 3.40,
+            // GE9X is not present in the March 2026 EEDB release. Until a
+            // manufacturer deck is available, retain an explicit GEnx family
+            // proxy rather than pretending the old linear law is measured.
+            part_power_fuel_flow_ratios: vec![0.082_578_70, 0.253_287_04, 0.815, 1.0],
+            part_power_source: "ICAO EEDB 03/2026 family proxy: 07P27GE235 GEnx-1B74/75/P2"
+                .to_owned(),
         }
     }
 }
@@ -200,6 +285,8 @@ impl EngineConfig {
             && self.turbine_inlet_temp_k == defaults.turbine_inlet_temp_k
             && self.cruise_tsfc_kg_kgf_hr == defaults.cruise_tsfc_kg_kgf_hr
             && self.fan_diameter_m == defaults.fan_diameter_m
+            && self.part_power_fuel_flow_ratios == defaults.part_power_fuel_flow_ratios
+            && self.part_power_source == defaults.part_power_source
             && self.nacelle_profile == defaults.nacelle_profile;
         if cycle_is_uninitialized {
             self.apply_engine_spec();
@@ -210,33 +297,160 @@ impl EngineConfig {
     /// covers.
     ///
     /// This is the only place the engine table is read once a design is
-    /// running; see the module documentation for why. A name the table does
-    /// not carry leaves the current values alone, which is what lets an
-    /// engine be given a name of its own and still be flown -- upstream does
-    /// the same by swallowing the lookup failure, and this records it instead
-    /// of discarding it.
+    /// running; see the module documentation for why. On an unknown name the
+    /// flat compatibility values remain available to the editor, but the
+    /// typed binding is invalidated and [`Self::active_model`] fails closed.
     pub fn apply_engine_spec(&mut self) {
+        if let Err(error) = self.try_apply_engine_spec() {
+            tracing::debug!(engine = %self.engine_name, %error, "engine binding invalidated");
+        }
+    }
+
+    /// Atomically replace geometry, compatibility mirrors and typed physics.
+    ///
+    /// On lookup failure the previous typed binding is cleared, so an unknown
+    /// selector can never continue to expose another engine's valid physics.
+    pub fn try_apply_engine_spec(&mut self) -> Result<(), EngineBindingError> {
         let spec = match crate::engines::get(&self.engine_name) {
             Ok(spec) => spec,
             Err(error) => {
-                tracing::debug!(
-                    engine = %self.engine_name,
-                    %error,
-                    "engine not in the table; keeping the values already set"
-                );
-                return;
+                self.turbofan = None;
+                self.turboprop = None;
+                return Err(error.into());
             }
         };
 
-        self.nacelle_profile = spec.nacelle_profile();
-        self.radius_scale_m = spec.nacelle_max_radius_m;
-        self.thrust_kn = spec.thrust_kn;
-        self.bypass_ratio = spec.bypass_ratio;
-        self.overall_pressure_ratio = spec.overall_pressure_ratio;
-        self.fan_pressure_ratio = spec.fan_pressure_ratio;
-        self.turbine_inlet_temp_k = spec.turbine_inlet_temp_k;
-        self.cruise_tsfc_kg_kgf_hr = spec.cruise_tsfc_kg_kgf_hr;
-        self.fan_diameter_m = spec.fan_diameter_m;
+        let (turbofan, turboprop) = match spec.technology {
+            PropulsionTechnology::Turbofan => (spec.turbofan_spec(), None),
+            PropulsionTechnology::Turboprop => (None, spec.turboprop.clone()),
+        };
+        if turbofan.is_none() && turboprop.is_none() {
+            self.turbofan = None;
+            self.turboprop = None;
+            return Err(EngineBindingError::MismatchedBinding {
+                engine_name: self.engine_name.clone(),
+                technology: spec.technology,
+            });
+        }
+
+        let mut replacement = self.clone();
+        replacement.nacelle_profile = spec.nacelle_profile();
+        replacement.radius_scale_m = spec.nacelle_max_radius_m;
+        replacement.thrust_kn = spec.thrust_kn;
+        replacement.bypass_ratio = spec.bypass_ratio;
+        replacement.overall_pressure_ratio = spec.overall_pressure_ratio;
+        replacement.fan_pressure_ratio = spec.fan_pressure_ratio;
+        replacement.turbine_inlet_temp_k = spec.turbine_inlet_temp_k;
+        replacement.cruise_tsfc_kg_kgf_hr = spec.cruise_tsfc_kg_kgf_hr;
+        replacement.fan_diameter_m = spec.fan_diameter_m;
+        replacement.part_power_fuel_flow_ratios = spec.part_power_fuel_flow_ratios.to_vec();
+        replacement.part_power_source = spec.part_power_source.clone();
+        replacement.propulsion_technology = spec.technology;
+        replacement.turbofan = turbofan;
+        replacement.turboprop = turboprop;
+        *self = replacement;
+        Ok(())
+    }
+
+    /// Return physics only when the selector, technology and typed payload
+    /// still agree with the catalogue binding.
+    pub fn active_model(&self) -> Result<ActiveEngineModel<'_>, EngineBindingError> {
+        let spec = crate::engines::get(&self.engine_name)?;
+        if spec.technology != self.propulsion_technology {
+            return Err(EngineBindingError::MismatchedBinding {
+                engine_name: self.engine_name.clone(),
+                technology: self.propulsion_technology,
+            });
+        }
+        match self.propulsion_technology {
+            PropulsionTechnology::Turbofan if self.turboprop.is_none() => {
+                let payload = self.turbofan.as_ref().ok_or_else(|| {
+                    EngineBindingError::MismatchedBinding {
+                        engine_name: self.engine_name.clone(),
+                        technology: self.propulsion_technology,
+                    }
+                })?;
+                let scalars = [
+                    payload.rated_thrust_kn,
+                    payload.bypass_ratio,
+                    payload.overall_pressure_ratio,
+                    payload.fan_pressure_ratio,
+                    payload.turbine_inlet_temp_k,
+                    payload.cruise_tsfc_kg_kgf_hr,
+                    payload.takeoff_fuel_flow_kg_s,
+                    payload.off_design.cruise_reference_thrust_n,
+                    payload.off_design.cruise_reference_altitude_m,
+                    payload.off_design.cruise_reference_mach,
+                ];
+                if scalars.iter().any(|value| !value.is_finite())
+                    || payload.rated_thrust_kn <= 0.0
+                    || payload.bypass_ratio < 0.0
+                    || payload
+                        .takeoff_bypass_ratio
+                        .is_some_and(|value| !value.is_finite() || value <= 0.0)
+                    || payload.overall_pressure_ratio <= 1.0
+                    || payload.fan_pressure_ratio <= 1.0
+                    || payload.turbine_inlet_temp_k <= 0.0
+                    || payload.cruise_tsfc_kg_kgf_hr <= 0.0
+                    || payload.takeoff_fuel_flow_kg_s <= 0.0
+                    || payload.off_design.cruise_reference_thrust_n <= 0.0
+                    || payload.off_design.cruise_reference_altitude_m <= 9_144.0
+                    || !(0.0..1.0).contains(&payload.off_design.cruise_reference_mach)
+                    || !matches!(
+                        payload.off_design.evidence.as_str(),
+                        "direct-openap"
+                            | "openap-static-fallback"
+                            | "family-proxy"
+                            | "aircraft-kinematic-calibration"
+                            | "aircraft-requirement-calibration"
+                    )
+                    || payload.off_design.source.trim().is_empty()
+                    || payload
+                        .part_power_fuel_flow_ratios
+                        .iter()
+                        .any(|ratio| !ratio.is_finite() || *ratio < 0.0)
+                {
+                    return Err(EngineBindingError::InvalidPayload {
+                        engine_name: self.engine_name.clone(),
+                        reason: "turbofan ratings, ratios, temperatures and fuel-flow anchors must be finite and in their physical domains",
+                    });
+                }
+                Ok(ActiveEngineModel::Turbofan(payload))
+            }
+            PropulsionTechnology::Turboprop if self.turbofan.is_none() => {
+                let payload = self.turboprop.as_ref().ok_or_else(|| {
+                    EngineBindingError::MismatchedBinding {
+                        engine_name: self.engine_name.clone(),
+                        technology: self.propulsion_technology,
+                    }
+                })?;
+                let positive = [
+                    payload.takeoff_shaft_power_kw,
+                    payload.maximum_reserve_shaft_power_kw,
+                    payload.maximum_continuous_shaft_power_kw,
+                    payload.maximum_climb_shaft_power_kw,
+                    payload.maximum_cruise_shaft_power_kw,
+                    payload.maximum_cruise_fuel_flow_kg_h,
+                    payload.propeller_diameter_m,
+                    payload.governed_propeller_speed_rpm,
+                    payload.reduction_ratio,
+                ];
+                if positive
+                    .iter()
+                    .any(|value| !value.is_finite() || *value <= 0.0)
+                {
+                    return Err(EngineBindingError::InvalidPayload {
+                        engine_name: self.engine_name.clone(),
+                        reason: "turboprop ratings, propeller geometry, governed speed and reduction ratio must be finite and positive",
+                    });
+                }
+                Ok(ActiveEngineModel::Turboprop(payload))
+            }
+            _ => Err(EngineBindingError::MismatchedBinding {
+                engine_name: self.engine_name.clone(),
+                technology: self.propulsion_technology,
+            }),
+        }
     }
 
     /// Nacelle length, read off the aft-most profile station.
@@ -329,6 +543,61 @@ mod tests {
         };
         engine.apply_engine_spec();
         assert_eq!(engine.thrust_kn, 480.0);
+        assert!(engine.active_model().is_err());
+    }
+
+    #[test]
+    fn pw127m_selection_exposes_only_turboprop_physics() {
+        let mut engine = EngineConfig {
+            engine_name: "PW127M".to_owned(),
+            ..Default::default()
+        };
+        engine.try_apply_engine_spec().unwrap();
+        assert!(matches!(
+            engine.active_model(),
+            Ok(ActiveEngineModel::Turboprop(_))
+        ));
+        assert!(engine.turbofan.is_none());
+        assert_eq!(engine.thrust_kn, 0.0);
+    }
+
+    #[test]
+    fn changing_the_selector_cannot_expose_stale_ge9x_physics() {
+        let mut engine = EngineConfig::default();
+        assert!(matches!(
+            engine.active_model(),
+            Ok(ActiveEngineModel::Turbofan(_))
+        ));
+        engine.engine_name = "PW127M".to_owned();
+        assert!(engine.active_model().is_err());
+    }
+
+    #[test]
+    fn a_physically_valid_typed_derivative_remains_usable() {
+        let mut engine = EngineConfig::default();
+        engine.turbofan.as_mut().unwrap().rated_thrust_kn = 480.0;
+        assert!(matches!(
+            engine.active_model(),
+            Ok(ActiveEngineModel::Turbofan(model)) if model.rated_thrust_kn == 480.0
+        ));
+    }
+
+    #[test]
+    fn typed_configs_saved_before_takeoff_bpr_split_remain_loadable() {
+        let engine = EngineConfig::default();
+        let mut value = serde_json::to_value(&engine).unwrap();
+        value
+            .pointer_mut("/turbofan")
+            .unwrap()
+            .as_object_mut()
+            .unwrap()
+            .remove("takeoff_bypass_ratio");
+        let restored: EngineConfig = serde_json::from_value(value).unwrap();
+        let Ok(ActiveEngineModel::Turbofan(spec)) = restored.active_model() else {
+            panic!("legacy typed turbofan binding");
+        };
+        assert_eq!(spec.takeoff_bypass_ratio, None);
+        assert!(spec.bypass_ratio > 0.0);
     }
 
     #[test]

@@ -61,7 +61,11 @@ pub(super) fn static_thrust_to_weight(config: &AlasConfig, default: f64) -> f64 
     if mtow_g <= 0.0 {
         return default;
     }
-    n_eng * config.geometry.engine.thrust_kn * 1000.0 / mtow_g
+    let Ok(alas_config::ActiveEngineModel::Turbofan(spec)) = config.geometry.engine.active_model()
+    else {
+        return default;
+    };
+    n_eng * spec.rated_thrust_kn * 1000.0 / mtow_g
 }
 
 /// A centered placeholder figure for data that could not be resolved -- the
@@ -173,7 +177,12 @@ mod tests {
     fn static_thrust_to_weight_matches_hand_computed_ratio() {
         let mut cfg = AlasConfig::default();
         cfg.geometry.engine.spanwise_positions_m = vec![1.0, -1.0];
-        cfg.geometry.engine.thrust_kn = 400.0;
+        cfg.geometry
+            .engine
+            .turbofan
+            .as_mut()
+            .unwrap()
+            .rated_thrust_kn = 400.0;
         cfg.requirements.mtow_kg = 80_000.0;
         let tw = static_thrust_to_weight(&cfg, 0.30);
         let expected = 2.0 * 400.0 * 1000.0 / (80_000.0 * G);

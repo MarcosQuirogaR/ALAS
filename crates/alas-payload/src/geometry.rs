@@ -270,6 +270,20 @@ impl CabinGeometry {
         (internal * deck.width_factor).max(0.0)
     }
 
+    /// Internal fuselage width available at an absolute vertical station.
+    ///
+    /// The conceptual fuselage sections are elliptical, so crown furniture
+    /// cannot reuse the floor chord without protruding through the sidewall.
+    pub fn usable_width_at_z(&self, x: f64, z: f64) -> f64 {
+        let half_width = (self.width_at(x) * 0.5 - self.wall).max(0.0);
+        let half_height = self.internal_half_height(x);
+        let normalized_z = (z - self.zc_at(x)) / half_height.max(1e-6);
+        if normalized_z.abs() >= 1.0 {
+            return 0.0;
+        }
+        2.0 * half_width * (1.0 - normalized_z * normalized_z).sqrt()
+    }
+
     /// A station as a percentage of MAC.
     ///
     /// The MAC is floored at a micrometre so that a degenerate wing reports a
@@ -464,6 +478,15 @@ mod tests {
         // two cabins would be drawn through each other.
         assert!(double[1].floor_frac > double[0].ceil_frac);
         assert!(hold.ceil_frac <= double[0].floor_frac);
+    }
+
+    #[test]
+    fn crown_width_is_narrower_than_the_section_center() {
+        let cabin = geometry(vec![xsec(0.0, 2.0), xsec(10.0, 2.0)]);
+        let center = cabin.usable_width_at_z(5.0, 0.0);
+        let crown = cabin.usable_width_at_z(5.0, 1.4);
+        assert!(center > crown);
+        assert!(crown > 0.0);
     }
 
     #[test]

@@ -98,6 +98,7 @@ pub struct SceneView<'a> {
     allow_wheel_zoom: bool,
     raster_scale: f64,
     cache_id: Option<Id>,
+    cache_revision: Option<u64>,
 }
 
 impl<'a> SceneView<'a> {
@@ -112,6 +113,7 @@ impl<'a> SceneView<'a> {
             allow_wheel_zoom: false,
             raster_scale: 2.0,
             cache_id: None,
+            cache_revision: None,
         }
     }
 
@@ -168,6 +170,16 @@ impl<'a> SceneView<'a> {
     /// allocation per drag frame.
     pub fn cache_key(mut self, key: impl Hash) -> Self {
         self.cache_id = Some(Id::new(("alas_scene_png", key)));
+        self
+    }
+
+    /// Use a caller-owned revision instead of formatting and hashing the scene graph.
+    ///
+    /// Dense orbiting scenes are rebuilt whenever their camera changes. Their
+    /// owner already knows that revision, so walking thousands of polygons to
+    /// rediscover the same fact would consume a significant part of a frame.
+    pub fn cache_revision(mut self, revision: u64) -> Self {
+        self.cache_revision = Some(revision);
         self
     }
 
@@ -243,9 +255,13 @@ impl<'a> SceneView<'a> {
             clipped_painter.rect_filled(rect, 0.0, to_egui_color(&background));
         }
 
-        if let Some(texture) =
-            cached_scene_texture(self.scene, ui, self.raster_scale, self.cache_id)
-        {
+        if let Some(texture) = cached_scene_texture(
+            self.scene,
+            ui,
+            self.raster_scale,
+            self.cache_id,
+            self.cache_revision,
+        ) {
             let image_rect = Rect::from_min_size(
                 pos2(base_transform.offset_x, base_transform.offset_y),
                 vec2(
@@ -321,10 +337,13 @@ fn cached_scene_texture(
     ui: &Ui,
     raster_scale: f64,
     cache_id: Option<Id>,
+    cache_revision: Option<u64>,
 ) -> Option<TextureHandle> {
-    let mut hasher = DefaultHasher::new();
-    format!("{scene:?}").hash(&mut hasher);
-    let scene_hash = hasher.finish();
+    let scene_hash = cache_revision.unwrap_or_else(|| {
+        let mut hasher = DefaultHasher::new();
+        format!("{scene:?}").hash(&mut hasher);
+        hasher.finish()
+    });
     let id = cache_id.unwrap_or_else(|| Id::new(("alas_scene_png", scene_hash)));
     if let Some(mut cached) = ui
         .ctx()

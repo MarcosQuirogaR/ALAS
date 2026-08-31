@@ -38,7 +38,13 @@ pub(super) fn item_color(item: &DeckItem) -> Color {
         ItemKind::Lav => Color::from_hex("#5dade2"),
         ItemKind::AccessibleLav => Color::from_hex("#2471a3"),
         ItemKind::WheelchairStowage => Color::from_hex("#f4d03f"),
-        ItemKind::OverheadBin => Color::from_hex("#566573"),
+        ItemKind::OverheadBin => match &item.meta {
+            ItemMeta::OverheadBin(meta) => Color::from_hex(match meta.bin_type {
+                alas_payload::layout::OverheadBinType::Sidewall => "#566573",
+                alas_payload::layout::OverheadBinType::Center => "#7b8790",
+            }),
+            _ => Color::from_hex("#566573"),
+        },
         ItemKind::Exit => Color::from_hex("#e74c3c"),
         ItemKind::Bag => Color::from_hex("#95a5a6"),
     }

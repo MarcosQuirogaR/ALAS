@@ -22,7 +22,7 @@ use serde::Deserialize;
 use serde_json::Value;
 use std::collections::BTreeMap;
 
-const SOURCE_CORRECTION_COUNT: usize = 51;
+const SOURCE_CORRECTION_COUNT: usize = 65;
 const DC_10_UPSTREAM_DISPLAY_NAME: &str = "McDonnell Douglas DC-10";
 const DC_10_CORRECTED_DISPLAY_NAME: &str = "McDonnell Douglas DC-10-30 (572k option)";
 
@@ -512,7 +512,31 @@ fn source_corrections() -> BTreeMap<String, SourceCorrection> {
     .into_iter()
     .collect::<BTreeMap<_, _>>();
     add_transport_planform_corrections(&mut corrections);
+    add_part_power_schedule_corrections(&mut corrections);
     corrections
+}
+
+fn add_part_power_schedule_corrections(corrections: &mut BTreeMap<String, SourceCorrection>) {
+    for preset in [
+        "AVE", "A340-300", "A380-800", "B787-9", "A320-200", "A220-300", "DC-10",
+    ] {
+        corrections.insert(
+            format!("{preset}.geometry.engine.part_power_fuel_flow_ratios"),
+            SourceCorrection {
+                upstream: Value::String("absent upstream".to_owned()),
+                corrected: serde_json::json!([0.08257870, 0.25328704, 0.815, 1.0]),
+            },
+        );
+        corrections.insert(
+            format!("{preset}.geometry.engine.part_power_source"),
+            SourceCorrection {
+                upstream: Value::String("absent upstream".to_owned()),
+                corrected: Value::String(
+                    "ICAO EEDB 03/2026 family proxy: 07P27GE235 GEnx-1B74/75/P2".to_owned(),
+                ),
+            },
+        );
+    }
 }
 
 fn source_correction(

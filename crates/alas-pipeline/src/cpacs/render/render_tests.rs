@@ -20,6 +20,7 @@ use crate::feasibility::{FeasibilityReport, FuelLoadingAssessment};
 use crate::full_analysis::{AnalysisReport, DesignPoint, PolarFit, PolarFitStatus};
 
 use super::{render_cpacs_v35, render_cpacs_v35_with_analysis};
+use crate::cpacs::read_cpacs;
 
 const TEST_TIMESTAMP: &str = "2026-08-23T00:00:00Z";
 
@@ -40,6 +41,42 @@ fn the_engine_cycle_is_written_to_machine_readable_cpacs_fields() {
     assert!(xml.contains("<length>7.8</length>"));
     assert!(xml.contains("<diameter>4.2</diameter>"));
     assert!(!xml.contains("<turbineInletTemperature>"));
+}
+
+#[test]
+fn turboprop_export_uses_shaft_power_extension_not_zero_jet_fields() {
+    let preset = alas_config::presets::get("ATR72-600").expect("ATR preset");
+    let mut config = AlasConfig::default();
+    config.geometry = preset.geometry.clone();
+    config.geometry.engine.apply_engine_spec();
+    let airplane = AircraftBuilder::new(Some(config.geometry.clone()))
+        .build(None, true)
+        .expect("ATR geometry builds");
+
+    let xml = render_cpacs_v35(&airplane, &config, TEST_TIMESTAMP)
+        .expect("typed turboprop is CPACS representable");
+
+    assert!(!xml.contains("<thrust00>"));
+    assert!(!xml.contains("<fpr00>"));
+    assert!(!xml.contains("<bpr00>"));
+    assert!(!xml.contains("<opr00>"));
+    assert!(xml.contains("<technology>turboprop</technology>"));
+    assert!(xml.contains("<engineModel>PW127M</engineModel>"));
+    assert!(xml.contains("<propellerModel>Hamilton Sundstrand 568F-1</propellerModel>"));
+    assert!(xml.contains("<takeoffShaftPowerKW>1845.6071832</takeoffShaftPowerKW>"));
+    assert!(xml.contains("<maximumClimbShaftPowerKW>1634.574119424</maximumClimbShaftPowerKW>"));
+
+    let imported = read_cpacs(&xml).expect("exported extension remains readable");
+    assert_eq!(imported.engines[0].name, "PW127M");
+    assert_eq!(imported.engines[0].thrust00_n, None);
+    let turboprop = imported.engines[0]
+        .turboprop
+        .as_ref()
+        .expect("toolspecific turboprop values round-trip");
+    assert_eq!(turboprop.takeoff_shaft_power_kw, 1845.6071832);
+    assert_eq!(turboprop.maximum_climb_shaft_power_kw, 1634.574119424);
+    assert_eq!(turboprop.maximum_cruise_fuel_flow_kg_h, 762.0);
+    assert_eq!(turboprop.propeller_diameter_m, 3.93);
 }
 
 #[test]
@@ -131,7 +168,9 @@ fn a_complete_mission_is_exported_as_a_cpacs_trajectory_summary() {
             converged: true,
             status: Status::Converged,
             evaluations: 0,
+            throttle_limited: false,
         }],
+        scheduled_segment_count: 1,
         fuel_exhaustion: None,
     };
 

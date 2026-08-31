@@ -17,8 +17,14 @@ use std::collections::BTreeMap;
 
 use alas_aero::drag_buildup::{DragSettings, FuselageParams, NacelleParams, WingParams};
 use alas_aero::lift_surrogate::{LiftSurrogate, TrainingGrid, TrainingTables};
-use alas_mission::segments::{MissionAnalyses, SegmentKind, SegmentSpec};
+use alas_mission::segments::{
+    LegacyTurbofanCompatibility, MissionAnalyses, SegmentKind, SegmentSpec,
+};
 use alas_prop::mission_turbofan::{TurbofanInputs, VehicleBuilderParams};
+use alas_prop::system::{
+    LegacyTurbofanModel, ModelIdentity, ModelProvenance, PropulsionInstallation,
+    PropulsionOrchestrator,
+};
 use serde::Deserialize;
 
 /// The resolved vehicle, exactly as the generator read it off the analyses.
@@ -201,6 +207,43 @@ pub fn analyses(vehicle: &Vehicle, training: &SurrogateTraining) -> MissionAnaly
     let surrogate = LiftSurrogate::from_training(&grid, &training.wing_tags, &tables)
         .expect("the recorded tables fit");
 
+    let turbofan = TurbofanInputs {
+        number_of_engines: vehicle.turbofan.number_of_engines,
+        bypass_ratio: vehicle.turbofan.bypass_ratio,
+        overall_pressure_ratio: vehicle.turbofan.hpc_pressure_ratio
+            * vehicle.turbofan.lpc_pressure_ratio,
+        fan_pressure_ratio: vehicle.turbofan.fan_pressure_ratio,
+        turbine_inlet_temperature_k: vehicle.turbofan.turbine_inlet_temperature_k,
+        cruise_mach: 0.0,
+        cruise_altitude_m: 0.0,
+        design_thrust_total_n: vehicle.turbofan.design_thrust_total_n,
+    };
+    let turbofan_params = VehicleBuilderParams::reference_compatibility();
+    let engine_count = vehicle.turbofan.number_of_engines as usize;
+    let propulsion = PropulsionOrchestrator::new(
+        LegacyTurbofanModel::new(
+            turbofan,
+            turbofan_params,
+            vehicle.turbofan.compressor_nondimensional_massflow,
+            ModelProvenance {
+                model: ModelIdentity {
+                    family: "legacy-mission-turbofan".to_owned(),
+                    version: "frozen-fixture-v1".to_owned(),
+                },
+                dataset: Some("SUAVE W6.4 frozen fixture".to_owned()),
+                sources: vec!["alas @ rust-port-baseline".to_owned()],
+            },
+            Vec::new(),
+            PropulsionInstallation {
+                unit_positions_m: vec![[0.0, 0.0, 0.0]; engine_count],
+                thrust_axes_body: vec![[1.0, 0.0, 0.0]; engine_count],
+                nacelle_wetted_area_m2: None,
+                frontal_area_m2: None,
+            },
+        )
+        .expect("the frozen fixture has a representable propulsion installation"),
+    );
+
     MissionAnalyses {
         reference_area_m2: vehicle.reference_area_m2,
         maximum_lift_coefficient: vehicle.maximum_lift_coefficient,
@@ -253,27 +296,12 @@ pub fn analyses(vehicle: &Vehicle, training: &SurrogateTraining) -> MissionAnaly
             .collect(),
         network_count: vehicle.network_count,
         surrogate,
-        turbofan: TurbofanInputs {
-            number_of_engines: vehicle.turbofan.number_of_engines,
-            bypass_ratio: vehicle.turbofan.bypass_ratio,
-            // The port backs the high-pressure ratio out of the overall one
-            // exactly as `vehicle_builder.py` does, and the fixture records
-            // the network's resolved value; multiplying back is how the
-            // recorded network is expressed in the port's own input, and
-            // `the_engine_the_port_assumes_is_the_one_that_was_flown` is what
-            // checks the two agree.
-            overall_pressure_ratio: vehicle.turbofan.hpc_pressure_ratio
-                * vehicle.turbofan.lpc_pressure_ratio,
-            fan_pressure_ratio: vehicle.turbofan.fan_pressure_ratio,
-            turbine_inlet_temperature_k: vehicle.turbofan.turbine_inlet_temperature_k,
-            // Only the sizing pass reads these three, and the mission flies an
-            // engine that was sized before it started.
-            cruise_mach: 0.0,
-            cruise_altitude_m: 0.0,
-            design_thrust_total_n: vehicle.turbofan.design_thrust_total_n,
-        },
-        turbofan_params: VehicleBuilderParams::default(),
-        compressor_nondimensional_massflow: vehicle.turbofan.compressor_nondimensional_massflow,
+        legacy_turbofan: Some(LegacyTurbofanCompatibility {
+            inputs: turbofan,
+            params: turbofan_params,
+            compressor_nondimensional_massflow: vehicle.turbofan.compressor_nondimensional_massflow,
+        }),
+        propulsion,
     }
 }
 

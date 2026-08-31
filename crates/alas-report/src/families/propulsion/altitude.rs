@@ -26,18 +26,24 @@ use alas_prop::cycle::sweeps::compute_altitude_sweep;
 /// Per-engine thrust and TSFC as contours over the full (altitude, Mach)
 /// flight envelope, holding the cycle design parameters fixed.
 pub fn figure_propulsion_altitude_sweep(config: &AlasConfig, theme: Option<&str>) -> Scene {
+    if let Some(scene) = super::technology::binding_error_scene(config, theme, (1000.0, 480.0)) {
+        return scene;
+    }
+    if super::is_turboprop(config) {
+        return super::technology::turboprop_speed_power_scene(config, theme);
+    }
     let pal = get_palette(theme);
     let mut scene = Scene::new(1000.0, 480.0, Some(Color::from_hex(pal.bg)));
     scene.title = Some("Per-Engine Thrust and TSFC vs Altitude & Mach".to_owned());
 
-    let eng = &config.geometry.engine;
+    let eng = super::turbofan_spec(config);
     let cyc_cfg = &config.propulsion_cycle;
     let req = &config.requirements;
 
     let mach_vec = linspace(0.0, (0.9f64).max(req.cruise_mach * 1.15), 26);
     let alt_vec = linspace(0.0, 13_000.0, 26);
     let (mdot_total, _static) = anchor_mass_flow_kg_s(
-        eng.thrust_kn,
+        eng.rated_thrust_kn,
         eng.overall_pressure_ratio,
         eng.fan_pressure_ratio,
         eng.bypass_ratio,

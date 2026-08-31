@@ -67,6 +67,12 @@ pub enum ItemKind {
     Galley,
     /// A lavatory bay.
     Lav,
+    /// A wheelchair-accessible lavatory bay.
+    AccessibleLav,
+    /// The dedicated in-cabin wheelchair stowage provision.
+    WheelchairStowage,
+    /// A sidewall or centre overhead stowage bin.
+    OverheadBin,
     /// An emergency exit cutout. Carries no mass.
     Exit,
     /// Checked baggage or belly freight in a lower hold.
@@ -81,6 +87,9 @@ impl ItemKind {
             Self::Uld => "uld",
             Self::Galley => "galley",
             Self::Lav => "lav",
+            Self::AccessibleLav => "accessible_lav",
+            Self::WheelchairStowage => "wheelchair_stowage",
+            Self::OverheadBin => "overhead_bin",
             Self::Exit => "exit",
             Self::Bag => "bag",
         }
@@ -134,6 +143,32 @@ pub struct ContainerMeta {
     pub net: Option<f64>,
 }
 
+/// The two overhead-stowage architectures represented by the cabin model.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OverheadBinType {
+    /// Pivot bin following the curved sidewall crown.
+    Sidewall,
+    /// Hinge bin suspended over a centre seat block between two aisles.
+    Center,
+}
+
+impl OverheadBinType {
+    /// Stable display and serialization token.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Sidewall => "sidewall",
+            Self::Center => "center",
+        }
+    }
+}
+
+/// Type-specific information for one overhead-bin run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OverheadBinMeta {
+    /// Whether this is a sidewall pivot bin or a centre hinge bin.
+    pub bin_type: OverheadBinType,
+}
+
 /// The kind-specific extras upstream carries in `DeckItem.meta`.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ItemMeta {
@@ -145,6 +180,8 @@ pub enum ItemMeta {
     Exit(ExitMeta),
     /// Baggage or freight in a container, or a freighter container.
     Container(ContainerMeta),
+    /// An overhead-bin run.
+    OverheadBin(OverheadBinMeta),
     /// The loose bulk block that carries whatever the containers could not.
     BulkBag,
 }
@@ -196,6 +233,10 @@ pub struct PassengerSummary {
     pub lavatories: i64,
     /// Galleys installed.
     pub galleys: i64,
+    /// Wheelchair-accessible lavatories installed.
+    pub accessible_lavatories: i64,
+    /// Dedicated wheelchair stowage positions installed.
+    pub wheelchair_stowages: i64,
     /// Which FAR/CS-25.807 exit type the fuselage takes.
     pub exit_type: &'static str,
     /// Exit pairs installed, summed over the passenger decks.

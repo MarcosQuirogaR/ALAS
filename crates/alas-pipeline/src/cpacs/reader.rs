@@ -15,8 +15,8 @@ use roxmltree::Node;
 use super::model::{
     CpacsAircraft, CpacsDocument, CpacsEngine, CpacsEnginePosition, CpacsFuselage,
     CpacsFuselageElement, CpacsFuselageProfile, CpacsFuselageSection, CpacsHeader, CpacsReference,
-    CpacsSegment, CpacsTransformation, CpacsVersionInfo, CpacsWing, CpacsWingAirfoil,
-    CpacsWingElement, CpacsWingSection, CPACS_35_VERSION,
+    CpacsSegment, CpacsTransformation, CpacsTurboprop, CpacsVersionInfo, CpacsWing,
+    CpacsWingAirfoil, CpacsWingElement, CpacsWingSection, CPACS_35_VERSION,
 };
 
 #[path = "read_error.rs"]
@@ -37,11 +37,17 @@ pub fn read_cpacs(xml: &str) -> Result<CpacsDocument, CpacsReadError> {
     let vehicles = required_child(root, "vehicles", "cpacs/vehicles")?;
     let aircraft = required_child(vehicles, "aircraft", "cpacs/vehicles/aircraft")?;
     let model = required_child(aircraft, "model", "cpacs/vehicles/aircraft/model")?;
+    let mut engines = parse_engines(vehicles)?;
+    if let Some((engine_uid, turboprop)) = parse_turboprop_extension(root)? {
+        if let Some(engine) = engines.iter_mut().find(|engine| engine.uid == engine_uid) {
+            engine.turboprop = Some(turboprop);
+        }
+    }
     let document = CpacsDocument {
         cpacs_version,
         header,
         aircraft: parse_aircraft(model)?,
-        engines: parse_engines(vehicles)?,
+        engines,
         fuselage_profiles: parse_fuselage_profiles(vehicles)?,
         wing_airfoils: parse_wing_airfoils(vehicles)?,
     };
@@ -394,9 +400,52 @@ fn parse_engines<'a, 'input: 'a>(
                 "opr00",
                 &format!("{path}/analysis/opr00"),
             )?,
+            turboprop: None,
         });
     }
     Ok(engines)
+}
+
+fn parse_turboprop_extension(
+    root: Node<'_, '_>,
+) -> Result<Option<(String, CpacsTurboprop)>, CpacsReadError> {
+    let Some(node) = root
+        .descendants()
+        .find(|node| node.is_element() && node.tag_name().name() == "propulsion")
+    else {
+        return Ok(None);
+    };
+    if optional_text(
+        node,
+        "technology",
+        "cpacs/toolspecific/propulsion/technology",
+    )?
+    .as_deref()
+        != Some("turboprop")
+    {
+        return Ok(None);
+    }
+    let path = "cpacs/toolspecific/propulsion";
+    let number = |name: &str| required_number(node, name, &format!("{path}/{name}"));
+    Ok(Some((
+        required_text(node, "engineUID", &format!("{path}/engineUID"))?,
+        CpacsTurboprop {
+            propeller_model: required_text(
+                node,
+                "propellerModel",
+                &format!("{path}/propellerModel"),
+            )?,
+            takeoff_shaft_power_kw: number("takeoffShaftPowerKW")?,
+            maximum_reserve_shaft_power_kw: number("maximumReserveShaftPowerKW")?,
+            maximum_continuous_shaft_power_kw: number("maximumContinuousShaftPowerKW")?,
+            maximum_climb_shaft_power_kw: number("maximumClimbShaftPowerKW")?,
+            maximum_cruise_shaft_power_kw: number("maximumCruiseShaftPowerKW")?,
+            maximum_cruise_fuel_flow_kg_h: number("maximumCruiseFuelFlowKgH")?,
+            propeller_diameter_m: number("propellerDiameterM")?,
+            governed_propeller_speed_rpm: number("governedPropellerSpeedRPM")?,
+            reduction_ratio: number("reductionRatio")?,
+        },
+    )))
 }
 
 fn optional_nested_number<'a, 'input: 'a>(
@@ -579,6 +628,16 @@ fn optional_number<'a, 'input: 'a>(
             parse_number(&value, path)
         })
         .transpose()
+}
+
+fn required_number<'a, 'input: 'a>(
+    node: Node<'a, 'input>,
+    name: &str,
+    path: &str,
+) -> Result<f64, CpacsReadError> {
+    optional_number(node, name, path)?.ok_or_else(|| CpacsReadError::MissingElement {
+        path: path.to_owned(),
+    })
 }
 
 fn parse_number(value: &str, path: &str) -> Result<f64, CpacsReadError> {

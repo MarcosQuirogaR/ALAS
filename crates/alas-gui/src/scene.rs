@@ -30,7 +30,9 @@ use alas_report::families::mass_balance::{
     figure_cg_envelope, figure_landing_gear_planform, figure_mass_breakdown,
     figure_mass_distribution,
 };
-use alas_report::families::mass_balance_layout::figure_fuel_volume_check;
+use alas_report::families::mass_balance_layout::{
+    figure_cabin_cross_section, figure_fuel_volume_check,
+};
 use alas_report::families::mission::{
     figure_mission_aero_coefficients, figure_mission_aero_forces, figure_mission_drag_components,
     figure_mission_flight_path, figure_mission_profile, figure_mission_route_2d,
@@ -467,6 +469,10 @@ pub fn build_result_figure_with_camera(
                 config,
                 Some(theme),
             )
+        }
+        "cabin_section" => {
+            let layout = report.payload_layout.as_ref()?;
+            figure_cabin_cross_section(layout, &report.airplane, config, Some(theme))
         }
         "payload_range" => figure_payload_range(report, config, Some(theme)),
         "lto_departure" => result

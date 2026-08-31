@@ -24,7 +24,7 @@
 
 use super::{
     CombustorOutput, CompressionNozzleOutput, CompressorOutput, ExpansionNozzleOutput, Freestream,
-    RamOutput, ThrustOutput, TurbineOutput,
+    PartPowerModel, RamOutput, ThrustOutput, TurbineOutput,
 };
 
 /// `Attributes.Gases.Air.compute_gamma`: a cubic fit of the ratio of specific
@@ -295,11 +295,9 @@ const REFERENCE_PRESSURE_PA: f64 = 1.013_25e5;
 /// meaningful -- faithfully what mission reference records when `Thrust.size` runs
 /// `compute` before it has solved the scale factor.
 ///
-/// `throttle` scales the dimensional thrust and nothing else, exactly as
-/// `conditions.propulsion.throttle` does upstream: the fuel flow follows it
-/// only through `FD2`, since TSFC is a specific quantity. The two sizing
-/// passes pass 1, the value `Thrust.size` fixes; a mission segment passes the
-/// unknown it is solving for.
+/// The mission command is a normalized requested net-thrust fraction, not a
+/// physical power-lever angle. Product fuel flow follows an empirical ICAO-LTO
+/// schedule; the proportional predecessor law is reference-only.
 #[allow(clippy::too_many_arguments)] // mirrors the inputs mission reference links onto Thrust
 pub(super) fn compute_thrust(
     freestream: &Freestream,
@@ -312,6 +310,7 @@ pub(super) fn compute_thrust(
     number_of_engines: f64,
     nondimensional_massflow: f64,
     throttle: f64,
+    part_power_model: PartPowerModel,
 ) -> ThrustOutput {
     let gamma = freestream.gamma;
     let u0 = freestream.velocity_m_s;
@@ -332,26 +331,116 @@ pub(super) fn compute_thrust(
     let thrust_nd = core_nd + fan_nd;
 
     let fsp = 1.0 / (gamma * m0) * thrust_nd;
-    let isp = fsp * a0 * (1.0 + bypass_ratio) / (fuel_to_air_ratio * g);
     // SFC_adjustment defaults to 0, so it is omitted from the (1 - adj) factor.
-    let tsfc = fuel_to_air_ratio * g / (fsp * a0 * (1.0 + bypass_ratio)) * SECONDS_PER_HOUR;
+    let full_tsfc = fuel_to_air_ratio * g / (fsp * a0 * (1.0 + bypass_ratio)) * SECONDS_PER_HOUR;
 
     let mdot_core = nondimensional_massflow
         * (REFERENCE_TEMPERATURE_K / total_temperature_reference_k).sqrt()
         * (total_pressure_reference_pa / REFERENCE_PRESSURE_PA);
-    let fd2 = fsp * a0 * (1.0 + bypass_ratio) * mdot_core * number_of_engines * throttle;
-    let fuel_flow_rate = (fd2 * tsfc / g).max(0.0) / SECONDS_PER_HOUR;
+    let full_thrust = fsp * a0 * (1.0 + bypass_ratio) * mdot_core * number_of_engines;
+    let full_fuel_flow = (full_thrust * full_tsfc / g).max(0.0) / SECONDS_PER_HOUR;
+    let command = throttle.clamp(0.0, 1.0);
+    let (thrust_fraction, fuel_fraction) = match part_power_model {
+        PartPowerModel::LegacyLinear => (command, command),
+        PartPowerModel::IcaoLtoFuelFlow { fuel_flow_ratios } => {
+            // Mission engines are operating; shutdown/windmilling is a
+            // separate state the current solver does not expose. Commands
+            // below the ICAO 7% idle rating therefore saturate at idle.
+            let operating_fraction = command.max(0.07);
+            (
+                operating_fraction,
+                part_power_fuel_fraction(operating_fraction, fuel_flow_ratios),
+            )
+        }
+    };
+    let fd2 = full_thrust * thrust_fraction;
+    let fuel_flow_rate = full_fuel_flow * fuel_fraction;
+    let tsfc = if fd2 > 0.0 {
+        fuel_flow_rate * g * SECONDS_PER_HOUR / fd2
+    } else if full_thrust == 0.0 && fsp > 0.0 {
+        // The first sizing pass intentionally has zero dimensional capacity,
+        // while its specific cycle quantities remain meaningful.
+        full_tsfc
+    } else {
+        0.0
+    };
+    let isp = if fuel_flow_rate > 0.0 {
+        fd2 / (fuel_flow_rate * g)
+    } else if full_thrust == 0.0 && fuel_to_air_ratio > 0.0 {
+        fsp * a0 * (1.0 + bypass_ratio) / (fuel_to_air_ratio * g)
+    } else {
+        0.0
+    };
     let power = fd2 * u0;
 
     ThrustOutput {
         thrust_n: fd2,
         thrust_specific_fuel_consumption: tsfc,
-        non_dimensional_thrust: fsp,
+        non_dimensional_thrust: fsp * thrust_fraction,
         core_mass_flow_rate_kg_s: mdot_core,
         fuel_flow_rate_kg_s: fuel_flow_rate,
         power_w: power,
         specific_impulse_s: isp,
     }
+}
+
+/// Shape-preserving cubic interpolation through normalized fuel-flow anchors
+/// at thrust fractions `[0.07, 0.30, 0.85, 1.0]`.
+pub(crate) fn part_power_fuel_fraction(thrust_fraction: f64, ratios: [f64; 4]) -> f64 {
+    const X: [f64; 4] = [0.07, 0.30, 0.85, 1.0];
+    let y = ratios;
+    if y.iter().any(|value| !value.is_finite())
+        || y.windows(2).any(|pair| pair[1] < pair[0])
+        || y[0] < 0.0
+        || y[3] <= 0.0
+    {
+        return f64::NAN;
+    }
+
+    let x = thrust_fraction.clamp(0.07, 1.0);
+    if x == 0.07 || x == 1.0 {
+        return y[if x == 0.07 { 0 } else { 3 }];
+    }
+
+    let mut secant = [0.0; 3];
+    for i in 0..3 {
+        secant[i] = (y[i + 1] - y[i]) / (X[i + 1] - X[i]);
+    }
+    let mut tangent = [0.0; 4];
+    tangent[0] = secant[0];
+    tangent[3] = secant[2];
+    for i in 1..3 {
+        tangent[i] = 0.5 * (secant[i - 1] + secant[i]);
+    }
+    // Fritsch-Carlson limiter: doi:10.1137/0717021.
+    for i in 0..3 {
+        if secant[i] == 0.0 {
+            tangent[i] = 0.0;
+            tangent[i + 1] = 0.0;
+            continue;
+        }
+        let alpha = tangent[i] / secant[i];
+        let beta = tangent[i + 1] / secant[i];
+        let magnitude = alpha * alpha + beta * beta;
+        if magnitude > 9.0 {
+            let scale = 3.0 / magnitude.sqrt();
+            tangent[i] = scale * alpha * secant[i];
+            tangent[i + 1] = scale * beta * secant[i];
+        }
+    }
+
+    let interval = (0..3).find(|&i| x <= X[i + 1]).unwrap_or(2);
+    let width = X[interval + 1] - X[interval];
+    let t = (x - X[interval]) / width;
+    let h00 = (2.0 * t - 3.0) * t * t + 1.0;
+    let h10 = ((t - 2.0) * t + 1.0) * t;
+    let h01 = (-2.0 * t + 3.0) * t * t;
+    let h11 = (t - 1.0) * t * t;
+    (h00 * y[interval]
+        + h10 * width * tangent[interval]
+        + h01 * y[interval + 1]
+        + h11 * width * tangent[interval + 1])
+        .clamp(y[interval], y[interval + 1])
 }
 
 /// Back out the design core mass flow and its scale factor from the design

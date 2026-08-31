@@ -65,7 +65,10 @@ pub const SYSTEMS: &str = "Systems";
 pub const FURNISHINGS: &str = "Furnishings";
 /// Passengers and/or cargo.
 pub const PAYLOAD: &str = "Payload";
-/// The fuel remainder: `MTOW - MZFW`.
+/// The signed fuel-closure remainder: `MTOW - MZFW`.
+///
+/// A negative value diagnoses an overweight zero-fuel configuration; it is
+/// not a physical negative fuel load.
 pub const FUEL: &str = "Fuel";
 
 /// The components that make up the Operating Empty Weight -- everything
@@ -147,11 +150,35 @@ pub struct MassBreakdown {
     pub furnishings: f64,
     /// [`PAYLOAD`]'s mass.
     pub payload: f64,
-    /// [`FUEL`]'s mass.
+    /// Signed [`FUEL`] closure, `MTOW - MZFW`, in kg.
+    ///
+    /// Negative values are retained so sizing and optimization callers can
+    /// diagnose an overweight candidate. Use
+    /// [`Self::physical_fuel_mass_kg`] before treating this value as a load or
+    /// forming a mass moment.
     pub fuel: f64,
 }
 
 impl MassBreakdown {
+    /// Signed MTOW-closure remainder, in kg.
+    ///
+    /// This diagnostic preserves negative closure for callers that must
+    /// detect `MZFW > MTOW`; it does not assert that the value is a physical
+    /// fuel load.
+    pub fn signed_fuel_closure_kg(&self) -> f64 {
+        self.fuel
+    }
+
+    /// Physically admissible fuel load, in kg.
+    ///
+    /// A finite, nonnegative closure is a usable mass value. Negative and
+    /// non-finite closures return `None` so they cannot silently become a
+    /// negative fuel mass or moment while remaining available through
+    /// [`Self::signed_fuel_closure_kg`] for diagnostics.
+    pub fn physical_fuel_mass_kg(&self) -> Option<f64> {
+        (self.fuel.is_finite() && self.fuel >= 0.0).then_some(self.fuel)
+    }
+
     /// Every component paired with its canonical name, in the order upstream's
     /// dict literal writes them -- the generic iteration
     /// [`calculate_physical_cg`] and [`OEW_KEYS`]'s summation need.
@@ -432,21 +459,30 @@ pub fn calculate_component_masses(
 
     let m_gear = mm.landing_gear_mass_fraction * mtow_target;
 
-    // Propulsion mass: dry engine weight + pylons + accessories. Reads the
-    // engine's live, editable design thrust (`EngineConfig::thrust_kn`) --
-    // kept in sync with the preset registry by `apply_engine_spec`, and
-    // directly editable from the Engine Designer tab -- rather than
-    // re-looking the engine up by name, so a hand-tuned thrust value is
-    // reflected here too.
-    let thrust_n = geometry_config.engine.thrust_kn * 1000.0;
-    let m_prop = if thrust_n > 0.0 {
-        let n_engines = geometry_config.engine.spanwise_positions_m.len() as f64;
-        n_engines
-            * (thrust_n / (mm.propulsion_twr_factor * requirements.gravity_m_s2))
-            * mm.propulsion_installation_factor
-    } else {
-        mm.propulsion_mass_fallback_fraction * mtow_target
+    // Technology-specific installed propulsion mass. Turbofans deliberately
+    // retain the historical operation order and coefficients exactly. A
+    // turboprop's compatibility `thrust_kn` is zero by design, so it is never
+    // treated as missing thrust or converted into a fictitious static rating.
+    let n_engines = geometry_config.engine.spanwise_positions_m.len();
+    let estimate = match geometry_config.engine.active_model() {
+        Ok(alas_config::ActiveEngineModel::Turbofan(spec)) => {
+            crate::propulsion_mass::turbofan_installed_mass(
+                spec.rated_thrust_kn * 1_000.0,
+                n_engines,
+                mm.propulsion_twr_factor,
+                mm.propulsion_installation_factor,
+                requirements.gravity_m_s2,
+            )
+        }
+        Ok(alas_config::ActiveEngineModel::Turboprop(spec)) => {
+            crate::propulsion_mass::turboprop_installed_mass(spec, n_engines)
+        }
+        Err(_) => None,
     };
+    let m_prop = estimate.map_or(
+        mm.propulsion_mass_fallback_fraction * mtow_target,
+        |estimate| estimate.total_kg,
+    );
 
     let m_sys = mm.systems_mass_fraction * mtow_target;
     let m_furn = mm.furnishings_mass_fraction * mtow_target;

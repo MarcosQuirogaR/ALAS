@@ -176,6 +176,7 @@ fn result_registry_covers_the_desktop_result_screen_in_tab_order() {
         "landing_gear_planform",
         "stability_side_view",
         "cabin_payload",
+        "cabin_section",
         "propulsion_cycle_summary",
         "propulsion_carpet_plot",
         "propulsion_efficiency_decomposition",

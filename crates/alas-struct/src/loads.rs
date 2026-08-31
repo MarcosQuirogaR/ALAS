@@ -17,7 +17,7 @@
 //! solver, and the NASTRAN BDF FORCE cards never disagree about the load
 //! model.
 
-use alas_config::{DesignRequirements, EngineConfig, MassModelConfig};
+use alas_config::{ActiveEngineModel, DesignRequirements, EngineConfig, MassModelConfig};
 
 /// The near-zero threshold below which a spanwise engine station is treated as
 /// centerline-mounted (loading neither semi-wing). Upstream's literal `1e-6`.
@@ -162,10 +162,13 @@ pub fn engine_point_loads_n(
     mass_cfg: &MassModelConfig,
     req: &DesignRequirements,
 ) -> Vec<(f64, f64)> {
-    let thrust_n = engine_cfg.thrust_kn * 1000.0;
-    if thrust_n <= 0.0 {
+    let Ok(ActiveEngineModel::Turbofan(spec)) = engine_cfg.active_model() else {
+        // This legacy load estimator is thrust-scaled. A shaft-power-rated
+        // installation needs a declared dry mass before it can contribute a
+        // physically meaningful point load.
         return Vec::new();
-    }
+    };
+    let thrust_n = spec.rated_thrust_kn * 1000.0;
     let m_engine = (thrust_n / (mass_cfg.propulsion_twr_factor * req.gravity_m_s2))
         * mass_cfg.propulsion_installation_factor;
     engine_cfg
@@ -271,11 +274,11 @@ mod tests {
 
     #[test]
     fn zero_thrust_loads_nothing_regardless_of_positions() {
-        let engine = EngineConfig {
-            thrust_kn: 0.0,
+        let mut engine = EngineConfig {
             spanwise_positions_m: vec![9.8, -9.8],
             ..Default::default()
         };
+        engine.turbofan.as_mut().unwrap().rated_thrust_kn = 0.0;
         let loads = engine_point_loads_n(&engine, &MassModelConfig::default(), &requirements());
         assert!(loads.is_empty());
     }

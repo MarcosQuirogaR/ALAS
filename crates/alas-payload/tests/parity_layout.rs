@@ -212,6 +212,9 @@ fn compare_meta(
                 numeric.scalar(&at("meta.net"), net, number(expected, "net"));
             }
         }
+        ItemMeta::OverheadBin(_) => {
+            panic!("product-only overhead bins must not enter the frozen reference layout");
+        }
         ItemMeta::BulkBag => {
             discrete.exact(&at("meta.keys"), &meta_keys(expected), &keys_of(&["bags"]));
         }

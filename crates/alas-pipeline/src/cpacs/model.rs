@@ -229,6 +229,23 @@ pub struct CpacsEngine {
     pub bpr00: Option<f64>,
     /// Take-off overall pressure ratio, when CPACS provides `analysis/opr00`.
     pub opr00: Option<f64>,
+    /// ALAS toolspecific turboprop data, when present.
+    pub turboprop: Option<CpacsTurboprop>,
+}
+
+/// Shaft-power propulsion data not representable by CPACS 3.5 jet fields.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CpacsTurboprop {
+    pub propeller_model: String,
+    pub takeoff_shaft_power_kw: f64,
+    pub maximum_reserve_shaft_power_kw: f64,
+    pub maximum_continuous_shaft_power_kw: f64,
+    pub maximum_climb_shaft_power_kw: f64,
+    pub maximum_cruise_shaft_power_kw: f64,
+    pub maximum_cruise_fuel_flow_kg_h: f64,
+    pub propeller_diameter_m: f64,
+    pub governed_propeller_speed_rpm: f64,
+    pub reduction_ratio: f64,
 }
 
 /// A reusable CPACS fuselage profile point list.

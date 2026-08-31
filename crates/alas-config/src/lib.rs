@@ -72,15 +72,20 @@ pub use control_surfaces::ControlSurfacesConfig;
 pub use design_variables::{
     DesignVariableSpec, DesignVector, DesignVectorError, SPECS as DESIGN_VARIABLE_SPECS,
 };
+pub use engines::{
+    PropulsionTechnology, TurbofanEngineSpec, TurbofanOffDesignSpec, TurbopropEngineSpec,
+};
 pub use fidelity_presets::{FidelityPreset, UnknownFidelityPreset};
 pub use geometry::{
-    EmpennageConfig, EngineConfig, FuselageConfig, GeometryConfig, InboardAerodynamicStation,
-    MainWingPanel, MainWingStation, MainWingStationKind, TransportPlanform, TransportPlanformError,
-    WingConfig,
+    ActiveEngineModel, EmpennageConfig, EngineBindingError, EngineConfig, FuselageConfig,
+    GeometryConfig, InboardAerodynamicStation, MainWingPanel, MainWingStation, MainWingStationKind,
+    TransportPlanform, TransportPlanformError, WingConfig,
 };
 pub use landing_gear::LandingGearConfig;
 pub use mass::MassModelConfig;
-pub use mission::{MissionConfig, MissionProfileConfig};
+pub use mission::{
+    FuelPolicy, MissionConfig, MissionModel, MissionProfileConfig, TotalEnergyMissionConfig,
+};
 pub use mses::MsesConfig;
 pub use optimizer::{ObjectiveWeights, OptimizerConfig, SolverSettings};
 pub use performance::PerformanceConfig;

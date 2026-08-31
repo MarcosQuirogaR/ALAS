@@ -9,7 +9,8 @@
 //! preset or from a generic percentage.
 
 use alas_config::{
-    ControlSurfacesConfig, DesignRequirements, FlopsTransportConfig, GeometryConfig,
+    ActiveEngineModel, ControlSurfacesConfig, DesignRequirements, FlopsTransportConfig,
+    GeometryConfig,
 };
 use alas_geom::aircraft::airplane::Airplane;
 use alas_geom::aircraft::fuselage::Fuselage;
@@ -158,6 +159,17 @@ pub fn evaluate_product(
     flops: &FlopsTransportConfig,
 ) -> FlopsTransportEvaluation {
     let mut reasons = Vec::new();
+    let rated_thrust_per_engine_n = match geometry.engine.active_model() {
+        Ok(ActiveEngineModel::Turbofan(spec)) => spec.rated_thrust_kn * 1_000.0,
+        Ok(ActiveEngineModel::Turboprop(_)) => {
+            reasons.push(FlopsTransportUnverifiedReason::UnsupportedPropulsionTechnology);
+            0.0
+        }
+        Err(_) => {
+            reasons.push(FlopsTransportUnverifiedReason::InvalidResolvedInput);
+            0.0
+        }
+    };
     let wing = main_wing(plane);
     let fuselage = primary_fuselage(plane);
     if wing.is_none() {
@@ -376,7 +388,7 @@ pub fn evaluate_product(
         wing_mounted_engine_count: wing_engines,
         fuselage_mounted_engine_count: fuselage_engines,
         engine_count,
-        rated_thrust_per_engine_n: geometry.engine.thrust_kn * 1_000.0,
+        rated_thrust_per_engine_n,
         nacelle_diameter_m: nacelle_diameter,
         hydraulic_pressure_pa,
         variable_sweep_penalty,

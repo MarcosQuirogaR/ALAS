@@ -11,7 +11,7 @@
 //! ratio (dual-axis).
 
 use super::support::axis_labels;
-use super::{design_point, linspace};
+use super::{design_point, linspace, turbofan_spec};
 use crate::chart_kit::{draw_legend, draw_title, LegendMarker};
 use crate::colormap::Colormap;
 use crate::scene::{Axes2D, Color, Fill, Scene, SceneElement, Stroke, TextAlign, TextBaseline};
@@ -36,17 +36,24 @@ fn plt_cmap_sample(cmap: Colormap, index: usize, n: usize) -> Color {
 /// inlet temperature are swept around the current engine's design point
 /// (BPR/FPR and flight condition held fixed at their current values).
 pub fn figure_propulsion_carpet_plot(config: &AlasConfig, theme: Option<&str>) -> Scene {
+    if let Some(scene) = super::technology::binding_error_scene(config, theme, (700.0, 500.0)) {
+        return scene;
+    }
+    if super::is_turboprop(config) {
+        return super::technology::turboprop_power_speed_envelope(config, theme);
+    }
     let pal = get_palette(theme);
     let mut scene = Scene::new(700.0, 500.0, Some(Color::from_hex(pal.bg)));
     scene.title = Some(format!(
         "On-Design Carpet Plot (BPR={:.1}, FPR={:.2})",
-        config.geometry.engine.bypass_ratio, config.geometry.engine.fan_pressure_ratio
+        turbofan_spec(config).bypass_ratio,
+        turbofan_spec(config).fan_pressure_ratio
     ));
     let title = scene.title.clone().unwrap_or_default();
     draw_title(&mut scene, &title, pal);
     scene.suppress_derived_title();
 
-    let eng = &config.geometry.engine;
+    let eng = turbofan_spec(config);
     let cyc_cfg = &config.propulsion_cycle;
     let req = &config.requirements;
 
@@ -180,17 +187,24 @@ pub fn figure_propulsion_efficiency_decomposition(
     config: &AlasConfig,
     theme: Option<&str>,
 ) -> Scene {
+    if let Some(scene) = super::technology::binding_error_scene(config, theme, (700.0, 420.0)) {
+        return scene;
+    }
+    if super::is_turboprop(config) {
+        return super::technology::turboprop_efficiency_scene(config, theme);
+    }
     let pal = get_palette(theme);
     let mut scene = Scene::new(700.0, 420.0, Some(Color::from_hex(pal.bg)));
     scene.title = Some(format!(
         "Efficiency Decomposition vs OPR (BPR={:.1}, TIT={:.0} K)",
-        config.geometry.engine.bypass_ratio, config.geometry.engine.turbine_inlet_temp_k
+        turbofan_spec(config).bypass_ratio,
+        turbofan_spec(config).turbine_inlet_temp_k
     ));
     let title = scene.title.clone().unwrap_or_default();
     draw_title(&mut scene, &title, pal);
     scene.suppress_derived_title();
 
-    let eng = &config.geometry.engine;
+    let eng = turbofan_spec(config);
     let cyc_cfg = &config.propulsion_cycle;
     let req = &config.requirements;
 
@@ -264,7 +278,7 @@ pub fn figure_propulsion_efficiency_decomposition(
             stroke: Stroke::dashed(Color::from_hex(pal.title), 1.3, 2.0, 2.0),
         });
         legend_entries.push((
-            format!("{} OPR = {opr:.0}", eng.engine_name),
+            format!("{} OPR = {opr:.0}", config.geometry.engine.engine_name),
             LegendMarker::Line(Stroke::dashed(Color::from_hex(pal.title), 1.3, 2.0, 2.0)),
         ));
     }
@@ -287,17 +301,24 @@ pub fn figure_propulsion_efficiency_decomposition(
 /// left, TSFC on the right), following the pattern `ax1.twinx()` has no
 /// direct equivalent for here.
 pub fn figure_propulsion_bpr_sensitivity(config: &AlasConfig, theme: Option<&str>) -> Scene {
+    if let Some(scene) = super::technology::binding_error_scene(config, theme, (700.0, 500.0)) {
+        return scene;
+    }
+    if super::is_turboprop(config) {
+        return super::technology::turboprop_rating_scene(config, theme);
+    }
     let pal = get_palette(theme);
     let mut scene = Scene::new(700.0, 420.0, Some(Color::from_hex(pal.bg)));
     scene.title = Some(format!(
         "Bypass-Ratio Sensitivity (OPR={:.0}, TIT={:.0} K)",
-        config.geometry.engine.overall_pressure_ratio, config.geometry.engine.turbine_inlet_temp_k
+        turbofan_spec(config).overall_pressure_ratio,
+        turbofan_spec(config).turbine_inlet_temp_k
     ));
     let title = scene.title.clone().unwrap_or_default();
     draw_title(&mut scene, &title, pal);
     scene.suppress_derived_title();
 
-    let eng = &config.geometry.engine;
+    let eng = turbofan_spec(config);
     let cyc_cfg = &config.propulsion_cycle;
     let req = &config.requirements;
 

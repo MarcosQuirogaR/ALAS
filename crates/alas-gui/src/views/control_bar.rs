@@ -77,6 +77,23 @@ pub fn show_control_bar(state: &mut AppState, ui: &mut Ui) {
         if run_response.clicked() {
             state.start_pipeline(false);
         }
+        if running {
+            let cancel = ui
+                .add_enabled(
+                    !state.cancellation_requested,
+                    egui::Button::new(tr(if state.cancellation_requested {
+                        "Cancelling..."
+                    } else {
+                        "Cancel"
+                    })),
+                )
+                .on_hover_text(tr(
+                    "Stop at the next safe stage boundary; active external tools finish first",
+                ));
+            if cancel.clicked() {
+                state.request_pipeline_cancel();
+            }
+        }
         state.record_walkthrough_target(
             TourTarget::Run,
             baseline_response.rect.union(run_response.rect),

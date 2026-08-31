@@ -191,6 +191,42 @@ impl CpacsDocument {
 
         if !engine.name.is_empty() {
             config.geometry.engine.engine_name = engine.name.clone();
+            if alas_config::engines::get(&engine.name).is_ok() {
+                // A known identity intentionally resolves its complete engine
+                // record once; CPACS values below remain authoritative and
+                // overwrite any differing fields from that baseline.
+                config.geometry.engine.apply_engine_spec();
+            } else {
+                // CPACS 3.5 does not provide a part-power fuel deck. Retaining
+                // the caller/default schedule here would attach false engine
+                // provenance, so product mission construction must stop until
+                // a schedule is supplied explicitly.
+                config.geometry.engine.part_power_fuel_flow_ratios.clear();
+                config.geometry.engine.part_power_source = format!(
+                    "unavailable: CPACS engine '{}' has no matched ICAO/EASA part-power schedule",
+                    engine.name
+                );
+                config.geometry.engine.turbofan = None;
+                config.geometry.engine.turboprop = None;
+            }
+        }
+        if let Some(imported) = engine.turboprop.as_ref() {
+            let payload = config.geometry.engine.turboprop.as_mut().ok_or(
+                CpacsAircraftError::InvalidEngineValue {
+                    field: "toolspecific/propulsion/technology",
+                    value: f64::NAN,
+                },
+            )?;
+            payload.takeoff_shaft_power_kw = imported.takeoff_shaft_power_kw;
+            payload.maximum_reserve_shaft_power_kw = imported.maximum_reserve_shaft_power_kw;
+            payload.maximum_continuous_shaft_power_kw = imported.maximum_continuous_shaft_power_kw;
+            payload.maximum_climb_shaft_power_kw = imported.maximum_climb_shaft_power_kw;
+            payload.maximum_cruise_shaft_power_kw = imported.maximum_cruise_shaft_power_kw;
+            payload.maximum_cruise_fuel_flow_kg_h = imported.maximum_cruise_fuel_flow_kg_h;
+            payload.propeller_model = imported.propeller_model.clone();
+            payload.propeller_diameter_m = imported.propeller_diameter_m;
+            payload.governed_propeller_speed_rpm = imported.governed_propeller_speed_rpm;
+            payload.reduction_ratio = imported.reduction_ratio;
         }
         if let Some(value) = engine.thrust00_n {
             require_engine_value("thrust00", value, |value| value > 0.0)?;
@@ -207,6 +243,15 @@ impl CpacsDocument {
         if let Some(value) = engine.opr00 {
             require_engine_value("opr00", value, |value| value > 0.0)?;
             config.geometry.engine.overall_pressure_ratio = value;
+        }
+        if let Some(payload) = config.geometry.engine.turbofan.as_mut() {
+            // CPACS scalars are authoritative for the imported derivative.
+            // Keep the transitional flat mirror and typed mission payload in
+            // lock-step until all remaining consumers are migrated.
+            payload.rated_thrust_kn = config.geometry.engine.thrust_kn;
+            payload.fan_pressure_ratio = config.geometry.engine.fan_pressure_ratio;
+            payload.bypass_ratio = config.geometry.engine.bypass_ratio;
+            payload.overall_pressure_ratio = config.geometry.engine.overall_pressure_ratio;
         }
         if let Some(value) = engine.geometry_diameter_m {
             require_engine_value("geometry/diameter", value, |value| value > 0.0)?;

@@ -22,6 +22,7 @@
 mod analysis;
 pub mod breakdown;
 pub mod flops_transport;
+pub mod propulsion_mass;
 pub mod torenbeek;
 pub mod transport_weight;
 pub mod wing_centroid;
