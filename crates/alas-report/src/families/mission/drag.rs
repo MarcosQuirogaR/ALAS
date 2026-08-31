@@ -133,6 +133,7 @@ mod tests {
         let mission = MissionResult {
             segments: Vec::new(),
             solutions: Vec::new(),
+            scheduled_segment_count: 0,
             fuel_exhaustion: None,
         };
         let scene = figure_mission_drag_components(&mission, None);

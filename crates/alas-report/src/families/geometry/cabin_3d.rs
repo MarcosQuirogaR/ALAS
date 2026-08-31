@@ -12,6 +12,7 @@ use crate::scene::{Camera3D, Color, Fill, Scene, SceneElement, Stroke};
 use crate::theme::get_palette;
 
 use super::cabin::item_color;
+use super::cabin_assets::asset_for_item;
 use super::wireframe::{draw_fuselage_wireframe, framing};
 
 #[derive(Clone)]
@@ -130,6 +131,26 @@ fn item_faces(item: &DeckItem) -> Vec<Face3D> {
     let color = item_color(item);
     if let (ItemKind::SeatRow, ItemMeta::Seat(meta)) = (item.kind, &item.meta) {
         return seat_faces(item, meta, color);
+    }
+    if let Some(asset) = asset_for_item(item) {
+        let is_bin = item.kind == ItemKind::OverheadBin;
+        return asset
+            .faces()
+            .into_iter()
+            .enumerate()
+            .map(|(index, points)| Face3D {
+                points,
+                // Alternating side shading makes the crown-mounted side bins
+                // legible against the fuselage wireframe without inventing a
+                // lighting or GPU dependency.
+                color: shade(color, if index % 2 == 0 { 1.12 } else { 0.88 }, 240),
+                outline: if is_bin {
+                    Color::rgba(213, 216, 220, 235)
+                } else {
+                    shade(color, 0.48, 255)
+                },
+            })
+            .collect();
     }
     cuboid_faces(
         [item.x, item.y, item.z],
@@ -326,6 +347,23 @@ mod tests {
         let faces = item_faces(&item(ItemKind::Galley, ItemMeta::None));
         assert_eq!(faces.len(), 6);
         assert!(faces.iter().all(|face| face.points.len() == 4));
+        assert_rendered_as_polygons(faces);
+    }
+
+    #[test]
+    fn overhead_bins_use_profile_extrusions_and_high_contrast_outlines() {
+        use alas_payload::layout::{OverheadBinMeta, OverheadBinType};
+
+        let faces = item_faces(&item(
+            ItemKind::OverheadBin,
+            ItemMeta::OverheadBin(OverheadBinMeta {
+                bin_type: OverheadBinType::Sidewall,
+            }),
+        ));
+        assert_eq!(faces.len(), 8, "six profile edges plus two end caps");
+        assert!(faces
+            .iter()
+            .all(|face| face.outline == Color::rgba(213, 216, 220, 235)));
         assert_rendered_as_polygons(faces);
     }
 }

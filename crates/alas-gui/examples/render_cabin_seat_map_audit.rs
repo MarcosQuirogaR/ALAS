@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! Render generated cabin maps for the two body-width cases used in visual review.
+//! Render generated cabin maps and sections for every registered aircraft preset.
 
 use std::error::Error;
 use std::path::PathBuf;
@@ -75,7 +75,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     std::fs::create_dir_all(&directory)?;
     alas_i18n::es::install();
     alas_i18n::set_language(Some("es"));
-    render_preset(&directory, "A320-200")?;
-    render_preset(&directory, "A380-800")?;
+    for preset in presets::available() {
+        render_preset(&directory, preset)?;
+    }
     Ok(())
 }

@@ -136,6 +136,18 @@ pub fn build_static_deck(
 
 /// The normal-modes deck in `dialect`'s spelling.
 pub fn build_modes_deck(deck: &Deck, cfg: &StructuresConfig, dialect: Dialect) -> String {
+    build_modes_deck_for_nodes(deck, cfg, dialect, &[])
+}
+
+/// The normal-modes deck while limiting printed eigenvectors to `output_nodes`.
+///
+/// An empty slice retains the public builder's historical all-grid output.
+pub(crate) fn build_modes_deck_for_nodes(
+    deck: &Deck,
+    cfg: &StructuresConfig,
+    dialect: Dialect,
+    output_nodes: &[i64],
+) -> String {
     let mut out = String::new();
     match dialect {
         Dialect::Nastran95 => {
@@ -154,7 +166,12 @@ pub fn build_modes_deck(deck: &Deck, cfg: &StructuresConfig, dialect: Dialect) -
     out.push_str("TITLE = ALAS WINGBOX -- NORMAL MODES\n");
     out.push_str(&format!("  SPC = {SPC_SET}\n"));
     out.push_str(&format!("  METHOD = {METHOD_SET}\n"));
-    out.push_str("  DISPLACEMENT = ALL\n");
+    if output_nodes.is_empty() {
+        out.push_str("  DISPLACEMENT = ALL\n");
+    } else {
+        case_control_set(&mut out, 9500, output_nodes);
+        out.push_str("  DISPLACEMENT = 9500\n");
+    }
     out.push_str("BEGIN BULK\n");
 
     let mut tags = ContinuationTags::new();
@@ -163,6 +180,27 @@ pub fn build_modes_deck(deck: &Deck, cfg: &StructuresConfig, dialect: Dialect) -
     eigenvalue_card(&mut out, &mut tags, cfg, dialect);
     out.push_str("ENDDATA\n");
     out
+}
+
+fn case_control_set(out: &mut String, set_id: i64, values: &[i64]) {
+    let mut line = format!("  SET {set_id} = ");
+    for value in values {
+        let token = value.to_string();
+        let separator = usize::from(!line.ends_with(' '));
+        if line.len() + separator + token.len() > 71 {
+            line.push(',');
+            out.push_str(&line);
+            out.push('\n');
+            line = format!("    {token}");
+        } else {
+            if separator != 0 {
+                line.push(',');
+            }
+            line.push_str(&token);
+        }
+    }
+    out.push_str(&line);
+    out.push('\n');
 }
 
 /// Keep NASTRAN-95's executive time card in minutes aligned with ALAS's
@@ -501,7 +539,7 @@ fn card(out: &mut String, tags: &mut ContinuationTags, name: &'static str, field
 
 #[cfg(test)]
 mod tests {
-    use super::{build_modes_deck, time_limit, Dialect};
+    use super::{build_modes_deck, build_modes_deck_for_nodes, time_limit, Dialect};
     use crate::mesh::Deck;
     use alas_config::StructuresConfig;
 
@@ -520,5 +558,31 @@ mod tests {
         };
         let deck = build_modes_deck(&Deck::default(), &config, Dialect::Nastran95);
         assert!(deck.contains("EIGR    1       INV     0.      100.    60      30"));
+    }
+
+    #[test]
+    fn local_modes_can_limit_eigenvector_printing_to_required_nodes() {
+        let nodes: Vec<i64> = (1..=40).map(|value| value * 10_000).collect();
+        let deck = build_modes_deck_for_nodes(
+            &Deck::default(),
+            &StructuresConfig::default(),
+            Dialect::Nastran95,
+            &nodes,
+        );
+        assert!(deck.contains("  SET 9500 = "));
+        assert!(deck.contains("  DISPLACEMENT = 9500\n"));
+        assert!(!deck.contains("  DISPLACEMENT = ALL\n"));
+        for line in deck
+            .lines()
+            .skip_while(|line| !line.starts_with("  SET 9500"))
+        {
+            if line == "  DISPLACEMENT = 9500" {
+                break;
+            }
+            assert!(
+                line.len() <= 72,
+                "case-control line exceeds 72 columns: {line}"
+            );
+        }
     }
 }

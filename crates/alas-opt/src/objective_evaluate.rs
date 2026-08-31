@@ -4,8 +4,7 @@
 //! Candidate scalar-cost evaluation for the aircraft design objective.
 
 use super::{
-    apply_candidate_payload_load_case, parasite_drag_reference_compatibility, wing_fuel_volume_m3,
-    wing_fuel_volume_m3_reference_compatibility, DesignObjective,
+    apply_candidate_payload_load_case, parasite_drag_reference_compatibility, DesignObjective,
 };
 
 use alas_aero::analysis::{AeroAnalysis, TrimPoint};
@@ -574,24 +573,11 @@ impl DesignObjective {
             cost += (-m_fuel / req.mtow_kg.max(1.0)) * w.fuel_penalty_scale;
         }
 
-        // The native transport path integrates the actual spar-box volume and
-        // reserves non-tankable inboard and outboard bays. The frozen path
-        // retains the reference global correlation below.
-        if !transport_constraints_active && !plane.wings.is_empty() {
-            let tank_capacity_kg = if self.reference_mass_coordinates {
-                wing_fuel_volume_m3_reference_compatibility(
-                    &plane.wings[0],
-                    mm.fuel_tank_usable_fraction,
-                )
-            } else {
-                wing_fuel_volume_m3(&plane.wings[0], mm.fuel_tank_usable_fraction)
-            } * mm.fuel_density_kg_m3;
-            let required_fuel_kg = m_fuel.max(0.0);
-            if required_fuel_kg > tank_capacity_kg {
-                let shortfall = (required_fuel_kg - tank_capacity_kg) / required_fuel_kg.max(1.0);
-                cost += shortfall.powi(2) * w.fuel_volume_penalty_scale;
-            }
-        }
+        // A positive MTOW mass-closure remainder is an allowance, not a fuel
+        // requirement. Tank capacity is therefore not scored against it here.
+        // Mission range and reserve-policy feasibility belong in the staged
+        // mission assessment; the negative remainder above remains a mass
+        // infeasibility because it means ZFM exceeds MTOW.
 
         if subjective_shape_priors_active {
             if dv.airfoil_thickness_scale < w.thickness_floor {

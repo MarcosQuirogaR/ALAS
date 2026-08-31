@@ -163,7 +163,7 @@ fn cabin_geometry_with_source_corrections(
         .build(design_vector.as_ref(), false)
         .expect("the case's aircraft builds");
 
-    CabinGeometry::new(
+    CabinGeometry::new_reference_compatibility(
         &plane,
         &builder.geometry,
         config.cabin.passenger.wall_thickness_m,

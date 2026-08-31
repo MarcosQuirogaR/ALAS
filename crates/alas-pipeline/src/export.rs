@@ -193,6 +193,7 @@ fn feasibility_to_json(report: &FeasibilityReport) -> serde_json::Value {
             "carried_fuel_basis": carried_fuel_basis_name(fuel.carried_fuel_basis),
             "zero_fuel_mass_kg": fuel.zero_fuel_mass_kg,
             "analyzed_takeoff_mass_kg": fuel.analyzed_takeoff_mass_kg,
+            "analyzed_landing_mass_kg": fuel.analyzed_landing_mass_kg,
             "mtow_shortfall_kg": fuel.mtow_shortfall_kg,
             "mission": {
                 "status": mission_fuel_status_name(fuel.mission.status),

@@ -106,11 +106,11 @@ impl AircraftBuilder {
     /// A new builder over `geometry`, defaulting to [`GeometryConfig::default`]
     /// when `None` -- `AircraftBuilder.__init__`.
     ///
-    /// Applies the engine spec once here, not on every [`Self::build`] call,
-    /// which would repeat the engine-table lookup on every evaluation.
+    /// Product geometry consumes the live engine configuration verbatim.
+    /// Engine selection is resolved when a preset is selected; reapplying the
+    /// database entry here would silently erase later engine-designer edits.
     pub fn new(geometry: Option<GeometryConfig>) -> Self {
-        let mut geometry = geometry.unwrap_or_default();
-        geometry.engine.apply_engine_spec();
+        let geometry = geometry.unwrap_or_default();
         Self {
             geometry,
             geometry_contract: GeometryContract::Product,
@@ -775,6 +775,53 @@ mod tests {
         let first_gap = values[1] - values[0];
         let last_gap = values[10] - values[9];
         assert!(first_gap < last_gap, "{first_gap} >= {last_gap}");
+    }
+
+    #[test]
+    fn product_builder_preserves_every_live_engine_and_nacelle_field() {
+        let mut geometry = GeometryConfig::default();
+        let engine = &mut geometry.engine;
+        engine.engine_name = "Trent 900".to_owned();
+        engine.nacelle_profile = vec![(0.0, 0.31), (2.3, 0.97), (6.4, 0.42)];
+        engine.radius_scale_m = 1.93;
+        engine.spanwise_positions_m = vec![-8.7, 8.7];
+        engine.z_m = -2.41;
+        engine.inlet_x_offset_m = 3.67;
+        engine.thrust_kn = 401.2;
+        engine.bypass_ratio = 9.31;
+        engine.overall_pressure_ratio = 42.7;
+        engine.fan_pressure_ratio = 1.61;
+        engine.turbine_inlet_temp_k = 1734.0;
+        engine.cruise_tsfc_kg_kgf_hr = 0.487;
+        engine.fan_diameter_m = 3.08;
+        let expected = engine.clone();
+
+        let builder = AircraftBuilder::new(Some(geometry));
+
+        assert_eq!(builder.geometry.engine, expected);
+        let airplane = builder
+            .build(Some(&DesignVector::default()), true)
+            .expect("edited live engine geometry builds");
+        let nacelle = &airplane.fuselages[1];
+        assert_eq!(nacelle.xsecs.len(), expected.nacelle_profile.len());
+        let built_length = nacelle.xsecs.last().unwrap().xyz_c[0] - nacelle.xsecs[0].xyz_c[0];
+        assert!((built_length - expected.nacelle_length_m()).abs() < 1.0e-12);
+    }
+
+    #[test]
+    fn reference_builder_still_resolves_the_named_database_engine() {
+        let mut geometry = GeometryConfig::default();
+        geometry.engine.engine_name = "Trent 900".to_owned();
+        geometry.engine.thrust_kn = 1.0;
+
+        let builder = AircraftBuilder::new_reference_compatibility(Some(geometry));
+        let spec = alas_config::engines::get("Trent 900").unwrap();
+
+        assert_eq!(builder.geometry.engine.thrust_kn, spec.thrust_kn);
+        assert_eq!(
+            builder.geometry.engine.nacelle_profile,
+            spec.nacelle_profile()
+        );
     }
 
     #[test]

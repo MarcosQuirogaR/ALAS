@@ -23,6 +23,7 @@
 mod airfoil;
 mod cabin;
 mod cabin_3d;
+pub(crate) mod cabin_assets;
 mod cabin_seat_map;
 mod planform;
 mod shared;

@@ -491,20 +491,35 @@ pub(super) fn place_baggage(
         let leftover = (bag_mass + belly_cargo) - hold_used;
         if leftover > MIN_PLACED_MASS_KG {
             let xx = g.cabin_end_x - BULK_BLOCK_INSET_M;
-            items.push(DeckItem {
-                kind: ItemKind::Bag,
-                deck: LOWER,
-                x: xx,
-                y: 0.0,
-                z: g.item_z(low, xx, BULK_BLOCK_HEIGHT_M),
-                length: BULK_BLOCK_LEN_M,
-                width: g.usable_width(low, xx),
-                mass: leftover,
-                height: g.clamp_height(low, xx, BULK_BLOCK_HEIGHT_M),
-                label: "Bulk overflow".to_owned(),
-                meta: ItemMeta::BulkBag,
-            });
-            hold_used += leftover;
+            let height = g.clamp_height(low, xx, BULK_BLOCK_HEIGHT_M);
+            let bottom = g.floor_z(low, xx);
+            let width = if g.enforces_physical_envelope() {
+                [bottom, bottom + height]
+                    .into_iter()
+                    .map(|z| g.usable_width_at_z(xx, z))
+                    .fold(f64::INFINITY, f64::min)
+                    * low.width_factor
+            } else {
+                g.usable_width(low, xx)
+            };
+            if g.check_rectangular_prism(xx, BULK_BLOCK_LEN_M, 0.0, width, bottom, height)
+                .is_ok()
+            {
+                items.push(DeckItem {
+                    kind: ItemKind::Bag,
+                    deck: LOWER,
+                    x: xx,
+                    y: 0.0,
+                    z: bottom + height * 0.5,
+                    length: BULK_BLOCK_LEN_M,
+                    width,
+                    mass: leftover,
+                    height,
+                    label: "Bulk overflow".to_owned(),
+                    meta: ItemMeta::BulkBag,
+                });
+                hold_used += leftover;
+            }
         }
     }
 

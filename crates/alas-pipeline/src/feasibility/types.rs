@@ -55,6 +55,8 @@ pub enum FindingCode {
     FieldTakeoffDistanceViolation,
     /// Landing distance exceeds the arrival field available.
     FieldLandingDistanceViolation,
+    /// The analyzed arrival mass exceeds the configured maximum landing mass.
+    LandingMassLimitViolation,
     /// Static thrust-to-weight is below the selected departure-field requirement.
     ThrustMarginViolation,
     /// A mission control point requires more than full throttle.

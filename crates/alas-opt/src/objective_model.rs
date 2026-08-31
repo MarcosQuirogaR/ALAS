@@ -181,9 +181,7 @@ impl DesignObjective {
             config.geometry.wing.kink_span_fraction = None;
             config.geometry.wing.outboard_le_sweep_deg = None;
         }
-        if !reference_mass_coordinates {
-            config.geometry.engine.apply_engine_spec_if_uninitialized();
-        } else {
+        if reference_mass_coordinates {
             config.geometry.engine.apply_engine_spec();
         }
         let target_num_passengers = config.requirements.num_passengers;

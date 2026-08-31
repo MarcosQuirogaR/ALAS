@@ -60,12 +60,97 @@ pub struct UldType {
     pub color: &'static str,
     /// Nominal internal volume.
     pub volume_m3: f64,
+    /// Normalized transverse contour, scaled by this type's width and height.
+    pub contour: UldContour,
 }
+
+/// A ULD cross-section in coordinates normalized to half-width and height.
+///
+/// `y = +/-1` denotes the base sides and `z = 0..1` runs from base to top.
+/// Types without a traceable contour use their full bounding rectangle, which
+/// is conservative for collision checks until approved contour data is added.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct UldContour {
+    /// Polygon vertices as normalized `[y, z]` pairs.
+    pub vertices: &'static [[f64; 2]],
+    /// Traceable status/source for this contour definition.
+    pub source: &'static str,
+    /// Whether this polygon may be used for physical collision decisions.
+    pub fidelity: ContourFidelity,
+    /// Whether the loading system may install the reflected contour.
+    pub mirrorable: bool,
+}
+
+/// Evidence level attached to a contour polygon.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ContourFidelity {
+    /// Source-controlled certified or aircraft-approved contour.
+    Authoritative,
+    /// Full bounding envelope: conservative for collision checks.
+    ConservativeEnvelope,
+    /// Approximation that must never increase solver feasibility.
+    VisualizationOnly,
+}
+
+const RECTANGULAR_CONTOUR: UldContour = UldContour {
+    vertices: &[[-1.0, 0.0], [1.0, 0.0], [1.0, 1.0], [-1.0, 1.0]],
+    source: "ALAS legacy SI extents; conservative bounding rectangle pending aircraft WBM data",
+    fidelity: ContourFidelity::ConservativeEnvelope,
+    mirrorable: false,
+};
 
 impl UldType {
     /// The cargo this container may hold, excluding its own tare.
     pub fn max_net(&self) -> f64 {
         self.max_gross_weight - self.tare_weight
+    }
+
+    /// Physical `(y, z)` polygon translated to an installed floor position.
+    pub fn physical_contour(&self, y_center: f64, z_bottom: f64, mirrored: bool) -> Vec<[f64; 2]> {
+        self.contour
+            .vertices
+            .iter()
+            .map(|&[normalized_y, normalized_z]| {
+                let oriented_y = if mirrored && self.contour.mirrorable {
+                    -normalized_y
+                } else {
+                    normalized_y
+                };
+                [
+                    y_center + oriented_y * self.width * 0.5,
+                    z_bottom + normalized_z * self.height,
+                ]
+            })
+            .collect()
+    }
+
+    /// Solver contour; visualization-only shapes fall back to their full box.
+    pub(crate) fn collision_contour(
+        &self,
+        y_center: f64,
+        z_bottom: f64,
+        mirrored: bool,
+    ) -> Vec<[f64; 2]> {
+        let contour = if self.contour.fidelity == ContourFidelity::VisualizationOnly {
+            RECTANGULAR_CONTOUR
+        } else {
+            self.contour
+        };
+        contour
+            .vertices
+            .iter()
+            .map(|&[normalized_y, normalized_z]| {
+                let oriented_y = if mirrored && contour.mirrorable {
+                    -normalized_y
+                } else {
+                    normalized_y
+                };
+                [
+                    y_center + oriented_y * self.width * 0.5,
+                    z_bottom + normalized_z * self.height,
+                ]
+            })
+            .collect()
     }
 }
 
@@ -81,6 +166,7 @@ const LD1: UldType = UldType {
     tare_weight: 120.0,
     color: "#c0392b",
     volume_m3: 5.0,
+    contour: RECTANGULAR_CONTOUR,
 };
 /// The LD2 container.
 const LD2: UldType = UldType {
@@ -94,6 +180,7 @@ const LD2: UldType = UldType {
     tare_weight: 92.0,
     color: "#d35400",
     volume_m3: 3.5,
+    contour: RECTANGULAR_CONTOUR,
 };
 /// The LD3 container, which is what a widebody lower hold is built around.
 const LD3: UldType = UldType {
@@ -107,6 +194,7 @@ const LD3: UldType = UldType {
     tare_weight: 82.0,
     color: "#e74c3c",
     volume_m3: 4.5,
+    contour: RECTANGULAR_CONTOUR,
 };
 /// The reduced-height LD3 that narrowbody holds take. Supplemental to the IATA
 /// table above, and included as the fit-check fallback so a narrowbody still
@@ -122,6 +210,7 @@ const LD3_45: UldType = UldType {
     tare_weight: 82.0,
     color: "#e57373",
     volume_m3: 3.6,
+    contour: RECTANGULAR_CONTOUR,
 };
 /// The LD6 double-width container.
 const LD6: UldType = UldType {
@@ -135,6 +224,7 @@ const LD6: UldType = UldType {
     tare_weight: 230.0,
     color: "#e67e22",
     volume_m3: 9.1,
+    contour: RECTANGULAR_CONTOUR,
 };
 /// The LD8 double-width container.
 const LD8: UldType = UldType {
@@ -148,6 +238,7 @@ const LD8: UldType = UldType {
     tare_weight: 127.0,
     color: "#f39c12",
     volume_m3: 7.1,
+    contour: RECTANGULAR_CONTOUR,
 };
 /// The LD11 double-width container.
 const LD11: UldType = UldType {
@@ -161,6 +252,7 @@ const LD11: UldType = UldType {
     tare_weight: 185.0,
     color: "#f1c40f",
     volume_m3: 7.4,
+    contour: RECTANGULAR_CONTOUR,
 };
 /// The 88-by-125-inch pallet.
 const PAG: UldType = UldType {
@@ -174,6 +266,7 @@ const PAG: UldType = UldType {
     tare_weight: 110.0,
     color: "#2980b9",
     volume_m3: 10.5,
+    contour: RECTANGULAR_CONTOUR,
 };
 /// The 96-by-125-inch pallet, which is what a freighter main deck is loaded
 /// with by default.
@@ -188,6 +281,7 @@ const PMC: UldType = UldType {
     tare_weight: 120.0,
     color: "#3498db",
     volume_m3: 11.5,
+    contour: RECTANGULAR_CONTOUR,
 };
 /// The twenty-foot-class main-deck box.
 const M1: UldType = UldType {
@@ -201,6 +295,7 @@ const M1: UldType = UldType {
     tare_weight: 1000.0,
     color: "#8e44ad",
     volume_m3: 33.7,
+    contour: RECTANGULAR_CONTOUR,
 };
 /// Loose bulk, which is not a container at all: it carries no tare and is what
 /// a hold falls back to when nothing rigid fits.
@@ -215,6 +310,7 @@ const BLK: UldType = UldType {
     tare_weight: 0.0,
     color: "#95a5a6",
     volume_m3: 3.0,
+    contour: RECTANGULAR_CONTOUR,
 };
 
 /// Every container type the loader can place.
@@ -224,9 +320,19 @@ pub static ULD_DATABASE: [UldType; 11] = [LD1, LD2, LD3, LD3_45, LD6, LD8, LD11,
 /// configured container's envelope fails at every station.
 pub static LOWER_HOLD_FALLBACKS: [&str; 2] = ["LD3-45", "BLK"];
 
+/// Containerized lower-hold formats considered by the physical auto-selector.
+/// Bulk is deliberately excluded because it is a hold region, not a ULD.
+pub static LOWER_HOLD_AUTO_CANDIDATES: [&str; 8] =
+    ["LD1", "LD2", "LD3", "LD3-45", "LD6", "LD8", "LD11", "PAG"];
+
 /// The container a key names, if the database has one.
 pub fn uld(key: &str) -> Option<&'static UldType> {
     ULD_DATABASE.iter().find(|entry| entry.key == key)
+}
+
+/// Resolve the standards-facing three-letter ULD type code.
+pub fn uld_by_code(code: &str) -> Option<&'static UldType> {
+    ULD_DATABASE.iter().find(|entry| entry.code == code)
 }
 
 /// The container a key names, falling back to `fallback` -- upstream's
@@ -294,6 +400,25 @@ mod tests {
         for entry in &ULD_DATABASE {
             assert_eq!(uld(entry.key).map(|found| found.code), Some(entry.code));
         }
+    }
+
+    #[test]
+    fn every_type_code_resolves_to_the_same_definition() {
+        for entry in &ULD_DATABASE {
+            assert_eq!(
+                uld_by_code(entry.code).map(|found| found.key),
+                Some(entry.key)
+            );
+        }
+        assert_eq!(uld_by_code("not-a-type-code"), None);
+    }
+
+    #[test]
+    fn physical_contour_scales_normalized_coordinates_in_si_units() {
+        let contour = LD3.physical_contour(2.0, -1.0, false);
+        assert_eq!(contour[0], [2.0 - LD3.width * 0.5, -1.0]);
+        assert_eq!(contour[2], [2.0 + LD3.width * 0.5, -1.0 + LD3.height]);
+        assert_eq!(LD3.contour.fidelity, ContourFidelity::ConservativeEnvelope);
     }
 
     #[test]

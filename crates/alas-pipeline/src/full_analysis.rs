@@ -180,8 +180,7 @@ pub struct FullAnalysis {
 
 impl FullAnalysis {
     /// Create a new analysis orchestrator for `config`.
-    pub fn new(mut config: AlasConfig) -> Self {
-        config.geometry.engine.apply_engine_spec_if_uninitialized();
+    pub fn new(config: AlasConfig) -> Self {
         Self {
             config,
             reference_compatibility: false,
@@ -191,10 +190,9 @@ impl FullAnalysis {
     /// Create a product analysis that preserves engine values supplied by an
     /// imported aircraft-data document.
     ///
-    /// The ordinary [`Self::new`] constructor resolves the configured engine
-    /// database entry for configuration-built aircraft. CPACS input has
-    /// already supplied its own machine-readable engine values, so resolving
-    /// the database again would silently replace that source data.
+    /// Kept as an explicit interchange-data entry point. Product constructors
+    /// preserve live engine fields regardless of whether they came from CPACS,
+    /// a preset, a saved configuration, or the engine designer.
     pub fn new_preserving_engine_config(config: AlasConfig) -> Self {
         Self {
             config,
@@ -728,6 +726,7 @@ mod tests {
     use alas_aero::analysis::PolarSweep;
     use alas_config::design_variables::DesignVector;
     use alas_config::{AlasConfig, AnalysisConfig};
+    use alas_geom::builder::AircraftBuilder;
 
     fn sweep(cl: Vec<f64>, cd: Vec<f64>) -> PolarSweep {
         let n = cl.len();
@@ -742,6 +741,28 @@ mod tests {
             cm: vec![0.0; n],
             l_over_d: vec![0.0; n],
         }
+    }
+
+    #[test]
+    fn product_full_analysis_preserves_the_live_engine_configuration() {
+        let mut config = AlasConfig::default();
+        config.geometry.engine.engine_name = "Trent 900".to_owned();
+        config.geometry.engine.nacelle_profile = vec![(0.0, 0.33), (2.5, 1.0), (6.2, 0.41)];
+        config.geometry.engine.radius_scale_m = 1.91;
+        config.geometry.engine.thrust_kn = 399.0;
+        config.geometry.engine.bypass_ratio = 9.2;
+        config.geometry.engine.overall_pressure_ratio = 43.0;
+        config.geometry.engine.fan_pressure_ratio = 1.59;
+        config.geometry.engine.turbine_inlet_temp_k = 1712.0;
+        config.geometry.engine.cruise_tsfc_kg_kgf_hr = 0.481;
+        config.geometry.engine.fan_diameter_m = 3.11;
+        let expected = config.geometry.engine.clone();
+
+        let analysis = FullAnalysis::new(config);
+
+        assert_eq!(analysis.config.geometry.engine, expected);
+        let builder = AircraftBuilder::new(Some(analysis.config.geometry.clone()));
+        assert_eq!(builder.geometry.engine, expected);
     }
 
     #[test]

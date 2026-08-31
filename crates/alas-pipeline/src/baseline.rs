@@ -56,11 +56,7 @@ pub struct BaselineReport {
 
 /// Run weight & balance and stability estimation on `design`.
 pub fn analyze_baseline(config: &AlasConfig, design: &DesignVector) -> BaselineReport {
-    let mut effective_config = config.clone();
-    effective_config
-        .geometry
-        .engine
-        .apply_engine_spec_if_uninitialized();
+    let effective_config = config.clone();
     let req = &effective_config.requirements;
     let builder = AircraftBuilder::new(Some(effective_config.geometry.clone()));
     let mut plane = match builder.build(Some(design), true) {

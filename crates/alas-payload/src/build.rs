@@ -100,11 +100,19 @@ fn build_payload_layout_with_mass_semantics(
     x_oew: f64,
     reference_compatibility: bool,
 ) -> Result<PayloadLayout, CabinGeometryError> {
-    let g = CabinGeometry::new(
-        plane,
-        &config.geometry,
-        config.cabin.passenger.wall_thickness_m,
-    )?;
+    let g = if reference_compatibility {
+        CabinGeometry::new_reference_compatibility(
+            plane,
+            &config.geometry,
+            config.cabin.passenger.wall_thickness_m,
+        )?
+    } else {
+        CabinGeometry::new(
+            plane,
+            &config.geometry,
+            config.cabin.passenger.wall_thickness_m,
+        )?
+    };
     let mut effective = config.clone();
     if !reference_compatibility {
         presets::apply_cabin_preset_to_geometry(&mut effective, &g);

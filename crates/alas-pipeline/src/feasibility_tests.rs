@@ -50,6 +50,7 @@ fn cruise_equilibrium_reports_scalar_and_inertial_force_residuals() {
     let mission = MissionResult {
         segments: vec![segment],
         solutions: Vec::new(),
+        scheduled_segment_count: 1,
         fuel_exhaustion: None,
     };
 
@@ -71,6 +72,7 @@ fn no_cruise_telemetry_is_not_reported_as_force_balance_evidence() {
     let assessment = assess_cruise_equilibrium(&MissionResult {
         segments: Vec::new(),
         solutions: Vec::new(),
+        scheduled_segment_count: 0,
         fuel_exhaustion: None,
     });
 

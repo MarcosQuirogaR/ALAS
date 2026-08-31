@@ -50,6 +50,19 @@ const MAIN_WING: &str = "Main Wing";
 /// default and therefore what `x_lemac` is measured back from.
 const AERODYNAMIC_CENTER_CHORD_FRACTION: f64 = 0.25;
 
+/// Numerical allowance used when testing a point against the inner ellipse.
+const ENVELOPE_TOLERANCE: f64 = 1e-9;
+
+/// Maximum longitudinal spacing between strict envelope evaluations.
+const MAX_CONTAINMENT_STEP_M: f64 = 0.10;
+
+/// Minimum clear deck-to-deck band, as a fraction of inner half-height.
+///
+/// This reserves approximately 0.15--0.20 m in a widebody for the floor beam,
+/// panels and systems instead of letting the hold ceiling touch the cabin
+/// floor geometrically.
+const MIN_DECK_SEPARATION_FRAC: f64 = 0.06;
+
 /// An airplane [`CabinGeometry`] cannot be built from.
 ///
 /// Upstream indexes `plane.fuselages[0]` and `plane.wings[0]` and raises an
@@ -66,6 +79,26 @@ pub enum CabinGeometryError {
     /// report a centre of gravity against.
     #[error("the airplane has no wing, so there is no MAC to measure the payload CG against")]
     NoWings,
+}
+
+/// Why an installed item cannot be evaluated or contained by the cabin.
+#[derive(Debug, Clone, Copy, PartialEq, thiserror::Error)]
+pub enum InteriorEnvelopeError {
+    /// One or more dimensions are negative or a coordinate is not finite.
+    #[error("the interior item has a non-finite coordinate or a negative extent")]
+    InvalidExtent,
+    /// A corner of the item lies outside the usable, wall-inset fuselage.
+    #[error(
+        "the interior item protrudes through the cabin envelope at ({x:.3}, {y:.3}, {z:.3}) m"
+    )]
+    OutsideEnvelope {
+        /// Longitudinal station, in metres.
+        x: f64,
+        /// Lateral coordinate, in metres; positive to starboard.
+        y: f64,
+        /// Vertical coordinate, in metres; positive upward.
+        z: f64,
+    },
 }
 
 /// A horizontal deck: its floor, its ceiling, and its usable width.
@@ -125,6 +158,9 @@ pub struct CabinGeometry {
     pub passenger_decks: Vec<DeckSpec>,
     /// The lower-deck holds.
     pub lower_deck: DeckSpec,
+    /// Whether product analyses enforce the physical inner-envelope contract.
+    /// Frozen Python parity construction leaves this false deliberately.
+    strict_envelope: bool,
     /// Station coordinates, ascending. The three sampled series below are in
     /// this same order, which is what lets one interpolation index serve all.
     x_stations: Vec<f64>,
@@ -134,6 +170,11 @@ pub struct CabinGeometry {
 }
 
 impl CabinGeometry {
+    /// Whether this frame enforces the product physical-envelope contract.
+    pub const fn enforces_physical_envelope(&self) -> bool {
+        self.strict_envelope
+    }
+
     /// Sample `plane`'s first fuselage into a cabin frame.
     ///
     /// # Errors
@@ -143,6 +184,24 @@ impl CabinGeometry {
         plane: &Airplane,
         geometry_config: &GeometryConfig,
         wall_thickness_m: f64,
+    ) -> Result<Self, CabinGeometryError> {
+        Self::new_with_mode(plane, geometry_config, wall_thickness_m, true)
+    }
+
+    /// Rebuild the historical cabin frame for explicit Python parity paths.
+    pub fn new_reference_compatibility(
+        plane: &Airplane,
+        geometry_config: &GeometryConfig,
+        wall_thickness_m: f64,
+    ) -> Result<Self, CabinGeometryError> {
+        Self::new_with_mode(plane, geometry_config, wall_thickness_m, false)
+    }
+
+    fn new_with_mode(
+        plane: &Airplane,
+        geometry_config: &GeometryConfig,
+        wall_thickness_m: f64,
+        strict_envelope: bool,
     ) -> Result<Self, CabinGeometryError> {
         let fus = plane
             .fuselages
@@ -184,7 +243,11 @@ impl CabinGeometry {
         let mac = plane.c_ref;
         let x_wing_ac = wing.aerodynamic_center(AERODYNAMIC_CENTER_CHORD_FRACTION)[0];
 
-        let (passenger_decks, lower_deck) = decks(fg.height_m, diameter_m);
+        let (passenger_decks, lower_deck) = if strict_envelope {
+            decks(fg.height_m, diameter_m)
+        } else {
+            reference_decks(fg.height_m, diameter_m)
+        };
 
         Ok(Self {
             wall: wall_thickness_m,
@@ -203,6 +266,7 @@ impl CabinGeometry {
             wing_root_chord: root.chord,
             passenger_decks,
             lower_deck,
+            strict_envelope,
             x_stations,
             widths,
             heights,
@@ -237,6 +301,21 @@ impl CabinGeometry {
         (self.height_at(x) / 2.0 - self.wall).max(0.1)
     }
 
+    /// Actual semi-axes of the wall-inset elliptical envelope at `x`.
+    ///
+    /// Unlike [`Self::internal_half_height`], this strict geometry does not
+    /// invent space in a tapered section. `None` means the lining consumes
+    /// the complete local section.
+    pub fn inner_semi_axes(&self, x: f64) -> Option<(f64, f64)> {
+        let half_width = self.width_at(x) * 0.5 - self.wall;
+        let half_height = self.height_at(x) * 0.5 - self.wall;
+        if half_width > 0.0 && half_height > 0.0 {
+            Some((half_width, half_height))
+        } else {
+            None
+        }
+    }
+
     /// Where `deck`'s floor sits at station `x`.
     pub fn floor_z(&self, deck: &DeckSpec, x: f64) -> f64 {
         self.zc_at(x) + deck.floor_frac * self.internal_half_height(x)
@@ -266,8 +345,122 @@ impl CabinGeometry {
     /// The floor width available for seats or containers on `deck` at station
     /// `x`, after both walls and the deck's own width factor.
     pub fn usable_width(&self, deck: &DeckSpec, x: f64) -> f64 {
-        let internal = (self.width_at(x) - 2.0 * self.wall).max(0.0);
-        (internal * deck.width_factor).max(0.0)
+        if self.strict_envelope {
+            self.usable_width_at_z(x, self.floor_z(deck, x)) * deck.width_factor
+        } else {
+            ((self.width_at(x) - 2.0 * self.wall).max(0.0) * deck.width_factor).max(0.0)
+        }
+    }
+
+    /// Internal fuselage width available at an absolute vertical station.
+    ///
+    /// The conceptual fuselage sections are elliptical, so crown furniture
+    /// cannot reuse the floor chord without protruding through the sidewall.
+    pub fn usable_width_at_z(&self, x: f64, z: f64) -> f64 {
+        let Some((half_width, half_height)) = self.inner_semi_axes(x) else {
+            return 0.0;
+        };
+        let normalized_z = (z - self.zc_at(x)) / half_height.max(1e-6);
+        if normalized_z.abs() >= 1.0 {
+            return 0.0;
+        }
+        2.0 * half_width * (1.0 - normalized_z * normalized_z).sqrt()
+    }
+
+    /// Whether a point lies in the station-dependent wall-inset ellipse.
+    pub fn contains_point(&self, x: f64, y: f64, z: f64) -> bool {
+        if !x.is_finite() || !y.is_finite() || !z.is_finite() || x < self.x_min || x > self.x_max {
+            return false;
+        }
+        let Some((half_width, half_height)) = self.inner_semi_axes(x) else {
+            return false;
+        };
+        let normalized_y = y / half_width;
+        let normalized_z = (z - self.zc_at(x)) / half_height;
+        normalized_y.mul_add(normalized_y, normalized_z * normalized_z) <= 1.0 + ENVELOPE_TOLERANCE
+    }
+
+    /// Check a constant cross-section polygon throughout a longitudinal span.
+    ///
+    /// `vertices_yz` are absolute `(y, z)` coordinates. The check includes
+    /// both item ends and every fuselage definition station inside the span,
+    /// so nose/tail taper and centreline upsweep cannot be skipped by a check
+    /// performed only at the item's centre.
+    pub fn check_polygon_containment(
+        &self,
+        x_start: f64,
+        x_end: f64,
+        vertices_yz: &[[f64; 2]],
+    ) -> Result<(), InteriorEnvelopeError> {
+        if !self.strict_envelope {
+            return Ok(());
+        }
+        if !x_start.is_finite()
+            || !x_end.is_finite()
+            || x_start > x_end
+            || vertices_yz.is_empty()
+            || vertices_yz
+                .iter()
+                .flatten()
+                .any(|coordinate| !coordinate.is_finite())
+        {
+            return Err(InteriorEnvelopeError::InvalidExtent);
+        }
+
+        let breakpoints: Vec<f64> = std::iter::once(x_start)
+            .chain(
+                self.x_stations
+                    .iter()
+                    .copied()
+                    .filter(|x| *x > x_start && *x < x_end),
+            )
+            .chain(std::iter::once(x_end))
+            .collect();
+        for interval in breakpoints.windows(2) {
+            let interval_length = interval[1] - interval[0];
+            let steps = (interval_length / MAX_CONTAINMENT_STEP_M).ceil().max(1.0) as usize;
+            for step in 0..=steps {
+                let x = interval[0] + interval_length * step as f64 / steps as f64;
+                for &[y, z] in vertices_yz {
+                    if !self.contains_point(x, y, z) {
+                        return Err(InteriorEnvelopeError::OutsideEnvelope { x, y, z });
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Check all eight corners of an axis-aligned rectangular installation.
+    pub fn check_rectangular_prism(
+        &self,
+        x_center: f64,
+        length: f64,
+        y_center: f64,
+        width: f64,
+        z_bottom: f64,
+        height: f64,
+    ) -> Result<(), InteriorEnvelopeError> {
+        if !x_center.is_finite()
+            || !length.is_finite()
+            || !y_center.is_finite()
+            || !width.is_finite()
+            || !z_bottom.is_finite()
+            || !height.is_finite()
+            || length < 0.0
+            || width < 0.0
+            || height < 0.0
+        {
+            return Err(InteriorEnvelopeError::InvalidExtent);
+        }
+        let half_width = width * 0.5;
+        let vertices = [
+            [y_center - half_width, z_bottom],
+            [y_center + half_width, z_bottom],
+            [y_center - half_width, z_bottom + height],
+            [y_center + half_width, z_bottom + height],
+        ];
+        self.check_polygon_containment(x_center - length * 0.5, x_center + length * 0.5, &vertices)
     }
 
     /// Internal fuselage width available at an absolute vertical station.
@@ -316,6 +509,54 @@ fn is_double_deck(height_m: Option<f64>, diameter_m: f64) -> bool {
 /// roughly half the section; a single-deck body's main deck takes nearly all
 /// of it and the hold takes the bottom fifth.
 fn decks(height_m: Option<f64>, diameter_m: f64) -> (Vec<DeckSpec>, DeckSpec) {
+    if is_double_deck(height_m, diameter_m) {
+        (
+            vec![
+                DeckSpec {
+                    name: crate::layout::MAIN,
+                    floor_frac: -0.30,
+                    ceil_frac: 0.12,
+                    width_factor: 0.95,
+                    is_passenger: true,
+                },
+                DeckSpec {
+                    name: crate::layout::UPPER,
+                    floor_frac: 0.14 + MIN_DECK_SEPARATION_FRAC,
+                    ceil_frac: 0.75,
+                    width_factor: 0.80,
+                    is_passenger: true,
+                },
+            ],
+            DeckSpec {
+                name: crate::layout::LOWER,
+                floor_frac: -0.82,
+                ceil_frac: -0.32 - MIN_DECK_SEPARATION_FRAC,
+                width_factor: 0.55,
+                is_passenger: false,
+            },
+        )
+    } else {
+        (
+            vec![DeckSpec {
+                name: crate::layout::MAIN,
+                floor_frac: 0.0,
+                ceil_frac: 0.95,
+                width_factor: 0.97,
+                is_passenger: true,
+            }],
+            DeckSpec {
+                name: crate::layout::LOWER,
+                floor_frac: -0.71,
+                ceil_frac: -0.02 - MIN_DECK_SEPARATION_FRAC,
+                width_factor: 0.60,
+                is_passenger: false,
+            },
+        )
+    }
+}
+
+/// Original Python deck table, retained only for explicit parity evidence.
+fn reference_decks(height_m: Option<f64>, diameter_m: f64) -> (Vec<DeckSpec>, DeckSpec) {
     if is_double_deck(height_m, diameter_m) {
         (
             vec![
@@ -476,8 +717,67 @@ mod tests {
         assert_eq!(double[1].name, crate::layout::UPPER);
         // The upper deck's floor has to clear the main deck's ceiling, or the
         // two cabins would be drawn through each other.
-        assert!(double[1].floor_frac > double[0].ceil_frac);
-        assert!(hold.ceil_frac <= double[0].floor_frac);
+        assert!(double[1].floor_frac - double[0].ceil_frac >= MIN_DECK_SEPARATION_FRAC);
+        assert!(double[0].floor_frac - hold.ceil_frac >= MIN_DECK_SEPARATION_FRAC);
+        let (single, hold) = decks(None, 6.2);
+        assert!(single[0].floor_frac - hold.ceil_frac >= MIN_DECK_SEPARATION_FRAC);
+    }
+
+    #[test]
+    fn crown_width_is_narrower_than_the_section_center() {
+        let cabin = geometry(vec![xsec(0.0, 2.0), xsec(10.0, 2.0)]);
+        let center = cabin.usable_width_at_z(5.0, 0.0);
+        let crown = cabin.usable_width_at_z(5.0, 1.4);
+        assert!(center > crown);
+        assert!(crown > 0.0);
+    }
+
+    #[test]
+    fn deck_width_is_the_ellipse_chord_at_its_actual_floor() {
+        let cabin = geometry(vec![xsec(0.0, 2.0), xsec(10.0, 2.0)]);
+        let deck = &cabin.lower_deck;
+        let floor_z = cabin.floor_z(deck, 5.0);
+        assert_eq!(
+            cabin.usable_width(deck, 5.0),
+            cabin.usable_width_at_z(5.0, floor_z) * deck.width_factor
+        );
+        assert!(cabin.usable_width(deck, 5.0) < (4.0 - 2.0 * cabin.wall) * deck.width_factor);
+    }
+
+    #[test]
+    fn rectangular_containment_checks_top_corners_not_only_the_centre() {
+        let cabin = geometry(vec![xsec(0.0, 2.0), xsec(10.0, 2.0)]);
+        assert!(cabin
+            .check_rectangular_prism(5.0, 1.0, 0.0, 1.0, -0.5, 1.0)
+            .is_ok());
+        let error = cabin
+            .check_rectangular_prism(5.0, 1.0, 0.0, 3.0, 0.0, 1.5)
+            .expect_err("the upper outer corners protrude through the ellipse");
+        assert!(matches!(
+            error,
+            InteriorEnvelopeError::OutsideEnvelope { .. }
+        ));
+    }
+
+    #[test]
+    fn longitudinal_containment_checks_the_tapered_item_end() {
+        let cabin = geometry(vec![xsec(0.0, 0.5), xsec(5.0, 2.0), xsec(10.0, 2.0)]);
+        let error = cabin
+            .check_rectangular_prism(3.0, 4.0, 0.0, 1.3, -0.25, 0.5)
+            .expect_err("an item fitting at its centre still protrudes at its nose end");
+        assert!(matches!(
+            error,
+            InteriorEnvelopeError::OutsideEnvelope { x, .. } if x == 1.0
+        ));
+    }
+
+    #[test]
+    fn invalid_item_extents_are_typed_instead_of_becoming_geometry() {
+        let cabin = geometry(vec![xsec(0.0, 2.0), xsec(10.0, 2.0)]);
+        assert_eq!(
+            cabin.check_rectangular_prism(5.0, -1.0, 0.0, 1.0, 0.0, 1.0),
+            Err(InteriorEnvelopeError::InvalidExtent)
+        );
     }
 
     #[test]

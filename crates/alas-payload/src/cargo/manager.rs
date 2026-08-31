@@ -26,7 +26,8 @@
 use alas_config::CargoDeckConfig;
 
 use super::{
-    uld_or, CargoSlot, UldType, BULK, LOWER_DECK_DEFAULT, LOWER_HOLD_FALLBACKS, MAIN_DECK_DEFAULT,
+    uld_or, CargoSlot, UldType, BULK, LOWER_DECK_DEFAULT, LOWER_HOLD_AUTO_CANDIDATES,
+    LOWER_HOLD_FALLBACKS, MAIN_DECK_DEFAULT,
 };
 use crate::geometry::{CabinGeometry, DeckSpec};
 use crate::layout::MAIN;
@@ -34,6 +35,8 @@ use crate::numeric::floor_div;
 
 /// Lateral clearance between two containers standing side by side.
 const SLOT_GAP_M: f64 = 0.05;
+/// Numerical tolerance for a row whose dimensions close exactly.
+const SLOT_FIT_TOLERANCE_M: f64 = 1e-9;
 /// Longitudinal clearance between two rows in a lower hold.
 const LOWER_ROW_GAP_M: f64 = 0.08;
 /// The same on a main deck, where the handling system needs more room.
@@ -52,6 +55,37 @@ const MAX_ACROSS: i64 = 3;
 const MAX_LOWER_ROWS: usize = 40;
 /// The same for a main deck.
 const MAX_MAIN_ROWS: usize = 60;
+
+/// Equally spaced slot centres for one transverse row.
+fn transverse_centers(usable_width: f64, container_width: f64) -> Vec<f64> {
+    let count = (((usable_width + SLOT_GAP_M + SLOT_FIT_TOLERANCE_M)
+        / (container_width + SLOT_GAP_M))
+        .floor() as i64)
+        .clamp(0, MAX_ACROSS);
+    let pitch = container_width + SLOT_GAP_M;
+    (0..count)
+        .map(|index| (index as f64 - (count - 1) as f64 * 0.5) * pitch)
+        .collect()
+}
+
+/// Lexicographic uniform-layout comparison: net capacity, volume, lower tare,
+/// then stable type code for reproducibility.
+fn candidate_is_better(
+    candidate: (&UldType, f64, f64, f64),
+    incumbent: (&UldType, f64, f64, f64),
+) -> bool {
+    let (candidate_type, capacity, volume, tare) = candidate;
+    let (best_type, best_capacity, best_volume, best_tare) = incumbent;
+    capacity.total_cmp(&best_capacity).is_gt()
+        || (capacity == best_capacity && volume.total_cmp(&best_volume).is_gt())
+        || (capacity == best_capacity
+            && volume == best_volume
+            && tare.total_cmp(&best_tare).is_lt())
+        || (capacity == best_capacity
+            && volume == best_volume
+            && tare == best_tare
+            && candidate_type.code < best_type.code)
+}
 
 /// Total-mass error the trim loop will correct for before shifting load.
 const MASS_CORRECTION_KG: f64 = 5.0;
@@ -104,21 +138,23 @@ impl<'g> CargoLoadManager<'g> {
     /// width or in height gets no positions at all.
     fn row(&mut self, sid_prefix: &str, deck: &DeckSpec, x: f64, uld: &'static UldType) -> usize {
         let usable = self.geometry.usable_width(deck, x);
-        if self.geometry.deck_height(deck, x) < uld.height {
-            return 0;
-        }
-        let n_across = floor_div(usable, uld.width) as i64;
-        if n_across <= 0 {
-            return 0;
-        }
-        let ys: Vec<f64> = match n_across.min(MAX_ACROSS) {
-            1 => vec![0.0],
-            2 => vec![
-                -(uld.width / 2.0 + SLOT_GAP_M),
-                uld.width / 2.0 + SLOT_GAP_M,
-            ],
-            _ => vec![-(uld.width + SLOT_GAP_M), 0.0, uld.width + SLOT_GAP_M],
+        let candidates = if self.geometry.enforces_physical_envelope() {
+            transverse_centers(usable, uld.width)
+        } else {
+            match (floor_div(usable, uld.width) as i64).clamp(0, MAX_ACROSS) {
+                0 => Vec::new(),
+                1 => vec![0.0],
+                2 => vec![
+                    -(uld.width / 2.0 + SLOT_GAP_M),
+                    uld.width / 2.0 + SLOT_GAP_M,
+                ],
+                _ => vec![-(uld.width + SLOT_GAP_M), 0.0, uld.width + SLOT_GAP_M],
+            }
         };
+        let ys: Vec<f64> = candidates
+            .into_iter()
+            .filter(|&y| self.uld_fits(deck, x, y, uld))
+            .collect();
         for (i, y) in ys.iter().enumerate() {
             self.slots.push(CargoSlot {
                 sid: format!("{sid_prefix}{}", i + 1),
@@ -130,6 +166,34 @@ impl<'g> CargoLoadManager<'g> {
             });
         }
         ys.len()
+    }
+
+    /// Whether the complete rigid ULD envelope stays inside both its deck and
+    /// the fuselage lining over the full longitudinal footprint.
+    fn uld_fits(&self, deck: &DeckSpec, x: f64, y: f64, uld: &UldType) -> bool {
+        if !self.geometry.enforces_physical_envelope() {
+            return self.geometry.deck_height(deck, x) >= uld.height;
+        }
+        let z_bottom = self.geometry.floor_z(deck, x);
+        let half_length = uld.length * 0.5;
+        let deck_clear = [x - half_length, x, x + half_length]
+            .into_iter()
+            .all(|sample_x| {
+                z_bottom >= self.geometry.floor_z(deck, sample_x)
+                    && z_bottom + uld.height <= self.geometry.ceil_z(deck, sample_x)
+            });
+
+        if !deck_clear {
+            return false;
+        }
+
+        let fits_orientation = |mirrored| {
+            let contour = uld.collision_contour(y, z_bottom, mirrored);
+            self.geometry
+                .check_polygon_containment(x - half_length, x + half_length, &contour)
+                .is_ok()
+        };
+        fits_orientation(false) || (uld.contour.mirrorable && fits_orientation(true))
     }
 
     /// Fill the forward and aft lower holds with rows of one container type,
@@ -162,6 +226,55 @@ impl<'g> CargoLoadManager<'g> {
         placed
     }
 
+    /// Generate and detach one complete uniform-format lower-hold layout.
+    fn lower_candidate_slots(&mut self, uld: &'static UldType) -> Vec<CargoSlot> {
+        let start = self.slots.len();
+        self.fill_lower_holds(uld);
+        self.slots.split_off(start)
+    }
+
+    /// Physical-mode lower-hold choice. Capacity dominates nominal volume;
+    /// equal capacity and volume prefer less installed tare, then type code.
+    fn select_lower_format(&mut self) {
+        let requested = uld_or(&self.config.lower_deck_uld, LOWER_DECK_DEFAULT);
+        let mut candidates = vec![requested];
+        candidates.extend(
+            LOWER_HOLD_AUTO_CANDIDATES
+                .iter()
+                .filter_map(|key| super::uld(key))
+                .filter(|candidate| candidate.code != requested.code),
+        );
+
+        let mut best: Option<(&'static UldType, Vec<CargoSlot>, f64, f64, f64)> = None;
+        for candidate in candidates {
+            let slots = self.lower_candidate_slots(candidate);
+            if slots.is_empty() {
+                continue;
+            }
+            let capacity = slots.len() as f64 * candidate.max_net();
+            let volume = slots.len() as f64 * candidate.volume_m3;
+            let tare = slots.len() as f64 * candidate.tare_weight;
+            let replace = best.as_ref().is_none_or(
+                |(best_type, _, best_capacity, best_volume, best_tare)| {
+                    candidate_is_better(
+                        (candidate, capacity, volume, tare),
+                        (best_type, *best_capacity, *best_volume, *best_tare),
+                    )
+                },
+            );
+            if replace {
+                best = Some((candidate, slots, capacity, volume, tare));
+            }
+        }
+
+        if let Some((selected, slots, _, _, _)) = best {
+            self.lower_uld = selected;
+            self.slots.extend(slots);
+        } else {
+            self.lower_uld = requested;
+        }
+    }
+
     /// The main deck if this is a freighter, then the lower holds, then the
     /// one loose bulk position every aircraft has.
     fn build_slots(&mut self) {
@@ -183,29 +296,37 @@ impl<'g> CargoLoadManager<'g> {
             }
         }
 
-        self.lower_uld = uld_or(&self.config.lower_deck_uld, LOWER_DECK_DEFAULT);
-        let mut candidates = vec![self.lower_uld];
-        candidates.extend(
-            LOWER_HOLD_FALLBACKS
-                .iter()
-                .filter_map(|key| super::uld(key))
-                .filter(|entry| entry.code != self.lower_uld.code),
-        );
-        for candidate in candidates {
-            if self.fill_lower_holds(candidate) > 0 {
-                self.lower_uld = candidate;
-                break;
+        if g.enforces_physical_envelope() && self.config.lower_deck_uld.eq_ignore_ascii_case("auto")
+        {
+            self.select_lower_format();
+        } else {
+            self.lower_uld = uld_or(&self.config.lower_deck_uld, LOWER_DECK_DEFAULT);
+            let mut candidates = vec![self.lower_uld];
+            candidates.extend(
+                LOWER_HOLD_FALLBACKS
+                    .iter()
+                    .filter_map(|key| super::uld(key))
+                    .filter(|entry| entry.code != self.lower_uld.code),
+            );
+            for candidate in candidates {
+                if self.fill_lower_holds(candidate) > 0 {
+                    self.lower_uld = candidate;
+                    break;
+                }
             }
         }
 
-        self.slots.push(CargoSlot {
-            sid: "BULK".to_owned(),
-            deck: g.lower_deck.name,
-            x: g.cabin_end_x - BULK_INSET_M,
-            y: 0.0,
-            uld: BULK,
-            payload: 0.0,
-        });
+        let bulk_x = g.cabin_end_x - BULK_INSET_M;
+        if self.uld_fits(&g.lower_deck, bulk_x, 0.0, BULK) {
+            self.slots.push(CargoSlot {
+                sid: "BULK".to_owned(),
+                deck: g.lower_deck.name,
+                x: bulk_x,
+                y: 0.0,
+                uld: BULK,
+                payload: 0.0,
+            });
+        }
     }
 
     /// Loaded mass, its longitudinal centre, and how many positions carry it.
@@ -480,5 +601,79 @@ impl<'g> CargoLoadManager<'g> {
         self.slots[from].payload -= amount;
         self.slots[to].payload += amount;
         true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alas_config::GeometryConfig;
+    use alas_geom::builder::AircraftBuilder;
+
+    fn geometry() -> CabinGeometry {
+        let builder = AircraftBuilder::new(Some(GeometryConfig::default()));
+        let plane = builder.build(None, false).expect("default aircraft builds");
+        CabinGeometry::new(&plane, &builder.geometry, 0.15).expect("default cabin samples")
+    }
+
+    #[test]
+    fn transverse_slots_include_exactly_one_gap_between_adjacent_containers() {
+        let container_width = 1.53;
+        let required_width = 2.0 * container_width + SLOT_GAP_M;
+        let centers = transverse_centers(required_width, container_width);
+
+        assert_eq!(centers.len(), 2);
+        assert!((centers[1] - centers[0] - container_width - SLOT_GAP_M).abs() < 1e-12);
+        assert!((centers[0] + centers[1]).abs() < 1e-12);
+    }
+
+    #[test]
+    fn transverse_slots_do_not_count_a_gap_outside_the_row() {
+        let container_width = 1.53;
+        let centers =
+            transverse_centers(2.0 * container_width + SLOT_GAP_M - 1e-6, container_width);
+
+        assert_eq!(centers, vec![0.0]);
+    }
+
+    #[test]
+    fn an_explicit_lower_format_is_preserved_when_it_fits() {
+        let geometry = geometry();
+        let config = CargoDeckConfig {
+            lower_deck_uld: "LD2".to_owned(),
+            ..Default::default()
+        };
+        let manager = CargoLoadManager::new(&geometry, config);
+
+        assert_eq!(manager.lower_uld.code, "DPE");
+        assert!(manager.slots.iter().any(|slot| slot.uld.code == "DPE"));
+    }
+
+    #[test]
+    fn auto_selects_the_highest_scoring_feasible_uniform_format() {
+        let geometry = geometry();
+        let config = CargoDeckConfig {
+            lower_deck_uld: "AUTO".to_owned(),
+            ..Default::default()
+        };
+        let manager = CargoLoadManager::new(&geometry, config);
+        let selected = manager.lower_uld;
+        let selected_slots = manager
+            .slots
+            .iter()
+            .filter(|slot| slot.deck == geometry.lower_deck.name && slot.uld.code == selected.code)
+            .count();
+        let selected_capacity = selected_slots as f64 * selected.max_net();
+        for key in LOWER_HOLD_AUTO_CANDIDATES {
+            let candidate = super::super::uld(key).expect("auto candidate resolves");
+            let mut probe = CargoLoadManager {
+                geometry: &geometry,
+                config: CargoDeckConfig::default(),
+                slots: Vec::new(),
+                lower_uld: LOWER_DECK_DEFAULT,
+            };
+            let slots = probe.lower_candidate_slots(candidate);
+            assert!(selected_capacity >= slots.len() as f64 * candidate.max_net());
+        }
     }
 }
