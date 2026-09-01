@@ -42,7 +42,8 @@ pub enum RunEventSeverity {
 /// Progress and status event emitted during a pipeline execution.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RunEvent {
-    /// Stage identifier (e.g., "baseline", "optimization", "full_analysis", "mission").
+    /// Stage identifier (e.g., "baseline", "optimization", "full_analysis",
+    /// or a detailed child such as "downstream/mses").
     pub stage: String,
     /// Human-readable message or progress update.
     pub message: String,

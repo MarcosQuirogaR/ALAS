@@ -23,7 +23,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime};
 
-use alas_exec::process::NoConsoleWindow;
+use alas_exec::process::{kill_process_tree, NewProcessGroup, NoConsoleWindow};
 use thiserror::Error;
 
 /// How often the run loop checks whether the child has exited.
@@ -161,6 +161,7 @@ pub fn run_tool(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .no_window()
+        .new_process_group()
         .spawn()
         .map_err(|source| RunError::Spawn {
             command: command.clone(),
@@ -213,7 +214,11 @@ pub fn run_tool(
             Some(status) => break status,
             None => {
                 if Instant::now() >= deadline {
-                    let _ = child.kill();
+                    // MSES is a launcher-style legacy executable on some
+                    // installations.  Killing only the immediate process
+                    // leaves a descendant holding the pipes or the working
+                    // directory, which makes the next point/sweep flaky.
+                    kill_process_tree(child.id());
                     let _ = child.wait();
                     return Err(RunError::Timeout {
                         command,

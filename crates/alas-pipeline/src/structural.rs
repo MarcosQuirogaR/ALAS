@@ -11,6 +11,7 @@
 //! and modal estimates, and optionally launches the NASTRAN solver if configured.
 
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 use alas_config::materials::get as get_material;
 use alas_config::AlasConfig;
@@ -25,6 +26,8 @@ use alas_struct::sizing::{size_wingbox, WingboxSizing};
 
 use crate::full_analysis::AnalysisReport;
 use crate::patran::run_patran_export;
+use crate::pipeline::{begin_component, finish_component};
+use crate::runs::RunEvent;
 
 /// Complete structural analysis outcomes for a pipeline run.
 #[derive(Debug, Clone, PartialEq)]
@@ -111,6 +114,29 @@ pub fn run_structural_analysis_with_environment(
     report: &AnalysisReport,
     work_dir: Option<&Path>,
     environment: &RunEnvironment,
+) -> StructuralAnalysisResult {
+    run_structural_analysis_with_environment_events(
+        config,
+        report,
+        work_dir,
+        environment,
+        None,
+        Instant::now(),
+    )
+}
+
+/// Execute structural analysis while reporting detailed solver timings.
+///
+/// The ordinary public entry point above remains event-free for library and
+/// CLI callers. The desktop pipeline supplies the typed callback so MSC
+/// NASTRAN, NASTRAN-95, and Patran appear as distinct downstream components.
+pub fn run_structural_analysis_with_environment_events(
+    config: &AlasConfig,
+    report: &AnalysisReport,
+    work_dir: Option<&Path>,
+    environment: &RunEnvironment,
+    events: Option<&(dyn Fn(RunEvent) + Sync)>,
+    run_clock: Instant,
 ) -> StructuralAnalysisResult {
     let scfg = &config.structures;
     let dv = &report.design;
@@ -254,6 +280,24 @@ pub fn run_structural_analysis_with_environment(
         }
     };
 
+    let primary_solver_stage = if environment.nastran_exe.is_some() {
+        "downstream/msc_nastran"
+    } else {
+        // `run_nastran_analysis` falls back to the local NASA dialect when no
+        // MSC executable is resolved, so label that measured work honestly.
+        "downstream/nastran95"
+    };
+    let primary_solver_label = if environment.nastran_exe.is_some() {
+        "MSC NASTRAN solve"
+    } else {
+        "NASTRAN-95 solve"
+    };
+    let primary_solver_clock = begin_component(
+        events,
+        run_clock,
+        primary_solver_stage,
+        primary_solver_label,
+    );
     let nastran_results = work_dir.map(|dir| {
         run_nastran_analysis(
             &mesh_deck,
@@ -264,12 +308,30 @@ pub fn run_structural_analysis_with_environment(
             environment.nastran_exe.as_deref(),
         )
     });
+    finish_component(
+        events,
+        run_clock,
+        primary_solver_clock,
+        primary_solver_stage,
+        if scfg.run_nastran && work_dir.is_some() {
+            "Completed"
+        } else {
+            "Skipped"
+        },
+    );
     // When MSC is available, retain its result in `nastran` and run the
     // independent NASA dialect beside it. The MSC-absent path above already
     // uses NASTRAN-95 as the primary fallback, so this branch only creates a
     // second result when the GUI can genuinely compare both solvers.
-    let nastran95_results = if scfg.run_nastran && environment.nastran_exe.is_some() {
-        work_dir.and_then(|dir| {
+    let nastran95_requested = scfg.run_nastran && environment.nastran_exe.is_some();
+    let nastran95_results = if nastran95_requested {
+        let stage_clock = begin_component(
+            events,
+            run_clock,
+            "downstream/nastran95",
+            "NASTRAN-95 comparison solve",
+        );
+        let result = work_dir.and_then(|dir| {
             run_nastran95_from_config_or_env(
                 &mesh_deck,
                 &node_index,
@@ -277,19 +339,44 @@ pub fn run_structural_analysis_with_environment(
                 req,
                 &dir.join("nastran95"),
             )
-        })
+        });
+        finish_component(
+            events,
+            run_clock,
+            stage_clock,
+            "downstream/nastran95",
+            if result.is_some() {
+                "Completed"
+            } else {
+                "Skipped"
+            },
+        );
+        result
     } else {
         None
     };
 
+    let patran_clock = begin_component(
+        events,
+        run_clock,
+        "downstream/patran",
+        "Patran deformation export",
+    );
     let patran = Some(if !scfg.run_patran_export {
+        finish_component(
+            events,
+            run_clock,
+            patran_clock,
+            "downstream/patran",
+            "Skipped",
+        );
         PatranExportResult {
             status: "not_run".to_owned(),
             error: Some("Patran export is disabled in Structural Analysis settings".to_owned()),
             png_paths: Vec::new(),
         }
     } else {
-        match (
+        let result = match (
             work_dir,
             environment.patran_exe.as_deref(),
             nastran_results.as_ref(),
@@ -307,7 +394,15 @@ pub fn run_structural_analysis_with_environment(
                 error: Some("Patran export requires a successful NASTRAN SOL 101 solve".to_owned()),
                 png_paths: Vec::new(),
             },
-        }
+        };
+        finish_component(
+            events,
+            run_clock,
+            patran_clock,
+            "downstream/patran",
+            "Completed",
+        );
+        result
     });
 
     StructuralAnalysisResult {

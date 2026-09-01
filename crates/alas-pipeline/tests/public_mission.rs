@@ -163,3 +163,35 @@ fn narrowbody_operational_routes_fly_full_trajectory_with_explicit_fuel_status()
             .is_some());
     }
 }
+
+#[test]
+fn b787_regression_does_not_cut_off_after_takeoff_or_publish_untrimmed_cruise() {
+    let config = config_for_preset("B787-9");
+    let route = dispatched_route(&config);
+    let result = DesignPipeline::new(config)
+        .run_with_environment_and_route(&options(), &RunEnvironment::default(), Some(route))
+        .expect("B787 public mission run");
+    let mission = result
+        .mission_result
+        .as_ref()
+        .expect("B787 mission telemetry");
+    let report = result.optimized_report.as_ref().expect("B787 report");
+
+    assert!(mission.figure_data_ready());
+    assert!(mission.fuel_exhaustion.is_none());
+    assert_eq!(mission.segments.len(), mission.scheduled_segment_count);
+    assert!(mission
+        .solutions
+        .iter()
+        .all(|solution| solution.converged && !solution.throttle_limited));
+    assert_eq!(
+        result.feasibility.fuel_loading.mission.status,
+        alas_pipeline::MissionFuelStatus::Completed
+    );
+    let trim = report
+        .trimmed_design_point
+        .as_ref()
+        .expect("B787 trimmed cruise point");
+    assert!(trim.cm_residual.abs() < 1.0e-6);
+    assert!(trim.trim_ih_deg.is_finite());
+}

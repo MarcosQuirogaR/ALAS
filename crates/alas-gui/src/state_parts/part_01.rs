@@ -91,7 +91,7 @@ pub enum LogKind {
 pub enum RunLogTab {
     /// Searchable diagnostic console.
     Console,
-    /// Stage progress, elapsed durations, and estimated remaining time.
+    /// Stage progress and elapsed durations.
     Timings,
 }
 
@@ -198,6 +198,11 @@ pub struct AppState {
     pub run_identity: u64,
     /// The channel a running pipeline reports over.
     pub worker_rx: Option<Receiver<WorkerMessage>>,
+    /// Completion channel for the optional navigation-data download.
+    pub navdata_download_rx:
+        Option<Receiver<Result<alas_exec::download::DownloadReport, String>>>,
+    /// Whether a navigation-data transfer is currently running.
+    pub navdata_download_in_progress: bool,
     /// The flag that asks a running pipeline to stop.
     pub cancel_flag: Arc<AtomicBool>,
     /// Whether the user has already requested cancellation for this run.
@@ -353,6 +358,8 @@ impl Default for AppState {
             pipeline_result: None,
             run_identity: 0,
             worker_rx: None,
+            navdata_download_rx: None,
+            navdata_download_in_progress: false,
             cancel_flag: Arc::new(AtomicBool::new(false)),
             cancellation_requested: false,
             run_events: Vec::new(),

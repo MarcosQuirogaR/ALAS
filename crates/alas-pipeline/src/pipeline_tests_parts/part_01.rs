@@ -133,8 +133,6 @@ fn a_named_preset_is_the_public_nominal_design() {
             evidence: crate::feasibility::FuelCapacityEvidence::PublishedPreset,
         }
     );
-    assert!(result.finalist_evaluations.is_empty());
-    assert!(result.finalist_audit.is_none());
 }
 
 #[test]
@@ -148,7 +146,6 @@ fn optimized_pipeline_delivers_only_a_native_reviewed_finalist() {
     config.optimizer.solver.population_size = 1;
     config.optimizer.solver.workers = 1;
     config.optimizer.solver.display_progress = false;
-    config.optimizer.solver.finalist_count = 1;
     let design = DesignVector::default();
     let bounds = design
         .to_array()
@@ -172,32 +169,15 @@ fn optimized_pipeline_delivers_only_a_native_reviewed_finalist() {
         .unwrap_or_else(|error| panic!("fixed-design finalist run: {error}"));
 
     assert_eq!(result.optimized_design, Some(design));
-    assert_eq!(
-        result.feasibility.verdict(),
-        crate::FeasibilityVerdict::Feasible
-    );
-    assert_eq!(result.finalist_evaluations.len(), 1);
-    assert_eq!(
-        result.finalist_evaluations[0].outcome,
-        crate::FinalistOutcome::Selected
-    );
-    assert_eq!(
-        result.finalist_evaluations[0].verdict,
-        Some(result.feasibility.verdict())
-    );
-    assert_eq!(
-        result.finalist_evaluations[0].finding_codes,
-        result
-            .feasibility
-            .findings
-            .iter()
-            .map(|finding| finding.code)
-            .collect::<Vec<_>>()
-    );
+    assert!(result.feasibility.is_feasible());
     assert!(result
-        .finalist_audit
+        .solver_optimizations
         .as_ref()
-        .is_some_and(|path| path.is_file()));
+        .is_some_and(|set| set.vlm.status == crate::SolverOptimizationStatus::Completed));
+    assert!(result
+        .optimization_result
+        .as_ref()
+        .is_some_and(|optimization| optimization.best_valid));
 }
 
 #[test]
@@ -210,7 +190,6 @@ fn optimized_pipeline_never_falls_back_to_a_native_infeasible_screening_winner()
     config.optimizer.solver.population_size = 1;
     config.optimizer.solver.workers = 1;
     config.optimizer.solver.display_progress = false;
-    config.optimizer.solver.finalist_count = 1;
     let design = DesignVector::default();
     let bounds = design
         .to_array()
@@ -277,14 +256,24 @@ fn an_explicit_design_and_bounds_reach_the_desktop_pipeline() {
     let events = events.lock().unwrap();
     let starts = events
         .iter()
-        .filter(|event| event.kind == crate::RunEventKind::StageStarted)
+        .filter(|event| {
+            event.kind == crate::RunEventKind::StageStarted && event.stage_index.is_some()
+        })
         .count();
     let finishes = events
         .iter()
-        .filter(|event| event.kind == crate::RunEventKind::StageCompleted)
+        .filter(|event| {
+            event.kind == crate::RunEventKind::StageCompleted && event.stage_index.is_some()
+        })
         .count();
     assert_eq!(starts, 7);
     assert_eq!(finishes, 7);
+    assert!(events.iter().any(|event| {
+        event.stage == "downstream/mses" && event.kind == crate::RunEventKind::StageStarted
+    }));
+    assert!(events.iter().any(|event| {
+        event.stage == "downstream/structural" && event.kind == crate::RunEventKind::StageCompleted
+    }));
     assert_eq!(
         events
             .last()

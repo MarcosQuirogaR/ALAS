@@ -5,11 +5,10 @@
 //! optional external solvers, consolidated in one place rather than spread
 //! across their own Advanced Settings pages.
 //!
-//! A port of the reference desktop app's `SetupScreen`. The reference's
-//! navdata download button calls out over HTTP to a Go-side downloader; that
-//! transport has no counterpart here (see `docs/PORTING.md`'s "Dropped: the
-//! HTTP sidecar"), so this shows the licensing note and a status line rather
-//! than fabricating a network call this crate has no client for.
+//! A port of the reference desktop app's `SetupScreen`. Navigation data is
+//! downloaded through the shared windowless curl boundary in `alas-exec`, so
+//! the setup page and headless CLI use the same HTTPS, retry, atomic-install,
+//! and size-validation policy.
 
 use alas_exec::ExecutableDiscovery;
 use egui::{RichText, ScrollArea, TextEdit, Ui};

@@ -46,6 +46,23 @@ fn v2_scene_never_promotes_nominal_geometry_to_authoritative() {
 }
 
 #[test]
+fn v2_scene_exports_polygonal_uld_profiles() {
+    let scene = scene();
+    let profiles = scene
+        .cargo
+        .items
+        .iter()
+        .filter_map(|item| item.uld.as_ref())
+        .map(|uld| uld.normalized_contour_yz.len())
+        .collect::<Vec<_>>();
+    assert!(
+        !profiles.is_empty(),
+        "the default passenger case has checked-bag ULDs"
+    );
+    assert!(profiles.iter().all(|&vertices| vertices >= 6));
+}
+
+#[test]
 fn v2_json_round_trip_keeps_individual_seat_ids() {
     let original = scene();
     let json = serde_json::to_string(&original).expect("serialize scene");

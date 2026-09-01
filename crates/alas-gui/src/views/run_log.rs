@@ -113,25 +113,33 @@ fn show_console(lines: &[RenderedLine], ui: &mut Ui) {
                 crate::layout_debug::RegionKind::Scroll,
             );
             egui::Grid::new("run_log_rows")
-                .num_columns(4)
+                // Keep the context, optional elapsed time, and severity in a
+                // single metadata cell.  System messages have no elapsed
+                // time; keeping timing as a separate grid column left a
+                // conspicuous blank gap between SYSTEM and INFO.
+                .num_columns(2)
                 .striped(true)
                 .spacing([8.0, 3.0])
                 .show(ui, |ui| {
                     for line in lines {
-                        ui.label(RichText::new(&line.context).monospace().small().strong());
-                        ui.label(RichText::new(&line.timing).monospace().small().weak());
-                        let color = match line.kind {
-                            LogKind::Info => ui.visuals().weak_text_color(),
-                            LogKind::Warn => ui.visuals().warn_fg_color,
-                            LogKind::Error => ui.visuals().error_fg_color,
-                        };
-                        ui.label(
-                            RichText::new(line.severity)
-                                .monospace()
-                                .small()
-                                .strong()
-                                .color(color),
-                        );
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new(&line.context).monospace().small().strong());
+                            if !line.timing.is_empty() {
+                                ui.label(RichText::new(&line.timing).monospace().small().weak());
+                            }
+                            let color = match line.kind {
+                                LogKind::Info => ui.visuals().weak_text_color(),
+                                LogKind::Warn => ui.visuals().warn_fg_color,
+                                LogKind::Error => ui.visuals().error_fg_color,
+                            };
+                            ui.label(
+                                RichText::new(line.severity)
+                                    .monospace()
+                                    .small()
+                                    .strong()
+                                    .color(color),
+                            );
+                        });
                         ui.add(
                             egui::Label::new(RichText::new(&line.message).monospace().size(12.0))
                                 .wrap(),
@@ -143,12 +151,6 @@ fn show_console(lines: &[RenderedLine], ui: &mut Ui) {
 }
 
 fn show_timings(events: &[RunEvent], elapsed_ms: u64, ui: &mut Ui) {
-    let estimate = timing_estimate(events, elapsed_ms);
-    ui.horizontal(|ui| {
-        ui.label(RichText::new(tr("Estimated remaining")).weak().small());
-        ui.label(RichText::new(estimate).monospace().strong());
-    });
-    ui.separator();
     ScrollArea::vertical()
         .id_salt("run_log_timings_scroll")
         .auto_shrink([false, false])
@@ -157,9 +159,44 @@ fn show_timings(events: &[RunEvent], elapsed_ms: u64, ui: &mut Ui) {
 }
 
 fn show_stage_progress(events: &[RunEvent], elapsed_ms: u64, ui: &mut Ui) {
+    let stages = stage_groups(events, None);
+    let downstream = stage_groups(events, Some("downstream"));
+    let mut rendered_downstream = false;
+
+    for (first, event) in stages {
+        show_stage_row(first, event, elapsed_ms, false, ui);
+        if event.stage == "downstream" {
+            rendered_downstream = true;
+            for (child_first, child_event) in &downstream {
+                show_stage_row(child_first, child_event, elapsed_ms, true, ui);
+            }
+        }
+    }
+
+    // Keep detail events useful even if a producer sends them without the
+    // aggregate `downstream` stage event.  Normal pipeline runs include the
+    // aggregate row, so this is primarily a defensive rendering fallback.
+    if !rendered_downstream {
+        for (first, event) in downstream {
+            show_stage_row(first, event, elapsed_ms, true, ui);
+        }
+    }
+}
+
+/// Return the first and latest lifecycle event for each stage in a scope.
+///
+/// A stage ID containing a slash is a detail row.  Only direct children of
+/// `downstream/` are rendered here; this prevents an arbitrary diagnostic
+/// string containing another slash from accidentally becoming a timing row.
+fn stage_groups<'a>(
+    events: &'a [RunEvent],
+    parent: Option<&str>,
+) -> Vec<(&'a RunEvent, &'a RunEvent)> {
     let mut stages: Vec<(&RunEvent, &RunEvent)> = Vec::new();
     for event in events {
-        if matches!(event.kind, RunEventKind::Diagnostic) {
+        if matches!(event.kind, RunEventKind::Diagnostic)
+            || !stage_is_in_scope(&event.stage, parent)
+        {
             continue;
         }
         if let Some((_, latest)) = stages
@@ -171,47 +208,231 @@ fn show_stage_progress(events: &[RunEvent], elapsed_ms: u64, ui: &mut Ui) {
             stages.push((event, event));
         }
     }
-    stages.sort_by_key(|(_, event)| event.stage_index.unwrap_or(u8::MAX));
-
-    for (first, event) in stages {
-        let completed = matches!(event.kind, RunEventKind::StageCompleted);
-        let fraction = if completed {
-            1.0
-        } else {
-            event.fraction.unwrap_or(0.0).clamp(0.0, 1.0) as f32
-        };
-        let timing_ms = event
-            .duration_ms
-            .unwrap_or_else(|| elapsed_ms.saturating_sub(first.elapsed_ms));
-        let timing = format_duration(timing_ms);
-        let stage_name = event.stage.replace('_', " ");
-        let stage_number = match (event.stage_index, event.stage_count) {
-            (Some(index), Some(count)) => format!("{index}/{count}  "),
-            _ => String::new(),
-        };
-        ui.horizontal(|ui| {
-            ui.add_sized(
-                [190.0, 18.0],
-                egui::Label::new(
-                    RichText::new(format!("{stage_number}{stage_name}"))
-                        .strong()
-                        .small(),
-                ),
-            );
-            ui.add(
-                egui::ProgressBar::new(fraction)
-                    .desired_width((ui.available_width() - 90.0).max(80.0))
-                    .animate(!completed)
-                    .text(if completed { tr("Done") } else { tr("Running") }),
-            );
-            ui.add_sized(
-                [75.0, 18.0],
-                egui::Label::new(RichText::new(timing).monospace().small()),
-            );
-        })
-        .response
-        .on_hover_text(&event.message);
+    if parent.is_some() {
+        stages.sort_by_key(|(_, event)| event.stage.as_str());
+    } else {
+        stages.sort_by_key(|(_, event)| event.stage_index.unwrap_or(u8::MAX));
     }
+    stages
+}
+
+fn stage_is_in_scope(stage: &str, parent: Option<&str>) -> bool {
+    match parent {
+        None => !stage.contains('/'),
+        Some(parent) => stage
+            .strip_prefix(parent)
+            .and_then(|suffix| suffix.strip_prefix('/'))
+            .is_some_and(|child| !child.is_empty() && !child.contains('/')),
+    }
+}
+
+fn show_stage_row(first: &RunEvent, event: &RunEvent, elapsed_ms: u64, nested: bool, ui: &mut Ui) {
+    // This row deliberately does not use a horizontal child layout.  In an
+    // `egui` ScrollArea, a child UI can expand to its contents' natural size;
+    // a long label then pushes the status and timing widgets beyond the
+    // viewport. Allocate one exact row, reserve the fixed right-side cells,
+    // and derive the bar rect from the interval left between them.
+    const ROW_HEIGHT: f32 = 24.0;
+    const MIN_LABEL_WIDTH: f32 = 132.0;
+    const PREFERRED_LABEL_WIDTH: f32 = 280.0;
+    const MIN_PROGRESS_WIDTH: f32 = 48.0;
+    const STATUS_WIDTH: f32 = 82.0;
+    const TIMING_WIDTH: f32 = 92.0;
+    const TOP_LEVEL_CHEVRON_WIDTH: f32 = 14.0;
+    const NESTED_INDENT_WIDTH: f32 = 18.0;
+
+    let status = stage_status(event);
+    let fraction = match status {
+        StageStatus::Done => 1.0,
+        StageStatus::Skipped => 0.0,
+        StageStatus::Running => event.fraction.unwrap_or(0.0).clamp(0.0, 1.0) as f32,
+    };
+    let timing_ms = event
+        .duration_ms
+        .unwrap_or_else(|| elapsed_ms.saturating_sub(first.elapsed_ms));
+    let timing = format_duration(timing_ms);
+    let stage_name = display_stage_name(&event.stage, nested);
+    let status_text = match status {
+        StageStatus::Done => tr("Done"),
+        StageStatus::Running => tr("Running"),
+        StageStatus::Skipped => tr("Skipped"),
+    };
+
+    let row_width = ui.available_rect_before_wrap().width().max(1.0);
+    let (row_rect, response) =
+        ui.allocate_exact_size(egui::vec2(row_width, ROW_HEIGHT), egui::Sense::hover());
+    let spacing = ui.spacing().item_spacing.x;
+
+    // Right-align these cells first. This keeps status and elapsed duration
+    // visible while the timing pane gets narrower; the progress bar is the
+    // only flexible column.
+    let timing_rect = egui::Rect::from_min_max(
+        egui::pos2(row_rect.right() - TIMING_WIDTH, row_rect.top()),
+        row_rect.right_bottom(),
+    );
+    let status_rect = egui::Rect::from_min_max(
+        egui::pos2(timing_rect.left() - spacing - STATUS_WIDTH, row_rect.top()),
+        egui::pos2(timing_rect.left() - spacing, row_rect.bottom()),
+    );
+    let available_label_width =
+        (status_rect.left() - row_rect.left() - spacing * 2.0 - MIN_PROGRESS_WIDTH).max(0.0);
+    let preferred_label_width = (row_width * 0.38).min(PREFERRED_LABEL_WIDTH);
+    let label_width = preferred_label_width
+        .min(available_label_width)
+        .max(MIN_LABEL_WIDTH.min(available_label_width));
+    let label_rect = egui::Rect::from_min_max(
+        row_rect.left_top(),
+        egui::pos2(row_rect.left() + label_width, row_rect.bottom()),
+    );
+    let progress_rect = egui::Rect::from_min_max(
+        egui::pos2(label_rect.right() + spacing, row_rect.top()),
+        egui::pos2(status_rect.left() - spacing, row_rect.bottom()),
+    );
+
+    let mut label_ui = ui.new_child(
+        egui::UiBuilder::new()
+            .id_salt(("timing-label", &event.stage))
+            .max_rect(label_rect)
+            .layout(egui::Layout::left_to_right(egui::Align::Center)),
+    );
+    if nested {
+        // A single tab-width indent keeps downstream components visually
+        // grouped without introducing a glyph that may be absent from the
+        // platform font.
+        label_ui.add_space(NESTED_INDENT_WIDTH);
+    } else {
+        // A painter-drawn chevron communicates the stage sequence without
+        // coupling the UI to a run-total such as "1/7". It also avoids any
+        // dependence on optional Unicode icon fonts.
+        let (chevron_rect, _) = label_ui.allocate_exact_size(
+            egui::vec2(TOP_LEVEL_CHEVRON_WIDTH, ROW_HEIGHT),
+            egui::Sense::hover(),
+        );
+        let center = chevron_rect.center();
+        let stroke = egui::Stroke::new(1.4_f32, label_ui.visuals().weak_text_color());
+        label_ui.painter().line_segment(
+            [
+                egui::pos2(center.x - 2.5, center.y - 3.5),
+                egui::pos2(center.x + 2.5, center.y),
+            ],
+            stroke,
+        );
+        label_ui.painter().line_segment(
+            [
+                egui::pos2(center.x + 2.5, center.y),
+                egui::pos2(center.x - 2.5, center.y + 3.5),
+            ],
+            stroke,
+        );
+        label_ui.add_space(2.0);
+    }
+    label_ui.add(
+        egui::Label::new(RichText::new(stage_name).strong().small().color(if nested {
+            label_ui.visuals().weak_text_color()
+        } else {
+            label_ui.visuals().text_color()
+        }))
+        .truncate(),
+    );
+
+    let mut progress_ui = ui.new_child(
+        egui::UiBuilder::new()
+            .id_salt(("timing-progress", &event.stage))
+            .max_rect(progress_rect)
+            .layout(egui::Layout::left_to_right(egui::Align::Center)),
+    );
+    progress_ui.add_sized(
+        progress_rect.size(),
+        egui::ProgressBar::new(fraction).animate(matches!(status, StageStatus::Running)),
+    );
+
+    show_right_aligned_cell(
+        ui,
+        status_rect,
+        ("timing-status", &event.stage),
+        RichText::new(status_text).small().strong(),
+    );
+    show_right_aligned_cell(
+        ui,
+        timing_rect,
+        ("timing-duration", &event.stage),
+        RichText::new(timing).monospace().small(),
+    );
+
+    response.on_hover_text(&event.message);
+}
+
+/// Render a right-aligned fixed-width cell without allowing its contents to
+/// reflow the row. The caller has already allocated the row's exact rect.
+fn show_right_aligned_cell(
+    ui: &mut Ui,
+    rect: egui::Rect,
+    id_salt: impl std::hash::Hash,
+    text: RichText,
+) {
+    let mut cell = ui.new_child(
+        egui::UiBuilder::new()
+            .id_salt(id_salt)
+            .max_rect(rect)
+            .layout(egui::Layout::right_to_left(egui::Align::Center)),
+    );
+    cell.add(egui::Label::new(text).halign(egui::Align::RIGHT).truncate());
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StageStatus {
+    Running,
+    Done,
+    Skipped,
+}
+
+fn stage_status(event: &RunEvent) -> StageStatus {
+    if !matches!(event.kind, RunEventKind::StageCompleted) {
+        return StageStatus::Running;
+    }
+    if event
+        .message
+        .trim_start()
+        .to_ascii_lowercase()
+        .starts_with("skipped")
+    {
+        StageStatus::Skipped
+    } else {
+        StageStatus::Done
+    }
+}
+
+fn display_stage_name(stage: &str, nested: bool) -> String {
+    if !nested {
+        return sentence_case_stage_name(stage);
+    }
+    let component = stage.strip_prefix("downstream/").unwrap_or(stage);
+    let component = match component.to_ascii_lowercase().as_str() {
+        "mses" => "MSES".to_owned(),
+        "msc" | "msc_nastran" | "mscnastran" => "MSC Nastran".to_owned(),
+        "nastran95" | "nastran_95" => "Nastran95".to_owned(),
+        "openvsp" => "OpenVSP".to_owned(),
+        "vspaero" => "VSPAERO".to_owned(),
+        "flowunsteady" => "FLOWUnsteady".to_owned(),
+        "avl" => "AVL".to_owned(),
+        "baseline_analysis" => "Baseline comparison".to_owned(),
+        "mission" => "Mission and route".to_owned(),
+        "patran" => "Patran".to_owned(),
+        "structural" => "Structural sizing and analysis".to_owned(),
+        _ => component.replace('_', " "),
+    };
+    format!("Downstream / {component}")
+}
+
+/// Present stage identifiers as human-readable section labels.  Pipeline
+/// identifiers stay lowercase snake_case; only their UI representation is
+/// capitalized.
+fn sentence_case_stage_name(stage: &str) -> String {
+    let mut label = stage.replace('_', " ");
+    if let Some(first) = label.get_mut(0..1) {
+        first.make_ascii_uppercase();
+    }
+    label
 }
 
 fn format_duration(milliseconds: u64) -> String {
@@ -264,15 +485,7 @@ fn render_line(line: &LogLine) -> RenderedLine {
         LogKind::Error => "ERROR",
     };
     let (context, timing) = match line.elapsed {
-        Some(elapsed) => (
-            format!("RUN {:03}", line.run_id),
-            format!(
-                "+{:02}:{:02}.{:03}",
-                elapsed.as_secs() / 60,
-                elapsed.as_secs() % 60,
-                elapsed.subsec_millis()
-            ),
-        ),
+        Some(elapsed) => ("RUN".to_owned(), format_elapsed(elapsed)),
         None => ("SYSTEM".to_owned(), String::new()),
     };
     let message = localize_log_text(&line.text);
@@ -291,41 +504,16 @@ fn render_line(line: &LogLine) -> RenderedLine {
     }
 }
 
-fn timing_estimate(events: &[RunEvent], elapsed_ms: u64) -> String {
-    let mut completed_durations = Vec::new();
-    let mut active_started = None;
-    let mut stage_count = None;
-    let mut completed_count = 0_u64;
-    for event in events {
-        stage_count = event.stage_count.or(stage_count);
-        match event.kind {
-            RunEventKind::StageStarted => active_started = Some(event.elapsed_ms),
-            RunEventKind::StageCompleted => {
-                completed_count += 1;
-                if let Some(duration) = event.duration_ms {
-                    completed_durations.push(duration);
-                }
-                active_started = None;
-            }
-            RunEventKind::Progress | RunEventKind::Diagnostic => {}
-        }
+fn format_elapsed(elapsed: std::time::Duration) -> String {
+    let total_seconds = elapsed.as_secs();
+    let seconds = total_seconds % 60;
+    let minutes = (total_seconds / 60) % 60;
+    let hours = total_seconds / 3_600;
+    if hours > 0 {
+        format!("{hours:02}:{minutes:02}:{seconds:02}")
+    } else {
+        format!("{minutes:02}:{seconds:02}")
     }
-    let Some(total) = stage_count.map(u64::from) else {
-        return tr("No timing data");
-    };
-    if completed_count >= total {
-        return tr("Complete");
-    }
-    if completed_durations.is_empty() {
-        return tr("Calculating...");
-    }
-    let mean_ms = completed_durations.iter().sum::<u64>() / completed_durations.len() as u64;
-    let future_stages = total.saturating_sub(completed_count + u64::from(active_started.is_some()));
-    let active_remaining = active_started
-        .map(|started| mean_ms.saturating_sub(elapsed_ms.saturating_sub(started)))
-        .unwrap_or(0);
-    let remaining_ms = active_remaining.saturating_add(future_stages.saturating_mul(mean_ms));
-    format!("~{}", format_duration(remaining_ms))
 }
 
 fn export_log(state: &AppState) -> String {
@@ -398,7 +586,10 @@ mod tests {
 
     use alas_pipeline::{RunEvent, RunEventKind, RunEventSeverity};
 
-    use super::{localize_log_text, render_line, timing_estimate};
+    use super::{
+        display_stage_name, format_elapsed, localize_log_text, render_line, stage_groups,
+        stage_status, StageStatus,
+    };
     use crate::state::{LogKind, LogLine};
 
     #[test]
@@ -415,31 +606,112 @@ mod tests {
         let run = render_line(&LogLine {
             text: "Working".to_owned(),
             kind: LogKind::Warn,
-            elapsed: Some(Duration::from_millis(19)),
+            elapsed: Some(Duration::from_millis(65_019)),
             run_id: 1,
         });
-        assert_eq!(run.plaintext, "RUN 001 +00:00.019 WARN Working");
+        assert_eq!(run.plaintext, "RUN 01:05 WARN Working");
+        assert_eq!(format_elapsed(Duration::from_secs(3_661)), "01:01:01");
     }
 
     #[test]
-    fn timing_estimate_uses_completed_stages_and_active_elapsed_time() {
-        let event = |kind, elapsed_ms, duration_ms| RunEvent {
-            stage: "stage".to_owned(),
-            message: String::new(),
-            fraction: None,
+    fn downstream_stage_events_are_grouped_without_top_level_numbers() {
+        let event = |stage: &str,
+                     kind: RunEventKind,
+                     elapsed_ms: u64,
+                     duration_ms: Option<u64>,
+                     message: &str| RunEvent {
+            stage: stage.to_owned(),
+            message: message.to_owned(),
+            fraction: Some(if matches!(kind, RunEventKind::StageCompleted) {
+                1.0
+            } else {
+                0.4
+            }),
             kind,
             severity: RunEventSeverity::Info,
-            stage_index: Some(1),
-            stage_count: Some(3),
+            stage_index: None,
+            stage_count: None,
             elapsed_ms,
             duration_ms,
         };
         let events = vec![
-            event(RunEventKind::StageStarted, 0, None),
-            event(RunEventKind::StageCompleted, 1_000, Some(1_000)),
-            event(RunEventKind::StageStarted, 1_000, None),
+            event(
+                "downstream",
+                RunEventKind::StageStarted,
+                0,
+                None,
+                "Downstream",
+            ),
+            event(
+                "downstream/mses",
+                RunEventKind::StageStarted,
+                10,
+                None,
+                "MSES",
+            ),
+            event(
+                "downstream/mses",
+                RunEventKind::StageCompleted,
+                110,
+                Some(100),
+                "Completed in 100 ms",
+            ),
+            event(
+                "downstream/nastran95",
+                RunEventKind::StageStarted,
+                20,
+                None,
+                "Nastran95",
+            ),
+            event(
+                "downstream/nastran95",
+                RunEventKind::StageCompleted,
+                120,
+                Some(100),
+                "Skipped (not configured)",
+            ),
+            event(
+                "unexpected/nested/detail",
+                RunEventKind::StageStarted,
+                0,
+                None,
+                "ignored",
+            ),
         ];
-        assert_eq!(timing_estimate(&events, 1_250), "~1.75 s");
+        let top_level = stage_groups(&events, None);
+        assert_eq!(top_level.len(), 1);
+        assert_eq!(top_level[0].1.stage, "downstream");
+        let children = stage_groups(&events, Some("downstream"));
+        assert_eq!(
+            children
+                .iter()
+                .map(|(_, event)| event.stage.as_str())
+                .collect::<Vec<_>>(),
+            vec!["downstream/mses", "downstream/nastran95"]
+        );
+        assert_eq!(stage_status(children[0].1), StageStatus::Done);
+        assert_eq!(stage_status(children[1].1), StageStatus::Skipped);
+        assert_eq!(
+            display_stage_name("downstream/mses", true),
+            "Downstream / MSES"
+        );
+        assert_eq!(display_stage_name("full_analysis", false), "Full analysis");
+    }
+
+    #[test]
+    fn completed_stage_status_is_not_inferred_from_fraction() {
+        let event = RunEvent {
+            stage: "downstream/msc".to_owned(),
+            message: String::new(),
+            fraction: Some(1.0),
+            kind: RunEventKind::StageCompleted,
+            severity: RunEventSeverity::Info,
+            stage_index: None,
+            stage_count: None,
+            elapsed_ms: 100,
+            duration_ms: Some(100),
+        };
+        assert_eq!(stage_status(&event), StageStatus::Done);
     }
 
     #[test]

@@ -12,6 +12,7 @@ use std::io;
 use std::path::Path;
 
 use alas_config::{AlasConfig, DesignVector};
+use alas_payload::cargo::{uld, uld_by_code, ContourFidelity, UldType};
 use alas_payload::layout::{DeckItem, ItemMeta, LayoutSummary, PassengerSummary, PayloadLayout};
 use serde::{Deserialize, Serialize};
 
@@ -185,6 +186,17 @@ mod tests {
         assert_eq!(decoded.schema_version, PAYLOAD_LAYOUT_SCHEMA_VERSION);
         assert_eq!(decoded.layout.items[0].meta["uld_code"], "AKE");
         assert_eq!(decoded.layout.items[0].meta["net_load_kg"], 1_120.0);
+        assert_eq!(
+            decoded.layout.items[0].meta["contour_fidelity"],
+            "visualization_only"
+        );
+        assert_eq!(
+            decoded.layout.items[0].meta["normalized_contour_yz"]
+                .as_array()
+                .expect("ULD contour is serialized")
+                .len(),
+            8
+        );
         assert_eq!(decoded.layout.items[0].geometry_m.center_y, -0.8);
         assert!(decoded
             .fidelity
@@ -239,15 +251,56 @@ fn meta_json(meta: &ItemMeta) -> serde_json::Value {
             "exit_type": exit.exit_type, "door_width_m": exit.door_w,
             "door_height_m": exit.door_h,
         }),
-        ItemMeta::Container(container) => serde_json::json!({
-            "uld_code": container.uld, "fill_fraction": container.fill,
-            "color": container.color, "net_load_kg": container.net,
-        }),
+        ItemMeta::Container(container) => {
+            let mut value = serde_json::json!({
+                "uld_code": container.uld, "fill_fraction": container.fill,
+                "color": container.color, "net_load_kg": container.net,
+            });
+            if let Some(uld) = uld_by_code(container.uld) {
+                merge_contour_metadata(&mut value, uld);
+            }
+            value
+        }
         ItemMeta::OverheadBin(bin) => {
             serde_json::json!({ "bin_type": bin.bin_type.as_str() })
         }
-        ItemMeta::BulkBag => serde_json::json!({ "loading": "loose_bulk" }),
+        ItemMeta::BulkBag => {
+            let mut value = serde_json::json!({ "loading": "loose_bulk" });
+            if let Some(uld) = uld("BLK") {
+                merge_contour_metadata(&mut value, uld);
+            }
+            value
+        }
     }
+}
+
+fn merge_contour_metadata(value: &mut serde_json::Value, uld: &UldType) {
+    let Some(object) = value.as_object_mut() else {
+        return;
+    };
+    object.insert(
+        "normalized_contour_yz".to_owned(),
+        serde_json::json!(uld.contour.vertices),
+    );
+    object.insert(
+        "contour_source".to_owned(),
+        serde_json::Value::String(uld.contour.source.to_owned()),
+    );
+    object.insert(
+        "contour_fidelity".to_owned(),
+        serde_json::Value::String(
+            match uld.contour.fidelity {
+                ContourFidelity::Authoritative => "authoritative",
+                ContourFidelity::ConservativeEnvelope => "conservative_envelope",
+                ContourFidelity::VisualizationOnly => "visualization_only",
+            }
+            .to_owned(),
+        ),
+    );
+    object.insert(
+        "contour_mirrorable".to_owned(),
+        serde_json::Value::Bool(uld.contour.mirrorable),
+    );
 }
 
 fn summary_json(summary: &LayoutSummary) -> serde_json::Value {

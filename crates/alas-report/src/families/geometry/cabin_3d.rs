@@ -366,4 +366,24 @@ mod tests {
             .all(|face| face.outline == Color::rgba(213, 216, 220, 235)));
         assert_rendered_as_polygons(faces);
     }
+
+    #[test]
+    fn ulds_use_the_polygonal_contour_instead_of_a_rectangular_solid() {
+        use alas_payload::layout::ContainerMeta;
+
+        let faces = item_faces(&item(
+            ItemKind::Uld,
+            ItemMeta::Container(ContainerMeta {
+                uld: "AKE",
+                fill: 0.8,
+                color: "#e74c3c",
+                net: Some(900.0),
+            }),
+        ));
+        // Eight normalized profile vertices produce two caps and one quad per
+        // edge. A six-face cuboid would be the old rectangular fallback.
+        assert_eq!(faces.len(), 10);
+        assert!(faces.iter().any(|face| face.points.len() == 8));
+        assert_rendered_as_polygons(faces);
+    }
 }

@@ -3,7 +3,7 @@
 
 //! Shared physical profiles for cabin cross-sections and solid previews.
 
-use alas_payload::cargo::uld_by_code;
+use alas_payload::cargo::{uld, uld_by_code, UldType};
 use alas_payload::layout::{ContainerMeta, DeckItem, ItemKind, ItemMeta, OverheadBinType};
 
 /// An item's transverse outline extruded over its longitudinal footprint.
@@ -16,6 +16,10 @@ pub(crate) struct CabinAsset {
 }
 
 impl CabinAsset {
+    // Retained as a small geometry primitive for callers that need to filter
+    // station-local assets; current renderers already filter by DeckItem
+    // interval before constructing the asset.
+    #[allow(dead_code)]
     pub(crate) fn intersects(&self, station: f64) -> bool {
         station >= self.x0 - 1e-9 && station <= self.x1 + 1e-9
     }
@@ -91,32 +95,26 @@ fn overhead_bin(item: &DeckItem, kind: OverheadBinType) -> Vec<[f64; 2]> {
     }
 }
 
+fn container_profile_for_uld(item: &DeckItem, uld: &UldType) -> Vec<[f64; 2]> {
+    let z_bottom = item.z - item.height * 0.5;
+    // Keep the render path on the payload type's physical-contour
+    // implementation. Use realized dimensions because loose bulk and clipped
+    // station items can differ from the catalogue dimensions.
+    uld.physical_contour_with_extents(item.y, z_bottom, item.width, item.height, item.y < 0.0)
+}
+
 fn container_profile(item: &DeckItem, meta: &ContainerMeta) -> Vec<[f64; 2]> {
     let Some(uld) = uld_by_code(meta.uld) else {
         return rectangle(item);
     };
-    let z_bottom = item.z - item.height * 0.5;
-    uld.contour
-        .vertices
-        .iter()
-        .map(|&[normalized_y, normalized_z]| {
-            let normalized_y = if item.y < 0.0 && uld.contour.mirrorable {
-                -normalized_y
-            } else {
-                normalized_y
-            };
-            [
-                item.y + normalized_y * item.width * 0.5,
-                z_bottom + normalized_z * item.height,
-            ]
-        })
-        .collect()
+    container_profile_for_uld(item, uld)
 }
 
 /// Convert one semantic layout item into a shared render asset.
 ///
-/// Container contour lookup is deliberately isolated here. Until the payload
-/// database exposes its contour, its authoritative bounding box is retained.
+/// Container contour lookup is deliberately isolated here. Known ULDs use the
+/// normalized polygon carried by the payload database; an unknown code keeps a
+/// conservative rectangular fallback so old saved layouts remain drawable.
 pub(crate) fn asset_for_item(item: &DeckItem) -> Option<CabinAsset> {
     if !item.length.is_finite()
         || !item.width.is_finite()
@@ -130,6 +128,10 @@ pub(crate) fn asset_for_item(item: &DeckItem) -> Option<CabinAsset> {
     let profile_yz = match (&item.kind, &item.meta) {
         (ItemKind::OverheadBin, ItemMeta::OverheadBin(meta)) => overhead_bin(item, meta.bin_type),
         (ItemKind::Uld | ItemKind::Bag, ItemMeta::Container(meta)) => container_profile(item, meta),
+        (ItemKind::Bag, ItemMeta::BulkBag) => uld("BLK").map_or_else(
+            || rectangle(item),
+            |bulk| container_profile_for_uld(item, bulk),
+        ),
         _ => return None,
     };
     Some(CabinAsset {
@@ -161,7 +163,7 @@ mod tests {
     }
 
     #[test]
-    fn each_uld_remains_one_six_face_asset() {
+    fn known_uld_uses_a_polygonal_profile_and_closed_extrusion() {
         let asset = asset_for_item(&item(
             ItemKind::Uld,
             ItemMeta::Container(ContainerMeta {
@@ -172,8 +174,12 @@ mod tests {
             }),
         ))
         .expect("ULD has an asset");
-        assert_eq!(asset.profile_yz.len(), 4);
-        assert_eq!(asset.faces().len(), 6);
+        assert!(asset.profile_yz.len() >= 6);
+        assert_eq!(asset.faces().len(), asset.profile_yz.len() + 2);
+        assert!(asset
+            .profile_yz
+            .windows(2)
+            .any(|pair| (pair[0][0] - pair[1][0]).abs() > 1e-9));
         assert!(asset.intersects(4.0));
         assert!(!asset.intersects(5.0));
     }

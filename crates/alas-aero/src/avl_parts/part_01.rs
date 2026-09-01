@@ -247,11 +247,13 @@ pub fn render_geometry(request: AvlDeckRequest<'_>) -> Result<String, AvlError> 
             request.chordwise_vortices,
             request
                 .spanwise_vortices
-                // AVL needs at least two spanwise panels between adjacent
-                // SECTION stations.  Keeping the minimum here makes a deck
-                // valid for a refined ALAS loft without silently dropping
-                // stations or claiming a completed run that exported none.
-                .max(wing.xsecs.len().saturating_mul(2))
+                // AVL needs more than one spanwise panel between adjacent
+                // SECTION stations after its cosine redistribution is applied.
+                // Four panels per station is a conservative lower bound for
+                // the refined ALAS loft: it keeps the native solver from
+                // rejecting dense section layouts while preserving the
+                // requested resolution when it is already higher.
+                .max(wing.xsecs.len().saturating_mul(4))
         )
         .ok();
         if wing.symmetric {

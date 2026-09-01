@@ -27,7 +27,7 @@ use alas_config::airports::get as get_airport;
 use alas_config::design_variables::DesignVector;
 use alas_config::presets;
 use alas_config::{AlasConfig, Severity};
-use alas_exec::RunEnvironment;
+use alas_exec::{RunEnvironment, ToolLocator};
 use alas_geom::aircraft::airplane::Airplane;
 use alas_mission::MissionResult;
 use alas_opt::OptimizationResult;
@@ -153,6 +153,66 @@ fn finish_stage(
     );
 }
 
+/// Start a detailed downstream component timer.
+///
+/// Component events intentionally do not carry the seven-stage index. They
+/// are children of the top-level `downstream` stage and are rendered as a
+/// separate, indented timing list by the desktop console.
+pub(crate) fn begin_component(
+    events: Option<&(dyn Fn(RunEvent) + Sync)>,
+    run_clock: Instant,
+    stage: &str,
+    message: &str,
+) -> Instant {
+    emit_event(
+        events,
+        run_clock,
+        RunEvent {
+            stage: stage.to_owned(),
+            message: message.to_owned(),
+            fraction: Some(0.0),
+            kind: RunEventKind::StageStarted,
+            severity: RunEventSeverity::Info,
+            stage_index: None,
+            stage_count: None,
+            elapsed_ms: 0,
+            duration_ms: None,
+        },
+    );
+    Instant::now()
+}
+
+/// Finish a detailed downstream component timer.
+pub(crate) fn finish_component(
+    events: Option<&(dyn Fn(RunEvent) + Sync)>,
+    run_clock: Instant,
+    stage_clock: Instant,
+    stage: &str,
+    status: &str,
+) {
+    let duration_ms = stage_clock.elapsed().as_millis() as u64;
+    let message = if status.eq_ignore_ascii_case("skipped") {
+        status.to_owned()
+    } else {
+        format!("{status} in {:.3} s", duration_ms as f64 / 1_000.0)
+    };
+    emit_event(
+        events,
+        run_clock,
+        RunEvent {
+            stage: stage.to_owned(),
+            message,
+            fraction: Some(1.0),
+            kind: RunEventKind::StageCompleted,
+            severity: RunEventSeverity::Info,
+            stage_index: None,
+            stage_count: None,
+            elapsed_ms: 0,
+            duration_ms: Some(duration_ms),
+        },
+    );
+}
+
 fn emit_diagnostic(
     events: Option<&(dyn Fn(RunEvent) + Sync)>,
     run_clock: Instant,
@@ -227,19 +287,42 @@ fn emit_tool_diagnostics(
     for (tool, status) in [
         (
             "OpenVSP",
-            openvsp.map(|value| format!("{:?}", value.status)),
+            openvsp.map(|value| {
+                status_with_detail(
+                    format!("{:?}", value.status),
+                    value.runtime_error.as_deref(),
+                )
+            }),
         ),
         (
             "VSPAERO",
-            vspaero.map(|value| format!("{:?}", value.status)),
+            vspaero.map(|value| {
+                status_with_detail(format!("{:?}", value.status), value.error.as_deref())
+            }),
         ),
-        ("AVL", avl.map(|value| format!("{:?}", value.status))),
+        (
+            "AVL",
+            avl.map(|value| {
+                status_with_detail(format!("{:?}", value.status), value.error.as_deref())
+            }),
+        ),
         (
             "FLOWUnsteady",
-            flowunsteady.map(|value| format!("{:?}", value.status)),
+            flowunsteady.map(|value| {
+                status_with_detail(format!("{:?}", value.status), value.error.as_deref())
+            }),
         ),
-        ("Structures", structures.map(|value| value.status.clone())),
-        ("MSES", mses.map(|value| format!("{:?}", value.status))),
+        (
+            "Structures",
+            structures
+                .map(|value| status_with_detail(value.status.clone(), value.error.as_deref())),
+        ),
+        (
+            "MSES",
+            mses.map(|value| {
+                status_with_detail(format!("{:?}", value.status), value.error.as_deref())
+            }),
+        ),
     ] {
         emit_diagnostic(
             events,
@@ -250,6 +333,93 @@ fn emit_tool_diagnostics(
                 status.unwrap_or_else(|| "not requested".to_owned())
             ),
         );
+    }
+
+    // The overall structural result is intentionally still `ok` when the
+    // analytical sizing path succeeded.  Surface the individual native
+    // solver outcomes as well, otherwise a missing MSC DLL is hidden behind
+    // the useful-but-different analytical answer.
+    if let Some(structures) = structures {
+        for (tool, outcome) in [
+            (
+                "MSC Nastran SOL 101",
+                structures.nastran.as_ref().map(|result| {
+                    (
+                        result.static_solve.status,
+                        result.static_solve.error.as_deref(),
+                    )
+                }),
+            ),
+            (
+                "MSC Nastran SOL 103",
+                structures
+                    .nastran
+                    .as_ref()
+                    .map(|result| (result.modes.status, result.modes.error.as_deref())),
+            ),
+            (
+                "NASTRAN-95 SOL 101",
+                structures.nastran95.as_ref().map(|result| {
+                    (
+                        result.static_solve.status,
+                        result.static_solve.error.as_deref(),
+                    )
+                }),
+            ),
+            (
+                "NASTRAN-95 SOL 103",
+                structures
+                    .nastran95
+                    .as_ref()
+                    .map(|result| (result.modes.status, result.modes.error.as_deref())),
+            ),
+        ] {
+            if let Some((status, error)) = outcome {
+                emit_diagnostic_with_severity(
+                    events,
+                    run_clock,
+                    "external_tools",
+                    &format!(
+                        "{tool}: {}",
+                        status_with_detail(status.as_str().to_owned(), error)
+                    ),
+                    if status == alas_struct::nastran::ResultStatus::Ok {
+                        RunEventSeverity::Info
+                    } else {
+                        RunEventSeverity::Warning
+                    },
+                );
+            }
+        }
+        if let Some(patran) = structures.patran.as_ref() {
+            emit_diagnostic_with_severity(
+                events,
+                run_clock,
+                "external_tools",
+                &format!(
+                    "Patran: {}",
+                    status_with_detail(patran.status.clone(), patran.error.as_deref())
+                ),
+                if patran.status.eq_ignore_ascii_case("ok") {
+                    RunEventSeverity::Info
+                } else {
+                    RunEventSeverity::Warning
+                },
+            );
+        }
+    }
+}
+
+fn status_with_detail(status: String, error: Option<&str>) -> String {
+    let Some(error) = error.map(str::trim).filter(|error| !error.is_empty()) else {
+        return status;
+    };
+    const MAX_CHARS: usize = 1_000;
+    let detail = error.chars().take(MAX_CHARS).collect::<String>();
+    if detail.chars().count() < error.chars().count() {
+        format!("{status}: {detail} …")
+    } else {
+        format!("{status}: {detail}")
     }
 }
 
@@ -563,10 +733,11 @@ impl DesignPipeline {
         )
     }
 
-    /// Execute a desktop-style design-space run while reporting coarse-grained
-    /// stage progress. The callback is deliberately synchronous and textual:
-    /// callers can forward it across their own worker boundary without the
-    /// pipeline depending on a GUI or logging implementation.
+    /// Execute a desktop-style design-space run while reporting stage and
+    /// downstream-component progress. The callback is deliberately
+    /// synchronous and typed: callers can forward it across their own worker
+    /// boundary without the pipeline depending on a GUI or logging
+    /// implementation.
     pub fn run_with_design_space_and_progress(
         &self,
         options: &PipelineOptions,
@@ -800,65 +971,199 @@ impl DesignPipeline {
             AerodynamicSolverMode::Avl | AerodynamicSolverMode::Both
         );
         let run_vspaero = || {
-            openvsp_export.as_ref().map(|openvsp| {
+            let stage_clock =
+                begin_component(events, run_clock, "downstream/vspaero", "VSPAERO analysis");
+            let result = openvsp_export.as_ref().map(|openvsp| {
                 run_vspaero_analysis(
                     &optimized_report,
                     &self.config,
                     openvsp,
                     environment.vspaero_exe.as_deref(),
-                    300.0,
-                )
-            })
-        };
-        let run_avl = || {
-            if !avl_requested {
-                return None;
-            }
-            Some({
-                run_avl_takeoff_comparison(
-                    &optimized_report,
-                    &self.config,
-                    &analysis_dir,
-                    environment.avl_exe.as_deref(),
-                    300.0,
-                )
-            })
-        };
-        let run_flowunsteady = || {
-            Some({
-                run_flowunsteady_analysis(
-                    &optimized_report,
-                    &self.config,
-                    &analysis_dir,
-                    environment.flowunsteady_exe.as_deref(),
+                    // The retained OpenVSP mesh is substantially larger than
+                    // the small smoke cases used by the executor tests.  A
+                    // five-minute wall clock cut the installed A380-like
+                    // case off halfway through its 15-point sweep; keep the
+                    // process-tree timeout, but allow one full legacy sweep
+                    // to finish when the solver is available.
                     900.0,
                 )
-            })
+            });
+            finish_component(
+                events,
+                run_clock,
+                stage_clock,
+                "downstream/vspaero",
+                if result.is_some() {
+                    "Completed"
+                } else {
+                    "Skipped"
+                },
+            );
+            result
+        };
+        let run_avl = || {
+            let stage_clock = begin_component(
+                events,
+                run_clock,
+                "downstream/avl",
+                "AVL take-off comparison",
+            );
+            if !avl_requested {
+                finish_component(events, run_clock, stage_clock, "downstream/avl", "Skipped");
+                return None;
+            }
+            let result = Some(run_avl_takeoff_comparison(
+                &optimized_report,
+                &self.config,
+                &analysis_dir,
+                environment.avl_exe.as_deref(),
+                300.0,
+            ));
+            finish_component(
+                events,
+                run_clock,
+                stage_clock,
+                "downstream/avl",
+                "Completed",
+            );
+            result
+        };
+        let run_flowunsteady = || {
+            let stage_clock = begin_component(
+                events,
+                run_clock,
+                "downstream/flowunsteady",
+                "FLOWUnsteady analysis",
+            );
+            let result = Some(run_flowunsteady_analysis(
+                &optimized_report,
+                &self.config,
+                &analysis_dir,
+                environment.flowunsteady_exe.as_deref(),
+                900.0,
+            ));
+            finish_component(
+                events,
+                run_clock,
+                stage_clock,
+                "downstream/flowunsteady",
+                "Completed",
+            );
+            result
         };
         let run_baseline_analysis = || -> (Option<AnalysisReport>, Option<String>) {
+            let stage_clock = begin_component(
+                events,
+                run_clock,
+                "downstream/baseline_analysis",
+                "Baseline comparison",
+            );
             if !options.compare_baseline {
+                finish_component(
+                    events,
+                    run_clock,
+                    stage_clock,
+                    "downstream/baseline_analysis",
+                    "Skipped",
+                );
                 (None, None)
             } else if !options.optimize && self.aircraft_override.is_none() {
+                finish_component(
+                    events,
+                    run_clock,
+                    stage_clock,
+                    "downstream/baseline_analysis",
+                    "Completed",
+                );
                 (Some(optimized_report.clone()), None)
             } else {
-                match full.run(&nominal_design, true) {
+                let result = match full.run(&nominal_design, true) {
                     Ok(report) => (Some(report), None),
                     Err(error) => (None, Some(error)),
-                }
+                };
+                finish_component(
+                    events,
+                    run_clock,
+                    stage_clock,
+                    "downstream/baseline_analysis",
+                    "Completed",
+                );
+                result
             }
         };
-        let run_mission = || self.evaluate_active_mission(&optimized_report, dispatched_route);
-        let run_mses = || self.run_mses_stage(&optimized_report, environment.mses_dir.as_deref());
+        let run_mission = || {
+            let stage_clock = begin_component(
+                events,
+                run_clock,
+                "downstream/mission",
+                "Mission and route analysis",
+            );
+            let result = self.evaluate_active_mission(&optimized_report, dispatched_route);
+            finish_component(
+                events,
+                run_clock,
+                stage_clock,
+                "downstream/mission",
+                if self.config.mission.enabled {
+                    "Completed"
+                } else {
+                    "Skipped"
+                },
+            );
+            result
+        };
+        let run_mses = || {
+            let stage_clock =
+                begin_component(events, run_clock, "downstream/mses", "MSES analysis");
+            let result = self.run_mses_stage(&optimized_report, environment.mses_dir.as_deref());
+            finish_component(
+                events,
+                run_clock,
+                stage_clock,
+                "downstream/mses",
+                if self.config.mses.enabled {
+                    "Completed"
+                } else {
+                    "Skipped"
+                },
+            );
+            result
+        };
         let run_structural = || {
+            let stage_clock = begin_component(
+                events,
+                run_clock,
+                "downstream/structural",
+                "Structural sizing and analysis",
+            );
             if self.config.structures.enabled {
                 let work_dir = Some(analysis_dir.join("structures"));
-                Some(crate::structural::run_structural_analysis_with_environment(
-                    &self.config,
-                    &optimized_report,
-                    work_dir.as_deref(),
-                    environment,
-                ))
+                let result = Some(
+                    crate::structural::run_structural_analysis_with_environment_events(
+                        &self.config,
+                        &optimized_report,
+                        work_dir.as_deref(),
+                        environment,
+                        events,
+                        run_clock,
+                    ),
+                );
+                finish_component(
+                    events,
+                    run_clock,
+                    stage_clock,
+                    "downstream/structural",
+                    "Completed",
+                );
+                result
             } else {
+                finish_component(
+                    events,
+                    run_clock,
+                    stage_clock,
+                    "downstream/structural",
+                    "Skipped",
+                );
                 None
             }
         };
@@ -1210,8 +1515,9 @@ impl DesignPipeline {
             );
             (outcome.route, outcome.status)
         };
-        let routes_dir = PathBuf::from(&self.config.mission.routes_dir);
-        let navdata_dir = PathBuf::from(&self.config.mission.navdata_dir);
+        let locator = ToolLocator::for_current_process();
+        let routes_dir = locator.resolve_data_path(Path::new(&self.config.mission.routes_dir));
+        let navdata_dir = locator.resolve_data_path(Path::new(&self.config.mission.navdata_dir));
         let navdata = load_navdata(&navdata_dir);
         let sources = RouteSources {
             dispatched: dispatched_route,

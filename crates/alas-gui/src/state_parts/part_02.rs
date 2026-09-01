@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
+use std::sync::mpsc::{channel, TryRecvError};
+use std::thread;
+
 
 /// Apply only the user-owned machine locations to a freshly selected design.
 /// These locations describe the local environment, not an aircraft, so a
@@ -43,6 +46,73 @@ fn apply_tool_preferences(config: &mut AlasConfig, preferences: &ToolPreferences
 }
 
 impl AppState {
+    /// Start the shared navdata downloader without blocking an egui frame.
+    pub fn start_navdata_download(&mut self, configured: &str) {
+        if self.navdata_download_in_progress {
+            return;
+        }
+        let configured = if configured.trim().is_empty() {
+            alas_route::assets::NAVDATA_REL.to_owned()
+        } else {
+            configured.trim().to_owned()
+        };
+        let target = self
+            .tool_locator
+            .resolve_data_path(std::path::Path::new(&configured));
+        let specs = alas_route::assets::NAVDATA_FILES
+            .iter()
+            .map(|file| {
+                alas_exec::download::DownloadSpec::new(
+                    file.name,
+                    alas_route::assets::navdata_file_url(file),
+                    file.min_bytes,
+                )
+            })
+            .collect::<Vec<_>>();
+        let (sender, receiver) = channel();
+        self.navdata_download_rx = Some(receiver);
+        self.navdata_download_in_progress = true;
+        self.log(
+            format!("Downloading navigation data into {}...", target.display()),
+            LogKind::Info,
+        );
+        thread::spawn(move || {
+            let result = alas_exec::download::download_files(&specs, &target, 120.0);
+            let _ = sender.send(result);
+        });
+    }
+
+    /// Drain a completed navdata transfer without blocking the UI.
+    pub fn poll_navdata_download(&mut self) {
+        let Some(receiver) = &self.navdata_download_rx else {
+            return;
+        };
+        let result = match receiver.try_recv() {
+            Ok(result) => result,
+            Err(TryRecvError::Empty) => return,
+            Err(TryRecvError::Disconnected) => {
+                Err("navigation-data downloader stopped unexpectedly".to_owned())
+            }
+        };
+        self.navdata_download_rx = None;
+        self.navdata_download_in_progress = false;
+        match result {
+            Ok(summary) => self.log(
+                format!(
+                    "Navigation data ready at {} (downloaded {}, skipped {}).",
+                    summary.target_dir.display(),
+                    summary.downloaded.len(),
+                    summary.skipped.len()
+                ),
+                LogKind::Info,
+            ),
+            Err(error) => self.log(
+                format!("Navigation-data download failed: {error}"),
+                LogKind::Error,
+            ),
+        }
+    }
+
     /// Open the walkthrough and remember the shell state it temporarily changes.
     pub fn begin_walkthrough(&mut self) {
         if self.walkthrough_restore.is_none() {
@@ -333,4 +403,3 @@ mod walkthrough_tests {
         assert_eq!(state.current_walkthrough_target(), Some(measured));
     }
 }
-

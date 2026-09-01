@@ -73,6 +73,7 @@ impl App for AlasApp {
             self.layout_debug.handle_shortcuts(ctx);
             self.layout_debug.begin_frame(ctx);
         }
+        self.state.poll_navdata_download();
         self.state.poll_worker();
         self.state.screening.poll();
         self.state.uav.poll();
@@ -86,7 +87,11 @@ impl App for AlasApp {
         if let Some(delay) = self.state.flush_parameter_feedback() {
             ctx.request_repaint_after(delay);
         }
-        if self.state.is_running || self.state.screening.running || self.state.uav.is_running() {
+        if self.state.is_running
+            || self.state.screening.running
+            || self.state.uav.is_running()
+            || self.state.navdata_download_in_progress
+        {
             ctx.request_repaint();
         }
         // Automatic sizing follows the client area until a View > Zoom action

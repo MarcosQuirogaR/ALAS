@@ -18,6 +18,11 @@ fn resolve_cargo(items: &[DeckItem]) -> CargoSystem {
                 Some(meta.fill),
                 meta.net,
             ),
+            // Loose overflow is not a certified container, but it still uses
+            // the shared bulk envelope for section/3D visualization. Keeping
+            // the BLK definition in the interchange prevents the Python
+            // renderer from silently falling back to a rectangular cuboid.
+            ItemMeta::BulkBag => (cargo::uld("BLK").map(uld_definition), None, None),
             _ => (None, None, None),
         };
         slots.push(CargoSlot {
@@ -182,4 +187,3 @@ fn base_missing() -> Vec<MissingInput> {
         ),
     ]
 }
-

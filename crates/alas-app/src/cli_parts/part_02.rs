@@ -216,6 +216,8 @@ mod tests {
     fn cli_applies_nastran_solver_preference_without_overriding_explicit_config() {
         let preferences = ToolPreferences {
             nastran_solver: Some("C:/MSC/analysis.exe".to_owned()),
+            navdata_dir: Some("C:/ALAS/navdata".to_owned()),
+            routes_dir: Some("C:/ALAS/routes".to_owned()),
             ..ToolPreferences::default()
         };
 
@@ -225,6 +227,8 @@ mod tests {
             default_config.structures.nastran_solver_path,
             "C:/MSC/analysis.exe"
         );
+        assert_eq!(default_config.mission.navdata_dir, "C:/ALAS/navdata");
+        assert_eq!(default_config.mission.routes_dir, "C:/ALAS/routes");
 
         let mut explicit_config = AlasConfig::default();
         explicit_config.structures.nastran_solver_path = "D:/project/analysis.exe".to_owned();
@@ -233,6 +237,8 @@ mod tests {
             explicit_config.structures.nastran_solver_path,
             "D:/project/analysis.exe"
         );
+        assert_ne!(explicit_config.mission.navdata_dir, "C:/ALAS/navdata");
+        assert_ne!(explicit_config.mission.routes_dir, "C:/ALAS/routes");
     }
 
     #[test]
@@ -254,5 +260,13 @@ mod tests {
         assert!(parsed.no_baseline);
         assert_eq!(parsed.aerodynamic_solver, AerodynamicSolverMode::Both);
     }
-}
 
+    #[test]
+    fn navdata_download_action_is_parsed_as_a_non_pipeline_command() {
+        let args = ["--download-navdata".to_owned()];
+        let parsed = parse_args(&args)
+            .unwrap_or_else(|error| panic!("navdata flag parses: {error}"))
+            .unwrap_or_else(|| panic!("navdata flag does not request help"));
+        assert!(parsed.download_navdata);
+    }
+}

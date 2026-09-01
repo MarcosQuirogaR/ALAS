@@ -5,6 +5,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use alas_config::AlasConfig;
+use alas_exec::download::{download_files, DownloadSpec};
 use alas_exec::{ToolLocator, ToolPreferences};
 use alas_pipeline::{
     read_cpacs_file, AerodynamicSolverMode, DesignPipeline, OptimizationSolverMode,
@@ -46,6 +47,8 @@ pub struct CliArgs {
     pub quiet: bool,
     /// Write the effective configuration to this path and exit.
     pub save_config: Option<PathBuf>,
+    /// Download any missing/truncated navigation-data files and exit.
+    pub download_navdata: bool,
 }
 
 impl Default for CliArgs {
@@ -67,6 +70,7 @@ impl Default for CliArgs {
             optimization_method: None,
             quiet: false,
             save_config: None,
+            download_navdata: false,
         }
     }
 }
@@ -140,6 +144,7 @@ pub fn parse_args(args: &[String]) -> Result<Option<CliArgs>, String> {
                 let val = iter.next().ok_or("missing argument for --save-config")?;
                 cli.save_config = Some(PathBuf::from(val));
             }
+            "--download-navdata" => cli.download_navdata = true,
             unknown if unknown.starts_with('-') => {
                 return Err(format!("unknown option: {unknown}"));
             }
@@ -170,6 +175,7 @@ fn print_help() {
     println!("      --optimization-method <METHOD>  differential_evolution, feasibility_first_de, nsga2, turbo_1, or cma_es");
     println!("      --quiet               Reduce console logging");
     println!("      --save-config <PATH>  Write effective configuration to YAML and exit");
+    println!("      --download-navdata    Download missing navigation-data files and exit");
     println!("  -h, --help                Display this help message");
 }
 
@@ -228,6 +234,12 @@ fn apply_cli_tool_preferences(
     if let Some(path) = &preferences.patran_exe {
         config.structures.patran_exe_path.clone_from(path);
     }
+    if let Some(path) = &preferences.navdata_dir {
+        config.mission.navdata_dir.clone_from(path);
+    }
+    if let Some(path) = &preferences.routes_dir {
+        config.mission.routes_dir.clone_from(path);
+    }
 }
 
 /// Main application orchestration entry point.
@@ -263,6 +275,35 @@ pub fn run_cli(args: &[String]) -> i32 {
     let openvsp_dir = preferences.openvsp_dir.clone();
     let avl_exe = preferences.avl_exe.clone();
     apply_cli_tool_preferences(&mut config, &preferences, cli.config.is_none());
+
+    if cli.download_navdata {
+        let target = locator.resolve_data_path(Path::new(&config.mission.navdata_dir));
+        let specs = alas_route::assets::NAVDATA_FILES
+            .iter()
+            .map(|file| {
+                DownloadSpec::new(
+                    file.name,
+                    alas_route::assets::navdata_file_url(file),
+                    file.min_bytes,
+                )
+            })
+            .collect::<Vec<_>>();
+        match download_files(&specs, &target, 120.0) {
+            Ok(summary) => {
+                println!(
+                    "Navigation data ready at {} (downloaded {}, skipped {}).",
+                    summary.target_dir.display(),
+                    summary.downloaded.len(),
+                    summary.skipped.len()
+                );
+                return 0;
+            }
+            Err(error) => {
+                eprintln!("Navigation-data download failed: {error}");
+                return 1;
+            }
+        }
+    }
 
     if let Some(ref save_path) = cli.save_config {
         let yaml = match serde_yaml::to_string(&config) {

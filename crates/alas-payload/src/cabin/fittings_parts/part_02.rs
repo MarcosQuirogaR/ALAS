@@ -17,6 +17,9 @@
 /// volumetrically than the airframe may carry, and filling to geometric
 /// capacity overshoots by tens of tonnes. An explicit `belly_cargo_kg` larger
 /// than the auto-fill still wins, for a deliberate overload study.
+#[allow(clippy::too_many_arguments)] // The final optional aircraft-CG target is
+                                    // kept explicit so layout-only callers and
+                                    // mass-analysis callers share one payload pass.
 pub(super) fn place_baggage(
     g: &CabinGeometry,
     pax: &PassengerCabinConfig,

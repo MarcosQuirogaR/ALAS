@@ -18,24 +18,37 @@ fn decks(height_m: Option<f64>, diameter_m: f64) -> (Vec<DeckSpec>, DeckSpec) {
             vec![
                 DeckSpec {
                     name: crate::layout::MAIN,
-                    floor_frac: -0.30,
-                    ceil_frac: 0.12,
+                    // Keep a full passenger cabin above the cargo ceiling;
+                    // the small upward shift also leaves the lower hold a
+                    // realistic ULD bay instead of a one-container-wide slit.
+                    floor_frac: -0.20,
+                    // A380-class upper floors leave roughly two metres of
+                    // clear cabin height for the seat block and overhead bins.
+                    ceil_frac: 0.32,
                     width_factor: 0.95,
                     is_passenger: true,
                 },
                 DeckSpec {
                     name: crate::layout::UPPER,
-                    floor_frac: 0.14 + MIN_DECK_SEPARATION_FRAC,
-                    ceil_frac: 0.75,
+                    floor_frac: 0.38,
+                    // The upper deck follows the crown; the remaining top
+                    // shell is the structural/insulation margin, not cabin
+                    // floor that can be sold as seats.
+                    ceil_frac: 0.95,
                     width_factor: 0.80,
                     is_passenger: true,
                 },
             ],
             DeckSpec {
                 name: crate::layout::LOWER,
-                floor_frac: -0.82,
-                ceil_frac: -0.32 - MIN_DECK_SEPARATION_FRAC,
-                width_factor: 0.55,
+                floor_frac: -0.70,
+                ceil_frac: -0.26,
+                // Passenger widebody lower holds are arranged as two
+                // half-width LD-family positions across the bay in the
+                // published A380 loading plans. Keep a structural/rail
+                // margin instead of filling the raw fuselage chord; tapered
+                // nose/tail stations still reduce this to one position.
+                width_factor: 0.72,
                 is_passenger: false,
             },
         )
@@ -52,7 +65,10 @@ fn decks(height_m: Option<f64>, diameter_m: f64) -> (Vec<DeckSpec>, DeckSpec) {
                 name: crate::layout::LOWER,
                 floor_frac: -0.71,
                 ceil_frac: -0.02 - MIN_DECK_SEPARATION_FRAC,
-                width_factor: 0.60,
+                // A narrowbody remains one ULD across, while a 5.6--6.0 m
+                // widebody gets the two-across lower-hold arrangement seen
+                // in aircraft cargo plans.
+                width_factor: 0.90,
                 is_passenger: false,
             },
         )

@@ -10,6 +10,7 @@ use alas_payload::layout::{
     DeckItem, ItemKind, ItemMeta, OverheadBinType, PayloadLayout, SeatMeta, LOWER,
 };
 
+use crate::families::geometry::cabin_assets::asset_for_item;
 use crate::scene::{Color, Fill, Scene, SceneElement, Stroke, TextAlign, TextBaseline};
 use crate::theme::get_palette;
 
@@ -319,19 +320,42 @@ fn draw_hold(
         .collect();
     cargo.sort_by(|a, b| (a.x - station).abs().total_cmp(&(b.x - station).abs()));
     for item in cargo.into_iter().take(3) {
-        let half = item.width.min(half_width * 0.95) * 0.5;
-        let height = item.height.min((ceiling - floor) * 0.82);
-        rect_physical(
-            scene,
-            map,
-            (item.y - half).max(-half_width),
-            (item.y + half).min(half_width),
-            floor + 0.05,
-            floor + height,
-            Color::from_hex("#9b9bd0"),
-            Color::from_hex("#5b5b91"),
-            2.0,
-        );
+        let fill = match &item.meta {
+            ItemMeta::Container(meta) => Color::from_hex(meta.color),
+            ItemMeta::BulkBag => Color::from_hex("#95a5a6"),
+            _ => Color::from_hex("#9b9bd0"),
+        };
+        let outline = Color::from_hex("#334155");
+        if let Some(asset) = asset_for_item(item) {
+            // The section view is intentionally driven by the same normalized
+            // ULD polygon as the 3D preview. This keeps an LD3's sloped crown
+            // visible in results instead of silently reverting to a box.
+            polygon(
+                scene,
+                asset
+                    .profile_yz
+                    .iter()
+                    .map(|&[y, z]| map.point(y, z))
+                    .collect(),
+                fill,
+                outline,
+            );
+        } else {
+            // Unknown legacy items still get a bounded, readable fallback.
+            let half = item.width.min(half_width * 0.95) * 0.5;
+            let height = item.height.min((ceiling - floor) * 0.82);
+            rect_physical(
+                scene,
+                map,
+                (item.y - half).max(-half_width),
+                (item.y + half).min(half_width),
+                floor + 0.05,
+                floor + height,
+                fill,
+                outline,
+                2.0,
+            );
+        }
     }
 }
 
@@ -424,7 +448,7 @@ pub fn figure_cabin_cross_section(
     );
     text(
         &mut scene,
-        "Seat color = class | dark bins = sidewall pivot | light bins = center hinge",
+        "Seat color = class | dark bins = sidewall pivot | light bins = center hinge | cargo = polygonal ULD profile",
         [WIDTH * 0.5, HEIGHT - 20.0],
         Color::from_hex(pal.tick),
         9.5,

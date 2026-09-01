@@ -45,6 +45,24 @@ impl ToolLocator {
         self.user_data_root.join("tool-preferences.json")
     }
 
+    /// Resolve a relative writable/data path against the same roots used by
+    /// the packaged application.  The pipeline cannot depend on `alas-app`
+    /// without creating a crate cycle, so this small policy lives with the
+    /// process/environment locator instead of being duplicated at each call
+    /// site.
+    pub fn resolve_data_path(&self, configured: &Path) -> PathBuf {
+        if configured.is_absolute() {
+            return configured.to_path_buf();
+        }
+        for root in [&self.app_root, &self.user_data_root] {
+            let candidate = root.join(configured);
+            if candidate.exists() {
+                return candidate;
+            }
+        }
+        self.user_data_root.join(configured)
+    }
+
     /// Load persisted locations. A missing or malformed file is equivalent to
     /// no preferences; an optional tool must never prevent the app starting.
     pub fn load_preferences(&self) -> ToolPreferences {

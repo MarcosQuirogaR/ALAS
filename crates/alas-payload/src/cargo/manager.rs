@@ -120,9 +120,10 @@ pub struct CargoLoadManager<'g> {
 include!("manager_parts/impl.rs");
 
 #[cfg(test)]
+#[allow(clippy::expect_used, clippy::unwrap_used)]
 mod tests {
     use super::*;
-    use alas_config::GeometryConfig;
+    use alas_config::{presets, AlasConfig, CargoDeckConfig, GeometryConfig};
     use alas_geom::builder::AircraftBuilder;
 
     fn geometry() -> CabinGeometry {
@@ -189,6 +190,86 @@ mod tests {
             };
             let slots = probe.lower_candidate_slots(candidate);
             assert!(selected_capacity >= slots.len() as f64 * candidate.max_net());
+        }
+    }
+
+    #[test]
+    fn a380_lower_hold_places_multiple_uld_across_the_widebody_bay() {
+        let config = AlasConfig::from_value(&serde_json::json!({ "preset": "A380-800" }))
+            .expect("the registered A380 preset loads");
+        let preset = presets::get("A380-800").expect("the registered A380 preset resolves");
+        let plane = AircraftBuilder::new(Some(config.geometry.clone()))
+            .build(Some(&preset.design_vector), true)
+            .expect("the A380 geometry builds");
+        let geometry = CabinGeometry::new(
+            &plane,
+            &config.geometry,
+            config.cabin.passenger.wall_thickness_m,
+        )
+        .expect("the A380 cabin frame builds");
+        let manager = CargoLoadManager::new(
+            &geometry,
+            CargoDeckConfig {
+                use_main_deck: false,
+                lower_deck_uld: "LD3".to_owned(),
+                ..Default::default()
+            },
+        );
+        let mut per_station = std::collections::BTreeMap::<i64, usize>::new();
+        for slot in manager
+            .slots
+            .iter()
+            .filter(|slot| slot.deck == geometry.lower_deck.name)
+        {
+            *per_station
+                .entry((slot.x * 1_000.0).round() as i64)
+                .or_default() += 1;
+        }
+        let maximum_across = per_station.values().copied().max().unwrap_or(0);
+        assert!(
+            maximum_across >= 2,
+            "A380 lower hold should carry two LD3 across, got {maximum_across}"
+        );
+    }
+
+    #[test]
+    fn widebody_lower_holds_use_multiple_transverse_positions() {
+        for name in ["A340-300", "A380-800", "B787-9", "DC-10"] {
+            let config = AlasConfig::from_value(&serde_json::json!({ "preset": name }))
+                .expect("the registered widebody preset loads");
+            let preset = presets::get(name).expect("the registered widebody preset resolves");
+            let plane = AircraftBuilder::new(Some(config.geometry.clone()))
+                .build(Some(&preset.design_vector), true)
+                .expect("the widebody geometry builds");
+            let geometry = CabinGeometry::new(
+                &plane,
+                &config.geometry,
+                config.cabin.passenger.wall_thickness_m,
+            )
+            .expect("the widebody cabin frame builds");
+            let manager = CargoLoadManager::new(
+                &geometry,
+                CargoDeckConfig {
+                    use_main_deck: false,
+                    lower_deck_uld: "LD3".to_owned(),
+                    ..Default::default()
+                },
+            );
+            let mut per_station = std::collections::BTreeMap::<i64, usize>::new();
+            for slot in manager
+                .slots
+                .iter()
+                .filter(|slot| slot.deck == geometry.lower_deck.name)
+            {
+                *per_station
+                    .entry((slot.x * 1_000.0).round() as i64)
+                    .or_default() += 1;
+            }
+            let maximum_across = per_station.values().copied().max().unwrap_or(0);
+            assert!(
+                maximum_across >= 2,
+                "{name} lower hold should carry at least two LD3 across, got {maximum_across}"
+            );
         }
     }
 }

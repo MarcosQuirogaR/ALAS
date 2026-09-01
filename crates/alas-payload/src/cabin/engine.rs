@@ -237,5 +237,18 @@ mod product_tests {
             .items
             .iter()
             .any(|item| item.kind == ItemKind::WheelchairStowage));
+        let baggage: Vec<&crate::layout::DeckItem> = layout
+            .items
+            .iter()
+            .filter(|item| item.kind == ItemKind::Bag)
+            .collect();
+        assert!(
+            baggage.len() >= 3,
+            "the A380 hold should load several longitudinal ULD positions"
+        );
+        assert!(
+            baggage.iter().any(|item| item.y.abs() > 0.5),
+            "the A380 hold should use a transverse position away from the centreline"
+        );
     }
 }
