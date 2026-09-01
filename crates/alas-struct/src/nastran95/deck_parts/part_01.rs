@@ -29,8 +29,8 @@ const SPC_SET: i64 = 1;
 const METHOD_SET: i64 = 1;
 
 /// The legacy inverse-power method needs a populated low-frequency search
-/// interval before it can identify the desired roots.  The product wingbox
-/// has its first thirty elastic modes below 100 Hz; using the 500 Hz SOL 111
+/// interval before it can identify the desired roots.  The product wingbox's
+/// target-bearing elastic modes are below 100 Hz; using the 500 Hz SOL 111
 /// response ceiling here made the solver skip the low roots altogether.
 const NASTRAN95_MODAL_SEARCH_UPPER_HZ: f64 = 100.0;
 
@@ -39,11 +39,12 @@ const NASTRAN95_MODAL_SEARCH_UPPER_HZ: f64 = 100.0;
 /// roots, without applying the impractical full-band count to the old solver.
 const NASTRAN95_MODAL_ROOT_ESTIMATE_FACTOR: i64 = 2;
 
-/// The inverse solver must extract a sufficiently broad low-frequency set
-/// even when a caller only displays a handful of modes.  The analysis reader
-/// trims this reliable set back to the configured count after filtering rigid
-/// modes.
-const NASTRAN95_MINIMUM_EXTRACTED_MODES: i64 = 30;
+/// The inverse solver must extract a sufficiently broad low-frequency set even
+/// when a caller only displays a handful of modes.  A sixteen-mode floor is the
+/// smallest full-mesh request validated against the active Rayleigh targets and
+/// the MSC Nastran baseline; the analysis reader trims this set back to the
+/// configured count after filtering rigid modes.
+const NASTRAN95_MINIMUM_EXTRACTED_MODES: i64 = 16;
 
 /// Load-set identifier bases, kept apart for the reason [`crate::nastran`]
 /// records: an earlier scheme let a pull-up force set collide with a push-down

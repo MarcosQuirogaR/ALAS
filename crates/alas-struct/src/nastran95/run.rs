@@ -25,6 +25,9 @@
 //! array. Current local builds write that limit beside `nastran.exe`, letting
 //! the runner use the compiled capacity by default and reject invalid requests
 //! before the Fortran program exits successfully without results.
+//! The supervised live runner defaults `DBMEM=1` to keep the database in the
+//! remaining open core and reduce scratch I/O; `ALAS_NASTRAN95_DBMEM=0` is the
+//! explicit opt-out for constrained hosts.
 //! The deck is fed with its carriage returns stripped, since a bare `CR` lands
 //! in column 81 and the scanner rejects the card; and the runtime directory
 //! carrying `libgfortran` has to be on `PATH`.

@@ -29,6 +29,9 @@
 //! * `run_sol_vibration_random` requests native force-PSD RMS integration.
 //!   The frozen default and the product default both enable it, but the Rust
 //!   calculation replaces the invalid acceleration-PSD/force-receptance path.
+//! * `n_modes` uses the validated 16-mode product default for the live
+//!   NASTRAN-95 path; the frozen Python reference remains at 30 so its
+//!   historical parity fixture stays reproducible.
 //! * The structures enable/station help names the native structural wing-mass
 //!   centroid consumer. Both old and corrected prose are pinned below; values,
 //!   field order, and exact comparison remain unchanged.
@@ -241,7 +244,7 @@ fn the_fixture_has_no_type_this_test_forgot_to_check() {
 /// Compare two default trees, reporting each disagreeing key by its path
 /// rather than dumping both trees.
 fn compare_values(comparison: &mut Comparison, path: &str, actual: &Value, expected: &Value) {
-    if let Some((upstream, corrected)) = vibration_performance_default_correction(path) {
+    if let Some((upstream, corrected)) = product_default_correction(path) {
         comparison.exact(&format!("{path}: frozen Python value"), expected, &upstream);
         comparison.exact(
             &format!("{path}: source-corrected Rust value"),
@@ -308,14 +311,16 @@ fn compare_values(comparison: &mut Comparison, path: &str, actual: &Value, expec
     }
 }
 
-/// The frozen Python configuration enabled an expensive 500 Hz harmonic
-/// output by default. The product default keeps force-PSD RMS enabled while
-/// making the extended sweep explicit and bounded to its useful RMS band.
-fn vibration_performance_default_correction(path: &str) -> Option<(Value, Value)> {
+/// Product defaults that intentionally differ from the frozen Python
+/// configuration. The reference values remain checked explicitly so a product
+/// optimization cannot silently become a parity drift.
+fn product_default_correction(path: &str) -> Option<(Value, Value)> {
     if path.ends_with(".run_sol_vibration_sine") {
         Some((Value::Bool(true), Value::Bool(false)))
     } else if path.ends_with(".freq_sweep_max_hz") {
         Some((serde_json::json!(500.0), serde_json::json!(60.0)))
+    } else if path.ends_with(".n_modes") {
+        Some((serde_json::json!(30), serde_json::json!(16)))
     } else {
         None
     }
@@ -814,7 +819,7 @@ fn compare_leaf(comparison: &mut Comparison, path: &str, leaf: &LeafField, expec
         expected.get("kind").unwrap_or(&Value::Null),
     );
     let expected_value = expected.get("value").unwrap_or(&Value::Null);
-    if let Some((upstream, corrected)) = vibration_performance_default_correction(path) {
+    if let Some((upstream, corrected)) = product_default_correction(path) {
         comparison.exact(
             &format!("{path}.value: frozen Python value"),
             expected_value,

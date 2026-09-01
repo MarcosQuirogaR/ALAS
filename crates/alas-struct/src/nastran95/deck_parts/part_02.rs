@@ -11,10 +11,10 @@
 /// interval.  `NE` is an estimate of the roots in that interval, not the
 /// requested output count: supplying `n_modes` for both while retaining the
 /// 500 Hz SOL 111 response ceiling made NASTRAN-95 skip the elastic roots.
-/// Extracting at least thirty modes with a two-to-one root estimate gives the
-/// historic solver enough shifts; the analysis reader then retains the user
-/// requested elastic subset. The continuation card is required by the `EIGR`
-/// format.
+/// Extracting at least sixteen modes with a two-to-one root estimate gives the
+/// historic solver enough shifts for the validated active model; the analysis
+/// reader then retains the user-requested elastic subset. The continuation card
+/// is required by the `EIGR` format.
 fn eigenvalue_card(
     out: &mut String,
     tags: &mut ContinuationTags,
@@ -88,6 +88,16 @@ mod tests {
             ..StructuresConfig::default()
         };
         let deck = build_modes_deck(&Deck::default(), &config, Dialect::Nastran95);
+        assert!(deck.contains("EIGR    1       INV     0.      100.    32      16"));
+    }
+
+    #[test]
+    fn local_modes_preserve_a_higher_explicit_request() {
+        let config = StructuresConfig {
+            n_modes: 30,
+            ..StructuresConfig::default()
+        };
+        let deck = build_modes_deck(&Deck::default(), &config, Dialect::Nastran95);
         assert!(deck.contains("EIGR    1       INV     0.      100.    60      30"));
     }
 
@@ -117,4 +127,3 @@ mod tests {
         }
     }
 }
-

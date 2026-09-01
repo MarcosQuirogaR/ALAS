@@ -194,11 +194,16 @@ pub fn run_nastran95(
         return RunOutcome::Failed(format!("could not stage the run: {error}"));
     }
     let scratch = work_dir.join("scr");
+    // The live default uses the legacy solver's in-memory database.  NASTRAN-
+    // 95 reuses the remaining compiled COMMON /ZZZZZZ/ after OCMEM; DBMEM=1
+    // removes a large amount of scratch I/O when OCMEM is below the executable
+    // maximum. Set ALAS_NASTRAN95_DBMEM=0 to opt out for constrained hosts.
+    let dbmem = std::env::var("ALAS_NASTRAN95_DBMEM").unwrap_or_else(|_| "1".to_owned());
 
     let mut command = Command::new(&solver.exe);
     command
         .current_dir(&work_dir)
-        .env("DBMEM", "0")
+        .env("DBMEM", dbmem)
         .env("OCMEM", &open_core)
         .env("RFDIR", short(&rf))
         .env("DIRCTY", short(&scratch))

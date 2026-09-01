@@ -5,7 +5,9 @@
 //!
 //! This intentionally exercises the same supervised subprocess path as ALAS.
 //! It writes the complete print file for cross-build numerical comparison and
-//! emits one compact machine-readable result on stdout.
+//! emits one compact machine-readable result on stdout.  An optional final
+//! argument selects OCMEM in words, allowing a campaign to reserve the rest
+//! of the executable's COMMON /ZZZZZZ/ for NASTRAN-95's in-memory database.
 
 use std::env;
 use std::fs;
@@ -35,6 +37,9 @@ fn run() -> Result<(), String> {
         .to_string_lossy()
         .parse::<f64>()
         .map_err(|error| format!("invalid timeout: {error}"))?;
+    let open_core = args
+        .next()
+        .map(|value| value.to_string_lossy().into_owned());
     if args.next().is_some() {
         return Err("unexpected extra arguments".to_owned());
     }
@@ -43,7 +48,7 @@ fn run() -> Result<(), String> {
         &solver_root,
         Some(&runtime),
         Some(Path::new("C:/n95rf")),
-        None,
+        open_core.as_deref(),
     )
     .ok_or_else(|| format!("invalid solver root: {}", solver_root.display()))?;
     let deck = fs::read_to_string(&deck_path)
