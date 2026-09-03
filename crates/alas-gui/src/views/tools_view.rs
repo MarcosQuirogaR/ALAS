@@ -400,7 +400,10 @@ fn resolved_status(state: &AppState, ui: &mut Ui) {
             status_row(
                 ui,
                 "MSC solver override",
-                describe_optional_file(&config.structures.nastran_solver_path),
+                describe_nastran_solver(
+                    &config.structures.nastran_solver_path,
+                    environment.nastran_solver.as_deref(),
+                ),
             );
             status_row(
                 ui,
@@ -468,6 +471,16 @@ fn describe_optional_file(configured: &str) -> String {
             &[("path", path.display().to_string())],
         )
     }
+}
+
+fn describe_nastran_solver(configured: &str, resolved: Option<&std::path::Path>) -> String {
+    if !configured.trim().is_empty() {
+        return describe_optional_file(configured);
+    }
+    resolved.map_or_else(
+        || tr("not found (automatic server-mode solver resolution)"),
+        |path| format!("{} (automatic server-mode solver)", path.display()),
+    )
 }
 
 fn describe_optional_directory(configured: &str) -> String {

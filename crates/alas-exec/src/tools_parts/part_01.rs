@@ -14,6 +14,13 @@ pub struct RunEnvironment {
     pub mses_dir: Option<PathBuf>,
     /// NASTRAN executable, when installed and configured.
     pub nastran_exe: Option<PathBuf>,
+    /// Paired MSC NASTRAN solver process, when a split Student Edition
+    /// installation exposes one.  The visible launcher can exist while its
+    /// default solver path is unusable, so keeping this resolved separately
+    /// lets the pipeline pass `a.solver` without requiring a manual setup
+    /// override.
+    #[serde(default)]
+    pub nastran_solver: Option<PathBuf>,
     /// Patran executable, when installed and configured.
     pub patran_exe: Option<PathBuf>,
     /// Headless OpenVSP AngelScript executable, when installed adjacent to ALAS.

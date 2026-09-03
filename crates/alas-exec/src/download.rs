@@ -223,6 +223,9 @@ fn diagnostic_text(body: &str, stderr: &str) -> String {
     result.replace(['\r', '\n'], " ")
 }
 
+// A test asserts on values it constructed here directly, so a failed unwrap
+// or expect is the assertion failing, not a library invariant being broken.
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -8,13 +8,15 @@ use alas_payload::{apply_cabin_preset, build::build_payload_layout};
 use alas_perf::performance::build_vn_diagram;
 use alas_report::families::aerodynamics::{
     figure_aero_panel, figure_airfoil_reynolds, figure_drag_breakdown, figure_model_comparison,
-    figure_mses_mach_contours, figure_mses_pressure_distribution,
+    figure_mses_convergence, figure_mses_mach_contours, figure_mses_pressure_distribution,
     figure_optimized_aircraft_comparison, figure_polar_comparison, figure_span_loading,
-    figure_status_message, figure_vlm_flow,
+    figure_status_message, figure_vlm_flow, figure_vspaero_load_distribution,
+    figure_vspaero_polar, figure_vspaero_wake_convergence,
 };
 use alas_report::families::geometry::{
     figure_airfoil_evolution, figure_design_evolution, figure_exterior_3d, figure_geometry,
-    figure_planform_comparison, figure_threeview, figure_wireframe_empennage,
+    figure_openvsp_cad_preview, figure_planform_comparison, figure_threeview,
+    figure_wireframe_empennage,
     figure_wireframe_fuselage, figure_wireframe_wing,
 };
 use alas_report::families::mass_balance::{

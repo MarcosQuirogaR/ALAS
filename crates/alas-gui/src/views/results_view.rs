@@ -15,8 +15,10 @@ use egui::{vec2, Align2, Area, Color32, Frame, Id, Key, Layout, Order, RichText,
 
 mod summary;
 use summary::show_summary;
+mod external;
 mod images;
 mod solver;
+use external::show_external_tools_result;
 #[cfg(test)]
 use images::scene_has_external_images;
 pub use solver::SolverResultView;
@@ -33,6 +35,11 @@ const TABS: &[Tab] = &[
         id: "optimization",
         title: "Optimization",
         category: "Optimization",
+    },
+    Tab {
+        id: "geometry",
+        title: "Geometry",
+        category: "Geometry",
     },
     Tab {
         id: "aero",
@@ -68,6 +75,11 @@ const TABS: &[Tab] = &[
         id: "model",
         title: "Model Comparison",
         category: "Model Comparison",
+    },
+    Tab {
+        id: "external",
+        title: "External Tools",
+        category: "External Tools",
     },
 ];
 
@@ -181,6 +193,14 @@ pub fn show_results_view(state: &mut AppState, ui: &mut Ui) {
                     crate::layout_debug::RegionKind::Scroll,
                 );
                 show_summary(state, ui, result);
+            });
+        return;
+    }
+    if state.results_tab == "external" {
+        ScrollArea::vertical()
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                show_external_tools_result(ui, result);
             });
         return;
     }

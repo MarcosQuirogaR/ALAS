@@ -14,6 +14,7 @@ use alas_aero::flowunsteady::{
 use alas_atmo::Atmosphere;
 use alas_config::AlasConfig;
 use alas_exec::flowunsteady::{run_flowunsteady_adapter, FlowUnsteadyProcessStatus};
+use alas_geom::airfoil_library::AirfoilLibrary;
 
 use crate::full_analysis::AnalysisReport;
 
@@ -100,18 +101,40 @@ pub fn request_from_report(report: &AnalysisReport, config: &AlasConfig) -> Flow
         .airplane
         .wings
         .iter()
-        .map(|wing| FlowUnsteadySurface {
+        .enumerate()
+        .map(|(surface_index, wing)| FlowUnsteadySurface {
             name: wing.name.clone(),
             symmetric_about_xz: wing.symmetric,
             sections: wing
                 .xsecs
                 .iter()
-                .map(|section| FlowUnsteadySection {
+                .enumerate()
+                .map(|(section_index, section)| FlowUnsteadySection {
                     leading_edge_m: section.xyz_le,
                     chord_m: section.chord,
                     twist_deg: section.twist,
-                    airfoil_name: section.airfoil.name.clone(),
-                    airfoil_coordinates: section.airfoil.coordinates.clone(),
+                    // FLOW request fields are comma-delimited.  Blended
+                    // sections legitimately carry names such as
+                    // "12% morphed, 88% sc20410" after the CPACS round trip;
+                    // serialize a stable delimiter-safe label while keeping
+                    // the exact section coordinates below.
+                    airfoil_name: flow_airfoil_name(
+                        &section.airfoil.name,
+                        surface_index,
+                        section_index,
+                    ),
+                    // CPACS and user-imported geometry may preserve an
+                    // airfoil name while omitting the contour.  Resolve that
+                    // name through the same library used by the geometry
+                    // builder before rejecting the adapter request; an
+                    // unknown name still yields an honest request rejection.
+                    airfoil_coordinates: if section.airfoil.coordinates.len() >= 3 {
+                        section.airfoil.coordinates.clone()
+                    } else {
+                        AirfoilLibrary::get(&section.airfoil.name)
+                            .map(|airfoil| airfoil.coordinates)
+                            .unwrap_or_default()
+                    },
                 })
                 .collect(),
         })
@@ -133,6 +156,21 @@ pub fn request_from_report(report: &AnalysisReport, config: &AlasConfig) -> Flow
             averaging_reference_chords: 5.0,
         },
         alpha_deg: report.polar.alpha_deg.clone(),
+    }
+}
+
+fn flow_airfoil_name(name: &str, surface_index: usize, section_index: usize) -> String {
+    let sanitized = name
+        .chars()
+        .map(|character| match character {
+            ',' | '\n' | '\r' | '=' => '_',
+            _ => character,
+        })
+        .collect::<String>();
+    if sanitized.trim().is_empty() {
+        format!("section_{surface_index}_{section_index}")
+    } else {
+        sanitized
     }
 }
 
@@ -341,6 +379,8 @@ fn close(a: f64, b: f64) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::full_analysis::FullAnalysis;
+    use alas_config::design_variables::DesignVector;
 
     #[test]
     fn exported_controls_preserve_clean_polar_provenance() {
@@ -360,5 +400,26 @@ mod tests {
             FlowUnsteadyAnalysisStatus::CompletedNotComparable.as_str(),
             "completed_not_comparable"
         );
+    }
+
+    #[test]
+    fn blended_airfoil_names_are_safe_for_the_comma_delimited_request() {
+        assert_eq!(
+            flow_airfoil_name("12% morphed, 88% sc20410", 0, 4),
+            "12% morphed_ 88% sc20410"
+        );
+        assert_eq!(flow_airfoil_name("", 2, 7), "section_2_7");
+    }
+
+    #[test]
+    fn default_report_with_blended_sections_renders_a_flow_request() {
+        let config = AlasConfig::default();
+        let report = FullAnalysis::new(config.clone())
+            .run(&DesignVector::default(), false)
+            .expect("default product report should build");
+        let request = request_from_report(&report, &config);
+        let rendered = render_request(&request).expect("default report should satisfy V2");
+        assert!(rendered.contains("airfoil_point="));
+        assert!(!rendered.contains("morphed, 88%"));
     }
 }

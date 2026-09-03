@@ -66,8 +66,8 @@ mod helpers;
 #[cfg(test)]
 use helpers::optimizer_config;
 use helpers::{
-    add_manifest_artifact, persist_mses_polar_diagnostics, persist_mses_raw_exports,
-    validate_bounds,
+    add_manifest_artifact, add_manifest_artifact_if_exists, persist_mses_polar_diagnostics,
+    persist_mses_raw_exports, validate_bounds,
 };
 
 /// The 2-D section condition sent to MSES for a 3-D swept-wing cruise case.
@@ -265,6 +265,7 @@ fn emit_tool_diagnostics(
         ("FLOWUnsteady", environment.flowunsteady_exe.as_deref()),
         ("MSES", environment.mses_dir.as_deref()),
         ("Nastran", environment.nastran_exe.as_deref()),
+        ("MSC solver", environment.nastran_solver.as_deref()),
         ("Patran", environment.patran_exe.as_deref()),
     ];
     for (tool, path) in configured {
@@ -1393,6 +1394,43 @@ impl DesignPipeline {
                 if let Some(result) = &flowunsteady_result {
                     stages.insert("flowunsteady".to_owned(), result.status.as_str().to_owned());
                 }
+                if let Some(result) = &mses_result {
+                    stages.insert("mses".to_owned(), result.status.as_str().to_owned());
+                }
+                if let Some(result) = &structural_result {
+                    stages.insert("structures".to_owned(), result.status.clone());
+                    if let Some(nastran) = result.nastran.as_ref() {
+                        stages.insert(
+                            "msc_nastran_sol101".to_owned(),
+                            nastran.static_solve.status.as_str().to_owned(),
+                        );
+                        stages.insert(
+                            "msc_nastran_sol103".to_owned(),
+                            nastran.modes.status.as_str().to_owned(),
+                        );
+                        stages.insert(
+                            "msc_nastran_sol111".to_owned(),
+                            nastran.vibration.status.as_str().to_owned(),
+                        );
+                    }
+                    if let Some(nastran95) = result.nastran95.as_ref() {
+                        stages.insert(
+                            "nastran95_sol101".to_owned(),
+                            nastran95.static_solve.status.as_str().to_owned(),
+                        );
+                        stages.insert(
+                            "nastran95_sol103".to_owned(),
+                            nastran95.modes.status.as_str().to_owned(),
+                        );
+                        stages.insert(
+                            "nastran95_sol111".to_owned(),
+                            nastran95.vibration.status.as_str().to_owned(),
+                        );
+                    }
+                    if let Some(patran) = result.patran.as_ref() {
+                        stages.insert("patran".to_owned(), patran.status.clone());
+                    }
+                }
                 let mut artifacts = BTreeMap::new();
                 add_manifest_artifact(&mut artifacts, out_dir, "cpacs_input", &export.path);
                 if let Some(path) = cpacs_adapter_manifest.as_ref() {
@@ -1403,6 +1441,175 @@ impl DesignPipeline {
                 }
                 if let Some(path) = cabin_scene_artifact.as_ref() {
                     add_manifest_artifact(&mut artifacts, out_dir, "cabin_scene_v2", path);
+                }
+                if let Some(openvsp) = openvsp_export.as_ref() {
+                    add_manifest_artifact_if_exists(
+                        &mut artifacts,
+                        out_dir,
+                        "openvsp_script",
+                        &openvsp.script_path,
+                    );
+                    add_manifest_artifact_if_exists(
+                        &mut artifacts,
+                        out_dir,
+                        "openvsp_project",
+                        &openvsp.vsp3_path,
+                    );
+                    let preview = openvsp.script_path.with_extension("preview.png");
+                    add_manifest_artifact_if_exists(
+                        &mut artifacts,
+                        out_dir,
+                        "openvsp_cad_preview",
+                        &preview,
+                    );
+                    add_manifest_artifact_if_exists(
+                        &mut artifacts,
+                        out_dir,
+                        "openvsp_vspaero_geometry",
+                        &openvsp.vspaero_geometry_path,
+                    );
+                    if let Some(path) = openvsp.runtime_stdout_path.as_ref() {
+                        add_manifest_artifact_if_exists(
+                            &mut artifacts,
+                            out_dir,
+                            "openvsp_stdout",
+                            path,
+                        );
+                    }
+                    if let Some(path) = openvsp.runtime_stderr_path.as_ref() {
+                        add_manifest_artifact_if_exists(
+                            &mut artifacts,
+                            out_dir,
+                            "openvsp_stderr",
+                            path,
+                        );
+                    }
+                }
+                if let Some(vspaero) = vspaero_result.as_ref() {
+                    for (name, path) in [
+                        ("vspaero_setup", &vspaero.setup_path),
+                        ("vspaero_polar", &vspaero.polar_path),
+                        ("vspaero_stdout", &vspaero.stdout_path),
+                        ("vspaero_stderr", &vspaero.stderr_path),
+                    ] {
+                        add_manifest_artifact_if_exists(&mut artifacts, out_dir, name, path);
+                    }
+                    let history = vspaero.case_path.with_extension("history");
+                    add_manifest_artifact_if_exists(
+                        &mut artifacts,
+                        out_dir,
+                        "vspaero_history",
+                        &history,
+                    );
+                    for (name, path) in [
+                        (
+                            "vspaero_load_distribution",
+                            vspaero.case_path.with_extension("lod"),
+                        ),
+                        ("vspaero_adb", vspaero.case_path.with_extension("adb")),
+                        (
+                            "vspaero_adb_cases",
+                            vspaero.case_path.with_extension("adb.cases"),
+                        ),
+                        (
+                            "vspaero_quad_cases",
+                            vspaero.case_path.with_extension("quad.cases"),
+                        ),
+                    ] {
+                        add_manifest_artifact_if_exists(&mut artifacts, out_dir, name, &path);
+                    }
+                }
+                if let Some(avl) = avl_result.as_ref() {
+                    for (name, path) in [
+                        ("avl_geometry", &avl.geometry_path),
+                        ("avl_session", &avl.session_path),
+                        ("avl_stdout", &avl.stdout_path),
+                        ("avl_stderr", &avl.stderr_path),
+                    ] {
+                        add_manifest_artifact_if_exists(&mut artifacts, out_dir, name, path);
+                    }
+                    for (index, path) in avl.force_paths.iter().enumerate() {
+                        add_manifest_artifact_if_exists(
+                            &mut artifacts,
+                            out_dir,
+                            &format!("avl_force_{:03}", index + 1),
+                            path,
+                        );
+                    }
+                }
+                if let Some(flow) = flowunsteady_result.as_ref() {
+                    for (name, path) in [
+                        ("flowunsteady_request", &flow.request_path),
+                        ("flowunsteady_result", &flow.result_path),
+                        ("flowunsteady_stdout", &flow.stdout_path),
+                        ("flowunsteady_stderr", &flow.stderr_path),
+                    ] {
+                        add_manifest_artifact_if_exists(&mut artifacts, out_dir, name, path);
+                    }
+                }
+                for (name, path) in [
+                    (
+                        "mses_polar_diagnostics",
+                        out_dir.join("mses/polar_diagnostics.json"),
+                    ),
+                    ("mses_bl_dump", out_dir.join("mses/bl_dump.txt")),
+                    ("mses_flowfield", out_dir.join("mses/flowfield.txt")),
+                ] {
+                    add_manifest_artifact_if_exists(&mut artifacts, out_dir, name, &path);
+                }
+                if let Some(structures) = structural_result.as_ref() {
+                    let structural_paths = [
+                        ("structures_mesh", out_dir.join("structures/wing_mesh.bdf")),
+                        (
+                            "structures_sol101_bdf",
+                            out_dir.join("structures/sol101/wing_sol101.bdf"),
+                        ),
+                        (
+                            "structures_sol101_f06",
+                            out_dir.join("structures/sol101/wing_sol101.f06"),
+                        ),
+                        (
+                            "structures_sol101_op2",
+                            out_dir.join("structures/sol101/wing_sol101.op2"),
+                        ),
+                        (
+                            "structures_sol103_bdf",
+                            out_dir.join("structures/sol103/wing_sol103.bdf"),
+                        ),
+                        (
+                            "structures_sol103_f06",
+                            out_dir.join("structures/sol103/wing_sol103.f06"),
+                        ),
+                        (
+                            "structures_sol103_op2",
+                            out_dir.join("structures/sol103/wing_sol103.op2"),
+                        ),
+                        (
+                            "structures_sol111_bdf",
+                            out_dir.join("structures/sol111_sine/wing_sol111_sine.bdf"),
+                        ),
+                        (
+                            "structures_sol111_f06",
+                            out_dir.join("structures/sol111_sine/wing_sol111_sine.f06"),
+                        ),
+                        (
+                            "structures_sol111_op2",
+                            out_dir.join("structures/sol111_sine/wing_sol111_sine.op2"),
+                        ),
+                    ];
+                    for (name, path) in structural_paths {
+                        add_manifest_artifact_if_exists(&mut artifacts, out_dir, name, &path);
+                    }
+                    if let Some(patran) = structures.patran.as_ref() {
+                        for (index, (_, path)) in patran.png_paths.iter().enumerate() {
+                            add_manifest_artifact_if_exists(
+                                &mut artifacts,
+                                out_dir,
+                                &format!("patran_deformation_{:03}", index + 1),
+                                path,
+                            );
+                        }
+                    }
                 }
                 let manifest_path = out_dir.join("cpacs/run_manifest.json");
                 Some(

@@ -32,6 +32,11 @@ pub fn build_result_figure_with_camera(
     if let Some(scene) = config_scene {
         return Some(Some(localize_scene_for_display(scene)));
     }
+    if id == "openvsp_cad_preview" {
+        return Some(Some(localize_scene_for_display(
+            figure_openvsp_cad_preview(result.openvsp_export.as_ref(), Some(theme)),
+        )));
+    }
     // A route is useful even when the aerodynamic report was disabled or
     // failed; the Python result factory only requires route data here.
     if id == "mission_route_2d" || id == "mission_route_3d" {
@@ -148,6 +153,14 @@ pub fn build_result_figure_with_camera(
                 .airfoil
                 .clone();
             figure_mses_mach_contours(result.mses_pressure.as_ref()?, Some(&airfoil), Some(theme))
+        }
+        "mses_convergence" => figure_mses_convergence(result.mses_result.as_ref()?, Some(theme)),
+        "vspaero_polar" => figure_vspaero_polar(result.vspaero_result.as_ref()?, Some(theme)),
+        "vspaero_wake_convergence" => {
+            figure_vspaero_wake_convergence(result.vspaero_result.as_ref()?, Some(theme))
+        }
+        "vspaero_load_distribution" => {
+            figure_vspaero_load_distribution(result.vspaero_result.as_ref()?, Some(theme))
         }
         "mass_breakdown" => figure_mass_breakdown(report, Some(theme)),
         "fuel_volume_check" => {

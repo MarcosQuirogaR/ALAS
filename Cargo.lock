@@ -45,6 +45,7 @@ dependencies = [
  "alas-app",
  "alas-atmo",
  "alas-config",
+ "alas-exec",
  "alas-geom",
  "alas-mass",
  "alas-mission",

@@ -64,6 +64,13 @@ pub static RESULT_FIGURES: &[FigureDescriptor] = &[
         "Optimization",
         "Top, front, side, and isometric aircraft views.",
     ),
+    // Native external geometry evidence
+    descriptor(
+        "openvsp_cad_preview",
+        "OpenVSP CAD Preview",
+        "Geometry",
+        "Native transparent CAD preview materialized by OpenVSP from the retained VSP3 project.",
+    ),
     // Aerodynamics and stability
     descriptor(
         "aero_panel",
@@ -124,6 +131,30 @@ pub static RESULT_FIGURES: &[FigureDescriptor] = &[
         "MSES Mach Contours",
         "Aerodynamics",
         "MSES surface and flowfield Mach contours.",
+    ),
+    descriptor(
+        "mses_convergence",
+        "MSES Sweep Convergence",
+        "Aerodynamics",
+        "Converged and non-converged MSES operating points with retained solver evidence.",
+    ),
+    descriptor(
+        "vspaero_polar",
+        "VSPAERO Native Polar",
+        "Aerodynamics",
+        "Native VSPAERO lift, drag, moment, and efficiency data, including rejected comparisons.",
+    ),
+    descriptor(
+        "vspaero_wake_convergence",
+        "VSPAERO Wake Convergence",
+        "Aerodynamics",
+        "Final native wake residual and iteration count for every VSPAERO angle case.",
+    ),
+    descriptor(
+        "vspaero_load_distribution",
+        "VSPAERO Native Load Distribution",
+        "Aerodynamics",
+        "Native VSPAERO sectional lift and induced-drag loading from the retained LOD export.",
     ),
     // Weight and balance
     descriptor(
@@ -365,4 +396,3 @@ pub fn find_figure(id: &str) -> Option<&'static FigureDescriptor> {
         .chain(SCREENING_FIGURES.iter())
         .find(|f| f.id == id)
 }
-

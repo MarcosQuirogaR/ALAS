@@ -1,5 +1,15 @@
 # Porting ledger
 
+**This is a numerical-parity and licence-provenance record, not a project
+status page.** For "does ALAS work today and what is wrong with it", read
+`docs/STATUS.md` instead. The two used to answer the same question, when
+every crate was a line-by-line translation; they no longer do, because
+orchestration layers such as `alas-pipeline` and `alas-gui` were built
+natively over already-parity-tested physics kernels rather than translated,
+so their rows below correctly read `todo` for "never checked against a
+Python counterpart" while the crates themselves build, run, and are exercised
+end to end. A `todo` row here is not evidence the crate is unbuilt.
+
 Every Python module in the reference implementation appears here exactly once,
 with where it goes, what licence its content carries, and whether it has been
 shown to agree with the original.

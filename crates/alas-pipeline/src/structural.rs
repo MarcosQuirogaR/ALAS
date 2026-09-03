@@ -292,6 +292,17 @@ pub fn run_structural_analysis_with_environment_events(
     } else {
         "NASTRAN-95 solve"
     };
+    // MSC Student Edition separates the visible launcher from the actual
+    // `analysis.exe` process.  Prefer an explicit user override, but use the
+    // resolver's paired server-mode solver automatically when the override is
+    // empty; otherwise a perfectly discoverable installation fails before
+    // NASTRAN can even read the deck.
+    let mut solver_config = scfg.clone();
+    if solver_config.nastran_solver_path.trim().is_empty() {
+        if let Some(solver) = environment.nastran_solver.as_deref() {
+            solver_config.nastran_solver_path = solver.display().to_string();
+        }
+    }
     let primary_solver_clock = begin_component(
         events,
         run_clock,
@@ -302,7 +313,7 @@ pub fn run_structural_analysis_with_environment_events(
         run_nastran_analysis(
             &mesh_deck,
             &node_index,
-            scfg,
+            &solver_config,
             req,
             dir,
             environment.nastran_exe.as_deref(),
@@ -429,11 +440,18 @@ fn sizing_failure_detail(sizing: &WingboxSizing) -> Option<String> {
         ));
     }
     if !sizing.strength_margins_pass() {
-        let minimum = sizing.minimum_margin_of_safety();
-        failures.push(if minimum.is_finite() {
-            format!("wingbox strength sizing is infeasible (minimum margin {minimum:.6})")
-        } else {
-            "wingbox strength sizing produced a non-finite margin".to_owned()
+        failures.push(match sizing.controlling_margin() {
+            Some(c) if c.margin.is_finite() => format!(
+                "wingbox strength sizing is infeasible: minimum margin {:.6e} at spar {} \
+                 (chord fraction {:.3}), station {} (y={:.4} m, eta={:.4})",
+                c.margin, c.spar_index, c.chord_fraction, c.station_index, c.y_m, c.eta,
+            ),
+            Some(c) => format!(
+                "wingbox strength sizing produced a non-finite margin at spar {}, station {} \
+                 (y={:.4} m, eta={:.4})",
+                c.spar_index, c.station_index, c.y_m, c.eta,
+            ),
+            None => "wingbox strength sizing produced no spar stations".to_owned(),
         });
     }
     (!failures.is_empty()).then(|| failures.join("; "))
@@ -515,7 +533,24 @@ mod tests {
             None => panic!("sizing must fail"),
         };
         assert!(detail.contains("installed rib spacing"));
-        assert!(detail.contains("minimum margin -0.100000"));
+        assert!(detail.contains("minimum margin -1.000000e-1"));
+        assert!(detail.contains("spar 0"));
+        assert!(detail.contains("station 0"));
+    }
+
+    #[test]
+    fn a_near_zero_margin_is_no_longer_reported_as_ambiguous_zero() {
+        // Regression test for the "-0.000000" bug: a `{:.6}`-rounded display
+        // could not distinguish floating-point noise at the root boundary
+        // (~-1e-15) from a real, small structural shortfall (~-4e-7). Both
+        // rounded to the same misleading string. Scientific notation at full
+        // precision keeps them distinguishable.
+        let mut sizing = sample_sizing();
+        sizing.rib_spacing_m = 4.0;
+        sizing.spars[0].margin_of_safety = vec![-4.2e-7, 0.5];
+        let detail = sizing_failure_detail(&sizing).expect("negative margin must fail");
+        assert!(!detail.contains("-0.000000"));
+        assert!(detail.contains("-4.200000e-7"));
     }
 
     #[test]

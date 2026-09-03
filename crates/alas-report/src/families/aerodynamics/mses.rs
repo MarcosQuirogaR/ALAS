@@ -15,7 +15,15 @@ use crate::colormap::Colormap;
 use crate::scene::{Axes2D, Color, Fill, Scene, SceneElement, Stroke, TextAlign, TextBaseline};
 use crate::theme::get_palette;
 
-fn panel_title(scene: &mut Scene, axes: &Axes2D, text: &str, pal: &crate::theme::Palette) {
+mod convergence;
+pub use convergence::figure_mses_convergence;
+
+pub(super) fn panel_title(
+    scene: &mut Scene,
+    axes: &Axes2D,
+    text: &str,
+    pal: &crate::theme::Palette,
+) {
     scene.add(SceneElement::Text {
         text: text.to_owned(),
         pos: [axes.left, axes.top - 8.0],
@@ -28,7 +36,7 @@ fn panel_title(scene: &mut Scene, axes: &Axes2D, text: &str, pal: &crate::theme:
     });
 }
 
-fn unavailable(theme: Option<&str>, reason: &str) -> Scene {
+pub(super) fn unavailable(theme: Option<&str>, reason: &str) -> Scene {
     let pal = get_palette(theme);
     let mut scene = Scene::new(760.0, 420.0, Some(Color::from_hex(pal.bg)));
     scene.title = Some("MSES figure unavailable".to_owned());

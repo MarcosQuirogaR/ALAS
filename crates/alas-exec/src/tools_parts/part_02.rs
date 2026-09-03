@@ -103,6 +103,7 @@ impl ToolLocator {
         RunEnvironment {
             mses_dir: self.resolve_mses_dir(mses_dir),
             nastran_exe: self.discover_nastran(nastran_exe).ready_path(),
+            nastran_solver: self.discover_nastran_solver(nastran_exe).ready_path(),
             patran_exe: self.discover_patran(patran_exe).ready_path(),
             openvsp_exe: self.discover_openvsp(openvsp_dir).ready_path(),
             vspaero_exe: self.discover_vspaero(openvsp_dir).ready_path(),
@@ -122,6 +123,19 @@ impl ToolLocator {
         );
         if matches!(adjacent, ExecutableDiscovery::Ready(_)) {
             return adjacent;
+        }
+        // A Student Edition's visible `Nastran/bin/nastran.exe` is a thin
+        // launcher that can fail at Windows loader startup on machines with
+        // a different VC80 side-by-side revision.  When the user has not
+        // explicitly selected a file, prefer the versioned inner launcher
+        // that is paired with the server-mode solver and was validated on the
+        // installed layout.
+        if configured.as_os_str().is_empty() {
+            for root in &self.system_tool_roots {
+                if let Some(path) = find_embedded_nastran(root) {
+                    return ExecutableDiscovery::Ready(path);
+                }
+            }
         }
         self.discover_msc_executable("Nastran/bin", &["nastran.exe", "nastranw.exe"])
             .unwrap_or(adjacent)
