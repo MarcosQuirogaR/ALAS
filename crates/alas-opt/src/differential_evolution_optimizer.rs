@@ -57,8 +57,9 @@ impl DesignOptimizer {
     /// # Errors
     ///
     /// Returns [`OptimizationError::NoFeasibleDesign`] when every evaluated
-    /// candidate fails physical validity. Invalid bounds and unknown solver
-    /// tokens are reported before any objective evaluation begins.
+    /// candidate fails the active objective/analysis policy. Invalid bounds
+    /// and unknown solver tokens are reported before any objective evaluation
+    /// begins.
     pub fn run(
         &mut self,
         bounds: Option<&[(f64, f64)]>,
@@ -82,9 +83,14 @@ impl DesignOptimizer {
 
         let result = ensure_feasible(result)?;
 
-        // Keep the final configuration on the same explicit payload load case
-        // used to score every candidate.
-        let _ = apply_candidate_payload_load_case(&mut self.config, &result.best_design);
+        // Keep constrained runs on the same explicit payload load case used to
+        // score every candidate. The unconstrained baseline mode deliberately
+        // leaves the caller's fixed load case untouched.
+        if self.reference_mass_coordinates
+            || self.config.optimizer.solver.enforce_physical_constraints
+        {
+            let _ = apply_candidate_payload_load_case(&mut self.config, &result.best_design);
+        }
         Ok(result)
     }
 
@@ -99,7 +105,7 @@ impl DesignOptimizer {
     /// # Errors
     ///
     /// Returns [`OptimizationError::NoFeasibleDesign`] when every evaluated
-    /// candidate fails the delegated evaluator's validity check.
+    /// candidate fails the delegated evaluator's active validity policy.
     pub fn run_with_evaluator<E: ObjectiveEvaluator + ?Sized>(
         &mut self,
         bounds: Option<&[(f64, f64)]>,
@@ -120,7 +126,11 @@ impl DesignOptimizer {
 
         let result = ensure_feasible(result)?;
 
-        let _ = apply_candidate_payload_load_case(&mut self.config, &result.best_design);
+        if self.reference_mass_coordinates
+            || self.config.optimizer.solver.enforce_physical_constraints
+        {
+            let _ = apply_candidate_payload_load_case(&mut self.config, &result.best_design);
+        }
         Ok(result)
     }
 

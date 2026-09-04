@@ -40,10 +40,12 @@ pub struct OptimizationResult {
     pub best_design: DesignVector,
     /// Objective function cost of the winning design.
     pub best_cost: f64,
-    /// Whether the winning design passed the evaluator's physical checks.
+    /// Whether the winning design passed the active evaluator policy.
     ///
-    /// A search with no feasible candidate is represented explicitly instead
-    /// of handing a lower-cost invalid design to the downstream pipeline.
+    /// In the unconstrained product-search mode this means that geometry,
+    /// mass and aerodynamic evaluation completed with a finite objective;
+    /// physical requirement violations are retained as downstream report
+    /// diagnostics rather than making the candidate ineligible.
     #[serde(default)]
     pub best_valid: bool,
     /// Full evaluation history collected during the run.
@@ -62,7 +64,7 @@ pub struct OptimizationResult {
 }
 
 /// Evidence returned when a search evaluated candidates but none passed the
-/// objective's physical validity checks.
+/// active objective/analysis validity policy.
 ///
 /// Rejected candidates are deliberately not promoted to
 /// [`OptimizationResult`].  A caller that wants to inspect the failed search
@@ -105,7 +107,7 @@ pub enum OptimizationError {
     /// The supplied design-space bounds cannot be searched safely.
     #[error("invalid optimizer bounds: {0}")]
     InvalidBounds(String),
-    /// Every evaluated candidate was rejected by the physical objective.
+    /// Every evaluated candidate failed the active objective/analysis policy.
     #[error("no feasible design: {0:?}")]
     NoFeasibleDesign(NoFeasibleDesign),
 }

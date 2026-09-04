@@ -4,6 +4,8 @@
 
 impl AvlObjective {
     fn evaluate_uncached(&self, design: &DesignVector, key: &str) -> ObjectiveEvaluation {
+        let enforce_physical_constraints =
+            self.config.optimizer.solver.enforce_physical_constraints;
         let report = match FullAnalysis::new(self.config.clone()).run(design, true) {
             Ok(report) => report,
             Err(_) => return ObjectiveEvaluation::rejected(self.failure_cost(), "full_analysis"),
@@ -13,17 +15,24 @@ impl AvlObjective {
             .wings
             .first()
             .map_or(f64::NAN, alas_geom::aircraft::wing::Wing::projected_area);
-        let Some(area_penalty) = wing_area_excess_penalty(
-            projected_wing_area_m2,
-            self.config.requirements.max_wing_area_m2,
-            self.config.optimizer.weights.area_penalty_scale,
-        ) else {
-            return ObjectiveEvaluation::rejected(self.failure_cost(), "wing_area_limit");
+        let area_penalty = if enforce_physical_constraints {
+            let Some(penalty) = wing_area_excess_penalty(
+                projected_wing_area_m2,
+                self.config.requirements.max_wing_area_m2,
+                self.config.optimizer.weights.area_penalty_scale,
+            ) else {
+                return ObjectiveEvaluation::rejected(self.failure_cost(), "wing_area_limit");
+            };
+            penalty
+        } else {
+            0.0
         };
-        if report.cg_envelope_ok != Some(true) {
+        if enforce_physical_constraints && report.cg_envelope_ok != Some(true) {
             return ObjectiveEvaluation::rejected(self.failure_cost(), "cg_envelope");
         }
-        if report.static_margin < self.config.requirements.min_physical_static_margin {
+        if enforce_physical_constraints
+            && report.static_margin < self.config.requirements.min_physical_static_margin
+        {
             return ObjectiveEvaluation::rejected(self.failure_cost(), "static_margin");
         }
         let evaluation_dir = self.output_root.join(key);
@@ -272,6 +281,7 @@ mod tests {
         let mut config = AlasConfig::default();
         config.optimizer.solver.max_iterations = 0;
         config.optimizer.solver.population_size = 1;
+        config.optimizer.solver.enforce_physical_constraints = true;
         config.requirements.max_cruise_cl = 0.01;
 
         let result = run_solver_optimizations(
@@ -295,4 +305,3 @@ mod tests {
             .is_some_and(|error| error.contains("no feasible design")));
     }
 }
-

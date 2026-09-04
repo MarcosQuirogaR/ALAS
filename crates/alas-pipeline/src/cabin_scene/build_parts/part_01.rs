@@ -11,22 +11,19 @@ use alas_payload::{
 };
 
 use super::*;
-use crate::AnalysisReport;
+use crate::cabin_scene::CabinSceneInputs;
 
 const CONTOUR_SAMPLES: usize = 96;
 
 pub(super) fn build_scene(
     config: &AlasConfig,
-    report: &AnalysisReport,
+    inputs: CabinSceneInputs<'_>,
     cabin: &CabinGeometry,
 ) -> Result<CabinScene, String> {
-    let layout = report
-        .payload_layout
-        .as_ref()
-        .ok_or("analysis has no resolved payload layout")?;
+    let layout = inputs.layout;
     let mut missing = base_missing();
     let mut recommended_sections = recommended_sections(&layout.items);
-    let mut station_x: Vec<f64> = report
+    let mut station_x: Vec<f64> = inputs
         .airplane
         .fuselages
         .first()
@@ -83,10 +80,10 @@ pub(super) fn build_scene(
         },
         provenance: SceneProvenance {
             producer: "ALAS optimized pipeline".into(),
-            source: "live AnalysisReport + effective AlasConfig".into(),
+            source: inputs.source.to_owned(),
             aircraft_preset: (!config.preset.is_empty()).then(|| config.preset.clone()),
             cabin_preset: config.requirements.cabin_preset.clone(),
-            optimized_design: report.design,
+            optimized_design: inputs.design,
         },
         stations,
         recommended_sections,

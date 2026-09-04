@@ -142,6 +142,7 @@ fn optimized_pipeline_delivers_only_a_native_reviewed_finalist() {
     config.structures.enabled = false;
     config.requirements.max_wing_area_m2 = 2_000.0;
     config.requirements.cg_range_pct_mac = 100.0;
+    config.optimizer.solver.enforce_physical_constraints = true;
     config.optimizer.solver.max_iterations = 0;
     config.optimizer.solver.population_size = 1;
     config.optimizer.solver.workers = 1;
@@ -181,11 +182,65 @@ fn optimized_pipeline_delivers_only_a_native_reviewed_finalist() {
 }
 
 #[test]
+fn unconstrained_optimizer_delivers_a_bounded_baseline_when_requirements_are_missed() {
+    let mut config = AlasConfig::default();
+    config.mission.enabled = false;
+    config.structures.enabled = false;
+    config.requirements.max_wing_area_m2 = 1.0;
+    config.requirements.max_cruise_cl = 0.0;
+    config.optimizer.weights.geometric_body_alpha_min_deg = 100.0;
+    config.optimizer.weights.geometric_body_alpha_max_deg = 101.0;
+    config.optimizer.solver.max_iterations = 0;
+    config.optimizer.solver.population_size = 1;
+    config.optimizer.solver.workers = 1;
+    config.optimizer.solver.display_progress = false;
+
+    let design = DesignVector::default();
+    let initial_span = design.to_array()[0];
+    let mut bounds = design
+        .to_array()
+        .into_iter()
+        .map(|value| (value, value))
+        .collect::<Vec<_>>();
+    bounds[0] = (initial_span - 1.0, initial_span + 1.0);
+    let options = PipelineOptions {
+        optimize: true,
+        compare_baseline: false,
+        parallel: false,
+        aerodynamic_solver: crate::AerodynamicSolverMode::Vlm,
+        optimization_solver: crate::OptimizationSolverMode::Vlm,
+        output_dir: None,
+        save_plots: false,
+        seed: Some(42),
+        quiet: true,
+    };
+
+    let result = DesignPipeline::new(config)
+        .run_with_design_space(&options, &RunEnvironment::default(), &design, &bounds)
+        .unwrap_or_else(|error| panic!("unconstrained bounded finalist run: {error}"));
+
+    let optimized = result
+        .optimized_design
+        .expect("unconstrained optimization should publish the baseline finalist");
+    assert!(optimized
+        .to_array()
+        .iter()
+        .zip(&bounds)
+        .all(|(value, &(lower, upper))| *value >= lower && *value <= upper));
+    assert!(result
+        .optimization_result
+        .as_ref()
+        .is_some_and(|optimization| optimization.best_valid));
+}
+
+#[test]
 fn optimized_pipeline_never_falls_back_to_a_native_infeasible_screening_winner() {
     let mut config = AlasConfig::default();
     config.mission.enabled = false;
     config.structures.enabled = false;
     config.requirements.max_wing_area_m2 = 2_000.0;
+    config.requirements.max_cruise_cl = 0.0;
+    config.optimizer.solver.enforce_physical_constraints = true;
     config.optimizer.solver.max_iterations = 0;
     config.optimizer.solver.population_size = 1;
     config.optimizer.solver.workers = 1;
@@ -212,9 +267,9 @@ fn optimized_pipeline_never_falls_back_to_a_native_infeasible_screening_winner()
         .run_with_design_space(&options, &RunEnvironment::default(), &design, &bounds)
         .expect_err("native-infeasible finalist must not be delivered");
 
-    assert!(error.contains("no native finalist passed"), "{error}");
-    assert!(error.contains("#1 infeasible"), "{error}");
-    assert!(error.contains("audit retained at"), "{error}");
+    assert!(error.contains("VLM optimization failed"), "{error}");
+    assert!(error.contains("no feasible design"), "{error}");
+    assert!(error.contains("stall_guard"), "{error}");
 }
 
 #[test]

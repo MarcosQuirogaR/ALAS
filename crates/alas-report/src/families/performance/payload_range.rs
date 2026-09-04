@@ -38,22 +38,38 @@ const OEW_KEYS: &[&str] = &[
     "Furnishings",
 ];
 
+/// One labelled corner of the conceptual payload-range curve.
 #[derive(Debug, Clone, Copy)]
-struct PayloadRangePoint {
-    label: &'static str,
-    range_nm: f64,
-    payload_kg: f64,
+pub struct PayloadRangePoint {
+    /// Which corner of the A-B-C-D curve this is.
+    pub label: &'static str,
+    /// Still-air Breguet range at this corner, nautical miles.
+    pub range_nm: f64,
+    /// Payload carried at this corner, kilograms.
+    pub payload_kg: f64,
 }
 
+/// The four corners and the mass/fuel basis they were computed on.
+///
+/// Public so the same numbers the figure draws can be read back and
+/// correlated against a published payload-range chart. A figure nobody can
+/// query is a figure nobody can check.
 #[derive(Debug, Clone)]
-struct PayloadRangeData {
-    points: [PayloadRangePoint; 4],
-    fuel_capacity_kg: f64,
-    fuel_capacity_limit: &'static str,
-    payload_basis: &'static str,
-    oew_kg: f64,
-    mtow_kg: f64,
-    method_note: String,
+pub struct PayloadRangeData {
+    /// The A-B-C-D corners, in order.
+    pub points: [PayloadRangePoint; 4],
+    /// Usable fuel the curve was built on, kilograms.
+    pub fuel_capacity_kg: f64,
+    /// What limited that fuel figure.
+    pub fuel_capacity_limit: &'static str,
+    /// What limited the maximum payload.
+    pub payload_basis: &'static str,
+    /// Modelled operating empty weight, kilograms.
+    pub oew_kg: f64,
+    /// Maximum takeoff weight the curve was built on, kilograms.
+    pub mtow_kg: f64,
+    /// Range method and its provenance.
+    pub method_note: String,
 }
 
 /// Generate an idealized Breguet payload-range curve from the report's masses,
@@ -205,7 +221,15 @@ pub fn figure_payload_range(
     scene
 }
 
-fn payload_range_data(report: &AnalysisReport, config: &AlasConfig) -> Option<PayloadRangeData> {
+/// Compute the conceptual payload-range corners for `report` under `config`.
+///
+/// Returns `None` when the report has no main wing or no typed usable-fuel
+/// capacity evidence, which are the two cases the figure renders as a status
+/// panel rather than a curve.
+pub fn payload_range_data(
+    report: &AnalysisReport,
+    config: &AlasConfig,
+) -> Option<PayloadRangeData> {
     report.airplane.wings.first()?;
     let masses = &report.component_masses;
     let oew_kg: f64 = OEW_KEYS

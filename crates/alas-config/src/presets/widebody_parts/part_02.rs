@@ -199,7 +199,9 @@ pub fn dc_10() -> AircraftPreset {
             root_chord_m: 12.798_762_957_481_8,
             break_chord_m: 7.799_246_177_215_49,
             tip_chord_m: 1.799_826_040_895_88,
-            sweep_deg: 35.0,
+            // NASA CR-3119 (1979) specifies 35 deg at quarter chord. The
+            // outboard taper converts it to this leading-edge angle.
+            sweep_deg: 38.371_897_798_492_91,
             tip_twist_deg: -2.0,
             wing_x_shift_m: -3.25,
             tail_scale: 1.0,
@@ -218,6 +220,9 @@ pub fn dc_10() -> AircraftPreset {
                 root_twist_deg: 4.0,
                 break_twist_deg: 1.5,
                 break_span_fraction: 0.35,
+                // Pin the area-calibrated chord independently of sweep and
+                // its automatic side-of-body trailing-edge clipping rule.
+                side_of_body_chord_ratio: Some(0.888_392_857_142_857_5),
                 kink_span_fraction: Some(0.35),
                 outboard_sweep_decrement_deg: 2.0,
                 root_airfoil: "sc20612".to_owned(),
@@ -281,4 +286,3 @@ pub fn dc_10() -> AircraftPreset {
         performance: super::high_lift("advanced_highlift_widebody"),
     }
 }
-

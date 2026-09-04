@@ -48,6 +48,8 @@ use std::path::Path;
 
 use alas_config::airports::Airport;
 
+mod coordinates;
+
 use crate::route::{angular_distance, haversine_m, Route, RouteSource, Waypoint, EARTH_RADIUS_M};
 
 /// The fix file's name within a navigation-data directory.

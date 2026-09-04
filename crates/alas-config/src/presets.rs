@@ -28,11 +28,18 @@
 //!
 //! # What a preset does not settle
 //!
-//! The registry records the engine name but retains the historical fallback
-//! cycle so its raw entries remain reference-compatible. The configuration
-//! loading boundary resolves an intentional preset selection before applying
-//! saved or user-provided overrides; downstream product solvers then consume
-//! those live fields without another database lookup.
+//! The registry binds each entry to the engine it names, at registration,
+//! before anything downstream can read it. It used to record only the name and
+//! leave the built-in GE9X cycle in place, on the understanding that the
+//! configuration-loading boundary would resolve it. Exactly one caller did.
+//! The geometry builder, the full analysis and the acceptance matrix all read
+//! `preset.geometry` directly, so every turbofan preset was weighed, drawn and
+//! flown as a 467 kN GE9X regardless of what it declared -- a constant 10.3 t
+//! of propulsion mass per engine, and a 2.1 m-radius nacelle on an A320.
+//! Resolving it here makes the declared engine the one every discipline sees;
+//! the loading boundary still applies saved or user-provided overrides on top,
+//! and downstream product solvers consume those live fields without another
+//! database lookup.
 //!
 //! Nor does a preset fit the design space it is offered in. The bounds in
 //! [`crate::design_variables`] are one global set describing AVE's family, so

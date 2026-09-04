@@ -31,7 +31,9 @@ use alas_exec::{RunEnvironment, ToolLocator};
 use alas_geom::aircraft::airplane::Airplane;
 use alas_mission::MissionResult;
 use alas_opt::OptimizationResult;
-use alas_route::planner::{load_navdata, plan_route, RouteSources};
+use alas_route::planner::{
+    load_navdata_with_airway_coordinates, plan_route_with_max_stretch, RouteSources,
+};
 use alas_route::route::{Route, RouteSource};
 use alas_route::{fetch_route_with_status, SimbriefFetchStatus};
 use serde::{Deserialize, Serialize};
@@ -1725,14 +1727,22 @@ impl DesignPipeline {
         let locator = ToolLocator::for_current_process();
         let routes_dir = locator.resolve_data_path(Path::new(&self.config.mission.routes_dir));
         let navdata_dir = locator.resolve_data_path(Path::new(&self.config.mission.navdata_dir));
-        let navdata = load_navdata(&navdata_dir);
+        let navdata = load_navdata_with_airway_coordinates(
+            &navdata_dir,
+            self.config.mission.use_airway_endpoint_coordinates,
+        );
         let sources = RouteSources {
             dispatched: dispatched_route,
             routes_dir: Some(routes_dir.as_path()),
             navdata: navdata.as_ref(),
             great_circle_points: self.config.mission.great_circle_points.max(1) as usize,
         };
-        let route = plan_route(origin, dest, sources);
+        let route = plan_route_with_max_stretch(
+            origin,
+            dest,
+            sources,
+            self.config.mission.max_airway_stretch,
+        );
         Some(PlannedRoute {
             status: RoutePlanningStatus {
                 selected_source: route.source,

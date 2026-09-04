@@ -131,19 +131,12 @@ fn evaluate_preset(
     let Some(preset) = presets::get(name).ok() else {
         return failed_row(name, &result_dir, "registered preset lookup failed");
     };
-    let mut config = AlasConfig {
-        preset: preset.name.to_owned(),
-        geometry: preset.geometry.clone(),
-        requirements: preset.requirements.clone(),
-        landing_gear: preset.landing_gear.clone(),
-        ..Default::default()
+    // Selected through the same boundary the program uses; a hand-built
+    // configuration here silently drops the cabin seed and the engine binding.
+    let mut config = match AlasConfig::from_value(&json!({ "preset": preset.name })) {
+        Ok(config) => config,
+        Err(error) => return failed_row(name, &result_dir, &error.to_string()),
     };
-    if let Some(mass_model) = &preset.mass_model {
-        config.mass_model = mass_model.clone();
-    }
-    if let Some(performance) = &preset.performance {
-        config.performance = performance.clone();
-    }
     config.mission.enabled = false;
     config.structures.enabled = false;
     config.mses.enabled = true;

@@ -557,7 +557,14 @@ fn compare_transport_planform_schema(
 }
 
 fn is_native_config_field(path: &str, key: &str) -> bool {
-    (key == "method" && (path.ends_with("SolverSettings") || path.ends_with(".solver")))
+    (key == "exclude_buried_main_wing_area"
+        && (path.ends_with("DragModelConfig") || path.ends_with(".drag_model")))
+        || (matches!(
+            key,
+            "use_airway_endpoint_coordinates" | "max_airway_stretch"
+        ) && (path.ends_with("MissionConfig") || path.ends_with(".mission")))
+        || (matches!(key, "method" | "enforce_physical_constraints")
+            && (path.ends_with("SolverSettings") || path.ends_with(".solver")))
         || (key == "random_force_psd_n2_per_hz"
             && (path.ends_with("StructuresConfig") || path.ends_with(".structures")))
         || (key == "optimize_passenger_capacity"

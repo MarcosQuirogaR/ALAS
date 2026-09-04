@@ -49,9 +49,16 @@ impl DesignObjective {
             }
         };
 
-        // Resolve capacity only for a load case that explicitly asks candidate
-        // geometry to determine payload. Fixed passenger targets stay fixed.
-        if apply_candidate_payload_load_case(&mut self.config, &dv).is_err() {
+        let enforce_physical_constraints = self.reference_mass_coordinates
+            || self.config.optimizer.solver.enforce_physical_constraints;
+
+        // Candidate-derived payload capacity is part of the constrained
+        // product objective. In the unconstrained baseline mode, retain the
+        // preset's fixed load case so cabin capacity cannot disqualify a
+        // geometrically analysable candidate.
+        if enforce_physical_constraints
+            && apply_candidate_payload_load_case(&mut self.config, &dv).is_err()
+        {
             let cost = w.failure_cost;
             self.history
                 .record(dv, false, cost, 0.0, 0.0, 0.0, 0.0, 0.0, "geometry_build");
@@ -92,8 +99,9 @@ impl DesignObjective {
 
         let req = &self.config.requirements;
 
-        let transport_constraints_active =
-            w.transport_planform_constraints_enabled && !self.reference_mass_coordinates;
+        let transport_constraints_active = enforce_physical_constraints
+            && w.transport_planform_constraints_enabled
+            && !self.reference_mass_coordinates;
         let analysis_config = self.config.analysis.clone();
         // These bounds describe a preferred transport-aircraft shape rather
         // than a feasibility condition. Keep them for frozen reference replay,
@@ -246,9 +254,11 @@ impl DesignObjective {
         let q = 0.5 * atmo.density() * v.powi(2);
         let cl_target = req.required_cruise_cl(q, plane.s_ref);
 
-        // Python rejects candidates outside the cruise lift limit before trim;
-        // allowing them through would score physically stalled designs.
-        if cl_target > req.max_cruise_cl || cl_target <= 0.0 {
+        // The constrained product objective rejects candidates outside the
+        // cruise lift limit before trim. The unconstrained baseline still
+        // lets the aerodynamic solver attempt the point; a failed/non-finite
+        // analysis remains a genuine evaluation failure.
+        if enforce_physical_constraints && (cl_target > req.max_cruise_cl || cl_target <= 0.0) {
             let cost = w.failure_cost;
             self.history
                 .record(dv, false, cost, 0.0, 0.0, 0.0, 0.0, 0.0, "stall_guard");
@@ -278,8 +288,11 @@ impl DesignObjective {
             match trim_res {
                 Ok(t) => {
                     let sm = t.static_margin;
-                    let sm_viol = sm.is_nan() || sm < req.min_physical_static_margin;
-                    let (cg_violation, cg_exceedance) = if self.reference_mass_coordinates {
+                    let sm_viol = enforce_physical_constraints
+                        && (sm.is_nan() || sm < req.min_physical_static_margin);
+                    let (cg_violation, cg_exceedance) = if !enforce_physical_constraints {
+                        (false, 0.0)
+                    } else if self.reference_mass_coordinates {
                         let cg_res = check_cg_envelope(
                             &plane,
                             &masses,
@@ -424,6 +437,7 @@ impl DesignObjective {
                 transport_planform,
                 transport_constraints_active,
                 geometric_body_alpha_deg,
+                physical_constraints_enabled: enforce_physical_constraints,
             },
         )
     }

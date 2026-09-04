@@ -43,7 +43,7 @@ pub struct CargoDeckConfig {
 
     /// Which container the lower holds are loaded with.
     #[config(
-        help = "Unit load device code for the lower holds. Use 'AUTO' to compare the conservative, physically feasible uniform ULD formats by net capacity, then volume and tare. An explicit code keeps the existing requested-format path and degrades to a shorter container and then bulk only when it cannot fit."
+        help = "Loading format for lower holds, including passenger baggage. 'BLK' permits loose bulk only and never enables a container system. Use 'AUTO' to compare physically feasible uniform ULD formats. Other explicit codes degrade to a shorter container and then bulk when they cannot fit."
     )]
     pub lower_deck_uld: String,
 

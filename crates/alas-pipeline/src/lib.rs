@@ -57,7 +57,9 @@ pub use avl::{
     AvlAnalysisStatus, AvlComparableQuantity, AvlComparisonReference, AvlComparisonStatus,
 };
 pub use baseline::{analyze_baseline, BaselineReport};
-pub use cabin_scene::{export_cabin_scene, CabinScene, CABIN_SCENE_SCHEMA_VERSION};
+pub use cabin_scene::{
+    export_cabin_scene, CabinScene, CabinSceneInputs, CABIN_SCENE_SCHEMA_VERSION,
+};
 pub use cpacs::{
     export_cpacs, export_cpacs_with_analysis, read_cpacs, read_cpacs_file, render_cpacs_v35,
     write_cpacs_run_manifest, CpacsAircraft, CpacsAircraftError, CpacsDocument, CpacsEngine,

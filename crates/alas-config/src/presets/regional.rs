@@ -97,9 +97,13 @@ pub fn atr72_600() -> AircraftPreset {
         },
         design_vector: DesignVector {
             span_m: 27.05,
-            root_chord_m: 3.65,
-            break_chord_m: 2.55,
-            tip_chord_m: 0.85,
+            // ATR 72-600 Factsheets (2020), three-view: S_ref = 61 m^2.
+            // Scale the estimated chords together to close the active
+            // side-of-body planform area. Chords and MAC remain estimates;
+            // the unverified training-manual MAC is not a fitting target.
+            root_chord_m: 4.015_779_489_708_101,
+            break_chord_m: 2.805_544_575_001_549_7,
+            tip_chord_m: 0.935_181_525_000_516_7,
             sweep_deg: 3.0,
             tip_twist_deg: -2.0,
             wing_x_shift_m: 0.0,

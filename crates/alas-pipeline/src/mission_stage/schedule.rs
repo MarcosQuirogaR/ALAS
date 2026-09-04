@@ -21,6 +21,15 @@ pub(super) fn build_schedule(request: &MissionRequest) -> Result<Vec<SegmentSpec
         ));
     }
     validate_profile_inputs(request)?;
+    // Every configured climb/descent has vertical rate below true airspeed,
+    // so changing elevation requires positive horizontal distance. Check
+    // this before altitude scaling can discard opposite-direction legs.
+    if request.route_distance_m <= DISTANCE_TOLERANCE_M
+        && (request.arrival_elevation_m - request.departure_elevation_m).abs()
+            > ALTITUDE_TOLERANCE_M
+    {
+        return Err("mission route distance cannot connect the airport elevations".to_owned());
+    }
     let cruise_fractions = [
         p.cruise_1_distance_fraction,
         p.cruise_2_distance_fraction,

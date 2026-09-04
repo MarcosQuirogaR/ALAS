@@ -113,6 +113,7 @@ fn zero_max_iterations_records_the_initial_population_and_its_feasibility() {
 #[test]
 fn a_short_product_search_reaches_the_cruise_body_angle_window() {
     let mut config = AlasConfig::default();
+    config.optimizer.solver.enforce_physical_constraints = true;
     config.optimizer.solver.max_iterations = 15;
     config.optimizer.solver.population_size = 1;
     config.optimizer.solver.seed = Some(42);

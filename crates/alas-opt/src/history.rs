@@ -16,7 +16,10 @@ use serde::{Deserialize, Serialize};
 pub struct OptimizationHistory {
     /// Evaluated design vectors in evaluation order.
     pub design_vectors: Vec<DesignVector>,
-    /// Whether each candidate passed all physical validity checks.
+    /// Whether each candidate passed the active optimizer validity policy.
+    ///
+    /// In unconstrained product searches, a completed finite-aero evaluation
+    /// is valid even when the physical requirement diagnostics are non-empty.
     pub valid: Vec<bool>,
     /// Objective cost computed for each candidate.
     pub cost: Vec<f64>,

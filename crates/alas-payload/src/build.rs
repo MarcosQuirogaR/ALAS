@@ -165,6 +165,7 @@ fn build_payload_layout_with_mass_semantics(
                 &product_config.requirements,
                 oew,
                 x_oew,
+                &product_config.cabin.cargo,
             )
         };
         Ok(layout)

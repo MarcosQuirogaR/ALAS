@@ -340,6 +340,11 @@ impl AircraftPreset {
     /// is `Custom`.
     pub fn planning_cabin_config(&self) -> crate::CabinConfig {
         let mut cabin = crate::CabinConfig::default();
+        if self.name == "A220-300" {
+            // Airbus A220 operator Weight and Balance Manual, sections 1.6
+            // and 1.6.1: cargo compartments are bulk-only; CLC is not installed.
+            cabin.cargo.lower_deck_uld = "BLK".to_owned();
+        }
         match self.name {
             "A220-300" | "A320-200" | "A340-300" | "ATR72-600" => {
                 cabin.passenger.set_length_share_mix(&[("Economy", 1.0)]);

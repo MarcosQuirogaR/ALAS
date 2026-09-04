@@ -42,8 +42,24 @@ fn build() -> Vec<AircraftPreset> {
     // The engine name is stated on the preset and read off the geometry, and
     // two of the seven state it in both places. Copying it down here is what
     // makes the two agree for the other five, and is upstream's `__post_init__`.
+    //
+    // Copying the name is not enough on its own. `EngineConfig::default()` is
+    // a materialized GE9X -- thrust, cycle, nacelle and all -- because a bare
+    // config has to describe some real engine before anything reads it. A
+    // preset that only renamed that default therefore declared a CFM56 and
+    // was still weighed, drawn and flown as a 467 kN GE9X: the propulsion
+    // group came out at 10.3 t per engine for every turbofan in the registry,
+    // and the A320 carried a 2.1 m-radius nacelle. Materializing the named
+    // entry here is what makes the declared engine the one the disciplines
+    // actually see. `..._if_uninitialized` rather than the unconditional form
+    // so the ATR, which binds PW127M in its own constructor and then moves
+    // the nacelle onto its wing, keeps that installation.
     for preset in &mut presets {
         preset.geometry.engine.engine_name = preset.engine_name.to_owned();
+        preset
+            .geometry
+            .engine
+            .apply_engine_spec_if_uninitialized();
     }
     presets
 }
@@ -138,9 +154,55 @@ mod tests {
     }
 
     #[test]
-    fn a_preset_still_carries_the_fallback_cycle_until_configuration_loading() {
+    fn a_preset_is_bound_to_the_engine_it_names_before_anything_reads_it() {
+        // This test used to assert the opposite -- that an A320 left the
+        // registry carrying 467 kN of GE9X, to be resolved later at
+        // "configuration loading". Only one caller resolved it. The geometry
+        // builder, the full analysis and the acceptance matrix all take
+        // `preset.geometry` directly, so every turbofan preset was weighed,
+        // drawn and flown as a GE9X: 10.3 t of propulsion mass per engine
+        // whatever the engine, and a 2.1 m-radius nacelle on a single-aisle.
         let a320 = get("A320-200").unwrap();
-        assert_eq!(a320.geometry.engine.thrust_kn, 467.0);
+        assert_eq!(a320.geometry.engine.engine_name, "CFM56-5B4/3");
+        let spec = crate::engines::get("CFM56-5B4/3").unwrap();
+        assert_eq!(a320.geometry.engine.thrust_kn, spec.thrust_kn);
+        assert_eq!(
+            a320.geometry.engine.radius_scale_m,
+            spec.nacelle_max_radius_m
+        );
+    }
+
+    #[test]
+    fn every_preset_resolves_a_typed_binding_for_the_engine_it_names() {
+        for preset in registry() {
+            let bound = preset
+                .geometry
+                .engine
+                .active_model()
+                .unwrap_or_else(|error| panic!("{}: {error}", preset.name));
+            match bound {
+                crate::ActiveEngineModel::Turbofan(spec) => {
+                    let catalogue = crate::engines::get(preset.engine_name).unwrap();
+                    assert!(
+                        spec.rated_thrust_kn > 0.0,
+                        "{}: bound engine has no thrust",
+                        preset.name
+                    );
+                    assert_eq!(
+                        preset.geometry.engine.fan_diameter_m, catalogue.fan_diameter_m,
+                        "{}: bound to another engine's fan",
+                        preset.name
+                    );
+                }
+                crate::ActiveEngineModel::Turboprop(spec) => {
+                    assert!(
+                        spec.takeoff_shaft_power_kw > 0.0,
+                        "{}: bound engine has no shaft power",
+                        preset.name
+                    );
+                }
+            }
+        }
     }
 
     #[test]

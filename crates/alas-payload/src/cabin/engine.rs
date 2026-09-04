@@ -13,7 +13,7 @@
 //! append their items in is part of the result -- a deck plan walking the list
 //! differently would draw monuments over seats -- so it is reproduced exactly.
 
-use alas_config::{DesignRequirements, PassengerCabinConfig};
+use alas_config::{CargoDeckConfig, DesignRequirements, PassengerCabinConfig};
 
 use super::fittings::{place_baggage, place_exits, place_monuments, place_overhead_bins};
 use super::resolve_aisle_width;
@@ -40,7 +40,15 @@ pub fn build_passenger_layout(
     pax: &PassengerCabinConfig,
     req: &DesignRequirements,
 ) -> PayloadLayout {
-    build_passenger_layout_with_mass_semantics(g, pax, req, CargoMassSemantics::Net, true, None)
+    build_passenger_layout_with_mass_semantics(
+        g,
+        pax,
+        req,
+        CargoMassSemantics::Net,
+        true,
+        None,
+        &CargoDeckConfig::default(),
+    )
 }
 
 /// Build a product passenger layout while balancing the payload against the
@@ -57,6 +65,7 @@ pub(crate) fn build_passenger_layout_with_aircraft_cg_target(
     req: &DesignRequirements,
     oew: f64,
     x_oew: f64,
+    cargo: &CargoDeckConfig,
 ) -> PayloadLayout {
     build_passenger_layout_with_mass_semantics(
         g,
@@ -65,6 +74,7 @@ pub(crate) fn build_passenger_layout_with_aircraft_cg_target(
         CargoMassSemantics::Net,
         true,
         Some((oew, x_oew)),
+        cargo,
     )
 }
 
@@ -83,6 +93,7 @@ pub fn build_passenger_layout_reference_compatibility(
         CargoMassSemantics::ReferenceGross,
         false,
         None,
+        &CargoDeckConfig::default(),
     )
 }
 
@@ -93,6 +104,7 @@ fn build_passenger_layout_with_mass_semantics(
     mass_semantics: CargoMassSemantics,
     product_interior: bool,
     aircraft_cg_target: Option<(f64, f64)>,
+    cargo: &CargoDeckConfig,
 ) -> PayloadLayout {
     let mut classes = resolve_classes(pax, req.num_passengers);
     let total_pax: i64 = classes.iter().map(|class| class.config.count).sum();
@@ -131,6 +143,7 @@ fn build_passenger_layout_with_mass_semantics(
         seat_cg,
         mass_semantics,
         aircraft_cg_target,
+        cargo,
     );
     items.extend(bags.items);
 

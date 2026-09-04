@@ -62,6 +62,22 @@ pub struct MissionConfig {
     )]
     pub great_circle_points: i64,
 
+    /// Maximum acceptable generated airway distance divided by great-circle distance.
+    #[serde(default = "default_max_airway_stretch")]
+    #[config(
+        label = "Maximum airway route stretch",
+        help = "Reject generated airway detours above this ratio to great-circle distance and visibly use the great-circle approximation. Default 1.20 is a conceptual-model quality threshold, not a clearance constraint. Imported and dispatched plans are exempt. Set 0 to retain legacy unfiltered airway routing."
+    )]
+    pub max_airway_stretch: f64,
+
+    /// Use endpoint coordinates in legacy airway records, including radio navaids.
+    #[serde(default = "default_airway_endpoint_coordinates")]
+    #[config(
+        label = "Use airway endpoint coordinates",
+        help = "Read complete endpoints from coordinate-bearing airway data, including navaids absent from the fix catalog. Turn off with maximum airway stretch 0 to reproduce legacy routing."
+    )]
+    pub use_airway_endpoint_coordinates: bool,
+
     /// Which dispatch account to read a filed flight plan from.
     #[config(
         hidden,
@@ -100,12 +116,25 @@ impl Default for MissionConfig {
             texture_path: "alas/data/textures/earth_blue_marble.jpg".to_owned(),
             routes_dir: "alas/data/routes".to_owned(),
             great_circle_points: 50,
+            max_airway_stretch: default_max_airway_stretch(),
+            use_airway_endpoint_coordinates: true,
             simbrief_username: String::new(),
             simbrief_timeout_s: 15.0,
             simbrief_overrides_airports: true,
             profile: MissionProfileConfig::default(),
         }
     }
+}
+
+// Teoh et al., Atmospheric Chemistry and Physics 24 (2024), 725-744,
+// doi:10.5194/acp-24-725-2024: mean whole-flight extension is 5.2%.
+// 20% is a conservative engineering rejection threshold, not a fitted percentile.
+fn default_max_airway_stretch() -> f64 {
+    1.20
+}
+
+fn default_airway_endpoint_coordinates() -> bool {
+    true
 }
 
 // A test asserts on values it constructed here directly, so a failed unwrap

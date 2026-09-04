@@ -121,7 +121,9 @@ pub fn a340_300() -> AircraftPreset {
                 hstab_tip_chord_m: 1.8,
                 hstab_root_twist_deg: -2.0,
                 hstab_tip_twist_deg: -2.0,
-                hstab_tip_le_m: (6.0, 9.0, 0.8),
+                // Airbus A340 Aircraft Characteristics, general dimensions:
+                // 19.4 m full horizontal-tail span.
+                hstab_tip_le_m: (6.0, 9.7, 0.8),
                 vstab_offset_from_tail_m: 10.5,
                 vstab_z_m: 1.8,
                 vstab_root_chord_m: 8.0,
@@ -246,7 +248,10 @@ pub fn a380_800() -> AircraftPreset {
             root_chord_m: 22.952_583_900_271_1,
             break_chord_m: 11.276_704_264_046_2,
             tip_chord_m: 3.492_784_506_562_99,
-            sweep_deg: 33.5,
+            // Airbus A380 Facts and Figures (2022) gives 33.5 deg wing
+            // sweep; Jane's identifies the quarter-chord convention. The
+            // outboard taper converts that to this leading-edge angle.
+            sweep_deg: 36.429_099_956_878_43,
             tip_twist_deg: -2.5,
             wing_x_shift_m: -7.5,
             tail_scale: 1.0,
@@ -265,8 +270,10 @@ pub fn a380_800() -> AircraftPreset {
                 root_twist_deg: 4.5,
                 break_twist_deg: 2.0,
                 break_span_fraction: 0.33,
-                // The side-of-body trailing edge is held at the kink station;
-                // this fraction recovers the published 845 m^2 gross area.
+                // Preserve the area-calibrated body chord explicitly: sweep
+                // must not change it through the trailing-edge clipping rule.
+                side_of_body_chord_ratio: Some(0.789_394_889_312_722_8),
+                // This station and chord distribution recover 845 m^2.
                 kink_span_fraction: Some(0.359_236_516_064_625_5),
                 outboard_sweep_decrement_deg: 2.5,
                 root_airfoil: "SC2-0714".to_owned(),

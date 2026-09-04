@@ -30,9 +30,11 @@
 //! double-width and pallet class; M-1 is the twenty-foot-class main-deck
 //! freighter box.
 
+mod capacity;
 mod engine;
 mod manager;
 
+pub use capacity::CargoCapacity;
 pub use engine::{build_cargo_layout, build_cargo_layout_reference_compatibility};
 pub use manager::CargoLoadManager;
 pub use manager::CargoMassSemantics;

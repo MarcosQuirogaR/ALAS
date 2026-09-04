@@ -24,6 +24,7 @@ pub(super) struct ObjectiveCostInputs {
     pub(super) transport_planform: Option<TransportPlanformAssessment>,
     pub(super) transport_constraints_active: bool,
     pub(super) geometric_body_alpha_deg: f64,
+    pub(super) physical_constraints_enabled: bool,
 }
 
 /// Apply the scalar objective penalties and record the candidate result.
@@ -43,6 +44,7 @@ pub(super) fn score_candidate(objective: &mut DesignObjective, inputs: Objective
         transport_planform,
         transport_constraints_active,
         geometric_body_alpha_deg,
+        physical_constraints_enabled,
     } = inputs;
     let w = objective.config.optimizer.weights.clone();
     let req = &objective.config.requirements;
@@ -50,8 +52,50 @@ pub(super) fn score_candidate(objective: &mut DesignObjective, inputs: Objective
     let subjective_shape_priors_active =
         objective.reference_mass_coordinates || w.transport_shape_priors_enabled;
 
-    // Assemble cost: primary L/D reward
+    // Assemble cost: primary L/D reward.
     let mut cost = -w.ld_weight * ld;
+
+    if !physical_constraints_enabled {
+        // This diagnostic mode intentionally removes every physical
+        // requirement penalty and eligibility gate from the search objective.
+        // The geometry/mass/aero passes above still have to complete and the
+        // caller-provided design-space bounds remain enforced by the search
+        // kernel. Keep an invalid finite-aero result out of the published
+        // finalist set only when the scalar objective itself is non-finite.
+        if !cost.is_finite() {
+            let failure_cost = w.failure_cost;
+            objective.history.record(
+                dv,
+                false,
+                failure_cost,
+                ld,
+                plane.b_ref,
+                alpha,
+                plane.s_ref,
+                trim_ih,
+                "non_finite_objective",
+            );
+            return failure_cost;
+        }
+        return record_objective_result(
+            &mut objective.history,
+            dv,
+            cost,
+            ld,
+            dv.span_m,
+            geometric_body_alpha_deg,
+            plane.s_ref,
+            trim_ih,
+            false,
+            false,
+            0.0,
+            false,
+            false,
+            false,
+            geometric_body_alpha_deg,
+            &w,
+        );
+    }
 
     // Payload / Seating shortfall penalty
     let mut shortfall_pct = 0.0;

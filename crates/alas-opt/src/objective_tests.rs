@@ -55,6 +55,7 @@ fn fuel_volume_uses_projected_reference_area_and_span() {
 #[test]
 fn a_cruise_lift_above_the_configured_limit_is_rejected_before_trim() {
     let mut config = AlasConfig::default();
+    config.optimizer.solver.enforce_physical_constraints = true;
     config.requirements.max_cruise_cl = 0.0;
     let failure_cost = config.optimizer.weights.failure_cost;
     let mut objective = DesignObjective::new(config);
@@ -89,6 +90,7 @@ fn malformed_design_vectors_record_the_failure_cost_in_objective_history() {
 #[test]
 fn a_wing_larger_than_the_declared_limit_keeps_an_optimizer_gradient() {
     let mut relaxed = AlasConfig::default();
+    relaxed.optimizer.solver.enforce_physical_constraints = true;
     relaxed.requirements.max_wing_area_m2 = 10_000.0;
     let mut constrained = relaxed.clone();
     constrained.requirements.max_wing_area_m2 = 1.0;
@@ -108,6 +110,7 @@ fn a_wing_larger_than_the_declared_limit_keeps_an_optimizer_gradient() {
 #[test]
 fn the_configured_body_angle_window_is_a_feasibility_condition_with_a_gradient() {
     let mut config = AlasConfig::default();
+    config.optimizer.solver.enforce_physical_constraints = true;
     config.optimizer.weights.geometric_body_alpha_min_deg = 100.0;
     config.optimizer.weights.geometric_body_alpha_max_deg = 101.0;
     let failure_cost = config.optimizer.weights.failure_cost;
@@ -141,8 +144,25 @@ fn the_product_transport_constraints_are_reached_at_the_default_area_requirement
 }
 
 #[test]
+fn unconstrained_product_mode_accepts_physical_misses_after_a_completed_analysis() {
+    let mut config = AlasConfig::default();
+    config.requirements.max_cruise_cl = 0.0;
+    config.requirements.max_wing_area_m2 = 1.0;
+    config.optimizer.weights.geometric_body_alpha_min_deg = 100.0;
+    config.optimizer.weights.geometric_body_alpha_max_deg = 101.0;
+
+    let mut objective = DesignObjective::new(config);
+    let cost = objective.evaluate(&DesignVector::default().to_array());
+
+    assert!(cost.is_finite());
+    assert_eq!(objective.history.valid, vec![true]);
+    assert_eq!(objective.history.reject_reason, vec![String::new()]);
+}
+
+#[test]
 fn subjective_shape_bounds_do_not_condition_the_default_product_search() {
     let mut relaxed = AlasConfig::default();
+    relaxed.optimizer.solver.enforce_physical_constraints = true;
     relaxed.optimizer.weights.fuselage_floor_m = 0.0;
     let mut aggressive = relaxed.clone();
     aggressive.optimizer.weights.fuselage_floor_m = 1_000.0;

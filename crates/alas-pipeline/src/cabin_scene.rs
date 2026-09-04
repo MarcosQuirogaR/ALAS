@@ -275,16 +275,57 @@ pub struct MissingInput {
     pub required_source: String,
 }
 
+/// The completed-analysis fields a cabin scene actually reads.
+///
+/// [`AnalysisReport`] carries a polar sweep, a trim solution and a mass
+/// breakdown; the scene reads three of its fields. Naming that subset lets a
+/// caller that already holds resolved geometry and a payload layout -- a
+/// figure gallery, a renderer regression test -- build the same scene without
+/// first running an analysis it does not use, and keeps the two paths building
+/// it through one function rather than two that can drift.
+#[derive(Debug, Clone, Copy)]
+pub struct CabinSceneInputs<'a> {
+    /// Design vector the geometry and layout were resolved at.
+    pub design: alas_config::DesignVector,
+    /// Built aircraft geometry the section contours come from.
+    pub airplane: &'a alas_geom::aircraft::airplane::Airplane,
+    /// Resolved cabin and cargo layout.
+    pub layout: &'a alas_payload::layout::PayloadLayout,
+    /// What produced these inputs, recorded verbatim in the scene provenance.
+    ///
+    /// A scene resolved from a preset design vector and one resolved from an
+    /// optimized run are not the same evidence, and the difference has to
+    /// survive into the exported file.
+    pub source: &'static str,
+}
+
 impl CabinScene {
     /// Resolve a scene exclusively from live configuration and analysis data.
     pub fn from_run(config: &AlasConfig, report: &AnalysisReport) -> Result<Self, String> {
+        let layout = report
+            .payload_layout
+            .as_ref()
+            .ok_or("analysis has no resolved payload layout")?;
+        Self::from_parts(
+            config,
+            CabinSceneInputs {
+                design: report.design,
+                airplane: &report.airplane,
+                layout,
+                source: "live AnalysisReport + effective AlasConfig",
+            },
+        )
+    }
+
+    /// Resolve a scene from geometry and a payload layout that already exist.
+    pub fn from_parts(config: &AlasConfig, inputs: CabinSceneInputs<'_>) -> Result<Self, String> {
         let cabin = CabinGeometry::new(
-            &report.airplane,
+            inputs.airplane,
             &config.geometry,
             config.cabin.passenger.wall_thickness_m,
         )
         .map_err(|error| format!("cabin geometry: {error}"))?;
-        build::build_scene(config, report, &cabin)
+        build::build_scene(config, inputs, &cabin)
     }
 }
 

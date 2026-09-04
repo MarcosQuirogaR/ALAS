@@ -29,6 +29,7 @@ pub(super) fn place_baggage(
     seat_cg: f64,
     mass_semantics: CargoMassSemantics,
     aircraft_cg_target: Option<(f64, f64)>,
+    cargo: &CargoDeckConfig,
 ) -> Baggage {
     let bag_mass = seated as f64 * pax.checked_bag_mass_kg;
     let belly_explicit = pax.belly_cargo_kg.max(0.0);
@@ -48,7 +49,7 @@ pub(super) fn place_baggage(
     if bag_mass + belly_cargo > 0.0 {
         let holds_only = CargoDeckConfig {
             use_main_deck: false,
-            ..Default::default()
+            ..cargo.clone()
         };
         let mut manager = CargoLoadManager::new(g, holds_only);
         hold_capacity = manager.total_capacity();
@@ -147,18 +148,24 @@ pub(super) fn place_baggage(
                 mass: total_weight,
                 height: g.clamp_height(low, slot.x, slot.uld.height),
                 label: format!("{} {} kg", slot.uld.code, total_weight as i64),
-                meta: ItemMeta::Container(ContainerMeta {
-                    uld: slot.uld.code,
-                    fill: if slot.max_net() > 0.0 {
-                        slot.payload / slot.max_net()
-                    } else {
-                        1.0
-                    },
-                    color: slot.uld.color,
-                    net: None,
-                }),
+                meta: if mass_semantics == CargoMassSemantics::Net && slot.uld.code == "BLK" {
+                    ItemMeta::BulkBag
+                } else {
+                    ItemMeta::Container(ContainerMeta {
+                        uld: slot.uld.code,
+                        fill: if slot.max_net() > 0.0 {
+                            slot.payload / slot.max_net()
+                        } else {
+                            1.0
+                        },
+                        color: slot.uld.color,
+                        net: None,
+                    })
+                },
             });
-            hold_ulds += 1;
+            if mass_semantics == CargoMassSemantics::ReferenceGross || slot.uld.code != "BLK" {
+                hold_ulds += 1;
+            }
         }
         let (placed, _cg, _used) = manager.mass_props();
         hold_used = placed;

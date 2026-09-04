@@ -43,6 +43,14 @@ pub struct SolverSettings {
     )]
     pub method: String,
 
+    /// Whether physical requirement checks disqualify candidates during the search.
+    #[serde(default)]
+    #[config(
+        label = "Enforce physical optimizer constraints",
+        help = "When enabled, candidates must satisfy the configured physical requirements to be selected. When disabled, the optimizer enforces only the supplied design-variable bounds and requires a candidate to complete the geometry/mass/aerodynamic analysis; area, payload, CG, stability and transport-shape checks remain report diagnostics. Use the disabled mode to obtain a baseline finalist, not as a certification of physical feasibility."
+    )]
+    pub enforce_physical_constraints: bool,
+
     /// How new candidates are generated from the population.
     #[config(
         options = Strategy,
@@ -112,6 +120,7 @@ impl Default for SolverSettings {
     fn default() -> Self {
         Self {
             method: default_optimizer_method(),
+            enforce_physical_constraints: false,
             strategy: "best1bin".to_owned(),
             max_iterations: 15,
             population_size: 6,
@@ -232,6 +241,11 @@ mod tests {
                 assert_ne!(leaf.kind, Kind::WeightSlider, "{}", field.name);
             }
         }
+    }
+
+    #[test]
+    fn baseline_mode_keeps_physical_requirement_checks_out_of_the_search_by_default() {
+        assert!(!SolverSettings::default().enforce_physical_constraints);
     }
 
     #[test]
