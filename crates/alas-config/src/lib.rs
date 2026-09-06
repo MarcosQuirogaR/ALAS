@@ -39,6 +39,7 @@ pub mod control_surfaces;
 pub mod design_variables;
 pub mod engines;
 pub mod fidelity_presets;
+pub mod flops_structure;
 pub mod fuel_policy;
 pub mod fuel_tanks;
 pub mod geometry;
@@ -79,6 +80,9 @@ pub use engines::{
     PropulsionTechnology, TurbofanEngineSpec, TurbofanOffDesignSpec, TurbopropEngineSpec,
 };
 pub use fidelity_presets::{FidelityPreset, UnknownFidelityPreset};
+pub use flops_structure::{
+    FlopsStructureConfig, FlopsWingBendingMethod, PropulsionMassMethod, StructuralMassMethod,
+};
 pub use fuel_policy::{FuelPolicyConfig, FuelScheme};
 pub use fuel_tanks::{
     AuxiliaryTankConfig, CenterTankConfig, FuelTankLayoutConfig, TrimTankConfig, WingTankConfig,

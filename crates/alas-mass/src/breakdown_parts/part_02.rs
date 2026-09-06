@@ -165,7 +165,7 @@ pub fn calculate_component_masses_checked_with_gear(
 ) -> Result<MassBreakdown, ComponentMassError> {
     let default_mass_model = MassModelConfig::default();
     let mm = mass_model.unwrap_or(&default_mass_model);
-    if mm.systems_mass_method.is_reference_compatible() {
+    if mm.uses_reference_mass_methods() {
         return Ok(calculate_component_masses(
             plane,
             requirements,
@@ -205,7 +205,7 @@ pub fn calculate_component_masses_checked_product_with_gear(
     let default_mass_model = MassModelConfig::default();
     let mm = mass_model.unwrap_or(&default_mass_model);
 
-    let mut masses = calculate_component_masses_with_product_configuration(
+    let masses = calculate_component_masses_with_product_configuration(
         plane,
         requirements,
         geometry_config,
@@ -213,33 +213,17 @@ pub fn calculate_component_masses_checked_product_with_gear(
         control_surfaces,
         landing_gear,
     );
-    if mm.systems_mass_method.is_reference_compatible() {
+    if mm.uses_reference_mass_methods() {
         return Ok(masses);
     }
-    let evaluation = evaluate_product(
+    flops_methods::apply_selected_methods(
         plane,
         requirements,
         geometry_config,
         control_surfaces,
-        &mm.flops_transport,
-    );
-    let breakdown = match evaluation {
-        FlopsTransportEvaluation::Verified { breakdown, .. } => breakdown,
-        FlopsTransportEvaluation::Unverified { reasons, partial } => {
-            return Err(ComponentMassError::FlopsUnverified {
-                reasons,
-                partial: Box::new(partial),
-            });
-        }
-    };
-    masses.systems = breakdown.systems.total_kg;
-    masses.furnishings = breakdown.systems.furnishings_kg + breakdown.operating_items.total_kg;
-    let oew = OEW_KEYS
-        .iter()
-        .filter_map(|name| masses.get(name))
-        .sum::<f64>();
-    masses.fuel = requirements.mtow_kg - oew - masses.payload;
-    Ok(masses)
+        mm,
+        masses,
+    )
 }
 
 #[cfg(test)]

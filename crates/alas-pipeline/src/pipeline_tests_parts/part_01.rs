@@ -142,7 +142,6 @@ fn reviewed_fixed_design_config() -> AlasConfig {
     config.structures.enabled = false;
     config.requirements.max_wing_area_m2 = 2_000.0;
     config.requirements.cg_range_pct_mac = 100.0;
-    config.optimizer.solver.enforce_physical_constraints = true;
     config.optimizer.solver.max_iterations = 0;
     config.optimizer.solver.population_size = 1;
     config.optimizer.solver.workers = 1;
@@ -238,14 +237,18 @@ fn default_brief_seating_shortfall_is_a_reported_finding_not_a_valid_finalist() 
 }
 
 #[test]
-fn unconstrained_optimizer_delivers_a_bounded_baseline_when_requirements_are_missed() {
+fn diagnostic_policies_deliver_a_bounded_baseline_when_requirements_are_missed() {
+    // Every requirement family is diagnostic, so the wing-area miss is
+    // reported on the finalist rather than making the search infeasible.
     let mut config = AlasConfig::default();
     config.mission.enabled = false;
     config.structures.enabled = false;
     config.requirements.max_wing_area_m2 = 1.0;
-    config.requirements.max_cruise_cl = 0.0;
-    config.optimizer.weights.geometric_body_alpha_min_deg = 100.0;
-    config.optimizer.weights.geometric_body_alpha_max_deg = 101.0;
+    let diagnostic = alas_config::ConstraintPolicy::Diagnostic;
+    config.optimizer.objective.mass_constraints = diagnostic;
+    config.optimizer.objective.balance_constraints = diagnostic;
+    config.optimizer.objective.performance_constraints = diagnostic;
+    config.optimizer.objective.geometry_constraints = diagnostic;
     config.optimizer.solver.max_iterations = 0;
     config.optimizer.solver.population_size = 1;
     config.optimizer.solver.workers = 1;
@@ -273,11 +276,11 @@ fn unconstrained_optimizer_delivers_a_bounded_baseline_when_requirements_are_mis
 
     let result = DesignPipeline::new(config)
         .run_with_design_space(&options, &RunEnvironment::default(), &design, &bounds)
-        .unwrap_or_else(|error| panic!("unconstrained bounded finalist run: {error}"));
+        .unwrap_or_else(|error| panic!("diagnostic bounded finalist run: {error}"));
 
     let optimized = result
         .optimized_design
-        .expect("unconstrained optimization should publish the baseline finalist");
+        .expect("a diagnostic-policy optimization publishes the baseline finalist");
     assert!(optimized
         .to_array()
         .iter()
@@ -296,7 +299,6 @@ fn optimized_pipeline_never_falls_back_to_a_native_infeasible_screening_winner()
     config.structures.enabled = false;
     config.requirements.max_wing_area_m2 = 2_000.0;
     config.requirements.max_cruise_cl = 0.0;
-    config.optimizer.solver.enforce_physical_constraints = true;
     config.optimizer.solver.max_iterations = 0;
     config.optimizer.solver.population_size = 1;
     config.optimizer.solver.workers = 1;
@@ -323,9 +325,11 @@ fn optimized_pipeline_never_falls_back_to_a_native_infeasible_screening_winner()
         .run_with_design_space(&options, &RunEnvironment::default(), &design, &bounds)
         .expect_err("native-infeasible finalist must not be delivered");
 
+    // The mission-sized objective folds the cruise stall guard into the
+    // trim-solve failure it prevents.
     assert!(error.contains("VLM optimization failed"), "{error}");
     assert!(error.contains("no feasible design"), "{error}");
-    assert!(error.contains("stall_guard"), "{error}");
+    assert!(error.contains("trim_solve"), "{error}");
 }
 
 #[test]

@@ -5,6 +5,9 @@
 
 use super::*;
 
+#[path = "sqp_search.rs"]
+mod sqp_search;
+
 impl DesignOptimizer {
     /// Construct a new design optimizer with `config`.
     pub fn new(config: AlasConfig) -> Self {
@@ -83,14 +86,9 @@ impl DesignOptimizer {
 
         let result = ensure_feasible(result)?;
 
-        // Keep constrained runs on the same explicit payload load case used to
-        // score every candidate. The unconstrained baseline mode deliberately
-        // leaves the caller's fixed load case untouched.
-        if self.reference_mass_coordinates
-            || self.config.optimizer.solver.enforce_physical_constraints
-        {
-            let _ = apply_candidate_payload_load_case(&mut self.config, &result.best_design);
-        }
+        // Keep the run on the same explicit payload load case every
+        // candidate was scored with.
+        let _ = apply_candidate_payload_load_case(&mut self.config, &result.best_design);
         Ok(result)
     }
 
@@ -126,11 +124,7 @@ impl DesignOptimizer {
 
         let result = ensure_feasible(result)?;
 
-        if self.reference_mass_coordinates
-            || self.config.optimizer.solver.enforce_physical_constraints
-        {
-            let _ = apply_candidate_payload_load_case(&mut self.config, &result.best_design);
-        }
+        let _ = apply_candidate_payload_load_case(&mut self.config, &result.best_design);
         Ok(result)
     }
 
@@ -291,14 +285,13 @@ impl DesignOptimizer {
 
             if let Some(ref mut cb) = progress_callback {
                 let h = objective.history();
-                let max_ld = h.l_over_d.iter().copied().fold(0.0_f64, f64::max);
                 let msg = format!(
-                    "generation {}/{} | valid: {}/{} total | best L/D so far: {:.2}",
+                    "generation {}/{} | valid: {}/{} total | best cost so far: {:.4}",
                     gen + 1,
                     max_iters,
                     h.n_valid(),
                     h.n_evaluations(),
-                    max_ld
+                    best_cost
                 );
                 cb(&msg);
             }
@@ -326,7 +319,7 @@ impl DesignOptimizer {
         }
     }
 
-    fn run_product_search<E: SearchObjective>(
+    fn run_product_search<E: sqp_search::ConstrainedSearch>(
         &self,
         bounds: Option<&[(f64, f64)]>,
         initial_design: Option<&DesignVector>,
@@ -336,6 +329,15 @@ impl DesignOptimizer {
         let solver = &self.config.optimizer.solver;
         let default_bounds = DesignVector::bounds();
         let bounds = bounds.unwrap_or(&default_bounds);
+        if alas_config::SolverSettings::is_gradient_method(&solver.method) {
+            return sqp_search::run(
+                &self.config,
+                bounds,
+                initial_design,
+                objective,
+                progress_callback,
+            );
+        }
         let population_size = (solver.population_size.max(1) as usize * bounds.len()).max(2);
         let generations = solver.max_iterations.max(0) as usize;
         let seed = solver.seed.map_or_else(runtime_seed, |value| value as u64);

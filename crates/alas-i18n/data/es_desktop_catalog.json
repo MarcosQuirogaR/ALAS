@@ -407,5 +407,6 @@
   "Feasibility-first DE": "DE con prioridad de factibilidad",
   "NSGA-II Pareto": "Pareto NSGA-II",
   "TuRBO-1 surrogate": "Sustituto TuRBO-1",
-  "CMA-ES": "CMA-ES"
+  "CMA-ES": "CMA-ES",
+  "SQP gradient driver": "Motor de gradiente SQP"
 }

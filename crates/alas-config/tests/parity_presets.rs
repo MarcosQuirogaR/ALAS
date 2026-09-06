@@ -67,10 +67,6 @@ fn every_solver_preset_matches_the_reference() {
                 // Solver presets preserve the selected method while changing
                 // only the historical effort/budget settings.
                 settings.remove("method");
-                assert_eq!(
-                    settings.remove("enforce_physical_constraints"),
-                    Some(Value::Bool(false))
-                );
                 (
                     preset.name,
                     preset.display_name,

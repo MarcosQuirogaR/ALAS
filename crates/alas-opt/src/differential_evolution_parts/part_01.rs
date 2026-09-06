@@ -23,8 +23,8 @@ pub struct ParetoCandidate {
     pub design: DesignVector,
     /// Scalar objective retained for deterministic downstream winner selection.
     pub cost: f64,
-    /// Lift-to-drag ratio objective.
-    pub l_over_d: f64,
+    /// Mission objective value minimised (the cost under a delegated evaluator).
+    pub objective_value: f64,
     /// Wing span objective, in meters.
     pub span_m: f64,
     /// Wing reference area objective, in square meters.
@@ -179,6 +179,14 @@ fn scored_point(values: &[f64], cost: f64, history: &OptimizationHistory) -> Sco
     let index = history.n_evaluations().saturating_sub(1);
     let valid = history.valid.get(index).copied().unwrap_or(false) && cost.is_finite();
     let l_over_d = history.l_over_d.get(index).copied().unwrap_or(0.0);
+    // The mission objective when the native path recorded one; the scalar
+    // cost is the only objective a delegated evaluator reports.
+    let objective_value = history
+        .objective_value
+        .get(index)
+        .copied()
+        .filter(|value| value.is_finite())
+        .unwrap_or(cost);
     let span_m = history.span_m.get(index).copied().unwrap_or(f64::INFINITY);
     let area_m2 = history.area_m2.get(index).copied().unwrap_or(f64::INFINITY);
     let reason = history
@@ -206,15 +214,7 @@ fn scored_point(values: &[f64], cost: f64, history: &OptimizationHistory) -> Sco
         cost,
         valid,
         constraint_violation,
-        objectives: [
-            if l_over_d.is_finite() {
-                -l_over_d
-            } else {
-                f64::INFINITY
-            },
-            span_m,
-            area_m2,
-        ],
+        objectives: [objective_value, span_m, area_m2],
     }
 }
 
@@ -235,7 +235,7 @@ fn result_from_method(
             Some(ParetoCandidate {
                 design,
                 cost: point.cost,
-                l_over_d: -point.objectives[0],
+                objective_value: point.objectives[0],
                 span_m: point.objectives[1],
                 area_m2: point.objectives[2],
                 valid: point.valid,

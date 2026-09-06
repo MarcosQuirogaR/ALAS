@@ -15,6 +15,9 @@ use alas_opt::{assess_candidate, ConstraintFamily, DesignOptimizer};
 fn block_fuel_config() -> AlasConfig {
     let mut config = AlasConfig::default();
     config.optimizer.objective.kind = ObjectiveKind::BlockFuel;
+    // The single-pass closure these tests were written against; the
+    // product default sizes the takeoff mass by the mission.
+    config.optimizer.objective.mtow_sizing = MtowSizing::FixedRequirement;
     config
 }
 

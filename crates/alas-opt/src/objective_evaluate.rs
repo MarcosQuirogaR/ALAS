@@ -2,6 +2,11 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 //! Candidate scalar-cost evaluation for the aircraft design objective.
+//!
+//! Product evaluation is the mission-sized objective in [`crate::mdo`]. The
+//! weighted lift-to-drag cost below is the frozen Python objective and is
+//! reachable only through `DesignObjective::new_reference_compatibility`,
+//! which the parity fixtures replay; it is not a selectable objective.
 
 use super::{
     apply_candidate_payload_load_case, parasite_drag_reference_compatibility, DesignObjective,
@@ -28,13 +33,11 @@ use cost::{score_candidate, ObjectiveCostInputs};
 impl DesignObjective {
     /// Evaluate the scalar cost for candidate design vector `x`.
     pub fn evaluate(&mut self, x: &[f64]) -> f64 {
-        // The mission-sized objectives size each candidate by the design
-        // mission and rank it feasibility first; the frozen reference
-        // replay keeps the legacy weighted penalty so its parity fixture
-        // stays attributable to the translated Python model.
-        if self.config.optimizer.objective.kind.is_mission_sized()
-            && !self.reference_mass_coordinates
-        {
+        // Every product evaluation sizes the candidate by the design mission
+        // and ranks it feasibility first; only the frozen reference replay
+        // keeps the legacy weighted penalty, so its parity fixture stays
+        // attributable to the translated Python model.
+        if !self.reference_mass_coordinates {
             return crate::mdo::evaluate_mission_sized(self, x);
         }
 
@@ -59,8 +62,10 @@ impl DesignObjective {
             }
         };
 
-        let enforce_physical_constraints = self.reference_mass_coordinates
-            || self.config.optimizer.solver.enforce_physical_constraints;
+        // The replay always enforced the physical gates of the frozen
+        // objective; the flag that once relaxed them for product runs is
+        // gone with the product path.
+        let enforce_physical_constraints = self.reference_mass_coordinates;
 
         // Candidate-derived payload capacity is part of the constrained
         // product objective. In the unconstrained baseline mode, retain the

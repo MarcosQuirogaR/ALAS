@@ -381,6 +381,7 @@ fn show_run_solver_options(state: &mut AppState, ui: &mut Ui) {
                 ("nsga2", "NSGA-II Pareto"),
                 ("turbo_1", "TuRBO-1 surrogate"),
                 ("cma_es", "CMA-ES"),
+                ("sqp", "SQP gradient driver"),
             ] {
                 ui.selectable_value(&mut method, value.to_owned(), tr(label));
             }
@@ -459,6 +460,7 @@ fn optimizer_method_label(method: &str) -> String {
         "nsga2" => "NSGA-II Pareto",
         "turbo_1" => "TuRBO-1 surrogate",
         "cma_es" => "CMA-ES",
+        "sqp" => "SQP gradient driver",
         _ => "Differential evolution",
     })
 }

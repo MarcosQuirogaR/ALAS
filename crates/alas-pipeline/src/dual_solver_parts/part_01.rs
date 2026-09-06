@@ -8,7 +8,11 @@ use alas_aero::avl::{AvlPolar, AvlPolarPoint};
 use alas_config::design_variables::DesignVector;
 use alas_config::AlasConfig;
 use alas_exec::RunEnvironment;
-use alas_opt::{DesignOptimizer, ObjectiveEvaluation, ObjectiveEvaluator, OptimizationResult};
+use alas_opt::objective::DesignObjective;
+use alas_opt::{
+    assess_candidate_with_polar, DesignOptimizer, ExternalPolar, ObjectiveEvaluation,
+    ObjectiveEvaluator, OptimizationResult,
+};
 
 use crate::avl::{run_avl_analysis, AvlAnalysisResult, AvlAnalysisStatus};
 use crate::full_analysis::{AnalysisReport, FullAnalysis};
@@ -370,6 +374,7 @@ fn seeded_config(config: &AlasConfig, seed: Option<u64>) -> Result<AlasConfig, S
 
 struct AvlObjective {
     config: AlasConfig,
+    objective: DesignObjective,
     executable: PathBuf,
     output_root: PathBuf,
     cache: BTreeMap<String, ObjectiveEvaluation>,
@@ -378,6 +383,7 @@ struct AvlObjective {
 impl AvlObjective {
     fn new(config: AlasConfig, executable: PathBuf, output_root: PathBuf) -> Self {
         Self {
+            objective: DesignObjective::new(config.clone()),
             config,
             executable,
             output_root,

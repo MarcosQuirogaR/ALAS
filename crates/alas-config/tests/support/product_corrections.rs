@@ -76,7 +76,14 @@ pub fn engine_copy(path: &str) -> Option<Value> {
 pub fn native_field(path: &str, key: &str) -> bool {
     (matches!(key, "fuel_policy" | "fuel_tanks") && !path.contains('.'))
         || (path.ends_with(".optimizer") && key == "objective")
-        || (path.ends_with(".mass_model") && key == "geometric_component_stations")
+        || (path.ends_with(".mass_model")
+            && matches!(
+                key,
+                "geometric_component_stations"
+                    | "structural_mass_method"
+                    | "propulsion_mass_method"
+                    | "flops_structure"
+            ))
         || (path.ends_with(".geometry.engine")
             && matches!(key, "turbofan" | "turboprop" | "propulsion_technology"))
         || (path.ends_with(".mission")
@@ -84,7 +91,8 @@ pub fn native_field(path: &str, key: &str) -> bool {
                 key,
                 "use_airway_endpoint_coordinates" | "max_airway_stretch"
             ))
-        || (path.ends_with(".optimizer.solver") && key == "enforce_physical_constraints")
+        || (path.ends_with(".optimizer.solver")
+            && matches!(key, "finite_difference_step" | "constraint_tolerance"))
         || (path.ends_with(".drag_model") && key == "exclude_buried_main_wing_area")
 }
 

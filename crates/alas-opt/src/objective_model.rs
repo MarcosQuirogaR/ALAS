@@ -167,6 +167,12 @@ impl DesignObjective {
         Self::with_mass_coordinate_compatibility(config, true)
     }
 
+    /// Whether this objective replays the frozen Python model (the parity
+    /// fixtures) rather than the mission-sized product objective.
+    pub(crate) fn is_reference_replay(&self) -> bool {
+        self.reference_mass_coordinates
+    }
+
     fn with_mass_coordinate_compatibility(
         mut config: AlasConfig,
         reference_mass_coordinates: bool,

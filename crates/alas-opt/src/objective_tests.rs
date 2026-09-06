@@ -3,7 +3,7 @@
 
 //! Unit tests for the scalar aircraft-design objective.
 
-use alas_config::{AlasConfig, DesignVector};
+use alas_config::{AlasConfig, ConstraintPolicy, DesignVector};
 use alas_geom::aircraft::airfoil::Airfoil;
 use alas_geom::aircraft::spacing::linspace;
 use alas_geom::aircraft::wing::{Wing, WingXSec};
@@ -52,13 +52,14 @@ fn fuel_volume_uses_projected_reference_area_and_span() {
     );
 }
 
+/// The frozen objective's stall guard, replayed through the parity
+/// constructor that is its only remaining entry point.
 #[test]
 fn a_cruise_lift_above_the_configured_limit_is_rejected_before_trim() {
     let mut config = AlasConfig::default();
-    config.optimizer.solver.enforce_physical_constraints = true;
     config.requirements.max_cruise_cl = 0.0;
     let failure_cost = config.optimizer.weights.failure_cost;
-    let mut objective = DesignObjective::new(config);
+    let mut objective = DesignObjective::new_reference_compatibility(config);
 
     let actual = objective.evaluate(&DesignVector::default().to_array());
 
@@ -87,10 +88,12 @@ fn malformed_design_vectors_record_the_failure_cost_in_objective_history() {
     );
 }
 
+/// A wing-area limit the candidate exceeds is a hard geometry residual: the
+/// candidate is infeasible, names the residual, and still costs a finite
+/// amount that orders it against other infeasible candidates.
 #[test]
 fn a_wing_larger_than_the_declared_limit_keeps_an_optimizer_gradient() {
     let mut relaxed = AlasConfig::default();
-    relaxed.optimizer.solver.enforce_physical_constraints = true;
     relaxed.requirements.max_wing_area_m2 = 10_000.0;
     let mut constrained = relaxed.clone();
     constrained.requirements.max_wing_area_m2 = 1.0;
@@ -103,25 +106,8 @@ fn a_wing_larger_than_the_declared_limit_keeps_an_optimizer_gradient() {
     assert!(relaxed_cost.is_finite());
     assert!(constrained_cost.is_finite());
     assert!(constrained_cost > relaxed_cost);
-    assert!(constrained_objective.history.reject_reason[0].contains("wing_area_limit"));
+    assert!(constrained_objective.history.reject_reason[0].contains("wing_area"));
     assert!(!constrained_objective.history.valid[0]);
-}
-
-#[test]
-fn the_configured_body_angle_window_is_a_feasibility_condition_with_a_gradient() {
-    let mut config = AlasConfig::default();
-    config.optimizer.solver.enforce_physical_constraints = true;
-    config.optimizer.weights.geometric_body_alpha_min_deg = 100.0;
-    config.optimizer.weights.geometric_body_alpha_max_deg = 101.0;
-    let failure_cost = config.optimizer.weights.failure_cost;
-    let mut objective = DesignObjective::new(config);
-
-    let cost = objective.evaluate(&DesignVector::default().to_array());
-
-    assert!(cost.is_finite());
-    assert_ne!(cost, failure_cost);
-    assert!(!objective.history.valid[0]);
-    assert!(objective.history.reject_reason[0].contains("body_alpha_window"));
 }
 
 #[test]
@@ -143,13 +129,16 @@ fn the_product_transport_constraints_are_reached_at_the_default_area_requirement
     assert_ne!(reason, "transport_planform");
 }
 
+/// With every requirement family diagnostic, a physical miss is reported
+/// but does not make the candidate infeasible.
 #[test]
-fn unconstrained_product_mode_accepts_physical_misses_after_a_completed_analysis() {
+fn diagnostic_families_accept_physical_misses_after_a_completed_analysis() {
     let mut config = AlasConfig::default();
-    config.requirements.max_cruise_cl = 0.0;
     config.requirements.max_wing_area_m2 = 1.0;
-    config.optimizer.weights.geometric_body_alpha_min_deg = 100.0;
-    config.optimizer.weights.geometric_body_alpha_max_deg = 101.0;
+    config.optimizer.objective.mass_constraints = ConstraintPolicy::Diagnostic;
+    config.optimizer.objective.balance_constraints = ConstraintPolicy::Diagnostic;
+    config.optimizer.objective.performance_constraints = ConstraintPolicy::Diagnostic;
+    config.optimizer.objective.geometry_constraints = ConstraintPolicy::Diagnostic;
 
     let mut objective = DesignObjective::new(config);
     let cost = objective.evaluate(&DesignVector::default().to_array());
@@ -159,24 +148,23 @@ fn unconstrained_product_mode_accepts_physical_misses_after_a_completed_analysis
     assert_eq!(objective.history.reject_reason, vec![String::new()]);
 }
 
+/// The shape priors of the frozen weight table are inert for the product
+/// objective, whether or not they are enabled: the mission-sized search is
+/// bounded by requirement residuals, not by penalty weights.
 #[test]
-fn subjective_shape_bounds_do_not_condition_the_default_product_search() {
+fn subjective_shape_bounds_do_not_condition_the_product_search() {
     let mut relaxed = AlasConfig::default();
-    relaxed.optimizer.solver.enforce_physical_constraints = true;
     relaxed.optimizer.weights.fuselage_floor_m = 0.0;
     let mut aggressive = relaxed.clone();
     aggressive.optimizer.weights.fuselage_floor_m = 1_000.0;
+    aggressive.optimizer.weights.transport_shape_priors_enabled = true;
 
     let design = DesignVector::default().to_array();
     let relaxed_cost = DesignObjective::new(relaxed).evaluate(&design);
-    let unconditioned_cost = DesignObjective::new(aggressive.clone()).evaluate(&design);
-
-    assert_eq!(unconditioned_cost, relaxed_cost);
-
-    aggressive.optimizer.weights.transport_shape_priors_enabled = true;
     let conditioned_cost = DesignObjective::new(aggressive).evaluate(&design);
 
-    assert!(conditioned_cost > unconditioned_cost);
+    assert!(relaxed_cost.is_finite());
+    assert_eq!(conditioned_cost, relaxed_cost);
 }
 
 #[test]

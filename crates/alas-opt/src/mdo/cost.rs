@@ -33,7 +33,6 @@ fn objective_value(
     passengers: i64,
 ) -> f64 {
     match kind {
-        ObjectiveKind::LegacyLiftToDrag => f64::NAN, // never reached: the legacy kind never delegates here
         ObjectiveKind::BlockFuel => sized.block_fuel_kg,
         ObjectiveKind::TakeoffMass => sized.takeoff_mass_kg,
         ObjectiveKind::OperatingEmptyMass => sized.operating_empty_mass_kg,
@@ -71,7 +70,6 @@ pub(crate) fn assemble(
 
     let objective_value = objective_value(kind, &outcome.sized, range_km, passengers);
     let normalization_scale = match kind {
-        ObjectiveKind::LegacyLiftToDrag => 1.0,
         ObjectiveKind::BlockFuel => BLOCK_FUEL_NORMALIZATION_FRACTION * mtow_ceiling,
         ObjectiveKind::TakeoffMass | ObjectiveKind::OperatingEmptyMass => mtow_ceiling,
         ObjectiveKind::FuelPerSeatKilometre => FUEL_PER_SEAT_KM_NORMALIZATION,

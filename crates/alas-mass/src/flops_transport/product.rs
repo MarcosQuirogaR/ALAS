@@ -21,7 +21,7 @@ use super::{
     FlopsTransportUnverifiedReason, PartialFlopsTransportBreakdown,
 };
 
-fn main_wing(plane: &Airplane) -> Option<&Wing> {
+pub(super) fn main_wing(plane: &Airplane) -> Option<&Wing> {
     plane
         .wings
         .iter()
@@ -30,7 +30,7 @@ fn main_wing(plane: &Airplane) -> Option<&Wing> {
         .filter(|wing| wing.xsecs.len() >= 2)
 }
 
-fn primary_fuselage(plane: &Airplane) -> Option<&Fuselage> {
+pub(super) fn primary_fuselage(plane: &Airplane) -> Option<&Fuselage> {
     plane
         .fuselages
         .iter()
@@ -44,7 +44,7 @@ fn primary_fuselage(plane: &Airplane) -> Option<&Fuselage> {
         .filter(|fuselage| fuselage.xsecs.len() >= 2)
 }
 
-fn max_fuselage_width_depth(fuselage: &Fuselage) -> (f64, f64) {
+pub(super) fn max_fuselage_width_depth(fuselage: &Fuselage) -> (f64, f64) {
     fuselage
         .xsecs
         .iter()
@@ -80,7 +80,10 @@ fn count_optional(
     value.ok_or(reason)
 }
 
-fn movable_surface_area(plane: &Airplane, controls: &ControlSurfacesConfig) -> Option<f64> {
+pub(super) fn movable_surface_area(
+    plane: &Airplane,
+    controls: &ControlSurfacesConfig,
+) -> Option<f64> {
     let wing = main_wing(plane)?;
     let hstab = plane
         .wings

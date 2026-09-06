@@ -6,19 +6,19 @@
 
 //! What the design search is looking for, and how hard it looks.
 //!
-//! The two halves are deliberately separate. [`ObjectiveWeights`] says what a
-//! good aircraft is -- the reward, and the price of every way of cheating it
-//! -- and changing one of those numbers changes which design the search
-//! converges on. [`SolverSettings`] says how long to look, and changing one of
-//! those changes how thoroughly the same target is approached, not what the
-//! target is. Two runs that differ only in solver settings are answering the
-//! same question; two that differ in a weight are not, and a comparison
-//! between them means nothing.
+//! The halves are deliberately separate. [`ObjectiveConfig`] says what a
+//! good aircraft is -- the mission quantity minimised and the policy of every
+//! requirement family that bounds it -- and changing one of those changes
+//! which design the search converges on. [`SolverSettings`] says how the
+//! search is run, and changing one of those changes how thoroughly the same
+//! target is approached, not what the target is. Two runs that differ only in
+//! solver settings are answering the same question; two that differ in the
+//! objective are not, and a comparison between them means nothing.
 //!
-//! Every weight is dimensionless and calibrated so that each term contributes
-//! order one to fifty near a good design, which is what lets the search see
-//! all of its constraints at once instead of one of them drowning out the
-//! lift-to-drag objective.
+//! [`ObjectiveWeights`] is the penalty table of the frozen Python objective.
+//! The product search reads only its failure cost and tail-volume window;
+//! the rest is replayed by the parity fixtures and kept so a saved
+//! configuration still round-trips.
 
 mod objective;
 mod solver;
@@ -39,7 +39,7 @@ pub struct OptimizerConfig {
     /// What the search rewards and what it penalizes.
     #[config(
         nested,
-        help = "The reward on lift-to-drag and the soft penalties that price every structurally, aerodynamically or operationally unrealistic way of raising it."
+        help = "Penalty table of the frozen reference objective, replayed by the parity fixtures. The mission-sized search reads only the failure cost and the tail-volume window from this group; every other weight is inert for product runs."
     )]
     pub weights: ObjectiveWeights,
 
@@ -54,7 +54,7 @@ pub struct OptimizerConfig {
     #[serde(default, skip_serializing_if = "ObjectiveConfig::is_default")]
     #[config(
         nested,
-        help = "The mission-sized objective -- block fuel, takeoff mass or empty mass over the design range under the fuel policy -- and the hard, soft or diagnostic policy of every requirement family that bounds it. The legacy lift-to-drag objective stays selectable here."
+        help = "The mission-sized objective -- block fuel, takeoff mass, empty mass or fuel per seat-kilometre over the design range under the fuel policy -- the takeoff-mass closure, and the hard, soft or diagnostic policy of every requirement family that bounds it."
     )]
     pub objective: ObjectiveConfig,
 }

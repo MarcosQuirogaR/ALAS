@@ -39,17 +39,31 @@ pub struct SolverSettings {
     #[config(
         options = OptimizerMethod,
         label = "Optimization method",
-        help = "Select the search algorithm. Differential evolution preserves the historical scalar search; feasibility-first DE gives physical validity priority; NSGA-II retains a Pareto set; TuRBO-1 uses a local trust-region surrogate for expensive evaluations; CMA-ES adapts correlated continuous design steps."
+        help = "Select the search algorithm. Differential evolution preserves the historical scalar search; feasibility-first DE gives physical validity priority; NSGA-II retains a Pareto set; TuRBO-1 uses a local trust-region surrogate for expensive evaluations; CMA-ES adapts correlated continuous design steps; SQP is the gradient-based sequential quadratic programming driver over the converged sizing loop, with finite-difference derivatives and explicit inequality constraints."
     )]
     pub method: String,
 
-    /// Whether physical requirement checks disqualify candidates during the search.
-    #[serde(default)]
-    #[config(
-        label = "Enforce physical optimizer constraints",
-        help = "When enabled, candidates must satisfy the configured physical requirements to be selected. When disabled, the optimizer enforces only the supplied design-variable bounds and requires a candidate to complete the geometry/mass/aerodynamic analysis; area, payload, CG, stability and transport-shape checks remain report diagnostics. Use the disabled mode to obtain a baseline finalist, not as a certification of physical feasibility."
+    /// Finite-difference step for the gradient-based driver.
+    #[serde(
+        default = "default_finite_difference_step",
+        skip_serializing_if = "is_default_finite_difference_step"
     )]
-    pub enforce_physical_constraints: bool,
+    #[config(
+        label = "Finite-difference step",
+        help = "Forward-difference step of the SQP driver, as a fraction of each design variable's bound range. It must exceed the numerical noise of the sizing closure (a 1 kg takeoff-mass tolerance on a 100 t aircraft is 1e-5) and stay below the scale on which the objective bends; 0.001-0.005 is the usual window."
+    )]
+    pub finite_difference_step: f64,
+
+    /// Normalized constraint violation accepted as feasible by the driver.
+    #[serde(
+        default = "default_constraint_tolerance",
+        skip_serializing_if = "is_default_constraint_tolerance"
+    )]
+    #[config(
+        label = "Constraint tolerance",
+        help = "Largest normalized inequality-constraint violation (violation divided by the limit) the SQP driver accepts at convergence. 1e-4 is one part in ten thousand of every limit."
+    )]
+    pub constraint_tolerance: f64,
 
     /// How new candidates are generated from the population.
     #[config(
@@ -120,7 +134,8 @@ impl Default for SolverSettings {
     fn default() -> Self {
         Self {
             method: default_optimizer_method(),
-            enforce_physical_constraints: false,
+            finite_difference_step: default_finite_difference_step(),
+            constraint_tolerance: default_constraint_tolerance(),
             strategy: "best1bin".to_owned(),
             max_iterations: 15,
             population_size: 6,
@@ -142,8 +157,19 @@ impl SolverSettings {
     pub fn is_supported_method(method: &str) -> bool {
         matches!(
             method,
-            "differential_evolution" | "feasibility_first_de" | "nsga2" | "turbo_1" | "cma_es"
+            "differential_evolution"
+                | "feasibility_first_de"
+                | "nsga2"
+                | "turbo_1"
+                | "cma_es"
+                | "sqp"
         )
+    }
+
+    /// Whether `method` is the gradient-based driver, which reads the
+    /// finite-difference and constraint-tolerance settings.
+    pub fn is_gradient_method(method: &str) -> bool {
+        method == "sqp"
     }
 
     /// Whether `strategy` is one of the DE mutation/crossover strategies.
@@ -168,6 +194,25 @@ impl SolverSettings {
 
 fn default_optimizer_method() -> String {
     "differential_evolution".to_owned()
+}
+
+fn default_finite_difference_step() -> f64 {
+    0.002
+}
+
+// The two gradient-driver settings are serialized only when changed, so a
+// saved configuration and the frozen solver-preset fixtures keep the
+// historical key set.
+fn is_default_finite_difference_step(value: &f64) -> bool {
+    *value == default_finite_difference_step()
+}
+
+fn default_constraint_tolerance() -> f64 {
+    1.0e-4
+}
+
+fn is_default_constraint_tolerance(value: &f64) -> bool {
+    *value == default_constraint_tolerance()
 }
 
 // A test asserts on values it constructed here directly, so a failed unwrap
@@ -241,11 +286,6 @@ mod tests {
                 assert_ne!(leaf.kind, Kind::WeightSlider, "{}", field.name);
             }
         }
-    }
-
-    #[test]
-    fn baseline_mode_keeps_physical_requirement_checks_out_of_the_search_by_default() {
-        assert!(!SolverSettings::default().enforce_physical_constraints);
     }
 
     #[test]

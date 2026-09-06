@@ -121,6 +121,53 @@ impl ConstraintResidual {
     fn violated(&self) -> bool {
         self.normalized_violation > 0.0
     }
+
+    /// The signed, dimensionless constraint value a gradient-based driver
+    /// works with: the counted violation when the requirement is missed,
+    /// and the negative margin over the limit's magnitude when it is met,
+    /// so the value crosses zero exactly at the limit.
+    pub fn signed_normalized(&self) -> f64 {
+        if self.normalized_violation > 0.0 {
+            self.normalized_violation
+        } else {
+            (self.raw_residual / self.limit.abs().max(1e-9)).min(0.0)
+        }
+    }
+}
+
+/// A cruise drag polar supplied by an external aerodynamic solver, so the
+/// sizing loop can close a candidate around aerodynamics it did not trim
+/// itself. `induced_factor_k` is the parabolic-polar factor
+/// `(cd - cd0) / cl^2` at the cruise lift coefficient.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ExternalPolar {
+    /// Zero-lift drag coefficient at the cruise point.
+    pub cd0: f64,
+    /// Induced-drag factor `k`, positive.
+    pub induced_factor_k: f64,
+    /// Lift-to-drag ratio at the required cruise lift.
+    pub lift_to_drag: f64,
+    /// Angle of attack at that point, degrees, for the history.
+    pub alpha_deg: f64,
+    /// Stabilizer incidence the point was evaluated at, degrees.
+    pub incidence_deg: f64,
+    /// Neutral-point station in geometry axes, m, for the balance family.
+    pub x_np: f64,
+}
+
+impl ExternalPolar {
+    /// Whether every term is finite and physically usable.
+    pub fn is_valid(&self) -> bool {
+        self.cd0.is_finite()
+            && self.cd0 > 0.0
+            && self.induced_factor_k.is_finite()
+            && self.induced_factor_k > 0.0
+            && self.lift_to_drag.is_finite()
+            && self.lift_to_drag > 0.0
+            && self.alpha_deg.is_finite()
+            && self.incidence_deg.is_finite()
+            && self.x_np.is_finite()
+    }
 }
 
 /// One design candidate closed against the sizing mission.
@@ -156,6 +203,13 @@ pub struct SizedCandidate {
     pub sizing_iterations: usize,
     /// Whether the outer sizing loop closed within its iteration budget.
     pub sizing_closed: bool,
+    /// Trim and drag-polar re-evaluations the sizing loop performed after
+    /// the first, each triggered by a centre-of-gravity shift beyond the
+    /// configured re-trim tolerance.
+    pub retrim_count: usize,
+    /// Centre-of-gravity shift, percent MAC, between the last trim and the
+    /// converged mass state: the residual inconsistency the loop accepted.
+    pub cg_shift_pct_mac: f64,
 }
 
 /// The residual table and scalar cost for one evaluated candidate.

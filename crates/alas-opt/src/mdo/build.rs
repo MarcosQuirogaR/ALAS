@@ -33,6 +33,7 @@ use super::types::CandidateFailure;
 
 /// The trimmed drag-polar terms a Breguet model is built from, alongside the
 /// history-facing angle labels.
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct TrimmedPolar {
     /// Zero-lift drag coefficient at the trimmed cruise point.
     pub cd0: f64,
@@ -144,6 +145,7 @@ pub(crate) fn trim_and_polar(
     plane: &mut Airplane,
     cg_x: f64,
     dv: &DesignVector,
+    cruise_mass_kg: f64,
 ) -> Result<TrimmedPolar, CandidateFailure> {
     let req = &config.requirements;
     let trim_failure = || CandidateFailure {
@@ -154,7 +156,9 @@ pub(crate) fn trim_and_polar(
     let atmo = Atmosphere::new(req.cruise_altitude_m);
     let velocity_m_s = req.cruise_mach * atmo.speed_of_sound();
     let dynamic_pressure_pa = 0.5 * atmo.density() * velocity_m_s * velocity_m_s;
-    let cl_target = req.required_cruise_cl(dynamic_pressure_pa, plane.s_ref);
+    // `W / (q S)` at the mass the loop is sizing, which equals
+    // `DesignRequirements::required_cruise_cl` at the takeoff-mass ceiling.
+    let cl_target = cruise_mass_kg * req.gravity_m_s2 / (dynamic_pressure_pa * plane.s_ref);
 
     // A candidate too close to stall to fly the required cruise CL has no
     // physically valid trim point. The mission-sized reason vocabulary is

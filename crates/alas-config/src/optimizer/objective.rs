@@ -3,21 +3,20 @@
 
 //! What the design search minimises, and which requirements bound it.
 //!
-//! The frozen objective rewards cruise lift-to-drag and prices every way of
-//! cheating it with a weighted penalty. A conceptual transport is not
-//! designed that way: it is sized by a mission -- payload over a design range
-//! under a reserve policy -- and judged by what that mission costs, with the
-//! certification and operating requirements as boundaries rather than as
-//! prices. This group selects that formulation. The objective is a mission
-//! quantity such as block fuel or takeoff mass; the maximum takeoff mass is
-//! closed by the mission rather than typed in; and each family of
+//! A conceptual transport is sized by a mission -- payload over a design
+//! range under a reserve policy -- and judged by what that mission costs,
+//! with the certification and operating requirements as boundaries rather
+//! than as prices. This group selects that formulation. The objective is a
+//! mission quantity such as block fuel or takeoff mass; the maximum takeoff
+//! mass is closed by the mission rather than typed in; and each family of
 //! requirements is declared hard (a candidate that misses it is infeasible),
 //! soft (it ranks behind feasibility but ahead of the objective), diagnostic
 //! (reported, never ranked) or off.
 //!
-//! The legacy formulation remains selectable, because the parity fixtures
-//! replay it and because a fixed-mass aerodynamic study is still a valid
-//! question to ask.
+//! The frozen weighted lift-to-drag objective of the Python reference is not
+//! a product objective: it survives only inside the parity replay
+//! (`DesignObjective::new_reference_compatibility`), where the fixtures need
+//! it, and cannot be selected here.
 
 use serde::{Deserialize, Serialize};
 
@@ -27,10 +26,8 @@ use crate::{ConfigNode, Kind, Leaf};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ObjectiveKind {
-    /// The frozen weighted-penalty objective on cruise lift-to-drag.
-    #[default]
-    LegacyLiftToDrag,
     /// Block fuel for the sizing mission: taxi plus trip fuel.
+    #[default]
     BlockFuel,
     /// Maximum takeoff mass closed by the sizing mission.
     TakeoffMass,
@@ -44,17 +41,11 @@ impl ObjectiveKind {
     /// Stable serialized name.
     pub const fn as_str(self) -> &'static str {
         match self {
-            Self::LegacyLiftToDrag => "legacy_lift_to_drag",
             Self::BlockFuel => "block_fuel",
             Self::TakeoffMass => "takeoff_mass",
             Self::OperatingEmptyMass => "operating_empty_mass",
             Self::FuelPerSeatKilometre => "fuel_per_seat_kilometre",
         }
-    }
-
-    /// Whether the objective needs the mission-sized candidate evaluation.
-    pub const fn is_mission_sized(self) -> bool {
-        !matches!(self, Self::LegacyLiftToDrag)
     }
 }
 
@@ -69,10 +60,10 @@ impl Leaf for ObjectiveKind {
 #[serde(rename_all = "snake_case")]
 pub enum MtowSizing {
     /// The takeoff mass is the requirement value and the mission must fit.
-    #[default]
     FixedRequirement,
     /// The takeoff mass is iterated until empty mass, payload and required
     /// fuel sum to it, bounded above by the requirement value.
+    #[default]
     SizedByMission,
 }
 
@@ -133,7 +124,7 @@ pub struct ObjectiveConfig {
     #[config(
         options = ObjectiveKind,
         label = "Objective",
-        help = "Quantity the design search minimises. The legacy lift-to-drag objective keeps the frozen weighted-penalty formulation; every other choice sizes each candidate by the design mission under the fuel policy and ranks it feasibility first."
+        help = "Quantity the design search minimises. Every choice sizes each candidate by the design mission under the fuel policy and ranks it feasibility first: block fuel is the operating cost of the mission, takeoff mass the structural and airport cost, operating empty mass the manufacturing cost, and fuel per seat-kilometre the block fuel normalised by the design passengers and range."
     )]
     pub kind: ObjectiveKind,
 
@@ -167,6 +158,15 @@ pub struct ObjectiveConfig {
         help = "Change in takeoff mass between two passes below which the sizing loop is taken as closed."
     )]
     pub sizing_tolerance_kg: f64,
+
+    /// Centre-of-gravity shift between sizing passes above which the
+    /// cruise trim and drag polar are re-evaluated.
+    #[config(
+        label = "Re-trim CG tolerance",
+        unit = "% MAC",
+        help = "When the takeoff mass is sized by the mission, the sizing loop re-trims the aircraft and re-evaluates its drag polar at the updated mass whenever the centre of gravity has moved by more than this fraction of the mean aerodynamic chord since the last trim, so the converged design is trimmed at its own weight. Zero keeps the single trim at the takeoff-mass ceiling."
+    )]
+    pub retrim_cg_tolerance_pct_mac: f64,
 
     /// Policy for the mass and fuel-volume requirements.
     #[config(
@@ -227,11 +227,12 @@ pub struct ObjectiveConfig {
 impl Default for ObjectiveConfig {
     fn default() -> Self {
         Self {
-            kind: ObjectiveKind::LegacyLiftToDrag,
+            kind: ObjectiveKind::BlockFuel,
             design_range_nmi: 0.0,
-            mtow_sizing: MtowSizing::FixedRequirement,
+            mtow_sizing: MtowSizing::SizedByMission,
             sizing_max_iterations: 30,
             sizing_tolerance_kg: 1.0,
+            retrim_cg_tolerance_pct_mac: 0.1,
             mass_constraints: ConstraintPolicy::Hard,
             balance_constraints: ConstraintPolicy::Hard,
             performance_constraints: ConstraintPolicy::Hard,
@@ -264,6 +265,10 @@ impl ObjectiveConfig {
             ("max_span_m", self.max_span_m),
             ("max_approach_speed_kt", self.max_approach_speed_kt),
             ("soft_penalty_weight", self.soft_penalty_weight),
+            (
+                "retrim_cg_tolerance_pct_mac",
+                self.retrim_cg_tolerance_pct_mac,
+            ),
         ] {
             if !value.is_finite() || value < 0.0 {
                 return Err(format!("objective {name} must be finite and nonnegative"));
@@ -278,29 +283,33 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_default_objective_keeps_the_frozen_lift_to_drag_formulation() {
+    fn the_default_objective_is_block_fuel_over_a_mission_sized_takeoff_mass() {
         let objective = ObjectiveConfig::default();
-        assert_eq!(objective.kind, ObjectiveKind::LegacyLiftToDrag);
-        assert!(!objective.kind.is_mission_sized());
-        assert_eq!(objective.mtow_sizing, MtowSizing::FixedRequirement);
+        assert_eq!(objective.kind, ObjectiveKind::BlockFuel);
+        assert_eq!(objective.mtow_sizing, MtowSizing::SizedByMission);
         assert!(objective.is_default());
         assert!(objective.validate().is_ok());
     }
 
     #[test]
-    fn every_mission_objective_reports_itself_as_mission_sized() {
+    fn every_objective_is_a_mission_quantity_with_a_stable_name() {
         for kind in [
             ObjectiveKind::BlockFuel,
             ObjectiveKind::TakeoffMass,
             ObjectiveKind::OperatingEmptyMass,
             ObjectiveKind::FuelPerSeatKilometre,
         ] {
-            assert!(kind.is_mission_sized(), "{}", kind.as_str());
             assert_eq!(
                 serde_json::to_value(kind).ok(),
                 Some(serde_json::json!(kind.as_str()))
             );
         }
+        // The frozen lift-to-drag objective is a parity-replay path, not a
+        // saved-configuration value.
+        assert!(
+            serde_json::from_value::<ObjectiveKind>(serde_json::json!("legacy_lift_to_drag"))
+                .is_err()
+        );
     }
 
     #[test]

@@ -8,15 +8,14 @@ use alas_config::{
 use alas_geom::aircraft::airplane::Airplane;
 use alas_geom::aircraft::wing::Wing;
 
-use crate::flops_transport::{
-    evaluate_product, FlopsTransportEvaluation, FlopsTransportUnverifiedReason,
-    PartialFlopsTransportBreakdown,
-};
+use crate::flops_transport::{FlopsTransportUnverifiedReason, PartialFlopsTransportBreakdown};
 use crate::torenbeek::{mass_fuselage_simple, mass_wing, mass_wing_with_control_surface_area};
 use crate::wing_centroid::WingCentroidError;
 
 #[path = "../breakdown/coordinates.rs"]
 mod coordinates;
+#[path = "../breakdown/flops_methods.rs"]
+mod flops_methods;
 pub use coordinates::{
     calculate_physical_cg, define_mass_coordinates, define_mass_coordinates_with_model,
     run_mass_analysis, run_mass_analysis_checked, run_mass_analysis_with_model,

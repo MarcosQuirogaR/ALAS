@@ -3,38 +3,16 @@
 
 
 impl AvlObjective {
+    /// Score one candidate with the mission-sized objective around AVL's
+    /// aerodynamics: AVL supplies the induced drag at the required cruise
+    /// lift, while the parasite build-up, trim incidence and neutral point
+    /// stay the native report's, and the sizing loop closes mass, fuel and
+    /// takeoff mass around that fixed polar.
     fn evaluate_uncached(&self, design: &DesignVector, key: &str) -> ObjectiveEvaluation {
-        let enforce_physical_constraints =
-            self.config.optimizer.solver.enforce_physical_constraints;
         let report = match FullAnalysis::new(self.config.clone()).run(design, true) {
             Ok(report) => report,
             Err(_) => return ObjectiveEvaluation::rejected(self.failure_cost(), "full_analysis"),
         };
-        let projected_wing_area_m2 = report
-            .airplane
-            .wings
-            .first()
-            .map_or(f64::NAN, alas_geom::aircraft::wing::Wing::projected_area);
-        let area_penalty = if enforce_physical_constraints {
-            let Some(penalty) = wing_area_excess_penalty(
-                projected_wing_area_m2,
-                self.config.requirements.max_wing_area_m2,
-                self.config.optimizer.weights.area_penalty_scale,
-            ) else {
-                return ObjectiveEvaluation::rejected(self.failure_cost(), "wing_area_limit");
-            };
-            penalty
-        } else {
-            0.0
-        };
-        if enforce_physical_constraints && report.cg_envelope_ok != Some(true) {
-            return ObjectiveEvaluation::rejected(self.failure_cost(), "cg_envelope");
-        }
-        if enforce_physical_constraints
-            && report.static_margin < self.config.requirements.min_physical_static_margin
-        {
-            return ObjectiveEvaluation::rejected(self.failure_cost(), "static_margin");
-        }
         let evaluation_dir = self.output_root.join(key);
         let avl = run_avl_analysis(
             &report,
@@ -56,20 +34,29 @@ impl AvlObjective {
         if !point.induced_drag_coefficient.is_finite() || point.induced_drag_coefficient <= 0.0 {
             return ObjectiveEvaluation::rejected(self.failure_cost(), "avl_induced_drag");
         }
-        let induced_l_over_d = required_cl / point.induced_drag_coefficient;
-        let moment_penalty = point.pitching_moment_coefficient.abs();
-        let cost = -induced_l_over_d + 10.0 * moment_penalty + area_penalty;
-        ObjectiveEvaluation {
-            cost,
-            valid: true,
-            l_over_d: induced_l_over_d,
-            span_m: report.airplane.b_ref,
+        let cd0 = report.polar_fit.cd0;
+        let polar = ExternalPolar {
+            cd0,
+            induced_factor_k: point.induced_drag_coefficient / (required_cl * required_cl),
+            lift_to_drag: required_cl / (cd0 + point.induced_drag_coefficient),
             alpha_deg: point.alpha_deg,
-            area_m2: report.airplane.s_ref,
-            trim_ih_deg: report
+            incidence_deg: report
                 .trimmed_design_point
                 .map_or(0.0, |trim| trim.trim_ih_deg),
-            reject_reason: String::new(),
+            x_np: report.x_neutral_point,
+        };
+        match assess_candidate_with_polar(&self.objective, &design.to_array(), &polar) {
+            Ok(assessment) => ObjectiveEvaluation {
+                cost: assessment.cost,
+                valid: assessment.hard_feasible,
+                l_over_d: polar.lift_to_drag,
+                span_m: report.airplane.b_ref,
+                alpha_deg: point.alpha_deg,
+                area_m2: report.airplane.s_ref,
+                trim_ih_deg: polar.incidence_deg,
+                reject_reason: assessment.violated_hard_ids().join("+"),
+            },
+            Err(reason) => ObjectiveEvaluation::rejected(self.failure_cost(), reason),
         }
     }
 
@@ -146,22 +133,6 @@ fn finite_avl_objective_point(point: &AvlPolarPoint) -> bool {
     .all(|value| value.is_finite())
 }
 
-fn wing_area_excess_penalty(
-    projected_area_m2: f64,
-    maximum_area_m2: f64,
-    penalty_scale: f64,
-) -> Option<f64> {
-    if !projected_area_m2.is_finite()
-        || !maximum_area_m2.is_finite()
-        || maximum_area_m2 <= 0.0
-        || !penalty_scale.is_finite()
-    {
-        return None;
-    }
-    let excess_fraction = ((projected_area_m2 - maximum_area_m2) / maximum_area_m2).max(0.0);
-    Some(excess_fraction.powi(2) * penalty_scale)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -198,21 +169,6 @@ mod tests {
                 },
             ],
         }
-    }
-
-    #[test]
-    fn avl_optimization_preserves_a_gradient_above_the_wing_area_limit() {
-        assert_eq!(wing_area_excess_penalty(90.0, 100.0, 0.5), Some(0.0));
-        assert_eq!(wing_area_excess_penalty(100.0, 100.0, 0.5), Some(0.0));
-        let Some(slight_excess) = wing_area_excess_penalty(101.0, 100.0, 0.5) else {
-            panic!("finite dimensions should produce a penalty");
-        };
-        let Some(larger_excess) = wing_area_excess_penalty(110.0, 100.0, 0.5) else {
-            panic!("finite dimensions should produce a penalty");
-        };
-        assert!(slight_excess > 0.0);
-        assert!(larger_excess > slight_excess);
-        assert_eq!(wing_area_excess_penalty(f64::NAN, 100.0, 0.5), None);
     }
 
     #[test]
@@ -281,7 +237,6 @@ mod tests {
         let mut config = AlasConfig::default();
         config.optimizer.solver.max_iterations = 0;
         config.optimizer.solver.population_size = 1;
-        config.optimizer.solver.enforce_physical_constraints = true;
         config.requirements.max_cruise_cl = 0.01;
 
         let result = run_solver_optimizations(

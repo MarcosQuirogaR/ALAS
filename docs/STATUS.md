@@ -219,9 +219,9 @@ mass/CG/inertia methods, MDO drivers).
   fuel, takeoff mass, empty mass, fuel per seat-kilometre) with an inner
   takeoff-mass closure and typed hard/soft/diagnostic requirement families
   (mass and fuel, balance, CS-25.121 and field performance, geometry) is
-  selectable in `optimizer.objective`; the legacy weighted lift-to-drag
-  objective remains the default so parity fixtures and existing studies are
-  unchanged.
+  selectable in `optimizer.objective`. (Superseded later the same day: the
+  legacy lift-to-drag objective is no longer a product objective; see
+  "Mission-driven objective only" below.)
 - **What moved.** The interactive routes are flown at the policy takeoff
   mass rather than at MTOW: the A320-200 (LEMD-LEPA) lands below its maximum
   landing mass, the A220-300 sits inside its published planning envelope,
@@ -241,6 +241,71 @@ mass/CG/inertia methods, MDO drivers).
   operational flight plan; the holding fuel flow is an analytic estimate
   (cruise TSFC at minimum-drag speed) rather than an engine-deck value; tank
   spanwise boundaries other than the A320's are volume-consistent estimates.
+
+## FLOPS airframe mass and gradient-based MDO driver, 2026-09-06
+
+Delivered on the working tree; the methods are described in
+`docs/methods.md` ("FLOPS transport mass method" and "Multidisciplinary
+sizing loop and gradient-based driver").
+
+- **Complete FLOPS transport method.** `mass_model` gains
+  `structural_mass_method` and `propulsion_mass_method` beside the existing
+  `systems_mass_method`, each with a `flops_transport_v1` option, and a
+  `flops_structure` group carrying the FLOPS technology factors and
+  overrides. The structural group (wing with simplified or detailed bending
+  factor, tails, fuselage, gear, nacelles, paint) and the propulsion group
+  (scaled engine, distributed-propulsion scaling, reversers, controls,
+  starters, fuel system) are evaluated from the built geometry and the
+  declared architecture; a missing datum blocks the method with a typed
+  reason. Defaults are unchanged: every preset still uses the frozen
+  methods, and the parity fixtures are untouched.
+- **Converged sizing loop.** The mission-sized candidate is closed as a
+  multidisciplinary analysis (mass, CG, trim, polar, fuel, takeoff mass)
+  with Aitken acceleration and re-trimming on CG shift
+  (`objective.retrim_cg_tolerance_pct_mac`, default 0.1 percent MAC), so
+  the design is trimmed at its own weight. `FixedRequirement` sizing keeps
+  its single pass.
+- **`sqp` optimizer method.** A native line-search SQP driver (l1 merit,
+  damped BFGS, elastic dense interior-point QP, parallel forward
+  differences) over the converged loop, with the hard requirement residuals
+  as explicit inequality constraints and the termination reason reported.
+  Two solver settings were added (`finite_difference_step`,
+  `constraint_tolerance`). The driver is verified on analytic constrained
+  problems and on a bound-constrained delegated objective; on the native
+  objective it is exercised for one major iteration in the test suite.
+- **Verification status.** Every FLOPS group reproduces the two FLOPS-run
+  validation cases NASA Aviary distributes (simple and detailed wing) to the
+  data file's quoted precision (`crates/alas-mass/tests/
+  flops_validation_cases.rs`, data in `.agent/reports/
+  flops-aviary-validation-data.md`). The SQP driver is verified on analytic
+  constrained problems and a bound-constrained delegated objective, and
+  exercised for one major iteration on the native mission-sized objective.
+  No physical validation against weighed aircraft, and no optimization
+  study has been run to convergence on a preset yet.
+
+## Mission-driven objective only, 2026-09-06
+
+- **The lift-to-drag objective is gone from the product.** `ObjectiveKind`
+  no longer has a legacy variant; the default objective is block fuel with
+  the takeoff mass sized by the mission (`mtow_sizing = sized_by_mission`,
+  `requirements.mtow_kg` is the ceiling). The frozen weighted lift-to-drag
+  cost survives only inside `DesignObjective::new_reference_compatibility`,
+  which the parity fixtures replay; a saved configuration naming
+  `legacy_lift_to_drag` is rejected.
+- **The `enforce_physical_constraints` switch is removed.** It only relaxed
+  the frozen objective's penalties; requirement families are now governed by
+  their `optimizer.objective` policies.
+- **The AVL optimization branch is mission-sized too.** AVL supplies the
+  induced drag at the required cruise lift; the parasite build-up, trim
+  incidence and neutral point stay the native report's, and the sizing loop
+  closes mass, fuel and takeoff mass around that fixed polar
+  (`assess_candidate_with_polar`). NSGA-II's first objective and the
+  convergence figure follow the mission objective.
+- **What is inert now.** Of `optimizer.weights`, the product search reads
+  only `failure_cost` and the tail-volume window; the rest is replay-only
+  and sits in a collapsed "Reference-replay penalty weights" section of the
+  optimizer page. `docs/OPTIMIZATION.md` lists how a run is driven and every
+  input the mission-sized search reads.
 
 ## External-solver integration state
 

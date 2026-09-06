@@ -90,17 +90,17 @@ pub const CHAPTERS: &[Chapter] = &[
         blurb: "How candidates are scored, and why penalties are shaped the way they are.",
         sections: &[
             Section {
-                heading: "The cost function",
+                heading: "The objective",
                 body: &[
-                    "SciPy's differential evolution minimises -L/D plus a set of weighted penalties: wing area, wing loading, tail volume coefficients, static-margin deviation, CG-envelope violation, fuel-volume shortfall and several geometric-realism terms.",
-                    "The weights are yours to tune, but the static-margin term is deliberately kept small relative to L/D. Push it much past ~30 and the optimizer chases an exact stability match instead of exploring shape.",
+                    "The search minimises a mission quantity: block fuel by default, or takeoff mass, operating empty mass or fuel per seat-kilometre. Each candidate is closed by the design mission under the fuel policy, so the objective is what a converged, trimmed aircraft actually burns or weighs, not a proxy such as lift-to-drag.",
+                    "The requirements are constraints, not prices. Mass and fuel capacity, the CG envelope and gear reactions, the CS-25 climb and field requirements, and the planform limits each form a family whose policy you set: hard, soft, diagnostic or off. The frozen weight table from the Python reference only serves the parity fixtures.",
                 ],
             },
             Section {
-                heading: "Why invalid designs still get scored",
+                heading: "Feasibility first",
                 body: &[
-                    "A candidate that fails to build or evaluate returns a large flat cost and is abandoned. But a candidate that builds fine and is merely physically invalid -- unstable, or outside the CG envelope -- is treated differently: it still gets a real aerodynamic evaluation, and the violation adds a large but continuous penalty on top.",
-                    "That distinction is load-bearing. An earlier version blanked out L/D for such candidates, and the solver lost the ability to feel its way toward the feasible region: it could no longer tell 'unstable but aerodynamically promising' from 'unstable and hopeless', and converged on an infeasible best-of-a-bad-lot design.",
+                    "A candidate that fails to build, trim or size is abandoned with a flat cost. A candidate that evaluates but violates a hard requirement is infeasible: it always ranks behind every feasible candidate, and among infeasible candidates the smaller normalised violation wins, which is what lets the search feel its way toward the feasible region.",
+                    "Every residual is reported with its actual value, limit and unit, so the results page shows which requirement is binding rather than a single blended score.",
                 ],
             },
             Section {

@@ -6,10 +6,8 @@
 //! the configured fuel policy and ranked feasibility first.
 //!
 //! [`crate::objective::DesignObjective::evaluate`] delegates here for every
-//! [`alas_config::ObjectiveKind`] that
-//! [`alas_config::ObjectiveKind::is_mission_sized`] reports true, except the
-//! frozen reference-compatibility replay, which keeps the legacy weighted
-//! penalty so its parity fixture stays meaningful.
+//! product evaluation; only the frozen reference-compatibility replay keeps
+//! the legacy weighted penalty so its parity fixture stays meaningful.
 //!
 //! The evaluation is a pipeline of four stages, one module each:
 //! [`build`] evaluates the geometry, mass and trimmed aerodynamic operating
@@ -23,6 +21,7 @@
 mod build;
 mod cost;
 mod engine;
+mod mda;
 mod range;
 mod residuals;
 mod residuals_geometry;
@@ -31,7 +30,9 @@ mod sizing;
 mod tanks;
 mod types;
 
-pub use types::{CandidateAssessment, ConstraintFamily, ConstraintResidual, SizedCandidate};
+pub use types::{
+    CandidateAssessment, ConstraintFamily, ConstraintResidual, ExternalPolar, SizedCandidate,
+};
 
 use alas_config::design_variables::DesignVector;
 
@@ -44,6 +45,15 @@ use crate::objective::DesignObjective;
 /// Called from [`crate::objective::DesignObjective::evaluate`]; not meant to
 /// be called directly on a kind that is not mission-sized.
 pub fn evaluate_mission_sized(objective: &mut DesignObjective, x: &[f64]) -> f64 {
+    evaluate_mission_sized_with_assessment(objective, x).0
+}
+
+/// [`evaluate_mission_sized`], also returning the residual table the cost
+/// was assembled from, for a driver that reads constraints individually.
+pub fn evaluate_mission_sized_with_assessment(
+    objective: &mut DesignObjective,
+    x: &[f64],
+) -> (f64, Option<CandidateAssessment>) {
     let weights = objective.config.optimizer.weights.clone();
     match sizing::run_candidate(&objective.config, x) {
         Ok(outcome) => {
@@ -73,7 +83,7 @@ pub fn evaluate_mission_sized(objective: &mut DesignObjective, x: &[f64]) -> f64
                 assessment.hard_violation_sum,
                 assessment.soft_violation_sum,
             );
-            assessment.cost
+            (assessment.cost, Some(assessment))
         }
         Err(failure) => {
             let cost = weights.failure_cost;
@@ -104,7 +114,7 @@ pub fn evaluate_mission_sized(objective: &mut DesignObjective, x: &[f64]) -> f64
                 f64::NAN,
                 f64::NAN,
             );
-            cost
+            (cost, None)
         }
     }
 }
@@ -122,8 +132,31 @@ pub fn assess_candidate(
     objective: &DesignObjective,
     x: &[f64],
 ) -> Result<CandidateAssessment, String> {
+    assess_with(objective, x, None)
+}
+
+/// [`assess_candidate`] with the cruise drag polar supplied by an external
+/// aerodynamic solver instead of the native trim: the sizing loop then keeps
+/// that polar fixed and closes mass, fuel and takeoff mass around it.
+///
+/// # Errors
+///
+/// As [`assess_candidate`]; an invalid polar is reported as `trim_solve`.
+pub fn assess_candidate_with_polar(
+    objective: &DesignObjective,
+    x: &[f64],
+    polar: &ExternalPolar,
+) -> Result<CandidateAssessment, String> {
+    assess_with(objective, x, Some(polar))
+}
+
+fn assess_with(
+    objective: &DesignObjective,
+    x: &[f64],
+    polar: Option<&ExternalPolar>,
+) -> Result<CandidateAssessment, String> {
     let weights = objective.config.optimizer.weights.clone();
-    match sizing::run_candidate(&objective.config, x) {
+    match sizing::run_candidate_with_polar(&objective.config, x, polar) {
         Ok(outcome) => {
             let residuals = residuals::build(
                 &outcome,

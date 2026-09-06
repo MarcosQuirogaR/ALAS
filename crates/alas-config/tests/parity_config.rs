@@ -353,7 +353,12 @@ fn compare_node(
                 && (node.type_name != "MassModelConfig"
                     || !matches!(
                         field.name,
-                        "systems_mass_method" | "flops_transport" | "geometric_component_stations"
+                        "systems_mass_method"
+                            | "flops_transport"
+                            | "structural_mass_method"
+                            | "propulsion_mass_method"
+                            | "flops_structure"
+                            | "geometric_component_stations"
                     ))
         })
         .collect();
@@ -579,8 +584,10 @@ fn is_native_config_field(path: &str, key: &str) -> bool {
             key,
             "use_airway_endpoint_coordinates" | "max_airway_stretch"
         ) && (path.ends_with("MissionConfig") || path.ends_with(".mission")))
-        || (matches!(key, "method" | "enforce_physical_constraints")
-            && (path.ends_with("SolverSettings") || path.ends_with(".solver")))
+        || (matches!(
+            key,
+            "method" | "finite_difference_step" | "constraint_tolerance"
+        ) && (path.ends_with("SolverSettings") || path.ends_with(".solver")))
         || (key == "random_force_psd_n2_per_hz"
             && (path.ends_with("StructuresConfig") || path.ends_with(".structures")))
         || (key == "optimize_passenger_capacity"

@@ -6,7 +6,7 @@ use egui::{vec2, ComboBox, RichText, Ui};
 
 use crate::nav::Page;
 use crate::state::AppState;
-use crate::views::form::{dynamic_form, dynamic_form_with_open_root_nodes, FormEdit};
+use crate::views::form::{dynamic_form, FormEdit};
 use crate::views::tr;
 
 #[path = "../form_page/aux_preset.rs"]
@@ -133,19 +133,6 @@ fn render_editor(
                     lang,
                     show_help,
                     sections,
-                )
-            } else if group == "optimizer" {
-                // These are the two first-class halves of one optimizer, not
-                // nested detail menus. Their direct sections should be ready
-                // to scan when the page first opens.
-                dynamic_form_with_open_root_nodes(
-                    ui,
-                    fields,
-                    values,
-                    error_fields,
-                    lang,
-                    show_help,
-                    true,
                 )
             } else {
                 dynamic_form(ui, fields, values, error_fields, lang, show_help)

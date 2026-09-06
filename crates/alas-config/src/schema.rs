@@ -189,6 +189,12 @@ pub enum OptionSource {
     CabinPreset,
     /// Versioned systems-and-equipment mass method.
     SystemsMassMethod,
+    /// Versioned structural-group mass method.
+    StructuralMassMethod,
+    /// Versioned propulsion-group mass method.
+    PropulsionMassMethod,
+    /// Which FLOPS wing bending-material factor is evaluated.
+    FlopsWingBendingMethod,
     /// The operating rule a design mission's reserves are sized under.
     FuelScheme,
     /// The scalar the mission-sized design search minimises.
@@ -227,11 +233,16 @@ impl OptionSource {
                 "nsga2",
                 "turbo_1",
                 "cma_es",
+                "sqp",
             ]),
             Self::AircraftType => Some(&["passenger", "cargo"]),
             Self::SystemsMassMethod => {
                 Some(&["reference_compatible_fractions", "flops_transport_v1"])
             }
+            Self::StructuralMassMethod | Self::PropulsionMassMethod => {
+                Some(&["reference_compatible", "flops_transport_v1"])
+            }
+            Self::FlopsWingBendingMethod => Some(&["simplified", "detailed"]),
             Self::FuelScheme => Some(&[
                 "easa_basic",
                 "faa_domestic",
@@ -240,7 +251,6 @@ impl OptionSource {
                 "trip_fuel_only",
             ]),
             Self::ObjectiveKind => Some(&[
-                "legacy_lift_to_drag",
                 "block_fuel",
                 "takeoff_mass",
                 "operating_empty_mass",

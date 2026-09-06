@@ -180,6 +180,7 @@ mod tests {
             "nsga2",
             "turbo_1",
             "cma_es",
+            "sqp",
         ] {
             let args = ["--optimization-method".to_owned(), method.to_owned()];
             let parsed = parse_args(&args)
