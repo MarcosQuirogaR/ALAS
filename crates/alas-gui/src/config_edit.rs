@@ -10,8 +10,9 @@
 use std::collections::BTreeMap;
 
 use alas_config::{
-    fidelity_presets, performance_presets, presets, solver_presets, validate, DesignVariableSpec,
-    EngineConfig, DESIGN_VARIABLE_SPECS,
+    fidelity_presets, performance_presets, presets, solver_presets, validate, AlasConfig,
+    DesignVariableSpec, EngineConfig, FuelPolicyConfig, FuelTankLayoutConfig,
+    DESIGN_VARIABLE_SPECS,
 };
 use alas_exec::ToolPreferences;
 use serde_json::Value;
@@ -19,6 +20,25 @@ use serde_json::Value;
 use crate::nav::PresetKind;
 use crate::state::{AppState, LogKind};
 use crate::views::{tr, tr_fields};
+
+/// Serialize a configuration for the generic form editor, which edits this
+/// JSON directly and needs every schema field present to find it back.
+///
+/// `fuel_policy` and `fuel_tanks` skip serialization when they equal their
+/// default, so a fresh or reloaded configuration -- which starts at that
+/// default -- would otherwise be missing both keys entirely.
+pub(crate) fn full_config_values(config: &AlasConfig) -> Value {
+    let mut value = serde_json::to_value(config).unwrap_or(Value::Null);
+    if let Some(map) = value.as_object_mut() {
+        map.entry("fuel_policy").or_insert_with(|| {
+            serde_json::to_value(FuelPolicyConfig::default()).unwrap_or(Value::Null)
+        });
+        map.entry("fuel_tanks").or_insert_with(|| {
+            serde_json::to_value(FuelTankLayoutConfig::default()).unwrap_or(Value::Null)
+        });
+    }
+    value
+}
 
 impl AppState {
     /// Persist optional-tool locations separately from an aircraft
@@ -79,7 +99,7 @@ impl AppState {
         config.arrival_airport = operational.arrival_airport.to_owned();
         config.mission.profile = operational.profile;
 
-        self.config_values = serde_json::to_value(&config).unwrap_or(Value::Null);
+        self.config_values = full_config_values(&config);
         self.active_preset = preset.name.to_owned();
 
         // Recenter the design space on the preset's own design vector, the way
@@ -276,14 +296,9 @@ impl AppState {
         };
         match parsed {
             Ok(value) => {
-                match alas_config::AlasConfig::from_value(&value).and_then(|config| {
-                    serde_json::to_value(config).map_err(|error| {
-                        alas_config::OverlayError::Rejected {
-                            type_name: "AlasConfig",
-                            source: error,
-                        }
-                    })
-                }) {
+                match alas_config::AlasConfig::from_value(&value)
+                    .map(|config| full_config_values(&config))
+                {
                     Ok(canonical) => {
                         self.config_values = canonical;
                         self.save_tool_preferences();

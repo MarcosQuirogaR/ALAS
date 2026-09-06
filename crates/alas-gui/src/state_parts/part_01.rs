@@ -304,7 +304,7 @@ impl Default for AppState {
         let mut config = AlasConfig::default();
         apply_tool_preferences(&mut config, &tool_preferences);
         let schema = config.schema();
-        let config_values = serde_json::to_value(&config).unwrap_or(Value::Null);
+        let config_values = crate::config_edit::full_config_values(&config);
 
         let preset_names = presets::display_names()
             .into_iter()
