@@ -20,9 +20,11 @@
 //! all of its constraints at once instead of one of them drowning out the
 //! lift-to-drag objective.
 
+mod objective;
 mod solver;
 mod weights;
 
+pub use objective::{ConstraintPolicy, MtowSizing, ObjectiveConfig, ObjectiveKind};
 pub use solver::SolverSettings;
 pub use weights::ObjectiveWeights;
 
@@ -47,6 +49,14 @@ pub struct OptimizerConfig {
         help = "Which optimization method runs, how long and wide its population is, and where in the design space it starts."
     )]
     pub solver: SolverSettings,
+
+    /// What the mission-sized search minimises, and which requirements bound it.
+    #[serde(default, skip_serializing_if = "ObjectiveConfig::is_default")]
+    #[config(
+        nested,
+        help = "The mission-sized objective -- block fuel, takeoff mass or empty mass over the design range under the fuel policy -- and the hard, soft or diagnostic policy of every requirement family that bounds it. The legacy lift-to-drag objective stays selectable here."
+    )]
+    pub objective: ObjectiveConfig,
 }
 
 // A test asserts on values it constructed here directly, so a failed unwrap
@@ -58,13 +68,14 @@ mod tests {
     use crate::Entry;
 
     #[test]
-    fn what_is_searched_for_and_how_it_is_searched_reach_the_form_as_two_groups() {
+    fn what_is_searched_for_and_how_it_is_searched_reach_the_form_as_separate_groups() {
         // A run that changed a weight and a run that changed a generation
         // count are not comparable, and the form is where that distinction
-        // has to be visible.
+        // has to be visible. The mission-sized objective is a third question
+        // -- what is being minimised at all -- and gets its own group.
         let schema = OptimizerConfig::default().schema();
         let names: Vec<&str> = schema.fields.iter().map(|field| field.name).collect();
-        assert_eq!(names, vec!["weights", "solver"]);
+        assert_eq!(names, vec!["weights", "solver", "objective"]);
         for field in &schema.fields {
             assert!(matches!(field.entry, Entry::Node(_)), "{}", field.name);
         }

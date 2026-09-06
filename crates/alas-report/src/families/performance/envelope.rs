@@ -44,6 +44,18 @@ pub fn figure_vn_diagram(vn: &VnDiagramData, theme: Option<&str>) -> Scene {
         pal,
     );
     scene.suppress_derived_title();
+    if let Err(message) = vn.validate_speed_order() {
+        scene.add(SceneElement::Text {
+            text: format!("INVALID: {message}"),
+            pos: [320.0, 450.0],
+            font_size: 10.0,
+            color: Color::rgba(RED.0, RED.1, RED.2, 255),
+            align: TextAlign::Center,
+            baseline: TextBaseline::Bottom,
+            angle_deg: 0.0,
+            bold: true,
+        });
+    }
 
     let v_max = vn
         .v_kt

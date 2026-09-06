@@ -39,6 +39,8 @@ pub mod control_surfaces;
 pub mod design_variables;
 pub mod engines;
 pub mod fidelity_presets;
+pub mod fuel_policy;
+pub mod fuel_tanks;
 pub mod geometry;
 pub mod landing_gear;
 pub mod mass;
@@ -49,6 +51,7 @@ pub mod optimizer;
 pub mod performance;
 pub mod performance_presets;
 pub mod physics;
+pub mod preset_fuel_tanks;
 pub mod presets;
 pub mod propulsion;
 pub mod requirements;
@@ -76,6 +79,10 @@ pub use engines::{
     PropulsionTechnology, TurbofanEngineSpec, TurbofanOffDesignSpec, TurbopropEngineSpec,
 };
 pub use fidelity_presets::{FidelityPreset, UnknownFidelityPreset};
+pub use fuel_policy::{FuelPolicyConfig, FuelScheme};
+pub use fuel_tanks::{
+    AuxiliaryTankConfig, CenterTankConfig, FuelTankLayoutConfig, TrimTankConfig, WingTankConfig,
+};
 pub use geometry::{
     ActiveEngineModel, EmpennageConfig, EngineBindingError, EngineConfig, FuselageConfig,
     GeometryConfig, InboardAerodynamicStation, MainWingPanel, MainWingStation, MainWingStationKind,
@@ -85,7 +92,10 @@ pub use landing_gear::LandingGearConfig;
 pub use mass::MassModelConfig;
 pub use mission::{MissionConfig, MissionProfileConfig};
 pub use mses::MsesConfig;
-pub use optimizer::{ObjectiveWeights, OptimizerConfig, SolverSettings};
+pub use optimizer::{
+    ConstraintPolicy, MtowSizing, ObjectiveConfig, ObjectiveKind, ObjectiveWeights,
+    OptimizerConfig, SolverSettings,
+};
 pub use performance::PerformanceConfig;
 pub use performance_presets::{PerformancePreset, UnknownPerformancePreset};
 pub use physics::DragModelConfig;

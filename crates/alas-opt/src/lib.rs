@@ -25,6 +25,7 @@ pub mod differential_evolution;
 pub mod envelope;
 pub mod evaluator;
 pub mod history;
+pub mod mdo;
 mod mesh_correction;
 pub mod objective;
 mod python_rng;
@@ -42,6 +43,10 @@ pub use envelope::{
 };
 pub use evaluator::{ObjectiveEvaluation, ObjectiveEvaluator};
 pub use history::OptimizationHistory;
+pub use mdo::{
+    assess_candidate, evaluate_mission_sized, CandidateAssessment, ConstraintFamily,
+    ConstraintResidual, SizedCandidate,
+};
 pub use objective::{
     wing_fuel_volume_m3, wing_fuel_volume_m3_reference_compatibility, DesignObjective,
 };

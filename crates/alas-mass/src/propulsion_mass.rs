@@ -67,7 +67,7 @@ pub(crate) fn turbofan_installed_mass(
 /// The calibration point is 480 kg per PW127M dry engine and 180 kg per
 /// Hamilton Sundstrand 568F propeller at 1,845.8 kW (2,475 shp).  Those values
 /// are secondary public evidence and therefore carry a deliberately broad
-/// ±25% preliminary uncertainty. Exponents 0.8 (gas turbine) and 0.5
+/// +/-25% preliminary uncertainty. Exponents 0.8 (gas turbine) and 0.5
 /// (propeller) provide smooth conceptual scaling without claiming an OEM
 /// family regression. The 25% installation allowance covers nacelle, mount,
 /// controls, fire protection and accessories; it excludes fuel.

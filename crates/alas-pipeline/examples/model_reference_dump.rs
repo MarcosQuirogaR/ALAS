@@ -8,6 +8,8 @@
 //! the two can be merged into a correlation table. It is a scratch validation
 //! instrument, not a shipped artifact.
 #![allow(clippy::print_stdout, clippy::print_stderr, missing_docs)]
+// Standalone fixture diagnostics fail immediately when their curated inputs are invalid.
+#![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -300,7 +302,7 @@ fn dump(name: &str) -> Result<Value, String> {
             "engine_model": config.geometry.engine.engine_name,
             "kind": "turbofan",
             "sls_thrust_kn": spec.rated_thrust_kn,
-            "config_thrust_kn": config.geometry.engine.thrust_kn,
+            "config_thrust_kn": config.geometry.engine.thrust_kn(),
             "cruise_reference_thrust_kn": spec.off_design.cruise_reference_thrust_n / 1000.0,
             "cruise_reference_altitude_m": spec.off_design.cruise_reference_altitude_m,
             "cruise_reference_mach": spec.off_design.cruise_reference_mach,

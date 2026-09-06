@@ -124,7 +124,7 @@ pub struct Rbe3 {
     pub refgrid: i64,
     /// Dependent components, as the digit string NASTRAN expects.
     pub refc: &'static str,
-    /// Weight on the single independent group.
+    /// Dimensionless interpolation weight on the single independent group.
     pub weight: f64,
     /// Independent components.
     pub comp: &'static str,

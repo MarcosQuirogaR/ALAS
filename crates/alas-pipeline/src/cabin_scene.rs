@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2026 Marcos Quiroga Rodriguez
 //! Versioned, renderer-neutral cabin scene produced from a completed analysis.
 
 use std::{fs::File, io, path::Path};
@@ -15,6 +16,7 @@ mod build;
 pub const CABIN_SCENE_SCHEMA_VERSION: &str = "alas.cabin-scene/v2";
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+// Serialized fields form the documented interchange schema.
 #[allow(missing_docs)]
 pub struct CabinScene {
     pub schema_version: String,
@@ -33,6 +35,7 @@ pub struct CabinScene {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+// Serialized fields form the documented interchange schema.
 #[allow(missing_docs)]
 pub struct SceneUnits {
     pub length: String,
@@ -41,6 +44,7 @@ pub struct SceneUnits {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+// Serialized fields form the documented interchange schema.
 #[allow(missing_docs)]
 pub struct CoordinateFrame {
     pub origin: String,
@@ -51,6 +55,7 @@ pub struct CoordinateFrame {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+// Serialized fields form the documented interchange schema.
 #[allow(missing_docs)]
 pub struct SceneProvenance {
     pub producer: String,
@@ -61,13 +66,17 @@ pub struct SceneProvenance {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+// Serialized fields form the documented interchange schema.
 #[allow(missing_docs)]
 pub struct Point2 {
+    /// Lateral coordinate [m], positive starboard from the aircraft origin.
     pub y: f64,
+    /// Vertical coordinate [m], positive up from the aircraft origin.
     pub z: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+// Serialized fields form the documented interchange schema.
 #[allow(missing_docs)]
 pub struct SourcedContour {
     pub points_yz_m: Vec<Point2>,
@@ -76,6 +85,7 @@ pub struct SourcedContour {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+// Serialized fields form the documented interchange schema.
 #[allow(missing_docs)]
 pub struct SectionStation {
     pub id: String,
@@ -87,6 +97,7 @@ pub struct SectionStation {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+// Serialized fields form the documented interchange schema.
 #[allow(missing_docs)]
 pub struct RecommendedSection {
     pub station_id: String,
@@ -98,6 +109,7 @@ pub struct RecommendedSection {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+// Serialized fields form the documented interchange schema.
 #[allow(missing_docs)]
 pub struct ResolvedDeck {
     pub id: String,
@@ -111,6 +123,7 @@ pub struct ResolvedDeck {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+// Serialized fields form the documented interchange schema.
 #[allow(missing_docs)]
 pub struct Box3 {
     pub center_x_m: f64,
@@ -122,6 +135,7 @@ pub struct Box3 {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+// Serialized fields form the documented interchange schema.
 #[allow(missing_docs)]
 pub struct SeatRow {
     pub id: String,
@@ -137,6 +151,7 @@ pub struct SeatRow {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+// Serialized fields form the documented interchange schema.
 #[allow(missing_docs)]
 pub struct Seat {
     pub id: String,
@@ -152,6 +167,7 @@ pub struct Seat {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+// Serialized fields form the documented interchange schema.
 #[allow(missing_docs)]
 pub struct NominalWindows {
     pub apertures: Vec<WindowAperture>,
@@ -161,6 +177,7 @@ pub struct NominalWindows {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+// Serialized fields form the documented interchange schema.
 #[allow(missing_docs)]
 pub struct WindowAperture {
     pub id: String,
@@ -174,6 +191,7 @@ pub struct WindowAperture {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+// Serialized fields form the documented interchange schema.
 #[allow(missing_docs)]
 pub struct OverheadSystem {
     pub runs: Vec<OverheadRun>,
@@ -182,6 +200,7 @@ pub struct OverheadSystem {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+// Serialized fields form the documented interchange schema.
 #[allow(missing_docs)]
 pub struct OverheadRun {
     pub id: String,
@@ -194,6 +213,7 @@ pub struct OverheadRun {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+// Serialized fields form the documented interchange schema.
 #[allow(missing_docs)]
 pub struct OverheadTopology {
     pub run_id: String,
@@ -205,6 +225,7 @@ pub struct OverheadTopology {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+// Serialized fields form the documented interchange schema.
 #[allow(missing_docs)]
 pub struct CargoSystem {
     pub slots: Vec<CargoSlot>,
@@ -213,6 +234,7 @@ pub struct CargoSystem {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+// Serialized fields form the documented interchange schema.
 #[allow(missing_docs)]
 pub struct CargoSlot {
     pub id: String,
@@ -224,6 +246,7 @@ pub struct CargoSlot {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+// Serialized fields form the documented interchange schema.
 #[allow(missing_docs)]
 pub struct CargoItem {
     pub id: String,
@@ -239,6 +262,7 @@ pub struct CargoItem {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+// Serialized fields form the documented interchange schema.
 #[allow(missing_docs)]
 pub struct UldDefinition {
     pub key: String,
@@ -252,6 +276,7 @@ pub struct UldDefinition {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+// Serialized fields form the documented interchange schema.
 #[allow(missing_docs)]
 pub struct OrientationStatus {
     pub value: Option<String>,
@@ -260,6 +285,7 @@ pub struct OrientationStatus {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+// Serialized fields form the documented interchange schema.
 #[allow(missing_docs)]
 pub struct CargoInventoryStatus {
     pub available: bool,
@@ -268,6 +294,7 @@ pub struct CargoInventoryStatus {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+// Serialized fields form the documented interchange schema.
 #[allow(missing_docs)]
 pub struct MissingInput {
     pub field: String,

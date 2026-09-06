@@ -34,6 +34,7 @@ pub mod dual_solver;
 pub mod export;
 pub mod feasibility;
 pub mod flowunsteady;
+pub mod fuel_model;
 pub mod full_analysis;
 mod mission_stage;
 pub mod openvsp;
@@ -82,10 +83,12 @@ pub use export::{
     export_json_with_feasibility_and_cpacs, format_summary, CpacsReference, DesignDatabase,
 };
 pub use feasibility::{
-    assess_physical_feasibility, format_feasibility, CarriedFuelBasis, CgEnvelopeAssessment,
-    CruiseEquilibriumAssessment, FeasibilityReport, FindingCode, FindingSeverity,
-    FuelCapacityAssessment, FuelCapacityEvidence, FuelLoadingAssessment, MissionFuelAssessment,
-    MissionFuelStatus, PhysicalFinding, PlanningCgStatus,
+    assess_physical_feasibility, assess_physical_feasibility_with_load_case, format_feasibility,
+    CarriedFuelBasis, CgEnvelopeAssessment, CruiseEquilibriumAssessment, DispatchAssessment,
+    DispatchOutcome, FeasibilityReport, FindingCode, FindingSeverity, FuelCapacityAssessment,
+    FuelCapacityEvidence, FuelLoadingAssessment, LedgerItemSummary, MassBalanceAssessment,
+    MassStateSummary, MissionFuelAssessment, MissionFuelStatus, PhysicalFinding, PlanningCgStatus,
+    TankSummary,
 };
 pub use flowunsteady::{
     run_flowunsteady_analysis, FlowUnsteadyAnalysisResult, FlowUnsteadyAnalysisStatus,
@@ -93,6 +96,7 @@ pub use flowunsteady::{
 pub use full_analysis::{
     AnalysisReport, DesignPoint, FullAnalysis, PolarFit, PolarFitStatus, TrimmedDesignPoint,
 };
+pub use mission_stage::dispatch::{LoadCaseSelection, PolicyClosureCase, SelectedLoadCase};
 pub use openvsp::{
     export_openvsp_script, materialize_openvsp_project, OpenVspExportResult, OpenVspExportStatus,
 };

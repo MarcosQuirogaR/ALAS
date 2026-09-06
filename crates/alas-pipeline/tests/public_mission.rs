@@ -7,6 +7,9 @@
 //! never publishes their result. These runs exercise the same pipeline entry
 //! used by the CLI and desktop worker, with a deterministic dispatched route.
 
+// Standalone fixture diagnostics fail immediately when their curated inputs are invalid.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::print_stdout)]
+
 use alas_config::airports::get as get_airport;
 use alas_config::AlasConfig;
 use alas_exec::RunEnvironment;

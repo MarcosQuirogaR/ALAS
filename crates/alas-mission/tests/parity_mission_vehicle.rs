@@ -120,11 +120,38 @@ fn compare(
             }
             for key in a.keys() {
                 if !e.contains_key(key) {
-                    strings.exact(
-                        &join(path, key),
-                        &"<present>".to_owned(),
-                        &"<absent>".to_owned(),
-                    );
+                    // The typed engine payload is a native addition the flat
+                    // legacy keys are derived from; the binding unit tests
+                    // validate it and the flat keys are compared here.
+                    if path.ends_with(".geometry_config.engine")
+                        && matches!(key.as_str(), "turbofan" | "turboprop")
+                    {
+                        continue;
+                    }
+                    let child = join(path, key);
+                    // A leaf the frozen request never carried is admitted
+                    // only through an explicit two-sided correction.
+                    if let Some(correction) = corrections.remove(child.as_str()) {
+                        let upstream = correction
+                            .upstream
+                            .as_str()
+                            .map_or_else(|| correction.upstream.to_string(), str::to_owned);
+                        strings.exact(
+                            &format!("{child}: frozen Python request"),
+                            &"<absent>".to_owned(),
+                            &upstream,
+                        );
+                        compare(
+                            &format!("{child}: source-corrected request"),
+                            &a[key],
+                            &correction.corrected,
+                            numbers,
+                            strings,
+                            corrections,
+                        );
+                        continue;
+                    }
+                    strings.exact(&child, &"<present>".to_owned(), &"<absent>".to_owned());
                 }
             }
         }
@@ -226,12 +253,87 @@ fn vehicle_request_matches_the_reference() {
 
 fn request_corrections() -> BTreeMap<&'static str, RequestCorrection> {
     [
+        // Airbus/EASA-sourced A320-214 and A340-312 dimension corrections,
+        // pinned two-sidedly by the alas-config preset ledger.
+        correction(
+            "A320-200.geometry_config.empennage.hstab_root_chord_m",
+            4.0,
+            3.831,
+        ),
+        correction(
+            "A320-200.geometry_config.empennage.hstab_tip_chord_m",
+            1.2,
+            1.149,
+        ),
+        correction(
+            "A320-200.geometry_config.empennage.hstab_tip_le_m[0]",
+            3.5,
+            3.631,
+        ),
+        correction(
+            "A320-200.geometry_config.empennage.hstab_tip_le_m[1]",
+            6.0,
+            6.225,
+        ),
+        correction(
+            "A320-200.geometry_config.empennage.vstab_root_chord_m",
+            5.2,
+            5.444,
+        ),
+        correction(
+            "A320-200.geometry_config.empennage.vstab_tip_chord_m",
+            1.8,
+            1.884,
+        ),
+        correction(
+            "A320-200.geometry_config.empennage.vstab_tip_le_m[0]",
+            5.0,
+            5.06,
+        ),
+        correction(
+            "A320-200.geometry_config.empennage.vstab_tip_le_m[2]",
+            5.8,
+            5.87,
+        ),
+        correction(
+            "A320-200.geometry_config.engine.spanwise_positions_m[0]",
+            5.5,
+            5.755,
+        ),
+        correction(
+            "A320-200.geometry_config.engine.spanwise_positions_m[1]",
+            -5.5,
+            -5.755,
+        ),
+        correction(
+            "A320-200.geometry_config.wing.break_span_fraction",
+            0.37,
+            0.34,
+        ),
+        correction("A320-200.geometry_config.wing.root_datum_x_m", 12.9, 12.913),
+        correction(
+            "A340-300.geometry_config.empennage.hstab_tip_le_m[1]",
+            9.0,
+            9.7,
+        ),
+        correction(
+            "A320-200.geometry_config.fuselage.height_m",
+            Value::Null,
+            4.14,
+        ),
+        correction(
+            "A320-200.geometry_config.wing.side_of_body_chord_ratio",
+            "<absent>",
+            0.827_405,
+        ),
         correction("A320-200.engine.bypass_ratio", 11.0, 5.5),
         correction("A320-200.engine.fan_pressure_ratio", 1.4, 1.6),
         correction("A320-200.engine.nacelle_length_m", 3.6, 3.3),
         correction("A320-200.engine.nacelle_max_radius_m", 1.15, 1.0),
         correction("A320-200.engine.overall_pressure_ratio", 40.0, 32.6),
-        correction("A320-200.engine.thrust_kn", 120.64, 117.77),
+        // The typed CFM56-5B4/3 binding carries its identity-matched ICAO
+        // LTO rating rather than the published design scalar.
+        correction("A320-200.engine.thrust_kn", 120.64, 120.1),
         correction("A320-200.engine.turbine_inlet_temp_k", 1650.0, 1600.0),
         correction("A320-200.geometry_config.engine.bypass_ratio", 11.0, 5.5),
         correction(
@@ -285,7 +387,7 @@ fn request_corrections() -> BTreeMap<&'static str, RequestCorrection> {
             32.6,
         ),
         correction("A320-200.geometry_config.engine.radius_scale_m", 1.15, 1.0),
-        correction("A320-200.geometry_config.engine.thrust_kn", 120.64, 117.77),
+        correction("A320-200.geometry_config.engine.thrust_kn", 120.64, 120.1),
         correction(
             "A320-200.geometry_config.engine.turbine_inlet_temp_k",
             1650.0,

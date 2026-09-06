@@ -189,6 +189,14 @@ pub enum OptionSource {
     CabinPreset,
     /// Versioned systems-and-equipment mass method.
     SystemsMassMethod,
+    /// The operating rule a design mission's reserves are sized under.
+    FuelScheme,
+    /// The scalar the mission-sized design search minimises.
+    ObjectiveKind,
+    /// Whether the takeoff mass is a fixed input or closed by the mission.
+    MtowSizing,
+    /// How a family of requirements takes part in the ranking.
+    ConstraintPolicy,
 }
 
 impl OptionSource {
@@ -224,6 +232,22 @@ impl OptionSource {
             Self::SystemsMassMethod => {
                 Some(&["reference_compatible_fractions", "flops_transport_v1"])
             }
+            Self::FuelScheme => Some(&[
+                "easa_basic",
+                "faa_domestic",
+                "faa_flag_supplemental",
+                "study_convention",
+                "trip_fuel_only",
+            ]),
+            Self::ObjectiveKind => Some(&[
+                "legacy_lift_to_drag",
+                "block_fuel",
+                "takeoff_mass",
+                "operating_empty_mass",
+                "fuel_per_seat_kilometre",
+            ]),
+            Self::MtowSizing => Some(&["fixed_requirement", "sized_by_mission"]),
+            Self::ConstraintPolicy => Some(&["hard", "soft", "diagnostic", "off"]),
             _ => None,
         }
     }

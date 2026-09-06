@@ -7,6 +7,8 @@
 //! compare -- same references, frames, alpha schedule and Prandtl-Glauert
 //! domain. Nothing in the tree then computes how far apart they actually are.
 #![allow(clippy::print_stdout, missing_docs)]
+// Standalone fixture diagnostics fail immediately when their curated inputs are invalid.
+#![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::path::Path;
 

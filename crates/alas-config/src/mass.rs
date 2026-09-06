@@ -50,6 +50,16 @@ pub struct MassModelConfig {
     )]
     pub flops_transport: FlopsTransportConfig,
 
+    /// Whether the product analysis places each mass group at its
+    /// geometry-derived station.
+    #[serde(default = "default_true", skip_serializing_if = "Clone::clone")]
+    #[config(
+        advanced,
+        label = "Geometry-derived component stations",
+        help = "Place every mass group at the station the built geometry gives it: the integrated wingbox centroid, the tails at 42 percent of their mean chord, the gear at its nose and main stations, the engines at their nacelles and the fuel in its tanks. Disable to keep the frozen point placement of the reference implementation."
+    )]
+    pub geometric_component_stations: bool,
+
     /// Share of maximum takeoff weight the wing structure must carry.
     #[config(
         label = "Wing suspended-mass fraction",
@@ -184,11 +194,16 @@ pub struct MassModelConfig {
     pub fuel_tank_usable_fraction: f64,
 }
 
+const fn default_true() -> bool {
+    true
+}
+
 impl Default for MassModelConfig {
     fn default() -> Self {
         Self {
             systems_mass_method: SystemsMassMethod::ReferenceCompatibleFractions,
             flops_transport: FlopsTransportConfig::default(),
+            geometric_component_stations: true,
             suspended_mass_fraction: 0.75,
             max_airspeed_for_flaps_ms: 90.0,
             flap_deflection_angle_deg: 40.0,

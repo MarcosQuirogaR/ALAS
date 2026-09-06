@@ -492,6 +492,8 @@ fn structural_error(msg: String, torenbeek: f64) -> StructuralAnalysisResult {
 }
 
 #[cfg(test)]
+// Failed expectations and unwraps here are failed test assertions.
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::{missing_patran_result, sizing_failure_detail};
     use alas_struct::sizing::{MassBreakdown, SparSizing, WingboxSizing};

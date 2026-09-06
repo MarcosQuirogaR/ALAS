@@ -422,9 +422,9 @@ P14 study, not a translation decision.
 | `alas/physics/dynamics.py` | 96 | `alas-stab::dynamics` | — | `closed` | todo — P7, not P4; needs `alas-aero::asb_vlm` |
 | `alas/physics/performance.py` | 555 | `alas-perf::performance` | — | `closed` | green — `golden/perf/performance.json` (point-performance surface; see scope note) |
 | `alas/physics/landing_gear.py` | 298 | `alas-perf::landing_gear` | — | `closed` | green — `golden/perf/landing_gear.json` |
-| `alas/physics/payload.py` | 540 | `alas-payload::{geometry,layout,oew}` | — | `closed` | wip — `golden/payload/layout.json`; see the split below |
-| `alas/physics/cabin_layout.py` | 693 | `alas-payload::cabin` | — | `exact` | todo |
-| `alas/physics/cargo_loader.py` | 381 | `alas-payload::cargo` | — | `exact` | todo |
+| `alas/physics/payload.py` | 540 | `alas-payload::{geometry,layout,oew}` | — | `closed` | green — `golden/payload/layout.json`; see the split below |
+| `alas/physics/cabin_layout.py` | 693 | `alas-payload::cabin` | — | `exact` | green — `golden/payload/layout.json` (item sequence and counts at `exact`, positions and masses at `closed`; the compatibility interior replays the frozen premium-economy slot) |
+| `alas/physics/cargo_loader.py` | 381 | `alas-payload::cargo` | — | `exact` | green — `golden/payload/layout.json` (frozen hold grid keeps its loose bulk position; the product envelope path fit-checks it) |
 | — | — | `alas-mass::torenbeek` | AeroSandbox, MIT | `closed` | green — `golden/mass/torenbeek.json` |
 | — | — | `alas-mass::suave_transport` | SUAVE, LGPL-2.1 | `closed` | todo |
 | — | — | `alas-stab::modes` | AeroSandbox, MIT | `closed` | todo |
@@ -543,8 +543,8 @@ because nothing in P4 through P9 calls them, not reproduced wrongly.
 | Python module | Lines | Rust target | Provenance | Tier | Status |
 |---|---:|---|---|---|---|
 | `alas/integration/suave_bridge.py` | 272 | — | — | — | dropped: the subprocess boundary disappears with the translation |
-| `alas/integration/suave_vehicle.py` | 96 | `alas-mission::vehicle` | — | `closed` | todo |
-| `alas/integration/suave_mission.py` | 38 | `alas-mission::profile` | — | `closed` | todo |
+| `alas/integration/suave_vehicle.py` | 96 | `alas-mission::vehicle` | — | `closed` | green — `golden/mission/vehicle.json`; source corrections pinned two-sidedly |
+| `alas/integration/suave_mission.py` | 38 | `alas-mission::profile` | — | `closed` | green — `golden/mission/profile.json`; replays the recorded baseline TAS profile |
 | — | — | `alas-mission::segments` | SUAVE, LGPL-2.1 | `iter` | todo |
 | — | — | `alas-mission::numerics` | SUAVE, LGPL-2.1 | `linalg` | todo |
 | — | — | `alas-mission::solve` | SUAVE, LGPL-2.1 | `iter` | todo |
@@ -663,6 +663,7 @@ figure registry survive as library concerns, listed above.
 | `alas-exec` | — | — | todo |
 | `alas-testkit` | — | — | native |
 | `alas-acceptance` | — | — | todo |
+| `alas-uav` | — | — | native |
 | `xtask` | — | — | native |
 
 `alas-math::bicubic` reproduces `scipy.interpolate.RectBivariateSpline` at its

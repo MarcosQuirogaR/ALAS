@@ -55,3 +55,19 @@ a large improvement. Global optimization is rejected. Any selective
 module-level optimization remains experimental until it passes SOL 101 and SOL
 103 regression, eigenvalue correlation, displacement/stress correlation, and
 repeatability checks on the production decks.
+
+## Local remediation status
+
+The sibling solver now records upstream fork commit
+`060ed900db822745353fcce96bddc1565027e7db` in `SOURCE-REVISION.txt`, verified
+against the fork remote, and inventories the local diff in `MODIFICATIONS.md`.
+Preexisting local change dates and authors are unknown, so this inventory is
+not a completed NOSA characterization or authorization to distribute. Required
+license and exact source/archive inputs remain release blockers.
+
+An opt-in `NASTRAN95_EXPERIMENTAL_SELECTIVE_OPTIMIZATION` CMake option applies
+GNU `-O3` except `mis/ifp1c.f` (`-O0`). It defaults off to retain the measured
+working build. Configuration on the audit-remediation host could not find
+Ninja or the GNU Fortran installation referenced by the old CMake cache;
+there is no rebuilt executable or new performance claim. Production adoption
+still requires the regression and correlation checks above.

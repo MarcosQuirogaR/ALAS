@@ -6,11 +6,13 @@
 use alas_config::{CgEnvelopeEvidence, CgEnvelopeSource};
 use alas_opt::ModelCgEnvelopeAssessment;
 
-use super::{CruiseEquilibriumAssessment, FuelLoadingAssessment};
+use super::{CruiseEquilibriumAssessment, FuelLoadingAssessment, MassBalanceAssessment};
 
 /// Stable identifier for one physical failure mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FindingCode {
+    /// The maneuver envelope does not satisfy VS < VA <= VC < VD.
+    InvalidEnvelopeSpeedOrder,
     /// Cruise aerodynamics did not produce a positive finite efficiency.
     InvalidCruiseAerodynamics,
     /// The MTOW mass closure left no positive fuel.
@@ -70,6 +72,20 @@ pub enum FindingCode {
     MaximumZeroFuelWeightViolation,
     /// The modeled payload exceeds the configured structural payload cap.
     StructuralPayloadLimitViolation,
+    /// The fuel the policy requires for the route does not fit under the
+    /// takeoff-mass limit or in the usable tanks.
+    ReserveFuelShortfall,
+    /// The fuel-policy takeoff-mass closure did not settle within its budget.
+    DispatchNotConverged,
+    /// The fuel policy could not be priced on this aircraft.
+    FuelPolicyUnavailable,
+    /// The item-level mass ledger could not be built for this aircraft.
+    MassLedgerUnavailable,
+    /// The tank arrangement could not be resolved on the built geometry.
+    FuelTankLayoutUnavailable,
+    /// The item ledger and the lumped model disagree about the takeoff
+    /// centre of gravity by more than the reporting band.
+    MassModelDisagreement,
 }
 
 /// Severity of a physical finding.
@@ -167,6 +183,9 @@ pub struct FeasibilityReport {
     pub fuel_loading: FuelLoadingAssessment,
     /// Explicit cruise force-balance evidence from the flown mission.
     pub cruise_equilibrium: Option<CruiseEquilibriumAssessment>,
+    /// The item-level mass statement: tanks, stations, and the mass, centre
+    /// of gravity and inertia of each named loading state.
+    pub mass_balance: Option<MassBalanceAssessment>,
 }
 
 impl FeasibilityReport {

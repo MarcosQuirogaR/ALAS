@@ -44,6 +44,9 @@ use alas_testkit::{Comparison, Tier};
 use serde::Deserialize;
 use serde_json::Value;
 
+#[path = "support/product_corrections.rs"]
+mod product_corrections;
+
 struct SourceCorrection {
     upstream: Value,
     corrected: Value,
@@ -140,7 +143,10 @@ fn every_aircraft_preset_survives_the_loading_path() {
     }
     comparison.exact(
         "preset count",
-        &alas_config::presets::available().len(),
+        &alas_config::presets::available()
+            .iter()
+            .filter(|name| fixture.from_preset.contains_key(**name))
+            .count(),
         &fixture.from_preset.len(),
     );
     comparison.exact(
@@ -177,6 +183,33 @@ fn compare_values(
     actual: &Value,
     expected: &Value,
 ) {
+    if let Some((old, new)) = product_corrections::dimensions(path) {
+        compare_correction_value(
+            comparison,
+            &format!("{path}: frozen dimension"),
+            expected,
+            &old,
+        );
+        compare_correction_value(
+            comparison,
+            &format!("{path}: published dimension"),
+            actual,
+            &new,
+        );
+        return;
+    }
+    if let Some(new) =
+        product_corrections::engine_copy(path).or_else(|| product_corrections::operational(path))
+    {
+        corrections.remove(path);
+        compare_correction_value(
+            comparison,
+            &format!("{path}: product binding"),
+            actual,
+            &new,
+        );
+        return;
+    }
     if let Some((upstream, corrected)) = vibration_performance_default_correction(path) {
         compare_correction_value(
             comparison,
@@ -234,6 +267,9 @@ fn compare_values(
                 }
             }
             for key in actual.keys() {
+                if product_corrections::native_field(path, key) {
+                    continue;
+                }
                 if (path.ends_with("MissionConfig") || path.ends_with(".mission"))
                     && (key == "suave_venv_dir" || key == "suave_runner_dir")
                 {
@@ -244,6 +280,24 @@ fn compare_values(
                 }
                 if !expected.contains_key(key) {
                     let child = format!("{path}.{key}");
+                    if let Some(new) = product_corrections::engine_copy(&child)
+                        .or_else(|| product_corrections::added_planform(&child))
+                    {
+                        corrections.remove(&child);
+                        compare_correction_value(comparison, &child, &actual[key], &new);
+                        continue;
+                    }
+                    if path.ends_with(".geometry.engine")
+                        && matches!(
+                            key.as_str(),
+                            "part_power_fuel_flow_ratios" | "part_power_source"
+                        )
+                    {
+                        let default =
+                            serde_json::to_value(alas_config::EngineConfig::default()).unwrap();
+                        compare_correction_value(comparison, &child, &actual[key], &default[key]);
+                        continue;
+                    }
                     if let Some(correction) = corrections.remove(child.as_str()) {
                         compare_correction_value(
                             comparison,
@@ -298,6 +352,8 @@ fn vibration_performance_default_correction(path: &str) -> Option<(Value, Value)
         Some((Value::Bool(true), Value::Bool(false)))
     } else if path.ends_with(".structures.freq_sweep_max_hz") {
         Some((serde_json::json!(500.0), serde_json::json!(60.0)))
+    } else if path.ends_with(".structures.n_modes") {
+        Some((serde_json::json!(30), serde_json::json!(16)))
     } else {
         None
     }

@@ -51,10 +51,12 @@ use crate::export::{
     export_airfoil_dat, export_json_with_feasibility_and_cpacs, format_summary, CpacsReference,
     DesignDatabase,
 };
-use crate::feasibility::{assess_physical_feasibility, format_feasibility, FeasibilityReport};
+use crate::feasibility::{
+    assess_physical_feasibility_with_load_case, format_feasibility, FeasibilityReport,
+};
 use crate::flowunsteady::{run_flowunsteady_analysis, FlowUnsteadyAnalysisResult};
 use crate::full_analysis::{AnalysisReport, FullAnalysis};
-use crate::mission_stage;
+use crate::mission_stage::{self, SelectedLoadCase};
 use crate::openvsp::{export_openvsp_script, materialize_openvsp_project, OpenVspExportResult};
 use crate::payload_layout_export::export_payload_layout_artifact;
 use crate::runs::{RunEvent, RunEventKind, RunEventSeverity};
@@ -248,6 +250,7 @@ fn emit_diagnostic_with_severity(
     );
 }
 
+// Coordinated analysis inputs are kept explicit at this integration boundary.
 #[allow(clippy::too_many_arguments)]
 fn emit_tool_diagnostics(
     events: Option<&(dyn Fn(RunEvent) + Sync)>,
@@ -338,10 +341,9 @@ fn emit_tool_diagnostics(
         );
     }
 
-    // The overall structural result is intentionally still `ok` when the
-    // analytical sizing path succeeded.  Surface the individual native
-    // solver outcomes as well, otherwise a missing MSC DLL is hidden behind
-    // the useful-but-different analytical answer.
+    // The overall structural result stays `ok` when the analytical sizing
+    // succeeded; the individual native solver outcomes are surfaced as well
+    // so a missing MSC DLL is not hidden behind the analytical answer.
     if let Some(structures) = structures {
         for (tool, outcome) in [
             (
@@ -420,7 +422,7 @@ fn status_with_detail(status: String, error: Option<&str>) -> String {
     const MAX_CHARS: usize = 1_000;
     let detail = error.chars().take(MAX_CHARS).collect::<String>();
     if detail.chars().count() < error.chars().count() {
-        format!("{status}: {detail} …")
+        format!("{status}: {detail} \u{2026}")
     } else {
         format!("{status}: {detail}")
     }
@@ -548,6 +550,8 @@ pub struct PipelineResult {
     pub route_status: Option<RoutePlanningStatus>,
     /// Flown mission telemetry, when a mission stage supplied one.
     pub mission_result: Option<MissionResult>,
+    /// The load case that telemetry was flown at, and how it was chosen.
+    pub mission_load_case: Option<SelectedLoadCase>,
     /// Explicit conservation-law and configured-limit failures for this run.
     pub feasibility: FeasibilityReport,
     /// MSES 2-D polar sweep results for the root section.
@@ -587,6 +591,7 @@ type MissionStageOutputs = (
     Option<Route>,
     Option<RoutePlanningStatus>,
     Option<MissionResult>,
+    Option<SelectedLoadCase>,
 );
 
 #[derive(Debug)]
@@ -787,6 +792,7 @@ impl DesignPipeline {
         )
     }
 
+    // Coordinated analysis inputs are kept explicit at this integration boundary.
     #[allow(clippy::too_many_arguments)]
     fn run_inner(
         &self,
@@ -820,10 +826,9 @@ impl DesignPipeline {
                     .to_owned(),
             );
         }
-        // `output_dir` controls retention, not whether the requested physics
-        // stages run. When retention is disabled, run every writer and
-        // external adapter in an isolated temporary workspace instead of
-        // using `None` as a stage-disable signal.
+        // `output_dir` controls retention, not which physics stages run:
+        // without it every writer and external adapter works in an isolated
+        // temporary workspace rather than treating `None` as "disabled".
         let analysis_dir = options.output_dir.clone().unwrap_or_else(|| {
             let nonce = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
@@ -925,11 +930,9 @@ impl DesignPipeline {
         finish_stage(events, run_clock, stage_clock, 3, "full_analysis");
         check_cancelled(cancel)?;
 
-        // Stage 3: CPACS geometry export and canonicalization.
-        //
-        // Downstream writers consume the typed aircraft reconstructed from
-        // this document, so CPACS is the non-GUI geometry boundary rather
-        // than a sidecar copy of the configuration-built geometry.
+        // Stage 3: CPACS export. Downstream writers consume the aircraft
+        // reconstructed from this document, so CPACS is the non-GUI geometry
+        // boundary rather than a sidecar copy of the built geometry.
         report("Stage 4/7: CPACS export and geometry canonicalization");
         stage_clock = begin_stage(
             events,
@@ -953,7 +956,6 @@ impl DesignPipeline {
         finish_stage(events, run_clock, stage_clock, 4, "geometry_export");
         check_cancelled(cancel)?;
 
-        // Native tool writers receive the CPACS-canonicalized report.
         let openvsp_export = {
             let af_path = analysis_dir.join("airfoils/optimized_root.dat");
             let openvsp_path = analysis_dir.join("openvsp/optimized_aircraft.vspscript");
@@ -982,12 +984,9 @@ impl DesignPipeline {
                     &self.config,
                     openvsp,
                     environment.vspaero_exe.as_deref(),
-                    // The retained OpenVSP mesh is substantially larger than
-                    // the small smoke cases used by the executor tests.  A
-                    // five-minute wall clock cut the installed A380-like
-                    // case off halfway through its 15-point sweep; keep the
-                    // process-tree timeout, but allow one full legacy sweep
-                    // to finish when the solver is available.
+                    // A five-minute wall clock cut the installed A380-like
+                    // 15-point sweep off halfway; fifteen minutes lets one
+                    // full sweep finish under the process-tree timeout.
                     900.0,
                 )
             });
@@ -1248,7 +1247,7 @@ impl DesignPipeline {
                 false,
             )
         };
-        let (route, route_status, mission_result) = mission_outputs;
+        let (route, route_status, mission_result, mission_load_case) = mission_outputs;
         let (mses_result, mses_pressure) = mses_outputs;
         finish_stage(events, run_clock, stage_clock, 5, "downstream");
         emit_tool_diagnostics(
@@ -1271,11 +1270,12 @@ impl DesignPipeline {
             "feasibility",
             "Physical feasibility assessment",
         );
-        let feasibility = assess_physical_feasibility(
+        let feasibility = assess_physical_feasibility_with_load_case(
             &self.config,
             &optimized_design,
             &optimized_report,
             mission_result.as_ref(),
+            mission_load_case.as_ref(),
         );
         finish_stage(events, run_clock, stage_clock, 6, "feasibility");
         check_cancelled(cancel)?;
@@ -1636,6 +1636,7 @@ impl DesignPipeline {
             route,
             route_status,
             mission_result,
+            mission_load_case,
             feasibility,
             mses_result,
             mses_pressure,
@@ -1678,7 +1679,7 @@ impl DesignPipeline {
         dispatched_route: Option<Route>,
     ) -> Result<MissionStageOutputs, String> {
         if !self.config.mission.enabled {
-            return Ok((None, None, None));
+            return Ok((None, None, None, None));
         }
         let planned = self
             .plan_active_route(dispatched_route)
@@ -1697,7 +1698,7 @@ impl DesignPipeline {
             .dest_airport
             .as_ref()
             .unwrap_or(selected_destination);
-        let mission = mission_stage::evaluate(
+        let (mission, load) = mission_stage::evaluate(
             &self.config,
             report,
             origin,
@@ -1705,7 +1706,8 @@ impl DesignPipeline {
             planned.route.total_distance_m(),
         )
         .map_err(|error| format!("native mission stage failed: {error}"))?;
-        Ok((Some(planned.route), Some(planned.status), Some(mission)))
+        let (route, status) = (Some(planned.route), Some(planned.status));
+        Ok((route, status, Some(mission), Some(load)))
     }
 
     fn plan_active_route(&self, dispatched_route: Option<Route>) -> Option<PlannedRoute> {
@@ -1860,5 +1862,7 @@ fn validate_run_configuration(config: &AlasConfig) -> Result<(), String> {
 }
 
 #[cfg(test)]
+// Failed expectations and unwraps here are failed test assertions.
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 #[path = "pipeline_tests.rs"]
 mod tests;

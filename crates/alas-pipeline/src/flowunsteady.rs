@@ -377,6 +377,8 @@ fn close(a: f64, b: f64) -> bool {
 }
 
 #[cfg(test)]
+// Failed expectations and unwraps here are failed test assertions.
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
     use crate::full_analysis::FullAnalysis;

@@ -70,3 +70,83 @@ There is no universal swept-wing efficiency ceiling below 0.968. The planar
 elliptic-loading bound is conditional; nonplanar lifting systems can exceed
 unity for a fixed projected reference span. See [NASA's nonplanar lifting-line
 discussion](https://ntrs.nasa.gov/api/citations/19920016018/downloads/19920016018.pdf).
+
+# Mass statement, tanks, fuel policy and dispatch closure
+
+The item ledger (`alas-mass::ledger`) is the representation every mass
+property is computed from. Each item carries a mass, a role (fixed,
+operating item, unusable fuel, payload, usable fuel), a reference point in
+the geometry frame (x aft, y starboard, z up) and a centroidal inertia
+tensor; the aircraft tensor about any state's centre of gravity follows from
+the parallel-axis theorem, with products of inertia stored as the positive
+integrals and negated on the matrix off-diagonal (JSBSim structural frame
+convention). Component tensors are closed-form solids: thin plates for
+lifting surfaces, a thin-walled cylinder for the fuselage, solid cylinders
+for engines, prisms for tanks and payload items. Component stations follow
+Raymer (*Aircraft Design*, 6th ed., ch. 15-16): the integrated wingbox
+centroid, tails at 42 percent of their mean chord, fuselage at 45-50 percent
+of its length by engine placement, gear at the configured nose and main
+stations, engines at nacelle mid-length. The radius-of-gyration cross-check
+uses Raymer's definition against half-span, half-length and half their mean
+(`I_xx = m (R_x b/2)^2`), reproducing the measured B747-100 tensor of NASA
+CR-2144 to one percent; the frozen `alas-stab` estimate keeps its own
+full-length convention for parity.
+
+Tanks (`alas-mass::tanks`) are spar-box volumes integrated on the built
+wing between the configured front and rear spars over declared semispan
+intervals, a carry-through centre tank between the body sides, a stabiliser
+trim tank and a declared-volume auxiliary tank. Manufacturer-published
+per-tank volumes are authoritative where a preset declares them; the
+geometric estimate supplies the centroid and a calibration factor that keeps
+a redesigned wing's capacity consistent: on a design other than the preset's
+own, each published cell becomes a per-cell factor between its published
+volume and the geometric estimate on the preset's geometry, applied to the
+candidate's own spar box (`FuelTankLayout::resolve_scaled`), so the optimizer
+sees fuel volume grow and shrink with the wing. Fuel is loaded in the reverse of the
+burn order and burned centre first, outer wing last; unusable fuel (CS
+25.959) is part of the empty mass and expansion space (CS 25.969, at least
+two percent) is excluded from the usable volume.
+
+The fuel policy (`alas-config::fuel_policy`, `alas-mass::fuel_policy`)
+decomposes the load into taxi, trip, contingency, destination alternate,
+final reserve, additional and extra fuel. Under the EASA basic scheme
+(CAT.OP.MPA.181(c) and AMC1) contingency is the larger of five percent of the
+trip fuel and five minutes holding at 1,500 ft above the destination at the
+estimated landing mass, the final reserve is thirty minutes holding at 1,500
+ft at the estimated mass on arrival at the alternate, and a missing
+destination alternate is replaced by a fifteen-minute hold. Under 14 CFR
+121.639 the reserve is forty-five minutes at normal cruise consumption after
+the alternate with no contingency; under 121.645(b) it is ten percent of the
+flight time to the destination priced at cruise consumption plus a thirty-
+minute hold, and two hours of cruise replace a missing alternate
+(121.645(c)). Holding fuel flow is the cruise TSFC applied at the minimum-
+drag lift coefficient of the parabolic polar, which for a high-bypass
+narrowbody lands within about ten percent of the cruise flow at the same
+mass; this is an analytic estimate, not an engine-deck value.
+
+The dispatch closure (`alas-mass::dispatch`, `alas-pipeline::mission_stage::
+dispatch`) solves the fixed point `takeoff mass = zero-fuel mass + required
+takeoff fuel(takeoff mass)`, first with the analytic Breguet model built from
+the report's drag polar and engine binding, then by re-flying the native
+segment mission at the estimate and re-pricing the policy on the flown trip
+until the mass changes by less than the larger of five kilograms and one
+part in ten thousand of the takeoff mass (the fixed point contracts by about
+a quarter per flight, so the residual error is under a third of the last
+change). The mass is bounded by
+the takeoff-mass limit and by the usable tanks less the taxi fuel; the
+shortfall beyond either bound is a reported finding, and the mission is
+flown at the admissible mass.
+
+The mission-sized objective (`optimizer.objective`) ranks candidates
+feasibility first: a candidate that violates a hard requirement family
+costs more than any feasible one and infeasible candidates order by their
+normalised violation; soft families rank behind feasibility and ahead of the
+objective; diagnostic families are reported only. Tail-volume windows are
+plausibility bands (tier S of the research note) and rank soft even under a
+hard geometry family, and a violation below ten parts per million of its
+limit is numerical noise (the builder's own rounding of the reference area)
+and is not counted. The objective is a
+mission quantity closed by an inner takeoff-mass fixed point, which the
+2026-09-05 MDO research note argues is the right architecture for a
+derivative-free search (an equality closure constraint leaves a
+population-based method a measure-zero feasible set).

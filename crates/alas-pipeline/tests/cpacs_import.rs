@@ -220,7 +220,7 @@ fn current_cpacs35_output_round_trips_into_native_aircraft_geometry() {
     assert_eq!(imported.s_ref, airplane.s_ref);
     assert_eq!(imported.c_ref, airplane.c_ref);
     assert_eq!(imported.b_ref, airplane.b_ref);
-    assert_eq!(imported_config.geometry.engine.thrust_kn, 467.0);
+    assert_eq!(imported_config.geometry.engine.thrust_kn(), 467.0);
     assert_eq!(imported_config.geometry.engine.bypass_ratio, 10.0);
     assert_eq!(imported_config.geometry.engine.overall_pressure_ratio, 60.0);
     assert_eq!(imported_config.geometry.engine.fan_pressure_ratio, 1.45);
@@ -286,7 +286,7 @@ fn cpacs_constructor_keeps_machine_readable_engine_inputs_in_the_pipeline_config
     let pipeline = alas_pipeline::DesignPipeline::new_with_cpacs_document(config, document)
         .expect("the current CPACS engine converts to pipeline inputs");
 
-    assert_eq!(pipeline.config.geometry.engine.thrust_kn, 467.0);
+    assert_eq!(pipeline.config.geometry.engine.thrust_kn(), 467.0);
     assert_eq!(pipeline.config.geometry.engine.bypass_ratio, 10.0);
     assert_eq!(pipeline.config.geometry.engine.overall_pressure_ratio, 60.0);
     assert_eq!(pipeline.config.geometry.engine.fan_pressure_ratio, 1.45);

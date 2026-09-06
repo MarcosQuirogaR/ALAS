@@ -450,13 +450,13 @@ pub struct CargoSlot {
     pub sid: String,
     /// Which deck it is on.
     pub deck: &'static str,
-    /// Longitudinal centre.
+    /// Longitudinal centre in aircraft body axes, m (positive aft).
     pub x: f64,
-    /// Lateral centre.
+    /// Lateral centre in aircraft body axes, m (positive starboard).
     pub y: f64,
     /// The container standing here.
     pub uld: &'static UldType,
-    /// Net cargo loaded, excluding the container's own tare.
+    /// Net cargo loaded, kg, excluding the container's own tare.
     pub payload: f64,
 }
 

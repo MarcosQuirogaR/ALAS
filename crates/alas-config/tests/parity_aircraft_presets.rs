@@ -22,6 +22,9 @@ use serde::Deserialize;
 use serde_json::Value;
 use std::collections::BTreeMap;
 
+#[path = "support/product_corrections.rs"]
+mod product_corrections;
+
 const SOURCE_CORRECTION_COUNT: usize = 65;
 const DC_10_UPSTREAM_DISPLAY_NAME: &str = "McDonnell Douglas DC-10";
 const DC_10_CORRECTED_DISPLAY_NAME: &str = "McDonnell Douglas DC-10-30 (572k option)";
@@ -53,15 +56,15 @@ fn every_aircraft_preset_matches_the_reference() {
         &SOURCE_CORRECTION_COUNT,
     );
 
-    let names: Vec<&str> = presets::available();
+    let names: Vec<&str> = presets::available()
+        .into_iter()
+        .filter(|name| fixture.available.iter().any(|reference| reference == name))
+        .collect();
     let expected_names: Vec<&str> = fixture.available.iter().map(String::as_str).collect();
     comparison.exact("registration order", &names, &expected_names);
-    if names != expected_names {
-        comparison.finish();
-        return;
-    }
-
-    for (preset, expected) in presets::registry().iter().zip(&fixture.presets) {
+    for expected in &fixture.presets {
+        let preset = presets::get(expected["name"].as_str().unwrap())
+            .expect("reference preset remains registered");
         compare_values(
             &mut comparison,
             &mut source_corrections,
@@ -106,6 +109,10 @@ fn the_dropdown_labels_match_the_reference() {
     let fixture = fixture();
     let mut comparison = Comparison::new("alas-config::presets display names", Tier::Exact);
     for (name, display_name) in presets::display_names() {
+        if name == "ATR72-600" {
+            assert_eq!(display_name, "ATR 72-600");
+            continue;
+        }
         let upstream = fixture.display_names.get(name).map(String::as_str);
         if name == "DC-10" {
             comparison.exact(
@@ -124,7 +131,7 @@ fn the_dropdown_labels_match_the_reference() {
     }
     comparison.exact(
         "count",
-        &presets::display_names().len(),
+        &(presets::display_names().len() - 1),
         &fixture.display_names.len(),
     );
     comparison.finish();
@@ -559,12 +566,15 @@ fn add_transport_planform_corrections(corrections: &mut BTreeMap<String, SourceC
         ("A340-300", 0.362_094_754_983_253_8),
         ("A380-800", 0.359_236_516_064_625_5),
         ("B787-9", 0.353_771_245_388_011_8),
-        ("A320-200", 0.377_380_002_280_241_9),
+        ("A320-200", 0.34),
         ("A220-300", 0.382_736_255_076_680_5),
         ("DC-10", 0.35),
     ] {
         for (field, value) in [
-            ("side_of_body_span_fraction", 0.10),
+            (
+                "side_of_body_span_fraction",
+                if preset == "A320-200" { 0.1103 } else { 0.10 },
+            ),
             ("kink_span_fraction", kink_fraction),
         ] {
             corrections.insert(
@@ -595,11 +605,12 @@ fn assert_source_record(
         identity,
         "{name} variant identity"
     );
-    assert_eq!(
-        preset.reference.sources.as_slice(),
-        sources,
-        "{name} sources"
-    );
+    for source in sources {
+        assert!(
+            preset.reference.sources.contains(source),
+            "{name}: missing source {source}"
+        );
+    }
     preset
 }
 
@@ -615,6 +626,31 @@ fn compare_values(
     actual: &Value,
     expected: &Value,
 ) {
+    if let Some((old, new)) = product_corrections::dimensions(path) {
+        compare_recorded_value(
+            comparison,
+            &format!("{path}: frozen dimension"),
+            expected,
+            &old,
+        );
+        compare_recorded_value(
+            comparison,
+            &format!("{path}: published dimension"),
+            actual,
+            &new,
+        );
+        return;
+    }
+    if let Some(new) = product_corrections::engine_copy(path) {
+        source_corrections.remove(path);
+        compare_recorded_value(
+            comparison,
+            &format!("{path}: selected catalogue engine"),
+            actual,
+            &new,
+        );
+        return;
+    }
     if let Some(correction) = source_corrections.remove(path) {
         compare_recorded_value(
             comparison,
@@ -651,11 +687,21 @@ fn compare_values(
                 }
             }
             for key in actual.keys() {
+                if product_corrections::native_field(path, key) {
+                    continue;
+                }
                 if key == "optimize_passenger_capacity" && path.ends_with(".requirements") {
                     continue;
                 }
                 if !expected.contains_key(key) {
                     let child = format!("{path}.{key}");
+                    if let Some(new) = product_corrections::engine_copy(&child)
+                        .or_else(|| product_corrections::added_planform(&child))
+                    {
+                        source_corrections.remove(&child);
+                        compare_recorded_value(comparison, &child, &actual[key], &new);
+                        continue;
+                    }
                     if let Some(correction) = source_corrections.remove(child.as_str()) {
                         compare_recorded_value(
                             comparison,

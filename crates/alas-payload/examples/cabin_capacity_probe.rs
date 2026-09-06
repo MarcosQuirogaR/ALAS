@@ -3,6 +3,8 @@
 
 //! Scratch probe: why each preset's cabin seats what it seats.
 #![allow(clippy::print_stdout, missing_docs)]
+// Standalone diagnostic examples report to the console and assert their inputs.
+#![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use alas_config::{presets, AlasConfig};
 use alas_geom::builder::AircraftBuilder;

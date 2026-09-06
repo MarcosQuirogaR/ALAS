@@ -211,8 +211,10 @@ pub fn build_vehicle_request(
 /// The current product configuration carries optional transport-wing stations
 /// for the side-of-body and Yehudi kink. The historical mission subprocess
 /// request predates those fields, so its compatibility document omits them
-/// while preserving every legacy geometry value. Product callers should use
-/// [`build_vehicle_request`] and retain the configured stations.
+/// while preserving every legacy geometry value. The typed engine payload is
+/// retained: the legacy flat thrust key is derived from it, so stripping it
+/// would leave the compatibility document without a rating. Product callers
+/// should use [`build_vehicle_request`] and retain the configured stations.
 pub fn build_vehicle_request_reference_compatibility(
     report: &ReportView,
     config: &AlasConfig,
@@ -223,8 +225,6 @@ pub fn build_vehicle_request_reference_compatibility(
         .wing
         .side_of_body_span_fraction = None;
     compatibility_config.geometry.wing.kink_span_fraction = None;
-    compatibility_config.geometry.engine.turbofan = None;
-    compatibility_config.geometry.engine.turboprop = None;
     compatibility_config
         .geometry
         .engine
@@ -241,7 +241,7 @@ pub fn build_vehicle_request_reference_compatibility(
         &compatibility_config,
         EngineRequest {
             n_engines: engine.spanwise_positions_m.len(),
-            thrust_kn: engine.thrust_kn,
+            thrust_kn: engine.thrust_kn(),
             cruise_thrust_kn: cruise_thrust_kn_per_engine(report, &compatibility_config),
             bypass_ratio: engine.bypass_ratio,
             nacelle_length_m: engine.nacelle_length_m(),
@@ -342,7 +342,7 @@ mod tests {
     #[test]
     fn product_vehicle_request_uses_typed_engine_data_not_the_flat_mirror() {
         let mut config = AlasConfig::default();
-        config.geometry.engine.thrust_kn = 1.0;
+        config.geometry.engine.set_thrust_kn(1.0).unwrap();
         config.geometry.engine.bypass_ratio = 0.0;
         let request = build_vehicle_request(&report(Some(19.0), None), &config).unwrap();
         let spec = config.geometry.engine.turbofan.as_ref().unwrap();

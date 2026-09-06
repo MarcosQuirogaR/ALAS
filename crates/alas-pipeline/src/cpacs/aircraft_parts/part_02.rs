@@ -123,7 +123,9 @@ impl CpacsDocument {
         }
         if let Some(value) = engine.thrust00_n {
             require_engine_value("thrust00", value, |value| value > 0.0)?;
-            config.geometry.engine.thrust_kn = value / 1_000.0;
+            if let Some(payload) = config.geometry.engine.turbofan.as_mut() {
+                payload.rated_thrust_kn = value / 1_000.0;
+            }
         }
         if let Some(value) = engine.fpr00 {
             require_engine_value("fpr00", value, |value| value > 0.0)?;
@@ -141,7 +143,6 @@ impl CpacsDocument {
             // CPACS scalars are authoritative for the imported derivative.
             // Keep the transitional flat mirror and typed mission payload in
             // lock-step until all remaining consumers are migrated.
-            payload.rated_thrust_kn = config.geometry.engine.thrust_kn;
             payload.fan_pressure_ratio = config.geometry.engine.fan_pressure_ratio;
             payload.bypass_ratio = config.geometry.engine.bypass_ratio;
             payload.overall_pressure_ratio = config.geometry.engine.overall_pressure_ratio;

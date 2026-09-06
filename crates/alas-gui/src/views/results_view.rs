@@ -239,19 +239,17 @@ pub fn show_results_view(state: &mut AppState, ui: &mut Ui) {
                     // visible left inset.
                     ui.spacing_mut().item_spacing.x = 0.0;
                     ui.add_space(RESULTS_SIDE_MARGIN);
-                    for item_index in row_start..row_end {
-                        let descriptor = &descriptors[item_index];
+                    let row = &descriptors[row_start..row_end];
+                    for (offset, descriptor) in row.iter().enumerate() {
                         figure_tile(
                             state,
                             ui,
                             &result_config,
-                            descriptor.id,
-                            descriptor.title,
-                            descriptor.description,
+                            descriptor,
                             tile_width,
                             canvas_height,
                         );
-                        if item_index + 1 < row_end {
+                        if offset + 1 < row.len() {
                             ui.add_space(CARD_GAP);
                         }
                     }
@@ -266,12 +264,11 @@ fn figure_tile(
     state: &mut AppState,
     ui: &mut Ui,
     config: &alas_config::AlasConfig,
-    id: &str,
-    title: &str,
-    description: &str,
+    descriptor: &alas_report::FigureDescriptor,
     tile_width: f32,
     canvas_height: f32,
 ) {
+    let (id, title, description) = (descriptor.id, descriptor.title, descriptor.description);
     let theme = state.theme.figure_theme_name().to_owned();
     let language = alas_i18n::get_language();
     let view_key = format!(
@@ -589,7 +586,7 @@ fn unavailable_reason(state: &AppState, id: &str) -> String {
         && result
             .mission_result
             .as_ref()
-            .map_or(true, |mission| !mission.figure_data_ready())
+            .is_none_or(|mission| !mission.figure_data_ready())
     {
         tr("Not available: mission was disabled, incomplete, or did not produce valid figure telemetry.")
     } else if required_stage == Some(alas_report::RequiredStage::Mses) {

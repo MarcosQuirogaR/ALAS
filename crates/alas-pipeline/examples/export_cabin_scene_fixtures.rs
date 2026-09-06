@@ -1,9 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2026 Marcos Quiroga Rodriguez
 //! Generate preset-design cabin-scene fixtures for renderer development.
 //!
 //! These are validation inputs evaluated at each preset's registered design
 //! vector. They are not optimization results. Production runs write their
 //! optimized scene through `DesignPipeline` instead.
+
+// Standalone fixture diagnostics fail immediately when their curated inputs are invalid.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::print_stdout)]
 
 use std::{env, error::Error, fs, path::PathBuf};
 

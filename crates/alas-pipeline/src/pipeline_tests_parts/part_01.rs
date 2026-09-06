@@ -135,8 +135,8 @@ fn a_named_preset_is_the_public_nominal_design() {
     );
 }
 
-#[test]
-fn optimized_pipeline_delivers_only_a_native_reviewed_finalist() {
+/// A fixed-design finalist run with the native physical review enabled.
+fn reviewed_fixed_design_config() -> AlasConfig {
     let mut config = AlasConfig::default();
     config.mission.enabled = false;
     config.structures.enabled = false;
@@ -147,6 +147,17 @@ fn optimized_pipeline_delivers_only_a_native_reviewed_finalist() {
     config.optimizer.solver.population_size = 1;
     config.optimizer.solver.workers = 1;
     config.optimizer.solver.display_progress = false;
+    config
+}
+
+#[test]
+fn optimized_pipeline_delivers_only_a_native_reviewed_finalist() {
+    let mut config = reviewed_fixed_design_config();
+    // The default shell seats 349 passengers at the default design vector,
+    // one short of the default 350-passenger brief. The finalist contract is
+    // exercised on a brief the reviewed cabin can seat; the shortfall of the
+    // default brief is pinned separately below.
+    config.requirements.num_passengers = 340;
     let design = DesignVector::default();
     let bounds = design
         .to_array()
@@ -170,11 +181,56 @@ fn optimized_pipeline_delivers_only_a_native_reviewed_finalist() {
         .unwrap_or_else(|error| panic!("fixed-design finalist run: {error}"));
 
     assert_eq!(result.optimized_design, Some(design));
-    assert!(result.feasibility.is_feasible());
+    assert!(result.feasibility.is_feasible(), "{:?}", result.feasibility.findings);
     assert!(result
         .solver_optimizations
         .as_ref()
         .is_some_and(|set| set.vlm.status == crate::SolverOptimizationStatus::Completed));
+    assert!(result
+        .optimization_result
+        .as_ref()
+        .is_some_and(|optimization| optimization.best_valid));
+}
+
+#[test]
+fn default_brief_seating_shortfall_is_a_reported_finding_not_a_valid_finalist() {
+    let config = reviewed_fixed_design_config();
+    let design = DesignVector::default();
+    let bounds = design
+        .to_array()
+        .into_iter()
+        .map(|value| (value, value))
+        .collect::<Vec<_>>();
+    let options = PipelineOptions {
+        optimize: true,
+        compare_baseline: false,
+        parallel: false,
+        aerodynamic_solver: crate::AerodynamicSolverMode::Vlm,
+        optimization_solver: crate::OptimizationSolverMode::Vlm,
+        output_dir: None,
+        save_plots: false,
+        seed: Some(42),
+        quiet: true,
+    };
+
+    let result = DesignPipeline::new(config)
+        .run_with_design_space(&options, &RunEnvironment::default(), &design, &bounds)
+        .unwrap_or_else(|error| panic!("fixed-design finalist run: {error}"));
+
+    let shortfall = result
+        .feasibility
+        .findings
+        .iter()
+        .find(|finding| finding.code == crate::FindingCode::PassengerCapacityShortfall)
+        .unwrap_or_else(|| panic!("{:?}", result.feasibility.findings));
+    assert_eq!(shortfall.limit, Some(350.0));
+    assert!(shortfall.actual.is_some_and(|seated| seated < 350.0));
+    assert!(!result.feasibility.is_feasible());
+    // The search's own constraint set does not include the cabin layout, so
+    // the optimizer still returns its winner as valid; the native review is
+    // what carries the shortfall, and the finalist is delivered with it rather
+    // than replaced or marked feasible.
+    assert_eq!(result.optimized_design, Some(design));
     assert!(result
         .optimization_result
         .as_ref()

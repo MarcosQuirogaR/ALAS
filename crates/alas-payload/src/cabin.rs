@@ -419,15 +419,15 @@ pub fn spread_bay_indices(n_items: i64, n_bays: usize) -> Vec<usize> {
 /// half-width the monuments stacked there have already consumed.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Bay {
-    /// Longitudinal centre.
+    /// Longitudinal centre in aircraft body axes, m (positive aft).
     pub x: f64,
     /// Which deck it is on.
     pub deck: &'static str,
-    /// Usable floor width at this station.
+    /// Usable floor width at this station, m.
     pub width: f64,
-    /// Floor already taken by galleys, measured in from the starboard wall.
+    /// Floor already taken by galleys, m inward from the starboard wall.
     pub galley_depth: f64,
-    /// Floor already taken by lavatories, measured in from the port wall.
+    /// Floor already taken by lavatories, m inward from the port wall.
     pub lav_depth: f64,
 }
 

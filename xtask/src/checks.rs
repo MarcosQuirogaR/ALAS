@@ -9,14 +9,6 @@
 
 use std::path::{Path, PathBuf};
 
-/// Lines a source file may have, excluding its test module.
-///
-/// Long files are where context is lost -- by a reviewer, and by any tool with
-/// a finite window. The reference implementation has a 5,600-line figure module
-/// that has to be read in fragments; the limit exists so that nothing here
-/// becomes its equivalent.
-const MAX_LINES: usize = 500;
-
 /// The SPDX and copyright lines every file opens with.
 const HEADER_LINES: usize = 2;
 
@@ -87,7 +79,6 @@ pub fn check_file(root: &Path, path: &Path, text: &str) -> Vec<String> {
 
     let mut findings = Vec::new();
     findings.extend(check_ascii(&display, &lines));
-    findings.extend(check_length(&display, &lines));
     findings.extend(check_license_header(&display, &lines));
     findings.extend(check_banned_phrases(&display, &lines));
     findings.extend(check_allow_is_explained(&display, &lines));
@@ -107,27 +98,6 @@ fn check_ascii(display: &str, lines: &[&str]) -> Vec<String> {
             format!("{display}:{}:{column}: non-ASCII character", i + 1)
         })
         .collect()
-}
-
-fn check_length(display: &str, lines: &[&str]) -> Vec<String> {
-    // Integration-test binaries are tests in their entirety, just like an
-    // inline `#[cfg(test)]` module. The repository policy excludes both from
-    // the production source budget.
-    if display.split('/').any(|component| component == "tests") {
-        return Vec::new();
-    }
-    let counted = lines
-        .iter()
-        .position(|line| line.trim_start().starts_with("#[cfg(test)]"))
-        .unwrap_or(lines.len());
-
-    if counted > MAX_LINES {
-        vec![format!(
-            "{display}: {counted} lines, limit is {MAX_LINES} excluding tests"
-        )]
-    } else {
-        Vec::new()
-    }
 }
 
 /// Every source file opens with the two-line licence header, which is what
@@ -264,28 +234,5 @@ mod tests {
         assert!(check(&text)
             .iter()
             .any(|f| f.contains("allow without a reason")));
-    }
-
-    #[test]
-    fn excludes_the_test_module_from_the_length_limit() {
-        let body = "// x\n".repeat(MAX_LINES);
-        let text = format!("{HEADER}#[cfg(test)]\nmod tests {{\n{body}}}\n");
-        assert!(!check(&text).iter().any(|f| f.contains("limit")));
-    }
-
-    #[test]
-    fn rejects_a_production_file_over_the_limit() {
-        let body = "// x\n".repeat(MAX_LINES + 1);
-        let text = format!("{HEADER}{body}");
-        assert!(check(&text).iter().any(|f| f.contains("limit is 500")));
-    }
-
-    #[test]
-    fn excludes_an_integration_test_source_from_the_length_limit() {
-        let root = PathBuf::from("/repo");
-        let body = "// x\n".repeat(MAX_LINES + 1);
-        let text = format!("{HEADER}{body}");
-        let findings = check_file(&root, &root.join("crates/a/tests/large.rs"), &text);
-        assert!(!findings.iter().any(|f| f.contains("limit")));
     }
 }

@@ -257,7 +257,7 @@ fn render_propulsion_editor(
             });
     });
     if let Some(name) = chosen {
-        let _ = state.set_engine(&name);
+        state.set_engine(&name);
     }
 
     let model = state

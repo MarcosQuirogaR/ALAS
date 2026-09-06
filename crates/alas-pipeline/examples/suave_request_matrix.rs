@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2026 Marcos Quiroga Rodriguez
+
 #![doc = "Export corrected ALAS reports in the legacy SUAVE runner request format."]
 
 //! This is an investigation aid, not a production bridge.  It builds each
@@ -8,6 +11,8 @@
 //! use the same Rust mass, geometry, trim and route inputs.
 
 #![allow(clippy::print_stdout)]
+// Standalone fixture diagnostics fail immediately when their curated inputs are invalid.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::print_stderr)]
 
 use std::path::PathBuf;
 
@@ -79,7 +84,7 @@ fn export_request(output_dir: &std::path::Path, name: &str) -> Result<PathBuf, S
             "component_masses_kg": report.component_masses,
             "engine": {
                 "n_engines": n_engines,
-                "thrust_kn": engine.thrust_kn,
+                "thrust_kn": engine.thrust_kn(),
                 "cruise_thrust_kn": cruise_thrust_kn,
                 "bypass_ratio": engine.bypass_ratio,
                 "nacelle_length_m": engine.nacelle_length_m(),

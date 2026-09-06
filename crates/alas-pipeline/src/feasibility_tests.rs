@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 use super::*;
+use alas_config::presets;
 
 #[test]
 fn warnings_do_not_turn_a_report_into_an_infeasible_aircraft() {
@@ -239,9 +240,21 @@ fn tank_limited_model_cg_uses_the_analyzed_fuel_and_names_the_load_case_honestly
     // high-lift/gear mass corrections are intentionally exercised by the
     // ordinary constructor and can legitimately change the closure remainder
     // relative to the published tank-capacity case.
-    let report = crate::full_analysis::FullAnalysis::new_reference_compatibility(config.clone())
-        .run(&preset.design_vector, true)
-        .expect("A320 full analysis");
+    let mut report =
+        crate::full_analysis::FullAnalysis::new_reference_compatibility(config.clone())
+            .run(&preset.design_vector, true)
+            .expect("A320 full analysis");
+    // Construct a tank-limited mass budget independently of preset calibration:
+    // preserve dry mass and allow 1,000 kg more fuel than the usable tank volume.
+    let capacity = assess_fuel_capacity(&config, &preset.design_vector, &report)
+        .capacity_kg
+        .expect("A320 usable capacity");
+    let closure = capacity + 1_000.0;
+    let previous = report
+        .component_masses
+        .insert(FUEL.to_owned(), closure)
+        .expect("analysis fuel mass");
+    config.requirements.mtow_kg += closure - previous;
     let fuel_loading = plan_fuel_loading(&config, &preset.design_vector, &report);
 
     assert!(fuel_loading.mtow_closure_fuel_kg > fuel_loading.analyzed_carried_fuel_kg);

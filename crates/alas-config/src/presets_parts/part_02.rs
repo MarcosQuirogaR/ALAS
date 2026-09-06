@@ -165,7 +165,7 @@ mod tests {
         let a320 = get("A320-200").unwrap();
         assert_eq!(a320.geometry.engine.engine_name, "CFM56-5B4/3");
         let spec = crate::engines::get("CFM56-5B4/3").unwrap();
-        assert_eq!(a320.geometry.engine.thrust_kn, spec.thrust_kn);
+        assert_eq!(a320.geometry.engine.thrust_kn(), a320.geometry.engine.turbofan.as_ref().unwrap().rated_thrust_kn);
         assert_eq!(
             a320.geometry.engine.radius_scale_m,
             spec.nacelle_max_radius_m

@@ -200,8 +200,112 @@ fn feasibility_to_json(report: &FeasibilityReport) -> serde_json::Value {
                 "burned_fuel_kg": fuel.mission.burned_fuel_kg,
                 "required_trip_fuel_kg": fuel.mission.required_trip_fuel_kg,
             },
+            "dispatch": fuel.dispatch.map(dispatch_to_json),
         },
         "cruise_equilibrium": cruise_equilibrium,
+        "mass_balance": report.mass_balance.as_ref().map(mass_balance_to_json),
+    })
+}
+
+fn mass_balance_to_json(
+    assessment: &crate::feasibility::MassBalanceAssessment,
+) -> serde_json::Value {
+    let states: Vec<serde_json::Value> = assessment
+        .states
+        .iter()
+        .map(|state| {
+            serde_json::json!({
+                "state": state.label,
+                "mass_kg": state.mass_kg,
+                "cg_m": state.cg_m,
+                "cg_pct_mac": state.cg_pct_mac,
+                "inertia_cg_kg_m2": {
+                    "ixx": state.inertia_cg.ixx,
+                    "iyy": state.inertia_cg.iyy,
+                    "izz": state.inertia_cg.izz,
+                    "pxy": state.inertia_cg.pxy,
+                    "pxz": state.inertia_cg.pxz,
+                    "pyz": state.inertia_cg.pyz,
+                },
+            })
+        })
+        .collect();
+    let tanks: Vec<serde_json::Value> = assessment
+        .tanks
+        .iter()
+        .map(|tank| {
+            serde_json::json!({
+                "id": tank.id,
+                "kind": tank.kind,
+                "usable_capacity_kg": tank.usable_capacity_kg,
+                "unusable_kg": tank.unusable_kg,
+                "centroid_m": tank.centroid_m,
+                "capacity_source": tank.capacity_source,
+                "burn_priority": tank.burn_priority,
+            })
+        })
+        .collect();
+    let items: Vec<serde_json::Value> = assessment
+        .ledger_items
+        .iter()
+        .map(|item| {
+            serde_json::json!({
+                "id": item.id,
+                "group": item.group,
+                "mass_kg": item.mass_kg,
+                "position_m": item.position_m,
+            })
+        })
+        .collect();
+    serde_json::json!({
+        "states": states,
+        "tanks": tanks,
+        "usable_capacity_kg": assessment.usable_capacity_kg,
+        "unusable_fuel_kg": assessment.unusable_fuel_kg,
+        "geometric_calibration_factor": assessment.geometric_calibration_factor,
+        "fuel_cg_curve": assessment
+            .fuel_cg_curve
+            .iter()
+            .map(|point| serde_json::json!({ "fuel_kg": point.fuel_kg, "cg_m": point.cg_m }))
+            .collect::<Vec<_>>(),
+        "radii_of_gyration_m": {
+            "ledger": assessment.radii_check.ledger_radii_m,
+            "raymer_jet_transport": assessment.radii_check.reference_radii_m,
+            "ratio": assessment.radii_check.ratio,
+        },
+        "ledger_items": items,
+        "lumped_takeoff_cg_pct_mac": assessment.lumped_takeoff_cg_pct_mac,
+    })
+}
+
+fn dispatch_to_json(dispatch: crate::feasibility::DispatchAssessment) -> serde_json::Value {
+    let plan = dispatch.plan.map(|plan| {
+        let quantity = |quantity: alas_mass::fuel_plan::FuelQuantity| {
+            serde_json::json!({ "kg": quantity.kg, "rule": format!("{:?}", quantity.rule) })
+        };
+        serde_json::json!({
+            "scheme": plan.scheme.as_str(),
+            "taxi": quantity(plan.taxi),
+            "trip": quantity(plan.trip),
+            "contingency": quantity(plan.contingency),
+            "alternate": quantity(plan.alternate),
+            "final_reserve": quantity(plan.final_reserve),
+            "additional": quantity(plan.additional),
+            "extra": quantity(plan.extra),
+            "takeoff_fuel_kg": plan.takeoff_fuel_kg(),
+            "ramp_fuel_kg": plan.ramp_fuel_kg(),
+            "block_fuel_kg": plan.block_fuel_kg(),
+            "trip_time_s": plan.trip_time_s,
+            "destination_landing_mass_kg": plan.destination_landing_mass_kg,
+            "reserve_landing_mass_kg": plan.reserve_landing_mass_kg,
+        })
+    });
+    serde_json::json!({
+        "outcome": dispatch.outcome.as_str(),
+        "takeoff_mass_kg": dispatch.takeoff_mass_kg,
+        "shortfall_kg": dispatch.shortfall_kg,
+        "native_flights": dispatch.native_flights,
+        "plan": plan,
     })
 }
 
@@ -218,6 +322,7 @@ fn carried_fuel_basis_name(basis: CarriedFuelBasis) -> &'static str {
         CarriedFuelBasis::MtowMassClosure => "mtow_mass_closure",
         CarriedFuelBasis::UsableFuelCapacity => "usable_fuel_capacity",
         CarriedFuelBasis::CapacityUnverified => "capacity_unverified",
+        CarriedFuelBasis::ReservePolicyClosure => "reserve_policy_closure",
     }
 }
 

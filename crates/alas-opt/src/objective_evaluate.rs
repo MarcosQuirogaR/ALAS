@@ -28,6 +28,16 @@ use cost::{score_candidate, ObjectiveCostInputs};
 impl DesignObjective {
     /// Evaluate the scalar cost for candidate design vector `x`.
     pub fn evaluate(&mut self, x: &[f64]) -> f64 {
+        // The mission-sized objectives size each candidate by the design
+        // mission and rank it feasibility first; the frozen reference
+        // replay keeps the legacy weighted penalty so its parity fixture
+        // stays attributable to the translated Python model.
+        if self.config.optimizer.objective.kind.is_mission_sized()
+            && !self.reference_mass_coordinates
+        {
+            return crate::mdo::evaluate_mission_sized(self, x);
+        }
+
         let w = self.config.optimizer.weights.clone();
 
         let dv = match DesignVector::from_array(x) {

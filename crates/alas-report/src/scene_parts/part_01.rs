@@ -132,9 +132,9 @@ impl Color {
 pub struct Stroke {
     /// Outline color.
     pub color: Color,
-    /// Line width.
+    /// Line width [CSS px].
     pub width: f64,
-    /// Optional dash and gap lengths.
+    /// Optional dash and gap lengths [CSS px].
     pub dash_array: Option<Vec<f64>>,
 }
 

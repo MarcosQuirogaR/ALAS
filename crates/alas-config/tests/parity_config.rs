@@ -351,7 +351,10 @@ fn compare_node(
             !is_native_config_field(node.type_name, field.name)
                 && !is_transport_planform_field_name(node.type_name, field.name)
                 && (node.type_name != "MassModelConfig"
-                    || !matches!(field.name, "systems_mass_method" | "flops_transport"))
+                    || !matches!(
+                        field.name,
+                        "systems_mass_method" | "flops_transport" | "geometric_component_stations"
+                    ))
         })
         .collect();
     let names: Vec<&str> = fields.iter().map(|field| field.name).collect();
@@ -360,6 +363,7 @@ fn compare_node(
         .filter(|field| {
             let name = field.get("name").and_then(Value::as_str);
             !matches!(name, Some("suave_venv_dir" | "suave_runner_dir"))
+                && !(node.type_name == "EngineConfig" && name == Some("thrust_kn"))
                 && !name.is_some_and(|name| product_hidden_cabin_field(node.type_name, name))
         })
         .collect();
@@ -557,8 +561,20 @@ fn compare_transport_planform_schema(
 }
 
 fn is_native_config_field(path: &str, key: &str) -> bool {
-    (key == "exclude_buried_main_wing_area"
-        && (path.ends_with("DragModelConfig") || path.ends_with(".drag_model")))
+    (matches!(key, "fuel_policy" | "fuel_tanks")
+        && (path.ends_with("AlasConfig") || path.is_empty()))
+        || (key == "objective"
+            && (path.ends_with("OptimizerConfig") || path.ends_with(".optimizer")))
+        || (matches!(
+            key,
+            "turbofan"
+                | "turboprop"
+                | "propulsion_technology"
+                | "part_power_fuel_flow_ratios"
+                | "part_power_source"
+        ) && (path.ends_with("EngineConfig") || path.ends_with(".engine")))
+        || (key == "exclude_buried_main_wing_area"
+            && (path.ends_with("DragModelConfig") || path.ends_with(".drag_model")))
         || (matches!(
             key,
             "use_airway_endpoint_coordinates" | "max_airway_stretch"
@@ -603,7 +619,13 @@ fn compare_field(
 ) {
     let declaration = declared.get(path);
 
-    if label.ends_with(".share_pct") {
+    if label.ends_with(".fuel_volume_penalty_scale") {
+        assert_eq!(
+            expected["label"],
+            "Insufficient wing fuel-volume penalty weight"
+        );
+        assert_eq!(field.label, "Legacy fuel-volume penalty weight (unused)");
+    } else if label.ends_with(".share_pct") {
         comparison.exact(
             &format!("{label}.label: product seat-share semantics"),
             &field.label,
@@ -664,11 +686,14 @@ fn compare_field(
     // Where upstream declared no explanation it emits an empty string, and
     // this port supplies one. Comparing those would fail on prose the port is
     // required to add, so what is checked instead is that it was added.
-    if label.ends_with(".share_pct") {
+    if label.ends_with(".fuel_volume_penalty_scale") {
+        assert_eq!(field.help, "Deprecated compatibility field. MTOW minus zero-fuel mass is a mass allowance, not mission-required fuel, so it is no longer used by the optimizer. Tank capacity will be constrained against mission fuel plus the selected reserve policy.");
+        assert_eq!(expected["help"], "Penalizes the wing's physical usable fuel-tank volume (physics.performance.wing_fuel_volume_m3, Torenbeek geometric estimate) being too small to hold the fuel mass the weight & balance analysis says this design actually needs -- a wing that's too thin/small/tapered to carry its own required fuel is not a buildable aircraft, independent of whether the MTOW fuel-mass budget itself closes. Quadratic on the fractional shortfall (required_fuel - tank_capacity) / required_fuel.");
+    } else if label.ends_with(".share_pct") {
         comparison.exact(
             &format!("{label}.help: product seat-share semantics"),
             &field.help,
-            &"Target percentage of passenger seats assigned to this class. The layout solver converts the target mix into floor-length allocations using each class's configured seat geometry, then fills the available cabin. Shares are normalised, so they need not add up to exactly 100. Set the class to 0 to remove it. Only editable with the Custom cabin preset.",
+            &"Target percentage of passengers in this class. The selected preset supplies the seat geometry; the layout converts the normalized mix into rows that fit the usable, regulation-compliant cabin. Only Custom exposes this value for editing.",
         );
         comparison.exact(
             &format!("{label}.help: frozen floor-share semantics"),

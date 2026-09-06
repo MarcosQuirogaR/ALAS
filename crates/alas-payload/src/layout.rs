@@ -198,19 +198,19 @@ pub struct DeckItem {
     pub kind: ItemKind,
     /// Which deck it sits on: [`MAIN`], [`UPPER`] or [`LOWER`].
     pub deck: &'static str,
-    /// Longitudinal centre.
+    /// Longitudinal centre in aircraft body axes, m (positive aft).
     pub x: f64,
-    /// Lateral centre.
+    /// Lateral centre in aircraft body axes, m (positive starboard).
     pub y: f64,
-    /// Vertical centre.
+    /// Vertical centre in aircraft body axes, m (positive up).
     pub z: f64,
-    /// Extent along x.
+    /// Extent along x, m.
     pub length: f64,
-    /// Extent along y.
+    /// Extent along y, m.
     pub width: f64,
     /// Mass, kg.
     pub mass: f64,
-    /// Extent along z, clamped to the deck it sits in.
+    /// Extent along z, m, clamped to the deck it sits in.
     pub height: f64,
     /// What a deck plan writes on it.
     pub label: String,

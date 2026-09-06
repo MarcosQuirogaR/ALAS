@@ -3,13 +3,16 @@
 
 //! Technology binding and preliminary installed-mass checks for the ATR preset.
 
+// A failed unwrap or expectation is a failed test assertion.
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 use alas_config::{presets, ActiveEngineModel};
 use alas_mass::propulsion_mass::{turboprop_installed_mass, PropulsionMassEvidence};
 
 #[test]
 fn atr72_uses_power_not_its_zero_thrust_compatibility_field() {
     let preset = presets::get("ATR72-600").expect("ATR preset is registered");
-    assert_eq!(preset.geometry.engine.thrust_kn, 0.0);
+    assert_eq!(preset.geometry.engine.thrust_kn(), 0.0);
     let ActiveEngineModel::Turboprop(spec) = preset
         .geometry
         .engine

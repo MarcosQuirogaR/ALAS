@@ -33,6 +33,9 @@ use serde::{Deserialize, Serialize};
 use crate::engines::{PropulsionTechnology, TurbofanEngineSpec, TurbopropEngineSpec};
 use crate::ConfigNode;
 
+#[path = "engine_wire.rs"]
+mod engine_wire;
+
 fn is_default_propulsion_technology(value: &PropulsionTechnology) -> bool {
     *value == PropulsionTechnology::default()
 }
@@ -72,7 +75,10 @@ pub enum ActiveEngineModel<'a> {
 
 /// Podded engine placement, nacelle shape, and the live cycle parameters.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ConfigNode)]
-#[serde(deny_unknown_fields)]
+#[serde(
+    try_from = "engine_wire::EngineConfigWire",
+    into = "engine_wire::EngineConfigWire"
+)]
 pub struct EngineConfig {
     /// Which table entry the fields below were last copied from.
     #[config(
@@ -143,16 +149,6 @@ pub struct EngineConfig {
         help = "How far forward of the (swept) wing leading edge the nacelle inlet face sits."
     )]
     pub inlet_x_offset_m: f64,
-
-    /// Deprecated turbofan compatibility mirror: sea-level static takeoff
-    /// thrust, per engine. Zero for non-thrust-rated technologies.
-    #[config(
-        decimals = 2,
-        label = "Rated thrust per engine",
-        unit = "kN",
-        help = "Maximum rated sea-level-static take-off thrust, per engine. Drives propulsion mass, the Matching Chart T/W lookup, and the mission turbofan sizing target."
-    )]
-    pub thrust_kn: f64,
 
     /// Deprecated turbofan compatibility mirror: bypass flow over core flow.
     #[config(
@@ -250,7 +246,6 @@ impl Default for EngineConfig {
             spanwise_positions_m: vec![9.8, -9.8],
             z_m: -2.9,
             inlet_x_offset_m: 4.2,
-            thrust_kn: 467.0,
             bypass_ratio: 10.0,
             overall_pressure_ratio: 60.0,
             fan_pressure_ratio: 1.45,
@@ -268,6 +263,36 @@ impl Default for EngineConfig {
 }
 
 impl EngineConfig {
+    /// Authoritative per-engine sea-level static thrust, kN. Turboprops are
+    /// power-rated and return zero; incoherent bindings return NaN.
+    pub fn thrust_kn(&self) -> f64 {
+        match self.active_model() {
+            Ok(ActiveEngineModel::Turbofan(payload)) => payload.rated_thrust_kn,
+            Ok(ActiveEngineModel::Turboprop(_)) => 0.0,
+            Err(_) => f64::NAN,
+        }
+    }
+
+    /// Set the sole turbofan thrust rating after validating its domain.
+    pub fn set_thrust_kn(&mut self, thrust_kn: f64) -> Result<(), EngineBindingError> {
+        if !thrust_kn.is_finite() || thrust_kn <= 0.0 {
+            return Err(EngineBindingError::InvalidPayload {
+                engine_name: self.engine_name.clone(),
+                reason: "rated thrust must be finite and positive",
+            });
+        }
+        self.active_model()?;
+        let payload =
+            self.turbofan
+                .as_mut()
+                .ok_or_else(|| EngineBindingError::MismatchedBinding {
+                    engine_name: self.engine_name.clone(),
+                    technology: self.propulsion_technology,
+                })?;
+        payload.rated_thrust_kn = thrust_kn;
+        Ok(())
+    }
+
     /// Resolve a selected database engine only when the cycle fields still
     /// carry the built-in, unselected defaults.
     ///
@@ -278,7 +303,8 @@ impl EngineConfig {
     pub fn apply_engine_spec_if_uninitialized(&mut self) {
         let defaults = Self::default();
         let cycle_is_uninitialized = self.radius_scale_m == defaults.radius_scale_m
-            && self.thrust_kn == defaults.thrust_kn
+            && self.turbofan.as_ref().map(|p| p.rated_thrust_kn)
+                == defaults.turbofan.as_ref().map(|p| p.rated_thrust_kn)
             && self.bypass_ratio == defaults.bypass_ratio
             && self.overall_pressure_ratio == defaults.overall_pressure_ratio
             && self.fan_pressure_ratio == defaults.fan_pressure_ratio
@@ -336,7 +362,6 @@ impl EngineConfig {
         let mut replacement = self.clone();
         replacement.nacelle_profile = spec.nacelle_profile();
         replacement.radius_scale_m = spec.nacelle_max_radius_m;
-        replacement.thrust_kn = spec.thrust_kn;
         replacement.bypass_ratio = spec.bypass_ratio;
         replacement.overall_pressure_ratio = spec.overall_pressure_ratio;
         replacement.fan_pressure_ratio = spec.fan_pressure_ratio;
@@ -484,7 +509,7 @@ mod tests {
         applied.apply_engine_spec();
 
         let bare = EngineConfig::default();
-        assert_eq!(applied.thrust_kn, bare.thrust_kn);
+        assert_eq!(applied.thrust_kn(), bare.thrust_kn());
         assert_eq!(applied.bypass_ratio, bare.bypass_ratio);
         assert_eq!(applied.overall_pressure_ratio, bare.overall_pressure_ratio);
         assert_eq!(applied.fan_pressure_ratio, bare.fan_pressure_ratio);
@@ -526,23 +551,21 @@ mod tests {
         engine.apply_engine_spec();
 
         let spec = crate::engines::get("Trent 900").unwrap();
-        assert_eq!(engine.thrust_kn, spec.thrust_kn);
+        assert_eq!(engine.thrust_kn(), spec.thrust_kn);
         assert_eq!(engine.bypass_ratio, spec.bypass_ratio);
         assert_eq!(engine.fan_diameter_m, spec.fan_diameter_m);
         assert_eq!(engine.radius_scale_m, spec.nacelle_max_radius_m);
     }
 
     #[test]
-    fn an_engine_the_table_does_not_carry_keeps_the_values_already_set() {
-        // A re-rated or hypothetical engine is named, edited and flown; a
-        // lookup failure must not silently revert it to something published.
+    fn an_unknown_engine_fails_closed_without_exposing_stale_thrust() {
+        // An unknown selector cannot expose the previous engine's rating.
         let mut engine = EngineConfig {
             engine_name: "GE9X derivative".to_owned(),
-            thrust_kn: 480.0,
             ..Default::default()
         };
         engine.apply_engine_spec();
-        assert_eq!(engine.thrust_kn, 480.0);
+        assert!(engine.thrust_kn().is_nan());
         assert!(engine.active_model().is_err());
     }
 
@@ -558,7 +581,7 @@ mod tests {
             Ok(ActiveEngineModel::Turboprop(_))
         ));
         assert!(engine.turbofan.is_none());
-        assert_eq!(engine.thrust_kn, 0.0);
+        assert_eq!(engine.thrust_kn(), 0.0);
     }
 
     #[test]
@@ -604,11 +627,11 @@ mod tests {
     fn conditional_resolution_preserves_an_explicit_edit_to_a_known_engine() {
         let mut engine = EngineConfig {
             engine_name: "Trent 900".to_owned(),
-            thrust_kn: 401.0,
             ..Default::default()
         };
+        engine.turbofan.as_mut().unwrap().rated_thrust_kn = 401.0;
         engine.apply_engine_spec_if_uninitialized();
-        assert_eq!(engine.thrust_kn, 401.0);
+        assert_eq!(engine.thrust_kn(), 401.0);
     }
 
     #[test]
@@ -619,7 +642,7 @@ mod tests {
         };
         engine.apply_engine_spec_if_uninitialized();
         assert_eq!(
-            engine.thrust_kn,
+            engine.thrust_kn(),
             crate::engines::get("Trent 900").unwrap().thrust_kn
         );
     }

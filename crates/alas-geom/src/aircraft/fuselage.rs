@@ -57,11 +57,11 @@ pub enum FuselageXSecError {
 /// (no normal vector, no analysis-specific options; see the module doc).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FuselageXSec {
-    /// The center of this cross-section, in geometry axes.
+    /// The center of this cross-section, m in geometry axes.
     pub xyz_c: [f64; 3],
-    /// The cross-section's width (its extent along the local Y axis).
+    /// The cross-section's width, m (its extent along the local Y axis).
     pub width: f64,
-    /// The cross-section's height (its extent along the local Z axis).
+    /// The cross-section's height, m (its extent along the local Z axis).
     pub height: f64,
     /// The superellipse shape exponent. Stored but not otherwise used here
     /// -- see the module doc for what queries it (none, in this program's

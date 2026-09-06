@@ -24,6 +24,7 @@ use alas_aero::operating_point::OperatingPoint;
 use alas_atmo::Atmosphere;
 use alas_config::AlasConfig;
 use alas_geom::aircraft::airplane::Airplane;
+use alas_pipeline::feasibility::takeoff_mass_properties;
 use alas_pipeline::full_analysis::AnalysisReport;
 use alas_stab::dynamics::{self, DynamicMode, DynamicModes};
 use alas_stab::modes::MassProperties;
@@ -117,12 +118,26 @@ fn prepare_trimmed_dynamic_state(
         0.0,
         0.0,
     );
-    let (ixx, iyy, izz) = dynamics::estimate_inertia(&plane, mass_kg);
-    let mass_props = MassProperties {
-        mass: mass_kg,
-        ixx,
-        iyy,
-        izz,
+    // The item ledger's tensor at the maximum-fuel takeoff state is the
+    // physical estimate; the radius-of-gyration fit stands in only when the
+    // ledger cannot be built for this report (a hand-built report without a
+    // tank arrangement, for example).
+    let mass_props = match takeoff_mass_properties(config, report) {
+        Some(ledger) if ledger.inertia_cg.is_physical() && ledger.mass_kg > 0.0 => MassProperties {
+            mass: ledger.mass_kg,
+            ixx: ledger.inertia_cg.ixx,
+            iyy: ledger.inertia_cg.iyy,
+            izz: ledger.inertia_cg.izz,
+        },
+        _ => {
+            let (ixx, iyy, izz) = dynamics::estimate_inertia(&plane, mass_kg);
+            MassProperties {
+                mass: mass_kg,
+                ixx,
+                iyy,
+                izz,
+            }
+        }
     };
 
     Some(PreparedDynamicState {

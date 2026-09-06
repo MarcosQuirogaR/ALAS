@@ -46,8 +46,10 @@ fn the_engine_cycle_is_written_to_machine_readable_cpacs_fields() {
 #[test]
 fn turboprop_export_uses_shaft_power_extension_not_zero_jet_fields() {
     let preset = alas_config::presets::get("ATR72-600").expect("ATR preset");
-    let mut config = AlasConfig::default();
-    config.geometry = preset.geometry.clone();
+    let mut config = AlasConfig {
+        geometry: preset.geometry.clone(),
+        ..Default::default()
+    };
     config.geometry.engine.apply_engine_spec();
     let airplane = AircraftBuilder::new(Some(config.geometry.clone()))
         .build(None, true)

@@ -120,6 +120,7 @@ pub struct CargoLoadManager<'g> {
 include!("manager_parts/impl.rs");
 
 #[cfg(test)]
+// Failed expectations and unwraps here are failed test assertions.
 #[allow(clippy::expect_used, clippy::unwrap_used)]
 mod tests {
     use super::*;

@@ -218,7 +218,7 @@ fn diagnostic_text(body: &str, stderr: &str) -> String {
     };
     let mut result = combined.chars().take(MAX_CHARS).collect::<String>();
     if result.chars().count() < combined.chars().count() {
-        result.push_str(" …");
+        result.push_str(" \u{2026}");
     }
     result.replace(['\r', '\n'], " ")
 }

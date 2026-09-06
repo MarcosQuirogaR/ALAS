@@ -456,7 +456,7 @@ mod tests {
         );
         let alt_vec = linspace(0.0, 13_000.0, 26);
         let (mdot, _) = anchor_mass_flow_kg_s(
-            eng.thrust_kn,
+            eng.thrust_kn(),
             eng.overall_pressure_ratio,
             eng.fan_pressure_ratio,
             eng.bypass_ratio,

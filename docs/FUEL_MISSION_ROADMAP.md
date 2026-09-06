@@ -180,6 +180,47 @@ Acceptance:
 - Every output states model version, policy, provenance, validity domain, and
   uncertainty.
 
+## Delivery status, 2026-09-06
+
+The typed mass and fuel contracts (P1), the coupled required-fuel closure
+(P2) and the tank-local part of P4 are in the normal product pipeline.
+Everything below is implementation and numerical verification; no preset
+has been validated against flight or operational-flight-plan data.
+
+- **P1, delivered.** `alas-mass::ledger` is the item-level mass statement
+  (mass, role, station, centroidal inertia tensor, method) every state is
+  computed from; `alas-mass::stations` places every group from the built
+  geometry; `alas-mass::statement` produces the operating-empty, zero-fuel,
+  takeoff and landing states with full inertia tensors; `alas-mass::tanks`
+  resolves the configured tank arrangement on the wing box, distributes fuel
+  in burn order and carries unusable fuel in the empty mass. Unusable fuel
+  cannot be consumed; negative or non-finite masses are refused rather than
+  clamped.
+- **P2, delivered for the interactive route.** `alas-config::fuel_policy`
+  selects the EASA basic scheme, the FAA domestic and flag/supplemental
+  rules or a named study convention; `alas-mass::fuel_policy` prices every
+  quantity with the rule that produced it; `alas-mass::dispatch` closes the
+  takeoff mass against the required fuel under the takeoff-mass limit and
+  the tank capacity. The pipeline's mission stage flies the route at that
+  mass (native trip re-flown to convergence, analytic reserves), and the
+  feasibility report carries the plan and a `ReserveFuelShortfall` finding
+  when the policy fuel does not fit. The frozen maximum-available-fuel case
+  remains selectable (`fuel_policy.fly_policy_load_case = false`).
+- **P4, tank part delivered.** Fuel sits in its tanks in burn order for
+  every state; the centre-of-gravity travel with fuel is reported as a
+  curve; the dynamic-mode figure reads the ledger tensor. Trim drag from
+  the tank strategy and phase-specific high-lift aerodynamics are not
+  implemented.
+- **Mission-sized optimization.** `optimizer.objective` selects block fuel,
+  takeoff mass, empty mass or fuel per seat-kilometre over a design range
+  under the fuel policy, with the takeoff mass closed by an inner fixed
+  point and every requirement family declared hard, soft, diagnostic or
+  off; a candidate's tank capacity follows its own spar box through the
+  preset's per-cell calibration. The legacy lift-to-drag objective remains
+  the default.
+- **Not done:** P3 (winds, CAS/Mach schedules, legwise routing), the trim
+  coupling of P4, and all of P5.
+
 ## Technical-debt priorities
 
 1. Correct propulsion scaling and invalid-state propagation before optimization.

@@ -208,16 +208,18 @@ impl<'g> CargoLoadManager<'g> {
         }
 
         let bulk_x = g.cabin_end_x - BULK_INSET_M;
-        // A bulk position consumes hold space just as a rigid container does.
-        // Keep the frozen compatibility grid, but never double-book this aft
-        // footprint in a physical load plan.
-        let bulk_overlaps = g.enforces_physical_envelope()
-            && self.slots.iter().any(|slot| {
-                slot.deck == g.lower_deck.name
-                    && (slot.x - bulk_x).abs() < (slot.uld.length + BULK.length) * 0.5
-                    && slot.y.abs() < (slot.uld.width + BULK.width) * 0.5
-            });
-        if !bulk_overlaps && self.uld_fits(&g.lower_deck, bulk_x, 0.0, BULK) {
+        // The frozen compatibility grid always carries its loose bulk
+        // position, drawn clamped to the hold height. A physical load plan
+        // requires the bulk footprint to fit, and never double-books hold
+        // space a rigid container slot already claims.
+        let bulk_admitted = !g.enforces_physical_envelope()
+            || (self.uld_fits(&g.lower_deck, bulk_x, 0.0, BULK)
+                && !self.slots.iter().any(|slot| {
+                    slot.deck == g.lower_deck.name
+                        && (slot.x - bulk_x).abs() < (slot.uld.length + BULK.length) * 0.5
+                        && slot.y.abs() < (slot.uld.width + BULK.width) * 0.5
+                }));
+        if bulk_admitted {
             self.slots.push(CargoSlot {
                 sid: "BULK".to_owned(),
                 deck: g.lower_deck.name,

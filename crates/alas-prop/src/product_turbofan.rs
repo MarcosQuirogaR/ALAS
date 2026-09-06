@@ -14,6 +14,7 @@ include!("product_turbofan_parts/part_02.rs");
 include!("product_turbofan_parts/part_03.rs");
 
 #[cfg(test)]
+// Test fixtures assert successful construction through unwrap.
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;

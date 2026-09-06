@@ -106,7 +106,7 @@ fn build_passenger_layout_with_mass_semantics(
     aircraft_cg_target: Option<(f64, f64)>,
     cargo: &CargoDeckConfig,
 ) -> PayloadLayout {
-    let mut classes = resolve_classes(pax, req.num_passengers);
+    let mut classes = resolve_classes(pax, req.num_passengers, product_interior);
     let total_pax: i64 = classes.iter().map(|class| class.config.count).sum();
     let aisle_w = resolve_aisle_width(pax, total_pax);
 
@@ -213,6 +213,7 @@ fn seat_mass_and_cg(items: &[crate::layout::DeckItem], g: &CabinGeometry) -> (f6
 }
 
 #[cfg(test)]
+// A failed expectation here is a failed test assertion.
 #[allow(clippy::expect_used)]
 mod product_tests {
     use super::*;

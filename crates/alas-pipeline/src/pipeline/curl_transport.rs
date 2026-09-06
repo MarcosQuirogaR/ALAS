@@ -75,7 +75,7 @@ fn bounded_diagnostic(text: &str) -> String {
     result.push(first);
     result.extend(chars.take(MAX_CHARS - 1));
     if result.chars().count() < text.chars().count() {
-        result.push_str(" …");
+        result.push_str(" \u{2026}");
     }
     result.replace(['\r', '\n'], " ")
 }

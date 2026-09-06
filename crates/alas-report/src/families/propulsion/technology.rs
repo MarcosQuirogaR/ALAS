@@ -12,7 +12,8 @@ use alas_prop::turboprop::{
     TurbopropOutput,
 };
 
-const NOTICE: &str = "EXTRAPOLATED · unvalidated generic six-blade surrogate; not an OEM 568F map";
+const NOTICE: &str =
+    "EXTRAPOLATED \u{b7} unvalidated generic six-blade surrogate; not an OEM 568F map";
 
 pub(super) fn binding_error_scene(
     config: &AlasConfig,
@@ -94,7 +95,7 @@ fn base(config: &AlasConfig, theme: Option<&str>, title: &str, size: (f64, f64))
     scene.suppress_derived_title();
     scene.add(SceneElement::Text {
         text: format!(
-            "{} / {} · {NOTICE}",
+            "{} / {} \u{b7} {NOTICE}",
             config.geometry.engine.engine_name,
             spec(config).propeller_model
         ),
@@ -133,7 +134,7 @@ pub(super) fn turboprop_power_speed_envelope(config: &AlasConfig, theme: Option<
     if let Some(scene) = binding_error_scene(config, theme, (700.0, 500.0)) {
         return scene;
     }
-    let title = "PW127M / 568F Power–Speed Operating Envelope";
+    let title = "PW127M / 568F Power\u{2013}Speed Operating Envelope";
     let mut scene = base(config, theme, title, (700.0, 500.0));
     let pal = get_palette(theme);
     let speeds = super::linspace(5.0, 150.0, 50);
@@ -258,14 +259,14 @@ pub(super) fn turboprop_rating_scene(config: &AlasConfig, theme: Option<&str>) -
         let values = output(config, speed, density, 1.0, rating);
         let text = match values {
             Some(value) => format!(
-                "{name}: {:.0} kW · {:.1} kN · {:.3} kg/s fuel · {:.0} N·m @ {:.0} rpm",
+                "{name}: {:.0} kW \u{b7} {:.1} kN \u{b7} {:.3} kg/s fuel \u{b7} {:.0} N\u{b7}m @ {:.0} rpm",
                 rating.shaft_power_w() / 1_000.0,
                 value.total_thrust_n / 1_000.0,
                 value.fuel_flow_kg_s,
                 value.propeller_torque_n_m,
                 spec(config).governed_propeller_speed_rpm
             ),
-            None => format!("{name}: no governed surrogate solution at 80 m/s, ρ=1.0 kg/m³"),
+            None => format!("{name}: no governed surrogate solution at 80 m/s, \u{3c1}=1.0 kg/m\u{b3}"),
         };
         scene.add(SceneElement::Text {
             text,
@@ -281,7 +282,7 @@ pub(super) fn turboprop_rating_scene(config: &AlasConfig, theme: Option<&str>) -
     label(
         &mut scene,
         theme,
-        "Comparison condition: 80 m/s, density 1.0 kg/m³, one engine",
+        "Comparison condition: 80 m/s, density 1.0 kg/m\u{b3}, one engine",
         [350.0, 345.0],
         0.0,
     );
@@ -346,13 +347,13 @@ pub(super) fn turboprop_summary_lines(config: &AlasConfig) -> Vec<String> {
                 0.7,
                 Pw127mRating::MaximumContinuous,
             ),
-            "80 m/s, density 1.0 kg/m³, 70% MCT (configured cruise is outside the surrogate governor envelope)"
+            "80 m/s, density 1.0 kg/m\u{b3}, 70% MCT (configured cruise is outside the surrogate governor envelope)"
                 .to_owned(),
             0.7,
         )
     };
     let mut lines = vec![format!(
-        "{} · {} · maximum-continuous rating",
+        "{} \u{b7} {} \u{b7} maximum-continuous rating",
         config.geometry.engine.engine_name,
         spec(config).propeller_model
     )];
@@ -377,7 +378,7 @@ pub(super) fn turboprop_summary_lines(config: &AlasConfig) -> Vec<String> {
                 value.fuel_flow_kg_s
             ),
             format!(
-                "Propeller: {:.0} rpm · {:.0} N·m · ηp={:.3}",
+                "Propeller: {:.0} rpm \u{b7} {:.0} N\u{b7}m \u{b7} \u{3b7}p={:.3}",
                 spec(config).governed_propeller_speed_rpm,
                 value.propeller_torque_n_m,
                 value.propulsive_efficiency

@@ -287,7 +287,6 @@ mod tests {
     fn only_starboard_wing_stations_survive_the_semi_wing_filter() {
         // A symmetric pair, a centerline engine, and a below-threshold station.
         let engine = EngineConfig {
-            thrust_kn: 350.0,
             spanwise_positions_m: vec![9.8, -9.8, 0.0, 1e-7, 22.5],
             ..Default::default()
         };

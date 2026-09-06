@@ -112,6 +112,7 @@ impl FullAnalysis {
         };
         let (masses_init, coords_init, _cg_init) =
             initial_mass_result.map_err(|error| format!("mass-coordinate error: {error}"))?;
+        let (coords_init, _) = self.station_coordinates(design, &plane, &masses_init, coords_init)?;
 
         // Second pass: build detailed interior layout and recompute mass breakdown and CG.
         let (oew, x_oew) = oew_and_cg(&masses_init, &coords_init);
@@ -158,9 +159,9 @@ impl FullAnalysis {
                 &self.config.landing_gear,
             )
         };
-        let (masses, coords, cg) =
+        let (masses, coords, _) =
             detailed_mass_result.map_err(|error| format!("mass-coordinate error: {error}"))?;
-
+        let (coords, cg) = self.station_coordinates(design, &plane, &masses, coords)?;
         // Anchor the aerodynamic moment reference to the actual physical CG.
         plane.xyz_ref[0] = cg[0];
 
@@ -257,15 +258,11 @@ impl FullAnalysis {
 
 }
 
-/// Resolve the structural payload bound for an unchanged registered preset.
-///
-/// The configuration cap is normally the published `MZFW - OEW` value. The
-/// product mass method is an estimate, however, and its modeled OEW can be
-/// heavier than the source OEW. In that case the safe payload bound is the
-/// smaller of the configured cap and `MZFW - modeled OEW`; otherwise the
-/// detailed layout would appear to respect the payload cap while still
-/// producing an overweight zero-fuel mass. Modified/notional designs do not
-/// inherit a published MZFW from a preset.
+/// Resolve the structural payload bound for an unchanged registered preset:
+/// the smaller of the configured cap (normally the published `MZFW - OEW`)
+/// and `MZFW - modeled OEW`, because the modeled OEW can be heavier than the
+/// source OEW and the layout would otherwise respect the cap while producing
+/// an overweight zero-fuel mass. Notional designs inherit no published MZFW.
 fn effective_structural_payload_limit_kg(
     config: &AlasConfig,
     design: &DesignVector,

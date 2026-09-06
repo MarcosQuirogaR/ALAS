@@ -11,7 +11,7 @@
 
 #[cfg(test)]
 use alas_config::CgEnvelopeEvidence;
-use alas_config::{presets, AlasConfig, DesignVector};
+use alas_config::{AlasConfig, DesignVector};
 use alas_mass::breakdown::{
     calculate_physical_cg, MassBreakdown, MassCoordinates, FUEL, FURNISHINGS, FUSELAGE, GEAR,
     H_STAB, PAYLOAD, PROPULSION, SYSTEMS, V_STAB, WING,
@@ -24,19 +24,29 @@ use alas_perf::performance::{
 };
 
 use crate::full_analysis::AnalysisReport;
+use crate::mission_stage::SelectedLoadCase;
 
 mod cruise_equilibrium;
+mod dispatch;
 mod fuel;
+mod mass_balance;
 mod planning;
 mod report_format;
+mod structural_mass;
 mod types;
 
 pub(crate) use cruise_equilibrium::assess as assess_cruise_equilibrium;
 pub use cruise_equilibrium::CruiseEquilibriumAssessment;
+pub use dispatch::{DispatchAssessment, DispatchOutcome};
 pub(crate) use fuel::plan_fuel_loading;
 pub use fuel::{
     assess_fuel_capacity, CarriedFuelBasis, FuelCapacityAssessment, FuelCapacityEvidence,
     FuelLoadingAssessment, MissionFuelAssessment, MissionFuelStatus,
+};
+pub(crate) use mass_balance::tank_reference;
+pub use mass_balance::{
+    takeoff_mass_properties, LedgerItemSummary, MassBalanceAssessment, MassStateSummary,
+    TankSummary,
 };
 use planning::assess_public_cg_reference;
 #[cfg(test)]
@@ -170,91 +180,47 @@ fn append_model_cg_findings(
     }
 }
 
-fn append_structural_mass_findings(
-    config: &AlasConfig,
-    design: &DesignVector,
-    report: &AnalysisReport,
-    fuel_loading: &FuelLoadingAssessment,
-    findings: &mut Vec<PhysicalFinding>,
-) {
-    let tolerance = config.requirements.mtow_kg.abs().max(1.0) * 1.0e-10;
-
-    let payload_kg = report.component_masses.get(PAYLOAD).copied();
-    let structural_limit_kg = config.requirements.max_structural_payload_kg;
-    if structural_limit_kg.is_finite() && structural_limit_kg > 0.0 {
-        if let Some(payload_kg) = payload_kg {
-            if payload_kg.is_finite() && payload_kg > structural_limit_kg + tolerance {
-                findings.push(error(
-                    FindingCode::StructuralPayloadLimitViolation,
-                    format!(
-                        "modeled payload exceeds the configured structural payload limit by {:.3} kg",
-                        payload_kg - structural_limit_kg
-                    ),
-                    Some(payload_kg),
-                    Some(structural_limit_kg),
-                    "kg",
-                ));
-            }
-        }
-    }
-
-    // Published weight limits are valid only for the unchanged registered
-    // design. A modified design may use the same preset name while having a
-    // different geometry or mass buildup, so do not apply the source value to
-    // that notional case.
-    let Ok(preset) = presets::get(&config.preset) else {
-        return;
-    };
-    if *design != preset.design_vector {
-        return;
-    }
-    let Some(mzfw_kg) = preset.reference.mzfw_kg else {
-        return;
-    };
-    if mzfw_kg.is_finite()
-        && fuel_loading.zero_fuel_mass_kg.is_finite()
-        && fuel_loading.zero_fuel_mass_kg > mzfw_kg + tolerance
-    {
-        let modeled_oew_kg = match (preset.reference.oew_kg, payload_kg) {
-            (Some(reference_oew_kg), Some(payload_kg)) => Some((
-                // The message below deliberately reports the zero-fuel
-                // excess, while this local value lets us name the calibration
-                // mismatch when reference OEW evidence exists.
-                fuel_loading.zero_fuel_mass_kg - payload_kg,
-                reference_oew_kg,
-            )),
-            _ => None,
-        };
-        let calibration_note = modeled_oew_kg
-            .map(|(modeled, reference)| {
-                format!(
-                    "; modeled OEW {:.1} kg versus reference OEW {:.1} kg",
-                    modeled, reference
-                )
-            })
-            .unwrap_or_default();
-        findings.push(error(
-            FindingCode::MaximumZeroFuelWeightViolation,
-            format!(
-                "modeled zero-fuel mass exceeds the published MZFW by {:.3} kg{}; reduce payload or calibrate the mass model before using this load case",
-                fuel_loading.zero_fuel_mass_kg - mzfw_kg,
-                calibration_note
-            ),
-            Some(fuel_loading.zero_fuel_mass_kg),
-            Some(mzfw_kg),
-            "kg",
-        ));
-    }
-}
-
 /// Evaluate conservation laws and configured limits on a completed run.
+///
+/// Without a selected load case the analyzed fuel is the takeoff-mass
+/// closure remainder, which is what a caller that did not fly the mission
+/// has to work with.
 pub fn assess_physical_feasibility(
     config: &AlasConfig,
     design: &DesignVector,
     report: &AnalysisReport,
     mission: Option<&MissionResult>,
 ) -> FeasibilityReport {
+    assess_physical_feasibility_with_load_case(config, design, report, mission, None)
+}
+
+/// Evaluate a run whose mission was flown at a selected load case.
+///
+/// The load case rewrites the analyzed fuel to what was actually flown and
+/// carries the reserve plan it was sized to into the report.
+pub fn assess_physical_feasibility_with_load_case(
+    config: &AlasConfig,
+    design: &DesignVector,
+    report: &AnalysisReport,
+    mission: Option<&MissionResult>,
+    load_case: Option<&SelectedLoadCase>,
+) -> FeasibilityReport {
     let mut findings = Vec::new();
+    let envelope = alas_perf::performance::build_vn_diagram(
+        report.airplane.s_ref,
+        &config.requirements,
+        &config.performance,
+        config.requirements.cruise_altitude_m,
+    );
+    if let Err(message) = envelope.validate_speed_order() {
+        findings.push(error(
+            FindingCode::InvalidEnvelopeSpeedOrder,
+            message,
+            Some(envelope.v_a_kt),
+            Some(envelope.v_c_kt),
+            "kt EAS",
+        ));
+    }
     let lift_to_drag = report.design_point.l_over_d;
     if !lift_to_drag.is_finite() || lift_to_drag <= 0.0 {
         findings.push(error(
@@ -267,6 +233,7 @@ pub fn assess_physical_feasibility(
     }
 
     let mut fuel_loading = plan_fuel_loading(config, design, report);
+    dispatch::apply_load_case(&mut fuel_loading, load_case, &mut findings);
     fuel_loading.analyzed_landing_mass_kg = mission
         .and_then(MissionResult::completed_summary)
         .map(|summary| summary.landing_mass_kg);
@@ -290,7 +257,13 @@ pub fn assess_physical_feasibility(
         assess_public_cg_reference(config, report, fuel_loading.analyzed_carried_fuel_kg);
     fuel_loading.mission = fuel::assess_mission_fuel(config.mission.enabled, mission);
     findings.extend(fuel::findings(config.requirements.mtow_kg, &fuel_loading));
-    append_structural_mass_findings(config, design, report, &fuel_loading, &mut findings);
+    structural_mass::append_structural_mass_findings(
+        config,
+        design,
+        report,
+        &fuel_loading,
+        &mut findings,
+    );
 
     let model_cg = match model_cg_assessment(config, report, &fuel_loading) {
         Ok(assessment) => {
@@ -414,7 +387,7 @@ pub fn assess_physical_feasibility(
     let mtow_kg = config.requirements.mtow_kg;
     let takeoff_mass_kg = fuel_loading.analyzed_takeoff_mass_kg;
     let gravity_m_s2 = config.requirements.gravity_m_s2;
-    let static_thrust_n = n_engines * config.geometry.engine.thrust_kn * 1000.0;
+    let static_thrust_n = n_engines * config.geometry.engine.thrust_kn() * 1000.0;
     let static_tw = static_thrust_n / (takeoff_mass_kg * gravity_m_s2);
     let mlw_limit_kg = mtow_kg * config.mass_model.mlw_fraction_mtow;
     let landing_mass_kg = fuel_loading
@@ -696,12 +669,15 @@ pub fn assess_physical_feasibility(
         }
     }
 
+    let mass_balance =
+        mass_balance::assess_mass_balance(config, design, report, &fuel_loading, &mut findings);
     FeasibilityReport {
         findings,
         cg_envelope,
         model_cg,
         fuel_loading,
         cruise_equilibrium,
+        mass_balance,
     }
 }
 

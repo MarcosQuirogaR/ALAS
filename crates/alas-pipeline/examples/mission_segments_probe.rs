@@ -3,6 +3,8 @@
 
 //! Scratch probe: every mission segment for one preset.
 #![allow(clippy::print_stdout, missing_docs)]
+// Standalone fixture diagnostics fail immediately when their curated inputs are invalid.
+#![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use alas_config::{presets, AlasConfig};
 use alas_pipeline::{DesignPipeline, PipelineOptions, RunEnvironment};

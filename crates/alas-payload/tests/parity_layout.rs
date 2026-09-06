@@ -40,8 +40,6 @@
 
 mod support;
 
-use alas_config::presets;
-use alas_geom::builder::AircraftBuilder;
 use alas_payload::layout::{ItemMeta, LayoutSummary};
 use alas_payload::{
     build_payload_layout, build_payload_layout_reference_compatibility, DeckItem, PayloadLayout,
@@ -244,7 +242,11 @@ fn compare_item(
         .scalar(&at("width"), actual.width, expected.width)
         .scalar(&at("height"), actual.height, expected.height)
         .scalar(&at("mass"), actual.mass, expected.mass);
-    compare_meta(discrete, numeric, at, &actual.meta, &expected.meta);
+    // A sequence mismatch already records a failure above. Its metadata
+    // belongs to a different item kind and cannot be decoded as this one.
+    if actual.kind.as_str() == expected.kind {
+        compare_meta(discrete, numeric, at, &actual.meta, &expected.meta);
+    }
 }
 
 /// Compare a summary's named quantities, whichever engine produced it.
@@ -407,7 +409,7 @@ fn every_laid_out_interior_matches_python_item_for_item() {
     let mut numeric = Comparison::new("alas-payload layouts (positions and masses)", Tier::Closed);
 
     for case in &fixture.layouts {
-        let (mut config, mut plane, _dv) = config_and_plane(&case.input);
+        let (mut config, plane, _dv) = config_and_plane(&case.input);
         // These fixtures predate the Boeing Rev Q weight correction. Replay
         // the frozen load-case inputs so this remains a payload-algorithm
         // parity test; the corrected preset values are pinned in alas-config
@@ -423,18 +425,6 @@ fn every_laid_out_interior_matches_python_item_for_item() {
             {
                 config.requirements.max_structural_payload_kg = 52_600.0;
             }
-        }
-        if config.preset == "A380-800" {
-            let mut frozen = presets::get("A380-800")
-                .expect("registered A380 preset")
-                .design_vector;
-            frozen.fuselage_length_m = 72.72;
-            frozen.root_chord_m = 23.0;
-            frozen.break_chord_m = 11.3;
-            frozen.tip_chord_m = 3.5;
-            plane = AircraftBuilder::new_reference_compatibility(Some(config.geometry.clone()))
-                .build(Some(&frozen), false)
-                .expect("frozen fixture aircraft builds");
         }
         let layout: PayloadLayout =
             build_payload_layout_reference_compatibility(&plane, &config, case.oew, case.x_oew)

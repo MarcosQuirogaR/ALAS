@@ -101,7 +101,7 @@ pub struct StreamThrust {
     pub exit_pressure_pa: f64,
     /// Local ambient static pressure, Pa.
     pub ambient_pressure_pa: f64,
-    /// Exhaust-plane flow area, m².
+    /// Exhaust-plane flow area, m--.
     pub exit_area_m2: f64,
 }
 

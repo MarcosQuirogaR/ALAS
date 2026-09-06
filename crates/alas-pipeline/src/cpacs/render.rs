@@ -15,7 +15,6 @@ mod render_tests;
 
 use std::fmt::Write as FmtWrite;
 
-use alas_config::ActiveEngineModel;
 use alas_config::AlasConfig;
 use alas_geom::aircraft::airplane::Airplane;
 use alas_geom::aircraft::fuselage::Fuselage;
@@ -97,17 +96,18 @@ fn validate_airplane(airplane: &Airplane, config: &AlasConfig) -> Result<(), Cpa
     validate_number(airplane.c_ref, "airplane reference chord")?;
     validate_number(airplane.b_ref, "airplane reference span")?;
     validate_vector(airplane.xyz_ref, "airplane reference point")?;
-    let active_engine = config
-        .geometry
-        .engine
-        .active_model()
-        .map_err(|error| CpacsExportError::InvalidEngineBinding(error.to_string()))?;
-    if let ActiveEngineModel::Turbofan(spec) = active_engine {
+    // A non-finite cycle scalar is named as such before the binding check.
+    if let Some(spec) = &config.geometry.engine.turbofan {
         validate_number(spec.rated_thrust_kn, "engine take-off thrust")?;
         validate_number(spec.bypass_ratio, "engine bypass ratio")?;
         validate_number(spec.overall_pressure_ratio, "engine overall pressure ratio")?;
         validate_number(spec.fan_pressure_ratio, "engine fan pressure ratio")?;
     }
+    config
+        .geometry
+        .engine
+        .active_model()
+        .map_err(|error| CpacsExportError::InvalidEngineBinding(error.to_string()))?;
     validate_number(
         config.geometry.engine.radius_scale_m,
         "engine maximum nacelle radius",

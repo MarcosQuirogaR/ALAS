@@ -1,5 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2026 Marcos Quiroga Rodriguez
 //! Contract and fidelity tests for the resolved cabin-scene interchange.
+
+// Standalone fixture diagnostics fail immediately when their curated inputs are invalid.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::print_stdout)]
 
 use alas_config::{AlasConfig, DesignVector};
 use alas_pipeline::{CabinScene, FullAnalysis, CABIN_SCENE_SCHEMA_VERSION};
@@ -90,10 +94,26 @@ fn recommendations_select_occupied_cabin_and_hold_stations() {
     let cabin = scene
         .recommended_sections
         .iter()
-        .find(|section| section.purpose == "occupied_cabin_with_overhead")
+        .find(|section| section.purpose.starts_with("occupied_cabin"))
         .expect("recommended passenger section");
     assert!(cabin.intersects.iter().any(|kind| kind == "seat_row"));
-    assert!(cabin.intersects.iter().any(|kind| kind == "overhead_bin"));
+    // The purpose claims an overhead overlap only when the solver produced
+    // overhead runs on that deck.
+    let deck_has_overhead = scene
+        .overhead
+        .runs
+        .iter()
+        .any(|run| run.deck_id == cabin.deck_id);
+    assert_eq!(
+        cabin.purpose == "occupied_cabin_with_overhead",
+        deck_has_overhead,
+        "{cabin:?}"
+    );
+    assert_eq!(
+        cabin.intersects.iter().any(|kind| kind == "overhead_bin"),
+        deck_has_overhead,
+        "{cabin:?}"
+    );
     assert!(scene
         .stations
         .iter()
@@ -130,7 +150,7 @@ fn narrowbody_recommendations_prefer_the_central_half_of_the_occupied_cabin() {
             .recommended_sections
             .iter()
             .find(|section| {
-                section.purpose == "occupied_cabin_with_overhead" && section.deck_id == "main"
+                section.purpose.starts_with("occupied_cabin") && section.deck_id == "main"
             })
             .expect("main-deck recommendation");
         let x_min = scene
@@ -153,9 +173,31 @@ fn narrowbody_recommendations_prefer_the_central_half_of_the_occupied_cabin() {
             x_min + quarter,
             x_max - quarter
         );
-        assert!(recommendation
-            .intersects
-            .iter()
-            .any(|kind| kind == "overhead_bin"));
+        // An overhead overlap is only claimed where the fitting solver
+        // produced overhead runs; a deck without them is reported as such.
+        let main_deck_has_overhead = scene.overhead.runs.iter().any(|run| run.deck_id == "main");
+        assert_eq!(
+            recommendation.purpose == "occupied_cabin_with_overhead",
+            main_deck_has_overhead,
+            "{name}: {recommendation:?}"
+        );
+        assert_eq!(
+            recommendation
+                .intersects
+                .iter()
+                .any(|kind| kind == "overhead_bin"),
+            main_deck_has_overhead,
+            "{name}: {recommendation:?}; overhead={:?}",
+            scene.overhead
+        );
+        if !main_deck_has_overhead {
+            assert!(
+                scene
+                    .missing_inputs
+                    .iter()
+                    .any(|input| input.field == "overhead.runs"),
+                "{name}: missing overhead runs are not declared"
+            );
+        }
     }
 }

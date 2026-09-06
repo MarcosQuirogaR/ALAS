@@ -13,6 +13,7 @@ include!("turboprop_parts/part_02.rs");
 include!("turboprop_parts/part_03.rs");
 
 #[cfg(test)]
+// Test fixtures assert successful construction through unwrap and expect.
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;

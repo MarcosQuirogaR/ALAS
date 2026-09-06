@@ -13,6 +13,14 @@ fn run_airfoil_screening_with_mass_model(
     should_cancel: Option<&dyn Fn() -> bool>,
     mass_model: ScreeningMassModel,
 ) -> Result<AirfoilScreeningResult, String> {
+    if !options.alpha_min_deg.is_finite()
+        || !options.alpha_max_deg.is_finite()
+        || !options.alpha_step_deg.is_finite()
+        || options.alpha_step_deg <= 0.0
+        || options.alpha_max_deg < options.alpha_min_deg
+    {
+        return Err("screening alpha sweep requires finite ordered bounds and a positive step".to_owned());
+    }
     let geometry = match mass_model {
         ScreeningMassModel::ReferenceCompatibility => ScreeningGeometry::ReferenceCompatibility,
         ScreeningMassModel::StructuralWingbox => ScreeningGeometry::Product,

@@ -334,45 +334,11 @@ impl MissionAnalyses {
             }
         };
 
-        // Mission's historical output uses positive fuel consumption in
-        // kg/s, while the neutral state derivative is negative store change.
-        // Project the explicit positive Jet-A resource flow and the +X body
-        // force without changing that established mission convention.
-        let fuel_flow_rate_kg_s = result
-            .resource_flows
-            .iter()
-            .find(|flow| flow.resource == ResourceKind::JetA)
-            .and_then(|flow| flow.mass_flow_kg_s)
-            .unwrap_or_else(|| panic!("mission propulsion result has no Jet-A mass flow"));
-        match result.trace {
-            Some(TechnologyTrace::LegacyTurbofan(mut output)) => {
-                output.thrust_n = result.body_force_n[0];
-                output.fuel_flow_rate_kg_s = fuel_flow_rate_kg_s;
-                output
-            }
-            None => {
-                let thrust_n = result.body_force_n[0];
-                let tsfc = if thrust_n > 0.0 {
-                    fuel_flow_rate_kg_s * gravity_m_s2 * 3_600.0 / thrust_n
-                } else {
-                    0.0
-                };
-                let specific_impulse_s = if fuel_flow_rate_kg_s > 0.0 {
-                    thrust_n / (fuel_flow_rate_kg_s * gravity_m_s2)
-                } else {
-                    0.0
-                };
-                ThrustOutput {
-                    thrust_n,
-                    thrust_specific_fuel_consumption: tsfc,
-                    non_dimensional_thrust: 0.0,
-                    core_mass_flow_rate_kg_s: 0.0,
-                    fuel_flow_rate_kg_s,
-                    power_w: thrust_n * velocity_m_s,
-                    specific_impulse_s,
-                }
-            }
-        }
+        self.project_propulsion_result(result, velocity_m_s, gravity_m_s2)
+            .unwrap_or_else(|error| {
+                tracing::warn!(error = %error, "mission propulsion projection rejected a trial point");
+                rejected_thrust_output()
+            })
     }
 
     /// Evaluate a phase rating through the technology-neutral model.
@@ -425,14 +391,7 @@ impl MissionAnalyses {
         velocity_m_s: f64,
         gravity_m_s2: f64,
     ) -> Result<ThrustOutput, PropulsionError> {
-        let fuel_flow_rate_kg_s = result
-            .resource_flows
-            .iter()
-            .find(|flow| flow.resource == ResourceKind::JetA)
-            .and_then(|flow| flow.mass_flow_kg_s)
-            .ok_or(PropulsionError::UnsupportedDemand(
-                "mission requires a Jet-A mass-flow result",
-            ))?;
+        let fuel_flow_rate_kg_s = jet_a_mass_flow(&result.resource_flows)?;
         match result.trace {
             Some(TechnologyTrace::LegacyTurbofan(mut output)) => {
                 output.thrust_n = result.body_force_n[0];
@@ -459,6 +418,72 @@ impl MissionAnalyses {
                     },
                 })
             }
+        }
+    }
+}
+
+// The historical scalar mission API signals rejected solver iterates through
+// non-finite residuals. The rated Result API retains the explicit error.
+fn rejected_thrust_output() -> ThrustOutput {
+    ThrustOutput {
+        thrust_n: f64::NAN,
+        thrust_specific_fuel_consumption: f64::NAN,
+        non_dimensional_thrust: f64::NAN,
+        core_mass_flow_rate_kg_s: f64::NAN,
+        fuel_flow_rate_kg_s: f64::NAN,
+        power_w: f64::NAN,
+        specific_impulse_s: f64::NAN,
+    }
+}
+
+fn jet_a_mass_flow(flows: &[alas_prop::system::ResourceFlow]) -> Result<f64, PropulsionError> {
+    flows
+        .iter()
+        .find(|flow| flow.resource == ResourceKind::JetA)
+        .and_then(|flow| flow.mass_flow_kg_s)
+        .ok_or(PropulsionError::UnsupportedDemand(
+            "mission requires a Jet-A mass-flow result",
+        ))
+}
+
+#[cfg(test)]
+mod projection_tests {
+    use super::*;
+    use alas_prop::system::ResourceFlow;
+
+    #[test]
+    fn unsupported_resource_flow_is_an_error_and_rejected_iterate() {
+        for resource in [
+            ResourceKind::Hydrogen,
+            ResourceKind::ElectricalEnergy,
+            ResourceKind::Custom("other".into()),
+            ResourceKind::JetA,
+        ] {
+            let flows = [ResourceFlow {
+                resource,
+                mass_flow_kg_s: None,
+                power_w: Some(1.0),
+            }];
+            assert!(matches!(
+                jet_a_mass_flow(&flows),
+                Err(PropulsionError::UnsupportedDemand(_))
+            ));
+        }
+        assert!(jet_a_mass_flow(&[]).is_err());
+        let rejected = rejected_thrust_output();
+        assert!(rejected.thrust_n.is_nan());
+        assert!(rejected.fuel_flow_rate_kg_s.is_nan());
+    }
+
+    #[test]
+    fn jet_a_projection_preserves_positive_consumption_including_zero() {
+        for value in [0.0, 0.75] {
+            let flows = [ResourceFlow {
+                resource: ResourceKind::JetA,
+                mass_flow_kg_s: Some(value),
+                power_w: None,
+            }];
+            assert!(matches!(jet_a_mass_flow(&flows), Ok(got) if got == value));
         }
     }
 }

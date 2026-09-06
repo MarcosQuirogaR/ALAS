@@ -184,11 +184,20 @@ provenance block is honest.
   an error and lets the caller decide.
 - **Every `#[allow]` carries a comment saying why**, on the line above. An
   unexplained allow is an unreviewed decision.
-- **No file over 500 lines**, tests excluded. This is enforced. Long files are
-  where context gets lost — by a reader, by a reviewer, and by a tool with a
-  finite window. The Python implementation has a 6,200-line visualization
-  module that nobody can hold in their head at once, and reproducing that here
-  would undo half the point of the rewrite.
+- **No module over 500 assembled production lines**, tests excluded. This is
+  enforced on the *assembled* module: `cargo xtask checks` parses each file,
+  follows every `include!()` recursively, and counts what the compiler sees
+  as one module, so splicing a file into `*_parts/` fragments does not make
+  it smaller. Long modules are where context gets lost — by a reader, by a
+  reviewer, and by a tool with a finite window. The Python implementation has
+  a 6,200-line visualization module that nobody can hold in their head at
+  once, and reproducing that here would undo half the point of the rewrite.
+  Modules that were already over the limit when the assembled check landed
+  are listed in `docs/source-size-budgets.tsv` with an explicit ceiling equal
+  to their reviewed size and a one-line rationale. A listed module may
+  shrink but not grow; once it drops to 500 lines the check asks for its row
+  to be removed. Do not add rows for new modules — split them into real
+  `mod`s with interfaces instead.
 - **No new dependencies without justification.** Every one is a licence to
   audit and a supply chain to trust. Add it in `[workspace.dependencies]`, and
   say in the commit body what it does and what the alternative was.

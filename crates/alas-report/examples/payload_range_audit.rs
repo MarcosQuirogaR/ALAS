@@ -1,4 +1,9 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2026 Marcos Quiroga Rodriguez
+
 #![doc = "Print the four conceptual payload-range points for each registered preset."]
+// Standalone diagnostic examples report to the console.
+#![allow(clippy::print_stdout)]
 
 use alas_config::{presets, AlasConfig};
 use alas_pipeline::FullAnalysis;

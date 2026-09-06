@@ -15,7 +15,7 @@ use alas_opt::wing_fuel_volume_m3;
 
 use crate::full_analysis::AnalysisReport;
 
-use super::{FindingCode, FindingSeverity, PhysicalFinding};
+use super::{DispatchAssessment, FindingCode, FindingSeverity, PhysicalFinding};
 
 /// Provenance of the usable-fuel capacity applied to one design result.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -56,6 +56,9 @@ pub enum CarriedFuelBasis {
     /// Capacity is unknown, so the analysis assumes the MTOW remainder.
     #[default]
     CapacityUnverified,
+    /// The fuel the policy requires for the flown route, bounded by the
+    /// takeoff-mass limit and the tanks.
+    ReservePolicyClosure,
 }
 
 /// Outcome of relating mission telemetry to the analyzed fuel load.
@@ -108,10 +111,14 @@ pub struct FuelLoadingAssessment {
     /// This is an analyzed state, not the maximum-landing-mass limit or the
     /// fallback fraction used by preliminary field-performance screening.
     pub analyzed_landing_mass_kg: Option<f64>,
-    /// Difference between configured MTOW and analyzed takeoff mass, in kilograms.
+    /// Takeoff mass the tanks cannot supply below the configured MTOW, in
+    /// kilograms: zero when a full load reaches MTOW. It describes the tank
+    /// bound, not the flown load case, so a policy closure leaves it as is.
     pub mtow_shortfall_kg: f64,
     /// Mission burn/requirement result for the analyzed load case.
     pub mission: MissionFuelAssessment,
+    /// The fuel policy as applied to the flown mission, when one was flown.
+    pub dispatch: Option<DispatchAssessment>,
 }
 
 impl Default for FuelLoadingAssessment {
@@ -126,6 +133,7 @@ impl Default for FuelLoadingAssessment {
             analyzed_landing_mass_kg: None,
             mtow_shortfall_kg: f64::NAN,
             mission: MissionFuelAssessment::default(),
+            dispatch: None,
         }
     }
 }
@@ -180,6 +188,7 @@ pub(super) fn plan_from_values(
         analyzed_landing_mass_kg: None,
         mtow_shortfall_kg: (mtow_kg - analyzed_takeoff_mass_kg).max(0.0),
         mission: MissionFuelAssessment::default(),
+        dispatch: None,
     }
 }
 
@@ -286,12 +295,15 @@ pub(super) fn findings(mtow_kg: f64, fuel_loading: &FuelLoadingAssessment) -> Ve
                 FuelCapacityEvidence::GeometryEstimate => "geometry-estimated usable tank capacity",
                 FuelCapacityEvidence::Unavailable => "usable tank capacity",
             };
+            // The tanks bound the takeoff mass at the zero-fuel mass plus
+            // the capacity whatever load case is flown, so the finding quotes
+            // that bound rather than the analyzed (possibly policy) mass.
+            let tank_bound_takeoff_mass_kg = fuel_loading.zero_fuel_mass_kg + capacity;
             findings.push(PhysicalFinding {
                 code: FindingCode::TankLimitedTakeoffMass,
                 severity: FindingSeverity::Warning,
                 message: format!(
-                    "{evidence} limits the analyzed takeoff mass to {:.3} kg, below the {:.3} kg MTOW limit",
-                    fuel_loading.analyzed_takeoff_mass_kg, mtow_kg
+                    "{evidence} limits the takeoff mass to {tank_bound_takeoff_mass_kg:.3} kg, below the {mtow_kg:.3} kg MTOW limit"
                 ),
                 actual: Some(mtow_closure_fuel_kg),
                 limit: Some(capacity),

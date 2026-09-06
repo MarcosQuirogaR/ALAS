@@ -366,9 +366,9 @@ pub struct NozzleResult {
     pub exit_velocity_m_s: f64,
     /// Exit Mach number.
     pub exit_mach: f64,
-    /// Exit density, kg/m³.
+    /// Exit density, kg/m--.
     pub exit_density_kg_m3: f64,
-    /// Area required to pass the supplied mass flow, m².
+    /// Area required to pass the supplied mass flow, m--.
     pub required_area_m2: f64,
     /// Gross momentum flux `mass_flow * exit_velocity`, N.
     pub momentum_thrust_n: f64,

@@ -43,8 +43,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     overlay, AnalysisConfig, CabinConfig, ConfigNode, ControlSurfacesConfig, DesignRequirements,
-    DragModelConfig, GeometryConfig, LandingGearConfig, MassModelConfig, MissionConfig, MsesConfig,
-    OptimizerConfig, OverlayError, PerformanceConfig, PropulsionCycleConfig, StructuresConfig,
+    DragModelConfig, FuelPolicyConfig, FuelTankLayoutConfig, GeometryConfig, LandingGearConfig,
+    MassModelConfig, MissionConfig, MsesConfig, OptimizerConfig, OverlayError, PerformanceConfig,
+    PropulsionCycleConfig, StructuresConfig,
 };
 
 /// Everything one run is configured with.
@@ -155,6 +156,22 @@ pub struct AlasConfig {
     )]
     pub structures: StructuresConfig,
 
+    /// The operating rule the mission fuel is planned under.
+    #[serde(default, skip_serializing_if = "FuelPolicyConfig::is_default")]
+    #[config(
+        nested,
+        help = "Fuel-planning policy: which operating rule supplies taxi, contingency, alternate and final-reserve fuel, and the operator assumptions those rules leave open."
+    )]
+    pub fuel_policy: FuelPolicyConfig,
+
+    /// Where the fuel is carried.
+    #[serde(default, skip_serializing_if = "FuelTankLayoutConfig::is_default")]
+    #[config(
+        nested,
+        help = "Fuel-tank arrangement: which wing, centre, trim and auxiliary tanks the aircraft has, the semispan stations that bound them, and the published capacities of a registered aircraft."
+    )]
+    pub fuel_tanks: FuelTankLayoutConfig,
+
     /// Where the route starts.
     ///
     /// Saved with the configuration rather than chosen per run, so reloading
@@ -189,6 +206,8 @@ impl Default for AlasConfig {
             control_surfaces: ControlSurfacesConfig::default(),
             propulsion_cycle: PropulsionCycleConfig::default(),
             structures: StructuresConfig::default(),
+            fuel_policy: FuelPolicyConfig::default(),
+            fuel_tanks: FuelTankLayoutConfig::default(),
             // A long-haul pair, so an unconfigured run has a real route rather
             // than a zero-length one.
             departure_airport: "London Heathrow (EGLL)".to_owned(),
@@ -242,6 +261,13 @@ impl AlasConfig {
                     }
                     if let Some(performance) = &preset.performance {
                         instance.performance = performance.clone();
+                    }
+                    // A registered aircraft's tank arrangement is aircraft
+                    // data, not a study assumption, so it travels with the
+                    // preset the same way its gear and high-lift calibrations
+                    // do; the overlay below still lets a file change it.
+                    if let Some(tanks) = crate::preset_fuel_tanks::layout_for(name) {
+                        instance.fuel_tanks = tanks;
                     }
                     instance.departure_airport = operational.departure_airport.to_owned();
                     instance.arrival_airport = operational.arrival_airport.to_owned();
@@ -318,8 +344,9 @@ mod tests {
         let preset = crate::presets::get("A220-300").unwrap();
         assert_eq!(config.departure_airport, "Riga (EVRA)");
         assert_eq!(config.arrival_airport, "Stockholm Arlanda (ESSA)");
-        let atmosphere = alas_atmo::Atmosphere::new(config.requirements.cruise_altitude_m);
-        let expected = config.requirements.cruise_mach * atmosphere.speed_of_sound();
+        let operational = preset.operational_mission_defaults();
+        let atmosphere = alas_atmo::Atmosphere::new(operational.cruise_altitude_m);
+        let expected = operational.cruise_mach * atmosphere.speed_of_sound();
         assert!((config.mission.profile.cruise_1_air_speed_m_s - expected).abs() < 1e-9);
         assert_ne!(
             config.mission.profile.cruise_1_air_speed_m_s,
@@ -404,7 +431,9 @@ mod tests {
             .collect();
         assert_eq!(names.first(), Some(&"preset"));
         assert_eq!(names.last(), Some(&"arrival_airport"));
-        assert_eq!(names.len(), 17);
+        assert_eq!(names.len(), 19);
+        assert!(names.contains(&"fuel_policy"));
+        assert!(names.contains(&"fuel_tanks"));
     }
 
     #[test]

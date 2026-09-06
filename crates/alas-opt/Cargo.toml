@@ -18,6 +18,7 @@ alas-perf = { path = "../alas-perf" }
 alas-aero = { path = "../alas-aero" }
 alas-stab = { path = "../alas-stab" }
 alas-math = { path = "../alas-math" }
+alas-units = { path = "../alas-units" }
 tracing = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }

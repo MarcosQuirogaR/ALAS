@@ -63,6 +63,7 @@ fn text(scene: &mut Scene, value: impl Into<String>, pos: [f64; 2], color: Color
     });
 }
 
+// Coordinated analysis inputs are kept explicit at this integration boundary.
 #[allow(clippy::too_many_arguments)]
 fn rect_physical(
     scene: &mut Scene,
@@ -457,6 +458,7 @@ pub fn figure_cabin_cross_section(
 }
 
 #[cfg(test)]
+// This regression helper asserts that its constructed fixture is valid.
 #[allow(clippy::expect_used)]
 mod tests {
     use super::*;

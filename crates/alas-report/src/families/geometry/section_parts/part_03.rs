@@ -181,7 +181,7 @@ fn draw_seat(scene: &mut Scene, map: SectionMap, seat: &SeatSlice, color: Color,
     );
     poly(
         scene,
-        map.ring(&vec![
+        map.ring(&[
             [seat.y_m - half * 0.86, pan],
             [seat.y_m + half * 0.86, pan],
             [seat.y_m + half * 0.74, top - seat.height_m * 0.16],

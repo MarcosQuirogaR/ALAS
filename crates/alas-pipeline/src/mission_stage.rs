@@ -19,9 +19,12 @@ use alas_aero::lift_surrogate::{LiftSurrogate, TrainingGrid};
 use alas_aero::vorlax::{VlmGeometry, VlmSettings, VlmWing};
 use alas_config::airports::Airport;
 use alas_config::{ActiveEngineModel, AlasConfig};
+#[cfg(test)]
 use alas_mission::segments::SegmentKind;
 use alas_mission::segments::{LegacyTurbofanCompatibility, MissionAnalyses};
-use alas_mission::{build_mission_request, Mission, MissionResult};
+#[cfg(test)]
+use alas_mission::Mission;
+use alas_mission::{build_mission_request, MissionResult};
 use alas_prop::empirical_turbofan::{EmpiricalTurbofanDeck, EmpiricalTurbofanModel};
 use alas_prop::mission_turbofan::{
     size_turbofan, size_turbofan_to_static_rating, PartPowerModel, TurbofanInputs,
@@ -36,102 +39,47 @@ use alas_prop::turboprop::{Atr72TurbopropSystem, Pw127m568fModel};
 use crate::feasibility::plan_fuel_loading;
 use crate::full_analysis::AnalysisReport;
 
+pub mod dispatch;
+mod flight;
 mod guidance;
 mod schedule;
 
+pub(crate) use dispatch::{LoadCaseSelection, SelectedLoadCase};
 use guidance::{adapt_failed_climb, adapt_failed_cruise, adapt_failed_descent};
+use schedule::build_schedule;
 #[cfg(test)]
 use schedule::schedule_horizontal_distance;
-use schedule::{build_schedule, close_schedule_distance};
 
 const METRES_PER_SECOND_TO_FEET_PER_MINUTE: f64 = 3.28084 * 60.0;
 
 /// Run the native mission for the selected report and route.
+///
+/// The route is flown at the load case [`dispatch::select_load_case`]
+/// chooses: the takeoff mass the fuel policy requires, or the frozen
+/// maximum-available-fuel case when the policy is switched off. The
+/// selection itself is returned beside the flown result so the feasibility
+/// stage can report the reserve plan the flight was sized to.
 pub(crate) fn evaluate(
     config: &AlasConfig,
     report: &AnalysisReport,
     origin: &Airport,
     destination: &Airport,
     route_distance_m: f64,
-) -> Result<MissionResult, String> {
+) -> Result<(MissionResult, SelectedLoadCase), String> {
     let request = build_mission_request(config, origin, destination, route_distance_m);
-    let mut schedule = build_schedule(&request)?;
-    let analyses = build_analyses(config, report)?;
-    const MAX_GUIDANCE_REVISIONS: usize = 24;
-    for revision in 0..=MAX_GUIDANCE_REVISIONS {
-        let result = Mission {
-            schedule: schedule.clone(),
-        }
-        .evaluate(&analyses)
-        .map_err(|error| format!("native mission failed: {error}"))?;
-        if result.completed_summary().is_some() || revision == MAX_GUIDANCE_REVISIONS {
-            return Ok(result);
-        }
-
-        let Some(index) = result.segments.len().checked_sub(1) else {
-            return Ok(result);
-        };
-        let segment_tag = schedule[index].tag.clone();
-        let solution = &result.solutions[index];
-        let adapted = if !solution.converged || solution.throttle_limited {
-            match schedule[index].kind {
-                SegmentKind::Climb { .. } => {
-                    adapt_failed_climb(&mut schedule, index, &result.segments[index]).map(
-                        |change| {
-                            tracing::info!(
-                                segment = %segment_tag,
-                                revision,
-                                old_rate_m_s = change.old_rate_m_s,
-                                new_rate_m_s = change.new_rate_m_s,
-                                old_end_altitude_m = change.old_end_altitude_m,
-                                new_end_altitude_m = change.new_end_altitude_m,
-                                old_speed_m_s = change.old_speed_m_s,
-                                new_speed_m_s = change.new_speed_m_s,
-                                "replanned unconverged climb from the available propulsion envelope"
-                            );
-                        },
-                    )
-                }
-                SegmentKind::Cruise { .. } => {
-                    adapt_failed_cruise(&mut schedule, index).map(|change| {
-                        tracing::info!(
-                            segment = %segment_tag,
-                            revision,
-                            old_speed_m_s = change.old_speed_m_s,
-                            new_speed_m_s = change.new_speed_m_s,
-                            "replanned unconverged cruise below the propulsion envelope"
-                        );
-                    })
-                }
-                SegmentKind::Descent { .. } => {
-                    adapt_failed_descent(&mut schedule, index).map(|change| {
-                        tracing::info!(
-                            segment = %segment_tag,
-                            revision,
-                            old_rate_m_s = change.old_rate_m_s,
-                            new_rate_m_s = change.new_rate_m_s,
-                            "replanned unconverged descent from idle-thrust excess drag"
-                        );
-                    })
-                }
-            }
-        } else {
-            None
-        };
-        if adapted.is_none() {
-            tracing::warn!(
-                segment = %segment_tag,
-                revision,
-                status = ?solution.status,
-                converged = solution.converged,
-                throttle_limited = solution.throttle_limited,
-                "mission guidance could not find a bounded profile revision"
-            );
-            return Ok(result);
-        }
-        close_schedule_distance(&mut schedule, &request)?;
-    }
-    unreachable!("bounded guidance revision loop always returns")
+    let schedule = build_schedule(&request)?;
+    let mut analyses = build_analyses(config, report)?;
+    let fuel_loading = plan_fuel_loading(config, &report.design, report);
+    let load_case = dispatch::select_load_case(
+        config,
+        report,
+        &fuel_loading,
+        &mut analyses,
+        &request,
+        &schedule,
+    )?;
+    let result = flight::fly_with_guidance(schedule, &request, &analyses)?;
+    Ok((result, load_case))
 }
 
 // The compatibility variant is only used by the in-crate W6.4 evidence tests.
@@ -1107,8 +1055,9 @@ mod tests {
         assert!(hot_temperature > cold_temperature);
         assert!(hot_density < cold_density);
 
-        let result = evaluate(&config, &report, origin, destination, 5_000_000.0)
+        let (result, load_case) = evaluate(&config, &report, origin, destination, 5_000_000.0)
             .unwrap_or_else(|error| panic!("default report flies: {error}"));
+        assert!((result.initial_mass_kg() - load_case.takeoff_mass_kg).abs() < 1.0e-6);
         assert_eq!(result.solutions.len(), result.scheduled_segment_count);
         assert!(result
             .solutions

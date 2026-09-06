@@ -1,4 +1,9 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2026 Marcos Quiroga Rodriguez
+
 #![doc = "Audit the materialized passenger load case and cabin capacity for registered presets."]
+// Standalone diagnostic examples report to the console and assert their inputs.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::print_stdout)]
 
 use alas_config::{presets, AlasConfig};
 use alas_geom::builder::AircraftBuilder;

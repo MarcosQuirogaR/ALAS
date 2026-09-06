@@ -311,7 +311,7 @@ mod tests {
         engine.spanwise_positions_m = vec![-8.7, 8.7];
         engine.z_m = -2.41;
         engine.inlet_x_offset_m = 3.67;
-        engine.thrust_kn = 401.2;
+        engine.turbofan.as_mut().unwrap().rated_thrust_kn = 401.2;
         engine.bypass_ratio = 9.31;
         engine.overall_pressure_ratio = 42.7;
         engine.fan_pressure_ratio = 1.61;
@@ -336,12 +336,12 @@ mod tests {
     fn reference_builder_still_resolves_the_named_database_engine() {
         let mut geometry = GeometryConfig::default();
         geometry.engine.engine_name = "Trent 900".to_owned();
-        geometry.engine.thrust_kn = 1.0;
+        geometry.engine.turbofan.as_mut().unwrap().rated_thrust_kn = 1.0;
 
         let builder = AircraftBuilder::new_reference_compatibility(Some(geometry));
         let spec = alas_config::engines::get("Trent 900").unwrap();
 
-        assert_eq!(builder.geometry.engine.thrust_kn, spec.thrust_kn);
+        assert_eq!(builder.geometry.engine.thrust_kn(), spec.thrust_kn);
         assert_eq!(
             builder.geometry.engine.nacelle_profile,
             spec.nacelle_profile()

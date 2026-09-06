@@ -286,7 +286,7 @@ fn parse_wake_history(text: &str) -> Result<Vec<WakeCase>, String> {
                     .position(|header| *header == name)
                     .unwrap_or(usize::MAX);
             }
-            if found.iter().any(|&index| index == usize::MAX) {
+            if found.contains(&usize::MAX) {
                 return Err("VSPAERO wake history is missing CLtot/CDi/CMytot columns".to_owned());
             }
             columns = Some(found);

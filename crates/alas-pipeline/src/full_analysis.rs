@@ -178,6 +178,9 @@ pub struct FullAnalysis {
     reference_compatibility: bool,
 }
 
+mod station_coordinates;
+pub(crate) use station_coordinates::station_coordinates_for;
+
 include!("full_analysis_parts/part_01.rs");
 include!("full_analysis_parts/part_02.rs");
 
@@ -196,6 +199,8 @@ fn coordinates_to_map(mc: &MassCoordinates) -> HashMap<String, [f64; 3]> {
 }
 
 #[cfg(test)]
+// Failed expectations and unwraps here are failed test assertions.
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::{FullAnalysis, PolarFitStatus};
     use alas_aero::analysis::PolarSweep;
@@ -224,7 +229,13 @@ mod tests {
         config.geometry.engine.engine_name = "Trent 900".to_owned();
         config.geometry.engine.nacelle_profile = vec![(0.0, 0.33), (2.5, 1.0), (6.2, 0.41)];
         config.geometry.engine.radius_scale_m = 1.91;
-        config.geometry.engine.thrust_kn = 399.0;
+        config
+            .geometry
+            .engine
+            .turbofan
+            .as_mut()
+            .unwrap()
+            .rated_thrust_kn = 399.0;
         config.geometry.engine.bypass_ratio = 9.2;
         config.geometry.engine.overall_pressure_ratio = 43.0;
         config.geometry.engine.fan_pressure_ratio = 1.59;

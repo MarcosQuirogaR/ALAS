@@ -161,8 +161,10 @@ mod tests {
 
     #[test]
     fn pw127m_uses_the_shaft_power_editor_payload() {
-        let mut engine = alas_config::EngineConfig::default();
-        engine.engine_name = "PW127M".to_owned();
+        let mut engine = alas_config::EngineConfig {
+            engine_name: "PW127M".to_owned(),
+            ..Default::default()
+        };
         engine.try_apply_engine_spec().expect("PW127M binding");
 
         let model = engine_editor_model(&engine).expect("supported technology");

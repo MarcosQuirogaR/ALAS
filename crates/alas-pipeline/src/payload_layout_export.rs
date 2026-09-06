@@ -21,6 +21,7 @@ pub const PAYLOAD_LAYOUT_SCHEMA_VERSION: &str = "alas.payload-layout-render/v1";
 
 /// Complete input needed to reproduce payload-layout figures from a real run.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+// Serialized fields form the documented interchange schema.
 #[allow(missing_docs)]
 pub struct PayloadLayoutArtifact {
     pub schema_version: String,
@@ -32,6 +33,7 @@ pub struct PayloadLayoutArtifact {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+// Serialized fields form the documented interchange schema.
 #[allow(missing_docs)]
 pub struct PayloadLayoutProvenance {
     pub producer: String,
@@ -41,6 +43,7 @@ pub struct PayloadLayoutProvenance {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+// Serialized fields form the documented interchange schema.
 #[allow(missing_docs)]
 pub struct RenderLayout {
     pub mode: String,
@@ -52,6 +55,7 @@ pub struct RenderLayout {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+// Serialized fields form the documented interchange schema.
 #[allow(missing_docs)]
 pub struct RenderItem {
     pub kind: String,
@@ -63,18 +67,26 @@ pub struct RenderItem {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+// Serialized fields form the documented interchange schema.
 #[allow(missing_docs)]
 pub struct RenderItemGeometry {
+    /// Center coordinate [m], positive aft from the aircraft origin.
     pub center_x: f64,
+    /// Center coordinate [m], positive starboard from the aircraft origin.
     pub center_y: f64,
+    /// Center coordinate [m], positive up from the aircraft origin.
     pub center_z: f64,
+    /// Longitudinal extent [m].
     pub length: f64,
+    /// Lateral extent [m].
     pub width: f64,
+    /// Vertical extent [m].
     pub height: f64,
 }
 
 /// What is authoritative in the snapshot and what still needs richer inputs.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+// Serialized fields form the documented interchange schema.
 #[allow(missing_docs)]
 pub struct RenderFidelity {
     pub authoritative: Vec<String>,
@@ -124,85 +136,6 @@ impl PayloadLayoutArtifact {
                 ],
             },
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use alas_payload::layout::{CargoSummary, ContainerMeta, DeckItem, ItemKind, Mode, LOWER};
-
-    #[test]
-    fn artifact_keeps_individual_uld_identity_geometry_and_load() {
-        let layout = PayloadLayout {
-            mode: Mode::Cargo,
-            items: vec![DeckItem {
-                kind: ItemKind::Uld,
-                deck: LOWER,
-                x: 14.0,
-                y: -0.8,
-                z: -1.1,
-                length: 1.534,
-                width: 1.562,
-                height: 1.626,
-                mass: 1_200.0,
-                label: "AKE 1200kg".to_owned(),
-                meta: ItemMeta::Container(ContainerMeta {
-                    uld: "AKE",
-                    fill: 0.75,
-                    color: "#4477aa",
-                    net: Some(1_120.0),
-                }),
-            }],
-            total_mass: 1_200.0,
-            cg_x: 14.0,
-            cg_y: -0.8,
-            summary: LayoutSummary::Cargo(Box::new(CargoSummary {
-                payload_t: 1.2,
-                requested_net_payload_t: 1.12,
-                loaded_net_payload_t: 1.12,
-                tare_mass_t: 0.08,
-                n_ulds: 1,
-                n_main_deck: 0,
-                n_lower_deck: 1,
-                n_slots: 1,
-                capacity_t: 1.5,
-                fill_pct: 75.0,
-                volume_m3: 4.3,
-                lower_uld: "AKE",
-                target_cg_pct_mac: 25.0,
-                achieved_cg_pct_mac: 25.1,
-                strategy: "balanced".to_owned(),
-            })),
-        };
-        let artifact = PayloadLayoutArtifact::from_run(
-            &AlasConfig::default(),
-            DesignVector::default(),
-            &layout,
-        );
-        let encoded = serde_json::to_string(&artifact).expect("serialize artifact");
-        let decoded: PayloadLayoutArtifact =
-            serde_json::from_str(&encoded).expect("deserialize artifact");
-        assert_eq!(decoded.schema_version, PAYLOAD_LAYOUT_SCHEMA_VERSION);
-        assert_eq!(decoded.layout.items[0].meta["uld_code"], "AKE");
-        assert_eq!(decoded.layout.items[0].meta["net_load_kg"], 1_120.0);
-        assert_eq!(
-            decoded.layout.items[0].meta["contour_fidelity"],
-            "visualization_only"
-        );
-        assert_eq!(
-            decoded.layout.items[0].meta["normalized_contour_yz"]
-                .as_array()
-                .expect("ULD contour is serialized")
-                .len(),
-            8
-        );
-        assert_eq!(decoded.layout.items[0].geometry_m.center_y, -0.8);
-        assert!(decoded
-            .fidelity
-            .missing_for_manufacturer_fidelity
-            .iter()
-            .any(|entry| entry.contains("window station")));
     }
 }
 
@@ -340,4 +273,85 @@ fn passenger_summary_json(summary: &PassengerSummary) -> serde_json::Value {
         "deck_utilization": summary.deck_utilization, "cg_pct_mac": summary.cg_pct_mac,
         "double_deck": summary.double_deck,
     })
+}
+
+#[cfg(test)]
+// Failed expectations and unwraps here are failed test assertions.
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod tests {
+    use super::*;
+    use alas_payload::layout::{CargoSummary, ContainerMeta, DeckItem, ItemKind, Mode, LOWER};
+
+    #[test]
+    fn artifact_keeps_individual_uld_identity_geometry_and_load() {
+        let layout = PayloadLayout {
+            mode: Mode::Cargo,
+            items: vec![DeckItem {
+                kind: ItemKind::Uld,
+                deck: LOWER,
+                x: 14.0,
+                y: -0.8,
+                z: -1.1,
+                length: 1.534,
+                width: 1.562,
+                height: 1.626,
+                mass: 1_200.0,
+                label: "AKE 1200kg".to_owned(),
+                meta: ItemMeta::Container(ContainerMeta {
+                    uld: "AKE",
+                    fill: 0.75,
+                    color: "#4477aa",
+                    net: Some(1_120.0),
+                }),
+            }],
+            total_mass: 1_200.0,
+            cg_x: 14.0,
+            cg_y: -0.8,
+            summary: LayoutSummary::Cargo(Box::new(CargoSummary {
+                payload_t: 1.2,
+                requested_net_payload_t: 1.12,
+                loaded_net_payload_t: 1.12,
+                tare_mass_t: 0.08,
+                n_ulds: 1,
+                n_main_deck: 0,
+                n_lower_deck: 1,
+                n_slots: 1,
+                capacity_t: 1.5,
+                fill_pct: 75.0,
+                volume_m3: 4.3,
+                lower_uld: "AKE",
+                target_cg_pct_mac: 25.0,
+                achieved_cg_pct_mac: 25.1,
+                strategy: "balanced".to_owned(),
+            })),
+        };
+        let artifact = PayloadLayoutArtifact::from_run(
+            &AlasConfig::default(),
+            DesignVector::default(),
+            &layout,
+        );
+        let encoded = serde_json::to_string(&artifact).expect("serialize artifact");
+        let decoded: PayloadLayoutArtifact =
+            serde_json::from_str(&encoded).expect("deserialize artifact");
+        assert_eq!(decoded.schema_version, PAYLOAD_LAYOUT_SCHEMA_VERSION);
+        assert_eq!(decoded.layout.items[0].meta["uld_code"], "AKE");
+        assert_eq!(decoded.layout.items[0].meta["net_load_kg"], 1_120.0);
+        assert_eq!(
+            decoded.layout.items[0].meta["contour_fidelity"],
+            "visualization_only"
+        );
+        assert_eq!(
+            decoded.layout.items[0].meta["normalized_contour_yz"]
+                .as_array()
+                .expect("ULD contour is serialized")
+                .len(),
+            8
+        );
+        assert_eq!(decoded.layout.items[0].geometry_m.center_y, -0.8);
+        assert!(decoded
+            .fidelity
+            .missing_for_manufacturer_fidelity
+            .iter()
+            .any(|entry| entry.contains("window station")));
+    }
 }

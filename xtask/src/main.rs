@@ -12,6 +12,7 @@ mod checks;
 mod dist;
 mod evidence;
 mod ledger;
+mod source_size;
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
@@ -113,6 +114,7 @@ fn run_checks(root: &Path) -> Result<(), String> {
         findings.extend(checks::check_file(root, path, &text));
     }
     findings.extend(ledger::check(root)?);
+    findings.extend(source_size::check(root, &sources)?);
 
     if findings.is_empty() {
         println!("checks: pass");
