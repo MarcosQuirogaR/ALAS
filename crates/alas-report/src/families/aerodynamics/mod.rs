@@ -10,7 +10,7 @@
 //!
 //! Split into topical submodules, following the pattern
 //! `crates/alas-geom/src/aircraft/airfoil/` already set, so no single file grows
-//! past this crate's 700-line limit: [`polar`] for the report-fed polar
+//! past this crate's 500-line limit: [`polar`] for the report-fed polar
 //! panels (`figure_aero_panel`, `figure_polar_comparison`,
 //! `figure_drag_breakdown`), [`model_comparison`] for the native-model/MSES
 //! overlay, [`mses`] for the two section-level MSES figures, [`vlm`] for
@@ -29,11 +29,17 @@ mod reynolds;
 mod status;
 mod support;
 mod vlm;
+mod vspaero;
+mod vspaero_lod;
 
 pub use drag_preview::figure_drag_preview;
 pub use model_comparison::{figure_model_comparison, figure_optimized_aircraft_comparison};
-pub use mses::{figure_mses_mach_contours, figure_mses_pressure_distribution};
+pub use mses::{
+    figure_mses_convergence, figure_mses_mach_contours, figure_mses_pressure_distribution,
+};
 pub use polar::{figure_aero_panel, figure_drag_breakdown, figure_polar_comparison};
 pub use reynolds::figure_airfoil_reynolds;
 pub use status::figure_status_message;
 pub use vlm::{figure_span_loading, figure_vlm_flow};
+pub use vspaero::{figure_vspaero_polar, figure_vspaero_wake_convergence};
+pub use vspaero_lod::figure_vspaero_load_distribution;

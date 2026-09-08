@@ -135,13 +135,22 @@ fn apply_cabin_preset_with_semantics(
         return Ok(());
     }
 
-    let Some(mix) = passenger_preset_mix(config, &preset) else {
+    let Some(product_mix) = passenger_preset_mix(config, &preset) else {
         return Ok(());
+    };
+    let mix = if semantics == CabinPresetSemantics::FrozenPython {
+        frozen_reference_mix(&preset).unwrap_or(product_mix)
+    } else {
+        product_mix
     };
     // Mirroring the preset's own mix into the per-class shares is what stops
     // the cabin page showing shares that did not produce the layout it is
     // displaying.
-    config.cabin.passenger.set_length_share_mix(&mix);
+    if semantics == CabinPresetSemantics::FrozenPython {
+        set_frozen_reference_mix(config, &mix);
+    } else {
+        config.cabin.passenger.set_length_share_mix(&mix);
+    }
     if semantics == CabinPresetSemantics::FrozenPython {
         let counts = simulate_passenger_counts(&cg_geom, &config.cabin.passenger, &mix);
         write_counts(config, counts);
@@ -151,6 +160,33 @@ fn apply_cabin_preset_with_semantics(
         write_counts(config, counts);
     }
     Ok(())
+}
+
+/// Historical mixes used only to replay the frozen Python evidence fixture.
+fn frozen_reference_mix(preset: &str) -> Option<Vec<(&'static str, f64)>> {
+    match preset {
+        "Ryanair" => Some(vec![("Economy", 1.0)]),
+        "Iberia" => Some(vec![
+            ("Business", 0.40),
+            ("Premium", 0.09),
+            ("Economy", 0.51),
+        ]),
+        "Emirates" => Some(vec![("First", 0.09), ("Business", 0.30), ("Economy", 0.61)]),
+        _ => None,
+    }
+}
+
+fn set_frozen_reference_mix(config: &mut AlasConfig, mix: &[(&str, f64)]) {
+    let share_of = |name: &str| {
+        mix.iter()
+            .find(|(other, _)| *other == name)
+            .map_or(0.0, |&(_, fraction)| fraction * 100.0)
+    };
+    let pax = &mut config.cabin.passenger;
+    pax.first.share_pct = share_of("First");
+    pax.business.share_pct = share_of("Business");
+    pax.premium.share_pct = share_of("Premium");
+    pax.economy.share_pct = share_of("Economy");
 }
 
 /// The "Custom" branches: a percent-mode cabin re-solved from its shares, and
@@ -323,11 +359,19 @@ fn cabin_geometry(
         AircraftBuilder::new(Some(config.geometry.clone()))
     };
     let plane = builder.build(design_vector, false)?;
-    Ok(CabinGeometry::new(
-        &plane,
-        &builder.geometry,
-        config.cabin.passenger.wall_thickness_m,
-    )?)
+    Ok(if semantics.uses_reference_geometry() {
+        CabinGeometry::new_reference_compatibility(
+            &plane,
+            &builder.geometry,
+            config.cabin.passenger.wall_thickness_m,
+        )?
+    } else {
+        CabinGeometry::new(
+            &plane,
+            &builder.geometry,
+            config.cabin.passenger.wall_thickness_m,
+        )?
+    })
 }
 
 // These are assertions over fixtures constructed in the test itself; a failed

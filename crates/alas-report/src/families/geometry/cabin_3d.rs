@@ -8,11 +8,11 @@ use alas_geom::aircraft::airplane::Airplane;
 use alas_payload::geometry::CabinGeometry;
 use alas_payload::layout::{DeckItem, ItemKind, ItemMeta, PayloadLayout, SeatMeta};
 
-use crate::chart_kit::{draw_legend, LegendMarker};
 use crate::scene::{Camera3D, Color, Fill, Scene, SceneElement, Stroke};
 use crate::theme::get_palette;
 
 use super::cabin::item_color;
+use super::cabin_assets::asset_for_item;
 use super::wireframe::{draw_fuselage_wireframe, framing};
 
 #[derive(Clone)]
@@ -94,19 +94,35 @@ fn seat_faces(item: &DeckItem, meta: &SeatMeta, color: Color) -> Vec<Face3D> {
     let back_height = (item.height * 0.68).max(0.35);
     let back_length = (item.length * 0.13).clamp(0.08, 0.18);
     let back_x = item.x + cushion_length * 0.42;
-    let back_z = floor + back_height * 0.5;
     let mut faces = Vec::new();
     for y in seat_centers(meta) {
-        faces.extend(cuboid_faces(
-            [item.x, item.y + y, cushion_z],
-            [cushion_length, seat_width, cushion_height],
+        let y0 = item.y + y - seat_width * 0.5;
+        let y1 = item.y + y + seat_width * 0.5;
+        let cushion_x0 = item.x - cushion_length * 0.5;
+        let cushion_x1 = item.x + cushion_length * 0.5;
+        let cushion_top = cushion_z + cushion_height * 0.5;
+        let back_x0 = back_x - back_length * 0.5;
+        let back_top = floor + back_height;
+        faces.push(Face3D {
+            points: vec![
+                [cushion_x0, y0, cushion_top],
+                [cushion_x1, y0, cushion_top],
+                [cushion_x1, y1, cushion_top],
+                [cushion_x0, y1, cushion_top],
+            ],
             color,
-        ));
-        faces.extend(cuboid_faces(
-            [back_x, item.y + y, back_z],
-            [back_length, seat_width, back_height],
-            shade(color, 0.88, 255),
-        ));
+            outline: shade(color, 0.62, 255),
+        });
+        faces.push(Face3D {
+            points: vec![
+                [back_x0, y0, floor],
+                [back_x0, y0, back_top],
+                [back_x0, y1, back_top],
+                [back_x0, y1, floor],
+            ],
+            color: shade(color, 0.88, 255),
+            outline: shade(color, 0.58, 255),
+        });
     }
     faces
 }
@@ -115,6 +131,26 @@ fn item_faces(item: &DeckItem) -> Vec<Face3D> {
     let color = item_color(item);
     if let (ItemKind::SeatRow, ItemMeta::Seat(meta)) = (item.kind, &item.meta) {
         return seat_faces(item, meta, color);
+    }
+    if let Some(asset) = asset_for_item(item) {
+        let is_bin = item.kind == ItemKind::OverheadBin;
+        return asset
+            .faces()
+            .into_iter()
+            .enumerate()
+            .map(|(index, points)| Face3D {
+                points,
+                // Alternating side shading makes the crown-mounted side bins
+                // legible against the fuselage wireframe without inventing a
+                // lighting or GPU dependency.
+                color: shade(color, if index % 2 == 0 { 1.12 } else { 0.88 }, 240),
+                outline: if is_bin {
+                    Color::rgba(213, 216, 220, 235)
+                } else {
+                    shade(color, 0.48, 255)
+                },
+            })
+            .collect();
     }
     cuboid_faces(
         [item.x, item.y, item.z],
@@ -137,9 +173,9 @@ fn floor_faces(cabin: &CabinGeometry, layout: &PayloadLayout) -> Vec<Face3D> {
         if layout.by_deck(deck.name).is_empty() {
             continue;
         }
-        for index in 0..28 {
-            let fraction0 = index as f64 / 28.0;
-            let fraction1 = (index + 1) as f64 / 28.0;
+        for index in 0..16 {
+            let fraction0 = index as f64 / 16.0;
+            let fraction1 = (index + 1) as f64 / 16.0;
             let x0 = cabin.cabin_start_x + (cabin.cabin_end_x - cabin.cabin_start_x) * fraction0;
             let x1 = cabin.cabin_start_x + (cabin.cabin_end_x - cabin.cabin_start_x) * fraction1;
             let w0 = cabin.usable_width(deck, x0) * 0.5;
@@ -244,26 +280,6 @@ pub fn figure_cabin_payload_3d(
     let mut faces = floor_faces(&cabin, layout);
     faces.extend(layout.items.iter().flat_map(item_faces));
     draw_faces(&mut scene, faces, &camera, center, span, viewport);
-    draw_legend(
-        &mut scene,
-        [560.0, 458.0],
-        &[
-            (
-                "Fuselage".to_owned(),
-                LegendMarker::Line(Stroke::new(Color::from_hex("#7f8c8d"), 1.2)),
-            ),
-            (
-                "Deck floor".to_owned(),
-                LegendMarker::Patch(Color::from_hex("#34495e")),
-            ),
-            (
-                "Seats / monuments".to_owned(),
-                LegendMarker::Patch(Color::from_hex("#27ae60")),
-            ),
-        ],
-        pal,
-        8.0,
-    );
     scene
 }
 
@@ -321,7 +337,7 @@ mod tests {
             aisle_w: 0.51,
         };
         let faces = item_faces(&item(ItemKind::SeatRow, ItemMeta::Seat(meta)));
-        assert_eq!(faces.len(), 24, "two seats each have two six-face solids");
+        assert_eq!(faces.len(), 4, "two seats each use two visible surfaces");
         assert!(faces.iter().all(|face| face.points.len() == 4));
         assert_rendered_as_polygons(faces);
     }
@@ -331,6 +347,43 @@ mod tests {
         let faces = item_faces(&item(ItemKind::Galley, ItemMeta::None));
         assert_eq!(faces.len(), 6);
         assert!(faces.iter().all(|face| face.points.len() == 4));
+        assert_rendered_as_polygons(faces);
+    }
+
+    #[test]
+    fn overhead_bins_use_profile_extrusions_and_high_contrast_outlines() {
+        use alas_payload::layout::{OverheadBinMeta, OverheadBinType};
+
+        let faces = item_faces(&item(
+            ItemKind::OverheadBin,
+            ItemMeta::OverheadBin(OverheadBinMeta {
+                bin_type: OverheadBinType::Sidewall,
+            }),
+        ));
+        assert_eq!(faces.len(), 8, "six profile edges plus two end caps");
+        assert!(faces
+            .iter()
+            .all(|face| face.outline == Color::rgba(213, 216, 220, 235)));
+        assert_rendered_as_polygons(faces);
+    }
+
+    #[test]
+    fn ulds_use_the_polygonal_contour_instead_of_a_rectangular_solid() {
+        use alas_payload::layout::ContainerMeta;
+
+        let faces = item_faces(&item(
+            ItemKind::Uld,
+            ItemMeta::Container(ContainerMeta {
+                uld: "AKE",
+                fill: 0.8,
+                color: "#e74c3c",
+                net: Some(900.0),
+            }),
+        ));
+        // Eight normalized profile vertices produce two caps and one quad per
+        // edge. A six-face cuboid would be the old rectangular fallback.
+        assert_eq!(faces.len(), 10);
+        assert!(faces.iter().any(|face| face.points.len() == 8));
         assert_rendered_as_polygons(faces);
     }
 }

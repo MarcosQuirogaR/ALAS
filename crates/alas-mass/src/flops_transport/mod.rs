@@ -15,11 +15,22 @@
 //! is absent or inconsistent. The reference-compatible MTOW fractions remain
 //! a different, explicit method and are never a fallback from this module.
 
+mod airframe;
+mod airframe_geometry;
 mod equations;
 mod product;
+pub mod propulsion;
+pub mod structure;
+pub mod wing_bending;
 
+pub use airframe::{
+    evaluate_airframe_product, FlopsAirframeBreakdown, FlopsAirframeEvaluation,
+    FlopsAirframeRequest, FlopsAirframeSelection, FlopsAirframeSources,
+};
 pub use equations::estimate_flops_transport;
 pub use product::evaluate_product;
+pub use propulsion::{estimate_flops_propulsion, FlopsPropulsionBreakdown, FlopsPropulsionInputs};
+pub use structure::{estimate_flops_structure, FlopsStructureBreakdown, FlopsStructureInputs};
 
 /// Fully resolved SI inputs to the FLOPS transport subsystem equations.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -216,10 +227,26 @@ pub enum FlopsTransportUnverifiedReason {
     CabinProvenance,
     /// Installed-architecture provenance was absent or incomplete.
     ArchitectureProvenance,
+    /// The translated thrust-based FLOPS operating-item equations do not
+    /// cover the selected propulsion technology.
+    UnsupportedPropulsionTechnology,
     /// Containerized cargo mass was absent or negative.
     ContainerizedCargo,
     /// A resolved scalar was nonfinite, nonpositive, or internally inconsistent.
     InvalidResolvedInput,
+    /// The built airplane has no horizontal or vertical stabilizer.
+    TailGeometry,
+    /// No nacelle body or profile with a positive diameter and length.
+    NacelleGeometry,
+    /// The main wing's lofted thickness ratio is not positive.
+    WingThickness,
+    /// A FLOPS technology factor or override is outside its fitted range.
+    StructureConfiguration,
+    /// The detailed wing method needs the FLOPS systems group for the pod
+    /// inertia relief and the systems method is not FLOPS.
+    DetailedWingRequiresFlopsSystems,
+    /// The detailed bending integration found no load-carrying planform.
+    DetailedWingIntegration,
 }
 
 impl FlopsTransportUnverifiedReason {
@@ -243,8 +270,15 @@ impl FlopsTransportUnverifiedReason {
             Self::MaximumFuelCapacity => "maximum_fuel_capacity",
             Self::CabinProvenance => "cabin_provenance",
             Self::ArchitectureProvenance => "architecture_provenance",
+            Self::UnsupportedPropulsionTechnology => "unsupported_propulsion_technology",
             Self::ContainerizedCargo => "containerized_cargo",
             Self::InvalidResolvedInput => "invalid_resolved_input",
+            Self::TailGeometry => "tail_geometry",
+            Self::NacelleGeometry => "nacelle_geometry",
+            Self::WingThickness => "wing_thickness",
+            Self::StructureConfiguration => "structure_configuration",
+            Self::DetailedWingRequiresFlopsSystems => "detailed_wing_requires_flops_systems",
+            Self::DetailedWingIntegration => "detailed_wing_integration",
         }
     }
 }

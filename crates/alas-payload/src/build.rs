@@ -34,9 +34,10 @@ use alas_config::{AlasConfig, PassengerCabinConfig, SeatClassConfig};
 use alas_geom::aircraft::airplane::Airplane;
 
 use crate::cabin::{
-    abreast, build_passenger_layout, build_passenger_layout_reference_compatibility,
-    cabin_deck_segments, ceil_div, max_certifiable_capacity, min_exit_pairs, resolve_aisle_width,
-    select_exit_type, service_reserve_len, MIN_PITCH, MONUMENT_LEN,
+    abreast, build_passenger_layout_reference_compatibility,
+    build_passenger_layout_with_aircraft_cg_target, cabin_deck_segments, ceil_div,
+    max_certifiable_capacity, min_exit_pairs, resolve_aisle_width, select_exit_type,
+    service_reserve_len, MIN_PITCH, MONUMENT_LEN,
 };
 use crate::cargo::{build_cargo_layout, build_cargo_layout_reference_compatibility};
 use crate::geometry::{CabinGeometry, CabinGeometryError};
@@ -100,11 +101,21 @@ fn build_payload_layout_with_mass_semantics(
     x_oew: f64,
     reference_compatibility: bool,
 ) -> Result<PayloadLayout, CabinGeometryError> {
-    let g = CabinGeometry::new(
-        plane,
-        &config.geometry,
-        config.cabin.passenger.wall_thickness_m,
-    )?;
+    let g = if reference_compatibility {
+        CabinGeometry::new_reference_compatibility(
+            plane,
+            &config.geometry,
+            config.cabin.passenger.wall_thickness_m,
+        )?
+    } else {
+        CabinGeometry::new(
+            plane,
+            &config.geometry,
+            config.cabin.passenger.wall_thickness_m,
+        )?
+    };
+    let requested_passengers =
+        (!reference_compatibility).then_some(config.requirements.num_passengers);
     let mut effective = config.clone();
     if !reference_compatibility {
         presets::apply_cabin_preset_to_geometry(&mut effective, &g);
@@ -128,6 +139,12 @@ fn build_payload_layout_with_mass_semantics(
         };
         Ok(layout)
     } else {
+        // The selected cabin geometry determines the class proportions and
+        // seat geometry, but the requirements' passenger count is the load
+        // case authority. Materializing a Custom cabin used to overwrite it
+        // with the shell's geometric capacity; that made an A320 preset turn
+        // into a 106-passenger aircraft and a 787 into a 303-passenger one,
+        // so the reported payload no longer matched the preset or its MZFW.
         let layout = if reference_compatibility {
             build_passenger_layout_reference_compatibility(
                 &g,
@@ -135,7 +152,21 @@ fn build_payload_layout_with_mass_semantics(
                 &config.requirements,
             )
         } else {
-            build_passenger_layout(&g, &config.cabin.passenger, &config.requirements)
+            let mut product_config = config.clone();
+            let requested = requested_passengers.unwrap_or_default();
+            product_config
+                .cabin
+                .passenger
+                .set_fixed_passenger_count(requested);
+            product_config.requirements.num_passengers = requested;
+            build_passenger_layout_with_aircraft_cg_target(
+                &g,
+                &product_config.cabin.passenger,
+                &product_config.requirements,
+                oew,
+                x_oew,
+                &product_config.cabin.cargo,
+            )
         };
         Ok(layout)
     }
@@ -193,10 +224,39 @@ pub fn simulate_passenger_counts(
     pax: &PassengerCabinConfig,
     mix: &[(&str, f64)],
 ) -> PassengerCounts {
+    simulate_passenger_counts_with_exit_semantics(g, pax, mix, false)
+}
+
+/// Product cabin sizing with the evacuation capacity of a complete exit pair.
+///
+/// The public [`simulate_passenger_counts`] entry point is retained for the
+/// frozen Python fixture, whose historical implementation divided by the
+/// capacity of one side of an exit. Product calculations use both exits in a
+/// pair; otherwise the sizing pass installs unnecessary mid-cabin bays and
+/// removes real seat rows.
+fn simulate_passenger_counts_product(
+    g: &CabinGeometry,
+    pax: &PassengerCabinConfig,
+    mix: &[(&str, f64)],
+) -> PassengerCounts {
+    simulate_passenger_counts_with_exit_semantics(g, pax, mix, true)
+}
+
+fn simulate_passenger_counts_with_exit_semantics(
+    g: &CabinGeometry,
+    pax: &PassengerCabinConfig,
+    mix: &[(&str, f64)],
+    product_exit_capacity: bool,
+) -> PassengerCounts {
     let mut counts = PassengerCounts::default();
     let aisle_w = resolve_aisle_width(pax, TRANSPORT_CATEGORY_PAX);
     let deck_caps = max_certifiable_capacity(g, pax);
-    let exit_cap = select_exit_type(g.diameter_m).capacity_per_side;
+    let exit_spec = select_exit_type(g.diameter_m);
+    let exit_cap = if product_exit_capacity {
+        exit_spec.capacity_per_side * 2
+    } else {
+        exit_spec.capacity_per_side
+    };
 
     for segment in cabin_deck_segments(g) {
         let total_length = segment.x1 - segment.x0;
@@ -256,7 +316,7 @@ pub fn simulate_passenger_counts_for_seat_mix(
     target_mix: &[(&str, f64)],
 ) -> PassengerCounts {
     let length_mix = length_mix_for_seat_targets(g, pax, target_mix);
-    simulate_passenger_counts(g, pax, &length_mix)
+    simulate_passenger_counts_product(g, pax, &length_mix)
 }
 
 fn length_mix_for_seat_targets<'a>(
@@ -284,7 +344,7 @@ fn length_mix_for_seat_targets<'a>(
     // correction is both more stable and more honest than pretending there is
     // a closed form. Twenty passes is tiny beside one geometry build.
     for _ in 0..20 {
-        let counts = simulate_passenger_counts(g, pax, &weights);
+        let counts = simulate_passenger_counts_product(g, pax, &weights);
         let total = counts.total().max(1) as f64;
         for (name, weight) in &mut weights {
             let target = target_mix
@@ -396,7 +456,8 @@ fn class_config<'a>(pax: &'a PassengerCabinConfig, name: &str) -> &'a SeatClassC
 #[cfg(test)]
 mod product_tests {
     use super::*;
-    use alas_config::GeometryConfig;
+    use crate::layout::LayoutSummary;
+    use alas_config::{presets, GeometryConfig};
     use alas_geom::builder::AircraftBuilder;
 
     fn geometry() -> CabinGeometry {
@@ -423,5 +484,46 @@ mod product_tests {
         let total = solved.total() as f64;
         assert!((solved.first as f64 / total - target[0].1).abs() < 0.04);
         assert!((solved.business as f64 / total - target[1].1).abs() < 0.04);
+    }
+
+    #[test]
+    fn product_layout_preserves_the_requested_passenger_load_case() {
+        for name in [
+            "AVE",
+            "A220-300",
+            "A320-200",
+            "A340-300",
+            "A380-800",
+            "ATR72-600",
+            "B787-9",
+            "DC-10",
+        ] {
+            let config = AlasConfig::from_value(&serde_json::json!({ "preset": name }))
+                .expect("registered preset loads");
+            let preset = presets::get(name).expect("registered preset resolves");
+            let plane = AircraftBuilder::new(Some(config.geometry.clone()))
+                .build(Some(&preset.design_vector), true)
+                .expect("preset geometry builds");
+            let layout = build_payload_layout(&plane, &config, 0.0, 0.0)
+                .expect("product passenger layout builds");
+            let LayoutSummary::Passenger(summary) = layout.summary else {
+                panic!("passenger preset selected a cargo layout");
+            };
+            assert_eq!(
+                summary.total_pax, preset.requirements.num_passengers,
+                "{name} layout changed the requested load case"
+            );
+        }
+    }
+
+    #[test]
+    fn product_sizing_counts_a_complete_exit_pair() {
+        let g = geometry();
+        let pax = PassengerCabinConfig::default();
+        let mix = pax.length_share_mix();
+        let compatibility = simulate_passenger_counts(&g, &pax, &mix);
+        let product = simulate_passenger_counts_product(&g, &pax, &mix);
+
+        assert!(product.total() > compatibility.total());
     }
 }

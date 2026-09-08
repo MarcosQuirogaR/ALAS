@@ -83,6 +83,7 @@ fn render_document(
     );
     write_header(&mut xml, airplane, timestamp);
     write_vehicles(&mut xml, airplane, config, report, feasibility, mission)?;
+    engine::write_toolspecific_propulsion(&mut xml, config);
     let _ = writeln!(xml, "</cpacs>");
     Ok(xml)
 }
@@ -95,7 +96,18 @@ fn validate_airplane(airplane: &Airplane, config: &AlasConfig) -> Result<(), Cpa
     validate_number(airplane.c_ref, "airplane reference chord")?;
     validate_number(airplane.b_ref, "airplane reference span")?;
     validate_vector(airplane.xyz_ref, "airplane reference point")?;
-    validate_number(config.geometry.engine.thrust_kn, "engine take-off thrust")?;
+    // A non-finite cycle scalar is named as such before the binding check.
+    if let Some(spec) = &config.geometry.engine.turbofan {
+        validate_number(spec.rated_thrust_kn, "engine take-off thrust")?;
+        validate_number(spec.bypass_ratio, "engine bypass ratio")?;
+        validate_number(spec.overall_pressure_ratio, "engine overall pressure ratio")?;
+        validate_number(spec.fan_pressure_ratio, "engine fan pressure ratio")?;
+    }
+    config
+        .geometry
+        .engine
+        .active_model()
+        .map_err(|error| CpacsExportError::InvalidEngineBinding(error.to_string()))?;
     validate_number(
         config.geometry.engine.radius_scale_m,
         "engine maximum nacelle radius",
@@ -104,16 +116,6 @@ fn validate_airplane(airplane: &Airplane, config: &AlasConfig) -> Result<(), Cpa
         config.geometry.engine.nacelle_length_m(),
         "engine nacelle length",
     )?;
-    validate_number(config.geometry.engine.bypass_ratio, "engine bypass ratio")?;
-    validate_number(
-        config.geometry.engine.overall_pressure_ratio,
-        "engine overall pressure ratio",
-    )?;
-    validate_number(
-        config.geometry.engine.fan_pressure_ratio,
-        "engine fan pressure ratio",
-    )?;
-
     for wing in &airplane.wings {
         if wing.xsecs.len() < 2 {
             return Err(CpacsExportError::TooFewWingSections {

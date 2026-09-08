@@ -63,6 +63,12 @@
   "Run in progress - figures refresh when it completes.": "Ejecución en curso: las figuras se actualizarán al terminar.",
   "RUN LOG": "REGISTRO DE EJECUCIÓN",
   "Run Log": "Registro de ejecución",
+  "Console": "Consola",
+  "Timings": "Tiempos",
+  "Estimated remaining": "Tiempo restante estimado",
+  "No timing data": "Sin datos de tiempo",
+  "Complete": "Completado",
+  "Calculating...": "Calculando...",
   "Close": "Cerrar",
   "Cancel": "Cancelar",
   "Rescan": "Volver a analizar",
@@ -401,5 +407,6 @@
   "Feasibility-first DE": "DE con prioridad de factibilidad",
   "NSGA-II Pareto": "Pareto NSGA-II",
   "TuRBO-1 surrogate": "Sustituto TuRBO-1",
-  "CMA-ES": "CMA-ES"
+  "CMA-ES": "CMA-ES",
+  "SQP gradient driver": "Motor de gradiente SQP"
 }

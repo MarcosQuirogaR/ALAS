@@ -13,7 +13,7 @@
 //! transport-sized set of points when the aircraft or its fuel model changes.
 
 use alas_atmo::Atmosphere;
-use alas_config::AlasConfig;
+use alas_config::{presets, ActiveEngineModel, AlasConfig};
 use alas_geom::aircraft::wing::Wing;
 use alas_perf::performance::breguet_range_m;
 use alas_pipeline::feasibility::{assess_fuel_capacity, FuelCapacityEvidence};
@@ -38,20 +38,38 @@ const OEW_KEYS: &[&str] = &[
     "Furnishings",
 ];
 
+/// One labelled corner of the conceptual payload-range curve.
 #[derive(Debug, Clone, Copy)]
-struct PayloadRangePoint {
-    label: &'static str,
-    range_nm: f64,
-    payload_kg: f64,
+pub struct PayloadRangePoint {
+    /// Which corner of the A-B-C-D curve this is.
+    pub label: &'static str,
+    /// Still-air Breguet range at this corner, nautical miles.
+    pub range_nm: f64,
+    /// Payload carried at this corner, kilograms.
+    pub payload_kg: f64,
 }
 
+/// The four corners and the mass/fuel basis they were computed on.
+///
+/// Public so the same numbers the figure draws can be read back and
+/// correlated against a published payload-range chart. A figure nobody can
+/// query is a figure nobody can check.
 #[derive(Debug, Clone)]
-struct PayloadRangeData {
-    points: [PayloadRangePoint; 4],
-    fuel_capacity_kg: f64,
-    fuel_capacity_limit: &'static str,
-    oew_kg: f64,
-    mtow_kg: f64,
+pub struct PayloadRangeData {
+    /// The A-B-C-D corners, in order.
+    pub points: [PayloadRangePoint; 4],
+    /// Usable fuel the curve was built on, kilograms.
+    pub fuel_capacity_kg: f64,
+    /// What limited that fuel figure.
+    pub fuel_capacity_limit: &'static str,
+    /// What limited the maximum payload.
+    pub payload_basis: &'static str,
+    /// Modelled operating empty weight, kilograms.
+    pub oew_kg: f64,
+    /// Maximum takeoff weight the curve was built on, kilograms.
+    pub mtow_kg: f64,
+    /// Range method and its provenance.
+    pub method_note: String,
 }
 
 /// Generate an idealized Breguet payload-range curve from the report's masses,
@@ -184,7 +202,9 @@ pub fn figure_payload_range(
     });
     scene.add(SceneElement::Text {
         text: format!(
-            "CONCEPTUAL BREGUET RANGE ONLY; capacity evidence: {}   |   usable fuel {} kg   |   OEW {} kg   |   MTOW {} kg   |   NOT AN AFM/WBM OPERATIONAL ENVELOPE",
+            "{}; payload basis: {}   |   capacity evidence: {}   |   usable fuel {} kg   |   OEW {} kg   |   MTOW {} kg   |   NOT AN AFM/WBM OPERATIONAL ENVELOPE",
+            data.method_note,
+            data.payload_basis,
             data.fuel_capacity_limit,
             format_thousands(data.fuel_capacity_kg),
             format_thousands(data.oew_kg),
@@ -201,15 +221,61 @@ pub fn figure_payload_range(
     scene
 }
 
-fn payload_range_data(report: &AnalysisReport, config: &AlasConfig) -> Option<PayloadRangeData> {
+/// Compute the conceptual payload-range corners for `report` under `config`.
+///
+/// Returns `None` when the report has no main wing or no typed usable-fuel
+/// capacity evidence, which are the two cases the figure renders as a status
+/// panel rather than a curve.
+pub fn payload_range_data(
+    report: &AnalysisReport,
+    config: &AlasConfig,
+) -> Option<PayloadRangeData> {
     report.airplane.wings.first()?;
     let masses = &report.component_masses;
     let oew_kg: f64 = OEW_KEYS
         .iter()
         .map(|key| masses.get(*key).copied().unwrap_or(0.0))
         .sum();
-    let max_payload_kg = masses.get("Payload").copied().unwrap_or(0.0);
+    let analyzed_payload_kg = masses.get("Payload").copied().unwrap_or(0.0);
     let mtow_kg = config.requirements.mtow_kg;
+
+    // A payload-range chart is an aircraft-capability curve, not a second
+    // drawing of the currently selected cabin load. The old implementation
+    // used the latter as point A, so a 130-seat A220 or 525-seat A380 could
+    // never show the structural payload the preset was meant to represent.
+    // Bound the configured/effective payload by MZFW - the *modeled* OEW;
+    // this keeps the chart on the same mass convention as the feasibility
+    // check and prevents an MZFW violation from being hidden in a figure.
+    let configured_payload_limit = config.requirements.max_structural_payload_kg;
+    let effective_payload_limit = report
+        .geometry_summary
+        .get("effective_structural_payload_limit_kg")
+        .copied();
+    let published_mzfw_payload_limit = presets::get(&config.preset)
+        .ok()
+        .and_then(|preset| preset.reference.mzfw_kg)
+        .map(|mzfw_kg| mzfw_kg - oew_kg);
+    let payload_limits = [
+        configured_payload_limit,
+        effective_payload_limit.unwrap_or(f64::NAN),
+        published_mzfw_payload_limit.unwrap_or(f64::NAN),
+    ];
+    let structural_payload_kg = payload_limits
+        .into_iter()
+        .filter(|value| value.is_finite() && *value > 0.0)
+        .reduce(f64::min);
+    let (max_payload_kg, payload_basis) = match structural_payload_kg {
+        Some(value)
+            if effective_payload_limit.is_some() || published_mzfw_payload_limit.is_some() =>
+        {
+            (value, "effective structural payload bounded by MZFW")
+        }
+        Some(value) => (value, "configured structural payload cap"),
+        None => (
+            analyzed_payload_kg,
+            "analyzed payload (no structural cap registered)",
+        ),
+    };
 
     let fuel_capacity = assess_fuel_capacity(config, &report.design, report);
     let fuel_capacity_kg = fuel_capacity
@@ -234,9 +300,27 @@ fn payload_range_data(report: &AnalysisReport, config: &AlasConfig) -> Option<Pa
         .unwrap_or(report.design_point.l_over_d);
     let atmo = Atmosphere::new(config.requirements.cruise_altitude_m);
     let tas_m_s = config.requirements.cruise_mach * atmo.speed_of_sound();
-    let tsfc_si = config.geometry.engine.cruise_tsfc_kg_kgf_hr / (G * 3600.0);
-    let range_nm = |start_kg: f64, end_kg: f64| {
-        breguet_range_m(tas_m_s, l_over_d, tsfc_si, start_kg, end_kg) / M_TO_NM
+    let active_model = config.geometry.engine.active_model().ok()?;
+    let (range_nm, method_note): (Box<dyn Fn(f64, f64) -> f64>, String) = match active_model {
+        ActiveEngineModel::Turbofan(spec) => {
+            let tsfc_si = spec.cruise_tsfc_kg_kgf_hr / (G * 3600.0);
+            (
+                Box::new(move |start_kg, end_kg| {
+                    breguet_range_m(tas_m_s, l_over_d, tsfc_si, start_kg, end_kg) / M_TO_NM
+                }),
+                // Keep the stable figure label generic; the engine family is
+                // already explicit in the typed calculation branch and the
+                // footer's limitation warning.
+                "CONCEPTUAL BREGUET RANGE ONLY".to_owned(),
+            )
+        }
+        ActiveEngineModel::Turboprop(spec) => {
+            let fuel_flow_kg_h = spec.maximum_cruise_fuel_flow_kg_h;
+            if !fuel_flow_kg_h.is_finite() || fuel_flow_kg_h <= 0.0 {
+                return None;
+            }
+            (Box::new(move |start_kg, end_kg| tas_m_s * 3600.0 * (start_kg - end_kg).max(0.0) / fuel_flow_kg_h / M_TO_NM), format!("CONCEPTUAL TURBOPROP CONSTANT-FLOW RANGE AT MAX-CRUISE ANCHOR ({fuel_flow_kg_h:.0} kg/h TOTAL); NO OFF-DESIGN DECK"))
+        }
     };
 
     let fuel_b = fuel_capacity_kg
@@ -274,8 +358,10 @@ fn payload_range_data(report: &AnalysisReport, config: &AlasConfig) -> Option<Pa
         ],
         fuel_capacity_kg,
         fuel_capacity_limit,
+        payload_basis,
         oew_kg,
         mtow_kg,
+        method_note,
     })
 }
 

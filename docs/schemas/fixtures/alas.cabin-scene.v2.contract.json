@@ -1,0 +1,67 @@
+{
+  "schema_version": "alas.cabin-scene/v2",
+  "units": { "length": "m", "mass": "kg", "angle": "rad" },
+  "frame": {
+    "origin": "aircraft geometry origin",
+    "x": "aft",
+    "y": "starboard",
+    "z": "up",
+    "handedness": "right-handed"
+  },
+  "provenance": {
+    "producer": "contract fixture only",
+    "source": "not an optimized aircraft result",
+    "aircraft_preset": null,
+    "cabin_preset": "fixture",
+    "optimized_design": {
+      "span_m": 71.75,
+      "root_chord_m": 16.5,
+      "break_chord_m": 7.8,
+      "tip_chord_m": 1.6,
+      "sweep_deg": 34.0,
+      "tip_twist_deg": 0.0,
+      "wing_x_shift_m": 0.0,
+      "tail_scale": 1.0,
+      "fuselage_length_m": 76.72,
+      "tail_x_shift_m": 0.0,
+      "airfoil_thickness_scale": 1.0,
+      "airfoil_camber_scale": 1.0,
+      "bump_upper_front": 0.0,
+      "bump_upper_rear": 0.0,
+      "bump_lower_mid": 0.0,
+      "bump_lower_rear": 0.0
+    }
+  },
+  "stations": [],
+  "recommended_sections": [],
+  "decks": [],
+  "seat_rows": [],
+  "seats": [],
+  "windows": {
+    "apertures": [],
+    "status": "missing",
+    "source": "contract fixture only",
+    "missing": ["authoritative window schedule"]
+  },
+  "overhead": {
+    "runs": [],
+    "topology": [],
+    "missing": ["supplier installation topology"]
+  },
+  "cargo": {
+    "slots": [],
+    "items": [],
+    "empty_slot_inventory": {
+      "available": false,
+      "reason": "contract fixture only",
+      "required_input": "solver slot inventory"
+    }
+  },
+  "missing_inputs": [
+    {
+      "field": "all_geometry",
+      "reason": "this fixture exercises the wire contract and contains no aircraft result",
+      "required_source": "a live optimized AnalysisReport"
+    }
+  ]
+}

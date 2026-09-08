@@ -16,7 +16,7 @@
 // A test binary's failed unwrap or expect is the assertion failing.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use alas_config::{presets, AlasConfig, DesignVector};
+use alas_config::{AlasConfig, DesignVector};
 use alas_geom::asb::airplane::Airplane;
 use alas_geom::builder::AircraftBuilder;
 use serde_json::Value;
@@ -24,7 +24,15 @@ use serde_json::Value;
 /// A case's configuration, the aircraft it builds, and the design vector it
 /// was built from -- the generator's `_config_and_plane`.
 pub fn config_and_plane(input: &Value) -> (AlasConfig, Airplane, Option<DesignVector>) {
-    let config = AlasConfig::from_value(input).expect("the overlay loads");
+    let defaults: Value = alas_testkit::load("config", "defaults");
+    let presets: Value = alas_testkit::load("config", "aircraft_presets");
+    let mut frozen = defaults["types"]["ALASConfig"]["defaults"].clone();
+    frozen.as_object_mut().unwrap().retain(|key, _| {
+        matches!(
+            key.as_str(),
+            "geometry" | "requirements" | "cabin" | "landing_gear" | "mass_model" | "performance"
+        )
+    });
     let preset_name = input
         .get("preset")
         .and_then(Value::as_str)
@@ -32,12 +40,27 @@ pub fn config_and_plane(input: &Value) -> (AlasConfig, Airplane, Option<DesignVe
     let design_vector: Option<DesignVector> = if preset_name.is_empty() {
         None
     } else {
-        Some(
-            presets::get(preset_name)
-                .expect("the fixture names a registered preset")
-                .design_vector,
-        )
+        let preset = presets["presets"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|preset| preset["name"] == preset_name)
+            .expect("the fixture names a frozen preset");
+        for key in [
+            "geometry",
+            "requirements",
+            "landing_gear",
+            "mass_model",
+            "performance",
+        ] {
+            if preset.get(key).is_some_and(|value| !value.is_null()) {
+                merge(&mut frozen[key], &preset[key]);
+            }
+        }
+        Some(serde_json::from_value(preset["design_vector"].clone()).unwrap())
     };
+    merge(&mut frozen, input);
+    let config = AlasConfig::from_value(&frozen).expect("the frozen overlay loads");
     // Payload fixtures are frozen Python translations.  Use the explicit
     // compatibility contract so the product transport-planform correction
     // cannot change the fixture's cabin frame implicitly.
@@ -46,6 +69,16 @@ pub fn config_and_plane(input: &Value) -> (AlasConfig, Airplane, Option<DesignVe
         .build(design_vector.as_ref(), false)
         .expect("the case's aircraft builds");
     (config, plane, design_vector)
+}
+
+fn merge(target: &mut Value, overlay: &Value) {
+    if let (Some(target), Some(overlay)) = (target.as_object_mut(), overlay.as_object()) {
+        for (key, value) in overlay {
+            merge(target.entry(key.clone()).or_insert(Value::Null), value);
+        }
+    } else {
+        *target = overlay.clone();
+    }
 }
 
 /// A number recorded under `key`.

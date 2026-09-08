@@ -69,6 +69,25 @@ pub struct VnDiagramData {
     pub v_cruise_op_kt: f64,
 }
 
+impl VnDiagramData {
+    /// Check positive finite speeds and the envelope ordering VS < VA <= VC < VD.
+    ///
+    /// Invalid inputs remain visible; this never clips VA or changes the
+    /// configured dive speed to disguise an infeasible design.
+    pub fn validate_speed_order(&self) -> Result<(), &'static str> {
+        if [self.v_s_kt, self.v_a_kt, self.v_c_kt, self.v_d_kt]
+            .iter()
+            .any(|v| !v.is_finite() || *v <= 0.0)
+        {
+            return Err("V-n speeds must be positive and finite");
+        }
+        if !(self.v_s_kt < self.v_a_kt && self.v_a_kt <= self.v_c_kt && self.v_c_kt < self.v_d_kt) {
+            return Err("V-n envelope requires VS < VA <= VC < VD");
+        }
+        Ok(())
+    }
+}
+
 /// Build the CS-25-style V-n diagram -- `build_vn_diagram`.
 ///
 /// Scoped to `s_ref` rather than a whole `Airplane`: upstream reads only
@@ -77,6 +96,9 @@ pub struct VnDiagramData {
 /// `n_lim_pos = ultimate_load_factor / 1.5` (CS-25.303 factor of safety),
 /// `VC = VD / 1.25` (CS-25.335(b) minimum margin); the stall boundaries use
 /// the clean-configuration lift limits, distinct from the flaps-down maxima.
+/// Deriving VC from a configured VD is a conceptual-design assumption, not
+/// a certification determination. Call `validate_speed_order` on the result
+/// before treating the envelope as feasible.
 pub fn build_vn_diagram(
     s_ref: f64,
     req: &DesignRequirements,
@@ -160,5 +182,21 @@ mod tests {
         );
         assert!(data.v_a_kt > data.v_s_kt);
         assert!(data.n_lim_pos < data.n_ult_pos);
+    }
+
+    #[test]
+    fn incompatible_design_speeds_are_reported_without_clipping() {
+        let req = DesignRequirements {
+            dive_speed_m_s: 80.0,
+            ..Default::default()
+        };
+        let mut data = build_vn_diagram(122.0, &req, &PerformanceConfig::default(), 10668.0);
+        assert!(data.v_a_kt > data.v_c_kt);
+        assert!(data.validate_speed_order().is_err());
+        data.v_c_kt = data.v_a_kt;
+        data.v_d_kt = data.v_c_kt * 1.25;
+        assert!(data.validate_speed_order().is_ok());
+        data.v_s_kt = f64::NAN;
+        assert!(data.validate_speed_order().is_err());
     }
 }

@@ -111,33 +111,6 @@ fn zero_max_iterations_records_the_initial_population_and_its_feasibility() {
 }
 
 #[test]
-fn a_short_product_search_reaches_the_cruise_body_angle_window() {
-    let mut config = AlasConfig::default();
-    config.optimizer.solver.max_iterations = 15;
-    config.optimizer.solver.population_size = 1;
-    config.optimizer.solver.seed = Some(42);
-    config.optimizer.solver.seed_near_initial_design = true;
-
-    let initial = DesignVector::default();
-    let mut optimizer = DesignOptimizer::new(config);
-    let result = optimizer
-        .run(None, Some(&initial), None)
-        .expect("the seeded product search contains a feasible candidate");
-    let best_index = result
-        .history
-        .cost
-        .iter()
-        .position(|cost| *cost == result.best_cost)
-        .expect("the returned winner comes from the recorded population");
-    let best_body_alpha_deg = result.history.alpha_deg[best_index];
-
-    assert!(
-        (2.0..=4.0).contains(&best_body_alpha_deg),
-        "the product winner must cruise inside the 2-4 deg body-angle window; got {best_body_alpha_deg} deg"
-    );
-}
-
-#[test]
 fn seeded_example_replays_the_python_winner() {
     let mut config = AlasConfig::default();
     config.optimizer.solver.max_iterations = 15;

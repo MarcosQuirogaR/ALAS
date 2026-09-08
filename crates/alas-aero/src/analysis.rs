@@ -46,6 +46,7 @@
 //! the phase order to name the type.
 
 mod performance;
+mod wetted;
 
 use std::f64::consts::PI;
 
@@ -296,12 +297,22 @@ impl<'a> AeroAnalysis<'a> {
             let sweep = sweep_deg.to_radians();
             let form_factor = (1.0 + 0.6 / x_over_c * thickness + 100.0 * thickness.powf(4.0))
                 * (1.34 * mach.powf(0.18) * sweep.cos().powf(0.28));
-            // This is a physical wetted-surface estimate, not an aircraft
-            // coefficient reference.  Keep the historical unfolded loft
-            // area explicitly: the factor is defined as exposed (both-side)
-            // area over the modeled wing surface, while `s_ref` below is the
-            // authoritative projected aircraft reference area.
-            let wetted = wing.unfolded_area() * self.geometry.wing_wetted_area_factor;
+            // Wetted area counts exposed skin; the center section inside
+            // the fuselage contributes no skin friction. The coefficient
+            // still uses the gross projected aircraft reference area.
+            let buried = if index == 0
+                && !self.reference_compatibility
+                && self.drag.exclude_buried_main_wing_area
+            {
+                self.plane
+                    .fuselages
+                    .first()
+                    .map_or(0.0, |body| wetted::buried_main_wing_area(wing, body))
+            } else {
+                0.0
+            };
+            let wetted =
+                (wing.unfolded_area() - buried).max(0.0) * self.geometry.wing_wetted_area_factor;
             cd0 += cf * form_factor * self.drag.interference_factor_wing * (wetted / s_ref);
         }
 
@@ -496,6 +507,24 @@ mod tests {
         assert!(
             with_nacelle.parasite_drag(0.8, 10000.0, 0.5, None, None)
                 > without.parasite_drag(0.8, 10000.0, 0.5, None, None)
+        );
+    }
+
+    #[test]
+    fn buried_wing_correction_is_selectable_without_changing_induced_or_wave_drag() {
+        let plane = probe();
+        let mut analysis = AeroAnalysis::new(&plane, 32.0, None, None, None);
+        analysis.drag.exclude_buried_main_wing_area = false;
+        let gross = analysis.drag_components(0.8, 10_000.0, 0.5, 0.012, None);
+        analysis.drag.exclude_buried_main_wing_area = true;
+        let exposed = analysis.drag_components(0.8, 10_000.0, 0.5, 0.012, None);
+        assert!(exposed.cd_parasite < gross.cd_parasite);
+        assert_eq!(exposed.cd_induced, gross.cd_induced);
+        assert_eq!(exposed.cd_wave, gross.cd_wave);
+        let reference = AeroAnalysis::new_reference_compatibility(&plane, 32.0, None, None, None);
+        assert_eq!(
+            reference.parasite_drag(0.8, 10_000.0, 0.5, None, None),
+            gross.cd_parasite
         );
     }
 

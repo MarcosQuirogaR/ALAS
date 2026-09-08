@@ -55,7 +55,7 @@ struct Fixture {
 #[test]
 fn mission_turbofan_sizing_matches_python_across_two_presets() {
     let fixture: Fixture = alas_testkit::load("prop", "suave_turbofan");
-    let params = VehicleBuilderParams::default();
+    let params = VehicleBuilderParams::reference_compatibility();
     let mut comparison = Comparison::new("alas-prop::mission_turbofan", Tier::Closed);
 
     for case in &fixture.cases {

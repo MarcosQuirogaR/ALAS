@@ -15,9 +15,10 @@ use egui::{vec2, Align2, Area, Color32, Frame, Id, Key, Layout, Order, RichText,
 
 mod summary;
 use summary::show_summary;
+mod external;
 mod images;
-mod model_details;
 mod solver;
+use external::show_external_tools_result;
 #[cfg(test)]
 use images::scene_has_external_images;
 pub use solver::SolverResultView;
@@ -34,6 +35,11 @@ const TABS: &[Tab] = &[
         id: "optimization",
         title: "Optimization",
         category: "Optimization",
+    },
+    Tab {
+        id: "geometry",
+        title: "Geometry",
+        category: "Geometry",
     },
     Tab {
         id: "aero",
@@ -70,6 +76,11 @@ const TABS: &[Tab] = &[
         title: "Model Comparison",
         category: "Model Comparison",
     },
+    Tab {
+        id: "external",
+        title: "External Tools",
+        category: "External Tools",
+    },
 ];
 
 /// Minimum width of a result card before another responsive column is added.
@@ -94,6 +105,25 @@ pub(crate) fn responsive_card_layout(available_width: f32) -> (usize, f32) {
         .clamp(1.0, 3.0) as usize;
     let card_width = (width - CARD_GAP * (columns - 1) as f32) / columns as f32;
     (columns, card_width.max(1.0))
+}
+
+/// Model Comparison is a single, information-dense overlay. Giving it the
+/// whole gallery row keeps its axes and legend readable and avoids wasting the
+/// results viewport below a generic 320 px canvas.
+fn figure_gallery_layout(
+    available_width: f32,
+    available_height: f32,
+    full_width: bool,
+) -> (usize, f32, f32) {
+    if full_width {
+        return (
+            1,
+            available_width.max(1.0),
+            (available_height - 52.0).clamp(320.0, 640.0),
+        );
+    }
+    let (columns, tile_width) = responsive_card_layout(available_width);
+    (columns, tile_width, 320.0)
 }
 
 fn result_tab_column_count(available_width: f32) -> usize {
@@ -138,7 +168,7 @@ pub fn show_results_view(state: &mut AppState, ui: &mut Ui) {
             ui.label(if state.is_running {
                 tr("Running the pipeline...")
             } else {
-                tr("Press Run to optimize and analyze, or Analyze baseline for a quick weight and balance pass.")
+                tr("Press Run to optimize and analyze, or Analyze reference for a fixed-aircraft weight and balance pass.")
             });
         });
         return;
@@ -166,13 +196,21 @@ pub fn show_results_view(state: &mut AppState, ui: &mut Ui) {
             });
         return;
     }
+    if state.results_tab == "external" {
+        ScrollArea::vertical()
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                show_external_tools_result(ui, result);
+            });
+        return;
+    }
     let Some(tab) = TABS.iter().find(|t| t.id == state.results_tab) else {
         return;
     };
     let result_config = result.config.clone();
     let category = tab.category;
-    let model_details_item = state.results_tab == "model";
-    let model_details_count = usize::from(model_details_item);
+    let full_width_figures = state.results_tab == "model";
+    let gallery_height = ui.available_height();
     ScrollArea::vertical()
         .auto_shrink([false, false])
         .show(ui, |ui| {
@@ -189,8 +227,9 @@ pub fn show_results_view(state: &mut AppState, ui: &mut Ui) {
                 .collect::<Vec<_>>();
             let available_width =
                 (ui.available_width() - 2.0 * RESULTS_SIDE_MARGIN).max(CARD_MIN_WIDTH);
-            let (columns, tile_width) = responsive_card_layout(available_width);
-            let item_count = descriptors.len() + model_details_count;
+            let (columns, tile_width, canvas_height) =
+                figure_gallery_layout(available_width, gallery_height, full_width_figures);
+            let item_count = descriptors.len();
             for row_start in (0..item_count).step_by(columns) {
                 let row_end = (row_start + columns).min(item_count);
                 ui.horizontal(|ui| {
@@ -200,30 +239,17 @@ pub fn show_results_view(state: &mut AppState, ui: &mut Ui) {
                     // visible left inset.
                     ui.spacing_mut().item_spacing.x = 0.0;
                     ui.add_space(RESULTS_SIDE_MARGIN);
-                    for item_index in row_start..row_end {
-                        if model_details_item && item_index == 0 {
-                            model_details::show_model_details(
-                                ui,
-                                state.run_identity,
-                                state
-                                    .pipeline_result
-                                    .as_ref()
-                                    .expect("pipeline result remains available while rendering"),
-                                tile_width,
-                            );
-                        } else {
-                            let descriptor = &descriptors[item_index - model_details_count];
-                            figure_tile(
-                                state,
-                                ui,
-                                &result_config,
-                                descriptor.id,
-                                descriptor.title,
-                                descriptor.description,
-                                tile_width,
-                            );
-                        }
-                        if item_index + 1 < row_end {
+                    let row = &descriptors[row_start..row_end];
+                    for (offset, descriptor) in row.iter().enumerate() {
+                        figure_tile(
+                            state,
+                            ui,
+                            &result_config,
+                            descriptor,
+                            tile_width,
+                            canvas_height,
+                        );
+                        if offset + 1 < row.len() {
                             ui.add_space(CARD_GAP);
                         }
                     }
@@ -238,11 +264,11 @@ fn figure_tile(
     state: &mut AppState,
     ui: &mut Ui,
     config: &alas_config::AlasConfig,
-    id: &str,
-    title: &str,
-    description: &str,
+    descriptor: &alas_report::FigureDescriptor,
     tile_width: f32,
+    canvas_height: f32,
 ) {
+    let (id, title, description) = (descriptor.id, descriptor.title, descriptor.description);
     let theme = state.theme.figure_theme_name().to_owned();
     let language = alas_i18n::get_language();
     let view_key = format!(
@@ -276,7 +302,7 @@ fn figure_tile(
                             ui,
                             scene,
                             canvas_width,
-                            320.0,
+                            canvas_height,
                             false,
                         ) {
                             open_fullscreen_result(
@@ -294,7 +320,8 @@ fn figure_tile(
                             scene,
                             &camera_key,
                             &view_key,
-                            vec2(canvas_width, 320.0),
+                            vec2(canvas_width, canvas_height),
+                            false,
                         );
                         if interaction.double_clicked {
                             open_fullscreen_result(
@@ -314,7 +341,7 @@ fn figure_tile(
                             alas_viz::SceneView::new(scene, state.view_state_mut(view_key.clone()))
                                 .static_view()
                                 .show_toolbar(false)
-                                .desired_size(vec2(canvas_width, 320.0)),
+                                .desired_size(vec2(canvas_width, canvas_height)),
                         );
                         if response.double_clicked() {
                             open_fullscreen_result(
@@ -503,6 +530,7 @@ fn show_fullscreen_result(state: &mut AppState, ctx: &egui::Context, figure: Ful
                             &fullscreen_camera,
                             &fullscreen_view,
                             vec2(available.x, available.y.max(180.0)),
+                            true,
                         );
                         if interaction.camera_changed {
                             result_3d::rebuild_scene(
@@ -555,9 +583,12 @@ fn unavailable_reason(state: &AppState, id: &str) -> String {
     } else if matches!(id, "mission_route_2d" | "mission_route_3d") && result.route.is_none() {
         tr("Not available: route planning did not produce a route.")
     } else if required_stage == Some(alas_report::RequiredStage::Mission)
-        && result.mission_result.is_none()
+        && result
+            .mission_result
+            .as_ref()
+            .is_none_or(|mission| !mission.figure_data_ready())
     {
-        tr("Not available: mission was disabled or did not produce telemetry.")
+        tr("Not available: mission was disabled, incomplete, or did not produce valid figure telemetry.")
     } else if required_stage == Some(alas_report::RequiredStage::Mses) {
         let detail = result
             .mses_pressure

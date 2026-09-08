@@ -8,7 +8,7 @@
 //!
 //! `figure_cg_envelope` and `figure_mass_distribution` alone translate close
 //! to 980 lines of `visualization.py`, past what one file under this crate's
-//! 700-line limit can hold, so this became a directory module -- the same
+//! 500-line limit can hold, so this became a directory module -- the same
 //! split `alas-geom::aircraft::airfoil` already uses. [`cg_envelope`] and
 //! [`mass_distribution`] hold those two.
 //!
@@ -41,8 +41,8 @@ pub fn quick_preview_report(
     config: &AlasConfig,
     design: DesignVector,
 ) -> Result<AnalysisReport, String> {
-    let mut geometry = config.geometry.clone();
-    geometry.engine.apply_engine_spec_if_uninitialized();
+    let geometry = config.geometry.clone();
+    let analysis_mass_model = config.analysis_mass_model(config.requirements.mtow_kg);
     let (masses, coordinates, physical_cg) =
         run_mass_analysis_with_model_checked_product_with_gear(
             &airplane,
@@ -50,7 +50,7 @@ pub fn quick_preview_report(
             &geometry,
             &config.cabin,
             &config.control_surfaces,
-            Some(&config.mass_model),
+            Some(&analysis_mass_model),
             None,
             MassCoordinateModel::StructuralWingbox(&config.structures),
             &config.landing_gear,

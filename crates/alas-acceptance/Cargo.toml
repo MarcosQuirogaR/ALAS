@@ -11,9 +11,14 @@ rust-version.workspace = true
 name = "alas-bench"
 path = "src/bin/benchmark.rs"
 
+[[bin]]
+name = "external_preset_audit"
+path = "src/bin/external_preset_audit.rs"
+
 [dependencies]
 alas-types = { path = "../alas-types" }
 alas-config = { path = "../alas-config" }
+alas-exec = { path = "../alas-exec" }
 alas-geom = { path = "../alas-geom" }
 alas-atmo = { path = "../alas-atmo" }
 alas-aero = { path = "../alas-aero" }

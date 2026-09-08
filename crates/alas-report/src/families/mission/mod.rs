@@ -7,7 +7,7 @@
 //! Flown mission trajectory, altitude/mass/speed timelines, aerodynamic
 //! coefficient and force timelines, and drag-component breakdowns.
 //!
-//! Split across topical submodules to stay under the repository's 700-line
+//! Split across topical submodules to stay under the repository's 500-line
 //! file limit while covering all six of `visualization.py`'s mission
 //! figures: [`profile::figure_mission_profile`] (altitude/mass/TAS/SFC),
 //! [`velocities::figure_mission_velocities`] (TAS+EAS/Mach),
@@ -212,7 +212,8 @@ pub(super) fn draw_time_axis_label(scene: &mut Scene, pal: &Palette, rect: (f64,
 #[cfg(test)]
 mod test_support {
     use alas_aero::drag_buildup::{ComponentParasiteDrag, DragBreakdown};
-    use alas_mission::solve::MissionResult;
+    use alas_math::hybrd::Status;
+    use alas_mission::solve::{MissionResult, SegmentSolution};
     use alas_mission::{Conditions, Numerics, Segment, SegmentKind, SegmentSpec};
 
     fn dummy_drag_breakdown(total: f64) -> DragBreakdown {
@@ -300,6 +301,7 @@ mod test_support {
                     distance_m: 277_000.0,
                 },
                 air_speed_m_s: 232.0,
+                air_speed_reference: alas_config::mission::SpeedReference::TrueAirspeed,
                 true_course_rad: 0.0,
                 temperature_deviation_k: 0.0,
                 number_control_points: n,
@@ -327,7 +329,21 @@ mod test_support {
         let second = cruise_segment(last_time, mass_burned, last_range);
         MissionResult {
             segments: vec![first, second],
-            solutions: Vec::new(),
+            solutions: vec![
+                SegmentSolution {
+                    converged: true,
+                    status: Status::Converged,
+                    evaluations: 0,
+                    throttle_limited: false,
+                },
+                SegmentSolution {
+                    converged: true,
+                    status: Status::Converged,
+                    evaluations: 0,
+                    throttle_limited: false,
+                },
+            ],
+            scheduled_segment_count: 2,
             fuel_exhaustion: None,
         }
     }
@@ -337,6 +353,14 @@ mod test_support {
         let mission = sample_mission();
         let total: usize = mission.segments.iter().map(|s| s.conditions.len()).sum();
         assert_eq!(total, 6);
+        assert!(mission.figure_data_ready());
+    }
+
+    #[test]
+    fn figure_readiness_rejects_a_missing_mach_series() {
+        let mut mission = sample_mission();
+        mission.segments[0].conditions.mach.pop();
+        assert!(!mission.figure_data_ready());
     }
 }
 

@@ -24,11 +24,14 @@
 pub mod differential_evolution;
 pub mod envelope;
 pub mod evaluator;
+pub mod gradient;
 pub mod history;
+pub mod mdo;
 mod mesh_correction;
 pub mod objective;
 mod python_rng;
 pub mod sampling;
+mod search;
 mod search_methods;
 pub mod transport_planform;
 
@@ -41,7 +44,16 @@ pub use envelope::{
     ModelCgLoadingAssessment, ModelCgLoadingState, StaticMarginPreferenceAssessment,
 };
 pub use evaluator::{ObjectiveEvaluation, ObjectiveEvaluator};
+pub use gradient::{
+    run_sqp, solve_qp, ConstrainedEvaluator, ConstrainedPoint, QpSolution, SqpOutcome, SqpSettings,
+};
 pub use history::OptimizationHistory;
+pub use mdo::{
+    assess_candidate, assess_candidate_with_polar, evaluate_mission_sized,
+    evaluate_mission_sized_with_assessment, CandidateAssessment, ConstraintFamily,
+    ConstraintResidual, ExternalPolar, PolarConditionTolerance, SegmentMissionModel,
+    SizedCandidate,
+};
 pub use objective::{
     wing_fuel_volume_m3, wing_fuel_volume_m3_reference_compatibility, DesignObjective,
 };
