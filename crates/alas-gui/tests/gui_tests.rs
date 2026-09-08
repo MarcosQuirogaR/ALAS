@@ -79,38 +79,46 @@ fn preset_switching_updates_the_json_configuration_and_scene() {
 }
 
 #[test]
-fn preset_switching_recenters_every_nonzero_design_bound() {
+fn preset_switching_rebuilds_the_selected_design_mode_envelope() {
     let mut state = AppState::default();
 
     for preset in alas_config::presets::registry() {
         state.load_preset(preset.name);
+        let config = state.typed_config().expect("typed configuration");
+        let design = state.current_design().expect("complete design");
+        let envelopes = config.optimizer.design_space.envelope(&design);
         for spec in alas_config::DESIGN_VARIABLE_SPECS {
             let value = state.design_values[spec.name];
             let (lower, upper) = state.bounds[spec.name];
-            assert!(
-                lower < upper,
-                "{} {} has an empty preset-local range",
-                preset.name,
-                spec.name
-            );
+            let envelope = envelopes
+                .iter()
+                .find(|variable| variable.name == spec.name)
+                .expect("envelope variable");
             assert!(
                 lower <= value && value <= upper,
-                "{} {} baseline is outside its preset-local range",
+                "{} {} baseline is outside its selected-mode envelope",
                 preset.name,
                 spec.name
             );
+            assert_eq!((lower, upper), (envelope.lower, envelope.upper));
+            if envelope.fixed {
+                assert_eq!(
+                    lower, upper,
+                    "{} {} must remain fixed",
+                    preset.name, spec.name
+                );
+            }
         }
     }
 
     state.load_preset("A220-300");
     let a220_span_bounds = state.bounds["span_m"];
     assert_eq!(state.design_values["span_m"], 35.10);
-    assert_eq!(a220_span_bounds, (29.8, 40.4));
+    assert_eq!(a220_span_bounds, (35.10, 80.0));
     state.load_preset("A380-800");
     let a380_span_bounds = state.bounds["span_m"];
-    assert_ne!(a220_span_bounds, a380_span_bounds);
     assert_eq!(state.design_values["span_m"], 79.75);
-    assert_eq!(a380_span_bounds, (67.7, 91.8));
+    assert_eq!(a380_span_bounds, (60.0, 80.0));
 }
 
 #[test]

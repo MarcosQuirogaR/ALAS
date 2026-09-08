@@ -6,6 +6,7 @@
 //!
 //! A port of the reference desktop app's `InputsScreen`.
 
+use alas_config::airport_dataset::{self, FieldSource, RunwayDataKind};
 use alas_geom::builder::AircraftBuilder;
 use alas_payload::{apply_cabin_preset, build_payload_layout, layout::LayoutSummary};
 use alas_pipeline::{AerodynamicSolverMode, OptimizationSolverMode};
@@ -195,7 +196,7 @@ fn live_payload_estimate(state: &AppState) -> Option<LivePayloadEstimate> {
 }
 
 fn show_requirements_card(state: &mut AppState, ui: &mut Ui) {
-    let _ = card(ui, "Mission requirements", |ui| {
+    let _ = card(ui, "TLAR / service requirements", |ui| {
         let fields = state
             .schema
             .field("requirements")
@@ -223,7 +224,7 @@ fn show_requirements_card(state: &mut AppState, ui: &mut Ui) {
         let show_help = state.help_verbose;
         ui.label(
             RichText::new(tr(
-                "Design limits and stability targets are grouped with the editable design variables on the Design Space page.",
+                "Set the mission target, aircraft type, payload layout and design mass here. Detailed limits and stability targets stay with the selected design mode on the Design Space page.",
             ))
             .weak()
             .small(),
@@ -295,6 +296,7 @@ fn show_route_field(state: &mut AppState, ui: &mut Ui, label: &str, key: &str) {
                 }
             }
         });
+    show_airport_resolution(ui, &current);
     if let Some(name) = chosen {
         let feedback_value = name.clone();
         if let Some(obj) = state.config_values.as_object_mut() {
@@ -303,6 +305,153 @@ fn show_route_field(state: &mut AppState, ui: &mut Ui, label: &str, key: &str) {
         state.on_config_modified();
         state.note_parameter_modified(localized_label, feedback_value);
     }
+}
+
+/// Show the resolved route data next to the simple airport selector. The
+/// resolver owns the distinction between curated declared distances and the
+/// small OurAirports physical-runway snapshot; the GUI only reports that
+/// distinction and never promotes one into the other.
+fn show_airport_resolution(ui: &mut Ui, name: &str) {
+    let status = airport_resolution(name);
+    match status {
+        AirportResolution::Missing => {
+            ui.colored_label(
+                ui.visuals().warn_fg_color,
+                tr("No airport selected; route and field-performance data are unavailable."),
+            );
+        }
+        AirportResolution::Unknown => {
+            ui.colored_label(
+                ui.visuals().warn_fg_color,
+                tr("No matching airport record; routing and declared field-performance data remain unresolved."),
+            );
+        }
+        AirportResolution::Resolved {
+            source,
+            runway_kind,
+            elevation_m,
+            latitude_deg,
+            longitude_deg,
+            toda_m,
+            lda_m,
+        } => {
+            ui.horizontal_wrapped(|ui| {
+                ui.label(RichText::new(tr("Resolved airport data")).strong());
+                ui.label(tr_fields(
+                    "Source: {source}",
+                    &[("source", source_label(source))],
+                ));
+            });
+            ui.horizontal_wrapped(|ui| {
+                ui.label(format_optional_metric("Elevation", elevation_m, "m"));
+                ui.separator();
+                ui.label(format_coordinates(latitude_deg, longitude_deg));
+            });
+            match runway_kind {
+                RunwayDataKind::DeclaredOperationalDistance => {
+                    ui.label(tr_fields(
+                        "Declared take-off / landing distances: {toda} / {lda} m",
+                        &[
+                            ("toda", format_optional_number(toda_m)),
+                            ("lda", format_optional_number(lda_m)),
+                        ],
+                    ));
+                }
+                RunwayDataKind::PhysicalRunwayLength => {
+                    ui.colored_label(
+                        ui.visuals().warn_fg_color,
+                        tr("Physical runway length only; declared take-off and landing distances are missing."),
+                    );
+                }
+                RunwayDataKind::Missing => {
+                    ui.colored_label(
+                        ui.visuals().warn_fg_color,
+                        tr("Runway distance data are missing; declared field-performance checks cannot use this airport."),
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum AirportResolution {
+    Missing,
+    Unknown,
+    Resolved {
+        source: FieldSource,
+        runway_kind: RunwayDataKind,
+        elevation_m: Option<f64>,
+        latitude_deg: Option<f64>,
+        longitude_deg: Option<f64>,
+        toda_m: Option<f64>,
+        lda_m: Option<f64>,
+    },
+}
+
+fn airport_resolution(name: &str) -> AirportResolution {
+    if name.trim().is_empty() {
+        return AirportResolution::Missing;
+    }
+    let Ok(record) = airport_dataset::resolve(name) else {
+        return AirportResolution::Unknown;
+    };
+    AirportResolution::Resolved {
+        source: record.name.source,
+        runway_kind: record.runway_data_kind,
+        elevation_m: record.elevation_m.value,
+        latitude_deg: record.latitude_deg.value,
+        longitude_deg: record.longitude_deg.value,
+        toda_m: record.toda_m.value,
+        lda_m: record.lda_m.value,
+    }
+}
+
+fn source_label(source: FieldSource) -> String {
+    tr(match source {
+        FieldSource::CuratedChartTable => "Curated chart table",
+        FieldSource::OurAirportsPublicDomain => "OurAirports public-domain snapshot",
+        FieldSource::UserOverride => "User override",
+        FieldSource::Missing => "Missing",
+    })
+}
+
+fn format_optional_metric(label: &str, value: Option<f64>, unit: &str) -> String {
+    tr_fields(
+        "{label}: {value} {unit}",
+        &[
+            ("label", tr(label)),
+            ("value", format_optional_number(value)),
+            ("unit", unit.to_owned()),
+        ],
+    )
+}
+
+fn format_optional_number(value: Option<f64>) -> String {
+    value
+        .filter(|value| value.is_finite())
+        .map(|value| format!("{value:.1}"))
+        .unwrap_or_else(|| tr("missing"))
+}
+
+fn format_coordinates(latitude_deg: Option<f64>, longitude_deg: Option<f64>) -> String {
+    tr_fields(
+        "Coordinates: {latitude}, {longitude}",
+        &[
+            ("latitude", format_coordinate(latitude_deg, "N", "S")),
+            ("longitude", format_coordinate(longitude_deg, "E", "W")),
+        ],
+    )
+}
+
+fn format_coordinate(value: Option<f64>, positive: &str, negative: &str) -> String {
+    value
+        .filter(|value| value.is_finite())
+        .map(|value| {
+            let hemisphere = if value >= 0.0 { positive } else { negative };
+            format!("{:.4} deg {hemisphere}", value.abs())
+        })
+        .unwrap_or_else(|| tr("missing"))
 }
 
 fn route_column_count(available_width: f32) -> usize {
@@ -318,11 +467,11 @@ fn show_run_options_card(state: &mut AppState, ui: &mut Ui) {
         if run_options_column_count(ui.available_width()) == 1 {
             show_run_content_options(state, ui);
             ui.add_space(10.0);
-            show_run_solver_options(state, ui);
+            show_run_evaluation_options(state, ui);
         } else {
             ui.columns(2, |columns| {
                 show_run_content_options(state, &mut columns[0]);
-                show_run_solver_options(state, &mut columns[1]);
+                show_run_evaluation_options(state, &mut columns[1]);
             });
         }
     });
@@ -330,11 +479,31 @@ fn show_run_options_card(state: &mut AppState, ui: &mut Ui) {
 
 fn show_run_content_options(state: &mut AppState, ui: &mut Ui) {
     ui.label(RichText::new(tr("Run contents")).strong());
-    ui.checkbox(&mut state.run_options.optimize, tr("Optimize design space"));
-    ui.checkbox(
-        &mut state.run_options.compare_baseline,
-        tr("Compare against baseline design"),
-    );
+    let baseline = state.design_mode() == alas_config::DesignMode::BaselineSandbox;
+    if baseline {
+        state.run_options.optimize = false;
+    }
+    ui.add_enabled_ui(!baseline, |ui| {
+        ui.checkbox(&mut state.run_options.optimize, tr("Optimize design space"));
+    });
+    if baseline {
+        ui.label(
+            RichText::new(tr(
+                "Baseline sandbox is fixed-aircraft analysis; select New aircraft or Adapt reference to enable MADS.",
+            ))
+            .weak()
+            .small(),
+        );
+    }
+    if baseline {
+        state.run_options.compare_baseline = false;
+    }
+    ui.add_enabled_ui(!baseline, |ui| {
+        ui.checkbox(
+            &mut state.run_options.compare_baseline,
+            tr("Compare against baseline design"),
+        );
+    });
     ui.checkbox(
         &mut state.run_options.write_outputs,
         tr("Write CPACS aircraft and output files"),
@@ -361,38 +530,24 @@ fn show_run_content_options(state: &mut AppState, ui: &mut Ui) {
     );
 }
 
-fn show_run_solver_options(state: &mut AppState, ui: &mut Ui) {
-    ui.label(RichText::new(tr("Solver selection")).strong());
-    ui.label(RichText::new(tr("Optimization strategy")).weak().small());
-    let mut method = state
-        .config_values
-        .pointer("/optimizer/solver/method")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("differential_evolution")
-        .to_owned();
-    let original_method = method.clone();
-    ComboBox::from_id_salt("alas_optimization_method")
-        .width(ui.available_width())
-        .selected_text(optimizer_method_label(&method))
-        .show_ui(ui, |ui| {
-            for (value, label) in [
-                ("differential_evolution", "Differential evolution"),
-                ("feasibility_first_de", "Feasibility-first DE"),
-                ("nsga2", "NSGA-II Pareto"),
-                ("turbo_1", "TuRBO-1 surrogate"),
-                ("cma_es", "CMA-ES"),
-            ] {
-                ui.selectable_value(&mut method, value.to_owned(), tr(label));
-            }
-        });
-    if method != original_method {
-        if let Some(value) = state.config_values.pointer_mut("/optimizer/solver/method") {
-            *value = serde_json::Value::String(method);
-            state.on_config_modified();
-        }
-    }
+fn show_run_evaluation_options(state: &mut AppState, ui: &mut Ui) {
+    ui.label(RichText::new(tr("MADS optimizer")).strong());
+    ui.label(
+        RichText::new(tr(
+            "MADS is the single product optimizer: a mesh search with a progressive barrier that ranks hard-feasible candidates before mission cost.",
+        ))
+        .weak()
+        .small(),
+    );
+    ui.label(
+        RichText::new(tr(
+            "Termination reports the evaluation budget, mesh limit, iteration limit or fixed bounds; it is not a claim of global optimality.",
+        ))
+        .weak()
+        .small(),
+    );
     ui.add_space(4.0);
-    ui.label(RichText::new(tr("Optimization backend")).weak().small());
+    ui.label(RichText::new(tr("Aero evaluation backend")).weak().small());
     ComboBox::from_id_salt("alas_optimization_solver")
         .width(ui.available_width())
         .selected_text(match state.pipeline_options.optimization_solver {
@@ -453,16 +608,6 @@ fn show_run_solver_options(state: &mut AppState, ui: &mut Ui) {
     ));
 }
 
-fn optimizer_method_label(method: &str) -> String {
-    tr(match method {
-        "feasibility_first_de" => "Feasibility-first DE",
-        "nsga2" => "NSGA-II Pareto",
-        "turbo_1" => "TuRBO-1 surrogate",
-        "cma_es" => "CMA-ES",
-        _ => "Differential evolution",
-    })
-}
-
 fn run_options_column_count(available_width: f32) -> usize {
     if available_width >= 760.0 {
         2
@@ -473,8 +618,12 @@ fn run_options_column_count(available_width: f32) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use super::{live_payload_estimate, route_column_count, run_options_column_count};
+    use super::{
+        airport_resolution, live_payload_estimate, route_column_count, run_options_column_count,
+        AirportResolution,
+    };
     use crate::state::AppState;
+    use alas_config::{DesignMode, FieldSource, RunwayDataKind};
 
     #[test]
     fn preset_changes_rebuild_the_live_cabin_and_payload_estimate() {
@@ -512,5 +661,43 @@ mod tests {
         assert_eq!(route_column_count(680.0), 2);
         assert_eq!(run_options_column_count(759.0), 1);
         assert_eq!(run_options_column_count(760.0), 2);
+    }
+
+    #[test]
+    fn airport_inputs_keep_declared_and_physical_runway_evidence_distinct() {
+        assert!(matches!(
+            airport_resolution("London Heathrow (EGLL)"),
+            AirportResolution::Resolved {
+                source: FieldSource::CuratedChartTable,
+                runway_kind: RunwayDataKind::DeclaredOperationalDistance,
+                ..
+            }
+        ));
+        assert!(matches!(
+            airport_resolution("LEBL"),
+            AirportResolution::Resolved {
+                source: FieldSource::OurAirportsPublicDomain,
+                runway_kind: RunwayDataKind::PhysicalRunwayLength,
+                ..
+            }
+        ));
+        assert_eq!(airport_resolution("ZZZZ"), AirportResolution::Unknown);
+        assert_eq!(airport_resolution(""), AirportResolution::Missing);
+    }
+
+    #[test]
+    fn baseline_mode_is_a_fixed_aircraft_run_state() {
+        let mut state = AppState::default();
+        state.set_design_mode(DesignMode::BaselineSandbox);
+        assert_eq!(state.design_mode(), DesignMode::BaselineSandbox);
+        assert!(!state.run_options.optimize);
+        assert!(state
+            .typed_config()
+            .expect("typed config")
+            .optimizer
+            .design_space
+            .envelope(&state.current_design().expect("design"))
+            .iter()
+            .all(|variable| variable.fixed));
     }
 }

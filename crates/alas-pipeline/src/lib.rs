@@ -26,6 +26,7 @@
 
 pub mod avl;
 pub mod baseline;
+pub mod cabin_scene;
 pub mod cpacs;
 #[path = "cpacs/adapters.rs"]
 pub mod cpacs_adapters;
@@ -33,10 +34,12 @@ pub mod dual_solver;
 pub mod export;
 pub mod feasibility;
 pub mod flowunsteady;
+pub mod fuel_model;
 pub mod full_analysis;
 mod mission_stage;
 pub mod openvsp;
 mod patran;
+pub mod payload_layout_export;
 pub mod pipeline;
 pub mod plot;
 pub mod runs;
@@ -55,6 +58,9 @@ pub use avl::{
     AvlAnalysisStatus, AvlComparableQuantity, AvlComparisonReference, AvlComparisonStatus,
 };
 pub use baseline::{analyze_baseline, BaselineReport};
+pub use cabin_scene::{
+    export_cabin_scene, CabinScene, CabinSceneInputs, CABIN_SCENE_SCHEMA_VERSION,
+};
 pub use cpacs::{
     export_cpacs, export_cpacs_with_analysis, read_cpacs, read_cpacs_file, render_cpacs_v35,
     write_cpacs_run_manifest, CpacsAircraft, CpacsAircraftError, CpacsDocument, CpacsEngine,
@@ -77,10 +83,12 @@ pub use export::{
     export_json_with_feasibility_and_cpacs, format_summary, CpacsReference, DesignDatabase,
 };
 pub use feasibility::{
-    assess_physical_feasibility, format_feasibility, CarriedFuelBasis, CgEnvelopeAssessment,
-    CruiseEquilibriumAssessment, FeasibilityReport, FindingCode, FindingSeverity,
-    FuelCapacityAssessment, FuelCapacityEvidence, FuelLoadingAssessment, MissionFuelAssessment,
-    MissionFuelStatus, PhysicalFinding, PlanningCgStatus,
+    assess_physical_feasibility, assess_physical_feasibility_with_load_case, format_feasibility,
+    CarriedFuelBasis, CgEnvelopeAssessment, CruiseEquilibriumAssessment, DispatchAssessment,
+    DispatchOutcome, FeasibilityReport, FindingCode, FindingSeverity, FuelCapacityAssessment,
+    FuelCapacityEvidence, FuelLoadingAssessment, LedgerItemSummary, MassBalanceAssessment,
+    MassStateSummary, MissionFuelAssessment, MissionFuelStatus, PhysicalFinding, PlanningCgStatus,
+    TankSummary,
 };
 pub use flowunsteady::{
     run_flowunsteady_analysis, FlowUnsteadyAnalysisResult, FlowUnsteadyAnalysisStatus,
@@ -88,14 +96,18 @@ pub use flowunsteady::{
 pub use full_analysis::{
     AnalysisReport, DesignPoint, FullAnalysis, PolarFit, PolarFitStatus, TrimmedDesignPoint,
 };
+pub use mission_stage::dispatch::{LoadCaseSelection, PolicyClosureCase, SelectedLoadCase};
 pub use openvsp::{
     export_openvsp_script, materialize_openvsp_project, OpenVspExportResult, OpenVspExportStatus,
+};
+pub use payload_layout_export::{
+    export_payload_layout_artifact, PayloadLayoutArtifact, PAYLOAD_LAYOUT_SCHEMA_VERSION,
 };
 pub use pipeline::{
     DesignPipeline, PipelineExecutionStatus, PipelineOptions, PipelineResult, RoutePlanningStatus,
 };
 pub use plot::render_scene_svg;
-pub use runs::{RunEvent, RunRegistry, RunState};
+pub use runs::{RunEvent, RunEventKind, RunEventSeverity, RunRegistry, RunState};
 pub use solver_mode::{AerodynamicSolverMode, OptimizationSolverMode, SolverKind};
 pub use structural::{run_structural_analysis, StructuralAnalysisResult};
 pub use vspaero::{

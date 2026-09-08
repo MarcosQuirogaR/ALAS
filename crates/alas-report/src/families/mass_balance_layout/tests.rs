@@ -2,8 +2,8 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 use super::common::assign_label_rows;
-use super::fuel_volume::figure_fuel_volume_check;
 use super::fuel_volume::wing_fuel_volume_m3;
+use super::fuel_volume::{figure_fuel_volume_check, figure_fuel_volume_check_for_loading};
 use super::landing_gear::figure_landing_gear_planform;
 use super::mass_breakdown::{figure_mass_breakdown, AC_CHORD_FRACTION, FUEL_NEG_COLOR};
 use crate::scene::{Color, SceneElement};
@@ -19,6 +19,9 @@ use alas_mass::breakdown::{
     FUEL, FURNISHINGS, FUSELAGE, GEAR, H_STAB, OEW_KEYS, PAYLOAD, PROPULSION, SYSTEMS, V_STAB, WING,
 };
 use alas_perf::landing_gear::size_landing_gear;
+use alas_pipeline::feasibility::{
+    FuelCapacityAssessment, FuelCapacityEvidence, FuelLoadingAssessment,
+};
 use alas_pipeline::full_analysis::{AnalysisReport, DesignPoint, PolarFit, PolarFitStatus};
 use std::collections::HashMap;
 fn test_wing(name: &str, symmetric: bool) -> Wing {
@@ -378,6 +381,30 @@ fn fuel_volume_check_is_red_when_required_fuel_exceeds_capacity() {
     assert!(scene.elements.iter().any(|e| {
             matches!(e, SceneElement::Rect { fill: Some(f), stroke: None, .. } if f.color.r == insufficient.r && f.color.g == insufficient.g && f.color.b == insufficient.b)
         }));
+}
+
+#[test]
+fn product_fuel_volume_check_uses_typed_carried_fuel_and_capacity() {
+    let loading = FuelLoadingAssessment {
+        usable_capacity: FuelCapacityAssessment {
+            capacity_kg: Some(20_000.0),
+            evidence: FuelCapacityEvidence::PublishedPreset,
+        },
+        analyzed_carried_fuel_kg: 18_000.0,
+        ..FuelLoadingAssessment::default()
+    };
+    let scene = figure_fuel_volume_check_for_loading(&loading, None);
+    let labels = scene
+        .elements
+        .iter()
+        .filter_map(|element| match element {
+            SceneElement::Text { text, .. } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert!(labels.contains(&"Published usable capacity"));
+    assert!(labels.contains(&"Analyzed carried fuel"));
+    assert!(!labels.contains(&"Required fuel"));
 }
 
 #[test]

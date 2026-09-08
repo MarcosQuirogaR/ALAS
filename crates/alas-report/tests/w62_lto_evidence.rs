@@ -210,7 +210,7 @@ fn w62_lto_matches_the_reference_intermediates_in_renderer_order() {
         );
         close(
             "inputs.thrust_per_engine_kn",
-            config.geometry.engine.thrust_kn,
+            config.geometry.engine.thrust_kn(),
             case.inputs.thrust_per_engine_kn,
         );
         close(

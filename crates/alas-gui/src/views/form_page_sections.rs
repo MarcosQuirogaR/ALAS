@@ -29,6 +29,8 @@ pub(super) fn page_sections(group: &str) -> Option<&'static [PageSection]> {
         PageSection {
             title: "Mass and propulsion",
             names: &[
+                "structural_mass_method",
+                "propulsion_mass_method",
                 "suspended_mass_fraction",
                 "max_airspeed_for_flaps_ms",
                 "flap_deflection_angle_deg",
@@ -53,7 +55,7 @@ pub(super) fn page_sections(group: &str) -> Option<&'static [PageSection]> {
         },
         PageSection {
             title: "FLOPS transport model",
-            names: &["flops_transport"],
+            names: &["flops_transport", "flops_structure"],
             default_open: true,
         },
         PageSection {
@@ -67,6 +69,18 @@ pub(super) fn page_sections(group: &str) -> Option<&'static [PageSection]> {
                 "mlw_fraction_mtow",
             ],
             default_open: false,
+        },
+    ];
+    const OPTIMIZER: &[PageSection] = &[
+        PageSection {
+            title: "Objective and requirements",
+            names: &["objective"],
+            default_open: true,
+        },
+        PageSection {
+            title: "MADS settings",
+            names: &["solver"],
+            default_open: true,
         },
     ];
     const LANDING_GEAR: &[PageSection] = &[
@@ -317,6 +331,7 @@ pub(super) fn page_sections(group: &str) -> Option<&'static [PageSection]> {
 
     match group {
         "mass_model" => Some(MASS_MODEL),
+        "optimizer" => Some(OPTIMIZER),
         "landing_gear" => Some(LANDING_GEAR),
         "control_surfaces" => Some(CONTROL_SURFACES),
         "structures" => Some(STRUCTURES),

@@ -133,7 +133,7 @@ fn the_analysis_settings_are_what_the_analysis_held() {
 fn the_engine_the_port_assumes_is_the_one_that_was_flown() {
     let fixture = fixture();
     let recorded = &fixture.inputs.vehicle.turbofan;
-    let params = VehicleBuilderParams::default();
+    let params = VehicleBuilderParams::reference_compatibility();
 
     let mut c = Comparison::new("alas-mission::segments engine", Tier::Exact);
     for (name, port, reference) in [

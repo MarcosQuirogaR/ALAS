@@ -24,6 +24,9 @@ alas-prop = { path = "../alas-prop" }
 alas-route = { path = "../alas-route" }
 alas-math = { path = "../alas-math" }
 alas-exec = { path = "../alas-exec" }
+# The fuel policy states its holding altitude in feet and its alternate
+# distance in nautical miles; the burn-model bridge converts them once.
+alas-units = { path = "../alas-units" }
 tracing = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

@@ -123,9 +123,9 @@ Public domain. Earth surface texture for the route map and globe.
 
 ## Invoked executables
 
-Separate programs, not distributed with this one. Each analysis that depends on
-one reports itself unavailable when it is absent, rather than substituting an
-approximation without saying so.
+Separate programs invoked through process boundaries. A Windows distribution
+may aggregate the open-source programs identified below; proprietary programs
+remain user-supplied.
 
 | Program | Licence | Used for |
 |---|---|---|
@@ -138,3 +138,6 @@ NOSA 1.3 is not compatible with the GPL family. NASTRAN-95 is therefore invoked
 as a separate executable and nothing of it is linked or translated into this
 program; the two are aggregated, not combined. If a NASTRAN-95 build is
 redistributed alongside a release, it must carry its own NOSA notices intact.
+ALAS release packaging additionally requires the exact corresponding source,
+frozen source revision, local modification record, build marker, runtime and
+rigid-format files; a missing item blocks archive creation.

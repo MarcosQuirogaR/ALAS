@@ -77,7 +77,24 @@ pub fn kml_file_name(origin: &Airport, dest: &Airport) -> String {
 ///
 /// Never fails: the great circle is always available, so every earlier tier is
 /// an improvement that may or may not be there.
+/// This entry point retains unfiltered parity behavior; the mission pipeline
+/// uses [`plan_route_with_max_stretch`] to reject excessive graph detours.
 pub fn plan_route(origin: &Airport, dest: &Airport, sources: RouteSources<'_>) -> Route {
+    plan_route_with_max_stretch(origin, dest, sources, 0.0)
+}
+
+/// Select a route while rejecting excessive detours from the approximate airway graph.
+///
+/// A positive limit compares airway distance with airport-to-airport great-circle
+/// distance. Zero disables the check for parity. Imported and dispatched routes
+/// are authoritative inputs and are not filtered. Rejection returns an explicitly
+/// labeled great-circle approximation, not an operational flight clearance.
+pub fn plan_route_with_max_stretch(
+    origin: &Airport,
+    dest: &Airport,
+    sources: RouteSources<'_>,
+    max_airway_stretch: f64,
+) -> Route {
     if let Some(dispatched) = sources.dispatched {
         tracing::info!(
             origin = %origin.icao,
@@ -109,7 +126,26 @@ pub fn plan_route(origin: &Airport, dest: &Airport, sources: RouteSources<'_>) -
 
     if let Some(navdata) = sources.navdata {
         if let Some(route) = navdata.airway_route(origin, dest) {
-            return route;
+            let direct = crate::route::haversine_m(
+                origin.latitude_deg,
+                origin.longitude_deg,
+                dest.latitude_deg,
+                dest.longitude_deg,
+            );
+            let distance = route.total_distance_m();
+            if max_airway_stretch == 0.0
+                || (max_airway_stretch.is_finite()
+                    && max_airway_stretch >= 1.0
+                    && distance <= direct * max_airway_stretch)
+            {
+                return route;
+            }
+            tracing::warn!(
+                airway_distance_m = distance,
+                great_circle_distance_m = direct,
+                max_airway_stretch,
+                "airway graph exceeds the configured detour limit; using a great-circle approximation"
+            );
         }
     }
 
@@ -122,10 +158,31 @@ pub fn plan_route(origin: &Airport, dest: &Airport, sources: RouteSources<'_>) -
 /// cannot be read, which are the same thing to a caller: the airway tier is
 /// unavailable and the one below it applies.
 pub fn load_navdata(navdata_dir: &Path) -> Option<NavdataGraph> {
+    load_navdata_with_airway_coordinates(navdata_dir, false)
+}
+
+/// Load coordinate-bearing airway records when enabled; false retains parity.
+pub fn load_navdata_with_airway_coordinates(
+    navdata_dir: &Path,
+    use_coordinates: bool,
+) -> Option<NavdataGraph> {
     if !navdata_available(navdata_dir) {
         return None;
     }
-    match NavdataGraph::load(navdata_dir) {
+    let result = if use_coordinates {
+        std::fs::read_to_string(navdata_dir.join(crate::navdata::FIX_FILE))
+            .and_then(|fixes| {
+                std::fs::read_to_string(navdata_dir.join(crate::navdata::AIRWAY_FILE))
+                    .map(|airways| NavdataGraph::parse_with_airway_coordinates(&fixes, &airways))
+            })
+            .map_err(|source| crate::navdata::NavdataError {
+                path: navdata_dir.display().to_string(),
+                source,
+            })
+    } else {
+        NavdataGraph::load(navdata_dir)
+    };
+    match result {
         Ok(graph) => Some(graph),
         Err(error) => {
             tracing::warn!(%error, "the navigation data could not be read");

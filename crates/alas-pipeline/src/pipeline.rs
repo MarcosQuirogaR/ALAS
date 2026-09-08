@@ -17,7 +17,8 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use alas_aero::mses::{
     run_mses_polar, run_mses_pressure_distribution, MsesPolarResult, MsesPressureResult,
@@ -26,17 +27,20 @@ use alas_config::airports::get as get_airport;
 use alas_config::design_variables::DesignVector;
 use alas_config::presets;
 use alas_config::{AlasConfig, Severity};
-use alas_exec::RunEnvironment;
+use alas_exec::{RunEnvironment, ToolLocator};
 use alas_geom::aircraft::airplane::Airplane;
 use alas_mission::MissionResult;
 use alas_opt::OptimizationResult;
-use alas_route::planner::{load_navdata, plan_route, RouteSources};
+use alas_route::planner::{
+    load_navdata_with_airway_coordinates, plan_route_with_max_stretch, RouteSources,
+};
 use alas_route::route::{Route, RouteSource};
 use alas_route::{fetch_route_with_status, SimbriefFetchStatus};
 use serde::{Deserialize, Serialize};
 
 use crate::avl::{run_avl_takeoff_comparison, AvlAnalysisResult};
 use crate::baseline::{analyze_baseline, BaselineReport};
+use crate::cabin_scene::export_cabin_scene;
 use crate::cpacs::{
     export_cpacs, export_cpacs_with_analysis, read_cpacs_file, write_cpacs_run_manifest,
     CpacsDocument, CpacsExportResult,
@@ -47,11 +51,15 @@ use crate::export::{
     export_airfoil_dat, export_json_with_feasibility_and_cpacs, format_summary, CpacsReference,
     DesignDatabase,
 };
-use crate::feasibility::{assess_physical_feasibility, format_feasibility, FeasibilityReport};
+use crate::feasibility::{
+    assess_physical_feasibility_with_load_case, format_feasibility, FeasibilityReport,
+};
 use crate::flowunsteady::{run_flowunsteady_analysis, FlowUnsteadyAnalysisResult};
 use crate::full_analysis::{AnalysisReport, FullAnalysis};
-use crate::mission_stage;
+use crate::mission_stage::{self, SelectedLoadCase};
 use crate::openvsp::{export_openvsp_script, materialize_openvsp_project, OpenVspExportResult};
+use crate::payload_layout_export::export_payload_layout_artifact;
+use crate::runs::{RunEvent, RunEventKind, RunEventSeverity};
 use crate::solver_mode::{AerodynamicSolverMode, OptimizationSolverMode};
 use crate::structural::StructuralAnalysisResult;
 use crate::vspaero::{run_vspaero_analysis, VspaeroAnalysisResult};
@@ -62,8 +70,8 @@ mod helpers;
 #[cfg(test)]
 use helpers::optimizer_config;
 use helpers::{
-    add_manifest_artifact, persist_mses_polar_diagnostics, persist_mses_raw_exports,
-    validate_bounds,
+    add_manifest_artifact, add_manifest_artifact_if_exists, persist_mses_polar_diagnostics,
+    persist_mses_raw_exports, validate_bounds,
 };
 
 /// The 2-D section condition sent to MSES for a 3-D swept-wing cruise case.
@@ -78,6 +86,346 @@ struct MsesSectionCondition {
     mach: f64,
     reynolds: f64,
     alpha_deg: f64,
+}
+
+const PIPELINE_STAGE_COUNT: u8 = 7;
+
+fn check_cancelled(cancel: Option<&AtomicBool>) -> Result<(), String> {
+    if cancel.is_some_and(|flag| flag.load(Ordering::Relaxed)) {
+        Err("Cancelled safely at a pipeline stage boundary".to_owned())
+    } else {
+        Ok(())
+    }
+}
+
+fn emit_event(events: Option<&(dyn Fn(RunEvent) + Sync)>, run_clock: Instant, event: RunEvent) {
+    if let Some(callback) = events {
+        callback(RunEvent {
+            elapsed_ms: run_clock.elapsed().as_millis() as u64,
+            ..event
+        });
+    }
+}
+
+fn begin_stage(
+    events: Option<&(dyn Fn(RunEvent) + Sync)>,
+    run_clock: Instant,
+    index: u8,
+    stage: &str,
+    message: &str,
+) -> Instant {
+    emit_event(
+        events,
+        run_clock,
+        RunEvent {
+            stage: stage.to_owned(),
+            message: message.to_owned(),
+            fraction: Some(0.0),
+            kind: RunEventKind::StageStarted,
+            severity: RunEventSeverity::Info,
+            stage_index: Some(index),
+            stage_count: Some(PIPELINE_STAGE_COUNT),
+            elapsed_ms: 0,
+            duration_ms: None,
+        },
+    );
+    Instant::now()
+}
+
+fn finish_stage(
+    events: Option<&(dyn Fn(RunEvent) + Sync)>,
+    run_clock: Instant,
+    stage_clock: Instant,
+    index: u8,
+    stage: &str,
+) {
+    let duration_ms = stage_clock.elapsed().as_millis() as u64;
+    emit_event(
+        events,
+        run_clock,
+        RunEvent {
+            stage: stage.to_owned(),
+            message: format!("Completed in {:.3} s", duration_ms as f64 / 1_000.0),
+            fraction: Some(1.0),
+            kind: RunEventKind::StageCompleted,
+            severity: RunEventSeverity::Info,
+            stage_index: Some(index),
+            stage_count: Some(PIPELINE_STAGE_COUNT),
+            elapsed_ms: 0,
+            duration_ms: Some(duration_ms),
+        },
+    );
+}
+
+/// Start a detailed downstream component timer.
+///
+/// Component events intentionally do not carry the seven-stage index. They
+/// are children of the top-level `downstream` stage and are rendered as a
+/// separate, indented timing list by the desktop console.
+pub(crate) fn begin_component(
+    events: Option<&(dyn Fn(RunEvent) + Sync)>,
+    run_clock: Instant,
+    stage: &str,
+    message: &str,
+) -> Instant {
+    emit_event(
+        events,
+        run_clock,
+        RunEvent {
+            stage: stage.to_owned(),
+            message: message.to_owned(),
+            fraction: Some(0.0),
+            kind: RunEventKind::StageStarted,
+            severity: RunEventSeverity::Info,
+            stage_index: None,
+            stage_count: None,
+            elapsed_ms: 0,
+            duration_ms: None,
+        },
+    );
+    Instant::now()
+}
+
+/// Finish a detailed downstream component timer.
+pub(crate) fn finish_component(
+    events: Option<&(dyn Fn(RunEvent) + Sync)>,
+    run_clock: Instant,
+    stage_clock: Instant,
+    stage: &str,
+    status: &str,
+) {
+    let duration_ms = stage_clock.elapsed().as_millis() as u64;
+    let message = if status.eq_ignore_ascii_case("skipped") {
+        status.to_owned()
+    } else {
+        format!("{status} in {:.3} s", duration_ms as f64 / 1_000.0)
+    };
+    emit_event(
+        events,
+        run_clock,
+        RunEvent {
+            stage: stage.to_owned(),
+            message,
+            fraction: Some(1.0),
+            kind: RunEventKind::StageCompleted,
+            severity: RunEventSeverity::Info,
+            stage_index: None,
+            stage_count: None,
+            elapsed_ms: 0,
+            duration_ms: Some(duration_ms),
+        },
+    );
+}
+
+fn emit_diagnostic(
+    events: Option<&(dyn Fn(RunEvent) + Sync)>,
+    run_clock: Instant,
+    stage: &str,
+    message: &str,
+) {
+    emit_diagnostic_with_severity(events, run_clock, stage, message, RunEventSeverity::Info);
+}
+
+fn emit_diagnostic_with_severity(
+    events: Option<&(dyn Fn(RunEvent) + Sync)>,
+    run_clock: Instant,
+    stage: &str,
+    message: &str,
+    severity: RunEventSeverity,
+) {
+    emit_event(
+        events,
+        run_clock,
+        RunEvent {
+            stage: stage.to_owned(),
+            message: message.to_owned(),
+            fraction: None,
+            kind: RunEventKind::Diagnostic,
+            severity,
+            stage_index: None,
+            stage_count: Some(PIPELINE_STAGE_COUNT),
+            elapsed_ms: 0,
+            duration_ms: None,
+        },
+    );
+}
+
+// Coordinated analysis inputs are kept explicit at this integration boundary.
+#[allow(clippy::too_many_arguments)]
+fn emit_tool_diagnostics(
+    events: Option<&(dyn Fn(RunEvent) + Sync)>,
+    run_clock: Instant,
+    environment: &RunEnvironment,
+    openvsp: Option<&OpenVspExportResult>,
+    vspaero: Option<&VspaeroAnalysisResult>,
+    avl: Option<&AvlAnalysisResult>,
+    flowunsteady: Option<&FlowUnsteadyAnalysisResult>,
+    structures: Option<&StructuralAnalysisResult>,
+    mses: Option<&MsesPolarResult>,
+) {
+    let configured = [
+        ("OpenVSP", environment.openvsp_exe.as_deref()),
+        ("VSPAERO", environment.vspaero_exe.as_deref()),
+        ("AVL", environment.avl_exe.as_deref()),
+        ("FLOWUnsteady", environment.flowunsteady_exe.as_deref()),
+        ("MSES", environment.mses_dir.as_deref()),
+        ("Nastran", environment.nastran_exe.as_deref()),
+        ("MSC solver", environment.nastran_solver.as_deref()),
+        ("Patran", environment.patran_exe.as_deref()),
+    ];
+    for (tool, path) in configured {
+        let message = path.map_or_else(
+            || format!("{tool}: not configured"),
+            |path| format!("{tool}: resolved {}", path.display()),
+        );
+        emit_diagnostic_with_severity(
+            events,
+            run_clock,
+            "external_tools",
+            &message,
+            if path.is_some() {
+                RunEventSeverity::Info
+            } else {
+                RunEventSeverity::Warning
+            },
+        );
+    }
+    for (tool, status) in [
+        (
+            "OpenVSP",
+            openvsp.map(|value| {
+                status_with_detail(
+                    format!("{:?}", value.status),
+                    value.runtime_error.as_deref(),
+                )
+            }),
+        ),
+        (
+            "VSPAERO",
+            vspaero.map(|value| {
+                status_with_detail(format!("{:?}", value.status), value.error.as_deref())
+            }),
+        ),
+        (
+            "AVL",
+            avl.map(|value| {
+                status_with_detail(format!("{:?}", value.status), value.error.as_deref())
+            }),
+        ),
+        (
+            "FLOWUnsteady",
+            flowunsteady.map(|value| {
+                status_with_detail(format!("{:?}", value.status), value.error.as_deref())
+            }),
+        ),
+        (
+            "Structures",
+            structures
+                .map(|value| status_with_detail(value.status.clone(), value.error.as_deref())),
+        ),
+        (
+            "MSES",
+            mses.map(|value| {
+                status_with_detail(format!("{:?}", value.status), value.error.as_deref())
+            }),
+        ),
+    ] {
+        emit_diagnostic(
+            events,
+            run_clock,
+            "external_tools",
+            &format!(
+                "{tool}: {}",
+                status.unwrap_or_else(|| "not requested".to_owned())
+            ),
+        );
+    }
+
+    // The overall structural result stays `ok` when the analytical sizing
+    // succeeded; the individual native solver outcomes are surfaced as well
+    // so a missing MSC DLL is not hidden behind the analytical answer.
+    if let Some(structures) = structures {
+        for (tool, outcome) in [
+            (
+                "MSC Nastran SOL 101",
+                structures.nastran.as_ref().map(|result| {
+                    (
+                        result.static_solve.status,
+                        result.static_solve.error.as_deref(),
+                    )
+                }),
+            ),
+            (
+                "MSC Nastran SOL 103",
+                structures
+                    .nastran
+                    .as_ref()
+                    .map(|result| (result.modes.status, result.modes.error.as_deref())),
+            ),
+            (
+                "NASTRAN-95 SOL 101",
+                structures.nastran95.as_ref().map(|result| {
+                    (
+                        result.static_solve.status,
+                        result.static_solve.error.as_deref(),
+                    )
+                }),
+            ),
+            (
+                "NASTRAN-95 SOL 103",
+                structures
+                    .nastran95
+                    .as_ref()
+                    .map(|result| (result.modes.status, result.modes.error.as_deref())),
+            ),
+        ] {
+            if let Some((status, error)) = outcome {
+                emit_diagnostic_with_severity(
+                    events,
+                    run_clock,
+                    "external_tools",
+                    &format!(
+                        "{tool}: {}",
+                        status_with_detail(status.as_str().to_owned(), error)
+                    ),
+                    if status == alas_struct::nastran::ResultStatus::Ok {
+                        RunEventSeverity::Info
+                    } else {
+                        RunEventSeverity::Warning
+                    },
+                );
+            }
+        }
+        if let Some(patran) = structures.patran.as_ref() {
+            emit_diagnostic_with_severity(
+                events,
+                run_clock,
+                "external_tools",
+                &format!(
+                    "Patran: {}",
+                    status_with_detail(patran.status.clone(), patran.error.as_deref())
+                ),
+                if patran.status.eq_ignore_ascii_case("ok") {
+                    RunEventSeverity::Info
+                } else {
+                    RunEventSeverity::Warning
+                },
+            );
+        }
+    }
+}
+
+fn status_with_detail(status: String, error: Option<&str>) -> String {
+    let Some(error) = error.map(str::trim).filter(|error| !error.is_empty()) else {
+        return status;
+    };
+    const MAX_CHARS: usize = 1_000;
+    let detail = error.chars().take(MAX_CHARS).collect::<String>();
+    if detail.chars().count() < error.chars().count() {
+        format!("{status}: {detail} \u{2026}")
+    } else {
+        format!("{status}: {detail}")
+    }
 }
 
 fn mses_section_condition(config: &AlasConfig, report: &AnalysisReport) -> MsesSectionCondition {
@@ -202,6 +550,8 @@ pub struct PipelineResult {
     pub route_status: Option<RoutePlanningStatus>,
     /// Flown mission telemetry, when a mission stage supplied one.
     pub mission_result: Option<MissionResult>,
+    /// The load case that telemetry was flown at, and how it was chosen.
+    pub mission_load_case: Option<SelectedLoadCase>,
     /// Explicit conservation-law and configured-limit failures for this run.
     pub feasibility: FeasibilityReport,
     /// MSES 2-D polar sweep results for the root section.
@@ -241,6 +591,7 @@ type MissionStageOutputs = (
     Option<Route>,
     Option<RoutePlanningStatus>,
     Option<MissionResult>,
+    Option<SelectedLoadCase>,
 );
 
 #[derive(Debug)]
@@ -284,8 +635,7 @@ pub struct DesignPipeline {
 
 impl DesignPipeline {
     /// Create a new design pipeline with `config`.
-    pub fn new(mut config: AlasConfig) -> Self {
-        config.geometry.engine.apply_engine_spec_if_uninitialized();
+    pub fn new(config: AlasConfig) -> Self {
         Self {
             config,
             aircraft_override: None,
@@ -329,7 +679,7 @@ impl DesignPipeline {
         options: &PipelineOptions,
         environment: &RunEnvironment,
     ) -> Result<PipelineResult, String> {
-        self.run_inner(options, environment, None, None, None, None)
+        self.run_inner(options, environment, None, None, None, None, None, None)
     }
 
     /// Execute a run using the one resolved external-tool environment shared
@@ -353,7 +703,16 @@ impl DesignPipeline {
         environment: &RunEnvironment,
         dispatched_route: Option<Route>,
     ) -> Result<PipelineResult, String> {
-        self.run_inner(options, environment, dispatched_route, None, None, None)
+        self.run_inner(
+            options,
+            environment,
+            dispatched_route,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
     }
 
     /// Execute a desktop run at the design point and bounds currently shown
@@ -377,13 +736,16 @@ impl DesignPipeline {
             Some(*initial_design),
             Some(bounds),
             None,
+            None,
+            None,
         )
     }
 
-    /// Execute a desktop-style design-space run while reporting coarse-grained
-    /// stage progress. The callback is deliberately synchronous and textual:
-    /// callers can forward it across their own worker boundary without the
-    /// pipeline depending on a GUI or logging implementation.
+    /// Execute a desktop-style design-space run while reporting stage and
+    /// downstream-component progress. The callback is deliberately
+    /// synchronous and typed: callers can forward it across their own worker
+    /// boundary without the pipeline depending on a GUI or logging
+    /// implementation.
     pub fn run_with_design_space_and_progress(
         &self,
         options: &PipelineOptions,
@@ -400,9 +762,38 @@ impl DesignPipeline {
             Some(*initial_design),
             Some(bounds),
             Some(progress),
+            None,
+            None,
         )
     }
 
+    /// Execute a design-space run with typed lifecycle events and cooperative
+    /// cancellation. Cancellation is observed only at safe stage boundaries;
+    /// an active external process is allowed to finish its supervised call.
+    pub fn run_with_design_space_events(
+        &self,
+        options: &PipelineOptions,
+        environment: &RunEnvironment,
+        initial_design: &DesignVector,
+        bounds: &[(f64, f64)],
+        events: &(dyn Fn(RunEvent) + Sync),
+        cancel: &AtomicBool,
+    ) -> Result<PipelineResult, String> {
+        validate_bounds(bounds)?;
+        self.run_inner(
+            options,
+            environment,
+            None,
+            Some(*initial_design),
+            Some(bounds),
+            None,
+            Some(events),
+            Some(cancel),
+        )
+    }
+
+    // Coordinated analysis inputs are kept explicit at this integration boundary.
+    #[allow(clippy::too_many_arguments)]
     fn run_inner(
         &self,
         options: &PipelineOptions,
@@ -411,13 +802,17 @@ impl DesignPipeline {
         initial_design: Option<DesignVector>,
         bounds: Option<&[(f64, f64)]>,
         progress: Option<&(dyn Fn(&str) + Sync)>,
+        events: Option<&(dyn Fn(RunEvent) + Sync)>,
+        cancel: Option<&AtomicBool>,
     ) -> Result<PipelineResult, String> {
+        let run_clock = Instant::now();
         let report = |message: &str| {
             if let Some(callback) = progress {
                 callback(message);
             }
         };
         report("Validating run configuration");
+        check_cancelled(cancel)?;
         validate_run_configuration(&self.config)?;
         if self.aircraft_override.is_some() && options.optimize {
             return Err(
@@ -431,10 +826,9 @@ impl DesignPipeline {
                     .to_owned(),
             );
         }
-        // `output_dir` controls retention, not whether the requested physics
-        // stages run. When retention is disabled, run every writer and
-        // external adapter in an isolated temporary workspace instead of
-        // using `None` as a stage-disable signal.
+        // `output_dir` controls retention, not which physics stages run:
+        // without it every writer and external adapter works in an isolated
+        // temporary workspace rather than treating `None` as "disabled".
         let analysis_dir = options.output_dir.clone().unwrap_or_else(|| {
             let nonce = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
@@ -445,14 +839,24 @@ impl DesignPipeline {
         std::fs::create_dir_all(&analysis_dir)
             .map_err(|error| format!("analysis workspace creation failed: {error}"))?;
         report("Analysis workspace ready");
+        emit_diagnostic(events, run_clock, "setup", "Analysis workspace ready");
         let nominal_design = initial_design.unwrap_or_else(|| self.configured_nominal_design());
 
         // Stage 0: Baseline W&B + stability estimation.
         report("Stage 1/7: baseline weight, balance, and stability");
+        let mut stage_clock = begin_stage(
+            events,
+            run_clock,
+            1,
+            "baseline",
+            "Baseline weight, balance, and stability",
+        );
         let baseline_report = self
             .aircraft_override
             .is_none()
             .then(|| analyze_baseline(&self.config, &nominal_design));
+        finish_stage(events, run_clock, stage_clock, 1, "baseline");
+        check_cancelled(cancel)?;
 
         // Stage 1: Design space optimization.
         report(if options.optimize {
@@ -460,6 +864,17 @@ impl DesignPipeline {
         } else {
             "Stage 2/7: optimization skipped"
         });
+        stage_clock = begin_stage(
+            events,
+            run_clock,
+            2,
+            "optimization",
+            if options.optimize {
+                "Design-space optimization"
+            } else {
+                "Optimization skipped"
+            },
+        );
         let solver_optimizations = if options.optimize {
             Some(run_solver_optimizations(
                 &self.config,
@@ -488,9 +903,18 @@ impl DesignPipeline {
             } else {
                 (nominal_design, None, None)
             };
+        finish_stage(events, run_clock, stage_clock, 2, "optimization");
+        check_cancelled(cancel)?;
 
         // Stage 2: Full analysis on optimized design.
         report("Stage 3/7: full aircraft analysis");
+        stage_clock = begin_stage(
+            events,
+            run_clock,
+            3,
+            "full_analysis",
+            "Full aircraft analysis",
+        );
         let full = if self.aircraft_override.is_some() {
             FullAnalysis::new_preserving_engine_config(self.config.clone())
         } else {
@@ -503,13 +927,20 @@ impl DesignPipeline {
                 None => full.run(&optimized_design, true)?,
             },
         };
+        finish_stage(events, run_clock, stage_clock, 3, "full_analysis");
+        check_cancelled(cancel)?;
 
-        // Stage 3: CPACS geometry export and canonicalization.
-        //
-        // Downstream writers consume the typed aircraft reconstructed from
-        // this document, so CPACS is the non-GUI geometry boundary rather
-        // than a sidecar copy of the configuration-built geometry.
+        // Stage 3: CPACS export. Downstream writers consume the aircraft
+        // reconstructed from this document, so CPACS is the non-GUI geometry
+        // boundary rather than a sidecar copy of the built geometry.
         report("Stage 4/7: CPACS export and geometry canonicalization");
+        stage_clock = begin_stage(
+            events,
+            run_clock,
+            4,
+            "geometry_export",
+            "CPACS export and geometry canonicalization",
+        );
         let cpacs_path = analysis_dir.join("cpacs/optimized_aircraft.cpacs.xml");
         let cpacs_export = Some(
             export_cpacs(&optimized_report, &self.config, &cpacs_path)
@@ -522,8 +953,9 @@ impl DesignPipeline {
                 .to_airplane()
                 .map_err(|error| format!("CPACS canonicalization failed: {error}"))?;
         }
+        finish_stage(events, run_clock, stage_clock, 4, "geometry_export");
+        check_cancelled(cancel)?;
 
-        // Native tool writers receive the CPACS-canonicalized report.
         let openvsp_export = {
             let af_path = analysis_dir.join("airfoils/optimized_root.dat");
             let openvsp_path = analysis_dir.join("openvsp/optimized_aircraft.vspscript");
@@ -544,65 +976,196 @@ impl DesignPipeline {
             AerodynamicSolverMode::Avl | AerodynamicSolverMode::Both
         );
         let run_vspaero = || {
-            openvsp_export.as_ref().map(|openvsp| {
+            let stage_clock =
+                begin_component(events, run_clock, "downstream/vspaero", "VSPAERO analysis");
+            let result = openvsp_export.as_ref().map(|openvsp| {
                 run_vspaero_analysis(
                     &optimized_report,
                     &self.config,
                     openvsp,
                     environment.vspaero_exe.as_deref(),
-                    300.0,
-                )
-            })
-        };
-        let run_avl = || {
-            if !avl_requested {
-                return None;
-            }
-            Some({
-                run_avl_takeoff_comparison(
-                    &optimized_report,
-                    &self.config,
-                    &analysis_dir,
-                    environment.avl_exe.as_deref(),
-                    300.0,
-                )
-            })
-        };
-        let run_flowunsteady = || {
-            Some({
-                run_flowunsteady_analysis(
-                    &optimized_report,
-                    &self.config,
-                    &analysis_dir,
-                    environment.flowunsteady_exe.as_deref(),
+                    // A five-minute wall clock cut the installed A380-like
+                    // 15-point sweep off halfway; fifteen minutes lets one
+                    // full sweep finish under the process-tree timeout.
                     900.0,
                 )
-            })
+            });
+            finish_component(
+                events,
+                run_clock,
+                stage_clock,
+                "downstream/vspaero",
+                if result.is_some() {
+                    "Completed"
+                } else {
+                    "Skipped"
+                },
+            );
+            result
+        };
+        let run_avl = || {
+            let stage_clock = begin_component(
+                events,
+                run_clock,
+                "downstream/avl",
+                "AVL take-off comparison",
+            );
+            if !avl_requested {
+                finish_component(events, run_clock, stage_clock, "downstream/avl", "Skipped");
+                return None;
+            }
+            let result = Some(run_avl_takeoff_comparison(
+                &optimized_report,
+                &self.config,
+                &analysis_dir,
+                environment.avl_exe.as_deref(),
+                300.0,
+            ));
+            finish_component(
+                events,
+                run_clock,
+                stage_clock,
+                "downstream/avl",
+                "Completed",
+            );
+            result
+        };
+        let run_flowunsteady = || {
+            let stage_clock = begin_component(
+                events,
+                run_clock,
+                "downstream/flowunsteady",
+                "FLOWUnsteady analysis",
+            );
+            let result = Some(run_flowunsteady_analysis(
+                &optimized_report,
+                &self.config,
+                &analysis_dir,
+                environment.flowunsteady_exe.as_deref(),
+                900.0,
+            ));
+            finish_component(
+                events,
+                run_clock,
+                stage_clock,
+                "downstream/flowunsteady",
+                "Completed",
+            );
+            result
         };
         let run_baseline_analysis = || -> (Option<AnalysisReport>, Option<String>) {
+            let stage_clock = begin_component(
+                events,
+                run_clock,
+                "downstream/baseline_analysis",
+                "Baseline comparison",
+            );
             if !options.compare_baseline {
+                finish_component(
+                    events,
+                    run_clock,
+                    stage_clock,
+                    "downstream/baseline_analysis",
+                    "Skipped",
+                );
                 (None, None)
             } else if !options.optimize && self.aircraft_override.is_none() {
+                finish_component(
+                    events,
+                    run_clock,
+                    stage_clock,
+                    "downstream/baseline_analysis",
+                    "Completed",
+                );
                 (Some(optimized_report.clone()), None)
             } else {
-                match full.run(&nominal_design, true) {
+                let result = match full.run(&nominal_design, true) {
                     Ok(report) => (Some(report), None),
                     Err(error) => (None, Some(error)),
-                }
+                };
+                finish_component(
+                    events,
+                    run_clock,
+                    stage_clock,
+                    "downstream/baseline_analysis",
+                    "Completed",
+                );
+                result
             }
         };
-        let run_mission = || self.evaluate_active_mission(&optimized_report, dispatched_route);
-        let run_mses = || self.run_mses_stage(&optimized_report, environment.mses_dir.as_deref());
+        let run_mission = || {
+            let stage_clock = begin_component(
+                events,
+                run_clock,
+                "downstream/mission",
+                "Mission and route analysis",
+            );
+            let result = self.evaluate_active_mission(&optimized_report, dispatched_route);
+            finish_component(
+                events,
+                run_clock,
+                stage_clock,
+                "downstream/mission",
+                if self.config.mission.enabled {
+                    "Completed"
+                } else {
+                    "Skipped"
+                },
+            );
+            result
+        };
+        let run_mses = || {
+            let stage_clock =
+                begin_component(events, run_clock, "downstream/mses", "MSES analysis");
+            let result = self.run_mses_stage(&optimized_report, environment.mses_dir.as_deref());
+            finish_component(
+                events,
+                run_clock,
+                stage_clock,
+                "downstream/mses",
+                if self.config.mses.enabled {
+                    "Completed"
+                } else {
+                    "Skipped"
+                },
+            );
+            result
+        };
         let run_structural = || {
+            let stage_clock = begin_component(
+                events,
+                run_clock,
+                "downstream/structural",
+                "Structural sizing and analysis",
+            );
             if self.config.structures.enabled {
                 let work_dir = Some(analysis_dir.join("structures"));
-                Some(crate::structural::run_structural_analysis_with_environment(
-                    &self.config,
-                    &optimized_report,
-                    work_dir.as_deref(),
-                    environment,
-                ))
+                let result = Some(
+                    crate::structural::run_structural_analysis_with_environment_events(
+                        &self.config,
+                        &optimized_report,
+                        work_dir.as_deref(),
+                        environment,
+                        events,
+                        run_clock,
+                    ),
+                );
+                finish_component(
+                    events,
+                    run_clock,
+                    stage_clock,
+                    "downstream/structural",
+                    "Completed",
+                );
+                result
             } else {
+                finish_component(
+                    events,
+                    run_clock,
+                    stage_clock,
+                    "downstream/structural",
+                    "Skipped",
+                );
                 None
             }
         };
@@ -611,6 +1174,17 @@ impl DesignPipeline {
         } else {
             "Stage 5/7: downstream analyses (sequential)"
         });
+        stage_clock = begin_stage(
+            events,
+            run_clock,
+            5,
+            "downstream",
+            if options.parallel {
+                "Downstream analyses (parallel)"
+            } else {
+                "Downstream analyses (sequential)"
+            },
+        );
         let (
             vspaero_result,
             avl_result,
@@ -673,15 +1247,38 @@ impl DesignPipeline {
                 false,
             )
         };
-        let (route, route_status, mission_result) = mission_outputs;
+        let (route, route_status, mission_result, mission_load_case) = mission_outputs;
         let (mses_result, mses_pressure) = mses_outputs;
+        finish_stage(events, run_clock, stage_clock, 5, "downstream");
+        emit_tool_diagnostics(
+            events,
+            run_clock,
+            environment,
+            openvsp_export.as_ref(),
+            vspaero_result.as_ref(),
+            avl_result.as_ref(),
+            flowunsteady_result.as_ref(),
+            structural_result.as_ref(),
+            mses_result.as_ref(),
+        );
+        check_cancelled(cancel)?;
         report("Stage 6/7: physical feasibility assessment");
-        let feasibility = assess_physical_feasibility(
+        stage_clock = begin_stage(
+            events,
+            run_clock,
+            6,
+            "feasibility",
+            "Physical feasibility assessment",
+        );
+        let feasibility = assess_physical_feasibility_with_load_case(
             &self.config,
             &optimized_design,
             &optimized_report,
             mission_result.as_ref(),
+            mission_load_case.as_ref(),
         );
+        finish_stage(events, run_clock, stage_clock, 6, "feasibility");
+        check_cancelled(cancel)?;
         if let Some(export) = cpacs_export.as_ref() {
             export_cpacs_with_analysis(
                 &optimized_report,
@@ -742,6 +1339,27 @@ impl DesignPipeline {
                 }
             }
         });
+        let payload_layout_artifact = options.output_dir.as_ref().and_then(|out_dir| {
+            let layout = optimized_report.payload_layout.as_ref()?;
+            let path = out_dir.join("payload_layout.json");
+            match export_payload_layout_artifact(&self.config, optimized_design, layout, &path) {
+                Ok(_) => Some(path),
+                Err(error) => {
+                    tracing::warn!(%error, "payload-layout render artifact export failed");
+                    None
+                }
+            }
+        });
+        let cabin_scene_artifact = options.output_dir.as_ref().and_then(|out_dir| {
+            let path = out_dir.join("cabin_scene_v2.json");
+            match export_cabin_scene(&self.config, &optimized_report, &path) {
+                Ok(_) => Some(path),
+                Err(error) => {
+                    tracing::warn!(%error, "cabin-scene v2 export failed");
+                    None
+                }
+            }
+        });
 
         if let (Some(out_dir), Some(polar)) = (options.output_dir.as_deref(), &mses_result) {
             if let Err(error) = persist_mses_polar_diagnostics(polar, out_dir) {
@@ -755,6 +1373,13 @@ impl DesignPipeline {
         }
 
         report("Stage 7/7: finalizing artifacts and run manifest");
+        stage_clock = begin_stage(
+            events,
+            run_clock,
+            7,
+            "finalization",
+            "Finalizing artifacts and run manifest",
+        );
         let cpacs_manifest = match (options.output_dir.as_ref(), cpacs_export.as_ref()) {
             (Some(out_dir), Some(export)) => {
                 let mut stages = BTreeMap::new();
@@ -771,10 +1396,222 @@ impl DesignPipeline {
                 if let Some(result) = &flowunsteady_result {
                     stages.insert("flowunsteady".to_owned(), result.status.as_str().to_owned());
                 }
+                if let Some(result) = &mses_result {
+                    stages.insert("mses".to_owned(), result.status.as_str().to_owned());
+                }
+                if let Some(result) = &structural_result {
+                    stages.insert("structures".to_owned(), result.status.clone());
+                    if let Some(nastran) = result.nastran.as_ref() {
+                        stages.insert(
+                            "msc_nastran_sol101".to_owned(),
+                            nastran.static_solve.status.as_str().to_owned(),
+                        );
+                        stages.insert(
+                            "msc_nastran_sol103".to_owned(),
+                            nastran.modes.status.as_str().to_owned(),
+                        );
+                        stages.insert(
+                            "msc_nastran_sol111".to_owned(),
+                            nastran.vibration.status.as_str().to_owned(),
+                        );
+                    }
+                    if let Some(nastran95) = result.nastran95.as_ref() {
+                        stages.insert(
+                            "nastran95_sol101".to_owned(),
+                            nastran95.static_solve.status.as_str().to_owned(),
+                        );
+                        stages.insert(
+                            "nastran95_sol103".to_owned(),
+                            nastran95.modes.status.as_str().to_owned(),
+                        );
+                        stages.insert(
+                            "nastran95_sol111".to_owned(),
+                            nastran95.vibration.status.as_str().to_owned(),
+                        );
+                    }
+                    if let Some(patran) = result.patran.as_ref() {
+                        stages.insert("patran".to_owned(), patran.status.clone());
+                    }
+                }
                 let mut artifacts = BTreeMap::new();
                 add_manifest_artifact(&mut artifacts, out_dir, "cpacs_input", &export.path);
                 if let Some(path) = cpacs_adapter_manifest.as_ref() {
                     add_manifest_artifact(&mut artifacts, out_dir, "cpacs_adapter_manifest", path);
+                }
+                if let Some(path) = payload_layout_artifact.as_ref() {
+                    add_manifest_artifact(&mut artifacts, out_dir, "payload_layout", path);
+                }
+                if let Some(path) = cabin_scene_artifact.as_ref() {
+                    add_manifest_artifact(&mut artifacts, out_dir, "cabin_scene_v2", path);
+                }
+                if let Some(openvsp) = openvsp_export.as_ref() {
+                    add_manifest_artifact_if_exists(
+                        &mut artifacts,
+                        out_dir,
+                        "openvsp_script",
+                        &openvsp.script_path,
+                    );
+                    add_manifest_artifact_if_exists(
+                        &mut artifacts,
+                        out_dir,
+                        "openvsp_project",
+                        &openvsp.vsp3_path,
+                    );
+                    let preview = openvsp.script_path.with_extension("preview.png");
+                    add_manifest_artifact_if_exists(
+                        &mut artifacts,
+                        out_dir,
+                        "openvsp_cad_preview",
+                        &preview,
+                    );
+                    add_manifest_artifact_if_exists(
+                        &mut artifacts,
+                        out_dir,
+                        "openvsp_vspaero_geometry",
+                        &openvsp.vspaero_geometry_path,
+                    );
+                    if let Some(path) = openvsp.runtime_stdout_path.as_ref() {
+                        add_manifest_artifact_if_exists(
+                            &mut artifacts,
+                            out_dir,
+                            "openvsp_stdout",
+                            path,
+                        );
+                    }
+                    if let Some(path) = openvsp.runtime_stderr_path.as_ref() {
+                        add_manifest_artifact_if_exists(
+                            &mut artifacts,
+                            out_dir,
+                            "openvsp_stderr",
+                            path,
+                        );
+                    }
+                }
+                if let Some(vspaero) = vspaero_result.as_ref() {
+                    for (name, path) in [
+                        ("vspaero_setup", &vspaero.setup_path),
+                        ("vspaero_polar", &vspaero.polar_path),
+                        ("vspaero_stdout", &vspaero.stdout_path),
+                        ("vspaero_stderr", &vspaero.stderr_path),
+                    ] {
+                        add_manifest_artifact_if_exists(&mut artifacts, out_dir, name, path);
+                    }
+                    let history = vspaero.case_path.with_extension("history");
+                    add_manifest_artifact_if_exists(
+                        &mut artifacts,
+                        out_dir,
+                        "vspaero_history",
+                        &history,
+                    );
+                    for (name, path) in [
+                        (
+                            "vspaero_load_distribution",
+                            vspaero.case_path.with_extension("lod"),
+                        ),
+                        ("vspaero_adb", vspaero.case_path.with_extension("adb")),
+                        (
+                            "vspaero_adb_cases",
+                            vspaero.case_path.with_extension("adb.cases"),
+                        ),
+                        (
+                            "vspaero_quad_cases",
+                            vspaero.case_path.with_extension("quad.cases"),
+                        ),
+                    ] {
+                        add_manifest_artifact_if_exists(&mut artifacts, out_dir, name, &path);
+                    }
+                }
+                if let Some(avl) = avl_result.as_ref() {
+                    for (name, path) in [
+                        ("avl_geometry", &avl.geometry_path),
+                        ("avl_session", &avl.session_path),
+                        ("avl_stdout", &avl.stdout_path),
+                        ("avl_stderr", &avl.stderr_path),
+                    ] {
+                        add_manifest_artifact_if_exists(&mut artifacts, out_dir, name, path);
+                    }
+                    for (index, path) in avl.force_paths.iter().enumerate() {
+                        add_manifest_artifact_if_exists(
+                            &mut artifacts,
+                            out_dir,
+                            &format!("avl_force_{:03}", index + 1),
+                            path,
+                        );
+                    }
+                }
+                if let Some(flow) = flowunsteady_result.as_ref() {
+                    for (name, path) in [
+                        ("flowunsteady_request", &flow.request_path),
+                        ("flowunsteady_result", &flow.result_path),
+                        ("flowunsteady_stdout", &flow.stdout_path),
+                        ("flowunsteady_stderr", &flow.stderr_path),
+                    ] {
+                        add_manifest_artifact_if_exists(&mut artifacts, out_dir, name, path);
+                    }
+                }
+                for (name, path) in [
+                    (
+                        "mses_polar_diagnostics",
+                        out_dir.join("mses/polar_diagnostics.json"),
+                    ),
+                    ("mses_bl_dump", out_dir.join("mses/bl_dump.txt")),
+                    ("mses_flowfield", out_dir.join("mses/flowfield.txt")),
+                ] {
+                    add_manifest_artifact_if_exists(&mut artifacts, out_dir, name, &path);
+                }
+                if let Some(structures) = structural_result.as_ref() {
+                    let structural_paths = [
+                        ("structures_mesh", out_dir.join("structures/wing_mesh.bdf")),
+                        (
+                            "structures_sol101_bdf",
+                            out_dir.join("structures/sol101/wing_sol101.bdf"),
+                        ),
+                        (
+                            "structures_sol101_f06",
+                            out_dir.join("structures/sol101/wing_sol101.f06"),
+                        ),
+                        (
+                            "structures_sol101_op2",
+                            out_dir.join("structures/sol101/wing_sol101.op2"),
+                        ),
+                        (
+                            "structures_sol103_bdf",
+                            out_dir.join("structures/sol103/wing_sol103.bdf"),
+                        ),
+                        (
+                            "structures_sol103_f06",
+                            out_dir.join("structures/sol103/wing_sol103.f06"),
+                        ),
+                        (
+                            "structures_sol103_op2",
+                            out_dir.join("structures/sol103/wing_sol103.op2"),
+                        ),
+                        (
+                            "structures_sol111_bdf",
+                            out_dir.join("structures/sol111_sine/wing_sol111_sine.bdf"),
+                        ),
+                        (
+                            "structures_sol111_f06",
+                            out_dir.join("structures/sol111_sine/wing_sol111_sine.f06"),
+                        ),
+                        (
+                            "structures_sol111_op2",
+                            out_dir.join("structures/sol111_sine/wing_sol111_sine.op2"),
+                        ),
+                    ];
+                    for (name, path) in structural_paths {
+                        add_manifest_artifact_if_exists(&mut artifacts, out_dir, name, &path);
+                    }
+                    if let Some(patran) = structures.patran.as_ref() {
+                        for (index, (_, path)) in patran.png_paths.iter().enumerate() {
+                            add_manifest_artifact_if_exists(
+                                &mut artifacts,
+                                out_dir,
+                                &format!("patran_deformation_{:03}", index + 1),
+                                path,
+                            );
+                        }
+                    }
                 }
                 let manifest_path = out_dir.join("cpacs/run_manifest.json");
                 Some(
@@ -785,6 +1622,8 @@ impl DesignPipeline {
             _ => None,
         };
 
+        finish_stage(events, run_clock, stage_clock, 7, "finalization");
+        check_cancelled(cancel)?;
         Ok(PipelineResult {
             config: self.config.clone(),
             optimized_design: Some(optimized_design),
@@ -797,6 +1636,7 @@ impl DesignPipeline {
             route,
             route_status,
             mission_result,
+            mission_load_case,
             feasibility,
             mses_result,
             mses_pressure,
@@ -839,7 +1679,7 @@ impl DesignPipeline {
         dispatched_route: Option<Route>,
     ) -> Result<MissionStageOutputs, String> {
         if !self.config.mission.enabled {
-            return Ok((None, None, None));
+            return Ok((None, None, None, None));
         }
         let planned = self
             .plan_active_route(dispatched_route)
@@ -858,7 +1698,7 @@ impl DesignPipeline {
             .dest_airport
             .as_ref()
             .unwrap_or(selected_destination);
-        let mission = mission_stage::evaluate(
+        let (mission, load) = mission_stage::evaluate(
             &self.config,
             report,
             origin,
@@ -866,7 +1706,8 @@ impl DesignPipeline {
             planned.route.total_distance_m(),
         )
         .map_err(|error| format!("native mission stage failed: {error}"))?;
-        Ok((Some(planned.route), Some(planned.status), Some(mission)))
+        let (route, status) = (Some(planned.route), Some(planned.status));
+        Ok((route, status, Some(mission), Some(load)))
     }
 
     fn plan_active_route(&self, dispatched_route: Option<Route>) -> Option<PlannedRoute> {
@@ -885,16 +1726,25 @@ impl DesignPipeline {
             );
             (outcome.route, outcome.status)
         };
-        let routes_dir = PathBuf::from(&self.config.mission.routes_dir);
-        let navdata_dir = PathBuf::from(&self.config.mission.navdata_dir);
-        let navdata = load_navdata(&navdata_dir);
+        let locator = ToolLocator::for_current_process();
+        let routes_dir = locator.resolve_data_path(Path::new(&self.config.mission.routes_dir));
+        let navdata_dir = locator.resolve_data_path(Path::new(&self.config.mission.navdata_dir));
+        let navdata = load_navdata_with_airway_coordinates(
+            &navdata_dir,
+            self.config.mission.use_airway_endpoint_coordinates,
+        );
         let sources = RouteSources {
             dispatched: dispatched_route,
             routes_dir: Some(routes_dir.as_path()),
             navdata: navdata.as_ref(),
             great_circle_points: self.config.mission.great_circle_points.max(1) as usize,
         };
-        let route = plan_route(origin, dest, sources);
+        let route = plan_route_with_max_stretch(
+            origin,
+            dest,
+            sources,
+            self.config.mission.max_airway_stretch,
+        );
         Some(PlannedRoute {
             status: RoutePlanningStatus {
                 selected_source: route.source,
@@ -1012,5 +1862,7 @@ fn validate_run_configuration(config: &AlasConfig) -> Result<(), String> {
 }
 
 #[cfg(test)]
+// Failed expectations and unwraps here are failed test assertions.
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 #[path = "pipeline_tests.rs"]
 mod tests;

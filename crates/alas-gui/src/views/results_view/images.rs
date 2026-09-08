@@ -55,7 +55,7 @@ pub(super) fn show_external_images(
     // not wrap, leaving the second render outside its frame.  Keep one
     // labelled render visible at a useful size and let the user switch views.
     let selection_id = Id::new((
-        "alas_patran_render_selection",
+        "alas_external_render_selection",
         images
             .iter()
             .map(|(source, _, _)| *source)
@@ -71,7 +71,7 @@ pub(super) fn show_external_images(
     if images.len() > 1 {
         ui.horizontal_wrapped(|ui| {
             for index in 0..images.len() {
-                let label = labels.get(index).copied().unwrap_or("Patran render");
+                let label = labels.get(index).copied().unwrap_or("External render");
                 if ui.selectable_label(selected == index, label).clicked() {
                     selected = index;
                 }
@@ -92,7 +92,7 @@ pub(super) fn show_external_images(
         .min(max_height)
         .max(120.0);
     let panel_width = (panel_height * native_width as f32 / native_height as f32).min(panel_width);
-    match load_patran_texture(state, ui.ctx(), source) {
+    match load_external_texture(state, ui.ctx(), source) {
         Some(texture) => {
             if ui
                 .add(
@@ -109,7 +109,7 @@ pub(super) fn show_external_images(
                 [panel_width, panel_height],
                 egui::Label::new(
                     RichText::new(tr_fields(
-                        "Patran image unavailable:\n{path}",
+                        "External image unavailable:\n{path}",
                         &[("path", source.to_string())],
                     ))
                     .weak(),
@@ -120,7 +120,7 @@ pub(super) fn show_external_images(
     double_clicked
 }
 
-fn load_patran_texture(
+fn load_external_texture(
     state: &mut AppState,
     context: &egui::Context,
     source: &str,
@@ -135,7 +135,7 @@ fn load_patran_texture(
         &icon.rgba,
     );
     let texture = context.load_texture(
-        format!("patran:{source}"),
+        format!("external:{source}"),
         image,
         egui::TextureOptions::LINEAR,
     );

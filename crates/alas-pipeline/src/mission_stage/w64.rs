@@ -228,25 +228,29 @@ fn mission_aerodynamic_inputs_match_the_pinned_suave_vehicle() {
         &analyses.network_count,
         &vehicle.network_count,
     );
+    let legacy = analyses
+        .legacy_turbofan
+        .as_ref()
+        .unwrap_or_else(|| panic!("reference mission retains legacy turbofan inputs"));
     comparison
         .scalar(
             "turbofan/number_of_engines",
-            analyses.turbofan.number_of_engines,
+            legacy.inputs.number_of_engines,
             vehicle.turbofan.number_of_engines,
         )
         .scalar(
             "turbofan/bypass_ratio",
-            analyses.turbofan.bypass_ratio,
+            legacy.inputs.bypass_ratio,
             vehicle.turbofan.bypass_ratio,
         )
         .scalar(
             "turbofan/fan_pressure_ratio",
-            analyses.turbofan.fan_pressure_ratio,
+            legacy.inputs.fan_pressure_ratio,
             vehicle.turbofan.fan_pressure_ratio,
         )
         .scalar(
             "turbofan/turbine_inlet_temperature_k",
-            analyses.turbofan.turbine_inlet_temperature_k,
+            legacy.inputs.turbine_inlet_temperature_k,
             vehicle.turbofan.turbine_inlet_temperature_k,
         );
     comparison.finish();
@@ -259,19 +263,19 @@ fn mission_aerodynamic_inputs_match_the_pinned_suave_vehicle() {
         .map(|point| point.l_over_d)
         .unwrap_or(report.design_point.l_over_d);
     let expected_reference_thrust_n = config.requirements.mtow_kg * 9.81 / l_over_d;
-    assert!((analyses.turbofan.design_thrust_total_n - expected_reference_thrust_n).abs() < 1.0e-9);
+    assert!((legacy.inputs.design_thrust_total_n - expected_reference_thrust_n).abs() < 1.0e-9);
     assert!(
-        (analyses.turbofan.design_thrust_total_n - vehicle.turbofan.design_thrust_total_n).abs()
+        (legacy.inputs.design_thrust_total_n - vehicle.turbofan.design_thrust_total_n).abs()
             < 1.0e-6,
         "reference thrust actual={} fixture={} expected_from_report={}",
-        analyses.turbofan.design_thrust_total_n,
+        legacy.inputs.design_thrust_total_n,
         vehicle.turbofan.design_thrust_total_n,
         expected_reference_thrust_n
     );
     let expected_flow = vehicle.turbofan.compressor_nondimensional_massflow
-        * analyses.turbofan.design_thrust_total_n
+        * legacy.inputs.design_thrust_total_n
         / vehicle.turbofan.design_thrust_total_n;
-    assert!((analyses.compressor_nondimensional_massflow - expected_flow).abs() < 1.0e-9);
+    assert!((legacy.compressor_nondimensional_massflow - expected_flow).abs() < 1.0e-9);
 }
 
 #[test]

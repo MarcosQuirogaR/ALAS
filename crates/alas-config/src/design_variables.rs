@@ -40,6 +40,18 @@ pub struct DesignVariableSpec {
     pub lower: f64,
     /// The optimizer's upper bound.
     pub upper: f64,
+    /// Lower cross-preset guardrail used when a registered aircraft is
+    /// selected as the centre of a local redesign study.
+    #[serde(skip)]
+    pub preset_lower: f64,
+    /// Upper cross-preset guardrail used when a registered aircraft is
+    /// selected as the centre of a local redesign study.
+    #[serde(skip)]
+    pub preset_upper: f64,
+    /// Absolute fallback scale for a symmetric local sweep around a zero
+    /// nominal value, in the variable's native units.
+    #[serde(skip)]
+    pub preset_local_scale: f64,
     /// Its physical unit, or `-` when dimensionless.
     pub unit: &'static str,
     /// What it means, in English.
@@ -75,6 +87,7 @@ macro_rules! design_space {
     (
         $(
             $name:ident: $default:expr, $lower:expr, $upper:expr,
+            $preset_lower:expr, $preset_upper:expr, $preset_local_scale:expr,
             $unit:literal, $decimals:literal, $description:literal;
         )*
     ) => {
@@ -96,6 +109,9 @@ macro_rules! design_space {
                     default: $default,
                     lower: $lower,
                     upper: $upper,
+                    preset_lower: $preset_lower,
+                    preset_upper: $preset_upper,
+                    preset_local_scale: $preset_local_scale,
                     unit: $unit,
                     description: $description,
                     decimals: $decimals,
@@ -144,25 +160,25 @@ macro_rules! design_space {
 }
 
 design_space! {
-    span_m: 71.75, 60.0, 80.0, "m", 2, "Full projected wingspan (tip to tip)";
-    root_chord_m: 16.50, 12.0, 19.0, "m", 2, "Chord at the wing root";
-    break_chord_m: 7.80, 6.0, 10.0, "m", 2, "Chord at the trailing-edge break (yehudi)";
-    tip_chord_m: 1.60, 1.0, 3.0, "m", 2, "Chord at the wingtip";
-    sweep_deg: 34.00, 25.0, 45.0, "deg", 2, "Inboard leading-edge sweep angle";
-    tip_twist_deg: 0.00, -5.0, 1.0, "deg", 2, "Geometric washout at tip (negative = washout)";
-    wing_x_shift_m: 0.00, -5.0, 8.0, "m", 2, "Longitudinal shift of the wing root for CG balance";
-    tail_scale: 1.00, 0.75, 1.25, "-", 3, "Uniform scale factor on the empennage";
-    fuselage_length_m: 76.72, 65.0, 85.0, "m", 2, "Overall fuselage length";
-    tail_x_shift_m: 0.00, -2.0, 3.0, "m", 2, "Longitudinal shift of the empennage";
-    airfoil_thickness_scale: 1.00, 0.80, 1.30, "-", 3, "Multiplier on root/break airfoil thickness";
-    airfoil_camber_scale: 1.00, 0.7, 1.4, "-", 3, "Multiplier on root/break airfoil camber";
-    bump_upper_front: 0.00, -0.005, 0.002, "-", 4,
+    span_m: 71.75, 60.0, 80.0, 20.0, 90.0, 1.0, "m", 2, "Full projected wingspan (tip to tip)";
+    root_chord_m: 16.50, 12.0, 19.0, 3.0, 26.0, 1.0, "m", 2, "Chord at the wing root";
+    break_chord_m: 7.80, 6.0, 10.0, 2.0, 14.0, 1.0, "m", 2, "Chord at the trailing-edge break (yehudi)";
+    tip_chord_m: 1.60, 1.0, 3.0, 0.5, 4.0, 1.0, "m", 2, "Chord at the wingtip";
+    sweep_deg: 34.00, 25.0, 45.0, 0.0, 45.0, 1.0, "deg", 2, "Inboard leading-edge sweep angle";
+    tip_twist_deg: 0.00, -5.0, 1.0, -5.0, 2.0, 1.0, "deg", 2, "Geometric washout at tip (negative = washout)";
+    wing_x_shift_m: 0.00, -5.0, 8.0, -10.0, 5.0, 1.0, "m", 2, "Longitudinal shift of the wing root for CG balance";
+    tail_scale: 1.00, 0.75, 1.25, 0.5, 1.5, 1.0, "-", 3, "Uniform scale factor on the empennage";
+    fuselage_length_m: 76.72, 65.0, 85.0, 20.0, 90.0, 1.0, "m", 2, "Overall fuselage length";
+    tail_x_shift_m: 0.00, -2.0, 3.0, -5.0, 5.0, 1.0, "m", 2, "Longitudinal shift of the empennage";
+    airfoil_thickness_scale: 1.00, 0.80, 1.30, 0.5, 1.5, 1.0, "-", 3, "Multiplier on root/break airfoil thickness";
+    airfoil_camber_scale: 1.00, 0.7, 1.4, 0.5, 1.5, 1.0, "-", 3, "Multiplier on root/break airfoil camber";
+    bump_upper_front: 0.00, -0.005, 0.002, -0.01, 0.005, 0.005, "-", 4,
         "Hicks-Henne bump, upper surface ~25% chord (suction)";
-    bump_upper_rear: 0.00, -0.005, 0.002, "-", 4,
+    bump_upper_rear: 0.00, -0.005, 0.002, -0.01, 0.005, 0.005, "-", 4,
         "Hicks-Henne bump, upper surface ~75% chord (shock/recovery)";
-    bump_lower_mid: 0.00, -0.005, 0.003, "-", 4,
+    bump_lower_mid: 0.00, -0.005, 0.003, -0.01, 0.006, 0.005, "-", 4,
         "Hicks-Henne bump, lower surface ~40% chord (belly volume)";
-    bump_lower_rear: 0.00, -0.005, 0.003, "-", 4,
+    bump_lower_rear: 0.00, -0.005, 0.003, -0.01, 0.006, 0.005, "-", 4,
         "Hicks-Henne bump, lower surface ~85% chord (rear loading)";
 }
 

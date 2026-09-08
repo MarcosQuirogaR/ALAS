@@ -22,7 +22,10 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::{ConfigNode, FlopsTransportConfig, SystemsMassMethod};
+use crate::{
+    ConfigNode, FlopsStructureConfig, FlopsTransportConfig, PropulsionMassMethod,
+    StructuralMassMethod, SystemsMassMethod,
+};
 
 /// Tunable mass fractions and structural parameters.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ConfigNode)]
@@ -49,6 +52,51 @@ pub struct MassModelConfig {
         help = "Declared range, crew, cabin, hydraulic, engine-mounting, and fuel-system inputs required by FLOPS transport mass correlations."
     )]
     pub flops_transport: FlopsTransportConfig,
+
+    /// Method used for the wing, tail, fuselage and landing-gear mass.
+    #[serde(
+        default,
+        skip_serializing_if = "StructuralMassMethod::is_reference_compatible"
+    )]
+    #[config(
+        advanced,
+        options = StructuralMassMethod,
+        label = "Structural mass method",
+        help = "Versioned structural-group method: the frozen Torenbeek wing, tail and fuselage methods with a landing-gear fraction, or the NASA FLOPS transport structural equations evaluated on the built geometry."
+    )]
+    pub structural_mass_method: StructuralMassMethod,
+
+    /// Method used for the installed propulsion mass.
+    #[serde(
+        default,
+        skip_serializing_if = "PropulsionMassMethod::is_reference_compatible"
+    )]
+    #[config(
+        advanced,
+        options = PropulsionMassMethod,
+        label = "Propulsion mass method",
+        help = "Versioned propulsion-group method: the frozen thrust-to-weight correlation with an installation factor, or the NASA FLOPS scaled engine, thrust reverser, engine controls, starter and fuel-system equations."
+    )]
+    pub propulsion_mass_method: PropulsionMassMethod,
+
+    /// Technology factors and overrides for the FLOPS airframe equations.
+    #[serde(default, skip_serializing_if = "FlopsStructureConfig::is_default")]
+    #[config(
+        nested,
+        advanced,
+        help = "FLOPS technology factors (composites, aeroelastic tailoring, strut bracing, variable sweep), landing-gear and landing-mass overrides, baseline engine scaling, and the empty-mass margin used by the FLOPS structural and propulsion methods."
+    )]
+    pub flops_structure: FlopsStructureConfig,
+
+    /// Whether the product analysis places each mass group at its
+    /// geometry-derived station.
+    #[serde(default = "default_true", skip_serializing_if = "Clone::clone")]
+    #[config(
+        advanced,
+        label = "Geometry-derived component stations",
+        help = "Place every mass group at the station the built geometry gives it: the integrated wingbox centroid, the tails at 42 percent of their mean chord, the gear at its nose and main stations, the engines at their nacelles and the fuel in its tanks. Disable to keep the frozen point placement of the reference implementation."
+    )]
+    pub geometric_component_stations: bool,
 
     /// Share of maximum takeoff weight the wing structure must carry.
     #[config(
@@ -184,11 +232,29 @@ pub struct MassModelConfig {
     pub fuel_tank_usable_fraction: f64,
 }
 
+const fn default_true() -> bool {
+    true
+}
+
+impl MassModelConfig {
+    /// Whether every group uses its frozen reference-compatible method, so
+    /// the buildup needs none of the declared FLOPS architecture.
+    pub fn uses_reference_mass_methods(&self) -> bool {
+        self.systems_mass_method.is_reference_compatible()
+            && self.structural_mass_method.is_reference_compatible()
+            && self.propulsion_mass_method.is_reference_compatible()
+    }
+}
+
 impl Default for MassModelConfig {
     fn default() -> Self {
         Self {
             systems_mass_method: SystemsMassMethod::ReferenceCompatibleFractions,
             flops_transport: FlopsTransportConfig::default(),
+            structural_mass_method: StructuralMassMethod::ReferenceCompatible,
+            propulsion_mass_method: PropulsionMassMethod::ReferenceCompatible,
+            flops_structure: FlopsStructureConfig::default(),
+            geometric_component_stations: true,
             suspended_mass_fraction: 0.75,
             max_airspeed_for_flaps_ms: 90.0,
             flap_deflection_angle_deg: 40.0,

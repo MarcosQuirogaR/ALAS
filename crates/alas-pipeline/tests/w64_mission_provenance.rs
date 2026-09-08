@@ -206,7 +206,7 @@ fn public_native_mission_matches_pinned_provenance_checkpoints() {
 
     // The installed GE9X rating, not the historical cruise-required target,
     // sizes product turbofan flow.  This is 2 * 467 kN = 934,000 N.
-    let rated_total_thrust_n = config.geometry.engine.thrust_kn
+    let rated_total_thrust_n = config.geometry.engine.thrust_kn()
         * config.geometry.engine.spanwise_positions_m.len() as f64
         * 1000.0;
     assert!((rated_total_thrust_n - 934_000.0).abs() < 1.0e-9);

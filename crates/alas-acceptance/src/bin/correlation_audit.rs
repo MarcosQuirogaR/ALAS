@@ -75,20 +75,15 @@ fn main() -> io::Result<()> {
     Ok(())
 }
 
+/// Select `preset` exactly as the program does.
+///
+/// Reassembling the configuration field-by-field here used to drop the cabin
+/// seed and the engine binding, so the audit measured a preset the product
+/// never evaluates. Going through the selection boundary is what keeps this
+/// bundle a correlation artifact rather than a description of the harness.
 fn config_for_preset(preset: &alas_config::AircraftPreset) -> AlasConfig {
-    let mut config = AlasConfig {
-        preset: preset.name.to_owned(),
-        geometry: preset.geometry.clone(),
-        requirements: preset.requirements.clone(),
-        landing_gear: preset.landing_gear.clone(),
-        ..AlasConfig::default()
-    };
-    if let Some(mass_model) = preset.mass_model.as_ref() {
-        config.mass_model = mass_model.clone();
-    }
-    if let Some(performance) = preset.performance.as_ref() {
-        config.performance = performance.clone();
-    }
+    let mut config = AlasConfig::from_value(&serde_json::json!({ "preset": preset.name }))
+        .unwrap_or_else(|error| panic!("selecting preset {}: {error}", preset.name));
     config.optimizer.solver.seed = Some(SEED as i64);
     config
 }

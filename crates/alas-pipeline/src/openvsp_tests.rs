@@ -11,7 +11,7 @@ fn the_script_contains_every_computed_outer_geometry_component(
     let config = AlasConfig::default();
     let airplane = AircraftBuilder::new(Some(config.geometry.clone()))
         .build(Some(&DesignVector::default()), true)?;
-    let script = render_script(&airplane, None, "aircraft.vsp3");
+    let script = render_script(&airplane, None, "aircraft.vsp3", "aircraft.preview.png");
     assert!(validate_script(&script).is_ok());
     assert_eq!(script.matches("AddGeom( \"WING\"").count(), 3);
     assert_eq!(
@@ -20,6 +20,7 @@ fn the_script_contains_every_computed_outer_geometry_component(
     );
     assert!(script.contains("SetAirfoilPnts"));
     assert!(script.contains("WriteVSPFile(\"aircraft.vsp3\", SET_ALL)"));
+    assert!(script.contains("ScreenGrab(\"aircraft.preview.png\", 1600, 900, true, true)"));
     assert_eq!(script.matches("SetSetFlag( wing_").count(), 3);
     assert!(script.contains(
         "SetIntAnalysisInput( alas_vspaero_geometry_analysis, \"GeomSet\", { SET_NONE }, 0 )"
@@ -36,7 +37,7 @@ fn the_script_preserves_each_section_twist_about_the_leading_edge(
     let config = AlasConfig::default();
     let airplane = AircraftBuilder::new(Some(config.geometry.clone()))
         .build(Some(&DesignVector::default()), true)?;
-    let script = render_script(&airplane, None, "aircraft.vsp3");
+    let script = render_script(&airplane, None, "aircraft.vsp3", "aircraft.preview.png");
 
     for (wing_index, wing) in airplane.wings.iter().enumerate() {
         for (section_index, section) in wing.xsecs.iter().enumerate() {

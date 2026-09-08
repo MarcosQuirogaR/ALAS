@@ -11,6 +11,7 @@
 //! and modal estimates, and optionally launches the NASTRAN solver if configured.
 
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 use alas_config::materials::get as get_material;
 use alas_config::AlasConfig;
@@ -25,6 +26,8 @@ use alas_struct::sizing::{size_wingbox, WingboxSizing};
 
 use crate::full_analysis::AnalysisReport;
 use crate::patran::run_patran_export;
+use crate::pipeline::{begin_component, finish_component};
+use crate::runs::RunEvent;
 
 /// Complete structural analysis outcomes for a pipeline run.
 #[derive(Debug, Clone, PartialEq)]
@@ -111,6 +114,29 @@ pub fn run_structural_analysis_with_environment(
     report: &AnalysisReport,
     work_dir: Option<&Path>,
     environment: &RunEnvironment,
+) -> StructuralAnalysisResult {
+    run_structural_analysis_with_environment_events(
+        config,
+        report,
+        work_dir,
+        environment,
+        None,
+        Instant::now(),
+    )
+}
+
+/// Execute structural analysis while reporting detailed solver timings.
+///
+/// The ordinary public entry point above remains event-free for library and
+/// CLI callers. The desktop pipeline supplies the typed callback so MSC
+/// NASTRAN, NASTRAN-95, and Patran appear as distinct downstream components.
+pub fn run_structural_analysis_with_environment_events(
+    config: &AlasConfig,
+    report: &AnalysisReport,
+    work_dir: Option<&Path>,
+    environment: &RunEnvironment,
+    events: Option<&(dyn Fn(RunEvent) + Sync)>,
+    run_clock: Instant,
 ) -> StructuralAnalysisResult {
     let scfg = &config.structures;
     let dv = &report.design;
@@ -254,22 +280,69 @@ pub fn run_structural_analysis_with_environment(
         }
     };
 
+    let primary_solver_stage = if environment.nastran_exe.is_some() {
+        "downstream/msc_nastran"
+    } else {
+        // `run_nastran_analysis` falls back to the local NASA dialect when no
+        // MSC executable is resolved, so label that measured work honestly.
+        "downstream/nastran95"
+    };
+    let primary_solver_label = if environment.nastran_exe.is_some() {
+        "MSC NASTRAN solve"
+    } else {
+        "NASTRAN-95 solve"
+    };
+    // MSC Student Edition separates the visible launcher from the actual
+    // `analysis.exe` process.  Prefer an explicit user override, but use the
+    // resolver's paired server-mode solver automatically when the override is
+    // empty; otherwise a perfectly discoverable installation fails before
+    // NASTRAN can even read the deck.
+    let mut solver_config = scfg.clone();
+    if solver_config.nastran_solver_path.trim().is_empty() {
+        if let Some(solver) = environment.nastran_solver.as_deref() {
+            solver_config.nastran_solver_path = solver.display().to_string();
+        }
+    }
+    let primary_solver_clock = begin_component(
+        events,
+        run_clock,
+        primary_solver_stage,
+        primary_solver_label,
+    );
     let nastran_results = work_dir.map(|dir| {
         run_nastran_analysis(
             &mesh_deck,
             &node_index,
-            scfg,
+            &solver_config,
             req,
             dir,
             environment.nastran_exe.as_deref(),
         )
     });
+    finish_component(
+        events,
+        run_clock,
+        primary_solver_clock,
+        primary_solver_stage,
+        if scfg.run_nastran && work_dir.is_some() {
+            "Completed"
+        } else {
+            "Skipped"
+        },
+    );
     // When MSC is available, retain its result in `nastran` and run the
     // independent NASA dialect beside it. The MSC-absent path above already
     // uses NASTRAN-95 as the primary fallback, so this branch only creates a
     // second result when the GUI can genuinely compare both solvers.
-    let nastran95_results = if scfg.run_nastran && environment.nastran_exe.is_some() {
-        work_dir.and_then(|dir| {
+    let nastran95_requested = scfg.run_nastran && environment.nastran_exe.is_some();
+    let nastran95_results = if nastran95_requested {
+        let stage_clock = begin_component(
+            events,
+            run_clock,
+            "downstream/nastran95",
+            "NASTRAN-95 comparison solve",
+        );
+        let result = work_dir.and_then(|dir| {
             run_nastran95_from_config_or_env(
                 &mesh_deck,
                 &node_index,
@@ -277,19 +350,44 @@ pub fn run_structural_analysis_with_environment(
                 req,
                 &dir.join("nastran95"),
             )
-        })
+        });
+        finish_component(
+            events,
+            run_clock,
+            stage_clock,
+            "downstream/nastran95",
+            if result.is_some() {
+                "Completed"
+            } else {
+                "Skipped"
+            },
+        );
+        result
     } else {
         None
     };
 
+    let patran_clock = begin_component(
+        events,
+        run_clock,
+        "downstream/patran",
+        "Patran deformation export",
+    );
     let patran = Some(if !scfg.run_patran_export {
+        finish_component(
+            events,
+            run_clock,
+            patran_clock,
+            "downstream/patran",
+            "Skipped",
+        );
         PatranExportResult {
             status: "not_run".to_owned(),
             error: Some("Patran export is disabled in Structural Analysis settings".to_owned()),
             png_paths: Vec::new(),
         }
     } else {
-        match (
+        let result = match (
             work_dir,
             environment.patran_exe.as_deref(),
             nastran_results.as_ref(),
@@ -307,7 +405,15 @@ pub fn run_structural_analysis_with_environment(
                 error: Some("Patran export requires a successful NASTRAN SOL 101 solve".to_owned()),
                 png_paths: Vec::new(),
             },
-        }
+        };
+        finish_component(
+            events,
+            run_clock,
+            patran_clock,
+            "downstream/patran",
+            "Completed",
+        );
+        result
     });
 
     StructuralAnalysisResult {
@@ -334,11 +440,18 @@ fn sizing_failure_detail(sizing: &WingboxSizing) -> Option<String> {
         ));
     }
     if !sizing.strength_margins_pass() {
-        let minimum = sizing.minimum_margin_of_safety();
-        failures.push(if minimum.is_finite() {
-            format!("wingbox strength sizing is infeasible (minimum margin {minimum:.6})")
-        } else {
-            "wingbox strength sizing produced a non-finite margin".to_owned()
+        failures.push(match sizing.controlling_margin() {
+            Some(c) if c.margin.is_finite() => format!(
+                "wingbox strength sizing is infeasible: minimum margin {:.6e} at spar {} \
+                 (chord fraction {:.3}), station {} (y={:.4} m, eta={:.4})",
+                c.margin, c.spar_index, c.chord_fraction, c.station_index, c.y_m, c.eta,
+            ),
+            Some(c) => format!(
+                "wingbox strength sizing produced a non-finite margin at spar {}, station {} \
+                 (y={:.4} m, eta={:.4})",
+                c.spar_index, c.station_index, c.y_m, c.eta,
+            ),
+            None => "wingbox strength sizing produced no spar stations".to_owned(),
         });
     }
     (!failures.is_empty()).then(|| failures.join("; "))
@@ -379,6 +492,8 @@ fn structural_error(msg: String, torenbeek: f64) -> StructuralAnalysisResult {
 }
 
 #[cfg(test)]
+// Failed expectations and unwraps here are failed test assertions.
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::{missing_patran_result, sizing_failure_detail};
     use alas_struct::sizing::{MassBreakdown, SparSizing, WingboxSizing};
@@ -420,7 +535,24 @@ mod tests {
             None => panic!("sizing must fail"),
         };
         assert!(detail.contains("installed rib spacing"));
-        assert!(detail.contains("minimum margin -0.100000"));
+        assert!(detail.contains("minimum margin -1.000000e-1"));
+        assert!(detail.contains("spar 0"));
+        assert!(detail.contains("station 0"));
+    }
+
+    #[test]
+    fn a_near_zero_margin_is_no_longer_reported_as_ambiguous_zero() {
+        // Regression test for the "-0.000000" bug: a `{:.6}`-rounded display
+        // could not distinguish floating-point noise at the root boundary
+        // (~-1e-15) from a real, small structural shortfall (~-4e-7). Both
+        // rounded to the same misleading string. Scientific notation at full
+        // precision keeps them distinguishable.
+        let mut sizing = sample_sizing();
+        sizing.rib_spacing_m = 4.0;
+        sizing.spars[0].margin_of_safety = vec![-4.2e-7, 0.5];
+        let detail = sizing_failure_detail(&sizing).expect("negative margin must fail");
+        assert!(!detail.contains("-0.000000"));
+        assert!(detail.contains("-4.200000e-7"));
     }
 
     #[test]

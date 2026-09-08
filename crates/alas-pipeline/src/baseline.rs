@@ -23,6 +23,8 @@ use alas_payload::layout::PayloadLayout;
 use alas_payload::oew::oew_and_cg;
 use alas_stab::trim::neutral_point;
 
+use crate::full_analysis::station_coordinates_for;
+
 /// Summary report of the initial baseline aircraft before optimization.
 #[derive(Debug, Clone, PartialEq)]
 pub struct BaselineReport {
@@ -54,14 +56,36 @@ pub struct BaselineReport {
     pub error: Option<String>,
 }
 
+/// The report of a baseline that failed before it could balance: the
+/// geometry it got as far as building, and why it stopped.
+fn baseline_error(
+    design: &DesignVector,
+    plane: Airplane,
+    payload_layout: Option<PayloadLayout>,
+    error: String,
+) -> BaselineReport {
+    BaselineReport {
+        design: *design,
+        airplane: Some(plane),
+        component_masses: HashMap::new(),
+        mass_coordinates: HashMap::new(),
+        physical_cg: [0.0, 0.0, 0.0],
+        static_margin: f64::NAN,
+        mac: 0.0,
+        x_neutral_point: 0.0,
+        cg_pct_mac: 0.0,
+        np_pct_mac: 0.0,
+        payload_layout,
+        status: "error".to_owned(),
+        error: Some(error),
+    }
+}
+
 /// Run weight & balance and stability estimation on `design`.
 pub fn analyze_baseline(config: &AlasConfig, design: &DesignVector) -> BaselineReport {
-    let mut effective_config = config.clone();
-    effective_config
-        .geometry
-        .engine
-        .apply_engine_spec_if_uninitialized();
+    let effective_config = config.clone();
     let req = &effective_config.requirements;
+    let analysis_mass_model = effective_config.analysis_mass_model(req.mtow_kg);
     let builder = AircraftBuilder::new(Some(effective_config.geometry.clone()));
     let mut plane = match builder.build(Some(design), true) {
         Ok(p) => p,
@@ -92,7 +116,7 @@ pub fn analyze_baseline(config: &AlasConfig, design: &DesignVector) -> BaselineR
             &effective_config.geometry,
             &effective_config.cabin,
             &effective_config.control_surfaces,
-            Some(&effective_config.mass_model),
+            Some(&analysis_mass_model),
             None,
             coordinate_model,
             &effective_config.landing_gear,
@@ -117,6 +141,12 @@ pub fn analyze_baseline(config: &AlasConfig, design: &DesignVector) -> BaselineR
             }
         };
 
+    let coords_init =
+        match station_coordinates_for(&effective_config, design, &plane, &masses_init, coords_init)
+        {
+            Ok((coords, _)) => coords,
+            Err(error) => return baseline_error(design, plane, None, error),
+        };
     let (oew, x_oew) = oew_and_cg(&masses_init, &coords_init);
     let payload_layout = match build_payload_layout(&plane, &effective_config, oew, x_oew) {
         Ok(layout) => layout,
@@ -147,14 +177,14 @@ pub fn analyze_baseline(config: &AlasConfig, design: &DesignVector) -> BaselineR
         cg_y: payload_layout.cg_y,
     });
 
-    let (masses, coords, cg) =
+    let (masses, coords, _) =
         match alas_mass::breakdown::run_mass_analysis_with_model_checked_product_with_gear(
             &plane,
             req,
             &effective_config.geometry,
             &effective_config.cabin,
             &effective_config.control_surfaces,
-            Some(&effective_config.mass_model),
+            Some(&analysis_mass_model),
             layout_summary.as_ref(),
             coordinate_model,
             &effective_config.landing_gear,
@@ -179,6 +209,11 @@ pub fn analyze_baseline(config: &AlasConfig, design: &DesignVector) -> BaselineR
             }
         };
 
+    let (coords, cg) =
+        match station_coordinates_for(&effective_config, design, &plane, &masses, coords) {
+            Ok(placed) => placed,
+            Err(error) => return baseline_error(design, plane, Some(payload_layout), error),
+        };
     plane.xyz_ref[0] = cg[0];
 
     let (x_np, sm, _) = match neutral_point(&plane, &effective_config.analysis) {

@@ -1,0 +1,539 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2026 Marcos Quiroga Rodriguez
+
+//! The item-level mass statement of a completed run: tanks resolved on the
+//! built geometry, every component at its geometry-derived station, and the
+//! mass, centre of gravity and inertia tensor of each named loading state.
+//!
+//! The lumped ten-group breakdown the analysis carries is the input; this
+//! stage is where it becomes evidence a reviewer can check item by item.
+//! The states are the operating empty aircraft, the zero-fuel aircraft, the
+//! aircraft at the flown takeoff and landing masses, and the aircraft at the
+//! largest fuel load its tanks and takeoff-mass limit admit. Fuel sits in
+//! its tanks in the burn order the arrangement declares, so the centre of
+//! gravity of each state is the tanks', not a single wing point.
+
+use alas_config::{presets, AlasConfig, DesignVector};
+use alas_mass::breakdown::{
+    calculate_physical_cg, MassBreakdown, MassCoordinates, FUEL, FURNISHINGS, FUSELAGE, GEAR,
+    H_STAB, PAYLOAD, PROPULSION, SYSTEMS, V_STAB, WING,
+};
+use alas_mass::ledger::{InertiaTensor, MassItem, MassProperties};
+use alas_mass::statement::{
+    LoadState, MassStatement, MassStatementInputs, PayloadItemSummary, RadiiComparison,
+};
+use alas_mass::stations::component_stations;
+use alas_mass::tanks::{FuelCgPoint, FuelTankLayout};
+
+use crate::full_analysis::AnalysisReport;
+
+use super::{FindingCode, FindingSeverity, FuelLoadingAssessment, PhysicalFinding};
+
+/// Fraction of the takeoff fuel assumed to remain at landing when no flown
+/// mission supplies a landing mass; the same operational-reserve convention
+/// the model CG envelope uses for its reserve loading state.
+const FALLBACK_LANDING_FUEL_FRACTION: f64 = 0.10;
+
+/// Difference in percent MAC beyond which the ledger and the lumped model
+/// are reported as disagreeing about the takeoff centre of gravity.
+const CG_DISAGREEMENT_PCT_MAC: f64 = 5.0;
+
+/// Fuel-load steps of the reported centre-of-gravity travel curve.
+const FUEL_CG_CURVE_STEPS: usize = 24;
+
+/// One named loading state of the statement.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MassStateSummary {
+    /// Stable report label.
+    pub label: &'static str,
+    /// Total mass, kg.
+    pub mass_kg: f64,
+    /// Centre of gravity in the geometry frame, m.
+    pub cg_m: [f64; 3],
+    /// Longitudinal centre of gravity in percent of the model MAC.
+    pub cg_pct_mac: f64,
+    /// Inertia tensor about the centre of gravity, kg m^2.
+    pub inertia_cg: InertiaTensor,
+}
+
+/// One resolved tank.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TankSummary {
+    /// Stable identifier.
+    pub id: String,
+    /// Tank family.
+    pub kind: &'static str,
+    /// Usable capacity at the declared density, kg.
+    pub usable_capacity_kg: f64,
+    /// Unusable fuel, kg.
+    pub unusable_kg: f64,
+    /// Volume centroid, m.
+    pub centroid_m: [f64; 3],
+    /// Where the capacity came from.
+    pub capacity_source: &'static str,
+    /// Burn order, lower first.
+    pub burn_priority: i64,
+}
+
+/// One ledger row.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LedgerItemSummary {
+    /// Stable identifier.
+    pub id: String,
+    /// Functional group label.
+    pub group: &'static str,
+    /// Mass, kg.
+    pub mass_kg: f64,
+    /// Reference point, m.
+    pub position_m: [f64; 3],
+}
+
+/// The mass statement of the run.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MassBalanceAssessment {
+    /// Named loading states, in the order they are listed in the report.
+    pub states: Vec<MassStateSummary>,
+    /// The tanks resolved on the built geometry.
+    pub tanks: Vec<TankSummary>,
+    /// Sum of usable tank capacity, kg.
+    pub usable_capacity_kg: f64,
+    /// Sum of unusable fuel, kg; part of the operating empty mass.
+    pub unusable_fuel_kg: f64,
+    /// Factor applied to geometric tank estimates to meet a published total.
+    pub geometric_calibration_factor: f64,
+    /// Centre of gravity as fuel is loaded in the reverse of the burn order.
+    pub fuel_cg_curve: Vec<FuelCgPoint>,
+    /// Ledger radii of gyration at the flown takeoff state against Raymer's
+    /// jet-transport reference.
+    pub radii_check: RadiiComparison,
+    /// Every ledger row, fuel excluded.
+    pub ledger_items: Vec<LedgerItemSummary>,
+    /// Lumped-model takeoff centre of gravity, percent MAC, for comparison.
+    pub lumped_takeoff_cg_pct_mac: f64,
+}
+
+/// Build the statement and append its findings.
+///
+/// Returns `None`, with a warning finding, when the geometry cannot place
+/// its components or the tank arrangement cannot be resolved on it; the
+/// lumped model then remains the only mass evidence, and the report says so.
+pub(super) fn assess_mass_balance(
+    config: &AlasConfig,
+    design: &DesignVector,
+    report: &AnalysisReport,
+    fuel_loading: &FuelLoadingAssessment,
+    findings: &mut Vec<PhysicalFinding>,
+) -> Option<MassBalanceAssessment> {
+    let warn = |findings: &mut Vec<PhysicalFinding>, code, message: String| {
+        findings.push(PhysicalFinding {
+            code,
+            severity: FindingSeverity::Warning,
+            message,
+            actual: None,
+            limit: None,
+            unit: "",
+        });
+    };
+    let stations = match component_stations(
+        &report.airplane,
+        &config.geometry,
+        &config.requirements,
+        &config.mass_model,
+        &config.structures,
+    ) {
+        Ok(stations) => stations,
+        Err(error) => {
+            warn(
+                findings,
+                FindingCode::MassLedgerUnavailable,
+                format!("component stations could not be placed: {error}"),
+            );
+            return None;
+        }
+    };
+    let (density_kg_m3, published_total_l) = tank_reference(config, design);
+    let tanks = match FuelTankLayout::resolve(
+        &report.airplane,
+        &config.geometry,
+        &config.structures,
+        &config.fuel_tanks,
+        &config.fuel_policy,
+        density_kg_m3,
+        published_total_l,
+    ) {
+        Ok(tanks) => tanks,
+        Err(error) => {
+            warn(
+                findings,
+                FindingCode::FuelTankLayoutUnavailable,
+                format!("the fuel-tank arrangement could not be resolved: {error}"),
+            );
+            return None;
+        }
+    };
+    let Some(masses) = lumped_masses(report) else {
+        warn(
+            findings,
+            FindingCode::MassLedgerUnavailable,
+            "the analysis report carries no complete component mass breakdown".to_owned(),
+        );
+        return None;
+    };
+    let payload_items = payload_items(report);
+    let capacity_kg = tanks.usable_capacity_kg();
+    let takeoff_fuel_kg = fuel_loading
+        .analyzed_carried_fuel_kg
+        .max(0.0)
+        .min(capacity_kg);
+    let landing_fuel_kg = fuel_loading
+        .analyzed_landing_mass_kg
+        .map(|mass| (mass - fuel_loading.zero_fuel_mass_kg).max(0.0))
+        .unwrap_or(FALLBACK_LANDING_FUEL_FRACTION * takeoff_fuel_kg)
+        .min(takeoff_fuel_kg);
+    let fuel_items = |fuel_kg: f64| -> Result<Vec<MassItem>, String> {
+        tanks
+            .distribute(fuel_kg)
+            .map(|state| state.mass_items(&tanks))
+            .map_err(|error| error.to_string())
+    };
+    let (takeoff_fuel_items, landing_fuel_items) =
+        match (fuel_items(takeoff_fuel_kg), fuel_items(landing_fuel_kg)) {
+            (Ok(takeoff), Ok(landing)) => (takeoff, landing),
+            (Err(error), _) | (_, Err(error)) => {
+                warn(
+                    findings,
+                    FindingCode::FuelTankLayoutUnavailable,
+                    format!("the analyzed fuel could not be placed in the tanks: {error}"),
+                );
+                return None;
+            }
+        };
+    let statement = match MassStatement::build(MassStatementInputs {
+        masses: &masses,
+        stations: &stations,
+        payload_items: &payload_items,
+        takeoff_fuel_items,
+        landing_fuel_items,
+        unusable_fuel_items: tanks.unusable_items(),
+        flops: None,
+    }) {
+        Ok(statement) => statement,
+        Err(error) => {
+            warn(
+                findings,
+                FindingCode::MassLedgerUnavailable,
+                format!("the mass ledger is not physical: {error}"),
+            );
+            return None;
+        }
+    };
+
+    let (mac_le_x_m, mac_m) = mac_reference(report);
+    let summarize = |label: &'static str, props: MassProperties| MassStateSummary {
+        label,
+        mass_kg: props.mass_kg,
+        cg_m: props.cg_m,
+        cg_pct_mac: statement.cg_pct_mac(&props, mac_le_x_m, mac_m),
+        inertia_cg: props.inertia_cg,
+    };
+    let maximum_fuel_kg =
+        capacity_kg.min((config.requirements.mtow_kg - fuel_loading.zero_fuel_mass_kg).max(0.0));
+    let maximum_fuel_state = fuel_items(maximum_fuel_kg)
+        .ok()
+        .map(|items| statement.with_fuel_items(&items));
+    let takeoff = statement.state(LoadState::Takeoff);
+    let mut states = vec![
+        summarize(
+            "operating empty",
+            statement.state(LoadState::OperatingEmpty),
+        ),
+        summarize("zero fuel", statement.state(LoadState::ZeroFuel)),
+        summarize("flown takeoff", takeoff),
+        summarize("flown landing", statement.state(LoadState::Landing)),
+    ];
+    if let Some(props) = maximum_fuel_state {
+        states.push(summarize("maximum fuel takeoff", props));
+    }
+
+    // The report's own centre of gravity belongs to the takeoff-mass closure
+    // load, which can exceed the tanks; the like-for-like comparison is the
+    // lumped model re-evaluated at the fuel the ledger actually placed.
+    let lumped_takeoff_cg_pct_mac = lumped_coordinates(report).map_or(f64::NAN, |coordinates| {
+        let mut lumped = masses;
+        lumped.fuel = takeoff_fuel_kg;
+        let lumped_cg = calculate_physical_cg(&lumped, &coordinates);
+        100.0 * (lumped_cg[0] - mac_le_x_m) / mac_m
+    });
+    let ledger_takeoff_cg_pct_mac = states[2].cg_pct_mac;
+    if lumped_takeoff_cg_pct_mac.is_finite()
+        && (ledger_takeoff_cg_pct_mac - lumped_takeoff_cg_pct_mac).abs() > CG_DISAGREEMENT_PCT_MAC
+    {
+        findings.push(PhysicalFinding {
+            code: FindingCode::MassModelDisagreement,
+            severity: FindingSeverity::Warning,
+            message: format!(
+                "at {takeoff_fuel_kg:.0} kg of fuel the item ledger places the takeoff centre of gravity at {ledger_takeoff_cg_pct_mac:.1} percent MAC and the lumped model at {lumped_takeoff_cg_pct_mac:.1}; the tank fill order and the detailed payload sit differently from the lumped fuel and payload points"
+            ),
+            actual: Some(ledger_takeoff_cg_pct_mac),
+            limit: Some(lumped_takeoff_cg_pct_mac),
+            unit: "% MAC",
+        });
+    }
+
+    let span_m = report.airplane.b_ref;
+    let fuselage_length_m = report
+        .airplane
+        .fuselages
+        .first()
+        .and_then(|fuselage| {
+            Some(fuselage.xsecs.last()?.xyz_c[0] - fuselage.xsecs.first()?.xyz_c[0])
+        })
+        .unwrap_or(f64::NAN);
+    Some(MassBalanceAssessment {
+        states,
+        tanks: tanks
+            .tanks()
+            .iter()
+            .map(|tank| TankSummary {
+                id: tank.id.clone(),
+                kind: tank.kind.label(),
+                usable_capacity_kg: tank.usable_capacity_kg,
+                unusable_kg: tank.unusable_kg,
+                centroid_m: tank.centroid_m,
+                capacity_source: capacity_source_label(tank.capacity_source),
+                burn_priority: tank.burn_priority,
+            })
+            .collect(),
+        usable_capacity_kg: capacity_kg,
+        unusable_fuel_kg: tanks.unusable_fuel_kg(),
+        geometric_calibration_factor: tanks.geometric_calibration_factor,
+        fuel_cg_curve: tanks.fuel_cg_curve(FUEL_CG_CURVE_STEPS),
+        radii_check: statement.radii_of_gyration_check(
+            LoadState::Takeoff,
+            span_m,
+            fuselage_length_m,
+        ),
+        ledger_items: statement
+            .ledger()
+            .items()
+            .iter()
+            .map(|item| LedgerItemSummary {
+                id: item.id.clone(),
+                group: item.group.label(),
+                mass_kg: item.mass_kg,
+                position_m: item.position_m,
+            })
+            .collect(),
+        lumped_takeoff_cg_pct_mac,
+    })
+}
+
+/// The takeoff mass properties of a report from its ledger, for consumers
+/// such as the dynamic-mode figure that need an inertia tensor and no
+/// findings. The fuel is the largest load the tanks and the takeoff-mass
+/// limit admit.
+pub fn takeoff_mass_properties(
+    config: &AlasConfig,
+    report: &AnalysisReport,
+) -> Option<MassProperties> {
+    let stations = component_stations(
+        &report.airplane,
+        &config.geometry,
+        &config.requirements,
+        &config.mass_model,
+        &config.structures,
+    )
+    .ok()?;
+    let (density_kg_m3, published_total_l) = tank_reference(config, &report.design);
+    let tanks = FuelTankLayout::resolve(
+        &report.airplane,
+        &config.geometry,
+        &config.structures,
+        &config.fuel_tanks,
+        &config.fuel_policy,
+        density_kg_m3,
+        published_total_l,
+    )
+    .ok()?;
+    let masses = lumped_masses(report)?;
+    let zero_fuel_mass_kg = config.requirements.mtow_kg - masses.fuel;
+    let fuel_kg = tanks
+        .usable_capacity_kg()
+        .min((config.requirements.mtow_kg - zero_fuel_mass_kg).max(0.0));
+    let fuel_items = tanks.distribute(fuel_kg).ok()?.mass_items(&tanks);
+    let payload_items = payload_items(report);
+    let statement = MassStatement::build(MassStatementInputs {
+        masses: &masses,
+        stations: &stations,
+        payload_items: &payload_items,
+        takeoff_fuel_items: fuel_items,
+        landing_fuel_items: Vec::new(),
+        unusable_fuel_items: tanks.unusable_items(),
+        flops: None,
+    })
+    .ok()?;
+    Some(statement.state(LoadState::Takeoff))
+}
+
+/// Density and published total volume for the tank resolution: the
+/// registered aircraft's own when the design is the unchanged preset, the
+/// configured density and no published total otherwise.
+pub(crate) fn tank_reference(config: &AlasConfig, design: &DesignVector) -> (f64, Option<f64>) {
+    let configured_density = config.mass_model.fuel_density_kg_m3;
+    let Ok(preset) = presets::get(&config.preset) else {
+        return (configured_density, None);
+    };
+    if *design != preset.design_vector {
+        return (configured_density, None);
+    }
+    let density = preset
+        .reference
+        .fuel_density_kg_l
+        .map_or(configured_density, |kg_l| kg_l * 1_000.0);
+    (density, preset.reference.usable_fuel_volume_l)
+}
+
+fn lumped_masses(report: &AnalysisReport) -> Option<MassBreakdown> {
+    let mass = |name: &str| report.component_masses.get(name).copied();
+    Some(MassBreakdown {
+        wing: mass(WING)?,
+        h_stab: mass(H_STAB)?,
+        v_stab: mass(V_STAB)?,
+        fuselage: mass(FUSELAGE)?,
+        gear: mass(GEAR)?,
+        propulsion: mass(PROPULSION)?,
+        systems: mass(SYSTEMS)?,
+        furnishings: mass(FURNISHINGS)?,
+        payload: mass(PAYLOAD)?,
+        fuel: mass(FUEL)?,
+    })
+}
+
+fn lumped_coordinates(report: &AnalysisReport) -> Option<MassCoordinates> {
+    let coordinate = |name: &str| report.mass_coordinates.get(name).copied();
+    Some(MassCoordinates {
+        wing: coordinate(WING)?,
+        h_stab: coordinate(H_STAB)?,
+        v_stab: coordinate(V_STAB)?,
+        fuselage: coordinate(FUSELAGE)?,
+        gear: coordinate(GEAR)?,
+        propulsion: coordinate(PROPULSION)?,
+        systems: coordinate(SYSTEMS)?,
+        furnishings: coordinate(FURNISHINGS)?,
+        payload: coordinate(PAYLOAD)?,
+        fuel: coordinate(FUEL)?,
+    })
+}
+
+fn payload_items(report: &AnalysisReport) -> Vec<PayloadItemSummary> {
+    report
+        .payload_layout
+        .as_ref()
+        .map(|layout| {
+            layout
+                .items
+                .iter()
+                .filter(|item| item.mass > 0.0)
+                .enumerate()
+                .map(|(index, item)| PayloadItemSummary {
+                    label: format!("{}_{index}", item.kind.as_str()),
+                    mass_kg: item.mass,
+                    position_m: [item.x, item.y, item.z],
+                    extent_m: [item.length, item.width, item.height],
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Leading edge of the model MAC and the MAC itself, the frame every
+/// percent-MAC figure in the report uses.
+fn mac_reference(report: &AnalysisReport) -> (f64, f64) {
+    let mac_m = report.airplane.c_ref.max(1.0e-3);
+    let mac_le_x_m = report
+        .airplane
+        .wings
+        .iter()
+        .find(|wing| wing.name == "Main Wing")
+        .or_else(|| report.airplane.wings.first())
+        .map(|wing| wing.aerodynamic_center(0.25)[0] - 0.25 * mac_m)
+        .unwrap_or(0.0);
+    (mac_le_x_m, mac_m)
+}
+
+fn capacity_source_label(source: alas_mass::tanks::CapacitySource) -> &'static str {
+    match source {
+        alas_mass::tanks::CapacitySource::Published => "published",
+        alas_mass::tanks::CapacitySource::GeometricCalibrated => "geometric, calibrated",
+        alas_mass::tanks::CapacitySource::Geometric => "geometric",
+        alas_mass::tanks::CapacitySource::Declared => "declared",
+    }
+}
+
+// A test asserts on the default aircraft it built, so a failed expect there
+// is the assertion failing, not a library panic.
+#[allow(clippy::expect_used)]
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::feasibility::plan_fuel_loading;
+    use crate::full_analysis::FullAnalysis;
+
+    #[test]
+    fn the_default_aircraft_yields_ordered_states_and_a_physical_tensor() {
+        let config = AlasConfig::default();
+        let design = DesignVector::default();
+        let report = FullAnalysis::new(config.clone())
+            .run(&design, true)
+            .expect("default analysis");
+        let fuel_loading = plan_fuel_loading(&config, &design, &report);
+        let mut findings = Vec::new();
+        let assessment =
+            assess_mass_balance(&config, &design, &report, &fuel_loading, &mut findings)
+                .expect("the default aircraft has a mass statement");
+
+        assert!(assessment.usable_capacity_kg > 0.0);
+        assert!(assessment.tanks.len() >= 3, "{:?}", assessment.tanks);
+        let mass = |label: &str| {
+            assessment
+                .states
+                .iter()
+                .find(|state| state.label == label)
+                .map(|state| state.mass_kg)
+                .expect(label)
+        };
+        assert!(mass("operating empty") < mass("zero fuel"));
+        assert!(mass("zero fuel") < mass("flown takeoff"));
+        assert!(mass("flown landing") <= mass("flown takeoff"));
+        for state in &assessment.states {
+            assert!(
+                state.inertia_cg.is_physical(),
+                "{}: {:?}",
+                state.label,
+                state.inertia_cg
+            );
+            assert!(state.cg_pct_mac.is_finite());
+        }
+        let takeoff = assessment
+            .states
+            .iter()
+            .find(|state| state.label == "flown takeoff")
+            .expect("takeoff state");
+        // A transport's pitch and yaw radii of gyration lie within a factor
+        // of two of Raymer's jet-transport fractions; roll depends on the
+        // fuel distribution and is only required to be finite and positive.
+        let ratio = assessment.radii_check.ratio;
+        assert!(ratio[0] > 0.0, "roll ratio {ratio:?}");
+        assert!((0.5..2.0).contains(&ratio[1]), "pitch ratio {ratio:?}");
+        assert!((0.5..2.0).contains(&ratio[2]), "yaw ratio {ratio:?}");
+        assert!(takeoff.inertia_cg.iyy > takeoff.inertia_cg.ixx);
+        let last_curve_point = assessment.fuel_cg_curve.last().expect("curve");
+        assert!((last_curve_point.fuel_kg - assessment.usable_capacity_kg).abs() < 1.0e-6);
+        assert!(
+            (takeoff.cg_pct_mac - assessment.lumped_takeoff_cg_pct_mac).abs() < 15.0,
+            "ledger {} vs lumped {} percent MAC",
+            takeoff.cg_pct_mac,
+            assessment.lumped_takeoff_cg_pct_mac
+        );
+    }
+}

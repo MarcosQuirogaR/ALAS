@@ -20,4 +20,9 @@
 //! single-flight-condition scope it is held to.
 
 pub mod cycle;
+pub mod empirical_turbofan;
 pub mod mission_turbofan;
+pub mod product_turbofan;
+pub mod system;
+pub mod turbofan_physics;
+pub mod turboprop;

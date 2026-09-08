@@ -16,7 +16,7 @@
 
 use alas_mass::transport_weight::{
     empty_weight, AccessoriesType, ControlSystemType, Fuselage, HorizontalTail, MainWing,
-    TransportVehicle, VerticalTail, WeightBreakdown,
+    TransportPropulsionMassBasis, TransportVehicle, VerticalTail, WeightBreakdown,
 };
 use alas_testkit::{Comparison, Tier};
 use serde::Deserialize;
@@ -184,6 +184,7 @@ fn build_vehicle(inputs: &Inputs) -> TransportVehicle {
         accessories_type: accessories_type(&inputs.accessories_type),
         engine_count: inputs.engine_count as u32,
         sealevel_static_thrust_per_engine_n: inputs.sealevel_static_thrust_per_engine_n,
+        propulsion_mass_basis: TransportPropulsionMassBasis::TurbofanThrust,
         main_wing: MainWing {
             span_m: inputs.main_wing.span_m,
             sweep_quarter_chord_rad: inputs.main_wing.sweep_quarter_chord_rad,

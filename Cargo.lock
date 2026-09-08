@@ -45,6 +45,7 @@ dependencies = [
  "alas-app",
  "alas-atmo",
  "alas-config",
+ "alas-exec",
  "alas-geom",
  "alas-mass",
  "alas-mission",
@@ -249,9 +250,12 @@ dependencies = [
  "alas-math",
  "alas-payload",
  "alas-perf",
+ "alas-prop",
  "alas-stab",
+ "alas-struct",
  "alas-testkit",
  "alas-types",
+ "alas-units",
  "serde",
  "serde_json",
  "thiserror 2.0.19",
@@ -304,6 +308,7 @@ dependencies = [
  "alas-struct",
  "alas-testkit",
  "alas-types",
+ "alas-units",
  "roxmltree",
  "serde",
  "serde_json",
@@ -3786,6 +3791,10 @@ checksum = "ec7a2a501ed189703dba8b08142f057e887dfc4b2cc4db2d343ac6376ba3e0b9"
 [[package]]
 name = "xtask"
 version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "syn 2.0.119",
+]
 
 [[package]]
 name = "yeslogic-fontconfig-sys"

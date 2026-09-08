@@ -87,9 +87,44 @@ pub struct ValidationIssue {
 pub fn validate(config: &AlasConfig) -> Vec<ValidationIssue> {
     let mut issues = cruise_point_inside_the_flight_envelope(config);
     issues.extend(atmosphere_domain_is_physical(config));
+    issues.extend(fuel_properties_are_physical(config));
     issues.extend(empennage_tapers_toward_its_tips(config));
     issues.extend(mses_timeouts_are_positive_and_finite(config));
     issues.extend(optimizer_tokens_are_supported(config));
+    issues
+}
+
+/// Fuel volume can only become a meaningful mass capacity when its conversion
+/// inputs are finite and physical. Keep these invariants at the configuration
+/// boundary so every downstream capacity consumer receives the same contract.
+fn fuel_properties_are_physical(config: &AlasConfig) -> Vec<ValidationIssue> {
+    let mass = &config.mass_model;
+    let mut issues = Vec::new();
+
+    if !mass.fuel_density_kg_m3.is_finite() || mass.fuel_density_kg_m3 <= 0.0 {
+        issues.push(ValidationIssue {
+            field_path: "mass_model.fuel_density_kg_m3".to_owned(),
+            message: format!(
+                "Fuel density ({:?} kg/m^3) must be finite and greater than zero.",
+                mass.fuel_density_kg_m3
+            ),
+            severity: Severity::Error,
+        });
+    }
+
+    if !mass.fuel_tank_usable_fraction.is_finite()
+        || !(0.0..=1.0).contains(&mass.fuel_tank_usable_fraction)
+    {
+        issues.push(ValidationIssue {
+            field_path: "mass_model.fuel_tank_usable_fraction".to_owned(),
+            message: format!(
+                "Usable fuel-tank volume fraction ({:?}) must be finite and within [0, 1].",
+                mass.fuel_tank_usable_fraction
+            ),
+            severity: Severity::Error,
+        });
+    }
+
     issues
 }
 
@@ -348,6 +383,43 @@ mod tests {
         assert!(issues
             .iter()
             .any(|issue| issue.field_path == "mses.timeout_mses_s"));
+    }
+
+    #[test]
+    fn nonpositive_or_nonfinite_fuel_density_is_blocked() {
+        for density_kg_m3 in [0.0, -1.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let mut config = AlasConfig::default();
+            config.mass_model.fuel_density_kg_m3 = density_kg_m3;
+            let issues = validate(&config);
+            assert!(issues.iter().any(|issue| {
+                issue.field_path == "mass_model.fuel_density_kg_m3"
+                    && issue.severity == Severity::Error
+            }));
+        }
+    }
+
+    #[test]
+    fn out_of_range_or_nonfinite_usable_tank_fraction_is_blocked() {
+        for usable_fraction in [-0.01, 1.01, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let mut config = AlasConfig::default();
+            config.mass_model.fuel_tank_usable_fraction = usable_fraction;
+            let issues = validate(&config);
+            assert!(issues.iter().any(|issue| {
+                issue.field_path == "mass_model.fuel_tank_usable_fraction"
+                    && issue.severity == Severity::Error
+            }));
+        }
+    }
+
+    #[test]
+    fn usable_tank_fraction_accepts_its_closed_interval_boundaries() {
+        for usable_fraction in [0.0, 1.0] {
+            let mut config = AlasConfig::default();
+            config.mass_model.fuel_tank_usable_fraction = usable_fraction;
+            assert!(!validate(&config)
+                .iter()
+                .any(|issue| { issue.field_path == "mass_model.fuel_tank_usable_fraction" }));
+        }
     }
 
     #[test]

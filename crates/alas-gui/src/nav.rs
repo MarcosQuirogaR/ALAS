@@ -222,14 +222,14 @@ const MODELING_PAGES: &[Page] = &[
 
 const ANALYSIS_PAGES: &[Page] = &[
     Page {
-        description: Some("Differential-evolution solver settings and the cost-function weights. The optimizer minimises -L/D plus the penalty terms weighted here."),
+        description: Some("The mission-sized objective, explicit requirement policies, and the single MADS search. Choose clean-sheet or reference adaptation on Design Space; the selected catalogue engine remains fixed."),
         detail: &[
-            "The optimizer runs SciPy differential evolution, minimising -L/D plus penalty terms. Each candidate is built, mass-balanced, trimmed, and scored with the fast 2-point aerodynamic estimate; only the winner is then re-run at full sweep fidelity.",
-            "The weights scale the soft penalties: static-margin target deviation, tail-volume-coefficient shortfalls, and CG-envelope pressure. A physically invalid candidate still gets a real L/D plus a large continuous penalty -- dominant enough that a compliant design always wins, but not so absolute that the solver loses all gradient toward the feasible region.",
-            "Population size and max iterations trade run time against thoroughness; seeding near the initial design starts the search from a known-valid point instead of sampling the whole space blindly.",
+            "Every candidate is built, mass-balanced and trimmed, then closed by the design mission: mass, centre of gravity, trim, mission fuel and takeoff mass are iterated until the design weights converge. The objective is what that converged mission costs (block fuel, takeoff mass, empty mass or fuel per seat-kilometre); the frozen lift-to-drag formulation of the Python reference is replayed only by the parity fixtures.",
+            "Each requirement family (mass and fuel, balance, airworthiness performance, geometry) is a hard constraint by default: a candidate that misses one is infeasible and ranks behind every compliant candidate. A family can be made soft (a priced preference), diagnostic (reported only) or switched off.",
+            "MADS (Mesh Adaptive Direct Search) polls deterministic, signed directions on a refining mesh and uses a progressive barrier to rank hard feasibility before mission cost. The run records whether its evaluation budget, mesh, iteration limit or fixed bounds stopped the search; that status describes termination, not a proof of global optimality.",
         ],
-        preset_kind: Some(PresetKind::Solver),
-        ..Page::form("optimizer", "Optimizer & weights", "optimizer")
+        preset_kind: None,
+        ..Page::form("optimizer", "Optimizer", "optimizer")
     },
     Page {
         description: Some("Alpha-sweep and VLM fidelity for the final fine analysis - how many points and panels the winning design is scored with."),

@@ -13,6 +13,11 @@ mod payload_range;
 mod support;
 
 pub use envelope::figure_vn_diagram;
-pub use lto::{figure_lto_arrival, figure_lto_departure, figure_lto_for_airport};
+pub use lto::{
+    figure_lto_arrival, figure_lto_departure, figure_lto_for_airport,
+    figure_lto_for_airport_at_masses,
+};
 pub use matching::figure_matching_chart;
-pub use payload_range::figure_payload_range;
+pub use payload_range::{
+    figure_payload_range, payload_range_data, PayloadRangeData, PayloadRangePoint,
+};

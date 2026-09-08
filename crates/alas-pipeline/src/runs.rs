@@ -11,15 +11,62 @@ use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
 
+/// Machine-readable lifecycle classification for a pipeline event.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RunEventKind {
+    /// A stage has begun.
+    StageStarted,
+    /// A stage completed successfully.
+    StageCompleted,
+    /// Intermediate progress within a stage.
+    #[default]
+    Progress,
+    /// A diagnostic about configuration, tools, or artifacts.
+    Diagnostic,
+}
+
+/// Severity carried independently from the event's display text.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RunEventSeverity {
+    /// Normal execution information.
+    #[default]
+    Info,
+    /// A recoverable condition or unavailable optional capability.
+    Warning,
+    /// A terminal failure.
+    Error,
+}
+
 /// Progress and status event emitted during a pipeline execution.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RunEvent {
-    /// Stage identifier (e.g., "baseline", "optimization", "full_analysis", "mission").
+    /// Stage identifier (e.g., "baseline", "optimization", "full_analysis",
+    /// or a detailed child such as "downstream/mses").
     pub stage: String,
     /// Human-readable message or progress update.
     pub message: String,
     /// Percentage progress (0.0 to 1.0), if applicable.
     pub fraction: Option<f64>,
+    /// Typed lifecycle classification.
+    #[serde(default)]
+    pub kind: RunEventKind,
+    /// Typed severity classification.
+    #[serde(default)]
+    pub severity: RunEventSeverity,
+    /// One-based top-level stage number, when this is a stage event.
+    #[serde(default)]
+    pub stage_index: Option<u8>,
+    /// Number of top-level stages in this execution contract.
+    #[serde(default)]
+    pub stage_count: Option<u8>,
+    /// Milliseconds since pipeline execution began.
+    #[serde(default)]
+    pub elapsed_ms: u64,
+    /// Completed stage duration in milliseconds.
+    #[serde(default)]
+    pub duration_ms: Option<u64>,
 }
 
 /// Lifecycle state and captured results of a single pipeline execution.

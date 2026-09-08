@@ -95,10 +95,13 @@ fn student_edition_layout_resolves_nastran_and_patran_separately() {
     let edition = root.join("20261");
     let nastran = edition.join("Nastran/bin/nastran.exe");
     let patran = edition.join("Patran/bin/patran.exe");
+    let solver = edition.join("Patran/mscnastran_files/20261/servermode/msc20261/win64i8/analysis.exe");
     let _ = fs::create_dir_all(nastran.parent().unwrap_or(Path::new(".")));
     let _ = fs::create_dir_all(patran.parent().unwrap_or(Path::new(".")));
+    let _ = fs::create_dir_all(solver.parent().unwrap_or(Path::new(".")));
     let _ = fs::write(&nastran, b"test");
     let _ = fs::write(&patran, b"test");
+    let _ = fs::write(&solver, b"test");
     let mut locator = ToolLocator::new(root.join("app"), root.join("prefs"));
     locator.system_tool_roots = vec![edition];
     assert_eq!(
@@ -109,6 +112,50 @@ fn student_edition_layout_resolves_nastran_and_patran_separately() {
         locator.discover_patran(Path::new("")),
         ExecutableDiscovery::Ready(patran)
     );
+    let environment = locator.resolve_environment(
+        Path::new(""),
+        Path::new(""),
+        Path::new(""),
+        Path::new(""),
+        Path::new(""),
+    );
+    assert_eq!(environment.nastran_solver, Some(solver));
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn automatic_student_edition_resolution_prefers_the_versioned_nastran_launcher() {
+    let root = std::env::temp_dir().join(format!(
+        "alas-msc-inner-launcher-{}",
+        std::process::id()
+    ));
+    let edition = root.join("20261");
+    let visible = edition.join("Nastran/bin/nastran.exe");
+    let inner = edition.join("Nastran/msc20261/win64i8/nastran.exe");
+    let solver = edition.join(
+        "Patran/mscnastran_files/20261/servermode/msc20261/win64i8/analysis.exe",
+    );
+    let _ = fs::create_dir_all(visible.parent().unwrap_or(Path::new(".")));
+    let _ = fs::create_dir_all(inner.parent().unwrap_or(Path::new(".")));
+    let _ = fs::create_dir_all(solver.parent().unwrap_or(Path::new(".")));
+    let _ = fs::write(&visible, b"visible");
+    let _ = fs::write(&inner, b"inner");
+    let _ = fs::write(&solver, b"solver");
+
+    let mut locator = ToolLocator::new(root.join("app"), root.join("prefs"));
+    locator.system_tool_roots = vec![edition];
+    assert_eq!(
+        locator.discover_nastran(Path::new("")),
+        ExecutableDiscovery::Ready(inner)
+    );
+    let environment = locator.resolve_environment(
+        Path::new(""),
+        Path::new(""),
+        Path::new(""),
+        Path::new(""),
+        Path::new(""),
+    );
+    assert_eq!(environment.nastran_solver, Some(solver));
     let _ = fs::remove_dir_all(root);
 }
 

@@ -101,6 +101,17 @@ pub(super) fn add_manifest_artifact(
     artifacts.insert(name.to_owned(), value);
 }
 
+pub(super) fn add_manifest_artifact_if_exists(
+    artifacts: &mut BTreeMap<String, String>,
+    output_dir: &Path,
+    name: &str,
+    path: &Path,
+) {
+    if path.is_file() {
+        add_manifest_artifact(artifacts, output_dir, name, path);
+    }
+}
+
 #[cfg(test)]
 pub(super) fn optimizer_config(
     config: &AlasConfig,

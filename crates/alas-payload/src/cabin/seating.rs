@@ -87,8 +87,27 @@ impl Seating {
 /// is one whose class mix has not been decided yet, and it falls back to a
 /// single economy cabin sized to the requested passenger count, keeping
 /// economy's own geometry.
-pub(super) fn resolve_classes(pax: &PassengerCabinConfig, num_passengers: i64) -> Vec<CabinClass> {
-    let declared = pax.classes();
+pub(super) fn resolve_classes(
+    pax: &PassengerCabinConfig,
+    num_passengers: i64,
+    product_interior: bool,
+) -> Vec<CabinClass> {
+    // The product allocates the three supported classes. The frozen reference
+    // layouts were generated with the premium-economy slot still active, so
+    // the compatibility interior resolves it too, in its historical position.
+    let declared: Vec<(&'static str, &SeatClassConfig)> = if product_interior {
+        pax.classes()
+    } else {
+        [
+            ("First", &pax.first),
+            ("Business", &pax.business),
+            ("Premium", &pax.premium),
+            ("Economy", &pax.economy),
+        ]
+        .into_iter()
+        .filter(|(_, class)| class.is_present())
+        .collect()
+    };
     if declared.is_empty() {
         let single = SeatClassConfig {
             count: num_passengers,
@@ -118,10 +137,16 @@ pub(super) fn place_seats(
     pax: &PassengerCabinConfig,
     classes: &mut [CabinClass],
     aisle_w: f64,
+    product_exit_capacity: bool,
 ) -> Seating {
     let deck_caps = max_certifiable_capacity(g, pax);
     let segments = cabin_deck_segments(g);
-    let est_cap = select_exit_type(g.diameter_m).capacity_per_side;
+    let exit_spec = select_exit_type(g.diameter_m);
+    let est_cap = if product_exit_capacity {
+        exit_spec.capacity_per_side * 2
+    } else {
+        exit_spec.capacity_per_side
+    };
 
     let mut items = Vec::new();
     let mut bays = Vec::new();

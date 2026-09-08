@@ -1,0 +1,35 @@
+# Dependency policy for the complete workspace, including development targets.
+# This checks declared licenses; external solver redistribution is governed
+# separately by docs/NASTRAN95-BUNDLE.md and THIRD-PARTY-NOTICES.md.
+[graph]
+all-features = true
+
+[advisories]
+yanked = "deny"
+# Maintenance notices, not vulnerability exemptions. Replacing the text stack
+# requires coordinated egui/resvg upgrades and rendering regression evidence.
+ignore = [
+  { id = "RUSTSEC-2026-0206", reason = "rustybuzz is transitive through the pinned resvg text renderer; tracked in docs/dependency-policy.md" },
+  { id = "RUSTSEC-2026-0192", reason = "ttf-parser is transitive through egui/resvg; tracked in docs/dependency-policy.md" },
+]
+unused-ignored-advisory = "deny"
+
+[licenses]
+confidence-threshold = 0.95
+allow = [
+  "AGPL-3.0-or-later", "Apache-2.0", "Apache-2.0 WITH LLVM-exception",
+  "MIT", "BSD-2-Clause", "BSD-3-Clause", "BSL-1.0", "ISC", "Zlib",
+  "MPL-2.0", "Unicode-3.0", "OFL-1.1", "LicenseRef-UFL-1.0",
+]
+
+[bans]
+multiple-versions = "warn"
+# Workspace crates use path-only dependencies. Cargo.lock pins external
+# resolution; publication/versioning policy is separate from this audit.
+wildcards = "allow"
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

@@ -34,9 +34,10 @@
 //! `Descent.Constant_Speed_Constant_Rate`, over the `Unknown_Throttle` process
 //! chain the first and third share and the second reproduces almost exactly.
 //! The one structural difference between them, beyond which `initialize`
-//! runs, is that a cruise segment's iterate chain omits `update_acceleration`
-//! and forms its horizontal residual from the *magnitude* of the horizontal
-//! force rather than from its `x` component; both are reproduced.
+//! runs, is that a cruise segment's iterate chain omits `update_acceleration`.
+//! The frozen compatibility path also retains the historical horizontal-force
+//! magnitude residual, while product missions use the signed longitudinal
+//! component so the root finder can distinguish thrust surplus from deficit.
 //!
 //! Untranslated because unreachable: `Energy.initialize_battery` (there is no
 //! battery behind a turbofan), `Weights.update_weights`' additional-fuel
@@ -50,10 +51,11 @@ pub mod common;
 pub mod conditions;
 pub mod frames;
 
-pub use analyses::{AeroSolution, MissionAnalyses};
+pub use analyses::{AeroSolution, LegacyTurbofanCompatibility, MissionAnalyses};
 pub use conditions::{Conditions, Initials, Matrix3, Vector3};
 
 use crate::numerics::Numerics;
+use alas_config::mission::SpeedReference;
 use alas_math::ChebyshevError;
 
 /// Which of the three trajectories a segment flies.
@@ -96,14 +98,31 @@ pub struct SegmentSpec {
     pub tag: String,
     /// Which trajectory it flies.
     pub kind: SegmentKind,
-    /// True airspeed, m/s.
+    /// True or calibrated airspeed, m/s, per `air_speed_reference`.
     pub air_speed_m_s: f64,
+    /// Whether `air_speed_m_s` above is a true airspeed (the legacy, and
+    /// still default, semantics -- flown unchanged at every control point)
+    /// or a calibrated airspeed. A calibrated [`SegmentKind::Climb`] or
+    /// [`SegmentKind::Descent`] resolves the true airspeed actually flown at
+    /// *each control point's own altitude* from the real ambient pressure
+    /// and temperature there ([`alas_atmo::airspeed::true_from_calibrated`]),
+    /// so it rises through the climb or falls through the descent instead of
+    /// staying constant; a calibrated [`SegmentKind::Cruise`] is not
+    /// meaningful (a cruise is already flown at one altitude) and is treated
+    /// as true airspeed regardless of this field.
+    pub air_speed_reference: SpeedReference,
     /// Course over the ground, radians. Zero on every segment this program
     /// builds, and carried because the ground-track integral projects onto it.
     pub true_course_rad: f64,
-    /// Deviation from the standard atmosphere, K. Zero on every segment: the
-    /// departure airport's ISA deviation is set on the *airport*, which only
-    /// a ground segment reads.
+    /// Deviation from the standard atmosphere, K, applied to every ambient
+    /// quantity this segment evaluates: the atmosphere the aerodynamics and
+    /// propulsion see at each control point and, in
+    /// [`SpeedReference::CalibratedAirspeed`] mode, the pressure and
+    /// temperature the calibrated airspeed is resolved against. The product
+    /// schedule (`alas-pipeline::mission_stage::schedule`) sets it to the
+    /// *departure* airport's ISA deviation on every segment of the mission,
+    /// so a flight into a warmer arrival field still flies the departure
+    /// deviation; the recorded parity fixtures carry zero.
     pub temperature_deviation_k: f64,
     /// How many control points the segment is discretized on. Sixteen.
     pub number_control_points: usize,
@@ -122,6 +141,35 @@ pub enum SegmentError {
     NoStartingAltitude {
         /// The segment that could not start.
         tag: String,
+    },
+    /// A calibrated airspeed and a control point's real ambient state implied
+    /// an invalid or supersonic condition.
+    #[error("segment {tag} calibrated airspeed at control point {point}: {source}")]
+    InvalidCalibratedAirspeed {
+        /// The segment that could not resolve its airspeed.
+        tag: String,
+        /// Which control point failed.
+        point: usize,
+        /// Why.
+        source: alas_atmo::airspeed::AirspeedError,
+    },
+    /// A resolved airspeed at a control point did not exceed the segment's
+    /// vertical rate, so no real horizontal velocity exists there. Checked
+    /// per control point in calibrated-airspeed mode because true airspeed
+    /// varies along the ramp; a true-airspeed segment is checked once, before
+    /// construction, by its caller.
+    #[error(
+        "segment {tag} vertical rate {vertical_velocity_m_s} m/s at or above the {resolved_speed_m_s} m/s airspeed resolved at control point {point}"
+    )]
+    VerticalRateExceedsAirspeed {
+        /// The segment that could not fly its ramp.
+        tag: String,
+        /// Which control point failed.
+        point: usize,
+        /// The configured vertical rate, m/s.
+        vertical_velocity_m_s: f64,
+        /// The true airspeed resolved at that control point, m/s.
+        resolved_speed_m_s: f64,
     },
 }
 
@@ -223,7 +271,7 @@ impl Segment {
             } => {
                 let start = self.starting_altitude(altitude_start_m)?;
                 // z points down, so a *climb* rate is a negative z velocity.
-                self.lay_down_ramp(&nodes, start, altitude_end_m, air_speed, -climb_rate_m_s);
+                self.lay_down_ramp(&nodes, start, altitude_end_m, air_speed, -climb_rate_m_s)?;
                 self.update_differentials_altitude();
             }
             SegmentKind::Descent {
@@ -232,7 +280,7 @@ impl Segment {
                 descent_rate_m_s,
             } => {
                 let start = self.starting_altitude(altitude_start_m)?;
-                self.lay_down_ramp(&nodes, start, altitude_end_m, air_speed, descent_rate_m_s);
+                self.lay_down_ramp(&nodes, start, altitude_end_m, air_speed, descent_rate_m_s)?;
                 self.update_differentials_altitude();
             }
             SegmentKind::Cruise {
@@ -262,6 +310,18 @@ impl Segment {
     /// The horizontal velocity is what is left of the airspeed once the
     /// vertical component is taken out of it, so a steeper climb at the same
     /// airspeed covers less ground.
+    ///
+    /// In [`SpeedReference::CalibratedAirspeed`] mode, `air_speed_m_s` is
+    /// resolved to a true airspeed independently *at each control point's own
+    /// altitude*, against the real ambient pressure and temperature there
+    /// ([`alas_atmo::us1976_compute_values`] at this segment's own ISA
+    /// deviation), so the true airspeed -- and with it the horizontal
+    /// velocity and, through [`crate::segments::frames::update_acceleration`]
+    /// downstream, the along-track acceleration the residual solve sees --
+    /// varies continuously along the ramp instead of being one constant
+    /// value for the whole segment. This is the genuine per-live-altitude
+    /// resolution the mission-scope integration calls for, not a
+    /// several-constant-sub-segment approximation of it.
     fn lay_down_ramp(
         &mut self,
         nodes: &[f64],
@@ -269,16 +329,47 @@ impl Segment {
         end_altitude_m: f64,
         air_speed_m_s: f64,
         vertical_velocity_m_s: f64,
-    ) {
-        let horizontal =
-            (air_speed_m_s * air_speed_m_s - vertical_velocity_m_s * vertical_velocity_m_s).sqrt();
+    ) -> Result<(), SegmentError> {
+        let reference = self.spec.air_speed_reference;
+        let temperature_deviation_k = self.spec.temperature_deviation_k;
+        let tag = self.spec.tag.clone();
         for (point, &node) in nodes.iter().enumerate() {
             let altitude = node * (end_altitude_m - start_altitude_m) + start_altitude_m;
-            self.conditions.velocity_vector_m_s[point][0] = horizontal;
+            let true_air_speed_m_s = match reference {
+                SpeedReference::TrueAirspeed => air_speed_m_s,
+                SpeedReference::CalibratedAirspeed => {
+                    let atmosphere =
+                        alas_atmo::us1976_compute_values(altitude, temperature_deviation_k);
+                    alas_atmo::airspeed::true_from_calibrated(
+                        air_speed_m_s,
+                        atmosphere.pressure_pa,
+                        atmosphere.temperature_k,
+                    )
+                    .map_err(|source| {
+                        SegmentError::InvalidCalibratedAirspeed {
+                            tag: tag.clone(),
+                            point,
+                            source,
+                        }
+                    })?
+                }
+            };
+            let horizontal_sq = true_air_speed_m_s * true_air_speed_m_s
+                - vertical_velocity_m_s * vertical_velocity_m_s;
+            if !horizontal_sq.is_finite() || horizontal_sq <= 0.0 {
+                return Err(SegmentError::VerticalRateExceedsAirspeed {
+                    tag: tag.clone(),
+                    point,
+                    vertical_velocity_m_s,
+                    resolved_speed_m_s: true_air_speed_m_s,
+                });
+            }
+            self.conditions.velocity_vector_m_s[point][0] = horizontal_sq.sqrt();
             self.conditions.velocity_vector_m_s[point][2] = vertical_velocity_m_s;
             self.conditions.position_vector_m[point][2] = -altitude;
             self.conditions.altitude_m[point] = altitude;
         }
+        Ok(())
     }
 
     /// `update_differentials_altitude`: how long a ramp discretized in
@@ -365,18 +456,17 @@ impl Segment {
             self.spec.true_course_rad,
         );
 
-        self.update_residuals();
+        self.update_residuals(analyses.signed_cruise_force_residual);
     }
 
     /// The force that did not balance, per unit mass.
     ///
     /// A climb or descent compares the `x` and `z` forces against the
     /// accelerations the trajectory implies. A cruise has no acceleration term
-    /// -- its chain never computed one -- and takes the *magnitude* of the
-    /// horizontal force instead of its `x` component, which makes its
-    /// horizontal residual one-sided: a thrust deficit and a thrust surplus
-    /// both read positive.
-    fn update_residuals(&mut self) {
+    /// -- its chain never computed one. Product analyses use the signed `x`
+    /// component; the frozen compatibility path retains the historical
+    /// horizontal-force magnitude residual.
+    fn update_residuals(&mut self, signed_cruise_force_residual: bool) {
         for point in 0..self.conditions.len() {
             let force = self.conditions.total_force_vector_n[point];
             let mass = self.conditions.total_mass_kg[point];
@@ -384,7 +474,11 @@ impl Segment {
 
             self.residuals[point] = match self.spec.kind {
                 SegmentKind::Cruise { .. } => [
-                    (force[0] * force[0] + force[1] * force[1]).sqrt() / mass,
+                    if signed_cruise_force_residual {
+                        force[0] / mass - acceleration[0]
+                    } else {
+                        (force[0] * force[0] + force[1] * force[1]).sqrt() / mass
+                    },
                     force[2] / mass,
                 ],
                 _ => [
@@ -475,6 +569,7 @@ mod tests {
                 climb_rate_m_s: 10.0,
             },
             air_speed_m_s: 150.0,
+            air_speed_reference: SpeedReference::TrueAirspeed,
             true_course_rad: 0.0,
             temperature_deviation_k: 0.0,
             number_control_points: 16,
@@ -623,5 +718,262 @@ mod tests {
         assert_eq!(climb.body_angle_rad[0], INITIAL_CLIMB_BODY_ANGLE_RAD);
         assert_eq!(cruise.body_angle_rad[0], INITIAL_CRUISE_BODY_ANGLE_RAD);
         assert_ne!(climb.body_angle_rad[0], cruise.body_angle_rad[0]);
+    }
+
+    #[test]
+    fn product_cruise_residual_preserves_the_sign_of_a_thrust_deficit() {
+        let spec = SegmentSpec {
+            tag: "cruise_sign_probe".to_owned(),
+            kind: SegmentKind::Cruise {
+                altitude_m: Some(10_000.0),
+                distance_m: 1_000.0,
+            },
+            air_speed_m_s: 250.0,
+            air_speed_reference: SpeedReference::TrueAirspeed,
+            true_course_rad: 0.0,
+            temperature_deviation_k: 0.0,
+            number_control_points: 2,
+        };
+        let mut segment = Segment::new(spec, None).expect("declared cruise altitude");
+        segment.conditions.total_force_vector_n[0] = [-100.0, 0.0, 0.0];
+        segment.conditions.total_mass_kg[0] = 10.0;
+
+        segment.update_residuals(true);
+        assert_eq!(segment.residuals[0][0], -10.0);
+
+        segment.update_residuals(false);
+        assert_eq!(segment.residuals[0][0], 10.0);
+    }
+
+    /// International knot in m/s.
+    const KNOT: f64 = 1852.0 / 3600.0;
+
+    /// 170 KCAS -- the ATR 72-600 factsheet climb speed -- flown as a
+    /// calibrated climb from a 610 m field (Madrid-Barajas' elevation) to
+    /// 4000 m at 6 m/s.
+    fn cas_climb_spec() -> SegmentSpec {
+        SegmentSpec {
+            tag: "cas_climb".to_owned(),
+            kind: SegmentKind::Climb {
+                altitude_start_m: Some(610.0),
+                altitude_end_m: 4000.0,
+                climb_rate_m_s: 6.0,
+            },
+            air_speed_m_s: 170.0 * KNOT,
+            air_speed_reference: SpeedReference::CalibratedAirspeed,
+            true_course_rad: 0.0,
+            temperature_deviation_k: 0.0,
+            number_control_points: 16,
+        }
+    }
+
+    fn true_air_speed_at(segment: &Segment, point: usize) -> f64 {
+        let v = segment.conditions.velocity_vector_m_s[point];
+        v[0].hypot(v[2])
+    }
+
+    // The configured number is a calibrated airspeed, and it has to be *the*
+    // calibrated airspeed at every control point: recovering CAS from the
+    // laid-down true airspeed and the node's own ambient state must give the
+    // configured value back, while the true airspeed itself rises with
+    // altitude. A port that resolved CAS once (at the top, bottom or middle)
+    // and flew that constant would pass a "TAS is above CAS" check and fail
+    // this one.
+    #[test]
+    fn a_calibrated_climb_holds_the_configured_cas_at_every_control_point() {
+        let spec = cas_climb_spec();
+        let cas = spec.air_speed_m_s;
+        let segment = Segment::new(spec, None).expect("a valid subsonic calibrated climb");
+        let mut previous_tas = 0.0;
+        for point in 0..16 {
+            let tas = true_air_speed_at(&segment, point);
+            let altitude = segment.conditions.altitude_m[point];
+            let atmosphere = alas_atmo::us1976_compute_values(altitude, 0.0);
+            let recovered = alas_atmo::airspeed::calibrated_from_true(
+                tas,
+                atmosphere.pressure_pa,
+                atmosphere.temperature_k,
+            )
+            .expect("a subsonic true airspeed has a calibrated airspeed");
+            assert!(
+                (recovered - cas).abs() <= 1.0e-9 * cas,
+                "point {point} at {altitude} m: recovered {recovered} m/s CAS from {tas} m/s TAS, configured {cas}"
+            );
+            assert!(
+                tas > previous_tas,
+                "true airspeed did not rise with altitude at point {point}: {tas} <= {previous_tas}"
+            );
+            previous_tas = tas;
+        }
+        // The elevated field's first node is already faster than CAS: the
+        // pressure at 610 m is below sea-level pressure.
+        assert!(true_air_speed_at(&segment, 0) > cas);
+        // Constant vertical rate throughout: only the horizontal component
+        // carries the variation.
+        assert!(segment
+            .conditions
+            .velocity_vector_m_s
+            .iter()
+            .all(|v| (v[2] + 6.0).abs() < 1.0e-12));
+    }
+
+    // The residual solve compares forces against the trajectory's
+    // acceleration. A calibrated climb accelerates along track, and the
+    // spectral acceleration has to be the derivative of the velocity actually
+    // laid down: integrating it over the segment must return exactly the
+    // change in horizontal velocity, and it must be positive at every node
+    // (the true airspeed rises monotonically). The legacy true-airspeed climb
+    // must keep its zero acceleration, or every recorded parity fixture would
+    // move.
+    #[test]
+    fn a_calibrated_climb_carries_a_consistent_positive_along_track_acceleration() {
+        let mut segment = Segment::new(cas_climb_spec(), None).expect("a valid calibrated climb");
+        segment
+            .numerics
+            .update_differentials_time(&segment.conditions.time_s);
+        frames::update_acceleration(
+            &mut segment.conditions,
+            &segment.numerics.time.differentiate,
+        );
+        let velocity = &segment.conditions.velocity_vector_m_s;
+        let acceleration = &segment.conditions.acceleration_vector_m_s2;
+        for (point, a) in acceleration.iter().enumerate() {
+            assert!(
+                a[0] > 0.0,
+                "along-track acceleration at point {point} is {} m/s^2, expected positive",
+                a[0]
+            );
+            assert!(
+                a[2].abs() < 1.0e-9,
+                "vertical acceleration at {point} is {}",
+                a[2]
+            );
+        }
+        let last_row = segment
+            .numerics
+            .time
+            .integrate
+            .last()
+            .expect("an operator row");
+        let integrated: f64 = last_row
+            .iter()
+            .zip(acceleration)
+            .map(|(&weight, a)| weight * a[0])
+            .sum();
+        let delta_vx = velocity[15][0] - velocity[0][0];
+        assert!(
+            delta_vx > 0.0 && (integrated - delta_vx).abs() <= 1.0e-9 * delta_vx,
+            "integrated acceleration {integrated} m/s does not return the velocity change {delta_vx} m/s"
+        );
+        // Order-of-magnitude sanity on the physics, not a fitted number: a
+        // 170 KCAS climb at 6 m/s gains roughly 5% TAS per 1000 m, so the
+        // along-track acceleration is a few hundredths of a m/s^2.
+        assert!(acceleration.iter().all(|a| a[0] < 0.1));
+
+        let mut legacy = Segment::new(climb_spec(), None).expect("a declared start altitude");
+        legacy
+            .numerics
+            .update_differentials_time(&legacy.conditions.time_s);
+        frames::update_acceleration(&mut legacy.conditions, &legacy.numerics.time.differentiate);
+        assert!(legacy
+            .conditions
+            .acceleration_vector_m_s2
+            .iter()
+            .all(|a| a[0].abs() < 1.0e-9 && a[2].abs() < 1.0e-9));
+    }
+
+    // The ambient state the calibrated airspeed is resolved against is the
+    // node's own: the field elevation (MSL, not "zero because it is the
+    // ground") and the segment's ISA deviation both have to move the true
+    // airspeed the right way.
+    #[test]
+    fn a_calibrated_speed_is_resolved_against_the_field_elevation_and_isa_deviation() {
+        let elevated = Segment::new(cas_climb_spec(), None).expect("a valid calibrated climb");
+        let sea_level_spec = SegmentSpec {
+            kind: SegmentKind::Climb {
+                altitude_start_m: Some(0.0),
+                altitude_end_m: 4000.0,
+                climb_rate_m_s: 6.0,
+            },
+            ..cas_climb_spec()
+        };
+        let sea_level = Segment::new(sea_level_spec, None).expect("a valid calibrated climb");
+        let cas = cas_climb_spec().air_speed_m_s;
+        // At sea level, standard day, CAS and TAS coincide by definition.
+        assert!((true_air_speed_at(&sea_level, 0) - cas).abs() <= 1.0e-9 * cas);
+        // At 610 m the same CAS is a faster true airspeed, and exactly the
+        // one the shared conversion gives at that pressure and temperature.
+        let ambient = alas_atmo::us1976_compute_values(610.0, 0.0);
+        let expected = alas_atmo::airspeed::true_from_calibrated(
+            cas,
+            ambient.pressure_pa,
+            ambient.temperature_k,
+        )
+        .expect("subsonic");
+        let actual = true_air_speed_at(&elevated, 0);
+        assert!((actual - expected).abs() <= 1.0e-9 * expected);
+        assert!(actual > true_air_speed_at(&sea_level, 0));
+
+        // A warmer day (positive ISA deviation) at the same field lowers the
+        // density, so the same CAS is a faster TAS again.
+        let warm_spec = SegmentSpec {
+            temperature_deviation_k: 15.0,
+            ..cas_climb_spec()
+        };
+        let warm = Segment::new(warm_spec, None).expect("a valid calibrated climb");
+        assert!(true_air_speed_at(&warm, 0) > actual);
+        let warm_ambient = alas_atmo::us1976_compute_values(610.0, 15.0);
+        let warm_expected = alas_atmo::airspeed::true_from_calibrated(
+            cas,
+            warm_ambient.pressure_pa,
+            warm_ambient.temperature_k,
+        )
+        .expect("subsonic");
+        assert!((true_air_speed_at(&warm, 0) - warm_expected).abs() <= 1.0e-9 * warm_expected);
+    }
+
+    // A calibrated airspeed outside the conversion's validity domain is a
+    // typed setup error naming the control point, not a NaN velocity that
+    // the solver discovers later; and a resolved true airspeed that does not
+    // exceed the vertical rate is the same typed error a true-airspeed ramp
+    // raises.
+    #[test]
+    fn an_unresolvable_calibrated_speed_is_rejected_at_setup() {
+        let supersonic = SegmentSpec {
+            kind: SegmentKind::Climb {
+                altitude_start_m: Some(9000.0),
+                altitude_end_m: 12_000.0,
+                climb_rate_m_s: 5.0,
+            },
+            air_speed_m_s: 330.0,
+            ..cas_climb_spec()
+        };
+        match Segment::new(supersonic, None) {
+            Err(SegmentError::InvalidCalibratedAirspeed { tag, .. }) => {
+                assert_eq!(tag, "cas_climb");
+            }
+            other => panic!("a 330 m/s CAS climb to 12 km must be rejected, got {other:?}"),
+        }
+        let not_a_number = SegmentSpec {
+            air_speed_m_s: f64::NAN,
+            ..cas_climb_spec()
+        };
+        assert!(matches!(
+            Segment::new(not_a_number, None),
+            Err(SegmentError::InvalidCalibratedAirspeed { .. })
+        ));
+        let too_steep = SegmentSpec {
+            kind: SegmentKind::Climb {
+                altitude_start_m: Some(0.0),
+                altitude_end_m: 1000.0,
+                climb_rate_m_s: 60.0,
+            },
+            air_speed_m_s: 50.0,
+            ..cas_climb_spec()
+        };
+        assert!(matches!(
+            Segment::new(too_steep, None),
+            Err(SegmentError::VerticalRateExceedsAirspeed { point: 0, .. })
+        ));
     }
 }

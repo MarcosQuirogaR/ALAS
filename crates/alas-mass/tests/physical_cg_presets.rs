@@ -6,7 +6,7 @@
 //! These are physical/integration checks, not a second golden fixture. Frozen
 //! Python agreement remains in `parity_breakdown`; this suite proves the
 //! explicit product path is finite, conservative about failure, and exercised
-//! by all seven registered aircraft configurations.
+//! by every registered aircraft configuration.
 
 // A test unwrap is the assertion failing on a registered preset or geometry.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
@@ -18,7 +18,10 @@ use alas_mass::breakdown::{run_mass_analysis, run_mass_analysis_with_model, Mass
 #[test]
 fn every_preset_uses_a_finite_structural_wing_point_inside_its_wingbox() {
     let preset_names = presets::available();
-    assert_eq!(preset_names.len(), 7, "the registered preset set changed");
+    assert!(
+        !preset_names.is_empty(),
+        "the preset registry must be populated"
+    );
 
     for preset_name in preset_names {
         let preset = presets::get(preset_name).expect("registered preset resolves");

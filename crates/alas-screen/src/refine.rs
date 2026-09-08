@@ -95,8 +95,6 @@ pub(crate) fn refine_candidate_3d_with_mass_model(
     cfg2.geometry.wing.root_airfoil = candidate.name.clone();
     if matches!(geometry, ScreeningGeometry::ReferenceCompatibility) {
         cfg2.geometry.engine.apply_engine_spec();
-    } else {
-        cfg2.geometry.engine.apply_engine_spec_if_uninitialized();
     }
 
     let builder = match geometry {
@@ -132,6 +130,7 @@ pub(crate) fn refine_candidate_3d_with_mass_model(
             MassCoordinateModel::StructuralWingbox(&cfg2.structures)
         }
     };
+    let analysis_mass_model = cfg2.analysis_mass_model(config.requirements.mtow_kg);
     let mass_result = if matches!(mass_model, ScreeningMassModel::ReferenceCompatibility) {
         alas_mass::breakdown::run_mass_analysis_with_model_checked_with_gear(
             &plane,
@@ -151,7 +150,7 @@ pub(crate) fn refine_candidate_3d_with_mass_model(
             &effective_geometry,
             &cfg2.cabin,
             &cfg2.control_surfaces,
-            Some(&cfg2.mass_model),
+            Some(&analysis_mass_model),
             None,
             coordinate_model,
             &cfg2.landing_gear,

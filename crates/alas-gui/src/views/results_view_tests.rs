@@ -2,9 +2,9 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 use super::{
-    format_cg_pct_mac, fullscreen_camera_key, fullscreen_id, fullscreen_open, fullscreen_view_key,
-    open_fullscreen_result, responsive_card_layout, scene_has_external_images, set_fullscreen,
-    unavailable_reason, CARD_GAP, CARD_MIN_WIDTH,
+    figure_gallery_layout, format_cg_pct_mac, fullscreen_camera_key, fullscreen_id,
+    fullscreen_open, fullscreen_view_key, open_fullscreen_result, responsive_card_layout,
+    scene_has_external_images, set_fullscreen, unavailable_reason, CARD_GAP, CARD_MIN_WIDTH,
 };
 use crate::state::{AppState, PreviewCamera};
 use alas_report::scene::{Scene, SceneElement};
@@ -84,6 +84,17 @@ fn result_card_frame_padding_is_counted_inside_the_gallery_width() {
             + (columns - 1) as f32 * CARD_GAP;
         assert!((row_width - available).abs() < 0.01);
     }
+}
+
+#[test]
+fn model_comparison_uses_the_full_gallery_and_available_viewport_height() {
+    let (columns, card_width, canvas_height) = figure_gallery_layout(1_200.0, 590.0, true);
+    assert_eq!(columns, 1);
+    assert_eq!(card_width, 1_200.0);
+    assert_eq!(canvas_height, 538.0);
+
+    let (_, _, short_canvas) = figure_gallery_layout(640.0, 250.0, true);
+    assert_eq!(short_canvas, 320.0);
 }
 
 #[test]

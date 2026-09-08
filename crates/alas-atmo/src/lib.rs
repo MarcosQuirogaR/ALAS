@@ -20,11 +20,17 @@
 //! [`us1976`] is mission analysis model's US Standard 1976 model, which every mission analysis model mission
 //! segment uses instead of either.
 
+pub mod airspeed;
 pub mod atmosphere;
 pub mod differentiable;
 pub mod isa;
 mod us1976;
 
+pub use airspeed::{
+    calibrated_from_true, equivalent_from_true, mach_from_calibrated, true_from_calibrated,
+    true_from_equivalent, true_from_mach, AirspeedError, SEA_LEVEL_DENSITY_DISPLAY_KG_M3,
+    SEA_LEVEL_PRESSURE_PA, SEA_LEVEL_TEMPERATURE_K,
+};
 pub use atmosphere::{
     Atmosphere, AtmosphereError, DensityAltitudeError, DensityAltitudeMethod, Method,
     STANDARD_GRAVITY,

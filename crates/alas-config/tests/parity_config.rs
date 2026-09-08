@@ -29,6 +29,9 @@
 //! * `run_sol_vibration_random` requests native force-PSD RMS integration.
 //!   The frozen default and the product default both enable it, but the Rust
 //!   calculation replaces the invalid acceleration-PSD/force-receptance path.
+//! * `n_modes` uses the validated 16-mode product default for the live
+//!   NASTRAN-95 path; the frozen Python reference remains at 30 so its
+//!   historical parity fixture stays reproducible.
 //! * The structures enable/station help names the native structural wing-mass
 //!   centroid consumer. Both old and corrected prose are pinned below; values,
 //!   field order, and exact comparison remain unchanged.
@@ -241,7 +244,7 @@ fn the_fixture_has_no_type_this_test_forgot_to_check() {
 /// Compare two default trees, reporting each disagreeing key by its path
 /// rather than dumping both trees.
 fn compare_values(comparison: &mut Comparison, path: &str, actual: &Value, expected: &Value) {
-    if let Some((upstream, corrected)) = vibration_performance_default_correction(path) {
+    if let Some((upstream, corrected)) = product_default_correction(path) {
         comparison.exact(&format!("{path}: frozen Python value"), expected, &upstream);
         comparison.exact(
             &format!("{path}: source-corrected Rust value"),
@@ -308,14 +311,16 @@ fn compare_values(comparison: &mut Comparison, path: &str, actual: &Value, expec
     }
 }
 
-/// The frozen Python configuration enabled an expensive 500 Hz harmonic
-/// output by default. The product default keeps force-PSD RMS enabled while
-/// making the extended sweep explicit and bounded to its useful RMS band.
-fn vibration_performance_default_correction(path: &str) -> Option<(Value, Value)> {
+/// Product defaults that intentionally differ from the frozen Python
+/// configuration. The reference values remain checked explicitly so a product
+/// optimization cannot silently become a parity drift.
+fn product_default_correction(path: &str) -> Option<(Value, Value)> {
     if path.ends_with(".run_sol_vibration_sine") {
         Some((Value::Bool(true), Value::Bool(false)))
     } else if path.ends_with(".freq_sweep_max_hz") {
         Some((serde_json::json!(500.0), serde_json::json!(60.0)))
+    } else if path.ends_with(".n_modes") {
+        Some((serde_json::json!(30), serde_json::json!(16)))
     } else {
         None
     }
@@ -346,7 +351,15 @@ fn compare_node(
             !is_native_config_field(node.type_name, field.name)
                 && !is_transport_planform_field_name(node.type_name, field.name)
                 && (node.type_name != "MassModelConfig"
-                    || !matches!(field.name, "systems_mass_method" | "flops_transport"))
+                    || !matches!(
+                        field.name,
+                        "systems_mass_method"
+                            | "flops_transport"
+                            | "structural_mass_method"
+                            | "propulsion_mass_method"
+                            | "flops_structure"
+                            | "geometric_component_stations"
+                    ))
         })
         .collect();
     let names: Vec<&str> = fields.iter().map(|field| field.name).collect();
@@ -355,6 +368,7 @@ fn compare_node(
         .filter(|field| {
             let name = field.get("name").and_then(Value::as_str);
             !matches!(name, Some("suave_venv_dir" | "suave_runner_dir"))
+                && !(node.type_name == "EngineConfig" && name == Some("thrust_kn"))
                 && !name.is_some_and(|name| product_hidden_cabin_field(node.type_name, name))
         })
         .collect();
@@ -552,7 +566,33 @@ fn compare_transport_planform_schema(
 }
 
 fn is_native_config_field(path: &str, key: &str) -> bool {
-    (key == "method" && (path.ends_with("SolverSettings") || path.ends_with(".solver")))
+    (matches!(key, "fuel_policy" | "fuel_tanks")
+        && (path.ends_with("AlasConfig") || path.is_empty()))
+        || (matches!(key, "objective" | "design_space")
+            && (path.ends_with("OptimizerConfig") || path.ends_with(".optimizer")))
+        // Native speed-reference switch for the climb/descent legs. Its
+        // serialization skips the `TrueAirspeed` default, so a legacy file
+        // and the frozen default tree round-trip unchanged.
+        || (key == "climb_descent_speed_reference"
+            && (path.ends_with("MissionProfileConfig") || path.ends_with(".profile")))
+        || (matches!(
+            key,
+            "turbofan"
+                | "turboprop"
+                | "propulsion_technology"
+                | "part_power_fuel_flow_ratios"
+                | "part_power_source"
+        ) && (path.ends_with("EngineConfig") || path.ends_with(".engine")))
+        || (key == "exclude_buried_main_wing_area"
+            && (path.ends_with("DragModelConfig") || path.ends_with(".drag_model")))
+        || (matches!(
+            key,
+            "use_airway_endpoint_coordinates" | "max_airway_stretch"
+        ) && (path.ends_with("MissionConfig") || path.ends_with(".mission")))
+        || (matches!(
+            key,
+            "method" | "finite_difference_step" | "constraint_tolerance"
+        ) && (path.ends_with("SolverSettings") || path.ends_with(".solver")))
         || (key == "random_force_psd_n2_per_hz"
             && (path.ends_with("StructuresConfig") || path.ends_with(".structures")))
         || (key == "optimize_passenger_capacity"
@@ -591,7 +631,13 @@ fn compare_field(
 ) {
     let declaration = declared.get(path);
 
-    if label.ends_with(".share_pct") {
+    if label.ends_with(".fuel_volume_penalty_scale") {
+        assert_eq!(
+            expected["label"],
+            "Insufficient wing fuel-volume penalty weight"
+        );
+        assert_eq!(field.label, "Legacy fuel-volume penalty weight (unused)");
+    } else if label.ends_with(".share_pct") {
         comparison.exact(
             &format!("{label}.label: product seat-share semantics"),
             &field.label,
@@ -652,11 +698,14 @@ fn compare_field(
     // Where upstream declared no explanation it emits an empty string, and
     // this port supplies one. Comparing those would fail on prose the port is
     // required to add, so what is checked instead is that it was added.
-    if label.ends_with(".share_pct") {
+    if label.ends_with(".fuel_volume_penalty_scale") {
+        assert_eq!(field.help, "Deprecated compatibility field. MTOW minus zero-fuel mass is a mass allowance, not mission-required fuel, so it is no longer used by the optimizer. Tank capacity will be constrained against mission fuel plus the selected reserve policy.");
+        assert_eq!(expected["help"], "Penalizes the wing's physical usable fuel-tank volume (physics.performance.wing_fuel_volume_m3, Torenbeek geometric estimate) being too small to hold the fuel mass the weight & balance analysis says this design actually needs -- a wing that's too thin/small/tapered to carry its own required fuel is not a buildable aircraft, independent of whether the MTOW fuel-mass budget itself closes. Quadratic on the fractional shortfall (required_fuel - tank_capacity) / required_fuel.");
+    } else if label.ends_with(".share_pct") {
         comparison.exact(
             &format!("{label}.help: product seat-share semantics"),
             &field.help,
-            &"Target percentage of passenger seats assigned to this class. The layout solver converts the target mix into floor-length allocations using each class's configured seat geometry, then fills the available cabin. Shares are normalised, so they need not add up to exactly 100. Set the class to 0 to remove it. Only editable with the Custom cabin preset.",
+            &"Target percentage of passengers in this class. The selected preset supplies the seat geometry; the layout converts the normalized mix into rows that fit the usable, regulation-compliant cabin. Only Custom exposes this value for editing.",
         );
         comparison.exact(
             &format!("{label}.help: frozen floor-share semantics"),
@@ -814,7 +863,7 @@ fn compare_leaf(comparison: &mut Comparison, path: &str, leaf: &LeafField, expec
         expected.get("kind").unwrap_or(&Value::Null),
     );
     let expected_value = expected.get("value").unwrap_or(&Value::Null);
-    if let Some((upstream, corrected)) = vibration_performance_default_correction(path) {
+    if let Some((upstream, corrected)) = product_default_correction(path) {
         comparison.exact(
             &format!("{path}.value: frozen Python value"),
             expected_value,

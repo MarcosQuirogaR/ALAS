@@ -25,6 +25,9 @@
 //!
 //! [`chart_kit`] provides colorbar and legend chrome built from `scene` primitives.
 
+// Unit tests assert that their constructed fixture inputs are valid.
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 pub mod chart_kit;
 pub mod colormap;
 pub mod document;

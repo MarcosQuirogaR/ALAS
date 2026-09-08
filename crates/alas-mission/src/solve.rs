@@ -45,6 +45,8 @@ pub struct SegmentSolution {
     pub status: Status,
     /// Residual evaluations spent.
     pub evaluations: usize,
+    /// The commanded-throttle boundary was reached before force balance.
+    pub throttle_limited: bool,
 }
 
 /// Why a mission could not be flown.
@@ -110,6 +112,11 @@ pub fn converge_root(
         hybrd::solve(
             |point, residual| {
                 segment.unpack_unknowns(point);
+                if analyses.enforce_throttle_envelope {
+                    for throttle in &mut segment.throttle {
+                        *throttle = throttle.clamp(0.0, 1.0);
+                    }
+                }
                 segment.iterate(analyses);
                 residual.copy_from_slice(&segment.pack_residuals());
             },
@@ -123,14 +130,32 @@ pub fn converge_root(
     })?;
 
     segment.unpack_unknowns(&solution.x);
+    let requested_above_limit = segment
+        .throttle
+        .iter()
+        .any(|throttle| throttle.is_finite() && *throttle > 1.0);
+    if analyses.enforce_throttle_envelope {
+        for throttle in &mut segment.throttle {
+            *throttle = throttle.clamp(0.0, 1.0);
+        }
+    }
     segment.iterate(analyses);
 
-    let throttle_within_available_envelope =
-        !analyses.enforce_throttle_envelope
-            || segment.conditions.throttle.iter().all(|throttle| {
-                throttle.is_finite() && *throttle >= 0.0 && *throttle <= 1.0 + 1.0e-6
-            });
+    let throttle_within_available_envelope = !analyses.enforce_throttle_envelope
+        || segment
+            .conditions
+            .throttle
+            .iter()
+            .all(|throttle| throttle.is_finite() && *throttle >= 0.0 && *throttle <= 1.0);
     let converged = solution.status.is_converged() && throttle_within_available_envelope;
+    let throttle_limited = analyses.enforce_throttle_envelope
+        && !converged
+        && (requested_above_limit
+            || segment
+                .conditions
+                .throttle
+                .iter()
+                .any(|throttle| throttle.is_finite() && *throttle >= 1.0 - 1.0e-9));
     segment.numerics.converged = Some(converged);
     if !converged {
         tracing::warn!(
@@ -145,6 +170,7 @@ pub fn converge_root(
         converged,
         status: solution.status,
         evaluations: solution.evaluations,
+        throttle_limited,
     })
 }
 
@@ -161,10 +187,31 @@ pub struct MissionResult {
     pub segments: Vec<Segment>,
     /// How each segment's solve came out, aligned with [`Self::segments`].
     pub solutions: Vec<SegmentSolution>,
+    /// Number of segments in the requested schedule.
+    ///
+    /// This remains larger than `segments.len()` when evaluation stops after
+    /// fuel exhaustion or a failed solve, so consumers cannot mistake partial
+    /// diagnostic telemetry for a completed flight.
+    pub scheduled_segment_count: usize,
     /// The first segment that consumed more fuel than the load case carried.
     /// A populated value means the returned telemetry is deliberately partial:
     /// later segments were not propagated below the dry-mass floor.
     pub fuel_exhaustion: Option<FuelExhaustion>,
+}
+
+/// Scalar outputs that are valid only for a fully completed mission.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CompletedMissionSummary {
+    /// Aircraft mass at the first mission control point, kg.
+    pub takeoff_mass_kg: f64,
+    /// Aircraft mass at the last mission control point, kg.
+    pub landing_mass_kg: f64,
+    /// Fuel consumed by the complete modeled mission, kg.
+    pub trip_fuel_kg: f64,
+    /// Sum of segment time spans, s.
+    pub block_time_s: f64,
+    /// Range recorded at the final mission control point, m.
+    pub distance_flown_m: f64,
 }
 
 /// Where a mission first crossed its usable-fuel boundary.
@@ -184,6 +231,127 @@ pub struct FuelExhaustion {
 }
 
 impl MissionResult {
+    /// Whether every field consumed by the mission figures is present and
+    /// finite for a completed mission.
+    ///
+    /// `completed_summary` intentionally validates only scalar mission totals.
+    /// The figure family also indexes drag breakdowns and force/aero columns,
+    /// so it needs this stricter boundary before flattening conditions.
+    pub fn figure_data_ready(&self) -> bool {
+        self.completed_summary().is_some()
+            && self.segments.iter().all(|segment| {
+                let c = &segment.conditions;
+                let n = c.len();
+                c.time_s.len() == n
+                    && c.altitude_m.len() == n
+                    && c.total_mass_kg.len() == n
+                    && c.velocity_m_s.len() == n
+                    && c.density_kg_m3.len() == n
+                    && c.mach.len() == n
+                    && c.vehicle_mass_rate_kg_s.len() == n
+                    && c.aircraft_range_m.len() == n
+                    && c.angle_of_attack_rad.len() == n
+                    && c.lift_coefficient.len() == n
+                    && c.drag_coefficient.len() == n
+                    && c.throttle.len() == n
+                    && c.body_inertial_rotations_rad.len() == n
+                    && c.wind_lift_force_vector_n.len() == n
+                    && c.wind_drag_force_vector_n.len() == n
+                    && c.thrust_force_vector_n.len() == n
+                    && c.drag_breakdown.len() == n
+                    && c.time_s
+                        .iter()
+                        .chain(&c.altitude_m)
+                        .chain(&c.total_mass_kg)
+                        .chain(&c.velocity_m_s)
+                        .chain(&c.density_kg_m3)
+                        .chain(&c.mach)
+                        .chain(&c.vehicle_mass_rate_kg_s)
+                        .chain(&c.aircraft_range_m)
+                        .chain(&c.angle_of_attack_rad)
+                        .chain(&c.lift_coefficient)
+                        .chain(&c.drag_coefficient)
+                        .chain(&c.throttle)
+                        .all(|value| value.is_finite())
+                    && c.body_inertial_rotations_rad
+                        .iter()
+                        .chain(&c.wind_lift_force_vector_n)
+                        .chain(&c.wind_drag_force_vector_n)
+                        .chain(&c.thrust_force_vector_n)
+                        .all(|vector| vector.iter().all(|value| value.is_finite()))
+                    && c.drag_breakdown.iter().all(|drag| {
+                        [
+                            drag.parasite_total,
+                            drag.induced_total,
+                            drag.compressible_total,
+                            drag.miscellaneous_total,
+                            drag.total,
+                        ]
+                        .iter()
+                        .all(|value| value.is_finite())
+                    })
+            })
+    }
+
+    /// Return scalar mission results only when all requested segments completed.
+    ///
+    /// Partial, exhausted, unconverged, throttle-limited, or non-finite
+    /// telemetry deliberately produces `None`.
+    pub fn completed_summary(&self) -> Option<CompletedMissionSummary> {
+        if self.scheduled_segment_count == 0
+            || self.fuel_exhaustion.is_some()
+            || self.segments.len() != self.scheduled_segment_count
+            || self.solutions.len() != self.scheduled_segment_count
+            || self
+                .solutions
+                .iter()
+                .any(|solution| !solution.converged || solution.throttle_limited)
+            || self.segments.iter().any(|segment| {
+                segment.conditions.total_mass_kg.len() < 2
+                    || segment.conditions.time_s.len() < 2
+                    || segment.conditions.aircraft_range_m.is_empty()
+                    || segment
+                        .conditions
+                        .total_mass_kg
+                        .iter()
+                        .chain(&segment.conditions.time_s)
+                        .chain(&segment.conditions.aircraft_range_m)
+                        .any(|value| !value.is_finite())
+            })
+        {
+            return None;
+        }
+
+        let takeoff_mass_kg = self.initial_mass_kg();
+        let landing_mass_kg = self.final_mass_kg();
+        let trip_fuel_kg = takeoff_mass_kg - landing_mass_kg;
+        let block_time_s = self.block_time_s();
+        let distance_flown_m = self
+            .segments
+            .last()?
+            .conditions
+            .aircraft_range_m
+            .last()
+            .copied()?;
+        (takeoff_mass_kg.is_finite()
+            && takeoff_mass_kg > 0.0
+            && landing_mass_kg.is_finite()
+            && landing_mass_kg > 0.0
+            && trip_fuel_kg.is_finite()
+            && trip_fuel_kg >= 0.0
+            && block_time_s.is_finite()
+            && block_time_s >= 0.0
+            && distance_flown_m.is_finite()
+            && distance_flown_m >= 0.0)
+            .then_some(CompletedMissionSummary {
+                takeoff_mass_kg,
+                landing_mass_kg,
+                trip_fuel_kg,
+                block_time_s,
+                distance_flown_m,
+            })
+    }
+
     /// Mass at the very start, kg.
     pub fn initial_mass_kg(&self) -> f64 {
         self.segments
@@ -225,11 +393,9 @@ impl Mission {
     /// Fly the mission: `expand_sub_segments` then `sequential_sub_segments`.
     ///
     /// Each segment is built against its predecessor's final state, solved,
-    /// finalized, and handed forward. A segment that fails to converge does
-    /// *not* stop the mission -- upstream prints and carries on, and stopping
-    /// here would make a mission that limps a mission that has no answer at
-    /// all -- so the outcome is reported per segment in
-    /// [`MissionResult::solutions`].
+    /// finalized, and handed forward. Product validity cannot be recovered by
+    /// propagating an unconverged state, so the first failed segment is kept as
+    /// partial diagnostic telemetry and terminates the flown trajectory.
     ///
     /// # Errors
     ///
@@ -266,19 +432,53 @@ impl Mission {
                         burned_fuel_kg: analyses.takeoff_mass_kg - crossing_mass_kg,
                         minimum_mass_kg,
                     });
-                    break;
                 }
             }
 
-            initials = Some(segment.initials_for_next());
+            let next_initials = segment.initials_for_next();
+            let converged = solution.converged;
             segments.push(segment);
             solutions.push(solution);
+            if fuel_exhaustion.is_some() || !converged {
+                break;
+            }
+            initials = Some(next_initials);
         }
 
         Ok(MissionResult {
             segments,
             solutions,
+            scheduled_segment_count: self.schedule.len(),
             fuel_exhaustion,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn partial_telemetry_cannot_publish_a_completed_summary() {
+        let result = MissionResult {
+            segments: Vec::new(),
+            solutions: Vec::new(),
+            scheduled_segment_count: 1,
+            fuel_exhaustion: None,
+        };
+
+        assert_eq!(result.completed_summary(), None);
+    }
+
+    #[test]
+    fn an_empty_schedule_is_not_a_completed_mission() {
+        let result = MissionResult {
+            segments: Vec::new(),
+            solutions: Vec::new(),
+            scheduled_segment_count: 0,
+            fuel_exhaustion: None,
+        };
+
+        assert_eq!(result.completed_summary(), None);
     }
 }

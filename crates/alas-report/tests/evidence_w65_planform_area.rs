@@ -52,6 +52,12 @@ fn close_array(label: &str, actual: &[f64], expected: &[f64]) {
     }
 }
 
+/// Engine leaves where the catalogue binding now differs from the frozen
+/// artifact, pinned on both sides: the LEAP-1A row binds its identity-matched
+/// ICAO LTO rating in place of the published design scalar.
+const ENGINE_BINDING_CORRECTIONS: &[(&str, &str, f64, f64)] =
+    &[("A320-200.after_builder", "thrust_kn", 120.64, 120.636)];
+
 fn compare_engine(actual: &Value, expected: &Value, label: &str) {
     for key in [
         "engine_name",
@@ -68,6 +74,22 @@ fn compare_engine(actual: &Value, expected: &Value, label: &str) {
         "cruise_tsfc_kg_kgf_hr",
         "fan_diameter_m",
     ] {
+        if let Some((_, _, frozen, bound)) = ENGINE_BINDING_CORRECTIONS
+            .iter()
+            .find(|(at, field, _, _)| *at == label && *field == key)
+        {
+            assert_eq!(
+                expected[key],
+                serde_json::json!(frozen),
+                "first W6.5 disagreement at {label}.engine.{key} frozen value"
+            );
+            assert_eq!(
+                actual[key],
+                serde_json::json!(bound),
+                "first W6.5 disagreement at {label}.engine.{key} bound value"
+            );
+            continue;
+        }
         assert_eq!(
             actual[key], expected[key],
             "first W6.5 disagreement at {label}.engine.{key}"
@@ -231,17 +253,27 @@ fn compare_case(case: &Value) {
         config.geometry.engine.engine_name = "LEAP-1A".to_owned();
     }
     // The pinned W6.5 artifact predates the product transport-planform
-    // defaults. Clear those optional stations before comparing the effective
-    // pre-builder configuration; the reference builder applies the same
-    // contract again at the geometry boundary below.
-    config.geometry.wing.side_of_body_span_fraction = None;
-    config.geometry.wing.side_of_body_chord_ratio = None;
-    config.geometry.wing.kink_span_fraction = None;
-    config.geometry.wing.outboard_le_sweep_deg = None;
+    // defaults, the independently sourced A320-214 dimension corrections and
+    // the catalogue engine binding presets now perform at registration. Those
+    // load-path differences are pinned two-sidedly by the alas-config parity
+    // ledgers; here the frozen pre-builder geometry is replayed so the
+    // planform-area and renderer chain is compared on the same input. The
+    // engine group serializes with its typed payload, so it is compared on
+    // the frozen keys rather than as one object.
+    config.geometry =
+        serde_json::from_value(case["effective_geometry_config_before_builder"].clone()).unwrap();
+    let mut actual_geometry = serde_json::to_value(&config.geometry).unwrap();
+    let mut expected_geometry = case["effective_geometry_config_before_builder"].clone();
+    let actual_engine = actual_geometry["engine"].take();
+    let expected_engine = expected_geometry["engine"].take();
     assert_eq!(
-        serde_json::to_value(&config.geometry).unwrap(),
-        case["effective_geometry_config_before_builder"],
+        actual_geometry, expected_geometry,
         "first W6.5 disagreement at {preset}.effective_geometry_config"
+    );
+    compare_engine(
+        &actual_engine,
+        &expected_engine,
+        &format!("{preset}.effective_geometry_config"),
     );
 
     let design: DesignVector =

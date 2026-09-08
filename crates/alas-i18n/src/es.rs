@@ -9,7 +9,7 @@
 //!
 //! The table itself is not Rust source. `alas/translations/es.py` is a
 //! roughly 1,100-line dict literal, and hand-formatting that as ~760 `match`
-//! arms would both blow past the 700-line file limit several times over and
+//! arms would both blow past the 500-line file limit several times over and
 //! turn a data file into code nobody reviews as code. It lives instead as
 //! `data/es_catalog.json`, checked into this crate, generated once from the
 //! Python source (`golden/generators/gen_i18n.py`) and parsed the first time

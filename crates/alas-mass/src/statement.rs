@@ -1,0 +1,243 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2026 Marcos Quiroga Rodriguez
+
+//! The mass statement: legacy component masses plus stations plus loadable
+//! items, turned into an item-level ledger and named mass states.
+//!
+//! [`crate::breakdown`] answers "how much does the wing weigh"; this module
+//! answers "what is the aircraft's mass, centre of gravity and inertia
+//! tensor at takeoff". [`MassStatement::build`] places every
+//! [`crate::breakdown::MassBreakdown`] component at its
+//! [`crate::stations::ComponentStations`] station as a [`MassItem`], with a
+//! centroidal tensor from [`crate::inertia`]'s closed-form solids ([`build`]
+//! is that physical detail), then [`MassStatement::state`] combines the
+//! right subset for each named load case. Fuel is kept out of the built
+//! ledger: [`MassStatement::state`] and [`MassStatement::with_fuel_items`]
+//! add whichever usable-fuel items the caller supplies on top of the
+//! zero-fuel ledger, so a CG-vs-fuel sweep never has to rebuild it.
+
+mod build;
+
+use crate::breakdown::MassBreakdown;
+use crate::flops_transport::FlopsTransportBreakdown;
+use crate::inertia::RadiiOfGyration;
+use crate::ledger::{LedgerError, MassGroup, MassItem, MassLedger, MassProperties};
+use crate::stations::ComponentStations;
+
+/// A payload item's mass, position and extent, independent of
+/// `alas-payload`'s `DeckItem` so this crate does not depend on it.
+///
+/// The pipeline fills these from `PayloadLayout`'s `DeckItem`s; an empty
+/// slice of these falls back to [`ComponentStations::payload_fallback`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct PayloadItemSummary {
+    /// A human-readable label, folded into the ledger item's id.
+    pub label: String,
+    /// Item mass, kg.
+    pub mass_kg: f64,
+    /// Item centroid in the geometry frame, m.
+    pub position_m: [f64; 3],
+    /// Item bounding extent `[length_x, width_y, height_z]`, m.
+    pub extent_m: [f64; 3],
+}
+
+/// A named aircraft mass state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum LoadState {
+    /// Fixed items, operating items and unusable fuel: no payload, no usable fuel.
+    OperatingEmpty,
+    /// Operating empty plus payload, no usable fuel.
+    ZeroFuel,
+    /// Zero fuel plus the statement's takeoff fuel items.
+    Takeoff,
+    /// Zero fuel plus the statement's landing fuel items.
+    Landing,
+}
+
+/// Everything [`MassStatement::build`] needs to construct a ledger.
+pub struct MassStatementInputs<'a> {
+    /// The legacy ten-group component masses.
+    pub masses: &'a MassBreakdown,
+    /// Geometry-derived placement and extent for every component.
+    pub stations: &'a ComponentStations,
+    /// Per-item payload, or empty to use the lumped fallback.
+    pub payload_items: &'a [PayloadItemSummary],
+    /// Usable-fuel items at takeoff, from the tanks/fuel-plan modules.
+    pub takeoff_fuel_items: Vec<MassItem>,
+    /// Usable-fuel items at landing.
+    pub landing_fuel_items: Vec<MassItem>,
+    /// Fuel that cannot be delivered to the engines; part of the OEW.
+    pub unusable_fuel_items: Vec<MassItem>,
+    /// The verified FLOPS systems/operating-items buildup, when the
+    /// selected systems-mass method produced one.
+    pub flops: Option<&'a FlopsTransportBreakdown>,
+}
+
+/// The item-level mass ledger plus the fuel loads it is combined with.
+///
+/// The ledger itself never holds usable fuel: [`Self::state`] and
+/// [`Self::with_fuel_items`] add [`Self::takeoff_fuel`]/
+/// [`Self::landing_fuel`] (or an arbitrary set) on top of it.
+pub struct MassStatement {
+    ledger: MassLedger,
+    takeoff_fuel: Vec<MassItem>,
+    landing_fuel: Vec<MassItem>,
+}
+
+/// A ledger's radii of gyration next to Raymer's jet-transport reference row.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RadiiComparison {
+    /// Roll, pitch and yaw radii of gyration from the ledger, m.
+    pub ledger_radii_m: [f64; 3],
+    /// The same three radii Raymer's jet-transport fractions imply, m.
+    pub reference_radii_m: [f64; 3],
+    /// `ledger / reference` per axis; near 1 is plausible, not a pin.
+    pub ratio: [f64; 3],
+}
+
+impl MassStatement {
+    /// Build and validate the ledger, keeping the fuel items separate.
+    ///
+    /// # Errors
+    ///
+    /// [`LedgerError`] if any item (including a caller-supplied payload or
+    /// fuel item) has an invalid mass, position, inertia tensor, or a
+    /// duplicate id.
+    pub fn build(inputs: MassStatementInputs<'_>) -> Result<Self, LedgerError> {
+        let ledger = build::build_ledger(
+            inputs.masses,
+            inputs.stations,
+            inputs.payload_items,
+            inputs.unusable_fuel_items,
+            inputs.flops,
+        );
+        ledger.validate()?;
+        Ok(Self {
+            ledger,
+            takeoff_fuel: inputs.takeoff_fuel_items,
+            landing_fuel: inputs.landing_fuel_items,
+        })
+    }
+
+    /// The built ledger, excluding usable fuel (see the struct doc).
+    pub fn ledger(&self) -> &MassLedger {
+        &self.ledger
+    }
+
+    /// Every ledger item combined: operating empty plus payload, no usable fuel.
+    fn zero_fuel(&self) -> MassProperties {
+        self.ledger.properties_where(|_| true)
+    }
+
+    /// Mass, centre of gravity and inertia tensor for a named load state.
+    pub fn state(&self, state: LoadState) -> MassProperties {
+        match state {
+            LoadState::OperatingEmpty => self.ledger.operating_empty(),
+            LoadState::ZeroFuel => self.zero_fuel(),
+            LoadState::Takeoff => self.with_fuel_items(&self.takeoff_fuel),
+            LoadState::Landing => self.with_fuel_items(&self.landing_fuel),
+        }
+    }
+
+    /// Zero-fuel properties plus an arbitrary set of fuel items.
+    ///
+    /// This is what a CG-vs-fuel curve sweeps over: each candidate fuel
+    /// loading is combined with the same zero-fuel ledger rather than
+    /// rebuilding it.
+    pub fn with_fuel_items(&self, fuel_items: &[MassItem]) -> MassProperties {
+        let zero_fuel = self.zero_fuel();
+        let fuel_properties: Vec<MassProperties> =
+            fuel_items.iter().map(MassItem::properties).collect();
+        let mut parts = Vec::with_capacity(fuel_properties.len() + 1);
+        parts.push(zero_fuel);
+        parts.extend(fuel_properties);
+        MassProperties::combine(parts.iter())
+    }
+
+    /// `props`'s longitudinal centre of gravity as a percentage of the mean
+    /// aerodynamic chord, aft of `mac_leading_edge_x_m`.
+    pub fn cg_pct_mac(&self, props: &MassProperties, mac_leading_edge_x_m: f64, mac_m: f64) -> f64 {
+        100.0 * (props.cg_m[0] - mac_leading_edge_x_m) / mac_m
+    }
+
+    /// Compare `state`'s ledger radii of gyration with Raymer's
+    /// jet-transport reference row at the given span and fuselage length.
+    ///
+    /// This is a plausibility check, not a pin: [`RadiiComparison::ratio`]
+    /// near 1 says the ledger's mass distribution is of the right order for
+    /// a jet transport, not that either value is correct to more precision
+    /// than a conceptual-design correlation supports.
+    pub fn radii_of_gyration_check(
+        &self,
+        state: LoadState,
+        span_m: f64,
+        fuselage_length_m: f64,
+    ) -> RadiiComparison {
+        let props = self.state(state);
+        let ledger_radii_m = props.radii_of_gyration();
+        let reference_radii_m = RadiiOfGyration::JET_TRANSPORT.radii_m(span_m, fuselage_length_m);
+        let ratio = [
+            safe_ratio(ledger_radii_m[0], reference_radii_m[0]),
+            safe_ratio(ledger_radii_m[1], reference_radii_m[1]),
+            safe_ratio(ledger_radii_m[2], reference_radii_m[2]),
+        ];
+        RadiiComparison {
+            ledger_radii_m,
+            reference_radii_m,
+            ratio,
+        }
+    }
+
+    /// Mass of each ledger group present in `state`, in first-appearance order.
+    pub fn group_totals(&self, state: LoadState) -> Vec<(MassGroup, f64)> {
+        let mut totals = match state {
+            LoadState::OperatingEmpty => {
+                group_totals_where(&self.ledger, |item| item.role.is_operating_empty())
+            }
+            LoadState::ZeroFuel | LoadState::Takeoff | LoadState::Landing => {
+                self.ledger.group_totals()
+            }
+        };
+        let fuel_items: &[MassItem] = match state {
+            LoadState::Takeoff => &self.takeoff_fuel,
+            LoadState::Landing => &self.landing_fuel,
+            LoadState::OperatingEmpty | LoadState::ZeroFuel => &[],
+        };
+        if !fuel_items.is_empty() {
+            totals.push((
+                MassGroup::Fuel,
+                fuel_items.iter().map(|item| item.mass_kg).sum(),
+            ));
+        }
+        totals
+    }
+}
+
+/// `numerator / denominator`, or `0.0` rather than `NaN`/`inf` when the
+/// reference radius is degenerate (zero span or fuselage length).
+fn safe_ratio(numerator: f64, denominator: f64) -> f64 {
+    if denominator > 0.0 {
+        numerator / denominator
+    } else {
+        0.0
+    }
+}
+
+/// Mass of each group among the items `include` selects, first-appearance order.
+fn group_totals_where(
+    ledger: &MassLedger,
+    include: impl Fn(&MassItem) -> bool,
+) -> Vec<(MassGroup, f64)> {
+    let mut totals: Vec<(MassGroup, f64)> = Vec::new();
+    for item in ledger.items().iter().filter(|item| include(item)) {
+        match totals.iter_mut().find(|(group, _)| *group == item.group) {
+            Some((_, total)) => *total += item.mass_kg,
+            None => totals.push((item.group, item.mass_kg)),
+        }
+    }
+    totals
+}
+
+#[cfg(test)]
+#[path = "statement_tests.rs"]
+mod tests;

@@ -47,6 +47,24 @@ pub struct SparSizing {
     pub margin_of_safety: Vec<f64>,
 }
 
+/// The station returned by [`WingboxSizing::controlling_margin`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ControllingMargin {
+    /// Raw margin of safety at the controlling station, full precision.
+    pub margin: f64,
+    /// Index into [`WingboxSizing::spars`] and [`WingboxSizing::spar_fracs`].
+    pub spar_index: usize,
+    /// The spar's chordwise position, as a fraction of local chord.
+    pub chord_fraction: f64,
+    /// Index into [`WingboxSizing::y_stations`] and
+    /// [`WingboxSizing::eta_stations`].
+    pub station_index: usize,
+    /// Spanwise station, m.
+    pub y_m: f64,
+    /// Normalized spanwise station, `y / semi_span`.
+    pub eta: f64,
+}
+
 /// The sized wingbox: per-station geometry, rib layout and mass breakdown.
 #[derive(Debug, Clone, PartialEq)]
 pub struct WingboxSizing {
@@ -108,22 +126,55 @@ impl WingboxSizing {
     /// is a valid margin for a station whose demand is below the numerical
     /// reporting threshold.
     pub fn minimum_margin_of_safety(&self) -> f64 {
-        let mut minimum = f64::INFINITY;
-        let mut found = false;
-        for spar in &self.spars {
-            for &margin in &spar.margin_of_safety {
-                if margin.is_nan() {
-                    return f64::NAN;
+        self.controlling_margin().map_or(f64::NAN, |c| c.margin)
+    }
+
+    /// The station that controls [`Self::minimum_margin_of_safety`], with its
+    /// location, for diagnostics.
+    ///
+    /// Rounding the controlling margin to a fixed number of decimals -- as a
+    /// failure message meant for humans naturally does -- collapses every
+    /// value between roughly `-5e-7` and `0` to the same displayed
+    /// `-0.000000`, hiding whether the shortfall is floating-point noise at
+    /// the active root boundary or a real, if small, structural deficit.
+    /// Callers that need to tell those apart must use the raw
+    /// [`ControllingMargin::margin`] here, not a display-rounded value.
+    ///
+    /// `None` only when there are no spar stations at all. As with
+    /// [`Self::minimum_margin_of_safety`], a NaN margin takes priority over
+    /// any finite one so an incomplete calculation is never reported as a
+    /// located structural result.
+    pub fn controlling_margin(&self) -> Option<ControllingMargin> {
+        let mut best: Option<ControllingMargin> = None;
+        for (spar_index, spar) in self.spars.iter().enumerate() {
+            for (station_index, &margin) in spar.margin_of_safety.iter().enumerate() {
+                let candidate = ControllingMargin {
+                    margin,
+                    spar_index,
+                    chord_fraction: self.spar_fracs.get(spar_index).copied().unwrap_or(f64::NAN),
+                    station_index,
+                    y_m: self
+                        .y_stations
+                        .get(station_index)
+                        .copied()
+                        .unwrap_or(f64::NAN),
+                    eta: self
+                        .eta_stations
+                        .get(station_index)
+                        .copied()
+                        .unwrap_or(f64::NAN),
+                };
+                let replace = match &best {
+                    None => true,
+                    Some(current) if current.margin.is_nan() => false,
+                    Some(current) => margin.is_nan() || margin < current.margin,
+                };
+                if replace {
+                    best = Some(candidate);
                 }
-                minimum = minimum.min(margin);
-                found = true;
             }
         }
-        if found {
-            minimum
-        } else {
-            f64::NAN
-        }
+        best
     }
 
     /// Whether every sized spar station has a non-NaN non-negative margin.
@@ -515,6 +566,84 @@ mod tests {
         assert_eq!(sizing.minimum_margin_of_safety(), -0.1);
         sizing.spars[0].margin_of_safety[0] = f64::NAN;
         assert!(!sizing.strength_margins_pass());
+        assert!(sizing.minimum_margin_of_safety().is_nan());
+    }
+
+    #[test]
+    fn controlling_margin_locates_the_smallest_finite_margin_across_spars_and_stations() {
+        let mut sizing = test_sizing();
+        sizing.spars = vec![
+            SparSizing {
+                chord_fraction: 0.25,
+                h: vec![1.0, 1.0],
+                w_cap: vec![1.0, 1.0],
+                t_cap: vec![1.0, 1.0],
+                a_cap: vec![1.0, 1.0],
+                t_web: 0.1,
+                frac_moment: vec![1.0, 1.0],
+                margin_of_safety: vec![0.5, 1.0],
+            },
+            SparSizing {
+                chord_fraction: 0.75,
+                h: vec![1.0, 1.0],
+                w_cap: vec![1.0, 1.0],
+                t_cap: vec![1.0, 1.0],
+                a_cap: vec![1.0, 1.0],
+                t_web: 0.1,
+                frac_moment: vec![1.0, 1.0],
+                margin_of_safety: vec![-4.2e-7, 2.0],
+            },
+        ];
+        let controlling = sizing.controlling_margin().expect("spar stations present");
+        assert_eq!(controlling.margin, -4.2e-7);
+        assert_eq!(controlling.spar_index, 1);
+        assert_eq!(controlling.station_index, 0);
+        assert!((controlling.chord_fraction - 0.75).abs() < 1e-12);
+        assert_eq!(controlling.y_m, 0.0);
+        assert_eq!(controlling.eta, 0.0);
+        // The raw value survives at full precision -- this is exactly what a
+        // `{:.6}`-rounded display collapses to the ambiguous "-0.000000".
+        assert_ne!(controlling.margin, 0.0);
+        assert_eq!(sizing.minimum_margin_of_safety(), controlling.margin);
+    }
+
+    #[test]
+    fn controlling_margin_prefers_a_nan_station_over_any_finite_margin() {
+        let mut sizing = test_sizing();
+        sizing.spars = vec![
+            SparSizing {
+                chord_fraction: 0.25,
+                h: vec![1.0, 1.0],
+                w_cap: vec![1.0, 1.0],
+                t_cap: vec![1.0, 1.0],
+                a_cap: vec![1.0, 1.0],
+                t_web: 0.1,
+                frac_moment: vec![1.0, 1.0],
+                margin_of_safety: vec![-1.0, f64::NAN],
+            },
+            SparSizing {
+                chord_fraction: 0.75,
+                h: vec![1.0],
+                w_cap: vec![1.0],
+                t_cap: vec![1.0],
+                a_cap: vec![1.0],
+                t_web: 0.1,
+                frac_moment: vec![1.0],
+                margin_of_safety: vec![-5.0],
+            },
+        ];
+        let controlling = sizing.controlling_margin().expect("spar stations present");
+        assert!(controlling.margin.is_nan());
+        assert_eq!(controlling.spar_index, 0);
+        assert_eq!(controlling.station_index, 1);
+        assert!(sizing.minimum_margin_of_safety().is_nan());
+    }
+
+    #[test]
+    fn controlling_margin_is_none_when_there_are_no_spar_stations() {
+        let sizing = test_sizing();
+        assert!(sizing.spars.is_empty());
+        assert!(sizing.controlling_margin().is_none());
         assert!(sizing.minimum_margin_of_safety().is_nan());
     }
 

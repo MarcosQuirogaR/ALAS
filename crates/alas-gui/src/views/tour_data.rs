@@ -105,7 +105,7 @@ pub const TOUR_STEPS: &[TourStep] = &[
     },
     TourStep {
         title: "Run the pipeline",
-        body: "Run optimizes the design, runs the aerodynamic analysis, and every discipline enabled under Setup > Analyses -- one pass. A stage label and status appear while it runs. Analyze baseline does a quick weight & balance check without the optimizer.",
+        body: "Run uses the single MADS optimizer, runs the aerodynamic analysis, and performs every discipline enabled under Setup > Analyses -- one pass. A stage label and status appear while it runs. Analyze reference selects the fixed-aircraft baseline sandbox and skips redesign.",
         page: None,
         target: Some(TourTarget::Run),
     },

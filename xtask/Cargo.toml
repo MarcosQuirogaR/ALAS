@@ -7,6 +7,10 @@ authors.workspace = true
 publish = false
 
 [dependencies]
+# Parse source items and their spans to count textual includes and exclude only
+# actual test items; a line grep can hide production items following tests.
+syn = { workspace = true, features = ["visit"] }
+proc-macro2 = { workspace = true, features = ["span-locations"] }
 
 [lints.rust]
 unsafe_code = "forbid"

@@ -43,8 +43,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     overlay, AnalysisConfig, CabinConfig, ConfigNode, ControlSurfacesConfig, DesignRequirements,
-    DragModelConfig, GeometryConfig, LandingGearConfig, MassModelConfig, MissionConfig, MsesConfig,
-    OptimizerConfig, OverlayError, PerformanceConfig, PropulsionCycleConfig, StructuresConfig,
+    DragModelConfig, FuelPolicyConfig, FuelTankLayoutConfig, GeometryConfig, LandingGearConfig,
+    MassModelConfig, MissionConfig, MsesConfig, OptimizerConfig, OverlayError, PerformanceConfig,
+    PropulsionCycleConfig, StructuresConfig,
 };
 
 /// Everything one run is configured with.
@@ -155,6 +156,22 @@ pub struct AlasConfig {
     )]
     pub structures: StructuresConfig,
 
+    /// The operating rule the mission fuel is planned under.
+    #[serde(default, skip_serializing_if = "FuelPolicyConfig::is_default")]
+    #[config(
+        nested,
+        help = "Fuel-planning policy: which operating rule supplies taxi, contingency, alternate and final-reserve fuel, and the operator assumptions those rules leave open."
+    )]
+    pub fuel_policy: FuelPolicyConfig,
+
+    /// Where the fuel is carried.
+    #[serde(default, skip_serializing_if = "FuelTankLayoutConfig::is_default")]
+    #[config(
+        nested,
+        help = "Fuel-tank arrangement: which wing, centre, trim and auxiliary tanks the aircraft has, the semispan stations that bound them, and the published capacities of a registered aircraft."
+    )]
+    pub fuel_tanks: FuelTankLayoutConfig,
+
     /// Where the route starts.
     ///
     /// Saved with the configuration rather than chosen per run, so reloading
@@ -189,6 +206,8 @@ impl Default for AlasConfig {
             control_surfaces: ControlSurfacesConfig::default(),
             propulsion_cycle: PropulsionCycleConfig::default(),
             structures: StructuresConfig::default(),
+            fuel_policy: FuelPolicyConfig::default(),
+            fuel_tanks: FuelTankLayoutConfig::default(),
             // A long-haul pair, so an unconfigured run has a real route rather
             // than a zero-length one.
             departure_airport: "London Heathrow (EGLL)".to_owned(),
@@ -224,13 +243,31 @@ impl AlasConfig {
                     let operational = preset.operational_mission_defaults();
                     instance.preset = name.to_owned();
                     instance.geometry = preset.geometry.clone();
+                    // A preset selection is the one product boundary where
+                    // an engine name intentionally loads database values.
+                    // The overlay below then applies saved/live edits, which
+                    // every downstream solver must preserve verbatim.
+                    instance.geometry.engine.apply_engine_spec();
                     instance.requirements = preset.requirements.clone();
+                    // A preset's published passenger target is a load-case
+                    // input, not an operator LOPA. Seed the generic cabin
+                    // with the profile that can physically represent that
+                    // target; the file overlay below remains authoritative
+                    // for deliberate cabin edits.
+                    instance.cabin = preset.planning_cabin_config();
                     instance.landing_gear = preset.landing_gear.clone();
                     if let Some(mass_model) = &preset.mass_model {
                         instance.mass_model = mass_model.clone();
                     }
                     if let Some(performance) = &preset.performance {
                         instance.performance = performance.clone();
+                    }
+                    // A registered aircraft's tank arrangement is aircraft
+                    // data, not a study assumption, so it travels with the
+                    // preset the same way its gear and high-lift calibrations
+                    // do; the overlay below still lets a file change it.
+                    if let Some(tanks) = crate::preset_fuel_tanks::layout_for(name) {
+                        instance.fuel_tanks = tanks;
                     }
                     instance.departure_airport = operational.departure_airport.to_owned();
                     instance.arrival_airport = operational.arrival_airport.to_owned();
@@ -244,6 +281,87 @@ impl AlasConfig {
 
         overlay(&instance, data)
     }
+
+    /// The maximum landing mass to enforce for `candidate_mtow_kg`.
+    ///
+    /// In [`crate::optimizer::DesignMode::BaselineSandbox`], a valid declared
+    /// reference MLW -- the registered preset's own certified limit -- governs
+    /// as a fixed aircraft limit and does not scale with `candidate_mtow_kg`:
+    /// BaselineSandbox replays that certified airframe unchanged, so its
+    /// certified MLW does not move because a candidate MTOW does.
+    /// [`crate::optimizer::DesignMode::ReferenceAdaptation`] applies the same
+    /// declared value, but there it is a *reference-aircraft* limit rather
+    /// than a certification of the adapted design: that mode may move some
+    /// design variables inside configured windows, so the aircraft actually
+    /// being evaluated is no longer necessarily the certified article the MLW
+    /// was published for. Using the reference value there models "hold to the
+    /// envelope of the aircraft this design is adapted from," not "this
+    /// modified design is certified to that mass." In
+    /// [`crate::optimizer::DesignMode::CleanSheet`], where there is no
+    /// reference airframe to anchor to at all, the configured mass-model
+    /// fraction of `candidate_mtow_kg` is used for sizing instead. A preset
+    /// with no declared MLW, or no preset at all, falls back to the fraction
+    /// in every mode; nothing here invents a value the registry does not
+    /// carry.
+    ///
+    /// No configuration field currently lets an explicit TLAR override this
+    /// (see [`DesignRequirements`]); if one is added later it must be checked
+    /// ahead of the design-mode branch below, not folded into either fallback.
+    pub fn landing_mass_limit_kg(&self, candidate_mtow_kg: f64) -> f64 {
+        use crate::optimizer::DesignMode;
+
+        let fraction_limit_kg = candidate_mtow_kg * self.mass_model.mlw_fraction_mtow;
+        match self.optimizer.design_space.mode {
+            DesignMode::CleanSheet => fraction_limit_kg,
+            DesignMode::BaselineSandbox | DesignMode::ReferenceAdaptation => self
+                .declared_reference_mlw_kg()
+                .unwrap_or(fraction_limit_kg),
+        }
+    }
+
+    /// The registered preset's own declared MLW, if it names one and it is a
+    /// finite positive mass.
+    fn declared_reference_mlw_kg(&self) -> Option<f64> {
+        let mlw_kg = crate::presets::get(&self.preset).ok()?.reference.mlw_kg?;
+        is_valid_declared_mass_kg(mlw_kg).then_some(mlw_kg)
+    }
+
+    /// This configuration's saved mass model, with `mlw_fraction_mtow`
+    /// replaced by the ratio that reproduces [`Self::landing_mass_limit_kg`]
+    /// for `candidate_mtow_kg`.
+    ///
+    /// Mass APIs below `AlasConfig` (e.g.
+    /// `run_mass_analysis_with_model_checked_product_with_gear`) take a
+    /// [`MassModelConfig`] and read a landing-mass fraction straight out of
+    /// it; they have no `DesignMode`/preset identity to resolve a reference
+    /// MLW themselves. `mlw_fraction_mtow` is this method's only way to carry
+    /// [`Self::landing_mass_limit_kg`]'s mode-aware result through that
+    /// existing slot -- it is not a new scalable design fraction. In
+    /// BaselineSandbox/ReferenceAdaptation it is a fixed reference MLW
+    /// divided by whatever `candidate_mtow_kg` is, so it changes if
+    /// `candidate_mtow_kg` does and must be recomputed per call rather than
+    /// cached. Every other field, and the caller's own saved configuration,
+    /// is returned unchanged.
+    ///
+    /// For a non-finite or non-positive `candidate_mtow_kg` the configured
+    /// fraction is left as-is: no ratio can be formed from it, and inventing
+    /// one would manufacture a finite result for an input the caller's own
+    /// design-requirements validation should already have rejected before it
+    /// reaches a mass call.
+    pub fn analysis_mass_model(&self, candidate_mtow_kg: f64) -> MassModelConfig {
+        let mut model = self.mass_model.clone();
+        if is_valid_declared_mass_kg(candidate_mtow_kg) {
+            model.mlw_fraction_mtow =
+                self.landing_mass_limit_kg(candidate_mtow_kg) / candidate_mtow_kg;
+        }
+        model
+    }
+}
+
+/// Whether a declared reference mass (MLW, MTOW, ...) is usable as a fixed
+/// limit rather than treated as missing data.
+fn is_valid_declared_mass_kg(mass_kg: f64) -> bool {
+    mass_kg.is_finite() && mass_kg > 0.0
 }
 
 // A test asserts on values it constructed here directly, so a failed unwrap
@@ -253,6 +371,171 @@ impl AlasConfig {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn baseline_sandbox_uses_the_declared_reference_mlw_not_the_fraction() {
+        let mut config = AlasConfig::from_value(&json!({"preset": "ATR72-600"})).unwrap();
+        config.optimizer.design_space.mode = crate::optimizer::DesignMode::BaselineSandbox;
+        assert_eq!(config.requirements.mtow_kg, 23_000.0);
+        // The generic fraction would give 23_000 * 0.92 = 21_160, not the
+        // preset's declared certified MLW of 22_350.
+        assert_eq!(
+            config.landing_mass_limit_kg(config.requirements.mtow_kg),
+            22_350.0
+        );
+    }
+
+    #[test]
+    fn reference_adaptation_also_uses_the_declared_reference_mlw() {
+        let mut config = AlasConfig::from_value(&json!({"preset": "ATR72-600"})).unwrap();
+        config.optimizer.design_space.mode = crate::optimizer::DesignMode::ReferenceAdaptation;
+        assert_eq!(
+            config.landing_mass_limit_kg(config.requirements.mtow_kg),
+            22_350.0
+        );
+    }
+
+    #[test]
+    fn every_preset_with_a_declared_mlw_resolves_to_it_in_reference_modes() {
+        for preset in crate::presets::registry() {
+            let Some(mlw_kg) = preset.reference.mlw_kg else {
+                continue;
+            };
+            let mut config = AlasConfig::from_value(&json!({"preset": preset.name})).unwrap();
+            for mode in [
+                crate::optimizer::DesignMode::BaselineSandbox,
+                crate::optimizer::DesignMode::ReferenceAdaptation,
+            ] {
+                config.optimizer.design_space.mode = mode;
+                assert_eq!(
+                    config.landing_mass_limit_kg(config.requirements.mtow_kg),
+                    mlw_kg,
+                    "{} in {mode:?}",
+                    preset.name
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn clean_sheet_mode_keeps_the_mass_model_fraction_even_with_a_declared_mlw() {
+        let mut config = AlasConfig::from_value(&json!({"preset": "ATR72-600"})).unwrap();
+        config.optimizer.design_space.mode = crate::optimizer::DesignMode::CleanSheet;
+        let candidate_mtow_kg = 24_000.0;
+        assert_eq!(
+            config.landing_mass_limit_kg(candidate_mtow_kg),
+            candidate_mtow_kg * config.mass_model.mlw_fraction_mtow
+        );
+    }
+
+    #[test]
+    fn a_reference_mode_certified_limit_does_not_move_with_the_candidate_mtow() {
+        let mut config = AlasConfig::from_value(&json!({"preset": "ATR72-600"})).unwrap();
+        config.optimizer.design_space.mode = crate::optimizer::DesignMode::BaselineSandbox;
+        // A search candidate's MTOW must not scale a real airframe's
+        // certified landing-mass limit the way the fraction fallback would.
+        assert_eq!(config.landing_mass_limit_kg(20_000.0), 22_350.0);
+        assert_eq!(config.landing_mass_limit_kg(23_000.0), 22_350.0);
+        assert_eq!(config.landing_mass_limit_kg(30_000.0), 22_350.0);
+    }
+
+    #[test]
+    fn a_preset_without_a_declared_mlw_falls_back_to_the_fraction_in_reference_modes() {
+        // AVE is the from-scratch default entry; it declares no reference data.
+        let mut config = AlasConfig::from_value(&json!({"preset": "AVE"})).unwrap();
+        assert_eq!(crate::presets::get("AVE").unwrap().reference.mlw_kg, None);
+        config.optimizer.design_space.mode = crate::optimizer::DesignMode::BaselineSandbox;
+        let mtow_kg = config.requirements.mtow_kg;
+        assert_eq!(
+            config.landing_mass_limit_kg(mtow_kg),
+            mtow_kg * config.mass_model.mlw_fraction_mtow
+        );
+    }
+
+    #[test]
+    fn an_unregistered_preset_name_falls_back_to_the_fraction_rather_than_erroring() {
+        let mut config = AlasConfig::default();
+        config.preset = "not-a-real-preset".to_owned();
+        config.optimizer.design_space.mode = crate::optimizer::DesignMode::BaselineSandbox;
+        let mtow_kg = config.requirements.mtow_kg;
+        assert_eq!(
+            config.landing_mass_limit_kg(mtow_kg),
+            mtow_kg * config.mass_model.mlw_fraction_mtow
+        );
+    }
+
+    #[test]
+    fn analysis_mass_model_in_reference_modes_carries_the_declared_mlw_through_the_fraction_slot() {
+        let mut config = AlasConfig::from_value(&json!({"preset": "ATR72-600"})).unwrap();
+        for mode in [
+            crate::optimizer::DesignMode::BaselineSandbox,
+            crate::optimizer::DesignMode::ReferenceAdaptation,
+        ] {
+            config.optimizer.design_space.mode = mode;
+            // Two different adapted MTOWs must still imply the same 22_350 kg
+            // reference landing mass once the derived fraction is applied
+            // back to the candidate it was built from -- the ratio itself is
+            // only the transport format, not a new scalable constraint.
+            for candidate_mtow_kg in [20_000.0, 23_000.0, 30_000.0] {
+                let model = config.analysis_mass_model(candidate_mtow_kg);
+                assert_eq!(
+                    model.mlw_fraction_mtow,
+                    22_350.0 / candidate_mtow_kg,
+                    "{mode:?} at {candidate_mtow_kg}"
+                );
+                assert!(
+                    (candidate_mtow_kg * model.mlw_fraction_mtow - 22_350.0).abs() < 1e-9,
+                    "{mode:?} at {candidate_mtow_kg}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn analysis_mass_model_in_clean_sheet_keeps_the_original_fraction() {
+        let mut config = AlasConfig::from_value(&json!({"preset": "ATR72-600"})).unwrap();
+        config.optimizer.design_space.mode = crate::optimizer::DesignMode::CleanSheet;
+        let original_fraction = config.mass_model.mlw_fraction_mtow;
+        let model = config.analysis_mass_model(24_000.0);
+        assert_eq!(model.mlw_fraction_mtow, original_fraction);
+    }
+
+    #[test]
+    fn analysis_mass_model_changes_only_the_landing_fraction_and_leaves_the_saved_config_alone() {
+        let mut config = AlasConfig::from_value(&json!({"preset": "ATR72-600"})).unwrap();
+        config.optimizer.design_space.mode = crate::optimizer::DesignMode::BaselineSandbox;
+        let saved_mass_model = config.mass_model.clone();
+        let model = config.analysis_mass_model(config.requirements.mtow_kg);
+        assert_eq!(
+            model,
+            MassModelConfig {
+                mlw_fraction_mtow: model.mlw_fraction_mtow,
+                ..saved_mass_model.clone()
+            }
+        );
+        // The call is read-only: the config's own saved mass model is
+        // unchanged afterwards.
+        assert_eq!(config.mass_model, saved_mass_model);
+    }
+
+    #[test]
+    fn analysis_mass_model_with_an_invalid_candidate_leaves_the_configured_fraction() {
+        let mut config = AlasConfig::from_value(&json!({"preset": "ATR72-600"})).unwrap();
+        config.optimizer.design_space.mode = crate::optimizer::DesignMode::BaselineSandbox;
+        let original_fraction = config.mass_model.mlw_fraction_mtow;
+        for invalid in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, 0.0, -1.0] {
+            let model = config.analysis_mass_model(invalid);
+            assert_eq!(model.mlw_fraction_mtow, original_fraction, "{invalid}");
+        }
+    }
+
+    #[test]
+    fn non_finite_or_non_positive_declared_masses_are_invalid() {
+        for invalid in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, 0.0, -1.0] {
+            assert!(!is_valid_declared_mass_kg(invalid), "{invalid}");
+        }
+        assert!(is_valid_declared_mass_kg(22_350.0));
+    }
 
     #[test]
     fn an_empty_file_is_the_defaults_rather_than_an_error() {
@@ -266,10 +549,28 @@ mod tests {
     fn a_preset_replaces_the_geometry_and_the_requirements() {
         let config = AlasConfig::from_value(&json!({"preset": "A380-800"})).unwrap();
         let preset = crate::presets::get("A380-800").unwrap();
-        assert_eq!(config.geometry, preset.geometry);
+        let mut expected_geometry = preset.geometry.clone();
+        expected_geometry.engine.apply_engine_spec();
+        assert_eq!(config.geometry, expected_geometry);
         assert_eq!(config.requirements, preset.requirements);
         assert_eq!(config.landing_gear, preset.landing_gear);
         assert_eq!(config.preset, "A380-800");
+    }
+
+    #[test]
+    fn a_preset_loads_a_representable_planning_cabin_without_changing_the_brief() {
+        let narrowbody = AlasConfig::from_value(&json!({"preset": "A320-200"})).unwrap();
+        assert_eq!(narrowbody.requirements.num_passengers, 150);
+        assert_eq!(narrowbody.cabin.passenger.business.share_pct, 0.0);
+        assert_eq!(narrowbody.cabin.passenger.economy.share_pct, 100.0);
+
+        let widebody = AlasConfig::from_value(&json!({"preset": "B787-9"})).unwrap();
+        assert_eq!(widebody.cabin.passenger.business.share_pct, 15.0);
+        assert_eq!(widebody.cabin.passenger.economy.share_pct, 85.0);
+
+        let regional = AlasConfig::from_value(&json!({"preset": "ATR72-600"})).unwrap();
+        assert_eq!(regional.requirements.num_passengers, 72);
+        assert_eq!(regional.cabin.passenger.min_exit_pair_spacing_m, 9.5);
     }
 
     #[test]
@@ -289,8 +590,9 @@ mod tests {
         let preset = crate::presets::get("A220-300").unwrap();
         assert_eq!(config.departure_airport, "Riga (EVRA)");
         assert_eq!(config.arrival_airport, "Stockholm Arlanda (ESSA)");
-        let atmosphere = alas_atmo::Atmosphere::new(config.requirements.cruise_altitude_m);
-        let expected = config.requirements.cruise_mach * atmosphere.speed_of_sound();
+        let operational = preset.operational_mission_defaults();
+        let atmosphere = alas_atmo::Atmosphere::new(operational.cruise_altitude_m);
+        let expected = operational.cruise_mach * atmosphere.speed_of_sound();
         assert!((config.mission.profile.cruise_1_air_speed_m_s - expected).abs() < 1e-9);
         assert_ne!(
             config.mission.profile.cruise_1_air_speed_m_s,
@@ -375,7 +677,9 @@ mod tests {
             .collect();
         assert_eq!(names.first(), Some(&"preset"));
         assert_eq!(names.last(), Some(&"arrival_airport"));
-        assert_eq!(names.len(), 17);
+        assert_eq!(names.len(), 19);
+        assert!(names.contains(&"fuel_policy"));
+        assert!(names.contains(&"fuel_tanks"));
     }
 
     #[test]

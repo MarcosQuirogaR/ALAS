@@ -32,6 +32,7 @@ mod leaf;
 mod overlay;
 mod schema;
 
+pub mod airport_dataset;
 pub mod airports;
 pub mod analysis;
 pub mod cabin;
@@ -39,6 +40,9 @@ pub mod control_surfaces;
 pub mod design_variables;
 pub mod engines;
 pub mod fidelity_presets;
+pub mod flops_structure;
+pub mod fuel_policy;
+pub mod fuel_tanks;
 pub mod geometry;
 pub mod landing_gear;
 pub mod mass;
@@ -49,6 +53,7 @@ pub mod optimizer;
 pub mod performance;
 pub mod performance_presets;
 pub mod physics;
+pub mod preset_fuel_tanks;
 pub mod presets;
 pub mod propulsion;
 pub mod requirements;
@@ -66,23 +71,40 @@ pub use schema::{
     TranslatedField, TranslatedNode,
 };
 
+pub use airport_dataset::{
+    dataset_provenance, AirportDataError, AirportField, DatasetProvenance, FieldSource,
+    ProvenancedAirport, RunwayDataKind,
+};
 pub use analysis::AnalysisConfig;
 pub use cabin::{CabinConfig, CargoDeckConfig, PassengerCabinConfig, SeatClassConfig};
 pub use control_surfaces::ControlSurfacesConfig;
 pub use design_variables::{
     DesignVariableSpec, DesignVector, DesignVectorError, SPECS as DESIGN_VARIABLE_SPECS,
 };
+pub use engines::{
+    PropulsionTechnology, TurbofanEngineSpec, TurbofanOffDesignSpec, TurbopropEngineSpec,
+};
 pub use fidelity_presets::{FidelityPreset, UnknownFidelityPreset};
+pub use flops_structure::{
+    FlopsStructureConfig, FlopsWingBendingMethod, PropulsionMassMethod, StructuralMassMethod,
+};
+pub use fuel_policy::{FuelPolicyConfig, FuelScheme};
+pub use fuel_tanks::{
+    AuxiliaryTankConfig, CenterTankConfig, FuelTankLayoutConfig, TrimTankConfig, WingTankConfig,
+};
 pub use geometry::{
-    EmpennageConfig, EngineConfig, FuselageConfig, GeometryConfig, InboardAerodynamicStation,
-    MainWingPanel, MainWingStation, MainWingStationKind, TransportPlanform, TransportPlanformError,
-    WingConfig,
+    ActiveEngineModel, EmpennageConfig, EngineBindingError, EngineConfig, FuselageConfig,
+    GeometryConfig, InboardAerodynamicStation, MainWingPanel, MainWingStation, MainWingStationKind,
+    TransportPlanform, TransportPlanformError, WingConfig,
 };
 pub use landing_gear::LandingGearConfig;
 pub use mass::MassModelConfig;
-pub use mission::{MissionConfig, MissionProfileConfig};
+pub use mission::{resolve_true_airspeed_m_s, MissionConfig, MissionProfileConfig, SpeedReference};
 pub use mses::MsesConfig;
-pub use optimizer::{ObjectiveWeights, OptimizerConfig, SolverSettings};
+pub use optimizer::{
+    ConstraintPolicy, DesignMode, DesignSpaceConfig, MtowSizing, ObjectiveConfig, ObjectiveKind,
+    ObjectiveWeights, OptimizerConfig, SolverSettings, VariableEnvelope,
+};
 pub use performance::PerformanceConfig;
 pub use performance_presets::{PerformancePreset, UnknownPerformancePreset};
 pub use physics::DragModelConfig;

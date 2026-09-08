@@ -109,3 +109,59 @@ fn altitude_sweep_has_labelled_isograms_and_a_readable_cruise_annotation() {
         assert!(marker_radii.iter().all(|radius| *radius <= 5.0));
     }
 }
+
+#[test]
+fn atr_turboprop_keeps_public_figures_but_never_presents_turbofan_quantities() {
+    let config_result = AlasConfig::from_value(&serde_json::json!({"preset": "ATR72-600"}));
+    assert!(config_result.is_ok(), "the built-in ATR preset must load");
+    let Ok(config) = config_result else {
+        return;
+    };
+
+    let scenes = [
+        propulsion::figure_propulsion_carpet_plot(&config, None),
+        propulsion::figure_propulsion_efficiency_decomposition(&config, None),
+        propulsion::figure_propulsion_bpr_sensitivity(&config, None),
+        propulsion::figure_propulsion_cycle_summary(&config, None),
+        propulsion::figure_propulsion_altitude_sweep(&config, None),
+    ];
+
+    for scene in &scenes {
+        assert!(has_text(scene, "EXTRAPOLATED"));
+        assert!(has_text(scene, "unvalidated generic six-blade surrogate"));
+        assert!(!has_text(scene, "Bypass ratio"));
+        assert!(!has_text(scene, "OPR"));
+        assert!(!has_text(scene, "TSFC"));
+    }
+
+    assert!(has_text(&scenes[0], "Per-engine net force [kN]"));
+    assert!(has_text(&scenes[1], "Propulsive efficiency"));
+    assert!(has_text(&scenes[2], "Maximum reserve / OEI"));
+    assert!(has_text(&scenes[3], "Fuel flow (family PSFC prior)"));
+    assert!(has_text(&scenes[4], "Per-engine fuel flow [kg/s]"));
+
+    let summary = propulsion::propulsion_cycle_summary(&config);
+    assert!(summary.iter().any(|line| line.contains("shaft command")));
+    assert!(summary.iter().any(|line| line.contains("EXTRAPOLATED")));
+    assert!(summary.iter().all(|line| !line.contains("TSFC")));
+}
+
+#[test]
+fn invalid_engine_binding_is_visible_in_every_public_propulsion_figure() {
+    let mut config = AlasConfig::default();
+    config.geometry.engine.turbofan = None;
+    let scenes = [
+        propulsion::figure_propulsion_carpet_plot(&config, None),
+        propulsion::figure_propulsion_efficiency_decomposition(&config, None),
+        propulsion::figure_propulsion_bpr_sensitivity(&config, None),
+        propulsion::figure_propulsion_cycle_summary(&config, None),
+        propulsion::figure_propulsion_altitude_sweep(&config, None),
+        propulsion::figure_engine_designer_preview(&config, None),
+    ];
+    for scene in &scenes {
+        assert!(has_text(scene, "Propulsion binding error"));
+    }
+    assert!(propulsion::propulsion_cycle_summary(&config)
+        .iter()
+        .any(|line| line.contains("Propulsion binding error")));
+}

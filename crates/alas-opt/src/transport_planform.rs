@@ -122,9 +122,9 @@ pub fn assess_product_transport_planform(
 pub fn transport_planform_penalty(
     assessment: TransportPlanformAssessment,
     geometric_body_alpha_deg: f64,
-    required_fuel_kg: f64,
-    fuel_density_kg_m3: f64,
-    usable_fuel_fraction: f64,
+    _mtow_fuel_allowance_kg: f64,
+    _fuel_density_kg_m3: f64,
+    _usable_fuel_fraction: f64,
     weights: &ObjectiveWeights,
 ) -> Option<f64> {
     let mut penalty = angle_bound_penalty(
@@ -182,26 +182,10 @@ pub fn transport_planform_penalty(
         )?;
     }
 
-    if !required_fuel_kg.is_finite()
-        || !fuel_density_kg_m3.is_finite()
-        || !usable_fuel_fraction.is_finite()
-        || required_fuel_kg < 0.0
-        || fuel_density_kg_m3 <= 0.0
-        || !(0.0..=1.0).contains(&usable_fuel_fraction)
-        || !weights.fuel_volume_penalty_scale.is_finite()
-        || weights.fuel_volume_penalty_scale < 0.0
-    {
-        return None;
-    }
-    if required_fuel_kg > 0.0 {
-        let tank_capacity_kg =
-            assessment.tankable_wingbox_volume_m3 * usable_fuel_fraction * fuel_density_kg_m3;
-        penalty += deficit_penalty(
-            tank_capacity_kg,
-            required_fuel_kg,
-            weights.fuel_volume_penalty_scale,
-        )?;
-    }
+    // Tankable volume remains an assessed packaging metric. It is not scored
+    // against the MTOW closure remainder: that remainder is a mass allowance,
+    // not mission-required fuel. A future mission/reserve constraint supplies
+    // the defensible required usable fuel for a capacity check.
     Some(penalty)
 }
 
@@ -550,5 +534,17 @@ mod tests {
                 .expect("the unconventional planform is evaluable");
 
         assert_eq!(nominal_penalty, unconventional_penalty);
+    }
+
+    #[test]
+    fn mtow_fuel_allowance_does_not_change_the_planform_score() {
+        let (assessment, weights) = nominal_assessment();
+        let low_allowance =
+            transport_planform_penalty(assessment, 3.0, 1_000.0, 800.0, 0.85, &weights)
+                .expect("finite planform");
+        let high_allowance =
+            transport_planform_penalty(assessment, 3.0, 100_000.0, 800.0, 0.85, &weights)
+                .expect("finite planform");
+        assert_eq!(low_allowance, high_allowance);
     }
 }

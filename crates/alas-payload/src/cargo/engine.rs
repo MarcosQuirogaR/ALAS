@@ -166,7 +166,11 @@ fn build_cargo_layout_with_mass_semantics(
         });
         let total_weight = slot.total_weight();
         items.push(DeckItem {
-            kind: ItemKind::Uld,
+            kind: if mass_semantics == CargoMassSemantics::Net && slot.uld.code == "BLK" {
+                ItemKind::Bag
+            } else {
+                ItemKind::Uld
+            },
             deck: slot.deck,
             x: slot.x,
             y: slot.y,
@@ -176,18 +180,24 @@ fn build_cargo_layout_with_mass_semantics(
             mass: total_weight,
             height: h_item,
             label: format!("{} {}kg", slot.uld.code, total_weight as i64),
-            meta: ItemMeta::Container(ContainerMeta {
-                uld: slot.uld.code,
-                fill: if slot.max_net() > 0.0 {
-                    slot.payload / slot.max_net()
-                } else {
-                    0.0
-                },
-                color: slot.uld.color,
-                net: Some(slot.payload),
-            }),
+            meta: if mass_semantics == CargoMassSemantics::Net && slot.uld.code == "BLK" {
+                ItemMeta::BulkBag
+            } else {
+                ItemMeta::Container(ContainerMeta {
+                    uld: slot.uld.code,
+                    fill: if slot.max_net() > 0.0 {
+                        slot.payload / slot.max_net()
+                    } else {
+                        0.0
+                    },
+                    color: slot.uld.color,
+                    net: Some(slot.payload),
+                })
+            },
         });
-        if slot.deck == MAIN {
+        if mass_semantics == CargoMassSemantics::Net && slot.uld.code == "BLK" {
+            continue;
+        } else if slot.deck == MAIN {
             n_main += 1;
         } else {
             n_lower += 1;
