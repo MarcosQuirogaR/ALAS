@@ -85,6 +85,7 @@ fn baseline_error(
 pub fn analyze_baseline(config: &AlasConfig, design: &DesignVector) -> BaselineReport {
     let effective_config = config.clone();
     let req = &effective_config.requirements;
+    let analysis_mass_model = effective_config.analysis_mass_model(req.mtow_kg);
     let builder = AircraftBuilder::new(Some(effective_config.geometry.clone()));
     let mut plane = match builder.build(Some(design), true) {
         Ok(p) => p,
@@ -115,7 +116,7 @@ pub fn analyze_baseline(config: &AlasConfig, design: &DesignVector) -> BaselineR
             &effective_config.geometry,
             &effective_config.cabin,
             &effective_config.control_surfaces,
-            Some(&effective_config.mass_model),
+            Some(&analysis_mass_model),
             None,
             coordinate_model,
             &effective_config.landing_gear,
@@ -183,7 +184,7 @@ pub fn analyze_baseline(config: &AlasConfig, design: &DesignVector) -> BaselineR
             &effective_config.geometry,
             &effective_config.cabin,
             &effective_config.control_surfaces,
-            Some(&effective_config.mass_model),
+            Some(&analysis_mass_model),
             layout_summary.as_ref(),
             coordinate_model,
             &effective_config.landing_gear,

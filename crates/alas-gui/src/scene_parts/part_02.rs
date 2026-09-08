@@ -208,7 +208,7 @@ pub fn build_result_figure_with_camera(
                 })?;
             let fuel = &result.feasibility.fuel_loading;
             let takeoff_mass_kg = fuel.analyzed_takeoff_mass_kg;
-            let mlw_limit_kg = config.requirements.mtow_kg * config.mass_model.mlw_fraction_mtow;
+            let mlw_limit_kg = config.landing_mass_limit_kg(config.requirements.mtow_kg);
             let landing_mass_kg = fuel
                 .analyzed_landing_mass_kg
                 .unwrap_or(mlw_limit_kg.min(takeoff_mass_kg));

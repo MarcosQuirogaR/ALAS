@@ -75,10 +75,27 @@ impl FuelTankLayout {
         });
         let mut fills_kg = vec![0.0; self.tanks.len()];
         let mut remaining_kg = usable_fuel_kg;
-        for index in fill_order {
-            let fill = remaining_kg.min(self.tanks[index].usable_capacity_kg);
-            fills_kg[index] = fill;
-            remaining_kg -= fill;
+        // Tanks that share a burn priority (mirrored left/right pairs, most
+        // often) split their group's fill by capacity share rather than
+        // sequentially by index -- a stable sort on equal keys would
+        // otherwise always saturate the first-listed tank of the tie before
+        // touching the other, biasing every partial load toward one side of
+        // a symmetric aircraft with no physical cause.
+        for group in
+            fill_order.chunk_by(|&a, &b| self.tanks[a].burn_priority == self.tanks[b].burn_priority)
+        {
+            let group_capacity_kg: f64 = group
+                .iter()
+                .map(|&index| self.tanks[index].usable_capacity_kg)
+                .sum();
+            let group_fill_kg = remaining_kg.min(group_capacity_kg);
+            if group_capacity_kg > 0.0 {
+                for &index in group {
+                    let share = self.tanks[index].usable_capacity_kg / group_capacity_kg;
+                    fills_kg[index] = share * group_fill_kg;
+                }
+            }
+            remaining_kg -= group_fill_kg;
         }
         Ok(FuelState { fills_kg })
     }
@@ -183,13 +200,26 @@ impl FuelState {
         burn_order.sort_by_key(|&index| layout.tanks[index].burn_priority);
         let mut fills_kg = self.fills_kg.clone();
         let mut remaining_kg = burned_kg;
-        for index in burn_order {
+        // Same-priority tanks (mirrored pairs) burn down together, split by
+        // each tank's current fuel share, for the same reason `distribute`
+        // fills them together: a sequential drain of the first-listed tank
+        // of a tie would otherwise walk the aircraft's fuel CG off-axis on a
+        // symmetric default with no asymmetric load to justify it.
+        for group in burn_order
+            .chunk_by(|&a, &b| layout.tanks[a].burn_priority == layout.tanks[b].burn_priority)
+        {
             if remaining_kg <= 0.0 {
                 break;
             }
-            let take_kg = remaining_kg.min(fills_kg[index]);
-            fills_kg[index] -= take_kg;
-            remaining_kg -= take_kg;
+            let group_available_kg: f64 = group.iter().map(|&index| fills_kg[index]).sum();
+            let group_take_kg = remaining_kg.min(group_available_kg);
+            if group_available_kg > 0.0 {
+                for &index in group {
+                    let share = fills_kg[index] / group_available_kg;
+                    fills_kg[index] -= share * group_take_kg;
+                }
+            }
+            remaining_kg -= group_take_kg;
         }
         Ok(Self { fills_kg })
     }

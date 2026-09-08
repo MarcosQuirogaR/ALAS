@@ -52,7 +52,10 @@ pub(crate) fn assemble(
     let mtow_ceiling = outcome.mtow_ceiling;
     let kind = objective_config.kind;
     let range_km = outcome.sized.design_range_m / 1_000.0;
-    let passengers = config.requirements.num_passengers;
+    // Efficiency is reported per seat actually carried by the detailed load
+    // case. A shell that cannot seat the requested brief must not look better
+    // merely because the denominator still uses the requested count.
+    let passengers = outcome.sized.carried_passengers;
 
     let hard_violation_sum: f64 = residuals
         .iter()

@@ -168,7 +168,7 @@ pub fn show_results_view(state: &mut AppState, ui: &mut Ui) {
             ui.label(if state.is_running {
                 tr("Running the pipeline...")
             } else {
-                tr("Press Run to optimize and analyze, or Analyze baseline for a quick weight and balance pass.")
+                tr("Press Run to optimize and analyze, or Analyze reference for a fixed-aircraft weight and balance pass.")
             });
         });
         return;

@@ -90,11 +90,15 @@ pub fn show_form_page(state: &mut AppState, ui: &mut Ui, page: &Page) {
     });
     ui.add_space(4.0);
 
-    let visible_fields: Vec<alas_config::Field> = fields
-        .iter()
-        .filter(|field| !is_external_tools_field(group, field.name))
-        .cloned()
-        .collect();
+    let visible_fields = if group == "optimizer" {
+        optimizer_ui_fields(&fields)
+    } else {
+        fields
+            .iter()
+            .filter(|field| !is_external_tools_field(group, field.name))
+            .cloned()
+            .collect()
+    };
     render_editor(state, ui, group, &visible_fields, &error_fields, lang);
     render_preview(state, ui, page.preview, page.preview_title);
 }
@@ -104,6 +108,68 @@ pub fn show_form_page(state: &mut AppState, ui: &mut Ui, page: &Page) {
 /// Setup > External Tools is the single human-facing place to manage them.
 fn is_external_tools_field(group: &str, name: &str) -> bool {
     group == "mission" && matches!(name, "navdata_dir" | "texture_path" | "routes_dir")
+}
+
+/// Keep the optimizer page focused on the one product search contract. Legacy
+/// method/strategy controls remain loadable by the config and parity paths,
+/// but exposing them here would suggest that the product still dispatches a
+/// menu of algorithms. The dedicated Design Space page owns `design_space`.
+const LEGACY_OPTIMIZER_FIELDS: &[&str] = &[
+    "weights",
+    "design_space",
+    "method",
+    "strategy",
+    "finite_difference_step",
+    "constraint_tolerance",
+    "tolerance",
+    "workers",
+    "display_progress",
+    "seed_near_initial_design",
+    "seed_perturbation_fraction",
+];
+
+fn optimizer_ui_fields(fields: &[alas_config::Field]) -> Vec<alas_config::Field> {
+    fields
+        .iter()
+        .filter_map(|field| {
+            if LEGACY_OPTIMIZER_FIELDS.contains(&field.name) {
+                return None;
+            }
+            if field.name != "solver" {
+                return Some(field.clone());
+            }
+            let alas_config::Entry::Node(node) = &field.entry else {
+                return Some(field.clone());
+            };
+            let mut filtered = field.clone();
+            let mut solver = node.clone();
+            solver.fields = solver
+                .fields
+                .into_iter()
+                .filter(|child| !LEGACY_OPTIMIZER_FIELDS.contains(&child.name))
+                .map(|mut child| {
+                    match child.name {
+                        "max_iterations" => {
+                            child.label = "MADS poll/search iterations";
+                            child.help = "Maximum number of MADS poll/search iterations before the run reports iteration_limit.";
+                        }
+                        "population_size" => {
+                            child.label = "MADS evaluation budget multiplier";
+                            child.help = "Multiplier used by the current product driver to derive the bounded MADS evaluation budget from the design dimension and poll iterations.";
+                        }
+                        "seed" => {
+                            child.label = "MADS random seed";
+                            child.help = "Optional integer seed for reproducible MADS search points and poll directions.";
+                        }
+                        _ => {}
+                    }
+                    child
+                })
+                .collect();
+            filtered.entry = alas_config::Entry::Node(solver);
+            Some(filtered)
+        })
+        .collect()
 }
 
 fn render_editor(

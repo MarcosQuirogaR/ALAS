@@ -389,7 +389,7 @@ pub fn assess_physical_feasibility_with_load_case(
     let gravity_m_s2 = config.requirements.gravity_m_s2;
     let static_thrust_n = n_engines * config.geometry.engine.thrust_kn() * 1000.0;
     let static_tw = static_thrust_n / (takeoff_mass_kg * gravity_m_s2);
-    let mlw_limit_kg = mtow_kg * config.mass_model.mlw_fraction_mtow;
+    let mlw_limit_kg = config.landing_mass_limit_kg(mtow_kg);
     let landing_mass_kg = fuel_loading
         .analyzed_landing_mass_kg
         .unwrap_or(mlw_limit_kg.min(takeoff_mass_kg));

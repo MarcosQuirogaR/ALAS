@@ -14,6 +14,7 @@ use std::f64::consts::PI;
 use alas_aero::analysis::AeroAnalysis;
 use alas_atmo::Atmosphere;
 use alas_config::design_variables::DesignVector;
+use alas_config::optimizer::DesignMode;
 use alas_config::AlasConfig;
 use alas_geom::aircraft::spacing::linspace;
 use alas_geom::aircraft::wing::Wing;
@@ -134,7 +135,21 @@ pub(crate) fn apply_candidate_payload_load_case(
     {
         return Ok(());
     }
-    apply_cabin_preset(config, Some(design_vector))
+    // Materialising a named cabin preset is needed to obtain its geometry and
+    // class mix, but the brief's payload is the load case being evaluated.
+    // Preserve it across the capacity solve so a long fuselage cannot turn a
+    // 350-passenger requirement into an unrequested 500-passenger airplane.
+    let target_passengers = config.requirements.num_passengers;
+    let target_cargo_kg = config.requirements.cargo_payload_kg;
+    let passenger_mass_kg = config.requirements.passenger_mass_kg;
+    apply_cabin_preset(config, Some(design_vector))?;
+    config.requirements.num_passengers = target_passengers;
+    config.requirements.cargo_payload_kg = target_cargo_kg;
+    config
+        .cabin
+        .passenger
+        .set_passenger_mass_kg(passenger_mass_kg);
+    Ok(())
 }
 
 /// Callable cost function for aircraft design space optimization.
@@ -148,6 +163,10 @@ pub struct DesignObjective {
     pub target_num_passengers: i64,
     /// Original cargo payload target in kg.
     pub target_cargo_payload_kg: f64,
+    /// Nominal vector around which reference and baseline design envelopes
+    /// are enforced. Clean-sheet runs use the configured preset when one is
+    /// present, otherwise the canonical default vector.
+    pub(crate) design_space_nominal: DesignVector,
     reference_mass_coordinates: bool,
     body_alpha_mesh_correction_deg: Option<f64>,
 }
@@ -155,7 +174,14 @@ pub struct DesignObjective {
 impl DesignObjective {
     /// Construct a new design objective initialized from `config`.
     pub fn new(config: AlasConfig) -> Self {
-        Self::with_mass_coordinate_compatibility(config, false)
+        Self::with_mass_coordinate_compatibility(config, false, None)
+    }
+
+    /// Construct a product objective around an explicit nominal design. The
+    /// optimizer uses this when a caller supplies a registered preset vector;
+    /// direct assessment keeps the configuration's preset/default nominal.
+    pub(crate) fn new_with_nominal(config: AlasConfig, nominal: DesignVector) -> Self {
+        Self::with_mass_coordinate_compatibility(config, false, Some(nominal))
     }
 
     /// Construct an objective that reproduces the frozen Python mass point.
@@ -164,7 +190,7 @@ impl DesignObjective {
     /// [`Self::new`], which evaluates the configured structural-wingbox
     /// centroid and refuses an invalid structural configuration.
     pub fn new_reference_compatibility(config: AlasConfig) -> Self {
-        Self::with_mass_coordinate_compatibility(config, true)
+        Self::with_mass_coordinate_compatibility(config, true, None)
     }
 
     /// Whether this objective replays the frozen Python model (the parity
@@ -176,6 +202,7 @@ impl DesignObjective {
     fn with_mass_coordinate_compatibility(
         mut config: AlasConfig,
         reference_mass_coordinates: bool,
+        nominal: Option<DesignVector>,
     ) -> Self {
         if reference_mass_coordinates {
             // The parity fixture predates the native transport-planform
@@ -192,14 +219,70 @@ impl DesignObjective {
         }
         let target_num_passengers = config.requirements.num_passengers;
         let target_cargo_payload_kg = config.requirements.cargo_payload_kg;
+        let nominal = nominal.unwrap_or_else(|| {
+            if config.preset.is_empty() {
+                DesignVector::default()
+            } else {
+                alas_config::presets::get(&config.preset)
+                    .map(|preset| preset.design_vector)
+                    .unwrap_or_default()
+            }
+        });
         Self {
             config,
             history: OptimizationHistory::new(),
             target_num_passengers,
             target_cargo_payload_kg,
+            // Direct evaluator callers historically pass the configured
+            // preset/default vector. Product optimizer callers use
+            // `new_with_nominal` after the driver has materialized any
+            // cabin-derived variables, so this field is always the nominal
+            // vector for the boundary being evaluated.
+            design_space_nominal: nominal,
             reference_mass_coordinates,
             body_alpha_mesh_correction_deg: None,
         }
+    }
+
+    /// Check the configured mutable/fixed design boundary before building a
+    /// candidate. This is deliberately at the evaluator boundary as well as
+    /// in optimizer bounds, so GUI/CLI finalist assessment cannot bypass a
+    /// reference or baseline sandbox by calling the production entry point
+    /// directly.
+    pub(crate) fn validate_design_space(&self, x: &[f64]) -> Result<(), String> {
+        if self.reference_mass_coordinates {
+            return Ok(());
+        }
+        let design = DesignVector::from_array(x).map_err(|error| error.to_string())?;
+        let space = &self.config.optimizer.design_space;
+        space.validate()?;
+        let envelopes = space.envelope(&self.design_space_nominal);
+        for (index, (value, envelope)) in design.to_array().into_iter().zip(envelopes).enumerate() {
+            // The clean-sheet passenger fuselage is a derived coordinate,
+            // solved from the requested cabin load case in `build_geometry`.
+            // It is fixed in optimizer bounds, but direct evaluator callers
+            // may still submit the pre-sizing preset/default vector. The
+            // builder replaces that coordinate deterministically before any
+            // discipline sees it, so enforcing this fixed boundary here
+            // would reject the public direct-assessment entry point without
+            // adding a mutable degree of freedom.
+            if space.sizes_fuselage_from_cabin() && envelope.name == "fuselage_length_m" {
+                continue;
+            }
+            let tolerance = 1.0e-10 * envelope.lower.abs().max(envelope.upper.abs()).max(1.0);
+            if value < envelope.lower - tolerance || value > envelope.upper + tolerance {
+                return Err(format!(
+                    "design variable {} ({}) lies outside the {:?} envelope [{}, {}]",
+                    index, envelope.name, space.mode, envelope.lower, envelope.upper
+                ));
+            }
+        }
+        if space.mode == DesignMode::BaselineSandbox
+            && design.to_array() != self.design_space_nominal.to_array()
+        {
+            return Err("baseline sandbox accepts only its nominal design vector".to_owned());
+        }
+        Ok(())
     }
 }
 

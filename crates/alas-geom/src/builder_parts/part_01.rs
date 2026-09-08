@@ -185,9 +185,15 @@ impl AircraftBuilder {
             g.root_twist_deg,
             root_section.clone(),
         )];
+        // A derived side-of-body station lies on the straight root-to-kink
+        // panel (its trailing-edge clip is millimetres), and meshing it only
+        // when that clip happens to be active made the lattice section count
+        // depend on the design vector: adjacent candidates differed by eight
+        // sections and by fifteen percent in induced drag. Only an explicitly
+        // cranked station changes the loft, so only that one is meshed.
         if let Some(side_of_body) = planform
             .side_of_body
-            .filter(|station| side_of_body_changes_loft(planform, *station))
+            .filter(|_| g.side_of_body_chord_ratio.is_some())
         {
             let root_to_kink_fraction = side_of_body.y_m / planform.kink.y_m;
             let side_of_body_z_m = g.root_z_m + root_to_kink_fraction * (g.break_z_m - g.root_z_m);

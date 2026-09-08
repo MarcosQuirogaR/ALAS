@@ -58,15 +58,37 @@ fn default_de_never_prefers_a_lower_cost_invalid_candidate_over_a_valid_one() {
 
 #[test]
 fn default_de_returns_the_valid_candidate_when_invalid_is_cheaper() {
+    // The synthetic bounds this fixture used to pass, `(0.0, 1.0)` on every
+    // coordinate including `span_m`, predate the design-mode envelope
+    // intersection in `DesignOptimizer::effective_bounds`: they sit entirely
+    // outside the global `[60, 80]` m span spec and are now rejected before
+    // the evaluator ever runs. Every coordinate is pinned at its default
+    // value except `span_m`, which is left free across its own global
+    // envelope -- an envelope-intersecting request that still lets the
+    // search choose between a low, valid span and a high, cheaper-but-
+    // rejected one, which is the behavior under test.
     let mut config = AlasConfig::default();
-    config.optimizer.solver.max_iterations = 0;
+    // A zero iteration budget only evaluates the single bounds-midpoint
+    // point under the current single-MADS-driver product path, so there is
+    // never a competing invalid candidate to prefer the valid one over.
+    // One iteration also runs the search-phase sampling that actually
+    // exercises multiple candidates across the free span coordinate.
+    config.optimizer.solver.max_iterations = 1;
     config.optimizer.solver.population_size = 1;
     config.optimizer.solver.seed = Some(42);
     config.optimizer.solver.seed_near_initial_design = false;
     let mut optimizer = DesignOptimizer::new(config);
-    let bounds = vec![(0.0, 1.0); alas_config::DESIGN_VARIABLE_SPECS.len()];
+    let nominal = DesignVector::default();
+    let span_bounds = DesignVector::bounds()[0];
+    let mut bounds: Vec<(f64, f64)> = nominal
+        .to_array()
+        .into_iter()
+        .map(|value| (value, value))
+        .collect();
+    bounds[0] = span_bounds;
+    let threshold = 0.5 * (span_bounds.0 + span_bounds.1);
     let mut evaluator = |design: &DesignVector| {
-        if design.span_m >= 0.5 {
+        if design.span_m >= threshold {
             ObjectiveEvaluation {
                 cost: 10.0,
                 valid: true,
@@ -369,15 +391,33 @@ fn native_worker_batches_merge_history_in_candidate_order() {
 
     assert_eq!(evaluations.len(), candidates.len());
     assert_eq!(objective.history.n_evaluations(), candidates.len());
+    // `DesignObjective::new` builds a product (non-reference) objective, so
+    // `evaluate` (`objective_evaluate.rs:41`) routes straight to
+    // `crate::mdo::evaluate_mission_sized` rather than the frozen-replay
+    // path below it that records "geometry_build". The mission-sized path
+    // validates the design-vector shape first
+    // (`DesignObjective::validate_design_space`,
+    // `objective_model.rs:252-286`) and records the earlier, more precise
+    // "design_space" reason before ever reaching geometry construction, so
+    // an empty (wrong-length) candidate now fails at that shape check.
     assert!(objective
         .history
         .reject_reason
         .iter()
-        .all(|reason| reason == "geometry_build"));
+        .all(|reason| reason == "design_space"));
 }
 
 #[test]
-fn every_native_method_dispatches_through_the_shared_evaluator_contract() {
+fn every_legacy_method_name_still_dispatches_through_the_single_mads_driver() {
+    // Every product run uses one MADS driver now (see the comment on
+    // `DesignOptimizer::run_product_search`); the legacy per-method names
+    // (`feasibility_first_de`, `nsga2`, `turbo_1`, `cma_es`) remain valid,
+    // loadable `optimizer.solver.method` values for saved configurations
+    // (`SolverSettings::is_supported_method`) but no longer select a
+    // distinct search algorithm or produce a genetic Pareto front. The
+    // shared contract this test actually verifies is that none of those
+    // saved values are rejected and every one reaches a finite, evaluated
+    // result through the same evaluator.
     for method in ["feasibility_first_de", "nsga2", "turbo_1", "cma_es"] {
         let mut config = AlasConfig::default();
         config.optimizer.solver.method = method.to_owned();
@@ -404,11 +444,8 @@ fn every_native_method_dispatches_through_the_shared_evaluator_contract() {
             .run_with_evaluator(None, Some(&DesignVector::default()), &mut evaluator, None)
             .expect("the test objective accepts every candidate");
 
-        assert_eq!(result.method, method);
+        assert_eq!(result.method, "mads", "{method}");
         assert!(result.best_cost.is_finite(), "{method}");
         assert!(result.history.n_evaluations() > 0, "{method}");
-        if method == "nsga2" {
-            assert!(!result.pareto_front.is_empty());
-        }
     }
 }

@@ -4,8 +4,10 @@
 //! Altitude fitting and horizontal distance closure for mission schedules.
 
 use super::{ALTITUDE_TOLERANCE_M, DISTANCE_TOLERANCE_M, PROFILE_SCALE_ITERATIONS};
+use alas_atmo::us1976_try_compute_values;
+use alas_config::mission::{resolve_true_airspeed_m_s, SpeedReference};
 use alas_mission::segments::{SegmentKind, SegmentSpec};
-use alas_mission::MissionRequest;
+use alas_mission::{MissionRequest, Numerics};
 
 /// Refit the current altitude profile and redistribute the remaining route
 /// distance over its active cruise legs after a guidance revision.
@@ -257,12 +259,8 @@ pub(crate) fn schedule_horizontal_distance(
                 climb_rate_m_s,
             } => {
                 let start = altitude_start_m.unwrap_or(current_altitude_m);
-                distance_m += profile_horizontal_distance(
-                    start,
-                    altitude_end_m,
-                    spec.air_speed_m_s,
-                    climb_rate_m_s,
-                );
+                distance_m +=
+                    profile_horizontal_distance(spec, start, altitude_end_m, climb_rate_m_s);
                 current_altitude_m = altitude_end_m;
             }
             SegmentKind::Descent {
@@ -271,12 +269,8 @@ pub(crate) fn schedule_horizontal_distance(
                 descent_rate_m_s,
             } => {
                 let start = altitude_start_m.unwrap_or(current_altitude_m);
-                distance_m += profile_horizontal_distance(
-                    start,
-                    altitude_end_m,
-                    spec.air_speed_m_s,
-                    descent_rate_m_s,
-                );
+                distance_m +=
+                    profile_horizontal_distance(spec, start, altitude_end_m, descent_rate_m_s);
                 current_altitude_m = altitude_end_m;
             }
             SegmentKind::Cruise {
@@ -304,12 +298,8 @@ pub(super) fn profile_horizontal_distance_of_schedule(
                 climb_rate_m_s,
             } => {
                 let start = altitude_start_m.unwrap_or(current_altitude_m);
-                distance_m += profile_horizontal_distance(
-                    start,
-                    altitude_end_m,
-                    spec.air_speed_m_s,
-                    climb_rate_m_s,
-                );
+                distance_m +=
+                    profile_horizontal_distance(spec, start, altitude_end_m, climb_rate_m_s);
                 current_altitude_m = altitude_end_m;
             }
             SegmentKind::Descent {
@@ -318,12 +308,8 @@ pub(super) fn profile_horizontal_distance_of_schedule(
                 descent_rate_m_s,
             } => {
                 let start = altitude_start_m.unwrap_or(current_altitude_m);
-                distance_m += profile_horizontal_distance(
-                    start,
-                    altitude_end_m,
-                    spec.air_speed_m_s,
-                    descent_rate_m_s,
-                );
+                distance_m +=
+                    profile_horizontal_distance(spec, start, altitude_end_m, descent_rate_m_s);
                 current_altitude_m = altitude_end_m;
             }
             SegmentKind::Cruise { .. } => {}
@@ -332,13 +318,77 @@ pub(super) fn profile_horizontal_distance_of_schedule(
     distance_m
 }
 
-fn profile_horizontal_distance(
+/// Still-air horizontal distance of one climb or descent leg, m.
+///
+/// In [`SpeedReference::TrueAirspeed`] mode the true airspeed is constant and
+/// this is the closed form `|dh| / Vz * sqrt(V^2 - Vz^2)`.
+///
+/// In [`SpeedReference::CalibratedAirspeed`] mode the true airspeed varies
+/// along the ramp, and the distance is *the same quadrature the native segment
+/// flies*: the true airspeed resolved from the configured CAS at each of the
+/// segment's own Chebyshev control-point altitudes (against the segment's ISA
+/// deviation, exactly as `alas_mission::segments::Segment` lays the ramp down),
+/// its horizontal component at each node, contracted with the segment's
+/// integration operator over a time grid that is linear in the node coordinate
+/// because the vertical rate is constant. Reusing the segment's discretization
+/// rather than a finer or analytic one is what makes the closed route distance
+/// equal the distance the pseudospectral mission then actually flies, instead of
+/// agreeing with it only to within quadrature error.
+///
+/// Non-finite when the calibrated airspeed cannot be resolved (supersonic or
+/// invalid state) or the resolved true airspeed does not exceed the vertical
+/// rate; callers already reject a non-finite footprint, and the segment setup
+/// reports the same condition as a typed error.
+pub(super) fn profile_horizontal_distance(
+    spec: &SegmentSpec,
     altitude_start_m: f64,
     altitude_end_m: f64,
-    air_speed_m_s: f64,
     vertical_rate_m_s: f64,
 ) -> f64 {
-    let horizontal_speed_m_s =
-        (air_speed_m_s * air_speed_m_s - vertical_rate_m_s * vertical_rate_m_s).sqrt();
-    (altitude_end_m - altitude_start_m).abs() / vertical_rate_m_s.abs() * horizontal_speed_m_s
+    let rate_m_s = vertical_rate_m_s.abs();
+    let altitude_change_m = (altitude_end_m - altitude_start_m).abs();
+    match spec.air_speed_reference {
+        SpeedReference::TrueAirspeed => {
+            let horizontal_speed_m_s =
+                (spec.air_speed_m_s * spec.air_speed_m_s - rate_m_s * rate_m_s).sqrt();
+            altitude_change_m / rate_m_s * horizontal_speed_m_s
+        }
+        SpeedReference::CalibratedAirspeed => {
+            let mut numerics = Numerics {
+                number_control_points: i64::try_from(spec.number_control_points)
+                    .unwrap_or(i64::MAX),
+                ..Numerics::default()
+            };
+            if numerics.initialize_differentials_dimensionless().is_err() {
+                return f64::NAN;
+            }
+            let Some(last_row) = numerics.dimensionless.integrate.last() else {
+                return f64::NAN;
+            };
+            let span_s = altitude_change_m / rate_m_s;
+            let mut distance_m = 0.0;
+            for (&weight, &node) in last_row.iter().zip(&numerics.dimensionless.control_points) {
+                let altitude_m = altitude_start_m + node * (altitude_end_m - altitude_start_m);
+                let Ok(atmosphere) =
+                    us1976_try_compute_values(altitude_m, spec.temperature_deviation_k)
+                else {
+                    return f64::NAN;
+                };
+                let Ok(true_air_speed_m_s) = resolve_true_airspeed_m_s(
+                    SpeedReference::CalibratedAirspeed,
+                    spec.air_speed_m_s,
+                    atmosphere.pressure_pa,
+                    atmosphere.temperature_k,
+                ) else {
+                    return f64::NAN;
+                };
+                let horizontal_sq = true_air_speed_m_s * true_air_speed_m_s - rate_m_s * rate_m_s;
+                if !horizontal_sq.is_finite() || horizontal_sq <= 0.0 {
+                    return f64::NAN;
+                }
+                distance_m += weight * span_s * horizontal_sq.sqrt();
+            }
+            distance_m
+        }
+    }
 }

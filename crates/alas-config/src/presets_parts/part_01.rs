@@ -381,7 +381,18 @@ impl AircraftPreset {
                 "Madrid Barajas (LEMD)",
                 "Palma de Mallorca (LEPA)",
                 17_000.0 * 0.3048,
-                0.40,
+                // Internal-consistency correction, not a calibration to the
+                // factsheet: this preset's `requirements.cruise_mach` (the
+                // design/sizing cruise condition) is 0.44; this operational
+                // route default previously used a separately chosen 0.40
+                // with no stated reason. Using the same 0.44 here removes
+                // that unexplained mismatch. It happens to land close to the
+                // ATR 72-600 factsheet's 275 KTAS at 95% MTOW/ISA/optimum FL
+                // (~273.5 KTAS at 17,000 ft ISA), but the factsheet does not
+                // state which FL is "optimum," so that agreement is not
+                // evidence of validation -- see
+                // `.agent/reports/2026-09-07-atr-physics.html`.
+                0.44,
                 "Representative European regional-sector default; operational example only, not an ATR design-mission claim",
             ),
             "A320-200" => (
@@ -436,6 +447,19 @@ impl AircraftPreset {
         profile.cruise_2_air_speed_m_s = cruise_tas_m_s;
         profile.cruise_3_air_speed_m_s = cruise_tas_m_s;
 
+        if self.name == "ATR72-600" {
+            apply_atr72_600_speed_schedule(
+                &mut profile,
+                self.requirements.mtow_kg,
+                self.reference
+                    .reference_wing_area_m2
+                    .unwrap_or(self.requirements.max_wing_area_m2),
+                self.performance
+                    .as_ref()
+                    .map_or_else(|| crate::PerformanceConfig::default().cl_max_to, |p| p.cl_max_to),
+            );
+        }
+
         OperationalMissionDefaults {
             departure_airport,
             arrival_airport,
@@ -449,6 +473,125 @@ impl AircraftPreset {
             provenance,
         }
     }
+}
+
+/// International knot, m/s.
+const KNOT_M_S: f64 = 1852.0 / 3600.0;
+/// Feet per minute, m/s.
+const FT_MIN_M_S: f64 = 0.3048 / 60.0;
+/// ISA sea-level density, kg/m^3, and standard gravity, m/s^2, for the
+/// takeoff-speed derivation below (a sea-level, standard-day reference
+/// stall speed, at which CAS, EAS and TAS coincide).
+const ISA_SEA_LEVEL_DENSITY_KG_M3: f64 = 1.225;
+const STANDARD_GRAVITY_M_S2: f64 = 9.806_65;
+/// CS-25.107(b) / FAR 25.107(b): V2 may not be less than 1.13 V_SR for a
+/// two-engine turbopropeller aeroplane. The regulatory minimum ratio, used
+/// here as the scheduled ratio (an assumption: an operator's actual V2 is
+/// tabulated per weight, flap setting and atmosphere from AFM data this
+/// preset does not carry).
+const ATR72_600_V2_OVER_VSR: f64 = 1.13;
+
+/// The ATR 72-600 takeoff-segment speed, m/s CAS: `1.13 * V_SR` with the
+/// reference stall speed taken at `mtow_kg`, `wing_area_m2` and the preset's
+/// configured takeoff lift limit `cl_max_takeoff` on a sea-level standard
+/// day, floored at the factsheet's published V2 min of 116 KCAS.
+///
+/// The lift limit is the preset's `conservative_simple_flaps` modelling
+/// value, not ATR high-lift data, so the result (about 135 KCAS at 23 t,
+/// 61 m^2 and CL_max 1.6) is a model-consistent operational speed under a
+/// declared assumption, and the mission deck's takeoff lift check then
+/// holds with the 1.13^2 margin. It is not a validated all-mass V2
+/// schedule; replacing the lift limit with source-specific high-lift data
+/// moves this speed with it.
+pub fn atr72_600_takeoff_speed_m_s(mtow_kg: f64, wing_area_m2: f64, cl_max_takeoff: f64) -> f64 {
+    let published_v2_min_m_s = 116.0 * KNOT_M_S;
+    let stall_reference_m_s = (2.0 * mtow_kg * STANDARD_GRAVITY_M_S2
+        / (ISA_SEA_LEVEL_DENSITY_KG_M3 * wing_area_m2 * cl_max_takeoff))
+        .sqrt();
+    (ATR72_600_V2_OVER_VSR * stall_reference_m_s).max(published_v2_min_m_s)
+}
+
+/// The ATR 72-600's takeoff/climb/descent/landing schedule, stated in
+/// calibrated airspeed and resolved to true airspeed against the real
+/// ambient state at each leg's own altitude by both mission paths.
+///
+/// `MissionProfileConfig::default()` is the long-range-widebody worked
+/// example (128.6-250 m/s *true* airspeeds with a 10,000 ft takeoff
+/// segment), which a PW127M-powered turboprop cannot fly: the mission deck
+/// rejected it with a typed climb energy deficit at 991 m and 128.6 m/s.
+///
+/// Sourced values (ATR 72-600 factsheet, 2020, page 2; local copy
+/// `.agent/evidence/manufacturer/atr72-600-factsheet-2020.pdf`):
+/// - optimum climb speed 170 KCAS (initial climb and both step climbs);
+/// - V2 min 116 KCAS. This is a published *minimum* at an unspecified
+///   weight, configuration and atmosphere, not a V2 valid at every mass: at
+///   this preset's MTOW it implies a takeoff lift coefficient above the
+///   preset's configured takeoff limit (1.615 against 1.60), and the
+///   mission deck rightly refuses to fly it. The takeoff segment therefore
+///   flies [`atr72_600_takeoff_speed_m_s`], a speed derived from the
+///   preset's own MTOW, reference wing area and configured takeoff lift
+///   limit, with the published minimum kept only as a floor;
+/// - approach speed 113 KIAS -- an *indicated* airspeed, not a published
+///   CAS. The landing leg flies 113 KCAS as an operational approximation
+///   that ASSUMES ZERO position and instrument error (unsourced; on a
+///   transport aircraft the difference is of the order of one to a few
+///   knots). It is therefore not an independent CAS reference and must not
+///   be used to validate the CAS conversion;
+/// - sea-level, MTOW rate of climb 1,355 ft/min (requested for the takeoff
+///   segment only; the deck's rating limit caps whatever cannot be
+///   delivered).
+///
+/// Everything else below is an UNSOURCED profile assumption, chosen to be
+/// operationally plausible for a 23 t turboprop cruising at FL170 and
+/// labelled as such: the 1,500 ft AGL takeoff-segment top (a typical
+/// acceleration altitude), the en-route climb rates, the whole descent
+/// ladder (altitudes, calibrated speeds and rates -- the factsheet publishes
+/// no altitude-resolved climb or descent table) and the 3-degree-like
+/// approach rate. None of it is calibrated to the factsheet's block fuel or
+/// time figures; see `.agent/reports/2026-09-07-speed-schedule-integration.html`
+/// for the comparison that was actually run.
+fn apply_atr72_600_speed_schedule(
+    profile: &mut crate::MissionProfileConfig,
+    mtow_kg: f64,
+    wing_area_m2: f64,
+    cl_max_takeoff: f64,
+) {
+    profile.climb_descent_speed_reference = crate::SpeedReference::CalibratedAirspeed;
+    // Takeoff segment: the derived V2 held to a 1,500 ft AGL acceleration
+    // altitude at the published sea-level MTOW rate of climb.
+    profile.takeoff_altitude_gain_m = 1_500.0 * 0.3048; // unsourced
+    profile.takeoff_air_speed_m_s = atr72_600_takeoff_speed_m_s(mtow_kg, wing_area_m2, cl_max_takeoff);
+    profile.takeoff_climb_rate_m_s = 1_355.0 * FT_MIN_M_S; // factsheet SL/MTOW ROC
+    // En-route climb at the published optimum climb speed; the rates are
+    // unsourced and below the sea-level figure because the deck's available
+    // power falls with altitude (a request above the rating is capped, not
+    // silently met).
+    profile.initial_climb_air_speed_m_s = 170.0 * KNOT_M_S; // factsheet
+    profile.initial_climb_rate_m_s = 1_000.0 * FT_MIN_M_S; // unsourced
+    profile.step_climb_1_air_speed_m_s = 170.0 * KNOT_M_S; // factsheet
+    profile.step_climb_1_rate_m_s = 600.0 * FT_MIN_M_S; // unsourced
+    profile.step_climb_2_air_speed_m_s = 170.0 * KNOT_M_S; // factsheet
+    profile.step_climb_2_rate_m_s = 600.0 * FT_MIN_M_S; // unsourced
+    // Descent ladder: entirely unsourced. Speeds are kept below the 250 KIAS
+    // class VMO with margin and step down towards the approach speed.
+    profile.descent_1_altitude_ft = 10_000.0;
+    profile.descent_1_air_speed_m_s = 220.0 * KNOT_M_S;
+    profile.descent_1_rate_m_s = 1_500.0 * FT_MIN_M_S;
+    profile.descent_2_altitude_ft = 6_000.0;
+    profile.descent_2_air_speed_m_s = 200.0 * KNOT_M_S;
+    profile.descent_2_rate_m_s = 1_200.0 * FT_MIN_M_S;
+    profile.descent_3_altitude_ft = 3_000.0;
+    profile.descent_3_air_speed_m_s = 170.0 * KNOT_M_S;
+    profile.descent_3_rate_m_s = 1_000.0 * FT_MIN_M_S;
+    profile.descent_4_altitude_ft = 1_500.0;
+    profile.descent_4_air_speed_m_s = 140.0 * KNOT_M_S;
+    profile.descent_4_rate_m_s = 800.0 * FT_MIN_M_S;
+    // Final approach at the published approach speed on a nominal 3-degree
+    // path (600 ft/min at ~113 kt ground speed; unsourced rate).
+    // Factsheet 113 KIAS taken as 113 KCAS: zero position/instrument error
+    // assumed (unsourced approximation, see above).
+    profile.landing_air_speed_m_s = 113.0 * KNOT_M_S;
+    profile.landing_descent_rate_m_s = 600.0 * FT_MIN_M_S; // unsourced
 }
 
 /// Every registered aircraft, in the order the interface lists them.

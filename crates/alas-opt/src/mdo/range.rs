@@ -37,13 +37,34 @@ pub(crate) fn mission_range_m(
     if design_range_nmi > 0.0 {
         return design_range_nmi * NAUTICAL_MILE;
     }
+    mission_range_from_coordinates(
+        design_range_nmi,
+        departure.map(|airport| (airport.latitude_deg, airport.longitude_deg)),
+        arrival.map(|airport| (airport.latitude_deg, airport.longitude_deg)),
+    )
+}
+
+/// Resolve a design range from an explicit still-air range or two airport
+/// coordinates.  This is kept separate from the legacy curated-airport
+/// helper so an imported record may provide route geometry without being
+/// promoted to a declared takeoff/landing performance distance.
+pub(crate) fn mission_range_from_coordinates(
+    design_range_nmi: f64,
+    departure: Option<(f64, f64)>,
+    arrival: Option<(f64, f64)>,
+) -> f64 {
+    if design_range_nmi > 0.0 {
+        return design_range_nmi * NAUTICAL_MILE;
+    }
     match (departure, arrival) {
-        (Some(from), Some(to)) => haversine_m(
-            from.latitude_deg,
-            from.longitude_deg,
-            to.latitude_deg,
-            to.longitude_deg,
-        ),
+        (Some((from_lat, from_lon)), Some((to_lat, to_lon)))
+            if from_lat.is_finite()
+                && from_lon.is_finite()
+                && to_lat.is_finite()
+                && to_lon.is_finite() =>
+        {
+            haversine_m(from_lat, from_lon, to_lat, to_lon)
+        }
         _ => 0.0,
     }
 }
@@ -68,5 +89,15 @@ mod tests {
     #[test]
     fn a_zero_range_with_no_resolved_aerodromes_falls_back_to_zero() {
         assert_eq!(mission_range_m(0.0, None, None), 0.0);
+    }
+
+    #[test]
+    fn imported_coordinates_can_define_route_distance_without_runway_claims() {
+        let range_m = mission_range_from_coordinates(
+            0.0,
+            Some((41.2971, 2.07846)),
+            Some((40.639447, -73.779317)),
+        );
+        assert!(range_m > 5_000_000.0 && range_m < 7_000_000.0);
     }
 }

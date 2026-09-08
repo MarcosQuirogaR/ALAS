@@ -44,6 +44,13 @@ impl DesignOptimizer {
         if let Some(reason) = self.invalid_solver_setting_reason() {
             return Err(OptimizationError::InvalidConfiguration(reason));
         }
+        if !self.reference_mass_coordinates {
+            self.config
+                .optimizer
+                .design_space
+                .validate()
+                .map_err(OptimizationError::InvalidConfiguration)?;
+        }
         let default_bounds;
         let bounds = match bounds {
             Some(bounds) => bounds,
@@ -53,6 +60,72 @@ impl DesignOptimizer {
             }
         };
         validate_bounds(bounds)
+    }
+
+    fn effective_bounds(
+        &self,
+        bounds: Option<&[(f64, f64)]>,
+        initial_design: Option<&DesignVector>,
+    ) -> Result<Vec<(f64, f64)>, OptimizationError> {
+        let default_bounds = DesignVector::bounds();
+        let requested = bounds.unwrap_or(&default_bounds);
+        validate_bounds(requested)?;
+        if self.reference_mass_coordinates {
+            return Ok(requested.to_vec());
+        }
+        let nominal = self.nominal_design(initial_design)?;
+        let design_space = &self.config.optimizer.design_space;
+        let declared = design_space.envelope(&nominal);
+        let mut effective = Vec::with_capacity(requested.len());
+        for (index, (&(requested_lower, requested_upper), variable)) in
+            requested.iter().zip(&declared).enumerate()
+        {
+            // The clean-sheet fuselage length is a derived coordinate solved
+            // from the requested cabin load case, not a caller-chosen search
+            // freedom (see the matching skip in
+            // `DesignObjective::validate_design_space`). A caller replaying an
+            // explicit design (for example a fixed-design finalist review)
+            // legitimately pins this coordinate at the design's own literal
+            // length; only the global spec bounds validated above apply.
+            if design_space.sizes_fuselage_from_cabin() && variable.name == "fuselage_length_m" {
+                effective.push((requested_lower, requested_upper));
+                continue;
+            }
+            let (declared_lower, declared_upper) = (variable.lower, variable.upper);
+            let lower = requested_lower.max(declared_lower);
+            let upper = requested_upper.min(declared_upper);
+            if lower > upper {
+                return Err(OptimizationError::InvalidBounds(format!(
+                    "bound {index} [{requested_lower}, {requested_upper}] does not intersect the design-mode envelope [{declared_lower}, {declared_upper}]"
+                )));
+            }
+            effective.push((lower, upper));
+        }
+        Ok(effective)
+    }
+
+    fn nominal_design(
+        &self,
+        initial_design: Option<&DesignVector>,
+    ) -> Result<DesignVector, OptimizationError> {
+        let nominal = initial_design.copied().unwrap_or_else(|| {
+            self.config
+                .preset
+                .as_str()
+                .is_empty()
+                .then_some(DesignVector::default())
+                .or_else(|| {
+                    alas_config::presets::get(&self.config.preset)
+                        .ok()
+                        .map(|preset| preset.design_vector)
+                })
+                .unwrap_or_default()
+        });
+        if self.reference_mass_coordinates {
+            return Ok(nominal);
+        }
+        crate::mdo::canonical_nominal_design(&self.config, nominal)
+            .map_err(OptimizationError::InvalidConfiguration)
     }
 
     /// Execute the Differential Evolution optimization search.
@@ -70,18 +143,23 @@ impl DesignOptimizer {
         progress_callback: Option<&mut dyn FnMut(&str)>,
     ) -> Result<OptimizationResult, OptimizationError> {
         self.validate_request(bounds)?;
+        let effective_bounds = self.effective_bounds(bounds, initial_design)?;
+        let nominal = self.nominal_design(initial_design)?;
         let mut objective = if self.reference_mass_coordinates {
             DesignObjective::new_reference_compatibility(self.config.clone())
         } else {
-            DesignObjective::new(self.config.clone())
+            DesignObjective::new_with_nominal(self.config.clone(), nominal)
         };
 
-        let result = if self.reference_mass_coordinates
-            || self.config.optimizer.solver.method == "differential_evolution"
-        {
-            self.run_search(bounds, initial_design, &mut objective, progress_callback)
+        let result = if self.reference_mass_coordinates {
+            self.run_search(Some(&effective_bounds), initial_design, &mut objective, progress_callback)
         } else {
-            self.run_product_search(bounds, initial_design, &mut objective, progress_callback)
+            self.run_product_search(
+                Some(&effective_bounds),
+                initial_design,
+                &mut objective,
+                progress_callback,
+            )
         };
 
         let result = ensure_feasible(result)?;
@@ -112,14 +190,18 @@ impl DesignOptimizer {
         progress_callback: Option<&mut dyn FnMut(&str)>,
     ) -> Result<OptimizationResult, OptimizationError> {
         self.validate_request(bounds)?;
+        let effective_bounds = self.effective_bounds(bounds, initial_design)?;
         let mut objective =
             DelegatedObjective::new(evaluator, self.config.optimizer.weights.failure_cost);
-        let result = if self.reference_mass_coordinates
-            || self.config.optimizer.solver.method == "differential_evolution"
-        {
-            self.run_search(bounds, initial_design, &mut objective, progress_callback)
+        let result = if self.reference_mass_coordinates {
+            self.run_search(Some(&effective_bounds), initial_design, &mut objective, progress_callback)
         } else {
-            self.run_product_search(bounds, initial_design, &mut objective, progress_callback)
+            self.run_product_search(
+                Some(&effective_bounds),
+                initial_design,
+                &mut objective,
+                progress_callback,
+            )
         };
 
         let result = ensure_feasible(result)?;
@@ -216,6 +298,7 @@ impl DesignOptimizer {
 
         let cr = 0.7;
         let max_iters = solver.max_iterations.max(0) as usize;
+        let mut termination = "iteration_limit";
 
         // Evolution loop
         for gen in 0..max_iters {
@@ -300,6 +383,7 @@ impl DesignOptimizer {
             // spread. The latter prevents convergence on a normal population
             // with one merely average member still present.
             if converged(&costs, solver.tolerance) {
+                termination = "converged";
                 break;
             }
         }
@@ -315,6 +399,7 @@ impl DesignOptimizer {
             wall_time_s,
             method: "differential_evolution".to_owned(),
             strategy: solver.strategy.clone(),
+            termination: termination.to_owned(),
             pareto_front: Vec::new(),
         }
     }
@@ -329,85 +414,38 @@ impl DesignOptimizer {
         let solver = &self.config.optimizer.solver;
         let default_bounds = DesignVector::bounds();
         let bounds = bounds.unwrap_or(&default_bounds);
-        if alas_config::SolverSettings::is_gradient_method(&solver.method) {
-            return sqp_search::run(
-                &self.config,
-                bounds,
-                initial_design,
-                objective,
-                progress_callback,
-            );
-        }
         let population_size = (solver.population_size.max(1) as usize * bounds.len()).max(2);
         let generations = solver.max_iterations.max(0) as usize;
         let seed = solver.seed.map_or_else(runtime_seed, |value| value as u64);
         let initial_values = initial_design.map(DesignVector::to_array);
         let started = Instant::now();
-        let method = solver.method.as_str();
-
-        let outcome = {
-            let mut evaluate = |values: &[f64]| {
-                let cost = objective.evaluate(values);
-                scored_point(values, cost, objective.history())
-            };
-            match method {
-                "feasibility_first_de" => run_feasibility_first_de(
-                    bounds,
-                    population_size,
-                    generations,
-                    seed,
-                    initial_values.as_deref(),
-                    &mut evaluate,
-                ),
-                "nsga2" => run_nsga2(
-                    bounds,
-                    population_size,
-                    generations,
-                    seed,
-                    initial_values.as_deref(),
-                    &mut evaluate,
-                ),
-                "turbo_1" => run_turbo_1(
-                    bounds,
-                    population_size,
-                    generations,
-                    seed,
-                    initial_values.as_deref(),
-                    &mut evaluate,
-                ),
-                "cma_es" => run_cma_es(
-                    bounds,
-                    population_size,
-                    generations,
-                    seed,
-                    initial_values.as_deref(),
-                    &mut evaluate,
-                ),
-                _ => run_feasibility_first_de(
-                    bounds,
-                    population_size,
-                    generations,
-                    seed,
-                    initial_values.as_deref(),
-                    &mut evaluate,
-                ),
-            }
+        let mut evaluate = |values: &[f64]| {
+            let cost = objective.evaluate(values);
+            scored_point(values, cost, objective.history())
         };
+        // Legacy method names remain loadable for saved configurations, but
+        // every product run uses this single MADS driver. The compatibility
+        // constructor above is the only path that still replays DE.
+        let search_result = crate::search::mads::run(
+            bounds,
+            initial_values.as_deref(),
+            crate::search::mads::Settings {
+                max_iterations: generations,
+                max_evaluations: (population_size.saturating_mul(generations.max(1) + 1))
+                    .max(1),
+                seed,
+                ..Default::default()
+            },
+            &mut evaluate,
+            progress_callback,
+        );
 
-        if let Some(callback) = progress_callback.as_mut() {
-            callback(&format!(
-                "{} complete | valid: {}/{} total | best cost: {:.4}",
-                method,
-                objective.history().n_valid(),
-                objective.history().n_evaluations(),
-                outcome.winner.cost
-            ));
-        }
-
+        let termination = search_result.termination.as_str();
         result_from_method(
-            outcome,
-            method,
-            solver.strategy.as_str(),
+            search_result.outcome,
+            "mads",
+            "progressive_barrier",
+            termination,
             objective.history(),
             started.elapsed().as_secs_f64(),
         )

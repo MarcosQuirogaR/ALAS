@@ -14,91 +14,122 @@
 //! the flown result build their models through this module, which is what
 //! keeps the reserve plan they report identical.
 
-use alas_atmo::Atmosphere;
-use alas_config::{ActiveEngineModel, AlasConfig};
-use alas_mass::breguet::{equivalent_tsfc_from_psfc, BreguetFuelModel, SegmentFractions};
+use alas_config::{airport_dataset, AlasConfig};
 use alas_mass::fuel_plan::{FuelBurnModel, FuelModelError, LegEstimate};
 use alas_units::FOOT;
 
 use crate::full_analysis::AnalysisReport;
+use alas_opt::mdo::mission_model::PhaseAeroLimits;
+use alas_opt::mdo::propulsion::{max_climb_rate_ft_min, PropulsionDeck};
+use alas_opt::SegmentMissionModel;
 
-/// Propeller efficiency assumed when a turboprop's brake-specific consumption
-/// is converted to an equivalent thrust-specific one; a cruise constant-speed
-/// propeller at its design advance ratio (Raymer, *Aircraft Design*, ch. 13).
-const CRUISE_PROPELLER_EFFICIENCY: f64 = 0.85;
-
-/// Representative horizontal distance a transport covers in climb and
-/// descent, credited against the cruise leg of the analytic model. The
-/// native mission flies its own climb and descent, so this only shapes the
-/// analytic estimate.
-const CLIMB_DESCENT_RANGE_CREDIT_M: f64 = 250_000.0;
-
-/// Kilograms of force per newton, for the catalogue's TSFC unit.
-const KGF_PER_N: f64 = 1.0 / 9.806_65;
-
-/// Build the analytic burn model from a completed analysis report.
+/// Build the segment burn model from a completed analysis report.
 ///
-/// The drag polar is the report's least-squares fit, the wing area the
-/// report's reference area, and the engine terms the typed binding of the
-/// configured engine. A report whose fit fell back to constants still yields
-/// a model: the fallback is recorded in the fit's status and the caller
-/// decides whether to trust the plan.
+/// The drag components are read at the report's design-point lift, the wing
+/// area is the report's reference area, and thrust and fuel flow come from
+/// the same off-design propulsion deck the optimizer's sizing loop and the
+/// native mission stage use. A report whose fit fell back to constants still
+/// yields a model: the fallback is recorded in the fit's status and the
+/// caller decides whether to trust the plan.
 pub fn breguet_from_report(
     config: &AlasConfig,
     report: &AnalysisReport,
-) -> Result<BreguetFuelModel, String> {
+) -> Result<SegmentMissionModel, String> {
     let requirements = &config.requirements;
-    let cruise = Atmosphere::new(requirements.cruise_altitude_m);
-    let cruise_tas_m_s = requirements.cruise_mach * cruise.speed_of_sound();
-    let holding = Atmosphere::new(holding_altitude_m(config, 0.0));
-    let engine = &config.geometry.engine;
-    let n_engines = engine.spanwise_positions_m.len().max(1) as f64;
-    let (tsfc_cruise_kg_per_n_s, takeoff_fuel_flow_kg_s) = match engine
-        .active_model()
-        .map_err(|error| format!("fuel model engine binding failed: {error}"))?
-    {
-        ActiveEngineModel::Turbofan(spec) => (
-            spec.cruise_tsfc_kg_kgf_hr * KGF_PER_N / 3_600.0,
-            spec.takeoff_fuel_flow_kg_s * n_engines,
-        ),
-        ActiveEngineModel::Turboprop(spec) => {
-            // The catalogue states the cruise fuel flow for the whole
-            // installation; the brake-specific consumption is per unit of
-            // shaft power, so the total flow is divided by the total power.
-            let total_cruise_power_w = spec.maximum_cruise_shaft_power_kw * 1_000.0 * n_engines;
-            let psfc_kg_per_w_s =
-                spec.maximum_cruise_fuel_flow_kg_h / 3_600.0 / total_cruise_power_w;
-            let takeoff_flow_kg_s =
-                psfc_kg_per_w_s * spec.takeoff_shaft_power_kw * 1_000.0 * n_engines;
-            (
-                equivalent_tsfc_from_psfc(
-                    psfc_kg_per_w_s,
-                    cruise_tas_m_s,
-                    CRUISE_PROPELLER_EFFICIENCY,
-                ),
-                takeoff_flow_kg_s,
-            )
-        }
+    let propulsion = PropulsionDeck::from_engine(
+        &config.geometry.engine,
+        requirements.cruise_mach,
+        requirements.cruise_altitude_m,
+        max_climb_rate_ft_min(config.mission.profile.initial_climb_rate_m_s),
+    )
+    .map_err(|error| format!("fuel model engine binding failed: {error}"))?;
+    let (cd0, induced_factor_k, wave_drag_cd) = report_drag_components(report);
+    let departure_elevation_m = airport_dataset::resolve(&config.departure_airport)
+        .ok()
+        .and_then(|airport| airport.elevation_m.value)
+        .unwrap_or(0.0);
+    let arrival_elevation_m = airport_dataset::resolve(&config.arrival_airport)
+        .ok()
+        .and_then(|airport| airport.elevation_m.value)
+        .unwrap_or(0.0);
+    // The native mission applies the departure airport's ISA deviation (from
+    // the same registry `build_mission_request` reads) to every segment; the
+    // segment burn model flies the same deviation so the fuel policy and the
+    // flown mission share one ambient convention.
+    let departure_isa_deviation_c = alas_config::airports::get(&config.departure_airport)
+        .map(|airport| airport.isa_deviation_c)
+        .unwrap_or(0.0);
+    let holding_altitude = holding_altitude_m(config, arrival_elevation_m);
+    SegmentMissionModel::new(
+        config.mission.profile.clone(),
+        requirements.cruise_mach,
+        requirements.cruise_altitude_m,
+        departure_elevation_m,
+        arrival_elevation_m,
+        report.airplane.s_ref,
+        cd0,
+        induced_factor_k,
+        wave_drag_cd,
+        requirements.gravity_m_s2,
+        holding_altitude,
+        PhaseAeroLimits::from_config(config),
+        propulsion,
+    )
+    .map(|model| model.with_isa_deviation_c(departure_isa_deviation_c))
+    .map_err(|error| format!("segment fuel model is not usable: {error}"))
+}
+
+/// Read the component arrays at the report's design-point lift. The fitted
+/// `PolarFit` is retained for reporting, but fitting total CD can fold the
+/// transonic wave term into `k`; the shared mission model must receive the
+/// VLM induced term and the wave term separately.
+fn report_drag_components(report: &AnalysisReport) -> (f64, f64, f64) {
+    let index = report
+        .polar
+        .cl
+        .iter()
+        .enumerate()
+        .min_by(|(_, left), (_, right)| {
+            (**left - report.design_point.cl)
+                .abs()
+                .total_cmp(&(**right - report.design_point.cl).abs())
+        })
+        .map(|(index, _)| index);
+    let Some(index) = index else {
+        return (
+            report.polar_fit.cd0.max(1.0e-5),
+            report.polar_fit.k.max(1.0e-5),
+            0.0,
+        );
     };
-    let model = BreguetFuelModel {
-        cruise_tas_m_s,
-        cruise_density_kg_m3: cruise.density(),
-        holding_density_kg_m3: holding.density(),
-        wing_area_m2: report.airplane.s_ref,
-        cd0: report.polar_fit.cd0,
-        induced_factor_k: report.polar_fit.k,
-        tsfc_cruise_kg_per_n_s,
-        holding_tsfc_factor: BreguetFuelModel::DEFAULT_HOLDING_TSFC_FACTOR,
-        takeoff_fuel_flow_kg_s,
-        idle_fuel_flow_fraction: BreguetFuelModel::DEFAULT_IDLE_FUEL_FLOW_FRACTION,
-        gravity_m_s2: requirements.gravity_m_s2,
-        segment_fractions: SegmentFractions::default(),
-        climb_descent_range_credit_m: CLIMB_DESCENT_RANGE_CREDIT_M,
+    let cl = report.polar.cl.get(index).copied().unwrap_or(f64::NAN);
+    let parasite = report
+        .polar
+        .cd_parasite
+        .get(index)
+        .copied()
+        .filter(|value| value.is_finite() && *value > 0.0)
+        .unwrap_or(report.polar_fit.cd0);
+    let induced = report
+        .polar
+        .cd_induced
+        .get(index)
+        .copied()
+        .filter(|value| value.is_finite() && *value > 0.0)
+        .unwrap_or(f64::NAN);
+    let k = if cl.is_finite() && cl.abs() > 1.0e-8 && induced.is_finite() {
+        induced / (cl * cl)
+    } else {
+        report.polar_fit.k
     };
-    model
-        .validate()
-        .map_err(|error| format!("analytic fuel model is not usable: {error}"))?;
-    Ok(model)
+    let wave = report
+        .polar
+        .cd_wave
+        .get(index)
+        .copied()
+        .filter(|value| value.is_finite() && *value >= 0.0)
+        .unwrap_or(0.0);
+    (parasite.max(1.0e-5), k.max(1.0e-5), wave.max(0.0))
 }
 
 /// The altitude the policy evaluates holding fuel at: the configured height
@@ -117,14 +148,14 @@ pub fn holding_altitude_m(config: &AlasConfig, aerodrome_elevation_m: f64) -> f6
 /// the takeoff mass the caller flew, and asking for another mass is a caller
 /// error the closure loop never makes because it re-flies instead.
 #[derive(Debug, Clone, Copy)]
-pub struct FlownTripModel<'a> {
+pub struct FlownTripModel<'a, M: FuelBurnModel + ?Sized> {
     /// The flown trip.
     pub leg: LegEstimate,
     /// The analytic model for holding, diversion and taxi.
-    pub analytic: &'a BreguetFuelModel,
+    pub analytic: &'a M,
 }
 
-impl FuelBurnModel for FlownTripModel<'_> {
+impl<M: FuelBurnModel + ?Sized> FuelBurnModel for FlownTripModel<'_, M> {
     fn trip(&self, _takeoff_mass_kg: f64, range_m: f64) -> Result<LegEstimate, FuelModelError> {
         if !range_m.is_finite() || range_m < 0.0 {
             return Err(FuelModelError::InvalidDistance {
@@ -160,6 +191,7 @@ mod tests {
     use super::*;
     use crate::full_analysis::FullAnalysis;
     use alas_config::design_variables::DesignVector;
+    use alas_mass::breguet::{BreguetFuelModel, SegmentFractions};
 
     #[test]
     fn the_default_aircraft_yields_a_usable_analytic_model() {
@@ -170,8 +202,17 @@ mod tests {
         let model = breguet_from_report(&config, &report)
             .unwrap_or_else(|error| panic!("analytic model: {error}"));
         assert!(model.cruise_tas_m_s > 200.0);
-        assert!(model.tsfc_cruise_kg_per_n_s > 1.0e-5 && model.tsfc_cruise_kg_per_n_s < 3.0e-5);
-        assert!(model.takeoff_fuel_flow_kg_s > 1.0);
+        let cruise_flow = model
+            .cruise_fuel_flow_kg_s(config.requirements.mtow_kg)
+            .unwrap_or_else(|error| panic!("cruise flow: {error}"));
+        let taxi_flow = model
+            .taxi_fuel_flow_kg_s()
+            .unwrap_or_else(|error| panic!("taxi flow: {error}"));
+        assert!(
+            cruise_flow > 0.1 && cruise_flow < 10.0,
+            "cruise flow {cruise_flow} kg/s"
+        );
+        assert!(taxi_flow > 0.0 && taxi_flow < cruise_flow);
         let trip = model
             .trip(config.requirements.mtow_kg, 5_000_000.0)
             .unwrap_or_else(|error| panic!("trip: {error}"));

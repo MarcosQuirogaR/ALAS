@@ -21,16 +21,15 @@
 use alas_config::design_variables::DesignVector;
 use alas_config::{AlasConfig, MtowSizing};
 use alas_geom::aircraft::airplane::Airplane;
-use alas_mass::breakdown::{
-    run_mass_analysis_with_model_checked_product_with_gear, MassBreakdown, MassCoordinateModel,
-    MassCoordinates, PayloadLayoutSummary,
-};
-use alas_mass::breguet::BreguetFuelModel;
+use alas_mass::breakdown::{MassBreakdown, MassCoordinates, PayloadLayoutSummary};
 use alas_mass::dispatch::{solve_dispatch, DispatchLimits, DispatchSolution, DispatchStatus};
 use alas_payload::oew::oew_and_cg;
 
-use super::build::{trim_and_polar, TrimmedPolar};
+use super::build::mass_analysis_with_structural_feedback;
+use super::mission_model::SegmentMissionModel;
+use super::trim::{trim_and_polar, TrimmedPolar};
 use super::types::CandidateFailure;
+use alas_mass::wingbox_feedback::ReferenceWingMass;
 
 /// What the loop reads but never changes.
 pub(crate) struct MdaContext<'a> {
@@ -40,8 +39,9 @@ pub(crate) struct MdaContext<'a> {
     pub dv: &'a DesignVector,
     /// Payload layout the mass analysis places.
     pub summary: &'a PayloadLayoutSummary,
-    /// Breguet model with every term except the polar filled in.
-    pub model: BreguetFuelModel,
+    /// Shared segment-integrated model with the candidate polar and engine
+    /// terms filled in.
+    pub model: SegmentMissionModel,
     /// Design-mission still-air distance, m.
     pub range_m: f64,
     /// Usable tank capacity, kg, when the tank arrangement resolved.
@@ -49,6 +49,11 @@ pub(crate) struct MdaContext<'a> {
     /// Whether the loop may re-trim; false when the polar was supplied by
     /// an external solver and must be held fixed.
     pub retrim_allowed: bool,
+    /// Frozen empirical reference wing inventory for reference adaptation or
+    /// the baseline sandbox. Clean-sheet runs leave this absent.
+    pub structural_reference: Option<ReferenceWingMass>,
+    /// Structural wing reconciliation at the initial mass pass.
+    pub structural_feedback: alas_mass::wingbox_feedback::WingboxFeedback,
 }
 
 /// The coupled state at one pass.
@@ -73,16 +78,14 @@ pub(crate) struct MdaClosure {
     /// Whether the takeoff mass settled within tolerance and the dispatch
     /// model never failed.
     pub sizing_closed: bool,
+    /// Structural wing reconciliation at the final mass pass.
+    pub structural_feedback: alas_mass::wingbox_feedback::WingboxFeedback,
 }
 
 fn mass_coordinates_failure() -> CandidateFailure {
     CandidateFailure {
         reason: "mass_coordinates",
     }
-}
-
-fn is_model_failed(status: &DispatchStatus) -> bool {
-    matches!(status, DispatchStatus::ModelFailed(_))
 }
 
 /// Aitken delta-squared extrapolation of the fixed-point iterates
@@ -107,7 +110,7 @@ pub(crate) fn converge(
     let config = context.config;
     let objective = &config.optimizer.objective;
     let ceiling = config.requirements.mtow_kg;
-    let mlw_kg = ceiling * config.mass_model.mlw_fraction_mtow;
+    let mlw_kg = config.landing_mass_limit_kg(ceiling);
     let sized_by_mission = objective.mtow_sizing == MtowSizing::SizedByMission;
     let max_passes = if sized_by_mission {
         objective.sizing_max_iterations.max(1) as usize
@@ -115,45 +118,48 @@ pub(crate) fn converge(
         1
     };
     let tolerance_kg = objective.sizing_tolerance_kg;
-    let retrim_tolerance = objective.retrim_cg_tolerance_pct_mac;
     let mac = plane.c_ref.max(1e-9);
 
     let mut state = initial;
     let mut cg_at_trim = state.cg[0];
     let mut tow_k = ceiling;
     let mut iterates: Vec<f64> = vec![tow_k];
-    let mut model = context.model;
+    let mut model = context.model.clone();
     let mut outcome: Option<(DispatchSolution, bool)> = None;
     let mut sizing_iterations = 0;
     let mut retrim_count = 0;
+    let mut structural_feedback = context.structural_feedback;
 
     for pass in 0..max_passes {
         sizing_iterations = pass + 1;
         if pass > 0 {
             let mut pass_requirements = config.requirements.clone();
             pass_requirements.mtow_kg = tow_k;
-            let (masses, coords, cg) = run_mass_analysis_with_model_checked_product_with_gear(
+            let mut pass_config = config.clone();
+            pass_config.requirements = pass_requirements;
+            let (masses, coords, cg, feedback, _, _) = mass_analysis_with_structural_feedback(
+                &pass_config,
+                context.dv,
                 plane,
-                &pass_requirements,
-                &config.geometry,
-                &config.cabin,
-                &config.control_surfaces,
-                Some(&config.mass_model),
                 Some(context.summary),
-                MassCoordinateModel::StructuralWingbox(&config.structures),
-                &config.landing_gear,
-            )
-            .map_err(|_| mass_coordinates_failure())?;
+                context.structural_reference,
+            )?;
+            structural_feedback = feedback;
             state.masses = masses;
             state.coords = coords;
             state.cg = cg;
-            let shift_pct = (cg[0] - cg_at_trim).abs() / mac * 100.0;
-            if context.retrim_allowed && retrim_tolerance > 0.0 && shift_pct > retrim_tolerance {
+            // The mission model is coupled to the trimmed polar. Re-trim on
+            // every closed-mass pass so a CG change cannot leave the fuel
+            // model using stale induced drag. The configured tolerance remains
+            // a reporting threshold for callers that want to inspect the
+            // shift; it is not a licence to break the closure.
+            if context.retrim_allowed {
                 state.polar = trim_and_polar(config, plane, cg[0], context.dv, tow_k)?;
                 cg_at_trim = cg[0];
                 retrim_count += 1;
                 model.cd0 = state.polar.cd0;
                 model.induced_factor_k = state.polar.induced_factor_k;
+                model.wave_drag_cd = state.polar.wave_drag_cd;
                 model.validate().map_err(|_| CandidateFailure {
                     reason: "trim_solve",
                 })?;
@@ -175,15 +181,15 @@ pub(crate) fn converge(
             max_passes.max(objective.sizing_max_iterations.max(1) as usize),
             tolerance_kg,
         );
-        let model_failed = is_model_failed(&solution.status);
+        let dispatch_converged = matches!(solution.status, DispatchStatus::Converged);
         if !sized_by_mission {
-            outcome = Some((solution, !model_failed));
+            outcome = Some((solution, dispatch_converged));
             break;
         }
         let next_tow = solution.takeoff_mass_kg;
         let delta_kg = (next_tow - tow_k).abs();
         let done = delta_kg < tolerance_kg;
-        outcome = Some((solution, done && !model_failed));
+        outcome = Some((solution, done && dispatch_converged));
         if done {
             break;
         }
@@ -212,6 +218,7 @@ pub(crate) fn converge(
         retrim_count,
         cg_shift_pct_mac,
         sizing_closed,
+        structural_feedback,
     })
 }
 

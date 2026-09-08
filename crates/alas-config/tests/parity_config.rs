@@ -568,8 +568,13 @@ fn compare_transport_planform_schema(
 fn is_native_config_field(path: &str, key: &str) -> bool {
     (matches!(key, "fuel_policy" | "fuel_tanks")
         && (path.ends_with("AlasConfig") || path.is_empty()))
-        || (key == "objective"
+        || (matches!(key, "objective" | "design_space")
             && (path.ends_with("OptimizerConfig") || path.ends_with(".optimizer")))
+        // Native speed-reference switch for the climb/descent legs. Its
+        // serialization skips the `TrueAirspeed` default, so a legacy file
+        // and the frozen default tree round-trip unchanged.
+        || (key == "climb_descent_speed_reference"
+            && (path.ends_with("MissionProfileConfig") || path.ends_with(".profile")))
         || (matches!(
             key,
             "turbofan"

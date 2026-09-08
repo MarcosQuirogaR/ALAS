@@ -203,6 +203,8 @@ pub enum OptionSource {
     MtowSizing,
     /// How a family of requirements takes part in the ranking.
     ConstraintPolicy,
+    /// How the optimizer treats the aircraft geometry it starts from.
+    DesignMode,
 }
 
 impl OptionSource {
@@ -258,6 +260,7 @@ impl OptionSource {
             ]),
             Self::MtowSizing => Some(&["fixed_requirement", "sized_by_mission"]),
             Self::ConstraintPolicy => Some(&["hard", "soft", "diagnostic", "off"]),
+            Self::DesignMode => Some(&["clean_sheet", "reference_adaptation", "baseline_sandbox"]),
             _ => None,
         }
     }

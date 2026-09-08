@@ -66,6 +66,7 @@ impl FullAnalysis {
         airplane: Airplane,
     ) -> Result<AnalysisReport, String> {
         let req = &self.config.requirements;
+        let analysis_mass_model = self.config.analysis_mass_model(req.mtow_kg);
         let mut plane = airplane;
 
         // The explicit compatibility constructor replays the historical
@@ -104,7 +105,7 @@ impl FullAnalysis {
                 &self.config.geometry,
                 &self.config.cabin,
                 &self.config.control_surfaces,
-                Some(&self.config.mass_model),
+                Some(&analysis_mass_model),
                 None,
                 coordinate_model,
                 &self.config.landing_gear,
@@ -153,7 +154,7 @@ impl FullAnalysis {
                 &self.config.geometry,
                 &self.config.cabin,
                 &self.config.control_surfaces,
-                Some(&self.config.mass_model),
+                Some(&analysis_mass_model),
                 layout_summary.as_ref(),
                 coordinate_model,
                 &self.config.landing_gear,

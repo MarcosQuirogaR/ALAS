@@ -13,9 +13,11 @@ alas-config = { path = "../alas-config" }
 alas-geom = { path = "../alas-geom" }
 alas-atmo = { path = "../alas-atmo" }
 alas-mass = { path = "../alas-mass" }
+alas-struct = { path = "../alas-struct" }
 alas-payload = { path = "../alas-payload" }
 alas-perf = { path = "../alas-perf" }
 alas-aero = { path = "../alas-aero" }
+alas-prop = { path = "../alas-prop" }
 alas-stab = { path = "../alas-stab" }
 alas-math = { path = "../alas-math" }
 alas-units = { path = "../alas-units" }

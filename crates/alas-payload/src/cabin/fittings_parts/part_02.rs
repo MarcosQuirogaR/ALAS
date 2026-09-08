@@ -10,13 +10,13 @@
 /// pass the empty-aircraft mass and CG, in which case the hold load is solved
 /// to keep the complete aircraft at the empty-aircraft balance target.
 ///
-/// The belly is then filled with revenue freight up to the airframe's maximum
-/// *structural* payload, on top of the passengers and their bags, so the
-/// residual fuel matches the real aircraft's max-payload design point. The
-/// structural cap is what makes that safe: a widebody belly holds far more
-/// volumetrically than the airframe may carry, and filling to geometric
-/// capacity overshoots by tens of tonnes. An explicit `belly_cargo_kg` larger
-/// than the auto-fill still wins, for a deliberate overload study.
+/// The belly then carries exactly the revenue freight requested through
+/// `pax.belly_cargo_kg`, subject to the physical hold capacity alongside the
+/// bags: a zero request means zero revenue freight, not an automatic fill to
+/// the structural limit. The [`CargoMassSemantics::ReferenceGross`] replay is
+/// the one exception -- it reproduces the frozen Python fixture's behaviour of
+/// auto-filling the belly to the airframe's maximum *structural* payload, and
+/// must keep doing so for that historical parity target.
 #[allow(clippy::too_many_arguments)] // The final optional aircraft-CG target is
                                     // kept explicit so layout-only callers and
                                     // mass-analysis callers share one payload pass.
@@ -34,7 +34,13 @@ pub(super) fn place_baggage(
     let bag_mass = seated as f64 * pax.checked_bag_mass_kg;
     let belly_explicit = pax.belly_cargo_kg.max(0.0);
     let max_struct_payload = req.max_structural_payload_kg;
-    let belly_to_max = if max_struct_payload > 0.0 {
+    // Auto-filling to the structural cap is the frozen reference-compatibility
+    // replay's behaviour, not the product contract: an ordinary baseline with
+    // `belly_cargo_kg == 0` must carry zero revenue freight, no matter how much
+    // structural or hold capacity remains.
+    let belly_to_max = if mass_semantics == CargoMassSemantics::ReferenceGross
+        && max_struct_payload > 0.0
+    {
         (max_struct_payload - seat_mass - bag_mass).max(0.0)
     } else {
         0.0

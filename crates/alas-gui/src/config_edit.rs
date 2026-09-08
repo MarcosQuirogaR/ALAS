@@ -11,14 +11,14 @@ use std::collections::BTreeMap;
 
 use alas_config::{
     fidelity_presets, performance_presets, presets, solver_presets, validate, AlasConfig,
-    DesignVariableSpec, EngineConfig, FuelPolicyConfig, FuelTankLayoutConfig,
-    DESIGN_VARIABLE_SPECS,
+    DesignMode, EngineConfig, FuelPolicyConfig, FuelTankLayoutConfig, DESIGN_VARIABLE_SPECS,
 };
 use alas_exec::ToolPreferences;
 use serde_json::Value;
 
 use crate::nav::PresetKind;
 use crate::state::{AppState, LogKind};
+use crate::views::design_space_view::design_mode_display_name;
 use crate::views::{tr, tr_fields};
 
 /// Serialize a configuration for the generic form editor, which edits this
@@ -102,19 +102,21 @@ impl AppState {
         self.config_values = full_config_values(&config);
         self.active_preset = preset.name.to_owned();
 
-        // Recenter the design space on the preset's own design vector, the way
-        // the reference refetches `design_vector` on every preset load.
+        // Recenter the design space on the preset's own design vector, using
+        // the selected design-mode envelope rather than the retired fixed
+        // percentage window. The same envelope is applied by the product
+        // evaluator, so the GUI cannot offer a reference limit it will later
+        // ignore.
         if let Ok(dv) = serde_json::to_value(preset.design_vector) {
             if let Some(map) = dv.as_object() {
                 for spec in DESIGN_VARIABLE_SPECS {
                     if let Some(v) = map.get(spec.name).and_then(Value::as_f64) {
                         self.design_values.insert(spec.name.to_owned(), v);
-                        self.bounds
-                            .insert(spec.name.to_owned(), preset_centered_bounds(spec, v));
                     }
                 }
             }
         }
+        self.reset_design_space_bounds_to_mode();
 
         self.log(
             tr_fields(
@@ -148,6 +150,90 @@ impl AppState {
             LogKind::Info,
         );
         self.on_config_modified();
+    }
+
+    /// Return the design mode currently represented by the edited config.
+    ///
+    /// A missing `optimizer.design_space` object is valid for a default
+    /// serialized config because the config crate skips that default group;
+    /// decoding through `AlasConfig` therefore supplies the canonical clean-
+    /// sheet mode instead of making the GUI invent a second default.
+    pub fn design_mode(&self) -> DesignMode {
+        self.typed_config()
+            .map(|config| config.optimizer.design_space.mode)
+            .unwrap_or_default()
+    }
+
+    /// Select the product design mode and synchronize the GUI envelope with
+    /// the typed config contract.
+    pub fn set_design_mode(&mut self, mode: DesignMode) {
+        let Some(mut config) = self.typed_config() else {
+            self.log(
+                tr("Configuration is not currently valid; the design mode was not changed."),
+                LogKind::Error,
+            );
+            return;
+        };
+        if config.optimizer.design_space.mode == mode {
+            self.run_options.optimize = mode != DesignMode::BaselineSandbox;
+            if mode == DesignMode::BaselineSandbox {
+                self.run_options.compare_baseline = false;
+            }
+            self.reset_design_space_bounds_to_mode();
+            return;
+        }
+        config.optimizer.design_space.mode = mode;
+        self.config_values = full_config_values(&config);
+        self.run_options.optimize = mode != DesignMode::BaselineSandbox;
+        if mode == DesignMode::BaselineSandbox {
+            self.run_options.compare_baseline = false;
+        }
+        self.reset_design_space_bounds_to_mode();
+        self.log(
+            tr_fields(
+                "Design mode changed to: {mode}",
+                &[("mode", design_mode_display_name(mode))],
+            ),
+            LogKind::Info,
+        );
+        self.on_config_modified();
+    }
+
+    /// Rebuild the GUI bounds from the same typed design-mode envelope the
+    /// product optimizer intersects with its request. This is called after a
+    /// mode/window/preset change; ordinary design-space edits still remain
+    /// explicit run bounds within that declared envelope.
+    pub fn reset_design_space_bounds_to_mode(&mut self) {
+        let Some(config) = self.typed_config() else {
+            return;
+        };
+        let nominal = self.current_design().unwrap_or_default();
+        for variable in config.optimizer.design_space.envelope(&nominal) {
+            self.bounds
+                .insert(variable.name.to_owned(), (variable.lower, variable.upper));
+            if variable.fixed {
+                self.design_values
+                    .insert(variable.name.to_owned(), variable.nominal);
+            }
+        }
+    }
+
+    /// Keep variables fixed by the typed envelope fixed immediately before a
+    /// run. This protects the baseline sandbox and clean-sheet cabin sizing
+    /// path even when the user last edited another page.
+    pub fn enforce_design_space_fixed_variables(&mut self) {
+        let Some(config) = self.typed_config() else {
+            return;
+        };
+        let nominal = self.current_design().unwrap_or_default();
+        for variable in config.optimizer.design_space.envelope(&nominal) {
+            if variable.fixed {
+                self.design_values
+                    .insert(variable.name.to_owned(), variable.nominal);
+                self.bounds
+                    .insert(variable.name.to_owned(), (variable.lower, variable.upper));
+            }
+        }
     }
 
     /// Apply one aux-preset (the Py6-era fidelity/solver/performance pickers)
@@ -301,6 +387,11 @@ impl AppState {
                 {
                     Ok(canonical) => {
                         self.config_values = canonical;
+                        // A loaded design mode owns the bounds shown on the
+                        // Design Space page. Reapply its envelope immediately
+                        // so stale bounds from the previous file cannot leak
+                        // into the next run.
+                        self.reset_design_space_bounds_to_mode();
                         self.save_tool_preferences();
                         self.log(
                             tr_fields("Loaded configuration from {path}.", &[("path", path)]),
@@ -324,28 +415,6 @@ impl AppState {
 
 fn nonempty(value: &str) -> Option<String> {
     (!value.trim().is_empty()).then(|| value.to_owned())
-}
-
-/// Build readable preset-local bounds without collapsing zero-centred variables.
-fn preset_centered_bounds(spec: &DesignVariableSpec, value: f64) -> (f64, f64) {
-    if !value.is_finite() || value.abs() < f64::EPSILON {
-        return (spec.lower, spec.upper);
-    }
-
-    let half_width = 0.15 * value.abs();
-    let displayed_decimals = if value.abs() >= 1.0 {
-        spec.decimals.min(1)
-    } else {
-        spec.decimals
-    };
-    let scale = 10_f64.powi(displayed_decimals as i32);
-    let lower = ((value - half_width) * scale).floor() / scale;
-    let upper = ((value + half_width) * scale).ceil() / scale;
-    if lower < upper {
-        (lower, upper)
-    } else {
-        (spec.lower, spec.upper)
-    }
 }
 
 /// A deterministic-per-name pseudo-random draw in `[0, 1)`.

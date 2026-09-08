@@ -58,6 +58,12 @@ pub struct OptimizationResult {
     /// Mutation/crossover strategy used by the search.
     #[serde(default = "default_result_strategy")]
     pub strategy: String,
+    /// Durable search lifecycle reason.  For product MADS this is one of
+    /// `evaluation_budget`, `mesh_limit`, `iteration_limit`, `fixed_bounds`
+    /// or `invalid_input`; it is kept separate from the legacy strategy
+    /// label so a budget stop is not mistaken for convergence.
+    #[serde(default = "default_result_termination")]
+    pub termination: String,
     /// Final nondominated set for a multi-objective method.
     #[serde(default)]
     pub pareto_front: Vec<ParetoCandidate>,
@@ -118,6 +124,10 @@ fn default_result_method() -> String {
 
 fn default_result_strategy() -> String {
     "best1bin".to_owned()
+}
+
+fn default_result_termination() -> String {
+    "unknown".to_owned()
 }
 
 /// Searches the aircraft design space to minimize the [`DesignObjective`].
@@ -194,17 +204,30 @@ fn scored_point(values: &[f64], cost: f64, history: &OptimizationHistory) -> Sco
         .get(index)
         .map(String::as_str)
         .unwrap_or("evaluation_failure");
+    let hard_violation = history
+        .hard_violation
+        .get(index)
+        .copied()
+        .filter(|value| value.is_finite() && *value >= 0.0)
+        .unwrap_or(f64::NAN);
     let constraint_violation = if valid {
         0.0
+    } else if hard_violation.is_finite() && hard_violation > 0.0 {
+        // A physical miss is ordered by its dimensionless aggregate
+        // violation. Counting reject labels made a severe single miss appear
+        // better than several small misses and discarded the actual physics.
+        hard_violation
     } else {
+        // Analysis failures are an extreme barrier and remain behind every
+        // completed physical miss, even when the delegated evaluator did not
+        // provide a residual table.
         let category_count = reason
             .split('+')
             .filter(|part| !part.is_empty())
             .count()
             .max(1) as f64;
-        // Solver failures must not outrank recoverable constraint misses.
         if !l_over_d.is_finite() || l_over_d <= 0.0 {
-            1_000.0 + category_count
+            1_000_000.0 + category_count
         } else {
             category_count
         }
@@ -222,6 +245,7 @@ fn result_from_method(
     outcome: MethodOutcome,
     method: &str,
     strategy: &str,
+    termination: &str,
     history: &OptimizationHistory,
     wall_time_s: f64,
 ) -> OptimizationResult {
@@ -250,6 +274,7 @@ fn result_from_method(
         wall_time_s,
         method: method.to_owned(),
         strategy: strategy.to_owned(),
+        termination: termination.to_owned(),
         pareto_front,
     }
 }

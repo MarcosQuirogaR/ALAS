@@ -42,6 +42,7 @@ pub fn quick_preview_report(
     design: DesignVector,
 ) -> Result<AnalysisReport, String> {
     let geometry = config.geometry.clone();
+    let analysis_mass_model = config.analysis_mass_model(config.requirements.mtow_kg);
     let (masses, coordinates, physical_cg) =
         run_mass_analysis_with_model_checked_product_with_gear(
             &airplane,
@@ -49,7 +50,7 @@ pub fn quick_preview_report(
             &geometry,
             &config.cabin,
             &config.control_surfaces,
-            Some(&config.mass_model),
+            Some(&analysis_mass_model),
             None,
             MassCoordinateModel::StructuralWingbox(&config.structures),
             &config.landing_gear,

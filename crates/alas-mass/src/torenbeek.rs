@@ -223,6 +223,150 @@ fn mass_wing_spoilers_and_speedbrakes(_wing: &Wing, mass_basic_wing: f64) -> f64
     0.015 * mass_basic_wing
 }
 
+/// The Torenbeek movable-wing secondary items that can be separated from the
+/// analytical primary wingbox.
+///
+/// These are the high-lift-device and spoiler/speedbrake terms from
+/// [`mass_wing`], including its empirical 1.2 installation multiplier. The
+/// basic spar/skin/rib structure is deliberately excluded. The result is a
+/// declared model contribution, not a complete non-box inventory: joints,
+/// fasteners, fairings, systems, seals, actuators, and other items absent
+/// from these two correlations remain an explicit residual for the caller.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct WingSecondaryMassBreakdown {
+    /// Installed high-lift-device mass, kg.
+    pub high_lift_devices_kg: f64,
+    /// Installed spoiler and speedbrake mass, kg.
+    pub spoilers_and_speedbrakes_kg: f64,
+    /// Sum of the two modeled secondary terms, kg.
+    pub total_kg: f64,
+}
+
+/// Return the modeled Torenbeek secondary wing items separately from the
+/// primary basic-wing structure.
+///
+/// The units and structural options match [`mass_wing_with_control_surface_area`]:
+/// masses are kilograms, speeds are metres per second, flap deflection is
+/// degrees, and `control_surface_area_m2` is square metres of the total
+/// configured flap planform in the wing extent used by the product mass path.
+/// For a symmetric wing that path supplies both sides. A caller holding only
+/// a semi-wing area must convert it consistently before calling this helper.
+/// The helper keeps `mass_wing`'s existing total-regression behaviour
+/// unchanged while exposing only the two terms that can be added to a sized
+/// analytical box without adding the empirical basic structure again.
+#[allow(clippy::too_many_arguments)]
+pub fn wing_secondary_mass_breakdown_with_control_surface_area(
+    wing: &Wing,
+    design_mass_togw: f64,
+    ultimate_load_factor: f64,
+    suspended_mass: f64,
+    never_exceed_airspeed: f64,
+    max_airspeed_for_flaps: f64,
+    main_gear_mounted_to_wing: bool,
+    flap_deflection_angle: f64,
+    strut_y_location: Option<f64>,
+    control_surface_area_m2: f64,
+) -> WingSecondaryMassBreakdown {
+    let mass_basic_wing = mass_wing_basic_structure(
+        wing,
+        design_mass_togw,
+        ultimate_load_factor,
+        suspended_mass,
+        never_exceed_airspeed,
+        main_gear_mounted_to_wing,
+        strut_y_location,
+        DEFAULT_K_E,
+    );
+    // `mass_wing` applies the same empirical 1.2 installation multiplier to
+    // both movable-item terms. Keep that multiplier visible here so callers
+    // can audit exactly what is included in the returned inventory.
+    // Do not clamp a negative area to zero: a malformed area should remain
+    // visible as the same non-finite/invalid numerical result as the source
+    // correlation rather than being turned into a plausible-looking mass.
+    let high_lift_devices_kg = 1.2
+        * mass_wing_high_lift_devices_with_area(
+            wing,
+            max_airspeed_for_flaps,
+            flap_deflection_angle,
+            control_surface_area_m2,
+        );
+    let spoilers_and_speedbrakes_kg =
+        1.2 * mass_wing_spoilers_and_speedbrakes(wing, mass_basic_wing);
+    WingSecondaryMassBreakdown {
+        high_lift_devices_kg,
+        spoilers_and_speedbrakes_kg,
+        total_kg: high_lift_devices_kg + spoilers_and_speedbrakes_kg,
+    }
+}
+
+/// Return only the modeled Torenbeek secondary wing mass, kg, using the
+/// reference-compatible cantilever/no-strut options.
+///
+/// This eight-argument convenience wrapper matches the mass arguments used by
+/// the legacy component buildup. It excludes the empirical basic
+/// spar/skin/rib structure and does not assert that the returned two-term sum
+/// exhausts the physical non-box wing inventory. Call
+/// [`wing_secondary_mass_with_structure_options`] when the product gear or
+/// strut architecture must be reflected in the spoiler term.
+#[allow(clippy::too_many_arguments)]
+pub fn wing_secondary_mass_with_control_surface_area(
+    wing: &Wing,
+    design_mass_togw: f64,
+    ultimate_load_factor: f64,
+    suspended_mass: f64,
+    never_exceed_airspeed: f64,
+    max_airspeed_for_flaps: f64,
+    flap_deflection_angle: f64,
+    control_surface_area_m2: f64,
+) -> f64 {
+    wing_secondary_mass_breakdown_with_control_surface_area(
+        wing,
+        design_mass_togw,
+        ultimate_load_factor,
+        suspended_mass,
+        never_exceed_airspeed,
+        max_airspeed_for_flaps,
+        false,
+        flap_deflection_angle,
+        None,
+        control_surface_area_m2,
+    )
+    .total_kg
+}
+
+/// Return only the modeled Torenbeek secondary wing mass, kg, with explicit
+/// gear and strut options.
+///
+/// This is the option-complete counterpart to
+/// [`wing_secondary_mass_with_control_surface_area`].
+#[allow(clippy::too_many_arguments)]
+pub fn wing_secondary_mass_with_structure_options(
+    wing: &Wing,
+    design_mass_togw: f64,
+    ultimate_load_factor: f64,
+    suspended_mass: f64,
+    never_exceed_airspeed: f64,
+    max_airspeed_for_flaps: f64,
+    main_gear_mounted_to_wing: bool,
+    flap_deflection_angle: f64,
+    strut_y_location: Option<f64>,
+    control_surface_area_m2: f64,
+) -> f64 {
+    wing_secondary_mass_breakdown_with_control_surface_area(
+        wing,
+        design_mass_togw,
+        ultimate_load_factor,
+        suspended_mass,
+        never_exceed_airspeed,
+        max_airspeed_for_flaps,
+        main_gear_mounted_to_wing,
+        flap_deflection_angle,
+        strut_y_location,
+        control_surface_area_m2,
+    )
+    .total_kg
+}
+
 /// The mass of a wing, according to Torenbeek's "Synthesis of Subsonic
 /// Airplane Design", 1976, Appendix C: "Prediction of Wing Structural
 /// Weight" -- `mass_wing`.
@@ -469,6 +613,84 @@ mod tests {
             &wing, 60_000.0, 3.75, 20_000.0, 180.0, 90.0, false, 30.0, None, 10.0,
         );
         assert!(product > legacy, "product={product}, legacy={legacy}");
+    }
+
+    #[test]
+    fn secondary_breakdown_matches_torenbeek_movable_increment_without_basic_structure() {
+        let wing = rectangular_wing();
+        let arguments = (
+            &wing, 60_000.0, 3.75, 20_000.0, 180.0, 90.0, false, 30.0, None, 10.0,
+        );
+        let breakdown = wing_secondary_mass_breakdown_with_control_surface_area(
+            arguments.0,
+            arguments.1,
+            arguments.2,
+            arguments.3,
+            arguments.4,
+            arguments.5,
+            arguments.6,
+            arguments.7,
+            arguments.8,
+            arguments.9,
+        );
+        let total = mass_wing_with_control_surface_area(
+            arguments.0,
+            arguments.1,
+            arguments.2,
+            arguments.3,
+            arguments.4,
+            arguments.5,
+            arguments.6,
+            arguments.7,
+            arguments.8,
+            arguments.9,
+        );
+        let basic = mass_wing_basic_structure(
+            arguments.0,
+            arguments.1,
+            arguments.2,
+            arguments.3,
+            arguments.4,
+            arguments.6,
+            arguments.8,
+            DEFAULT_K_E,
+        );
+
+        assert!(breakdown.high_lift_devices_kg > 0.0);
+        assert!(breakdown.spoilers_and_speedbrakes_kg > 0.0);
+        assert_eq!(
+            breakdown.total_kg,
+            breakdown.high_lift_devices_kg + breakdown.spoilers_and_speedbrakes_kg
+        );
+        assert!((total - (basic + breakdown.total_kg)).abs() < 1.0e-9);
+        assert_eq!(
+            wing_secondary_mass_with_structure_options(
+                arguments.0,
+                arguments.1,
+                arguments.2,
+                arguments.3,
+                arguments.4,
+                arguments.5,
+                arguments.6,
+                arguments.7,
+                arguments.8,
+                arguments.9,
+            ),
+            breakdown.total_kg
+        );
+        assert_eq!(
+            wing_secondary_mass_with_control_surface_area(
+                arguments.0,
+                arguments.1,
+                arguments.2,
+                arguments.3,
+                arguments.4,
+                arguments.5,
+                arguments.7,
+                arguments.9,
+            ),
+            breakdown.total_kg
+        );
     }
 
     #[test]

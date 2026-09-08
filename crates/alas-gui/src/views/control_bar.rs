@@ -2,7 +2,7 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 //! The bottom control bar: the randomizer group (DOE Sample / Random), the
-//! run group (Analyze baseline / Run), and the status/elapsed readout.
+//! run group (Analyze reference / Run), and the status/elapsed readout.
 //!
 //! A port of the reference desktop app's `ControlBar`.
 
@@ -11,6 +11,7 @@ use egui::{RichText, Ui};
 use crate::state::{AppState, LogKind};
 use crate::views::tour_data::TourTarget;
 use crate::views::tr;
+use alas_config::DesignMode;
 
 /// Render the control bar.
 pub fn show_control_bar(state: &mut AppState, ui: &mut Ui) {
@@ -20,8 +21,13 @@ pub fn show_control_bar(state: &mut AppState, ui: &mut Ui) {
     ui.horizontal(|ui| {
         let running = state.is_running;
 
+        let baseline_mode = state.design_mode() == DesignMode::BaselineSandbox;
+
         let doe_response = ui
-            .add_enabled(!running, egui::Button::new(tr("DOE Sample")))
+            .add_enabled(
+                !running && !baseline_mode,
+                egui::Button::new(tr("DOE Sample")),
+            )
             .on_hover_text(tr("Draw one design point within the Design Space bounds"));
         if doe_response.clicked() {
             let sample = state.sample_design(0.0);
@@ -34,7 +40,7 @@ pub fn show_control_bar(state: &mut AppState, ui: &mut Ui) {
         }
 
         let surprise_response = ui
-            .add_enabled(!running, egui::Button::new(tr("Random")))
+            .add_enabled(!running && !baseline_mode, egui::Button::new(tr("Random")))
             .on_hover_text(tr(
                 "Draw a design +/-30% beyond the bounds, then run the full pipeline",
             ));
@@ -55,9 +61,9 @@ pub fn show_control_bar(state: &mut AppState, ui: &mut Ui) {
         ui.separator();
 
         let baseline_response = ui
-            .add_enabled(!running, egui::Button::new(tr("Analyze baseline")))
+            .add_enabled(!running, egui::Button::new(tr("Analyze reference")))
             .on_hover_text(tr(
-                "Weight and balance + stability of the current design, no optimizer",
+                "Analyze the selected reference aircraft and load case with no redesign",
             ));
         if baseline_response.clicked() {
             state.start_pipeline(true);
@@ -68,9 +74,11 @@ pub fn show_control_bar(state: &mut AppState, ui: &mut Ui) {
             RichText::new(tr(if running { "Running..." } else { "Run" })).strong(),
         );
         let run_response = ui
-            .add_enabled(!running && !blocked, run_button)
+            .add_enabled(!running && !blocked && !baseline_mode, run_button)
             .on_hover_text(if blocked {
                 tr("Fix error-severity validation issues first")
+            } else if baseline_mode {
+                tr("Select New aircraft or Adapt reference to run MADS")
             } else {
                 tr("Optimize, analyze and run the mission in one pass")
             });

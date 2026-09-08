@@ -156,6 +156,7 @@ fn a_complete_mission_is_exported_as_a_cpacs_trajectory_summary() {
             distance_m: 1_000.0,
         },
         air_speed_m_s: 250.0,
+        air_speed_reference: alas_config::mission::SpeedReference::TrueAirspeed,
         true_course_rad: 0.0,
         temperature_deviation_k: 0.0,
         number_control_points: 2,

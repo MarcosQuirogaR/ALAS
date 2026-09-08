@@ -151,6 +151,7 @@ impl DesignObjective {
         } else {
             MassCoordinateModel::StructuralWingbox(&self.config.structures)
         };
+        let analysis_mass_model = self.config.analysis_mass_model(req.mtow_kg);
         let initial_mass_result = if self.reference_mass_coordinates {
             alas_mass::breakdown::run_mass_analysis_with_model_checked_with_gear(
                 &plane,
@@ -170,7 +171,7 @@ impl DesignObjective {
                 &self.config.geometry,
                 &self.config.cabin,
                 &self.config.control_surfaces,
-                Some(&self.config.mass_model),
+                Some(&analysis_mass_model),
                 None,
                 coordinate_model,
                 &self.config.landing_gear,
@@ -227,7 +228,7 @@ impl DesignObjective {
                     &self.config.geometry,
                     &self.config.cabin,
                     &self.config.control_surfaces,
-                    Some(&self.config.mass_model),
+                    Some(&analysis_mass_model),
                     Some(&summary),
                     coordinate_model,
                     &self.config.landing_gear,

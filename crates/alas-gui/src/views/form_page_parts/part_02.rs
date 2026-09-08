@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-
 /// Group the otherwise flat turbofan-cycle inputs by their physical subsystem.
 /// The model schema remains the single source of field metadata; this only
 /// supplies visual hierarchy for a form with no nested configuration nodes.
@@ -148,7 +147,10 @@ fn render_preview(
 
 #[cfg(test)]
 mod tests {
-    use super::{engine_editor_model, is_external_tools_field, EngineEditorModel};
+    use super::{
+        engine_editor_model, is_external_tools_field, optimizer_ui_fields, EngineEditorModel,
+    };
+    use alas_config::ConfigNode;
 
     #[test]
     fn mission_locations_are_managed_only_on_the_external_tools_page() {
@@ -189,5 +191,48 @@ mod tests {
             Ok(EngineEditorModel::Turbofan { .. })
         ));
     }
-}
 
+    #[test]
+    fn optimizer_page_hides_legacy_methods_and_exposes_only_mads_settings() {
+        let config = alas_config::AlasConfig::default();
+        let fields = config
+            .schema()
+            .field("optimizer")
+            .expect("optimizer group")
+            .entry
+            .clone();
+        let alas_config::Entry::Node(node) = fields else {
+            panic!("optimizer must be a group");
+        };
+        let filtered = optimizer_ui_fields(&node.fields);
+        assert!(filtered
+            .iter()
+            .all(|field| { !matches!(field.name, "weights" | "design_space") }));
+        let solver = filtered
+            .iter()
+            .find(|field| field.name == "solver")
+            .expect("MADS settings group");
+        let alas_config::Entry::Node(solver) = &solver.entry else {
+            panic!("solver must be a group");
+        };
+        assert!(solver.fields.iter().all(|field| !matches!(
+            field.name,
+            "method"
+                | "strategy"
+                | "finite_difference_step"
+                | "constraint_tolerance"
+                | "tolerance"
+                | "workers"
+                | "display_progress"
+                | "seed_near_initial_design"
+                | "seed_perturbation_fraction"
+        )));
+        if let Some(iterations) = solver
+            .fields
+            .iter()
+            .find(|field| field.name == "max_iterations")
+        {
+            assert_eq!(iterations.label, "MADS poll/search iterations");
+        }
+    }
+}

@@ -64,8 +64,9 @@ pub fn figure_lto_for_airport(
     theme: Option<&str>,
 ) -> Scene {
     let takeoff_mass_kg = config.requirements.mtow_kg;
-    let landing_mass_kg =
-        (takeoff_mass_kg * config.mass_model.mlw_fraction_mtow).clamp(0.0, takeoff_mass_kg);
+    let landing_mass_kg = config
+        .landing_mass_limit_kg(takeoff_mass_kg)
+        .clamp(0.0, takeoff_mass_kg);
     figure_lto_for_airport_at_masses(
         report,
         config,

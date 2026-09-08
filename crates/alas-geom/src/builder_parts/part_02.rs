@@ -2,25 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 
-/// Whether a side-of-body station changes the physical loft rather than only
-/// naming a point on the straight root-to-kink panel.
-///
-/// Keeping a collinear bookkeeping station out of the VLM mesh avoids adding
-/// an entire extra subdivision block to every candidate and every live-preview
-/// camera update, while a genuinely cranked body fairing is still retained.
-fn side_of_body_changes_loft(
-    planform: &TransportPlanform,
-    side_of_body: alas_config::MainWingStation,
-) -> bool {
-    let fraction = side_of_body.y_m / planform.kink.y_m;
-    let interpolated_le = planform.root.leading_edge_x_m
-        + fraction * (planform.kink.leading_edge_x_m - planform.root.leading_edge_x_m);
-    let interpolated_chord =
-        planform.root.chord_m + fraction * (planform.kink.chord_m - planform.root.chord_m);
-    (side_of_body.leading_edge_x_m - interpolated_le).abs() > 1e-10
-        || (side_of_body.chord_m - interpolated_chord).abs() > 1e-10
-}
-
 /// `n_subdivisions` clamped to `usize`, so a negative or overflowing
 /// configuration value becomes `0` -- which [`Wing::subdivide_sections`]
 /// rejects with [`SubdivideSectionsError::RatioTooSmall`], the same outcome

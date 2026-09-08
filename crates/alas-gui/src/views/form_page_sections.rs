@@ -78,14 +78,9 @@ pub(super) fn page_sections(group: &str) -> Option<&'static [PageSection]> {
             default_open: true,
         },
         PageSection {
-            title: "Search settings",
+            title: "MADS settings",
             names: &["solver"],
             default_open: true,
-        },
-        PageSection {
-            title: "Reference-replay penalty weights",
-            names: &["weights"],
-            default_open: false,
         },
     ];
     const LANDING_GEAR: &[PageSection] = &[

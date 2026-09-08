@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-
 impl AvlObjective {
     /// Score one candidate with the mission-sized objective around AVL's
     /// aerodynamics: AVL supplies the induced drag at the required cruise
@@ -35,15 +34,39 @@ impl AvlObjective {
             return ObjectiveEvaluation::rejected(self.failure_cost(), "avl_induced_drag");
         }
         let cd0 = report.polar_fit.cd0;
+        let wave_drag_cd = report
+            .polar
+            .cl
+            .iter()
+            .enumerate()
+            .min_by(|(_, left), (_, right)| {
+                (**left - required_cl)
+                    .abs()
+                    .total_cmp(&(**right - required_cl).abs())
+            })
+            .and_then(|(index, _)| report.polar.cd_wave.get(index).copied())
+            .filter(|value| value.is_finite() && *value >= 0.0)
+            .unwrap_or(0.0);
         let polar = ExternalPolar {
             cd0,
             induced_factor_k: point.induced_drag_coefficient / (required_cl * required_cl),
-            lift_to_drag: required_cl / (cd0 + point.induced_drag_coefficient),
+            wave_drag_cd,
+            lift_to_drag: required_cl / (cd0 + wave_drag_cd + point.induced_drag_coefficient),
             alpha_deg: point.alpha_deg,
             incidence_deg: report
                 .trimmed_design_point
                 .map_or(0.0, |trim| trim.trim_ih_deg),
             x_np: report.x_neutral_point,
+            // Evaluation identity, so this polar cannot be flown at another
+            // state: AVL's own run Mach (a mis-commanded run is caught, not
+            // relabelled), the requirement altitude (AVL has no atmosphere),
+            // and the area the coefficients are referred to.
+            mach: point.mach,
+            altitude_m: self.config.requirements.cruise_altitude_m,
+            reference_area_m2: report.airplane.s_ref,
+            target_cl: required_cl,
+            source: "avl",
+            bracketed: true,
         };
         match assess_candidate_with_polar(&self.objective, &design.to_array(), &polar) {
             Ok(assessment) => ObjectiveEvaluation {

@@ -31,6 +31,7 @@ mod mesh_correction;
 pub mod objective;
 mod python_rng;
 pub mod sampling;
+mod search;
 mod search_methods;
 pub mod transport_planform;
 
@@ -50,7 +51,8 @@ pub use history::OptimizationHistory;
 pub use mdo::{
     assess_candidate, assess_candidate_with_polar, evaluate_mission_sized,
     evaluate_mission_sized_with_assessment, CandidateAssessment, ConstraintFamily,
-    ConstraintResidual, ExternalPolar, SizedCandidate,
+    ConstraintResidual, ExternalPolar, PolarConditionTolerance, SegmentMissionModel,
+    SizedCandidate,
 };
 pub use objective::{
     wing_fuel_volume_m3, wing_fuel_volume_m3_reference_compatibility, DesignObjective,

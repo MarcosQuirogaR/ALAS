@@ -22,21 +22,50 @@ mod build;
 mod cost;
 mod engine;
 mod mda;
+pub mod mission_model;
+pub mod propulsion;
 mod range;
 mod residuals;
 mod residuals_geometry;
 mod residuals_performance;
 mod sizing;
 mod tanks;
+mod trim;
 mod types;
 
+pub use mission_model::SegmentMissionModel;
 pub use types::{
-    CandidateAssessment, ConstraintFamily, ConstraintResidual, ExternalPolar, SizedCandidate,
+    CandidateAssessment, ConstraintFamily, ConstraintResidual, ExternalPolar,
+    PolarConditionTolerance, SizedCandidate,
 };
 
 use alas_config::design_variables::DesignVector;
+use alas_config::AlasConfig;
 
 use crate::objective::DesignObjective;
+
+/// Resolve a deterministic nominal vector for a product design space.
+///
+/// Clean-sheet passenger studies with cabin-derived fuselage length need the
+/// same one-dimensional sizing solve before bounds are handed to the search;
+/// otherwise the search would evaluate one body length and return another in
+/// its best-design vector. Other modes return the supplied nominal intact.
+pub(crate) fn canonical_nominal_design(
+    config: &AlasConfig,
+    mut nominal: DesignVector,
+) -> Result<DesignVector, String> {
+    if !config.optimizer.design_space.sizes_fuselage_from_cabin()
+        || config.requirements.aircraft_type == "cargo"
+    {
+        return Ok(nominal);
+    }
+    let mut materialized = config.clone();
+    crate::objective::apply_candidate_payload_load_case(&mut materialized, &nominal)
+        .map_err(|error| format!("cabin load case cannot be materialized: {error}"))?;
+    build::size_fuselage_from_cabin(&materialized, &mut nominal)
+        .map_err(|failure| format!("fuselage cannot be sized from cabin: {}", failure.reason))?;
+    Ok(nominal)
+}
 
 /// Evaluate a mission-sized objective for candidate design vector `x`,
 /// recording the result into `objective`'s history and returning the scalar
@@ -55,6 +84,27 @@ pub fn evaluate_mission_sized_with_assessment(
     x: &[f64],
 ) -> (f64, Option<CandidateAssessment>) {
     let weights = objective.config.optimizer.weights.clone();
+    if objective.validate_design_space(x).is_err() {
+        let cost = weights.failure_cost;
+        let dv = DesignVector::from_array(x).unwrap_or_default();
+        objective.history.record_mission_sized(
+            dv,
+            false,
+            cost,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            "design_space".to_owned(),
+            f64::NAN,
+            f64::NAN,
+            f64::NAN,
+            f64::NAN,
+            f64::NAN,
+        );
+        return (cost, None);
+    }
     match sizing::run_candidate(&objective.config, x) {
         Ok(outcome) => {
             let history = outcome.history;
@@ -155,6 +205,9 @@ fn assess_with(
     x: &[f64],
     polar: Option<&ExternalPolar>,
 ) -> Result<CandidateAssessment, String> {
+    objective
+        .validate_design_space(x)
+        .map_err(|_| "design_space".to_owned())?;
     let weights = objective.config.optimizer.weights.clone();
     match sizing::run_candidate_with_polar(&objective.config, x, polar) {
         Ok(outcome) => {

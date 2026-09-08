@@ -20,10 +20,12 @@
 //! the rest is replayed by the parity fixtures and kept so a saved
 //! configuration still round-trips.
 
+pub mod design_space;
 mod objective;
 mod solver;
 mod weights;
 
+pub use design_space::{DesignMode, DesignSpaceConfig, VariableEnvelope};
 pub use objective::{ConstraintPolicy, MtowSizing, ObjectiveConfig, ObjectiveKind};
 pub use solver::SolverSettings;
 pub use weights::ObjectiveWeights;
@@ -57,6 +59,14 @@ pub struct OptimizerConfig {
         help = "The mission-sized objective -- block fuel, takeoff mass, empty mass or fuel per seat-kilometre over the design range under the fuel policy -- the takeoff-mass closure, and the hard, soft or diagnostic policy of every requirement family that bounds it."
     )]
     pub objective: ObjectiveConfig,
+
+    /// Which aircraft fields are allowed to change during a product run.
+    #[serde(default, skip_serializing_if = "DesignSpaceConfig::is_default")]
+    #[config(
+        nested,
+        help = "Design boundary for clean-sheet studies, reference-aircraft adaptation, and the fixed baseline sandbox. The resolved mutable/fixed envelope is recorded with each run and is enforced by the evaluator as well as the search bounds."
+    )]
+    pub design_space: DesignSpaceConfig,
 }
 
 // A test asserts on values it constructed here directly, so a failed unwrap
@@ -75,7 +85,10 @@ mod tests {
         // -- what is being minimised at all -- and gets its own group.
         let schema = OptimizerConfig::default().schema();
         let names: Vec<&str> = schema.fields.iter().map(|field| field.name).collect();
-        assert_eq!(names, vec!["weights", "solver", "objective"]);
+        assert_eq!(
+            names,
+            vec!["weights", "solver", "objective", "design_space"]
+        );
         for field in &schema.fields {
             assert!(matches!(field.entry, Entry::Node(_)), "{}", field.name);
         }
@@ -86,5 +99,6 @@ mod tests {
         let config = OptimizerConfig::default();
         assert_eq!(config.weights, ObjectiveWeights::default());
         assert_eq!(config.solver, SolverSettings::default());
+        assert_eq!(config.design_space, DesignSpaceConfig::default());
     }
 }

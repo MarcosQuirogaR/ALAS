@@ -261,6 +261,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         wall_time_s: 1.0,
         method: "differential_evolution".to_owned(),
         strategy: "best1bin".to_owned(),
+        termination: "example".to_owned(),
         pareto_front: Vec::new(),
     });
     state.pipeline_result = Some(result);

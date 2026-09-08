@@ -25,16 +25,15 @@ use alas_mission::segments::{LegacyTurbofanCompatibility, MissionAnalyses};
 #[cfg(test)]
 use alas_mission::Mission;
 use alas_mission::{build_mission_request, MissionResult};
-use alas_prop::empirical_turbofan::{EmpiricalTurbofanDeck, EmpiricalTurbofanModel};
-use alas_prop::mission_turbofan::{
-    size_turbofan, size_turbofan_to_static_rating, PartPowerModel, TurbofanInputs,
-    VehicleBuilderParams,
-};
+#[cfg(test)]
+use alas_prop::mission_turbofan::PartPowerModel;
+use alas_prop::mission_turbofan::{size_turbofan, TurbofanInputs, VehicleBuilderParams};
 use alas_prop::system::{
     LegacyTurbofanModel, ModelIdentity, ModelProvenance, PropulsionInstallation,
     PropulsionOrchestrator,
 };
-use alas_prop::turboprop::{Atr72TurbopropSystem, Pw127m568fModel};
+
+use alas_opt::mdo::propulsion::product_orchestrator;
 
 use crate::feasibility::plan_fuel_loading;
 use crate::full_analysis::AnalysisReport;
@@ -147,10 +146,13 @@ fn build_analyses_with_mode(
         .active_model()
         .map_err(|error| format!("mission engine binding failed: {error}"))?;
     let (propulsion, legacy_turbofan) = match active_model {
-        ActiveEngineModel::Turbofan(payload) => {
-            // The legacy scalar evaluator has no per-unit moment model. Keep
-            // its equivalent thrust line through the mission reference point;
-            // the typed propulsion boundary is still what mission code sees.
+        ActiveEngineModel::Turbofan(payload)
+            if reference_mode == MissionReferenceMode::ReferenceCompatibility =>
+        {
+            // The historical vehicle fixture sizes its turbofan from
+            // cruise-required thrust with the frozen compatibility parameters;
+            // the legacy scalar evaluator has no per-unit moment model, so its
+            // equivalent thrust line runs through the mission reference point.
             let legacy_installation = PropulsionInstallation {
                 unit_positions_m: engine
                     .spanwise_positions_m
@@ -159,24 +161,12 @@ fn build_analyses_with_mode(
                     .collect(),
                 ..installation.clone()
             };
-            let design_thrust_total_n = match reference_mode {
-                MissionReferenceMode::Product => {
-                    payload.rated_thrust_kn * n_engines as f64 * 1_000.0
-                }
-                MissionReferenceMode::ReferenceCompatibility => {
-                    historical_cruise_required_thrust_total_n(config, report)?
-                }
-            };
+            let design_thrust_total_n = historical_cruise_required_thrust_total_n(config, report)?;
             if !design_thrust_total_n.is_finite() || design_thrust_total_n <= 0.0 {
-                return Err(match reference_mode {
-                    MissionReferenceMode::Product => {
-                        "mission aircraft has no positive finite rated engine thrust".to_owned()
-                    }
-                    MissionReferenceMode::ReferenceCompatibility => {
-                        "reference mission aircraft has no positive finite cruise-required thrust"
-                            .to_owned()
-                    }
-                });
+                return Err(
+                    "reference mission aircraft has no positive finite cruise-required thrust"
+                        .to_owned(),
+                );
             }
             let inputs = TurbofanInputs {
                 number_of_engines: n_engines as f64,
@@ -188,21 +178,8 @@ fn build_analyses_with_mode(
                 cruise_altitude_m: config.requirements.cruise_altitude_m,
                 design_thrust_total_n,
             };
-            let params = match reference_mode {
-                MissionReferenceMode::Product => VehicleBuilderParams {
-                    part_power_model: PartPowerModel::IcaoLtoFuelFlow {
-                        fuel_flow_ratios: payload.part_power_fuel_flow_ratios,
-                    },
-                    ..VehicleBuilderParams::default()
-                },
-                MissionReferenceMode::ReferenceCompatibility => {
-                    VehicleBuilderParams::reference_compatibility()
-                }
-            };
-            let sized = match reference_mode {
-                MissionReferenceMode::Product => size_turbofan_to_static_rating(&inputs, &params),
-                MissionReferenceMode::ReferenceCompatibility => size_turbofan(&inputs, &params),
-            };
+            let params = VehicleBuilderParams::reference_compatibility();
+            let sized = size_turbofan(&inputs, &params);
             let flow = sized.compressor_nondimensional_massflow;
             let legacy_model = LegacyTurbofanModel::new(
                 inputs,
@@ -220,73 +197,32 @@ fn build_analyses_with_mode(
                 legacy_installation,
             )
             .map_err(|error| format!("mission propulsion construction failed: {error}"))?;
-            if reference_mode == MissionReferenceMode::Product {
-                let model = EmpiricalTurbofanModel::new(
-                    EmpiricalTurbofanDeck {
-                        takeoff_thrust_n: design_thrust_total_n,
-                        max_climb_reference_thrust_n: payload.off_design.cruise_reference_thrust_n
-                            * n_engines as f64,
-                        max_climb_reference_altitude_m: payload
-                            .off_design
-                            .cruise_reference_altitude_m,
-                        max_climb_reference_mach: payload.off_design.cruise_reference_mach,
-                        bypass_ratio: payload.takeoff_bypass_ratio.unwrap_or(payload.bypass_ratio),
-                        takeoff_fuel_flow_kg_s: payload.takeoff_fuel_flow_kg_s * n_engines as f64,
-                        cruise_reference_tsfc_kg_kgf_h: payload.cruise_tsfc_kg_kgf_hr,
-                        part_power_fuel_flow_ratios: payload.part_power_fuel_flow_ratios,
-                        max_climb_rate_ft_min: configured_max_climb_rate_ft_min(config),
-                        flight_idle_fraction: 0.07,
-                    },
-                    legacy_model,
-                    ModelProvenance {
-                        model: ModelIdentity {
-                            family: "bartel-young-openap-turbofan".to_owned(),
-                            version: "three-region-v2".to_owned(),
-                        },
-                        dataset: Some(engine.engine_name.clone()),
-                        sources: vec![
-                            "Battel & Young (2008), Journal of Aircraft 45(4), DOI 10.2514/1.35589"
-                                .to_owned(),
-                            format!(
-                                "{} [{}]",
-                                payload.off_design.source, payload.off_design.evidence
-                            ),
-                            payload.part_power_source.clone(),
-                        ],
-                    },
-                )
-                .map_err(|error| format!("mission propulsion construction failed: {error}"))?;
-                (PropulsionOrchestrator::new(model), None)
-            } else {
-                (
-                    PropulsionOrchestrator::new(legacy_model),
-                    Some(LegacyTurbofanCompatibility {
-                        inputs,
-                        params,
-                        compressor_nondimensional_massflow: flow,
-                    }),
-                )
-            }
+            (
+                PropulsionOrchestrator::new(legacy_model),
+                Some(LegacyTurbofanCompatibility {
+                    inputs,
+                    params,
+                    compressor_nondimensional_massflow: flow,
+                }),
+            )
         }
-        ActiveEngineModel::Turboprop(payload) => {
-            if reference_mode == MissionReferenceMode::ReferenceCompatibility {
-                return Err("reference compatibility supports turbofan aircraft only".to_owned());
-            }
-            let unit_model = Pw127m568fModel {
-                normal_takeoff_power_w: payload.takeoff_shaft_power_kw * 1_000.0,
-                maximum_takeoff_reserve_power_w: payload.maximum_reserve_shaft_power_kw * 1_000.0,
-                maximum_continuous_power_w: payload.maximum_continuous_shaft_power_kw * 1_000.0,
-                maximum_climb_power_w: payload.maximum_climb_shaft_power_kw * 1_000.0,
-                maximum_cruise_power_w: payload.maximum_cruise_shaft_power_kw * 1_000.0,
-                governed_propeller_speed_rpm: payload.governed_propeller_speed_rpm,
-                propeller_diameter_m: payload.propeller_diameter_m,
-                reference_psfc_kg_kwh: payload.maximum_cruise_fuel_flow_kg_h
-                    / (2.0 * payload.maximum_cruise_shaft_power_kw),
-                ..Pw127m568fModel::default()
-            };
-            let model = Atr72TurbopropSystem::new(unit_model, Vec::new(), installation)
-                .map_err(|error| format!("mission propulsion construction failed: {error}"))?;
-            (PropulsionOrchestrator::new(model), None)
+        ActiveEngineModel::Turboprop(_)
+            if reference_mode == MissionReferenceMode::ReferenceCompatibility =>
+        {
+            return Err("reference compatibility supports turbofan aircraft only".to_owned());
+        }
+        ActiveEngineModel::Turbofan(_) | ActiveEngineModel::Turboprop(_) => {
+            // The product path shares one constructor with the optimizer's
+            // candidate mission model, so the finalist mission and candidate
+            // ranking read the same off-design deck.
+            let (orchestrator, _) = product_orchestrator(
+                engine,
+                installation,
+                config.requirements.cruise_mach,
+                config.requirements.cruise_altitude_m,
+                configured_max_climb_rate_ft_min(config),
+            )?;
+            (orchestrator, None)
         }
     };
 

@@ -241,6 +241,18 @@ pub fn evaluate_airframe_product(request: &FlopsAirframeRequest<'_>) -> FlopsAir
     );
 
     let design_gross_mass_kg = requirements.mtow_kg;
+    // This function has no `AlasConfig`/`DesignMode`/preset identity in scope
+    // (only `DesignRequirements` and `MassModelConfig`, via
+    // `FlopsAirframeRequest`), so it cannot call the mode-aware
+    // `AlasConfig::landing_mass_limit_kg` resolver itself. Every product call
+    // site instead resolves that limit ahead of time and passes it down
+    // through the ordinary `mlw_fraction_mtow` slot via
+    // `AlasConfig::analysis_mass_model`, so `mass_model.mlw_fraction_mtow`
+    // here already *is* the resolved limit divided by `design_gross_mass_kg`
+    // for those callers. The plain fraction below is only reached by
+    // standalone low-level callers that build a `MassModelConfig` directly
+    // without going through `AlasConfig`, where the documented fraction
+    // semantics still apply.
     let (design_landing_mass_kg, landing_source) = match technology.design_landing_mass_kg {
         Some(value) => (value, "declared"),
         None => (
@@ -518,6 +530,47 @@ mod tests {
         assert!(
             (0.10..=0.35).contains(&fraction),
             "structure fraction {fraction}"
+        );
+    }
+
+    #[test]
+    fn choosing_flops_for_the_atr_baseline_uses_the_declared_mlw_not_the_generic_fraction() {
+        let (plane, geometry) = built_default();
+        let mut config =
+            alas_config::AlasConfig::from_value(&serde_json::json!({"preset": "ATR72-600"}))
+                .unwrap();
+        config.optimizer.design_space.mode = alas_config::DesignMode::BaselineSandbox;
+        assert_eq!(config.requirements.mtow_kg, 23_000.0);
+        // Product callers feed the resolved reference landing limit through
+        // `AlasConfig::analysis_mass_model` rather than the saved
+        // `mlw_fraction_mtow`; only that derived model should reproduce the
+        // preset's declared 22_350 kg MLW here.
+        let analysis_mass_model = config.analysis_mass_model(config.requirements.mtow_kg);
+        let mut mass_model = declared_mass_model();
+        mass_model.mlw_fraction_mtow = analysis_mass_model.mlw_fraction_mtow;
+        mass_model.flops_transport.wing_mounted_engine_count =
+            Some(geometry.engine.spanwise_positions_m.len());
+        let controls = ControlSurfacesConfig::default();
+        let result = evaluate_airframe_product(&FlopsAirframeRequest {
+            plane: &plane,
+            requirements: &config.requirements,
+            geometry: &geometry,
+            controls: &controls,
+            mass_model: &mass_model,
+            systems: None,
+            selection: FlopsAirframeSelection {
+                structure: true,
+                propulsion: true,
+            },
+        });
+        let FlopsAirframeEvaluation::Verified(breakdown) = result else {
+            panic!("declared architecture must evaluate: {result:?}");
+        };
+        assert_eq!(breakdown.sources.landing_mass, "mlw_fraction_of_mtow");
+        assert!(
+            (breakdown.structure_inputs.design_landing_mass_kg - 22_350.0).abs() < 1e-6,
+            "{}",
+            breakdown.structure_inputs.design_landing_mass_kg
         );
     }
 

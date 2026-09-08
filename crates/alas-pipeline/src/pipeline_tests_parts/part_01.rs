@@ -325,11 +325,11 @@ fn optimized_pipeline_never_falls_back_to_a_native_infeasible_screening_winner()
         .run_with_design_space(&options, &RunEnvironment::default(), &design, &bounds)
         .expect_err("native-infeasible finalist must not be delivered");
 
-    // The mission-sized objective folds the cruise stall guard into the
-    // trim-solve failure it prevents.
+    // The mission-sized objective reports the cruise stall guard as its own
+    // physical-infeasibility reason, distinct from a numerical trim failure.
     assert!(error.contains("VLM optimization failed"), "{error}");
     assert!(error.contains("no feasible design"), "{error}");
-    assert!(error.contains("trim_solve"), "{error}");
+    assert!(error.contains("trim_cruise_cl_exceeds_max"), "{error}");
 }
 
 #[test]

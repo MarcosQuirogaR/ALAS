@@ -95,22 +95,22 @@ pub(super) fn geometry_residuals(
 
     residuals.push(if req.aircraft_type == "cargo" {
         ConstraintResidual::scaled(
-            "passenger_shortfall",
+            "cargo_shortfall",
             Geometry,
-            req.cargo_payload_kg,
+            outcome.sized.carried_cargo_payload_kg,
             target_cargo_payload_kg,
             "kg",
-            target_cargo_payload_kg - req.cargo_payload_kg,
+            target_cargo_payload_kg - outcome.sized.carried_cargo_payload_kg,
             policy,
         )
     } else {
         ConstraintResidual::scaled(
             "passenger_shortfall",
             Geometry,
-            req.num_passengers as f64,
+            outcome.sized.carried_passengers as f64,
             target_num_passengers as f64,
             "passengers",
-            (target_num_passengers - req.num_passengers) as f64,
+            (target_num_passengers - outcome.sized.carried_passengers) as f64,
             policy,
         )
     });

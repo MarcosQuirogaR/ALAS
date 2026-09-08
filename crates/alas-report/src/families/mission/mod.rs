@@ -301,6 +301,7 @@ mod test_support {
                     distance_m: 277_000.0,
                 },
                 air_speed_m_s: 232.0,
+                air_speed_reference: alas_config::mission::SpeedReference::TrueAirspeed,
                 true_course_rad: 0.0,
                 temperature_deviation_k: 0.0,
                 number_control_points: n,

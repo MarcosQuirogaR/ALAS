@@ -44,3 +44,5 @@ pub mod tanks;
 pub mod torenbeek;
 pub mod transport_weight;
 pub mod wing_centroid;
+pub mod wing_inventory;
+pub mod wingbox_feedback;

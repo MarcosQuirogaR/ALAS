@@ -227,7 +227,7 @@ pub const CHAPTERS: &[Chapter] = &[
             Section {
                 heading: "Start from a preset",
                 body: &[
-                    "Presets are calibrated so their nominal design and the all-variables-at-minimum corner both stay feasible. Run Analyze baseline first and confirm the CG and static margin look sane -- if the baseline is wrong, everything downstream is wrong.",
+                    "Presets are calibrated so their nominal design and the all-variables-at-minimum corner both stay feasible. Run Analyze reference first and confirm the CG and static margin look sane -- if the baseline is wrong, everything downstream is wrong.",
                 ],
             },
             Section {

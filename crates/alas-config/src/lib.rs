@@ -32,6 +32,7 @@ mod leaf;
 mod overlay;
 mod schema;
 
+pub mod airport_dataset;
 pub mod airports;
 pub mod analysis;
 pub mod cabin;
@@ -70,6 +71,10 @@ pub use schema::{
     TranslatedField, TranslatedNode,
 };
 
+pub use airport_dataset::{
+    dataset_provenance, AirportDataError, AirportField, DatasetProvenance, FieldSource,
+    ProvenancedAirport, RunwayDataKind,
+};
 pub use analysis::AnalysisConfig;
 pub use cabin::{CabinConfig, CargoDeckConfig, PassengerCabinConfig, SeatClassConfig};
 pub use control_surfaces::ControlSurfacesConfig;
@@ -94,11 +99,11 @@ pub use geometry::{
 };
 pub use landing_gear::LandingGearConfig;
 pub use mass::MassModelConfig;
-pub use mission::{MissionConfig, MissionProfileConfig};
+pub use mission::{resolve_true_airspeed_m_s, MissionConfig, MissionProfileConfig, SpeedReference};
 pub use mses::MsesConfig;
 pub use optimizer::{
-    ConstraintPolicy, MtowSizing, ObjectiveConfig, ObjectiveKind, ObjectiveWeights,
-    OptimizerConfig, SolverSettings,
+    ConstraintPolicy, DesignMode, DesignSpaceConfig, MtowSizing, ObjectiveConfig, ObjectiveKind,
+    ObjectiveWeights, OptimizerConfig, SolverSettings, VariableEnvelope,
 };
 pub use performance::PerformanceConfig;
 pub use performance_presets::{PerformancePreset, UnknownPerformancePreset};

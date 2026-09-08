@@ -17,7 +17,7 @@ use alas_geom::aircraft::spacing::linspace;
 use alas_geom::aircraft::wing::{Wing, WingXSec};
 use alas_geom::builder::AircraftBuilder;
 
-use super::{CapacitySource, FuelTank, FuelTankLayout, TankKind, TankSide};
+use super::{CapacitySource, FuelState, FuelTank, FuelTankLayout, TankKind, TankSide};
 
 const DENSITY_KG_M3: f64 = 800.0;
 
@@ -166,6 +166,68 @@ fn distribute_sums_exactly_and_fills_the_last_burned_tank_first() {
     assert!((mass_of("wing_outer") - 1_500.0).abs() < 1.0e-9);
     assert!((mass_of("wing_inner") - 300.0).abs() < 1.0e-9);
     assert_eq!(mass_of("center"), 0.0);
+}
+
+/// A mirrored left/right pair at the same burn priority, the shape every
+/// resolved wing tank comes in ([`super::resolve::wing_tank_pair`]).
+fn symmetric_pair_layout() -> FuelTankLayout {
+    let right = FuelTank {
+        centroid_m: [20.0, 6.0, 0.0],
+        ..synthetic_tank("wing_inner_right", 1_000.0, 2, 20.0)
+    };
+    let left = FuelTank {
+        centroid_m: [20.0, -6.0, 0.0],
+        ..synthetic_tank("wing_inner_left", 1_000.0, 2, 20.0)
+    };
+    FuelTankLayout {
+        tanks: vec![right, left],
+        geometric_calibration_factor: 1.0,
+        density_kg_m3: DENSITY_KG_M3,
+    }
+}
+
+#[test]
+fn a_partial_load_splits_evenly_between_tanks_tied_on_burn_priority() {
+    let layout = symmetric_pair_layout();
+    let state = layout
+        .distribute(600.0)
+        .expect("600 kg fits the 2000 kg symmetric layout");
+    let mass_of = |id: &str| -> f64 {
+        state
+            .mass_items(&layout)
+            .iter()
+            .find(|item| item.id == id)
+            .map_or(0.0, |item| item.mass_kg)
+    };
+    // Sequential fill-by-index would put all 600 kg in whichever tank is
+    // listed first and none in the other; a symmetric aircraft with no
+    // declared asymmetric load must instead keep the lateral CG at y=0.
+    assert!((mass_of("wing_inner_right") - 300.0).abs() < 1.0e-9);
+    assert!((mass_of("wing_inner_left") - 300.0).abs() < 1.0e-9);
+    let cg_y = state.properties(&layout).cg_m[1];
+    assert!(cg_y.abs() < 1.0e-9, "lateral CG {cg_y} should be zero");
+}
+
+#[test]
+fn draining_a_tied_pair_keeps_it_balanced_at_every_step() {
+    let layout = symmetric_pair_layout();
+    let full = layout
+        .distribute(layout.usable_capacity_kg())
+        .expect("a full load fits its own capacity");
+    let after = full
+        .burned(&layout, 700.0)
+        .expect("700 kg is less than the 2000 kg on board");
+    let mass_of = |state: &FuelState, id: &str| -> f64 {
+        state
+            .mass_items(&layout)
+            .iter()
+            .find(|item| item.id == id)
+            .map_or(0.0, |item| item.mass_kg)
+    };
+    assert!((mass_of(&after, "wing_inner_right") - 650.0).abs() < 1.0e-9);
+    assert!((mass_of(&after, "wing_inner_left") - 650.0).abs() < 1.0e-9);
+    let cg_y = after.properties(&layout).cg_m[1];
+    assert!(cg_y.abs() < 1.0e-9, "lateral CG {cg_y} should be zero");
 }
 
 #[test]

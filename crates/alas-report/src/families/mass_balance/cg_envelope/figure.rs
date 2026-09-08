@@ -62,7 +62,6 @@ pub fn figure_cg_envelope(
     let nlg_x_frac = mm.nlg_x_fraction;
     let mlg_x_frac_mac = mm.mlg_x_fraction_mac;
     let pct_nlg_min = mm.pct_load_nlg_min;
-    let mlw_frac = mm.mlw_fraction_mtow;
 
     // --- Fuselage for NLG/MLG wheel positioning ----------------------------
     let fus_start_x = fus.xsecs[0].xyz_c[0];
@@ -79,7 +78,11 @@ pub fn figure_cg_envelope(
     let payload = get_mass(PAYLOAD);
     let fuel = get_mass(FUEL);
     let mtow_mass = oew_mass + payload + fuel.max(0.0);
-    let mlw_mass = mtow_mass * mlw_frac;
+    // The same resolved limit the `LandingMassLimitViolation` feasibility
+    // check uses (declared reference MLW in BaselineSandbox/
+    // ReferenceAdaptation; the mass-model fraction in CleanSheet), so the plot
+    // and the feasibility finding never disagree on which line is the limit.
+    let mlw_mass = config.landing_mass_limit_kg(mtow_mass);
     let mzfw_mass = oew_mass + payload;
 
     let cg_of_subset = |keys: &[&str]| -> f64 {

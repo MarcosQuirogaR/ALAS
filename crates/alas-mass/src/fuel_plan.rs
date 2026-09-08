@@ -182,6 +182,16 @@ pub enum FuelModelError {
     },
     /// The model's own inputs are not usable.
     InvalidModel(String),
+    /// The requested still-air distance is shorter than the climb and
+    /// descent footprint of the configured profile at its lowest usable
+    /// cruise altitude, so no vertical profile can fly it without overflying
+    /// the route.
+    RouteTooShort {
+        /// The requested distance, m.
+        range_m: f64,
+        /// The smallest distance the profile can fly, m.
+        minimum_range_m: f64,
+    },
     /// The leg could not be flown to completion.
     NotConverged(String),
 }
@@ -203,6 +213,13 @@ impl fmt::Display for FuelModelError {
             }
             Self::InvalidModel(reason) => write!(formatter, "burn model is invalid: {reason}"),
             Self::NotConverged(reason) => write!(formatter, "leg did not converge: {reason}"),
+            Self::RouteTooShort {
+                range_m,
+                minimum_range_m,
+            } => write!(
+                formatter,
+                "route of {range_m} m is shorter than the {minimum_range_m} m climb/descent footprint"
+            ),
         }
     }
 }

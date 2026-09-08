@@ -32,6 +32,7 @@ fn cruise_equilibrium_reports_scalar_and_inertial_force_residuals() {
             distance_m: 1_000.0,
         },
         air_speed_m_s: 250.0,
+        air_speed_reference: alas_config::mission::SpeedReference::TrueAirspeed,
         true_course_rad: 0.0,
         temperature_deviation_k: 0.0,
         number_control_points: 2,

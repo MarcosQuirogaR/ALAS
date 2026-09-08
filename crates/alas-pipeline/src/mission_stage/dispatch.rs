@@ -117,10 +117,18 @@ pub(super) fn select_load_case(
     let limits = DispatchLimits {
         mtow_kg: config.requirements.mtow_kg,
         mzfw_kg: None,
-        mlw_kg: Some(config.requirements.mtow_kg * config.mass_model.mlw_fraction_mtow),
+        mlw_kg: Some(config.landing_mass_limit_kg(config.requirements.mtow_kg)),
         usable_capacity_kg: fuel_loading.usable_capacity.capacity_kg,
     };
     let range_m = request.route_distance_m;
+    // `alas_mass::dispatch::solve_dispatch` recovers internally from a
+    // model failure encountered anywhere in its own search (an overshoot
+    // during the Picard iteration, or at its own MTOW boundary check) by
+    // bisecting toward the zero-fuel mass; see
+    // `alas-mass/src/dispatch.rs::evaluate_bracketed`. `limits` is passed
+    // straight through and is never adjusted here, so a `ModelFailed` below
+    // means the model could not be evaluated anywhere between the zero-fuel
+    // mass and its search ceiling, not merely at one starting guess.
     let analytic_solution = solve_dispatch(
         zero_fuel_mass_kg,
         range_m,

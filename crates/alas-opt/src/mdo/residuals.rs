@@ -10,9 +10,7 @@
 //! performance and geometry families are large enough on their own that they
 //! live in `mdo::residuals_performance` and `mdo::residuals_geometry`.
 
-use alas_config::{
-    AlasConfig, ConstraintPolicy, MassModelConfig, ObjectiveConfig, ObjectiveWeights,
-};
+use alas_config::{AlasConfig, ConstraintPolicy, ObjectiveConfig, ObjectiveWeights};
 
 use crate::envelope::{
     assess_model_cg_envelope, ModelCgConstraint, ModelCgConstraintAssessment,
@@ -35,7 +33,7 @@ pub(crate) fn build(
 ) -> Vec<ConstraintResidual> {
     let objective = &config.optimizer.objective;
     let mut residuals = Vec::new();
-    residuals.extend(mass_residuals(outcome, objective, &config.mass_model));
+    residuals.extend(mass_residuals(outcome, objective, config));
     residuals.extend(balance_residuals(
         outcome,
         config,
@@ -62,7 +60,7 @@ pub(crate) fn build(
 fn mass_residuals(
     outcome: &SizingOutcome,
     objective: &ObjectiveConfig,
-    mass_model: &MassModelConfig,
+    config: &AlasConfig,
 ) -> Vec<ConstraintResidual> {
     let policy = objective.mass_constraints;
     if policy == ConstraintPolicy::Off {
@@ -70,6 +68,24 @@ fn mass_residuals(
     }
     let sized = &outcome.sized;
     let mut residuals = Vec::new();
+
+    // The clean-sheet reconciliation currently has an explicit primary box
+    // and Torenbeek high-lift/spoiler inventory, while joints, actuators,
+    // fairings and other non-box items are not represented by a sourced
+    // complete inventory. Keep that limitation binding so a partial wing
+    // model cannot become the accepted finalist through a finite penalty.
+    if !outcome.structural_inventory_complete {
+        residuals.push(ConstraintResidual::direct(
+            "structural_inventory_unverified",
+            Mass,
+            1.0,
+            0.0,
+            "bool",
+            1.0,
+            1.0,
+            policy,
+        ));
+    }
 
     if sized.usable_capacity_kg.is_finite() {
         residuals.push(ConstraintResidual::scaled(
@@ -106,7 +122,7 @@ fn mass_residuals(
         policy,
     ));
 
-    let mlw_kg = outcome.mtow_ceiling * mass_model.mlw_fraction_mtow;
+    let mlw_kg = config.landing_mass_limit_kg(outcome.mtow_ceiling);
     residuals.push(ConstraintResidual::scaled(
         "landing_mass",
         Mass,
@@ -116,6 +132,69 @@ fn mass_residuals(
         sized.dispatch.destination_landing_mass_kg - mlw_kg,
         policy,
     ));
+
+    match &sized.dispatch.status {
+        alas_mass::dispatch::DispatchStatus::Converged => {}
+        alas_mass::dispatch::DispatchStatus::MtowLimited { shortfall_kg } => {
+            residuals.push(ConstraintResidual::scaled(
+                "dispatch_mtow_limited",
+                Mass,
+                sized.takeoff_mass_kg + shortfall_kg,
+                outcome.mtow_ceiling,
+                "kg",
+                *shortfall_kg,
+                policy,
+            ));
+        }
+        alas_mass::dispatch::DispatchStatus::TankLimited { shortfall_kg } => {
+            let capacity = sized.usable_capacity_kg;
+            residuals.push(if capacity.is_finite() {
+                ConstraintResidual::scaled(
+                    "dispatch_tank_limited",
+                    Mass,
+                    sized.ramp_fuel_kg,
+                    capacity,
+                    "kg",
+                    *shortfall_kg,
+                    policy,
+                )
+            } else {
+                ConstraintResidual::direct(
+                    "dispatch_tank_limited",
+                    Mass,
+                    1.0,
+                    0.0,
+                    "bool",
+                    1.0,
+                    1.0,
+                    policy,
+                )
+            });
+        }
+        alas_mass::dispatch::DispatchStatus::NotConverged { last_change_kg } => {
+            residuals.push(ConstraintResidual::scaled(
+                "dispatch_not_converged",
+                Mass,
+                *last_change_kg,
+                objective.sizing_tolerance_kg,
+                "kg",
+                last_change_kg.abs(),
+                policy,
+            ));
+        }
+        alas_mass::dispatch::DispatchStatus::ModelFailed(_) => {
+            residuals.push(ConstraintResidual::direct(
+                "dispatch_model_failed",
+                Mass,
+                1.0,
+                0.0,
+                "bool",
+                1.0,
+                1.0,
+                policy,
+            ));
+        }
+    }
 
     let not_closed = if sized.sizing_closed { 0.0 } else { 1.0 };
     residuals.push(ConstraintResidual::direct(

@@ -212,6 +212,7 @@ pub(super) fn run<E: ConstrainedSearch + ?Sized>(
         wall_time_s: started.elapsed().as_secs_f64(),
         method: "sqp".to_owned(),
         strategy: outcome.termination.to_owned(),
+        termination: outcome.termination.to_owned(),
         pareto_front: Vec::new(),
     }
 }

@@ -77,15 +77,51 @@ pub(super) fn performance_residuals(
         policy,
     ));
 
-    if outcome.departure.is_none() || outcome.arrival.is_none() {
+    if !outcome.airport_records_resolved {
         residuals.push(ConstraintResidual::direct(
-            "airport_unavailable",
+            "airport_unknown",
             Performance,
             1.0,
             0.0,
             "bool",
             1.0,
             1.0,
+            policy,
+        ));
+    } else if !outcome.declared_airport_data_complete {
+        residuals.push(ConstraintResidual::direct(
+            "airport_declared_distance_unavailable",
+            Performance,
+            1.0,
+            0.0,
+            "bool",
+            1.0,
+            1.0,
+            policy,
+        ));
+    }
+
+    if !outcome.mission_distance_known {
+        residuals.push(ConstraintResidual::direct(
+            "mission_distance_unavailable",
+            Performance,
+            1.0,
+            0.0,
+            "bool",
+            1.0,
+            1.0,
+            policy,
+        ));
+    }
+
+    if outcome.minimum_profile_range_m.is_finite() && outcome.minimum_profile_range_m > 0.0 {
+        residuals.push(ConstraintResidual::scaled(
+            "mission_profile_range",
+            Performance,
+            sized.design_range_m,
+            outcome.minimum_profile_range_m,
+            "m",
+            outcome.minimum_profile_range_m - sized.design_range_m,
             policy,
         ));
     }

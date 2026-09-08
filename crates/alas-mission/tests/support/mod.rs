@@ -185,6 +185,9 @@ impl Spec {
             tag: self.tag.clone(),
             kind,
             air_speed_m_s: self.air_speed_m_s,
+            // Every recorded parity fixture predates calibrated-airspeed
+            // support and is a literal true airspeed.
+            air_speed_reference: alas_config::mission::SpeedReference::TrueAirspeed,
             true_course_rad: self.true_course_rad,
             temperature_deviation_k: self.temperature_deviation_k,
             number_control_points: self.number_control_points,

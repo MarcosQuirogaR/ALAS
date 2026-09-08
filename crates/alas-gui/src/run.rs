@@ -15,6 +15,7 @@ use std::path::Path;
 
 use crate::state::{AppState, LogKind, WorkerMessage};
 use crate::views::{tr, tr_fields};
+use alas_config::DesignMode;
 use alas_pipeline::{RunEventKind, RunEventSeverity};
 
 impl AppState {
@@ -23,6 +24,14 @@ impl AppState {
         if self.is_running {
             return;
         }
+        // The baseline action is a fixed-aircraft sandbox by contract. Set the
+        // typed design mode before decoding the worker config so the main
+        // integrator receives the same mode the user just selected in the UI.
+        if baseline_only {
+            self.set_design_mode(DesignMode::BaselineSandbox);
+        }
+        let baseline_only = baseline_only || self.design_mode() == DesignMode::BaselineSandbox;
+        self.enforce_design_space_fixed_variables();
         let config = match self.typed_config() {
             Some(c) => c,
             None => {
