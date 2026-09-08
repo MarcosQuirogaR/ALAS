@@ -25,7 +25,7 @@ mod fuselage;
 mod wing;
 
 pub use empennage::EmpennageConfig;
-pub use engine::EngineConfig;
+pub use engine::{ActiveEngineModel, EngineBindingError, EngineConfig};
 pub use fuselage::FuselageConfig;
 pub use wing::{
     InboardAerodynamicStation, MainWingPanel, MainWingStation, MainWingStationKind,

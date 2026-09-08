@@ -168,11 +168,13 @@ fn engine_point_loads_match_the_reference() {
 
     let mut comparison = Comparison::new("alas-struct::loads::engine_point_loads_n", Tier::Closed);
     for (index, entry) in fixture.engine_point_loads_n.iter().enumerate() {
-        let engine = EngineConfig {
-            thrust_kn: entry.engine.thrust_kn,
+        let mut engine = EngineConfig {
             spanwise_positions_m: entry.engine.spanwise_positions_m.clone(),
             ..Default::default()
         };
+        // Replay the fixture's thrust in the active physics payload, rather
+        // than leaving the default GE9X behind a compatibility mirror.
+        engine.turbofan.as_mut().unwrap().rated_thrust_kn = entry.engine.thrust_kn;
         let mass_cfg = MassModelConfig {
             propulsion_twr_factor: entry.mass_cfg.propulsion_twr_factor,
             propulsion_installation_factor: entry.mass_cfg.propulsion_installation_factor,

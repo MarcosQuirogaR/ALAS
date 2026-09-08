@@ -79,6 +79,12 @@ pub struct TrimmedPerformance {
     pub incidence_deg: f64,
     /// Total drag coefficient, all three components.
     pub cd: f64,
+    /// Parasite drag coefficient at the trimmed operating point.
+    pub cd_parasite: f64,
+    /// Induced drag coefficient returned by the vortex-lattice solve.
+    pub cd_induced: f64,
+    /// Wave drag coefficient from the configured compressibility correction.
+    pub cd_wave: f64,
     /// Lift coefficient the solve produced at the trimmed angle.
     pub cl: f64,
     /// The pitching moment left over at that condition. Diagnostic: it should
@@ -249,6 +255,9 @@ impl AeroAnalysis<'_> {
             alpha_deg: alpha_report,
             incidence_deg: trim.trim_ih_deg,
             cd: components.cd_total(),
+            cd_parasite: components.cd_parasite,
+            cd_induced: components.cd_induced,
+            cd_wave: components.cd_wave,
             cl: cl_trim,
             cm_residual: solved.cm_pitch,
         })

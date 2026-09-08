@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 use super::*;
+use alas_config::presets;
 
 #[test]
 fn warnings_do_not_turn_a_report_into_an_infeasible_aircraft() {
@@ -31,6 +32,7 @@ fn cruise_equilibrium_reports_scalar_and_inertial_force_residuals() {
             distance_m: 1_000.0,
         },
         air_speed_m_s: 250.0,
+        air_speed_reference: alas_config::mission::SpeedReference::TrueAirspeed,
         true_course_rad: 0.0,
         temperature_deviation_k: 0.0,
         number_control_points: 2,
@@ -50,6 +52,7 @@ fn cruise_equilibrium_reports_scalar_and_inertial_force_residuals() {
     let mission = MissionResult {
         segments: vec![segment],
         solutions: Vec::new(),
+        scheduled_segment_count: 1,
         fuel_exhaustion: None,
     };
 
@@ -71,6 +74,7 @@ fn no_cruise_telemetry_is_not_reported_as_force_balance_evidence() {
     let assessment = assess_cruise_equilibrium(&MissionResult {
         segments: Vec::new(),
         solutions: Vec::new(),
+        scheduled_segment_count: 0,
         fuel_exhaustion: None,
     });
 
@@ -237,9 +241,21 @@ fn tank_limited_model_cg_uses_the_analyzed_fuel_and_names_the_load_case_honestly
     // high-lift/gear mass corrections are intentionally exercised by the
     // ordinary constructor and can legitimately change the closure remainder
     // relative to the published tank-capacity case.
-    let report = crate::full_analysis::FullAnalysis::new_reference_compatibility(config.clone())
-        .run(&preset.design_vector, true)
-        .expect("A320 full analysis");
+    let mut report =
+        crate::full_analysis::FullAnalysis::new_reference_compatibility(config.clone())
+            .run(&preset.design_vector, true)
+            .expect("A320 full analysis");
+    // Construct a tank-limited mass budget independently of preset calibration:
+    // preserve dry mass and allow 1,000 kg more fuel than the usable tank volume.
+    let capacity = assess_fuel_capacity(&config, &preset.design_vector, &report)
+        .capacity_kg
+        .expect("A320 usable capacity");
+    let closure = capacity + 1_000.0;
+    let previous = report
+        .component_masses
+        .insert(FUEL.to_owned(), closure)
+        .expect("analysis fuel mass");
+    config.requirements.mtow_kg += closure - previous;
     let fuel_loading = plan_fuel_loading(&config, &preset.design_vector, &report);
 
     assert!(fuel_loading.mtow_closure_fuel_kg > fuel_loading.analyzed_carried_fuel_kg);

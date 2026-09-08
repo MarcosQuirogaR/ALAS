@@ -343,8 +343,9 @@ fn supervise(mut command: Command, solve: &Solve) -> NastranRunOutcome {
             Some(code) => code.to_string(),
             None => "a signal".to_owned(),
         };
+        let loader_hint = loader_failure_hint(status.code());
         return NastranRunOutcome::failed(format!(
-            "{} exited with code {code} (cwd={}).\n{streams}",
+            "{} exited with code {code}{loader_hint} (cwd={}).\n{streams}",
             solve.exe_name,
             solve.work_dir.display()
         ));
@@ -385,6 +386,20 @@ fn supervise(mut command: Command, solve: &Solve) -> NastranRunOutcome {
         fatals.len(),
         quoted.join("\n")
     ))
+}
+
+/// Add a useful diagnosis for the Windows loader status that appears when a
+/// launcher is present on disk but its side-by-side runtime is not.
+fn loader_failure_hint(code: Option<i32>) -> &'static str {
+    // Windows STATUS_DLL_NOT_FOUND. The native launcher can be a regular file
+    // while its CRT dependency is absent; naming that distinction is much more
+    // useful than an opaque negative exit code in the external-tools panel.
+    match code {
+        Some(-1_073_741_515) => {
+            " (Windows 0xC0000135: a required DLL or side-by-side runtime is missing; inspect the executable manifest and install/runtime PATH)"
+        }
+        _ => "",
+    }
 }
 
 /// A path's final component, for a message that names a file rather than a path.
@@ -531,6 +546,12 @@ mod tests {
             outcome.detail
         );
         assert!(outcome.detail.contains("stdout (tail):"));
+    }
+
+    #[test]
+    fn the_windows_loader_failure_has_a_runtime_dependency_hint() {
+        assert!(super::loader_failure_hint(Some(-1_073_741_515)).contains("0xC0000135"));
+        assert!(super::loader_failure_hint(Some(1)).is_empty());
     }
 
     #[test]

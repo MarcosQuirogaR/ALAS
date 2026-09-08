@@ -1,0 +1,189 @@
+{
+  "schema": "alas.cabin-renderer-bibliography/v1",
+  "access_date": "2026-08-30",
+  "policy": {
+    "fact_classes": [
+      "manufacturer_fact",
+      "regulation_or_advisory",
+      "industry_standard",
+      "software_documentation",
+      "engineering_inference"
+    ],
+    "rule": "Do not promote planning data, illustrations, envelopes, or engineering inferences to authoritative aircraft geometry. Every rendered datum must retain provenance and fidelity."
+  },
+  "sources": [
+    {
+      "id": "airbus-a320-acap-2026",
+      "fact_class": "manufacturer_fact",
+      "title": "A320 Aircraft Characteristics — Airport and Maintenance Planning (1 July 2026)",
+      "owner": "Airbus",
+      "url": "https://www.aircraft.airbus.com/en/customer-care/fleet-wide-care/airport-operations-and-aircraft-characteristics/aircraft-characteristics",
+      "access_date": "2026-08-30",
+      "relevant_datum_or_use": "Public A320-family planning dimensions and cargo/servicing arrangements explicitly shown in the selected publication and revision.",
+      "authority_class": "aircraft_manufacturer_publication",
+      "limitations": "The catalogue and ACAP are for airport and maintenance planning, not a cabin CAD model or Weight and Balance Manual. Do not infer unseen liner, window, bin, seat, or ULD cross-section coordinates."
+    },
+    {
+      "id": "airbus-fast-39",
+      "fact_class": "manufacturer_fact",
+      "title": "FAST magazine 39",
+      "owner": "Airbus",
+      "url": "https://www.aircraft.airbus.com/sites/g/files/jlcbta126/files/2022-04/FAST39.pdf",
+      "access_date": "2026-08-30",
+      "relevant_datum_or_use": "Identifies A320-family cargo options and depicts named NAS 3610/IATA ULD contours and dimensions, including LD3-45W; states an A320 arrangement of three forward and four aft ULD positions.",
+      "authority_class": "aircraft_manufacturer_technical_magazine",
+      "limitations": "December 2006 fleet-upgrade article, not a current aircraft-specific loading manual. Reference illustrations require scale verification and are not certified station geometry."
+    },
+    {
+      "id": "airbus-safety-first-windows",
+      "fact_class": "manufacturer_fact",
+      "title": "Under the Spotlights",
+      "owner": "Airbus Safety First",
+      "url": "https://safetyfirst.airbus.com/under-the-spotlights/?airbus-iframe=true&airbus-post=2055",
+      "access_date": "2026-08-30",
+      "relevant_datum_or_use": "Supports a layered passenger-window asset: typical inner and outer stretched-acrylic panes in a seal, cabin-side transparent lining, retainer, and plug-type installation.",
+      "authority_class": "aircraft_manufacturer_safety_publication",
+      "limitations": "Does not provide aircraft-specific aperture dimensions, belt height, pane curvature, pitch, or installation coordinates."
+    },
+    {
+      "id": "boeing-acap-library",
+      "fact_class": "manufacturer_fact",
+      "title": "Airplane Characteristics for Airport Planning — Plan Manuals",
+      "owner": "The Boeing Company",
+      "url": "https://www.boeing.com/commercial/airports/plan-manuals",
+      "access_date": "2026-08-30",
+      "relevant_datum_or_use": "Catalogue for current public Boeing planning manuals, including 787 and legacy DC/MD types, and statement of their airport-planning scope.",
+      "authority_class": "aircraft_manufacturer_publication_catalogue",
+      "limitations": "No universal cabin or hold contour. Cite the exact model and revision for extracted numbers; coordinate-level cabin geometry generally requires configuration-controlled data."
+    },
+    {
+      "id": "easa-cs25-775",
+      "fact_class": "regulation_or_advisory",
+      "title": "Easy Access Rules for Large Aeroplanes (CS-25), CS 25.775 and AMC 25.775(d)",
+      "owner": "European Union Aviation Safety Agency",
+      "url": "https://www.easa.europa.eu/en/document-library/easy-access-rules/online-publications/easy-access-rules-large-aeroplanes-cs-25?page=26",
+      "access_date": "2026-08-30",
+      "relevant_datum_or_use": "Structural and high-altitude design context for windows; AMC text describes typical multi-pane cabin-window construction.",
+      "authority_class": "certification_specification_and_acceptable_means_of_compliance",
+      "limitations": "Does not prescribe renderer geometry, window position, dimensions, or curvature. Verify the applicable CS-25 amendment for certification work."
+    },
+    {
+      "id": "faa-ac25-17a-chg1",
+      "fact_class": "regulation_or_advisory",
+      "title": "AC 25-17A Change 1 — Transport Airplane Cabin Interiors Crashworthiness Handbook",
+      "owner": "Federal Aviation Administration",
+      "url": "https://www.faa.gov/regulations_policies/advisory_circulars/index.cfm/go/document.information/documentid/74596",
+      "access_date": "2026-08-30",
+      "relevant_datum_or_use": "Certification context for transport-airplane cabin interiors and occupant/restraint installations.",
+      "authority_class": "active_advisory_circular",
+      "limitations": "Acceptable guidance is not mandatory and supplies no aircraft-specific seat, bin, liner, or aisle geometry."
+    },
+    {
+      "id": "faa-ac25-21-cancelled",
+      "fact_class": "regulation_or_advisory",
+      "title": "AC 25-21 — Certification of Transport Airplane Structure",
+      "owner": "Federal Aviation Administration",
+      "url": "https://www.faa.gov/regulations_policies/advisory_circulars/index.cfm/go/document.information/documentid/22649",
+      "access_date": "2026-08-30",
+      "relevant_datum_or_use": "Historical structural-certification context; retained to document and reject an earlier research lead.",
+      "authority_class": "cancelled_advisory_circular",
+      "limitations": "Cancelled 2017-03-21. Do not use as current guidance or as a source of cabin geometry."
+    },
+    {
+      "id": "iata-uldr",
+      "fact_class": "industry_standard",
+      "title": "ULD Regulations (ULDR)",
+      "owner": "International Air Transport Association",
+      "url": "https://www.iata.org/en/publications/manuals/uld-regulations/",
+      "access_date": "2026-08-30",
+      "relevant_datum_or_use": "Authoritative catalogue route for registered ULD type codes, diagrams, characteristics, aircraft acceptability, pallet/net compatibility, markings, and operating limitations.",
+      "authority_class": "industry_standard_landing_page",
+      "limitations": "Full normative data are licensed. The public page establishes scope but is not a dimensional dataset. Use licensed ULDR plus the applicable aircraft Weight and Balance Manual for authoritative contours and compatibility."
+    },
+    {
+      "id": "iata-uld-identification",
+      "fact_class": "industry_standard",
+      "title": "What is Aircraft ULD in Air Transport?",
+      "owner": "International Air Transport Association",
+      "url": "https://www.iata.org/en/publications/newsletters/iata-knowledge-hub/what-is-aircraft-uld-in-air-transport/",
+      "access_date": "2026-08-30",
+      "relevant_datum_or_use": "Public explanation that ULD markings follow IATA Cargo Services Conference Resolution 685 and the ULDR; supports label semantics.",
+      "authority_class": "industry_body_educational_summary",
+      "limitations": "Not a dimensional or compatibility dataset. Mark diagram codes synthetic unless sourced from the solved load record."
+    },
+    {
+      "id": "fuchs-2023-cabin-variants",
+      "fact_class": "engineering_inference",
+      "title": "An Approach for Linking Heterogenous and Domain-Specific Models to Investigate Cabin System Variants",
+      "owner": "Mara Fuchs, Yassine Ghanjaoui, Jörn Biedermann, and Björn Nagel",
+      "url": "https://doi.org/10.1002/iis2.13090",
+      "access_date": "2026-08-30",
+      "relevant_datum_or_use": "Supports stable cross-domain object IDs, a low-detail geometric model followed by high-resolution asset substitution, object-level requirements, and the regular/large/extra-large OHSC variant taxonomy.",
+      "authority_class": "peer_reviewed_conference_paper",
+      "limitations": "The paper publishes no dimensioned OHSC profile, attachment geometry, fuselage-liner curve, or center-bin formulation. Its silhouettes cannot be treated as aircraft geometry; provisional renderer dimensions remain ALAS assumptions."
+    },
+    {
+      "id": "shapely-manual",
+      "fact_class": "software_documentation",
+      "title": "The Shapely User Manual",
+      "owner": "Shapely project",
+      "url": "https://shapely.readthedocs.io/en/stable/manual.html",
+      "access_date": "2026-08-30",
+      "relevant_datum_or_use": "Cartesian constructive and set-theoretic operations for offsets, intersections, containment, and clearance/collision checks.",
+      "authority_class": "official_software_documentation",
+      "limitations": "Does not validate aircraft physics or provenance and performs no coordinate-system transformations. Buffer curves are polygonal approximations controlled by resolution and tolerance."
+    },
+    {
+      "id": "svg-clippath-mdn",
+      "fact_class": "software_documentation",
+      "title": "<clipPath> — SVG",
+      "owner": "MDN Web Docs",
+      "url": "https://developer.mozilla.org/en-US/docs/Web/SVG/Reference/Element/clipPath",
+      "access_date": "2026-08-30",
+      "relevant_datum_or_use": "Defines SVG clipping for keeping decorative layers inside resolved liner and hold regions while retaining semantic vector content.",
+      "authority_class": "web_platform_reference_documentation",
+      "limitations": "Clipping changes painting, not inherent geometry. It cannot replace collision or containment validation."
+    },
+    {
+      "id": "cairosvg-docs",
+      "fact_class": "software_documentation",
+      "title": "CairoSVG Documentation",
+      "owner": "CairoSVG project",
+      "url": "https://cairosvg.org/documentation/",
+      "access_date": "2026-08-30",
+      "relevant_datum_or_use": "Command-line and Python conversion of SVG 1.1 to PNG, PDF, PS, and SVG for preview and export.",
+      "authority_class": "official_software_documentation",
+      "limitations": "Output converter only. Validate supported SVG/CSS features, fonts, and golden renders on each deployment platform."
+    }
+  ],
+  "engineering_inferences": [
+    {
+      "id": "inference-prevalidate-geometry",
+      "fact_class": "engineering_inference",
+      "owner": "ALAS project",
+      "relevant_datum_or_use": "Construct station-indexed containment polygons and validate SI-coordinate components before drawing.",
+      "limitations": "Project architecture decision; not asserted by any aircraft manufacturer or regulator."
+    },
+    {
+      "id": "inference-connected-ohcp-system",
+      "fact_class": "engineering_inference",
+      "owner": "ALAS project",
+      "relevant_datum_or_use": "Model side/center bins, rails, valances, PSUs, and ceiling panels as an explicit connected topology with collision and opening-sweep checks.",
+      "limitations": "Generic representation until configuration-specific supplier and aircraft installation data are available."
+    },
+    {
+      "id": "inference-preserve-solved-geometry",
+      "fact_class": "engineering_inference",
+      "owner": "ALAS project",
+      "relevant_datum_or_use": "Do not resize seats, occupants, holds, or ULDs to improve appearance; expose clearance and utilization failures instead.",
+      "limitations": "Renderer acceptance policy, not an external physical datum."
+    },
+    {
+      "id": "inference-clipping-is-decorative",
+      "fact_class": "engineering_inference",
+      "owner": "ALAS project",
+      "relevant_datum_or_use": "Restrict SVG clipping to paint; evaluate containment and collision on unclipped model geometry.",
+      "limitations": "Implementation rule inferred from SVG and geometry-engine semantics."
+    }
+  ]
+}

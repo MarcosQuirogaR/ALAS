@@ -159,6 +159,7 @@ fn result_registry_covers_the_desktop_result_screen_in_tab_order() {
         "wireframe_fuselage",
         "wireframe_empennage",
         "threeview",
+        "openvsp_cad_preview",
         "aero_panel",
         "drag_breakdown",
         "span_loading",
@@ -169,6 +170,10 @@ fn result_registry_covers_the_desktop_result_screen_in_tab_order() {
         "airfoil_reynolds",
         "mses_pressure",
         "mses_mach_contours",
+        "mses_convergence",
+        "vspaero_polar",
+        "vspaero_wake_convergence",
+        "vspaero_load_distribution",
         "mass_breakdown",
         "fuel_volume_check",
         "mass_distribution",
@@ -176,6 +181,7 @@ fn result_registry_covers_the_desktop_result_screen_in_tab_order() {
         "landing_gear_planform",
         "stability_side_view",
         "cabin_payload",
+        "cabin_section",
         "propulsion_cycle_summary",
         "propulsion_carpet_plot",
         "propulsion_efficiency_decomposition",
@@ -329,6 +335,7 @@ fn figures_render_to_valid_svg_across_families() {
     let mission_res = alas_mission::solve::MissionResult {
         segments: Vec::new(),
         solutions: Vec::new(),
+        scheduled_segment_count: 0,
         fuel_exhaustion: None,
     };
     let sc_miss = mission::figure_mission_drag_components(&mission_res, Some("dark"));

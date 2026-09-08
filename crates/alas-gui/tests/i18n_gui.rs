@@ -161,8 +161,9 @@ fn literal_arguments(source: &str, function: &str) -> Vec<String> {
                 Some(b't') => value.push('\t'),
                 Some(b'"') => value.push('"'),
                 Some(b'\\') => value.push('\\'),
-                Some(b'\n') => {
-                    index += 1;
+                // A backslash before the line break continues the literal on
+                // the next line; the break is LF or, on a CRLF checkout, CRLF.
+                Some(b'\n') | Some(b'\r') => {
                     while source
                         .as_bytes()
                         .get(index)

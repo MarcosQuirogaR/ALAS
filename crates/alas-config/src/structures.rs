@@ -403,7 +403,9 @@ impl Default for StructuresConfig {
             // can replace it with the aircraft-specific excitation level.
             run_sol_vibration_random: true,
             timeout_s: 3600.0,
-            n_modes: 30,
+            // Sixteen modes is the smallest full-mesh NASTRAN-95 request
+            // validated to retain all four active Rayleigh target matches.
+            n_modes: 16,
             freq_sweep_max_hz: 60.0,
             freq_step_hz: 1.0,
             modal_damping_ratio: 0.02,

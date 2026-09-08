@@ -41,6 +41,12 @@ const STATION_COLORS: [&str; 8] = [
 /// text summary of specific thrust, TSFC, efficiencies, and a dimensional
 /// cruise-thrust estimate anchored to the engine's rated static thrust.
 pub fn figure_propulsion_cycle_summary(config: &AlasConfig, theme: Option<&str>) -> Scene {
+    if let Some(scene) = super::technology::binding_error_scene(config, theme, (700.0, 460.0)) {
+        return scene;
+    }
+    if super::is_turboprop(config) {
+        return super::technology::turboprop_summary_scene(config, theme);
+    }
     let pal = get_palette(theme);
     let mut scene = Scene::new(700.0, 460.0, Some(Color::from_hex(pal.bg)));
     let title = "On-Design Cruise Cycle Summary";
@@ -127,6 +133,12 @@ pub fn figure_propulsion_cycle_summary(config: &AlasConfig, theme: Option<&str>)
 /// Keeping this beside the figure preserves one calculation and one wording
 /// source while allowing the station chart to remain a focused visual.
 pub fn propulsion_cycle_summary(config: &AlasConfig) -> Vec<String> {
+    if let Err(error) = config.geometry.engine.active_model() {
+        return vec![format!("Propulsion binding error: {error}")];
+    }
+    if super::is_turboprop(config) {
+        return super::technology::turboprop_summary_lines(config);
+    }
     let out = compute_turbofan_cycle(&design_point(config), &config.propulsion_cycle);
     if !out.cycle_feasible {
         return vec![
@@ -141,6 +153,9 @@ pub fn propulsion_cycle_summary(config: &AlasConfig) -> Vec<String> {
 /// cycle quantities belong in the Results Summary, where they can be read at
 /// useful scale instead of competing with the editable geometry preview.
 pub fn figure_engine_designer_preview(config: &AlasConfig, theme: Option<&str>) -> Scene {
+    if let Some(scene) = super::technology::binding_error_scene(config, theme, (550.0, 390.0)) {
+        return scene;
+    }
     let pal = get_palette(theme);
     let mut scene = Scene::new(550.0, 390.0, Some(Color::from_hex(pal.bg)));
     scene.title = Some("Engine Designer Preview".to_owned());
@@ -180,11 +195,12 @@ fn propulsion_cycle_summary_lines(
     out: &TurbofanCycleResult,
     verbose: bool,
 ) -> Vec<String> {
-    let eng = &config.geometry.engine;
+    let engine = &config.geometry.engine;
+    let eng = super::turbofan_spec(config);
     let cyc_cfg = &config.propulsion_cycle;
 
     let (mdot_total, _static) = anchor_mass_flow_kg_s(
-        eng.thrust_kn,
+        eng.rated_thrust_kn,
         eng.overall_pressure_ratio,
         eng.fan_pressure_ratio,
         eng.bypass_ratio,
@@ -196,7 +212,7 @@ fn propulsion_cycle_summary_lines(
     } else {
         out.specific_thrust_ms * mdot_total / 1000.0
     };
-    let n_eng = eng.spanwise_positions_m.len();
+    let n_eng = engine.spanwise_positions_m.len();
     let cruise_line = if cruise_thrust_kn.is_nan() {
         "Per-engine thrust, this cruise pt : n/a".to_owned()
     } else {
@@ -209,7 +225,7 @@ fn propulsion_cycle_summary_lines(
         format!("Total installed thrust (x{n_eng})       : {total_kn:7.1} kN")
     };
 
-    let engine_name = &eng.engine_name;
+    let engine_name = &engine.engine_name;
     let engine_class = classify_engine_by_bpr(eng.bypass_ratio);
     let cruise_mach = config.requirements.cruise_mach;
     let cruise_alt_km = config.requirements.cruise_altitude_m / 1000.0;
@@ -220,7 +236,7 @@ fn propulsion_cycle_summary_lines(
     let sfn = out.specific_thrust_ms;
     let tsfc_computed = out.tsfc_mg_ns;
     let tsfc_reference = eng.cruise_tsfc_kg_kgf_hr / (9.81 * 3600.0) * 1.0e6;
-    let thrust_static_kn = eng.thrust_kn;
+    let thrust_static_kn = eng.rated_thrust_kn;
 
     let mut lines = vec![
         format!("Engine: {engine_name}  ({engine_class})"),
@@ -453,7 +469,13 @@ mod tests {
         // A turbine inlet at or below the compressor discharge temperature
         // cannot combust; this is the same infeasibility branch
         // `compute_turbofan_cycle`'s own unit tests exercise.
-        config.geometry.engine.turbine_inlet_temp_k = 100.0;
+        config
+            .geometry
+            .engine
+            .turbofan
+            .as_mut()
+            .unwrap()
+            .turbine_inlet_temp_k = 100.0;
         let scene = figure_propulsion_cycle_summary(&config, None);
         assert!(!scene
             .elements
@@ -553,13 +575,20 @@ mod tests {
         // compressor-discharge temperature makes the static cycle itself
         // infeasible, so the anchor returns NaN.
         let mut config = AlasConfig::default();
-        config.geometry.engine.turbine_inlet_temp_k = 10.0;
+        config
+            .geometry
+            .engine
+            .turbofan
+            .as_mut()
+            .unwrap()
+            .turbine_inlet_temp_k = 10.0;
+        let spec = config.geometry.engine.turbofan.as_ref().unwrap();
         let (mdot, _) = anchor_mass_flow_kg_s(
-            config.geometry.engine.thrust_kn,
-            config.geometry.engine.overall_pressure_ratio,
-            config.geometry.engine.fan_pressure_ratio,
-            config.geometry.engine.bypass_ratio,
-            config.geometry.engine.turbine_inlet_temp_k,
+            spec.rated_thrust_kn,
+            spec.overall_pressure_ratio,
+            spec.fan_pressure_ratio,
+            spec.bypass_ratio,
+            spec.turbine_inlet_temp_k,
             &config.propulsion_cycle,
         );
         assert!(mdot.is_nan());

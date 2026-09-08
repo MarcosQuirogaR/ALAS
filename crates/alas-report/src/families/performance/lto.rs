@@ -8,7 +8,7 @@
 //! Landing and take-off runway and required-versus-available distance figures.
 
 use alas_config::airports::Airport;
-use alas_config::AlasConfig;
+use alas_config::{ActiveEngineModel, AlasConfig, PropulsionTechnology};
 use alas_perf::performance::{compute_field_performance_at_masses, FieldPerformance};
 use alas_pipeline::full_analysis::AnalysisReport;
 
@@ -63,6 +63,46 @@ pub fn figure_lto_for_airport(
     role: &str,
     theme: Option<&str>,
 ) -> Scene {
+    let takeoff_mass_kg = config.requirements.mtow_kg;
+    let landing_mass_kg = config
+        .landing_mass_limit_kg(takeoff_mass_kg)
+        .clamp(0.0, takeoff_mass_kg);
+    figure_lto_for_airport_at_masses(
+        report,
+        config,
+        airport,
+        role,
+        takeoff_mass_kg,
+        landing_mass_kg,
+        theme,
+    )
+}
+
+/// Generate field-performance evidence for explicit analyzed masses.
+///
+/// Pipeline and GUI callers should use this entry point so a tank-limited
+/// takeoff or mission-derived arrival is not silently redrawn at configured
+/// MTOW/MLW. The legacy wrapper remains for standalone report construction
+/// where no completed load state exists.
+pub fn figure_lto_for_airport_at_masses(
+    report: &AnalysisReport,
+    config: &AlasConfig,
+    airport: &Airport,
+    role: &str,
+    takeoff_mass_kg: f64,
+    landing_mass_kg: f64,
+    theme: Option<&str>,
+) -> Scene {
+    if matches!(
+        config.geometry.engine.propulsion_technology,
+        PropulsionTechnology::Turboprop
+    ) {
+        return status_message_scene(
+            "Landing & Take-Off",
+            "Turboprop take-off distance is uncalibrated: the current field model requires jet static T/W and cannot substitute zero thrust for PW127M/568F propeller force capability.",
+            theme,
+        );
+    }
     if report
         .airplane
         .wings
@@ -81,11 +121,20 @@ pub fn figure_lto_for_airport(
         .get("wing_area_m2")
         .copied()
         .unwrap_or(report.airplane.s_ref);
-    let tw_sl = static_thrust_to_weight(config, 0.30);
-    let landing_mass_kg = (config.requirements.mtow_kg * config.mass_model.mlw_fraction_mtow)
-        .clamp(0.0, config.requirements.mtow_kg);
+    let rated_thrust_n = match config.geometry.engine.active_model() {
+        Ok(ActiveEngineModel::Turbofan(spec)) => {
+            config.geometry.engine.spanwise_positions_m.len() as f64 * spec.rated_thrust_kn * 1000.0
+        }
+        _ => 0.0,
+    };
+    let takeoff_weight_n = takeoff_mass_kg * config.requirements.gravity_m_s2;
+    let tw_sl = if takeoff_weight_n.is_finite() && takeoff_weight_n > 0.0 {
+        rated_thrust_n / takeoff_weight_n
+    } else {
+        static_thrust_to_weight(config, 0.30)
+    };
     let performance = compute_field_performance_at_masses(
-        config.requirements.mtow_kg,
+        takeoff_mass_kg,
         landing_mass_kg,
         wing_area,
         airport,

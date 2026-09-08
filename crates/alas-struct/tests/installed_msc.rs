@@ -217,8 +217,9 @@ fn installed_msc_sol101_sol103_and_harmonic_sol111_are_consumed() {
 
     let modal_results = parsed_op2(&output.join("sol103/wing_sol103.op2"));
     let modes = modal_results.eigenvectors.get(&1).expect("modal subcase 1");
-    // RESVEC=YES augments the 30 extracted modes with six residual vectors in
-    // this run; the OP2 must retain both sets rather than truncate to EIGRL ND.
+    // RESVEC=YES augments the configured extracted modes with six residual
+    // vectors in this run; the OP2 must retain both sets rather than truncate
+    // to EIGRL ND.
     assert_eq!(modes.modes.len(), config.n_modes as usize + 6);
     assert_eq!(modes.node_ids.len(), 568);
     assert!(modes

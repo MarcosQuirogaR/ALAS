@@ -53,6 +53,7 @@ pub fn create_distribution(root: &Path) -> Result<(), String> {
     println!("Copied standalone binary: {}", dst_exe.display());
 
     bundle_avl(root, &pkg_dir)?;
+    bundle_nastran95(root, &pkg_dir)?;
 
     // Copy documentation and notices
     for doc in ["README.md", "LICENSE", "NOTICE", "THIRD-PARTY-NOTICES.md"] {
@@ -250,5 +251,74 @@ fn bundle_avl(root: &Path, package_dir: &Path) -> Result<(), String> {
         "Bundled AVL 3.52 child executable, corresponding source, and GPL text in {}",
         package_tools.display()
     );
+    Ok(())
+}
+
+/// Copy NASTRAN-95 as a separately licensed adjacent program.
+///
+/// The staging directory is deliberately strict: packaging is refused unless
+/// the exact executable, rigid formats, runtime, corresponding source, NOSA
+/// text, and local change record have all been assembled and reviewed.
+fn bundle_nastran95(root: &Path, package_dir: &Path) -> Result<(), String> {
+    let source = root.join("external tools").join("NASTRAN-95");
+    let required_files = [
+        "build/bin/nastran.exe",
+        "build/bin/nastran95-build.txt",
+        "rf/NASINFO",
+        "LICENSE",
+        "MODIFICATIONS.md",
+        "SOURCE-REVISION.txt",
+        "source/NASTRAN-95-source.zip",
+    ];
+    for relative in required_files {
+        let artifact = source.join(relative);
+        if !artifact.is_file() {
+            return Err(format!(
+                "NASTRAN-95 bundle compliance artifact is missing: {}; release packaging is intentionally blocked",
+                artifact.display()
+            ));
+        }
+    }
+    let runtime = source.join("runtime");
+    if !runtime.is_dir()
+        || fs::read_dir(&runtime)
+            .map_err(|error| format!("failed to inspect {}: {error}", runtime.display()))?
+            .next()
+            .is_none()
+    {
+        return Err(format!(
+            "NASTRAN-95 runtime directory is missing or empty: {}",
+            runtime.display()
+        ));
+    }
+
+    let destination = package_dir.join("external tools").join("NASTRAN-95");
+    copy_directory(&source, &destination)?;
+    println!(
+        "Bundled separately licensed NASTRAN-95 executable, runtime, rigid formats, corresponding source, and notices in {}",
+        destination.display()
+    );
+    Ok(())
+}
+
+fn copy_directory(source: &Path, destination: &Path) -> Result<(), String> {
+    fs::create_dir_all(destination)
+        .map_err(|error| format!("failed to create {}: {error}", destination.display()))?;
+    for entry in fs::read_dir(source)
+        .map_err(|error| format!("failed to read {}: {error}", source.display()))?
+    {
+        let entry = entry.map_err(|error| format!("failed to read directory entry: {error}"))?;
+        let target = destination.join(entry.file_name());
+        if entry
+            .file_type()
+            .map_err(|error| format!("failed to inspect {}: {error}", entry.path().display()))?
+            .is_dir()
+        {
+            copy_directory(&entry.path(), &target)?;
+        } else {
+            fs::copy(entry.path(), &target)
+                .map_err(|error| format!("failed to copy {}: {error}", entry.path().display()))?;
+        }
+    }
     Ok(())
 }

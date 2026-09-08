@@ -16,7 +16,7 @@ use alas_config::design_variables::DesignVector;
 pub struct ObjectiveEvaluation {
     /// Scalar cost minimized by differential evolution.
     pub cost: f64,
-    /// Whether the candidate passed the backend's physical checks.
+    /// Whether the candidate passed the backend's active validity policy.
     pub valid: bool,
     /// Lift-to-drag ratio, when the backend computed one.
     pub l_over_d: f64,

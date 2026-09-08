@@ -13,9 +13,9 @@
 //! append their items in is part of the result -- a deck plan walking the list
 //! differently would draw monuments over seats -- so it is reproduced exactly.
 
-use alas_config::{DesignRequirements, PassengerCabinConfig};
+use alas_config::{CargoDeckConfig, DesignRequirements, PassengerCabinConfig};
 
-use super::fittings::{place_baggage, place_exits, place_monuments};
+use super::fittings::{place_baggage, place_exits, place_monuments, place_overhead_bins};
 use super::resolve_aisle_width;
 use super::seating::{place_seats, resolve_classes};
 use crate::cargo::CargoMassSemantics;
@@ -40,7 +40,42 @@ pub fn build_passenger_layout(
     pax: &PassengerCabinConfig,
     req: &DesignRequirements,
 ) -> PayloadLayout {
-    build_passenger_layout_with_mass_semantics(g, pax, req, CargoMassSemantics::Net)
+    build_passenger_layout_with_mass_semantics(
+        g,
+        pax,
+        req,
+        CargoMassSemantics::Net,
+        true,
+        None,
+        &CargoDeckConfig::default(),
+    )
+}
+
+/// Build a product passenger layout while balancing the payload against the
+/// operating-empty aircraft supplied by the caller.
+///
+/// The public layout-only entry point above has no empty-aircraft mass and
+/// therefore retains its seat-centred baggage placement. Full mass analyses
+/// do have that information. Passing it here lets the loader solve the
+/// longitudinal moment balance instead of accepting an aft passenger load
+/// that makes the zero-fuel aircraft unstable or unloads the nose gear.
+pub(crate) fn build_passenger_layout_with_aircraft_cg_target(
+    g: &CabinGeometry,
+    pax: &PassengerCabinConfig,
+    req: &DesignRequirements,
+    oew: f64,
+    x_oew: f64,
+    cargo: &CargoDeckConfig,
+) -> PayloadLayout {
+    build_passenger_layout_with_mass_semantics(
+        g,
+        pax,
+        req,
+        CargoMassSemantics::Net,
+        true,
+        Some((oew, x_oew)),
+        cargo,
+    )
 }
 
 /// Build a passenger layout with the frozen gross-target baggage correction
@@ -51,7 +86,15 @@ pub fn build_passenger_layout_reference_compatibility(
     pax: &PassengerCabinConfig,
     req: &DesignRequirements,
 ) -> PayloadLayout {
-    build_passenger_layout_with_mass_semantics(g, pax, req, CargoMassSemantics::ReferenceGross)
+    build_passenger_layout_with_mass_semantics(
+        g,
+        pax,
+        req,
+        CargoMassSemantics::ReferenceGross,
+        false,
+        None,
+        &CargoDeckConfig::default(),
+    )
 }
 
 fn build_passenger_layout_with_mass_semantics(
@@ -59,25 +102,49 @@ fn build_passenger_layout_with_mass_semantics(
     pax: &PassengerCabinConfig,
     req: &DesignRequirements,
     mass_semantics: CargoMassSemantics,
+    product_interior: bool,
+    aircraft_cg_target: Option<(f64, f64)>,
+    cargo: &CargoDeckConfig,
 ) -> PayloadLayout {
-    let mut classes = resolve_classes(pax, req.num_passengers);
+    let mut classes = resolve_classes(pax, req.num_passengers, product_interior);
     let total_pax: i64 = classes.iter().map(|class| class.config.count).sum();
     let aisle_w = resolve_aisle_width(pax, total_pax);
 
-    let mut seating = place_seats(g, pax, &mut classes, aisle_w);
+    let mut seating = place_seats(g, pax, &mut classes, aisle_w, product_interior);
     let seated: i64 = classes.iter().map(|class| class.seated).sum();
 
     let mut items = std::mem::take(&mut seating.items);
-    let (monuments, monument_counts) = place_monuments(g, pax, &mut seating.bays, total_pax);
+    if product_interior {
+        let overhead_bins = place_overhead_bins(g, &items);
+        items.extend(overhead_bins);
+    }
+    let (monuments, monument_counts) = place_monuments(
+        g,
+        pax,
+        &mut seating.bays,
+        total_pax,
+        seating.max_aisles,
+        product_interior,
+    );
     items.extend(monuments);
-    let exits = place_exits(g, &seating);
+    let exits = place_exits(g, &seating, product_interior);
     items.extend(exits.items);
 
     // The bags follow the passengers, so the trim target is the seating's own
     // balance. An empty cabin has none, and the middle of it is the neutral
     // answer rather than the datum.
     let (seat_mass, seat_cg) = seat_mass_and_cg(&items, g);
-    let bags = place_baggage(g, pax, req, seated, seat_mass, seat_cg, mass_semantics);
+    let bags = place_baggage(
+        g,
+        pax,
+        req,
+        seated,
+        seat_mass,
+        seat_cg,
+        mass_semantics,
+        aircraft_cg_target,
+        cargo,
+    );
     items.extend(bags.items);
 
     let (total_mass, cg_x, cg_y) = mass_properties(&items);
@@ -91,6 +158,8 @@ fn build_passenger_layout_with_mass_semantics(
             .collect(),
         lavatories: monument_counts.lavatories,
         galleys: monument_counts.galleys,
+        accessible_lavatories: monument_counts.accessible_lavatories,
+        wheelchair_stowages: monument_counts.wheelchair_stowages,
         exit_type: exits.exit_type,
         exit_pairs: exits.pairs,
         exit_capacity: exits.pairs * exits.capacity_per_side * 2,
@@ -140,5 +209,60 @@ fn seat_mass_and_cg(items: &[crate::layout::DeckItem], g: &CabinGeometry) -> (f6
         (mass, moment / mass)
     } else {
         (mass, 0.5 * (g.cabin_start_x + g.cabin_end_x))
+    }
+}
+
+#[cfg(test)]
+// A failed expectation here is a failed test assertion.
+#[allow(clippy::expect_used)]
+mod product_tests {
+    use super::*;
+    use crate::build::build_payload_layout;
+    use crate::layout::{ItemMeta, OverheadBinType};
+    use alas_config::{presets, AlasConfig};
+    use alas_geom::builder::AircraftBuilder;
+
+    #[test]
+    fn widebody_product_layout_has_side_and_center_bins_and_accessibility_items() {
+        let config = AlasConfig::from_value(&serde_json::json!({ "preset": "A380-800" }))
+            .expect("the registered A380 preset loads");
+        let preset = presets::get("A380-800").expect("the registered A380 preset resolves");
+        let plane = AircraftBuilder::new(Some(config.geometry.clone()))
+            .build(Some(&preset.design_vector), true)
+            .expect("the A380 geometry builds");
+        let layout = build_payload_layout(&plane, &config, 0.0, 0.0)
+            .expect("the A380 passenger layout builds");
+
+        let bin_types: Vec<OverheadBinType> = layout
+            .items
+            .iter()
+            .filter_map(|item| match &item.meta {
+                ItemMeta::OverheadBin(meta) => Some(meta.bin_type),
+                _ => None,
+            })
+            .collect();
+        assert!(bin_types.contains(&OverheadBinType::Sidewall));
+        assert!(bin_types.contains(&OverheadBinType::Center));
+        assert!(layout
+            .items
+            .iter()
+            .any(|item| item.kind == ItemKind::AccessibleLav));
+        assert!(layout
+            .items
+            .iter()
+            .any(|item| item.kind == ItemKind::WheelchairStowage));
+        let baggage: Vec<&crate::layout::DeckItem> = layout
+            .items
+            .iter()
+            .filter(|item| item.kind == ItemKind::Bag)
+            .collect();
+        assert!(
+            baggage.len() >= 3,
+            "the A380 hold should load several longitudinal ULD positions"
+        );
+        assert!(
+            baggage.iter().any(|item| item.y.abs() > 0.5),
+            "the A380 hold should use a transverse position away from the centreline"
+        );
     }
 }

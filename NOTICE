@@ -105,11 +105,11 @@ they are the ones a reader is most likely to question:
 
   * External solvers -- MSES, MSC Nastran, AVL, NASTRAN-95 -- are separate
     executables and are not covered by this licence. The Windows release
-    carries the unmodified GPL AVL 3.52 executable as an adjacent child
-    program, with its own GPL text and corresponding source archive; the other
-    solvers are supplied and licensed by the user. ALAS invokes each through a
-    process boundary and reports the affected analysis as unavailable when it
-    is absent rather than substituting a silent approximation.
+    carries GPL AVL 3.52 and may carry NOSA-licensed NASTRAN-95 as adjacent
+    child programs, each with its own licence and corresponding source. The
+    release task refuses to package NASTRAN-95 unless its exact source,
+    revision and modification record are present. MSES and MSC Nastran remain
+    user-supplied. ALAS invokes every solver through a process boundary.
 
 Every translated module names its origin, the upstream licence and the source
 revision in a provenance header. THIRD-PARTY-NOTICES.md lists the components

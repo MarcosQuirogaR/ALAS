@@ -48,6 +48,8 @@ use std::path::Path;
 
 use alas_config::airports::Airport;
 
+mod coordinates;
+
 use crate::route::{angular_distance, haversine_m, Route, RouteSource, Waypoint, EARTH_RADIUS_M};
 
 /// The fix file's name within a navigation-data directory.
@@ -82,7 +84,20 @@ pub struct Fix {
 
 /// Whether a directory holds both files this module needs.
 pub fn navdata_available(navdata_dir: &Path) -> bool {
-    navdata_dir.join(FIX_FILE).exists() && navdata_dir.join(AIRWAY_FILE).exists()
+    let Some(fix) = crate::assets::NAVDATA_FILES
+        .iter()
+        .find(|file| file.name == FIX_FILE)
+    else {
+        return false;
+    };
+    let Some(airway) = crate::assets::NAVDATA_FILES
+        .iter()
+        .find(|file| file.name == AIRWAY_FILE)
+    else {
+        return false;
+    };
+    crate::assets::navdata_file_is_usable(navdata_dir, fix)
+        && crate::assets::navdata_file_is_usable(navdata_dir, airway)
 }
 
 /// The parsed waypoint and airway network.

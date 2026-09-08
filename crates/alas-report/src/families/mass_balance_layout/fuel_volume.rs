@@ -11,6 +11,7 @@ use alas_config::AlasConfig;
 use alas_geom::aircraft::spacing::linspace;
 use alas_geom::aircraft::wing::Wing;
 use alas_mass::breakdown::FUEL;
+use alas_pipeline::feasibility::{FuelCapacityEvidence, FuelLoadingAssessment};
 use alas_pipeline::full_analysis::AnalysisReport;
 /// `color` with its alpha channel replaced -- `Color` carries no builder for
 /// this, so the two channels a translucent fill needs are set by hand.
@@ -48,7 +49,6 @@ pub fn figure_fuel_volume_check(
     config: &AlasConfig,
     theme: Option<&str>,
 ) -> Scene {
-    let pal = get_palette(theme);
     let wing = &report.airplane.wings[0];
     let mm = &config.mass_model;
 
@@ -60,10 +60,78 @@ pub fn figure_fuel_volume_check(
         .copied()
         .unwrap_or(0.0)
         .max(0.0);
-    let sufficient = tank_capacity_kg >= required_fuel_kg;
+    draw_fuel_storage_check(
+        tank_capacity_kg,
+        required_fuel_kg,
+        "Tank capacity",
+        "Required fuel",
+        theme,
+    )
+}
+
+/// Draw the product fuel-storage check from the pipeline's authoritative load
+/// assessment. This avoids recomputing capacity or calling MTOW closure fuel a
+/// mission requirement.
+pub fn figure_fuel_volume_check_for_loading(
+    loading: &FuelLoadingAssessment,
+    theme: Option<&str>,
+) -> Scene {
+    let capacity_kg = loading
+        .usable_capacity
+        .capacity_kg
+        .filter(|value| value.is_finite() && *value >= 0.0);
+    let carried_kg = loading.analyzed_carried_fuel_kg;
+    let Some(capacity_kg) = capacity_kg else {
+        return unavailable_capacity_scene(theme);
+    };
+    if !carried_kg.is_finite() || carried_kg < 0.0 {
+        return unavailable_capacity_scene(theme);
+    }
+    let capacity_label = match loading.usable_capacity.evidence {
+        FuelCapacityEvidence::PublishedPreset => "Published usable capacity",
+        FuelCapacityEvidence::GeometryEstimate => "Geometry-estimated usable capacity",
+        FuelCapacityEvidence::Unavailable => "Usable capacity",
+    };
+    draw_fuel_storage_check(
+        capacity_kg,
+        carried_kg,
+        capacity_label,
+        "Analyzed carried fuel",
+        theme,
+    )
+}
+
+fn unavailable_capacity_scene(theme: Option<&str>) -> Scene {
+    let pal = get_palette(theme);
+    let mut scene = Scene::new(700.0, 320.0, Some(Color::from_hex(pal.bg)));
+    scene.title = Some("Wing Fuel-Volume Check".to_owned());
+    draw_title(&mut scene, "Wing Fuel-Volume Check", pal);
+    scene.suppress_derived_title();
+    scene.add(SceneElement::Text {
+        text: "Usable fuel capacity or analyzed carried fuel is unavailable.".to_owned(),
+        pos: [350.0, 160.0],
+        font_size: 12.0,
+        color: Color::from_hex(pal.tick),
+        align: TextAlign::Center,
+        baseline: TextBaseline::Middle,
+        angle_deg: 0.0,
+        bold: false,
+    });
+    scene
+}
+
+fn draw_fuel_storage_check(
+    tank_capacity_kg: f64,
+    carried_fuel_kg: f64,
+    capacity_label: &str,
+    carried_label: &str,
+    theme: Option<&str>,
+) -> Scene {
+    let pal = get_palette(theme);
+    let sufficient = tank_capacity_kg >= carried_fuel_kg;
 
     let cap_t = tank_capacity_kg / 1000.0;
-    let req_t = required_fuel_kg / 1000.0;
+    let req_t = carried_fuel_kg / 1000.0;
     let bar_max = if cap_t.max(req_t) > 0.0 {
         cap_t.max(req_t) * 1.25
     } else {
@@ -129,11 +197,11 @@ pub fn figure_fuel_volume_check(
 
     let entries = vec![
         (
-            "Tank capacity".to_owned(),
+            capacity_label.to_owned(),
             LegendMarker::Patch(with_alpha(Color::from_hex(color), 90)),
         ),
         (
-            "Required fuel".to_owned(),
+            carried_label.to_owned(),
             LegendMarker::Patch(Color::from_hex(color)),
         ),
     ];

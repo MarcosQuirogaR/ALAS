@@ -5,11 +5,10 @@
 //! optional external solvers, consolidated in one place rather than spread
 //! across their own Advanced Settings pages.
 //!
-//! A port of the reference desktop app's `SetupScreen`. The reference's
-//! navdata download button calls out over HTTP to a Go-side downloader; that
-//! transport has no counterpart here (see `docs/PORTING.md`'s "Dropped: the
-//! HTTP sidecar"), so this shows the licensing note and a status line rather
-//! than fabricating a network call this crate has no client for.
+//! A port of the reference desktop app's `SetupScreen`. Navigation data is
+//! downloaded through the shared windowless curl boundary in `alas-exec`, so
+//! the setup page and headless CLI use the same HTTPS, retry, atomic-install,
+//! and size-validation policy.
 
 use alas_exec::ExecutableDiscovery;
 use egui::{RichText, ScrollArea, TextEdit, Ui};
@@ -401,7 +400,10 @@ fn resolved_status(state: &AppState, ui: &mut Ui) {
             status_row(
                 ui,
                 "MSC solver override",
-                describe_optional_file(&config.structures.nastran_solver_path),
+                describe_nastran_solver(
+                    &config.structures.nastran_solver_path,
+                    environment.nastran_solver.as_deref(),
+                ),
             );
             status_row(
                 ui,
@@ -469,6 +471,16 @@ fn describe_optional_file(configured: &str) -> String {
             &[("path", path.display().to_string())],
         )
     }
+}
+
+fn describe_nastran_solver(configured: &str, resolved: Option<&std::path::Path>) -> String {
+    if !configured.trim().is_empty() {
+        return describe_optional_file(configured);
+    }
+    resolved.map_or_else(
+        || tr("not found (automatic server-mode solver resolution)"),
+        |path| format!("{} (automatic server-mode solver)", path.display()),
+    )
 }
 
 fn describe_optional_directory(configured: &str) -> String {

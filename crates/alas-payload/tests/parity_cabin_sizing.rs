@@ -28,7 +28,8 @@ mod support;
 
 use std::collections::BTreeMap;
 
-use alas_payload::{apply_cabin_preset, simulate_passenger_counts, CabinGeometry};
+use alas_payload::build::apply_cabin_preset_reference_compatibility;
+use alas_payload::{simulate_passenger_counts, CabinGeometry};
 use alas_testkit::{Comparison, Tier};
 use serde::Deserialize;
 use serde_json::Value;
@@ -101,7 +102,7 @@ fn the_seat_count_auto_sizer_matches_python_on_every_shipped_mix() {
 
     for case in &fixture.simulations {
         let (config, plane, _dv) = config_and_plane(&case.input);
-        let g = CabinGeometry::new(
+        let g = CabinGeometry::new_reference_compatibility(
             &plane,
             &config.geometry,
             config.cabin.passenger.wall_thickness_m,
@@ -127,14 +128,15 @@ fn the_seat_count_auto_sizer_matches_python_on_every_shipped_mix() {
 }
 
 #[test]
-fn applying_a_cabin_preset_writes_what_python_writes() {
+fn frozen_compatibility_cabin_presets_write_what_python_writes() {
     let fixture: Fixture = alas_testkit::load("payload", "layout");
     let mut discrete = Comparison::new("alas-payload::apply_cabin_preset (counts)", Tier::Exact);
     let mut numeric = Comparison::new("alas-payload::apply_cabin_preset (geometry)", Tier::Closed);
 
     for case in &fixture.cabin_presets {
         let (mut config, _plane, design_vector) = config_and_plane(&case.input);
-        apply_cabin_preset(&mut config, design_vector.as_ref()).expect("the preset applies");
+        apply_cabin_preset_reference_compatibility(&mut config, design_vector.as_ref())
+            .expect("the reference-compatible preset applies");
         let at = |what: &str| format!("{}: {what}", case.name);
         let after = &case.after;
         let pax = &config.cabin.passenger;

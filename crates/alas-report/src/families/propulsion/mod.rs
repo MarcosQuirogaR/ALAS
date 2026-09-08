@@ -21,6 +21,7 @@ mod altitude;
 mod cycle;
 mod support;
 mod sweeps;
+mod technology;
 
 pub use altitude::figure_propulsion_altitude_sweep;
 pub use cycle::{
@@ -31,7 +32,7 @@ pub use sweeps::{
     figure_propulsion_efficiency_decomposition,
 };
 
-use alas_config::AlasConfig;
+use alas_config::{ActiveEngineModel, AlasConfig, TurbofanEngineSpec};
 use alas_prop::cycle::TurbofanCycleInputs;
 
 /// The cruise design point every propulsion figure evaluates the cycle at.
@@ -40,7 +41,7 @@ use alas_prop::cycle::TurbofanCycleInputs;
 /// engine's BPR/OPR/FPR/TIT at the design requirements' cruise Mach and
 /// altitude.
 fn design_point(config: &AlasConfig) -> TurbofanCycleInputs {
-    let eng = &config.geometry.engine;
+    let eng = turbofan_spec(config);
     let req = &config.requirements;
     TurbofanCycleInputs {
         mach: req.cruise_mach,
@@ -50,6 +51,26 @@ fn design_point(config: &AlasConfig) -> TurbofanCycleInputs {
         fan_pressure_ratio: eng.fan_pressure_ratio,
         turbine_inlet_temperature_k: eng.turbine_inlet_temp_k,
     }
+}
+
+/// Resolve the single authoritative turbofan payload used by every jet figure.
+/// Invalid technology/payload combinations are programming/configuration
+/// errors and must never fall back to the deprecated flat compatibility copy.
+fn turbofan_spec(config: &AlasConfig) -> &TurbofanEngineSpec {
+    match config.geometry.engine.active_model() {
+        Ok(ActiveEngineModel::Turbofan(spec)) => spec,
+        Ok(ActiveEngineModel::Turboprop(_)) => {
+            unreachable!("technology dispatch routes turboprops to dedicated figures")
+        }
+        Err(error) => panic!("invalid propulsion binding: {error}"),
+    }
+}
+
+fn is_turboprop(config: &AlasConfig) -> bool {
+    matches!(
+        config.geometry.engine.propulsion_technology,
+        alas_config::PropulsionTechnology::Turboprop
+    )
 }
 
 /// `numpy.linspace(start, stop, num)` with the inclusive endpoint NumPy uses.

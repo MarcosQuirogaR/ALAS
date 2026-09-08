@@ -6,23 +6,27 @@
 
 //! What the design search is looking for, and how hard it looks.
 //!
-//! The two halves are deliberately separate. [`ObjectiveWeights`] says what a
-//! good aircraft is -- the reward, and the price of every way of cheating it
-//! -- and changing one of those numbers changes which design the search
-//! converges on. [`SolverSettings`] says how long to look, and changing one of
-//! those changes how thoroughly the same target is approached, not what the
-//! target is. Two runs that differ only in solver settings are answering the
-//! same question; two that differ in a weight are not, and a comparison
-//! between them means nothing.
+//! The halves are deliberately separate. [`ObjectiveConfig`] says what a
+//! good aircraft is -- the mission quantity minimised and the policy of every
+//! requirement family that bounds it -- and changing one of those changes
+//! which design the search converges on. [`SolverSettings`] says how the
+//! search is run, and changing one of those changes how thoroughly the same
+//! target is approached, not what the target is. Two runs that differ only in
+//! solver settings are answering the same question; two that differ in the
+//! objective are not, and a comparison between them means nothing.
 //!
-//! Every weight is dimensionless and calibrated so that each term contributes
-//! order one to fifty near a good design, which is what lets the search see
-//! all of its constraints at once instead of one of them drowning out the
-//! lift-to-drag objective.
+//! [`ObjectiveWeights`] is the penalty table of the frozen Python objective.
+//! The product search reads only its failure cost and tail-volume window;
+//! the rest is replayed by the parity fixtures and kept so a saved
+//! configuration still round-trips.
 
+pub mod design_space;
+mod objective;
 mod solver;
 mod weights;
 
+pub use design_space::{DesignMode, DesignSpaceConfig, VariableEnvelope};
+pub use objective::{ConstraintPolicy, MtowSizing, ObjectiveConfig, ObjectiveKind};
 pub use solver::SolverSettings;
 pub use weights::ObjectiveWeights;
 
@@ -37,7 +41,7 @@ pub struct OptimizerConfig {
     /// What the search rewards and what it penalizes.
     #[config(
         nested,
-        help = "The reward on lift-to-drag and the soft penalties that price every structurally, aerodynamically or operationally unrealistic way of raising it."
+        help = "Penalty table of the frozen reference objective, replayed by the parity fixtures. The mission-sized search reads only the failure cost and the tail-volume window from this group; every other weight is inert for product runs."
     )]
     pub weights: ObjectiveWeights,
 
@@ -47,6 +51,22 @@ pub struct OptimizerConfig {
         help = "Which optimization method runs, how long and wide its population is, and where in the design space it starts."
     )]
     pub solver: SolverSettings,
+
+    /// What the mission-sized search minimises, and which requirements bound it.
+    #[serde(default, skip_serializing_if = "ObjectiveConfig::is_default")]
+    #[config(
+        nested,
+        help = "The mission-sized objective -- block fuel, takeoff mass, empty mass or fuel per seat-kilometre over the design range under the fuel policy -- the takeoff-mass closure, and the hard, soft or diagnostic policy of every requirement family that bounds it."
+    )]
+    pub objective: ObjectiveConfig,
+
+    /// Which aircraft fields are allowed to change during a product run.
+    #[serde(default, skip_serializing_if = "DesignSpaceConfig::is_default")]
+    #[config(
+        nested,
+        help = "Design boundary for clean-sheet studies, reference-aircraft adaptation, and the fixed baseline sandbox. The resolved mutable/fixed envelope is recorded with each run and is enforced by the evaluator as well as the search bounds."
+    )]
+    pub design_space: DesignSpaceConfig,
 }
 
 // A test asserts on values it constructed here directly, so a failed unwrap
@@ -58,13 +78,17 @@ mod tests {
     use crate::Entry;
 
     #[test]
-    fn what_is_searched_for_and_how_it_is_searched_reach_the_form_as_two_groups() {
+    fn what_is_searched_for_and_how_it_is_searched_reach_the_form_as_separate_groups() {
         // A run that changed a weight and a run that changed a generation
         // count are not comparable, and the form is where that distinction
-        // has to be visible.
+        // has to be visible. The mission-sized objective is a third question
+        // -- what is being minimised at all -- and gets its own group.
         let schema = OptimizerConfig::default().schema();
         let names: Vec<&str> = schema.fields.iter().map(|field| field.name).collect();
-        assert_eq!(names, vec!["weights", "solver"]);
+        assert_eq!(
+            names,
+            vec!["weights", "solver", "objective", "design_space"]
+        );
         for field in &schema.fields {
             assert!(matches!(field.entry, Entry::Node(_)), "{}", field.name);
         }
@@ -75,5 +99,6 @@ mod tests {
         let config = OptimizerConfig::default();
         assert_eq!(config.weights, ObjectiveWeights::default());
         assert_eq!(config.solver, SolverSettings::default());
+        assert_eq!(config.design_space, DesignSpaceConfig::default());
     }
 }

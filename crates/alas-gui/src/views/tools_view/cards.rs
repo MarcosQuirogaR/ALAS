@@ -75,8 +75,26 @@ pub(super) fn routing_card(state: &mut AppState, ui: &mut Ui) {
             );
             state.save_tool_preferences();
             state.on_config_modified();
-            state.note_parameter_modified(tr("Navigation-data directory"), navdata);
+            state.note_parameter_modified(tr("Navigation-data directory"), navdata.clone());
         }
+        ui.horizontal(|ui| {
+            if ui
+                .add_enabled(
+                    !state.navdata_download_in_progress,
+                    egui::Button::new(if state.navdata_download_in_progress {
+                        tr("Downloading navigation data...")
+                    } else {
+                        tr("Download navigation data")
+                    }),
+                )
+                .on_hover_text(tr(
+                    "Download missing or truncated navigation-data files into the configured directory.",
+                ))
+                .clicked()
+            {
+                state.start_navdata_download(&navdata);
+            }
+        });
         let mut routes = str_field(&state.config_values, "mission", "routes_dir");
         if text_row(
             state,

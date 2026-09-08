@@ -126,7 +126,7 @@ pub fn mission_trajectory_series(
 
 /// Synchronize a solved [`MissionResult`] onto a [`Route`].
 pub fn sync_mass_to_route(route: &Route, mission: &MissionResult) -> (Vec<f64>, Vec<f64>) {
-    if mission.fuel_exhaustion.is_some() {
+    if !mission.figure_data_ready() {
         return (Vec::new(), Vec::new());
     }
     let (time_s, tas_m_s, mass_kg, alt_m) = mission_trajectory_series(mission);
@@ -195,6 +195,7 @@ mod tests {
         let mission = MissionResult {
             segments: Vec::new(),
             solutions: Vec::new(),
+            scheduled_segment_count: 1,
             fuel_exhaustion: Some(FuelExhaustion {
                 segment_index: 0,
                 segment_tag: "cruise".to_owned(),

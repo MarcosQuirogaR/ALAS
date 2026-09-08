@@ -82,6 +82,7 @@ fn render_element(svg: &mut String, element: &Value) -> Result<(), String> {
             optional_stroke(data.get("stroke"))?,
         )),
         "Text" => render_text(svg, data)?,
+        "Image" => render_image(svg, data)?,
         _ => return Err(format!("unsupported scene element: {kind}")),
     }
     Ok(())
@@ -164,6 +165,82 @@ fn render_text(svg: &mut String, data: &Value) -> Result<(), String> {
         escape_xml(text),
     ));
     Ok(())
+}
+
+fn render_image(svg: &mut String, data: &Value) -> Result<(), String> {
+    let source = data
+        .get("source")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "image source is missing".to_owned())?;
+    let x = field_number(data, "x")?;
+    let y = field_number(data, "y")?;
+    let width = field_number(data, "width")?;
+    let height = field_number(data, "height")?;
+    let href = image_href(source);
+
+    let source_rect = match data.get("source_rect") {
+        None | Some(Value::Null) => None,
+        Some(value) => {
+            let corners = value
+                .as_array()
+                .ok_or_else(|| "image source_rect is not an array".to_owned())?;
+            Some([
+                number(corners.first(), "source_rect[0]")?,
+                number(corners.get(1), "source_rect[1]")?,
+                number(corners.get(2), "source_rect[2]")?,
+                number(corners.get(3), "source_rect[3]")?,
+            ])
+        }
+    };
+
+    if let Some([left, top, crop_width, crop_height]) = source_rect {
+        let left = left.clamp(0.0, 1.0);
+        let top = top.clamp(0.0, 1.0);
+        let crop_width = crop_width.clamp(0.0, 1.0 - left);
+        let crop_height = crop_height.clamp(0.0, 1.0 - top);
+        if crop_width <= f64::EPSILON || crop_height <= f64::EPSILON {
+            return Ok(());
+        }
+        svg.push_str(&format!(
+            r#"  <svg x="{x:.2}" y="{y:.2}" width="{width:.2}" height="{height:.2}" viewBox="{left:.8} {top:.8} {crop_width:.8} {crop_height:.8}" preserveAspectRatio="none" overflow="hidden"><image href="{href}" x="0" y="0" width="1" height="1" preserveAspectRatio="none"/></svg>"#
+        ));
+    } else {
+        svg.push_str(&format!(
+            r#"  <image href="{href}" x="{x:.2}" y="{y:.2}" width="{width:.2}" height="{height:.2}" preserveAspectRatio="xMidYMid meet"/>"#
+        ));
+    }
+    Ok(())
+}
+
+fn image_href(source: &str) -> String {
+    if source == "embedded://nasa-blue-marble" {
+        let bytes = include_bytes!("../../../assets/textures/earth_blue_marble.png");
+        return format!("data:image/png;base64,{}", encode_base64(bytes));
+    }
+    escape_xml(source)
+}
+
+fn encode_base64(bytes: &[u8]) -> String {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut output = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let a = chunk[0];
+        let b = *chunk.get(1).unwrap_or(&0);
+        let c = *chunk.get(2).unwrap_or(&0);
+        output.push(TABLE[(a >> 2) as usize] as char);
+        output.push(TABLE[(((a & 0b0000_0011) << 4) | (b >> 4)) as usize] as char);
+        output.push(if chunk.len() >= 2 {
+            TABLE[(((b & 0b0000_1111) << 2) | (c >> 6)) as usize] as char
+        } else {
+            '='
+        });
+        output.push(if chunk.len() == 3 {
+            TABLE[(c & 0b0011_1111) as usize] as char
+        } else {
+            '='
+        });
+    }
+    output
 }
 
 fn number(value: Option<&Value>, name: &str) -> Result<f64, String> {
@@ -311,5 +388,38 @@ mod tests {
         assert!(svg.contains("<circle"));
         assert!(svg.contains("A &lt; B"));
         assert!(svg.ends_with("</svg>\n"));
+    }
+
+    #[test]
+    fn image_elements_render_as_svg_image_references() {
+        let scene = json!({
+            "width": 100.0,
+            "height": 80.0,
+            "background": null,
+            "elements": [
+                {"Image": {"source": "C:/renders/a & b.png", "x": 0.0, "y": 0.0,
+                    "width": 100.0, "height": 80.0, "source_rect": null}}
+            ]
+        });
+
+        let svg = render_scene_svg(&scene).unwrap_or_default();
+        assert!(svg.contains("<image href=\"C:/renders/a &amp; b.png\""));
+    }
+
+    #[test]
+    fn a_cropped_image_source_rect_becomes_a_nested_viewbox() {
+        let scene = json!({
+            "width": 100.0,
+            "height": 80.0,
+            "background": null,
+            "elements": [
+                {"Image": {"source": "texture.png", "x": 0.0, "y": 0.0,
+                    "width": 100.0, "height": 80.0,
+                    "source_rect": [0.25, 0.0, 0.5, 1.0]}}
+            ]
+        });
+
+        let svg = render_scene_svg(&scene).unwrap_or_default();
+        assert!(svg.contains("viewBox=\"0.25000000 0.00000000 0.50000000 1.00000000\""));
     }
 }

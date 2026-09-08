@@ -26,6 +26,13 @@ use crate::ConfigNode;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ConfigNode)]
 #[serde(deny_unknown_fields)]
 pub struct DragModelConfig {
+    /// Exclude the main-wing center section shielded by the fuselage.
+    #[serde(default = "exclude_buried_main_wing_area_default")]
+    #[config(
+        label = "Exclude buried main-wing area",
+        help = "Subtract the tapered center section inside the local fuselage width at the root quarter chord from the parasite wetted-area estimate (NASA NDARC exposed-area convention). This is a local body approximation, not a surface intersection. Disable to replay the gross-wing-area convention."
+    )]
+    pub exclude_buried_main_wing_area: bool,
     /// Chordwise location of maximum airfoil thickness.
     #[config(
         label = "Max-thickness chordwise location",
@@ -88,6 +95,7 @@ pub struct DragModelConfig {
 impl Default for DragModelConfig {
     fn default() -> Self {
         Self {
+            exclude_buried_main_wing_area: true,
             max_thickness_chordwise_loc: 0.35,
             interference_factor_wing: 1.0,
             interference_factor_fuselage: 1.25,
@@ -98,6 +106,10 @@ impl Default for DragModelConfig {
             wave_drag_coefficient: 20.0,
         }
     }
+}
+
+fn exclude_buried_main_wing_area_default() -> bool {
+    true
 }
 
 // A test asserts on values it constructed here directly, so a failed unwrap
@@ -115,6 +127,7 @@ mod tests {
         assert_eq!(
             names,
             vec![
+                "exclude_buried_main_wing_area",
                 "max_thickness_chordwise_loc",
                 "interference_factor_wing",
                 "interference_factor_fuselage",

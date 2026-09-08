@@ -7,7 +7,7 @@ use alas_config::{design_variables::DesignVector, ObjectiveWeights};
 
 use crate::history::OptimizationHistory;
 
-/// Record a completed objective evaluation and derive its rejection labels.
+/// Record a completed objective evaluation and derive its physical-diagnostic labels.
 ///
 /// Keeping this bookkeeping outside the numerical evaluator keeps the latter
 /// below the repository's production-source size limit without changing the

@@ -83,6 +83,44 @@ fn a_negative_mass_is_clamped_to_zero_rather_than_pulling_the_cg_the_wrong_way()
 }
 
 #[test]
+fn negative_fuel_closure_remains_diagnostic_but_is_not_a_physical_load() {
+    let mut masses = all_zero_breakdown();
+    masses.fuselage = 100.0;
+    masses.fuel = -25.0;
+    let coords = all_zero_coordinates();
+
+    assert_eq!(masses.signed_fuel_closure_kg(), -25.0);
+    assert_eq!(masses.get(FUEL), Some(-25.0));
+    assert_eq!(masses.physical_fuel_mass_kg(), None);
+    assert_eq!(calculate_physical_cg(&masses, &coords), coords.fuselage);
+}
+
+#[test]
+fn finite_nonnegative_fuel_closure_is_admitted_as_a_physical_load() {
+    let mut masses = all_zero_breakdown();
+    masses.fuel = 25.0;
+
+    assert_eq!(masses.signed_fuel_closure_kg(), 25.0);
+    assert_eq!(masses.physical_fuel_mass_kg(), Some(25.0));
+    assert_eq!(
+        calculate_physical_cg(&masses, &all_zero_coordinates()),
+        all_zero_coordinates().fuel
+    );
+}
+
+#[test]
+fn non_finite_fuel_closure_is_not_admitted_as_a_physical_load() {
+    let mut masses = all_zero_breakdown();
+    masses.fuel = f64::NAN;
+
+    assert_eq!(masses.physical_fuel_mass_kg(), None);
+    assert_eq!(
+        calculate_physical_cg(&masses, &all_zero_coordinates()),
+        [0.0, 0.0, 0.0]
+    );
+}
+
+#[test]
 fn the_cg_of_one_component_is_that_components_own_coordinate() {
     let mut masses = all_zero_breakdown();
     masses.gear = 500.0;

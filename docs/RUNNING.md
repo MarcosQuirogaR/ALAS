@@ -28,7 +28,7 @@ only command you need.
 
 ## The three commands that matter
 
-Run these from `C:\Proyectos\ALAS-native`.
+Run these from the repository root (`C:\Proyectos\ALAS` on this machine).
 
 ```powershell
 cargo test              # check that everything still agrees with Python
@@ -115,34 +115,38 @@ conventions (file sizes, licence headers, comment rules), formatting, the
 compiler's lints, and the whole test suite. It stops at the first failure and
 says what it wants.
 
-For "how much is done", read `docs/PORTING.md`. Every module of the Python
-implementation has a row there with a status: `todo`, `wip`, `green`,
-`native` or `dropped`. Counting the `green` rows is the honest progress
-measure, and it cannot drift from reality because the gate fails if a crate
-exists that no row mentions.
+For numerical parity against the Python reference and licence provenance,
+read `docs/PORTING.md` — every translated module has a row there. It is not
+a project-completion tracker any more, since orchestration layers such as
+`alas-pipeline` and `alas-gui` were written natively rather than translated;
+for "does the program work and what is currently wrong with it", read
+`docs/STATUS.md` instead.
 
 ---
 
 ## Running the application
 
-Not yet possible: the interface is phase 12, and the compute core comes first.
-When it exists there will be two ways in.
+There are two ways in, both through the `alas` binary built from `alas-app`.
+The workspace also builds `alas-bench` and `external_preset_audit`
+(`alas-acceptance`), so `cargo run` alone is ambiguous — name the binary.
 
 ```powershell
-cargo run --release
+cargo run --release --bin alas
 ```
 
-starts the desktop application. `--release` builds the optimized version, which
-is slower to compile and much faster to run — always use it for anything you
-are timing or actually using.
+starts the desktop application (equivalent to `... --bin alas -- --gui`).
+`--release` builds the optimized version, which is slower to compile and much
+faster to run — always use it for anything you are timing or actually using.
 
 ```powershell
-cargo run --release -- headless run --config configs/a320.yaml --out result.json
+cargo run --release --bin alas -- --config path\to\your.yaml --output outputs
 ```
 
-runs an analysis with no interface and writes the results as JSON. This is what
-the acceptance check uses: run the same configuration through Python and
-through Rust, and compare the two result files field by field.
+runs an analysis with no interface: `--config` overlays a YAML/JSON
+configuration, `--output` selects the directory the reports and figures are
+written into (default `outputs`). Run `cargo run --bin alas -- --help` for
+the full flag list — it includes `--no-optimize`, `--no-mission`,
+`--aero-solver`, `--cpacs-input` and others.
 
 The built executable lands at `target\release\alas.exe` and is standalone —
 copy it anywhere, no installation, no Python.

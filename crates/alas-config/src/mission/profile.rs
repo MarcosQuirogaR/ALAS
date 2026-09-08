@@ -27,12 +27,110 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::ConfigNode;
+use crate::{ConfigNode, Kind, Leaf};
+
+/// Which airspeed definition the takeoff, climb, descent and landing legs'
+/// `*_air_speed_m_s` fields are stated in.
+///
+/// Only those legs: the three cruise legs are always a true airspeed (or, for
+/// a preset's operational route, a true airspeed derived from a commanded
+/// Mach at the configured cruise altitude -- see
+/// [`crate::AircraftPreset::operational_mission_defaults`]) regardless of
+/// this setting, so switching an aircraft's climb schedule to calibrated
+/// airspeed cannot silently reinterpret an already-correct cruise value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SpeedReference {
+    /// The legacy, and still default, semantics: every `*_air_speed_m_s`
+    /// field on the takeoff/climb/descent/landing legs is a true airspeed
+    /// flown along the path, independent of local density.
+    #[default]
+    TrueAirspeed,
+    /// Each field is a calibrated airspeed: the true airspeed actually flown
+    /// is resolved from it and the real ambient pressure and temperature at
+    /// that leg's own altitude (via [`alas_atmo::airspeed`]), so it rises
+    /// through a climb or descent rung instead of staying constant. A jet's
+    /// widebody climb schedule and a turboprop's are both stated in knots
+    /// CAS in real operating manuals; this is what lets a preset reproduce
+    /// that instead of literally flying the jet schedule's true-airspeed
+    /// numbers.
+    CalibratedAirspeed,
+}
+
+impl Leaf for SpeedReference {
+    fn kind(&self, _name: &str) -> Kind {
+        Kind::Str
+    }
+}
+
+/// How many equal-altitude sub-rungs a [`SpeedReference::CalibratedAirspeed`]
+/// climb or descent leg is split into, in *both* the MDO mission model
+/// (`alas-opt::mdo::mission_model::profile`) and the native pseudospectral
+/// schedule (`alas-pipeline::mission_stage::schedule`).
+///
+/// Defined once, here, and read by both consumers, so "resolve CAS at each
+/// live altitude" means the same discretization in both paths rather than
+/// two paths that each pick their own rung count and happen to agree. This
+/// is a discretized approximation of constant calibrated airspeed, not the
+/// continuous, exact quantity: within one sub-rung the true airspeed is
+/// still held constant at the value resolved from the sub-rung's own
+/// midpoint altitude, not literally recomputed at every integration step.
+/// Finer than this constant reduces that discretization error further; see
+/// the refinement test next to this constant's two consumers for how much.
+pub const CAS_SPEED_SUBDIVISIONS: usize = 8;
+
+/// True airspeed to fly for a configured takeoff/climb/descent/landing speed
+/// `configured_speed_m_s`, under `reference`, at the given ambient state.
+///
+/// Centralizes the CAS-\>TAS resolution so the MDO mission model
+/// (`alas-opt`) and the native pseudospectral mission (`alas-mission`/
+/// `alas-pipeline`) consume the identical conversion rather than each
+/// re-deriving it.
+///
+/// # Errors
+///
+/// [`alas_atmo::airspeed::AirspeedError`] when the calibrated airspeed and
+/// ambient state imply an invalid or supersonic state; see
+/// [`alas_atmo::airspeed::true_from_calibrated`]. Never returned in
+/// [`SpeedReference::TrueAirspeed`] mode, which passes `configured_speed_m_s`
+/// through unchanged.
+pub fn resolve_true_airspeed_m_s(
+    reference: SpeedReference,
+    configured_speed_m_s: f64,
+    ambient_pressure_pa: f64,
+    ambient_temperature_k: f64,
+) -> Result<f64, alas_atmo::airspeed::AirspeedError> {
+    match reference {
+        SpeedReference::TrueAirspeed => Ok(configured_speed_m_s),
+        SpeedReference::CalibratedAirspeed => alas_atmo::airspeed::true_from_calibrated(
+            configured_speed_m_s,
+            ambient_pressure_pa,
+            ambient_temperature_k,
+        ),
+    }
+}
+
+/// Whether `reference` is the legacy default, for
+/// `#[serde(skip_serializing_if)]`: a saved file or wire format that never
+/// asked for calibrated airspeed looks exactly as it did before this field
+/// existed.
+fn is_true_airspeed(reference: &SpeedReference) -> bool {
+    *reference == SpeedReference::TrueAirspeed
+}
 
 /// Mission segment speeds, rates and altitudes.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ConfigNode)]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, default)]
 pub struct MissionProfileConfig {
+    /// How the takeoff, climb, descent and landing legs' airspeeds below are
+    /// defined. The three cruise legs are unaffected -- see
+    /// [`SpeedReference`].
+    #[serde(skip_serializing_if = "is_true_airspeed")]
+    #[config(
+        help = "Whether the takeoff/climb/descent/landing air speeds below are true airspeeds (legacy default) or calibrated airspeeds resolved against the real ambient pressure and temperature at each leg's altitude. Cruise legs are never affected by this."
+    )]
+    pub climb_descent_speed_reference: SpeedReference,
+
     /// Height above the field the takeoff segment climbs to.
     #[config(
         help = "Height above the departure field the takeoff segment climbs to before the initial climb takes over."
@@ -192,6 +290,7 @@ pub struct MissionProfileConfig {
 impl Default for MissionProfileConfig {
     fn default() -> Self {
         Self {
+            climb_descent_speed_reference: SpeedReference::TrueAirspeed,
             takeoff_altitude_gain_m: 3048.0,
             takeoff_air_speed_m_s: 128.6,
             takeoff_climb_rate_m_s: 10.0,

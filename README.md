@@ -17,12 +17,20 @@ have is written down.
 
 ## State
 
-Early. The foundations are in place and the process that governs the rest of
-the port is working end to end; the physics has not been translated yet.
+Running, not finished. `cargo run --bin alas` launches the desktop interface,
+and the full pipeline — geometry, mass/CG, mission, drag build-up, wingbox
+sizing, figures — runs end to end for hand-built and CPACS-imported aircraft,
+against eight reference presets and the external solvers that are installed.
+None of that means it is trustworthy yet: no preset currently has a verified
+design mission, and several open defects are tracked in `docs/STATUS.md`.
 
-`docs/PORTING.md` is the authoritative answer to "what is done" — one row per
-module of the Python implementation, with where it goes, what licence its
-content carries, and whether it has been shown to agree.
+`docs/STATUS.md` is the authoritative answer to "does it work and what is
+wrong with it". `docs/PORTING.md` answers a narrower, still-important
+question — whether a given module has been checked against the Python
+reference to a stated tolerance, and what licence its content carries — which
+matters for the physics kernels but no longer describes the project as a
+whole, since orchestration layers like `alas-pipeline` and `alas-gui` were
+written natively rather than translated.
 
 ```
 cargo test          # everything, including the parity tests
@@ -38,7 +46,7 @@ cargo xtask gate    # what has to pass before a commit
 | `crates/` | The workspace. One crate per discipline; `docs/ARCHITECTURE.md` explains the layering. |
 | `golden/` | Reference values generated from the Python implementation, and the generators that produce them. |
 | `xtask/` | Repository checks and the backup task. `cargo xtask` lists them. |
-| `docs/` | Architecture, the porting ledger, and the methods the models come from. |
+| `docs/` | Architecture, current project status, the parity/provenance ledger, and the methods the models come from. |
 
 ---
 

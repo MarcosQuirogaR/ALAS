@@ -6,12 +6,12 @@
 //!
 //! A port of the reference desktop app's `DesignSpaceTable`.
 
-use alas_config::DESIGN_VARIABLE_SPECS;
-use egui::{DragValue, RichText, ScrollArea, Ui};
+use alas_config::{DesignMode, VariableEnvelope, DESIGN_VARIABLE_SPECS};
+use egui::{ComboBox, DragValue, RichText, ScrollArea, Ui};
 
 use crate::state::AppState;
 use crate::views::form::dynamic_form;
-use crate::views::tr;
+use crate::views::{tr, tr_fields};
 
 /// A search variable needs room for its three numeric values. Two columns are
 /// useful on a desktop, but a third makes the labels and bounds too narrow to
@@ -45,13 +45,22 @@ pub fn show_design_space_view(state: &mut AppState, ui: &mut Ui) {
     ui.heading(tr("Design Space"));
     ui.label(
         RichText::new(
-            tr("The optimizer's search variables. Edit the Initial Value (nominal/starting design) \
-             and the Lower/Upper bounds; loading a preset recenters these around its design vector.",
-            ),
+            tr("Choose a clean-sheet study, a bounded reference adaptation, or a fixed-aircraft baseline. Each row shows the starting design and the limits handed to MADS."),
         )
         .weak(),
     );
     ui.add_space(6.0);
+
+    show_design_mode_card(state, ui);
+    ui.add_space(8.0);
+
+    // Fixed rows are enforced at the view boundary as well as immediately
+    // before a run. This keeps the editor honest when a user returns from an
+    // advanced page after changing a requirement or loading a file.
+    state.enforce_design_space_fixed_variables();
+    let config = state.typed_config().unwrap_or_default();
+    let nominal = state.current_design().unwrap_or_default();
+    let envelopes = config.optimizer.design_space.envelope(&nominal);
 
     ScrollArea::vertical()
         .auto_shrink([false, false])
@@ -62,12 +71,179 @@ pub fn show_design_space_view(state: &mut AppState, ui: &mut Ui) {
             for row in DESIGN_VARIABLE_SPECS.chunks(columns) {
                 ui.columns(columns, |column_uis| {
                     for (index, spec) in row.iter().enumerate() {
-                        show_variable_editor(state, &mut column_uis[index], spec);
+                        if let Some(envelope) = envelopes.iter().find(|e| e.name == spec.name) {
+                            show_variable_editor(state, &mut column_uis[index], spec, envelope);
+                        }
                     }
                 });
                 ui.add_space(8.0);
             }
         });
+}
+
+/// The names shown in the product-level mode selector. The serialized values
+/// remain the `DesignMode` snake-case tokens owned by `alas-config`.
+pub(crate) fn design_mode_display_name(mode: DesignMode) -> String {
+    tr(match mode {
+        DesignMode::CleanSheet => "New aircraft",
+        DesignMode::ReferenceAdaptation => "Adapt reference",
+        DesignMode::BaselineSandbox => "Analyze reference",
+    })
+}
+
+fn design_mode_description(mode: DesignMode) -> &'static str {
+    match mode {
+        DesignMode::CleanSheet => {
+            "Clean-sheet mode lets the declared geometry variables move inside their global bounds. The cabin-sizing option may derive fuselage length, while the selected catalogue engine stays fixed."
+        }
+        DesignMode::ReferenceAdaptation => {
+            "Reference adaptation starts from the selected aircraft preset. Fixed variables stay at their reference values; mutable variables move only inside the explicit windows below."
+        }
+        DesignMode::BaselineSandbox => {
+            "Baseline sandbox analyzes the selected reference aircraft and load case with every design variable fixed. Mission and accommodation inputs remain editable; use Analyze reference to run this path."
+        }
+    }
+}
+
+fn show_design_mode_card(state: &mut AppState, ui: &mut Ui) {
+    crate::theme::card_frame(ui).show(ui, |ui| {
+        ui.set_min_width(ui.available_width());
+        ui.label(RichText::new(tr("Design study")).strong());
+        ui.add_space(3.0);
+        let current = state.design_mode();
+        let mut selected = current;
+        ComboBox::from_id_salt("alas_design_mode")
+            .width(ui.available_width())
+            .selected_text(design_mode_display_name(current))
+            .show_ui(ui, |ui| {
+                for mode in [
+                    DesignMode::CleanSheet,
+                    DesignMode::ReferenceAdaptation,
+                    DesignMode::BaselineSandbox,
+                ] {
+                    ui.selectable_value(&mut selected, mode, design_mode_display_name(mode));
+                }
+            });
+        if selected != current {
+            state.set_design_mode(selected);
+        }
+
+        let selected = state.design_mode();
+        ui.label(
+            RichText::new(tr(design_mode_description(selected)))
+                .weak()
+                .small(),
+        );
+        let config = state.typed_config().unwrap_or_default();
+        let nominal = state.current_design().unwrap_or_default();
+        let envelopes = config.optimizer.design_space.envelope(&nominal);
+        let fixed = envelopes.iter().filter(|variable| variable.fixed).count();
+        let mutable = envelopes.len().saturating_sub(fixed);
+        ui.add_space(4.0);
+        ui.label(
+            RichText::new(tr_fields(
+                "Envelope: {fixed} fixed / {mutable} mutable variables",
+                &[
+                    ("fixed", fixed.to_string()),
+                    ("mutable", mutable.to_string()),
+                ],
+            ))
+            .weak()
+            .small(),
+        );
+
+        show_design_mode_settings(state, ui, selected);
+    });
+}
+
+fn show_design_mode_settings(state: &mut AppState, ui: &mut Ui, mode: DesignMode) {
+    let fields = state
+        .schema
+        .field("optimizer")
+        .and_then(|field| match &field.entry {
+            alas_config::Entry::Node(node) => node
+                .fields
+                .iter()
+                .find(|field| field.name == "design_space"),
+            alas_config::Entry::Leaf(_) => None,
+        })
+        .and_then(|field| match &field.entry {
+            alas_config::Entry::Node(node) => Some(
+                node.fields
+                    .iter()
+                    .filter(|field| match mode {
+                        DesignMode::CleanSheet => field.name == "fuselage_sized_by_cabin",
+                        DesignMode::ReferenceAdaptation => matches!(
+                            field.name,
+                            "reference_fixed_variables"
+                                | "reference_fraction_half_width"
+                                | "reference_angle_half_width_deg"
+                                | "reference_shift_half_width_m"
+                                | "reference_bump_half_width"
+                        ),
+                        DesignMode::BaselineSandbox => false,
+                    })
+                    .cloned()
+                    .map(|mut field| {
+                        // The mode card already provides the hierarchy; these
+                        // controls should not acquire another Advanced fold.
+                        field.advanced = false;
+                        field
+                    })
+                    .collect::<Vec<_>>(),
+            ),
+            alas_config::Entry::Leaf(_) => None,
+        })
+        .unwrap_or_default();
+
+    if fields.is_empty() {
+        if mode == DesignMode::BaselineSandbox {
+            ui.label(
+                RichText::new(tr(
+                    "All design variables are fixed at the selected reference values for this run.",
+                ))
+                .weak()
+                .small(),
+            );
+        }
+        return;
+    }
+
+    ui.add_space(6.0);
+    let title = match mode {
+        DesignMode::CleanSheet => "Clean-sheet options",
+        DesignMode::ReferenceAdaptation => "Reference envelope controls",
+        DesignMode::BaselineSandbox => "Baseline options",
+    };
+    ui.label(RichText::new(tr(title)).strong());
+    let lang = Some(state.language.code());
+    let show_help = state.help_verbose;
+    let error_fields: std::collections::HashSet<String> = state
+        .validation_findings
+        .iter()
+        .filter(|finding| finding.field_path.starts_with("optimizer.design_space"))
+        .filter_map(|finding| finding.field_path.rsplit('.').next())
+        .map(str::to_owned)
+        .collect();
+    let Some(optimizer) = state.group_mut("optimizer") else {
+        return;
+    };
+    let Some(object) = optimizer.as_object_mut() else {
+        return;
+    };
+    let values = object
+        .entry("design_space".to_owned())
+        .or_insert_with(|| serde_json::json!({}));
+    let edits = dynamic_form(ui, &fields, values, &error_fields, lang, show_help);
+    if !edits.is_empty() {
+        // Changing a window or the clean-sheet cabin-sizing policy changes the
+        // declared envelope. Rebuild run bounds from that same source.
+        state.reset_design_space_bounds_to_mode();
+        state.on_config_modified();
+        for edit in edits {
+            state.note_parameter_modified(edit.label, edit.value);
+        }
+    }
 }
 
 /// Render the optimizer-facing limits next to the variables they constrain.
@@ -142,13 +318,23 @@ fn show_design_constraints(state: &mut AppState, ui: &mut Ui) {
     }
 }
 
-fn show_variable_editor(state: &mut AppState, ui: &mut Ui, spec: &alas_config::DesignVariableSpec) {
+fn show_variable_editor(
+    state: &mut AppState,
+    ui: &mut Ui,
+    spec: &alas_config::DesignVariableSpec,
+    envelope: &VariableEnvelope,
+) {
     crate::theme::card_frame(ui).show(ui, |ui| {
         ui.set_min_width(ui.available_width());
         ui.horizontal(|ui| {
             ui.label(RichText::new(tr(&display_name(spec))).strong())
                 .on_hover_text(tr(spec.description));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.label(
+                    RichText::new(tr(if envelope.fixed { "Fixed" } else { "Mutable" }))
+                        .weak()
+                        .small(),
+                );
                 ui.label(
                     RichText::new(if spec.unit.is_empty() { "-" } else { spec.unit })
                         .weak()
@@ -159,22 +345,30 @@ fn show_variable_editor(state: &mut AppState, ui: &mut Ui, spec: &alas_config::D
         ui.add_space(2.0);
 
         let decimals = spec.decimals.max(0) as usize;
+        let requested_bounds = state
+            .bounds
+            .get(spec.name)
+            .copied()
+            .unwrap_or((envelope.lower, envelope.upper));
+        let lower = if envelope.fixed {
+            envelope.lower
+        } else {
+            requested_bounds.0.max(envelope.lower).min(envelope.upper)
+        };
+        let upper = if envelope.fixed {
+            envelope.upper
+        } else {
+            requested_bounds.1.min(envelope.upper).max(lower)
+        };
         let mut values = [
             state
                 .design_values
                 .get(spec.name)
                 .copied()
-                .unwrap_or(spec.default),
-            state
-                .bounds
-                .get(spec.name)
-                .map(|bounds| bounds.0)
-                .unwrap_or(spec.lower),
-            state
-                .bounds
-                .get(spec.name)
-                .map(|bounds| bounds.1)
-                .unwrap_or(spec.upper),
+                .unwrap_or(envelope.nominal)
+                .clamp(lower, upper),
+            lower,
+            upper,
         ];
         let mut changed = false;
         let labels = ["Initial value", "Lower bound", "Upper bound"];
@@ -183,17 +377,23 @@ fn show_variable_editor(state: &mut AppState, ui: &mut Ui, spec: &alas_config::D
                 let column = &mut columns[index];
                 column.label(RichText::new(tr(label)).weak().small());
                 let width = column.available_width().max(72.0);
-                changed |= column
-                    .add_sized(
-                        [width, column.spacing().interact_size.y],
+                let height = column.spacing().interact_size.y;
+                let response = column.add_enabled_ui(!envelope.fixed, |ui| {
+                    ui.add_sized(
+                        [width, height],
                         DragValue::new(&mut values[index])
                             .speed(0.01)
                             .max_decimals(decimals),
                     )
-                    .changed();
+                });
+                changed |= response.inner.changed();
             }
         });
-        if changed {
+        if changed && !envelope.fixed {
+            if values[1] > values[2] {
+                values.swap(1, 2);
+            }
+            values[0] = values[0].clamp(values[1], values[2]);
             state.design_values.insert(spec.name.to_owned(), values[0]);
             state
                 .bounds
@@ -214,8 +414,11 @@ fn design_space_column_count(available_width: f32) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use super::{design_space_column_count, display_name, MIN_DESIGN_COLUMN_WIDTH};
-    use alas_config::DESIGN_VARIABLE_SPECS;
+    use super::{
+        design_mode_display_name, design_space_column_count, display_name, MIN_DESIGN_COLUMN_WIDTH,
+    };
+    use crate::state::AppState;
+    use alas_config::{DesignMode, DESIGN_VARIABLE_SPECS};
 
     #[test]
     fn design_space_labels_use_human_names_and_keep_units_separate() {
@@ -241,5 +444,42 @@ mod tests {
             1
         );
         assert_eq!(design_space_column_count(MIN_DESIGN_COLUMN_WIDTH * 2.0), 2);
+    }
+
+    #[test]
+    fn product_mode_labels_are_stable_and_baseline_is_distinct() {
+        assert_eq!(
+            design_mode_display_name(DesignMode::CleanSheet),
+            "New aircraft"
+        );
+        assert_eq!(
+            design_mode_display_name(DesignMode::ReferenceAdaptation),
+            "Adapt reference"
+        );
+        assert_eq!(
+            design_mode_display_name(DesignMode::BaselineSandbox),
+            "Analyze reference"
+        );
+    }
+
+    #[test]
+    fn selecting_reference_mode_writes_the_typed_config_and_fixes_reference_rows() {
+        let mut state = AppState::default();
+        state.set_design_mode(DesignMode::ReferenceAdaptation);
+
+        assert_eq!(state.design_mode(), DesignMode::ReferenceAdaptation);
+        assert_eq!(
+            state
+                .config_values
+                .pointer("/optimizer/design_space/mode")
+                .and_then(serde_json::Value::as_str),
+            Some("reference_adaptation")
+        );
+        let config = state.typed_config().expect("typed config");
+        let fixed = config.optimizer.design_space.fixed_variable_names();
+        for name in fixed {
+            let (lower, upper) = state.bounds[name];
+            assert_eq!(lower, upper, "{name} must stay fixed in reference mode");
+        }
     }
 }

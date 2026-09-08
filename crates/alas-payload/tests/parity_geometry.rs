@@ -39,6 +39,8 @@ use alas_testkit::{Comparison, Tier};
 use serde::Deserialize;
 use serde_json::Value;
 
+mod support;
+
 #[derive(Debug, Deserialize)]
 struct DeckRecord {
     name: String,
@@ -128,6 +130,15 @@ fn cabin_geometry_with_source_corrections(
     input: &Value,
     use_source_corrected_geometry: bool,
 ) -> CabinGeometry {
+    if !use_source_corrected_geometry {
+        let (config, plane, _) = support::config_and_plane(input);
+        return CabinGeometry::new_reference_compatibility(
+            &plane,
+            &config.geometry,
+            config.cabin.passenger.wall_thickness_m,
+        )
+        .expect("a frozen aircraft has a cabin");
+    }
     let config = AlasConfig::from_value(input).expect("the overlay loads");
     let preset_name = input
         .get("preset")
@@ -163,7 +174,7 @@ fn cabin_geometry_with_source_corrections(
         .build(design_vector.as_ref(), false)
         .expect("the case's aircraft builds");
 
-    CabinGeometry::new(
+    CabinGeometry::new_reference_compatibility(
         &plane,
         &builder.geometry,
         config.cabin.passenger.wall_thickness_m,

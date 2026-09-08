@@ -1,0 +1,28 @@
+{
+  "source": {
+    "provider": "OurAirports",
+    "airport_url": "https://davidmegginson.github.io/ourairports-data/airports.csv",
+    "runway_url": "https://davidmegginson.github.io/ourairports-data/runways.csv",
+    "documentation_url": "https://ourairports.com/help/data-dictionary.html",
+    "retrieved_utc": "2026-09-06",
+    "license_and_limitation": "Public Domain; provider gives no guarantee of accuracy or fitness for use. Physical runway length only, never declared performance distance."
+  },
+  "airports": [
+    {
+      "icao": "LEBL",
+      "name": "Josep Tarradellas Barcelona-El Prat Airport",
+      "elevation_m": 3.6576,
+      "physical_runway_length_m": 3352.8,
+      "latitude_deg": 41.2971,
+      "longitude_deg": 2.07846
+    },
+    {
+      "icao": "KJFK",
+      "name": "John F. Kennedy International Airport",
+      "elevation_m": 3.9624,
+      "physical_runway_length_m": 4422.9528,
+      "latitude_deg": 40.639447,
+      "longitude_deg": -73.779317
+    }
+  ]
+}

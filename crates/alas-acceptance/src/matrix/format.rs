@@ -118,12 +118,16 @@ pub fn format_matrix_report(matrix: &AcceptanceMatrixReport) -> String {
     for preset in &matrix.presets {
         if preset.mtow_shortfall_kg.is_finite() && preset.mtow_shortfall_kg > 0.0 {
             tank_limited_count += 1;
+            // The shortfall describes the tank bound, so the line names that
+            // bound explicitly; the flown takeoff mass can sit well below it
+            // when the fuel policy, not the tanks, sized the load.
             out.push_str(&format!(
-                "- {}: analyzed TOW {:.3} kg is {:.3} kg below the {:.3} kg MTOW limit; carried fuel {:.3} kg, closure remainder {:.3} kg, capacity evidence {}\n",
+                "- {}: the tanks admit a takeoff mass of {:.3} kg, {:.3} kg below the {:.3} kg MTOW limit; flown TOW {:.3} kg, carried fuel {:.3} kg, closure remainder {:.3} kg, capacity evidence {}\n",
                 preset.name,
-                preset.analyzed_takeoff_mass_kg,
+                preset.mtow_kg - preset.mtow_shortfall_kg,
                 preset.mtow_shortfall_kg,
                 preset.mtow_kg,
+                preset.analyzed_takeoff_mass_kg,
                 preset.analyzed_carried_fuel_kg,
                 preset.mtow_closure_fuel_kg,
                 format_fuel_capacity_evidence(preset.fuel_capacity_evidence),

@@ -49,12 +49,15 @@ pub fn show_preview_dock(state: &mut AppState, ui: &mut Ui) {
             // The right-side dock owns the full remaining height, so the
             // viewport stays vertical instead of becoming a wide bottom row.
             let height = ui.available_height().max(180.0);
+            let scene_revision = state.preview_scene_revision;
             let response = ui.add(
                 SceneView::new(&scene, state.view_state_mut(&view_key))
                     .desired_size(vec2(width, height))
                     .orbit_only()
+                    .raster_scale(1.0)
                     .show_toolbar(false)
-                    .cache_key(&view_key),
+                    .cache_key(&view_key)
+                    .cache_revision(scene_revision),
             );
             let response = response.on_hover_text(tr("Drag to orbit the camera; scroll to zoom"));
             camera_changed |= handle_camera_response(state, &response, &active_camera_id);
@@ -65,6 +68,9 @@ pub fn show_preview_dock(state: &mut AppState, ui: &mut Ui) {
                 &active_camera_id,
                 &view_key,
             );
+            if state.preview_tab == PreviewTab::Cabin && legend_open(ui.ctx(), &view_key) {
+                show_cabin_legend(ui, response.rect, &view_key);
+            }
             if response.double_clicked() {
                 open_fullscreen_preview(state, ui.ctx(), &view_key, &active_camera_id);
             }
@@ -101,17 +107,24 @@ fn show_aircraft_viewer_controls(
     let current = state.preview_tab;
     let mut requested = current;
     let mut reset = false;
+    let mut show_legend = legend_open(ui.ctx(), view_key);
+    let bar_width: f32 = if current == PreviewTab::Cabin {
+        304.0_f32
+    } else {
+        226.0_f32
+    }
+    .min((viewport.width() - 16.0).max(180.0));
     let controls = egui::Rect::from_min_size(
-        viewport.min + vec2(8.0, 8.0),
-        vec2((viewport.width() - 16.0).max(180.0), 30.0),
+        egui::pos2(viewport.center().x - bar_width * 0.5, viewport.top() + 8.0),
+        vec2(bar_width, 36.0),
     );
     ui.allocate_new_ui(egui::UiBuilder::new().max_rect(controls), |ui| {
-        Frame::default()
-            .fill(Color32::from_black_alpha(180))
-            .corner_radius(5.0)
-            .inner_margin(egui::Margin::symmetric(4.0, 2.0))
+        Frame::group(ui.style())
+            .fill(ui.visuals().panel_fill)
+            .inner_margin(egui::Margin::symmetric(5.0, 3.0))
             .show(ui, |ui| {
-                ui.horizontal(|ui| {
+                ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                    ui.spacing_mut().item_spacing.x = 5.0;
                     if ui
                         .selectable_label(current == PreviewTab::Exterior, tr("Exterior"))
                         .on_hover_text(tr("Show the complete aircraft exterior"))
@@ -126,8 +139,16 @@ fn show_aircraft_viewer_controls(
                     {
                         requested = PreviewTab::Cabin;
                     }
+                    if current == PreviewTab::Cabin
+                        && ui
+                            .selectable_label(show_legend, tr("Legend"))
+                            .on_hover_text(tr("Show or hide the cabin legend"))
+                            .clicked()
+                    {
+                        show_legend = !show_legend;
+                    }
                     if ui
-                        .small_button(tr("Reset"))
+                        .add(egui::Button::new(tr("Reset")).small())
                         .on_hover_text(tr("Restore the default isometric camera and framing"))
                         .clicked()
                     {
@@ -137,6 +158,8 @@ fn show_aircraft_viewer_controls(
             });
     });
 
+    set_legend_open(ui.ctx(), view_key, show_legend);
+
     if requested != current {
         state.preview_tab = requested;
     }
@@ -144,6 +167,67 @@ fn show_aircraft_viewer_controls(
         reset_camera(state, camera_id, view_key);
     }
     requested != current || reset
+}
+
+fn legend_id(view_key: &str) -> Id {
+    Id::new(("aircraft_preview_legend", view_key))
+}
+
+fn legend_open(ctx: &egui::Context, view_key: &str) -> bool {
+    ctx.data(|data| data.get_temp::<bool>(legend_id(view_key)))
+        .unwrap_or(true)
+}
+
+fn set_legend_open(ctx: &egui::Context, view_key: &str, open: bool) {
+    ctx.data_mut(|data| data.insert_temp(legend_id(view_key), open));
+}
+
+fn legend_item(ui: &mut Ui, color: Color32, label: &str) {
+    ui.horizontal(|ui| {
+        let (rect, _) = ui.allocate_exact_size(vec2(12.0, 12.0), egui::Sense::hover());
+        ui.painter().rect_filled(rect, 2.0, color);
+        ui.label(RichText::new(tr(label)).size(12.0));
+    });
+}
+
+/// Draw a readable screen-space key that never follows the 3-D camera.
+fn show_cabin_legend(ui: &mut Ui, viewport: egui::Rect, view_key: &str) {
+    let width = (viewport.width() - 24.0).clamp(230.0, 310.0);
+    let height = 104.0;
+    let rect = egui::Rect::from_min_size(
+        egui::pos2(
+            viewport.center().x - width * 0.5,
+            viewport.bottom() - height - 12.0,
+        ),
+        vec2(width, height),
+    );
+    ui.allocate_new_ui(egui::UiBuilder::new().max_rect(rect), |ui| {
+        Frame::group(ui.style())
+            .fill(ui.visuals().panel_fill)
+            .inner_margin(egui::Margin::same(7.0))
+            .show(ui, |ui| {
+                ui.push_id(view_key, |ui| {
+                    ui.label(RichText::new(tr("Cabin legend")).strong().size(12.0));
+                    egui::Grid::new("cabin_legend_grid")
+                        .num_columns(2)
+                        .spacing(vec2(14.0, 3.0))
+                        .show(ui, |ui| {
+                            legend_item(ui, Color32::from_rgb(142, 68, 173), "First class");
+                            legend_item(ui, Color32::from_rgb(41, 128, 185), "Business class");
+                            ui.end_row();
+                            legend_item(ui, Color32::from_rgb(39, 174, 96), "Economy class");
+                            legend_item(ui, Color32::from_rgb(230, 126, 34), "Galley");
+                            ui.end_row();
+                            legend_item(ui, Color32::from_rgb(93, 173, 226), "Lavatory");
+                            legend_item(ui, Color32::from_rgb(231, 76, 60), "Exit");
+                            ui.end_row();
+                            legend_item(ui, Color32::from_rgb(86, 101, 115), "Side bins");
+                            legend_item(ui, Color32::from_rgb(123, 135, 144), "Center bins");
+                            ui.end_row();
+                        });
+                });
+            });
+    });
 }
 
 fn reset_camera(state: &mut AppState, camera_id: &str, view_key: &str) {
@@ -281,12 +365,15 @@ fn show_fullscreen_preview(
                     });
                     let available = ui.available_size();
                     let available = vec2(available.x.max(320.0), available.y.max(180.0));
+                    let scene_revision = state.preview_scene_revision;
                     let response = ui.add(
                         SceneView::new(active_scene, state.view_state_mut(fullscreen_view.clone()))
                             .desired_size(available)
                             .orbit_only()
+                            .raster_scale(1.5)
                             .show_toolbar(false)
-                            .cache_key(&fullscreen_view),
+                            .cache_key(&fullscreen_view)
+                            .cache_revision(scene_revision),
                     );
                     let response =
                         response.on_hover_text(tr("Drag to orbit the camera; scroll to zoom"));
@@ -298,6 +385,11 @@ fn show_fullscreen_preview(
                             &fullscreen_camera,
                             &fullscreen_view,
                         );
+                    if state.preview_tab == PreviewTab::Cabin
+                        && legend_open(ui.ctx(), &fullscreen_view)
+                    {
+                        show_cabin_legend(ui, response.rect, &fullscreen_view);
+                    }
                     if changed {
                         state.update_preview_scene();
                         ctx.request_repaint();

@@ -93,24 +93,41 @@ pub fn navdata_file_url(file: &NavdataFile) -> String {
     format!("{NAVDATA_BASE_URL}/{}", file.name)
 }
 
+/// Whether one navigation-data file is a complete-looking regular file.
+///
+/// Existence alone is not enough here: a killed download leaves a file behind
+/// and the parsers would otherwise accept it as a valid, silently incomplete
+/// navigation graph.
+pub fn navdata_file_is_usable(navdata_dir: &Path, file: &NavdataFile) -> bool {
+    navdata_dir
+        .join(file.name)
+        .metadata()
+        .is_ok_and(|metadata| metadata.is_file() && metadata.len() >= file.min_bytes)
+}
+
 /// Whether a directory holds a complete navigation-data set.
 pub fn navdata_status(navdata_dir: &Path) -> AssetStatus {
+    let valid = NAVDATA_FILES
+        .iter()
+        .filter(|file| navdata_file_is_usable(navdata_dir, file))
+        .count();
     let present = NAVDATA_FILES
         .iter()
-        .filter(|file| navdata_dir.join(file.name).exists())
+        .filter(|file| navdata_dir.join(file.name).is_file())
         .count();
     let where_it_is = navdata_dir.display();
-    if present == NAVDATA_FILES.len() {
+    if valid == NAVDATA_FILES.len() {
         AssetStatus {
             available: true,
-            detail: format!("present at {where_it_is}"),
+            detail: format!("valid at {where_it_is}"),
         }
     } else {
         AssetStatus {
             available: false,
             detail: format!(
-                "missing ({present}/{} files) at {where_it_is}",
-                NAVDATA_FILES.len()
+                "incomplete ({valid}/{} valid files; {present}/{} present) at {where_it_is}",
+                NAVDATA_FILES.len(),
+                NAVDATA_FILES.len(),
             ),
         }
     }
@@ -119,15 +136,18 @@ pub fn navdata_status(navdata_dir: &Path) -> AssetStatus {
 /// Whether the Earth texture is installed.
 pub fn texture_status(texture_path: &Path) -> AssetStatus {
     let where_it_is = texture_path.display();
-    if texture_path.exists() {
+    if texture_path
+        .metadata()
+        .is_ok_and(|metadata| metadata.is_file() && metadata.len() >= MIN_TEXTURE_BYTES)
+    {
         AssetStatus {
             available: true,
-            detail: format!("present at {where_it_is}"),
+            detail: format!("valid at {where_it_is}"),
         }
     } else {
         AssetStatus {
             available: false,
-            detail: format!("missing at {where_it_is}"),
+            detail: format!("missing or incomplete at {where_it_is}"),
         }
     }
 }
@@ -164,6 +184,20 @@ mod tests {
             assert!(file.min_bytes > 0, "{} has no size floor", file.name);
             assert!(navdata_file_url(file).ends_with(file.name));
         }
+    }
+
+    #[test]
+    fn files_below_the_floor_are_not_reported_as_available() {
+        let directory =
+            std::env::temp_dir().join(format!("alas-navdata-short-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).expect("test navdata directory");
+        for file in &NAVDATA_FILES {
+            std::fs::write(directory.join(file.name), b"short").expect("short test file");
+        }
+        let status = navdata_status(&directory);
+        assert!(!status.available);
+        assert!(status.detail.contains("0/3 valid"), "{}", status.detail);
+        let _ = std::fs::remove_dir_all(directory);
     }
 
     #[test]

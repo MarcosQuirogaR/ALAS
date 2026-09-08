@@ -50,6 +50,13 @@ use alas_atmo::{us1976_compute_values, us1976_try_compute_values, Us1976Error, U
 use alas_prop::mission_turbofan::{
     evaluate_thrust, freestream_from_atmosphere, ThrustOutput, TurbofanInputs, VehicleBuilderParams,
 };
+use alas_prop::system::{
+    FailureState, OperatingMode, PropulsionDemand, PropulsionError, PropulsionLoads,
+    PropulsionOrchestrator, PropulsionRating, PropulsionRequest, PropulsionResult, PropulsionState,
+    ResourceKind, TechnologyTrace,
+};
+
+use crate::operating::ThrustRating;
 
 /// What one call to the aerodynamics analysis produces.
 pub struct AeroSolution {
@@ -67,6 +74,17 @@ pub struct AeroSolution {
     /// parity, but carries this status so callers can reject or label
     /// out-of-domain trajectory points explicitly.
     pub surrogate_domain: SurrogateDomainStatus,
+}
+
+/// Inputs retained solely for the frozen turbofan solver's rejected-iterate
+/// compatibility path. Non-turbofan systems never carry this state.
+pub struct LegacyTurbofanCompatibility {
+    /// Legacy network inputs.
+    pub inputs: TurbofanInputs,
+    /// Legacy component and part-power parameters.
+    pub params: VehicleBuilderParams,
+    /// Sized core-flow scale.
+    pub compressor_nondimensional_massflow: f64,
 }
 
 /// The analysis stack, resolved onto one aircraft.
@@ -87,11 +105,18 @@ pub struct MissionAnalyses {
     /// multiplied by.
     pub fuselage_lift_correction: f64,
     /// Scale applied to per-wing VLM lift and induced-drag coefficients before
-    /// the drag buildup. Product analyses may carry the fuselage correction
-    /// here when their induced-drag policy follows corrected wing loads.
-    /// Frozen SUAVE evidence leaves the VLM drag inputs unchanged and sets
-    /// this to `1.0`.
+    /// the drag buildup. The product currently leaves this at `1.0`: the
+    /// SUAVE Fidelity-Zero fuselage correction belongs to the aircraft lift
+    /// balance, and must not be squared into VLM induced drag without a
+    /// separately calibrated load model. Frozen compatibility also sets this
+    /// to `1.0`.
     pub induced_drag_lift_correction: f64,
+    /// Whether the product solver uses the signed longitudinal force residual
+    /// for cruise. The frozen compatibility path retains SUAVE's historical
+    /// horizontal-force magnitude residual so its golden fixture remains
+    /// reproducible; product missions must preserve the sign so a thrust
+    /// deficit cannot look identical to a thrust surplus to the root finder.
+    pub signed_cruise_force_residual: bool,
     /// Whether a solved throttle above the available `[0, 1]` envelope marks
     /// the segment as non-converged. Product mission runs enforce this
     /// physical availability check; the frozen SUAVE compatibility path keeps
@@ -113,16 +138,22 @@ pub struct MissionAnalyses {
     pub network_count: usize,
     /// The trained vortex-lattice surrogate.
     pub surrogate: LiftSurrogate,
-    /// The engine's variable inputs.
-    pub turbofan: TurbofanInputs,
-    /// The engine's fixed component efficiencies and losses.
-    pub turbofan_params: VehicleBuilderParams,
-    /// The core-flow scale factor `turbofan_sizing` solved. The engine is
-    /// already sized by the time a mission flies it.
-    pub compressor_nondimensional_massflow: f64,
+    /// Rejected-iterate fallback state carried only by legacy turbofans.
+    /// Turboprops and future technologies leave this absent.
+    pub legacy_turbofan: Option<LegacyTurbofanCompatibility>,
+    /// Immutable technology-neutral propulsion boundary used by every mission
+    /// operating-point evaluation. The optional compatibility state is not a
+    /// second product model; it only preserves historical nonlinear-solver
+    /// behavior when the strict boundary rejects a turbofan probe.
+    pub propulsion: PropulsionOrchestrator,
 }
 
 impl MissionAnalyses {
+    /// Whether named ratings still need the historical scalar schedule.
+    pub(crate) fn uses_legacy_propulsion_schedule(&self) -> bool {
+        self.legacy_turbofan.is_some()
+    }
+
     /// `US_Standard_1976.compute_values` at one altitude.
     pub fn atmosphere(&self, altitude_m: f64, temperature_deviation_k: f64) -> Us1976Values {
         us1976_compute_values(altitude_m, temperature_deviation_k)
@@ -238,12 +269,221 @@ impl MissionAnalyses {
     ) -> ThrustOutput {
         let freestream =
             freestream_from_atmosphere(atmosphere, altitude_m, velocity_m_s, mach, gravity_m_s2);
-        evaluate_thrust(
-            &freestream,
-            &self.turbofan,
-            &self.turbofan_params,
-            self.compressor_nondimensional_massflow,
-            throttle,
-        )
+        let request = PropulsionRequest {
+            flight: (&freestream).into(),
+            demand: PropulsionDemand::NormalizedForce(throttle),
+            mode: OperatingMode::Normal,
+            failure: FailureState::None,
+            loads: PropulsionLoads::default(),
+            state: PropulsionState::default(),
+            time_step_s: None,
+        };
+        let result = match self.propulsion.evaluate(&request) {
+            Ok(result) => result,
+            Err(PropulsionError::InvalidInput { .. } | PropulsionError::NonFiniteOutput(_))
+                if self.legacy_turbofan.is_some() =>
+            {
+                // MINPACK can probe non-finite iterates before returning to
+                // the physical solution. The neutral boundary intentionally
+                // rejects those points; preserve the frozen solver's NaN
+                // propagation only for such rejected compatibility probes.
+                let Some(legacy) = self.legacy_turbofan.as_ref() else {
+                    unreachable!("guarded by the compatibility-state check");
+                };
+                return evaluate_thrust(
+                    &freestream,
+                    &legacy.inputs,
+                    &legacy.params,
+                    legacy.compressor_nondimensional_massflow,
+                    throttle,
+                );
+            }
+            Err(PropulsionError::InvalidInput { .. } | PropulsionError::NonFiniteOutput(_)) => {
+                // Nonlinear root solvers may probe outside a typed model's
+                // validity domain. Return a rejected numerical point, never
+                // a result from another propulsion technology.
+                return ThrustOutput {
+                    thrust_n: f64::NAN,
+                    thrust_specific_fuel_consumption: f64::NAN,
+                    non_dimensional_thrust: f64::NAN,
+                    core_mass_flow_rate_kg_s: f64::NAN,
+                    fuel_flow_rate_kg_s: f64::NAN,
+                    power_w: f64::NAN,
+                    specific_impulse_s: f64::NAN,
+                };
+            }
+            Err(error) => {
+                // A typed model-domain rejection can occur at a nonlinear
+                // solver trial point. The mission API predates the neutral
+                // Result boundary, so encode the rejected point as a
+                // non-finite residual input and let the root solver report a
+                // controlled non-convergence instead of panicking the GUI.
+                tracing::warn!(
+                    error = %error,
+                    "mission propulsion rejected a trial operating point"
+                );
+                return ThrustOutput {
+                    thrust_n: f64::NAN,
+                    thrust_specific_fuel_consumption: f64::NAN,
+                    non_dimensional_thrust: f64::NAN,
+                    core_mass_flow_rate_kg_s: f64::NAN,
+                    fuel_flow_rate_kg_s: f64::NAN,
+                    power_w: f64::NAN,
+                    specific_impulse_s: f64::NAN,
+                };
+            }
+        };
+
+        self.project_propulsion_result(result, velocity_m_s, gravity_m_s2)
+            .unwrap_or_else(|error| {
+                tracing::warn!(error = %error, "mission propulsion projection rejected a trial point");
+                rejected_thrust_output()
+            })
+    }
+
+    /// Evaluate a phase rating through the technology-neutral model.
+    ///
+    /// Legacy turbofans have no named schedules, so their established rating
+    /// fraction is supplied explicitly by the mission configuration. Typed
+    /// technologies receive the named rating without reinterpretation.
+    #[allow(clippy::too_many_arguments)] // mirrors the existing mission thrust boundary plus rating
+    pub fn thrust_for_rating(
+        &self,
+        atmosphere: &Us1976Values,
+        altitude_m: f64,
+        velocity_m_s: f64,
+        mach: f64,
+        gravity_m_s2: f64,
+        rating: ThrustRating,
+        legacy_rating_fraction: f64,
+    ) -> Result<ThrustOutput, PropulsionError> {
+        let freestream =
+            freestream_from_atmosphere(atmosphere, altitude_m, velocity_m_s, mach, gravity_m_s2);
+        let demand = if self.uses_legacy_propulsion_schedule() {
+            PropulsionDemand::NormalizedForce(legacy_rating_fraction)
+        } else {
+            PropulsionDemand::RatedFraction {
+                rating: match rating {
+                    ThrustRating::TakeoffGoAround => PropulsionRating::TakeoffGoAround,
+                    ThrustRating::MaximumClimb => PropulsionRating::MaximumClimb,
+                    ThrustRating::MaximumContinuous => PropulsionRating::MaximumContinuous,
+                    ThrustRating::FlightIdle => PropulsionRating::FlightIdle,
+                    ThrustRating::Cruise => PropulsionRating::Cruise,
+                },
+                fraction: legacy_rating_fraction,
+            }
+        };
+        let result = self.propulsion.evaluate(&PropulsionRequest {
+            flight: (&freestream).into(),
+            demand,
+            mode: OperatingMode::Normal,
+            failure: FailureState::None,
+            loads: PropulsionLoads::default(),
+            state: PropulsionState::default(),
+            time_step_s: None,
+        })?;
+        self.project_propulsion_result(result, velocity_m_s, gravity_m_s2)
+    }
+
+    fn project_propulsion_result(
+        &self,
+        result: PropulsionResult,
+        velocity_m_s: f64,
+        gravity_m_s2: f64,
+    ) -> Result<ThrustOutput, PropulsionError> {
+        let fuel_flow_rate_kg_s = jet_a_mass_flow(&result.resource_flows)?;
+        match result.trace {
+            Some(TechnologyTrace::LegacyTurbofan(mut output)) => {
+                output.thrust_n = result.body_force_n[0];
+                output.fuel_flow_rate_kg_s = fuel_flow_rate_kg_s;
+                Ok(output)
+            }
+            None => {
+                let thrust_n = result.body_force_n[0];
+                Ok(ThrustOutput {
+                    thrust_n,
+                    thrust_specific_fuel_consumption: if thrust_n > 0.0 {
+                        fuel_flow_rate_kg_s * gravity_m_s2 * 3_600.0 / thrust_n
+                    } else {
+                        0.0
+                    },
+                    non_dimensional_thrust: 0.0,
+                    core_mass_flow_rate_kg_s: 0.0,
+                    fuel_flow_rate_kg_s,
+                    power_w: thrust_n * velocity_m_s,
+                    specific_impulse_s: if fuel_flow_rate_kg_s > 0.0 {
+                        thrust_n / (fuel_flow_rate_kg_s * gravity_m_s2)
+                    } else {
+                        0.0
+                    },
+                })
+            }
+        }
+    }
+}
+
+// The historical scalar mission API signals rejected solver iterates through
+// non-finite residuals. The rated Result API retains the explicit error.
+fn rejected_thrust_output() -> ThrustOutput {
+    ThrustOutput {
+        thrust_n: f64::NAN,
+        thrust_specific_fuel_consumption: f64::NAN,
+        non_dimensional_thrust: f64::NAN,
+        core_mass_flow_rate_kg_s: f64::NAN,
+        fuel_flow_rate_kg_s: f64::NAN,
+        power_w: f64::NAN,
+        specific_impulse_s: f64::NAN,
+    }
+}
+
+fn jet_a_mass_flow(flows: &[alas_prop::system::ResourceFlow]) -> Result<f64, PropulsionError> {
+    flows
+        .iter()
+        .find(|flow| flow.resource == ResourceKind::JetA)
+        .and_then(|flow| flow.mass_flow_kg_s)
+        .ok_or(PropulsionError::UnsupportedDemand(
+            "mission requires a Jet-A mass-flow result",
+        ))
+}
+
+#[cfg(test)]
+mod projection_tests {
+    use super::*;
+    use alas_prop::system::ResourceFlow;
+
+    #[test]
+    fn unsupported_resource_flow_is_an_error_and_rejected_iterate() {
+        for resource in [
+            ResourceKind::Hydrogen,
+            ResourceKind::ElectricalEnergy,
+            ResourceKind::Custom("other".into()),
+            ResourceKind::JetA,
+        ] {
+            let flows = [ResourceFlow {
+                resource,
+                mass_flow_kg_s: None,
+                power_w: Some(1.0),
+            }];
+            assert!(matches!(
+                jet_a_mass_flow(&flows),
+                Err(PropulsionError::UnsupportedDemand(_))
+            ));
+        }
+        assert!(jet_a_mass_flow(&[]).is_err());
+        let rejected = rejected_thrust_output();
+        assert!(rejected.thrust_n.is_nan());
+        assert!(rejected.fuel_flow_rate_kg_s.is_nan());
+    }
+
+    #[test]
+    fn jet_a_projection_preserves_positive_consumption_including_zero() {
+        for value in [0.0, 0.75] {
+            let flows = [ResourceFlow {
+                resource: ResourceKind::JetA,
+                mass_flow_kg_s: Some(value),
+                power_w: None,
+            }];
+            assert!(matches!(jet_a_mass_flow(&flows), Ok(got) if got == value));
+        }
     }
 }

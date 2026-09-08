@@ -121,6 +121,9 @@ pub enum CpacsExportError {
         /// Human-readable source field.
         context: String,
     },
+    /// Technology tag and typed engine payload do not form a valid binding.
+    #[error("invalid propulsion binding: {0}")]
+    InvalidEngineBinding(String),
     /// A section has no projected span direction, so its local orientation is undefined.
     #[error("wing {name:?} section {section} has no YZ span direction")]
     DegenerateWingStation {

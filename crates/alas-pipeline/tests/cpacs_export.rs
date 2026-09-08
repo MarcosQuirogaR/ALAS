@@ -55,7 +55,13 @@ fn cpacs_export_refuses_a_nonfinite_engine_input() {
     let airplane = AircraftBuilder::new(Some(config.geometry.clone()))
         .build(None, true)
         .expect("the default configured airframe builds");
-    config.geometry.engine.thrust_kn = f64::NAN;
+    config
+        .geometry
+        .engine
+        .turbofan
+        .as_mut()
+        .expect("the default engine binds a turbofan payload")
+        .rated_thrust_kn = f64::NAN;
 
     assert!(matches!(
         render_cpacs_v35(&airplane, &config, "2026-08-22T00:00:00Z"),

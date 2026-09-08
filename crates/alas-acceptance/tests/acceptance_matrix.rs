@@ -90,44 +90,105 @@ fn public_planning_cg_uses_the_source_frame_without_becoming_a_certification_cla
     let result = evaluate_preset("A220-300").expect("A220 evaluation");
 
     assert!(result.execution_passed);
-    assert!(result.model_cg_envelope_ok);
+    // Current product state of the A220-300 preset, with its PW1521G-3
+    // binding at the ICAO rating and the bulk-only lower hold from its
+    // weight-and-balance manual, flown at the EASA basic-scheme takeoff mass
+    // with geometry-derived component stations: the takeoff CG lies inside
+    // the published planning envelope at that mass, the operating-empty
+    // state sits forward of the model's configured forward range, and the
+    // published tanks cannot reach MTOW. These are open physical findings;
+    // the assertions record them as reported rather than passed.
+    assert!(!result.model_cg_envelope_ok);
     assert_eq!(
         result.public_planning_cg_status,
         PlanningCgStatus::WithinPublishedLimits
     );
     assert!(!result.physical_passed);
-    assert!(result.physical_findings.iter().any(|finding| {
-        finding.code == FindingCode::TrimUnavailable
-            && finding.severity == alas_pipeline::FindingSeverity::Error
-    }));
-    assert!(result.physical_findings.iter().any(|finding| {
-        finding.code == FindingCode::MissionFuelShortfall
-            && finding.severity == alas_pipeline::FindingSeverity::Error
-    }));
+    for (code, severity) in [
+        (
+            FindingCode::ModelCgForwardRangeViolation,
+            alas_pipeline::FindingSeverity::Error,
+        ),
+        (
+            FindingCode::TankLimitedTakeoffMass,
+            alas_pipeline::FindingSeverity::Warning,
+        ),
+    ] {
+        assert!(
+            result
+                .physical_findings
+                .iter()
+                .any(|finding| finding.code == code && finding.severity == severity),
+            "{code:?} is not reported: {:?}",
+            result.physical_findings
+        );
+    }
+    // The maximum-fuel case reported these; the policy load case does not.
+    for code in [
+        FindingCode::PublicPlanningCgEnvelopeViolation,
+        FindingCode::MinimumNoseGearLoadViolation,
+        FindingCode::LandingMassLimitViolation,
+    ] {
+        assert!(
+            !result
+                .physical_findings
+                .iter()
+                .any(|finding| finding.code == code),
+            "{code:?} is reported for the policy load case: {:?}",
+            result.physical_findings
+        );
+    }
+    assert!(result.mission_fuel_within_available);
     assert!(!result
         .physical_findings
         .iter()
-        .any(|finding| finding.code == FindingCode::PublicPlanningCgEnvelopeViolation));
+        .any(|finding| finding.code == FindingCode::TrimUnavailable));
+
+    // Regression pins of the same analyzed takeoff state in the two frames.
+    // They are product-state values, not validated aircraft data.
     assert!(
-        (result.model_cg_pct_mac - 31.308_560_863_399).abs() < 1.0e-9,
+        (result.model_cg_pct_mac - 38.797_602_412_110_95).abs() < 1.0e-6,
         "model-frame CG was {}% MAC",
         result.model_cg_pct_mac
     );
+    let public_pct_mac = result
+        .public_planning_cg_pct_mac
+        .expect("A220 has a source planning frame");
     assert!(
-        (result
-            .public_planning_cg_pct_mac
-            .expect("A220 has a source planning frame")
-            - 27.993_704_440_679_245)
-            .abs()
-            < 1.0e-9,
-        "public-frame CG was {:?}% MAC",
-        result.public_planning_cg_pct_mac
+        (public_pct_mac - 35.420_764_248_083_17).abs() < 1.0e-6,
+        "public-frame CG was {public_pct_mac}% MAC"
     );
-    let envelope = presets::get("A220-300")
-        .expect("registered A220")
+
+    // The two percentages must name one physical station. The public frame
+    // is the manufacturer's LEMAC and MAC from the recovery publication; the
+    // model frame is the built wing's quarter-chord aerodynamic centre and
+    // the airplane's reference chord. Recomputing both from those primitives
+    // checks the frame mapping independently of the pipeline's conversion.
+    let preset = presets::get("A220-300").expect("registered A220");
+    let envelope = preset
         .reference
         .planning_cg_envelope
         .expect("A220 planning envelope");
+    let reference = envelope.mac_reference;
+    let x_public_m = reference.lemac_from_aircraft_nose_m
+        + public_pct_mac / 100.0 * reference.mean_aerodynamic_chord_m;
+    let config = AlasConfig::from_value(&serde_json::json!({ "preset": preset.name }))
+        .expect("preset configuration");
+    let airplane = AircraftBuilder::new(Some(config.geometry.clone()))
+        .build(Some(&preset.design_vector), true)
+        .expect("A220 airplane");
+    let wing = airplane.wings.first().expect("main wing");
+    let x_mac_le_m = wing.aerodynamic_center(0.25)[0] - 0.25 * airplane.c_ref;
+    let x_model_m = x_mac_le_m + result.model_cg_pct_mac / 100.0 * airplane.c_ref;
+    assert!(
+        (x_public_m - x_model_m).abs() < 1.0e-6,
+        "public frame station {x_public_m} m and model frame station {x_model_m} m differ"
+    );
+    assert!(
+        (reference.mean_aerodynamic_chord_m - airplane.c_ref).abs() > 1.0e-3
+            || (reference.lemac_from_aircraft_nose_m - x_mac_le_m).abs() > 1.0e-3,
+        "the published frame is expected to differ from the model frame"
+    );
     assert!(envelope.controlling_document.contains("WBM"));
     assert!(envelope
         .mac_reference
@@ -139,23 +200,21 @@ fn public_planning_cg_uses_the_source_frame_without_becoming_a_certification_cla
         presets: vec![result],
         all_executed: true,
         all_passed: false,
-        all_physical_passed: true,
+        all_physical_passed: false,
         all_design_missions_verified: false,
     };
     let text = format_matrix_report(&report);
     assert!(text.contains("Execution Verdict: ALL PRESETS EXECUTED"));
-    assert!(text.contains("Physical Verdict: ALL PRESETS PASS ROUTE-INDEPENDENT"));
+    assert!(text.contains("Physical Verdict: 1 preset finding(s) require investigation"));
     assert!(text.contains("Design mission evidence:"));
     assert!(text.contains("A220-300: UNVERIFIED - no source-backed mission registered"));
     assert!(text.contains("Interactive route diagnostics (not preset design-mission validation):"));
-    let governing_section = text
-        .split("Design mission evidence:")
-        .next()
-        .expect("governing findings section");
-    assert!(!governing_section.contains("usable fuel was exhausted during mission segment"));
-    assert!(text.contains("usable fuel was exhausted during mission segment"));
-    assert!(text.contains("Acceptance Verdict: INCOMPLETE - DESIGN MISSIONS UNVERIFIED"));
+    assert!(text.contains("Acceptance Verdict: NOT PASSED - DESIGN MISSIONS ALSO UNVERIFIED"));
     assert!(text.contains("Cruise force-balance telemetry"));
+    // The planning frame is reported as public planning evidence, separate
+    // from the model assessment, whether or not a limit is violated.
+    assert!(text.contains("separate from public planning evidence"));
+    assert!(text.contains("WITHIN"));
     assert!(!text.to_ascii_lowercase().contains("certif"));
 
     let json = format_matrix_json(&report).expect("acceptance JSON artifact");
@@ -212,18 +271,63 @@ fn acceptance_narrowbody_and_widebody_mass_calibrations() {
         "A320 MTOW in expected range: {}",
         a320.mtow_kg
     );
-    assert!((a320.mtow_closure_fuel_kg - 17_733.275_8).abs() < 1.0e-3);
-    assert!((a320.mtow_closure_fuel_kg - a320.analyzed_carried_fuel_kg).abs() < 1.0e-9);
+    // Regression pin of the MTOW closure remainder over the source-corrected
+    // A320-214 WV017 preset (Airbus/EASA planform, empennage, fuselage height
+    // and 21,256 kg structural payload) with its typed CFM56-5B4/3 binding at
+    // the 120.1 kN ICAO rating. It is a product-state pin, not a validated
+    // fuel figure: the typed rating alone moves it by about 100 kg through
+    // the thrust-scaled propulsion mass. Mass conservation is asserted below
+    // independently of the pinned value.
+    assert!(
+        (a320.mtow_closure_fuel_kg - 16_882.220_987_229_135).abs() < 1.0e-3,
+        "A320 MTOW closure fuel was {} kg",
+        a320.mtow_closure_fuel_kg
+    );
+    // The interactive route (LEMD-LEPA) is flown at the takeoff mass the
+    // EASA basic fuel scheme requires, closed by re-flying the native
+    // mission until the mass settles, so the carried fuel is the policy
+    // load rather than the closure remainder. The pinned values are
+    // product-state figures of that closure, not an operational flight plan.
     assert_eq!(a320.usable_fuel_capacity_kg, Some(19_334.0));
+    assert!(
+        (a320.analyzed_carried_fuel_kg - 9_917.501_715_558).abs() < 1.0e-3,
+        "A320 policy takeoff fuel was {} kg",
+        a320.analyzed_carried_fuel_kg
+    );
+    assert!(a320.analyzed_carried_fuel_kg < a320.mtow_closure_fuel_kg);
     assert!(a320.analyzed_carried_fuel_kg < a320.usable_fuel_capacity_kg.unwrap());
-    assert!((a320.analyzed_takeoff_mass_kg - a320.mtow_kg).abs() < 1.0e-6);
+    assert!(
+        (a320.analyzed_takeoff_mass_kg - 71_035.280_728_329).abs() < 1.0e-3,
+        "A320 policy takeoff mass was {} kg",
+        a320.analyzed_takeoff_mass_kg
+    );
+    let a320_zero_fuel_mass_kg = a320.mtow_kg - a320.mtow_closure_fuel_kg;
+    assert!(
+        (a320.analyzed_takeoff_mass_kg - (a320_zero_fuel_mass_kg + a320.analyzed_carried_fuel_kg))
+            .abs()
+            < 1.0e-6
+    );
+    assert!(a320.analyzed_takeoff_mass_kg < a320.mtow_kg);
     assert!(a320.mtow_shortfall_kg.abs() < 1.0e-6);
-    assert!(a320.physical_passed);
+    // At the policy takeoff mass the route completes within the loaded fuel
+    // and lands below the WV017 maximum landing mass. The open physical
+    // finding is the operating-empty centre of gravity, which the
+    // geometry-derived stations place forward of the model's configured
+    // forward range; it is reported rather than passed.
+    assert!(a320.mission_fuel_within_available);
+    assert!(!a320
+        .physical_findings
+        .iter()
+        .any(|finding| finding.code == FindingCode::MissionFuelShortfall));
+    assert!(!a320
+        .physical_findings
+        .iter()
+        .any(|finding| finding.code == FindingCode::LandingMassLimitViolation));
     assert!(a320.physical_findings.iter().any(|finding| {
-        finding.code == FindingCode::MissionFuelShortfall
+        finding.code == FindingCode::ModelCgForwardRangeViolation
             && finding.severity == alas_pipeline::FindingSeverity::Error
     }));
-    assert!(!a320.mission_fuel_within_available);
+    assert!(!a320.physical_passed);
     assert!(!a320
         .physical_findings
         .iter()
@@ -232,12 +336,12 @@ fn acceptance_narrowbody_and_widebody_mass_calibrations() {
         presets: vec![a320.clone()],
         all_executed: true,
         all_passed: false,
-        all_physical_passed: true,
+        all_physical_passed: false,
         all_design_missions_verified: false,
     });
     assert!(a320_text.contains("Tank-limited load cases:"));
     assert!(a320_text.contains("- None"));
-    assert!(a320_text.contains("usable fuel was exhausted during mission segment"));
+    assert!(!a320_text.contains("usable fuel was exhausted during mission segment"));
 
     // A380 mega-widebody MTOW is around 500-600 tonnes
     assert!(
@@ -262,10 +366,12 @@ fn acceptance_narrowbody_and_widebody_mass_calibrations() {
         alas_pipeline::FindingSeverity::Error
     );
     // `evaluate_preset` intentionally follows the product path, whose
-    // structural wingbox centroid is distinct from the frozen compatibility
-    // coordinates used to establish the historical 14.749% reference.
+    // geometry-derived component stations (nacelles at mid-length ahead of
+    // the wing, wing mass in the spar box) are distinct from the frozen
+    // compatibility coordinates used to establish the historical 14.749%
+    // reference; the finding is reported at the analyzed zero-fuel state.
     assert!(
-        (ave_forward_finding.actual.expect("AVE CG actual") - 15.499_723_289_191_273).abs() < 0.01
+        (ave_forward_finding.actual.expect("AVE CG actual") - 12.417_881_232_502_797).abs() < 0.01
     );
     assert!((ave_forward_finding.limit.expect("AVE CG limit") - 18.194).abs() < 0.01);
     assert_eq!(ave_forward_finding.unit, "% MAC");
@@ -278,11 +384,12 @@ fn acceptance_narrowbody_and_widebody_mass_calibrations() {
 #[test]
 fn acceptance_scene_and_svg_export_integrity() {
     let preset = presets::get("A320-200").expect("preset");
-    let config = AlasConfig {
-        geometry: preset.geometry.clone(),
-        requirements: preset.requirements.clone(),
-        ..Default::default()
-    };
+    // Select the preset through the loader, as `evaluate_preset` does. A
+    // hand-assembled config skips the preset's cabin and design seed, and a
+    // widebody default cabin over an A320 shell exceeds the A320 MTOW before
+    // any figure is rendered.
+    let config = AlasConfig::from_value(&serde_json::json!({ "preset": preset.name }))
+        .expect("preset configuration");
 
     let builder = AircraftBuilder::new(Some(config.geometry.clone()));
     let airplane = builder

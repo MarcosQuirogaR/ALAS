@@ -167,8 +167,15 @@ pub fn define_mass_coordinates_with_model(
 pub fn calculate_physical_cg(masses: &MassBreakdown, coords: &MassCoordinates) -> [f64; 3] {
     let mut moment = [0.0; 3];
     let mut total_mass = 0.0;
-    for ((_, mass), (_, xyz)) in masses.as_pairs().into_iter().zip(coords.as_pairs()) {
-        let mass = mass.max(0.0);
+    for ((name, reported_mass), (_, xyz)) in masses.as_pairs().into_iter().zip(coords.as_pairs()) {
+        // Fuel is a signed MTOW-closure diagnostic in `MassBreakdown`. Only a
+        // checked, nonnegative value is a physical load. Other legacy
+        // component estimates retain the established nonnegative clamp.
+        let mass = if name == super::FUEL {
+            masses.physical_fuel_mass_kg().unwrap_or(0.0)
+        } else {
+            reported_mass.max(0.0)
+        };
         for axis in 0..3 {
             moment[axis] += mass * xyz[axis];
         }

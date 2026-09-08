@@ -21,6 +21,7 @@
 //! causal process status for product-level orchestration.
 
 pub mod avl;
+pub mod download;
 pub mod flowunsteady;
 pub mod process;
 pub mod tools;

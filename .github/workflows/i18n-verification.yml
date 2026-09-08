@@ -1,4 +1,4 @@
-name: i18n verification
+name: Workspace gate
 
 on:
   pull_request:
@@ -9,10 +9,10 @@ permissions:
   contents: read
 
 jobs:
-  alas-i18n:
-    name: alas-i18n on approved Linux runner
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
+  gate:
+    name: Repository checks, formatting, clippy and workspace tests
+    runs-on: windows-latest
+    timeout-minutes: 60
     steps:
       - name: Check out source
         uses: actions/checkout@v4
@@ -20,5 +20,19 @@ jobs:
       - name: Install the repository Rust toolchain
         uses: dtolnay/rust-toolchain@1.97.1
 
-      - name: Execute the i18n regression suite
-        run: cargo test -p alas-i18n
+      - name: Execute the complete repository gate
+        run: cargo xtask gate
+
+  dependencies:
+    name: Dependency licenses, advisories and sources
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Check the locked dependency graph
+        uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          rust-version: "1.97.1"
+          command: check
+          arguments: --locked

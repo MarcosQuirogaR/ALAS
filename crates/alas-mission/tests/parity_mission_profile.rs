@@ -5,8 +5,9 @@
 //!
 //! Each case names the inputs the reference used -- a preset (empty is the
 //! default configuration) and two airport codes -- and the parity test rebuilds
-//! exactly those, `AlasConfig::from_value({"preset": name})` and
-//! `airports::get(icao)`, rather than re-deriving anything. It then compares the
+//! those with `AlasConfig::from_value({"preset": name})` and
+//! `airports::get(icao)`, supplying the independently recorded baseline profile
+//! from `golden/config/defaults.json`. It then compares the
 //! request `build_mission_request` assembles against the recorded one by walking
 //! the two documents in parallel: strings (the mission tag) at `exact`, numbers
 //! (every altitude, elevation, distance and profile speed) at `closed`. A
@@ -113,7 +114,16 @@ fn mission_request_matches_the_reference() {
     let mut strings = Comparison::new("mission request strings", Tier::Exact);
 
     for case in &fixture.cases {
-        let config = config_for(&case.preset);
+        let mut config = config_for(&case.preset);
+        // The Python request builder received the baseline explicit TAS profile.
+        // Product presets derive their schedule from Mach; freeze the independent
+        // reference input so that this test measures the builder, not preset drift.
+        config.mission.profile = serde_json::from_value(
+            load_json("config", "defaults")["types"]["ALASConfig"]["defaults"]["mission"]
+                ["profile"]
+                .clone(),
+        )
+        .expect("reference mission profile input");
         let origin = airports::get(&case.origin).expect("origin airport");
         let dest = airports::get(&case.dest).expect("destination airport");
 

@@ -157,9 +157,9 @@ fn reference_requirements_view(
 ) -> Value {
     let mut serialized = serde_json::to_value(requirements).unwrap();
     let object = serialized.as_object_mut().unwrap();
-    let optimized_capacity = object
-        .remove("optimize_passenger_capacity")
-        .expect("Rust requirements carry the explicit load-case flag");
+    object.remove("optimize_passenger_capacity");
+    let optimized_capacity =
+        serde_json::to_value(requirements.optimize_passenger_capacity).unwrap();
     assert_eq!(
         corrections.get("requirements.optimize_passenger_capacity"),
         Some(&optimized_capacity),
@@ -386,9 +386,21 @@ fn fuselage_mass_evidence_matches_in_input_and_correlation_order() {
             "first W6.3 divergence in {} at mass_model",
             case.name
         );
+        let mut geometry_view = serde_json::to_value(&builder.geometry).unwrap();
+        // Propulsion evidence is independent of this frozen fuselage-mass
+        // correlation; retain every historical geometry field in the oracle.
+        for key in [
+            "turbofan",
+            "turboprop",
+            "propulsion_technology",
+            "part_power_fuel_flow_ratios",
+            "part_power_source",
+        ] {
+            assert!(case.geometry_config["engine"].get(key).is_none());
+            geometry_view["engine"].as_object_mut().unwrap().remove(key);
+        }
         assert_eq!(
-            serde_json::to_value(&builder.geometry).unwrap(),
-            case.geometry_config,
+            geometry_view, case.geometry_config,
             "first W6.3 divergence in {} at geometry_config",
             case.name
         );

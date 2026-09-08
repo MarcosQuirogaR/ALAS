@@ -11,6 +11,7 @@
 
 mod figure;
 mod helpers;
+mod render;
 #[cfg(test)]
 // These tests intentionally panic if their constructed fixture violates its precondition.
 #[allow(clippy::unwrap_used, clippy::expect_used)]

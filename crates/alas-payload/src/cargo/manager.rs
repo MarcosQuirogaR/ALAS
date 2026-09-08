@@ -26,7 +26,8 @@
 use alas_config::CargoDeckConfig;
 
 use super::{
-    uld_or, CargoSlot, UldType, BULK, LOWER_DECK_DEFAULT, LOWER_HOLD_FALLBACKS, MAIN_DECK_DEFAULT,
+    uld_or, CargoSlot, UldType, BULK, LOWER_DECK_DEFAULT, LOWER_HOLD_AUTO_CANDIDATES,
+    LOWER_HOLD_FALLBACKS, MAIN_DECK_DEFAULT,
 };
 use crate::geometry::{CabinGeometry, DeckSpec};
 use crate::layout::MAIN;
@@ -34,6 +35,8 @@ use crate::numeric::floor_div;
 
 /// Lateral clearance between two containers standing side by side.
 const SLOT_GAP_M: f64 = 0.05;
+/// Numerical tolerance for a row whose dimensions close exactly.
+const SLOT_FIT_TOLERANCE_M: f64 = 1e-9;
 /// Longitudinal clearance between two rows in a lower hold.
 const LOWER_ROW_GAP_M: f64 = 0.08;
 /// The same on a main deck, where the handling system needs more room.
@@ -52,6 +55,37 @@ const MAX_ACROSS: i64 = 3;
 const MAX_LOWER_ROWS: usize = 40;
 /// The same for a main deck.
 const MAX_MAIN_ROWS: usize = 60;
+
+/// Equally spaced slot centres for one transverse row.
+fn transverse_centers(usable_width: f64, container_width: f64) -> Vec<f64> {
+    let count = (((usable_width + SLOT_GAP_M + SLOT_FIT_TOLERANCE_M)
+        / (container_width + SLOT_GAP_M))
+        .floor() as i64)
+        .clamp(0, MAX_ACROSS);
+    let pitch = container_width + SLOT_GAP_M;
+    (0..count)
+        .map(|index| (index as f64 - (count - 1) as f64 * 0.5) * pitch)
+        .collect()
+}
+
+/// Lexicographic uniform-layout comparison: net capacity, volume, lower tare,
+/// then stable type code for reproducibility.
+fn candidate_is_better(
+    candidate: (&UldType, f64, f64, f64),
+    incumbent: (&UldType, f64, f64, f64),
+) -> bool {
+    let (candidate_type, capacity, volume, tare) = candidate;
+    let (best_type, best_capacity, best_volume, best_tare) = incumbent;
+    capacity.total_cmp(&best_capacity).is_gt()
+        || (capacity == best_capacity && volume.total_cmp(&best_volume).is_gt())
+        || (capacity == best_capacity
+            && volume == best_volume
+            && tare.total_cmp(&best_tare).is_lt())
+        || (capacity == best_capacity
+            && volume == best_volume
+            && tare == best_tare
+            && candidate_type.code < best_type.code)
+}
 
 /// Total-mass error the trim loop will correct for before shifting load.
 const MASS_CORRECTION_KG: f64 = 5.0;
@@ -83,402 +117,160 @@ pub struct CargoLoadManager<'g> {
     pub lower_uld: &'static UldType,
 }
 
-impl<'g> CargoLoadManager<'g> {
-    /// Build the positions this fuselage and configuration admit.
-    pub fn new(geometry: &'g CabinGeometry, config: CargoDeckConfig) -> Self {
-        let mut manager = Self {
-            geometry,
-            config,
-            slots: Vec::new(),
-            lower_uld: LOWER_DECK_DEFAULT,
+include!("manager_parts/impl.rs");
+
+#[cfg(test)]
+// Failed expectations and unwraps here are failed test assertions.
+#[allow(clippy::expect_used, clippy::unwrap_used)]
+mod tests {
+    use super::*;
+    use alas_config::{presets, AlasConfig, CargoDeckConfig, GeometryConfig};
+    use alas_geom::builder::AircraftBuilder;
+
+    fn geometry() -> CabinGeometry {
+        let builder = AircraftBuilder::new(Some(GeometryConfig::default()));
+        let plane = builder.build(None, false).expect("default aircraft builds");
+        CabinGeometry::new(&plane, &builder.geometry, 0.15).expect("default cabin samples")
+    }
+
+    #[test]
+    fn transverse_slots_include_exactly_one_gap_between_adjacent_containers() {
+        let container_width = 1.53;
+        let required_width = 2.0 * container_width + SLOT_GAP_M;
+        let centers = transverse_centers(required_width, container_width);
+
+        assert_eq!(centers.len(), 2);
+        assert!((centers[1] - centers[0] - container_width - SLOT_GAP_M).abs() < 1e-12);
+        assert!((centers[0] + centers[1]).abs() < 1e-12);
+    }
+
+    #[test]
+    fn transverse_slots_do_not_count_a_gap_outside_the_row() {
+        let container_width = 1.53;
+        let centers =
+            transverse_centers(2.0 * container_width + SLOT_GAP_M - 1e-6, container_width);
+
+        assert_eq!(centers, vec![0.0]);
+    }
+
+    #[test]
+    fn an_explicit_lower_format_is_preserved_when_it_fits() {
+        let geometry = geometry();
+        let config = CargoDeckConfig {
+            lower_deck_uld: "LD2".to_owned(),
+            ..Default::default()
         };
-        manager.build_slots();
-        manager
+        let manager = CargoLoadManager::new(&geometry, config);
+
+        assert_eq!(manager.lower_uld.code, "DPE");
+        assert!(manager.slots.iter().any(|slot| slot.uld.code == "DPE"));
     }
 
-    /// Place a transverse row of containers across a deck at station `x`,
-    /// returning how many positions it produced.
-    ///
-    /// The fit check is what makes this return nothing rather than something
-    /// unloadable: a station whose cross-section cannot take the container in
-    /// width or in height gets no positions at all.
-    fn row(&mut self, sid_prefix: &str, deck: &DeckSpec, x: f64, uld: &'static UldType) -> usize {
-        let usable = self.geometry.usable_width(deck, x);
-        if self.geometry.deck_height(deck, x) < uld.height {
-            return 0;
-        }
-        let n_across = floor_div(usable, uld.width) as i64;
-        if n_across <= 0 {
-            return 0;
-        }
-        let ys: Vec<f64> = match n_across.min(MAX_ACROSS) {
-            1 => vec![0.0],
-            2 => vec![
-                -(uld.width / 2.0 + SLOT_GAP_M),
-                uld.width / 2.0 + SLOT_GAP_M,
-            ],
-            _ => vec![-(uld.width + SLOT_GAP_M), 0.0, uld.width + SLOT_GAP_M],
+    #[test]
+    fn auto_selects_the_highest_scoring_feasible_uniform_format() {
+        let geometry = geometry();
+        let config = CargoDeckConfig {
+            lower_deck_uld: "AUTO".to_owned(),
+            ..Default::default()
         };
-        for (i, y) in ys.iter().enumerate() {
-            self.slots.push(CargoSlot {
-                sid: format!("{sid_prefix}{}", i + 1),
-                deck: deck.name,
-                x,
-                y: *y,
-                uld,
-                payload: 0.0,
-            });
-        }
-        ys.len()
-    }
-
-    /// Fill the forward and aft lower holds with rows of one container type,
-    /// returning how many positions were placed.
-    fn fill_lower_holds(&mut self, uld: &'static UldType) -> usize {
-        let g = self.geometry;
-        let low = &g.lower_deck;
-        let pitch = uld.length + LOWER_ROW_GAP_M;
-        let (wing_box_start, wing_box_end) = g.wing_box_x_range();
-        let mut placed = 0;
-
-        let mut x = g.cabin_start_x + FWD_HOLD_INSET_M + uld.length / 2.0;
-        for i in 0..MAX_LOWER_ROWS {
-            if x > wing_box_start - uld.length / 2.0 {
-                break;
-            }
-            placed += self.row(&format!("FWD-{}-", i + 1), low, x, uld);
-            x += pitch;
-        }
-
-        let mut x = wing_box_end + uld.length / 2.0 + AFT_HOLD_INSET_M;
-        let x_end = g.cabin_end_x - uld.length / 2.0;
-        for i in 0..MAX_LOWER_ROWS {
-            if x > x_end {
-                break;
-            }
-            placed += self.row(&format!("AFT-{}-", i + 1), low, x, uld);
-            x += pitch;
-        }
-        placed
-    }
-
-    /// The main deck if this is a freighter, then the lower holds, then the
-    /// one loose bulk position every aircraft has.
-    fn build_slots(&mut self) {
-        let g = self.geometry;
-
-        if self.config.use_main_deck {
-            if let Some(main_deck) = g.passenger_decks.iter().find(|deck| deck.name == MAIN) {
-                let uld = uld_or(&self.config.main_deck_uld, MAIN_DECK_DEFAULT);
-                let pitch = uld.length + MAIN_ROW_GAP_M;
-                let mut x = g.cabin_start_x + MAIN_DECK_INSET_M + uld.length / 2.0;
-                let x_end = g.cabin_end_x - uld.length / 2.0;
-                for i in 0..MAX_MAIN_ROWS {
-                    if x > x_end {
-                        break;
-                    }
-                    self.row(&format!("MD-{}-", i + 1), main_deck, x, uld);
-                    x += pitch;
-                }
-            }
-        }
-
-        self.lower_uld = uld_or(&self.config.lower_deck_uld, LOWER_DECK_DEFAULT);
-        let mut candidates = vec![self.lower_uld];
-        candidates.extend(
-            LOWER_HOLD_FALLBACKS
-                .iter()
-                .filter_map(|key| super::uld(key))
-                .filter(|entry| entry.code != self.lower_uld.code),
-        );
-        for candidate in candidates {
-            if self.fill_lower_holds(candidate) > 0 {
-                self.lower_uld = candidate;
-                break;
-            }
-        }
-
-        self.slots.push(CargoSlot {
-            sid: "BULK".to_owned(),
-            deck: g.lower_deck.name,
-            x: g.cabin_end_x - BULK_INSET_M,
-            y: 0.0,
-            uld: BULK,
-            payload: 0.0,
-        });
-    }
-
-    /// Loaded mass, its longitudinal centre, and how many positions carry it.
-    pub fn mass_props(&self) -> (f64, f64, usize) {
-        let mut mass = 0.0;
-        let mut moment = 0.0;
-        let mut used = 0;
-        for slot in &self.slots {
-            let weight = slot.total_weight();
-            if weight > 0.0 {
-                mass += weight;
-                moment += weight * slot.x;
-                used += 1;
-            }
-        }
-        let cg = if mass > 0.0 { moment / mass } else { 0.0 };
-        (mass, cg, used)
-    }
-
-    /// What every position together could hold, containers excluded.
-    pub fn total_capacity(&self) -> f64 {
-        self.slots.iter().map(CargoSlot::max_net).sum()
-    }
-
-    /// Empty every position.
-    pub fn clear(&mut self) {
-        for slot in &mut self.slots {
-            slot.payload = 0.0;
-        }
-    }
-
-    /// Distribute `target_mass` of net cargo, trimming toward `target_cg`.
-    ///
-    /// `priority` ranks the positions, smallest loaded first. `fill_full` loads
-    /// each position to its limit in that order; the alternative spreads the
-    /// load evenly over every position regardless of the ranking, which is what
-    /// the uniform strategy asks for.
-    ///
-    /// More net payload than the positions can hold is clamped to their net
-    /// capacity rather than refused: the caller reports the shortfall, and a
-    /// freighter asked for more than it can carry still has a load plan for
-    /// what it can. ULD tare is retained in [`Self::mass_props`] for CG and
-    /// aircraft mass, but never deducted from this requested net load.
-    pub fn solve(
-        &mut self,
-        target_mass: f64,
-        target_cg: f64,
-        priority: &dyn Fn(&CargoSlot) -> f64,
-        fill_full: bool,
-    ) {
-        self.solve_with_mass_semantics(
-            target_mass,
-            target_cg,
-            priority,
-            fill_full,
-            CargoMassSemantics::Net,
-        );
-    }
-
-    /// Reproduce the frozen loader's gross-target correction for parity
-    /// fixtures. Product analyses must use [`Self::solve`], whose request is a
-    /// net-cargo quantity.
-    pub(crate) fn solve_reference_compatibility(
-        &mut self,
-        target_mass: f64,
-        target_cg: f64,
-        priority: &dyn Fn(&CargoSlot) -> f64,
-        fill_full: bool,
-    ) {
-        self.solve_with_mass_semantics(
-            target_mass,
-            target_cg,
-            priority,
-            fill_full,
-            CargoMassSemantics::ReferenceGross,
-        );
-    }
-
-    fn solve_with_mass_semantics(
-        &mut self,
-        target_mass: f64,
-        target_cg: f64,
-        priority: &dyn Fn(&CargoSlot) -> f64,
-        fill_full: bool,
-        semantics: CargoMassSemantics,
-    ) {
-        self.clear();
-        if self.slots.is_empty() {
-            return;
-        }
-        let by_priority = self.ranked(priority);
-        let target_net_mass = target_mass.max(0.0).min(self.total_capacity());
-        let target_closure_mass = match semantics {
-            CargoMassSemantics::Net => target_net_mass,
-            CargoMassSemantics::ReferenceGross => target_mass.max(0.0).min(self.total_capacity()),
-        };
-
-        if fill_full {
-            let mut remaining = target_net_mass;
-            for &i in &by_priority {
-                if remaining <= 0.0 {
-                    break;
-                }
-                let add = remaining.min(self.slots[i].max_net());
-                self.slots[i].payload = add;
-                remaining -= add;
-            }
-        } else {
-            let per_slot = target_net_mass / self.slots.len() as f64;
-            for slot in &mut self.slots {
-                slot.payload = per_slot.min(slot.uld.max_net());
-            }
-        }
-
-        let step = self.config.cg_trim_step_kg;
-        for _ in 0..self.config.cg_trim_max_iterations.max(0) {
-            let (current_gross_mass, current_cg, _) = self.mass_props();
-            let current_closure_mass = match semantics {
-                CargoMassSemantics::Net => self.net_payload_mass(),
-                CargoMassSemantics::ReferenceGross => current_gross_mass,
-            };
-            self.correct_total(
-                target_closure_mass - current_closure_mass,
-                current_cg - target_cg,
-            );
-
-            let error = current_cg - target_cg;
-            if error.abs() < CG_SETTLED_M
-                && (target_closure_mass - current_closure_mass).abs() < MASS_CONVERGED_KG
-            {
-                break;
-            }
-            if !self.shift_toward_target(error, current_cg, step, priority) {
-                break;
-            }
-        }
-    }
-
-    /// Net cargo currently carried by loaded positions, excluding ULD tare.
-    fn net_payload_mass(&self) -> f64 {
-        self.slots
+        let manager = CargoLoadManager::new(&geometry, config);
+        let selected = manager.lower_uld;
+        let selected_slots = manager
+            .slots
             .iter()
-            .filter(|slot| slot.payload > super::MIN_LOADED_KG)
-            .map(|slot| slot.payload)
-            .sum()
-    }
-
-    /// Position indices ranked by `priority`, best first.
-    ///
-    /// The sort is stable, as Python's is, so positions that rank equally stay
-    /// in the order the decks were walked -- which is what decides the load
-    /// plan whenever a strategy ranks a whole hold alike.
-    fn ranked(&self, priority: &dyn Fn(&CargoSlot) -> f64) -> Vec<usize> {
-        let mut order: Vec<usize> = (0..self.slots.len()).collect();
-        order.sort_by(|&a, &b| priority(&self.slots[a]).total_cmp(&priority(&self.slots[b])));
-        order
-    }
-
-    /// The first position among `indices` with the largest priority value.
-    ///
-    /// Upstream reaches it by sorting descending and taking the head, and
-    /// Python's descending sort is stable, so ties go to whichever position the
-    /// decks were walked first rather than last.
-    fn worst_ranked(
-        &self,
-        indices: &[usize],
-        priority: &dyn Fn(&CargoSlot) -> f64,
-    ) -> Option<usize> {
-        let mut best: Option<(usize, f64)> = None;
-        for &i in indices {
-            let value = priority(&self.slots[i]);
-            if best.is_none_or(|(_, current)| value > current) {
-                best = Some((i, value));
-            }
-        }
-        best.map(|(i, _)| i)
-    }
-
-    /// The first position among `indices` with the smallest priority value.
-    fn best_ranked(
-        &self,
-        indices: &[usize],
-        priority: &dyn Fn(&CargoSlot) -> f64,
-    ) -> Option<usize> {
-        let mut best: Option<(usize, f64)> = None;
-        for &i in indices {
-            let value = priority(&self.slots[i]);
-            if best.is_none_or(|(_, current)| value < current) {
-                best = Some((i, value));
-            }
-        }
-        best.map(|(i, _)| i)
-    }
-
-    /// Put the total mass back on target, adding on the light side of the
-    /// balance error and removing from the heavy side.
-    fn correct_total(&mut self, mut diff: f64, error: f64) {
-        if diff.abs() <= MASS_CORRECTION_KG {
-            return;
-        }
-        let aft_first = if diff > 0.0 { error < 0.0 } else { error > 0.0 };
-        let mut candidates: Vec<usize> = (0..self.slots.len()).collect();
-        candidates.sort_by(|&a, &b| {
-            if aft_first {
-                self.slots[b].x.total_cmp(&self.slots[a].x)
-            } else {
-                self.slots[a].x.total_cmp(&self.slots[b].x)
-            }
-        });
-
-        for &i in &candidates {
-            if diff.abs() < MASS_SETTLED_KG {
-                break;
-            }
-            if diff > 0.0 {
-                let space = self.slots[i].max_net() - self.slots[i].payload;
-                if space > 0.0 {
-                    let add = diff.min(space);
-                    self.slots[i].payload += add;
-                    diff -= add;
-                }
-            } else if self.slots[i].payload > 0.0 {
-                let removed = (-diff).min(self.slots[i].payload);
-                self.slots[i].payload -= removed;
-                diff += removed;
-            }
+            .filter(|slot| slot.deck == geometry.lower_deck.name && slot.uld.code == selected.code)
+            .count();
+        let selected_capacity = selected_slots as f64 * selected.max_net();
+        for key in LOWER_HOLD_AUTO_CANDIDATES {
+            let candidate = super::super::uld(key).expect("auto candidate resolves");
+            let mut probe = CargoLoadManager {
+                geometry: &geometry,
+                config: CargoDeckConfig::default(),
+                slots: Vec::new(),
+                lower_uld: LOWER_DECK_DEFAULT,
+            };
+            let slots = probe.lower_candidate_slots(candidate);
+            assert!(selected_capacity >= slots.len() as f64 * candidate.max_net());
         }
     }
 
-    /// Move one step of load from the heavy side toward the light side.
-    ///
-    /// Returns whether there was anywhere to move it from and to: when there is
-    /// not, the balance is as good as this set of positions can make it and the
-    /// loop has nothing left to try.
-    fn shift_toward_target(
-        &mut self,
-        error: f64,
-        current_cg: f64,
-        step: f64,
-        priority: &dyn Fn(&CargoSlot) -> f64,
-    ) -> bool {
-        // A position exactly at the current centre of gravity is in neither
-        // list: moving load to or from it would not shift the balance.
-        let heavy_side_is_aft = error > 0.0;
-        let on_heavy_side = |x: f64| {
-            if heavy_side_is_aft {
-                x > current_cg
-            } else {
-                x < current_cg
-            }
-        };
-        let source: Vec<usize> = (0..self.slots.len())
-            .filter(|&i| on_heavy_side(self.slots[i].x) && self.slots[i].payload > 0.0)
-            .collect();
-        let destination: Vec<usize> = (0..self.slots.len())
-            .filter(|&i| {
-                !on_heavy_side(self.slots[i].x)
-                    && self.slots[i].x != current_cg
-                    && self.slots[i].payload < self.slots[i].max_net()
-            })
-            .collect();
-        let (Some(from), Some(to)) = (
-            self.worst_ranked(&source, priority),
-            self.best_ranked(&destination, priority),
-        ) else {
-            return false;
-        };
+    #[test]
+    fn a380_lower_hold_places_multiple_uld_across_the_widebody_bay() {
+        let config = AlasConfig::from_value(&serde_json::json!({ "preset": "A380-800" }))
+            .expect("the registered A380 preset loads");
+        let preset = presets::get("A380-800").expect("the registered A380 preset resolves");
+        let plane = AircraftBuilder::new(Some(config.geometry.clone()))
+            .build(Some(&preset.design_vector), true)
+            .expect("the A380 geometry builds");
+        let geometry = CabinGeometry::new(
+            &plane,
+            &config.geometry,
+            config.cabin.passenger.wall_thickness_m,
+        )
+        .expect("the A380 cabin frame builds");
+        let manager = CargoLoadManager::new(
+            &geometry,
+            CargoDeckConfig {
+                use_main_deck: false,
+                lower_deck_uld: "LD3".to_owned(),
+                ..Default::default()
+            },
+        );
+        let mut per_station = std::collections::BTreeMap::<i64, usize>::new();
+        for slot in manager
+            .slots
+            .iter()
+            .filter(|slot| slot.deck == geometry.lower_deck.name)
+        {
+            *per_station
+                .entry((slot.x * 1_000.0).round() as i64)
+                .or_default() += 1;
+        }
+        let maximum_across = per_station.values().copied().max().unwrap_or(0);
+        assert!(
+            maximum_across >= 2,
+            "A380 lower hold should carry two LD3 across, got {maximum_across}"
+        );
+    }
 
-        let amount = step
-            .min(self.slots[from].payload)
-            .min(self.slots[to].max_net() - self.slots[to].payload);
-        self.slots[from].payload -= amount;
-        self.slots[to].payload += amount;
-        true
+    #[test]
+    fn widebody_lower_holds_use_multiple_transverse_positions() {
+        for name in ["A340-300", "A380-800", "B787-9", "DC-10"] {
+            let config = AlasConfig::from_value(&serde_json::json!({ "preset": name }))
+                .expect("the registered widebody preset loads");
+            let preset = presets::get(name).expect("the registered widebody preset resolves");
+            let plane = AircraftBuilder::new(Some(config.geometry.clone()))
+                .build(Some(&preset.design_vector), true)
+                .expect("the widebody geometry builds");
+            let geometry = CabinGeometry::new(
+                &plane,
+                &config.geometry,
+                config.cabin.passenger.wall_thickness_m,
+            )
+            .expect("the widebody cabin frame builds");
+            let manager = CargoLoadManager::new(
+                &geometry,
+                CargoDeckConfig {
+                    use_main_deck: false,
+                    lower_deck_uld: "LD3".to_owned(),
+                    ..Default::default()
+                },
+            );
+            let mut per_station = std::collections::BTreeMap::<i64, usize>::new();
+            for slot in manager
+                .slots
+                .iter()
+                .filter(|slot| slot.deck == geometry.lower_deck.name)
+            {
+                *per_station
+                    .entry((slot.x * 1_000.0).round() as i64)
+                    .or_default() += 1;
+            }
+            let maximum_across = per_station.values().copied().max().unwrap_or(0);
+            assert!(
+                maximum_across >= 2,
+                "{name} lower hold should carry at least two LD3 across, got {maximum_across}"
+            );
+        }
     }
 }

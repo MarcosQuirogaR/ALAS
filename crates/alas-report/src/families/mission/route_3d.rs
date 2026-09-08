@@ -272,7 +272,7 @@ pub fn figure_mission_route_3d(
     };
     scene.add(SceneElement::Text {
         text: format!(
-            "{} waypoints | {:.0} km | {profile_note} | orthographic globe; drag to orbit; scroll to zoom",
+            "{} waypoints | {:.0} km | {profile_note} | orthographic globe; drag to orbit; wheel zoom in fullscreen",
             route.waypoints.len(),
             route.total_distance_m() / 1000.0
         ),
@@ -383,6 +383,40 @@ mod tests {
         assert_eq!(svg.matches("Mission route globe").count(), 2);
         assert!(svg.contains("Total Mass (t)"));
         assert!(!svg.contains("Total Mass (kg)"));
+    }
+
+    #[test]
+    fn camera_zoom_changes_the_globe_but_keeps_the_legend_screen_anchored() {
+        let route = dateline_route();
+        let build = |zoom| {
+            figure_mission_route_3d(
+                &route,
+                Some(&[70_000.0, 65_000.0]),
+                Some(&[0.0, 10_000.0]),
+                Some(Camera3D {
+                    zoom,
+                    ..route_focused_camera(&route)
+                }),
+                Some("dark"),
+            )
+        };
+        let normal = build(1.0);
+        let zoomed = build(1.8);
+        let text_position = |scene: &Scene, label: &str| {
+            scene.elements.iter().find_map(|element| match element {
+                SceneElement::Text { text, pos, .. } if text == label => Some(*pos),
+                _ => None,
+            })
+        };
+
+        assert_eq!(
+            text_position(&normal, "Total Mass (t)"),
+            text_position(&zoomed, "Total Mass (t)")
+        );
+        assert_ne!(
+            text_position(&normal, "WEST"),
+            text_position(&zoomed, "WEST")
+        );
     }
 
     #[test]

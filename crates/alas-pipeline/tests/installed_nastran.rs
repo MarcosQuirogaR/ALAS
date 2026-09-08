@@ -62,6 +62,7 @@ fn installed_msc_nastran_sol101_runs_through_the_public_pipeline() {
     let environment = RunEnvironment {
         mses_dir: None,
         nastran_exe: Some(executable),
+        nastran_solver: None,
         patran_exe: None,
         openvsp_exe: None,
         vspaero_exe: None,

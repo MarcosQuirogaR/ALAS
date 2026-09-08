@@ -18,36 +18,67 @@ use alas_aero::drag_buildup::{DragSettings, FuselageParams, NacelleParams, WingP
 use alas_aero::lift_surrogate::{LiftSurrogate, TrainingGrid};
 use alas_aero::vorlax::{VlmGeometry, VlmSettings, VlmWing};
 use alas_config::airports::Airport;
-use alas_config::AlasConfig;
-use alas_mission::segments::MissionAnalyses;
+use alas_config::{ActiveEngineModel, AlasConfig};
 #[cfg(test)]
 use alas_mission::segments::SegmentKind;
-use alas_mission::{build_mission_request, Mission, MissionResult};
+use alas_mission::segments::{LegacyTurbofanCompatibility, MissionAnalyses};
+#[cfg(test)]
+use alas_mission::Mission;
+use alas_mission::{build_mission_request, MissionResult};
+#[cfg(test)]
+use alas_prop::mission_turbofan::PartPowerModel;
 use alas_prop::mission_turbofan::{size_turbofan, TurbofanInputs, VehicleBuilderParams};
+use alas_prop::system::{
+    LegacyTurbofanModel, ModelIdentity, ModelProvenance, PropulsionInstallation,
+    PropulsionOrchestrator,
+};
+
+use alas_opt::mdo::propulsion::product_orchestrator;
 
 use crate::feasibility::plan_fuel_loading;
 use crate::full_analysis::AnalysisReport;
 
+pub mod dispatch;
+mod flight;
+mod guidance;
 mod schedule;
 
+pub(crate) use dispatch::{LoadCaseSelection, SelectedLoadCase};
+use guidance::{adapt_failed_climb, adapt_failed_cruise, adapt_failed_descent};
 use schedule::build_schedule;
 #[cfg(test)]
 use schedule::schedule_horizontal_distance;
 
+const METRES_PER_SECOND_TO_FEET_PER_MINUTE: f64 = 3.28084 * 60.0;
+
 /// Run the native mission for the selected report and route.
+///
+/// The route is flown at the load case [`dispatch::select_load_case`]
+/// chooses: the takeoff mass the fuel policy requires, or the frozen
+/// maximum-available-fuel case when the policy is switched off. The
+/// selection itself is returned beside the flown result so the feasibility
+/// stage can report the reserve plan the flight was sized to.
 pub(crate) fn evaluate(
     config: &AlasConfig,
     report: &AnalysisReport,
     origin: &Airport,
     destination: &Airport,
     route_distance_m: f64,
-) -> Result<MissionResult, String> {
+) -> Result<(MissionResult, SelectedLoadCase), String> {
     let request = build_mission_request(config, origin, destination, route_distance_m);
     let schedule = build_schedule(&request)?;
-    let analyses = build_analyses(config, report)?;
-    Mission { schedule }
-        .evaluate(&analyses)
-        .map_err(|error| format!("native mission failed: {error}"))
+    let mut analyses = build_analyses(config, report)?;
+    let fuel_loading = plan_fuel_loading(config, &report.design, report);
+    let load_case = dispatch::select_load_case(
+        config,
+        report,
+        &fuel_loading,
+        &mut analyses,
+        &request,
+        &schedule,
+    )?;
+    let result = flight::fly_with_guidance(schedule, &request, &analyses)?;
+    Ok((result, load_case))
 }
 
 // The compatibility variant is only used by the in-crate W6.4 evidence tests.
@@ -101,39 +132,116 @@ fn build_analyses_with_mode(
     let wings = mission_wings(config, report, reference_mode)?;
     let fuselage = mission_fuselage(config, report.design.fuselage_length_m);
     let nacelles = mission_nacelles(engine, n_engines);
-    let design_thrust_total_n = match reference_mode {
-        MissionReferenceMode::Product => engine.thrust_kn * n_engines as f64 * 1000.0,
-        MissionReferenceMode::ReferenceCompatibility => {
-            historical_cruise_required_thrust_total_n(config, report)?
+    let installation = PropulsionInstallation {
+        unit_positions_m: engine
+            .spanwise_positions_m
+            .iter()
+            .map(|&y_m| [0.0, y_m, engine.z_m])
+            .collect(),
+        thrust_axes_body: vec![[1.0, 0.0, 0.0]; n_engines],
+        nacelle_wetted_area_m2: None,
+        frontal_area_m2: None,
+    };
+    let active_model = engine
+        .active_model()
+        .map_err(|error| format!("mission engine binding failed: {error}"))?;
+    let (propulsion, legacy_turbofan) = match active_model {
+        ActiveEngineModel::Turbofan(payload)
+            if reference_mode == MissionReferenceMode::ReferenceCompatibility =>
+        {
+            // The historical vehicle fixture sizes its turbofan from
+            // cruise-required thrust with the frozen compatibility parameters;
+            // the legacy scalar evaluator has no per-unit moment model, so its
+            // equivalent thrust line runs through the mission reference point.
+            let legacy_installation = PropulsionInstallation {
+                unit_positions_m: engine
+                    .spanwise_positions_m
+                    .iter()
+                    .map(|&y_m| [0.0, y_m, 0.0])
+                    .collect(),
+                ..installation.clone()
+            };
+            let design_thrust_total_n = historical_cruise_required_thrust_total_n(config, report)?;
+            if !design_thrust_total_n.is_finite() || design_thrust_total_n <= 0.0 {
+                return Err(
+                    "reference mission aircraft has no positive finite cruise-required thrust"
+                        .to_owned(),
+                );
+            }
+            let inputs = TurbofanInputs {
+                number_of_engines: n_engines as f64,
+                bypass_ratio: payload.bypass_ratio,
+                overall_pressure_ratio: payload.overall_pressure_ratio,
+                fan_pressure_ratio: payload.fan_pressure_ratio,
+                turbine_inlet_temperature_k: payload.turbine_inlet_temp_k,
+                cruise_mach: config.requirements.cruise_mach,
+                cruise_altitude_m: config.requirements.cruise_altitude_m,
+                design_thrust_total_n,
+            };
+            let params = VehicleBuilderParams::reference_compatibility();
+            let sized = size_turbofan(&inputs, &params);
+            let flow = sized.compressor_nondimensional_massflow;
+            let legacy_model = LegacyTurbofanModel::new(
+                inputs,
+                params,
+                flow,
+                ModelProvenance {
+                    model: ModelIdentity {
+                        family: "legacy-mission-turbofan".to_owned(),
+                        version: "compatibility-v1".to_owned(),
+                    },
+                    dataset: Some(engine.engine_name.clone()),
+                    sources: vec![payload.part_power_source.clone()],
+                },
+                Vec::new(),
+                legacy_installation,
+            )
+            .map_err(|error| format!("mission propulsion construction failed: {error}"))?;
+            (
+                PropulsionOrchestrator::new(legacy_model),
+                Some(LegacyTurbofanCompatibility {
+                    inputs,
+                    params,
+                    compressor_nondimensional_massflow: flow,
+                }),
+            )
+        }
+        ActiveEngineModel::Turboprop(_)
+            if reference_mode == MissionReferenceMode::ReferenceCompatibility =>
+        {
+            return Err("reference compatibility supports turbofan aircraft only".to_owned());
+        }
+        ActiveEngineModel::Turbofan(_) | ActiveEngineModel::Turboprop(_) => {
+            // The product path shares one constructor with the optimizer's
+            // candidate mission model, so the finalist mission and candidate
+            // ranking read the same off-design deck.
+            let (orchestrator, _) = product_orchestrator(
+                engine,
+                installation,
+                config.requirements.cruise_mach,
+                config.requirements.cruise_altitude_m,
+                configured_max_climb_rate_ft_min(config),
+            )?;
+            (orchestrator, None)
         }
     };
-    if !design_thrust_total_n.is_finite() || design_thrust_total_n <= 0.0 {
-        return Err(match reference_mode {
-            MissionReferenceMode::Product => {
-                "mission aircraft has no positive finite rated engine thrust".to_owned()
-            }
-            MissionReferenceMode::ReferenceCompatibility => {
-                "reference mission aircraft has no positive finite cruise-required thrust"
-                    .to_owned()
-            }
-        });
-    }
-    let engine_inputs = TurbofanInputs {
-        number_of_engines: n_engines as f64,
-        bypass_ratio: engine.bypass_ratio,
-        overall_pressure_ratio: engine.overall_pressure_ratio,
-        fan_pressure_ratio: engine.fan_pressure_ratio,
-        turbine_inlet_temperature_k: engine.turbine_inlet_temp_k,
-        cruise_mach: config.requirements.cruise_mach,
-        cruise_altitude_m: config.requirements.cruise_altitude_m,
-        // Product sizing uses the selected engine's available rating. The
-        // explicit compatibility path above is the only caller that retains
-        // the old cruise-required sizing used by the frozen fixture.
-        design_thrust_total_n,
-    };
-    let sized_engine = size_turbofan(&engine_inputs, &VehicleBuilderParams::default());
 
     let fuel_loading = plan_fuel_loading(config, &report.design, report);
+    if !fuel_loading.zero_fuel_mass_kg.is_finite()
+        || !fuel_loading.analyzed_carried_fuel_kg.is_finite()
+        || !fuel_loading.analyzed_takeoff_mass_kg.is_finite()
+        || fuel_loading.zero_fuel_mass_kg < 0.0
+        || fuel_loading.analyzed_carried_fuel_kg <= 0.0
+        || fuel_loading.analyzed_takeoff_mass_kg > config.requirements.mtow_kg
+    {
+        return Err(format!(
+            "mission load state is invalid: ZFW={:.3} kg, carried fuel={:.3} kg, TOW={:.3} kg, MTOW limit={:.3} kg",
+            fuel_loading.zero_fuel_mass_kg,
+            fuel_loading.analyzed_carried_fuel_kg,
+            fuel_loading.analyzed_takeoff_mass_kg,
+            config.requirements.mtow_kg,
+        ));
+    }
 
     let reference_area_m2 = match reference_mode {
         MissionReferenceMode::Product => report.airplane.s_ref,
@@ -154,9 +262,16 @@ fn build_analyses_with_mode(
         minimum_mass_kg: Some(fuel_loading.zero_fuel_mass_kg),
         fuselage_lift_correction: alas_aero::lift_surrogate::FUSELAGE_LIFT_CORRECTION,
         induced_drag_lift_correction: match reference_mode {
-            MissionReferenceMode::Product => alas_aero::lift_surrogate::FUSELAGE_LIFT_CORRECTION,
+            // SUAVE's Fidelity_Zero `fuselage_lift_correction` multiplies the
+            // aircraft lift used for force balance. It does not say to scale
+            // each VLM wing's induced drag, and `MissionAnalyses` squares this
+            // field before the drag buildup. Keeping this at unity avoids an
+            // unsupported CDi bias; a future calibrated wing-load model can
+            // opt in explicitly at this boundary.
+            MissionReferenceMode::Product => 1.0,
             MissionReferenceMode::ReferenceCompatibility => 1.0,
         },
+        signed_cruise_force_residual: matches!(reference_mode, MissionReferenceMode::Product),
         enforce_throttle_envelope: matches!(reference_mode, MissionReferenceMode::Product),
         drag_settings,
         wings,
@@ -166,10 +281,19 @@ fn build_analyses_with_mode(
         // network containing every engine.
         network_count: 1,
         surrogate,
-        turbofan: engine_inputs,
-        turbofan_params: VehicleBuilderParams::default(),
-        compressor_nondimensional_massflow: sized_engine.compressor_nondimensional_massflow,
+        legacy_turbofan,
+        propulsion,
     })
+}
+
+/// Convert the explicitly configured initial-climb rate to the units used by
+/// the OpenAP/Bartel--Young maximum-climb correlation. Missing or invalid
+/// configuration is represented as `None`; no universal aircraft-independent
+/// climb rate is invented at the propulsion boundary.
+fn configured_max_climb_rate_ft_min(config: &AlasConfig) -> Option<f64> {
+    let rate_m_s = config.mission.profile.initial_climb_rate_m_s;
+    (rate_m_s.is_finite() && rate_m_s >= 0.0)
+        .then_some(rate_m_s * METRES_PER_SECOND_TO_FEET_PER_MINUTE)
 }
 
 /// Reproduce the old vehicle-builder's cruise-required turbofan target.
@@ -387,6 +511,14 @@ fn vlm_geometry(
     let wing_x = wing.root_datum_x_m + design.wing_x_shift_m;
     let hstab_span = 2.0 * hstab_area / (tail.hstab_root_chord_m + tail.hstab_tip_chord_m);
     let vstab_span = 2.0 * vstab_area / (tail.vstab_root_chord_m + tail.vstab_tip_chord_m);
+    let mission_hstab_incidence_deg = match reference_mode {
+        MissionReferenceMode::Product => report
+            .trimmed_design_point
+            .map(|point| point.trim_ih_deg)
+            .filter(|incidence| incidence.is_finite())
+            .unwrap_or(tail.hstab_root_twist_deg),
+        MissionReferenceMode::ReferenceCompatibility => tail.hstab_root_twist_deg,
+    };
 
     let main = VlmWing {
         tag: "main_wing".to_owned(),
@@ -428,8 +560,13 @@ fn vlm_geometry(
         aspect_ratio: hstab_span * hstab_span / hstab_area,
         sweep_quarter_chord_rad: tail.hstab_tip_le_m.0.atan2(tail.hstab_tip_le_m.1),
         sweep_leading_edge_rad: None,
-        twist_root_rad: tail.hstab_root_twist_deg.to_radians(),
-        twist_tip_rad: tail.hstab_tip_twist_deg.to_radians(),
+        // The full analysis solves the cruise pitching-moment trim before the
+        // mission surrogate is trained. A fixed trimmed incidence is the
+        // closest available cruise surrogate; the point-mass mission itself
+        // has no elevator or Cm residual, so phase-specific trim remains a
+        // declared fidelity limit rather than being implied here.
+        twist_root_rad: mission_hstab_incidence_deg.to_radians(),
+        twist_tip_rad: mission_hstab_incidence_deg.to_radians(),
         dihedral_rad: 0.0,
         area_reference_m2: hstab_area,
         origin_m: [
@@ -528,22 +665,78 @@ mod tests {
     }
 
     #[test]
-    fn a_route_shorter_than_mandatory_profile_distance_is_rejected() {
+    fn preset_like_short_routes_scale_the_altitude_profile_and_close_distance() {
         let config = AlasConfig::default();
         let origin = get_airport(&config.departure_airport)
             .unwrap_or_else(|error| panic!("default origin: {error}"));
         let destination = get_airport(&config.arrival_airport)
             .unwrap_or_else(|error| panic!("default destination: {error}"));
-        let request = build_mission_request(&config, origin, destination, 1_000.0);
+        for route_distance_m in [442_000.0, 547_000.0] {
+            let request = build_mission_request(&config, origin, destination, route_distance_m);
+            let schedule = build_schedule(&request)
+                .unwrap_or_else(|error| panic!("short route schedule: {error}"));
+            let flown_distance_m =
+                schedule_horizontal_distance(&schedule, request.departure_elevation_m);
+            assert!(
+                (flown_distance_m - route_distance_m).abs() < 1.0e-6,
+                "schedule flew {flown_distance_m} m for a {route_distance_m} m route"
+            );
+            assert!(schedule.iter().all(|segment| match segment.kind {
+                SegmentKind::Climb {
+                    altitude_start_m: Some(start),
+                    altitude_end_m,
+                    ..
+                } => altitude_end_m > start,
+                SegmentKind::Descent {
+                    altitude_start_m: Some(start),
+                    altitude_end_m,
+                    ..
+                } => altitude_end_m < start,
+                _ => true,
+            }));
+        }
+    }
+
+    #[test]
+    fn a_zero_route_at_one_elevation_has_no_negative_or_vertical_legs() {
+        let config = AlasConfig::default();
+        let origin = get_airport(&config.departure_airport)
+            .unwrap_or_else(|error| panic!("default origin: {error}"));
+        let destination = get_airport(&config.arrival_airport)
+            .unwrap_or_else(|error| panic!("default destination: {error}"));
+        let mut request = build_mission_request(&config, origin, destination, 0.0);
+        request.arrival_elevation_m = request.departure_elevation_m;
+
+        let schedule =
+            build_schedule(&request).unwrap_or_else(|error| panic!("zero route schedule: {error}"));
+        assert_eq!(
+            schedule_horizontal_distance(&schedule, request.departure_elevation_m),
+            0.0
+        );
+        assert!(schedule.iter().all(|segment| matches!(
+            segment.kind,
+            SegmentKind::Cruise {
+                distance_m: 0.0,
+                ..
+            }
+        )));
+    }
+
+    #[test]
+    fn an_irreducible_airport_elevation_change_reports_its_footprint() {
+        let config = AlasConfig::default();
+        let origin = get_airport(&config.departure_airport)
+            .unwrap_or_else(|error| panic!("default origin: {error}"));
+        let destination = get_airport(&config.arrival_airport)
+            .unwrap_or_else(|error| panic!("default destination: {error}"));
+        let mut request = build_mission_request(&config, origin, destination, 0.0);
+        request.arrival_elevation_m = request.departure_elevation_m + 1_000.0;
 
         let error = match build_schedule(&request) {
             Err(error) => error,
-            Ok(_) => panic!("a short route cannot satisfy the fixed climb/descent profile"),
+            Ok(_) => panic!("zero horizontal distance cannot connect different elevations"),
         };
-        assert!(
-            error.contains("shorter than the mandatory climb/descent distance"),
-            "unexpected route validation error: {error}"
-        );
+        assert!(error.contains("connect the airport elevations"), "{error}");
     }
 
     #[test]
@@ -586,6 +779,41 @@ mod tests {
             error.contains("finite and non-negative"),
             "unexpected cruise-share error: {error}"
         );
+    }
+
+    #[test]
+    fn a_vertical_rate_equal_to_airspeed_is_rejected_before_geometry() {
+        let mut config = AlasConfig::default();
+        config.mission.profile.takeoff_climb_rate_m_s =
+            config.mission.profile.takeoff_air_speed_m_s;
+        let origin = get_airport(&config.departure_airport)
+            .unwrap_or_else(|error| panic!("default origin: {error}"));
+        let destination = get_airport(&config.arrival_airport)
+            .unwrap_or_else(|error| panic!("default destination: {error}"));
+        let request = build_mission_request(&config, origin, destination, 5_000_000.0);
+
+        let error = match build_schedule(&request) {
+            Err(error) => error,
+            Ok(_) => panic!("a vertical rate equal to airspeed is invalid"),
+        };
+        assert!(error.contains("must be below airspeed"), "{error}");
+    }
+
+    #[test]
+    fn a_nonfinite_cruise_speed_is_rejected_before_geometry() {
+        let mut config = AlasConfig::default();
+        config.mission.profile.cruise_2_air_speed_m_s = f64::NAN;
+        let origin = get_airport(&config.departure_airport)
+            .unwrap_or_else(|error| panic!("default origin: {error}"));
+        let destination = get_airport(&config.arrival_airport)
+            .unwrap_or_else(|error| panic!("default destination: {error}"));
+        let request = build_mission_request(&config, origin, destination, 5_000_000.0);
+
+        let error = match build_schedule(&request) {
+            Err(error) => error,
+            Ok(_) => panic!("a NaN cruise speed is invalid"),
+        };
+        assert!(error.contains("cruise 2 airspeed"), "{error}");
     }
 
     #[test]
@@ -660,19 +888,28 @@ mod tests {
             "product and compatibility reference areas must use distinct policies"
         );
 
-        let rated_total_thrust_n = config.geometry.engine.thrust_kn
-            * config.geometry.engine.spanwise_positions_m.len() as f64
-            * 1000.0;
-        assert_eq!(product.turbofan.design_thrust_total_n, rated_total_thrust_n);
         let reference_l_over_d = reference_report
             .trimmed_design_point
             .map(|point| point.l_over_d)
             .unwrap_or(reference_report.design_point.l_over_d);
         let expected_reference_thrust_n = config.requirements.mtow_kg * 9.81 / reference_l_over_d;
+        let reference_legacy = reference
+            .legacy_turbofan
+            .as_ref()
+            .unwrap_or_else(|| panic!("reference mission retains legacy compatibility inputs"));
         assert!(
-            (reference.turbofan.design_thrust_total_n - expected_reference_thrust_n).abs() < 1.0e-9
+            (reference_legacy.inputs.design_thrust_total_n - expected_reference_thrust_n).abs()
+                < 1.0e-9
         );
-        assert!(product.turbofan.design_thrust_total_n > reference.turbofan.design_thrust_total_n);
+        assert!(product.legacy_turbofan.is_none());
+        assert_eq!(
+            product.propulsion.provenance().model.family,
+            "bartel-young-openap-turbofan"
+        );
+        assert_eq!(
+            reference_legacy.params.part_power_model,
+            PartPowerModel::LegacyLinear
+        );
         assert!(product.drag_settings.area_weighted_compressibility);
         assert!(!reference.drag_settings.area_weighted_compressibility);
         assert!(product
@@ -754,26 +991,29 @@ mod tests {
         assert!(hot_temperature > cold_temperature);
         assert!(hot_density < cold_density);
 
-        let result = evaluate(&config, &report, origin, destination, 5_000_000.0)
+        let (result, load_case) = evaluate(&config, &report, origin, destination, 5_000_000.0)
             .unwrap_or_else(|error| panic!("default report flies: {error}"));
-        assert!(
-            result.solutions.iter().all(|solution| solution.converged),
-            "dynamic mission convergence diagnostics: {:?}",
-            result.solutions
-        );
-        assert_eq!(result.segments.len(), 12);
+        assert!((result.initial_mass_kg() - load_case.takeoff_mass_kg).abs() < 1.0e-6);
+        assert_eq!(result.solutions.len(), result.scheduled_segment_count);
+        assert!(result
+            .solutions
+            .iter()
+            .all(|solution| solution.converged && !solution.throttle_limited));
+        assert_eq!(result.segments.len(), result.scheduled_segment_count);
+        assert!(result.completed_summary().is_some());
+        assert!(result.figure_data_ready());
         assert!(result
             .segments
             .iter()
             .all(|segment| segment.conditions.len() == 16));
-        assert!(result.initial_mass_kg() > result.final_mass_kg());
-        assert!(result.fuel_burned_kg() > 0.0);
-        assert!(result.block_time_s() > 0.0);
         assert!(result
             .segments
             .iter()
-            .flat_map(|segment| segment.conditions.aircraft_range_m.iter())
-            .any(|&range| range > 4_000_000.0));
+            .flat_map(|segment| segment.conditions.throttle.iter())
+            .all(|throttle| throttle.is_finite() && (0.0..=1.0).contains(throttle)));
+        assert!(result.initial_mass_kg() > result.final_mass_kg());
+        assert!(result.fuel_burned_kg() > 0.0);
+        assert!(result.block_time_s() > 0.0);
     }
 }
 
