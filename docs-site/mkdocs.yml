@@ -85,6 +85,7 @@ nav:
   - Get started:
       - Installation: installation.md
       - User guide: user-guide.md
+      - External tools guide: external-tools.md
       - Gallery: gallery.md
       - Meet AVE: meet-ave.md
   - The AVE walkthrough:
