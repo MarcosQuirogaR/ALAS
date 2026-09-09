@@ -5,23 +5,38 @@ export type Release = {
   name: string
   published: string
   body: string
+  htmlUrl: string
+  prerelease: boolean
   windowsAssetMB: number | null
+  windowsAssetUrl: string | null
   linuxAssetMB: number | null
+  linuxAssetUrl: string | null
 }
 
 const REPO = 'MarcosQuirogaR/ALAS'
 
 function parse(raw: Record<string, unknown>): Release {
-  const assets = (raw.assets as { name: string; size: number }[] | undefined) ?? []
-  const win = assets.find((a) => a.name === 'ALAS-windows.exe')
-  const linux = assets.find((a) => a.name === 'ALAS-linux')
+  const assets =
+    (raw.assets as { name: string; size: number; browser_download_url?: string }[] | undefined) ?? []
+  const win = assets.find(
+    (a) => a.name === 'ALAS-windows.exe' || a.name.toLowerCase().endsWith('.exe'),
+  )
+  const linux = assets.find(
+    (a) =>
+      a.name === 'ALAS-linux' ||
+      (a.name.toLowerCase().includes('linux') && !a.name.endsWith('.txt')),
+  )
   return {
     tag: String(raw.tag_name ?? ''),
     name: String(raw.name || raw.tag_name || ''),
     published: String(raw.published_at ?? ''),
     body: String(raw.body ?? ''),
+    htmlUrl: String(raw.html_url || `https://github.com/${REPO}/releases`),
+    prerelease: Boolean(raw.prerelease),
     windowsAssetMB: win ? Math.round(win.size / 1_000_000) : null,
+    windowsAssetUrl: win?.browser_download_url ?? null,
     linuxAssetMB: linux ? Math.round(linux.size / 1_000_000) : null,
+    linuxAssetUrl: linux?.browser_download_url ?? null,
   }
 }
 

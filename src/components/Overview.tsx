@@ -1,28 +1,21 @@
 import { useEffect, useState } from 'react'
+import { withBase } from '../lib/base'
 
-const COMPUTES = [
-  'Aerodynamics and drag',
-  'Transonic section flow',
-  'Wingbox structures',
-  'Engine cycle',
-  'Weight, balance and stability',
-  'A complete flown mission',
+const CAPABILITIES = [
+  'Parametric airframe sizing & geometry optimization',
+  'Multi-point aerodynamics & transonic section diagnostics (MSES)',
+  'Wingbox structural estimation & rib-spacing analysis',
+  'Turbofan cycle analysis & engine matching',
+  'Mass breakdown, CG envelope & longitudinal stability margins',
+  'Flown mission simulation (climb, cruise, descent, reserves)',
+  'Stage execution reporting & external solver diagnostics in progress',
+  'UAS (unmanned aircraft systems) configurations (work in progress)',
 ]
 
-const FIGURES = [
-  {
-    src: '/demo/transonic.png',
-    caption: 'Transonic flow around the wing section',
-  },
-  {
-    src: '/demo/cabin.png',
-    caption: 'Cabin and payload layout',
-  },
-  {
-    src: '/demo/mission-route.png',
-    caption: 'Flown mission, coloured by aircraft mass',
-  },
-]
+type Figure = {
+  src: string
+  caption: string
+}
 
 /** Full-screen preview of one figure, dismissible via backdrop click, the
  *  close button, or Escape. */
@@ -30,7 +23,7 @@ function Lightbox({
   figure,
   onClose,
 }: {
-  figure: (typeof FIGURES)[number]
+  figure: Figure
   onClose: () => void
 }) {
   useEffect(() => {
@@ -68,7 +61,22 @@ function Lightbox({
 }
 
 export default function Overview() {
-  const [expanded, setExpanded] = useState<(typeof FIGURES)[number] | null>(null)
+  const [expanded, setExpanded] = useState<Figure | null>(null)
+
+  const figures: Figure[] = [
+    {
+      src: withBase('demo/transonic.png'),
+      caption: 'Transonic section flow diagnostics (MSES coupled Euler/boundary-layer)',
+    },
+    {
+      src: withBase('demo/cabin.png'),
+      caption: 'Cabin and payload arrangement preview',
+    },
+    {
+      src: withBase('demo/mission-route.png'),
+      caption: 'Flown mission trajectory, tracking fuel burn and aircraft mass',
+    },
+  ]
 
   return (
     <section id="overview" className="border-b border-rule">
@@ -78,18 +86,24 @@ export default function Overview() {
         <div className="mt-6 grid gap-x-12 gap-y-8 lg:grid-cols-[1.15fr_1fr]">
           <div>
             <h2 className="font-serif text-[1.85rem] font-semibold leading-[1.2] tracking-[-0.015em] text-fg-strong">
-              One run, from requirements to a preliminary design
+              Coupled multidisciplinary stages for preliminary design
             </h2>
-            <p className="mt-5 max-w-[52ch] text-[1rem] leading-[1.65] text-fg">
-              You describe the mission. ALAS searches the geometry against
-              it, then re-analyses the winning aircraft properly, so the
-              numbers you get back have been checked, not just sized.
+            <p className="mt-5 max-w-[52ch] text-[0.98rem] leading-[1.65] text-fg">
+              You specify the operational requirements. ALAS explores the geometric design space
+              using preliminary engineering models, evaluating candidate airframes across aerodynamics,
+              structures, propulsion, and trajectory simulation. Stage execution diagnostics report
+              solver status and convergence directly.
+            </p>
+            <p className="mt-3 max-w-[52ch] text-[0.86rem] leading-[1.6] text-fg-dim">
+              Intended for engineering exploration and stage diagnostics. Sized configurations
+              represent preliminary approximations, not flight-certified or manufacturer-validated
+              aircraft, with no exact runtime guarantees.
             </p>
           </div>
 
           <ul className="grid grid-cols-1 gap-y-2.5 self-center sm:grid-cols-2 lg:grid-cols-1 lg:gap-y-3">
-            {COMPUTES.map((c) => (
-              <li key={c} className="flex items-baseline gap-3 text-[0.92rem] text-fg">
+            {CAPABILITIES.map((c) => (
+              <li key={c} className="flex items-baseline gap-3 text-[0.9rem] text-fg">
                 <span className="h-1 w-1 shrink-0 translate-y-[-0.2em] bg-accent" />
                 {c}
               </li>
@@ -98,7 +112,7 @@ export default function Overview() {
         </div>
 
         <div className="mt-14 grid grid-cols-1 gap-6 sm:grid-cols-3">
-          {FIGURES.map((f) => (
+          {figures.map((f) => (
             <figure key={f.src}>
               <button
                 onClick={() => setExpanded(f)}

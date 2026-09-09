@@ -1,7 +1,5 @@
+import { withBase } from '../lib/base'
 import { useReleases } from '../lib/useRelease'
-
-const WINDOWS_ASSET =
-  'https://github.com/MarcosQuirogaR/ALAS/releases/latest/download/ALAS-windows.exe'
 
 export default function Hero() {
   const releases = useReleases(1)
@@ -13,7 +11,7 @@ export default function Hero() {
           Acknowledgements. Positioned so the aircraft sits in the right-hand
           third, which the veil deliberately leaves clear. */}
       <img
-        src="/brand/hero.jpg"
+        src={withBase('brand/hero.jpg')}
         alt=""
         aria-hidden="true"
         className="absolute inset-0 -z-20 h-full w-full object-cover object-[72%_42%]"
@@ -22,35 +20,39 @@ export default function Hero() {
       <div aria-hidden="true" className="hero-fade absolute inset-0 -z-10" />
 
       <div className="mx-auto max-w-[68rem] px-6 pb-20 pt-24 sm:pb-28 sm:pt-32 lg:pb-36 lg:pt-40">
-        <p className="section-mark">Aircraft preliminary design</p>
+        <div className="flex flex-wrap items-center gap-3">
+          <p className="section-mark">Aircraft preliminary design</p>
+          <span className="inline-flex items-center gap-1.5 border border-rule-strong bg-raised/80 px-2.5 py-0.5 font-mono text-[0.7rem] text-fg-dim">
+            <span className="h-1.5 w-1.5 rounded-full bg-accent" />
+            <span>Release candidate under verification · Latest public binary: v1.0.0 (2026-07-29)</span>
+          </span>
+        </div>
 
-        <h1 className="mt-6 max-w-[22ch] font-serif text-[2.6rem] font-semibold leading-[1.08] tracking-[-0.02em] text-fg-strong sm:text-[3.4rem]">
-          Size an airframe.
-          <br />
-          Then find out if it flies.
+        <h1 className="mt-6 max-w-[24ch] font-serif text-[2.5rem] font-semibold leading-[1.12] tracking-[-0.02em] text-fg-strong sm:text-[3.3rem]">
+          Preliminary airframe sizing, optimization, and multi-disciplinary analysis.
         </h1>
 
-        <p className="mt-7 max-w-[46ch] text-[1.08rem] leading-[1.6] text-fg">
-          The desktop application that sizes an aircraft against the mission
-          you design.
+        <p className="mt-7 max-w-[48ch] text-[1.06rem] leading-[1.62] text-fg">
+          ALAS evaluates aircraft configurations against mission requirements using preliminary
+          engineering models across aerodynamics, wingbox structures, turbofan cycle propulsion, and
+          trajectory simulation. Built for design-space exploration; not flight certification.
         </p>
 
         <div className="mt-10 flex flex-col gap-4 sm:flex-row sm:items-center">
           <a
-            href={WINDOWS_ASSET}
+            href={withBase('#download')}
             className="inline-flex items-center justify-center gap-3 bg-accent px-7 py-4 font-semibold text-base transition-colors hover:bg-accent-bright"
           >
-            Download for Windows
+            Downloads &amp; Releases
             {latest && (
-              <span className="font-mono text-[0.72rem] font-normal opacity-80">
+              <span className="font-mono text-[0.72rem] font-normal opacity-85">
                 {latest.tag}
-                {latest.windowsAssetMB ? ` · ${latest.windowsAssetMB} MB` : ''}
               </span>
             )}
           </a>
 
           <a
-            href="/docs/"
+            href={withBase('docs/')}
             className="inline-flex items-center justify-center border border-rule-strong px-7 py-4 font-semibold text-fg-strong transition-colors hover:border-accent hover:text-accent-bright"
           >
             Read the documentation
@@ -58,7 +60,7 @@ export default function Hero() {
         </div>
 
         <p className="mt-6 font-mono text-[0.72rem] uppercase tracking-[0.13em] text-fg-dim">
-          Free · Open source · Runs offline · Windows &amp; Linux
+          Free · Open source (AGPL-3.0) · Native Rust binary · Windows &amp; Linux
         </p>
       </div>
     </section>

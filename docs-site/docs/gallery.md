@@ -1,12 +1,17 @@
 # Gallery
 
-Every figure ALAS produces, from a single run of the reference
-aircraft. Click any of them to see it full size.
+Visual output across the multidisciplinary pipeline. Click any figure to
+view it full size.
 
-Figures follow whichever theme you are reading in. Switch with the control
-in the header and they redraw to match. What each one means is covered in
-the chapter it belongs to; this page exists so you can look through the lot
-without reading all of them first.
+!!! note "Reference benchmark artifacts"
+    The figures showcased in this gallery represent benchmark output artifacts
+    generated during reference validation runs of the AVE design case. Historical
+    visualization plots from benchmark reference passes are documented here to
+    illustrate the complete chart and scene suite generated across aerodynamics,
+    structures, propulsion, stability, and mission simulation.
+
+Figures adapt to light and dark themes. Each figure is explained in detail
+in its corresponding walkthrough chapter.
 
 
 ## Geometry and configuration

@@ -1,107 +1,88 @@
-# Installation
+# Installation & Setup
 
-## Windows
+ALAS is built in Rust as a single native executable. There is no Python runtime,
+no package manager, and no background sidecar service required.
 
-Download the executable from the
-[downloads page](/#download) and run it. There is no
-installer and no separate runtime to fetch: the whole analysis stack is
-inside the file.
+## Executable & Release Status
 
-Windows will show a SmartScreen warning the first time, because the build
-is not code-signed. Choose **More info**, then **Run anyway**.
+### Windows
 
-The download is around 300 MB, which is large for what looks like a desktop
-application. The reason is that it carries a complete scientific computing
-stack: the aerodynamic solver, the optimiser, the finite-element code and
-the plotting library are all packaged in rather than installed separately.
+- **Upcoming Release Candidate**: Under verification as a single native
+  `alas.exe` binary. The core application runs locally; full external multidisciplinary
+  analyses require compatible external solver executables and any necessary licenses.
+- **Legacy binary (v1.0.0, 2026-07-29)**: The previous public release remains
+  available on GitHub Releases for reference while the current candidate undergoes
+  verification.
+- **SmartScreen**: Windows may display an untrusted application warning on first
+  launch of newly published binaries. Select **More info → Run anyway**.
 
-### What you get without doing anything else
+### Other Platforms
 
-Optimisation, aerodynamics, wingbox structures, engine cycle, weight and
-balance, stability, cabin layout, field performance and the transonic
-section solver all work on a fresh install.
+This candidate's Windows distribution is currently being verified; builds for other
+platforms are not verified here at this time.
 
-Two things do not, and both are optional:
+---
 
-| Feature | Needs |
-|---|---|
-| [Mission simulation](mission-and-route.md) | A one-time setup step, below |
-| [Nastran and Patran cross-checks](structural-analysis.md) | Your own licensed installation |
+## What runs out of the box
 
-## Linux
+Within the core local application, the following capabilities execute without external solvers:
 
-A packaged build is in progress. Until it lands, Linux users can run from
-source: see below. The application itself is already Linux-native; what
-remains is packaging the bundled analysis stack, which has to be built on
-Linux rather than cross-compiled.
+- Parametric airframe sizing and design space definition
+- Numerical airframe optimization (Differential Evolution, NSGA-II, SQP)
+- Vortex-lattice aerodynamics and empirical drag build-ups
+- Turbofan cycle thermodynamic modeling
+- Wingbox structural sizing and analytical rib spacing
+- Mass distribution, center of gravity limits, and longitudinal stability margins
+- Native mission trajectory simulation (climb, cruise, descent, reserves)
+- Passenger cabin deck arrangement and payload loading
 
-## Mission simulation setup
+---
 
-Mission analysis flies the aircraft through climb, cruise and descent using
-[SUAVE](https://suave.stanford.edu). SUAVE needs an older numerical stack
-than the rest of ALAS uses, so it lives in its own isolated
-environment rather than being forced to share one.
+## Compatible external tools
 
-Setting it up takes a couple of minutes and only has to be done once. Open
-**Setup → External Tools** in the application, where the SUAVE row shows
-its status and how to provision it.
+ALAS couples with specialized external analysis tools across disciplines. Compatible
+tools are required as documented for each distribution; each stage reports itself
+unavailable when a tool is absent:
 
-Skipping this costs you one results tab. Everything else runs normally, and
-the mission stage reports itself unavailable rather than failing the run.
+| Tool | Discipline | Status when absent |
+|---|---|---|
+| **MSES** | Transonic section coupled Euler/boundary-layer analysis | Reported unavailable if absent |
+| **AVL** | Extended vortex-lattice aerodynamic cross-check | Reported unavailable if absent |
+| **OpenVSP / VSPAERO** | CAD geometry generation and aerodynamic cross-check | Reported unavailable if absent |
+| **MSC Nastran / NASTRAN-95** | Finite-element structural analysis and vibration modes | Reported unavailable if absent |
+| **Patran** | Finite-element structural visualization | Reported unavailable if absent |
 
-### Optional route data
+Tool directories and executable paths are configured in the application under
+**Setup → External Tools** or through configuration files.
 
-Two downloads make the mission more realistic, and both are on
-**Advanced Settings → Mission Analysis**:
+---
 
-- **Airway navdata** lets routes follow published airways instead of a
-  great-circle line. It is third-party GPLv3 data, so the application asks
-  before fetching it.
-- **Earth texture** gives the route map a textured background.
+## Navigation & route data <a id="optional-route-data"></a>
 
-Without either, routing falls back to a great-circle track and the map
-still draws.
+Native mission simulation supports both great-circle tracks and published airway
+routes. Airway navigation data can be downloaded on demand through application settings
+or via the CLI:
 
-## Running from source
-
-Useful if you are on Linux, want to script ALAS, or intend to modify
-it. You will need Python 3.10 or newer.
-
-=== "pip"
-
-    ```bash
-    pip install -r requirements.txt
-    python main.py
-    ```
-
-=== "uv"
-
-    ```bash
-    uv sync
-    uv run python main.py
-    ```
-
-Running with no arguments opens the same application the executable does.
-[Running ALAS](running-alas.md) covers the command-line and
-library interfaces, which exist only in a source checkout.
-
-Optional dependency groups:
-
-| Group | Adds |
-|---|---|
-| `gui` | 3D previews and the textured route map |
-| `sidecar` | The local API the desktop application talks to |
-| `package` | The tooling that freezes it into an executable |
-
-```bash
-pip install -e .[gui]
+```powershell
+alas --download-navdata
 ```
 
-## Checking it works
+---
 
-Open the application, leave every setting alone, and press
-**Analyze baseline**. It runs in seconds and fills in the weight, balance
-and stability tabs. If those look sensible, your installation is fine.
+## Building from source (developers)
 
-If something does not work, [Troubleshooting](troubleshooting.md) covers
-the failures that actually happen.
+For developers with an authorized source checkout:
+
+1. Install Visual Studio Build Tools with the **Desktop development with C++** workload.
+2. Install Rust via [rustup.rs](https://rustup.rs).
+3. Build and launch:
+
+```powershell
+# Launch interactive desktop interface
+cargo run --release --bin alas
+
+# Run headless pipeline
+cargo run --release --bin alas -- --seed 42 --output outputs --plots
+```
+
+The compiled binary is written to `target/release/alas.exe` (or `target/release/alas`).

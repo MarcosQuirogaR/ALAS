@@ -1,3 +1,5 @@
+import { withBase } from '../lib/base'
+
 type Credit = { role: string; names: string[]; body: string }
 
 const CREDITS: Credit[] = [
@@ -41,7 +43,12 @@ export default function Acknowledgements() {
   return (
     <section id="acknowledgements" className="border-b border-rule">
       <div className="mx-auto max-w-[68rem] px-6 py-20">
-        <p className="section-mark">Acknowledgements</p>
+        <div className="flex items-center justify-between">
+          <p className="section-mark">Acknowledgements</p>
+          <a href={withBase('')} className="font-mono text-[0.75rem] text-accent hover:underline">
+            ← Back to Overview
+          </a>
+        </div>
 
         <div className="mt-6 max-w-[54ch]">
           <h2 className="font-serif text-[1.85rem] font-semibold leading-[1.2] tracking-[-0.015em] text-fg-strong">

@@ -3,7 +3,7 @@
 Every optimizer evaluation runs a cheap version of this; once a design is
 final, ALAS re-runs it properly. This chapter is that final,
 full-fidelity aerodynamic analysis of AVE's baseline geometry
-(`python main.py --no-optimize --plots`), the same run behind
+(`alas --no-optimize --plots`), the same run behind
 [Weight, balance & stability](weight-balance-and-stability.md) and
 [Structural analysis](structural-analysis.md).
 

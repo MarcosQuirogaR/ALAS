@@ -1,11 +1,17 @@
 # ALAS documentation
 
 ALAS (Aircraft Layout, Analysis and Sizing) sizes an aircraft against a
-mission and then analyses what it came up with. You supply the
-requirements: how fast, how high, how heavy, how many passengers. It
-searches the geometry for something that meets them, and puts the result
-through aerodynamics, structures, propulsion, weight and balance,
-stability and a flown mission.
+specified mission and evaluates the resulting configuration using preliminary
+engineering models. You define the operational requirements: speed, altitude,
+payload capacity, and design range. ALAS searches the geometric design space
+and executes coupled multidisciplinary stages across aerodynamics, wingbox
+structures, turbofan propulsion cycles, mass and balance, longitudinal
+stability, and trajectory simulation.
+
+Stage execution provides detailed solver diagnostics and results in progress,
+enabling engineers to examine intermediate convergence and evaluate off-design
+behavior. Sizing models for Unmanned Aircraft Systems (UAS) configurations are
+currently a work in progress.
 
 ## Where to start
 
@@ -19,38 +25,54 @@ stability and a flown mission.
 
 ## About the worked example
 
-Most chapters follow a single aircraft, called AVE, a long-range twin that
-ships with the application as its reference design. Using one aircraft
-throughout means the numbers in the aerodynamics chapter and the numbers in
-the structures chapter describe the same wing, and you can check one
-against the other.
+Most chapters follow a single reference aircraft, called **AVE**, a preliminary
+long-range widebody twin design that ships with the application. Using one
+reference model throughout ensures that metrics in the aerodynamic chapter and
+the structural chapter refer to the exact same airframe, allowing direct
+cross-discipline evaluation.
 
-Every figure and every number in these pages comes from an actual run. None
-of it was written from memory or reconstructed afterwards.
+Every figure and metric in these documentation pages was recorded from an actual
+computational run. None of it was fabricated or reconstructed after the fact.
 
 ## How the documentation is organised
 
-**Get started** covers installation, the interface, and a gallery of
-results.
+**Get started** covers installation, interface controls, and a gallery of
+engineering results.
 
-**The AVE walkthrough** is the long read: requirements, the design space,
-the optimiser, and then one chapter per discipline. Read it in order and
-you follow an aircraft from a set of requirements to a finished analysis.
+**The AVE walkthrough** is the complete walkthrough: requirements definition,
+design-space boundaries, numerical optimization, and discipline-specific
+analysis stages.
 
-**Reference** holds the pipeline diagram, an explanation of the internals,
-a field-by-field configuration index, and the formulas with worked numbers.
+**Reference** documents pipeline architecture, solver interface internals,
+configuration schemas, and theoretical formulas.
 
-**Help** is troubleshooting and a glossary.
+**Help** provides troubleshooting guidance and a domain glossary.
 
-## A note on scope
+## A note on scope & preliminary engineering models
 
-ALAS does preliminary design. It answers questions like whether a
-configuration closes, roughly what it weighs, and whether the wing survives
-the loads. It does not replace a detailed design process, and several of
-its models are documented as approximations where they are: the engine
-cycle chapter says plainly where its fuel consumption diverges from a real
-engine, and the structures chapter says which check needs a licensed
-solver.
+ALAS provides preliminary design capabilities and conceptual exploration. It
+addresses feasibility questions such as configuration closure, structural
+mass trends, and aerodynamic performance margins.
 
-Where a limitation exists, the relevant chapter states it rather than
-leaving you to discover it.
+Important boundaries to note:
+
+- **Not certified or validated aircraft**: Designs generated or analyzed by
+  ALAS represent preliminary engineering approximations. They are neither
+  certified by aviation authorities nor validated for manufacturing.
+- **Approximations & solver limits**: Models reflect conceptual-level physics.
+  The engine cycle model simplifies secondary bleed and cooling losses, while
+  structural modules provide analytical beam and wingbox estimates; advanced
+  finite-element analysis requires external licensed solvers (such as MSC
+  NASTRAN).
+- **No exact runtime guarantees**: Convergence duration and solver stage
+  runtimes depend heavily on optimization bounds, constraint tolerances, and
+  mesh resolution.
+- **Stage results and diagnostics**: Individual stages execute with active
+  status reporting. When an external solver encounters non-convergence or
+  mesh breakdown, ALAS records diagnostic status flags without halting the
+  broader pipeline.
+- **UAS configurations**: Sizing workflows for UAS configurations remain under
+  active development.
+
+Where limitations exist, each chapter states them explicitly. ALAS is open
+source under AGPL-3.0-or-later and built on AeroSandbox and SUAVE (LGPL-2.1).

@@ -1,27 +1,29 @@
-const ENTRIES = [
-  {
-    href: '/docs/installation/',
-    title: 'Installation',
-    body: 'Getting it running, the optional extras, and the one-time setup for mission analysis.',
-  },
-  {
-    href: '/docs/user-guide/',
-    title: 'User guide',
-    body: 'Every page, control and action in the application, with a suggested first session.',
-  },
-  {
-    href: '/docs/meet-ave/',
-    title: 'Worked example',
-    body: 'One aircraft carried through the whole pipeline, with its results explained.',
-  },
-  {
-    href: '/docs/architecture/',
-    title: 'How it works inside',
-    body: 'The internals: layering, fidelity levels, and what happens during a run.',
-  },
-]
+import { withBase } from '../lib/base'
 
 export default function Documentation() {
+  const entries = [
+    {
+      href: withBase('docs/installation/'),
+      title: 'Installation',
+      body: 'Getting it running, the optional extras, and setup for mission and structural analysis.',
+    },
+    {
+      href: withBase('docs/user-guide/'),
+      title: 'User guide',
+      body: 'Every page, control and action in the application, with a suggested first session.',
+    },
+    {
+      href: withBase('docs/meet-ave/'),
+      title: 'Worked example (AVE)',
+      body: 'One reference aircraft carried through the multidisciplinary pipeline, with stage results explained.',
+    },
+    {
+      href: withBase('docs/architecture/'),
+      title: 'How it works inside',
+      body: 'The internals: pipeline stages, solver interfaces, and data flow during a run.',
+    },
+  ]
+
   return (
     <section id="documentation" className="border-b border-rule">
       <div className="mx-auto max-w-[68rem] px-6 py-20">
@@ -31,13 +33,13 @@ export default function Documentation() {
           <h2 className="font-serif text-[1.85rem] font-semibold leading-[1.2] tracking-[-0.015em] text-fg-strong">
             Learn how to use it
           </h2>
-          <a href="/docs/" className="prose-link text-[0.92rem]">
+          <a href={withBase('docs/')} className="prose-link text-[0.92rem]">
             Browse the full documentation →
           </a>
         </div>
 
         <div className="mt-10 grid grid-cols-1 gap-px border border-rule bg-rule sm:grid-cols-2">
-          {ENTRIES.map((e) => (
+          {entries.map((e) => (
             <a
               key={e.href}
               href={e.href}

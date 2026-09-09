@@ -1,132 +1,125 @@
 # Transonic section analysis
 
 Everything in [Aerodynamic analysis](aerodynamic-analysis.md) treats
-compressibility with a correlation: the Korn equation returns a wave-drag
-*number* from thickness, sweep and lift coefficient. That is the right
-tool for an optimizer loop: it costs nothing and it captures the trend.
-What it cannot tell you is *where the shock actually sits on the section*,
-how strong it is, or whether the boundary layer survives it.
+compressibility with empirical correlations: the Korn equation estimates wave-drag
+penalties from section thickness, leading-edge sweep, and lift coefficient. That is
+the appropriate tool for an optimization loop: it carries near-zero computational
+cost and captures primary design trends.
 
-This chapter is the answer to that. ALAS couples to
-[MSES](https://web.mit.edu/drela/Public/web/mses/) (Drela's coupled
-Euler/boundary-layer solver) and runs the real viscous, compressible
-problem on the wing's root section at the trimmed cruise condition.
+What a correlation cannot reveal is *where the shock actually sits on the section*,
+how strong it is, or whether the boundary layer separates behind it.
+
+To investigate those local phenomena, ALAS couples to
+[MSES](https://web.mit.edu/drela/Public/web/mses/) (Mark Drela's coupled
+Euler / boundary-layer solver) to evaluate the viscous, compressible flow field on
+the wing's root or defining sections at the cruise condition.
 
 ## What it solves, and why that's different
 
-MSES solves a steady Euler flow field on a body-fitted streamline grid,
-coupled to a two-equation integral boundary-layer formulation with a
-transition model. In plain terms:
+MSES solves a steady Euler flow field on a body-fitted streamline grid coupled to
+a two-equation integral boundary-layer formulation with transition modeling:
 
-- The **Euler** side gets compressibility right, including embedded
-  supersonic regions and the shock that terminates them. A vortex-lattice
-  method is incompressible and linear by construction; it has no
-  mechanism to produce a shock at all.
-- The **boundary-layer** side gets viscosity right, including the
-  displacement effect that thickens the effective body, and the shock/
-  boundary-layer interaction that decides whether the flow separates.
+- The **Euler formulation** captures compressible effects directly, including
+  embedded supersonic regions and the recompression shock terminating them.
+  (Linearized vortex-lattice methods are incompressible and lack shock-capturing
+  mechanisms.)
+- The **integral boundary layer** captures viscous displacement thickness, skin
+  friction, and shock/boundary-layer interaction to evaluate separation risk.
 
-That combination is why the figures below carry information no other stage
-in ALAS produces: the earlier chapters give integrated coefficients,
-this one gives a *field*.
+This provides local field diagnostics that integrated 3D vortex-lattice models
+cannot produce.
 
 ## Surface pressure and Mach
 
 <figure markdown>
   ![Surface Cp and local Mach distributions from MSES](assets/ave-mses-pressure-light.png#only-light)
   ![Surface Cp and local Mach distributions from MSES](assets/ave-mses-pressure-dark.png#only-dark)
-  <figcaption>Surface pressure coefficient (left) and local Mach number (right) around the root section at the trimmed cruise point.</figcaption>
+  <figcaption>Surface pressure coefficient (left) and local Mach number (right) around the root section at the nominal cruise condition.</figcaption>
 </figure>
 
-Read the two panels together and the physics is unambiguous:
+Reading the two panels together illustrates the underlying physics:
 
-1. The flow accelerates hard around the leading edge, and by about 6 % chord
-   the **upper surface has gone supersonic**: local Mach peaks near 1.24
-   even though the freestream is at M 0.70 for this section.
-2. That supersonic pocket is sustained across the forward third of the
-   chord, held roughly flat by the supercritical section's characteristic
-   low-curvature roof.
-3. At about **32 % chord the flow shocks down**: a near-vertical jump in
-   Cp, with local Mach dropping abruptly back through 1.0. This is the
-   shock the Korn equation only ever knew as a scalar penalty.
-4. Downstream of the shock the upper surface hovers just around sonic
-   before recovering smoothly to the trailing edge, and the lower surface
-   pressure rises steeply over the aft region: the rear loading a
-   supercritical section relies on to make up the lift it gives away by
-   flattening its roof.
+1. Rapid flow acceleration occurs around the leading edge; by approximately 6% chord
+   the **upper surface becomes supersonic**, with local Mach peaking near 1.24 at
+   a section freestream Mach of 0.70.
+2. The supersonic plateau is maintained across the forward portion of the chord
+   by the supercritical section's low upper-surface curvature.
+3. Near **32% chord the flow recompresses through a shock**, characterized by a
+   sharp pressure jump and deceleration back below Mach 1.0.
+4. Downstream of the shock, the flow recovers toward the trailing edge, while aft
+   camber provides rear loading to compensate for reduced forward lift.
 
-A designer reads this plot for shock *position* and *strength*. A shock
-far forward and weak is cheap; a strong shock near mid-chord is expensive
-in drag and risks separating the boundary layer behind it.
+Engineers inspect these distributions to evaluate shock strength, location, and
+downstream boundary-layer health.
 
 ## The Mach field
 
 <figure markdown>
   ![Filled Mach contours around the section](assets/ave-mses-mach-light.png#only-light)
   ![Filled Mach contours around the section](assets/ave-mses-mach-dark.png#only-dark)
-  <figcaption>Mach field around the exact panelled geometry MSES solved. The supersonic pocket over the forward upper surface is the dark region; the sharp boundary running down from it is the shock.</figcaption>
+  <figcaption>Mach field around the solved section geometry. The dark region marks the supersonic pocket terminated by the recompression shock.</figcaption>
 </figure>
 
-The contour plot makes the extent of the supersonic region visible in a
-way a surface plot cannot: it is not a thin skin over the section but a
-pocket that reaches a noticeable distance into the flow. The near-vertical
-contour crowding at its aft edge is the shock, and the two blue lobes at
-the leading and trailing edges are the stagnation regions.
+The contour field illustrates the vertical extent of the supersonic pocket above the
+airfoil surface. The tight contour gradient at the aft boundary marks the shock.
 
-!!! note "The outline is the geometry that was actually solved"
-    The section drawn on this plot is MSES's own panelled geometry, taken
-    straight from the solver's output, not a re-plot of the airfoil object
-    ALAS sent in. If the two ever disagreed (a meshing failure, a
-    degenerate section from an extreme optimizer candidate) the figure
-    would show it rather than hide it behind a tidy re-draw.
+!!! note "Solved geometry verification"
+    The section outline plotted above reflects the actual paneled coordinates
+    discretized and solved by MSES. If geometric irregularities or meshing anomalies
+    occur, they are visible in the diagnostic visualization rather than concealed by
+    an idealized spline.
 
-## Where this sits in a run
+## Stage execution & convergence diagnostics
 
-MSES runs as one of the parallel post-analysis stages, on the **final**
-design only, never inside the optimizer loop, where its cost and its
-convergence behaviour would both be unacceptable. Two things come back:
+MSES executes as an optional post-analysis diagnostic stage on the final configuration,
+outside the primary optimization loop where solve time and convergence variance
+would be prohibitive. Outputs include:
 
 | Result | Contents |
 |---|---|
-| `mses_result` | A converged 2-D polar: lift, drag and moment across an angle-of-attack sweep |
-| `mses_pressure` | The surface Cp/Mach distributions and the Mach field above |
+| `mses_result` | 2D section polar data across an angle-of-attack sweep |
+| `mses_pressure` | Surface pressure ($C_p$), local Mach number, and field contours |
 
-Both are optional. The solver ships with the application, so the usual
-reasons this stage produces nothing are a mesh that could not be generated
-from a degenerate section, or a solve that did not converge at the requested
-condition, neither of which is a crash. Non-convergence is an expected
-solver outcome on some geometries. The stage records a non-`ok` status and
-the rest of the pipeline continues untouched: the same degrade-don't-crash
-contract the
-[mission](mission-and-route.md) and
-[NASTRAN](structural-analysis.md#the-analytical-fallback-no-nastran-required)
-stages follow.
+### Distinguishing converged vs. partial or non-converged points
 
-## Three models, three answers
+Transonic viscous-inviscid coupling can be sensitive to strong shock separation or
+severe adverse pressure gradients. In ALAS, **converged points are explicitly
+distinguished from partial or non-converged points**:
 
-Because ALAS ends up holding an AeroSandbox polar, a SUAVE mission
-polar and an MSES polar for the same aircraft, it can put them on shared
+- **Converged points**: Points where the Newton solver reduces Euler and
+  boundary-layer residuals below the specified convergence tolerance ($10^{-4}$).
+  These points are recorded as valid flow states and included in polar plots.
+- **Partial or non-converged points**: Points where MSES exceeds iteration limits,
+  encounters boundary-layer separation unsteadiness, or fails to converge on a valid
+  streamline grid.
+- **Diagnostic transparency**: Non-converged points are flagged with explicit solver
+  status codes. In diagnostic outputs, they are visually distinguished (or excluded)
+  and never blended into lift-curve slope regressions or polar interpolations.
+
+When an individual point or section solve fails, the stage records diagnostic warning
+flags and the broader analysis pipeline proceeds uninterrupted.
+
+## Multi-model comparison
+
+ALAS can compare polars from AeroSandbox (3D VLM + empirical drag build-up),
+SUAVE (flown mission simulation drag polar), and MSES (2D viscous section) on shared
 axes:
 
 <figure markdown>
   ![AeroSandbox, SUAVE and MSES polars overlaid](assets/ave-model-comparison-light.png#only-light)
   ![AeroSandbox, SUAVE and MSES polars overlaid](assets/ave-model-comparison-dark.png#only-dark)
-  <figcaption>The three models on common CL–CD and CL–α axes.</figcaption>
+  <figcaption>Overlay of AeroSandbox, SUAVE, and 2D MSES polars on shared CL–CD and CL–α axes.</figcaption>
 </figure>
 
-This is deliberately **not** presented as a validation exercise, and you
-should not read the spread as one model being "wrong". They answer
-different questions:
+This comparison is an engineering consistency check, not an experimental validation:
 
-- **AeroSandbox**: the full 3-D aircraft, inviscid lifting surfaces plus
-  empirical viscous and wave-drag build-ups.
-- **SUAVE**: the same aircraft as flown through the mission, with its own
-  internal drag model and at the actual in-flight conditions.
-- **MSES**: a single 2-D section, viscous and compressible, with no
-  three-dimensional effects at all (no induced drag, no tip losses).
+- **AeroSandbox**: Models the full 3D airframe, accounting for induced drag and
+  empirical drag build-ups.
+- **SUAVE**: Evaluates the airframe along the mission trajectory with independent
+  flight-condition corrections.
+- **MSES**: Evaluates a 2D section without 3D induced drag or finite-span effects.
 
-A 2-D section polar sitting well below a 3-D aircraft polar in drag is the
-expected result, not a discrepancy: the 3-D number carries induced drag
-the 2-D one structurally cannot contain. The value of the overlay is
-seeing that the *shapes* agree: that three independent codes describe the
-same lift-curve slope and the same drag rise onset.
+A 2D section polar exhibiting lower drag than a 3D aircraft polar is physically
+expected due to the absence of induced drag. The diagnostic value lies in checking
+that the lift-curve slope and drag-rise onset remain consistent across preliminary
+models.

@@ -1,33 +1,33 @@
 # Meet AVE
 
-Every example in this guide is the same aircraft: **AVE**, the long-range
-widebody twin that ships as ALAS's default reference case. When you
-run ALAS with no configuration file at all, this is the design space
-you're searching and the mission you're sizing against.
+Every example in this guide uses the same reference aircraft: **AVE**, a
+preliminary long-range widebody twin that ships as ALAS's default test case.
+When you launch ALAS with default settings, this is the design space explored
+and the operational mission sized against.
 
 ## Why a reference case exists
 
-An optimizer with sixteen free geometric variables and a physics stack
-spanning aerodynamics, structures, propulsion, and mission simulation is a
-lot to point at a blank page. AVE exists so the app is runnable (and,
-more importantly, *checkable*) the moment you clone it. Its geometry,
-mission requirements, and engine are calibrated against a real 777X-class
-long-range twin closely enough that every sanity check in this guide (does
-the static margin look like an airliner's? does the fuel fraction make
-sense? does the payload-range diagram have the right shape?) has a
-real-world answer to compare against.
+An optimizer navigating sixteen geometric degrees of freedom alongside a
+physics stack spanning aerodynamics, structures, propulsion, and mission
+simulation requires an established baseline for benchmarking. AVE exists so
+the application is runnable and verifiable immediately.
 
-AVE is also the aircraft `suave_example.py` (the hand-built script
-ALAS's SUAVE bridge was originally validated against) was written
-for, flying a Madrid-departure long-range route. That heritage is why the
-mission-analysis defaults later in this guide (climb schedule, cruise-leg
-speed profile) are shaped the way they are.
+AVE is an **uncertified preliminary engineering model**, not a certified or
+flight-ready aircraft. Its geometry, mission parameters, and engine cycle are
+dimensioned around open-literature 777X-class twin-aisle transports. This
+provides meaningful engineering baselines for sanity checks (e.g., verifying
+whether static margin, fuel mass fraction, and payload-range curves reflect
+typical long-range transport behavior) without claiming manufacturer validation.
+
+AVE is also the configuration used to evaluate stage diagnostics and external
+solver integrations, flying a Madrid-departure long-range flight profile.
+Additional airframe classes, including Unmanned Aircraft Systems (UAS), are
+currently under development as works in progress.
 
 ## The airframe, as ALAS sees it
 
-These are the sixteen design-vector values that *define* AVE, the exact
-numbers `DesignVector.default()` returns, and what every optimizer run in
-this guide starts its search from:
+These are the sixteen design-vector values defining AVE, corresponding to the
+nominal values returned by `DesignVector.default()`:
 
 | Parameter | Value |
 |---|---|
@@ -42,7 +42,7 @@ this guide starts its search from:
 | Tip airfoil | sc20410 |
 
 Run through ALAS's geometry builder, that design vector resolves to
-the aircraft actually analyzed in every later chapter:
+the preliminary aircraft model analyzed across subsequent chapters:
 
 <div class="ave-stat-grid" markdown>
 <div class="ave-stat"><div class="label">Wing area</div><div class="value">529.0 m²</div></div>
@@ -56,20 +56,19 @@ the aircraft actually analyzed in every later chapter:
 <figure markdown>
   ![Four-panel three-dimensional view](assets/ave-threeview-3d-light.png#only-light)
   ![Four-panel three-dimensional view](assets/ave-threeview-3d-dark.png#only-dark)
-  <figcaption>The same geometry rendered in three dimensions (top, front, side and isometric) straight from the built aircraft object.</figcaption>
+  <figcaption>The preliminary AVE geometry rendered in three dimensions (top, front, side and isometric) directly from the geometry pipeline.</figcaption>
 </figure>
 
 ## The mission
 
-AVE's requirements target a M0.84 cruise at 11,887 m (roughly FL390), a
-358.7 t MTOW, and 350 passengers, parameters real enough that the
-resulting weight breakdown (next section) lands within a few percent of
-a real 777X-class twin's public numbers.
+AVE's conceptual requirements specify a M0.84 cruise at 11,887 m (approx. FL390),
+a 358.7 t nominal MTOW, and a 350-passenger cabin arrangement. These values
+serve as engineering target inputs for sizing checks, not certified flight limits.
 
 ## The engine
 
-Two GE9X-class high-bypass turbofans, sized and cycle-modeled in
-[Propulsion analysis](propulsion-analysis.md):
+Two GE9X-class high-bypass turbofans, sized and modeled via 1D thermodynamic
+cycle relationships in [Propulsion analysis](propulsion-analysis.md):
 
 | Parameter | Value |
 |---|---|
@@ -79,29 +78,27 @@ Two GE9X-class high-bypass turbofans, sized and cycle-modeled in
 | Turbine inlet temperature (TIT) | 1670 K |
 | Rated static thrust, per engine | 467.0 kN |
 
-## Why AVE, and not a smaller aircraft, as the default
+## Presets & ongoing UAS development
 
-ALAS ships six other airliner presets (A340-300, A380-800, B787-9,
-A320-200, A220-300, DC-10) selectable from the same Inputs tab AVE loads
-from by default; swapping one in re-scales the design space, cabin
-layout, and engine to match. AVE is the *default* rather than, say, the
-A320, because a long-range widebody exercises every subsystem this guide
-covers at once: SUAVE mission analysis matters more over a multi-thousand-
-mile cruise than a regional hop, the wingbox FEM has a genuinely large
-structure to size, and the propulsion cycle is modeling a real
-high-bypass, high-OPR engine rather than a smaller turbofan with less
-margin to explore. If you swap in a different preset once you've read this
-guide, everything here still applies: you're changing the input, not the
-pipeline.
+ALAS provides six other airliner presets (A340-300, A380-800, B787-9,
+A320-200, A220-300, DC-10) selectable from the Inputs tab; selecting one
+re-scales the design space, cabin layout, and engine parameters accordingly.
+AVE serves as the default reference because widebody twin configurations exercise
+every coupled discipline simultaneously: transoceanic mission simulation,
+wingbox structural sizing, and high-bypass thermodynamic cycle modeling.
+
+Work is in progress to introduce dedicated presets and empirical sizing rules
+for Unmanned Aircraft Systems (UAS), addressing distinct low-Reynolds flight
+regimes and novel propulsion architectures.
 
 ## Where AVE's numbers come from
 
-Every figure and statistic in this guide, from here through
-[Reporting & export](reporting-and-export.md), was generated by an actual
-`python main.py` run against AVE's defaults: either
-`--no-optimize --plots` (the *baseline* pass, analyzing this exact
-geometry with no optimizer search) or a full optimize-and-analyze pass
-using `configs/example_config.yaml`. Where a chapter draws on one versus
-the other is called out explicitly, because the two give meaningfully
-different numbers: that difference *is* the subject of
-[Optimization results](optimization-results.md).
+Every figure and statistic in this guide was generated from computational
+runs of ALAS (`alas --no-optimize --plots` or `target/release/alas.exe --seed 42 --output isolated-dir --plots`)
+against AVE inputs: either evaluating the baseline geometry without optimization
+or performing a full optimization pass using `-c configs/example_config.yaml --plots`.
+
+Because numerical convergence depends on variable bounds, solver tolerances,
+and atmospheric conditions, stage execution times vary; ALAS provides no exact
+runtime guarantees. Where baseline and optimized evaluations diverge, the
+differences are documented in [Optimization results](optimization-results.md).

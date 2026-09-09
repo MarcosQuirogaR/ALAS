@@ -76,16 +76,14 @@ Fully covered in [Cabin & payload](../cabin-and-payload.md).
 
 ## Mission: `MissionConfig` / `MissionProfileConfig`
 
-Whether mission analysis runs at all, and where the isolated environment
-lives:
+Whether native mission analysis runs, and directory configuration for navigation data:
 
 | Field | Default | Meaning |
 |---|---|---|
-| `enabled` | true | Run SUAVE mission analysis as part of every `DesignPipeline.run()` |
-| `suave_venv_dir` | `.suave-venv` | Isolated Python 3.10 environment, repo-root-relative |
-| `navdata_dir` / `routes_dir` | `alas/data/{navdata,routes}` | Where the optional airway-graph download and cached routes live |
-| `great_circle_points` | 50 | Resolution of the always-available great-circle fallback route |
-| `timeout_s` | none | Subprocess timeout for the SUAVE run |
+| `enabled` | `true` | Run native mission segment analysis as part of the pipeline |
+| `navdata_dir` / `routes_dir` | `alas/data/{navdata,routes}` | Where downloaded navigation data and cached routes live |
+| `great_circle_points` | `50` | Resolution of the great-circle fallback route |
+| `timeout_s` | `120.0` | Maximum time allowed for mission simulation before reporting timeout |
 
 `MissionProfileConfig`'s ~30 fields (climb rates/speeds, three cruise-leg
 speed/distance fractions, a four-step descent ladder) are covered

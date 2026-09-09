@@ -3,20 +3,20 @@
 Every other chapter in this guide analyzes AVE sitting still: one flight
 condition, one design point. This chapter is the one place the aircraft
 actually *flies*: a full climb/cruise/descent simulation over a real route,
-run through [SUAVE](https://suave.stanford.edu) in its own isolated
-environment and bridged back into ALAS as ordinary figures and
-numbers.
+executed natively by `alas-mission` and output as detailed trajectory figures
+and tabular performance data.
 
-## Why a subprocess, not an import
+## Mission simulation architecture
 
-SUAVE 2.5.2 needs an old numpy/scipy/scikit-learn stack that directly
-conflicts with the versions ALAS's own optimizer and aerodynamics
-depend on. Rather than force one Python environment to satisfy both,
-ALAS shells out: `alas/integration/suave_bridge.py` calls the
-isolated `.suave-venv` interpreter as a subprocess, running a small runner
-script that builds a SUAVE vehicle and mission from a plain JSON request
-and writes results back as CSV. The main process never imports SUAVE
-directly: it's a clean process boundary, not a shared-environment hack.
+The mission segment solver translates aircraft geometry, engine deck models,
+and operational profiles into numerical flight segments (take-off, climb,
+stepped cruise, descent, reserves). The simulation is built natively into ALAS,
+incorporating segment methods and aerodynamic drag integrations translated
+from SUAVE (LGPL-2.1).
+
+Because mission analysis runs natively within `alas-pipeline`, it executes
+as a standard concurrent stage without requiring external Python interpreters
+or virtual environment management.
 
 ## The route
 
@@ -24,7 +24,7 @@ ALAS's default route is **London Heathrow (EGLL) → Dubai (OMDB)**:
 `departure_airport`/`arrival_airport` in the top-level app settings. This
 run used the great-circle routing tier (2,968 nm / 5,497 km) rather than
 the airway-graph tier, since that requires the optional navdata download
-described in [Installation](installation.md#optional-route-data).
+described in [Installation](installation.md#navigation-route-data).
 
 <figure markdown>
   ![Mission route, colored by mass](assets/ave-mission-route-light.png#only-light)

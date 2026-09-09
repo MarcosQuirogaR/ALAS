@@ -1,156 +1,99 @@
 # Troubleshooting
 
-Problems are grouped by when you hit them. Most of what looks like a
-failure here is an optional component reporting that it is absent, which is
-different from something being broken.
+Diagnostic guidance for common issues and solver warnings. Most warnings indicate
+optional external tool absences or expected physical limits rather than application
+failures.
 
-## Starting up
+---
 
-### Windows blocks the download or the first launch
+## Startup & Execution
 
-SmartScreen warns about executables it has not seen before, and this build
-is not code-signed. Choose **More info**, then **Run anyway**. If your
-browser blocked the download itself, use its downloads list to keep the
-file.
+### Windows SmartScreen warning
 
-### The window takes a long time to appear on first run
+Newly published release binaries are not code-signed. Windows SmartScreen may
+display a protective dialog. Select **More info**, then **Run anyway**.
 
-The first launch unpacks the bundled analysis stack, which is several
-hundred megabytes and a few thousand files. Later launches reuse what was
-unpacked and start much faster. If your antivirus scans on access, the
-first run is slower still.
+### The application will not launch on Linux
 
-### It starts, but the interface never loads
+Ensure the executable has execution permissions (`chmod +x alas`). If running
+from source via Cargo, verify that Rust and standard system build tools are installed.
 
-The application is a thin shell around a local analysis service, and the
-shell is waiting for that service to answer. Give it a minute on a slow or
-heavily-loaded machine. If it never connects, the usual cause is security
-software blocking a loopback connection: the service listens only on your
-own machine and never opens a network port to the outside.
+---
 
-## While setting up a design
+## Design Configuration & Sizing
 
-### The passenger count will not let me edit it
+### The passenger count cannot be edited
 
-Passenger count is derived from the cabin preset. Set the preset to
-**Custom** on the Inputs page and the field becomes editable. See
-[Cabin & payload](cabin-and-payload.md).
+The passenger count is derived from the active cabin layout. To set an arbitrary
+seat count, set the **Cabin preset** to `Custom` on the Inputs page.
 
-### A preset gives a different passenger count than I asked for
+### Layout passenger count differs slightly from target
 
-The layout engine places whole rows into the real fuselage shape and stops
-when it runs out of cabin. It will not invent a partial row to reach a
-round number, so a request for 350 seats can come back as 349.
+The cabin generator places integer seating rows within the real parametric fuselage
+cross-section. It does not invent fractional rows; if cabin volume is constrained,
+the actual seat count may round down to the nearest feasible integer.
 
-### The baseline pass says the design does not balance
+### The baseline evaluation reports center of gravity outside envelope
 
-This is the check doing its job. Something in the inputs is inconsistent:
-commonly a take-off weight the mass build-up cannot close against, a
-payload too large for the fuselage, or a wing position that puts the centre
-of gravity outside the envelope. Read the weight and balance tab and fix
-the input rather than moving on to a full run.
+This indicates an unclosed configuration balance: MTOW may be insufficient for the
+requested payload, or the wing root attachment position places the mean aerodynamic
+chord too far forward or aft relative to the payload and fuel distribution.
+Adjust wing position or fuselage stretch before launching optimization.
 
-## During a run
+---
 
-### A candidate is rejected as infeasible
+## Stage Results & Solver Diagnostics
 
-Expected, and frequent. The optimizer explores the whole bounded space,
-including combinations that violate a constraint, and penalises them. Worry
-only if convergence stalls completely or every candidate in a generation
-fails, which usually means the constraints have left no feasible region;
-loosen whichever one is binding.
+### An optional results tab reports "not available"
 
-### The run finishes but a results tab says "not available"
+When an optional stage cannot execute, ALAS degrades gracefully. The stage records
+a diagnostic status (`NotRun` or `Error`) and the rest of the pipeline completes:
 
-An optional stage did not run. The tab explains which and why. The rest of
-the run is unaffected. Common cases:
-
-| Tab | Usual cause |
+| Stage | Common cause |
 |---|---|
-| Mission & Route | Mission environment not set up; see [Installation](installation.md#mission-simulation-setup) |
-| MSES | The solver did not converge on this geometry |
-| Structures (vibration) | No Nastran licence; this check has no analytical fallback |
-| Structures (Patran renders) | No Patran licence |
+| **MSES** | Solver not installed in path, or solve did not achieve numerical convergence |
+| **Structures (vibration)** | MSC Nastran / NASTRAN-95 executable not configured |
+| **Airway routing** | Airway navigation data files not yet downloaded (`alas --download-navdata`) |
 
-### Mission analysis reports "not configured"
+### MSES reports non-converged points
 
-The isolated mission environment has not been provisioned. **Setup →
-External Tools** shows the SUAVE row and how to set it up. It is a one-time
-step of a couple of minutes.
+MSES is a viscous-inviscid coupled transonic solver. Non-convergence is an expected
+outcome when examining sections near boundary-layer separation, buffet onset, or
+under severe shock-induced adverse pressure gradients.
 
-### The transonic solve produces nothing
+In ALAS, non-converged points are recorded with diagnostic status codes and
+distinguished from converged data. To improve convergence on steep polars:
+- Check that section geometry does not contain sharp irregularities or zero-thickness trailing edges.
+- Narrow the angle-of-attack sweep in **Advanced Settings → MSES**.
+- Review solver transcript logs retained in the run directory.
 
-MSES ships with the application, so absence is rarely the reason. Far more
-often the solver did not converge, which is a normal outcome on some
-sections rather than a crash. If it reports the target lift coefficient
-outside its converged range, widen the sweep half-width on **Advanced
-Settings → MSES Analysis**.
+### Structural Nastran solver fails to run
 
-Very thin or otherwise degenerate sections (the kind an optimizer produces
-when a bound is set too wide) can also fail to mesh.
+MSC Nastran requires an independent licensed installation. Check that the solver
+path is correctly configured under **Setup → External Tools** or provided in the
+configuration YAML. Analytical beam and wingbox sizing calculations run natively
+without Nastran.
 
-### Nastran fails to launch
+---
 
-Nastran is not installed, not licensed, or not on a path the application
-can start it from. Check that it runs from a plain terminal before looking
-at the ALAS side. Every structural number except the vibration check
-comes from the built-in solver and does not need a licence at all: see
-[Structural analysis](structural-analysis.md).
+## Optimization
 
-### A long run appears to hang
+### Re-running the same case produces slightly different geometry
 
-Optimisation with a large population and iteration count is genuinely slow,
-and progress between generations can be quiet. The log is the thing to
-watch. Airfoil screening is the one long operation with a cancel button,
-because interrupting it is often the right move once you realise a filter
-was wrong.
+Optimization algorithms use stochastic population initialization. If the random
+seed is unset, runs will differ. Fix the seed via `--seed <INT>` or in
+**Advanced Settings → Optimizer** for bitwise reproducible runs.
 
-## Results and output
+### Optimization L/D differs from final report polar
 
-### Two runs of the same configuration give different answers
+The optimization loop evaluates candidates with a high-throughput aerodynamic model
+to rapidly assess thousands of geometries. The winning airframe is subsequently
+re-analyzed in full post-analysis stages. Always cite values from the final report.
 
-Check the optimizer seed. Left unset, each run starts from a different
-random population, and a search over this many constrained variables can
-settle on a different local optimum. Fix the seed on **Advanced Settings →
-Optimizer & weights** to make runs comparable.
+---
 
-### The optimizer's lift-to-drag does not match the final report
+## Further Assistance
 
-Correct, and expected. The search uses a deliberately cheap aerodynamic
-model, and the winning design is then re-analysed at full fidelity. The two
-numbers come from different calculations. Quote the second.
-
-### Figures are hard to read when pasted into a document
-
-Switch the theme before exporting. Figures follow the application theme, so
-the light theme gives you charts that sit properly on a white page. **View
-→ Light theme**, then export.
-
-### Where did my output go?
-
-Alongside the figures, every run writes a design database, the winning
-section coordinates and, if a mission ran, the flight data. The Results
-view exports a PDF report and a figure archive on demand. See
-[Reporting & export](reporting-and-export.md).
-
-## Running from source
-
-### A build under OneDrive fails with a locked directory
-
-OneDrive holds locks on freshly written files for longer than the build
-tolerates, which matters when a step has just produced several hundred
-megabytes. Delete the stale directory the error names and run again, or
-move the checkout outside a synced folder.
-
-### Installing pyvista or pyvistaqt fails
-
-Those belong to the optional `gui` group and are only needed for 3D
-previews and the textured map. Skip the group if you are working
-headlessly.
-
-## Nothing here matches
-
-Open an issue on
-[GitHub](https://github.com/MarcosQuirogaR/ALAS/issues) with what
-you did, what happened, and the log from the run. The log is the useful
-part: it names the stage that failed and usually the reason.
+For bug reports, solver crashes, or parity discrepancies, open an issue on
+[GitHub](https://github.com/MarcosQuirogaR/ALAS/issues) including the console
+diagnostic output and configuration YAML.

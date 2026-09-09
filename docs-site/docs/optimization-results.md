@@ -2,7 +2,7 @@
 
 This chapter runs the search described in
 [Design space & optimizer](design-space-and-optimizer.md) for real
-(`python main.py -c configs/example_config.yaml --plots`) and shows what
+(`alas -c configs/example_config.yaml --plots`) and shows what
 differential evolution actually does to AVE's baseline geometry over 15
 generations.
 
