@@ -7,12 +7,13 @@ no package manager, and no background sidecar service required.
 
 ### Windows
 
-- **Upcoming Release Candidate**: Under verification as a single native
-  `alas.exe` binary. The core application runs locally; full external multidisciplinary
-  analyses require compatible external solver executables and any necessary licenses.
-- **Legacy binary (v1.0.0, 2026-07-29)**: The previous public release remains
-  available on GitHub Releases for reference while the current candidate undergoes
-  verification.
+- **Upcoming Release Candidate**: Remains under verification as a native
+  `alas.exe` binary (Rust version 0.1.0) and is not published. The core application runs locally;
+  full multidisciplinary analyses require compatible external solver executables and any
+  necessary licenses.
+- **Legacy binary (v1.0.0, 2026-07-29)**: Historical Python 1.0.0 release (distinct
+  from the current Rust version 0.1.0), available on GitHub Releases for reference while the current
+  candidate undergoes verification.
 - **SmartScreen**: Windows may display an untrusted application warning on first
   launch of newly published binaries. Select **More info → Run anyway**.
 
@@ -54,6 +55,13 @@ unavailable when a tool is absent:
 
 Tool directories and executable paths are configured in the application under
 **Setup → External Tools** or through configuration files.
+
+Packaging and solver integration notes:
+
+- **AVL**: Packaging currently includes AVL with separate GPL source and notices.
+- **NASTRAN-95**: Optional and user-supplied unless a reviewed bundle is explicitly staged.
+- **MSES / MSC Nastran / Patran**: Remain user-supplied with required licenses.
+- **OpenVSP**: May run headless; preview fallback projects the actual VSPGEOM mesh, explicitly labelled, rather than a screenshot from the native GUI.
 
 ---
 

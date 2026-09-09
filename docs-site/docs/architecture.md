@@ -66,6 +66,11 @@ This enforces **honest degradation**:
   transcripts preserved.
 - Missing optional stages render as stated absences rather than empty axes or
   fabricated default values.
+- Partial numerical results identify the run and analysis stage that produced them.
+  Check the status before using a value from an unfinished analysis.
+- In external solvers such as MSES, finite contour files alone are not convergence;
+  accepted pressure data require recorded native convergence, and failed attempts
+  are retained as diagnostics.
 
 ### 2. Compile-time configuration metadata
 
@@ -77,8 +82,8 @@ From this single source of truth, ALAS generates:
 - CLI argument parsing and overrides.
 - Serialization and deserialization for YAML and JSON configuration files.
 
-No hardcoded design values exist in the solvers; every assumption is exposed
-and documented in the configuration layer.
+Configuration metadata controls supported inputs, while numerical and model
+assumptions remain documented in code.
 
 ### 3. Figures as vector scenes
 
@@ -96,8 +101,8 @@ text, coordinates, and axes).
 External tools (MSES, MSC Nastran, NASTRAN-95, AVL) are invoked as isolated child
 processes by `alas-exec`.
 
-- `alas-exec` prepares input decks, manages execution timeouts, and kills the entire
-  process tree on exit to prevent orphaned worker processes or lingering license holds.
+- `alas-exec` prepares input decks, manages execution timeouts, and terminates child
+  processes when a run ends or is cancelled.
 - Solvers report structured outputs or error logs; if an external solver is not
   installed, ALAS reports the stage unavailable without crashing.
 
