@@ -22,6 +22,9 @@ use external::show_external_tools_result;
 #[cfg(test)]
 use images::scene_has_external_images;
 pub use solver::SolverResultView;
+#[path = "results_progress.rs"]
+mod results_progress;
+use results_progress::show_progressive_results;
 
 /// One discipline tab in the Python desktop ResultsScreen.
 struct Tab {
@@ -164,13 +167,7 @@ pub fn show_results_view(state: &mut AppState, ui: &mut Ui) {
         crate::layout_debug::RegionKind::Content,
     );
     if state.pipeline_result.is_none() {
-        ui.centered_and_justified(|ui| {
-            ui.label(if state.is_running {
-                tr("Running the pipeline...")
-            } else {
-                tr("Press Run to optimize and analyze, or Analyze reference for a fixed-aircraft weight and balance pass.")
-            });
-        });
+        show_progressive_results(state, ui);
         return;
     }
 
@@ -341,6 +338,11 @@ fn figure_tile(
                             alas_viz::SceneView::new(scene, state.view_state_mut(view_key.clone()))
                                 .static_view()
                                 .show_toolbar(false)
+                                // A normal result card lives inside the page
+                                // ScrollArea.  Let an ordinary wheel gesture
+                                // move through the report; the fullscreen
+                                // viewer is the deliberate zoom surface.
+                                .wheel_zoom(false)
                                 .desired_size(vec2(canvas_width, canvas_height)),
                         );
                         if response.double_clicked() {

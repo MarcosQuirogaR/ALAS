@@ -195,6 +195,56 @@ impl Network {
         }
         activations
     }
+
+    /// Evaluate the network on a batch of inputs, one output vector per input.
+    ///
+    /// Bit-identical to calling [`Self::evaluate`] on each input: every
+    /// output is accumulated over the columns in the same order and the bias
+    /// and activation are applied at the same point. The batch only changes
+    /// the loop nest -- activations are held feature-major so that the
+    /// innermost loop runs across the batch with one weight, which the
+    /// compiler vectorizes and which reads each weight once per layer rather
+    /// than once per input. An airfoil sweep of a few dozen angles, each
+    /// evaluated direct and mirrored, is the batch this exists for.
+    pub(super) fn evaluate_batch(&self, inputs: &[[f64; INPUTS]]) -> Vec<Vec<f64>> {
+        let batch = inputs.len();
+        if batch == 0 {
+            return Vec::new();
+        }
+        let mut width = INPUTS;
+        let mut activations = vec![0.0; INPUTS * batch];
+        for (b, input) in inputs.iter().enumerate() {
+            for (feature, value) in input.iter().enumerate() {
+                activations[feature * batch + b] = *value;
+            }
+        }
+        let last = self.layers.len().saturating_sub(1);
+        for (index, layer) in self.layers.iter().enumerate() {
+            let mut next = vec![0.0; layer.rows * batch];
+            for row in 0..layer.rows {
+                let totals = &mut next[row * batch..(row + 1) * batch];
+                let weights = &layer.weights[row * layer.cols..row * layer.cols + width];
+                for (column, &weight) in weights.iter().enumerate() {
+                    let feature = &activations[column * batch..(column + 1) * batch];
+                    for (total, activation) in totals.iter_mut().zip(feature) {
+                        *total += weight * activation;
+                    }
+                }
+                let bias = layer.bias[row];
+                for total in totals.iter_mut() {
+                    *total += bias;
+                    if index != last {
+                        *total = swish(*total);
+                    }
+                }
+            }
+            activations = next;
+            width = layer.rows;
+        }
+        (0..batch)
+            .map(|b| (0..width).map(|row| activations[row * batch + b]).collect())
+            .collect()
+    }
 }
 
 /// Where the training data sat in the twenty-five-dimensional input space.

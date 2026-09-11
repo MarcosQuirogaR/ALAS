@@ -12,7 +12,7 @@ use crate::scene::{
 use crate::theme::get_palette;
 use alas_config::AlasConfig;
 use alas_mass::breakdown::{FUEL, OEW_KEYS, PAYLOAD};
-use alas_perf::landing_gear::size_landing_gear;
+use alas_perf::landing_gear::size_landing_gear_with_group_stations;
 use alas_pipeline::full_analysis::AnalysisReport;
 use std::collections::HashSet;
 use std::f64::consts::PI;
@@ -88,8 +88,12 @@ pub fn figure_landing_gear_planform(
     let fus_start_x = fus.xsecs[0].xyz_c[0];
     let fus_end_x = fus.xsecs[fus.xsecs.len() - 1].xyz_c[0];
     let fus_len = fus_end_x - fus_start_x;
-    let x_nlg = fus_start_x + fus_len * mm.nlg_x_fraction;
-    let x_mlg = x_mac_le + mm.mlg_x_fraction_mac * mac;
+    let fallback_x_nlg = fus_start_x + fus_len * mm.nlg_x_fraction;
+    let fallback_x_mlg = x_mac_le + mm.mlg_x_fraction_mac * mac;
+    let gear_stations =
+        gear_cfg.resolved_station_positions(fallback_x_nlg, fallback_x_mlg, fus_start_x, fus_len);
+    let x_nlg = gear_stations.x_nlg_m;
+    let x_mlg = gear_stations.x_mlg_m;
     let fus_diam = if config.geometry.fuselage.diameter_m > 0.0 {
         config.geometry.fuselage.diameter_m
     } else if fus.xsecs.is_empty() {
@@ -122,7 +126,7 @@ pub fn figure_landing_gear_planform(
         + masses.get(PAYLOAD).copied().unwrap_or(0.0)
         + masses.get(FUEL).copied().unwrap_or(0.0).max(0.0);
 
-    let gear = size_landing_gear(
+    let gear = size_landing_gear_with_group_stations(
         mtow_mass,
         x_nlg,
         x_mlg,
@@ -130,6 +134,7 @@ pub fn figure_landing_gear_planform(
         aero_aft_lim_x,
         fus_diam,
         fus_diam * 1.1,
+        &gear_stations.main_gear_x_m,
         gear_cfg,
     );
 

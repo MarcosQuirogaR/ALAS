@@ -15,6 +15,19 @@ use alas_opt::{assess_candidate, ConstraintFamily, DesignOptimizer};
 fn block_fuel_config() -> AlasConfig {
     let mut config = AlasConfig::default();
     config.optimizer.objective.kind = ObjectiveKind::BlockFuel;
+    // These tests isolate mission sizing and residual-family behavior. The
+    // transport body-attitude window is a separate clean-sheet design policy;
+    // the canonical default vector is intentionally outside that preferred
+    // window and is therefore not a suitable generic fixture for this file.
+    config
+        .optimizer
+        .weights
+        .transport_planform_constraints_enabled = false;
+    // The canonical vector is deliberately not a trimmed aircraft fixture;
+    // keep balance residuals visible while excluding them from the sizing
+    // assertions below so this file tests mission closure rather than a
+    // particular landing-gear/CG layout.
+    config.optimizer.objective.balance_constraints = ConstraintPolicy::Diagnostic;
     // The single-pass closure these tests were written against; the
     // product default sizes the takeoff mass by the mission.
     config.optimizer.objective.mtow_sizing = MtowSizing::FixedRequirement;
@@ -76,12 +89,10 @@ fn sized_by_mission_closes_and_never_exceeds_the_ceiling() {
 /// (3) A design range no transport can fly is `MtowLimited`, hard
 /// infeasible, and costs more than the feasible default.
 ///
-/// The default design is hard-feasible under the default (hard) geometry
-/// family: its tail volumes sit a few percent inside the preferred window,
-/// which ranks soft because the window is a plausibility band rather than a
-/// requirement, and its built wing area exceeds the configured cap by a few
-/// parts per million, which is the geometry builder's own rounding and lies
-/// inside the residual table's numerical slack.
+/// The fixture disables the transport planform policy and records balance
+/// residuals as diagnostics; this keeps the test focused on mission range,
+/// sizing and residual accounting while the dedicated parity tests cover
+/// reference balance layouts.
 #[test]
 fn an_impossible_design_range_is_hard_infeasible_and_costs_more() {
     let feasible_objective = DesignObjective::new(block_fuel_config());

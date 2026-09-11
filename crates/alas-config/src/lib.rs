@@ -54,6 +54,7 @@ pub mod performance;
 pub mod performance_presets;
 pub mod physics;
 pub mod preset_fuel_tanks;
+pub mod preset_structures;
 pub mod presets;
 pub mod propulsion;
 pub mod requirements;
@@ -97,7 +98,10 @@ pub use geometry::{
     GeometryConfig, InboardAerodynamicStation, MainWingPanel, MainWingStation, MainWingStationKind,
     TransportPlanform, TransportPlanformError, WingConfig,
 };
-pub use landing_gear::LandingGearConfig;
+pub use landing_gear::{
+    effective_main_gear_station, EffectiveGearStationExt, EffectiveMainGearStation,
+    GearStationRejection, LandingGearConfig, LandingGearStationPositions, ValidGearStation,
+};
 pub use mass::MassModelConfig;
 pub use mission::{resolve_true_airspeed_m_s, MissionConfig, MissionProfileConfig, SpeedReference};
 pub use mses::MsesConfig;
@@ -109,12 +113,12 @@ pub use performance::PerformanceConfig;
 pub use performance_presets::{PerformancePreset, UnknownPerformancePreset};
 pub use physics::DragModelConfig;
 pub use presets::{
-    AircraftPreset, AircraftReferenceData, AircraftVariantIdentity, CgEnvelopeCondition,
-    CgEnvelopeEvidence, CgEnvelopeSource, CgEnvelopeVertex, CgLimits, DesignMissionEvidence,
-    DesignMissionReference, MissingDesignMissionDatum, MissionEvidenceApplicability,
-    PartialDesignMissionEvidence, PartialMissionEvidenceKind, PlanningCgEnvelope,
-    PlanningMacReference, PublishedMissionLoadCase, PublishedRange, PublishedReserveContract,
-    UnknownAircraftPreset,
+    AircraftPreset, AircraftReferenceData, AircraftVariantIdentity, CertifiedExitLayout,
+    CertifiedExitPair, CgEnvelopeCondition, CgEnvelopeEvidence, CgEnvelopeSource, CgEnvelopeVertex,
+    CgLimits, DesignMissionEvidence, DesignMissionReference, MissingDesignMissionDatum,
+    MissionEvidenceApplicability, PartialDesignMissionEvidence, PartialMissionEvidenceKind,
+    PlanningCgEnvelope, PlanningMacReference, PublishedMissionLoadCase, PublishedRange,
+    PublishedReserveContract, UnknownAircraftPreset,
 };
 pub use propulsion::PropulsionCycleConfig;
 pub use requirements::{DesignRequirements, RequirementsError};

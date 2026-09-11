@@ -4,7 +4,7 @@
 use std::f64::consts::PI;
 
 use alas_aero::operating_point::OperatingPoint;
-use alas_aero::vlm::{self, VlmError, VlmResult};
+use alas_aero::vlm::{VlmError, VlmResult, VlmSystem};
 use alas_atmo::Atmosphere;
 use alas_config::analysis::AnalysisConfig;
 use alas_geom::aircraft::airplane::Airplane;
@@ -175,20 +175,13 @@ fn fuselage_cm_alpha_with_reference_mode(
 pub fn static_margin(airplane: &Airplane, analysis: &AnalysisConfig) -> Result<f64, VlmError> {
     let atmosphere = Atmosphere::new(0.0);
     let velocity = analysis.autobalance_velocity_m_s;
-    let r_lo = probe(
-        airplane,
-        analysis,
-        atmosphere,
-        velocity,
+    let (a_lo, a_hi) = (
         analysis.autobalance_alpha_low_deg,
-    )?;
-    let r_hi = probe(
-        airplane,
-        analysis,
-        atmosphere,
-        velocity,
         analysis.autobalance_alpha_high_deg,
-    )?;
+    );
+    let system = assemble(airplane, analysis)?;
+    let r_lo = probe(&system, atmosphere, velocity, a_lo)?;
+    let r_hi = probe(&system, atmosphere, velocity, a_hi)?;
     let d_cm = r_hi.cm_pitch - r_lo.cm_pitch;
     let d_cl = r_hi.cl_lift - r_lo.cl_lift;
     if d_cl.abs() < DEGENERACY_FLOOR {
@@ -254,20 +247,13 @@ fn neutral_point_with_reference_mode(
 ) -> Result<(f64, f64, f64), VlmError> {
     let atmosphere = Atmosphere::new(0.0);
     let velocity = analysis.autobalance_velocity_m_s;
-    let r_lo = probe(
-        airplane,
-        analysis,
-        atmosphere,
-        velocity,
+    let (a_lo, a_hi) = (
         analysis.autobalance_alpha_low_deg,
-    )?;
-    let r_hi = probe(
-        airplane,
-        analysis,
-        atmosphere,
-        velocity,
         analysis.autobalance_alpha_high_deg,
-    )?;
+    );
+    let system = assemble(airplane, analysis)?;
+    let r_lo = probe(&system, atmosphere, velocity, a_lo)?;
+    let r_hi = probe(&system, atmosphere, velocity, a_hi)?;
 
     let d_cl = r_hi.cl_lift - r_lo.cl_lift;
     let d_cm = r_hi.cm_pitch - r_lo.cm_pitch;
@@ -343,8 +329,9 @@ fn stability_and_trim_with_reference_mode(
     let a_hi = analysis.probe_alpha_high_deg;
     let delta_ih = analysis.trim_incidence_probe_delta_deg;
 
-    let r1 = probe(airplane, analysis, atmosphere, velocity, a_lo)?;
-    let r2 = probe(airplane, analysis, atmosphere, velocity, a_hi)?;
+    let system = assemble(airplane, analysis)?;
+    let r1 = probe(&system, atmosphere, velocity, a_lo)?;
+    let r2 = probe(&system, atmosphere, velocity, a_hi)?;
 
     let d_alpha = a_hi - a_lo;
     let (cl_alpha, cm_alpha) = if d_alpha.abs() > DEGENERACY_FLOOR {
@@ -406,7 +393,7 @@ fn stability_and_trim_with_reference_mode(
     };
 
     let perturbed = with_hstab_twist(airplane, i_h0 + delta_ih);
-    let r3 = probe(&perturbed, analysis, atmosphere, velocity, a_lo)?;
+    let r3 = probe(&assemble(&perturbed, analysis)?, atmosphere, velocity, a_lo)?;
 
     let cl_ih = (r3.cl_lift - r1.cl_lift) / delta_ih;
     let cm_ih = (r3.cm_pitch - r1.cm_pitch) / delta_ih;

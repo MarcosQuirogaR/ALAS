@@ -167,6 +167,7 @@ pub(crate) fn plan_fuel_loading(
     design: &DesignVector,
     report: &AnalysisReport,
 ) -> FuelLoadingAssessment {
+    let analysis_mass_basis_kg = report_mass_basis_kg(config, report);
     let gross_mtow_closure_fuel_kg = report
         .component_masses
         .get("Fuel")
@@ -174,16 +175,39 @@ pub(crate) fn plan_fuel_loading(
         .unwrap_or(f64::NAN);
     let usable_capacity = assess_fuel_capacity(config, design, report);
     let unusable_fuel_kg = resolved_unusable_fuel_kg(config, design, report);
-    let usable_mtow_closure_fuel_kg =
-        gross_mtow_closure_fuel_kg - unusable_fuel_kg.unwrap_or(0.0);
+    let usable_mtow_closure_fuel_kg = gross_mtow_closure_fuel_kg - unusable_fuel_kg.unwrap_or(0.0);
     FuelLoadingAssessment {
         unusable_fuel_kg,
         ..plan_from_values(
-            config.requirements.mtow_kg,
+            analysis_mass_basis_kg,
             usable_mtow_closure_fuel_kg,
             usable_capacity,
         )
     }
+}
+
+/// Return the takeoff-mass basis used to build a report.
+///
+/// A mission-sized finalist carries its closed mass in the report provenance,
+/// while `config.requirements.mtow_kg` remains the design or regulatory upper
+/// limit. Downstream mission and feasibility code must use the former for
+/// mass closure and retain the latter only as a limit; otherwise it silently
+/// recreates fuel and zero-fuel mass at the heavier ceiling.
+pub(crate) fn report_mass_basis_kg(config: &AlasConfig, report: &AnalysisReport) -> f64 {
+    let sized = report
+        .geometry_summary
+        .get("analysis_mass_basis_kg")
+        .copied();
+    let is_sized = report
+        .geometry_summary
+        .get("analysis_mass_basis_is_sized")
+        .is_some_and(|value| value.is_finite() && *value > 0.5);
+    if is_sized {
+        if let Some(value) = sized.filter(|value| value.is_finite() && *value > 0.0) {
+            return value;
+        }
+    }
+    config.requirements.mtow_kg
 }
 
 /// The tank-physical mass permanently unusable to the engines, from the same
@@ -417,6 +441,9 @@ pub(super) fn findings(mtow_kg: f64, fuel_loading: &FuelLoadingAssessment) -> Ve
     findings
 }
 
+// A test asserts on values it constructed here directly, so a failed unwrap
+// or expect is the assertion failing, not a library invariant being broken.
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -505,9 +532,10 @@ mod tests {
         let preset = presets::get("ATR72-600").expect("registered ATR preset");
         let config = AlasConfig::from_value(&serde_json::json!({"preset": preset.name}))
             .expect("ATR config");
-        let report = crate::full_analysis::FullAnalysis::new_reference_compatibility(config.clone())
-            .run(&preset.design_vector, true)
-            .expect("ATR full analysis");
+        let report =
+            crate::full_analysis::FullAnalysis::new_reference_compatibility(config.clone())
+                .run(&preset.design_vector, true)
+                .expect("ATR full analysis");
 
         let gross_fuel_kg = report
             .component_masses
@@ -583,8 +611,10 @@ mod tests {
         };
         assert!(findings(10_000.0, &unresolved)
             .iter()
-            .any(|finding| finding.code == FindingCode::FuelTankLayoutUnavailable
-                && finding.severity == FindingSeverity::Warning));
+            .any(
+                |finding| finding.code == FindingCode::FuelTankLayoutUnavailable
+                    && finding.severity == FindingSeverity::Warning
+            ));
     }
 
     #[test]

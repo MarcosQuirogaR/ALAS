@@ -174,10 +174,32 @@ pub fn figure_mses_convergence(result: &MsesPolarResult, theme: Option<&str>) ->
         angle_deg: 0.0,
         bold: false,
     });
+    if !result.transition_model_is_valid() {
+        scene.add(SceneElement::Text {
+            text: result.osmap_diagnostic.clone().unwrap_or_else(|| {
+                "Free-transition results are diagnostic only: no compatible OSMAP resource was resolved."
+                    .to_owned()
+            }),
+            pos: [60.0, 626.0],
+            font_size: 9.0,
+            color: Color::from_hex("#d97706"),
+            align: TextAlign::Left,
+            baseline: TextBaseline::Top,
+            angle_deg: 0.0,
+            bold: false,
+        });
+    }
     if let Some(error) = result.error.as_deref() {
         scene.add(SceneElement::Text {
             text: error.to_owned(),
-            pos: [60.0, 630.0],
+            pos: [
+                60.0,
+                if result.transition_model_is_valid() {
+                    630.0
+                } else {
+                    642.0
+                },
+            ],
             font_size: 9.0,
             color: Color::from_hex("#d62728"),
             align: TextAlign::Left,

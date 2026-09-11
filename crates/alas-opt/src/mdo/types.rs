@@ -11,6 +11,7 @@
 
 use alas_config::design_variables::DesignVector;
 use alas_config::ConstraintPolicy;
+use alas_mass::breakdown::{MassBreakdown, MassCoordinates};
 use alas_mass::dispatch::DispatchSolution;
 
 /// Which requirement family a [`ConstraintResidual`] belongs to.
@@ -364,11 +365,62 @@ pub struct SizedCandidate {
     pub structural_secondary_mass_kg: f64,
 }
 
+/// Where a [`ResolvedProductState`] came from, so a consumer can say which
+/// physical evaluation it is quoting instead of assuming every mass/CG state
+/// in the run is the same one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProductStateProvenance {
+    /// The converged mass/CG/trim fixed point of `mdo::mda::converge`, i.e.
+    /// the state the search's own hard-feasibility gate was evaluated on.
+    MissionSizedClosure,
+}
+
+impl ProductStateProvenance {
+    /// Stable identifier for reports, manifests and JSON exports.
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::MissionSizedClosure => "mdo::mda::converge",
+        }
+    }
+}
+
+/// The converged physical state a candidate's feasibility was actually
+/// decided on.
+///
+/// [`CandidateAssessment`] previously carried only scalars, so a downstream
+/// report had no way to reuse the balance state the search accepted and had
+/// to rebuild its own. Two independent rebuilds of "the same" aircraft can
+/// disagree about where it balances while agreeing on its takeoff mass, which
+/// is exactly how a hard-feasible finalist could be printed as physically
+/// infeasible. Carrying the state itself makes the two comparable, and the
+/// provenance keeps it explicit that these numbers are the search's, not a
+/// second opinion.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ResolvedProductState {
+    /// Component masses at the closed takeoff mass, kg.
+    pub masses: MassBreakdown,
+    /// Component centroids the balance was evaluated at, m.
+    pub coords: MassCoordinates,
+    /// Physical centre of gravity of `masses` at `coords`, m.
+    pub cg_x_m: f64,
+    /// Neutral point the static margin was measured against, m.
+    pub x_neutral_point_m: f64,
+    /// Mean aerodynamic chord the percentages are expressed in, m.
+    pub mac_m: f64,
+    /// Closed takeoff mass this state belongs to, kg.
+    pub takeoff_mass_kg: f64,
+    /// Which evaluation produced it.
+    pub provenance: ProductStateProvenance,
+}
+
 /// The residual table and scalar cost for one evaluated candidate.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CandidateAssessment {
     /// The candidate the mission was sized against.
     pub sized: SizedCandidate,
+    /// The converged mass/CG/neutral-point state the balance residuals above
+    /// were evaluated on, for a caller that must report the same aircraft.
+    pub resolved: ResolvedProductState,
     /// Every evaluated requirement, as a typed residual.
     pub residuals: Vec<ConstraintResidual>,
     /// Whether every hard-policy residual is satisfied.

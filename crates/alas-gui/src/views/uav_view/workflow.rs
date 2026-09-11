@@ -20,6 +20,30 @@ const MIN_WORKFLOW_TAB_WIDTH: f32 = 156.0;
 /// Capping the row at three tabs keeps labels easy to scan at wide sizes.
 const MAX_WORKFLOW_TAB_COLUMNS: usize = 3;
 
+/// The fixed-wing UAV page is visible for product discovery but remains gated
+/// until its catalogue and engineering inputs are release-ready.
+pub(super) const UAV_RELEASE_BLOCKED: bool = true;
+
+/// Make the release gate explicit before any editable or executable workflow
+/// control is shown.
+pub(super) fn release_blocker(ui: &mut Ui) {
+    card_frame(ui).show(ui, |ui| {
+        ui.set_min_width(ui.available_width());
+        ui.heading(tr("Fixed-Wing UAV"));
+        ui.colored_label(
+            ui.visuals().warn_fg_color,
+            RichText::new(tr("Work in progress")).strong(),
+        );
+        ui.label(RichText::new(tr("UAV workflow is blocked for this release.")).strong());
+        ui.label(
+            RichText::new(tr(
+                "The fixed-wing UAV module is unavailable in the release app while its engineering and catalogue inputs are completed.",
+            ))
+            .weak(),
+        );
+    });
+}
+
 /// Render the page identity and its responsive task navigation.
 pub(super) fn workflow_header(state: &mut UavWorkflowState, ui: &mut Ui) {
     card_frame(ui).show(ui, |ui| {

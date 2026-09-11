@@ -5,6 +5,27 @@
 
 use super::*;
 
+/// Whether the caller supplied a single literal fuselage-length bound.
+///
+/// The GUI uses fixed bounds for a reference/full-analysis review.  In that
+/// case the design vector is authoritative and the cabin-derived clean-sheet
+/// sizing solve must not silently replace it.  A non-degenerate bound keeps
+/// the normal derived-coordinate behavior.
+fn explicit_fuselage_length_bound(bounds: Option<&[(f64, f64)]>) -> bool {
+    let Some(bounds) = bounds else {
+        return false;
+    };
+    let Some(index) = alas_config::design_variables::SPECS
+        .iter()
+        .position(|spec| spec.name == "fuselage_length_m")
+    else {
+        return false;
+    };
+    bounds
+        .get(index)
+        .is_some_and(|&(lower, upper)| lower == upper)
+}
+
 #[path = "sqp_search.rs"]
 mod sqp_search;
 
@@ -88,7 +109,21 @@ impl DesignOptimizer {
             // legitimately pins this coordinate at the design's own literal
             // length; only the global spec bounds validated above apply.
             if design_space.sizes_fuselage_from_cabin() && variable.name == "fuselage_length_m" {
-                effective.push((requested_lower, requested_upper));
+                // The evaluator derives this coordinate from the cabin load
+                // case.  When the caller uses the optimizer's ordinary
+                // global bounds (or those bounds contain the derived value),
+                // remove the redundant search dimension and keep the winner
+                // self-consistent.  An explicitly incompatible fixed range
+                // remains caller-owned for compatibility with review tools
+                // that deliberately replay a literal design vector.
+                if bounds.is_none()
+                    || (requested_lower <= nominal.fuselage_length_m
+                        && nominal.fuselage_length_m <= requested_upper)
+                {
+                    effective.push((nominal.fuselage_length_m, nominal.fuselage_length_m));
+                } else {
+                    effective.push((requested_lower, requested_upper));
+                }
                 continue;
             }
             let (declared_lower, declared_upper) = (variable.lower, variable.upper);
@@ -111,7 +146,6 @@ impl DesignOptimizer {
         let nominal = initial_design.copied().unwrap_or_else(|| {
             self.config
                 .preset
-                .as_str()
                 .is_empty()
                 .then_some(DesignVector::default())
                 .or_else(|| {
@@ -145,18 +179,39 @@ impl DesignOptimizer {
         self.validate_request(bounds)?;
         let effective_bounds = self.effective_bounds(bounds, initial_design)?;
         let nominal = self.nominal_design(initial_design)?;
+        let preserve_explicit_fuselage_length = explicit_fuselage_length_bound(bounds);
         let mut objective = if self.reference_mass_coordinates {
             DesignObjective::new_reference_compatibility(self.config.clone())
         } else {
-            DesignObjective::new_with_nominal(self.config.clone(), nominal)
+            DesignObjective::new_with_nominal_and_fuselage_policy(
+                self.config.clone(),
+                nominal,
+                preserve_explicit_fuselage_length,
+            )
         };
 
+        let search_initial = if bounds.is_none()
+            && self
+                .config
+                .optimizer
+                .design_space
+                .sizes_fuselage_from_cabin()
+        {
+            Some(&nominal)
+        } else {
+            initial_design
+        };
         let result = if self.reference_mass_coordinates {
-            self.run_search(Some(&effective_bounds), initial_design, &mut objective, progress_callback)
+            self.run_search(
+                Some(&effective_bounds),
+                initial_design,
+                &mut objective,
+                progress_callback,
+            )
         } else {
             self.run_product_search(
                 Some(&effective_bounds),
-                initial_design,
+                search_initial,
                 &mut objective,
                 progress_callback,
             )
@@ -191,14 +246,31 @@ impl DesignOptimizer {
     ) -> Result<OptimizationResult, OptimizationError> {
         self.validate_request(bounds)?;
         let effective_bounds = self.effective_bounds(bounds, initial_design)?;
+        let nominal = self.nominal_design(initial_design)?;
+        let search_initial = if bounds.is_none()
+            && self
+                .config
+                .optimizer
+                .design_space
+                .sizes_fuselage_from_cabin()
+        {
+            Some(&nominal)
+        } else {
+            initial_design
+        };
         let mut objective =
             DelegatedObjective::new(evaluator, self.config.optimizer.weights.failure_cost);
         let result = if self.reference_mass_coordinates {
-            self.run_search(Some(&effective_bounds), initial_design, &mut objective, progress_callback)
+            self.run_search(
+                Some(&effective_bounds),
+                initial_design,
+                &mut objective,
+                progress_callback,
+            )
         } else {
             self.run_product_search(
                 Some(&effective_bounds),
-                initial_design,
+                search_initial,
                 &mut objective,
                 progress_callback,
             )
@@ -409,9 +481,18 @@ impl DesignOptimizer {
         bounds: Option<&[(f64, f64)]>,
         initial_design: Option<&DesignVector>,
         objective: &mut E,
-        mut progress_callback: Option<&mut dyn FnMut(&str)>,
+        progress_callback: Option<&mut dyn FnMut(&str)>,
     ) -> OptimizationResult {
         let solver = &self.config.optimizer.solver;
+        if solver.method == "sqp" {
+            return sqp_search::run(
+                &self.config,
+                bounds.unwrap_or(&DesignVector::bounds()),
+                initial_design,
+                objective,
+                progress_callback,
+            );
+        }
         let default_bounds = DesignVector::bounds();
         let bounds = bounds.unwrap_or(&default_bounds);
         let population_size = (solver.population_size.max(1) as usize * bounds.len()).max(2);
@@ -431,8 +512,7 @@ impl DesignOptimizer {
             initial_values.as_deref(),
             crate::search::mads::Settings {
                 max_iterations: generations,
-                max_evaluations: (population_size.saturating_mul(generations.max(1) + 1))
-                    .max(1),
+                max_evaluations: (population_size.saturating_mul(generations.max(1) + 1)).max(1),
                 seed,
                 ..Default::default()
             },

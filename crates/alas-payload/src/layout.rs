@@ -243,8 +243,19 @@ pub struct PassengerSummary {
     pub exit_pairs: i64,
     /// What those pairs are rated to evacuate.
     pub exit_capacity: i64,
-    /// The realistic capacity ceiling, which is what caps the seating.
+    /// The effective capacity ceiling after geometry and any source cap.
     pub max_certifiable_capacity: i64,
+    /// The geometry and exit-derived floor capacity before a source cap.
+    pub geometric_capacity: i64,
+    /// The immutable registered-aircraft source cap, when applicable.
+    pub source_capacity_cap: Option<i64>,
+    /// The source-defined exit-pair sequence, when the preset carries one.
+    ///
+    /// This is an evidence label such as `C-III-C`, not a certification
+    /// result produced by the layout engine.
+    pub source_exit_layout: Option<&'static str>,
+    /// Which ceiling bound the row allocation reached.
+    pub capacity_binding: &'static str,
     /// Total payload, tonnes.
     pub payload_t: f64,
     /// Occupants and their carry-on, tonnes.

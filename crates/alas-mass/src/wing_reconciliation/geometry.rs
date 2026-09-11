@@ -93,7 +93,7 @@ fn fixed_non_box_structure(config: &AlasConfig, wing: &Wing) -> FixedNonBoxStruc
 
 fn validate_secondary_breakdown(
     breakdown: WingSecondaryMassBreakdown,
-) -> Result<(), CandidateFailure> {
+) -> Result<(), WingReconciliationError> {
     let values = [
         breakdown.high_lift_devices_kg,
         breakdown.spoilers_and_speedbrakes_kg,
@@ -111,7 +111,7 @@ fn validate_secondary_breakdown(
     {
         Ok(())
     } else {
-        Err(structural_failure())
+        Err(WingReconciliationError::StructuralSizing)
     }
 }
 

@@ -152,7 +152,12 @@ impl ProfilePlan {
 pub(crate) enum LegKind {
     /// Departure to destination with the full configured ladders.
     Trip,
-    /// Missed approach to the alternate: one climb, one cruise, one landing.
+    /// Missed approach at the destination followed by the alternate leg.
+    ///
+    /// The reduced mission geometry currently has no separate alternate-field
+    /// elevation.  It therefore uses the trip arrival elevation as both the
+    /// go-around departure reference and the diversion landing reference,
+    /// while still flying the configured climb and descent tiers.
     Diversion,
 }
 
@@ -183,12 +188,24 @@ impl ProfileGeometry<'_> {
         })
     }
 
-    /// Cruise altitude the configuration asks for, never below either
-    /// aerodrome.
+    /// Cruise altitude the trip configuration asks for, never below either
+    /// trip aerodrome.
+    #[cfg(test)]
     pub fn configured_cruise_m(&self) -> f64 {
-        self.cruise_altitude_m
-            .max(self.departure_elevation_m)
-            .max(self.arrival_elevation_m)
+        self.configured_cruise_m_for(LegKind::Trip)
+    }
+
+    /// Cruise altitude the selected leg configuration asks for, m.
+    ///
+    /// A diversion starts at the trip arrival field.  Keeping its reference
+    /// elevations explicit avoids using the original departure field when a
+    /// route is rebuilt after a missed approach.
+    fn configured_cruise_m_for(&self, leg: LegKind) -> f64 {
+        let (departure, arrival) = match leg {
+            LegKind::Trip => (self.departure_elevation_m, self.arrival_elevation_m),
+            LegKind::Diversion => (self.arrival_elevation_m, self.arrival_elevation_m),
+        };
+        self.cruise_altitude_m.max(departure).max(arrival)
     }
 
     /// A climbing or descending leg from `start_m` to `end_m` flown at
@@ -247,18 +264,24 @@ impl ProfileGeometry<'_> {
 
     /// Lowest cruise altitude the ladders can be built at, m.
     pub fn floor_cruise_m(&self, leg: LegKind) -> f64 {
+        // Both legs open with the configured takeoff band -- the diversion
+        // is a go-around from the arrival field, see `diversion_ladders` --
+        // so neither may cruise below the top of that band. A floor at the
+        // field elevation itself let a short alternate distance plan the
+        // diversion cruise at 8 m above sea level at the literal cruise true
+        // airspeed, which no propulsion deck sustains.
         let start = match leg {
-            LegKind::Trip => self.departure_elevation_m + self.profile.takeoff_altitude_gain_m,
+            LegKind::Trip => self.departure_elevation_m,
             LegKind::Diversion => self.arrival_elevation_m,
-        };
+        } + self.profile.takeoff_altitude_gain_m;
         start.max(self.arrival_elevation_m) + MINIMUM_SEGMENT_ALTITUDE_M
     }
 
     /// Climb-rung altitude bands `(takeoff top, initial top, step-one top)`
     /// for a cruise at `cruise_m`.
-    fn climb_bands(&self, cruise_m: f64) -> (f64, f64, f64) {
+    fn climb_bands_from(&self, departure_m: f64, cruise_m: f64) -> (f64, f64, f64) {
         let p = self.profile;
-        let takeoff_top = (self.departure_elevation_m + p.takeoff_altitude_gain_m).min(cruise_m);
+        let takeoff_top = (departure_m + p.takeoff_altitude_gain_m).min(cruise_m);
         let initial_top = (cruise_m * p.initial_climb_altitude_fraction)
             .max(takeoff_top)
             .min(cruise_m);
@@ -268,11 +291,15 @@ impl ProfileGeometry<'_> {
         (takeoff_top, initial_top, step_one_top)
     }
 
-    fn climb_ladder(&self, cruise_m: f64) -> Result<Vec<Segment>, FuelModelError> {
+    fn climb_ladder_from(
+        &self,
+        departure_m: f64,
+        cruise_m: f64,
+    ) -> Result<Vec<Segment>, FuelModelError> {
         let p = self.profile;
         let mut segments = Vec::with_capacity(4 * self.cas_subdivisions);
-        let departure = self.departure_elevation_m;
-        let (takeoff_top, initial_top, step_one_top) = self.climb_bands(cruise_m);
+        let departure = departure_m;
+        let (takeoff_top, initial_top, step_one_top) = self.climb_bands_from(departure_m, cruise_m);
         for (kind, start, end, configured_speed, rate) in [
             (
                 SegmentKind::Takeoff,
@@ -326,9 +353,16 @@ impl ProfileGeometry<'_> {
         Ok(segments)
     }
 
-    fn descent_ladder(&self, cruise_m: f64) -> Result<Vec<Segment>, FuelModelError> {
+    fn climb_ladder(&self, cruise_m: f64) -> Result<Vec<Segment>, FuelModelError> {
+        self.climb_ladder_from(self.departure_elevation_m, cruise_m)
+    }
+
+    fn descent_ladder_to(
+        &self,
+        cruise_m: f64,
+        arrival_m: f64,
+    ) -> Result<Vec<Segment>, FuelModelError> {
         let p = self.profile;
-        let arrival = self.arrival_elevation_m;
         let mut segments = Vec::with_capacity(5 * self.cas_subdivisions);
         // Every configured true airspeed remains literal when the cruise
         // altitude is adapted. Calibrated legs resolve their configured CAS
@@ -356,7 +390,7 @@ impl ProfileGeometry<'_> {
                 p.descent_4_rate_m_s,
             ),
         ] {
-            let target = (target_ft * FOOT).max(arrival).min(altitude);
+            let target = (target_ft * FOOT).max(arrival_m).min(altitude);
             match p.climb_descent_speed_reference {
                 SpeedReference::TrueAirspeed => segments.extend(Segment::vertical(
                     SegmentKind::Descent,
@@ -383,7 +417,7 @@ impl ProfileGeometry<'_> {
                 segments.extend(Segment::vertical(
                     SegmentKind::Landing,
                     altitude,
-                    arrival,
+                    arrival_m,
                     p.landing_air_speed_m_s,
                     p.landing_descent_rate_m_s,
                 )?);
@@ -392,7 +426,7 @@ impl ProfileGeometry<'_> {
                 segments.extend(self.cas_vertical_segments(
                     SegmentKind::Landing,
                     altitude,
-                    arrival,
+                    arrival_m,
                     p.landing_air_speed_m_s,
                     p.landing_descent_rate_m_s,
                     self.cas_subdivisions,
@@ -402,52 +436,22 @@ impl ProfileGeometry<'_> {
         Ok(segments)
     }
 
+    fn descent_ladder(&self, cruise_m: f64) -> Result<Vec<Segment>, FuelModelError> {
+        self.descent_ladder_to(cruise_m, self.arrival_elevation_m)
+    }
+
     fn diversion_ladders(
         &self,
         cruise_m: f64,
     ) -> Result<(Vec<Segment>, Vec<Segment>), FuelModelError> {
-        let p = self.profile;
-        let start = self.arrival_elevation_m;
-        let (climb, descent) = match p.climb_descent_speed_reference {
-            SpeedReference::TrueAirspeed => (
-                Segment::vertical(
-                    SegmentKind::Climb,
-                    start,
-                    cruise_m,
-                    p.initial_climb_air_speed_m_s,
-                    p.initial_climb_rate_m_s,
-                )?
-                .into_iter()
-                .collect(),
-                Segment::vertical(
-                    SegmentKind::Landing,
-                    cruise_m,
-                    start,
-                    p.landing_air_speed_m_s,
-                    p.landing_descent_rate_m_s,
-                )?
-                .into_iter()
-                .collect(),
-            ),
-            SpeedReference::CalibratedAirspeed => (
-                self.cas_vertical_segments(
-                    SegmentKind::Climb,
-                    start,
-                    cruise_m,
-                    p.initial_climb_air_speed_m_s,
-                    p.initial_climb_rate_m_s,
-                    self.cas_subdivisions,
-                )?,
-                self.cas_vertical_segments(
-                    SegmentKind::Landing,
-                    cruise_m,
-                    start,
-                    p.landing_air_speed_m_s,
-                    p.landing_descent_rate_m_s,
-                    self.cas_subdivisions,
-                )?,
-            ),
-        };
+        // A missed approach is a go-around from the trip arrival field.  Use
+        // the same configured takeoff/initial/step climb tiers as a trip,
+        // then use the complete descent ladder and its low-speed landing
+        // segment to the current model's alternate-field reference.  The
+        // latter is the trip arrival elevation until the model gains a
+        // separate alternate-elevation input.
+        let climb = self.climb_ladder_from(self.arrival_elevation_m, cruise_m)?;
+        let descent = self.descent_ladder_to(cruise_m, self.arrival_elevation_m)?;
         Ok((climb, descent))
     }
 
@@ -490,7 +494,7 @@ impl ProfileGeometry<'_> {
         };
         let plan = ProfilePlan {
             cruise_altitude_m: cruise_m,
-            adapted: cruise_m < self.configured_cruise_m(),
+            adapted: cruise_m < self.configured_cruise_m_for(leg),
             climb,
             cruise_rungs,
             descent,
@@ -518,7 +522,7 @@ impl ProfileGeometry<'_> {
                 distance_m: range_m,
             });
         }
-        let configured = self.configured_cruise_m();
+        let configured = self.configured_cruise_m_for(leg);
         match self.plan_at(leg, range_m, configured) {
             Err(FuelModelError::RouteTooShort { .. }) => {}
             other => return other,
@@ -547,7 +551,7 @@ impl ProfileGeometry<'_> {
     /// Horizontal footprint of the non-cruise phases at the configured
     /// cruise altitude, m.
     pub fn configured_footprint_m(&self, leg: LegKind) -> Result<f64, FuelModelError> {
-        let cruise = self.configured_cruise_m();
+        let cruise = self.configured_cruise_m_for(leg);
         let (climb, descent) = match leg {
             LegKind::Trip => (self.climb_ladder(cruise)?, self.descent_ladder(cruise)?),
             LegKind::Diversion => self.diversion_ladders(cruise)?,
@@ -567,6 +571,179 @@ impl ProfileGeometry<'_> {
 mod tests {
     use super::*;
     use alas_config::mission::CAS_SPEED_SUBDIVISIONS;
+    use alas_units::NAUTICAL_MILE;
+
+    #[test]
+    fn diversion_uses_configured_climb_and_descent_tiers_from_arrival_field() {
+        let profile = MissionProfileConfig::default();
+        let cruise_m = 10_000.0;
+        let arrival_m = 250.0;
+        let geometry = ProfileGeometry {
+            profile: &profile,
+            // Deliberately keep the original departure field above the
+            // diversion cruise altitude.  A missed approach starts at the
+            // arrival field, so it must not inherit this trip-only reference.
+            departure_elevation_m: 12_000.0,
+            arrival_elevation_m: arrival_m,
+            cruise_altitude_m: cruise_m,
+            cas_subdivisions: CAS_SPEED_SUBDIVISIONS,
+            isa_deviation_c: 0.0,
+        };
+        let plan = geometry
+            .plan_at(LegKind::Diversion, 2_000_000.0, cruise_m)
+            .expect("the high-altitude diversion profile fits the long test route");
+
+        assert!(
+            !plan.adapted,
+            "diversion configuration uses its own arrival reference"
+        );
+        assert_eq!(geometry.configured_cruise_m(), 12_000.0);
+
+        let expected_climb = [
+            (SegmentKind::Takeoff, profile.takeoff_air_speed_m_s),
+            (SegmentKind::Climb, profile.initial_climb_air_speed_m_s),
+            (SegmentKind::Climb, profile.step_climb_1_air_speed_m_s),
+            (SegmentKind::Climb, profile.step_climb_2_air_speed_m_s),
+        ];
+        assert_eq!(plan.climb.len(), expected_climb.len());
+        assert!((plan.climb.first().unwrap().start_altitude_m - arrival_m).abs() < 1.0e-9);
+        assert!((plan.climb.last().unwrap().end_altitude_m - cruise_m).abs() < 1.0e-9);
+        for (segment, (kind, speed_m_s)) in plan.climb.iter().zip(expected_climb) {
+            assert_eq!(segment.kind, kind);
+            assert_eq!(segment.tas_m_s, speed_m_s);
+        }
+
+        let expected_descent = [
+            (SegmentKind::Descent, profile.descent_1_air_speed_m_s),
+            (SegmentKind::Descent, profile.descent_2_air_speed_m_s),
+            (SegmentKind::Descent, profile.descent_3_air_speed_m_s),
+            (SegmentKind::Descent, profile.descent_4_air_speed_m_s),
+            (SegmentKind::Landing, profile.landing_air_speed_m_s),
+        ];
+        assert_eq!(plan.descent.len(), expected_descent.len());
+        assert!((plan.descent.first().unwrap().start_altitude_m - cruise_m).abs() < 1.0e-9);
+        assert!((plan.descent.last().unwrap().end_altitude_m - arrival_m).abs() < 1.0e-9);
+        for (segment, (kind, speed_m_s)) in plan.descent.iter().zip(expected_descent) {
+            assert_eq!(segment.kind, kind);
+            assert_eq!(segment.tas_m_s, speed_m_s);
+        }
+        let approach_top_m = profile.descent_4_altitude_ft * FOOT;
+        assert!(
+            plan.descent.last().unwrap().start_altitude_m <= approach_top_m + 1.0e-9,
+            "the low-speed landing segment must start at the approach rung, not cruise altitude"
+        );
+        assert!(
+            plan.descent
+                .iter()
+                .any(|segment| segment.kind == SegmentKind::Descent),
+            "a diversion must retain high-altitude descent phases"
+        );
+    }
+
+    #[test]
+    fn calibrated_airspeed_diversion_keeps_the_same_phase_boundaries() {
+        // The default profile is true-airspeed based; its 250 m/s step speed
+        // is above the subsonic CAS conversion domain at this altitude.  Use
+        // a deliberately subsonic calibrated schedule here so the test
+        // checks phase construction rather than a profile-domain rejection.
+        let mut profile = MissionProfileConfig {
+            climb_descent_speed_reference: SpeedReference::CalibratedAirspeed,
+            takeoff_air_speed_m_s: 110.0,
+            initial_climb_air_speed_m_s: 140.0,
+            ..MissionProfileConfig::default()
+        };
+        profile.step_climb_1_air_speed_m_s = 160.0;
+        profile.step_climb_2_air_speed_m_s = 165.0;
+        profile.descent_1_air_speed_m_s = 160.0;
+        profile.descent_2_air_speed_m_s = 150.0;
+        profile.descent_3_air_speed_m_s = 140.0;
+        profile.descent_4_air_speed_m_s = 130.0;
+        profile.landing_air_speed_m_s = 110.0;
+        let cruise_m = 10_000.0;
+        let arrival_m = 250.0;
+        let subdivisions = 4;
+        let geometry = ProfileGeometry {
+            profile: &profile,
+            departure_elevation_m: 12_000.0,
+            arrival_elevation_m: arrival_m,
+            cruise_altitude_m: cruise_m,
+            cas_subdivisions: subdivisions,
+            isa_deviation_c: 0.0,
+        };
+        let plan = geometry
+            .plan_at(LegKind::Diversion, 2_000_000.0, cruise_m)
+            .expect("the calibrated-airspeed diversion profile resolves");
+
+        assert_eq!(plan.climb.len(), 4 * subdivisions);
+        assert_eq!(plan.descent.len(), 5 * subdivisions);
+        assert!((plan.climb.first().unwrap().start_altitude_m - arrival_m).abs() < 1.0e-9);
+        assert!((plan.climb.last().unwrap().end_altitude_m - cruise_m).abs() < 1.0e-9);
+        assert!(plan
+            .climb
+            .iter()
+            .take(subdivisions)
+            .all(|segment| { segment.kind == SegmentKind::Takeoff }));
+        assert!(plan
+            .climb
+            .iter()
+            .skip(subdivisions)
+            .all(|segment| { segment.kind == SegmentKind::Climb }));
+        assert!(plan
+            .descent
+            .iter()
+            .take(4 * subdivisions)
+            .all(|segment| { segment.kind == SegmentKind::Descent }));
+        assert!(plan
+            .descent
+            .iter()
+            .skip(4 * subdivisions)
+            .all(|segment| segment.kind == SegmentKind::Landing));
+        assert!((plan.descent.last().unwrap().end_altitude_m - arrival_m).abs() < 1.0e-9);
+        assert!(
+            plan.climb
+                .windows(2)
+                .take(subdivisions - 1)
+                .all(|pair| pair[1].tas_m_s > pair[0].tas_m_s),
+            "constant CAS must resolve rising TAS through the high-altitude takeoff rung"
+        );
+    }
+
+    #[test]
+    fn default_diversion_200_nmi_closes_with_tiered_profile() {
+        let profile = MissionProfileConfig::default();
+        let geometry = ProfileGeometry {
+            profile: &profile,
+            departure_elevation_m: 0.0,
+            arrival_elevation_m: 0.0,
+            cruise_altitude_m: 10_668.0, // 35,000 ft, m
+            cas_subdivisions: CAS_SPEED_SUBDIVISIONS,
+            isa_deviation_c: 0.0,
+        };
+        let range_m = 200.0 * NAUTICAL_MILE;
+        let plan = geometry
+            .plan(LegKind::Diversion, range_m)
+            .expect("the default 200 nmi diversion must dispatch with altitude adaptation");
+
+        assert!(
+            plan.adapted,
+            "200 nmi is shorter than the full configured profile footprint"
+        );
+        assert!(plan.cruise_altitude_m > geometry.floor_cruise_m(LegKind::Diversion));
+        assert!(plan.cruise_distance_m() >= -1.0e-9);
+        let closed_range_m =
+            plan.climb_footprint_m() + plan.cruise_distance_m() + plan.descent_footprint_m();
+        assert!(
+            (closed_range_m - range_m).abs() <= 1.0e-6,
+            "profile dispatch must close the requested still-air distance: {closed_range_m} vs {range_m} m"
+        );
+        assert_eq!(plan.climb.len(), 4);
+        assert!(plan.descent.len() >= 2);
+        assert!(plan
+            .descent
+            .iter()
+            .any(|segment| segment.kind == SegmentKind::Descent));
+        assert_eq!(plan.descent.last().unwrap().kind, SegmentKind::Landing);
+    }
 
     /// A calibrated-airspeed climb's true airspeed rises with altitude
     /// (falling density), and the sub-rung discretization converges as it is

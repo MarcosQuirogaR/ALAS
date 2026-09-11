@@ -23,6 +23,7 @@ use alas_config::{AlasConfig, MtowSizing};
 use alas_geom::aircraft::airplane::Airplane;
 use alas_mass::breakdown::{MassBreakdown, MassCoordinates, PayloadLayoutSummary};
 use alas_mass::dispatch::{solve_dispatch, DispatchLimits, DispatchSolution, DispatchStatus};
+use alas_payload::build::build_payload_layout;
 use alas_payload::oew::oew_and_cg;
 
 use super::build::mass_analysis_with_structural_feedback;
@@ -37,8 +38,6 @@ pub(crate) struct MdaContext<'a> {
     pub config: &'a AlasConfig,
     /// The design vector, for the aerodynamic analysis.
     pub dv: &'a DesignVector,
-    /// Payload layout the mass analysis places.
-    pub summary: &'a PayloadLayoutSummary,
     /// Shared segment-integrated model with the candidate polar and engine
     /// terms filled in.
     pub model: SegmentMissionModel,
@@ -137,11 +136,45 @@ pub(crate) fn converge(
             pass_requirements.mtow_kg = tow_k;
             let mut pass_config = config.clone();
             pass_config.requirements = pass_requirements;
+            // Two passes at this takeoff mass, the same structure
+            // `build::first_mass_pass` and `alas-pipeline`'s report both use:
+            // a lumped pass establishes the operating empty mass and its
+            // centroid, the cabin is laid out against *those*, and the
+            // detailed pass closes on the layout just placed.
+            //
+            // Freezing the ceiling-mass layout through the whole closure
+            // instead -- which is what happened while `context.summary` was
+            // the only summary in the loop -- leaves the search balancing a
+            // cabin loaded against an operating empty mass the candidate no
+            // longer has, and is the last input the final report did not
+            // share with it.
+            let (lumped_masses, lumped_coords, ..) = mass_analysis_with_structural_feedback(
+                &pass_config,
+                context.dv,
+                plane,
+                None,
+                context.structural_reference,
+            )?;
+            let (pass_oew, pass_x_oew) = oew_and_cg(&lumped_masses, &lumped_coords);
+            let layout =
+                build_payload_layout(plane, &pass_config, pass_oew, pass_x_oew).map_err(|_| {
+                    CandidateFailure {
+                        reason: "payload_layout",
+                    }
+                })?;
+            // The cabin layout this pass loads: re-placed at every closed
+            // mass below the takeoff-mass ceiling `build::first_mass_pass`
+            // placed `context.summary` at, which the first pass used.
+            let summary = PayloadLayoutSummary {
+                total_mass: layout.total_mass,
+                cg_x: layout.cg_x,
+                cg_y: layout.cg_y,
+            };
             let (masses, coords, cg, feedback, _, _) = mass_analysis_with_structural_feedback(
                 &pass_config,
                 context.dv,
                 plane,
-                Some(context.summary),
+                Some(&summary),
                 context.structural_reference,
             )?;
             structural_feedback = feedback;

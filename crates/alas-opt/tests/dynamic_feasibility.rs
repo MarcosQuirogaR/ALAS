@@ -13,17 +13,30 @@ use alas_opt::{DesignOptimizer, ObjectiveEvaluation, OptimizationError};
 fn public_de_returns_a_valid_candidate_when_an_invalid_one_is_cheaper() {
     for seed in [0, 1, 42, 99] {
         let mut config = AlasConfig::default();
-        config.optimizer.solver.max_iterations = 0;
+        // A zero-iteration product search only evaluates the midpoint, so it
+        // cannot exercise feasibility-first ordering. One search iteration
+        // supplies the initial population and a competing trial set.
+        config.optimizer.solver.max_iterations = 1;
         config.optimizer.solver.population_size = 1;
         config.optimizer.solver.seed = Some(seed);
         config.optimizer.solver.seed_near_initial_design = false;
 
-        // Latin-hypercube initialization over [0, 1] necessarily visits both
-        // sides of the span threshold.  The invalid side is deliberately
-        // cheaper so scalar-only ranking would select it.
-        let bounds = vec![(0.0, 1.0); alas_config::design_variables::SPECS.len()];
+        // Every fixed coordinate is a physically valid nominal value. The
+        // only free coordinate is span, using its declared [60, 80] m range;
+        // the invalid side is deliberately cheaper so scalar-only ranking
+        // would select it. The old [0, 1] fixture was rejected by the
+        // design-mode envelope before the evaluator could run.
+        let nominal = DesignVector::default();
+        let span_bounds = DesignVector::bounds()[0];
+        let mut bounds: Vec<(f64, f64)> = nominal
+            .to_array()
+            .into_iter()
+            .map(|value| (value, value))
+            .collect();
+        bounds[0] = span_bounds;
+        let threshold = 0.5 * (span_bounds.0 + span_bounds.1);
         let mut evaluator = |design: &DesignVector| {
-            if design.span_m >= 0.5 {
+            if design.span_m >= threshold {
                 ObjectiveEvaluation {
                     cost: 10.0,
                     valid: true,

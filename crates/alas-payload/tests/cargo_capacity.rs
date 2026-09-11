@@ -8,7 +8,9 @@
 
 use alas_config::{presets, AlasConfig, CargoDeckConfig};
 use alas_geom::builder::AircraftBuilder;
-use alas_payload::{CabinGeometry, CargoLoadManager};
+use alas_payload::{
+    cabin::cabin_deck_segments, cabin::select_exit_type, CabinGeometry, CargoLoadManager,
+};
 
 fn geometry(name: &str) -> CabinGeometry {
     let preset = presets::get(name).expect("registered preset");
@@ -164,6 +166,106 @@ fn a220_passenger_baggage_uses_the_configured_bulk_only_system() {
     );
     assert_eq!(manager.capacity_summary().uld_positions, 0);
     assert_eq!(manager.capacity_summary().container_internal_volume_m3, 0.0);
+}
+
+#[test]
+fn a220_registered_source_capacity_is_applied_during_row_allocation() {
+    let preset = presets::get("A220-300").expect("registered A220");
+    let config = AlasConfig::from_value(&serde_json::json!({"preset": "A220-300"}))
+        .expect("A220 configuration");
+    assert_eq!(config.requirements.num_passengers, 130);
+    assert_eq!(config.cabin.passenger.class_mix_mode, "percent");
+    let plane = AircraftBuilder::new(Some(config.geometry.clone()))
+        .build(Some(&preset.design_vector), true)
+        .expect("A220 geometry");
+    let cabin = CabinGeometry::new(
+        &plane,
+        &config.geometry,
+        config.cabin.passenger.wall_thickness_m,
+    )
+    .expect("A220 cabin geometry");
+    let segments = cabin_deck_segments(&cabin);
+    assert_eq!(segments.len(), 1);
+    assert_eq!(select_exit_type(cabin.diameter_m).name, "III");
+    let deck_length_m = segments[0].x1 - segments[0].x0;
+    assert!((deck_length_m - 29.75).abs() < 0.01);
+    let layout = alas_payload::build_payload_layout(&plane, &config, 0.0, 0.0)
+        .expect("A220 source-capped payload");
+    let alas_payload::LayoutSummary::Passenger(summary) = &layout.summary else {
+        panic!("A220 registered preset must use passenger layout");
+    };
+
+    assert_eq!(preset.reference.certified_max_seats, Some(145));
+    assert_eq!(summary.source_capacity_cap, Some(145));
+    assert_eq!(summary.source_exit_layout, Some("C-III-C"));
+    assert_eq!(summary.exit_type, "C-III-C");
+    assert_eq!(summary.exit_pairs, 3);
+    assert_eq!(summary.exit_capacity, 145);
+    // The source sequence replaces the generic diameter proxy on the product
+    // path.  Keep the registered 145-seat sum and the actual row-pass result
+    // visible; this must not turn the source cap into a post-hoc count
+    // truncation.
+    assert_eq!(summary.geometric_capacity, 145);
+    assert!(
+        summary.geometric_capacity
+            <= summary
+                .source_capacity_cap
+                .expect("the source exit layout caps the capacity")
+    );
+    assert_eq!(summary.max_certifiable_capacity, summary.geometric_capacity);
+    assert_eq!(summary.capacity_binding, "source_exit_layout");
+    assert_eq!(summary.total_pax, summary.geometric_capacity);
+    assert_eq!(summary.seated_pax, summary.total_pax);
+    assert_eq!(summary.unseated_pax, 0);
+
+    // The cap is enforced by the same row pass that creates the mass-bearing
+    // items.  This guards against reporting 145 after laying out a larger
+    // geometry and truncating only the summary count.
+    let row_seats: i64 = layout
+        .items
+        .iter()
+        .filter_map(|item| match &item.meta {
+            alas_payload::ItemMeta::Seat(meta) => Some(meta.filled),
+            _ => None,
+        })
+        .sum();
+    assert_eq!(row_seats, summary.seated_pax);
+    let exit_types: Vec<&str> = layout
+        .items
+        .iter()
+        .filter_map(|item| match &item.meta {
+            alas_payload::ItemMeta::Exit(meta) => Some(meta.exit_type),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(exit_types, vec!["C", "C", "III", "III", "C", "C"]);
+
+    // CS-25.807's adjacent-exit spacing criterion is 18.3 m for the
+    // applicable source arrangement.  The model emits two physical doors at
+    // each pair station; collapse those coincident x coordinates before
+    // checking the longitudinal pair spacing.  This is a geometry/layout
+    // check only and does not claim the full evacuation demonstration.
+    let mut pair_stations: Vec<f64> = layout
+        .items
+        .iter()
+        .filter_map(|item| match &item.meta {
+            alas_payload::ItemMeta::Exit(_) => Some(item.x),
+            _ => None,
+        })
+        .collect();
+    pair_stations.sort_by(f64::total_cmp);
+    pair_stations.dedup_by(|a, b| (*a - *b).abs() < 1.0e-9);
+    assert_eq!(pair_stations.len(), 3);
+    assert!(pair_stations
+        .windows(2)
+        .all(|window| window[1] - window[0] <= 18.3 + 1.0e-9));
+    let row_mass_kg: f64 = layout
+        .items
+        .iter()
+        .filter(|item| item.kind == alas_payload::ItemKind::SeatRow)
+        .map(|item| item.mass)
+        .sum();
+    assert!((row_mass_kg - 1_000.0 * summary.seat_mass_t).abs() < 1.0e-9);
 }
 
 #[test]

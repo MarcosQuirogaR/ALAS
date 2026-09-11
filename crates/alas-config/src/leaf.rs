@@ -115,6 +115,19 @@ impl Leaf for Vec<f64> {
     }
 }
 
+impl Leaf for Vec<i64> {
+    /// Integer lists use the same number-list editor as floating-point lists.
+    /// This is used by discrete configuration data such as heterogeneous
+    /// landing-gear bogie wheel counts.
+    fn kind(&self, _name: &str) -> Kind {
+        if self.is_empty() {
+            Kind::Unsupported
+        } else {
+            Kind::NumberList
+        }
+    }
+}
+
 impl Leaf for Vec<(f64, f64)> {
     /// Empty behaves as it does for a list of numbers, and for the same
     /// upstream reason.

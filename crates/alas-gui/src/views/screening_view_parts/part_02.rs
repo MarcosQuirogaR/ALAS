@@ -151,7 +151,10 @@ fn show_result(
                             let view = SceneView::new(&scene, state.view_state_mut(view_key))
                                 .static_view()
                                 .show_toolbar(false)
-                                .wheel_zoom(true)
+                                // Screening cards share the page ScrollArea;
+                                // zoom is available in the fullscreen/result
+                                // viewer instead of stealing page scrolling.
+                                .wheel_zoom(false)
                                 .desired_size(vec2(
                                     canvas_width,
                                     screening_figure_height(canvas_width, &scene),
@@ -269,4 +272,3 @@ mod tests {
         );
     }
 }
-

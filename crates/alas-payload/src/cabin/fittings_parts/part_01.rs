@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-use alas_config::{CargoDeckConfig, DesignRequirements, PassengerCabinConfig};
+use alas_config::{CargoDeckConfig, CertifiedExitLayout, DesignRequirements, PassengerCabinConfig};
 
 use super::seating::Seating;
 use super::{
-    cabin_deck_segments, ceil_div, min_exit_pairs, monument_fill_order, select_exit_type,
-    spread_bay_indices, stack_y, Bay, MonumentSide, MONUMENT_LEN, SEAT_BOX_H,
+    cabin_deck_segments, ceil_div, effective_pair_capacity, min_exit_pairs, monument_fill_order,
+    select_exit_type, spread_bay_indices, stack_y, Bay, ExitSpec, MonumentSide, EXIT_TYPES,
+    MONUMENT_LEN, SEAT_BOX_H,
 };
 use crate::cargo::{CargoLoadManager, CargoMassSemantics};
 use crate::geometry::CabinGeometry;
@@ -290,8 +291,8 @@ pub(super) struct Exits {
     pub exit_type: &'static str,
     /// Pairs installed, summed over the passenger decks.
     pub pairs: i64,
-    /// What one door of that type is rated for, per side.
-    pub capacity_per_side: i64,
+    /// Sum of the ratings of the installed complete exit pairs.
+    pub capacity_total: i64,
 }
 
 /// Size and place one exit-pair set per passenger deck.
@@ -303,17 +304,23 @@ pub(super) struct Exits {
 /// otherwise be given doors for.
 pub(super) fn place_exits(
     g: &CabinGeometry,
+    pax: &PassengerCabinConfig,
     seating: &Seating,
     product_exit_capacity: bool,
+    source_exit_layout: Option<CertifiedExitLayout>,
 ) -> Exits {
-    let spec = select_exit_type(g.diameter_m);
-    let capacity_per_pair = if product_exit_capacity {
-        spec.capacity_per_side * 2
+    let default_spec = select_exit_type(g.diameter_m);
+    let default_capacity_per_pair = if product_exit_capacity {
+        effective_pair_capacity(default_spec, pax)
     } else {
-        spec.capacity_per_side
+        // Frozen Python compatibility treated the pair table as a side
+        // quantity.  Keep that historical branch isolated from the product
+        // path's corrected complete-pair unit.
+        default_spec.capacity_per_pair
     };
     let mut items = Vec::new();
     let mut pairs = 0i64;
+    let mut capacity_total = 0i64;
 
     for segment in cabin_deck_segments(g) {
         let deck = segment.deck;
@@ -321,7 +328,19 @@ pub(super) fn place_exits(
         if deck_pax <= 0 {
             continue;
         }
-        let n_pairs = min_exit_pairs(deck_pax).max(ceil_div(deck_pax, capacity_per_pair));
+        let n_pairs = if let Some(source_exit_layout) = source_exit_layout {
+            let max_source_pair_capacity = source_exit_layout
+                .pairs
+                .iter()
+                .map(|pair| pair.capacity_per_pair.max(1))
+                .max()
+                .unwrap_or(default_capacity_per_pair.max(1));
+            ceil_div(deck_pax, max_source_pair_capacity)
+                .max(min_exit_pairs(deck_pax))
+                .clamp(1, source_exit_layout.pairs.len().max(1) as i64)
+        } else {
+            min_exit_pairs(deck_pax).max(ceil_div(deck_pax, default_capacity_per_pair.max(1)))
+        };
 
         let mut deck_bays: Vec<&Bay> = seating
             .bays
@@ -329,7 +348,17 @@ pub(super) fn place_exits(
             .filter(|bay| bay.deck == deck.name)
             .collect();
         deck_bays.sort_by(|a, b| a.x.total_cmp(&b.x));
-        let mut exit_xs: Vec<f64> = spread_bay_indices(n_pairs, deck_bays.len())
+        // A source arrangement has a fixed pair order.  Use the lower bay at
+        // an exact midpoint instead of the generic banker's rounding: for
+        // four model bays and three source pairs, rounding 1.5 upward would
+        // select stations [0, 2, 3] and leave an avoidable over-spacing gap,
+        // while [0, 1, 3] preserves the same physical bay candidates.
+        let bay_indices = if source_exit_layout.is_some() {
+            source_spread_bay_indices(n_pairs, deck_bays.len())
+        } else {
+            spread_bay_indices(n_pairs, deck_bays.len())
+        };
+        let mut exit_xs: Vec<f64> = bay_indices
             .into_iter()
             .map(|i| deck_bays[i].x)
             .collect();
@@ -343,7 +372,25 @@ pub(super) fn place_exits(
             exit_xs.extend((0..extra).map(|i| ex0 + (ex1 - ex0) * (i as f64 + 0.5) / extra as f64));
         }
 
-        for xe in exit_xs {
+        for (pair_index, xe) in exit_xs.into_iter().enumerate() {
+            let pair_spec = source_exit_layout
+                .and_then(|layout| layout.pairs.get(pair_index))
+                .and_then(|pair| find_exit_spec(pair.exit_type))
+                .unwrap_or(default_spec);
+            let pair_capacity = source_exit_layout
+                .and_then(|layout| layout.pairs.get(pair_index))
+                .map_or(
+                    if product_exit_capacity {
+                        default_capacity_per_pair
+                    } else {
+                        // The frozen summary recorded two side ratings per
+                        // pair; this conversion is deliberately confined to
+                        // the compatibility branch.
+                        default_capacity_per_pair * 2
+                    },
+                    |pair| pair.capacity_per_pair.max(0),
+                );
+            capacity_total += pair_capacity;
             let half = g.usable_width(deck, xe) / 2.0 + g.wall;
             for side in [-1.0, 1.0] {
                 items.push(DeckItem {
@@ -351,16 +398,16 @@ pub(super) fn place_exits(
                     deck: deck.name,
                     x: xe,
                     y: side * half,
-                    z: g.item_z(deck, xe, spec.height_m),
-                    length: spec.width_m,
+                    z: g.item_z(deck, xe, pair_spec.height_m),
+                    length: pair_spec.width_m,
                     width: 0.25,
                     mass: 0.0,
-                    height: g.clamp_height(deck, xe, spec.height_m),
-                    label: format!("Type {}", spec.name),
+                    height: g.clamp_height(deck, xe, pair_spec.height_m),
+                    label: format!("Type {}", pair_spec.name),
                     meta: ItemMeta::Exit(ExitMeta {
-                        exit_type: spec.name,
-                        door_w: spec.width_m,
-                        door_h: spec.height_m,
+                        exit_type: pair_spec.name,
+                        door_w: pair_spec.width_m,
+                        door_h: pair_spec.height_m,
                     }),
                 });
             }
@@ -370,10 +417,45 @@ pub(super) fn place_exits(
 
     Exits {
         items,
-        exit_type: spec.name,
+        exit_type: source_exit_layout.map_or(default_spec.name, |layout| layout.label),
         pairs,
-        capacity_per_side: spec.capacity_per_side,
+        capacity_total,
     }
+}
+
+/// Look up a source arrangement's class in the generic drawing dimensions.
+fn find_exit_spec(name: &str) -> Option<&'static ExitSpec> {
+    EXIT_TYPES.iter().find(|spec| spec.name == name)
+}
+
+/// Spread a registered source arrangement across existing bay stations.
+///
+/// The source sequence fixes the number and order of exit pairs, while the
+/// model's monument/seat pass supplies the available stations.  Choosing the
+/// lower integer at an exact midpoint keeps a source pair away from the aft
+/// endpoint when the candidate count is even; the registered A220/A320
+/// layouts then satisfy CS-25's 18.3 m adjacent-exit spacing check without
+/// inventing a longitudinal station.  The final spacing assertion belongs in
+/// the source-specific acceptance test because this helper has no fuselage
+/// frame or regulatory applicability context.
+fn source_spread_bay_indices(n_items: i64, n_bays: usize) -> Vec<usize> {
+    if n_bays == 0 || n_items <= 0 {
+        return Vec::new();
+    }
+    let n_items = (n_items as usize).min(n_bays);
+    if n_items == 1 {
+        return vec![0];
+    }
+    let mut out: Vec<usize> = Vec::with_capacity(n_items);
+    for i in 0..n_items {
+        let exact = (i * (n_bays - 1)) as f64 / (n_items - 1) as f64;
+        let mut idx = exact.floor() as usize;
+        while out.contains(&idx) && idx < n_bays - 1 {
+            idx += 1;
+        }
+        out.push(idx);
+    }
+    out
 }
 
 /// What went into the holds.

@@ -11,8 +11,8 @@ use egui::{
     pos2, vec2, Color32, Id, Rect, Response, Sense, Stroke, TextureHandle, Ui, Vec2, Widget,
 };
 
-use crate::raster::render_scene_rgba_scaled;
-use crate::render::{to_egui_color, ViewportTransform};
+use crate::raster::{render_scene_rgba_scaled, render_scene_textures_rgba_scaled};
+use crate::render::{render_scene_to_shapes_with_context, to_egui_color, ViewportTransform};
 
 /// Interactive scene viewport state for persistent pan and zoom.
 #[derive(Debug, Clone, PartialEq)]
@@ -99,6 +99,7 @@ pub struct SceneView<'a> {
     raster_scale: f64,
     cache_id: Option<Id>,
     cache_revision: Option<u64>,
+    vector_overlay: bool,
 }
 
 impl<'a> SceneView<'a> {
@@ -114,7 +115,23 @@ impl<'a> SceneView<'a> {
             raster_scale: 2.0,
             cache_id: None,
             cache_revision: None,
+            vector_overlay: false,
         }
+    }
+
+    /// Draw the scene's vector elements as `egui` shapes and rasterize only
+    /// its textured elements (embedded rasters, the orthographic globe).
+    ///
+    /// The default path rasterizes the whole scene through its SVG export,
+    /// which keeps a static card pixel-identical to the exported figure. A
+    /// scene rebuilt on every camera frame cannot afford that: on the route
+    /// globe the vector overlay's SVG round-trip cost about 80 ms per frame
+    /// while the sphere itself cost about 4 ms (2026-09-11). With this
+    /// enabled the texture is the only per-frame raster and the route,
+    /// labels and colorbar are painted directly.
+    pub fn vector_overlay(mut self, enabled: bool) -> Self {
+        self.vector_overlay = enabled;
+        self
     }
 
     /// Set a desired size for the viewport rectangle.
@@ -255,26 +272,42 @@ impl<'a> SceneView<'a> {
             clipped_painter.rect_filled(rect, 0.0, to_egui_color(&background));
         }
 
-        if let Some(texture) = cached_scene_texture(
+        let image_rect = Rect::from_min_size(
+            pos2(base_transform.offset_x, base_transform.offset_y),
+            vec2(
+                self.scene.width as f32 * base_transform.scale,
+                self.scene.height as f32 * base_transform.scale,
+            ),
+        );
+        let full_uv = Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0));
+        if self.vector_overlay {
+            // The texture layer, if the scene has one, then the vector
+            // elements as shapes in the viewport's own coordinate system.
+            if let Some(texture) = cached_scene_texture(
+                self.scene,
+                ui,
+                self.raster_scale,
+                self.cache_id,
+                self.cache_revision,
+                textures_color_image,
+            ) {
+                clipped_painter.image(texture.id(), image_rect, full_uv, Color32::WHITE);
+            }
+            let overlay = vector_overlay_scene(self.scene);
+            clipped_painter.extend(render_scene_to_shapes_with_context(
+                &overlay,
+                &base_transform,
+                ui.ctx(),
+            ));
+        } else if let Some(texture) = cached_scene_texture(
             self.scene,
             ui,
             self.raster_scale,
             self.cache_id,
             self.cache_revision,
+            scene_color_image,
         ) {
-            let image_rect = Rect::from_min_size(
-                pos2(base_transform.offset_x, base_transform.offset_y),
-                vec2(
-                    self.scene.width as f32 * base_transform.scale,
-                    self.scene.height as f32 * base_transform.scale,
-                ),
-            );
-            clipped_painter.image(
-                texture.id(),
-                image_rect,
-                Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
-                Color32::WHITE,
-            );
+            clipped_painter.image(texture.id(), image_rect, full_uv, Color32::WHITE);
         }
 
         // Render border
@@ -332,12 +365,16 @@ struct CachedSceneTexture {
     texture: TextureHandle,
 }
 
+/// One cached GPU texture per view, refreshed through `render` whenever the
+/// scene revision changes. `render` returning `None` means the scene has
+/// nothing to rasterize on this path, and no texture is created.
 fn cached_scene_texture(
     scene: &Scene,
     ui: &Ui,
     raster_scale: f64,
     cache_id: Option<Id>,
     cache_revision: Option<u64>,
+    render: fn(&Scene, f64) -> Option<egui::ColorImage>,
 ) -> Option<TextureHandle> {
     let scene_hash = cache_revision.unwrap_or_else(|| {
         let mut hasher = DefaultHasher::new();
@@ -352,7 +389,7 @@ fn cached_scene_texture(
         if cached.scene_hash == scene_hash {
             return Some(cached.texture);
         }
-        let image = scene_color_image(scene, raster_scale)?;
+        let image = render(scene, raster_scale)?;
         cached.texture.set(image, egui::TextureOptions::LINEAR);
         cached.scene_hash = scene_hash;
         let texture = cached.texture.clone();
@@ -361,7 +398,7 @@ fn cached_scene_texture(
     }
     // Result cards are commonly displayed larger than the authored scene;
     // supersampling here keeps labels and one-pixel plot strokes legible.
-    let image = scene_color_image(scene, raster_scale)?;
+    let image = render(scene, raster_scale)?;
     let texture = ui.ctx().load_texture(
         format!("alas-scene-png-{scene_hash}"),
         image,
@@ -385,6 +422,31 @@ fn scene_color_image(scene: &Scene, raster_scale: f64) -> Option<egui::ColorImag
         [width as usize, height as usize],
         &rgba,
     ))
+}
+
+/// The textured elements alone, on a transparent canvas; `None` when the
+/// scene has none.
+fn textures_color_image(scene: &Scene, raster_scale: f64) -> Option<egui::ColorImage> {
+    let (width, height, rgba) = render_scene_textures_rgba_scaled(scene, raster_scale)?.ok()?;
+    Some(egui::ColorImage::from_rgba_premultiplied(
+        [width as usize, height as usize],
+        &rgba,
+    ))
+}
+
+/// The scene without its textured elements and background: what the shape
+/// renderer draws on top of the texture layer in the vector-overlay path.
+fn vector_overlay_scene(scene: &Scene) -> Scene {
+    let mut overlay = scene.clone();
+    overlay.background = None;
+    overlay.elements.retain(|element| {
+        !matches!(
+            element,
+            alas_report::scene::SceneElement::Image { .. }
+                | alas_report::scene::SceneElement::SphericalImage { .. }
+        )
+    });
+    overlay
 }
 
 impl<'a> Widget for SceneView<'a> {

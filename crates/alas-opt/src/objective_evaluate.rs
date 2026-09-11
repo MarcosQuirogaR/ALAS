@@ -9,7 +9,8 @@
 //! which the parity fixtures replay; it is not a selectable objective.
 
 use super::{
-    apply_candidate_payload_load_case, parasite_drag_reference_compatibility, DesignObjective,
+    apply_candidate_payload_load_case, apply_candidate_payload_load_case_reference_compatibility,
+    parasite_drag_reference_compatibility, DesignObjective,
 };
 
 use alas_aero::analysis::{AeroAnalysis, TrimPoint};
@@ -71,9 +72,12 @@ impl DesignObjective {
         // product objective. In the unconstrained baseline mode, retain the
         // preset's fixed load case so cabin capacity cannot disqualify a
         // geometrically analysable candidate.
-        if enforce_physical_constraints
-            && apply_candidate_payload_load_case(&mut self.config, &dv).is_err()
-        {
+        let payload_load_case_result = if self.reference_mass_coordinates {
+            apply_candidate_payload_load_case_reference_compatibility(&mut self.config, &dv)
+        } else {
+            apply_candidate_payload_load_case(&mut self.config, &dv)
+        };
+        if enforce_physical_constraints && payload_load_case_result.is_err() {
             let cost = w.failure_cost;
             self.history
                 .record(dv, false, cost, 0.0, 0.0, 0.0, 0.0, 0.0, "geometry_build");

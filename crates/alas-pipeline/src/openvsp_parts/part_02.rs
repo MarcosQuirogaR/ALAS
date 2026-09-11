@@ -138,6 +138,7 @@ fn emit_landing_gear(script: &mut String, airplane: &Airplane, gear: &LandingGea
         let width = wheel.width_m.max(0.05);
         let diameter = wheel.diameter_m.max(0.05);
         let _ = writeln!(script, "    string {id} = AddGeom( \"FUSELAGE\", \"\" );");
+        let _ = writeln!(script, "    SetSetFlag( {id}, 4, true );");
         let _ = writeln!(
             script,
             "    SetGeomName( {id}, \"{} wheel {}\" );",
@@ -218,6 +219,9 @@ fn script_string(value: &str) -> String {
         .collect()
 }
 
+// A test asserts on values it constructed here directly, so a failed unwrap
+// or expect is the assertion failing, not a library invariant being broken.
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 #[cfg(test)]
 #[path = "../openvsp_tests.rs"]
 mod tests;

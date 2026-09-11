@@ -568,6 +568,29 @@ fn compare_transport_planform_schema(
 fn is_native_config_field(path: &str, key: &str) -> bool {
     (matches!(key, "fuel_policy" | "fuel_tanks")
         && (path.ends_with("AlasConfig") || path.is_empty()))
+        // Source-backed landing-gear references and heterogeneous bogie
+        // counts are native additions; the frozen Python schema predates
+        // them. Their values are checked by landing-gear unit/config tests.
+        || (matches!(
+            key,
+            "reference_wheelbase_m"
+                | "reference_station_frame"
+                | "reference_station_fuselage_length_m"
+                | "reference_nlg_x_fraction"
+                | "reference_mlg_x_fractions"
+                | "reference_body_wheelbase_m"
+                | "reference_track_m"
+                | "mlg_strut_bogie_wheels"
+        ) && (path.ends_with("LandingGearConfig") || path.ends_with(".landing_gear")))
+        // Condition-specific OEI evidence fields are native additions; the
+        // frozen Python schema predates them. Their optional/default
+        // semantics are covered by the OEI assessment tests.
+        || (matches!(
+            key,
+            "oei_condition_to_sls_thrust_ratio"
+                | "oei_asymmetric_trim_cd"
+                | "oei_windmilling_cd"
+        ) && (path.ends_with("PerformanceConfig") || path.ends_with(".performance")))
         || (matches!(key, "objective" | "design_space")
             && (path.ends_with("OptimizerConfig") || path.ends_with(".optimizer")))
         // Native speed-reference switch for the climb/descent legs. Its
@@ -670,6 +693,17 @@ fn compare_field(
             &expected.get("label").and_then(Value::as_str).unwrap_or(""),
             &"Random vibration base PSD",
         );
+    } else if let Some((source_label, frozen_label, _, _)) = oei_documentation_correction(label) {
+        comparison.exact(
+            &format!("{label}.label: source-corrected Rust value"),
+            &field.label,
+            &source_label,
+        );
+        comparison.exact(
+            &format!("{label}.label: frozen Python value"),
+            &expected.get("label").and_then(Value::as_str).unwrap_or(""),
+            &frozen_label,
+        );
     } else {
         compare_string(
             comparison,
@@ -756,6 +790,17 @@ fn compare_field(
             &expected.get("help").and_then(Value::as_str).unwrap_or(""),
             &frozen_python,
         );
+    } else if let Some((_, _, source_help, frozen_help)) = oei_documentation_correction(label) {
+        comparison.exact(
+            &format!("{label}.help: source-corrected Rust value"),
+            &field.help,
+            &source_help,
+        );
+        comparison.exact(
+            &format!("{label}.help: frozen Python value"),
+            &expected.get("help").and_then(Value::as_str).unwrap_or(""),
+            &frozen_help,
+        );
     } else if declaration.is_some_and(|entry| entry.help) {
         compare_string(
             comparison,
@@ -795,6 +840,38 @@ fn is_random_response_correction(path: &str) -> bool {
 
 fn is_legacy_acceleration_psd_correction(path: &str) -> bool {
     path.ends_with(".psd_base_g2_per_hz")
+}
+
+/// The native OEI fields retain the frozen names and defaults, while their
+/// documentation was tightened to distinguish conceptual fallbacks and the
+/// gear-up, high-lift configuration used by the evidence-aware helpers. Keep
+/// both texts checked explicitly so this remains a documented migration rather
+/// than silently dropping parity coverage.
+fn oei_documentation_correction(
+    label: &str,
+) -> Option<(&'static str, &'static str, &'static str, &'static str)> {
+    match label {
+        "PerformanceConfig.oei_gradient" | "ALASConfig.performance.oei_gradient" => Some((
+            "OEI 2nd-segment climb gradient (fallback)",
+            "OEI 2nd-segment climb gradient (fallback)",
+            "Conceptual fallback for an engine count outside the implemented 14 CFR 25.121(b) two/three/four-engine table. The matching chart auto-selects 0.024 (twin) / 0.027 (tri-jet) / 0.030 (quad) from the actual engine count; this fallback does not establish a Part 25 result for unsupported counts.",
+            "FAR 25.121 minimum second-segment climb gradient with one engine inoperative (OEI). The matching chart auto-selects 0.024 (twin) / 0.027 (tri-jet) / 0.030 (quad) from the actual engine count; this value is only the fallback for any other engine count.",
+        )),
+        "PerformanceConfig.oei_climb_cl" | "ALASConfig.performance.oei_climb_cl" => Some((
+            "OEI climb configuration CL",
+            "OEI climb configuration CL",
+            "Legacy constant lift coefficient for conceptual OEI second-segment climb L/D (Raymer Ch.17). A V2-based evaluation should derive CL from CLmax_TO and the selected V2/VSR or V2/VS ratio instead.",
+            "Lift coefficient assumed in the take-off configuration when evaluating OEI second-segment climb L/D (Raymer Ch.17).",
+        )),
+        "PerformanceConfig.oei_climb_delta_cd"
+        | "ALASConfig.performance.oei_climb_delta_cd" => Some((
+            "OEI climb high-lift drag increment (gear up)",
+            "OEI climb flap/gear drag increment",
+            "Parasite-drag increment added to clean CD0 for the takeoff flap/slat configuration with landing gear retracted, as required by 14 CFR 25.121(b). Asymmetric trim/control and inoperative-engine or windmilling drag require separate source values; this field does not represent them.",
+            "Parasite-drag increment added to the clean CD0 for the flap/gear-down OEI second-segment climb configuration.",
+        )),
+        _ => None,
+    }
 }
 
 fn wing_centroid_help_correction(label: &str) -> Option<(&'static str, &'static str)> {

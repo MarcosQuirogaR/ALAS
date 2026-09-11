@@ -12,7 +12,7 @@ use crate::scene::{Color, Scene};
 use crate::theme::get_palette;
 use alas_config::AlasConfig;
 use alas_mass::breakdown::{FUEL, OEW_KEYS, PAYLOAD};
-use alas_perf::landing_gear::size_landing_gear;
+use alas_perf::landing_gear::size_landing_gear_with_group_stations;
 use alas_pipeline::full_analysis::AnalysisReport;
 
 /// Generate a model-derived CG loading-state check figure.
@@ -68,8 +68,16 @@ pub fn figure_cg_envelope(
     let fus_end_x = fus.xsecs[fus.xsecs.len() - 1].xyz_c[0];
     let fus_len = fus_end_x - fus_start_x;
 
-    let x_nlg = fus_start_x + fus_len * nlg_x_frac;
-    let x_mlg = x_mac_le + mlg_x_frac_mac * mac;
+    let fallback_x_nlg = fus_start_x + fus_len * nlg_x_frac;
+    let fallback_x_mlg = x_mac_le + mlg_x_frac_mac * mac;
+    let gear_stations = config.landing_gear.resolved_station_positions(
+        fallback_x_nlg,
+        fallback_x_mlg,
+        fus_start_x,
+        fus_len,
+    );
+    let x_nlg = gear_stations.x_nlg_m;
+    let x_mlg = gear_stations.x_mlg_m;
     let wheelbase = x_mlg - x_nlg;
 
     // --- Component groups ----------------------------------------------------
@@ -178,7 +186,7 @@ pub fn figure_cg_envelope(
     };
     let aero_fwd_lim_x = x_mac_le + fwd_limit_mac / 100.0 * mac;
     let aero_aft_lim_x = x_mac_le + aft_limit_mac / 100.0 * mac;
-    let gear = size_landing_gear(
+    let gear = size_landing_gear_with_group_stations(
         mtow_mass,
         x_nlg,
         x_mlg,
@@ -186,6 +194,7 @@ pub fn figure_cg_envelope(
         aero_aft_lim_x,
         fus_diam,
         fus_diam * 1.1,
+        &gear_stations.main_gear_x_m,
         &config.landing_gear,
     );
     let pct_nlg_max = gear.pct_load_nlg_max;

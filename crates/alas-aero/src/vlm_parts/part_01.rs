@@ -2,24 +2,24 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 use alas_geom::aircraft::airplane::Airplane;
-use alas_geom::aircraft::wing::{SpacingFunction, SubdivideSectionsError, Wing};
-use alas_math::linalg;
+use alas_geom::aircraft::wing::SubdivideSectionsError;
 use alas_math::linalg::SolveDiagnostics;
 
-use crate::operating_point::{AxisFrame, OperatingPoint};
-use crate::singularities::calculate_induced_velocity_horseshoe;
-use crate::vector3::{add3, cross3, dot3, norm3, scale3, sub3};
+use crate::operating_point::OperatingPoint;
 
 #[path = "../vlm/stability_derivatives.rs"]
 pub mod stability_derivatives;
 #[path = "../vlm/streamlines.rs"]
 pub mod streamlines;
+#[path = "../vlm/system.rs"]
+pub mod system;
 
 pub use stability_derivatives::{
     run_with_stability_derivatives, run_with_stability_derivatives_reference_compatibility,
     run_with_stability_derivatives_with_steps, CoefficientDerivatives, VlmStabilityResult,
 };
 pub use streamlines::{calculate_streamlines, PanelSample};
+pub use system::VlmSystem;
 
 /// The Kaufmann vortex core smoothing radius `VortexLatticeMethod`'s
 /// constructor defaults to and every call site in this program's inputs
@@ -36,10 +36,10 @@ const TRAILING_VORTEX_DIRECTION: [f64; 3] = [1.0, 0.0, 0.0];
 pub enum VlmError {
     /// Subdividing a wing's spanwise sections failed. Reachable only through
     /// [`SubdivideSectionsError::Blend`] in practice: `run` only calls
-    /// [`Wing::subdivide_sections`] when `spanwise_resolution > 1`, which
-    /// always satisfies that method's own `ratio >= 2` requirement, so
-    /// [`SubdivideSectionsError::RatioTooSmall`] cannot occur from this call
-    /// path.
+    /// [`alas_geom::aircraft::wing::Wing::subdivide_sections`] when
+    /// `spanwise_resolution > 1`, which always satisfies that method's own
+    /// `ratio >= 2` requirement, so [`SubdivideSectionsError::RatioTooSmall`]
+    /// cannot occur from this call path.
     #[error("subdividing a wing's spanwise sections failed: {0}")]
     Subdivide(#[from] SubdivideSectionsError),
     /// The AIC matrix was numerically singular at the named elimination step.
@@ -136,156 +136,13 @@ pub struct VlmResult {
     pub solve_diagnostics: SolveDiagnostics,
 }
 
-/// One panel's four quad-mesh corners and the vortex-lattice quantities
-/// derived from them -- the per-panel arrays `run` builds and consumes,
-/// grouped so the assembly loop below reads as one step per panel rather
-/// than eight parallel index operations.
-struct Panel {
-    normal_direction: [f64; 3],
-    left_vortex_vertex: [f64; 3],
-    right_vortex_vertex: [f64; 3],
-    vortex_center: [f64; 3],
-    vortex_bound_leg: [f64; 3],
-    collocation_point: [f64; 3],
-    /// Kept alongside the derived quantities above so [`VlmResult::panels`]
-    /// can report the raw mesh, not just what the AIC assembly needs -- see
-    /// [`streamlines::PanelSample`].
-    front_left: [f64; 3],
-    back_left: [f64; 3],
-    back_right: [f64; 3],
-    front_right: [f64; 3],
-    is_trailing_edge: bool,
-    wing_index: usize,
-}
-
-impl Panel {
-    /// Derive one panel's vortex-lattice quantities from its four quad-mesh
-    /// corners, in `run`'s own front-left/back-left/back-right/front-right
-    /// order.
-    fn from_quad(
-        front_left: [f64; 3],
-        back_left: [f64; 3],
-        back_right: [f64; 3],
-        front_right: [f64; 3],
-        is_trailing_edge: bool,
-        wing_index: usize,
-    ) -> Result<Self, VlmError> {
-        let diag1 = sub3(front_right, back_left);
-        let diag2 = sub3(front_left, back_right);
-        let cross = cross3(diag1, diag2);
-        let area_normal = norm3(cross);
-        if !area_normal.is_finite() || area_normal <= f64::EPSILON {
-            return Err(VlmError::DegeneratePanel { wing_index });
-        }
-        let normal_direction = scale3(cross, 1.0 / area_normal);
-
-        let left_vortex_vertex = add3(scale3(front_left, 0.75), scale3(back_left, 0.25));
-        let right_vortex_vertex = add3(scale3(front_right, 0.75), scale3(back_right, 0.25));
-        let vortex_center = scale3(add3(left_vortex_vertex, right_vortex_vertex), 0.5);
-        let vortex_bound_leg = sub3(right_vortex_vertex, left_vortex_vertex);
-
-        let collocation_left = add3(scale3(front_left, 0.25), scale3(back_left, 0.75));
-        let collocation_right = add3(scale3(front_right, 0.25), scale3(back_right, 0.75));
-        let collocation_point = scale3(add3(collocation_left, collocation_right), 0.5);
-
-        Ok(Self {
-            normal_direction,
-            left_vortex_vertex,
-            right_vortex_vertex,
-            vortex_center,
-            vortex_bound_leg,
-            collocation_point,
-            front_left,
-            back_left,
-            back_right,
-            front_right,
-            is_trailing_edge,
-            wing_index,
-        })
-    }
-}
-
-/// Mesh every wing on `airplane` into quad panels, exactly as `run`'s own
-/// meshing step does: [`Wing::subdivide_sections`] with
-/// [`SpacingFunction::Cosspace`] when `spanwise_resolution > 1`, then
-/// [`Wing::mesh_thin_surface`] at `chordwise_resolution` with camber.
-fn mesh_panels(
-    airplane: &Airplane,
-    spanwise_resolution: usize,
-    chordwise_resolution: usize,
-) -> Result<Vec<Panel>, VlmError> {
-    let mut panels = Vec::new();
-    for (wing_index, wing) in airplane.wings.iter().enumerate() {
-        let subdivided;
-        let wing_ref: &Wing = if spanwise_resolution > 1 {
-            subdivided = wing.subdivide_sections(spanwise_resolution, SpacingFunction::Cosspace)?;
-            &subdivided
-        } else {
-            wing
-        };
-
-        let (points, faces) = wing_ref.mesh_thin_surface(chordwise_resolution, true);
-        // Upstream's `(arange(len(faces)) + 1) % chordwise_resolution == 0`,
-        // evaluated per wing (including its mirrored half, already appended
-        // to `faces` by `mesh_thin_surface` when the wing is symmetric)
-        // before the per-wing arrays are concatenated.
-        for (i, face) in faces.iter().enumerate() {
-            let is_trailing_edge = (i + 1) % chordwise_resolution == 0;
-            panels.push(Panel::from_quad(
-                points[face[0]],
-                points[face[1]],
-                points[face[2]],
-                points[face[3]],
-                is_trailing_edge,
-                wing_index,
-            )?);
-        }
-    }
-    Ok(panels)
-}
-
-/// The velocity every horseshoe vortex (strength `vortex_strengths[j]`)
-/// induces at `points[i]`, summed over every panel, plus the freestream and
-/// rotation-induced velocity at that point -- `get_velocity_at_points`
-/// (through `get_induced_velocity_at_points`), scoped to the internal use
-/// [`run`] makes of it. See the module doc for why the two upstream methods
-/// are collapsed into this one non-broadcast helper.
-fn velocity_at_points(
-    points: &[[f64; 3]],
-    panels: &[Panel],
-    vortex_strengths: &[f64],
-    op_point: &OperatingPoint,
-    steady_freestream_velocity: [f64; 3],
-    reference: [f64; 3],
-) -> Vec<[f64; 3]> {
-    let rotation_velocities = op_point.rotation_velocity_geometry_axes_about(points, reference);
-    points
-        .iter()
-        .zip(rotation_velocities)
-        .map(|(&point, rotation_velocity)| {
-            let induced = panels.iter().zip(vortex_strengths).fold(
-                [0.0, 0.0, 0.0],
-                |acc, (panel, &gamma)| {
-                    let contribution = calculate_induced_velocity_horseshoe(
-                        point,
-                        panel.left_vortex_vertex,
-                        panel.right_vortex_vertex,
-                        TRAILING_VORTEX_DIRECTION,
-                        gamma,
-                        VORTEX_CORE_RADIUS,
-                    );
-                    add3(acc, contribution)
-                },
-            );
-            add3(induced, add3(steady_freestream_velocity, rotation_velocity))
-        })
-        .collect()
-}
-
 /// Run a vortex-lattice solve of `airplane` at `op_point` -- `VortexLatticeMethod(...).run()`,
 /// with the constructor arguments folded in as documented above.
 /// `spanwise_resolution`/`chordwise_resolution` are the only two constructor
 /// arguments this program's call sites ever vary.
+///
+/// One mesh, one factorization, one solve. A caller with several operating
+/// points over the same geometry should hold a [`VlmSystem`] instead.
 ///
 /// # Errors
 ///
@@ -296,13 +153,7 @@ pub fn run(
     spanwise_resolution: usize,
     chordwise_resolution: usize,
 ) -> Result<VlmResult, VlmError> {
-    run_with_rotation_reference(
-        airplane,
-        op_point,
-        spanwise_resolution,
-        chordwise_resolution,
-        airplane.xyz_ref,
-    )
+    VlmSystem::assemble(airplane, spanwise_resolution, chordwise_resolution)?.solve(op_point)
 }
 
 /// Run the frozen reference VLM convention used by the AeroSandbox fixtures.
@@ -318,11 +169,6 @@ pub fn run_reference_compatibility(
     spanwise_resolution: usize,
     chordwise_resolution: usize,
 ) -> Result<VlmResult, VlmError> {
-    run_with_rotation_reference(
-        airplane,
-        op_point,
-        spanwise_resolution,
-        chordwise_resolution,
-        [0.0; 3],
-    )
+    VlmSystem::assemble(airplane, spanwise_resolution, chordwise_resolution)?
+        .solve_reference_compatibility(op_point)
 }

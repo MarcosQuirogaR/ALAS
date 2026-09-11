@@ -9,6 +9,9 @@ rust-version.workspace = true
 
 [dependencies]
 thiserror = { workspace = true }
+# The dense LU behind `linalg`: see the workspace manifest for why a
+# LAPACK-class kernel replaced the scalar elimination that lived here.
+faer = { workspace = true }
 
 [dev-dependencies]
 alas-testkit = { path = "../alas-testkit" }

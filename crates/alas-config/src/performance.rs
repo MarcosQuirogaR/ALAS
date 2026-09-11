@@ -69,7 +69,7 @@ pub struct PerformanceConfig {
     #[config(
         label = "OEI 2nd-segment climb gradient (fallback)",
         unit = "fraction",
-        help = "FAR 25.121 minimum second-segment climb gradient with one engine inoperative (OEI). The matching chart auto-selects 0.024 (twin) / 0.027 (tri-jet) / 0.030 (quad) from the actual engine count; this value is only the fallback for any other engine count."
+        help = "Conceptual fallback for an engine count outside the implemented 14 CFR 25.121(b) two/three/four-engine table. The matching chart auto-selects 0.024 (twin) / 0.027 (tri-jet) / 0.030 (quad) from the actual engine count; this fallback does not establish a Part 25 result for unsupported counts."
     )]
     pub oei_gradient: f64,
 
@@ -83,16 +83,47 @@ pub struct PerformanceConfig {
     /// Lift coefficient assumed during the engine-out climb.
     #[config(
         label = "OEI climb configuration CL",
-        help = "Lift coefficient assumed in the take-off configuration when evaluating OEI second-segment climb L/D (Raymer Ch.17)."
+        help = "Legacy constant lift coefficient for conceptual OEI second-segment climb L/D (Raymer Ch.17). A V2-based evaluation should derive CL from CLmax_TO and the selected V2/VSR or V2/VS ratio instead."
     )]
     pub oei_climb_cl: f64,
 
-    /// Drag added by flaps and gear during the engine-out climb.
+    /// High-lift drag added during the engine-out climb with gear retracted.
     #[config(
-        label = "OEI climb flap/gear drag increment",
-        help = "Parasite-drag increment added to the clean CD0 for the flap/gear-down OEI second-segment climb configuration."
+        label = "OEI climb high-lift drag increment (gear up)",
+        help = "Parasite-drag increment added to clean CD0 for the takeoff flap/slat configuration with landing gear retracted, as required by 14 CFR 25.121(b). Asymmetric trim/control and inoperative-engine or windmilling drag require separate source values; this field does not represent them."
     )]
     pub oei_climb_delta_cd: f64,
+
+    /// Ratio of installed thrust available at the selected OEI V2 condition
+    /// to the rated sea-level-static thrust. This must come from an
+    /// engine-performance deck or an explicitly identified aircraft source;
+    /// it is intentionally unset for the generic conceptual defaults.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[config(
+        label = "OEI thrust at V2 / rated SLS thrust",
+        help = "Optional condition-to-SLS installed thrust ratio for the FAR 25.121(b) V2 engine-out check. Supply a value from the selected engine deck at the departure altitude, temperature, Mach, bleed state and take-off thrust setting. A missing value keeps the OEI result as conceptual and reports an evidence gap."
+    )]
+    pub oei_condition_to_sls_thrust_ratio: Option<f64>,
+
+    /// Asymmetric trim and control drag increment in the OEI V2 condition.
+    ///
+    /// This is separate from the high-lift increment above because the rudder
+    /// and aileron trim solution depends on engine placement and the aircraft
+    /// yaw-control schedule.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[config(
+        label = "OEI asymmetric trim/control drag increment",
+        help = "Optional additional OEI trim/control drag coefficient at V2. Set only from an aircraft-specific yaw/trim analysis or source. Leave empty when no such evidence is available."
+    )]
+    pub oei_asymmetric_trim_cd: Option<f64>,
+
+    /// Inoperative-engine/windmilling drag increment in the OEI V2 condition.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[config(
+        label = "OEI inoperative-engine/windmilling drag increment",
+        help = "Optional additional drag coefficient for the failed engine or propeller at V2. Set only from the engine/airframe drag source for the selected failure state; it is not a generic zero."
+    )]
+    pub oei_windmilling_cd: Option<f64>,
 
     /// Left-hand end of the matching chart's wing-loading axis.
     #[config(
@@ -186,6 +217,9 @@ impl Default for PerformanceConfig {
             k_land: 0.60,
             oei_climb_cl: 1.2,
             oei_climb_delta_cd: 0.025,
+            oei_condition_to_sls_thrust_ratio: None,
+            oei_asymmetric_trim_cd: None,
+            oei_windmilling_cd: None,
             ws_min_pa: 2000.0,
             ws_max_pa: 10000.0,
             bfl_factor: 1.15,

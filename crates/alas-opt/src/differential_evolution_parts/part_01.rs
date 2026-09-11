@@ -12,9 +12,7 @@ use crate::evaluator::{ObjectiveEvaluation, ObjectiveEvaluator};
 use crate::history::OptimizationHistory;
 use crate::objective::{apply_candidate_payload_load_case, DesignObjective};
 use crate::python_rng::{Pcg64, RandomState};
-use crate::search_methods::{
-    run_cma_es, run_feasibility_first_de, run_nsga2, run_turbo_1, MethodOutcome, ScoredPoint,
-};
+use crate::search_methods::{MethodOutcome, ScoredPoint};
 
 /// One member of a retained multi-objective Pareto set.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

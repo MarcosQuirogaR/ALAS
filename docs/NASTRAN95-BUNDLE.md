@@ -71,3 +71,49 @@ working build. Configuration on the audit-remediation host could not find
 Ninja or the GNU Fortran installation referenced by the old CMake cache;
 there is no rebuilt executable or new performance claim. Production adoption
 still requires the regression and correlation checks above.
+
+## Kernel-whitelist optimization (2026-09-11)
+
+The selective `-O3` option was built and run for the first time, with GNU
+Fortran 16.2.0 (winlibs) and Ninja 1.13.2 unpacked under the ALAS
+`.agent/tools/` directory because the MSYS2 installation the old CMake cache
+referenced no longer exists. It fails the production SOL 101 deck with USER
+FATAL MESSAGE 321 (`mis/ifp.f`) after 0.16 s, so `ifp1c.f` is not the only
+routine the optimizer breaks. `-O2 -fno-aggressive-loop-optimizations
+-fno-strict-aliasing` over every file fails the same way; excluding the
+`mis/if*.f` and `mis/x*.f` families moves the failure to XGPI (SYSTEM FATAL
+14, array IORDNL overflowed); optimizing the kernel and assembly families
+together fails in EMGOUT (SYSTEM FATAL 3111). Several unrelated legacy
+routines miscompile, so an exclusion list is the wrong tool.
+
+The working policy is a whitelist. The CMake project now has two empty-by-
+default cache strings, `NASTRAN95_OPTIMIZATION_FLAGS` and
+`NASTRAN95_OPTIMIZED_GLOBS` (recorded in the solver's `MODIFICATIONS.md`): every
+source stays at `-O0` and only the listed files receive the flags. With
+`-O2 -fno-aggressive-loop-optimizations -fno-strict-aliasing` applied to the
+decomposition, forward-backward substitution, multiply-add, transpose and
+eigensolver families only (`mis/fbs*.f`, `mis/sdcomp*.f`, `mis/sdcmps.f`,
+`mis/decomp.f`, `mis/cdcomp.f`, `mis/cdcmp*.f`, `mis/cfbsor.f`, `mis/gfbs.f`,
+`mis/invfbs.f`, `mis/mpyad*.f`, `mis/mpy3*.f`, `mis/mpy4t.f`, `mis/mpydri.f`,
+`mis/mpyq.f`, `mis/invp*.f`, `mis/feer*.f`, `mis/solve*.f`, `mis/trnsp*.f`), the
+production SOL 101 deck passes with an F06 of identical size, all 12,822
+displacement rows identical to the `-O0` baseline to every printed digit,
+identical epsilon values, and 13.6 s wall time against 23.6 s for the `-O0`
+executable on the same host (both under the ALAS launch contract: DBMEM 1,
+OCMEM 64,000,000 words, patched NASINFO timing constants). The SOL 103 result
+for the same build is recorded in `docs/STATUS.md` together with its modal
+correlation against the baseline.
+
+Configure and build:
+
+```sh
+cmake -S . -B build/o2-kernels2 -G Ninja \
+  -DNASTRAN95_OPTIMIZATION_FLAGS="-O2 -fno-aggressive-loop-optimizations -fno-strict-aliasing" \
+  -DNASTRAN95_OPTIMIZED_GLOBS="mis/fbs*.f;mis/sdcomp*.f;mis/sdcmps.f;mis/decomp.f;mis/cdcomp.f;mis/cdcmp*.f;mis/cfbsor.f;mis/gfbs.f;mis/invfbs.f;mis/mpyad*.f;mis/mpy3*.f;mis/mpy4t.f;mis/mpydri.f;mis/mpyq.f;mis/invp*.f;mis/feer*.f;mis/solve*.f;mis/trnsp*.f"
+cmake --build build/o2-kernels2
+```
+
+The default `-O0` build and the packaged executable are unchanged. Adopting the
+whitelist build for the bundle still requires the SOL 101/103 regression on
+every production deck, the eigenvalue correlation, the repeatability check,
+and the NOSA source-archive obligations described above.

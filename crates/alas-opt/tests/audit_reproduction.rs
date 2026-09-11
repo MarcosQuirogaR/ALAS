@@ -7,7 +7,9 @@
 //! compared before and after the evaluator is changed; the assertions pin
 //! the mechanism, not a tolerance.
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+// A failed unwrap is the assertion failing, and the reproduction prints the
+// audited quantities so they can be read from the test log (module doc).
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::print_stdout)]
 
 use alas_config::design_variables::DesignVector;
 use alas_config::{AlasConfig, MtowSizing, ObjectiveKind};
@@ -146,8 +148,10 @@ fn short_mission_loses_aerodynamic_sensitivity() {
     config.optimizer.objective.mtow_sizing = MtowSizing::FixedRequirement;
     config.optimizer.objective.design_range_nmi = 100.0;
     let evaluate = |scale: f64| {
-        let mut design = DesignVector::default();
-        design.airfoil_thickness_scale = scale;
+        let design = DesignVector {
+            airfoil_thickness_scale: scale,
+            ..DesignVector::default()
+        };
         let objective = DesignObjective::new(config.clone());
         let assessment = assess_candidate(&objective, &design.to_array()).unwrap();
         (
@@ -230,7 +234,15 @@ fn nsga2_loses_the_scalar_incumbent() {
     config.optimizer.solver.max_iterations = 5;
     config.optimizer.solver.population_size = 1;
     config.optimizer.solver.seed = Some(42);
-    let mut bounds = vec![(0.0, 0.0); alas_config::DESIGN_VARIABLE_SPECS.len()];
+    // Fixed coordinates still have to be inside the selected design-mode
+    // envelope. Zero was valid for several dimensionless bumps in the old
+    // evaluator-only harness, but it is outside the chord bounds and now
+    // correctly fails before NSGA-II starts. Pin each coordinate at its
+    // declared nominal value and leave span free for this probe.
+    let mut bounds: Vec<_> = alas_config::DESIGN_VARIABLE_SPECS
+        .iter()
+        .map(|spec| (spec.default, spec.default))
+        .collect();
     bounds[0] = (60.0, 80.0);
     let mut best_seen = f64::INFINITY;
     let mut evaluator = |design: &DesignVector| {
@@ -395,8 +407,10 @@ fn trim_convergence_and_induced_drag_probe() {
     let velocity = req.cruise_mach * atmo.speed_of_sound();
     let q = 0.5 * atmo.density() * velocity * velocity;
     for span in [69.62, 69.75, 71.75] {
-        let mut design = DesignVector::default();
-        design.span_m = span;
+        let design = DesignVector {
+            span_m: span,
+            ..DesignVector::default()
+        };
         let mut plane = AircraftBuilder::new(Some(config.geometry.clone()))
             .build(Some(&design), false)
             .unwrap();
@@ -517,8 +531,10 @@ fn planform_discontinuity_probe() {
     use alas_geom::builder::AircraftBuilder;
     let config = AlasConfig::default();
     for span in [69.62, 69.68, 69.72, 69.75] {
-        let mut design = DesignVector::default();
-        design.span_m = span;
+        let design = DesignVector {
+            span_m: span,
+            ..DesignVector::default()
+        };
         let plane = AircraftBuilder::new(Some(config.geometry.clone()))
             .build(Some(&design), false)
             .unwrap();

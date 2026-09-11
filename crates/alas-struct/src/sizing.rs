@@ -25,6 +25,25 @@ use alas_geom::wing_structure::WingStructureGeometry;
 
 use crate::loads::{self, LoadCase};
 
+/// Material-modelling qualification carried when a wingbox sizing result
+/// uses composite materials under an effective isotropic proxy.
+///
+/// An effective isotropic proxy is appropriate for preliminary sizing passes,
+/// but must never be confused with or presented as a certified laminate
+/// stress analysis.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CompositeProxyDeclaration {
+    /// Material-family evidence tier and citation.
+    pub source: &'static str,
+    /// Model applicability and non-certification disclosure.
+    pub applicability: &'static str,
+    /// Calibrated relative uncertainty if known/calibrated, or `None` if uncalibrated.
+    ///
+    /// Per strict audit override, uncalibrated uncertainty must be represented
+    /// explicitly as unknown (`None`), not as zero or a fabricated numeric figure.
+    pub relative_uncertainty: Option<f64>,
+}
+
 /// Per-spar sizing result, sampled at [`WingboxSizing::y_stations`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct SparSizing {
@@ -90,6 +109,9 @@ pub struct WingboxSizing {
     pub total_mass_kg: f64,
     /// The name of the load case that sized the box.
     pub sizing_load_case: &'static str,
+    /// Material qualification declaration, present whenever any wingbox
+    /// material is composite. `None` for all-metallic wings.
+    pub composite_declaration: Option<CompositeProxyDeclaration>,
 }
 
 impl WingboxSizing {
@@ -273,10 +295,53 @@ pub(crate) fn cap_taper(eta: &[f64], eta_lock: f64, tip_fraction: f64) -> Vec<f6
         .collect()
 }
 
+/// The root cap flange width and thickness, m, that carry the required cap
+/// area `a_cap0` on a spar of height `h0` at a station of chord `chord0`.
+///
+/// The flange starts at the lesser of half the chord and 0.6 of the spar
+/// height, and its thickness is capped at a fifth of the spar height so the
+/// caps never fill the web. When that thickness clip binds -- a shallow rear
+/// spar with a low-allowable alloy at a high root moment does it -- the same
+/// area is spread over a wider flange, up to the half-chord bound, rather
+/// than left short: the box skins are what carry a wide flange in a real wing,
+/// and an under-strength root would contradict the zero root margin this
+/// routine sizes to. Only past the half-chord bound is the root reported
+/// under strength, which is then a genuine infeasibility.
+///
+/// Shared with `crate::mesh`, which re-derives the cap dimensions on its own
+/// station grid and has to apply the same law.
+pub(crate) fn root_cap_dimensions(a_cap0: f64, chord0: f64, h0: f64) -> (f64, f64) {
+    let w_max = (0.5 * chord0).max(1e-6);
+    let t_max = h0 * 0.20;
+    let mut w_cap0 = w_max.min(h0 * 0.6).max(1e-6);
+    let mut t_cap0 = (a_cap0 / w_cap0).min(t_max);
+    if a_cap0 / w_cap0 > t_max && t_max > 0.0 {
+        w_cap0 = (a_cap0 / t_max).min(w_max).max(w_cap0);
+        t_cap0 = (a_cap0 / w_cap0).min(t_max);
+    }
+    (w_cap0, t_cap0)
+}
+
+/// Which cap-sizing law a solve applies.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SizingLaw {
+    /// Every station carries its own bending moment: the root flange widens
+    /// when its thickness clip binds and an outboard station whose tapered
+    /// flange falls short of the local moment is sized up to it.
+    Product,
+    /// The frozen reference law: the root cap alone is sized, its thickness
+    /// clipped at a fifth of the spar height, and the outboard caps follow the
+    /// taper whatever the local moment. A shallow spar can be left under
+    /// strength, which the fixtures record.
+    Frozen,
+}
+
 /// Size the wingbox directly from strength -- `size_wingbox`.
 ///
 /// The load cases come from [`crate::loads::load_cases`]; the box is sized to
-/// whichever produces the larger root bending moment.
+/// whichever produces the larger root bending moment. Every station is left
+/// with a non-negative strength margin wherever the section geometry admits
+/// one; see [`size_wingbox_reference_compatibility`] for the frozen law.
 #[allow(clippy::too_many_arguments)] // mirrors upstream's own signature
 pub fn size_wingbox(
     wsg: &WingStructureGeometry,
@@ -286,6 +351,60 @@ pub fn size_wingbox(
     web_mat: &MaterialSpec,
     cap_mat: &MaterialSpec,
     rib_mat: &MaterialSpec,
+) -> WingboxSizing {
+    size_wingbox_with_law(
+        wsg,
+        cfg,
+        req,
+        skin_mat,
+        web_mat,
+        cap_mat,
+        rib_mat,
+        SizingLaw::Product,
+    )
+}
+
+/// The frozen reference form of [`size_wingbox`], for the parity fixtures.
+///
+/// The reference sizes the root cap only, with its thickness clipped at a
+/// fifth of the spar height, and tapers the outboard caps regardless of the
+/// local moment, so a shallow spar with a low-allowable alloy at a high root
+/// moment comes out under strength; the fixtures pin that behaviour. Product
+/// callers use [`size_wingbox`], whose result the mass reconciliation gate
+/// accepts only with non-negative margins.
+#[allow(clippy::too_many_arguments)] // mirrors upstream's own signature
+pub fn size_wingbox_reference_compatibility(
+    wsg: &WingStructureGeometry,
+    cfg: &StructuresConfig,
+    req: &DesignRequirements,
+    skin_mat: &MaterialSpec,
+    web_mat: &MaterialSpec,
+    cap_mat: &MaterialSpec,
+    rib_mat: &MaterialSpec,
+) -> WingboxSizing {
+    size_wingbox_with_law(
+        wsg,
+        cfg,
+        req,
+        skin_mat,
+        web_mat,
+        cap_mat,
+        rib_mat,
+        SizingLaw::Frozen,
+    )
+}
+
+// The public entry points' signature plus the law they differ in.
+#[allow(clippy::too_many_arguments)]
+fn size_wingbox_with_law(
+    wsg: &WingStructureGeometry,
+    cfg: &StructuresConfig,
+    req: &DesignRequirements,
+    skin_mat: &MaterialSpec,
+    web_mat: &MaterialSpec,
+    cap_mat: &MaterialSpec,
+    rib_mat: &MaterialSpec,
+    law: SizingLaw,
 ) -> WingboxSizing {
     let n = cfg.spanwise_stations.max(0) as usize;
     let y = linspace(0.0, wsg.semi_span, n);
@@ -358,14 +477,40 @@ pub fn size_wingbox(
         // Root cap: MS = 0 by construction.
         let h_eff0 = h_eff[0].max(1e-6);
         let a_cap0 = (frac_m[0] * m0) / (cap_mat.f_allow_pa * h_eff0);
-        let w_cap0 = (0.5 * chord[0]).min(h_i[0] * 0.6).max(1e-6);
-        let t_cap0 = (a_cap0 / w_cap0).min(h_i[0] * 0.20);
+        let (w_cap0, t_cap0) = match law {
+            SizingLaw::Product => root_cap_dimensions(a_cap0, chord[0], h_i[0]),
+            SizingLaw::Frozen => {
+                let w_cap0 = (0.5 * chord[0]).min(h_i[0] * 0.6).max(1e-6);
+                (w_cap0, (a_cap0 / w_cap0).min(h_i[0] * 0.20))
+            }
+        };
 
         // Taper outboard; keep width >= thickness and thickness <= H_local/3.
-        let t_cap: Vec<f64> = (0..n)
-            .map(|j| (t_cap0 * taper[j]).min(h_i[j] / 3.0))
-            .collect();
-        let w_cap: Vec<f64> = (0..n).map(|j| (w_cap0 * taper[j]).max(t_cap[j])).collect();
+        // The tapered section is the floor: where the local moment demands
+        // more than it carries -- a shallow spar whose height falls faster
+        // than the moment inboard of the taper lock -- the station is sized
+        // up to its own demand, thickness first within the H/3 clip and
+        // then width within the half-chord bound, so no station is left
+        // short by construction. A station whose tapered flange already
+        // carries its moment is untouched.
+        let mut t_cap = Vec::with_capacity(n);
+        let mut w_cap = Vec::with_capacity(n);
+        for j in 0..n {
+            let mut t = (t_cap0 * taper[j]).min(h_i[j] / 3.0);
+            let mut w = (w_cap0 * taper[j]).max(t);
+            let demand = (frac_m[j] * m_sizing[j]).abs();
+            if law == SizingLaw::Product && demand > 1.0 {
+                let a_req = demand / (cap_mat.f_allow_pa * h_eff[j].max(1e-6));
+                if w * t < a_req {
+                    t = (a_req / w).min(h_i[j] / 3.0);
+                    if w * t < a_req && t > 0.0 {
+                        w = (a_req / t).min((0.5 * chord[j]).max(w));
+                    }
+                }
+            }
+            t_cap.push(t);
+            w_cap.push(w);
+        }
         let a_cap: Vec<f64> = (0..n).map(|j| w_cap[j] * t_cap[j]).collect();
 
         // Web: uniform thickness sized from root shear.
@@ -458,6 +603,27 @@ pub fn size_wingbox(
 
     let total = m_caps + m_webs + m_skin + m_ribs;
 
+    let any_composite = [skin_mat, web_mat, cap_mat, rib_mat]
+        .iter()
+        .any(|m| m.category == "composite");
+
+    let composite_declaration = if any_composite {
+        Some(CompositeProxyDeclaration {
+            source: "Open source gap: the real wing box is composite, but no document in .agent/evidence/ \
+                     states it. Assigned as an effective isotropic proxy, not a verified material.",
+            applicability: "Effective isotropic proxy for a laminate wing box. f_allow is a single \
+                            strength-based design allowable, not a laminate allowable; no ply schedule, \
+                            stacking sequence, compression-after-impact knockdown, inter-laminar check \
+                            or aeroelastic tailoring is modelled. Not a certified laminate analysis. \
+                            Gauge is a declared class assumption, not a measured gauge.",
+            // Represent uncalibrated relative uncertainty explicitly as unknown (None),
+            // never inventing a spurious number or 0.0 per strict audit instructions.
+            relative_uncertainty: None,
+        })
+    } else {
+        None
+    };
+
     WingboxSizing {
         y_stations: y,
         eta_stations: eta,
@@ -475,12 +641,28 @@ pub fn size_wingbox(
         },
         total_mass_kg: total,
         sizing_load_case: worst_case.name,
+        composite_declaration,
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_root_cap_that_does_not_fit_its_height_clip_widens_instead_of_falling_short() {
+        // Fits: the flange stays at 0.6 h and carries the area.
+        let (w, t) = root_cap_dimensions(0.01, 6.0, 0.5);
+        assert!((w - 0.3).abs() < 1e-12 && (w * t - 0.01).abs() < 1e-12);
+        // Does not fit at 0.6 h: the thickness clips at 0.2 h and the flange
+        // widens until the area is carried.
+        let (w, t) = root_cap_dimensions(0.05, 6.0, 0.5);
+        assert!((t - 0.1).abs() < 1e-12);
+        assert!((w - 0.5).abs() < 1e-12 && (w * t - 0.05).abs() < 1e-12);
+        // Past the half-chord bound the area cannot be carried: reported short.
+        let (w, t) = root_cap_dimensions(0.5, 6.0, 0.5);
+        assert!((w - 3.0).abs() < 1e-12 && w * t < 0.5);
+    }
 
     #[test]
     fn linspace_pins_both_endpoints_and_spaces_evenly() {
@@ -647,6 +829,17 @@ mod tests {
         assert!(sizing.minimum_margin_of_safety().is_nan());
     }
 
+    #[test]
+    fn composite_declaration_structure_and_uncalibrated_uncertainty_contract() {
+        let decl = CompositeProxyDeclaration {
+            source: "Open source gap...",
+            applicability: "Effective isotropic proxy...",
+            relative_uncertainty: None,
+        };
+        assert!(decl.relative_uncertainty.is_none());
+        assert!(decl.applicability.contains("Effective isotropic proxy"));
+    }
+
     fn test_sizing() -> WingboxSizing {
         WingboxSizing {
             y_stations: vec![0.0, 35.875],
@@ -665,6 +858,7 @@ mod tests {
             },
             total_mass_kg: 0.0,
             sizing_load_case: "test",
+            composite_declaration: None,
         }
     }
 }

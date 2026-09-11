@@ -77,6 +77,25 @@ pub fn report_to_database(report: &AnalysisReport, config: &AlasConfig) -> Desig
 
     let weights = serde_json::json!({
         "mtow_kg": req.mtow_kg,
+        "mtow_limit_kg": report
+            .geometry_summary
+            .get("analysis_mtow_limit_kg")
+            .copied()
+            .unwrap_or(req.mtow_kg),
+        "analysis_mass_basis_kg": report
+            .geometry_summary
+            .get("analysis_mass_basis_kg")
+            .copied()
+            .unwrap_or(req.mtow_kg),
+        "analysis_mass_basis": if report
+            .geometry_summary
+            .get("analysis_mass_basis_is_sized")
+            .is_some_and(|value| *value > 0.5)
+        {
+            "mission_sized_finalist"
+        } else {
+            "configured_mtow"
+        },
         "systems_mass_method": config.mass_model.systems_mass_method,
         "systems_mass_status": match config.mass_model.systems_mass_method {
             alas_config::SystemsMassMethod::ReferenceCompatibleFractions => {
@@ -405,6 +424,12 @@ pub fn format_summary(report: &AnalysisReport, config: Option<&AlasConfig>) -> S
         lines.push(format!(
             "  MTOW (specified) : {:>10.0} kg",
             cfg.requirements.mtow_kg
+        ));
+    }
+    if let Some(mass_basis) = g.get("analysis_mass_basis_kg") {
+        lines.push(format!(
+            "  Analysis mass    : {:>10.0} kg (mission-sized finalist)",
+            mass_basis
         ));
     }
     lines.extend([

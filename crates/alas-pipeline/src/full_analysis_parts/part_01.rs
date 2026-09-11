@@ -113,7 +113,8 @@ impl FullAnalysis {
         };
         let (masses_init, coords_init, _cg_init) =
             initial_mass_result.map_err(|error| format!("mass-coordinate error: {error}"))?;
-        let (coords_init, _) = self.station_coordinates(design, &plane, &masses_init, coords_init)?;
+        let (coords_init, _) =
+            self.station_coordinates(design, &plane, &masses_init, coords_init)?;
 
         // Second pass: build detailed interior layout and recompute mass breakdown and CG.
         let (oew, x_oew) = oew_and_cg(&masses_init, &coords_init);
@@ -160,8 +161,27 @@ impl FullAnalysis {
                 &self.config.landing_gear,
             )
         };
-        let (masses, coords, _) =
+        let (mut masses, mut coords, _) =
             detailed_mass_result.map_err(|error| format!("mass-coordinate error: {error}"))?;
+        // The complete wing group is the strength-sized primary box reconciled
+        // with its non-box remainder, not the bare empirical total. The
+        // optimizer has always sized its candidates against that reconciled
+        // wing; publishing the empirical total here instead made the report
+        // describe a different operating empty mass for the same aircraft,
+        // with the fuel closure absorbing the difference. The frozen
+        // translation fixture keeps the original buildup.
+        if !self.reference_compatibility {
+            let reconciliation =
+                alas_mass::wing_reconciliation::reconcile(&self.config, design, &plane, None)
+                    .map_err(|error| format!("wing reconciliation error: {error}"))?;
+            masses.wing = reconciliation.feedback.total_wing_mass_kg;
+            coords.wing = reconciliation.feedback.centroid_m;
+            // The fuel item is the takeoff-mass closure remainder, so a
+            // heavier or lighter wing must move it rather than leave the
+            // breakdown summing to a different aircraft.
+            let (reconciled_oew, _) = oew_and_cg(&masses, &coords);
+            masses.fuel = req.mtow_kg - reconciled_oew - masses.payload;
+        }
         let (coords, cg) = self.station_coordinates(design, &plane, &masses, coords)?;
         // Anchor the aerodynamic moment reference to the actual physical CG.
         plane.xyz_ref[0] = cg[0];
@@ -233,10 +253,7 @@ impl FullAnalysis {
 
         let mut geometry_summary = self.geometry_summary(&plane, design);
         if let Some(limit_kg) = effective_structural_payload_limit_kg {
-            geometry_summary.insert(
-                "effective_structural_payload_limit_kg".to_owned(),
-                limit_kg,
-            );
+            geometry_summary.insert("effective_structural_payload_limit_kg".to_owned(), limit_kg);
         }
 
         Ok(AnalysisReport {
@@ -257,6 +274,51 @@ impl FullAnalysis {
         })
     }
 
+    /// Run the final report at the takeoff mass closed by the mission-sized
+    /// optimizer.
+    ///
+    /// `requirements.mtow_kg` is the aircraft's upper takeoff-mass limit, but
+    /// it is not necessarily the mass the selected candidate actually flies
+    /// at.  Reusing the limit for the final cruise CL and mass breakdown can
+    /// therefore make the report describe a different, heavier aircraft than
+    /// the candidate that won the search.  This entry point keeps the limit
+    /// as provenance while evaluating all mass-coupled quantities at the
+    /// candidate's closed takeoff mass.  A mass above the limit is retained as
+    /// an explicit infeasible review case; it is never silently clamped.
+    pub fn run_at_sized_takeoff_mass(
+        &self,
+        design: &DesignVector,
+        include_engines: bool,
+        takeoff_mass_kg: f64,
+    ) -> Result<AnalysisReport, String> {
+        if !takeoff_mass_kg.is_finite() || takeoff_mass_kg <= 0.0 {
+            return Err(format!(
+                "sized takeoff mass must be finite and positive, got {takeoff_mass_kg} kg"
+            ));
+        }
+        let mtow_limit_kg = self.config.requirements.mtow_kg;
+        let mut sized_config = self.config.clone();
+        sized_config.requirements.mtow_kg = takeoff_mass_kg;
+        let sized_analysis = Self {
+            config: sized_config,
+            reference_compatibility: self.reference_compatibility,
+        };
+        let mut report = sized_analysis.run(design, include_engines)?;
+        // The report schema predates the mission-sized mass seam.  Keep the
+        // provenance in the existing numeric geometry map so JSON, CPACS
+        // sidecars and GUI consumers can expose it without breaking their
+        // struct layout or silently interpreting the limit as flown mass.
+        report
+            .geometry_summary
+            .insert("analysis_mass_basis_kg".to_owned(), takeoff_mass_kg);
+        report
+            .geometry_summary
+            .insert("analysis_mtow_limit_kg".to_owned(), mtow_limit_kg);
+        report
+            .geometry_summary
+            .insert("analysis_mass_basis_is_sized".to_owned(), 1.0);
+        Ok(report)
+    }
 }
 
 /// Resolve the structural payload bound for an unchanged registered preset:
@@ -279,9 +341,11 @@ fn effective_structural_payload_limit_kg(
         return None;
     }
     let configured_limit_kg = config.requirements.max_structural_payload_kg;
-    Some(if configured_limit_kg.is_finite() && configured_limit_kg > 0.0 {
-        configured_limit_kg.min(available_payload_kg)
-    } else {
-        available_payload_kg
-    })
+    Some(
+        if configured_limit_kg.is_finite() && configured_limit_kg > 0.0 {
+            configured_limit_kg.min(available_payload_kg)
+        } else {
+            available_payload_kg
+        },
+    )
 }

@@ -18,8 +18,77 @@ pub fn run_mses_pressure_distribution(
     mses_dir: &Path,
     retry_offsets_deg: Option<&[f64]>,
 ) -> MsesPressureResult {
+    run_mses_pressure_distribution_with_cancel(
+        airfoil,
+        mach,
+        reynolds,
+        alpha_deg,
+        config,
+        mses_dir,
+        retry_offsets_deg,
+        None,
+    )
+}
+
+/// Run the MSES pressure entry point with cooperative cancellation.
+// Every argument is an independently configured input of one MSES run, and
+// each caller varies a different one; bundling them would hide which.
+#[allow(clippy::too_many_arguments)]
+pub fn run_mses_pressure_distribution_with_cancel(
+    airfoil: &Airfoil,
+    mach: f64,
+    reynolds: f64,
+    alpha_deg: f64,
+    config: &MsesConfig,
+    mses_dir: &Path,
+    retry_offsets_deg: Option<&[f64]>,
+    cancel: Option<&AtomicBool>,
+) -> MsesPressureResult {
+    run_mses_pressure_distribution_with_checkpoint_and_cancel(
+        airfoil,
+        mach,
+        reynolds,
+        alpha_deg,
+        config,
+        mses_dir,
+        retry_offsets_deg,
+        None,
+        cancel,
+    )
+}
+
+/// Run the MSES pressure entry point warm-started from a genuinely converged
+/// polar checkpoint, with cooperative cancellation.
+///
+/// `checkpoint` is typically one entry of [`MsesPolarResult::checkpoints`]
+/// from a prior [`run_mses_polar_with_cancel`] call on the *same*
+/// airfoil/config/Mach/Reynolds/OSMAP -- picked as whichever checkpoint's
+/// `alpha_deg` is nearest the pressure point actually wanted. Passing a
+/// checkpoint from a different geometry, config, Mach, Reynolds, or OSMAP map
+/// is safe (it is rejected by an exact identity check and this call falls
+/// back to the same cold-start search [`run_mses_pressure_distribution`]
+/// already performs) but wastes the opportunity to skip that search.
+///
+/// See [`Mses::pressure_with_checkpoint_and_cancel`] for what "warm-started"
+/// means here: the checkpoint's converged flowfield is restored and bridged
+/// toward the exact requested angle in bounded steps before any cold clean
+/// mesh is attempted, cheaper than (and in addition to, never instead of)
+/// the existing retry-offset search.
+#[allow(clippy::too_many_arguments)]
+pub fn run_mses_pressure_distribution_with_checkpoint_and_cancel(
+    airfoil: &Airfoil,
+    mach: f64,
+    reynolds: f64,
+    alpha_deg: f64,
+    config: &MsesConfig,
+    mses_dir: &Path,
+    retry_offsets_deg: Option<&[f64]>,
+    checkpoint: Option<&MsesConvergedCheckpoint>,
+    cancel: Option<&AtomicBool>,
+) -> MsesPressureResult {
     let base = MsesPressureResult {
         alpha_deg,
+        requested_alpha_deg: alpha_deg,
         ..MsesPressureResult::default()
     };
     if !config.enabled {
@@ -33,7 +102,9 @@ pub fn run_mses_pressure_distribution(
         Err(error) => return base.into_error(error.to_string()),
     };
     let offsets = retry_offsets_deg.unwrap_or(&DEFAULT_RETRY_OFFSETS_DEG);
-    Mses::new(repaneled, config, mses_dir).pressure(alpha_deg, reynolds, mach, offsets)
+    Mses::new(repaneled, config, mses_dir).pressure_with_checkpoint_and_cancel(
+        alpha_deg, reynolds, mach, offsets, checkpoint, cancel,
+    )
 }
 
 /// A section's name, or the placeholder upstream uses when it has none.
@@ -160,6 +231,9 @@ mod raw_export_tests {
     }
 }
 
+// A test asserts on values it constructed here directly, so a failed unwrap
+// or expect is the assertion failing, not a library invariant being broken.
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 #[cfg(test)]
 mod polar_diagnostic_tests {
     use super::*;
@@ -228,5 +302,67 @@ mod polar_diagnostic_tests {
             "Newton iteration stopped"
         );
     }
-}
 
+    #[test]
+    fn closest_checkpoint_selection_uses_total_cmp_and_ignores_nonfinite() {
+        let make_cp = |alpha: f64, mach: f64, re: f64, name: &str| MsesConvergedCheckpoint {
+            airfoil_name: name.to_owned(),
+            airfoil_coordinates: vec![(0.0, 0.0), (1.0, 0.0)],
+            n_crit: 9.0,
+            xtr_upper: 1.0,
+            xtr_lower: 1.0,
+            mset_n: 215,
+            mset_e: 1.2,
+            mucon: 1.0,
+            max_iterations: 100,
+            mach,
+            reynolds: re,
+            osmap_path: None,
+            alpha_deg: alpha,
+            solver_output: "Converged on tolerance".to_owned(),
+            mdat_case: vec![1, 2, 3],
+        };
+
+        let polar = MsesPolarResult {
+            airfoil_name: "test_section".to_owned(),
+            mach: 0.735,
+            reynolds: 5.0e6,
+            checkpoints: vec![
+                make_cp(1.0, 0.735, 5.0e6, "test_section"),
+                make_cp(2.0, 0.735, 5.0e6, "test_section"),
+                make_cp(3.0, 0.735, 5.0e6, "test_section"),
+                make_cp(f64::NAN, 0.735, 5.0e6, "test_section"),
+                // Mismatched Mach
+                make_cp(2.1, 0.800, 5.0e6, "test_section"),
+                // Mismatched Reynolds
+                make_cp(2.2, 0.735, 1.0e7, "test_section"),
+                // Mismatched Airfoil
+                make_cp(2.3, 0.735, 5.0e6, "other_section"),
+            ],
+            ..MsesPolarResult::default()
+        };
+
+        // Non-finite target alpha returns None
+        assert!(polar.closest_checkpoint(f64::NAN).is_none());
+        assert!(polar.closest_checkpoint(f64::INFINITY).is_none());
+        assert!(polar.closest_checkpoint(f64::NEG_INFINITY).is_none());
+
+        // Target 2.1 is closest to 2.0 (dist 0.1 vs 0.9 to 3.0), ignoring mismatched 2.1/2.2/2.3
+        let closest = polar.closest_checkpoint(2.1).expect("closest checkpoint");
+        assert_eq!(closest.alpha_deg, 2.0);
+
+        // Target 2.6 is closest to 3.0 (dist 0.4 vs 0.6 to 2.0)
+        let closest = polar.closest_checkpoint(2.6).expect("closest checkpoint");
+        assert_eq!(closest.alpha_deg, 3.0);
+
+        // Standalone selector helper
+        let cps = vec![
+            make_cp(0.0, 0.735, 5.0e6, "test"),
+            make_cp(1.5, 0.735, 5.0e6, "test"),
+            make_cp(f64::NAN, 0.735, 5.0e6, "test"),
+        ];
+        assert_eq!(select_closest_checkpoint(&cps, 1.2).map(|c| c.alpha_deg), Some(1.5));
+        assert_eq!(select_closest_checkpoint(&cps, 0.5).map(|c| c.alpha_deg), Some(0.0));
+        assert!(select_closest_checkpoint(&cps, f64::NAN).is_none());
+    }
+}

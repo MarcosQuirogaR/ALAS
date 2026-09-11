@@ -88,10 +88,28 @@ pub fn validate(config: &AlasConfig) -> Vec<ValidationIssue> {
     let mut issues = cruise_point_inside_the_flight_envelope(config);
     issues.extend(atmosphere_domain_is_physical(config));
     issues.extend(fuel_properties_are_physical(config));
+    issues.extend(landing_gear_inputs_are_physical(config));
     issues.extend(empennage_tapers_toward_its_tips(config));
     issues.extend(mses_timeouts_are_positive_and_finite(config));
     issues.extend(optimizer_tokens_are_supported(config));
     issues
+}
+
+/// Keep source-backed landing-gear dimensions and heterogeneous bogie lists
+/// valid before any sizing or preview code consumes them. A reference
+/// wheelbase is deliberately validated as metadata only: it cannot supply a
+/// missing datum for the active model's absolute gear stations.
+fn landing_gear_inputs_are_physical(config: &AlasConfig) -> Vec<ValidationIssue> {
+    config
+        .landing_gear
+        .validation_errors()
+        .into_iter()
+        .map(|(field_path, message)| ValidationIssue {
+            field_path,
+            message,
+            severity: Severity::Error,
+        })
+        .collect()
 }
 
 /// Fuel volume can only become a meaningful mass capacity when its conversion
@@ -318,6 +336,18 @@ mod tests {
             };
             assert_eq!(validate(&config), Vec::new(), "{}", preset.name);
         }
+    }
+
+    #[test]
+    fn malformed_heterogeneous_bogies_are_blocking_errors() {
+        let mut config = AlasConfig::default();
+        config.landing_gear.n_mlg_struts = 3;
+        config.landing_gear.mlg_strut_bogie_wheels = Some(vec![4, 4]);
+        let issues = validate(&config);
+        assert!(issues.iter().any(|issue| {
+            issue.field_path == "landing_gear.mlg_strut_bogie_wheels"
+                && issue.severity == Severity::Error
+        }));
     }
 
     #[test]

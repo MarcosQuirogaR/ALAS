@@ -71,6 +71,7 @@ fn sample_structural_result() -> StructuralAnalysisResult {
         },
         total_mass_kg: 410.0,
         sizing_load_case: "pull-up",
+        composite_declaration: None,
     };
     let load_case = LoadCaseResult {
         name: "pull-up",

@@ -373,6 +373,44 @@ fn partial_mission_evidence_never_promotes_a_capability_claim_to_a_design_missio
         .contains(&MissingDesignMissionDatum::ReserveFuel));
 }
 
+#[test]
+fn a220_source_gear_stations_are_normalized_and_topology_is_explicit() {
+    let preset = presets::get("A220-300").expect("registered A220-300 preset");
+    let gear = &preset.landing_gear;
+
+    assert_eq!(gear.n_nlg_wheels, 2);
+    assert_eq!(gear.n_mlg_struts, 2);
+    assert_eq!(gear.wheels_per_mlg_strut, 2);
+    assert_eq!(gear.mlg_strut_bogie_wheels, Some(vec![2, 2]));
+    assert_eq!(
+        gear.reference_station_frame.as_deref(),
+        Some("nose_tip_drawing_reference")
+    );
+    assert_eq!(gear.reference_wheelbase_m, Some(15.23238));
+    assert_eq!(gear.reference_track_m, Some(6.731));
+
+    let source_length_m = 38.68928;
+    let resolved = gear.resolved_station_positions(1.0, 2.0, 0.0, source_length_m);
+    assert!(resolved.source_scaled);
+    assert_eq!(resolved.main_gear_x_m.len(), 2);
+    assert!((resolved.x_nlg_m - 3.401568).abs() < 1.0e-12);
+    assert!((resolved.x_mlg_m - 18.633948).abs() < 1.0e-12);
+    assert!((resolved.x_mlg_m - resolved.x_nlg_m - 15.23238).abs() < 1.0e-12);
+    assert!(
+        (resolved.main_gear_x_m[0] - resolved.main_gear_x_m[1]).abs() < 1.0e-12,
+        "left and right A220 main axles share the source longitudinal station"
+    );
+
+    // The source dimensions are not frozen absolute stations. A shrink run
+    // re-applies the normalized fractions to the active fuselage length.
+    let shrunk_length_m = 30.0;
+    let shrunk = gear.resolved_station_positions(1.0, 2.0, 0.0, shrunk_length_m);
+    assert!(shrunk.source_scaled);
+    assert!((shrunk.x_nlg_m - 3.401568 * shrunk_length_m / source_length_m).abs() < 1.0e-12);
+    assert!((shrunk.x_mlg_m - 18.633948 * shrunk_length_m / source_length_m).abs() < 1.0e-12);
+    assert!(shrunk.x_mlg_m < resolved.x_mlg_m);
+}
+
 fn preset_projected_area(preset: &AircraftPreset) -> f64 {
     let semi_span = preset.design_vector.span_m / 2.0;
     let inner_span = semi_span * preset.geometry.wing.break_span_fraction;

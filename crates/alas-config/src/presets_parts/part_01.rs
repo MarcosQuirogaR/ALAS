@@ -209,6 +209,36 @@ pub struct AircraftVariantIdentity {
     pub tank_configuration: &'static str,
 }
 
+/// One source-defined emergency-exit pair and its CS-25 evacuation rating.
+///
+/// The capacities in the regulation are ratings for the complete pair of
+/// exits.  Keeping that unit in the field name prevents a consumer from
+/// multiplying a pair rating by two when it emits the two physical door
+/// cut-outs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CertifiedExitPair {
+    /// Exit class printed in the source cabin configuration.
+    pub exit_type: &'static str,
+    /// Passengers assigned to this complete exit pair.
+    pub capacity_per_pair: i64,
+}
+
+/// A revision-locked exit arrangement for a registered aircraft variant.
+///
+/// This is source metadata used to keep a product preset's cabin topology
+/// separate from the generic diameter heuristic.  It is not a declaration
+/// that the layout engine has demonstrated the aircraft's certified
+/// evacuation performance.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CertifiedExitLayout {
+    /// Human-readable pair sequence, for example `C-III-C`.
+    pub label: &'static str,
+    /// Exit pairs in source order, including each pair's rating.
+    pub pairs: &'static [CertifiedExitPair],
+    /// Exact source, revision and location for the arrangement.
+    pub source: &'static str,
+}
+
 /// Primary-source values against which one preset is validated.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct AircraftReferenceData {
@@ -234,6 +264,8 @@ pub struct AircraftReferenceData {
     pub planning_seats: Option<i64>,
     /// Certified evacuation maximum for the applicable exit arrangement.
     pub certified_max_seats: Option<i64>,
+    /// Source-defined exit-pair arrangement for the registered variant.
+    pub certified_exit_layout: Option<CertifiedExitLayout>,
     /// Whether a complete design-mission definition has source provenance.
     pub design_mission_evidence: DesignMissionEvidence,
     /// Relevant public range/mission material that is not a complete mission.
@@ -350,6 +382,13 @@ impl AircraftPreset {
                 cabin.passenger.set_length_share_mix(&[("Economy", 1.0)]);
             }
             _ => {}
+        }
+        if self.name == "A320-200" {
+            // Airbus A320 Aircraft Characteristics Figure 2-4-1 lists
+            // 28/29 in pitch for the 180-seat single-class high-density
+            // arrangement.  Use the 28 in lower bound for this source load
+            // case rather than the generic 33 in economy seed.
+            cabin.passenger.economy.pitch_m = 0.7112;
         }
         if self.name == "ATR72-600" {
             // The official ATR 72-600 72-seat layout uses two Type-III exit

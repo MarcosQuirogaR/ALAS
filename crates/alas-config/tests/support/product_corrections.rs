@@ -75,6 +75,18 @@ pub fn engine_copy(path: &str) -> Option<Value> {
 /// Additive propulsion fields are validated by the active-binding unit tests.
 pub fn native_field(path: &str, key: &str) -> bool {
     (matches!(key, "fuel_policy" | "fuel_tanks") && !path.contains('.'))
+        || (path.ends_with(".landing_gear")
+            && matches!(
+                key,
+                "reference_wheelbase_m"
+                    | "reference_station_frame"
+                    | "reference_station_fuselage_length_m"
+                    | "reference_nlg_x_fraction"
+                    | "reference_mlg_x_fractions"
+                    | "reference_body_wheelbase_m"
+                    | "reference_track_m"
+                    | "mlg_strut_bogie_wheels"
+            ))
         || (path.ends_with(".optimizer") && key == "objective")
         || (path.ends_with(".mass_model")
             && matches!(

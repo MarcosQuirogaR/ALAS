@@ -24,11 +24,64 @@
 //! which sizes them out of runways they operate from every day.
 
 use crate::{
-    AircraftPreset, AircraftReferenceData, AircraftVariantIdentity, CgEnvelopeEvidence,
+    AircraftPreset, AircraftReferenceData, AircraftVariantIdentity, CertifiedExitLayout,
+    CertifiedExitPair, CgEnvelopeEvidence,
     DesignRequirements, DesignVector, EmpennageConfig, EngineConfig, FuselageConfig,
     GeometryConfig, LandingGearConfig, MassModelConfig, MissingDesignMissionDatum,
     MissionEvidenceApplicability, PartialDesignMissionEvidence, PartialMissionEvidenceKind,
     PublishedMissionLoadCase, PublishedRange, WingConfig,
+};
+
+/// EASA's baseline A220-300 cabin arrangement for the legacy registered
+/// variant.  Each number is the rating of the complete exit pair; the
+/// physical layout has two Type-C pairs and one Type-III pair, for 145 seats
+/// in the source table.  The 149-seat C-III*-C option requires a different
+/// exit installation and is intentionally absent here.
+const A220_300_CERTIFIED_EXIT_LAYOUT: CertifiedExitLayout = CertifiedExitLayout {
+    label: "C-III-C",
+    pairs: &[
+        CertifiedExitPair {
+            exit_type: "C",
+            capacity_per_pair: 55,
+        },
+        CertifiedExitPair {
+            exit_type: "III",
+            capacity_per_pair: 35,
+        },
+        CertifiedExitPair {
+            exit_type: "C",
+            capacity_per_pair: 55,
+        },
+    ],
+    source: "EASA.IM.A.570 BD-500 TCDS Issue 24, 2026-02-20, Section 2 BD-500-1A11 III.19 p.23 (baseline C-III-C MPSC 145; Option C25631002 is required for C-III*-C 149)",
+};
+
+/// EASA's A320-200 maximum-seating arrangement.  The four stations on each
+/// side are two Type-C door pairs and two Type-III overwing pairs; their
+/// complete-pair ratings sum to the 180-seat certified maximum.  The source
+/// permits a lower maximum when an overwing exit is deactivated, so this
+/// metadata is tied to the fully active WV017 arrangement used by the preset.
+const A320_200_CERTIFIED_EXIT_LAYOUT: CertifiedExitLayout = CertifiedExitLayout {
+    label: "C-III-III-C",
+    pairs: &[
+        CertifiedExitPair {
+            exit_type: "C",
+            capacity_per_pair: 55,
+        },
+        CertifiedExitPair {
+            exit_type: "III",
+            capacity_per_pair: 35,
+        },
+        CertifiedExitPair {
+            exit_type: "III",
+            capacity_per_pair: 35,
+        },
+        CertifiedExitPair {
+            exit_type: "C",
+            capacity_per_pair: 55,
+        },
+    ],
+    source: "EASA.A.064 A318/A319/A320/A321 TCDS Issue 12, 2013-09-12, Section 1 III.19 (maximum certified seating 180 with all four Type III overwing exits active)",
 };
 
 /// Short and medium-range twin, the reference single-aisle.
@@ -58,6 +111,8 @@ pub fn a320_200() -> AircraftPreset {
             usable_fuel_volume_l: Some(24_167.0),
             usable_fuel_mass_kg: Some(19_334.0),
             fuel_density_kg_l: Some(0.8),
+            certified_max_seats: Some(180),
+            certified_exit_layout: Some(A320_200_CERTIFIED_EXIT_LAYOUT),
             partial_design_mission_evidence: vec![PartialDesignMissionEvidence {
                 kind: PartialMissionEvidenceKind::PayloadRangeChart,
                 range: None,
@@ -97,6 +152,17 @@ pub fn a320_200() -> AircraftPreset {
             n_mlg_struts: 2,
             wheels_per_mlg_strut: 2,
             track_diameter_factor: 7.59 / 3.95,
+            // EASA A.064 gives a 12.64 m NLG-to-MLG wheelbase and 7.59 m
+            // main-gear track. The Airbus aircraft-characteristics drawing
+            // also provides nose-tip-referenced stations; they are stored as
+            // normalized geometry anchors so shrink/optimization scales them
+            // with the active fuselage instead of freezing absolute metres.
+            reference_wheelbase_m: Some(12.64),
+            reference_track_m: Some(7.59),
+            reference_station_frame: Some("nose_tip_drawing_reference".to_owned()),
+            reference_station_fuselage_length_m: Some(37.57),
+            reference_nlg_x_fraction: Some(5.07 / 37.57),
+            reference_mlg_x_fractions: Some(vec![17.71 / 37.57, 17.71 / 37.57]),
             ..LandingGearConfig::default()
         },
         // The four planform numbers below are not read off a specification
@@ -264,6 +330,13 @@ pub fn a220_300() -> AircraftPreset {
             usable_fuel_mass_kg: Some(17_395.27),
             fuel_density_kg_l: Some(0.8089),
             planning_seats: Some(140),
+            // EASA's BD-500 type-certificate data sheet sets 145 as the
+            // baseline maximum passenger seating capacity for the selected
+            // legacy S/N 55001-59999 configuration.  The optional 149-seat
+            // arrangement is a different exit installation and is therefore
+            // deliberately not folded into this preset.
+            certified_max_seats: Some(145),
+            certified_exit_layout: Some(A220_300_CERTIFIED_EXIT_LAYOUT),
             partial_design_mission_evidence: vec![
                 PartialDesignMissionEvidence {
                     kind: PartialMissionEvidenceKind::AdvertisedRange,
@@ -307,6 +380,8 @@ pub fn a220_300() -> AircraftPreset {
             sources: vec![
                 "Airbus A220 Aircraft Recovery Publication BD500-3AB48-10400-00, May 2026, J06-20-01 p.14 and J08-41-03-01 p.2",
                 "Airbus A220 ARP J07-40-00-06AAA-030A-A, 2019-10-22 p.2",
+                "Airbus A220 Aircraft Characteristics - Airport and Maintenance Planning, A220-ACP-Issue013-00-27Nov2025, DM BD500-A-J06-10-00-00AAA-030A-A Rev 2023-11-01, pp.150-156 (nominal nose-tip drawing frame; dimensions vary with weight/CG)",
+                "EASA.IM.A.570 BD-500 TCDS Issue 24, 2026-02-20, Section 2 BD-500-1A11 III.19 p.23 (baseline MPSC 145; Option C25631002 is required for 149)",
             ],
             ..AircraftReferenceData::default()
         },
@@ -317,6 +392,22 @@ pub fn a220_300() -> AircraftPreset {
             n_mlg_struts: 2,
             wheels_per_mlg_strut: 2,
             track_diameter_factor: 6.731 / 3.50,
+            // Airbus' ACP side/ground drawing gives the A220-300 nominal
+            // longitudinal anchors for S/N 55001-59999.  The dimensions
+            // originate at the geometric nose-tip extension, so retain that
+            // frame explicitly and normalize the stations before applying
+            // them to a resized active fuselage.  These are drawing/group
+            // centres, not certified WBM/AFM datum or attachment points.
+            reference_wheelbase_m: Some(15.23238),
+            reference_track_m: Some(6.731),
+            reference_station_frame: Some("nose_tip_drawing_reference".to_owned()),
+            reference_station_fuselage_length_m: Some(38.68928),
+            reference_nlg_x_fraction: Some(3.401568 / 38.68928),
+            reference_mlg_x_fractions: Some(vec![
+                18.633948 / 38.68928,
+                18.633948 / 38.68928,
+            ]),
+            mlg_strut_bogie_wheels: Some(vec![2, 2]),
             ..LandingGearConfig::default()
         },
         design_vector: DesignVector {

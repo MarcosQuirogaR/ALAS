@@ -10,8 +10,8 @@ use alas_config::AlasConfig;
 use alas_exec::RunEnvironment;
 use alas_opt::objective::DesignObjective;
 use alas_opt::{
-    assess_candidate_with_polar, DesignOptimizer, ExternalPolar, ObjectiveEvaluation,
-    ObjectiveEvaluator, OptimizationResult,
+    assess_candidate_with_polar, assess_product_candidate, DesignOptimizer, ExternalPolar,
+    ObjectiveEvaluation, ObjectiveEvaluator, OptimizationResult,
 };
 
 use crate::avl::{run_avl_analysis, AvlAnalysisResult, AvlAnalysisStatus};
@@ -250,7 +250,31 @@ fn run_vlm_optimizer(
         }
     };
     let design = optimization.best_design;
-    let report = match FullAnalysis::new(config).run(&design, true) {
+    let assessment = match assess_product_candidate(&config, &design) {
+        Ok(assessment) if assessment.hard_feasible => assessment,
+        Ok(assessment) => {
+            return SolverOptimizationResult::failed(
+                SolverKind::Vlm,
+                output_dir,
+                format!(
+                    "VLM finalist failed its replayed hard constraints: {}",
+                    assessment.violated_hard_ids().join(", ")
+                ),
+            )
+        }
+        Err(error) => {
+            return SolverOptimizationResult::failed(
+                SolverKind::Vlm,
+                output_dir,
+                format!("VLM finalist replay failed: {error}"),
+            )
+        }
+    };
+    let report = match FullAnalysis::new(config).run_at_sized_takeoff_mass(
+        &design,
+        true,
+        assessment.sized.takeoff_mass_kg,
+    ) {
         Ok(report) => report,
         Err(error) => {
             return SolverOptimizationResult::failed(

@@ -435,6 +435,7 @@ mod tests {
             },
             total_mass_kg: 11.0,
             sizing_load_case: "probe",
+            composite_declaration: None,
         };
 
         let without_ribs = mass_per_length(&sizing, 1.0, 1.0, 1.0, false);

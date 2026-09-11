@@ -142,6 +142,7 @@ mod tests {
             },
             total_mass_kg: 6200.0,
             sizing_load_case: "pull-up",
+            composite_declaration: None,
         }
     }
 

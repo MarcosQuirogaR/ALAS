@@ -217,6 +217,19 @@ impl Default for AlasConfig {
 }
 
 impl AlasConfig {
+    /// Whether this run is allowed to carry an explicit passenger target.
+    ///
+    /// A clean-sheet study has no registered aircraft capacity to preserve, so
+    /// its passenger target is a legitimate sizing input. Once a run starts
+    /// from a registered aircraft, the cabin mix is the input and the layout
+    /// fills the usable floor for each candidate; retaining a copied seat
+    /// count there would recreate one-seat shortfalls such as 349/350.
+    pub fn uses_fixed_passenger_target(&self) -> bool {
+        self.requirements.aircraft_type == "passenger"
+            && self.optimizer.design_space.mode == crate::optimizer::DesignMode::CleanSheet
+            && self.preset.is_empty()
+    }
+
     /// Build a configuration from what a saved file holds.
     ///
     /// `data` names a subset of the fields below, to any depth. A `preset` key
@@ -268,6 +281,15 @@ impl AlasConfig {
                     // do; the overlay below still lets a file change it.
                     if let Some(tanks) = crate::preset_fuel_tanks::layout_for(name) {
                         instance.fuel_tanks = tanks;
+                    }
+                    // A registered aircraft's wing-box material family is aircraft data, not a
+                    // global study default: the default's CFRP spar cap lands on metallic wings
+                    // that no source describes that way. Only the material family travels here;
+                    // gauges and spar stations stay with the study, because no source in
+                    // .agent/evidence/ establishes them and the spars bound the fuel tank box.
+                    // The overlay below still lets a file change any of it.
+                    if let Some(structures) = crate::preset_structures::config_for(name) {
+                        instance.structures = structures;
                     }
                     instance.departure_airport = operational.departure_airport.to_owned();
                     instance.arrival_airport = operational.arrival_airport.to_owned();
@@ -454,8 +476,10 @@ mod tests {
 
     #[test]
     fn an_unregistered_preset_name_falls_back_to_the_fraction_rather_than_erroring() {
-        let mut config = AlasConfig::default();
-        config.preset = "not-a-real-preset".to_owned();
+        let mut config = AlasConfig {
+            preset: "not-a-real-preset".to_owned(),
+            ..Default::default()
+        };
         config.optimizer.design_space.mode = crate::optimizer::DesignMode::BaselineSandbox;
         let mtow_kg = config.requirements.mtow_kg;
         assert_eq!(
@@ -689,5 +713,33 @@ mod tests {
         let config = AlasConfig::default();
         assert!(crate::airports::get(&config.departure_airport).is_ok());
         assert!(crate::airports::get(&config.arrival_airport).is_ok());
+    }
+
+    #[test]
+    fn preset_selection_binds_preset_structures_config() {
+        let a320 = AlasConfig::from_value(&json!({"preset": "A320-200"})).unwrap();
+        assert_eq!(a320.structures.spar_cap_material, "Al 7075-T6");
+        assert_eq!(a320.structures.skin_material, "Al 7075-T6");
+
+        let b787 = AlasConfig::from_value(&json!({"preset": "B787-9"})).unwrap();
+        assert_eq!(b787.structures.skin_material, "CFRP QI");
+        assert_eq!(b787.structures.spar_web_material, "CFRP QI");
+        assert_eq!(b787.structures.spar_cap_material, "CFRP QI");
+
+        let ave = AlasConfig::from_value(&json!({"preset": "AVE"})).unwrap();
+        assert_eq!(ave.structures, StructuresConfig::default());
+    }
+
+    #[test]
+    fn explicit_structures_overlay_overrides_preset_structures() {
+        let custom = AlasConfig::from_value(&json!({
+            "preset": "A320-200",
+            "structures": {
+                "skin_material": "Ti-6Al-4V"
+            }
+        }))
+        .unwrap();
+        assert_eq!(custom.structures.skin_material, "Ti-6Al-4V");
+        assert_eq!(custom.structures.spar_cap_material, "Al 7075-T6");
     }
 }

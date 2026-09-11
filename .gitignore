@@ -34,3 +34,9 @@
 
 # Session hand-off notes, kept local: working scratch, not project record.
 /NOTE.md
+
+# Scratch outputs of hand-run MSES sessions inside the bundled tool directory.
+/external tools/Mses3.12c-win32/*.png
+/external tools/Mses3.12c-win32/*.ps
+/external tools/Mses3.12c-win32/*.csv
+/external tools/Mses3.12c-win32/mdat.*

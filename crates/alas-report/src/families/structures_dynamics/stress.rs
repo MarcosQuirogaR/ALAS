@@ -170,6 +170,7 @@ mod tests {
             },
             total_mass_kg: 410.0,
             sizing_load_case: "pull-up",
+            composite_declaration: None,
         };
         let spar_stress = SparStressResult {
             chord_fraction: 0.2,

@@ -154,7 +154,7 @@ pub fn run_airfoil_screening(
     options: &AirfoilScreeningOptions,
     mses_dir: Option<&Path>,
     progress_callback: Option<&mut dyn FnMut(&str)>,
-    should_cancel: Option<&dyn Fn() -> bool>,
+    should_cancel: Option<&(dyn Fn() -> bool + Sync)>,
 ) -> Result<AirfoilScreeningResult, String> {
     run_airfoil_screening_with_mass_model(
         config,
@@ -179,7 +179,7 @@ pub fn run_airfoil_screening_product(
     options: &AirfoilScreeningOptions,
     mses_dir: Option<&Path>,
     progress_callback: Option<&mut dyn FnMut(&str)>,
-    should_cancel: Option<&dyn Fn() -> bool>,
+    should_cancel: Option<&(dyn Fn() -> bool + Sync)>,
 ) -> Result<AirfoilScreeningResult, String> {
     run_airfoil_screening_with_mass_model(
         config,

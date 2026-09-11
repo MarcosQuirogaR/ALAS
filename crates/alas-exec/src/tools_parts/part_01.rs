@@ -105,7 +105,54 @@ pub enum MsesDiscovery {
         missing: Vec<String>,
     },
     /// All required MSES programs are present.
-    Ready(PathBuf),
+    Ready {
+        /// Directory containing the three MSES programs.
+        directory: PathBuf,
+        /// How the directory was selected. An adjacent result means an
+        /// explicit preference was unavailable and a caller should surface
+        /// that fallback in its status text or run log.
+        source: MsesSource,
+    },
+}
+
+/// Provenance for a resolved MSES directory.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MsesSource {
+    /// The configured path resolved to a complete installation.
+    Configured,
+    /// A complete installation was found in an application-adjacent tools
+    /// directory after the configured path was unavailable.
+    Adjacent {
+        /// Application root whose `external tools` directory was inspected.
+        root: PathBuf,
+    },
+}
+
+impl MsesDiscovery {
+    /// Return a resolved directory without discarding discovery provenance.
+    pub fn ready_path(&self) -> Option<&Path> {
+        match self {
+            Self::Ready { directory, .. } => Some(directory),
+            Self::Absent | Self::Incomplete { .. } => None,
+        }
+    }
+
+    /// Explain when a stale configured location was replaced by a packaged or
+    /// development-checkout candidate. The caller can place this in a run
+    /// log without silently rewriting the user's preference.
+    pub fn fallback_warning(&self) -> Option<String> {
+        match self {
+            Self::Ready {
+                directory,
+                source: MsesSource::Adjacent { root },
+            } => Some(format!(
+                "Configured MSES directory was unavailable; using adjacent installation {} (root {})",
+                directory.display(),
+                root.display()
+            )),
+            _ => None,
+        }
+    }
 }
 
 /// Result of inspecting one executable-based installation.

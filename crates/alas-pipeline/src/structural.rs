@@ -525,6 +525,7 @@ mod tests {
             },
             total_mass_kg: 0.0,
             sizing_load_case: "test",
+            composite_declaration: None,
         }
     }
 

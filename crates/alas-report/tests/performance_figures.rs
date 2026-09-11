@@ -108,7 +108,11 @@ fn performance_figures_render_from_the_report_and_configuration() {
         None,
     ));
     assert!(matching.contains("FEASIBLE"));
-    assert!(matching.matches("<polyline").count() >= 4);
+    // The default config has no condition-specific OEI thrust/drag evidence.
+    // Its conceptual in-flight estimate is reported as a gap rather than
+    // plotted on the installed SLS T/W axis.
+    assert!(matching.matches("<polyline").count() >= 3);
+    assert!(matching.contains("OEI SLS evidence gap"));
 
     let departure = render_svg(&performance::figure_lto_departure(&report, &config, None));
     let arrival = render_svg(&performance::figure_lto_arrival(&report, &config, None));

@@ -27,6 +27,7 @@ pub fn b787_9() -> AircraftPreset {
             reference_wing_area_m2: Some(360.464),
             planning_seats: Some(290),
             certified_max_seats: Some(420),
+            certified_exit_layout: None,
             design_mission_evidence: crate::DesignMissionEvidence::Unverified,
             partial_design_mission_evidence: vec![PartialDesignMissionEvidence {
                 kind: PartialMissionEvidenceKind::PayloadRangeChart,

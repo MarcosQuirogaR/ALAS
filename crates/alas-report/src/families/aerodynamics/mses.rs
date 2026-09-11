@@ -16,7 +16,9 @@ use crate::scene::{Axes2D, Color, Fill, Scene, SceneElement, Stroke, TextAlign, 
 use crate::theme::get_palette;
 
 mod convergence;
+mod cp;
 pub use convergence::figure_mses_convergence;
+pub use cp::figure_mses_cp_contours;
 
 pub(super) fn panel_title(
     scene: &mut Scene,
@@ -109,13 +111,15 @@ pub fn figure_mses_pressure_distribution(
     theme: Option<&str>,
 ) -> Scene {
     let pal = get_palette(theme);
-    if result.status != alas_aero::mses::MsesStatus::Ok
-        || result.x_upper.is_empty()
-        || result.x_lower.is_empty()
+    if !result.is_valid_for_presentation() || result.x_upper.is_empty() || result.x_lower.is_empty()
     {
         return unavailable(
             theme,
-            result.error.as_deref().unwrap_or("MSES data unavailable"),
+            result
+                .error
+                .as_deref()
+                .or(result.osmap_diagnostic.as_deref())
+                .unwrap_or("MSES data unavailable"),
         );
     }
     let mut scene = Scene::new(900.0, 420.0, Some(Color::from_hex(pal.bg)));
@@ -274,10 +278,14 @@ pub fn figure_mses_mach_contours(
         "MSES Mach Field (alpha = {:.2} deg)",
         result.alpha_deg
     ));
-    if result.status != alas_aero::mses::MsesStatus::Ok {
+    if !result.is_valid_for_presentation() {
         return unavailable(
             theme,
-            result.error.as_deref().unwrap_or("MSES data unavailable"),
+            result
+                .error
+                .as_deref()
+                .or(result.osmap_diagnostic.as_deref())
+                .unwrap_or("MSES data unavailable"),
         );
     }
     if result.field_x.is_empty() || result.field_y.is_empty() || result.field_mach.is_empty() {

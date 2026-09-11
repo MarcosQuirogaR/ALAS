@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 use std::collections::BTreeMap;
+use std::path::Path;
 use std::sync::atomic::AtomicBool;
 use std::sync::mpsc::Receiver;
 use std::sync::Arc;
@@ -325,6 +326,18 @@ impl Default for AppState {
 
         let findings = validate(&config);
 
+        // A desktop shortcut commonly starts in a read-only installation
+        // directory (or in `C:\Windows\System32`).  Keep the GUI's default
+        // artifact tree in the same per-user data root used for preferences;
+        // development checkouts still resolve to their existing `outputs`
+        // directory when it is present.  The CLI retains its explicit
+        // working-directory default because its output path is a command-line
+        // contract.
+        let pipeline_options = PipelineOptions {
+            output_dir: Some(tool_locator.resolve_data_path(Path::new("outputs"))),
+            ..PipelineOptions::default()
+        };
+
         let mut state = Self {
             config_values,
             schema,
@@ -348,7 +361,7 @@ impl Default for AppState {
             preview_cameras: BTreeMap::new(),
             result_cameras: BTreeMap::new(),
             run_options: RunOptions::default(),
-            pipeline_options: PipelineOptions::default(),
+            pipeline_options,
             is_running: false,
             status_message: "Ready.".to_owned(),
             parameter_feedback: None,

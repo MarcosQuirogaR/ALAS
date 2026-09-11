@@ -111,6 +111,12 @@ pub(crate) struct TrimmedPolar {
     pub lift_to_drag: f64,
     /// Compressibility-corrected reporting angle of attack, degrees.
     pub alpha_deg: f64,
+    /// Uncorrected geometric aircraft-body angle used by the VLM trim solve,
+    /// in degrees.  This is kept separately from [`Self::alpha_deg`]: the
+    /// latter is a display quantity after the transonic compressibility
+    /// correction, while sizing constraints and the 2-D section mapping need
+    /// the actual body attitude that generated the solved forces.
+    pub geometric_body_alpha_deg: f64,
     /// Trimmed horizontal-stabilizer incidence, degrees.
     pub incidence_deg: f64,
     /// Neutral-point station in geometry axes, m.
@@ -155,6 +161,11 @@ impl TrimmedPolar {
             wave_drag_cd: polar.wave_drag_cd,
             lift_to_drag: polar.lift_to_drag,
             alpha_deg: polar.alpha_deg,
+            // An external polar's alpha is the angle at which its solver was
+            // commanded.  ExternalPolar deliberately has no separate
+            // compressibility-display field, so it is the geometric input
+            // available at this boundary.
+            geometric_body_alpha_deg: polar.alpha_deg,
             incidence_deg: polar.incidence_deg,
             x_np: polar.x_np,
             cl_trim: polar.target_cl,
@@ -295,6 +306,7 @@ pub(crate) fn trim_and_polar(
         wave_drag_cd: perf.cd_wave,
         lift_to_drag: perf.l_over_d,
         alpha_deg: perf.alpha_deg,
+        geometric_body_alpha_deg: trim.trim_alpha_deg,
         incidence_deg: perf.incidence_deg,
         x_np: trim.x_np,
         cl_trim: perf.cl,

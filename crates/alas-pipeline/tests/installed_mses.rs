@@ -45,6 +45,11 @@ fn assert_pressure_result_is_coherent(pressure: &MsesPressureResult) {
         "flow-field coordinates and Mach stay parallel"
     );
     assert_eq!(
+        pressure.field_x.len(),
+        pressure.field_cp.len(),
+        "flow-field coordinates and Cp stay parallel"
+    );
+    assert_eq!(
         pressure.airfoil_x.len(),
         pressure.airfoil_y.len(),
         "panelled airfoil coordinates stay parallel"
@@ -79,6 +84,10 @@ fn assert_pressure_result_is_coherent(pressure: &MsesPressureResult) {
                 finite(&pressure.field_mach),
                 "flow-field Mach values are finite"
             );
+            assert!(
+                finite(&pressure.field_cp),
+                "flow-field Cp values are finite"
+            );
             assert!(finite(&pressure.airfoil_x), "airfoil x values are finite");
             assert!(finite(&pressure.airfoil_y), "airfoil y values are finite");
         }
@@ -100,6 +109,7 @@ fn assert_pressure_result_is_coherent(pressure: &MsesPressureResult) {
                     && pressure.field_x.is_empty()
                     && pressure.field_y.is_empty()
                     && pressure.field_mach.is_empty()
+                    && pressure.field_cp.is_empty()
                     && pressure.field_row_offsets.is_empty()
                     && pressure.airfoil_x.is_empty()
                     && pressure.airfoil_y.is_empty(),

@@ -31,9 +31,26 @@ fn b787_config() -> (AlasConfig, alas_geom::aircraft::airplane::Airplane) {
     (config, plane)
 }
 
-fn passenger_summary(layout: alas_payload::PayloadLayout) -> Box<alas_payload::layout::PassengerSummary> {
+/// Loads the unregistered clean-sheet configuration and its default aircraft.
+///
+/// The product payload boundary treats `requirements.num_passengers` as a
+/// fixed load-case target only in this mode. Keeping this fixture separate
+/// from [`b787_config`] prevents a registered aircraft's geometry-derived
+/// capacity contract from being mistaken for a clean-sheet requirement.
+fn clean_sheet_config() -> (AlasConfig, alas_geom::aircraft::airplane::Airplane) {
+    let mut config = AlasConfig::default();
+    config.requirements.cabin_preset = "Custom".to_owned();
+    let plane = AircraftBuilder::new(Some(config.geometry.clone()))
+        .build(None, true)
+        .expect("clean-sheet geometry");
+    (config, plane)
+}
+
+fn passenger_summary(
+    layout: alas_payload::PayloadLayout,
+) -> Box<alas_payload::layout::PassengerSummary> {
     let LayoutSummary::Passenger(summary) = layout.summary else {
-        panic!("B787-9 is a passenger baseline");
+        panic!("the fixture is a passenger baseline");
     };
     summary
 }
@@ -102,16 +119,17 @@ fn belly_cargo_request_beyond_hold_capacity_is_clamped_and_reported_as_a_shortfa
 
 #[test]
 fn passenger_count_and_baggage_changes_move_the_actual_payload() {
-    // `requirements.num_passengers` is the public load-case authority: the
-    // product entry point (`build_payload_layout`) always re-derives every
-    // cabin class's seat count from it via `set_fixed_passenger_count`
-    // (crates/alas-config/src/cabin.rs), discarding any class count written
-    // directly on `cabin.passenger`. Drive the count through the field the
-    // product boundary actually reads.
-    let (mut low_config, plane) = b787_config();
+    // A clean-sheet configuration has no registered aircraft capacity to
+    // preserve, so `requirements.num_passengers` is the load-case authority
+    // and the product boundary applies it through `set_fixed_passenger_count`.
+    // A registered aircraft deliberately follows its cabin percentage mix
+    // instead; that contract is covered by the test below.
+    let (mut low_config, plane) = clean_sheet_config();
+    assert!(low_config.preset.is_empty());
+    assert!(low_config.uses_fixed_passenger_target());
     low_config.requirements.num_passengers = 100;
 
-    let (mut high_config, _) = b787_config();
+    let mut high_config = low_config.clone();
     high_config.requirements.num_passengers = 250;
 
     let low = passenger_summary(
@@ -154,6 +172,49 @@ fn passenger_count_and_baggage_changes_move_the_actual_payload() {
 }
 
 #[test]
+fn registered_aircraft_uses_cabin_percentages_instead_of_saved_passenger_target() {
+    let (mut low_config, plane) = b787_config();
+    low_config.requirements.num_passengers = 1;
+    assert!(!low_config.uses_fixed_passenger_target());
+
+    let low = passenger_summary(
+        build_payload_layout(&plane, &low_config, 0.0, 0.0)
+            .expect("registered low-target layout builds"),
+    );
+
+    // The B787 aircraft preset carries a Custom percentage-mode cabin seed.
+    // Changing only the saved passenger target must not alter its geometry-
+    // derived capacity, while changing the class percentages must alter the
+    // class allocation that produces that capacity.
+    let mut high_target = low_config.clone();
+    high_target.requirements.num_passengers = 999;
+    let high_target_summary = passenger_summary(
+        build_payload_layout(&plane, &high_target, 0.0, 0.0)
+            .expect("registered high-target layout builds"),
+    );
+    assert_eq!(
+        high_target_summary.seated_pax, low.seated_pax,
+        "a registered aircraft derives seats from its cabin percentage mix"
+    );
+    assert_eq!(
+        high_target_summary.payload_t, low.payload_t,
+        "a registered aircraft's saved passenger target must not change payload"
+    );
+
+    let mut shifted_mix = low_config;
+    shifted_mix.cabin.passenger.business.share_pct = 60.0;
+    shifted_mix.cabin.passenger.economy.share_pct = 40.0;
+    let shifted = passenger_summary(
+        build_payload_layout(&plane, &shifted_mix, 0.0, 0.0)
+            .expect("registered shifted-mix layout builds"),
+    );
+    assert_ne!(
+        shifted.classes, low.classes,
+        "editing the Custom cabin percentages must change class allocation"
+    );
+}
+
+#[test]
 fn container_tare_is_counted_once_in_the_loaded_hold_mass() {
     let (mut config, plane) = b787_config();
     config.cabin.passenger.belly_cargo_kg = 2_000.0;
@@ -161,7 +222,10 @@ fn container_tare_is_counted_once_in_the_loaded_hold_mass() {
     let layout = build_payload_layout(&plane, &config, 0.0, 0.0).expect("B787-9 layout builds");
     let summary = passenger_summary(layout);
 
-    assert!(summary.hold_ulds > 0, "the request should fill at least one ULD");
+    assert!(
+        summary.hold_ulds > 0,
+        "the request should fill at least one ULD"
+    );
     let net_requested_kg = summary.bag_mass_t * 1_000.0 + summary.belly_cargo_t * 1_000.0;
     let hold_used_kg = summary.hold_used_t * 1_000.0;
     let implied_tare_kg = hold_used_kg - net_requested_kg;

@@ -268,6 +268,24 @@ fn tank_limited_model_cg_uses_the_analyzed_fuel_and_names_the_load_case_honestly
         .expect("analyzed takeoff state");
 
     assert_eq!(takeoff.state.label(), "analyzed TOW");
-    assert!((takeoff.mass_kg - fuel_loading.analyzed_takeoff_mass_kg).abs() < 1.0e-9);
+    // `model_cg_assessment` builds its `MassBreakdown` from exactly the ten
+    // named OEW/payload/fuel fields (`crates/alas-mass/src/breakdown_parts/part_01.rs`'s
+    // `OEW_KEYS` plus payload and fuel) -- there is no eleventh "unusable
+    // fuel" slot, so `takeoff.mass_kg` here is OEW(narrow) + payload +
+    // analyzed usable fuel, the same quantity `fuel_loading.analyzed_takeoff_mass_kg`
+    // held before the MTOW/unusable-fuel closure. That closure made
+    // `analyzed_takeoff_mass_kg` the physically complete takeoff mass by
+    // reserving and re-adding the tank layout's unusable fuel
+    // (`fuel_loading.unusable_fuel_kg`), which `model_cg_assessment`'s CG
+    // envelope does not carry at all. The two are expected to differ by
+    // exactly that reserved mass now; this is not a double count, it is two
+    // distinct, intentionally-scoped totals.
+    let unusable_fuel_kg = fuel_loading
+        .unusable_fuel_kg
+        .expect("A320's tank layout resolves for this fixture");
+    assert!(
+        (takeoff.mass_kg - (fuel_loading.analyzed_takeoff_mass_kg - unusable_fuel_kg)).abs()
+            < 1.0e-9
+    );
     assert!(takeoff.mass_kg < config.requirements.mtow_kg);
 }

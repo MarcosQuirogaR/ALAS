@@ -88,6 +88,13 @@ impl AppState {
         config.geometry = preset.geometry.clone();
         config.geometry.engine.apply_engine_spec();
         config.requirements = preset.requirements.clone();
+        // Keep the interactive path identical to `AlasConfig::from_value`:
+        // registered aircraft carry a representable planning cabin seed,
+        // while their passenger count remains derived from the editable class
+        // shares. Without this assignment a preset loaded after startup kept
+        // the previous cabin (often the generic 15/85 mix), so the displayed
+        // aircraft and its payload layout disagreed.
+        config.cabin = preset.planning_cabin_config();
         config.landing_gear = preset.landing_gear.clone();
         if let Some(mm) = &preset.mass_model {
             config.mass_model = mm.clone();
@@ -179,10 +186,28 @@ impl AppState {
             if mode == DesignMode::BaselineSandbox {
                 self.run_options.compare_baseline = false;
             }
+            if mode == DesignMode::CleanSheet && !config.preset.is_empty() {
+                // A registered aircraft is a reference starting point. Once
+                // the user explicitly chooses New aircraft, clear that
+                // provenance so clean-sheet-only inputs (including passenger
+                // target) become available while retaining the current shape
+                // as a useful starting geometry.
+                config.preset.clear();
+                self.active_preset.clear();
+                self.config_values = full_config_values(&config);
+                self.on_config_modified();
+            }
             self.reset_design_space_bounds_to_mode();
             return;
         }
         config.optimizer.design_space.mode = mode;
+        if mode == DesignMode::CleanSheet {
+            // New aircraft studies may start from the currently displayed
+            // geometry, but they must not carry a registered aircraft's
+            // fixed passenger load case into the product model.
+            config.preset.clear();
+            self.active_preset.clear();
+        }
         self.config_values = full_config_values(&config);
         self.run_options.optimize = mode != DesignMode::BaselineSandbox;
         if mode == DesignMode::BaselineSandbox {
@@ -225,7 +250,20 @@ impl AppState {
         let Some(config) = self.typed_config() else {
             return;
         };
-        let nominal = self.current_design().unwrap_or_default();
+        let mut nominal = self.current_design().unwrap_or_default();
+        // A cabin-sized clean-sheet fuselage is a derived coordinate. Keep
+        // the editor, the initial point, and the optimizer bounds on the same
+        // materialized length so a GUI run cannot publish a vector that the
+        // evaluator silently replaces during candidate construction.
+        if config.optimizer.design_space.sizes_fuselage_from_cabin()
+            && config.requirements.aircraft_type != "cargo"
+        {
+            if let Ok(canonical) = alas_opt::canonicalize_design(&config, nominal) {
+                nominal = canonical;
+                self.design_values
+                    .insert("fuselage_length_m".to_owned(), nominal.fuselage_length_m);
+            }
+        }
         for variable in config.optimizer.design_space.envelope(&nominal) {
             if variable.fixed {
                 self.design_values

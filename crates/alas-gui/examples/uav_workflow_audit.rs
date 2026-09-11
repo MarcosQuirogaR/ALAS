@@ -21,12 +21,11 @@ fn main() -> Result<(), eframe::Error> {
 
     eframe::run_native(
         "ALAS - UAV Workflow Audit",
-        eframe::NativeOptions {
-            viewport: egui::ViewportBuilder::default()
-                .with_inner_size([1440.0, 920.0])
-                .with_min_inner_size([1000.0, 680.0]),
-            ..Default::default()
-        },
+        alas_gui::native_options(
+            "ALAS - UAV Workflow Audit",
+            [1440.0, 920.0],
+            [1000.0, 680.0],
+        ),
         Box::new(move |creation_context| {
             apply_theme(AppTheme::Dark, &creation_context.egui_ctx);
             Ok(Box::new(AlasApp::from_state(state)))

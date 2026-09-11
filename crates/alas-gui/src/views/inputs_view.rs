@@ -10,7 +10,7 @@ use alas_config::airport_dataset::{self, FieldSource, RunwayDataKind};
 use alas_geom::builder::AircraftBuilder;
 use alas_payload::{apply_cabin_preset, build_payload_layout, layout::LayoutSummary};
 use alas_pipeline::{AerodynamicSolverMode, OptimizationSolverMode};
-use egui::{CollapsingHeader, ComboBox, RichText, ScrollArea, Ui};
+use egui::{CollapsingHeader, ComboBox, DragValue, RichText, ScrollArea, Ui};
 use serde_json::Value;
 
 use crate::state::AppState;
@@ -238,7 +238,54 @@ fn show_requirements_card(state: &mut AppState, ui: &mut Ui) {
                 }
             }
         }
+        show_clean_sheet_passenger_target(state, ui);
     });
+}
+
+/// Render the one passenger count that is a real user input. A clean-sheet
+/// study has no registered cabin capacity to preserve, so its count sizes the
+/// fuselage. A named aircraft uses its class shares and the usable floor
+/// instead; exposing its copied planning count would make a discrete row
+/// shortfall look like a failed requirement.
+fn show_clean_sheet_passenger_target(state: &mut AppState, ui: &mut Ui) {
+    let eligible = state
+        .typed_config()
+        .is_some_and(|config| config.uses_fixed_passenger_target());
+    if !eligible {
+        return;
+    }
+
+    let mut target = state
+        .config_values
+        .get("requirements")
+        .and_then(|values| values.get("num_passengers"))
+        .and_then(Value::as_i64)
+        .unwrap_or_default()
+        .clamp(1, 5_000);
+    ui.separator();
+    ui.label(RichText::new(tr("Clean-sheet passenger target")).strong());
+    ui.label(
+        RichText::new(tr(
+            "Choose the passenger load for a clean-sheet study. Named aircraft presets derive capacity from class shares and usable cabin floor.",
+        ))
+        .weak()
+        .small(),
+    );
+    let changed = ui
+        .add(
+            DragValue::new(&mut target)
+                .range(1..=5_000)
+                .speed(1.0)
+                .prefix(format!("{}: ", tr("Passenger count"))),
+        )
+        .changed();
+    if changed {
+        if let Some(values) = state.group_mut("requirements") {
+            values["num_passengers"] = Value::from(target);
+        }
+        state.on_config_modified();
+        state.note_parameter_modified(tr("Passenger count"), target.to_string());
+    }
 }
 
 fn show_route_card(state: &mut AppState, ui: &mut Ui) {
@@ -699,5 +746,23 @@ mod tests {
             .envelope(&state.current_design().expect("design"))
             .iter()
             .all(|variable| variable.fixed));
+    }
+
+    #[test]
+    fn passenger_count_input_is_only_available_for_a_clean_sheet() {
+        let mut state = AppState::default();
+        assert_eq!(state.active_preset, "AVE");
+        state.set_design_mode(DesignMode::CleanSheet);
+        assert!(state
+            .typed_config()
+            .expect("default config")
+            .uses_fixed_passenger_target());
+        assert!(state.active_preset.is_empty());
+
+        state.load_preset("A380-800");
+        assert!(!state
+            .typed_config()
+            .expect("preset config")
+            .uses_fixed_passenger_target());
     }
 }

@@ -15,10 +15,7 @@
 use alas_config::design_variables::DesignVector;
 use alas_geom::aircraft::airplane::Airplane;
 use alas_mass::breakdown::{calculate_physical_cg, MassBreakdown, MassCoordinates};
-use alas_mass::stations::component_stations;
-use alas_mass::tanks::FuelTankLayout;
-
-use crate::feasibility::tank_reference;
+use alas_mass::product_stations::product_mass_coordinates;
 
 use super::FullAnalysis;
 
@@ -48,9 +45,11 @@ impl FullAnalysis {
     }
 }
 
-/// The product placement for any caller holding a configuration: the
-/// geometry-derived stations when the configuration asks for them, the
-/// frozen points otherwise.
+/// The product placement for any caller holding a configuration.
+///
+/// This is a thin seam over [`alas_mass::product_stations`], which is where
+/// the placement itself lives so the optimizer's search-time balance gate
+/// evaluates the same stations this report does.
 pub(crate) fn station_coordinates_for(
     config: &alas_config::AlasConfig,
     design: &DesignVector,
@@ -58,53 +57,5 @@ pub(crate) fn station_coordinates_for(
     masses: &MassBreakdown,
     legacy: MassCoordinates,
 ) -> Result<(MassCoordinates, [f64; 3]), String> {
-    if !config.mass_model.geometric_component_stations {
-        let cg = calculate_physical_cg(masses, &legacy);
-        return Ok((legacy, cg));
-    }
-    let stations = component_stations(
-        plane,
-        &config.geometry,
-        &config.requirements,
-        &config.mass_model,
-        &config.structures,
-    )
-    .map_err(|error| format!("component stations could not be placed: {error}"))?;
-    let fuel_position =
-        analyzed_fuel_centroid(config, design, plane, masses).unwrap_or(legacy.fuel);
-    let coords = stations.mass_coordinates(masses, legacy.payload, fuel_position);
-    let cg = calculate_physical_cg(masses, &coords);
-    Ok((coords, cg))
-}
-
-/// Centroid of the analyzed fuel load as the tanks hold it, when the
-/// arrangement resolves on this geometry and the load is positive.
-pub(crate) fn analyzed_fuel_centroid(
-    config: &alas_config::AlasConfig,
-    design: &DesignVector,
-    plane: &Airplane,
-    masses: &MassBreakdown,
-) -> Option<[f64; 3]> {
-    let (density_kg_m3, published_total_l) = tank_reference(config, design);
-    let tanks = FuelTankLayout::resolve(
-        plane,
-        &config.geometry,
-        &config.structures,
-        &config.fuel_tanks,
-        &config.fuel_policy,
-        density_kg_m3,
-        published_total_l,
-    )
-    .ok()?;
-    let fill_kg = masses
-        .physical_fuel_mass_kg()?
-        .min(tanks.usable_capacity_kg());
-    if fill_kg <= 0.0 {
-        return None;
-    }
-    let centroid = tanks.distribute(fill_kg).ok()?.properties(&tanks).cg_m;
-    centroid
-        .iter()
-        .all(|value| value.is_finite())
-        .then_some(centroid)
+    product_mass_coordinates(config, design, plane, masses, legacy)
 }

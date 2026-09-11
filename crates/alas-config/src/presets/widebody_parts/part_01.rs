@@ -74,11 +74,27 @@ pub fn a340_300() -> AircraftPreset {
         landing_gear: LandingGearConfig {
             n_nlg_wheels: 2,
             n_mlg_struts: 3,
-            // The two four-wheel wing bogies and two-wheel center gear cannot
-            // be represented by one uniform per-strut count, so tire sizing
-            // remains automatic while the load-bearing leg count is exact.
+            // Airbus AC 2-9-0 describes two four-wheel wing bogies and a
+            // twin-wheel centreline gear. The list preserves that topology in
+            // the 2-D/3-D wheel layout while per-wheel tire class remains
+            // load-sized.
+            mlg_strut_bogie_wheels: Some(vec![4, 4, 2]),
             wheels_per_mlg_strut: 0,
             track_diameter_factor: 10.684 / 5.64,
+            // AC 7-2-0 gives the wheelbase to the wing MLG bogie centre and
+            // the wing-gear centreline track. AC 2-2-0 supplies nose-tip
+            // drawing stations for both wing and centreline gear; normalized
+            // fractions keep the source geometry adaptable during shrink.
+            reference_wheelbase_m: Some(25.375),
+            reference_track_m: Some(10.684),
+            reference_station_frame: Some("nose_tip_drawing_reference".to_owned()),
+            reference_station_fuselage_length_m: Some(63.66),
+            reference_nlg_x_fraction: Some(6.67 / 63.66),
+            reference_mlg_x_fractions: Some(vec![
+                32.05 / 63.66,
+                32.05 / 63.66,
+                33.04 / 63.66,
+            ]),
             ..LandingGearConfig::default()
         },
         design_vector: DesignVector {
@@ -235,9 +251,27 @@ pub fn a380_800() -> AircraftPreset {
         landing_gear: LandingGearConfig {
             n_nlg_wheels: 2,
             n_mlg_struts: 4,
-            // Wing and body bogies carry four and six wheels respectively.
+            // Airbus AC 2-9-0 states four-wheel WLG bogies and six-wheel BLG
+            // bogies. Keep the source arrangement instead of sizing all four
+            // legs to the largest common bogie.
+            mlg_strut_bogie_wheels: Some(vec![4, 4, 6, 6]),
             wheels_per_mlg_strut: 0,
             track_diameter_factor: 14.34 / 7.14,
+            // The dimensions source defines 14.34 m as the wing-gear track.
+            // Its 28.61 m wheelbase is NLG-to-WLG; 31.88 m is the distinct
+            // NLG-to-BLG body-gear wheelbase and is retained separately.
+            reference_wheelbase_m: Some(28.61),
+            reference_body_wheelbase_m: Some(31.88),
+            reference_track_m: Some(14.34),
+            reference_station_frame: Some("nose_tip_drawing_reference".to_owned()),
+            reference_station_fuselage_length_m: Some(72.73),
+            reference_nlg_x_fraction: Some(4.97 / 72.73),
+            reference_mlg_x_fractions: Some(vec![
+                33.58 / 72.73,
+                33.58 / 72.73,
+                36.85 / 72.73,
+                36.85 / 72.73,
+            ]),
             ..LandingGearConfig::default()
         },
         design_vector: DesignVector {

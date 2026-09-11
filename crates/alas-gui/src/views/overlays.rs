@@ -32,7 +32,9 @@ pub fn show_splash(state: &mut AppState, ctx: &Context) {
     egui::CentralPanel::default().show(ctx, |ui| {
         ui.centered_and_justified(|ui| {
             ui.vertical_centered(|ui| {
-                ui.heading(RichText::new("ALAS").size(40.0).strong());
+                if let Some(image) = crate::branding::composite_image(ctx) {
+                    ui.add(image.max_size(vec2(460.0, 290.0)));
+                }
                 ui.label(tr("Aircraft Layout and Analysis Suite"));
             });
         });
@@ -359,7 +361,10 @@ pub fn show_about(state: &mut AppState, ctx: &Context) {
         .resizable(false)
         .collapsible(false)
         .show(ctx, |ui| {
-            ui.heading(tr("ALAS - Aircraft Layout and Analysis Suite"));
+            if let Some(image) = crate::branding::text_logo_image(ctx) {
+                ui.add(image.max_size(vec2(300.0, 40.0)));
+            }
+            ui.add_space(8.0);
             ui.label(tr(
                 "Conceptual transport aircraft sizing, optimization, and multi-disciplinary analysis.",
             ));

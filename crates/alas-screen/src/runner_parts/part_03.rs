@@ -43,6 +43,7 @@ mod tests {
             8,
             3,
             Arc::new(AtomicBool::new(false)),
+            None,
             |index| {
                 thread::sleep(Duration::from_millis((8 - index) as u64));
                 if index == 3 {
@@ -80,6 +81,7 @@ mod tests {
             32,
             3,
             cancellation,
+            None,
             move |index| {
                 let now = active_for_job.fetch_add(1, Ordering::Relaxed) + 1;
                 maximum_for_job.fetch_max(now, Ordering::Relaxed);
@@ -99,4 +101,3 @@ mod tests {
         assert!(output.len() >= 4);
     }
 }
-

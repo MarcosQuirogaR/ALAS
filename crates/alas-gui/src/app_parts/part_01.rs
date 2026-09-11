@@ -115,6 +115,10 @@ impl App for AlasApp {
 
         let menu_panel = TopBottomPanel::top("menu_bar").show(ctx, |ui| {
             menu::bar(ui, |ui| {
+                if let Some(image) = crate::branding::text_logo_image(ctx) {
+                    ui.add(image.max_width(132.0).max_height(20.0));
+                }
+                ui.separator();
                 self.render_file_menu(ui);
                 self.render_view_menu(ctx, ui);
                 self.render_help_menu(ui);

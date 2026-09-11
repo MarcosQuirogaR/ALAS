@@ -3,6 +3,7 @@
 
 //! The sizing mission's still-air distance.
 
+#[cfg(test)]
 use alas_config::airports::Airport;
 use alas_units::NAUTICAL_MILE;
 
@@ -29,6 +30,7 @@ fn haversine_m(lat1_deg: f64, lon1_deg: f64, lat2_deg: f64, lon2_deg: f64) -> f6
 /// positive, or the great-circle distance between the configured aerodromes
 /// when it is zero. Reserve segments never receive range credit, so this is
 /// the design mission's trip distance alone.
+#[cfg(test)]
 pub(crate) fn mission_range_m(
     design_range_nmi: f64,
     departure: Option<&Airport>,
