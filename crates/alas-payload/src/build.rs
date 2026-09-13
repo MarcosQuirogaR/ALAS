@@ -149,8 +149,6 @@ fn build_payload_layout_with_mass_semantics(
     };
     let source_capacity_cap = registered_source_capacity_cap(config, reference_compatibility);
     let source_exit_layout = registered_source_exit_layout(config, reference_compatibility);
-    let requested_passengers = (!reference_compatibility && config.uses_fixed_passenger_target())
-        .then_some(config.requirements.num_passengers);
     let mut effective = config.clone();
     if !reference_compatibility {
         presets::apply_cabin_preset_to_geometry(
@@ -159,6 +157,17 @@ fn build_payload_layout_with_mass_semantics(
             source_capacity_cap,
             source_exit_layout,
         );
+        // `requirements.passenger_mass_kg` is the single product load-case
+        // authority (occupant plus checked bag, the same for every class):
+        // reprice each class slot after the preset wrote its geometry seed,
+        // so every product path agrees with the optimizer's
+        // `apply_candidate_payload_load_case`; the reference-compatibility
+        // branch keeps the frozen per-class masses.
+        let requirements = effective.requirements.clone();
+        effective
+            .cabin
+            .passenger
+            .apply_passenger_mass_authority(&requirements);
     }
     let config = if reference_compatibility {
         config
@@ -180,10 +189,11 @@ fn build_payload_layout_with_mass_semantics(
         Ok(layout)
     } else {
         // The selected cabin geometry determines the class proportions and
-        // seat geometry. A clean-sheet study may carry an explicit passenger
-        // target, but a registered aircraft is sized from its class shares
-        // and fills the usable floor. Materializing a Custom cabin therefore
-        // must not replace the computed capacity with a stale copied count.
+        // seat geometry. Every study -- a registered aircraft or a
+        // clean-sheet one alike -- is sized from its class shares and fills
+        // the usable floor; there is no explicit passenger target for the
+        // solver to hit. Materializing a Custom cabin therefore must not
+        // replace the computed capacity with a stale copied count.
         let layout = if reference_compatibility {
             build_passenger_layout_reference_compatibility(
                 &g,
@@ -192,13 +202,6 @@ fn build_payload_layout_with_mass_semantics(
             )
         } else {
             let mut product_config = config.clone();
-            if let Some(requested) = requested_passengers {
-                product_config
-                    .cabin
-                    .passenger
-                    .set_fixed_passenger_count(requested);
-                product_config.requirements.num_passengers = requested;
-            }
             let mut layout = build_passenger_layout_with_aircraft_cg_target(
                 &g,
                 &product_config.cabin.passenger,
@@ -212,36 +215,33 @@ fn build_payload_layout_with_mass_semantics(
 
             // The fast capacity solver and the detailed row packer share the
             // same geometry rules, but row placement still has a few discrete
-            // edge cases (most visibly at a class boundary on a 787). A
-            // registered aircraft must never expose an unseated passenger,
-            // so close that last-row gap against the actual product layout.
-            // Clean-sheet studies keep their explicit target and report a
-            // genuine shortfall for the user to resolve by sizing the shell.
-            if requested_passengers.is_none() {
-                for _ in 0..4 {
-                    let LayoutSummary::Passenger(summary) = &layout.summary else {
-                        break;
-                    };
-                    if summary.unseated_pax == 0 {
-                        break;
-                    }
-                    let target = summary.seated_pax;
-                    product_config
-                        .cabin
-                        .passenger
-                        .set_fixed_passenger_count(target);
-                    product_config.requirements.num_passengers = target;
-                    layout = build_passenger_layout_with_aircraft_cg_target(
-                        &g,
-                        &product_config.cabin.passenger,
-                        &product_config.requirements,
-                        oew,
-                        x_oew,
-                        &product_config.cabin.cargo,
-                        source_capacity_cap,
-                        source_exit_layout,
-                    );
+            // edge cases (most visibly at a class boundary on a 787). No
+            // study carries an explicit passenger target to fall back on, so
+            // every candidate must never expose an unseated passenger: close
+            // that last-row gap against the actual product layout.
+            for _ in 0..4 {
+                let LayoutSummary::Passenger(summary) = &layout.summary else {
+                    break;
+                };
+                if summary.unseated_pax == 0 {
+                    break;
                 }
+                let target = summary.seated_pax;
+                product_config
+                    .cabin
+                    .passenger
+                    .set_fixed_passenger_count(target);
+                product_config.requirements.num_passengers = target;
+                layout = build_passenger_layout_with_aircraft_cg_target(
+                    &g,
+                    &product_config.cabin.passenger,
+                    &product_config.requirements,
+                    oew,
+                    x_oew,
+                    &product_config.cabin.cargo,
+                    source_capacity_cap,
+                    source_exit_layout,
+                );
             }
             layout
         };

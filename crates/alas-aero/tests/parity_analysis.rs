@@ -46,7 +46,7 @@ use alas_aero::analysis::TrimPoint;
 use alas_config::analysis::AnalysisConfig;
 use alas_testkit::{Comparison, Tier};
 
-use support::{aero, analysis_config, build, names, or_nan, Fixture};
+use support::{aero, analysis_config, build, names, or_nan, reference_mesh, Fixture};
 
 #[test]
 fn the_two_implementations_are_analysing_the_same_aeroplane() {
@@ -79,7 +79,7 @@ fn the_two_implementations_are_analysing_the_same_aeroplane() {
     numeric.scalar("c_ref", plane.c_ref, fixture.airplane.c_ref);
     numeric.scalar("b_ref", plane.b_ref, fixture.airplane.b_ref);
     numeric.slice("xyz_ref", &plane.xyz_ref, &fixture.airplane.xyz_ref);
-    let analysis = aero(&plane, &fixture, AnalysisConfig::default());
+    let analysis = aero(&plane, &fixture, reference_mesh());
     numeric.scalar(
         "section_thickness",
         analysis.section_thickness(),
@@ -126,7 +126,7 @@ fn the_empirical_drag_buildup_matches_python() {
         } else {
             &plane_no_engines
         };
-        let analysis = aero(target, &fixture, AnalysisConfig::default());
+        let analysis = aero(target, &fixture, reference_mesh());
         comparison.scalar(
             &format!("parasite.{name}"),
             analysis.parasite_drag(
@@ -140,7 +140,7 @@ fn the_empirical_drag_buildup_matches_python() {
         );
     }
 
-    let analysis = aero(&plane, &fixture, AnalysisConfig::default());
+    let analysis = aero(&plane, &fixture, reference_mesh());
     for name in names(&fixture.wave) {
         let case = &fixture.wave[name];
         comparison.scalar(
@@ -189,7 +189,7 @@ fn an_aircraft_with_no_wing_falls_back_to_pythons_own_section_thickness() {
     let fixture: Fixture = alas_testkit::load("aero", "analysis");
     let mut plane = build(true);
     plane.wings.clear();
-    let analysis = aero(&plane, &fixture, AnalysisConfig::default());
+    let analysis = aero(&plane, &fixture, reference_mesh());
 
     let mut comparison = Comparison::new("analysis.no_wings", Tier::Closed);
     comparison.scalar(
@@ -243,7 +243,7 @@ fn the_vortex_lattice_fed_estimates_match_python() {
         comparison.scalar(&format!("quick.{name}.cl"), quick.cl, case.cl);
     }
 
-    let analysis = aero(&plane, &fixture, AnalysisConfig::default());
+    let analysis = aero(&plane, &fixture, reference_mesh());
     for name in names(&fixture.trimmed) {
         let case = &fixture.trimmed[name];
         let trim = TrimPoint {
@@ -284,7 +284,7 @@ fn the_vortex_lattice_fed_estimates_match_python() {
             sweep_n_points: case.inputs.n_points,
             sweep_alpha_min_deg: case.inputs.alpha_min,
             sweep_alpha_max_deg: case.inputs.alpha_max,
-            ..Default::default()
+            ..reference_mesh()
         };
         let polar = aero(&plane, &fixture, config)
             .run_sweep(case.inputs.mach, case.inputs.altitude)
@@ -332,7 +332,7 @@ fn a_trimmed_evaluation_leaves_the_aircraft_it_was_given_unaltered() {
     let fixture: Fixture = alas_testkit::load("aero", "analysis");
     let plane = build(true);
     let before = plane.clone();
-    let analysis = aero(&plane, &fixture, AnalysisConfig::default());
+    let analysis = aero(&plane, &fixture, reference_mesh());
 
     analysis
         .trimmed_performance(

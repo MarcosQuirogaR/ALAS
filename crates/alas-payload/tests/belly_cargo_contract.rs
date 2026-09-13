@@ -33,10 +33,13 @@ fn b787_config() -> (AlasConfig, alas_geom::aircraft::airplane::Airplane) {
 
 /// Loads the unregistered clean-sheet configuration and its default aircraft.
 ///
-/// The product payload boundary treats `requirements.num_passengers` as a
-/// fixed load-case target only in this mode. Keeping this fixture separate
-/// from [`b787_config`] prevents a registered aircraft's geometry-derived
-/// capacity contract from being mistaken for a clean-sheet requirement.
+/// No study -- clean-sheet included -- treats `requirements.num_passengers`
+/// as a fixed load-case target; capacity is always resolved from the cabin
+/// class-mix percentages and the candidate's actual geometry. Keeping this
+/// fixture separate from [`b787_config`] still matters: a clean-sheet study
+/// has no registered-aircraft source cap or certified exit layout to apply,
+/// which is a real (if now identically-resolved) difference from a
+/// registered aircraft.
 fn clean_sheet_config() -> (AlasConfig, alas_geom::aircraft::airplane::Airplane) {
     let mut config = AlasConfig::default();
     config.requirements.cabin_preset = "Custom".to_owned();
@@ -118,19 +121,20 @@ fn belly_cargo_request_beyond_hold_capacity_is_clamped_and_reported_as_a_shortfa
 }
 
 #[test]
-fn passenger_count_and_baggage_changes_move_the_actual_payload() {
-    // A clean-sheet configuration has no registered aircraft capacity to
-    // preserve, so `requirements.num_passengers` is the load-case authority
-    // and the product boundary applies it through `set_fixed_passenger_count`.
-    // A registered aircraft deliberately follows its cabin percentage mix
-    // instead; that contract is covered by the test below.
-    let (mut low_config, plane) = clean_sheet_config();
+fn cabin_density_and_baggage_changes_move_the_actual_payload() {
+    // No study -- clean-sheet included -- carries a fixed/exact
+    // passenger-count target any more: capacity is always resolved from the
+    // cabin class-mix percentages and the candidate's actual geometry,
+    // exactly like the registered-aircraft contract covered by the test
+    // below. A denser economy pitch seats more passengers in the same cabin
+    // floor, which is the lever that actually moves capacity now that
+    // `requirements.num_passengers` is a pure output.
+    let (low_config, plane) = clean_sheet_config();
     assert!(low_config.preset.is_empty());
-    assert!(low_config.uses_fixed_passenger_target());
-    low_config.requirements.num_passengers = 100;
+    assert_eq!(low_config.requirements.cabin_preset, "Custom");
 
     let mut high_config = low_config.clone();
-    high_config.requirements.num_passengers = 250;
+    high_config.cabin.passenger.economy.pitch_m = 0.7112;
 
     let low = passenger_summary(
         build_payload_layout(&plane, &low_config, 0.0, 0.0).expect("low pax layout builds"),
@@ -141,7 +145,7 @@ fn passenger_count_and_baggage_changes_move_the_actual_payload() {
 
     assert!(
         high.seated_pax > low.seated_pax,
-        "the higher requirements.num_passengers should seat more passengers: low={}, high={}",
+        "a denser economy pitch should seat more passengers: low={}, high={}",
         low.seated_pax,
         high.seated_pax
     );
@@ -152,6 +156,19 @@ fn passenger_count_and_baggage_changes_move_the_actual_payload() {
     assert!(
         high.payload_t > low.payload_t,
         "the higher passenger count must increase total payload"
+    );
+
+    // The retired `requirements.num_passengers` target has no effect: a
+    // clean-sheet study's saved passenger count must not change the
+    // geometry-resolved capacity, exactly like a registered aircraft.
+    let mut overridden = low_config.clone();
+    overridden.requirements.num_passengers = 1;
+    let overridden_summary = passenger_summary(
+        build_payload_layout(&plane, &overridden, 0.0, 0.0).expect("overridden layout builds"),
+    );
+    assert_eq!(
+        overridden_summary.seated_pax, low.seated_pax,
+        "a clean-sheet study's saved passenger target must not change the resolved capacity"
     );
 
     // Heavier checked bags, same passengers, must also move the payload.
@@ -175,7 +192,6 @@ fn passenger_count_and_baggage_changes_move_the_actual_payload() {
 fn registered_aircraft_uses_cabin_percentages_instead_of_saved_passenger_target() {
     let (mut low_config, plane) = b787_config();
     low_config.requirements.num_passengers = 1;
-    assert!(!low_config.uses_fixed_passenger_target());
 
     let low = passenger_summary(
         build_payload_layout(&plane, &low_config, 0.0, 0.0)

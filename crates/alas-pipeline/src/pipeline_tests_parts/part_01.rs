@@ -98,18 +98,10 @@ fn an_unrepresentable_pipeline_seed_is_rejected_before_optimization() {
 fn a_named_preset_is_the_public_nominal_design() {
     let preset =
         presets::get("A220-300").unwrap_or_else(|error| panic!("registered preset: {error}"));
-    let mut config = AlasConfig {
-        preset: preset.name.to_owned(),
-        geometry: preset.geometry.clone(),
-        requirements: preset.requirements.clone(),
-        ..AlasConfig::default()
-    };
-    if let Some(mass_model) = preset.mass_model.clone() {
-        config.mass_model = mass_model;
-    }
-    if let Some(performance) = preset.performance.clone() {
-        config.performance = performance;
-    }
+    let mut config = AlasConfig::from_value(&serde_json::json!({
+        "preset": preset.name
+    }))
+    .unwrap_or_else(|error| panic!("load preset configuration: {error}"));
     config.mission.enabled = false;
     config.structures.enabled = false;
     let options = PipelineOptions {
@@ -213,6 +205,9 @@ fn default_brief_seating_shortfall_is_a_reported_finding_not_a_valid_finalist() 
     // that explicit fixed-design load to exercise the shortfall finding;
     // clean-sheet sizing itself is covered by the optimizer test.
     config.requirements.num_passengers = 360;
+    config.mass_model.flops_transport.first_class_passenger_count = Some(0);
+    config.mass_model.flops_transport.business_class_passenger_count = Some(0);
+    config.mass_model.flops_transport.tourist_class_passenger_count = Some(360);
     let design = DesignVector::default();
     let bounds = design
         .to_array()

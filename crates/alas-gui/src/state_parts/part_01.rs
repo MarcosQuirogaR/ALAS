@@ -13,7 +13,7 @@ use crate::path_picker::PathPicker;
 use crate::theme::AppTheme;
 pub use crate::viewport::PreviewCamera;
 use crate::views::results_view::SolverResultView;
-use crate::views::tour_data::{TourTarget, TOUR_STEPS};
+use crate::views::tour_data::TourTarget;
 use alas_config::{
     airports, engines, presets, validate, AlasConfig, ConfigNode, DesignVector, Node, Severity,
     ValidationIssue, DESIGN_VARIABLE_SPECS,
@@ -26,10 +26,10 @@ use serde_json::Value;
 #[derive(Debug, Clone)]
 /// Shell state temporarily replaced while the walkthrough exposes its targets.
 pub struct WalkthroughRestore {
-    active_page: String,
-    nav_pinned: bool,
-    nav_hover_open: bool,
-    preview_open: bool,
+    pub(crate) active_page: String,
+    pub(crate) nav_pinned: bool,
+    pub(crate) nav_hover_open: bool,
+    pub(crate) preview_open: bool,
 }
 
 /// Supported user interface languages.
@@ -282,6 +282,8 @@ pub struct AppState {
     pub screening: crate::screening::ScreeningState,
     /// Independent fixed-wing UAV inputs, selections, and latest outcome.
     pub uav: crate::uav::UavWorkflowState,
+    /// The clean-sheet sandbox session and workspace mode.
+    pub sandbox: crate::sandbox::SandboxSession,
     /// Frames remaining for the boot splash. The reference's `Splash` bridges
     /// a real network wait for a cold-starting Python sidecar; this port calls
     /// the library directly and has nothing to wait for, so this is a short,
@@ -414,6 +416,7 @@ impl Default for AppState {
             guide_chapter: 0,
             screening: crate::screening::ScreeningState::default(),
             uav: crate::uav::UavWorkflowState::default(),
+            sandbox: crate::sandbox::SandboxSession::default(),
             boot_frames_remaining: 40,
         };
 

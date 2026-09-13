@@ -25,7 +25,13 @@ use std::collections::BTreeMap;
 #[path = "support/product_corrections.rs"]
 mod product_corrections;
 
-const SOURCE_CORRECTION_COUNT: usize = 65;
+/// How many source corrections the ledger is allowed to hold.
+///
+/// Pinned so a correction cannot be added without someone noticing. 65 became
+/// 72 when the seven frozen presets moved from a per-section spanwise
+/// subdivision multiplier to an absolute panel count; see
+/// [`add_spanwise_panel_corrections`].
+const SOURCE_CORRECTION_COUNT: usize = 72;
 const DC_10_UPSTREAM_DISPLAY_NAME: &str = "McDonnell Douglas DC-10";
 const DC_10_CORRECTED_DISPLAY_NAME: &str = "McDonnell Douglas DC-10-30 (572k option)";
 
@@ -43,6 +49,14 @@ struct Fixture {
 
 fn fixture() -> Fixture {
     alas_testkit::load("config", "aircraft_presets")
+}
+
+/// The empty-mass figure a preset's declared structural payload was derived
+/// from, as the OEW reference registry documents it.
+fn structural_payload_basis_oew_kg(name: &str) -> f64 {
+    alas_config::oew_reference::get(name)
+        .and_then(|record| record.structural_payload_basis_oew_kg)
+        .unwrap_or_else(|| panic!("{name} has a documented structural payload basis"))
 }
 
 #[test]
@@ -195,9 +209,12 @@ fn source_corrected_presets_name_the_revision_locked_evidence() {
     );
     assert_eq!(b787.reference.mtow_kg, Some(254_692.0));
     assert_eq!(b787.reference.mtow_kg, Some(b787.requirements.mtow_kg));
+    // No configuration-matched OEW is published for the legacy variant; the
+    // declared structural payload keeps its documented derivation basis.
+    assert_eq!(b787.reference.oew_kg, None);
     assert_eq!(
         b787.requirements.max_structural_payload_kg,
-        b787.reference.mzfw_kg.unwrap() - b787.reference.oew_kg.unwrap()
+        b787.reference.mzfw_kg.unwrap() - structural_payload_basis_oew_kg("B787-9")
     );
 
     let a320 = assert_source_record(
@@ -234,6 +251,7 @@ fn source_corrected_presets_name_the_revision_locked_evidence() {
     );
     assert_eq!(a220.reference.mtow_kg, Some(67_585.0));
     assert_eq!(a220.reference.mtow_kg, Some(a220.requirements.mtow_kg));
+    assert_eq!(a220.reference.oew_kg, Some(37_149.0));
     assert_eq!(
         a220.requirements.max_structural_payload_kg,
         a220.reference.mzfw_kg.unwrap() - a220.reference.oew_kg.unwrap()
@@ -256,9 +274,13 @@ fn source_corrected_presets_name_the_revision_locked_evidence() {
     );
     assert_eq!(dc_10.reference.mtow_kg, Some(259_454.0));
     assert_eq!(dc_10.reference.mtow_kg, Some(dc_10.requirements.mtow_kg));
+    // The ACAP Series 30 passenger column with its 572,000 lb footnote
+    // applied (266,191 + 379 lb) is the registry's comparable value, and the
+    // structural payload is the same column's 101,809 - 379 lb.
+    assert_eq!(dc_10.reference.oew_kg, Some(120_914.0));
     assert_eq!(
         dc_10.requirements.max_structural_payload_kg,
-        dc_10.reference.mzfw_kg.unwrap() - dc_10.reference.oew_kg.unwrap()
+        dc_10.reference.mzfw_kg.unwrap() - structural_payload_basis_oew_kg("DC-10")
     );
     assert_eq!(
         dc_10.reference.reference_wing_area_m2,
@@ -557,6 +579,7 @@ fn source_corrections() -> BTreeMap<String, SourceCorrection> {
     .into_iter()
     .collect::<BTreeMap<_, _>>();
     add_transport_planform_corrections(&mut corrections);
+    add_spanwise_panel_corrections(&mut corrections);
     add_part_power_schedule_corrections(&mut corrections);
     corrections
 }
@@ -596,6 +619,26 @@ fn source_correction(
             corrected: corrected.into(),
         },
     )
+}
+
+/// The wing spanwise panel count, which every registered aircraft inherits.
+///
+/// The frozen value is a per-section multiplier: eight panels on each lofted
+/// section, so a planform with a side-of-body station meshed to 24 panels per
+/// semispan and one without to 16. The product states the count absolutely
+/// instead, which makes the mesh the same density on every aircraft and stops
+/// a design vector that adds a station from changing the panel count
+/// underneath a search (`alas_geom::aircraft::spanwise`). 24 is the count the
+/// three-section presets already had, so their aerodynamics are unchanged;
+/// the two-section ones refine from 16 to 24.
+fn add_spanwise_panel_corrections(corrections: &mut BTreeMap<String, SourceCorrection>) {
+    for preset in [
+        "AVE", "A340-300", "A380-800", "B787-9", "A320-200", "A220-300", "DC-10",
+    ] {
+        let (path, correction) =
+            source_correction(format!("{preset}.geometry.wing.n_subdivisions"), 8, 24);
+        corrections.insert(path, correction);
+    }
 }
 
 fn add_transport_planform_corrections(corrections: &mut BTreeMap<String, SourceCorrection>) {

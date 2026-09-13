@@ -481,8 +481,12 @@ fn a320_source_max_payload_case_separates_net_tare_gross_and_usable_fuel() {
     let actual_hold_contents_kg = actual_summary.hold_used_t * 1_000.0;
     let actual_uld_tare_kg = actual_hold_contents_kg
         - 1_000.0 * (actual_summary.bag_mass_t + actual_summary.belly_cargo_t);
-    let source_gross_payload_kg = preset.reference.mzfw_kg.expect("A320 source MZFW")
-        - preset.reference.oew_kg.expect("A320 source OEW");
+    // The declared structural payload is the 21,256 kg the preset carries
+    // (historically MZFW 62,500 kg less a 41,244 kg empty weight that the
+    // OEW reference registry records as unsourced); it is an input, not a
+    // registry OEW, so it is read from the requirements.
+    assert_eq!(preset.reference.oew_kg, None);
+    let source_gross_payload_kg = config.requirements.max_structural_payload_kg;
     assert!((source_gross_payload_kg - 21_256.0).abs() < 1.0e-6);
     assert!(actual_layout.total_mass <= source_gross_payload_kg + 1.0e-6);
     // The product loader trims the requested net freight against the actual

@@ -38,6 +38,7 @@ pub fn a340_300() -> AircraftPreset {
             mtow_kg: Some(260_000.0),
             mlw_kg: Some(188_000.0),
             mzfw_kg: Some(178_000.0),
+            oew_kg: crate::oew_reference::preset_reference_oew_kg("A340-300"),
             usable_fuel_volume_l: Some(141_500.0),
             usable_fuel_mass_kg: Some(113_200.0),
             fuel_density_kg_l: Some(0.8),

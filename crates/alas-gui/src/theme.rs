@@ -250,6 +250,22 @@ pub fn apply_theme(theme: AppTheme, ctx: &Context) {
     let border = widget_border(theme, pal);
     let field_fill = input_fill(theme);
     let field_border = input_border(theme);
+    // egui also uses active.fg_stroke for RichText::strong everywhere.
+    // Keep that foreground readable on ordinary surfaces and adapt the
+    // highlight fill to it, rather than making all emphasized labels black.
+    let hover_foreground = text_color;
+    let mut highlight_fill = accent;
+    let highlight_target = if is_dark {
+        Color32::BLACK
+    } else {
+        Color32::WHITE
+    };
+    for step in 0..=100 {
+        highlight_fill = blend_color(accent, highlight_target, step as f32 / 100.0);
+        if contrast_ratio(hover_foreground, highlight_fill) >= 4.5 {
+            break;
+        }
+    }
 
     visuals.panel_fill = panel_bg;
     visuals.window_fill = bg_color;
@@ -263,8 +279,19 @@ pub fn apply_theme(theme: AppTheme, ctx: &Context) {
     visuals.widgets.inactive.bg_stroke = Stroke::new(1.0_f32, field_border);
     visuals.widgets.inactive.fg_stroke = Stroke::new(1.0_f32, disabled_text_color(theme));
     visuals.widgets.open.bg_stroke = Stroke::new(1.0_f32, border);
-    visuals.widgets.hovered.bg_stroke = Stroke::new(1.0_f32, accent);
-    visuals.widgets.active.bg_stroke = Stroke::new(2.0_f32, accent);
+    // Menu bars intentionally remove egui's default hover stroke, so the
+    // optional button fill is the visible hover affordance there. Use the
+    // contrast-adjusted palette accent; the old
+    // neutral grey fill was too close to the Grey panel background to read as
+    // a highlighted top-bar item.
+    visuals.widgets.hovered.weak_bg_fill = highlight_fill;
+    visuals.widgets.hovered.bg_fill = highlight_fill;
+    visuals.widgets.hovered.fg_stroke = Stroke::new(1.5_f32, hover_foreground);
+    visuals.widgets.hovered.bg_stroke = Stroke::new(1.0_f32, hover_foreground);
+    visuals.widgets.active.weak_bg_fill = highlight_fill;
+    visuals.widgets.active.bg_fill = highlight_fill;
+    visuals.widgets.active.fg_stroke = Stroke::new(2.0_f32, hover_foreground);
+    visuals.widgets.active.bg_stroke = Stroke::new(2.0_f32, hover_foreground);
     visuals.window_rounding = Rounding::same(10.0);
     visuals.menu_rounding = Rounding::same(8.0);
     for widget in [
@@ -322,6 +349,145 @@ pub fn apply_theme(theme: AppTheme, ctx: &Context) {
 mod tests {
     use super::*;
 
+    fn emitted_label_colors(context: &Context) -> Vec<(String, Color32)> {
+        let output = context.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                card_frame(ui).show(ui, |ui| {
+                    ui.heading("Preset");
+                    for label in ["Parameter values", "Console", "Timings"] {
+                        ui.label(egui::RichText::new(label).strong());
+                    }
+                    egui::CollapsingHeader::new(egui::RichText::new("Cruise sweep").strong())
+                        .show(ui, |_| {});
+                    ui.scope(|ui| {
+                        card_frame(ui).show(ui, |ui| {
+                            ui.label(egui::RichText::new("Nested status").strong());
+                        });
+                    });
+                    ui.add(
+                        egui::ProgressBar::new(0.0)
+                            .text(egui::RichText::new("Screening status").strong()),
+                    );
+                    ui.add(
+                        egui::Button::new("Highlighted control")
+                            .fill(ui.visuals().widgets.hovered.weak_bg_fill),
+                    );
+                    ui.add(
+                        egui::Button::new(egui::RichText::new("Active control").strong())
+                            .fill(ui.visuals().widgets.active.weak_bg_fill),
+                    );
+                });
+            });
+        });
+        fn collect(shape: &egui::Shape, colors: &mut Vec<(String, Color32)>) {
+            match shape {
+                egui::Shape::Text(text) => {
+                    for section in &text.galley.job.sections {
+                        let color = text.override_text_color.unwrap_or_else(|| {
+                            if section.format.color == Color32::PLACEHOLDER {
+                                text.fallback_color
+                            } else {
+                                section.format.color
+                            }
+                        });
+                        colors.push((
+                            text.galley.job.text[section.byte_range.clone()].to_owned(),
+                            color,
+                        ));
+                    }
+                }
+                egui::Shape::Vec(shapes) => {
+                    for shape in shapes {
+                        collect(shape, colors);
+                    }
+                }
+                _ => {}
+            }
+        }
+        let mut colors = Vec::new();
+        for shape in &output.shapes {
+            collect(&shape.shape, &mut colors);
+        }
+        colors
+    }
+
+    #[test]
+    fn rendered_theme_labels_keep_contrast_including_strong_and_nested_text() {
+        for theme in [AppTheme::Dark, AppTheme::Grey, AppTheme::Light] {
+            let context = Context::default();
+            apply_theme(theme, &context);
+            let visuals = context.style().visuals.clone();
+            let colors = emitted_label_colors(&context);
+            for label in [
+                "Preset",
+                "Parameter values",
+                "Console",
+                "Timings",
+                "Cruise sweep",
+                "Nested status",
+                "Screening status",
+            ] {
+                let color = colors
+                    .iter()
+                    .find(|(text, _)| text == label)
+                    .unwrap_or_else(|| panic!("{theme:?}: missing rendered {label}"))
+                    .1;
+                for background in [
+                    visuals.panel_fill,
+                    visuals.window_fill,
+                    visuals.extreme_bg_color,
+                ] {
+                    assert!(
+                        contrast_ratio(color, background) >= 4.5,
+                        "{theme:?}: rendered {label} {color:?} unreadable on {background:?}"
+                    );
+                }
+            }
+            // Normal and strong button text resolve differently in egui;
+            // both emitted colors must remain readable on active/hover fills.
+            for label in ["Highlighted control", "Active control"] {
+                let color = colors.iter().find(|(text, _)| text == label).unwrap().1;
+                for fill in [
+                    visuals.widgets.hovered.weak_bg_fill,
+                    visuals.widgets.active.weak_bg_fill,
+                ] {
+                    assert!(contrast_ratio(color, fill) >= 4.5);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn rendered_theme_regression_detects_previous_black_strong_foreground() {
+        let context = Context::default();
+        apply_theme(AppTheme::Grey, &context);
+        // Reproduce the previous foreground in this isolated context only.
+        context.style_mut(|style| {
+            style.visuals.widgets.active.fg_stroke.color =
+                selection_foreground(hex_to_color32(AppTheme::Grey.palette().accent));
+        });
+        let colors = emitted_label_colors(&context);
+        let panel = context.style().visuals.panel_fill;
+        let strong = colors
+            .iter()
+            .find(|(label, _)| label == "Parameter values")
+            .unwrap()
+            .1;
+        let heading = colors
+            .iter()
+            .find(|(label, _)| label == "Preset")
+            .unwrap()
+            .1;
+        assert!(
+            contrast_ratio(strong, panel) < 4.5,
+            "old strong-color bug must be observable"
+        );
+        assert!(
+            contrast_ratio(heading, panel) >= 4.5,
+            "ordinary heading takes override_text_color"
+        );
+    }
+
     #[test]
     fn interactive_dark_themes_select_accessible_figure_palettes() {
         assert_eq!(AppTheme::Dark.figure_theme_name(), "dark-accessible");
@@ -343,6 +509,13 @@ mod tests {
             assert!(contrast_ratio(visuals.warn_fg_color, panel) >= 4.5);
             assert!(contrast_ratio(success_color(visuals), panel) >= 4.5);
             assert!(contrast_ratio(visuals.widgets.inactive.fg_stroke.color, panel) >= 4.5);
+            assert!(
+                contrast_ratio(
+                    visuals.widgets.hovered.fg_stroke.color,
+                    visuals.widgets.hovered.weak_bg_fill
+                ) >= 4.5,
+                "hovered controls need readable text on their highlight"
+            );
             assert!(contrast_ratio(visuals.widgets.inactive.bg_stroke.color, panel) >= 3.0);
             assert!(
                 contrast_ratio(

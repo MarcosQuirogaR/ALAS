@@ -98,7 +98,7 @@ pub fn render_scene_to_shapes_with_context(
 ) -> Vec<Shape> {
     let mut backend = EguiBackend::new(scene, transform, context.clone());
 
-    if let Some(bg) = scene.background {
+    if let (true, Some(bg)) = (scene.paint_background, scene.background) {
         backend.fill_rect((0, 0), backend.to_coord([scene.width, scene.height]), bg);
     }
 

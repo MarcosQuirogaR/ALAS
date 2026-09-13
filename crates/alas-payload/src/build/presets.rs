@@ -217,6 +217,18 @@ fn apply_custom(
     // early on "already has seats" -- which is right in count mode, where the
     // counts *are* the input -- would freeze the layout at whatever the first
     // solve produced and silently ignore every later share edit.
+    // A `count` cabin with seats declared is an input, not a seed: the
+    // registered or user-declared per-class counts are the cabin the case
+    // is about (a source-matched 12F/138Y A320, say), and the layout seats
+    // exactly those. Whether they fit is the layout's finding to report.
+    if config.requirements.aircraft_type != "cargo"
+        && semantics == CabinPresetSemantics::RequirementsFirst
+        && config.cabin.passenger.class_mix_mode == "count"
+        && config.cabin.passenger.total_seats() > 0
+    {
+        config.requirements.num_passengers = config.cabin.passenger.total_seats();
+        return Ok(());
+    }
     if config.requirements.aircraft_type != "cargo"
         && (semantics == CabinPresetSemantics::RequirementsFirst
             || config.cabin.passenger.class_mix_mode == "percent")
@@ -370,6 +382,14 @@ pub(super) fn apply_cabin_preset_to_geometry(
         return;
     }
     let preset = config.requirements.cabin_preset.clone();
+    if preset == "Custom"
+        && config.cabin.passenger.class_mix_mode == "count"
+        && config.cabin.passenger.total_seats() > 0
+    {
+        // Declared counts are the cabin; see `apply_custom`.
+        config.requirements.num_passengers = config.cabin.passenger.total_seats();
+        return;
+    }
     let mix = if preset == "Custom" {
         config.cabin.passenger.length_share_mix()
     } else {

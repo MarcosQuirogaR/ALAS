@@ -21,14 +21,14 @@
 //! lays the file's own keys over the result, so a file may start from a real
 //! aircraft and change three fields of it.
 //!
-//! Applying the calibrations is the part most easily lost. Upstream's
-//! graphical front end applies them when a preset is chosen from the dropdown,
-//! which makes them look like an interface concern; they are not. A headless
-//! run of the A220-300 that skipped them would silently revert to the
-//! widebody-calibrated mass fractions its entry exists to correct -- about
-//! 2.8 t of operating empty weight -- and to a generic narrowbody's high-lift
-//! system, worth fifteen to twenty knots on every V-speed. Both would produce
-//! a plausible aircraft and a wrong one.
+//! Applying the aircraft data is the part most easily lost. Upstream's
+//! graphical front end applies it when a preset is chosen from the dropdown,
+//! which makes it look like an interface concern; it is part of the run
+//! definition. A headless run that skips a preset's source-backed FLOPS
+//! transport inputs, wing-box material family, tank arrangement or high-lift
+//! system can produce a plausible aircraft with the wrong mass method or
+//! performance domain. The historical mass fractions carried by some presets
+//! remain available only to the explicit reference-compatible comparison path.
 //!
 //! # Where the file formats went
 //!
@@ -47,6 +47,12 @@ use crate::{
     MassModelConfig, MissionConfig, MsesConfig, OptimizerConfig, OverlayError, PerformanceConfig,
     PropulsionCycleConfig, StructuresConfig,
 };
+
+/// Top-level key under which the desktop application stores its workspace
+/// session (mode, sandbox design and window layout) beside the aircraft
+/// configuration in one saved file. [`AlasConfig::from_value`] removes it
+/// before decoding, so such a file remains a valid configuration everywhere.
+pub const WORKSPACE_ENVELOPE_KEY: &str = "alas_workspace";
 
 /// Everything one run is configured with.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ConfigNode)]
@@ -103,7 +109,7 @@ pub struct AlasConfig {
     /// How the empty weight is estimated.
     #[config(
         nested,
-        help = "Mass-model calibration: the empirical fractions the structural, systems and furnishings weights are estimated from, and the centre-of-gravity limits the balance check uses."
+        help = "Mass architecture and weight-and-balance inputs. Pure FLOPS transport is the product default and owns every production mass group; the legacy reference-compatible fractions remain available only through an explicit comparison path."
     )]
     pub mass_model: MassModelConfig,
 
@@ -217,19 +223,6 @@ impl Default for AlasConfig {
 }
 
 impl AlasConfig {
-    /// Whether this run is allowed to carry an explicit passenger target.
-    ///
-    /// A clean-sheet study has no registered aircraft capacity to preserve, so
-    /// its passenger target is a legitimate sizing input. Once a run starts
-    /// from a registered aircraft, the cabin mix is the input and the layout
-    /// fills the usable floor for each candidate; retaining a copied seat
-    /// count there would recreate one-seat shortfalls such as 349/350.
-    pub fn uses_fixed_passenger_target(&self) -> bool {
-        self.requirements.aircraft_type == "passenger"
-            && self.optimizer.design_space.mode == crate::optimizer::DesignMode::CleanSheet
-            && self.preset.is_empty()
-    }
-
     /// Build a configuration from what a saved file holds.
     ///
     /// `data` names a subset of the fields below, to any depth. A `preset` key
@@ -248,6 +241,37 @@ impl AlasConfig {
     /// [`OverlayError`] when `data` is not a mapping, names a field that does
     /// not exist, or gives one a value of the wrong type.
     pub fn from_value(data: &serde_json::Value) -> Result<Self, OverlayError> {
+        Self::from_value_with_migration(data).map(|(config, _)| config)
+    }
+
+    /// [`Self::from_value`], also reporting what loading did to the mass
+    /// method.
+    ///
+    /// The mass architecture is the one configuration decision whose
+    /// migration changes a published number -- operating empty mass -- so it
+    /// is returned rather than logged. A front end shows it, an export
+    /// records it, and a headless run can assert on it.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::from_value`].
+    pub fn from_value_with_migration(
+        data: &serde_json::Value,
+    ) -> Result<(Self, crate::MassArchitectureMigration), OverlayError> {
+        // A workspace file carries the desktop session envelope next to the
+        // aircraft configuration. The envelope is not aircraft data, so it is
+        // removed before the strict overlay sees the document; a file with no
+        // envelope is unchanged by this step.
+        let without_envelope;
+        let data = match data.as_object() {
+            Some(map) if map.contains_key(WORKSPACE_ENVELOPE_KEY) => {
+                let mut map = map.clone();
+                map.remove(WORKSPACE_ENVELOPE_KEY);
+                without_envelope = serde_json::Value::Object(map);
+                &without_envelope
+            }
+            _ => data,
+        };
         let mut instance = Self::default();
 
         if let Some(name) = data.get("preset").and_then(serde_json::Value::as_str) {
@@ -271,6 +295,16 @@ impl AlasConfig {
                     instance.landing_gear = preset.landing_gear.clone();
                     if let Some(mass_model) = &preset.mass_model {
                         instance.mass_model = mass_model.clone();
+                    }
+                    // A registered aircraft's declared FLOPS architecture is
+                    // aircraft data with its own provenance, exactly like its
+                    // tanks and its wing-box material family. It is applied
+                    // after the preset's own mass model so a preset that
+                    // carries both keeps both, and before the file overlay so
+                    // a saved file can still change any of it.
+                    if let Some(flops) = crate::preset_flops::inputs_for(name) {
+                        instance.mass_model.flops_transport = flops.transport;
+                        instance.mass_model.flops_structure = flops.structure;
                     }
                     if let Some(performance) = &preset.performance {
                         instance.performance = performance.clone();
@@ -301,7 +335,81 @@ impl AlasConfig {
             }
         }
 
-        overlay(&instance, data)
+        // `MassModelConfig`'s serde representation repairs its derived group
+        // selectors whenever a current architecture field is present.  The
+        // overlay starts from the current defaults, so capture a pre-version-2
+        // file's selectors before that repair; otherwise an old all-legacy
+        // file would look like an old all-FLOPS file and the migration message
+        // would be wrong.
+        let legacy_group_selection = data
+            .get("mass_model")
+            .filter(|mass_model| mass_model.get("mass_architecture").is_none())
+            .filter(|mass_model| {
+                mass_model
+                    .get("schema_version")
+                    .and_then(serde_json::Value::as_u64)
+                    .is_none_or(|version| version < crate::MASS_MODEL_SCHEMA_VERSION as u64)
+            })
+            .map(|mass_model| {
+                (
+                    mass_model
+                        .get("systems_mass_method")
+                        .cloned()
+                        .and_then(|value| serde_json::from_value(value).ok())
+                        .unwrap_or_default(),
+                    mass_model
+                        .get("structural_mass_method")
+                        .cloned()
+                        .and_then(|value| serde_json::from_value(value).ok())
+                        .unwrap_or_default(),
+                    mass_model
+                        .get("propulsion_mass_method")
+                        .cloned()
+                        .and_then(|value| serde_json::from_value(value).ok())
+                        .unwrap_or_default(),
+                )
+            });
+
+        let mut loaded: Self = overlay(&instance, data)?;
+        // The overlay merges `data` onto the *serialized defaults*, so the
+        // schema version the merged document carries is this build's, not the
+        // file's. Read the file's own claim instead, from `data` directly: a
+        // `mass_model` block with no `schema_version` is by definition one
+        // written before the version existed, and a file with no `mass_model`
+        // block at all states no mass method to migrate.
+        loaded.mass_model.schema_version =
+            data.get("mass_model")
+                .map_or(crate::MASS_MODEL_SCHEMA_VERSION, |mass_model| {
+                    // The visible architecture field is the current UI
+                    // selection. `schema_version` is hidden from that form, so
+                    // its omission cannot turn an explicit legacy comparison
+                    // choice back into a version-1 migration.
+                    if mass_model.get("mass_architecture").is_some() {
+                        crate::MASS_MODEL_SCHEMA_VERSION
+                    } else {
+                        mass_model
+                            .get("schema_version")
+                            .and_then(serde_json::Value::as_u64)
+                            .and_then(|version| u32::try_from(version).ok())
+                            .unwrap_or_else(crate::mass_architecture::legacy_schema_version)
+                    }
+                });
+        if let Some((systems, structure, propulsion)) = legacy_group_selection {
+            loaded.mass_model.mass_architecture = crate::MassArchitecture::default();
+            loaded.mass_model.systems_mass_method = systems;
+            loaded.mass_model.structural_mass_method = structure;
+            loaded.mass_model.propulsion_mass_method = propulsion;
+        }
+        // The overlay is the last thing that can name a mass method, so the
+        // architecture is reconciled here rather than in `MassModelConfig`'s
+        // `Deserialize`: a version-1 file's three group selectors only mean
+        // something once the preset defaults underneath them have been
+        // applied. A caller that supplies the current architecture field
+        // without the hidden schema-version field is already making an
+        // explicit version-2 selection (as the settings form does), so it
+        // must remain selectable rather than being mistaken for an old file.
+        let migration = loaded.mass_model.normalize_architecture();
+        Ok((loaded, migration))
     }
 
     /// The maximum landing mass to enforce for `candidate_mtow_kg`.
@@ -570,6 +678,22 @@ mod tests {
     }
 
     #[test]
+    fn a_visible_architecture_selection_without_the_hidden_schema_version_stays_explicit() {
+        let (config, migration) = AlasConfig::from_value_with_migration(&json!({
+            "mass_model": {
+                "mass_architecture": "legacy_reference_compatible_comparison"
+            }
+        }))
+        .expect("the visible mass architecture is a valid overlay");
+        assert_eq!(migration, crate::MassArchitectureMigration::None);
+        assert_eq!(
+            config.mass_model.mass_architecture,
+            crate::MassArchitecture::LegacyReferenceCompatibleComparison
+        );
+        assert!(config.mass_model.architecture_is_coherent());
+    }
+
+    #[test]
     fn a_preset_replaces_the_geometry_and_the_requirements() {
         let config = AlasConfig::from_value(&json!({"preset": "A380-800"})).unwrap();
         let preset = crate::presets::get("A380-800").unwrap();
@@ -598,10 +722,11 @@ mod tests {
     }
 
     #[test]
-    fn a_presets_own_calibrations_are_applied_on_the_headless_path_too() {
-        // The graphical front end applies these on selection, which makes
-        // them look like an interface concern. Skipping them here is about
-        // 2.8 t of operating empty weight and fifteen knots of V-speed.
+    fn a_preset_compatibility_calibrations_are_applied_on_the_headless_path_too() {
+        // The graphical front end applies these historical comparison values
+        // on selection, which makes them look like an interface concern. They
+        // remain serialized for the explicit reference-compatible path; pure
+        // FLOPS uses the preset's declared transport and structure inputs.
         let config = AlasConfig::from_value(&json!({"preset": "A220-300"})).unwrap();
         assert_eq!(config.mass_model.systems_mass_fraction, 0.13);
         assert_eq!(config.mass_model.furnishings_mass_fraction, 0.12);
@@ -640,9 +765,15 @@ mod tests {
     }
 
     #[test]
-    fn a_preset_without_its_own_calibration_keeps_the_global_mass_model() {
+    fn a_preset_loads_its_declared_pure_flops_inputs() {
         let config = AlasConfig::from_value(&json!({"preset": "B787-9"})).unwrap();
-        assert_eq!(config.mass_model, MassModelConfig::default());
+        let declared = crate::preset_flops::inputs_for("B787-9").expect("787 FLOPS inputs");
+        assert_eq!(
+            config.mass_model.mass_architecture,
+            crate::MassArchitecture::PureFlopsTransportV1
+        );
+        assert_eq!(config.mass_model.flops_transport, declared.transport);
+        assert_eq!(config.mass_model.flops_structure, declared.structure);
     }
 
     #[test]

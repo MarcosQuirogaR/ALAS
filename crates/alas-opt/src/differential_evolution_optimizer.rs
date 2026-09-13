@@ -43,7 +43,14 @@ impl DesignOptimizer {
     /// Product runs use [`Self::new`]. This compatibility constructor exists
     /// only for the differential-evolution parity fixture, so a physical
     /// improvement does not masquerade as a translation discrepancy.
-    pub fn new_reference_compatibility(config: AlasConfig) -> Self {
+    pub fn new_reference_compatibility(mut config: AlasConfig) -> Self {
+        // This constructor is the explicit comparison boundary.  Make the
+        // selected architecture agree with the replay flag so the legacy
+        // optimizer cannot accidentally ask the pure FLOPS mass evaluator for
+        // a reference-coordinate run.
+        config.mass_model.mass_architecture =
+            alas_config::MassArchitecture::LegacyReferenceCompatibleComparison;
+        config.mass_model.apply_architecture();
         Self {
             config,
             reference_mass_coordinates: true,
@@ -66,6 +73,12 @@ impl DesignOptimizer {
             return Err(OptimizationError::InvalidConfiguration(reason));
         }
         if !self.reference_mass_coordinates {
+            if !self.config.mass_model.mass_architecture.is_production() {
+                return Err(OptimizationError::InvalidConfiguration(
+                    "the production optimizer requires pure_flops_transport_v1; use the explicit reference-compatibility constructor for legacy comparison"
+                        .to_owned(),
+                ));
+            }
             self.config
                 .optimizer
                 .design_space

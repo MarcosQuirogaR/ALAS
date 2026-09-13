@@ -46,19 +46,24 @@ pub mod fuel_tanks;
 pub mod geometry;
 pub mod landing_gear;
 pub mod mass;
+pub mod mass_architecture;
 pub mod materials;
 pub mod mission;
 pub mod mses;
+pub mod oew_reference;
 pub mod optimizer;
 pub mod performance;
 pub mod performance_presets;
 pub mod physics;
+pub mod preset_flops;
 pub mod preset_fuel_tanks;
 pub mod preset_structures;
 pub mod presets;
 pub mod propulsion;
 pub mod requirements;
 pub mod settings;
+pub mod sizing_basis;
+pub use sizing_basis::MassSizingBasis;
 pub mod solver_presets;
 pub mod structures;
 pub mod systems_mass;
@@ -103,8 +108,16 @@ pub use landing_gear::{
     GearStationRejection, LandingGearConfig, LandingGearStationPositions, ValidGearStation,
 };
 pub use mass::MassModelConfig;
+pub(crate) use mass_architecture::legacy_mass_model_schema_version;
+pub use mass_architecture::{
+    MassArchitecture, MassArchitectureMigration, MASS_MODEL_SCHEMA_VERSION,
+};
 pub use mission::{resolve_true_airspeed_m_s, MissionConfig, MissionProfileConfig, SpeedReference};
 pub use mses::MsesConfig;
+pub use oew_reference::{
+    InclusionStatus, OewApplicability, OewCaseAnchor, OewInclusionList, OewReference,
+    OewReferenceConfiguration, OewSource, OewSourceTier, PublishedOewValue,
+};
 pub use optimizer::{
     ConstraintPolicy, DesignMode, DesignSpaceConfig, MtowSizing, ObjectiveConfig, ObjectiveKind,
     ObjectiveWeights, OptimizerConfig, SolverSettings, VariableEnvelope,
@@ -122,11 +135,12 @@ pub use presets::{
 };
 pub use propulsion::PropulsionCycleConfig;
 pub use requirements::{DesignRequirements, RequirementsError};
-pub use settings::AlasConfig;
+pub use settings::{AlasConfig, WORKSPACE_ENVELOPE_KEY};
 pub use solver_presets::{SolverPreset, UnknownSolverPreset};
 pub use structures::StructuresConfig;
 pub use systems_mass::{
-    FlopsInputProvenance, FlopsTransportConfig, FlopsTransportProvenance, SystemsMassMethod,
+    FlopsInputEvidence, FlopsInputProvenance, FlopsTransportConfig, FlopsTransportProvenance,
+    SystemsMassMethod,
 };
 pub use validation::{validate, Severity, ValidationIssue};
 

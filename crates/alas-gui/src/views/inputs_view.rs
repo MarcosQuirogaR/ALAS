@@ -7,12 +7,12 @@
 //! A port of the reference desktop app's `InputsScreen`.
 
 use alas_config::airport_dataset::{self, FieldSource, RunwayDataKind};
-use alas_geom::builder::AircraftBuilder;
-use alas_payload::{apply_cabin_preset, build_payload_layout, layout::LayoutSummary};
+use alas_config::{AlasConfig, DesignMode};
 use alas_pipeline::{AerodynamicSolverMode, OptimizationSolverMode};
 use egui::{CollapsingHeader, ComboBox, DragValue, RichText, ScrollArea, Ui};
 use serde_json::Value;
 
+use crate::sandbox::StartingDesign;
 use crate::state::AppState;
 use crate::views::form::dynamic_form;
 use crate::views::tour_data::TourTarget;
@@ -23,6 +23,8 @@ pub fn show_inputs_view(state: &mut AppState, ui: &mut Ui) {
     ScrollArea::vertical()
         .auto_shrink([false, false])
         .show(ui, |ui| {
+            show_starting_design_card(state, ui);
+            ui.add_space(8.0);
             show_aircraft_card(state, ui);
             ui.add_space(8.0);
             show_requirements_card(state, ui);
@@ -49,8 +51,59 @@ fn card(ui: &mut Ui, title: &str, body: impl FnOnce(&mut Ui)) -> egui::Response 
         .response
 }
 
-fn show_aircraft_card(state: &mut AppState, ui: &mut Ui) {
-    let response = card(ui, "Aircraft Configuration", |ui| {
+/// The starting-design choice: a clean sheet opens the sandbox, a preset
+/// aircraft keeps its geometry protected. Whether a run optimizes is a
+/// separate toggle below.
+fn show_starting_design_card(state: &mut AppState, ui: &mut Ui) {
+    let _ = card(ui, "Starting design", |ui| {
+        let choice = state.starting_design();
+        ui.horizontal_wrapped(|ui| {
+            if ui
+                .add(crate::theme::selectable_button(
+                    tr("Clean sheet design"),
+                    choice == StartingDesign::CleanSheet,
+                ))
+                .on_hover_text(tr(
+                    "Open the sandbox: the first time from the AVE reference, afterwards resuming the last sandbox or custom design.",
+                ))
+                .clicked()
+            {
+                state.enter_sandbox(false);
+            }
+            if ui
+                .add(crate::theme::selectable_button(
+                    tr("Preset aircraft"),
+                    choice == StartingDesign::PresetAircraft,
+                ))
+                .on_hover_text(tr(
+                    "Analyse or adapt a registered aircraft; its defining geometry stays protected from manual edits.",
+                ))
+                .clicked()
+                && choice != StartingDesign::PresetAircraft
+            {
+                if let Some((first, _)) = state.preset_names.first().cloned() {
+                    state.load_preset(&first);
+                }
+            }
+            if ui
+                .add(egui::Button::new(tr("New from AVE")).small())
+                .on_hover_text(tr("Open a new sandbox from the AVE reference instead of resuming."))
+                .clicked()
+            {
+                state.enter_sandbox(true);
+            }
+        });
+        if choice == StartingDesign::CleanSheet && state.has_custom_design() {
+            ui.label(
+                RichText::new(tr("A custom baseline promoted from the sandbox is active."))
+                    .weak()
+                    .small(),
+            );
+        }
+    });
+}
+
+fn show_aircraft_card(state: &mut AppState, ui: &mut Ui) {    let response = card(ui, "Aircraft Configuration", |ui| {
         ui.horizontal_wrapped(|ui| {
             ui.label(tr("Preset:"));
             let names = state.preset_names.clone();
@@ -60,6 +113,8 @@ fn show_aircraft_card(state: &mut AppState, ui: &mut Ui) {
                 .map(|(_, d)| d.clone())
                 .unwrap_or_else(|| tr("Choose a preset..."));
             let mut chosen = None;
+            let preset_mode = state.starting_design() == StartingDesign::PresetAircraft;
+            ui.add_enabled_ui(preset_mode, |ui| {
             ComboBox::from_id_salt("inputs_preset_combo")
                 .selected_text(current_display)
                 .show_ui(ui, |ui| {
@@ -72,6 +127,7 @@ fn show_aircraft_card(state: &mut AppState, ui: &mut Ui) {
                         }
                     }
                 });
+            });
             if let Some(name) = chosen {
                 state.load_preset(&name);
             }
@@ -100,98 +156,12 @@ fn show_aircraft_card(state: &mut AppState, ui: &mut Ui) {
                 state.set_engine(&name);
             }
         });
-        if let Some(estimate) = live_payload_estimate(state) {
-            ui.add_space(6.0);
-            ui.label(RichText::new(tr("Live cabin estimate")).strong());
-            ui.horizontal_wrapped(|ui| {
-                ui.label(RichText::new(estimate.primary).strong());
-                for metric in estimate.metrics {
-                    ui.separator();
-                    ui.label(metric);
-                }
-            });
-            if state.help_verbose {
-                ui.label(
-                    RichText::new(tr(
-                        "Derived from the selected preset's fuselage and cabin settings; it updates before a run.",
-                    ))
-                    .weak()
-                    .small(),
-                );
-            }
-        } else {
-            ui.weak(tr(
-                "Cabin estimate is unavailable while the edited geometry is incomplete.",
-            ));
-        }
     });
     if state.walkthrough_targets(TourTarget::AircraftConfig) {
         response.scroll_to_me(Some(egui::Align::Center));
     }
     if ui.clip_rect().intersects(response.rect) {
         state.record_walkthrough_target(TourTarget::AircraftConfig, response.rect);
-    }
-}
-
-/// Display-ready layout metrics drawn from the same live cabin build as the
-/// preview. Keeping the individual measures separate avoids a dense sentence
-/// with semicolons and avoids presenting a model-derived AVE capacity as an
-/// unknown real-world certification number.
-struct LivePayloadEstimate {
-    primary: String,
-    metrics: Vec<String>,
-}
-
-/// Build the same detailed layout used by the report. Named cabin presets are
-/// applied to a temporary configuration first, so switching Ryanair, Iberia,
-/// or Emirates immediately changes the estimate before a run writes anything
-/// back to the edit buffer.
-fn live_payload_estimate(state: &AppState) -> Option<LivePayloadEstimate> {
-    let mut config = state.typed_config()?;
-    let design = state.current_design();
-    if config.requirements.cabin_preset != "Custom" {
-        apply_cabin_preset(&mut config, design.as_ref()).ok()?;
-    }
-    let airplane = AircraftBuilder::new(Some(config.geometry.clone()))
-        .build(design.as_ref(), true)
-        .ok()?;
-    let layout = build_payload_layout(&airplane, &config, 0.0, 0.0).ok()?;
-    match &layout.summary {
-        LayoutSummary::Passenger(summary) => Some(LivePayloadEstimate {
-            primary: tr_fields(
-                "{seated} passengers seated",
-                &[("seated", summary.seated_pax.to_string())],
-            ),
-            metrics: vec![
-                tr_fields(
-                    "Payload: {payload} t",
-                    &[("payload", format!("{:.1}", summary.payload_t))],
-                ),
-                tr_fields(
-                    "Hold: {used} of {capacity} t",
-                    &[
-                        ("used", format!("{:.1}", summary.hold_used_t)),
-                        ("capacity", format!("{:.1}", summary.hold_capacity_t)),
-                    ],
-                ),
-            ],
-        }),
-        LayoutSummary::Cargo(summary) => Some(LivePayloadEstimate {
-            primary: tr_fields(
-                "Cargo payload: {payload} t",
-                &[("payload", format!("{:.1}", summary.payload_t))],
-            ),
-            metrics: vec![
-                tr_fields(
-                    "Hold capacity: {capacity} t",
-                    &[("capacity", format!("{:.1}", summary.capacity_t))],
-                ),
-                tr_fields(
-                    "{slots} loading positions",
-                    &[("slots", summary.n_slots.to_string())],
-                ),
-            ],
-        }),
     }
 }
 
@@ -222,13 +192,6 @@ fn show_requirements_card(state: &mut AppState, ui: &mut Ui) {
             .collect();
         let lang = Some(state.language.code());
         let show_help = state.help_verbose;
-        ui.label(
-            RichText::new(tr(
-                "Set the mission target, aircraft type, payload layout and design mass here. Detailed limits and stability targets stay with the selected design mode on the Design Space page.",
-            ))
-            .weak()
-            .small(),
-        );
         if let Some(values) = state.group_mut("requirements") {
             let edits = dynamic_form(ui, &fields, values, &error_fields, lang, show_help);
             if !edits.is_empty() {
@@ -238,19 +201,30 @@ fn show_requirements_card(state: &mut AppState, ui: &mut Ui) {
                 }
             }
         }
-        show_clean_sheet_passenger_target(state, ui);
+        show_custom_cabin_passenger_target(state, ui);
     });
 }
 
-/// Render the one passenger count that is a real user input. A clean-sheet
-/// study has no registered cabin capacity to preserve, so its count sizes the
-/// fuselage. A named aircraft uses its class shares and the usable floor
-/// instead; exposing its copied planning count would make a discrete row
-/// shortfall look like a failed requirement.
-fn show_clean_sheet_passenger_target(state: &mut AppState, ui: &mut Ui) {
+/// Whether the passenger-count input below is meaningful for `config`.
+///
+/// Passenger capacity is always dynamic -- resolved from the cabin class-mix
+/// percentages and the candidate's actual geometry, for every study,
+/// registered aircraft or clean-sheet alike. A `Custom` cabin's starting
+/// count is the one passenger value a person can still hand-edit, exactly
+/// like `cargo_payload_kg` and each class's `share_pct` are only editable
+/// while `cabin_preset` is `Custom`.
+fn custom_cabin_passenger_target_eligible(config: &AlasConfig) -> bool {
+    config.requirements.aircraft_type == "passenger" && config.requirements.cabin_preset == "Custom"
+}
+
+/// Render the one passenger count that is a real user input. Exposing a
+/// named aircraft's or a percentage-mix clean sheet's copied planning count
+/// would make a discrete row shortfall look like a failed requirement, since
+/// that count is recomputed from geometry regardless of what is shown here.
+fn show_custom_cabin_passenger_target(state: &mut AppState, ui: &mut Ui) {
     let eligible = state
         .typed_config()
-        .is_some_and(|config| config.uses_fixed_passenger_target());
+        .is_some_and(|config| custom_cabin_passenger_target_eligible(&config));
     if !eligible {
         return;
     }
@@ -263,10 +237,10 @@ fn show_clean_sheet_passenger_target(state: &mut AppState, ui: &mut Ui) {
         .unwrap_or_default()
         .clamp(1, 5_000);
     ui.separator();
-    ui.label(RichText::new(tr("Clean-sheet passenger target")).strong());
+    ui.label(RichText::new(tr("Custom cabin passenger count")).strong());
     ui.label(
         RichText::new(tr(
-            "Choose the passenger load for a clean-sheet study. Named aircraft presets derive capacity from class shares and usable cabin floor.",
+            "Starting passenger count for a hand-edited Custom cabin. Every other cabin preset resolves its own capacity from the class-mix percentages and the candidate's geometry.",
         ))
         .weak()
         .small(),
@@ -307,18 +281,6 @@ fn show_route_card(state: &mut AppState, ui: &mut Ui) {
                 }
             });
         }
-        if state.help_verbose {
-            ui.add(
-                egui::Label::new(
-                    RichText::new(
-                        tr("Overridden by a configured SimBrief flight plan (Mission Advanced Settings) whenever its origin/destination match."),
-                    )
-                    .weak()
-                    .small(),
-                )
-                .wrap(),
-            );
-        }
     });
 }
 
@@ -333,7 +295,7 @@ fn show_route_field(state: &mut AppState, ui: &mut Ui, label: &str, key: &str) {
         .unwrap_or("")
         .to_owned();
     let mut chosen = None;
-    ComboBox::from_id_salt(format!("inputs_{key}_combo"))
+    let combo_response = ComboBox::from_id_salt(format!("inputs_{key}_combo"))
         .width(ui.available_width())
         .selected_text(&current)
         .show_ui(ui, |ui| {
@@ -343,7 +305,9 @@ fn show_route_field(state: &mut AppState, ui: &mut Ui, label: &str, key: &str) {
                 }
             }
         });
-    show_airport_resolution(ui, &current);
+    combo_response
+        .response
+        .on_hover_text(airport_resolution_tooltip(&current));
     if let Some(name) = chosen {
         let feedback_value = name.clone();
         if let Some(obj) = state.config_values.as_object_mut() {
@@ -354,25 +318,18 @@ fn show_route_field(state: &mut AppState, ui: &mut Ui, label: &str, key: &str) {
     }
 }
 
-/// Show the resolved route data next to the simple airport selector. The
-/// resolver owns the distinction between curated declared distances and the
-/// small OurAirports physical-runway snapshot; the GUI only reports that
-/// distinction and never promotes one into the other.
-fn show_airport_resolution(ui: &mut Ui, name: &str) {
-    let status = airport_resolution(name);
-    match status {
+/// Build the airport and runway details shown when the user hovers a selector.
+/// The resolver still reads the same source records used by route and field
+/// performance checks; the Inputs page keeps those details out of the normal
+/// layout so the two airport controls stay compact.
+fn airport_resolution_tooltip(name: &str) -> String {
+    let details = match airport_resolution(name) {
         AirportResolution::Missing => {
-            ui.colored_label(
-                ui.visuals().warn_fg_color,
-                tr("No airport selected; route and field-performance data are unavailable."),
-            );
+            tr("No airport selected; route and field-performance data are unavailable.")
         }
-        AirportResolution::Unknown => {
-            ui.colored_label(
-                ui.visuals().warn_fg_color,
-                tr("No matching airport record; routing and declared field-performance data remain unresolved."),
-            );
-        }
+        AirportResolution::Unknown => tr(
+            "No matching airport record; routing and declared field-performance data remain unresolved.",
+        ),
         AirportResolution::Resolved {
             source,
             runway_kind,
@@ -382,43 +339,38 @@ fn show_airport_resolution(ui: &mut Ui, name: &str) {
             toda_m,
             lda_m,
         } => {
-            ui.horizontal_wrapped(|ui| {
-                ui.label(RichText::new(tr("Resolved airport data")).strong());
-                ui.label(tr_fields(
+            let mut lines = vec![
+                tr("Resolved airport data"),
+                tr_fields(
                     "Source: {source}",
                     &[("source", source_label(source))],
-                ));
+                ),
+                format_optional_metric("Elevation", elevation_m, "m"),
+                format_coordinates(latitude_deg, longitude_deg),
+            ];
+            lines.push(match runway_kind {
+                RunwayDataKind::DeclaredOperationalDistance => tr_fields(
+                    "Declared take-off / landing distances: {toda} / {lda} m",
+                    &[
+                        ("toda", format_optional_number(toda_m)),
+                        ("lda", format_optional_number(lda_m)),
+                    ],
+                ),
+                RunwayDataKind::PhysicalRunwayLength => tr(
+                    "Physical runway length only; declared take-off and landing distances are missing.",
+                ),
+                RunwayDataKind::Missing => tr(
+                    "Runway distance data are missing; declared field-performance checks cannot use this airport.",
+                ),
             });
-            ui.horizontal_wrapped(|ui| {
-                ui.label(format_optional_metric("Elevation", elevation_m, "m"));
-                ui.separator();
-                ui.label(format_coordinates(latitude_deg, longitude_deg));
-            });
-            match runway_kind {
-                RunwayDataKind::DeclaredOperationalDistance => {
-                    ui.label(tr_fields(
-                        "Declared take-off / landing distances: {toda} / {lda} m",
-                        &[
-                            ("toda", format_optional_number(toda_m)),
-                            ("lda", format_optional_number(lda_m)),
-                        ],
-                    ));
-                }
-                RunwayDataKind::PhysicalRunwayLength => {
-                    ui.colored_label(
-                        ui.visuals().warn_fg_color,
-                        tr("Physical runway length only; declared take-off and landing distances are missing."),
-                    );
-                }
-                RunwayDataKind::Missing => {
-                    ui.colored_label(
-                        ui.visuals().warn_fg_color,
-                        tr("Runway distance data are missing; declared field-performance checks cannot use this airport."),
-                    );
-                }
-            }
+            lines.join("\n")
         }
-    }
+    };
+
+    format!(
+        "{details}\n\n{}",
+        tr("Overridden by a configured SimBrief flight plan (Mission Advanced Settings) whenever its origin/destination match.")
+    )
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -511,41 +463,42 @@ fn route_column_count(available_width: f32) -> usize {
 
 fn show_run_options_card(state: &mut AppState, ui: &mut Ui) {
     let _ = card(ui, "Run options", |ui| {
-        if run_options_column_count(ui.available_width()) == 1 {
-            show_run_content_options(state, ui);
-            ui.add_space(10.0);
-            show_run_evaluation_options(state, ui);
-        } else {
-            ui.columns(2, |columns| {
-                show_run_content_options(state, &mut columns[0]);
-                show_run_evaluation_options(state, &mut columns[1]);
-            });
-        }
+        show_run_content_options(state, ui);
     });
+}
+
+/// Apply the optimization toggle to the typed design mode: a preset
+/// aircraft optimizes inside its reference envelope or is analysed as a
+/// fixed aircraft; a custom design keeps the clean-sheet mode either way.
+fn apply_optimize_choice(state: &mut AppState, optimize: bool) {
+    state.run_options.optimize = optimize;
+    if state.starting_design() == StartingDesign::PresetAircraft {
+        state.set_design_mode(if optimize {
+            DesignMode::ReferenceAdaptation
+        } else {
+            DesignMode::BaselineSandbox
+        });
+        state.run_options.optimize = optimize;
+    }
+    if !optimize {
+        state.run_options.compare_baseline = false;
+    }
 }
 
 fn show_run_content_options(state: &mut AppState, ui: &mut Ui) {
     ui.label(RichText::new(tr("Run contents")).strong());
-    let baseline = state.design_mode() == alas_config::DesignMode::BaselineSandbox;
-    if baseline {
-        state.run_options.optimize = false;
+    let mut optimize = state.run_options.optimize
+        && state.design_mode() != DesignMode::BaselineSandbox;
+    if ui
+        .checkbox(&mut optimize, tr("Optimize design space"))
+        .on_hover_text(tr(
+            "On: the single MADS optimizer searches the design space before analysis. Off: the current design is analysed as drawn.",
+        ))
+        .changed()
+    {
+        apply_optimize_choice(state, optimize);
     }
-    ui.add_enabled_ui(!baseline, |ui| {
-        ui.checkbox(&mut state.run_options.optimize, tr("Optimize design space"));
-    });
-    if baseline {
-        ui.label(
-            RichText::new(tr(
-                "Baseline sandbox is fixed-aircraft analysis; select New aircraft or Adapt reference to enable MADS.",
-            ))
-            .weak()
-            .small(),
-        );
-    }
-    if baseline {
-        state.run_options.compare_baseline = false;
-    }
-    ui.add_enabled_ui(!baseline, |ui| {
+    ui.add_enabled_ui(optimize, |ui| {
         ui.checkbox(
             &mut state.run_options.compare_baseline,
             tr("Compare against baseline design"),
@@ -577,23 +530,9 @@ fn show_run_content_options(state: &mut AppState, ui: &mut Ui) {
     );
 }
 
-fn show_run_evaluation_options(state: &mut AppState, ui: &mut Ui) {
-    ui.label(RichText::new(tr("MADS optimizer")).strong());
-    ui.label(
-        RichText::new(tr(
-            "MADS is the single product optimizer: a mesh search with a progressive barrier that ranks hard-feasible candidates before mission cost.",
-        ))
-        .weak()
-        .small(),
-    );
-    ui.label(
-        RichText::new(tr(
-            "Termination reports the evaluation budget, mesh limit, iteration limit or fixed bounds; it is not a claim of global optimality.",
-        ))
-        .weak()
-        .small(),
-    );
-    ui.add_space(4.0);
+/// The solver backend selections, shown in the Advanced Settings window.
+pub(crate) fn show_run_evaluation_options(state: &mut AppState, ui: &mut Ui) {
+    ui.label(RichText::new(tr("Aerodynamic solvers")).strong());    ui.add_space(4.0);
     ui.label(RichText::new(tr("Aero evaluation backend")).weak().small());
     ComboBox::from_id_salt("alas_optimization_solver")
         .width(ui.available_width())
@@ -655,59 +594,19 @@ fn show_run_evaluation_options(state: &mut AppState, ui: &mut Ui) {
     ));
 }
 
-fn run_options_column_count(available_width: f32) -> usize {
-    if available_width >= 760.0 {
-        2
-    } else {
-        1
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
-        airport_resolution, live_payload_estimate, route_column_count, run_options_column_count,
-        AirportResolution,
+        airport_resolution, airport_resolution_tooltip, custom_cabin_passenger_target_eligible,
+        route_column_count, AirportResolution,
     };
     use crate::state::AppState;
     use alas_config::{DesignMode, FieldSource, RunwayDataKind};
 
     #[test]
-    fn preset_changes_rebuild_the_live_cabin_and_payload_estimate() {
-        let mut state = AppState::default();
-        let narrowbody = live_payload_estimate(&state).expect("default preset layout");
-
-        state.load_preset("A380-800");
-        let widebody = live_payload_estimate(&state).expect("widebody preset layout");
-
-        assert!(
-            narrowbody.primary != widebody.primary || narrowbody.metrics != widebody.metrics,
-            "the live estimate should reflect the selected preset's cabin geometry"
-        );
-        assert!(widebody.primary.contains("passengers seated"));
-    }
-
-    #[test]
-    fn named_cabin_presets_change_the_live_layout_before_a_run() {
-        let mut state = AppState::default();
-        let ryanair = live_payload_estimate(&state).expect("Ryanair layout");
-        state.config_values["requirements"]["cabin_preset"] =
-            serde_json::Value::String("Iberia".to_owned());
-        let iberia = live_payload_estimate(&state).expect("Iberia layout");
-
-        assert_ne!(ryanair.primary, iberia.primary);
-        assert!(ryanair
-            .metrics
-            .iter()
-            .all(|line| !line.contains("certified")));
-    }
-
-    #[test]
     fn input_cards_add_columns_only_when_the_window_has_room() {
         assert_eq!(route_column_count(679.0), 1);
         assert_eq!(route_column_count(680.0), 2);
-        assert_eq!(run_options_column_count(759.0), 1);
-        assert_eq!(run_options_column_count(760.0), 2);
     }
 
     #[test]
@@ -733,6 +632,14 @@ mod tests {
     }
 
     #[test]
+    fn airport_details_are_available_as_hover_text_without_a_persistent_row() {
+        let tooltip = airport_resolution_tooltip("London Heathrow (EGLL)");
+        assert!(tooltip.contains("Resolved airport data"));
+        assert!(tooltip.contains("Declared take-off / landing distances"));
+        assert!(tooltip.contains("SimBrief"));
+    }
+
+    #[test]
     fn baseline_mode_is_a_fixed_aircraft_run_state() {
         let mut state = AppState::default();
         state.set_design_mode(DesignMode::BaselineSandbox);
@@ -749,20 +656,48 @@ mod tests {
     }
 
     #[test]
-    fn passenger_count_input_is_only_available_for_a_clean_sheet() {
+    fn passenger_count_input_is_only_available_for_a_custom_cabin() {
+        // Eligibility tracks the cabin scheme, not clean-sheet-vs-registered
+        // status: the AVE default (a clean-sheet-eligible synthetic
+        // aircraft) still carries the "Ryanair" percentage-mix cabin, so the
+        // hand-edit input stays hidden even once the study goes clean-sheet.
         let mut state = AppState::default();
         assert_eq!(state.active_preset, "AVE");
         state.set_design_mode(DesignMode::CleanSheet);
-        assert!(state
-            .typed_config()
-            .expect("default config")
-            .uses_fixed_passenger_target());
         assert!(state.active_preset.is_empty());
+        assert_eq!(
+            state
+                .typed_config()
+                .expect("default config")
+                .requirements
+                .cabin_preset,
+            "Ryanair"
+        );
+        assert!(!custom_cabin_passenger_target_eligible(
+            &state.typed_config().expect("default config")
+        ));
 
+        // Switching the cabin scheme to Custom makes the input available.
+        if let Some(values) = state.group_mut("requirements") {
+            values["cabin_preset"] = serde_json::Value::String("Custom".to_owned());
+        }
+        assert!(custom_cabin_passenger_target_eligible(
+            &state.typed_config().expect("custom cabin config")
+        ));
+
+        // A registered aircraft whose own preset seeds a Custom cabin (e.g.
+        // the A380-800) is eligible too, even though it is not clean-sheet.
         state.load_preset("A380-800");
-        assert!(!state
-            .typed_config()
-            .expect("preset config")
-            .uses_fixed_passenger_target());
+        assert_eq!(
+            state
+                .typed_config()
+                .expect("preset config")
+                .requirements
+                .cabin_preset,
+            "Custom"
+        );
+        assert!(custom_cabin_passenger_target_eligible(
+            &state.typed_config().expect("preset config")
+        ));
     }
 }

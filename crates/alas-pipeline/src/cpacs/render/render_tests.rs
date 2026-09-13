@@ -287,6 +287,7 @@ fn test_report(config: &AlasConfig) -> AnalysisReport {
         x_neutral_point: 30.0,
         geometry_summary: HashMap::new(),
         component_masses,
+        flops_mass_buildup: None,
         mass_coordinates,
         physical_cg: [1.0, 0.0, 0.0],
         payload_layout: None,

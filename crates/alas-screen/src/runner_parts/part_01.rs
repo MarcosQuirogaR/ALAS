@@ -156,6 +156,29 @@ pub fn run_airfoil_screening(
     progress_callback: Option<&mut dyn FnMut(&str)>,
     should_cancel: Option<&(dyn Fn() -> bool + Sync)>,
 ) -> Result<AirfoilScreeningResult, String> {
+    run_airfoil_screening_product(
+        config,
+        dv,
+        options,
+        mses_dir,
+        progress_callback,
+        should_cancel,
+    )
+}
+
+/// Execute screening with the frozen reference-compatible mass-coordinate
+/// model for parity evidence. Product callers use the unsuffixed
+/// [`run_airfoil_screening`] or the explicitly equivalent
+/// [`run_airfoil_screening_product`].
+#[allow(clippy::too_many_arguments)] // parity entry keeps the callback and cancellation contract explicit
+pub fn run_airfoil_screening_reference_compatibility(
+    config: &AlasConfig,
+    dv: Option<&DesignVector>,
+    options: &AirfoilScreeningOptions,
+    mses_dir: Option<&Path>,
+    progress_callback: Option<&mut dyn FnMut(&str)>,
+    should_cancel: Option<&(dyn Fn() -> bool + Sync)>,
+) -> Result<AirfoilScreeningResult, String> {
     run_airfoil_screening_with_mass_model(
         config,
         dv,

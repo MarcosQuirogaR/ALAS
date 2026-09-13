@@ -187,6 +187,10 @@ pub enum OptionSource {
     AircraftType,
     /// The cabin layout presets, which differ by aircraft type.
     CabinPreset,
+    /// The one method that owns every production mass group.
+    MassArchitecture,
+    /// What kind of knowledge a family of declared FLOPS inputs rests on.
+    FlopsInputEvidence,
     /// Versioned systems-and-equipment mass method.
     SystemsMassMethod,
     /// Versioned structural-group mass method.
@@ -199,7 +203,9 @@ pub enum OptionSource {
     FuelScheme,
     /// The scalar the mission-sized design search minimises.
     ObjectiveKind,
-    /// Whether the takeoff mass is a fixed input or closed by the mission.
+    /// Whether the takeoff mass is a fixed input, closed by the mission up
+    /// to it, or closed by the mission with it used only to seed the first
+    /// pass.
     MtowSizing,
     /// How a family of requirements takes part in the ranking.
     ConstraintPolicy,
@@ -238,6 +244,16 @@ impl OptionSource {
                 "sqp",
             ]),
             Self::AircraftType => Some(&["passenger", "cargo"]),
+            Self::MassArchitecture => Some(&[
+                "pure_flops_transport_v1",
+                "legacy_reference_compatible_comparison",
+            ]),
+            Self::FlopsInputEvidence => Some(&[
+                "source_backed",
+                "user_declared",
+                "published_flops_default",
+                "uncertain_engineering_estimate",
+            ]),
             Self::SystemsMassMethod => {
                 Some(&["reference_compatible_fractions", "flops_transport_v1"])
             }
@@ -258,7 +274,7 @@ impl OptionSource {
                 "operating_empty_mass",
                 "fuel_per_seat_kilometre",
             ]),
-            Self::MtowSizing => Some(&["fixed_requirement", "sized_by_mission"]),
+            Self::MtowSizing => Some(&["fixed_requirement", "sized_by_mission", "unconstrained"]),
             Self::ConstraintPolicy => Some(&["hard", "soft", "diagnostic", "off"]),
             Self::DesignMode => Some(&["clean_sheet", "reference_adaptation", "baseline_sandbox"]),
             _ => None,

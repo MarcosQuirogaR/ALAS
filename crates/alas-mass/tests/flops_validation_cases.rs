@@ -6,12 +6,28 @@
 //! NASA's Aviary (github.com/OpenMDAO/Aviary, Apache-2.0) ships the inputs
 //! and the FLOPS-produced outputs of `LargeSingleAisle2FLOPS` (simple wing
 //! bending factor, every mass scaler at one) and `LargeSingleAisle1FLOPS`
-//! (detailed wing, several group scalers). The values are recorded verbatim
-//! in `.agent/reports/flops-aviary-validation-data.md`. Every equation here
-//! is fed the case's inputs converted to SI and must reproduce the FLOPS
-//! output to the precision the data file quotes (mostly 0.1 lb on four to
-//! five figures). Where Aviary applies a group scaler the FLOPS output is
-//! divided by it, since ALAS carries no scalers.
+//! (detailed wing, several group scalers). Every equation here is fed the
+//! case's inputs converted to SI and must reproduce the FLOPS output to the
+//! precision the data file quotes (mostly 0.1 lb on four to five figures).
+//! Where Aviary applies a group scaler the FLOPS output is divided by it,
+//! since ALAS carries no scalers.
+//!
+//! ## Provenance
+//!
+//! The numbers below were taken from the **pinned** sources recorded in
+//! `.agent/data/flops-reference-20260911/manifest.json` (copied to
+//! `docs/flops-mass-sources.json`), each with its retrieval URL and SHA-256:
+//!
+//! * Aviary commit `c7affbbe54dcbeded7373eae05f771882e2bb28a`, files
+//!   `large_single_aisle_1_FLOPS_data.py`,
+//!   `large_single_aisle_2_FLOPS_data.py`, `distributed_prop.py` and
+//!   `surface_controls.py`, retrieved 2026-09-11.
+//! * NASA/TM-2017-219627 Vol. I, the NTRS PDF and its extracted text,
+//!   `sha256:819a48fc9c8f34f14595d93f3e3d54dc8454298e83e64048c14ac7bda00bb51d`.
+//!
+//! This supersedes the earlier unpinned, model-transcribed summary in
+//! `.agent/reports/flops-aviary-validation-data.md`, which is retained only
+//! as a narrative note.
 //!
 //! This is implementation verification against the published equations as
 //! FLOPS itself evaluates them, not physical validation against weighed
@@ -185,6 +201,10 @@ mod large_single_aisle_2 {
             baseline_thrust_n: lbf(THRUST_LBF),
             baseline_engine_mass_kg: Some(lbm(8_071.35)),
             scaling_exponent: 1.15,
+            baseline_inlet_mass_kg: None,
+            inlet_scaling_exponent: 1.0,
+            baseline_nozzle_mass_kg: None,
+            nozzle_scaling_exponent: 1.0,
             thrust_reversers_installed: true,
             maximum_mach: MAX_MACH,
             nacelle_diameter_m: ft(NACELLE_DIAMETER_FT),
@@ -475,6 +495,10 @@ mod large_single_aisle_1 {
             baseline_thrust_n: lbf(THRUST_LBF),
             baseline_engine_mass_kg: Some(lbm(7_400.0)),
             scaling_exponent: 1.15,
+            baseline_inlet_mass_kg: None,
+            inlet_scaling_exponent: 1.0,
+            baseline_nozzle_mass_kg: None,
+            nozzle_scaling_exponent: 1.0,
             thrust_reversers_installed: false,
             maximum_mach: 0.785,
             nacelle_diameter_m: ft(7.94),

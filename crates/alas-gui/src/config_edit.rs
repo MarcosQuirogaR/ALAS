@@ -323,7 +323,15 @@ impl AppState {
     }
 
     /// Revalidate and rebuild the live preview after an edit.
+    ///
+    /// A registered preset's protected geometry is restored first, and a
+    /// sandbox edit is routed to the sandbox's own revision bookkeeping.
     pub fn on_config_modified(&mut self) {
+        if self.sandbox.active() {
+            self.on_sandbox_model_changed();
+            return;
+        }
+        self.enforce_preset_geometry();
         if let Some(config) = self.typed_config() {
             self.validation_findings = validate(&config);
         }
@@ -377,7 +385,7 @@ impl AppState {
 
     /// Save the current configuration to [`AppState::config_path`] as JSON.
     pub fn save_config(&mut self) {
-        let text = match serde_json::to_string_pretty(&self.config_values) {
+        let text = match serde_json::to_string_pretty(&self.workspace_document()) {
             Ok(t) => t,
             Err(e) => {
                 self.log(
@@ -419,30 +427,19 @@ impl AppState {
             serde_json::from_str(&text).map_err(|e| e.to_string())
         };
         match parsed {
-            Ok(value) => {
-                match alas_config::AlasConfig::from_value(&value)
-                    .map(|config| full_config_values(&config))
-                {
-                    Ok(canonical) => {
-                        self.config_values = canonical;
-                        // A loaded design mode owns the bounds shown on the
-                        // Design Space page. Reapply its envelope immediately
-                        // so stale bounds from the previous file cannot leak
-                        // into the next run.
-                        self.reset_design_space_bounds_to_mode();
-                        self.save_tool_preferences();
-                        self.log(
-                            tr_fields("Loaded configuration from {path}.", &[("path", path)]),
-                            LogKind::Info,
-                        );
-                        self.on_config_modified();
-                    }
-                    Err(error) => self.log(
-                        tr_fields("Load failed: {error}", &[("error", error.to_string())]),
-                        LogKind::Error,
-                    ),
+            Ok(value) => match self.apply_workspace_document(&value) {
+                Ok(()) => {
+                    self.save_tool_preferences();
+                    self.log(
+                        tr_fields("Loaded configuration from {path}.", &[("path", path)]),
+                        LogKind::Info,
+                    );
                 }
-            }
+                Err(error) => self.log(
+                    tr_fields("Load failed: {error}", &[("error", error)]),
+                    LogKind::Error,
+                ),
+            },
             Err(e) => self.log(
                 tr_fields("Load failed: {error}", &[("error", e.to_string())]),
                 LogKind::Error,

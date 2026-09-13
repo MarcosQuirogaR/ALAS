@@ -25,11 +25,10 @@
 
 use crate::{
     AircraftPreset, AircraftReferenceData, AircraftVariantIdentity, CertifiedExitLayout,
-    CertifiedExitPair, CgEnvelopeEvidence,
-    DesignRequirements, DesignVector, EmpennageConfig, EngineConfig, FuselageConfig,
-    GeometryConfig, LandingGearConfig, MassModelConfig, MissingDesignMissionDatum,
-    MissionEvidenceApplicability, PartialDesignMissionEvidence, PartialMissionEvidenceKind,
-    PublishedMissionLoadCase, PublishedRange, WingConfig,
+    CertifiedExitPair, CgEnvelopeEvidence, DesignRequirements, DesignVector, EmpennageConfig,
+    EngineConfig, FuselageConfig, GeometryConfig, LandingGearConfig, MassModelConfig,
+    MissingDesignMissionDatum, MissionEvidenceApplicability, PartialDesignMissionEvidence,
+    PartialMissionEvidenceKind, PublishedMissionLoadCase, PublishedRange, WingConfig,
 };
 
 /// EASA's baseline A220-300 cabin arrangement for the legacy registered
@@ -102,12 +101,9 @@ pub fn a320_200() -> AircraftPreset {
             mtow_kg: Some(78_000.0),
             mlw_kg: Some(66_000.0),
             mzfw_kg: Some(62_500.0),
-            // Airbus states this operating empty weight on the sharklet
-            // ground-clearance table, alongside the WV000 and WV015 ramp
-            // weights it shares the figure with. It is a published aircraft
-            // configuration weight, not a certified limit and not an
-            // individual aeroplane's weighed OEW.
-            oew_kg: Some(41_244.0),
+            // No configuration-matched OEW is published for this aircraft;
+            // the registry (`crate::oew_reference`) records the anchors.
+            oew_kg: crate::oew_reference::preset_reference_oew_kg("A320-200"),
             usable_fuel_volume_l: Some(24_167.0),
             usable_fuel_mass_kg: Some(19_334.0),
             fuel_density_kg_l: Some(0.8),
@@ -138,7 +134,7 @@ pub fn a320_200() -> AircraftPreset {
             sources: vec![
                 "Airbus A320 Aircraft Characteristics Rev 46, 2026-07-01, section 2-1-1 p.2",
                 "Airbus A320 Aircraft Characteristics, section 2-2-0 Figure 2-2-0-991-004-A01 (sharklet general aircraft dimensions: 35.80 m span, 37.57 m length, 3.95 m body width, 12.45 m tailplane span, 5.87 m fin height, 6.07 m side-of-body wing chord, 16.29 m nose to leading edge of MAC)",
-                "Airbus A320 Aircraft Characteristics, section 2-4-0 ground-clearance table (OEW 41,244 kg; 17% / 36.8% MAC CG conditions)",
+                "Airbus A320 Aircraft Characteristics, section 2-3-0 ground-clearance figures (45,000 kg empty weight for maintenance; 17% / 36.8% MAC CG conditions; no OEW)",
                 "EASA.A.064 Issue 62, pp.37-48",
                 "EASA.A.064 Issue 12, section 1 items 15-16 (datum 2.540 m forward of nose; MAC 4.1935 m)",
                 "EASA.E.003 Issue 06, pp.10-11",
@@ -294,10 +290,9 @@ pub fn a320_200() -> AircraftPreset {
             optimize_passenger_capacity: true,
             num_passengers: 150,
             cargo_payload_kg: 18_000.0,
-            // Maximum zero-fuel weight 62,500 kg less the 41,244 kg operating
-            // empty weight Airbus publishes for this configuration. The older
-            // 19,900 kg here was the same subtraction against a 42.6 t OEW
-            // that no longer has a source attached to it.
+            // Declared input: maximum zero-fuel weight 62,500 kg less a
+            // 41,244 kg empty weight that is absent from the current Airbus
+            // document (see `crate::oew_reference`); retained as declared.
             max_structural_payload_kg: 21_256.0,
             dive_speed_m_s: 180.0,
             ..DesignRequirements::default()
@@ -325,7 +320,7 @@ pub fn a220_300() -> AircraftPreset {
             mtow_kg: Some(67_585.0),
             mlw_kg: Some(58_740.0),
             mzfw_kg: Some(55_792.0),
-            oew_kg: Some(37_149.0),
+            oew_kg: crate::oew_reference::preset_reference_oew_kg("A220-300"),
             usable_fuel_volume_l: Some(21_504.92),
             usable_fuel_mass_kg: Some(17_395.27),
             fuel_density_kg_l: Some(0.8089),
@@ -483,8 +478,7 @@ pub fn a220_300() -> AircraftPreset {
             optimize_passenger_capacity: true,
             num_passengers: 130,
             cargo_payload_kg: 15_000.0,
-            // The same published planning configuration gives MZFW 55,792 kg
-            // and OEW 37,149 kg.
+            // Airbus recovery publication: MZFW 55,792 kg less OEW 37,149 kg.
             max_structural_payload_kg: 18_643.0,
             dive_speed_m_s: 175.0,
             ..DesignRequirements::default()

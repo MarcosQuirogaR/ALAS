@@ -32,8 +32,34 @@ pub enum ScreeningMassModel {
     StructuralWingbox,
 }
 
-/// Re-simulate candidate on the real 3-D aircraft geometry, checking trim and stability.
+/// Re-simulate a candidate on the product 3-D aircraft geometry, checking
+/// trim and stability with the pure-FLOPS mass-coordinate path.
 pub fn refine_candidate_3d(
+    candidate: &mut AirfoilCandidateResult,
+    config: &AlasConfig,
+    dv: &DesignVector,
+    mach: f64,
+    altitude: f64,
+    cl_target: f64,
+    min_static_margin: Option<f64>,
+) {
+    refine_candidate_3d_with_mass_model(
+        candidate,
+        config,
+        dv,
+        mach,
+        altitude,
+        cl_target,
+        min_static_margin,
+        ScreeningMassModel::StructuralWingbox,
+        ScreeningGeometry::Product,
+    );
+}
+
+/// Re-simulate a candidate using the frozen reference-compatible screening
+/// geometry and mass coordinates. This is retained only for parity evidence;
+/// product callers use [`refine_candidate_3d`].
+pub fn refine_candidate_3d_reference_compatibility(
     candidate: &mut AirfoilCandidateResult,
     config: &AlasConfig,
     dv: &DesignVector,
@@ -65,7 +91,7 @@ pub fn refine_candidate_3d_product(
     cl_target: f64,
     min_static_margin: Option<f64>,
 ) {
-    refine_candidate_3d_with_mass_model(
+    refine_candidate_3d(
         candidate,
         config,
         dv,
@@ -73,8 +99,6 @@ pub fn refine_candidate_3d_product(
         altitude,
         cl_target,
         min_static_margin,
-        ScreeningMassModel::StructuralWingbox,
-        ScreeningGeometry::Product,
     );
 }
 
@@ -95,6 +119,13 @@ pub(crate) fn refine_candidate_3d_with_mass_model(
     cfg2.geometry.wing.root_airfoil = candidate.name.clone();
     if matches!(geometry, ScreeningGeometry::ReferenceCompatibility) {
         cfg2.geometry.engine.apply_engine_spec();
+        // Compatibility screening is an explicit replay boundary.  Pin the
+        // whole legacy architecture here so a caller starting from the pure
+        // product default cannot accidentally run product masses with the
+        // reference geometry and then call the result parity evidence.
+        cfg2.mass_model.mass_architecture =
+            alas_config::MassArchitecture::LegacyReferenceCompatibleComparison;
+        cfg2.mass_model.apply_architecture();
     }
 
     let builder = match geometry {

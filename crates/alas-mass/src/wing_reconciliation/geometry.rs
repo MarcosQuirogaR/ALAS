@@ -13,7 +13,7 @@
 /// the `TCA` the equations ask for.
 fn flops_wing_inputs(config: &AlasConfig, wing: &Wing) -> FlopsWingInputs {
     FlopsWingInputs {
-        design_gross_mass_kg: config.requirements.mtow_kg,
+        design_gross_mass_kg: design_gross_mass_kg(config),
         wing_area_m2: wing.reference_area(),
         wing_span_m: wing.reference_span(),
         taper_ratio: wing.taper_ratio(),

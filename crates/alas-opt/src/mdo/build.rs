@@ -18,8 +18,8 @@ use alas_config::AlasConfig;
 use alas_geom::aircraft::airplane::Airplane;
 use alas_geom::builder::AircraftBuilder;
 use alas_mass::breakdown::{
-    calculate_physical_cg, run_mass_analysis_with_model_checked_product_with_gear, MassBreakdown,
-    MassCoordinateModel, MassCoordinates, PayloadLayoutSummary, OEW_KEYS,
+    run_mass_analysis_with_model_checked_product_with_gear, MassBreakdown, MassCoordinateModel,
+    MassCoordinates, PayloadLayoutSummary,
 };
 use alas_mass::product_stations::product_mass_coordinates;
 use alas_mass::wingbox_feedback::{ReferenceWingMass, WingboxFeedback};
@@ -277,25 +277,6 @@ type StructuralMassAnalysis = (
     StructuralInventory,
 );
 
-fn reclose_mass(
-    mut masses: MassBreakdown,
-    mut coords: MassCoordinates,
-    requirements: &alas_config::DesignRequirements,
-    payload_summary: Option<&PayloadLayoutSummary>,
-) -> (MassBreakdown, MassCoordinates, [f64; 3]) {
-    if let Some(layout) = payload_summary.filter(|layout| layout.total_mass > 0.0) {
-        masses.payload = layout.total_mass;
-        coords.payload = [layout.cg_x, layout.cg_y, coords.payload[2]];
-    }
-    let oew: f64 = OEW_KEYS
-        .iter()
-        .map(|&key| masses.get(key).unwrap_or(0.0))
-        .sum();
-    masses.fuel = requirements.mtow_kg - oew - masses.payload;
-    let cg = calculate_physical_cg(&masses, &coords);
-    (masses, coords, cg)
-}
-
 include!("build_structural.rs");
 
 #[cfg(test)]
@@ -318,8 +299,18 @@ mod tests {
 
         match layout.summary {
             LayoutSummary::Passenger(summary) => {
-                assert_eq!(summary.total_pax, 340);
+                // Capacity is always dynamic -- resolved from the cabin
+                // class mix and the sized fuselage's actual geometry, never
+                // forced to an exact copied count -- so the sized cabin may
+                // seat more than the 340-passenger floor `size_fuselage_
+                // from_cabin` bisected against, never fewer.
+                assert!(
+                    summary.total_pax >= 340,
+                    "the sized clean-sheet cabin must seat at least the requested passenger floor: got {}",
+                    summary.total_pax
+                );
                 assert_eq!(summary.unseated_pax, 0);
+                assert_eq!(summary.total_pax, summary.seated_pax);
                 assert!(summary.seated_pax >= config.requirements.num_passengers);
             }
             LayoutSummary::Cargo(_) => panic!("clean-sheet passenger sizing built cargo"),

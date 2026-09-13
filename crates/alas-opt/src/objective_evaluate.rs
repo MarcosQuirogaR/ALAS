@@ -84,7 +84,15 @@ impl DesignObjective {
             return cost;
         }
 
-        let builder = AircraftBuilder::new(Some(self.config.geometry.clone()));
+        // This is the frozen replay path, and the two builders no longer mesh
+        // alike: the product one reads `n_subdivisions` as an absolute panel
+        // count across the surface, the reference one as the per-section
+        // multiplier the fixtures were generated with.
+        let builder = if self.reference_mass_coordinates {
+            AircraftBuilder::new_reference_compatibility(Some(self.config.geometry.clone()))
+        } else {
+            AircraftBuilder::new(Some(self.config.geometry.clone()))
+        };
         let mut plane: Airplane = match builder.build(Some(&dv), false) {
             Ok(p) => p,
             Err(_) => {

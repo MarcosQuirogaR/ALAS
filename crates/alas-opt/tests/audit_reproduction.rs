@@ -27,8 +27,16 @@ fn candidate_capacity(config: &AlasConfig, design: &DesignVector) -> i64 {
         .unwrap_or(-1)
 }
 
-/// Finding 1: the candidate cabin seats one count, the residual table and
-/// the per-seat objective divide by another.
+/// Finding 1 (historical, fixed): the candidate cabin seated one count while
+/// the residual table and the per-seat objective divided by another, because
+/// the residual's target was a copy of the brief's `num_passengers` that
+/// could go stale relative to the dynamically-resolved candidate capacity.
+/// Fixed by retargeting the residual at the explicit
+/// `DesignRequirements::min_passenger_capacity` floor instead of a copied
+/// brief count: with no floor configured (the default) there is no
+/// passenger-count residual to disagree with the candidate at all, and once
+/// a floor is configured its `limit` is exactly that floor, not a
+/// second-guessed capacity number.
 #[test]
 fn capacity_scoring_mismatch() {
     let config = AlasConfig::default();
@@ -36,23 +44,22 @@ fn capacity_scoring_mismatch() {
     let capacity = candidate_capacity(&config, &design);
     let objective = DesignObjective::new(config.clone());
     let assessment = assess_candidate(&objective, &design.to_array()).unwrap();
-    let shortfall = assessment
-        .residuals
-        .iter()
-        .find(|residual| residual.id == "passenger_shortfall")
-        .unwrap();
-    println!(
-        "capacity: candidate seats {capacity}, brief {}, residual actual {} limit {} raw {}, payload {} kg",
-        config.requirements.num_passengers,
-        shortfall.actual,
-        shortfall.limit,
-        shortfall.raw_residual,
-        assessment.sized.payload_kg
+    assert!(
+        assessment
+            .residuals
+            .iter()
+            .all(|residual| residual.id != "passenger_shortfall"),
+        "no passenger floor is configured, so no passenger_shortfall residual should be scored"
     );
+    println!(
+        "capacity: candidate seats {capacity}, brief {}, payload {} kg",
+        config.requirements.num_passengers, assessment.sized.payload_kg
+    );
+
     let mut shorter = design;
     shorter.fuselage_length_m *= 0.90;
     let mut target = config.clone();
-    target.requirements.num_passengers = 525;
+    target.requirements.min_passenger_capacity = 525;
     let capacity_short = candidate_capacity(&target, &shorter);
     let objective = DesignObjective::new(target);
     let assessment = assess_candidate(&objective, &shorter.to_array()).unwrap();
@@ -61,8 +68,12 @@ fn capacity_scoring_mismatch() {
         .iter()
         .find(|residual| residual.id == "passenger_shortfall")
         .unwrap();
+    assert_eq!(
+        shortfall.limit, 525.0,
+        "the residual's floor is the configured min_passenger_capacity, not a copied brief count"
+    );
     println!(
-        "capacity (target 525, fuselage -10%): candidate seats {capacity_short}, residual actual {} limit {} raw {}, payload {} kg, hard ids {:?}",
+        "capacity (floor 525, fuselage -10%): candidate seats {capacity_short}, residual actual {} limit {} raw {}, payload {} kg, hard ids {:?}",
         shortfall.actual,
         shortfall.limit,
         shortfall.raw_residual,

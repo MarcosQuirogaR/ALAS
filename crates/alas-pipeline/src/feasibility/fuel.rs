@@ -223,7 +223,7 @@ fn resolved_unusable_fuel_kg(
     report: &AnalysisReport,
 ) -> Option<f64> {
     let (density_kg_m3, published_total_l) = super::mass_balance::tank_reference(config, design);
-    FuelTankLayout::resolve(
+    let tanks = FuelTankLayout::resolve(
         &report.airplane,
         &config.geometry,
         &config.structures,
@@ -232,8 +232,21 @@ fn resolved_unusable_fuel_kg(
         density_kg_m3,
         published_total_l,
     )
-    .ok()
-    .map(|tanks| tanks.unusable_fuel_kg())
+    .ok()?;
+    if config.mass_model.mass_architecture.is_pure_flops() {
+        let total_kg = report
+            .flops_mass_buildup
+            .as_deref()?
+            .systems_and_operating_items
+            .operating_items
+            .unusable_fuel_kg;
+        tanks
+            .with_unusable_fuel_total(total_kg)
+            .ok()
+            .map(|adjusted| adjusted.unusable_fuel_kg())
+    } else {
+        Some(tanks.unusable_fuel_kg())
+    }
 }
 
 /// Build a load-case fuel contract from already-resolved values.
@@ -532,6 +545,10 @@ mod tests {
         let preset = presets::get("ATR72-600").expect("registered ATR preset");
         let config = AlasConfig::from_value(&serde_json::json!({"preset": preset.name}))
             .expect("ATR config");
+        let mut config = config;
+        config.mass_model.mass_architecture =
+            alas_config::MassArchitecture::LegacyReferenceCompatibleComparison;
+        config.mass_model.apply_architecture();
         let report =
             crate::full_analysis::FullAnalysis::new_reference_compatibility(config.clone())
                 .run(&preset.design_vector, true)

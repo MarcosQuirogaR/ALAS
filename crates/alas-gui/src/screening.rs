@@ -19,6 +19,13 @@ use alas_config::{AlasConfig, DesignVector};
 use alas_screen::runner::run_airfoil_screening_product;
 use alas_screen::types::{AirfoilScreeningOptions, AirfoilScreeningResult};
 
+mod figure_cache;
+use figure_cache::ScreeningFigureCache;
+
+#[path = "screening_readiness.rs"]
+mod readiness;
+pub(crate) use readiness::MsesReadiness;
+
 enum ScreeningMessage {
     Progress(String),
     Finished(Box<Result<AirfoilScreeningResult, String>>),
@@ -26,6 +33,9 @@ enum ScreeningMessage {
 
 /// The airfoil-screening page's run state.
 pub struct ScreeningState {
+    pub(crate) mses_readiness: MsesReadiness,
+    /// Inspection state only: never applied to the aircraft configuration.
+    pub preview: ScreeningPreview,
     /// The sweep's configured options.
     pub options: AirfoilScreeningOptions,
     /// Whether a sweep is currently running.
@@ -34,6 +44,10 @@ pub struct ScreeningState {
     pub status: String,
     /// The finished result, if any.
     pub result: Option<AirfoilScreeningResult>,
+    /// Revision of the completed result, independent of live aircraft edits.
+    pub(crate) result_revision: u64,
+    /// Localized completed-result scenes reused between frames.
+    pub(crate) figure_cache: ScreeningFigureCache,
     /// The error a failed sweep ended with, if any.
     pub error: Option<String>,
     rx: Option<Receiver<ScreeningMessage>>,
@@ -43,10 +57,14 @@ pub struct ScreeningState {
 impl Default for ScreeningState {
     fn default() -> Self {
         Self {
+            mses_readiness: MsesReadiness::default(),
+            preview: ScreeningPreview::default(),
             options: AirfoilScreeningOptions::default(),
             running: false,
             status: String::new(),
             result: None,
+            result_revision: 0,
+            figure_cache: ScreeningFigureCache::default(),
             error: None,
             rx: None,
             cancel_flag: Arc::new(AtomicBool::new(false)),
@@ -61,8 +79,10 @@ impl ScreeningState {
             return;
         }
         self.running = true;
+        self.options.objective = alas_screen::types::ScreeningObjective::Balanced;
         self.error = None;
         self.result = None;
+        self.invalidate_result_figures();
         self.status = "Starting...".to_owned();
         self.cancel_flag.store(false, Ordering::Relaxed);
 
@@ -112,6 +132,7 @@ impl ScreeningState {
             self.status = p;
         }
         if let Some(res) = finished {
+            self.invalidate_result_figures();
             self.running = false;
             match res {
                 Ok(result) => {
@@ -127,5 +148,59 @@ impl ScreeningState {
                 }
             }
         }
+    }
+
+    /// Invalidate scene and raster revisions when replacing or clearing results.
+    pub(crate) fn invalidate_result_figures(&mut self) {
+        self.result_revision = self.result_revision.wrapping_add(1);
+        self.figure_cache.clear();
+    }
+}
+
+/// A stable library name, independent of ranking position and run lifecycle.
+#[derive(Default)]
+pub struct ScreeningPreview {
+    selected: Option<String>,
+    coordinates: Option<Vec<(f64, f64)>>,
+    filter: Option<String>,
+    filtered_names: Vec<String>,
+}
+
+impl ScreeningPreview {
+    /// The embedded library is immutable. Refilter only when the query changes.
+    pub fn update_filter(&mut self, filter: &str) {
+        if self.filter.as_deref() == Some(filter) {
+            return;
+        }
+        static NAMES: std::sync::OnceLock<Vec<&'static str>> = std::sync::OnceLock::new();
+        let names = NAMES.get_or_init(
+            alas_geom::airfoil_library::AirfoilLibrary::get_available_airfoils,
+        );
+        self.filtered_names = alas_screen::runner::filter_names(names, filter);
+        self.filter = Some(filter.to_owned());
+    }
+
+    pub fn filtered_names(&self) -> &[String] {
+        &self.filtered_names
+    }
+
+    pub fn selected(&self) -> Option<&str> {
+        self.selected.as_deref()
+    }
+
+    pub fn coordinates(&self) -> Option<&[(f64, f64)]> {
+        self.coordinates.as_deref()
+    }
+
+    pub fn select(&mut self, name: &str) {
+        if self.selected() == Some(name) {
+            return;
+        }
+        self.coordinates = alas_geom::airfoil_library::AirfoilLibrary::get(name)
+            .map(|airfoil| airfoil.coordinates)
+            .filter(|points| {
+                points.len() >= 3 && points.iter().all(|(x, y)| x.is_finite() && y.is_finite())
+            });
+        self.selected = Some(name.to_owned());
     }
 }

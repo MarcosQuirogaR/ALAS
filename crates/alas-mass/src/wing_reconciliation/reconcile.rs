@@ -23,7 +23,8 @@ pub fn reconcile_structural_wing(
     ),
     WingReconciliationError,
 > {
-    let (candidate_primary, sizing) = sized_primary_wing(config, dv, plane, &config.requirements)?;
+    let (candidate_primary, sizing) =
+        sized_primary_wing(config, dv, plane, &design_requirements(config))?;
     let primary_declaration = sizing.composite_declaration;
     match config.optimizer.design_space.mode {
         DesignMode::CleanSheet => {
@@ -47,14 +48,7 @@ pub fn reconcile_structural_wing(
                 Some(value) => value,
                 None => reference_wing(config)?,
             };
-            let feedback = reconcile_reference_wing(reference, candidate_primary)
-                .map_err(|_| WingReconciliationError::StructuralSizing)?;
-            Ok((
-                feedback,
-                Some(reference),
-                StructuralInventory::FrozenReference,
-                primary_declaration,
-            ))
+            reconcile_against_reference(reference, candidate_primary, primary_declaration)
         }
     }
 }
@@ -172,7 +166,7 @@ fn reference_wing(config: &AlasConfig) -> Result<ReferenceWingMass, WingReconcil
         config,
         &reference_dv,
         &reference_plane,
-        &config.requirements,
+        &design_requirements(config),
     )?;
     let analysis_mass_model = config.analysis_mass_model(config.requirements.mtow_kg);
     let (masses, coords, _) = run_mass_analysis_with_model_checked_product_with_gear(
@@ -223,10 +217,11 @@ pub fn clean_sheet_secondary(
     );
     let mounted_to_wing =
         config.landing_gear.n_mlg_struts == 0 || config.landing_gear.n_mlg_struts >= 2;
+    let design_gross_mass_kg = design_gross_mass_kg(config);
     let torenbeek_arguments = (
-        config.requirements.mtow_kg,
+        design_gross_mass_kg,
         config.requirements.ultimate_load_factor,
-        config.requirements.mtow_kg * mm.suspended_mass_fraction,
+        design_gross_mass_kg * mm.suspended_mass_fraction,
         config.requirements.dive_speed_m_s,
         mm.max_airspeed_for_flaps_ms,
         mounted_to_wing,

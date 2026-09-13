@@ -230,7 +230,11 @@ impl AppState {
                     }
                     self.pipeline_result = Some(result);
                     self.update_result_scene();
-                    self.active_page = "results".to_owned();
+                    if self.sandbox.active() {
+                        self.sandbox.results_window_open = true;
+                    } else {
+                        self.active_page = "results".to_owned();
+                    }
                 }
                 Err(e) => {
                     if e.starts_with("Cancelled safely") {

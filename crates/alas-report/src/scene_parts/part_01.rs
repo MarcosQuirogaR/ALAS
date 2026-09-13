@@ -314,8 +314,21 @@ pub struct Scene {
     pub width: f64,
     /// Canvas height in display pixels.
     pub height: f64,
-    /// Background color of the scene canvas.
+    /// Background color of the scene canvas, and the color renderers treat as
+    /// this scene's true backdrop for contrast decisions (see
+    /// [`Self::paint_background`] and [`visual_title`]) even on paths that
+    /// must not paint an opaque rect here.
     pub background: Option<Color>,
+    /// Whether renderers should paint an opaque [`Self::background`] rect.
+    ///
+    /// A scene composited over pre-drawn raster content (an embedded texture,
+    /// a globe) must keep this canvas layer transparent there or the opaque
+    /// rect would hide it, while `background` itself must keep carrying the
+    /// real color: [`visual_title`] and other contrast decisions still need
+    /// to know what is actually behind the scene. Use
+    /// [`Self::hide_background_paint`] rather than clearing `background`.
+    #[serde(default = "default_paint_background")]
+    pub paint_background: bool,
     /// Figure title.
     pub title: Option<String>,
     /// Whether renderers should synthesize a visible heading from [`Self::title`].
@@ -335,6 +348,7 @@ impl Scene {
             width,
             height,
             background: bg,
+            paint_background: true,
             title: None,
             render_title: true,
             elements: Vec::new(),
@@ -350,9 +364,26 @@ impl Scene {
     pub fn suppress_derived_title(&mut self) {
         self.render_title = false;
     }
+
+    /// Stop renderers from painting an opaque [`Self::background`] rect while
+    /// keeping the color itself, so [`visual_title`] and other contrast
+    /// decisions still see the scene's true backdrop.
+    ///
+    /// Compositing paths that pre-paint textured content beneath the vector
+    /// layer (embedded rasters, the orbit globe) call this instead of
+    /// clearing `background` to `None`, which would silently steer the
+    /// automatic title onto its light-background fallback color regardless
+    /// of the active theme.
+    pub fn hide_background_paint(&mut self) {
+        self.paint_background = false;
+    }
 }
 
 const fn default_render_title() -> bool {
+    true
+}
+
+const fn default_paint_background() -> bool {
     true
 }
 
@@ -362,6 +393,13 @@ const fn default_render_title() -> bool {
 /// figures had no heading in either the SVG or the raster viewport. Keeping
 /// the heading derived at render time preserves the scene contract while
 /// making the same title visible in every backend.
+///
+/// The contrast decision reads [`Scene::background`] directly, independent of
+/// whether that color is actually painted (see [`Scene::paint_background`]).
+/// A caller that needs a transparent canvas layer must use
+/// [`Scene::hide_background_paint`] rather than clearing `background`, or
+/// this heading silently falls back to its light-background color on every
+/// theme.
 pub fn visual_title(scene: &Scene) -> Option<SceneElement> {
     if !scene.render_title {
         return None;
@@ -445,4 +483,13 @@ pub struct Axes2D {
     pub x_scale: Scale,
     /// Y-axis coordinate scaling mode.
     pub y_scale: Scale,
+    /// Optional fixed number of decimals for X-axis tick labels.
+    ///
+    /// Most axes use the automatic nice-step formatter.  Scientific figures
+    /// with a deliberately small coefficient range can request a fixed
+    /// precision so the labels remain comparable and do not collide with the
+    /// axis title.
+    pub x_tick_decimals: Option<usize>,
+    /// Optional fixed number of decimals for Y-axis tick labels.
+    pub y_tick_decimals: Option<usize>,
 }

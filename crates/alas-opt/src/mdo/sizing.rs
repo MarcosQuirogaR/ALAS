@@ -5,7 +5,7 @@
 //! depend on the takeoff mass run once, then `mdo::mda` closes the coupled
 //! mass, centre-of-gravity, trim and mission-fuel fixed point.
 
-use alas_config::{airport_dataset, airports, AlasConfig};
+use alas_config::{airport_dataset, airports, AlasConfig, MtowSizing};
 use alas_geom::aircraft::airplane::Airplane;
 use alas_mass::breakdown::{MassBreakdown, MassCoordinates};
 use alas_payload::oew::oew_and_cg;
@@ -262,8 +262,41 @@ pub(crate) fn run_candidate_with_polar_and_fuselage_policy(
     let polar = state.polar;
 
     let (operating_empty_mass_kg, _) = oew_and_cg(&state.masses, &state.coords);
+    // A fixed-requirement run evaluates the aircraft at its declared MTOW;
+    // the dispatch solution is the mission's required takeoff mass and is
+    // compared against that ceiling by the mass residuals.  Keeping those
+    // quantities separate prevents geometry/thrust/CG checks from using the
+    // lower mission-required mass while the component ledger is closed at
+    // the declared MTOW.  Both mission-sized modes -- `SizedByMission`,
+    // bounded above by the declared MTOW, and `Unconstrained`, which only
+    // seeds its first pass from it -- use the converged dispatch mass for
+    // both purposes instead, since there each candidate's own closure, not
+    // the declared requirement, is what the analysis mass answers to.
+    let analysis_takeoff_mass_kg =
+        if candidate_config.optimizer.objective.mtow_sizing == MtowSizing::FixedRequirement {
+            mtow_ceiling
+        } else {
+            closure.dispatch.takeoff_mass_kg
+        };
+    // The design-weight basis the ledger was closed on, made explicit so a
+    // report can say whether the components belong to the declared aircraft
+    // or to the sized one (`alas_config::MassSizingBasis`).
+    let basis = candidate_config.mass_sizing_basis();
+    let (design_gross_mass_kg, design_landing_mass_kg) = match basis {
+        alas_config::MassSizingBasis::FixedAircraft {
+            design_gross_mass_kg,
+            design_landing_mass_kg,
+        } => (design_gross_mass_kg, design_landing_mass_kg),
+        alas_config::MassSizingBasis::Coupled => (
+            analysis_takeoff_mass_kg,
+            candidate_config.landing_mass_limit_kg(analysis_takeoff_mass_kg),
+        ),
+    };
     let sized = SizedCandidate {
-        takeoff_mass_kg: closure.dispatch.takeoff_mass_kg,
+        takeoff_mass_kg: analysis_takeoff_mass_kg,
+        sizing_basis: basis.as_str(),
+        design_gross_mass_kg,
+        design_landing_mass_kg,
         operating_empty_mass_kg,
         zero_fuel_mass_kg: closure.dispatch.zero_fuel_mass_kg,
         payload_kg: state.masses.payload,

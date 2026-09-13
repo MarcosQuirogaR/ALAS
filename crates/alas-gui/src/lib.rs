@@ -18,12 +18,14 @@ pub mod nav;
 mod nav_overlay;
 pub mod path_picker;
 pub mod run;
+pub mod sandbox;
 pub mod scene;
 pub mod screening;
 pub mod state;
 pub mod theme;
 pub mod uav;
 mod view_controls;
+mod walkthrough_state;
 pub mod viewport;
 pub mod views;
 

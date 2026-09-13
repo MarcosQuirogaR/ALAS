@@ -123,3 +123,20 @@ fn fixed_option_values_are_capitalized_without_changing_their_data_value() {
     assert_eq!(display_option("passenger"), "Passenger");
     assert_eq!(display_option("auto"), "Auto");
 }
+
+#[test]
+fn cabin_presets_display_a_descriptive_airline_independent_name() {
+    // The combo box shows a descriptive name, but `resolved_options` above
+    // still returns the serialized identifier a saved config stores and
+    // `apply_cabin_preset` matches on -- only the label changes.
+    assert_eq!(display_option("Ryanair"), "High-density single-class");
+    assert_eq!(display_option("Iberia"), "Two-class (Business/Economy)");
+    assert_eq!(
+        display_option("Emirates"),
+        "Three-class (First/Business/Economy)"
+    );
+    // Unaffected cabin/cargo identifiers still pass through unchanged.
+    assert_eq!(display_option("Custom"), "Custom");
+    assert_eq!(display_option("Max payload"), "Max payload");
+    assert_eq!(display_option("Dense payload"), "Dense payload");
+}

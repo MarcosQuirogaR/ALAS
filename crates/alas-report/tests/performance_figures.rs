@@ -81,6 +81,7 @@ fn sample_report(payload_kg: f64) -> AnalysisReport {
         x_neutral_point: 5.0,
         trimmed_design_point: None,
         component_masses,
+        flops_mass_buildup: None,
         mass_coordinates: HashMap::new(),
         physical_cg: [4.0, 0.0, 0.0],
         geometry_summary: HashMap::new(),
@@ -96,9 +97,10 @@ fn performance_figures_render_from_the_report_and_configuration() {
 
     let payload = render_svg(&performance::figure_payload_range(&report, &config, None));
     assert!(payload.contains("20.0 t"));
-    assert!(payload.contains("CONCEPTUAL BREGUET RANGE ONLY"));
-    assert!(payload.contains("capacity evidence:"));
-    assert!(payload.contains("NOT AN AFM/WBM OPERATIONAL ENVELOPE"));
+    assert!(payload.contains("OEW:"));
+    assert!(payload.contains("MTOW:"));
+    assert!(!payload.contains("capacity evidence:"));
+    assert!(!payload.contains("NOT AN AFM/WBM OPERATIONAL ENVELOPE"));
 
     let mut matching_config = config.clone();
     matching_config.performance.matching_chart_resolution = 7;
@@ -172,7 +174,7 @@ fn payload_range_uses_a_registered_structural_payload_cap() {
     ));
 
     assert!(svg.contains("30.0 t"));
-    assert!(svg.contains("configured structural payload cap"));
+    assert!(!svg.contains("configured structural payload cap"));
 }
 
 #[test]
@@ -202,7 +204,7 @@ fn performance_renderers_keep_the_w34_contract_details_visible() {
     let payload = performance::figure_payload_range(&report, &config, Some("dark"));
     let footer = payload.elements.iter().find_map(|element| match element {
         alas_report::scene::SceneElement::Text { text, pos, .. }
-            if text.starts_with("CONCEPTUAL BREGUET RANGE ONLY;") =>
+            if text.starts_with("OEW:") && text.contains("MTOW:") =>
         {
             Some(*pos)
         }

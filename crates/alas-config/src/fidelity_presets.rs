@@ -106,10 +106,20 @@ fn build() -> Vec<FidelityPreset> {
             display_name: "Draft (fast)",
             description: "Coarse polar sweep and panel resolution -- fastest feedback while \
                           iterating on requirements/geometry.",
+            // Four chordwise panels, not one. Draft buys speed by sweeping
+            // fewer polar points and meshing more coarsely than standard, but
+            // one chordwise panel is not a coarse camber line, it is no
+            // camber line: the section degenerates to a flat plate and the
+            // four airfoil bump design variables stop having any effect. Four
+            // panels still rank candidates in nearly the converged order
+            // (Spearman 0.93 against 0.77 at one) for a third less cost than
+            // the standard eight, which is what a draft setting should trade.
             analysis: AnalysisConfig {
                 sweep_n_points: 7,
                 spanwise_resolution: 1,
-                chordwise_resolution: 1,
+                chordwise_resolution: 4,
+                fine_spanwise_resolution: 1,
+                fine_chordwise_resolution: 8,
                 ..AnalysisConfig::default()
             },
         },
@@ -127,10 +137,22 @@ fn build() -> Vec<FidelityPreset> {
             display_name: "High Fidelity (slow)",
             description: "Fine polar sweep and panel resolution for a final, high-confidence \
                           analysis. Slowest option.",
+            // Panels go chordwise, not spanwise. The builder has already
+            // resolved the span, so raising `spanwise_resolution` only
+            // re-subdivides finished strips and degrades the induced drag --
+            // the previous 3x3 setting measured *worse* than the standard
+            // preset on the A320 (k = 0.0571 against 0.0559, converged
+            // 0.0414) while costing nine times the panels. 1x16 costs a third
+            // of 3x3's panels and lands on the converged value. Raising the
+            // reported mesh too is the point of a high-fidelity preset: a
+            // setting that refined only the search would leave the published
+            // numbers exactly where the standard preset left them.
             analysis: AnalysisConfig {
                 sweep_n_points: 30,
-                spanwise_resolution: 3,
-                chordwise_resolution: 3,
+                spanwise_resolution: 1,
+                chordwise_resolution: 16,
+                fine_spanwise_resolution: 1,
+                fine_chordwise_resolution: 24,
                 ..AnalysisConfig::default()
             },
         },
@@ -157,6 +179,69 @@ mod tests {
     }
 
     #[test]
+    fn no_preset_meshes_a_section_as_a_flat_plate() {
+        // One chordwise panel samples the mean camber line only at the
+        // leading and trailing edges, where every airfoil's is zero, so the
+        // section carries no camber at all and the airfoil bump design
+        // variables produce bit-identical forces. A fidelity preset may be
+        // coarse; it may not be a different aircraft.
+        for preset in registry() {
+            assert!(
+                preset.analysis.chordwise_resolution >= 2,
+                "{} meshes the search at {} chordwise panels",
+                preset.name,
+                preset.analysis.chordwise_resolution
+            );
+            assert!(
+                preset.analysis.fine_chordwise_resolution >= 2,
+                "{} meshes the report at {} chordwise panels",
+                preset.name,
+                preset.analysis.fine_chordwise_resolution
+            );
+        }
+    }
+
+    #[test]
+    fn every_preset_spends_its_panels_chordwise() {
+        // The spanwise field is a multiplier over a surface the builder has
+        // already subdivided, and `validation::vlm_mesh_is_solvable` rejects
+        // anything above two because the induced drag stops converging there.
+        // A preset is a shipped configuration, so it must be inside the range
+        // the validator accepts.
+        for preset in registry() {
+            assert!(
+                preset.analysis.spanwise_resolution <= 2
+                    && preset.analysis.fine_spanwise_resolution <= 2,
+                "{} would be rejected by configuration validation",
+                preset.name
+            );
+        }
+    }
+
+    #[test]
+    fn the_presets_are_ordered_from_coarsest_to_finest_by_mesh_as_well() {
+        // `sweep_n_points` already increases across the registry; if the mesh
+        // did not, "High Fidelity" would be slower without being finer, which
+        // is what the previous 3x3 setting actually was.
+        let search: Vec<i64> = registry()
+            .iter()
+            .map(|preset| preset.analysis.chordwise_resolution)
+            .collect();
+        let reported: Vec<i64> = registry()
+            .iter()
+            .map(|preset| preset.analysis.fine_chordwise_resolution)
+            .collect();
+        assert!(
+            search.windows(2).all(|pair| pair[0] <= pair[1]),
+            "{search:?}"
+        );
+        assert!(
+            reported.windows(2).all(|pair| pair[0] <= pair[1]),
+            "{reported:?}"
+        );
+    }
+
+    #[test]
     fn the_presets_differ_from_each_other_in_nothing_but_resolution() {
         // This is the registry's stated scope, and the property that decides
         // whether handing a consumer the whole configuration is harmless: it
@@ -166,6 +251,8 @@ mod tests {
                 sweep_n_points: AnalysisConfig::default().sweep_n_points,
                 spanwise_resolution: AnalysisConfig::default().spanwise_resolution,
                 chordwise_resolution: AnalysisConfig::default().chordwise_resolution,
+                fine_spanwise_resolution: AnalysisConfig::default().fine_spanwise_resolution,
+                fine_chordwise_resolution: AnalysisConfig::default().fine_chordwise_resolution,
                 ..preset.analysis.clone()
             };
             assert_eq!(restored, AnalysisConfig::default(), "{}", preset.name);

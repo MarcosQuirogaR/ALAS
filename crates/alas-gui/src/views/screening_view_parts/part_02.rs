@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-
 fn show_result(
     state: &mut AppState,
     ui: &mut Ui,
@@ -80,7 +79,16 @@ fn show_result(
 
                         for c in &result.candidates {
                             ui.label(if c.is_reference { "*" } else { "" });
-                            ui.label(&c.name);
+                            if ui
+                                .selectable_label(
+                                    state.screening.preview.selected() == Some(c.name.as_str()),
+                                    &c.name,
+                                )
+                                .clicked()
+                            {
+                                state.screening.preview.select(&c.name);
+                                ui.ctx().request_repaint();
+                            }
                             ui.label(fmt_opt(c.l_over_d));
                             ui.label(fmt_opt(c.cl));
                             ui.label(fmt_opt(c.cd));
@@ -122,14 +130,21 @@ fn show_result(
 
     ui.add_space(12.0);
     ui.label(RichText::new(tr("Screening figures")).strong());
-    let config = state.typed_config().unwrap_or_default();
     let theme = state.theme.figure_theme_name().to_owned();
+    let language = alas_i18n::get_language();
     let (columns, card_width) = responsive_card_layout(ui.available_width());
     for row in alas_report::SCREENING_FIGURES.chunks(columns) {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = CARD_GAP;
             for descriptor in row {
-                let scene = crate::scene::build_screening_figure(state, descriptor.id, &theme);
+                let scene = state.screening.figure_cache.get(
+                    result,
+                    state.screening.result_revision,
+                    &theme,
+                    &language,
+                    descriptor.id,
+                );
+                let scene_revision = state.screening.figure_cache.revision();
                 crate::theme::card_frame(ui).show(ui, |ui| {
                     let content_width = crate::theme::card_content_width(card_width);
                     ui.set_min_width(content_width);
@@ -142,23 +157,28 @@ fn show_result(
                     let canvas_width = ui.available_width().max(280.0);
                     match scene {
                         Some(scene) => {
-                            let view_key = crate::scene::figure_cache_key(
-                                state.run_identity,
-                                &config,
-                                &theme,
-                                descriptor.id,
-                            );
+                            let size =
+                                vec2(canvas_width, screening_figure_height(canvas_width, &scene));
+                            if !ui.is_rect_visible(egui::Rect::from_min_size(
+                                ui.next_widget_position(),
+                                size,
+                            )) {
+                                // Preserve scroll layout without rasterizing cards below
+                                // the viewport on first entry to the screening page.
+                                ui.allocate_space(size);
+                                return;
+                            }
+                            let view_key = format!("screening:{}", descriptor.id);
                             let view = SceneView::new(&scene, state.view_state_mut(view_key))
+                                .cache_key(("screening", descriptor.id))
+                                .cache_revision(scene_revision)
                                 .static_view()
                                 .show_toolbar(false)
                                 // Screening cards share the page ScrollArea;
                                 // zoom is available in the fullscreen/result
                                 // viewer instead of stealing page scrolling.
                                 .wheel_zoom(false)
-                                .desired_size(vec2(
-                                    canvas_width,
-                                    screening_figure_height(canvas_width, &scene),
-                                ));
+                                .desired_size(size);
                             ui.add(view);
                         }
                         None => {

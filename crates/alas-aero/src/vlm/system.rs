@@ -38,6 +38,18 @@ use crate::vector3::{add3, cross3, dot3, norm3, scale3, sub3};
 /// two regions below only pay off once a mesh has a few hundred panels.
 const PARALLEL_PANEL_THRESHOLD: usize = 128;
 
+/// The largest `max |pivot| / min |pivot|` a solve may report and still be
+/// treated as a flow field -- see [`VlmError::IllConditionedAic`].
+///
+/// Measured across the registered presets at every mesh from 1x1 to 10x16
+/// (`.agent/reports/2026-09-11-vlm-resolution-sensitivity.html`): meshes whose
+/// lift is correct report 2 to 60, and every mesh that returns a negative or
+/// absurd lift coefficient reports above 1e4 -- the A320 at a spanwise
+/// resolution of ten and one chordwise panel reports 9.1e7 and a lift
+/// coefficient of -2.1e7. Two orders of margin above the usable range keeps
+/// this a backstop against collapse rather than a second opinion on meshing.
+const MAX_PIVOT_RATIO: f64 = 1.0e4;
+
 /// One panel's four quad-mesh corners and the vortex-lattice quantities
 /// derived from them -- the per-panel arrays `run` builds and consumes,
 /// grouped so the assembly loop reads as one step per panel rather than
@@ -327,6 +339,11 @@ impl<'a> VlmSystem<'a> {
             || !solve_diagnostics.minimum_pivot.is_finite()
         {
             return Err(VlmError::NonFiniteResult);
+        }
+        if solve_diagnostics.pivot_ratio > MAX_PIVOT_RATIO {
+            return Err(VlmError::IllConditionedAic {
+                pivot_ratio: solve_diagnostics.pivot_ratio,
+            });
         }
 
         let vortex_centers: Vec<[f64; 3]> = panels.iter().map(|p| p.vortex_center).collect();

@@ -91,7 +91,10 @@ pub fn native_field(path: &str, key: &str) -> bool {
         || (path.ends_with(".mass_model")
             && matches!(
                 key,
-                "geometric_component_stations"
+                "schema_version"
+                    | "mass_architecture"
+                    | "flops_transport"
+                    | "geometric_component_stations"
                     | "structural_mass_method"
                     | "propulsion_mass_method"
                     | "flops_structure"

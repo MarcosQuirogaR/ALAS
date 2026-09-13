@@ -124,9 +124,16 @@ fn wing_fuel_volume_m3_with_references(wing: &Wing, usable_fraction: f64, s: f64
 
 /// Resolve a geometry-driven payload only when the configured load case asks.
 ///
-/// A fixed passenger target must survive every candidate evaluation. Cargo
-/// presets retain their existing capacity-derived behavior, while passenger
-/// capacity sizing is an explicit opt-in on [`alas_config::DesignRequirements`].
+/// Passenger capacity is always dynamic: for every study, registered
+/// aircraft or clean-sheet alike, it is whatever the configured cabin
+/// class-mix percentages and the candidate's actual fuselage/cabin geometry
+/// produce. There is no fixed/exact passenger-count target that overrides
+/// that solve; a hard floor on the resolved count is instead a configurable
+/// constraint (see [`alas_config::DesignRequirements::min_passenger_capacity`]
+/// and the `passenger_shortfall` residual in `mdo::residuals_geometry`).
+/// Cargo presets retain their existing capacity-derived behavior; cargo's
+/// `cargo_payload_kg` load-case target is a separate mechanism, untouched
+/// here.
 pub(crate) fn apply_candidate_payload_load_case(
     config: &mut AlasConfig,
     design_vector: &DesignVector,
@@ -137,16 +144,30 @@ pub(crate) fn apply_candidate_payload_load_case(
     {
         return Ok(());
     }
-    // Materialising a named cabin preset is needed to obtain its geometry and
-    // class mix, but the brief's payload is the load case being evaluated.
-    // Preserve it across the capacity solve so a long fuselage cannot turn a
-    // 350-passenger requirement into an unrequested 500-passenger airplane.
-    let target_passengers = config.requirements.num_passengers;
     let target_cargo_kg = config.requirements.cargo_payload_kg;
     let passenger_mass_kg = config.requirements.passenger_mass_kg;
     apply_cabin_preset(config, Some(design_vector))?;
-    if config.uses_fixed_passenger_target() {
-        config.requirements.num_passengers = target_passengers;
+    if config.requirements.aircraft_type == "passenger" {
+        // The FLOPS transport mass model declares its own per-class
+        // passenger counts independently of the cabin/requirements model.
+        // Keep them derived from the same geometry-resolved counts
+        // `apply_cabin_preset` just wrote, so the FLOPS buildup's own
+        // completeness check (`first + business + tourist ==
+        // requested_passengers`, in `alas_mass::flops_transport::product`)
+        // can never fail from a stale copy, whatever the resolved total is.
+        let to_count = |count: i64| usize::try_from(count.max(0)).unwrap_or(0);
+        config
+            .mass_model
+            .flops_transport
+            .first_class_passenger_count = Some(to_count(config.cabin.passenger.first.count));
+        config
+            .mass_model
+            .flops_transport
+            .business_class_passenger_count = Some(to_count(config.cabin.passenger.business.count));
+        config
+            .mass_model
+            .flops_transport
+            .tourist_class_passenger_count = Some(to_count(config.cabin.passenger.economy.count));
     }
     config.requirements.cargo_payload_kg = target_cargo_kg;
     config
@@ -184,7 +205,13 @@ pub struct DesignObjective {
     pub config: AlasConfig,
     /// Trajectory of evaluated candidates.
     pub history: OptimizationHistory,
-    /// Original passenger count target before cabin preset scaling.
+    /// Hard floor on geometry-resolved passenger capacity
+    /// ([`alas_config::DesignRequirements::min_passenger_capacity`]), or zero
+    /// when no floor is configured. This does not force the cabin to hit an
+    /// exact count -- capacity is always resolved dynamically from the cabin
+    /// class mix and the candidate's geometry -- it only feeds the
+    /// `passenger_shortfall` residual/penalty so a candidate whose resolved
+    /// capacity falls short of the floor is scored accordingly.
     pub target_num_passengers: i64,
     /// Original cargo payload target in kg.
     pub target_cargo_payload_kg: f64,
@@ -236,7 +263,14 @@ impl DesignObjective {
     /// This is only for reference-parity replay. Product optimization uses
     /// [`Self::new`], which evaluates the configured structural-wingbox
     /// centroid and refuses an invalid structural configuration.
-    pub fn new_reference_compatibility(config: AlasConfig) -> Self {
+    pub fn new_reference_compatibility(mut config: AlasConfig) -> Self {
+        // The comparison constructor is the explicit opt-in to the frozen
+        // mass model.  Pin the authoritative architecture here so a caller
+        // starting from the pure product default cannot accidentally run the
+        // legacy coordinate/aerodynamic replay with a FLOPS mass buildup.
+        config.mass_model.mass_architecture =
+            alas_config::MassArchitecture::LegacyReferenceCompatibleComparison;
+        config.mass_model.apply_architecture();
         Self::with_mass_coordinate_compatibility(config, true, None, false)
     }
 
@@ -261,15 +295,17 @@ impl DesignObjective {
             config.geometry.wing.side_of_body_chord_ratio = None;
             config.geometry.wing.kink_span_fraction = None;
             config.geometry.wing.outboard_le_sweep_deg = None;
+            // And its vortex-lattice mesh, for the same reason. The
+            // geometry's own spanwise subdivision is not restored here: it
+            // changed meaning rather than value, and only a builder can
+            // interpret it, so `AircraftBuilder::new_reference_compatibility`
+            // owns that -- which is the builder this path uses below.
+            config.analysis.restore_reference_mesh();
         }
         if reference_mass_coordinates {
             config.geometry.engine.apply_engine_spec();
         }
-        let target_num_passengers = if config.uses_fixed_passenger_target() {
-            config.requirements.num_passengers
-        } else {
-            Default::default()
-        };
+        let target_num_passengers = config.requirements.min_passenger_capacity;
         let target_cargo_payload_kg = config.requirements.cargo_payload_kg;
         let nominal = nominal.unwrap_or_else(|| {
             if config.preset.is_empty() {

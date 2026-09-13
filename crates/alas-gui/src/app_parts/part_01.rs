@@ -110,20 +110,33 @@ impl App for AlasApp {
             return;
         }
 
+        if crate::sandbox::workspace::show_if_active(&mut self.state, ctx) {
+            return self.show_detached_view_panel(ctx);
+        }
         self.state.prepare_walkthrough_step();
         self.state.clear_walkthrough_targets();
 
-        let menu_panel = TopBottomPanel::top("menu_bar").show(ctx, |ui| {
-            menu::bar(ui, |ui| {
-                if let Some(image) = crate::branding::text_logo_image(ctx) {
-                    ui.add(image.max_width(132.0).max_height(20.0));
-                }
-                ui.separator();
-                self.render_file_menu(ui);
-                self.render_view_menu(ctx, ui);
-                self.render_help_menu(ui);
+        let menu_panel = TopBottomPanel::top("menu_bar")
+            .frame(
+                EguiFrame::side_top_panel(ctx.style().as_ref()).inner_margin(egui::Margin {
+                    left: 8.0,
+                    right: 8.0,
+                    top: layout::MENU_BAR_VERTICAL_INSET,
+                    bottom: layout::MENU_BAR_VERTICAL_INSET,
+                }),
+            )
+            .show(ctx, |ui| {
+                menu::bar(ui, |ui| {
+                    if let Some(image) = crate::branding::text_logo_image(ctx) {
+                        ui.add(image.max_width(132.0).max_height(20.0));
+                    }
+                    ui.separator();
+                    self.render_file_menu(ui);
+                    self.render_view_menu(ctx, ui);
+                    crate::sandbox::advanced::show_menu_action(&mut self.state, ui);
+                    self.render_help_menu(ui);
+                });
             });
-        });
         self.state
             .record_walkthrough_target(TourTarget::MenuBar, menu_panel.response.rect);
         #[cfg(debug_assertions)]
@@ -267,6 +280,7 @@ impl App for AlasApp {
         overlays::show_advanced_guide(&mut self.state, ctx);
         overlays::show_storage_dialog(&mut self.state, ctx);
         overlays::show_about(&mut self.state, ctx);
+        crate::sandbox::advanced::show_advanced_settings_window(&mut self.state, ctx);
         self.show_detached_view_panel(ctx);
         #[cfg(debug_assertions)]
         self.layout_debug.finish_frame(ctx);

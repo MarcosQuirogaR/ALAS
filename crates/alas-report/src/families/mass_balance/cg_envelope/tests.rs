@@ -72,6 +72,7 @@ fn sample_report() -> AnalysisReport {
         x_neutral_point: cg[0] + 0.12 * 4.0,
         geometry_summary: HashMap::new(),
         component_masses,
+        flops_mass_buildup: None,
         mass_coordinates,
         physical_cg: cg,
         payload_layout: None,

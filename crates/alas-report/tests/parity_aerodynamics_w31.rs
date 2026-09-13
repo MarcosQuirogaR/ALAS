@@ -66,6 +66,7 @@ fn report() -> AnalysisReport {
         x_neutral_point: 4.0,
         trimmed_design_point: None,
         component_masses: HashMap::new(),
+        flops_mass_buildup: None,
         mass_coordinates: HashMap::new(),
         physical_cg: [0.0, 0.0, 0.0],
         geometry_summary: HashMap::new(),

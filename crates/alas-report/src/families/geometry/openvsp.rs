@@ -25,8 +25,15 @@ const MAX_PROJECTED_FACES: usize = 5_000;
 
 fn status_scene(title: &str, message: &str, ok: bool, theme: Option<&str>) -> Scene {
     let pal = get_palette(theme);
-    let mut scene = Scene::new(760.0, 240.0, Some(Color::from_hex(pal.bg)));
+    const MESSAGE_TOP: f64 = 82.0;
+    const LINE_HEIGHT: f64 = 17.0;
+    const BOTTOM_MARGIN: f64 = 16.0;
+    let wrapped = crate::chart_kit::wrap_text(message, 100);
+    let line_count = wrapped.lines().count().max(1) as f64;
+    let height = (240.0_f64).max(MESSAGE_TOP + line_count * LINE_HEIGHT + BOTTOM_MARGIN);
+    let mut scene = Scene::new(760.0, height, Some(Color::from_hex(pal.bg)));
     scene.title = Some(title.to_owned());
+    scene.suppress_derived_title();
     scene.add(SceneElement::Text {
         text: title.to_owned(),
         pos: [24.0, 34.0],
@@ -38,8 +45,8 @@ fn status_scene(title: &str, message: &str, ok: bool, theme: Option<&str>) -> Sc
         bold: true,
     });
     scene.add(SceneElement::Text {
-        text: message.to_owned(),
-        pos: [24.0, 82.0],
+        text: wrapped,
+        pos: [24.0, MESSAGE_TOP],
         font_size: 12.0,
         color: Color::from_hex(pal.tick),
         align: TextAlign::Left,
@@ -443,6 +450,27 @@ mod tests {
             .elements
             .iter()
             .any(|element| matches!(element, SceneElement::Image { .. })));
+    }
+
+    #[test]
+    fn unavailable_preview_has_one_red_visible_title_and_keeps_metadata() {
+        let scene = figure_openvsp_cad_preview(None, Some("dark"));
+        assert_eq!(
+            scene.title.as_deref(),
+            Some("OpenVSP CAD preview unavailable")
+        );
+        assert!(!scene.render_title);
+        let title_elements = scene
+            .elements
+            .iter()
+            .filter_map(|element| match element {
+                SceneElement::Text {
+                    text, color, bold, ..
+                } if text == "OpenVSP CAD preview unavailable" => Some((*color, *bold)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(title_elements, vec![(Color::from_hex("#c0392b"), true)]);
     }
 
     #[test]

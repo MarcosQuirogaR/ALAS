@@ -12,6 +12,8 @@ rust-version = "1.85"
 # Dependencies are declared here once so every crate resolves the same version.
 # A new entry needs the justification described in CONTRIBUTING.md.
 [workspace.dependencies]
+# Build-only Windows SDK discovery and resource linking avoids bespoke toolchain plumbing.
+winresource = { version = "0.1.31", default-features = false }
 serde = { version = "1", features = ["derive"] }
 # Direct DOM parsing keeps CPACS UID/reference validation separate from rendering.
 roxmltree = "0.20"

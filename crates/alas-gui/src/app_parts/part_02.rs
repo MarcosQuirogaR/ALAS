@@ -54,6 +54,11 @@ impl AlasApp {
                 }
             });
             ui.separator();
+            if ui.button(tr("Clean sheet design (sandbox)")).clicked() {
+                self.state.enter_sandbox(false);
+                ui.close_menu();
+            }
+            ui.separator();
             if ui.button(tr("Exit")).clicked() {
                 std::process::exit(0);
             }

@@ -434,11 +434,13 @@ fn textures_color_image(scene: &Scene, raster_scale: f64) -> Option<egui::ColorI
     ))
 }
 
-/// The scene without its textured elements and background: what the shape
-/// renderer draws on top of the texture layer in the vector-overlay path.
+/// The scene without its textured elements, and with its opaque background
+/// paint suppressed: what the shape renderer draws on top of the texture
+/// layer in the vector-overlay path. `background` itself stays set so
+/// `visual_title`'s contrast decision still sees the true theme color.
 fn vector_overlay_scene(scene: &Scene) -> Scene {
     let mut overlay = scene.clone();
-    overlay.background = None;
+    overlay.hide_background_paint();
     overlay.elements.retain(|element| {
         !matches!(
             element,

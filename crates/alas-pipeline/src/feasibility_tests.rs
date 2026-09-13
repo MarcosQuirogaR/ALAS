@@ -237,6 +237,9 @@ fn tank_limited_model_cg_uses_the_analyzed_fuel_and_names_the_load_case_honestly
     if let Some(mass_model) = &preset.mass_model {
         config.mass_model = mass_model.clone();
     }
+    config.mass_model.mass_architecture =
+        alas_config::MassArchitecture::LegacyReferenceCompatibleComparison;
+    config.mass_model.apply_architecture();
     // Keep this conservation regression on the frozen A320 fixture. Product
     // high-lift/gear mass corrections are intentionally exercised by the
     // ordinary constructor and can legitimately change the closure remainder

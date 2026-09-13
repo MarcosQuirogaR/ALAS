@@ -50,7 +50,11 @@ pub fn render_scene_rgba_scaled(scene: &Scene, scale: f64) -> Result<(u32, u32, 
                 if source == "embedded://nasa-blue-marble"
         )
     });
-    vector_scene.background = None;
+    // Keep `background` itself set to the true theme color so the automatic
+    // title's contrast decision (`visual_title`, called from `render_svg`)
+    // still sees it; only suppress painting the opaque rect that would
+    // otherwise hide the texture layer drawn onto `pixmap` below.
+    vector_scene.hide_background_paint();
     let svg = render_svg(&vector_scene);
     // usvg intentionally starts with an empty font database. Loading system
     // fonts on every globe orbit frame dominates raster time, so all figure
@@ -312,8 +316,57 @@ fn blue_marble_texture() -> Option<&'static tiny_skia::Pixmap> {
 
 #[cfg(test)]
 mod tests {
-    use super::{render_scene_png, render_scene_rgba, source_longitude, sphere_sample_direction};
+    use super::{
+        render_scene_png, render_scene_rgba, render_scene_rgba_scaled, source_longitude,
+        sphere_sample_direction,
+    };
     use alas_report::scene::{Camera3D, Color, Scene, SceneElement, TextAlign, TextBaseline};
+
+    /// Regression for the actual GUI figure-card bug: this function used to
+    /// clear `scene.background` before calling `render_svg` so the vector
+    /// layer stayed transparent over pre-painted texture content. That also
+    /// blinded `visual_title`'s contrast decision (it reads the same field),
+    /// so every automatic figure title rendered in its near-black
+    /// light-theme color on Grey and Dark, on top of a still-correctly-dark
+    /// background -- reproducing the reported "black global titles on Grey
+    /// background despite white panel titles". Panel headings were
+    /// unaffected because they are colored explicitly from the palette, not
+    /// through `visual_title`.
+    #[test]
+    fn automatic_title_stays_legible_against_dark_and_grey_backgrounds() {
+        for (theme_name, bg_hex) in [("grey", "#3a3a3a"), ("dark", "#1e1e1e")] {
+            let bg = Color::from_hex(bg_hex);
+            let mut scene = Scene::new(300.0, 120.0, Some(bg));
+            scene.title = Some("Themed Figure Title".to_owned());
+
+            let (width, _height, rgba) =
+                render_scene_rgba_scaled(&scene, 1.0).expect("raster succeeds");
+
+            // The automatic title sits at [width * 0.5, 18.0] in scene units;
+            // scan a small neighborhood for its brightest opaque pixel, since
+            // anti-aliased glyph edges vary in exact intensity.
+            let cx = (width as f64 * 0.5) as i64;
+            let mut brightest = 0u8;
+            for dy in -8i64..=8 {
+                for dx in -40i64..=40 {
+                    let (x, y) = ((cx + dx) as u32, (18 + dy) as u32);
+                    let idx = ((y * width + x) * 4) as usize;
+                    let Some(pixel) = rgba.get(idx..idx + 4) else {
+                        continue;
+                    };
+                    if pixel[3] > 10 {
+                        let luma = (u32::from(pixel[0]) + u32::from(pixel[1]) + u32::from(pixel[2])) / 3;
+                        brightest = brightest.max(luma as u8);
+                    }
+                }
+            }
+            assert!(
+                brightest > 200,
+                "theme={theme_name}: automatic title should paint near-white glyphs against \
+                 background {bg_hex}, brightest sampled luma was {brightest}"
+            );
+        }
+    }
 
     #[test]
     fn scene_rasterization_returns_a_decodable_png() {

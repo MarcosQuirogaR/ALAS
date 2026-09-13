@@ -53,7 +53,12 @@ pub(super) fn geometry_residuals(
         policy,
     ));
 
-    let wing_loading_kg_m2 = outcome.sized.takeoff_mass_kg / plane.s_ref.max(1e-9);
+    // The requirement is a design wing loading, MTOW over area: the design
+    // gross mass the components were sized against. That is the closed
+    // takeoff mass of a coupled clean-sheet design and the declared MTOW of
+    // a fixed aircraft, which does not stop being the same wing when it is
+    // dispatched light on a short route.
+    let wing_loading_kg_m2 = outcome.sized.design_gross_mass_kg / plane.s_ref.max(1e-9);
     residuals.push(ConstraintResidual::scaled(
         "wing_loading",
         Geometry,
@@ -124,9 +129,12 @@ pub(super) fn geometry_residuals(
             policy,
         ));
     } else if target_num_passengers > 0 {
-        // Registered-aircraft studies size from the class mix and fill the
-        // candidate floor. There is no copied integer passenger target to
-        // violate in that mode; only clean-sheet studies carry this residual.
+        // Every study -- registered aircraft or clean-sheet alike -- sizes
+        // its cabin from the class mix and fills the candidate floor; there
+        // is no copied integer passenger target to violate. This residual
+        // only appears when `DesignRequirements::min_passenger_capacity` is
+        // set: a one-sided floor check on the resolved capacity, not an
+        // equality constraint.
         residuals.push(ConstraintResidual::scaled(
             "passenger_shortfall",
             Geometry,

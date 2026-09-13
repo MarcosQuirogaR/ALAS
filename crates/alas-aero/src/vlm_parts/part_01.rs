@@ -49,6 +49,35 @@ pub enum VlmError {
     /// (`CONTRIBUTING.md`).
     #[error("the panel influence matrix was numerically singular at row {0}")]
     SingularAic(usize),
+    /// The AIC matrix was solvable but so ill-conditioned that the
+    /// circulation it returns is not a flow field.
+    ///
+    /// This is a *meshing* failure wearing numerical clothes. It appears when
+    /// the spanwise panel count is pushed far past what the geometry needs --
+    /// `AnalysisConfig::spanwise_resolution` multiplies a surface the builder
+    /// has already subdivided, so a value of ten means slivers -- and the
+    /// horseshoe legs of neighbouring panels approach collinearity. The
+    /// residual stays at machine precision throughout (the linear solve is
+    /// accurate; it is the system that is meaningless), so only the pivot
+    /// ratio distinguishes it.
+    ///
+    /// The threshold catches the collapse, not the onset: measured over the
+    /// registered presets, a usable mesh sits below about 60 and the meshes
+    /// that return a negative or absurd lift coefficient sit above 1e4. A
+    /// mesh between those can still return a plausible lift with a badly
+    /// wrong induced drag, which no linear-algebra diagnostic can detect --
+    /// `alas_config::validation` rejects that range at the configuration
+    /// boundary instead, and this is the backstop for callers that construct
+    /// a [`super::VlmSystem`] directly.
+    #[error(
+        "the panel influence matrix is too ill-conditioned to trust \
+         (pivot ratio {pivot_ratio:.3e}); the spanwise panel resolution is \
+         far finer than the geometry supports"
+    )]
+    IllConditionedAic {
+        /// `max |pivot| / min |pivot|` from the factorization.
+        pivot_ratio: f64,
+    },
     /// A finite-difference derivative step was not finite and positive.
     #[error("stability-derivative steps must be finite and positive")]
     InvalidDerivativeStep,

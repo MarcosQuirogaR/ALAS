@@ -7,7 +7,7 @@
 use alas_aero::mses::{MsesPolarPointStatus, MsesPolarResult};
 
 use super::super::support::padded_range;
-use crate::chart_kit::{draw_legend, LegendMarker};
+use crate::chart_kit::{draw_axes_without_x_tick_labels, draw_legend, LegendMarker};
 use crate::scene::{Axes2D, Color, Fill, Scene, SceneElement, Stroke, TextAlign, TextBaseline};
 use crate::theme::get_palette;
 
@@ -81,13 +81,24 @@ pub fn figure_mses_convergence(result: &MsesPolarResult, theme: Option<&str>) ->
         result.converged_alpha_count,
         result.requested_alpha_count
     ));
-    for (axis, (plot_title, y_label)) in axes.iter().zip([
-        ("Converged lift samples", "CL"),
-        ("Converged drag samples", "CD"),
-        ("Converged moment samples", "CM"),
-        ("Requested-point status", "state"),
-    ]) {
-        axis.draw_frame_with_labels(&mut scene, pal, "alpha [deg]", y_label);
+    for (index, (axis, (plot_title, y_label))) in axes
+        .iter()
+        .zip([
+            ("Converged lift samples", "CL"),
+            ("Converged drag samples", "CD"),
+            ("Converged moment samples", "CM"),
+            ("Requested-point status", "state"),
+        ])
+        .enumerate()
+    {
+        // The lower row carries the shared alpha label.  Omitting the
+        // duplicate upper-row labels leaves a clean gutter for the verdict
+        // legend between the two plot rows.
+        if index < 2 {
+            draw_axes_without_x_tick_labels(axis, &mut scene, pal, None, Some(y_label));
+        } else {
+            axis.draw_frame_with_labels(&mut scene, pal, "alpha [deg]", y_label);
+        }
         super::panel_title(&mut scene, axis, plot_title, pal);
     }
 
@@ -161,19 +172,6 @@ pub fn figure_mses_convergence(result: &MsesPolarResult, theme: Option<&str>) ->
             });
         }
     }
-    scene.add(SceneElement::Text {
-        text: format!(
-            "{} requested, {} converged; no coefficients are invented for rejected points",
-            result.requested_alpha_count, result.converged_alpha_count
-        ),
-        pos: [60.0, 610.0],
-        font_size: 10.0,
-        color: Color::from_hex(pal.tick),
-        align: TextAlign::Left,
-        baseline: TextBaseline::Top,
-        angle_deg: 0.0,
-        bold: false,
-    });
     if !result.transition_model_is_valid() {
         scene.add(SceneElement::Text {
             text: result.osmap_diagnostic.clone().unwrap_or_else(|| {
@@ -210,7 +208,7 @@ pub fn figure_mses_convergence(result: &MsesPolarResult, theme: Option<&str>) ->
     }
     draw_legend(
         &mut scene,
-        [480.0, 600.0],
+        [480.0, 305.0],
         &[
             (
                 "converged request".to_owned(),

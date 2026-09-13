@@ -15,7 +15,21 @@ use crate::theme::get_palette;
 /// informational success note, matching upstream's `#c0392b`/`#27ae60`.
 pub fn figure_status_message(title: &str, message: &str, ok: bool, theme: Option<&str>) -> Scene {
     let pal = get_palette(theme);
-    let mut scene = Scene::new(560.0, 140.0, Some(Color::from_hex(pal.bg)));
+    const WIDTH: f64 = 560.0;
+    const MESSAGE_TOP: f64 = 60.0;
+    const LINE_HEIGHT: f64 = 17.0;
+    const BOTTOM_MARGIN: f64 = 16.0;
+    // Upstream wraps the message text (`wrap=True`); this scene graph has no
+    // text-layout engine, so `wrap_text` reflows it onto multiple explicit
+    // rows from a character budget derived from the canvas width instead of
+    // measured glyphs -- close enough at this font size to stay inside the
+    // figure instead of running off its right edge.
+    let wrapped = crate::chart_kit::wrap_text(message, 78);
+    let line_count = wrapped.lines().count().max(1) as f64;
+    let height = (140.0_f64).max(MESSAGE_TOP + line_count * LINE_HEIGHT + BOTTOM_MARGIN);
+    let mut scene = Scene::new(WIDTH, height, Some(Color::from_hex(pal.bg)));
+    scene.title = Some(title.to_owned());
+    scene.suppress_derived_title();
 
     let title_color = if ok { "#27ae60" } else { "#c0392b" };
     scene.add(SceneElement::Text {
@@ -29,13 +43,9 @@ pub fn figure_status_message(title: &str, message: &str, ok: bool, theme: Option
         bold: true,
     });
 
-    // Upstream wraps the message text (`wrap=True`); this scene graph has no
-    // text-flow primitive, so it is drawn as a single line and left to the
-    // caller's viewport to clip or scroll -- the closest faithful
-    // approximation available without a text-layout dependency.
     scene.add(SceneElement::Text {
-        text: message.to_owned(),
-        pos: [12.0, 60.0],
+        text: wrapped,
+        pos: [12.0, MESSAGE_TOP],
         font_size: 12.0,
         color: Color::from_hex(pal.tick),
         align: TextAlign::Left,

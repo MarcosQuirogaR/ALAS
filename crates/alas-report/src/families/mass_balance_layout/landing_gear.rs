@@ -20,12 +20,6 @@ use std::f64::consts::PI;
 // figure_landing_gear_planform
 // ---------------------------------------------------------------------------
 
-/// The class name before its parenthetical detail, e.g. `"Narrowbody
-/// (~46x17 class, A320/737)"` -> `"Narrowbody"` -- `name.split(' (')[0]`.
-pub(super) fn short_tire_name(name: &str) -> &str {
-    name.split(" (").next().unwrap_or(name)
-}
-
 /// The fill color for one gear group -- upstream's `group_colors.get(...,
 /// "#9b59b6")`.
 pub(super) fn gear_color(strut_label: &str) -> &'static str {
@@ -190,12 +184,7 @@ pub fn figure_landing_gear_planform(
     let to_px = |lateral: f64, station: f64| axes.map_point(lateral, -station);
 
     let mut scene = Scene::new(canvas_w, canvas_h, Some(Color::from_hex(pal.bg)));
-    let nlg_short = short_tire_name(gear.nlg_tire.name);
-    let mlg_short = short_tire_name(gear.mlg_tire.name);
-    scene.title = Some(format!(
-        "Landing Gear Planform -- NLG: {}x{}   MLG: {} strut(s) x {}w {}",
-        gear.n_nlg_wheels, nlg_short, gear.n_mlg_struts, gear.wheels_per_mlg_strut, mlg_short
-    ));
+    scene.title = Some("Landing-Gear Planform".to_owned());
     axes.draw_frame(&mut scene, pal);
 
     scene.add(SceneElement::Text {

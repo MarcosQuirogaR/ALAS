@@ -2060,10 +2060,7 @@ fn report_mass_basis_kg(report: &AnalysisReport, fallback_kg: f64) -> f64 {
 /// a limit and remains in the final result; only the structural load cards
 /// need the closed mission-sized value as their working mass.
 fn config_for_report_mass(config: &AlasConfig, report: &AnalysisReport) -> AlasConfig {
-    let mut analysis_config = config.clone();
-    analysis_config.requirements.mtow_kg =
-        report_mass_basis_kg(report, config.requirements.mtow_kg);
-    analysis_config
+    config.at_closure_mass(report_mass_basis_kg(report, config.requirements.mtow_kg))
 }
 
 fn finite_range(values: &[f64]) -> Option<(f64, f64)> {

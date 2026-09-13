@@ -219,6 +219,12 @@ pub fn assess_product_candidate(
     config: &AlasConfig,
     design: &DesignVector,
 ) -> Result<CandidateAssessment, String> {
+    if !config.mass_model.mass_architecture.is_production() {
+        return Err(
+            "the product candidate assessor requires pure_flops_transport_v1; select the explicit reference-compatibility comparison path for legacy masses"
+                .to_owned(),
+        );
+    }
     let objective = DesignObjective::new_with_nominal(config.clone(), *design);
     assess_candidate(&objective, &design.to_array())
 }

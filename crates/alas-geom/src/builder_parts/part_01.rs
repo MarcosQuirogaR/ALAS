@@ -7,7 +7,7 @@ use alas_math::CubicSplineError;
 use crate::aircraft::airfoil::Airfoil;
 use crate::aircraft::airplane::Airplane;
 use crate::aircraft::fuselage::{Fuselage, FuselageXSec, FuselageXSecError, DEFAULT_SHAPE};
-use crate::aircraft::wing::{SpacingFunction, SubdivideSectionsError, Wing, WingXSec};
+use crate::aircraft::wing::{SubdivideSectionsError, Wing, WingXSec};
 use crate::airfoil_library::{build_section, AirfoilLibrary};
 
 /// Why [`AircraftBuilder::build`] could not assemble an [`Airplane`].
@@ -91,6 +91,8 @@ impl AircraftBuilder {
         geometry.wing.side_of_body_chord_ratio = None;
         geometry.wing.kink_span_fraction = None;
         geometry.wing.outboard_le_sweep_deg = None;
+        // And its spanwise mesh; see `mesh`.
+        mesh::restore_reference_ratios(&mut geometry);
         Self {
             geometry,
             geometry_contract: GeometryContract::ReferenceCompatibility,
@@ -228,12 +230,11 @@ impl AircraftBuilder {
         ));
 
         let wing = Wing::new("Main Wing", xsecs, true);
-        let wing = wing
-            .translate([x_wing_global, 0.0, 0.0])
-            .subdivide_sections(
-                n_subdivisions_usize(g.n_subdivisions),
-                SpacingFunction::Linspace,
-            )?;
+        let wing = mesh::for_contract(
+            self.geometry_contract,
+            &wing.translate([x_wing_global, 0.0, 0.0]),
+            g.n_subdivisions,
+        )?;
         Ok(wing)
     }
 
@@ -267,12 +268,11 @@ impl AircraftBuilder {
             ],
             true,
         );
-        let wing = wing
-            .translate([x_hstab, 0.0, g.hstab_z_m])
-            .subdivide_sections(
-                n_subdivisions_usize(g.n_subdivisions),
-                SpacingFunction::Linspace,
-            )?;
+        let wing = mesh::for_contract(
+            self.geometry_contract,
+            &wing.translate([x_hstab, 0.0, g.hstab_z_m]),
+            g.n_subdivisions,
+        )?;
         Ok(wing)
     }
 
@@ -307,12 +307,11 @@ impl AircraftBuilder {
             ],
             false,
         );
-        let wing = wing
-            .translate([x_vstab, 0.0, g.vstab_z_m])
-            .subdivide_sections(
-                n_subdivisions_usize(g.n_subdivisions),
-                SpacingFunction::Linspace,
-            )?;
+        let wing = mesh::for_contract(
+            self.geometry_contract,
+            &wing.translate([x_vstab, 0.0, g.vstab_z_m]),
+            g.n_subdivisions,
+        )?;
         Ok(wing)
     }
 

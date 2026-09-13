@@ -26,13 +26,13 @@
 //! mean aerodynamic chord -- which is how a candidate the search accepted as
 //! hard-feasible could print as physically INFEASIBLE in its own final report.
 //!
-//! Both paths now resolve their stations through
+//! Both paths are required to resolve their stations through
 //! `alas_mass::product_stations::product_mass_coordinates` and build the same
 //! aircraft, so these tests assert the ledger itself agrees item by item, not
 //! merely that two pipelines produced the same scalar takeoff mass.
 use alas_config::design_variables::DesignVector;
 use alas_config::AlasConfig;
-use alas_pipeline::FullAnalysis;
+use alas_pipeline::{export::report_to_database, FullAnalysis};
 
 /// Exact `design_vector` block from the r5 nominal run's own
 /// `design_database.json` (`.agent/bench/nominal-r5-claude-20260909/`), not a
@@ -174,8 +174,8 @@ fn the_search_and_the_report_agree_on_where_the_finalist_balances() {
             (search_mass - report_mass).abs() <= mass_round_off_kg,
             "{name}: the search sizes {search_mass} kg and the report publishes {report_mass} kg \
              for one identical design vector at one identical closed takeoff mass. Both must \
-             build the wing group through `alas_mass::wing_reconciliation` and close the fuel \
-             remainder against it.",
+             consume the same pure FLOPS component buildup and close the fuel remainder against \
+             it.",
         );
     }
 
@@ -335,4 +335,57 @@ fn payload_station_divergence_stays_bounded() {
         (assessment.resolved.masses.payload - report.component_masses["Payload"]).abs() < 1.0e-6,
         "both paths must seat the same payload mass"
     );
+}
+
+#[test]
+fn the_full_report_and_json_export_share_one_flops_ledger() {
+    let config = AlasConfig::default();
+    let design = DesignVector::default();
+    let report = FullAnalysis::new(config.clone())
+        .run(&design, true)
+        .expect("default product report");
+    let buildup = report
+        .flops_mass_buildup
+        .as_deref()
+        .expect("pure product report carries its grouped FLOPS buildup");
+    let database = report_to_database(&report, &config);
+
+    assert_eq!(
+        database.weights["mass_architecture"],
+        serde_json::json!("pure_flops_transport_v1")
+    );
+    let exported = database.weights["flops_mass_buildup"]
+        .as_object()
+        .expect("database export carries grouped FLOPS evidence");
+    assert!(
+        !exported.contains_key("airframe"),
+        "nacelle ownership is emitted under airframe_ownership"
+    );
+    assert_eq!(
+        exported["airframe_ownership"]["nacelles_counted_once"],
+        serde_json::json!(true)
+    );
+
+    let exported_masses = exported["component_masses_kg"]
+        .as_object()
+        .expect("export carries the component mass map");
+    for (name, mass) in buildup.masses.as_pairs() {
+        let report_mass = report
+            .component_masses
+            .get(name)
+            .copied()
+            .unwrap_or_else(|| panic!("report carries {name}"));
+        let exported_mass = exported_masses
+            .get(name)
+            .and_then(serde_json::Value::as_f64)
+            .unwrap_or_else(|| panic!("export carries {name}"));
+        assert!(
+            (report_mass - mass).abs() < 1.0e-9,
+            "{name}: report {report_mass} vs buildup {mass}"
+        );
+        assert!(
+            (exported_mass - mass).abs() < 1.0e-9,
+            "{name}: export {exported_mass} vs buildup {mass}"
+        );
+    }
 }

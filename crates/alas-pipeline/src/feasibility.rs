@@ -33,6 +33,7 @@ mod fuel;
 mod mass_balance;
 mod planning;
 mod report_format;
+mod reported_attitude;
 mod structural_mass;
 mod types;
 
@@ -182,9 +183,8 @@ fn append_model_cg_findings(
 
 /// Evaluate conservation laws and configured limits on a completed run.
 ///
-/// Without a selected load case the analyzed fuel is the takeoff-mass
-/// closure remainder, which is what a caller that did not fly the mission
-/// has to work with.
+/// Without a selected load case the analyzed fuel is the takeoff-mass closure
+/// remainder, which is what a caller that did not fly the mission has to use.
 pub fn assess_physical_feasibility(
     config: &AlasConfig,
     design: &DesignVector,
@@ -249,10 +249,9 @@ pub fn assess_physical_feasibility_with_load_case(
             ));
         }
     }
-    // Public planning limits apply to the load that is actually carried. A
-    // mass-closure remainder can exceed the usable tank capacity, so using
-    // `report.physical_cg` here would compare a capped mass case with a CG
-    // that still contains the uncarried fuel remainder.
+    // Public planning limits apply to the load actually carried: a mass-closure
+    // remainder can exceed usable tank capacity, so `report.physical_cg` would
+    // compare a capped mass case against a CG still holding uncarried fuel.
     let cg_envelope =
         assess_public_cg_reference(config, report, fuel_loading.analyzed_carried_fuel_kg);
     fuel_loading.mission = fuel::assess_mission_fuel(config.mission.enabled, mission);
@@ -338,6 +337,7 @@ pub fn assess_physical_feasibility_with_load_case(
         ));
     }
 
+    findings.extend(reported_attitude::assess(config, report));
     let trim_is_finite = report.trimmed_design_point.as_ref().is_some_and(|trim| {
         trim.alpha_deg.is_finite()
             && trim.geometric_body_alpha_deg.is_finite()
@@ -374,9 +374,9 @@ pub fn assess_physical_feasibility_with_load_case(
         ));
     }
 
-    // Field performance is a feasibility check, not a report-only chart. Use
-    // the selected engine rating for static thrust and use arrival telemetry
-    // when available rather than silently evaluating landing at MTOW.
+    // Field performance is a feasibility check, not a report-only chart: use the
+    // selected engine rating for static thrust, and arrival telemetry when it
+    // exists, rather than silently evaluating landing at MTOW.
     let wing_area_m2 = report
         .geometry_summary
         .get("wing_area_m2")

@@ -295,8 +295,16 @@ impl ExternalPolar {
 /// One design candidate closed against the sizing mission.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SizedCandidate {
-    /// Takeoff mass the dispatch closure settled on, kg.
+    /// Analysis takeoff mass, kg: the mission-closed dispatch mass for the
+    /// two mission-sized modes, the declared MTOW for `FixedRequirement`; the
+    /// dispatch plan keeps the mission-required mass for the ceiling check.
     pub takeoff_mass_kg: f64,
+    /// `fixed_aircraft` or `coupled` (`alas_config::MassSizingBasis`).
+    pub sizing_basis: &'static str,
+    /// FLOPS design gross mass `DG` the components were evaluated at, kg.
+    pub design_gross_mass_kg: f64,
+    /// Design landing mass `WLDG` the gear was evaluated at, kg.
+    pub design_landing_mass_kg: f64,
     /// Operating empty mass at the closed takeoff mass, kg.
     pub operating_empty_mass_kg: f64,
     /// Zero-fuel mass (operating empty plus payload) at closure, kg.
@@ -340,25 +348,22 @@ pub struct SizedCandidate {
     /// The dispatch closure this candidate was sized by.
     pub dispatch: DispatchSolution,
     /// Outer sizing passes taken (fixed-point iterations of empty mass, fuel
-    /// and takeoff mass; always `1` under `MtowSizing::FixedRequirement`).
+    /// and takeoff mass; always `1` under `MtowSizing::FixedRequirement`,
+    /// up to the configured iteration limit under `MtowSizing::SizedByMission`
+    /// and `MtowSizing::Unconstrained`).
     pub sizing_iterations: usize,
     /// Whether the outer sizing loop closed within its iteration budget.
     pub sizing_closed: bool,
-    /// Trim and drag-polar re-evaluations the sizing loop performed after
-    /// the first, each triggered by a centre-of-gravity shift beyond the
+    /// Re-trims after the first, each triggered by a CG shift beyond the
     /// configured re-trim tolerance.
     pub retrim_count: usize,
-    /// Centre-of-gravity shift, percent MAC, between the last trim and the
-    /// converged mass state: the residual inconsistency the loop accepted.
+    /// CG shift, percent MAC, between the last trim and the converged state.
     pub cg_shift_pct_mac: f64,
     /// Whether the wing total includes a complete, declared primary and
-    /// secondary inventory. Clean-sheet Torenbeek movable terms are partial
-    /// by design and therefore remain false until the omitted inventory is
-    /// explicitly supplied.
+    /// secondary inventory (false while a clean-sheet inventory is partial).
     pub structural_inventory_complete: bool,
-    /// Strength-sized primary wingbox mass represented in the complete wing,
-    /// kg. This is retained for the result/report seam so a structural mass
-    /// change is observable rather than hidden behind the empirical total.
+    /// Strength-sized primary wingbox mass in the complete wing, kg, kept
+    /// so a structural change is observable beside the empirical total.
     pub structural_primary_mass_kg: f64,
     /// Reconciled non-box wing inventory represented in the complete wing,
     /// kg.

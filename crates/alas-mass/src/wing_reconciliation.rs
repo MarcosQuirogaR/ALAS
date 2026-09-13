@@ -44,9 +44,12 @@ use crate::wing_inventory::{
     WingInventoryInputs, WingMovableSurfaces, WingNonBoxInventory,
 };
 use crate::wingbox_feedback::{
-    reconcile_clean_sheet_wing, reconcile_reference_wing, ReferenceWingMass, SizedWingboxMass,
-    WingboxFeedback,
+    reconcile_clean_sheet_wing, ReferenceWingMass, SizedWingboxMass, WingboxFeedback,
 };
+
+mod support;
+pub use support::{design_gross_mass_kg, StructuralInventory};
+use support::{design_requirements, reconcile_against_reference};
 
 /// Why a candidate's wing could not be reconciled.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
@@ -58,30 +61,6 @@ pub enum WingReconciliationError {
     /// The frozen reference aircraft's own mass buildup did not resolve.
     #[error("the reference aircraft's wing mass and coordinates did not resolve")]
     MassCoordinates,
-}
-
-/// Where the non-box part of the reconciled wing comes from.
-///
-/// Reference adaptation and the baseline sandbox freeze a measured empirical
-/// wing, so their non-box inventory is complete by construction and carries no
-/// item list. Clean-sheet runs build the enumerated [`crate::wing_inventory`]
-/// list and are complete only when that list is.
-#[derive(Debug, Clone)]
-pub enum StructuralInventory {
-    /// Frozen empirical remainder of a registered reference aircraft.
-    FrozenReference,
-    /// Enumerated, sourced clean-sheet non-box inventory.
-    CleanSheet(Box<WingNonBoxInventory>),
-}
-
-impl StructuralInventory {
-    /// Whether the wing inventory may be presented as complete.
-    pub fn is_complete(&self) -> bool {
-        match self {
-            Self::FrozenReference => true,
-            Self::CleanSheet(inventory) => inventory.status().is_complete(),
-        }
-    }
 }
 
 /// The reconciled wing every product consumer should publish.

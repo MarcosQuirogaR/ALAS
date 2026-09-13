@@ -22,7 +22,8 @@ use super::airframe_geometry::{
     average_thickness, detailed_stations, dihedral_deg, find_surface, nacelle_dimensions,
     surface_wetted_area,
 };
-use super::product::{main_wing, max_fuselage_width_depth, movable_surface_area, primary_fuselage};
+use super::movable_area::movable_surface_area;
+use super::product::{main_wing, max_fuselage_width_depth, primary_fuselage};
 use super::propulsion::{
     distributed_scaling, estimate_flops_propulsion, pod_mass_kg, total_nacelles,
     FlopsPropulsionBreakdown, FlopsPropulsionInputs,
@@ -54,6 +55,10 @@ pub struct FlopsAirframeSources {
     pub nose_gear_length: &'static str,
     /// `declared` or `flops_equation_76`.
     pub baseline_engine_mass: &'static str,
+    /// `declared` (a `flops_structure.design_gross_mass_kg` override, which
+    /// is also how a fixed-aircraft closure pins the basis) or
+    /// `requirements_mtow`.
+    pub design_gross_mass: &'static str,
 }
 
 /// The evaluated groups with the resolved inputs kept for audit.
@@ -225,6 +230,14 @@ pub fn evaluate_airframe_product(request: &FlopsAirframeRequest<'_>) -> FlopsAir
         baseline_thrust_n,
         baseline_engine_mass_kg: technology.baseline_engine_mass_kg,
         scaling_exponent: technology.engine_mass_scaling_exponent,
+        // Equations 77-79 only when the configuration declares the inlet or
+        // nozzle separately; `FlopsStructureConfig::validate` has already
+        // refused a separate item without an explicit baseline core mass, so
+        // the equation 76 all-in estimate can never be double counted.
+        baseline_inlet_mass_kg: technology.baseline_inlet_mass_kg,
+        inlet_scaling_exponent: technology.inlet_mass_scaling_exponent,
+        baseline_nozzle_mass_kg: technology.baseline_nozzle_mass_kg,
+        nozzle_scaling_exponent: technology.nozzle_mass_scaling_exponent,
         thrust_reversers_installed: technology.thrust_reversers_installed,
         maximum_mach,
         nacelle_diameter_m,
@@ -240,7 +253,15 @@ pub fn evaluate_airframe_product(request: &FlopsAirframeRequest<'_>) -> FlopsAir
         nacelle_diameter_m,
     );
 
-    let design_gross_mass_kg = requirements.mtow_kg;
+    // The structural design gross mass is the declared override when the
+    // configuration carries one -- a weight-variant declaration, or the
+    // fixed-aircraft basis `AlasConfig::at_closure_mass` writes so a mission
+    // closure cannot re-size a registered aircraft -- and otherwise the
+    // takeoff-mass requirement of the case being evaluated.
+    let (design_gross_mass_kg, design_gross_source) = match technology.design_gross_mass_kg {
+        Some(value) => (value, "declared"),
+        None => (requirements.mtow_kg, "requirements_mtow"),
+    };
     // This function has no `AlasConfig`/`DesignMode`/preset identity in scope
     // (only `DesignRequirements` and `MassModelConfig`, via
     // `FlopsAirframeRequest`), so it cannot call the mode-aware
@@ -248,15 +269,17 @@ pub fn evaluate_airframe_product(request: &FlopsAirframeRequest<'_>) -> FlopsAir
     // site instead resolves that limit ahead of time and passes it down
     // through the ordinary `mlw_fraction_mtow` slot via
     // `AlasConfig::analysis_mass_model`, so `mass_model.mlw_fraction_mtow`
-    // here already *is* the resolved limit divided by `design_gross_mass_kg`
-    // for those callers. The plain fraction below is only reached by
-    // standalone low-level callers that build a `MassModelConfig` directly
-    // without going through `AlasConfig`, where the documented fraction
-    // semantics still apply.
+    // here already *is* the resolved limit divided by the takeoff-mass
+    // requirement for those callers. The fraction therefore multiplies
+    // `requirements.mtow_kg`, the mass it was derived from, and not the
+    // design gross mass, which a declared override may have pinned elsewhere.
+    // The plain fraction is only reached by standalone low-level callers
+    // that build a `MassModelConfig` directly without going through
+    // `AlasConfig`, where the documented fraction semantics still apply.
     let (design_landing_mass_kg, landing_source) = match technology.design_landing_mass_kg {
         Some(value) => (value, "declared"),
         None => (
-            design_gross_mass_kg * mass_model.mlw_fraction_mtow,
+            requirements.mtow_kg * mass_model.mlw_fraction_mtow,
             "mlw_fraction_of_mtow",
         ),
     };
@@ -400,6 +423,7 @@ pub fn evaluate_airframe_product(request: &FlopsAirframeRequest<'_>) -> FlopsAir
             } else {
                 "flops_equation_76"
             },
+            design_gross_mass: design_gross_source,
         },
     };
     if !(breakdown
@@ -418,7 +442,8 @@ pub fn evaluate_airframe_product(request: &FlopsAirframeRequest<'_>) -> FlopsAir
 mod tests {
     use super::*;
     use alas_config::{
-        FlopsInputProvenance, FlopsStructureConfig, FlopsTransportConfig, FlopsTransportProvenance,
+        FlopsInputEvidence, FlopsInputProvenance, FlopsStructureConfig, FlopsTransportConfig,
+        FlopsTransportProvenance,
     };
     use alas_geom::builder::AircraftBuilder;
 
@@ -428,6 +453,8 @@ mod tests {
             revision: "test".to_owned(),
             location: "test".to_owned(),
             applicability: "test".to_owned(),
+            evidence: FlopsInputEvidence::UserDeclared,
+            uncertainty: "test fixture".to_owned(),
         }
     }
 
@@ -492,7 +519,11 @@ mod tests {
     #[test]
     fn an_undeclared_architecture_is_unverified_rather_than_estimated() {
         let (plane, geometry) = built_default();
-        let result = evaluate(&plane, &geometry, &MassModelConfig::default(), None);
+        let model = MassModelConfig {
+            flops_transport: FlopsTransportConfig::default(),
+            ..MassModelConfig::default()
+        };
+        let result = evaluate(&plane, &geometry, &model, None);
         let FlopsAirframeEvaluation::Unverified { reasons } = result else {
             panic!("missing engine mounting and Mach must block the airframe method");
         };
@@ -596,10 +627,71 @@ mod tests {
         assert_eq!(breakdown.sources.main_gear_length, "declared");
         assert_eq!(breakdown.sources.nose_gear_length, "declared");
         assert_eq!(breakdown.sources.baseline_engine_mass, "declared");
+        assert_eq!(breakdown.sources.design_gross_mass, "requirements_mtow");
         assert_eq!(breakdown.structure_inputs.design_landing_mass_kg, 300_000.0);
         assert_eq!(breakdown.structure_inputs.main_gear_oleo_length_m, 3.0);
         let propulsion = breakdown.propulsion.unwrap_or_else(|| panic!("selected"));
         assert!((propulsion.engine_each_kg - 6_000.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_declared_design_gross_mass_sizes_the_structure_without_moving_the_landing_fallback() {
+        // A fixed aircraft whose closure mass has dropped below its declared
+        // design weight: the wing, tails and fuselage must still be sized at
+        // the declared `DG`, while the landing-mass fraction keeps
+        // multiplying the takeoff-mass requirement it was derived from.
+        let (plane, geometry) = built_default();
+        let mut mass_model = declared_mass_model();
+        mass_model.flops_transport.wing_mounted_engine_count =
+            Some(geometry.engine.spanwise_positions_m.len());
+        let controls = ControlSurfacesConfig::default();
+        let mut requirements = DesignRequirements::default();
+        let declared_mtow_kg = requirements.mtow_kg;
+        let evaluate_with = |requirements: &DesignRequirements, mass_model: &MassModelConfig| {
+            match evaluate_airframe_product(&FlopsAirframeRequest {
+                plane: &plane,
+                requirements,
+                geometry: &geometry,
+                controls: &controls,
+                mass_model,
+                systems: None,
+                selection: FlopsAirframeSelection {
+                    structure: true,
+                    propulsion: true,
+                },
+            }) {
+                FlopsAirframeEvaluation::Verified(breakdown) => breakdown,
+                other => panic!("declared architecture evaluates: {other:?}"),
+            }
+        };
+        let at_design = evaluate_with(&requirements, &mass_model);
+        assert_eq!(at_design.sources.design_gross_mass, "requirements_mtow");
+
+        // Closure mass below the design weight, coupled: the wing shrinks.
+        requirements.mtow_kg = 0.8 * declared_mtow_kg;
+        let coupled = evaluate_with(&requirements, &mass_model);
+        let wing = |b: &FlopsAirframeBreakdown| b.structure.map_or(0.0, |s| s.wing.total_kg);
+        assert!(wing(&coupled) < wing(&at_design));
+
+        // The same closure mass with the design weight pinned: the wing is
+        // the design-weight wing again, and the gear follows the fraction of
+        // the closure mass exactly as the fraction contract says.
+        mass_model.flops_structure.design_gross_mass_kg = Some(declared_mtow_kg);
+        let pinned = evaluate_with(&requirements, &mass_model);
+        assert_eq!(pinned.sources.design_gross_mass, "declared");
+        assert!((wing(&pinned) - wing(&at_design)).abs() < 1.0e-9);
+        assert!(
+            (pinned.structure_inputs.design_landing_mass_kg
+                - requirements.mtow_kg * mass_model.mlw_fraction_mtow)
+                .abs()
+                < 1.0e-9
+        );
+        assert!(
+            (pinned.structure_inputs.design_landing_mass_kg
+                - coupled.structure_inputs.design_landing_mass_kg)
+                .abs()
+                < 1.0e-9
+        );
     }
 
     #[test]

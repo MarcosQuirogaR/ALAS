@@ -7,23 +7,18 @@ fn structural_failure() -> CandidateFailure {
     }
 }
 
-/// Run the checked product mass buildup and then replace the empirical total
-/// wing item with the reconciled structural box inventory.  The replacement
-/// is followed by the same payload/fuel/CG closure used by the mass crate;
-/// leaving the old fuel remainder in place would make a heavier wing appear
-/// to have the same takeoff mass.
+/// Run the checked pure-FLOPS product mass buildup and independently evaluate
+/// the structural wing-sizing diagnostic.  The structural result is retained
+/// for feasibility and reporting, but it never replaces the FLOPS wing mass:
+/// replacing one group after the buildup would create a hybrid mass model and
+/// would make the fuel remainder compensate for a second, unrelated wing
+/// estimate.
 ///
 /// The lumped group points are then placed by
 /// [`alas_mass::product_stations::product_mass_coordinates`], the same
 /// authoritative product placement `alas-pipeline`'s final report uses.  The
-/// buildup itself is still requested with
-/// [`MassCoordinateModel::ReferenceCompatibility`] because that model is what
-/// supplies the *fallback* points (payload seating, and the frozen wing point
-/// used when no tank arrangement resolves); every station the product
-/// placement can derive from geometry overrides it.  Deriving the search's
-/// balance from those frozen fractions instead was what let the optimizer
-/// accept a candidate whose centre of gravity the final report placed
-/// several percent of the mean aerodynamic chord further forward.
+/// product mass path is evaluated with the structural-wingbox coordinate
+/// model, while the structural sizing result remains a separate diagnostic.
 pub(crate) fn mass_analysis_with_structural_feedback(
     config: &AlasConfig,
     dv: &DesignVector,
@@ -31,8 +26,16 @@ pub(crate) fn mass_analysis_with_structural_feedback(
     payload_summary: Option<&PayloadLayoutSummary>,
     reference: Option<ReferenceWingMass>,
 ) -> Result<StructuralMassAnalysis, CandidateFailure> {
+    // The mission-sized optimizer is the production path.  The legacy
+    // architecture has a separate explicit comparison constructor and must
+    // never enter this evaluator through a silent branch.
+    if !config.mass_model.mass_architecture.is_production() {
+        return Err(CandidateFailure {
+            reason: "legacy_mass_architecture",
+        });
+    }
     let analysis_mass_model = config.analysis_mass_model(config.requirements.mtow_kg);
-    let (mut masses, mut coords, _) = run_mass_analysis_with_model_checked_product_with_gear(
+    let (masses, coords, _) = run_mass_analysis_with_model_checked_product_with_gear(
         plane,
         &config.requirements,
         &config.geometry,
@@ -40,26 +43,24 @@ pub(crate) fn mass_analysis_with_structural_feedback(
         &config.control_surfaces,
         Some(&analysis_mass_model),
         payload_summary,
-        MassCoordinateModel::ReferenceCompatibility,
+        MassCoordinateModel::StructuralWingbox(&config.structures),
         &config.landing_gear,
     )
     .map_err(|_| CandidateFailure {
         reason: "mass_coordinates",
     })?;
 
-    // The reconciliation itself lives in `alas_mass::wing_reconciliation`, so
-    // `alas-pipeline`'s report publishes the same wing group this search sizes
-    // against rather than the bare empirical total.
+    // Structural sizing is an independent feasibility/diagnostic check.  Its
+    // empirical/Torenbeek reconciliation is deliberately not applied to the
+    // pure FLOPS mass ledger.
     let reconciliation = alas_mass::wing_reconciliation::reconcile(config, dv, plane, reference)
         .map_err(|_| structural_failure())?;
     let feedback = reconciliation.feedback;
     let reference = reconciliation.reference;
     let inventory = reconciliation.inventory;
-    masses.wing = feedback.total_wing_mass_kg;
-    coords.wing = feedback.centroid_m;
-    let (masses, coords, _) = reclose_mass(masses, coords, &config.requirements, payload_summary);
-    // The fuel closure above is what the tank fill is placed from, so the
-    // stations are resolved after it rather than beside it.
+    // The FLOPS buildup already closed payload and fuel against its own
+    // component groups.  Keep those values untouched so the search and final
+    // report share one authoritative ledger.
     let (coords, cg) =
         product_mass_coordinates(config, dv, plane, &masses, coords).map_err(|_| {
             CandidateFailure {
@@ -114,7 +115,7 @@ mod structural_tests {
     }
 
     #[test]
-    fn the_inventory_reaches_the_reconciled_wing_mass_first_moment_and_fuel_closure() {
+    fn structural_diagnostics_do_not_replace_the_pure_flops_wing_or_fuel_closure() {
         let (config, dv, plane) = clean_sheet_candidate();
         let wing = main_wing(&plane).expect("built aircraft has a main wing");
         let (primary, _) = sized_primary_wing(&config, &dv, &plane, &config.requirements)
@@ -131,20 +132,33 @@ mod structural_tests {
         );
         assert!(structural.is_complete());
 
-        // The wing group the mass breakdown carries is exactly the sized box
-        // plus the enumerated inventory, and its centroid is their first
-        // moment divided by that mass.
-        assert!((masses.wing - inventory.complete_wing_mass_kg).abs() < 1.0e-6);
+        // The structural inventory is a diagnostic/feasibility result.  The
+        // mass path must remain the pure FLOPS buildup, including its own
+        // wing group, rather than replacing it with the structural estimate.
+        let (pure_masses, _, _, _) = alas_mass::breakdown::run_product_mass_analysis_with_groups(
+            &plane,
+            &config.requirements,
+            &config.geometry,
+            &config.cabin,
+            &config.control_surfaces,
+            Some(&config.mass_model),
+            None,
+            MassCoordinateModel::StructuralWingbox(&config.structures),
+            &config.landing_gear,
+        )
+        .unwrap_or_else(|error| panic!("pure FLOPS buildup: {error}"));
+        assert!((masses.wing - pure_masses.wing).abs() < 1.0e-9);
         assert!((feedback.secondary_mass_kg - inventory.total_kg()).abs() < 1.0e-9);
         for axis in 0..3 {
             let moment = feedback.first_moment_kg_m[axis];
             let scale = moment.abs().max(1.0);
-            // The reconciled wing centroid reproduces the reconciled moment.
-            // The *published* `coords.wing` is no longer this point: the
-            // product placement puts every group on its geometric station so
-            // the search and the final report balance one aircraft, so the
-            // reconciliation is checked at its own output.
-            assert!((feedback.centroid_m[axis] * masses.wing - moment).abs() / scale < 1.0e-9);
+            // The structural feedback still closes its own diagnostic first
+            // moment, independently of the FLOPS wing point published by the
+            // mass ledger.
+            assert!(
+                (feedback.centroid_m[axis] * feedback.total_wing_mass_kg - moment).abs() / scale
+                    < 1.0e-9
+            );
             // The secondary part of that moment is the enumerated inventory's
             // own first moment, so no item is lost or double counted between
             // the inventory and the reconciliation.
@@ -162,10 +176,9 @@ mod structural_tests {
             );
         }
 
-        // The fuel remainder is reclosed against the heavier wing, so the
-        // inventory participates in the mass closure instead of sitting beside
-        // it: OEW plus payload plus fuel is the takeoff-mass ceiling.
-        let oew: f64 = OEW_KEYS
+        // The pure FLOPS buildup's fuel remainder closes the same ledger; the
+        // structural diagnostic is not allowed to alter it.
+        let oew: f64 = alas_mass::breakdown::OEW_KEYS
             .iter()
             .map(|&key| masses.get(key).unwrap_or(0.0))
             .sum();
@@ -208,12 +221,18 @@ mod structural_tests {
         config.structures.spanwise_stations = 1;
         let enabled_failure = sized_primary_wing(&config, &dv, &plane, &config.requirements)
             .expect_err("one spanwise station cannot be strength-sized");
-        assert_eq!(enabled_failure, alas_mass::wing_reconciliation::WingReconciliationError::StructuralSizing);
+        assert_eq!(
+            enabled_failure,
+            alas_mass::wing_reconciliation::WingReconciliationError::StructuralSizing
+        );
 
         config.structures.enabled = false;
         let disabled_failure = sized_primary_wing(&config, &dv, &plane, &config.requirements)
             .expect_err("disabling the downstream solve does not waive the strength gate");
-        assert_eq!(disabled_failure, alas_mass::wing_reconciliation::WingReconciliationError::StructuralSizing);
+        assert_eq!(
+            disabled_failure,
+            alas_mass::wing_reconciliation::WingReconciliationError::StructuralSizing
+        );
     }
 
     #[test]

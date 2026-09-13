@@ -20,7 +20,7 @@ pub fn b787_9() -> AircraftPreset {
             mtow_kg: Some(254_692.0),
             mlw_kg: Some(192_776.0),
             mzfw_kg: Some(181_436.0),
-            oew_kg: Some(128_850.0),
+            oew_kg: crate::oew_reference::preset_reference_oew_kg("B787-9"),
             usable_fuel_volume_l: Some(126_429.0),
             usable_fuel_mass_kg: Some(101_522.0),
             fuel_density_kg_l: Some(101_522.0 / 126_429.0),
@@ -162,14 +162,13 @@ pub fn dc_10() -> AircraftPreset {
             tank_configuration: "36,652 US gal with center-wing auxiliary tank",
         },
         reference: AircraftReferenceData {
-            // The ACAP footnote defines the 572,000 lb takeoff option but does
-            // not restate a matching ramp limit. 253,105 kg belongs to the
-            // standard 555,000 lb row and must not be mixed into this record.
+            // The ACAP 572,000 lb footnote restates no ramp limit or OEW; the
+            // standard-row values (253,105 kg MRW) are not mixed in here.
             mrw_kg: None,
             mtow_kg: Some(259_454.0),
             mlw_kg: Some(190_962.0),
             mzfw_kg: Some(166_922.0),
-            oew_kg: Some(120_914.0),
+            oew_kg: crate::oew_reference::preset_reference_oew_kg("DC-10"),
             usable_fuel_volume_l: Some(137_509.0),
             usable_fuel_mass_kg: Some(111_387.0),
             reference_wing_area_m2: Some(338.84),

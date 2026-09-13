@@ -16,6 +16,7 @@ use alas_geom::aircraft::airplane::Airplane;
 use alas_geom::aircraft::fuselage::Fuselage;
 use alas_geom::aircraft::wing::Wing;
 
+use super::movable_area::movable_surface_area;
 use super::{
     estimate_flops_transport, FlopsTransportEvaluation, FlopsTransportInputs,
     FlopsTransportUnverifiedReason, PartialFlopsTransportBreakdown,
@@ -80,64 +81,6 @@ fn count_optional(
     value.ok_or(reason)
 }
 
-pub(super) fn movable_surface_area(
-    plane: &Airplane,
-    controls: &ControlSurfacesConfig,
-) -> Option<f64> {
-    let wing = main_wing(plane)?;
-    let hstab = plane
-        .wings
-        .iter()
-        .find(|surface| surface.name == "Horizontal Stabilizer")
-        .or_else(|| plane.wings.get(1))?;
-    let vstab = plane
-        .wings
-        .iter()
-        .find(|surface| surface.name == "Vertical Stabilizer")
-        .or_else(|| plane.wings.get(2))?;
-    let wing_fraction = |chord: f64, start: f64, end: f64| chord.max(0.0) * (end - start).max(0.0);
-    // FLOPS receives planform areas on the aircraft reference plane.  Keep
-    // control-surface fractions tied to each surface's projected reference
-    // area; the legacy unfolded area would add a dihedral-dependent bias.
-    let wing_area = wing.reference_area();
-    let hstab_area = hstab.reference_area();
-    // The fin is a vertical XZ surface; XY projection would collapse its
-    // planform. Its physical planform is the unfolded surface area, while the
-    // main-wing reference area remains the projected aircraft scale.
-    let vstab_area = vstab.unfolded_area();
-    let movable = wing_area
-        * (wing_fraction(
-            controls.slat_chord_fraction,
-            controls.slat_span_start_frac,
-            controls.slat_span_end_frac,
-        ) + wing_fraction(
-            controls.flap_chord_fraction,
-            controls.flap_span_start_frac,
-            controls.flap_span_end_frac,
-        ) + wing_fraction(
-            controls.aileron_chord_fraction,
-            controls.aileron_span_start_frac,
-            controls.aileron_span_end_frac,
-        ) + wing_fraction(
-            controls.spoiler_chord_fraction,
-            controls.spoiler_span_start_frac,
-            controls.spoiler_span_end_frac,
-        ))
-        + hstab_area
-            * wing_fraction(
-                controls.elevator_chord_fraction,
-                controls.elevator_span_start_frac,
-                controls.elevator_span_end_frac,
-            )
-        + vstab_area
-            * wing_fraction(
-                controls.rudder_chord_fraction,
-                controls.rudder_span_start_frac,
-                controls.rudder_span_end_frac,
-            );
-    (movable.is_finite() && movable > 0.0).then_some(movable)
-}
-
 fn unavailable(reasons: Vec<FlopsTransportUnverifiedReason>) -> FlopsTransportEvaluation {
     let mut reasons = reasons;
     reasons.sort_unstable();
@@ -160,6 +103,25 @@ pub fn evaluate_product(
     geometry: &GeometryConfig,
     controls: &ControlSurfacesConfig,
     flops: &FlopsTransportConfig,
+) -> FlopsTransportEvaluation {
+    evaluate_product_at_design_gross_mass(plane, requirements, geometry, controls, flops, None)
+}
+
+/// [`evaluate_product`] with the FLOPS design gross mass `DG` declared
+/// separately from the takeoff-mass requirement.
+///
+/// `None` sizes at `requirements.mtow_kg`, the takeoff mass of the case being
+/// evaluated. `Some` is the declared structural design weight -- the
+/// `flops_structure.design_gross_mass_kg` override, which is also how a
+/// fixed-aircraft mission closure keeps the surface-controls term at the
+/// aircraft's design weight while the closure mass moves.
+pub fn evaluate_product_at_design_gross_mass(
+    plane: &Airplane,
+    requirements: &DesignRequirements,
+    geometry: &GeometryConfig,
+    controls: &ControlSurfacesConfig,
+    flops: &FlopsTransportConfig,
+    design_gross_mass_kg: Option<f64>,
 ) -> FlopsTransportEvaluation {
     let mut reasons = Vec::new();
     let rated_thrust_per_engine_n = match geometry.engine.active_model() {
@@ -372,7 +334,7 @@ pub fn evaluate_product(
     let inputs = FlopsTransportInputs {
         maximum_mach,
         design_range_nmi,
-        design_gross_mass_kg: requirements.mtow_kg,
+        design_gross_mass_kg: design_gross_mass_kg.unwrap_or(requirements.mtow_kg),
         wing_area_m2: wing.reference_area(),
         movable_surface_area_m2,
         wing_span_m: wing.reference_span(),
@@ -564,12 +526,47 @@ mod tests {
         );
     }
 
+    #[test]
+    fn a_turboprop_installation_is_reported_unsupported_and_never_given_a_fake_thrust() {
+        // NASA/TM-2017-219627 Vol. I has no propeller, gearbox or shaft-power
+        // mass equation: section 5.3 scales engine mass from rated thrust
+        // (equations 75-76) and Appendix D lists no power variable. A
+        // turboprop therefore has no published FLOPS engine or propeller
+        // mass, and substituting a thrust for its shaft power would be an
+        // invention. The evaluation must say so instead.
+        let geometry = GeometryConfig::default();
+        let plane = AircraftBuilder::new(Some(geometry.clone()))
+            .build(None, true)
+            .unwrap_or_else(|error| panic!("default geometry builds: {error}"));
+        let turboprop_config =
+            alas_config::AlasConfig::from_value(&serde_json::json!({"preset": "ATR72-600"}))
+                .unwrap_or_else(|error| panic!("the ATR preset loads: {error}"));
+        let mut turboprop_geometry = geometry;
+        turboprop_geometry.engine = turboprop_config.geometry.engine;
+        let Ok(ActiveEngineModel::Turboprop(_)) = turboprop_geometry.engine.active_model() else {
+            panic!("the ATR baseline must resolve as a turboprop model");
+        };
+        let result = evaluate_product(
+            &plane,
+            &DesignRequirements::default(),
+            &turboprop_geometry,
+            &ControlSurfacesConfig::default(),
+            &complete_test_config(),
+        );
+        let FlopsTransportEvaluation::Unverified { reasons, .. } = result else {
+            panic!("a turboprop must not produce a verified thrust-based FLOPS buildup");
+        };
+        assert!(reasons.contains(&FlopsTransportUnverifiedReason::UnsupportedPropulsionTechnology));
+    }
+
     fn complete_provenance(document: &str) -> FlopsInputProvenance {
         FlopsInputProvenance {
             document: document.to_owned(),
             revision: "test revision".to_owned(),
             location: "test locator".to_owned(),
             applicability: "test configured variant".to_owned(),
+            evidence: alas_config::FlopsInputEvidence::UserDeclared,
+            uncertainty: "test fixture".to_owned(),
         }
     }
 

@@ -155,11 +155,28 @@ pub(super) fn select_load_case(
         analyses.takeoff_mass_kg = takeoff_mass_kg;
         analyses.minimum_mass_kg = None;
         native_flights += 1;
-        let flown = fly_with_guidance(schedule.to_vec(), request, analyses)?;
+        let flown = match fly_with_guidance(schedule.to_vec(), request, analyses) {
+            Ok(result) => result,
+            Err(error) => {
+                // A policy closure is an optional refinement of the load
+                // case. If the native mission cannot be evaluated at its
+                // trial mass, return the last analytically admissible case
+                // with an explicit partial-mission reason. The caller still
+                // runs the final flight and reports its stopping condition;
+                // this is a mission result, never a mass-method fallback.
+                analyses.takeoff_mass_kg = fuel_loading.analyzed_takeoff_mass_kg;
+                analyses.minimum_mass_kg = Some(zero_fuel_mass_kg);
+                return Ok(maximum(Some(format!(
+                    "native mission could not evaluate policy closure at {takeoff_mass_kg:.1} kg: {error}"
+                ))));
+            }
+        };
         let Some(summary) = flown.completed_summary() else {
-            return Err(format!(
+            analyses.takeoff_mass_kg = fuel_loading.analyzed_takeoff_mass_kg;
+            analyses.minimum_mass_kg = Some(zero_fuel_mass_kg);
+            return Ok(maximum(Some(format!(
                 "the route could not be flown at {takeoff_mass_kg:.1} kg during the fuel-policy closure"
-            ));
+            ))));
         };
         let leg = LegEstimate {
             fuel_kg: summary.trip_fuel_kg,
