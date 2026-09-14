@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-
 // The private dispatcher carries the explicit parity/product mode seam.
 #[allow(clippy::too_many_arguments)]
 fn run_airfoil_screening_with_mass_model(
@@ -10,7 +9,7 @@ fn run_airfoil_screening_with_mass_model(
     options: &AirfoilScreeningOptions,
     mses_dir: Option<&Path>,
     mut progress_callback: Option<&mut dyn FnMut(&str)>,
-    should_cancel: Option<&dyn Fn() -> bool>,
+    should_cancel: Option<&(dyn Fn() -> bool + Sync)>,
     mass_model: ScreeningMassModel,
 ) -> Result<AirfoilScreeningResult, String> {
     if !options.alpha_min_deg.is_finite()
@@ -19,7 +18,9 @@ fn run_airfoil_screening_with_mass_model(
         || options.alpha_step_deg <= 0.0
         || options.alpha_max_deg < options.alpha_min_deg
     {
-        return Err("screening alpha sweep requires finite ordered bounds and a positive step".to_owned());
+        return Err(
+            "screening alpha sweep requires finite ordered bounds and a positive step".to_owned(),
+        );
     }
     let geometry = match mass_model {
         ScreeningMassModel::ReferenceCompatibility => ScreeningGeometry::ReferenceCompatibility,
@@ -56,54 +57,67 @@ fn run_airfoil_screening_with_mass_model(
     let mut errors: Vec<HashMap<String, String>> = Vec::new();
     let mut cancelled = false;
 
-    // Stage 1: 2-D screening
-    for (i, name) in names.iter().enumerate() {
-        if let Some(cancel_fn) = should_cancel {
-            if cancel_fn() {
-                cancelled = true;
-                break;
+    // Stage 1: 2-D screening. Scoring one candidate touches nothing shared,
+    // so the sweep runs one candidate per core. The coordinator alone reports
+    // progress, and the results come back in library order by index, so the
+    // ranking does not depend on completion timing.
+    let stage1_workers = thread::available_parallelism().map_or(4, |n| n.get());
+    let mut n_completed = 0usize;
+    let mut n_ok = 0usize;
+    let mut n_err = 0usize;
+    let scored = run_bounded_indexed(
+        n_total,
+        stage1_workers,
+        Arc::new(AtomicBool::new(false)),
+        should_cancel,
+        |index| {
+            score_candidate_with_geometry(
+                &names[index],
+                config,
+                &dv_val,
+                section_mach,
+                reynolds,
+                cl_target,
+                config.mass_model.fuel_tank_usable_fraction,
+                &alphas_deg,
+                model_size,
+                options.min_tc,
+                options.max_tc,
+                options.cl_band,
+                geometry,
+            )
+        },
+        |_, cand| {
+            n_completed += 1;
+            if cand.status == "ok" {
+                n_ok += 1;
+            } else {
+                n_err += 1;
             }
-        }
-
-        let cand = score_candidate_with_geometry(
-            name,
-            config,
-            &dv_val,
-            section_mach,
-            reynolds,
-            cl_target,
-            config.mass_model.fuel_tank_usable_fraction,
-            &alphas_deg,
-            model_size,
-            options.min_tc,
-            options.max_tc,
-            options.cl_band,
-            geometry,
-        );
-
+            if let Some(cb) = progress_callback.as_mut() {
+                if n_completed % 50 == 0 || n_completed == n_total {
+                    let msg = format!(
+                        "Stage 1 (2-D): {n_completed}/{n_total} evaluated -- {n_ok} ok, {n_err} errors"
+                    );
+                    cb(&msg);
+                }
+            }
+        },
+    );
+    if scored.len() < n_total {
+        cancelled = true;
+    }
+    for (index, cand) in scored {
         if cand.status == "ok" {
             results.push(cand);
         } else {
             let mut err_map = HashMap::new();
-            err_map.insert("name".to_string(), name.clone());
+            err_map.insert("name".to_string(), names[index].clone());
             err_map.insert(
                 "error".to_string(),
                 cand.error.unwrap_or_else(|| "unknown error".to_string()),
             );
             errors.push(err_map);
-        }
-
-        if let Some(ref mut cb) = progress_callback {
-            if (i + 1) % 50 == 0 || i + 1 == n_total {
-                let msg = format!(
-                    "Stage 1 (2-D): {}/{} evaluated -- {} ok, {} errors",
-                    i + 1,
-                    n_total,
-                    results.len(),
-                    errors.len()
-                );
-                cb(&msg);
-            }
         }
     }
 
@@ -248,11 +262,11 @@ fn run_airfoil_screening_with_mass_model(
                 mses_indices.len(),
                 MAX_MSES_WORKERS,
                 cancellation.clone(),
+                should_cancel,
                 |job_index| {
                     let idx = mses_indices[job_index];
                     let mut candidate = results[idx].clone();
                     let worker_cancellation = cancellation.clone();
-                    let worker_cancel = || worker_cancellation.load(Ordering::Relaxed);
                     verify_candidate_mses(
                         &mut candidate,
                         config,
@@ -261,7 +275,7 @@ fn run_airfoil_screening_with_mass_model(
                         altitude,
                         cl_target,
                         dir,
-                        Some(&worker_cancel),
+                        Some(worker_cancellation.as_ref()),
                     );
                     candidate
                 },
@@ -363,6 +377,7 @@ fn run_bounded_indexed<T, F, P>(
     job_count: usize,
     worker_limit: usize,
     cancellation: Arc<AtomicBool>,
+    cancel_check: Option<&(dyn Fn() -> bool + Sync)>,
     job: F,
     mut on_result: P,
 ) -> Vec<(usize, T)>
@@ -380,6 +395,18 @@ where
     let mut output = Vec::with_capacity(job_count);
     thread::scope(|scope| {
         let job_ref = &job;
+        if let Some(cancel_check) = cancel_check {
+            let cancellation = cancellation.clone();
+            scope.spawn(move || {
+                while !cancellation.load(Ordering::Relaxed) {
+                    if cancel_check() {
+                        cancellation.store(true, Ordering::Relaxed);
+                        break;
+                    }
+                    thread::sleep(std::time::Duration::from_millis(20));
+                }
+            });
+        }
         for _ in 0..workers {
             let sender = sender.clone();
             let next = next.clone();
@@ -403,6 +430,10 @@ where
             on_result(index, &value);
             output.push((index, value));
         }
+        // Stop the scoped cancellation monitor after all workers have
+        // drained. Without this release edge a non-cancelled sweep would
+        // keep the monitor alive until `thread::scope` tried to join it.
+        cancellation.store(true, Ordering::Relaxed);
     });
     output.sort_by_key(|(index, _)| *index);
     output

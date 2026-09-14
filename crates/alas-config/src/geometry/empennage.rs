@@ -38,10 +38,10 @@ pub struct EmpennageConfig {
     )]
     pub tail_airfoil: String,
 
-    /// How finely each tail surface is panelled for the vortex lattice.
+    /// How many spanwise panels each tail surface is meshed into.
     #[config(
         label = "Tail VLM panel count",
-        help = "Spanwise panel refinement per tail surface for the vortex-lattice solver."
+        help = "Spanwise panels across each tail surface for the vortex-lattice solver, as an absolute count rather than a count per section. Both stabilizers are single-section surfaces, so this is the panel count they already had; it is stated absolutely so a cranked fin later gets the same density rather than twice it."
     )]
     pub n_subdivisions: i64,
 

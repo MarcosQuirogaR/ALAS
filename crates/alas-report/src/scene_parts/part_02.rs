@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-
 impl Axes2D {
     /// Construct a 2D axes mapping data coordinates to a canvas bounding box.
     pub fn new(rect: (f64, f64, f64, f64), x_range: (f64, f64), y_range: (f64, f64)) -> Self {
@@ -19,6 +18,8 @@ impl Axes2D {
             y_max,
             x_scale: Scale::Linear,
             y_scale: Scale::Linear,
+            x_tick_decimals: None,
+            y_tick_decimals: None,
         }
     }
 
@@ -31,6 +32,18 @@ impl Axes2D {
     /// Set the Y-axis scale (chainable).
     pub fn with_y_scale(mut self, scale: Scale) -> Self {
         self.y_scale = scale;
+        self
+    }
+
+    /// Set a fixed number of decimal places for X-axis tick labels.
+    pub fn with_x_tick_decimals(mut self, decimals: usize) -> Self {
+        self.x_tick_decimals = Some(decimals);
+        self
+    }
+
+    /// Set a fixed number of decimal places for Y-axis tick labels.
+    pub fn with_y_tick_decimals(mut self, decimals: usize) -> Self {
+        self.y_tick_decimals = Some(decimals);
         self
     }
 
@@ -299,4 +312,3 @@ mod tests {
         assert_eq!(points.last().copied(), Some([110.0, 50.0]));
     }
 }
-

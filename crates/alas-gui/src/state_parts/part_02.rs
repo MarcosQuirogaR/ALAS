@@ -4,7 +4,6 @@
 use std::sync::mpsc::{channel, TryRecvError};
 use std::thread;
 
-
 /// Apply only the user-owned machine locations to a freshly selected design.
 /// These locations describe the local environment, not an aircraft, so a
 /// preset must never replace a person's solver, navigation-data, or route
@@ -111,81 +110,6 @@ impl AppState {
                 LogKind::Error,
             ),
         }
-    }
-
-    /// Open the walkthrough and remember the shell state it temporarily changes.
-    pub fn begin_walkthrough(&mut self) {
-        if self.walkthrough_restore.is_none() {
-            self.walkthrough_restore = Some(WalkthroughRestore {
-                active_page: self.active_page.clone(),
-                nav_pinned: self.nav_pinned,
-                nav_hover_open: self.nav_hover_open,
-                preview_open: self.preview_open,
-            });
-        }
-        self.walkthrough_step = 0;
-        self.show_walkthrough = true;
-        self.prepare_walkthrough_step();
-    }
-
-    /// Make the current step's page or normally-collapsed shell region visible.
-    pub(crate) fn prepare_walkthrough_step(&mut self) {
-        if !self.show_walkthrough {
-            return;
-        }
-        let Some(step) = TOUR_STEPS.get(self.walkthrough_step) else {
-            self.finish_walkthrough();
-            return;
-        };
-        if let Some(page) = step.page {
-            self.active_page = page.to_owned();
-        }
-        match step.target {
-            Some(TourTarget::Navigation) => {
-                self.nav_pinned = true;
-                self.nav_hover_open = false;
-            }
-            Some(TourTarget::PreviewDock) => self.preview_open = true,
-            _ => {}
-        }
-    }
-
-    /// Close the tour and restore the page and docks it temporarily changed.
-    pub(crate) fn finish_walkthrough(&mut self) {
-        self.show_walkthrough = false;
-        self.walkthrough_targets.clear();
-        if let Some(restore) = self.walkthrough_restore.take() {
-            self.active_page = restore.active_page;
-            self.nav_pinned = restore.nav_pinned;
-            self.nav_hover_open = restore.nav_hover_open;
-            self.preview_open = restore.preview_open;
-        }
-    }
-
-    /// Start a fresh collection of response geometry for this frame.
-    pub(crate) fn clear_walkthrough_targets(&mut self) {
-        self.walkthrough_targets.clear();
-    }
-
-    /// Record one shell region from the response egui actually laid out.
-    pub(crate) fn record_walkthrough_target(&mut self, target: TourTarget, rect: egui::Rect) {
-        if self.show_walkthrough && rect.is_finite() && rect.is_positive() {
-            self.walkthrough_targets.insert(target, rect);
-        }
-    }
-
-    /// Return the measured rectangle for the current walkthrough target.
-    pub(crate) fn current_walkthrough_target(&self) -> Option<egui::Rect> {
-        let target = TOUR_STEPS.get(self.walkthrough_step)?.target?;
-        self.walkthrough_targets.get(&target).copied()
-    }
-
-    /// Whether the current tour step owns a particular shell target.
-    pub(crate) fn walkthrough_targets(&self, target: TourTarget) -> bool {
-        self.show_walkthrough
-            && TOUR_STEPS
-                .get(self.walkthrough_step)
-                .is_some_and(|step| step.target == Some(target))
     }
 
     /// Return the orbit state belonging to one three-dimensional preview.
@@ -380,7 +304,9 @@ mod walkthrough_tests {
         assert_eq!(state.active_page, "inputs");
         assert!(state.preview_open);
 
-        state.walkthrough_step = 12;
+        // The randomizer walkthrough step was removed with the DOE/Random
+        // controls, so Results is now the following step.
+        state.walkthrough_step = 11;
         state.prepare_walkthrough_step();
         assert_eq!(state.active_page, "results");
 

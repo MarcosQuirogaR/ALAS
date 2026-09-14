@@ -8,15 +8,17 @@
 //! the same scored-candidate callback, so changing the search algorithm cannot
 //! silently change the aircraft physics being evaluated.
 
+// The saved `optimizer.solver.method` names that once selected these
+// population methods still load, but no longer choose a distinct search
+// algorithm (see `differential_evolution_tests`); the methods and their
+// shared helpers are kept, with their own tests, until the dispatch is
+// either rebuilt or the modules are retired outright.
+#![allow(dead_code)]
+
 mod cma_es;
 mod constrained_de;
 mod nsga2;
 mod turbo;
-
-pub(crate) use cma_es::run_cma_es;
-pub(crate) use constrained_de::run_feasibility_first_de;
-pub(crate) use nsga2::run_nsga2;
-pub(crate) use turbo::run_turbo_1;
 
 /// Objective and feasibility data attached to one evaluated design.
 #[derive(Debug, Clone, PartialEq)]

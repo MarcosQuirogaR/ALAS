@@ -83,10 +83,16 @@ pub struct DesignRequirements {
     pub aircraft_type: String,
 
     /// The named layout the cabin is filled from.
+    ///
+    /// The serialized values are historical identifiers (originally named
+    /// after the airline whose published layout each one reproduces, see
+    /// `alas-payload/src/build/presets.rs`) and must not change; only the
+    /// descriptive label the GUI shows for each one does
+    /// (`alas-gui/src/views/form_options.rs::display_option`).
     #[config(
         options = CabinPreset,
         label = "Cabin preset",
-        help = "Named seating/payload layout preset ('Ryanair', 'Iberia', 'Emirates' for passenger; 'Max payload', 'Dense payload' for cargo). 'Custom' lets you hand-edit the Cabin & Payload tab."
+        help = "Named seating/payload layout preset ('High-density single-class', 'Two-class (Business/Economy)', 'Three-class (First/Business/Economy)' for passenger; 'Max payload', 'Dense payload' for cargo). 'Custom' lets you hand-edit the Cabin & Payload tab."
     )]
     pub cabin_preset: String,
 
@@ -119,6 +125,14 @@ pub struct DesignRequirements {
         help = "Maximum structural payload (= MZFW - OEW), i.e. the most the airframe may carry regardless of how much the belly could physically hold. In passenger mode the detailed layout fills the lower-deck belly with revenue freight (on top of passengers + checked bags) up to this structural limit, so the payload -- and therefore the residual fuel (MTOW - OEW - payload) -- matches the real aircraft's max-payload point. A widebody belly can volumetrically hold far more than this structural cap, so without it 'fill the belly' overshoots. 0 = disabled (use the explicit Cabin & Payload belly_cargo_kg instead)."
     )]
     pub max_structural_payload_kg: f64,
+
+    /// The fewest passengers a candidate's geometry-resolved cabin may carry.
+    #[config(
+        advanced,
+        label = "Minimum passenger capacity",
+        help = "Hard floor on the geometry-resolved passenger capacity: a candidate whose class-mix and geometry produce fewer than this many seats is scored infeasible under the configured geometry constraint policy. 0 = disabled (the default) -- capacity is otherwise always dynamic, whatever the configured cabin class-mix percentages and the candidate's actual fuselage/cabin geometry produce, with no minimum."
+    )]
+    pub min_passenger_capacity: i64,
 
     /// Limit load factor with the certification safety margin applied.
     #[config(
@@ -203,7 +217,7 @@ pub struct DesignRequirements {
         advanced,
         label = "Mass per passenger",
         unit = "kg",
-        help = "Combined average mass per occupant (body + baggage). FAA AC 120-27E standard is 100 kg; airlines may use 90-105 kg."
+        help = "Combined average mass per occupant (body + baggage). FAA AC 120-27E standard is 100 kg; airlines may use 90-105 kg. This is the single load-case authority for every product path (report, GUI preview, pipeline, export and the optimizer): every seated passenger, of any class, is priced at this combined mass, with cabin.passenger.checked_bag_mass_kg as the baggage share and the occupant slot the remainder. Per-class seat masses (e.g. a named cabin preset's business/economy figures) are cosmetic/geometry seeds only and are overwritten by this value."
     )]
     pub passenger_mass_kg: f64,
 
@@ -229,6 +243,7 @@ impl Default for DesignRequirements {
             num_passengers: 350,
             cargo_payload_kg: 102_100.0,
             max_structural_payload_kg: 0.0,
+            min_passenger_capacity: 0,
             ultimate_load_factor: 3.75,
             dive_speed_m_s: 220.0,
             limit_load_factor_neg: -1.0,
@@ -454,5 +469,15 @@ mod tests {
             }
             crate::Entry::Node(_) => panic!("a passenger count is not a group"),
         }
+    }
+
+    #[test]
+    fn the_passenger_capacity_floor_defaults_to_disabled_and_is_advanced() {
+        assert_eq!(DesignRequirements::default().min_passenger_capacity, 0);
+        let schema = DesignRequirements::default().schema();
+        let field = schema
+            .field("min_passenger_capacity")
+            .expect("min_passenger_capacity is in the schema");
+        assert!(field.advanced);
     }
 }

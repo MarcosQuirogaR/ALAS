@@ -65,7 +65,7 @@ pub fn figure_lto_for_airport(
 ) -> Scene {
     let takeoff_mass_kg = config.requirements.mtow_kg;
     let landing_mass_kg = config
-        .landing_mass_limit_kg(takeoff_mass_kg)
+        .design_landing_mass_for(takeoff_mass_kg)
         .clamp(0.0, takeoff_mass_kg);
     figure_lto_for_airport_at_masses(
         report,
@@ -283,7 +283,7 @@ fn draw_runway(scene: &mut Scene, performance: &FieldPerformance, pal: &crate::t
     let marker_half_length = rw_h * 1.15;
     for (name, speed, colour) in speeds {
         let position = if v2 > 0.0 {
-            x(toda * (speed / v2).powi(2).min(1.0) * 0.75)
+            x(performance.todr_m * (speed / v2).powi(2).min(1.0) * 0.75)
         } else {
             x(0.0)
         };
@@ -544,5 +544,57 @@ mod tests {
             _ => None,
         });
         assert!(distance_label_x.is_some_and(|x| x <= 40.0));
+    }
+
+    /// The V1/VR/V2 dashed markers must sit within the drawn TODR distance,
+    /// scaled the same way as the golden `gen_w62_lto.py` sidecar (by
+    /// `todr_m`, not by the full declared TODA). A prior port regression
+    /// scaled by TODA instead, pushing the markers far past the TODR/BFL
+    /// arrows whenever TODR is a small fraction of the available runway.
+    #[test]
+    fn v_speed_markers_are_scaled_by_todr_not_toda() {
+        let performance = sample_performance();
+        let scene = draw_lto(&performance, "Departure", None);
+
+        let left = 60.0;
+        let field_width = 780.0;
+        let margin = field_width * 0.05;
+        let runway_start = left + margin;
+        let runway_width = field_width - 2.0 * margin;
+        let toda = performance.toda_m();
+        let x = |distance: f64| runway_start + distance / toda * runway_width;
+
+        let v2 = performance.v_speeds.v2_ms;
+        for (name, speed, colour) in [
+            ("V1", performance.v_speeds.v1_ms, "#f1c40f"),
+            ("VR", performance.v_speeds.v_r_ms, "#e67e22"),
+            ("V2", performance.v_speeds.v2_ms, "#3498db"),
+        ] {
+            let expected_todr_based = x(performance.todr_m * (speed / v2).powi(2).min(1.0) * 0.75);
+            let expected_toda_based = x(toda * (speed / v2).powi(2).min(1.0) * 0.75);
+
+            let actual = scene
+                .elements
+                .iter()
+                .find_map(|element| match element {
+                    SceneElement::Line { p1, stroke, .. }
+                        if stroke.dash_array.is_some()
+                            && stroke.color == Color::from_hex(colour) =>
+                    {
+                        Some(p1[0])
+                    }
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("no dashed marker line found for {name}"));
+
+            assert!(
+                (actual - expected_todr_based).abs() < 1e-6,
+                "{name} marker at {actual}, expected {expected_todr_based} (todr-based)"
+            );
+            assert!(
+                (expected_toda_based - expected_todr_based).abs() > 1.0,
+                "fixture does not distinguish todr- from toda-based scaling for {name}"
+            );
+        }
     }
 }

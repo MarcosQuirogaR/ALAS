@@ -7,16 +7,20 @@
 //! design, multi-stage engineering analysis, optimization, and visualization.
 
 pub mod app;
+mod branding;
+pub mod cfd;
 pub mod config_edit;
 pub mod export;
 pub mod feedback;
 pub mod layout;
 #[cfg(debug_assertions)]
 mod layout_debug;
+pub(crate) mod native_viewport;
 pub mod nav;
 mod nav_overlay;
 pub mod path_picker;
 pub mod run;
+pub mod sandbox;
 pub mod scene;
 pub mod screening;
 pub mod state;
@@ -25,20 +29,20 @@ pub mod uav;
 mod view_controls;
 pub mod viewport;
 pub mod views;
+mod walkthrough_state;
 
 pub use app::AlasApp;
+pub use branding::native_options;
 pub use state::AppState;
 pub use theme::{apply_theme, AppTheme};
 
 /// Launch the native ALAS desktop graphical user interface.
 pub fn run() -> Result<(), eframe::Error> {
-    let native_options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_title("ALAS - Aircraft Layout and Analysis Suite")
-            .with_inner_size([1280.0, 820.0])
-            .with_min_inner_size([880.0, 560.0]),
-        ..Default::default()
-    };
+    let native_options = native_options(
+        "ALAS - Aircraft Layout and Analysis Suite",
+        [1280.0, 820.0],
+        [880.0, 560.0],
+    );
 
     eframe::run_native(
         "ALAS",

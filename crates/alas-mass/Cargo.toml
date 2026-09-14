@@ -14,6 +14,9 @@ alas-geom = { path = "../alas-geom" }
 # `breakdown` reads `DesignRequirements`, `GeometryConfig` and
 # `MassModelConfig` directly, exactly as `alas/physics/mass.py` does.
 alas-config = { path = "../alas-config" }
+# `wing_reconciliation` strength-sizes the primary box through the structural
+# crate; `alas-struct` depends on config/exec/geom only, so this is acyclic.
+alas-struct = { path = "../alas-struct" }
 # `transport_weight`'s correlations are written in imperial units and convert
 # through these ratios at every formula, exactly as the mission analysis model source does.
 alas-units = { path = "../alas-units" }

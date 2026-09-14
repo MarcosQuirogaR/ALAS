@@ -40,12 +40,15 @@
 //!
 //! # Scope
 //!
-//! Vectorization is not translated. Upstream accepts arrays for every input
-//! and broadcasts them to a common length; both reached call sites pass
-//! scalars (`airfoil_screening.py` sweeps alpha in a Python loop over
-//! candidates, and `visualization.py` loops over its grid), and a
-//! broadcasting rule is a lot of machinery to reproduce for a shape nothing
-//! asks for.
+//! Upstream's broadcasting rule is not translated: it accepts arrays for
+//! every input and broadcasts them to a common length, and both reached call
+//! sites pass scalars (`airfoil_screening.py` sweeps alpha in a Python loop
+//! over candidates, and `visualization.py` loops over its grid). The one
+//! batch shape this program does ask for -- one section at a schedule of
+//! angles -- is [`evaluate_sweep`], which runs the network once over the
+//! whole schedule and returns, bit for bit, what [`evaluate`] returns for
+//! each angle; it exists because the scalar path read every weight once per
+//! angle and made the airfoil screening network-bound.
 //!
 //! `nf.bl_x_points` -- the 32 chord stations the boundary layer is reported
 //! at -- is not translated either. It is externally accessible upstream, and
@@ -130,11 +133,59 @@ pub fn evaluate(
     let mirrored_input = mirror_input(&input);
     let mut mirrored = network.evaluate(&mirrored_input);
     mirrored[0] -= distribution.squared_mahalanobis_distance(&mirrored_input) / penalty;
-    let restored = restore_mirrored(&mirrored);
 
+    Ok(fuse(
+        &direct,
+        &restore_mirrored(&mirrored),
+        conditions.reynolds,
+    ))
+}
+
+/// [`evaluate`] over a schedule of flight conditions for one section, with
+/// the network run once over the whole batch -- both passes of every
+/// condition together. The outputs are, in order, exactly what evaluating
+/// each condition alone returns.
+///
+/// # Errors
+///
+/// See [`evaluate`].
+pub fn evaluate_sweep(
+    airfoil: &KulfanAirfoil,
+    conditions: &[Conditions],
+    size: ModelSize,
+) -> Result<Vec<NetworkAero>, NeuralFoilError> {
+    let network = parameters::network(size);
+    let distribution = parameters::distribution();
+    let penalty = 2.0 * distribution.inputs() as f64;
+
+    let mut inputs = Vec::with_capacity(2 * conditions.len());
+    for conditions in conditions {
+        let input = features(airfoil, conditions)?;
+        inputs.push(mirror_input(&input));
+        inputs.push(input);
+    }
+    // Direct at odd, mirrored at even positions: pushed mirrored-first so
+    // the swap above keeps `input` usable without a copy.
+    let outputs = network.evaluate_batch(&inputs);
+    Ok(conditions
+        .iter()
+        .zip(inputs.chunks_exact(2).zip(outputs.chunks_exact(2)))
+        .map(|(conditions, (pair_in, pair_out))| {
+            let mut direct = pair_out[1].clone();
+            direct[0] -= distribution.squared_mahalanobis_distance(&pair_in[1]) / penalty;
+            let mut mirrored = pair_out[0].clone();
+            mirrored[0] -= distribution.squared_mahalanobis_distance(&pair_in[0]) / penalty;
+            fuse(&direct, &restore_mirrored(&mirrored), conditions.reynolds)
+        })
+        .collect())
+}
+
+/// Average the direct and the un-mirrored evaluation, squash the confidence
+/// and clamp the transition stations, then name the channels.
+fn fuse(direct: &[f64], restored: &[f64], reynolds: f64) -> NetworkAero {
     let mut fused: Vec<f64> = direct
         .iter()
-        .zip(&restored)
+        .zip(restored)
         .map(|(one, other)| (one + other) / 2.0)
         .collect();
 
@@ -142,7 +193,7 @@ pub fn evaluate(
     fused[4] = fused[4].clamp(0.0, 1.0);
     fused[5] = fused[5].clamp(0.0, 1.0);
 
-    Ok(unpack(&fused, conditions.reynolds))
+    unpack(&fused, reynolds)
 }
 
 /// The twenty-five features the network takes, in upstream's order.
@@ -297,6 +348,41 @@ fn surface(fused: &[f64], base: usize, reynolds: f64) -> BoundaryLayer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_batched_sweep_reproduces_every_single_evaluation_bit_for_bit() {
+        let airfoil = section();
+        let schedule: Vec<Conditions> = [-6.0, -1.5, 0.0, 2.25, 7.0, 13.5]
+            .into_iter()
+            .map(|alpha| Conditions::new(alpha, 4.0e6))
+            .collect();
+        for size in ModelSize::all() {
+            let batched = evaluate_sweep(&airfoil, &schedule, size).expect("sweep");
+            assert_eq!(batched.len(), schedule.len());
+            for (conditions, from_batch) in schedule.iter().zip(&batched) {
+                let alone = evaluate(&airfoil, conditions, size).expect("single");
+                assert_eq!(from_batch.cl.to_bits(), alone.cl.to_bits());
+                assert_eq!(from_batch.cd.to_bits(), alone.cd.to_bits());
+                assert_eq!(from_batch.cm.to_bits(), alone.cm.to_bits());
+                assert_eq!(
+                    from_batch.analysis_confidence.to_bits(),
+                    alone.analysis_confidence.to_bits()
+                );
+                assert_eq!(from_batch.top_xtr.to_bits(), alone.top_xtr.to_bits());
+                assert_eq!(
+                    from_batch.upper.theta.map(f64::to_bits),
+                    alone.upper.theta.map(f64::to_bits)
+                );
+                assert_eq!(
+                    from_batch.lower.ue_over_vinf.map(f64::to_bits),
+                    alone.lower.ue_over_vinf.map(f64::to_bits)
+                );
+            }
+        }
+        assert!(evaluate_sweep(&airfoil, &[], ModelSize::Large)
+            .expect("empty sweep")
+            .is_empty());
+    }
 
     fn section() -> KulfanAirfoil {
         // A plausible cambered section, close enough to the training data

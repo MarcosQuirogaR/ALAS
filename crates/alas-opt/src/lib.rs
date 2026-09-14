@@ -49,10 +49,10 @@ pub use gradient::{
 };
 pub use history::OptimizationHistory;
 pub use mdo::{
-    assess_candidate, assess_candidate_with_polar, evaluate_mission_sized,
-    evaluate_mission_sized_with_assessment, CandidateAssessment, ConstraintFamily,
-    ConstraintResidual, ExternalPolar, PolarConditionTolerance, SegmentMissionModel,
-    SizedCandidate,
+    assess_candidate, assess_candidate_with_polar, assess_product_candidate, canonicalize_design,
+    evaluate_mission_sized, evaluate_mission_sized_with_assessment, CandidateAssessment,
+    ConstraintFamily, ConstraintResidual, ExternalPolar, PolarConditionTolerance,
+    ProductStateProvenance, ResolvedProductState, SegmentMissionModel, SizedCandidate,
 };
 pub use objective::{
     wing_fuel_volume_m3, wing_fuel_volume_m3_reference_compatibility, DesignObjective,

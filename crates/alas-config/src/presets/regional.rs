@@ -53,9 +53,8 @@ pub fn atr72_600() -> AircraftPreset {
             mtow_kg: Some(23_000.0),
             mlw_kg: Some(22_350.0),
             mzfw_kg: Some(21_000.0),
-            // Representative manufacturer planning weight; operator equipment
-            // and cabin choices move OEW appreciably.
-            oew_kg: Some(13_450.0),
+            // Factsheet typical in-service value; see `crate::oew_reference`.
+            oew_kg: crate::oew_reference::preset_reference_oew_kg("ATR72-600"),
             usable_fuel_mass_kg: Some(5_000.0),
             reference_wing_area_m2: Some(61.0),
             planning_seats: Some(72),

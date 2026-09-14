@@ -17,6 +17,89 @@ use std::time::{Duration, Instant};
 
 use crate::process::{kill_process_tree, NewProcessGroup, NoConsoleWindow};
 
+/// Wake model declared by the native `.vspaero` setup.
+///
+/// This is setup provenance, not a convergence result. A frozen wake is a
+/// deliberately fixed-surface solve; it must never be reported as a
+/// converged free-wake solution merely because the process exited cleanly.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VspaeroWakeMode {
+    /// The wake is allowed to update through the requested iterations.
+    FreeWake,
+    /// The wake is configured to freeze at the recorded outer-loop iteration.
+    FrozenWake {
+        /// Iteration at which VSPAERO is configured to stop updating the wake.
+        at_iteration: usize,
+    },
+}
+
+impl VspaeroWakeMode {
+    /// Stable text used by retained runtime summaries.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::FreeWake => "free_wake",
+            Self::FrozenWake { .. } => "frozen_wake",
+        }
+    }
+}
+
+/// Wake orientation represented by a hand-authored VSPAERO case.
+///
+/// The native case format does not carry an independent wake-direction vector;
+/// VSPAERO initializes the wake in the freestream direction. Recording that
+/// fact keeps a frozen result distinct from ALAS/AVL cases that use an
+/// X-parallel trailing wake.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VspaeroWakeAlignment {
+    /// Native VSPAERO initial wake follows the freestream direction.
+    InitialFreeStream,
+}
+
+impl VspaeroWakeAlignment {
+    /// Stable text used by retained runtime summaries.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::InitialFreeStream => "initial_free_stream",
+        }
+    }
+}
+
+/// Wake and linear-solver settings parsed from a native `.vspaero` setup.
+///
+/// The values describe what the case requested. They do not prove that the
+/// native process reached the freeze iteration or that its coefficient history
+/// converged; those claims remain the responsibility of the result/history
+/// checks in the caller.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct VspaeroWakeSettings {
+    /// Requested outer wake iterations.
+    pub wake_iterations: usize,
+    /// Configured wake-freeze iteration.
+    pub freeze_wake_at_iteration: usize,
+    /// Whether VSPAERO's implicit wake coupling was requested.
+    pub implicit_wake: bool,
+    /// Wake relaxation factor.
+    pub wake_relax: f64,
+    /// Forward GMRES convergence factor.
+    pub forward_gmres_convergence_factor: f64,
+    /// Native initial wake alignment.
+    pub initial_wake_alignment: VspaeroWakeAlignment,
+}
+
+impl VspaeroWakeSettings {
+    /// Classify the declared setup as free or frozen using its own iteration
+    /// settings. This does not assert that the process reached that iteration.
+    pub fn mode(self) -> VspaeroWakeMode {
+        if self.freeze_wake_at_iteration <= self.wake_iterations {
+            VspaeroWakeMode::FrozenWake {
+                at_iteration: self.freeze_wake_at_iteration,
+            }
+        } else {
+            VspaeroWakeMode::FreeWake
+        }
+    }
+}
+
 /// Native VSPAERO process outcome before aerodynamic parsing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VspaeroProcessStatus {
@@ -49,7 +132,7 @@ impl VspaeroProcessStatus {
 }
 
 /// Files and diagnostics retained from one native VSPAERO invocation.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct VspaeroProcessResult {
     /// Explicit process-level state.
     pub status: VspaeroProcessStatus,
@@ -61,8 +144,70 @@ pub struct VspaeroProcessResult {
     pub stdout_path: PathBuf,
     /// Captured standard error.
     pub stderr_path: PathBuf,
+    /// Parsed wake/linear-solver setup values, when the adjacent setup is
+    /// complete enough to classify. `None` is an explicit unknown state.
+    pub wake_settings: Option<VspaeroWakeSettings>,
+    /// Declared wake model derived from `wake_settings`.
+    pub wake_mode: Option<VspaeroWakeMode>,
     /// Actionable failure detail, absent only for a completed run.
     pub error: Option<String>,
+}
+
+/// Parse wake and linear-solver provenance from native `.vspaero` text.
+///
+/// Missing or malformed settings return `None`; callers must preserve that
+/// unknown state rather than guessing free or frozen wake behavior.
+pub fn parse_wake_settings(setup_text: &str) -> Option<VspaeroWakeSettings> {
+    let wake_iterations = parse_nonnegative_setting(setup_text, "WakeIters")?;
+    let freeze_wake_at_iteration = parse_nonnegative_setting(setup_text, "FreezeWakeAtIteration")?;
+    let implicit_wake = parse_flag_setting(setup_text, "ImplicitWake")?;
+    let wake_relax = parse_finite_setting(setup_text, "WakeRelax")?;
+    let forward_gmres_convergence_factor =
+        parse_finite_setting(setup_text, "ForwardGMRESConvergenceFactor")?;
+    Some(VspaeroWakeSettings {
+        wake_iterations,
+        freeze_wake_at_iteration,
+        implicit_wake,
+        wake_relax,
+        forward_gmres_convergence_factor,
+        initial_wake_alignment: VspaeroWakeAlignment::InitialFreeStream,
+    })
+}
+
+/// Read and parse an adjacent native `.vspaero` setup for provenance.
+pub fn inspect_wake_settings(setup_path: &Path) -> Option<VspaeroWakeSettings> {
+    let setup_text = fs::read_to_string(setup_path).ok()?;
+    parse_wake_settings(&setup_text)
+}
+
+fn setting_value<'a>(setup_text: &'a str, key: &str) -> Option<&'a str> {
+    setup_text
+        .lines()
+        .filter_map(|line| line.split_once('='))
+        .filter(|(name, _)| name.trim() == key)
+        .map(|(_, value)| value.trim())
+        .next_back()
+}
+
+fn parse_nonnegative_setting(setup_text: &str, key: &str) -> Option<usize> {
+    setting_value(setup_text, key)?
+        .parse::<u64>()
+        .ok()?
+        .try_into()
+        .ok()
+}
+
+fn parse_flag_setting(setup_text: &str, key: &str) -> Option<bool> {
+    match setting_value(setup_text, key)?.parse::<u8>().ok()? {
+        0 => Some(false),
+        1 => Some(true),
+        _ => None,
+    }
+}
+
+fn parse_finite_setting(setup_text: &str, key: &str) -> Option<f64> {
+    let value = setting_value(setup_text, key)?.parse::<f64>().ok()?;
+    value.is_finite().then_some(value)
 }
 
 /// Execute native VSPAERO for an extensionless case path.
@@ -79,6 +224,8 @@ pub fn run_vspaero(
 ) -> VspaeroProcessResult {
     let polar_path = case_path.with_extension("polar");
     let history_path = case_path.with_extension("history");
+    let setup_path = case_path.with_extension("vspaero");
+    let wake_settings = inspect_wake_settings(&setup_path);
     let stdout_path = case_path.with_extension("vspaero.stdout.txt");
     let stderr_path = case_path.with_extension("vspaero.stderr.txt");
     let mut result = VspaeroProcessResult {
@@ -87,6 +234,8 @@ pub fn run_vspaero(
         polar_path: polar_path.clone(),
         stdout_path: stdout_path.clone(),
         stderr_path: stderr_path.clone(),
+        wake_mode: wake_settings.map(VspaeroWakeSettings::mode),
+        wake_settings,
         error: None,
     };
 
@@ -260,6 +409,56 @@ mod tests {
                 && error.contains("case.vkey")
                 && error.contains("case.vspaero")
         }));
+        assert_eq!(result.wake_settings, None);
+        assert_eq!(result.wake_mode, None);
+    }
+
+    #[test]
+    fn wake_setup_classifies_free_and_frozen_modes_without_claiming_convergence(
+    ) -> Result<(), &'static str> {
+        let free = parse_wake_settings(
+            "WakeIters = 20\nFreezeWakeAtIteration = 10000\nImplicitWake = 0\nWakeRelax = 1\nForwardGMRESConvergenceFactor = 1\n",
+        )
+        .ok_or("complete native setup should be observable")?;
+        assert_eq!(free.mode(), VspaeroWakeMode::FreeWake);
+        assert_eq!(free.mode().as_str(), "free_wake");
+        assert_eq!(free.initial_wake_alignment.as_str(), "initial_free_stream");
+        assert!(!free.implicit_wake);
+
+        let frozen = parse_wake_settings(
+            "WakeIters = 20\nFreezeWakeAtIteration = 1\nImplicitWake = 0\nWakeRelax = 0.75\nForwardGMRESConvergenceFactor = 1\n",
+        )
+        .ok_or("complete frozen setup should be observable")?;
+        assert_eq!(
+            frozen.mode(),
+            VspaeroWakeMode::FrozenWake { at_iteration: 1 }
+        );
+        assert_eq!(frozen.mode().as_str(), "frozen_wake");
+        assert_eq!(frozen.wake_iterations, 20);
+        assert_eq!(frozen.wake_relax, 0.75);
+        Ok(())
+    }
+
+    #[test]
+    fn incomplete_or_unsupported_wake_setup_remains_unknown() {
+        let base = "WakeIters = 20\nFreezeWakeAtIteration = 1\nImplicitWake = 0\nWakeRelax = 1\nForwardGMRESConvergenceFactor = 1\n";
+        assert!(parse_wake_settings(base).is_some());
+        assert!(parse_wake_settings(
+            "WakeIters = 20\nFreezeWakeAtIteration = 1\nImplicitWake = 2\nWakeRelax = 1\nForwardGMRESConvergenceFactor = 1\n"
+        )
+        .is_none());
+        assert!(parse_wake_settings(
+            "WakeIters = 20\nFreezeWakeAtIteration = 1\nImplicitWake = 0\nWakeRelax = nan\nForwardGMRESConvergenceFactor = 1\n"
+        )
+        .is_none());
+        assert!(parse_wake_settings(
+            "WakeIters = 20\nFreezeWakeAtIteration = 1\nImplicitWake = 0\nWakeRelax = 1\n"
+        )
+        .is_none());
+        assert!(parse_wake_settings(
+            "WakeIters = 18446744073709551616\nFreezeWakeAtIteration = 1\nImplicitWake = 0\nWakeRelax = 1\nForwardGMRESConvergenceFactor = 1\n"
+        )
+        .is_none());
     }
 
     #[test]

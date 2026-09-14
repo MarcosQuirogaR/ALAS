@@ -12,19 +12,13 @@ use crate::scene::{
 use crate::theme::get_palette;
 use alas_config::AlasConfig;
 use alas_mass::breakdown::{FUEL, OEW_KEYS, PAYLOAD};
-use alas_perf::landing_gear::size_landing_gear;
+use alas_perf::landing_gear::size_landing_gear_with_group_stations;
 use alas_pipeline::full_analysis::AnalysisReport;
 use std::collections::HashSet;
 use std::f64::consts::PI;
 // ---------------------------------------------------------------------------
 // figure_landing_gear_planform
 // ---------------------------------------------------------------------------
-
-/// The class name before its parenthetical detail, e.g. `"Narrowbody
-/// (~46x17 class, A320/737)"` -> `"Narrowbody"` -- `name.split(' (')[0]`.
-pub(super) fn short_tire_name(name: &str) -> &str {
-    name.split(" (").next().unwrap_or(name)
-}
 
 /// The fill color for one gear group -- upstream's `group_colors.get(...,
 /// "#9b59b6")`.
@@ -88,8 +82,12 @@ pub fn figure_landing_gear_planform(
     let fus_start_x = fus.xsecs[0].xyz_c[0];
     let fus_end_x = fus.xsecs[fus.xsecs.len() - 1].xyz_c[0];
     let fus_len = fus_end_x - fus_start_x;
-    let x_nlg = fus_start_x + fus_len * mm.nlg_x_fraction;
-    let x_mlg = x_mac_le + mm.mlg_x_fraction_mac * mac;
+    let fallback_x_nlg = fus_start_x + fus_len * mm.nlg_x_fraction;
+    let fallback_x_mlg = x_mac_le + mm.mlg_x_fraction_mac * mac;
+    let gear_stations =
+        gear_cfg.resolved_station_positions(fallback_x_nlg, fallback_x_mlg, fus_start_x, fus_len);
+    let x_nlg = gear_stations.x_nlg_m;
+    let x_mlg = gear_stations.x_mlg_m;
     let fus_diam = if config.geometry.fuselage.diameter_m > 0.0 {
         config.geometry.fuselage.diameter_m
     } else if fus.xsecs.is_empty() {
@@ -122,7 +120,7 @@ pub fn figure_landing_gear_planform(
         + masses.get(PAYLOAD).copied().unwrap_or(0.0)
         + masses.get(FUEL).copied().unwrap_or(0.0).max(0.0);
 
-    let gear = size_landing_gear(
+    let gear = size_landing_gear_with_group_stations(
         mtow_mass,
         x_nlg,
         x_mlg,
@@ -130,6 +128,7 @@ pub fn figure_landing_gear_planform(
         aero_aft_lim_x,
         fus_diam,
         fus_diam * 1.1,
+        &gear_stations.main_gear_x_m,
         gear_cfg,
     );
 
@@ -185,12 +184,7 @@ pub fn figure_landing_gear_planform(
     let to_px = |lateral: f64, station: f64| axes.map_point(lateral, -station);
 
     let mut scene = Scene::new(canvas_w, canvas_h, Some(Color::from_hex(pal.bg)));
-    let nlg_short = short_tire_name(gear.nlg_tire.name);
-    let mlg_short = short_tire_name(gear.mlg_tire.name);
-    scene.title = Some(format!(
-        "Landing Gear Planform -- NLG: {}x{}   MLG: {} strut(s) x {}w {}",
-        gear.n_nlg_wheels, nlg_short, gear.n_mlg_struts, gear.wheels_per_mlg_strut, mlg_short
-    ));
+    scene.title = Some("Landing-Gear Planform".to_owned());
     axes.draw_frame(&mut scene, pal);
 
     scene.add(SceneElement::Text {

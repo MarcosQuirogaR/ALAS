@@ -370,6 +370,7 @@ pub fn figure_cabin_cross_section(
     let pal = get_palette(theme);
     let mut scene = Scene::new(WIDTH, HEIGHT, Some(Color::from_hex(pal.bg)));
     scene.title = Some("Cabin Cross-Section".to_owned());
+    scene.suppress_derived_title();
     let Ok(cabin) = CabinGeometry::new(
         plane,
         &config.geometry,
@@ -444,13 +445,6 @@ pub fn figure_cabin_cross_section(
             "Representative station x = {station:.1} m | outer section {width:.2} x {height:.2} m"
         ),
         [WIDTH * 0.5, 50.0],
-        Color::from_hex(pal.tick),
-        9.5,
-    );
-    text(
-        &mut scene,
-        "Seat color = class | dark bins = sidewall pivot | light bins = center hinge | cargo = polygonal ULD profile",
-        [WIDTH * 0.5, HEIGHT - 20.0],
         Color::from_hex(pal.tick),
         9.5,
     );

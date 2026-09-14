@@ -167,21 +167,6 @@ fn widest_sheet_rows(case: &LodCase, span_m: f64) -> Vec<(f64, f64, f64)> {
     points
 }
 
-fn case_note(result: &VspaeroAnalysisResult) -> String {
-    let comparison = match &result.comparison {
-        alas_pipeline::VspaeroComparisonStatus::NotEvaluated => {
-            "comparison not evaluated".to_owned()
-        }
-        alas_pipeline::VspaeroComparisonStatus::Compatible(_) => {
-            "comparison admitted for shared quantities".to_owned()
-        }
-        alas_pipeline::VspaeroComparisonStatus::Rejected(reason) => {
-            format!("comparison rejected; native LOD retained ({reason})")
-        }
-    };
-    format!("native status: {}; {comparison}", result.status.as_str())
-}
-
 /// Plot the widest native VSPAERO lifting sheet for representative AoA cases.
 ///
 /// The figure is explicitly native: it does not imply that a rejected polar
@@ -275,7 +260,7 @@ pub fn figure_vspaero_load_distribution(
         axis.draw_frame_with_labels(&mut scene, pal, "Y/Bref", y_label);
         scene.add(SceneElement::Text {
             text: title.to_owned(),
-            pos: [axis.left, axis.top - 8.0],
+            pos: [axis.left, axis.top - 10.0],
             font_size: 10.0,
             color: Color::from_hex(pal.title),
             align: TextAlign::Left,
@@ -313,16 +298,6 @@ pub fn figure_vspaero_load_distribution(
         ));
     }
     draw_horizontal_legend_columns(&mut scene, [60.0, 372.0], &legend, pal, 8.0);
-    scene.add(SceneElement::Text {
-        text: format!("{}; widest VSPAERO lifting sheet", case_note(result)),
-        pos: [60.0, 400.0],
-        font_size: 9.0,
-        color: Color::from_hex(pal.tick),
-        align: TextAlign::Left,
-        baseline: TextBaseline::Top,
-        angle_deg: 0.0,
-        bold: false,
-    });
     scene
 }
 

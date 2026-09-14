@@ -55,6 +55,9 @@ pub(super) fn finding_title(code: FindingCode) -> String {
         FindingCode::FuelTankLayoutUnavailable => "Fuel-tank arrangement unavailable",
         FindingCode::MassModelDisagreement => "Ledger and lumped mass models disagree",
         FindingCode::InvalidEnvelopeSpeedOrder => "Maneuver envelope speeds out of order",
+        FindingCode::ReportedCruiseAttitudeOutsideWindow => {
+            "Reported cruise attitude outside the design window"
+        }
     })
 }
 
@@ -96,6 +99,7 @@ pub(super) fn finding_meaning(code: FindingCode) -> String {
         FindingCode::FuelTankLayoutUnavailable => "The configured tank arrangement could not be resolved on the built wing, so tank capacities, fuel centroids and the inertia tensor are not available.",
         FindingCode::MassModelDisagreement => "The item ledger and the lumped model place the takeoff centre of gravity more than five percent of the mean chord apart; the component stations and the lumped coordinates need reconciling before the balance result is trusted.",
         FindingCode::InvalidEnvelopeSpeedOrder => "The V-n envelope speeds do not satisfy VS < VA <= VC < VD, so the maneuver diagram is not a valid envelope.",
+        FindingCode::ReportedCruiseAttitudeOutsideWindow => "The optimizer selected this design because its cruise attitude fell inside the configured window, but it measured that on the coarser in-loop panel mesh. Re-solved on the finer reported mesh the attitude lies outside the window, so the constraint the candidate was chosen for is not met by the published aircraft.",
     })
 }
 
@@ -141,6 +145,9 @@ pub(super) fn finding_next_step(code: FindingCode) -> String {
         | FindingCode::MassModelDisagreement => "Weight & Balance and the tank arrangement",
         FindingCode::MaximumZeroFuelWeightViolation => "Weight & Balance and Payload",
         FindingCode::StructuralPayloadLimitViolation => "Structures and Weight & Balance",
+        FindingCode::ReportedCruiseAttitudeOutsideWindow => {
+            "Aerodynamics, then the analysis panel resolutions"
+        }
     })
 }
 
@@ -189,6 +196,9 @@ pub(super) fn affected_disciplines(code: FindingCode) -> String {
         | FindingCode::MassModelDisagreement => "Mass properties | Fuel system | Weight & balance",
         FindingCode::StructuralPayloadLimitViolation => {
             "Structures | Payload layout | Weight & balance"
+        }
+        FindingCode::ReportedCruiseAttitudeOutsideWindow => {
+            "Aerodynamics | Stability & control | Optimization"
         }
     })
 }

@@ -65,6 +65,16 @@ pub enum MtowSizing {
     /// fuel sum to it, bounded above by the requirement value.
     #[default]
     SizedByMission,
+    /// The takeoff mass is iterated exactly as under `SizedByMission`, but
+    /// the requirement value is used only to seed the first pass: it is
+    /// never re-applied as a dispatch ceiling, an Aitken-extrapolation
+    /// admissibility bound, or a landing-mass-fraction basis on any later
+    /// pass, and the mission-required mass is not checked against it. This
+    /// is a calibration/validation mode -- it asks what the closure lands on
+    /// with nothing but the seed pinned to the declared aircraft, not a
+    /// sizing mode for producing a certifiable design against a declared
+    /// requirement.
+    Unconstrained,
 }
 
 impl MtowSizing {
@@ -73,6 +83,7 @@ impl MtowSizing {
         match self {
             Self::FixedRequirement => "fixed_requirement",
             Self::SizedByMission => "sized_by_mission",
+            Self::Unconstrained => "unconstrained",
         }
     }
 }
@@ -140,7 +151,7 @@ pub struct ObjectiveConfig {
     #[config(
         options = MtowSizing,
         label = "Takeoff mass sizing",
-        help = "Whether the maximum takeoff mass is the fixed requirement value or is iterated until empty mass, payload and the fuel the policy requires sum to it. Sizing by mission makes the structural mass follow the closed takeoff mass, which is what lets a lighter wing pay for itself."
+        help = "Whether the maximum takeoff mass is the fixed requirement value, is iterated by the mission up to the requirement value, or is iterated by the mission with the requirement used only to seed the first pass. Sizing by mission makes the structural mass follow the closed takeoff mass, which is what lets a lighter wing pay for itself. Unconstrained runs the same mission-sized iteration with the requirement dropped as a ceiling after the seed, for asking what the closure converges to on its own rather than for producing a design bounded by a declared requirement."
     )]
     pub mtow_sizing: MtowSizing,
 
@@ -321,6 +332,10 @@ mod tests {
         assert_eq!(
             serde_json::to_value(MtowSizing::SizedByMission).ok(),
             Some(serde_json::json!("sized_by_mission"))
+        );
+        assert_eq!(
+            serde_json::to_value(MtowSizing::Unconstrained).ok(),
+            Some(serde_json::json!("unconstrained"))
         );
     }
 

@@ -8,3 +8,5 @@
 
 include!("screening_view_parts/part_01.rs");
 include!("screening_view_parts/part_02.rs");
+include!("screening_view_parts/preview.rs");
+include!("screening_view_parts/performance_tests.rs");

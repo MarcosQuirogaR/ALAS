@@ -1,8 +1,23 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-
 impl AlasApp {
+    /// Top-bar entry point for standalone analyses that do not require a
+    /// whole-aircraft pipeline run.
+    fn render_analysis_menu(&mut self, ui: &mut Ui) {
+        ui.menu_button(tr("Analysis"), |ui| {
+            if ui.button(tr("Open Airfoil CFD")).clicked() {
+                self.state.cfd.window_open = true;
+                self.state.cfd.tab = crate::cfd::CfdTab::Study;
+                ui.close_menu();
+            }
+            if ui.button(tr("Open Airfoil Screening")).clicked() {
+                self.state.screening.window_open = true;
+                ui.close_menu();
+            }
+        });
+    }
+
     fn render_file_menu(&mut self, ui: &mut Ui) {
         ui.menu_button(tr("File"), |ui| {
             ui.horizontal(|ui| {
@@ -54,6 +69,11 @@ impl AlasApp {
                 }
             });
             ui.separator();
+            if ui.button(tr("Clean sheet design (sandbox)")).clicked() {
+                self.state.enter_sandbox(false);
+                ui.close_menu();
+            }
+            ui.separator();
             if ui.button(tr("Exit")).clicked() {
                 std::process::exit(0);
             }
@@ -87,15 +107,22 @@ impl AlasApp {
         if !self.state.show_view_panel {
             return;
         }
-        let mut open = self.state.show_view_panel;
-        Window::new(tr("View options"))
-            .open(&mut open)
-            .default_width(290.0)
-            .resizable(true)
-            .show(ctx, |ui| {
-                render_view_options(&mut self.state, ctx, ui, false)
-            });
-        self.state.show_view_panel = open;
+        let response = crate::native_viewport::show_native_viewport(
+            ctx,
+            "view_options",
+            tr("View options"),
+            egui::ViewportBuilder::default()
+                .with_title(tr("View options"))
+                .with_inner_size(egui::vec2(290.0, 360.0))
+                .with_min_inner_size(egui::vec2(240.0, 260.0))
+                .with_resizable(true),
+            |child_ctx, ui, _class| {
+                render_view_options(&mut self.state, child_ctx, ui, false);
+            },
+        );
+        if response.close_requested {
+            self.state.show_view_panel = false;
+        }
     }
 
     fn render_help_menu(&mut self, ui: &mut Ui) {
@@ -262,4 +289,3 @@ mod tests {
         assert_eq!(auto_zoom_factor(&context), automatic);
     }
 }
-

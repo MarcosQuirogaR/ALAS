@@ -24,7 +24,6 @@ use crate::loads;
 use crate::mesh::{Deck, MeshNodeIndex};
 use crate::nastran::{ModesResult, NastranResults, ResultStatus, StaticResult, VibrationResult};
 
-const MODE_CUTOFF_HZ: f64 = 0.5;
 const SOL101: &str = "sol101";
 const SOL103: &str = "sol103";
 
@@ -149,10 +148,20 @@ fn read_modes_print(
     requested_modes: i64,
 ) -> ModesResult {
     let all_modes = read_eigenvalues(print);
+    // NASTRAN-95 substitutes zero for rigid-body frequencies (the BULK manual
+    // documents this for non-FEER-X extraction). A fixed 0.5 Hz cutoff has no
+    // physical basis and discards valid low-frequency elastic roots, so retain
+    // every finite positive root and let the solver/model diagnostics describe
+    // mesh or constraint quality separately.
     let kept: Vec<usize> = all_modes
         .iter()
         .enumerate()
-        .filter(|(_, mode)| mode.cyclic_hz > MODE_CUTOFF_HZ)
+        .filter(|(_, mode)| {
+            mode.eigenvalue.is_finite()
+                && mode.eigenvalue > 0.0
+                && mode.cyclic_hz.is_finite()
+                && mode.cyclic_hz > 0.0
+        })
         .map(|(index, _)| index)
         .take(requested_modes.max(1) as usize)
         .collect();
@@ -316,7 +325,7 @@ mod tests {
     }
 
     #[test]
-    fn local_modes_filter_rigid_body_frequencies_and_normalize_shapes() {
+    fn local_modes_filter_zero_rigid_body_frequency_and_keep_sub_hz_elastic_modes() {
         let mut deck = Deck::new();
         deck.add_grid(1, [0.0, 0.0, 0.0]);
         deck.add_grid(2, [0.0, 1.0, 0.0]);
@@ -330,18 +339,22 @@ mod tests {
         };
         let print = "\
  R E A L   E I G E N V A L U E S
- 1 1 1.0 1.0 0.25
- 2 1 4.0 2.0 1.0
+ 1 1 0.0 0.0 0.0
+ 2 1 1.0 1.0 0.25
+ 3 1 4.0 2.0 1.0
  R E A L   E I G E N V E C T O R   N O .          1
- 1 G 0.0 0.0 0.5 0.0 0.0 0.0
- 2 G 0.0 0.0 1.0 0.0 0.0 0.0
+ 1 G 0.0 0.0 0.0 0.0 0.0 0.0
+ 2 G 0.0 0.0 0.0 0.0 0.0 0.0
  R E A L   E I G E N V E C T O R   N O .          2
  1 G 0.0 0.0 0.5 0.0 0.0 0.0
  2 G 0.0 0.0 1.0 0.0 0.0 0.0
+ R E A L   E I G E N V E C T O R   N O .          3
+ 1 G 0.0 0.0 0.25 0.0 0.0 0.0
+ 2 G 0.0 0.0 1.0 0.0 0.0 0.0
 ";
-        let result = read_modes_print(print, &deck, &index, 1);
-        assert_eq!(result.frequencies_hz, vec![1.0]);
+        let result = read_modes_print(print, &deck, &index, 2);
+        assert_eq!(result.frequencies_hz, vec![0.25, 1.0]);
         assert_eq!(result.mode_shape_y_m, Some(vec![0.0, 1.0]));
-        assert_eq!(result.mode_shapes, vec![vec![0.5, 1.0]]);
+        assert_eq!(result.mode_shapes, vec![vec![0.5, 1.0], vec![0.25, 1.0]]);
     }
 }

@@ -9,8 +9,8 @@ use alas_config::{
     AlasConfig, ConstraintPolicy, DesignRequirements, ObjectiveConfig, PerformanceConfig,
 };
 use alas_perf::performance::{
-    compute_v_speeds_at_masses, density_ratio, far25_oei_gradient, tw_cruise_constraint,
-    tw_oei_climb_constraint, tw_takeoff_constraint, ws_landing_limit,
+    assess_oei_climb, compute_v_speeds_at_masses, density_ratio, far25_oei_gradient,
+    tw_cruise_constraint, tw_takeoff_constraint, ws_landing_limit, OeiClimbStatus, OeiV2Condition,
 };
 use alas_units::KNOT;
 
@@ -39,24 +39,84 @@ pub(super) fn performance_residuals(
 
     let mut residuals = Vec::new();
 
-    let oei_gradient = far25_oei_gradient(outcome.n_engines).unwrap_or(perf.oei_gradient);
-    let required_oei_tw = tw_oei_climb_constraint(
+    let certified_oei_gradient = far25_oei_gradient(outcome.n_engines);
+    let oei_condition = outcome.departure.map(|departure| {
+        let speeds = compute_v_speeds_at_masses(
+            sized.takeoff_mass_kg,
+            sized.takeoff_mass_kg,
+            s_ref,
+            departure,
+            perf.cl_max_to,
+            perf.cl_max_land,
+            perf,
+        );
+        OeiV2Condition {
+            departure_elevation_m: departure.elevation_m,
+            departure_isa_deviation_c: departure.isa_deviation_c,
+            v2_over_vstall: speeds.v2_ms / speeds.v_stall_to_ms,
+            condition_to_sls_thrust_ratio: perf.oei_condition_to_sls_thrust_ratio,
+            asymmetric_trim_cd: perf.oei_asymmetric_trim_cd,
+            windmilling_cd: perf.oei_windmilling_cd,
+        }
+    });
+    let oei_assessment = assess_oei_climb(
         outcome.cd0,
         outcome.induced_factor_k,
         outcome.n_engines,
-        oei_gradient,
+        certified_oei_gradient.unwrap_or(perf.oei_gradient),
         perf.oei_climb_cl,
         perf.oei_climb_delta_cd,
+        perf.cl_max_to,
+        oei_condition,
     );
-    residuals.push(ConstraintResidual::scaled(
-        "oei_second_segment",
-        Performance,
-        available_tw,
-        required_oei_tw,
-        "T/W",
-        required_oei_tw - available_tw,
-        policy,
-    ));
+    // A conceptual in-flight estimate remains useful as a soft ranking
+    // signal, but only the shared assessor's SLS-equivalent result may become
+    // a hard residual. In particular, unsupported engine counts never fall
+    // back to a made-up Part 25 requirement.
+    if let Some(required_oei_tw) = oei_assessment
+        .required_sls_tw
+        .or(oei_assessment.required_inflight_tw)
+    {
+        let oei_policy = if oei_assessment.status == OeiClimbStatus::SlsEquivalent {
+            policy
+        } else {
+            ConstraintPolicy::Soft
+        };
+        residuals.push(ConstraintResidual::scaled(
+            "oei_second_segment",
+            Performance,
+            available_tw,
+            required_oei_tw,
+            "T/W",
+            required_oei_tw - available_tw,
+            oei_policy,
+        ));
+    }
+    match oei_assessment.status {
+        OeiClimbStatus::NotApplicable | OeiClimbStatus::SlsEquivalent => {}
+        OeiClimbStatus::UnsupportedEngineCount => residuals.push(ConstraintResidual::direct(
+            "oei_part25_engine_count_unsupported",
+            Performance,
+            1.0,
+            0.0,
+            "bool",
+            1.0,
+            1.0,
+            ConstraintPolicy::Diagnostic,
+        )),
+        OeiClimbStatus::ConceptualInflight | OeiClimbStatus::EvidenceGap => {
+            residuals.push(ConstraintResidual::direct(
+                "oei_second_segment_evidence_gap",
+                Performance,
+                1.0,
+                0.0,
+                "bool",
+                1.0,
+                1.0,
+                ConstraintPolicy::Diagnostic,
+            ));
+        }
+    }
 
     let cruise_ws_pa = sized.takeoff_mass_kg * req.gravity_m_s2 / s_ref;
     let required_cruise_tw = tw_cruise_constraint(

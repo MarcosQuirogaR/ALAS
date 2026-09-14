@@ -68,7 +68,9 @@ pub struct UldType {
 
 /// A ULD cross-section in coordinates normalized to half-width and height.
 ///
-/// `y = +/-1` denotes the base sides and `z = 0..1` runs from base to top.
+/// `y = +/-1` denotes the profile's lateral bounding sides and `z = 0..1`
+/// runs from base to top. A contoured lower outboard corner can therefore sit
+/// inside `y = +/-1` at the base while still reaching the full side at height.
 /// Publicly sourced silhouettes are tagged [`ContourFidelity::VisualizationOnly`]
 /// until an aircraft/operator WBM supplies a station-specific certified trace;
 /// the solver then uses the full bounding rectangle conservatively.
@@ -102,25 +104,73 @@ const RECTANGULAR_CONTOUR: UldContour = UldContour {
     mirrorable: false,
 };
 
-// Public ULD drawings identify the sloped/chamfered upper corners that make an
-// aircraft container follow a circular fuselage. The exact certified contour
-// is aircraft- and position-specific (and normally comes from IATA ULDR or an
+// The public IATA LD3 illustration identifies the E contour by its lower
+// outboard corner tapering toward the fuselage. The exact certified contour is
+// aircraft- and position-specific (and normally comes from IATA ULDR or an
 // operator WBM/CAD package), so these normalized silhouettes are deliberately
 // visualization-only. `collision_contour` keeps using the full rectangle until
 // a certified station/orientation dataset is available; a prettier profile
 // must never make the loading solver accept an impossible position.
-const NAS3610_CONTAINER_CONTOUR: UldContour = UldContour {
+const IATA_E_CONTAINER_CONTOUR: UldContour = UldContour {
     vertices: &[
         [-1.0, 0.0],
-        [1.0, 0.0],
-        [1.0, 0.52],
-        [0.86, 0.82],
-        [0.68, 1.0],
-        [-0.68, 1.0],
-        [-0.86, 0.82],
-        [-1.0, 0.52],
+        [0.56, 0.0],
+        [1.0, 0.44],
+        [1.0, 0.78],
+        [1.0, 1.0],
+        [0.0, 1.0],
+        [-1.0, 1.0],
+        [-1.0, 0.50],
     ],
-    source: "Public IATA/NAS 3610-style normalized ULD silhouette; visualization approximation, not aircraft-specific WBM/CAD",
+    source: concat!(
+        "IATA public LD3 illustration (AKE/AVE/AKN/RKN), E contour; ",
+        "normalized visualization approximation, not aircraft-specific WBM/CAD",
+    ),
+    fidelity: ContourFidelity::VisualizationOnly,
+    mirrorable: true,
+};
+
+// Public material does not expose certified transverse traces for every
+// registered code in this small catalogue. Keep the confirmed lower-outboard
+// taper for the remaining lower-hold container families, but label the result
+// as a family fallback rather than claiming that C/F/P share E exactly.
+const LOWER_HOLD_CONTAINER_CONTOUR: UldContour = UldContour {
+    vertices: &[
+        [-1.0, 0.0],
+        [0.48, 0.0],
+        [1.0, 0.52],
+        [1.0, 0.76],
+        [1.0, 1.0],
+        [0.0, 1.0],
+        [-1.0, 1.0],
+        [-1.0, 0.50],
+    ],
+    source: concat!(
+        "Public lower-hold ULD family silhouette fallback; ",
+        "code-specific ULDR/WBM contour required for certification",
+    ),
+    fidelity: ContourFidelity::VisualizationOnly,
+    mirrorable: true,
+};
+
+// Airbus FAST 39 distinguishes the reduced-height LD3-45 (AKH) family from
+// the standard LD3-45W drawing. This normalized profile keeps that family
+// separate while retaining the same lower-outboard orientation convention.
+const NAS3610_LD3_45_CONTOUR: UldContour = UldContour {
+    vertices: &[
+        [-1.0, 0.0],
+        [0.42, 0.0],
+        [1.0, 0.58],
+        [1.0, 0.80],
+        [1.0, 1.0],
+        [0.0, 1.0],
+        [-1.0, 1.0],
+        [-1.0, 0.50],
+    ],
+    source: concat!(
+        "Airbus FAST39 NAS 3610 LD3-45 (AKH) family; ",
+        "normalized visualization approximation, not aircraft-specific WBM/CAD",
+    ),
     fidelity: ContourFidelity::VisualizationOnly,
     mirrorable: true,
 };
@@ -128,17 +178,20 @@ const NAS3610_CONTAINER_CONTOUR: UldContour = UldContour {
 const NAS3610_PALLET_CONTOUR: UldContour = UldContour {
     vertices: &[
         [-1.0, 0.0],
-        [1.0, 0.0],
-        [1.0, 0.24],
-        [0.94, 0.52],
-        [0.84, 0.78],
-        [0.72, 1.0],
-        [-0.72, 1.0],
-        [-0.84, 0.78],
-        [-0.94, 0.52],
-        [-1.0, 0.24],
+        [0.60, 0.0],
+        [0.84, 0.18],
+        [0.97, 0.42],
+        [1.0, 0.70],
+        [1.0, 1.0],
+        [0.0, 1.0],
+        [-1.0, 1.0],
+        [-1.0, 0.48],
+        [-1.0, 0.20],
     ],
-    source: "Public NAS 3610-style pallet/net envelope; visualization approximation, not aircraft-specific WBM/CAD",
+    source: concat!(
+        "Airbus FAST39 NAS 3610 pallet/net family; ",
+        "normalized visualization approximation, not aircraft-specific WBM/CAD",
+    ),
     fidelity: ContourFidelity::VisualizationOnly,
     mirrorable: true,
 };
@@ -259,7 +312,7 @@ const LD1: UldType = UldType {
     tare_weight: 120.0,
     color: "#c0392b",
     volume_m3: 5.0,
-    contour: NAS3610_CONTAINER_CONTOUR,
+    contour: LOWER_HOLD_CONTAINER_CONTOUR,
 };
 /// The LD2 container.
 const LD2: UldType = UldType {
@@ -273,7 +326,7 @@ const LD2: UldType = UldType {
     tare_weight: 92.0,
     color: "#d35400",
     volume_m3: 3.5,
-    contour: NAS3610_CONTAINER_CONTOUR,
+    contour: IATA_E_CONTAINER_CONTOUR,
 };
 /// The LD3 container, which is what a widebody lower hold is built around.
 const LD3: UldType = UldType {
@@ -287,7 +340,7 @@ const LD3: UldType = UldType {
     tare_weight: 82.0,
     color: "#e74c3c",
     volume_m3: 4.5,
-    contour: NAS3610_CONTAINER_CONTOUR,
+    contour: IATA_E_CONTAINER_CONTOUR,
 };
 /// The reduced-height LD3 that narrowbody holds take. Supplemental to the IATA
 /// table above, and included as the fit-check fallback so a narrowbody still
@@ -303,7 +356,7 @@ const LD3_45: UldType = UldType {
     tare_weight: 82.0,
     color: "#e57373",
     volume_m3: 3.6,
-    contour: NAS3610_CONTAINER_CONTOUR,
+    contour: NAS3610_LD3_45_CONTOUR,
 };
 /// The LD6 double-width container.
 const LD6: UldType = UldType {
@@ -317,7 +370,7 @@ const LD6: UldType = UldType {
     tare_weight: 230.0,
     color: "#e67e22",
     volume_m3: 9.1,
-    contour: NAS3610_CONTAINER_CONTOUR,
+    contour: LOWER_HOLD_CONTAINER_CONTOUR,
 };
 /// The LD8 double-width container.
 const LD8: UldType = UldType {
@@ -331,7 +384,7 @@ const LD8: UldType = UldType {
     tare_weight: 127.0,
     color: "#f39c12",
     volume_m3: 7.1,
-    contour: NAS3610_CONTAINER_CONTOUR,
+    contour: LOWER_HOLD_CONTAINER_CONTOUR,
 };
 /// The LD11 double-width container.
 const LD11: UldType = UldType {
@@ -345,7 +398,7 @@ const LD11: UldType = UldType {
     tare_weight: 185.0,
     color: "#f1c40f",
     volume_m3: 7.4,
-    contour: NAS3610_CONTAINER_CONTOUR,
+    contour: LOWER_HOLD_CONTAINER_CONTOUR,
 };
 /// The 88-by-125-inch pallet.
 const PAG: UldType = UldType {
@@ -522,6 +575,27 @@ mod tests {
         assert_eq!(max_z, -1.0 + LD3.height);
         assert!(LD3.contour.vertices.len() >= 6);
         assert_eq!(LD3.contour.fidelity, ContourFidelity::VisualizationOnly);
+    }
+
+    #[test]
+    fn e_contour_tapers_the_lower_outboard_corner_and_mirrors_for_port() {
+        let starboard = LD3.physical_contour(0.0, 0.0, false);
+        let port = LD3.physical_contour(0.0, 0.0, true);
+        let half_width = LD3.width * 0.5;
+        let bottom_starboard = starboard
+            .iter()
+            .filter(|point| point[1].abs() < 1e-12)
+            .map(|point| point[0])
+            .fold(f64::NEG_INFINITY, f64::max);
+        let bottom_port = port
+            .iter()
+            .filter(|point| point[1].abs() < 1e-12)
+            .map(|point| point[0])
+            .fold(f64::INFINITY, f64::min);
+        assert!(bottom_starboard < half_width);
+        assert!(bottom_port > -half_width);
+        assert!(starboard.iter().any(|point| point[0] == half_width));
+        assert!(port.iter().any(|point| point[0] == -half_width));
     }
 
     #[test]

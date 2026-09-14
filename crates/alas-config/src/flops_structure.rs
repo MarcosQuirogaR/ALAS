@@ -1,16 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! Product selection and declared inputs for the NASA FLOPS airframe and
-//! propulsion mass equations.
+//! Declared inputs for the NASA FLOPS airframe and propulsion mass equations.
 //!
-//! The systems-and-equipment method is selected by
-//! [`crate::SystemsMassMethod`]. The structural group (wing, tails,
-//! fuselage, landing gear, nacelles, paint) and the propulsion group
-//! (scaled engines, thrust reversers, engine controls and starters, fuel
-//! system) are selected separately here, so a study can pair the FLOPS
-//! airframe correlations with the frozen systems fractions or the other way
-//! round, and each selection is recorded in the saved configuration.
+//! The authoritative [`crate::MassArchitecture`] selects the complete
+//! production buildup. This node carries FLOPS technology factors and
+//! overrides; the derived legacy method selectors remain only for schema
+//! migration and explicit comparison compatibility, so no production run can
+//! pair FLOPS airframe groups with legacy systems fractions.
 //!
 //! Every technology factor below is a FLOPS input variable
 //! (NASA/TM-2017-219627 Vol. I, section 5.2-5.3 and Appendix D) with the
@@ -164,6 +161,15 @@ pub struct FlopsStructureConfig {
     )]
     pub military_cargo_floor: f64,
 
+    /// Declared structural design gross mass, FLOPS `DG`.
+    #[config(
+        advanced,
+        label = "Structural design gross mass",
+        unit = "kg",
+        help = "FLOPS DG for the wing, tail, fuselage, surface-control and pod-relief equations. Blank sizes at the takeoff mass of the case being evaluated: the declared MTOW of a fixed aircraft, or the closed takeoff mass while a clean-sheet design is being sized. Declare it when the structure was designed for a heavier weight variant than the MTOW in use."
+    )]
+    pub design_gross_mass_kg: Option<f64>,
+
     /// Declared design landing mass, FLOPS `WLDG`.
     #[config(
         advanced,
@@ -226,6 +232,40 @@ pub struct FlopsStructureConfig {
     )]
     pub engine_mass_scaling_exponent: f64,
 
+    /// Baseline inlet mass, FLOPS `WINLB`.
+    #[config(
+        advanced,
+        label = "Baseline inlet mass",
+        unit = "kg",
+        help = "FLOPS WINLB: inlet mass of the baseline engine, declared separately from the baseline engine mass (equation 77). Blank means the inlet is already inside the baseline engine mass, which is what an engine catalogue dry mass normally quotes. Declaring it requires an explicit baseline engine mass, so the inlet is not counted twice."
+    )]
+    pub baseline_inlet_mass_kg: Option<f64>,
+
+    /// Inlet mass scaling exponent, FLOPS `EINL`.
+    #[config(
+        advanced,
+        label = "Inlet mass scaling exponent",
+        help = "FLOPS EINL: exponent on the thrust ratio when the baseline inlet is scaled (equation 77). The FLOPS default is 1."
+    )]
+    pub inlet_mass_scaling_exponent: f64,
+
+    /// Baseline nozzle mass, FLOPS `WNOZB`.
+    #[config(
+        advanced,
+        label = "Baseline nozzle mass",
+        unit = "kg",
+        help = "FLOPS WNOZB: nozzle mass of the baseline engine, declared separately from the baseline engine mass (equation 78). Blank means the nozzle is already inside the baseline engine mass. Declaring it requires an explicit baseline engine mass, so the nozzle is not counted twice."
+    )]
+    pub baseline_nozzle_mass_kg: Option<f64>,
+
+    /// Nozzle mass scaling exponent, FLOPS `ENOZ`.
+    #[config(
+        advanced,
+        label = "Nozzle mass scaling exponent",
+        help = "FLOPS ENOZ: exponent on the thrust ratio when the baseline nozzle is scaled (equation 78). The FLOPS default is 1."
+    )]
+    pub nozzle_mass_scaling_exponent: f64,
+
     /// Whether thrust reversers are installed.
     #[config(
         advanced,
@@ -262,6 +302,7 @@ impl Default for FlopsStructureConfig {
             strut_bracing: 0.0,
             wing_load_fraction: 1.0,
             military_cargo_floor: 0.0,
+            design_gross_mass_kg: None,
             design_landing_mass_kg: None,
             main_gear_oleo_length_m: None,
             nose_gear_oleo_length_m: None,
@@ -269,6 +310,10 @@ impl Default for FlopsStructureConfig {
             baseline_engine_mass_kg: None,
             baseline_engine_thrust_kn: None,
             engine_mass_scaling_exponent: 1.15,
+            baseline_inlet_mass_kg: None,
+            inlet_mass_scaling_exponent: 1.0,
+            baseline_nozzle_mass_kg: None,
+            nozzle_mass_scaling_exponent: 1.0,
             thrust_reversers_installed: true,
             misc_propulsion_mass_kg: 0.0,
             empty_mass_margin_fraction: 0.0,
@@ -306,12 +351,21 @@ impl FlopsStructureConfig {
                 "engine_mass_scaling_exponent",
                 self.engine_mass_scaling_exponent,
             ),
+            (
+                "inlet_mass_scaling_exponent",
+                self.inlet_mass_scaling_exponent,
+            ),
+            (
+                "nozzle_mass_scaling_exponent",
+                self.nozzle_mass_scaling_exponent,
+            ),
         ] {
             if !value.is_finite() || value < 0.0 {
                 return Err(format!("FLOPS {name} must be finite and nonnegative"));
             }
         }
         for (name, value) in [
+            ("design_gross_mass_kg", self.design_gross_mass_kg),
             ("design_landing_mass_kg", self.design_landing_mass_kg),
             ("main_gear_oleo_length_m", self.main_gear_oleo_length_m),
             ("nose_gear_oleo_length_m", self.nose_gear_oleo_length_m),
@@ -324,10 +378,41 @@ impl FlopsStructureConfig {
                 }
             }
         }
+        for (name, value) in [
+            ("baseline_inlet_mass_kg", self.baseline_inlet_mass_kg),
+            ("baseline_nozzle_mass_kg", self.baseline_nozzle_mass_kg),
+        ] {
+            if let Some(value) = value {
+                if !value.is_finite() || value < 0.0 {
+                    return Err(format!(
+                        "FLOPS {name} must be finite and nonnegative when declared"
+                    ));
+                }
+            }
+        }
+        // NASA/TM-2017-219627 Vol. I is explicit that `WENGB` "includes inlet
+        // and nozzle weight if they are not specified separately", and the
+        // equation 76 fallback `THRSO / 5.5` is such an all-in baseline.
+        // Declaring a separate inlet or nozzle against that fallback would
+        // add mass the baseline already contains, so an explicit baseline
+        // engine mass is required before either may be declared.
+        if (self.baseline_inlet_mass_kg.is_some() || self.baseline_nozzle_mass_kg.is_some())
+            && self.baseline_engine_mass_kg.is_none()
+        {
+            return Err(
+                "FLOPS baseline_engine_mass_kg must be declared before a separate \
+                 baseline_inlet_mass_kg or baseline_nozzle_mass_kg, because the equation 76 \
+                 estimate already includes the inlet and nozzle"
+                    .to_owned(),
+            );
+        }
         Ok(())
     }
 }
 
+// A test asserts on values it constructed here directly, so a failed unwrap
+// or expect is the assertion failing, not a library invariant being broken.
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -364,6 +449,100 @@ mod tests {
             ..Default::default()
         };
         assert!(declared.validate().is_err());
+    }
+
+    #[test]
+    fn the_separate_inlet_and_nozzle_are_absent_by_default_and_scale_linearly() {
+        // Equations 77-78 default `EINL` and `ENOZ` to 1; equation 80 (no
+        // separate items) stays the default path, so an unmodified group is
+        // still the catalogue-dry-mass baseline.
+        let config = FlopsStructureConfig::default();
+        assert_eq!(config.baseline_inlet_mass_kg, None);
+        assert_eq!(config.baseline_nozzle_mass_kg, None);
+        assert_eq!(config.inlet_mass_scaling_exponent, 1.0);
+        assert_eq!(config.nozzle_mass_scaling_exponent, 1.0);
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn a_separate_inlet_or_nozzle_requires_a_declared_baseline_engine_mass() {
+        // The equation 76 estimate `THRSO / 5.5` already includes the inlet
+        // and nozzle, so adding them on top of it would double count.
+        let orphan = FlopsStructureConfig {
+            baseline_inlet_mass_kg: Some(150.0),
+            ..Default::default()
+        };
+        assert!(orphan.validate().is_err());
+        let orphan_nozzle = FlopsStructureConfig {
+            baseline_nozzle_mass_kg: Some(90.0),
+            ..Default::default()
+        };
+        assert!(orphan_nozzle.validate().is_err());
+        let declared = FlopsStructureConfig {
+            baseline_engine_mass_kg: Some(3_000.0),
+            baseline_inlet_mass_kg: Some(150.0),
+            baseline_nozzle_mass_kg: Some(90.0),
+            ..Default::default()
+        };
+        assert!(declared.validate().is_ok());
+        // Nonfinite or negative values are rejected on their own.
+        for bad in [
+            FlopsStructureConfig {
+                baseline_engine_mass_kg: Some(3_000.0),
+                baseline_inlet_mass_kg: Some(-1.0),
+                ..Default::default()
+            },
+            FlopsStructureConfig {
+                baseline_engine_mass_kg: Some(3_000.0),
+                baseline_nozzle_mass_kg: Some(f64::NAN),
+                ..Default::default()
+            },
+            FlopsStructureConfig {
+                inlet_mass_scaling_exponent: -0.5,
+                ..Default::default()
+            },
+            FlopsStructureConfig {
+                nozzle_mass_scaling_exponent: f64::INFINITY,
+                ..Default::default()
+            },
+        ] {
+            assert!(bad.validate().is_err());
+        }
+    }
+
+    #[test]
+    fn a_saved_configuration_without_the_inlet_and_nozzle_fields_still_loads() {
+        // Backward compatibility: every configuration written before the
+        // separate inlet and nozzle existed must deserialize to the
+        // equation 80 defaults, not fail on a missing field.
+        let legacy = serde_json::json!({
+            "wing_bending_method": "simplified",
+            "composite_utilization": 0.2,
+            "engine_mass_scaling_exponent": 1.15,
+            "baseline_engine_mass_kg": 3_000.0
+        });
+        let loaded: FlopsStructureConfig =
+            serde_json::from_value(legacy).expect("a pre-existing configuration still loads");
+        assert_eq!(loaded.baseline_inlet_mass_kg, None);
+        assert_eq!(loaded.baseline_nozzle_mass_kg, None);
+        assert_eq!(loaded.inlet_mass_scaling_exponent, 1.0);
+        assert_eq!(loaded.nozzle_mass_scaling_exponent, 1.0);
+        assert_eq!(loaded.composite_utilization, 0.2);
+        assert!(loaded.validate().is_ok());
+
+        // And a round trip of the new fields is stable.
+        let declared = FlopsStructureConfig {
+            baseline_engine_mass_kg: Some(3_000.0),
+            baseline_inlet_mass_kg: Some(150.0),
+            baseline_nozzle_mass_kg: Some(90.0),
+            inlet_mass_scaling_exponent: 0.8,
+            nozzle_mass_scaling_exponent: 1.2,
+            ..Default::default()
+        };
+        let round_trip: FlopsStructureConfig =
+            serde_json::from_value(serde_json::to_value(&declared).expect("serializes"))
+                .expect("deserializes");
+        assert_eq!(round_trip, declared);
     }
 
     #[test]

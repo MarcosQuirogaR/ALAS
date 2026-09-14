@@ -88,6 +88,13 @@ impl AppState {
         config.geometry = preset.geometry.clone();
         config.geometry.engine.apply_engine_spec();
         config.requirements = preset.requirements.clone();
+        // Keep the interactive path identical to `AlasConfig::from_value`:
+        // registered aircraft carry a representable planning cabin seed,
+        // while their passenger count remains derived from the editable class
+        // shares. Without this assignment a preset loaded after startup kept
+        // the previous cabin (often the generic 15/85 mix), so the displayed
+        // aircraft and its payload layout disagreed.
+        config.cabin = preset.planning_cabin_config();
         config.landing_gear = preset.landing_gear.clone();
         if let Some(mm) = &preset.mass_model {
             config.mass_model = mm.clone();
@@ -179,10 +186,28 @@ impl AppState {
             if mode == DesignMode::BaselineSandbox {
                 self.run_options.compare_baseline = false;
             }
+            if mode == DesignMode::CleanSheet && !config.preset.is_empty() {
+                // A registered aircraft is a reference starting point. Once
+                // the user explicitly chooses New aircraft, clear that
+                // provenance so clean-sheet-only inputs (including passenger
+                // target) become available while retaining the current shape
+                // as a useful starting geometry.
+                config.preset.clear();
+                self.active_preset.clear();
+                self.config_values = full_config_values(&config);
+                self.on_config_modified();
+            }
             self.reset_design_space_bounds_to_mode();
             return;
         }
         config.optimizer.design_space.mode = mode;
+        if mode == DesignMode::CleanSheet {
+            // New aircraft studies may start from the currently displayed
+            // geometry, but they must not carry a registered aircraft's
+            // fixed passenger load case into the product model.
+            config.preset.clear();
+            self.active_preset.clear();
+        }
         self.config_values = full_config_values(&config);
         self.run_options.optimize = mode != DesignMode::BaselineSandbox;
         if mode == DesignMode::BaselineSandbox {
@@ -225,7 +250,20 @@ impl AppState {
         let Some(config) = self.typed_config() else {
             return;
         };
-        let nominal = self.current_design().unwrap_or_default();
+        let mut nominal = self.current_design().unwrap_or_default();
+        // A cabin-sized clean-sheet fuselage is a derived coordinate. Keep
+        // the editor, the initial point, and the optimizer bounds on the same
+        // materialized length so a GUI run cannot publish a vector that the
+        // evaluator silently replaces during candidate construction.
+        if config.optimizer.design_space.sizes_fuselage_from_cabin()
+            && config.requirements.aircraft_type != "cargo"
+        {
+            if let Ok(canonical) = alas_opt::canonicalize_design(&config, nominal) {
+                nominal = canonical;
+                self.design_values
+                    .insert("fuselage_length_m".to_owned(), nominal.fuselage_length_m);
+            }
+        }
         for variable in config.optimizer.design_space.envelope(&nominal) {
             if variable.fixed {
                 self.design_values
@@ -285,7 +323,15 @@ impl AppState {
     }
 
     /// Revalidate and rebuild the live preview after an edit.
+    ///
+    /// A registered preset's protected geometry is restored first, and a
+    /// sandbox edit is routed to the sandbox's own revision bookkeeping.
     pub fn on_config_modified(&mut self) {
+        if self.sandbox.active() {
+            self.on_sandbox_model_changed();
+            return;
+        }
+        self.enforce_preset_geometry();
         if let Some(config) = self.typed_config() {
             self.validation_findings = validate(&config);
         }
@@ -339,7 +385,7 @@ impl AppState {
 
     /// Save the current configuration to [`AppState::config_path`] as JSON.
     pub fn save_config(&mut self) {
-        let text = match serde_json::to_string_pretty(&self.config_values) {
+        let text = match serde_json::to_string_pretty(&self.workspace_document()) {
             Ok(t) => t,
             Err(e) => {
                 self.log(
@@ -381,30 +427,19 @@ impl AppState {
             serde_json::from_str(&text).map_err(|e| e.to_string())
         };
         match parsed {
-            Ok(value) => {
-                match alas_config::AlasConfig::from_value(&value)
-                    .map(|config| full_config_values(&config))
-                {
-                    Ok(canonical) => {
-                        self.config_values = canonical;
-                        // A loaded design mode owns the bounds shown on the
-                        // Design Space page. Reapply its envelope immediately
-                        // so stale bounds from the previous file cannot leak
-                        // into the next run.
-                        self.reset_design_space_bounds_to_mode();
-                        self.save_tool_preferences();
-                        self.log(
-                            tr_fields("Loaded configuration from {path}.", &[("path", path)]),
-                            LogKind::Info,
-                        );
-                        self.on_config_modified();
-                    }
-                    Err(error) => self.log(
-                        tr_fields("Load failed: {error}", &[("error", error.to_string())]),
-                        LogKind::Error,
-                    ),
+            Ok(value) => match self.apply_workspace_document(&value) {
+                Ok(()) => {
+                    self.save_tool_preferences();
+                    self.log(
+                        tr_fields("Loaded configuration from {path}.", &[("path", path)]),
+                        LogKind::Info,
+                    );
                 }
-            }
+                Err(error) => self.log(
+                    tr_fields("Load failed: {error}", &[("error", error)]),
+                    LogKind::Error,
+                ),
+            },
             Err(e) => self.log(
                 tr_fields("Load failed: {error}", &[("error", e.to_string())]),
                 LogKind::Error,

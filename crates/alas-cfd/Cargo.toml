@@ -1,0 +1,17 @@
+[package]
+name = "alas-cfd"
+description = "Reusable OpenFOAM airfoil study contracts, case templates, runners and result parsers."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+alas-exec = { path = "../alas-exec" }
+alas-geom = { path = "../alas-geom" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[lints]
+workspace = true

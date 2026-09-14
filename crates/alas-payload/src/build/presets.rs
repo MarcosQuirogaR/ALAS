@@ -28,10 +28,13 @@
 //! narrower one lets the automatic calculation squeeze a tenth seat into a 787
 //! that the real fuselage cannot fit.
 
-use alas_config::{AlasConfig, DesignVector};
+use alas_config::{AlasConfig, CertifiedExitLayout, DesignVector};
 use alas_geom::builder::{AircraftBuilder, BuildError};
 
-use super::{simulate_passenger_counts, simulate_passenger_counts_for_seat_mix, PassengerCounts};
+use super::{
+    registered_source_capacity_cap, registered_source_exit_layout, simulate_passenger_counts,
+    simulate_passenger_counts_for_seat_mix_with_source_cap, PassengerCounts,
+};
 use crate::cargo::CargoLoadManager;
 use crate::geometry::{CabinGeometry, CabinGeometryError};
 
@@ -138,6 +141,10 @@ fn apply_cabin_preset_with_semantics(
     let Some(product_mix) = passenger_preset_mix(config, &preset) else {
         return Ok(());
     };
+    let source_capacity_cap =
+        registered_source_capacity_cap(config, semantics.uses_reference_geometry());
+    let source_exit_layout =
+        registered_source_exit_layout(config, semantics.uses_reference_geometry());
     let mix = if semantics == CabinPresetSemantics::FrozenPython {
         frozen_reference_mix(&preset).unwrap_or(product_mix)
     } else {
@@ -155,8 +162,13 @@ fn apply_cabin_preset_with_semantics(
         let counts = simulate_passenger_counts(&cg_geom, &config.cabin.passenger, &mix);
         write_counts(config, counts);
     } else {
-        let counts =
-            simulate_passenger_counts_for_seat_mix(&cg_geom, &config.cabin.passenger, &mix);
+        let counts = simulate_passenger_counts_for_seat_mix_with_source_cap(
+            &cg_geom,
+            &config.cabin.passenger,
+            &mix,
+            source_capacity_cap,
+            source_exit_layout,
+        );
         write_counts(config, counts);
     }
     Ok(())
@@ -196,11 +208,27 @@ fn apply_custom(
     design_vector: Option<&DesignVector>,
     semantics: CabinPresetSemantics,
 ) -> Result<(), CabinPresetError> {
+    let source_capacity_cap =
+        registered_source_capacity_cap(config, semantics.uses_reference_geometry());
+    let source_exit_layout =
+        registered_source_exit_layout(config, semantics.uses_reference_geometry());
     // In percent mode the shares are the input and the counts are derived, so
     // a Custom cabin has to be re-solved whenever the shares change. Returning
     // early on "already has seats" -- which is right in count mode, where the
     // counts *are* the input -- would freeze the layout at whatever the first
     // solve produced and silently ignore every later share edit.
+    // A `count` cabin with seats declared is an input, not a seed: the
+    // registered or user-declared per-class counts are the cabin the case
+    // is about (a source-matched 12F/138Y A320, say), and the layout seats
+    // exactly those. Whether they fit is the layout's finding to report.
+    if config.requirements.aircraft_type != "cargo"
+        && semantics == CabinPresetSemantics::RequirementsFirst
+        && config.cabin.passenger.class_mix_mode == "count"
+        && config.cabin.passenger.total_seats() > 0
+    {
+        config.requirements.num_passengers = config.cabin.passenger.total_seats();
+        return Ok(());
+    }
     if config.requirements.aircraft_type != "cargo"
         && (semantics == CabinPresetSemantics::RequirementsFirst
             || config.cabin.passenger.class_mix_mode == "percent")
@@ -213,7 +241,13 @@ fn apply_custom(
         let counts = if semantics == CabinPresetSemantics::FrozenPython {
             simulate_passenger_counts(&cg_geom, &config.cabin.passenger, &mix)
         } else {
-            simulate_passenger_counts_for_seat_mix(&cg_geom, &config.cabin.passenger, &mix)
+            simulate_passenger_counts_for_seat_mix_with_source_cap(
+                &cg_geom,
+                &config.cabin.passenger,
+                &mix,
+                source_capacity_cap,
+                source_exit_layout,
+            )
         };
         write_counts(config, counts);
         return Ok(());
@@ -239,8 +273,17 @@ fn apply_custom(
         let manager = CargoLoadManager::new(&cg_geom, config.cabin.cargo.clone());
         config.requirements.cargo_payload_kg = CUSTOM_CARGO_FILL * manager.total_capacity();
     } else {
-        let counts =
-            simulate_passenger_counts(&cg_geom, &config.cabin.passenger, &[("Economy", 1.0)]);
+        let counts = if semantics == CabinPresetSemantics::FrozenPython {
+            simulate_passenger_counts(&cg_geom, &config.cabin.passenger, &[("Economy", 1.0)])
+        } else {
+            simulate_passenger_counts_for_seat_mix_with_source_cap(
+                &cg_geom,
+                &config.cabin.passenger,
+                &[("Economy", 1.0)],
+                source_capacity_cap,
+                source_exit_layout,
+            )
+        };
         config.cabin.passenger.economy.count = counts.economy;
         config.requirements.num_passengers = counts.total();
     }
@@ -329,11 +372,24 @@ fn write_counts(config: &mut AlasConfig, counts: PassengerCounts) {
 /// Materialize a named or custom passenger mix against an already-built
 /// cabin. This is the shared product boundary used by every layout consumer,
 /// so previews, reports, mass/CG and pipeline runs cannot silently disagree.
-pub(super) fn apply_cabin_preset_to_geometry(config: &mut AlasConfig, g: &CabinGeometry) {
+pub(super) fn apply_cabin_preset_to_geometry(
+    config: &mut AlasConfig,
+    g: &CabinGeometry,
+    source_capacity_cap: Option<i64>,
+    source_exit_layout: Option<CertifiedExitLayout>,
+) {
     if config.requirements.aircraft_type == "cargo" {
         return;
     }
     let preset = config.requirements.cabin_preset.clone();
+    if preset == "Custom"
+        && config.cabin.passenger.class_mix_mode == "count"
+        && config.cabin.passenger.total_seats() > 0
+    {
+        // Declared counts are the cabin; see `apply_custom`.
+        config.requirements.num_passengers = config.cabin.passenger.total_seats();
+        return;
+    }
     let mix = if preset == "Custom" {
         config.cabin.passenger.length_share_mix()
     } else {
@@ -343,7 +399,13 @@ pub(super) fn apply_cabin_preset_to_geometry(config: &mut AlasConfig, g: &CabinG
         return;
     }
     config.cabin.passenger.set_length_share_mix(&mix);
-    let counts = simulate_passenger_counts_for_seat_mix(g, &config.cabin.passenger, &mix);
+    let counts = simulate_passenger_counts_for_seat_mix_with_source_cap(
+        g,
+        &config.cabin.passenger,
+        &mix,
+        source_capacity_cap,
+        source_exit_layout,
+    );
     write_counts(config, counts);
 }
 

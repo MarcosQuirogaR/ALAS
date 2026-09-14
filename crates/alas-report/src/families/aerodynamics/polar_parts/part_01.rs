@@ -28,7 +28,7 @@ fn add_markers(axes: &Axes2D, scene: &mut Scene, points: &[(f64, f64)], color: C
 }
 
 /// Four-panel polar set: lift curve, drag polar, efficiency, longitudinal
-/// stability -- `figure_aero_panel`.
+/// stability, as implemented by `figure_aero_panel`.
 pub fn figure_aero_panel(report: &AnalysisReport, theme: Option<&str>) -> Scene {
     let pal = get_palette(theme);
     let mut scene = Scene::new(900.0, 700.0, Some(Color::from_hex(pal.bg)));

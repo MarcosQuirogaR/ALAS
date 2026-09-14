@@ -209,6 +209,36 @@ pub struct AircraftVariantIdentity {
     pub tank_configuration: &'static str,
 }
 
+/// One source-defined emergency-exit pair and its CS-25 evacuation rating.
+///
+/// The capacities in the regulation are ratings for the complete pair of
+/// exits.  Keeping that unit in the field name prevents a consumer from
+/// multiplying a pair rating by two when it emits the two physical door
+/// cut-outs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CertifiedExitPair {
+    /// Exit class printed in the source cabin configuration.
+    pub exit_type: &'static str,
+    /// Passengers assigned to this complete exit pair.
+    pub capacity_per_pair: i64,
+}
+
+/// A revision-locked exit arrangement for a registered aircraft variant.
+///
+/// This is source metadata used to keep a product preset's cabin topology
+/// separate from the generic diameter heuristic.  It is not a declaration
+/// that the layout engine has demonstrated the aircraft's certified
+/// evacuation performance.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CertifiedExitLayout {
+    /// Human-readable pair sequence, for example `C-III-C`.
+    pub label: &'static str,
+    /// Exit pairs in source order, including each pair's rating.
+    pub pairs: &'static [CertifiedExitPair],
+    /// Exact source, revision and location for the arrangement.
+    pub source: &'static str,
+}
+
 /// Primary-source values against which one preset is validated.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct AircraftReferenceData {
@@ -220,7 +250,7 @@ pub struct AircraftReferenceData {
     pub mlw_kg: Option<f64>,
     /// Maximum zero-fuel weight.
     pub mzfw_kg: Option<f64>,
-    /// Configuration-specific operating empty weight, when publicly available.
+    /// Same-aircraft OEW for conditional comparison, from [`crate::oew_reference`].
     pub oew_kg: Option<f64>,
     /// Usable fuel volume before applying the declared density.
     pub usable_fuel_volume_l: Option<f64>,
@@ -234,6 +264,8 @@ pub struct AircraftReferenceData {
     pub planning_seats: Option<i64>,
     /// Certified evacuation maximum for the applicable exit arrangement.
     pub certified_max_seats: Option<i64>,
+    /// Source-defined exit-pair arrangement for the registered variant.
+    pub certified_exit_layout: Option<CertifiedExitLayout>,
     /// Whether a complete design-mission definition has source provenance.
     pub design_mission_evidence: DesignMissionEvidence,
     /// Relevant public range/mission material that is not a complete mission.
@@ -284,13 +316,13 @@ pub struct AircraftPreset {
     pub n_engines: usize,
     /// Existing-aircraft landing-gear topology and track.
     pub landing_gear: LandingGearConfig,
-    /// A mass model calibrated for this type, where the global one misses.
+    /// Legacy comparison inputs calibrated for this type, where the global
+    /// compatibility model misses.
     ///
-    /// The Torenbeek fractions in [`MassModelConfig`] are calibrated around a
-    /// modern widebody, and structural and furnishings mass does not scale
-    /// linearly with weight: a small narrowbody carries a higher operating
-    /// empty weight per unit of maximum takeoff weight than a widebody does.
-    /// `None` means the global default already lands close enough.
+    /// These Torenbeek/fraction values are retained for the explicit
+    /// reference-compatible comparison path. Pure production runs use the
+    /// preset's source-backed FLOPS transport and structure inputs instead.
+    /// `None` means the global compatibility values already land close enough.
     pub mass_model: Option<MassModelConfig>,
     /// Field-performance assumptions calibrated for this type.
     ///
@@ -350,6 +382,11 @@ impl AircraftPreset {
                 cabin.passenger.set_length_share_mix(&[("Economy", 1.0)]);
             }
             _ => {}
+        }
+        if self.name == "A320-200" {
+            // Airbus A320 ACAP Figure 2-4-1: 28/29 in pitch for the 180-seat
+            // single-class arrangement; the 28 in lower bound is used.
+            cabin.passenger.economy.pitch_m = 0.7112;
         }
         if self.name == "ATR72-600" {
             // The official ATR 72-600 72-seat layout uses two Type-III exit
@@ -454,9 +491,10 @@ impl AircraftPreset {
                 self.reference
                     .reference_wing_area_m2
                     .unwrap_or(self.requirements.max_wing_area_m2),
-                self.performance
-                    .as_ref()
-                    .map_or_else(|| crate::PerformanceConfig::default().cl_max_to, |p| p.cl_max_to),
+                self.performance.as_ref().map_or_else(
+                    || crate::PerformanceConfig::default().cl_max_to,
+                    |p| p.cl_max_to,
+                ),
             );
         }
 
@@ -560,20 +598,21 @@ fn apply_atr72_600_speed_schedule(
     // Takeoff segment: the derived V2 held to a 1,500 ft AGL acceleration
     // altitude at the published sea-level MTOW rate of climb.
     profile.takeoff_altitude_gain_m = 1_500.0 * 0.3048; // unsourced
-    profile.takeoff_air_speed_m_s = atr72_600_takeoff_speed_m_s(mtow_kg, wing_area_m2, cl_max_takeoff);
+    profile.takeoff_air_speed_m_s =
+        atr72_600_takeoff_speed_m_s(mtow_kg, wing_area_m2, cl_max_takeoff);
     profile.takeoff_climb_rate_m_s = 1_355.0 * FT_MIN_M_S; // factsheet SL/MTOW ROC
-    // En-route climb at the published optimum climb speed; the rates are
-    // unsourced and below the sea-level figure because the deck's available
-    // power falls with altitude (a request above the rating is capped, not
-    // silently met).
+                                                           // En-route climb at the published optimum climb speed; the rates are
+                                                           // unsourced and below the sea-level figure because the deck's available
+                                                           // power falls with altitude (a request above the rating is capped, not
+                                                           // silently met).
     profile.initial_climb_air_speed_m_s = 170.0 * KNOT_M_S; // factsheet
     profile.initial_climb_rate_m_s = 1_000.0 * FT_MIN_M_S; // unsourced
     profile.step_climb_1_air_speed_m_s = 170.0 * KNOT_M_S; // factsheet
     profile.step_climb_1_rate_m_s = 600.0 * FT_MIN_M_S; // unsourced
     profile.step_climb_2_air_speed_m_s = 170.0 * KNOT_M_S; // factsheet
     profile.step_climb_2_rate_m_s = 600.0 * FT_MIN_M_S; // unsourced
-    // Descent ladder: entirely unsourced. Speeds are kept below the 250 KIAS
-    // class VMO with margin and step down towards the approach speed.
+                                                        // Descent ladder: entirely unsourced. Speeds are kept below the 250 KIAS
+                                                        // class VMO with margin and step down towards the approach speed.
     profile.descent_1_altitude_ft = 10_000.0;
     profile.descent_1_air_speed_m_s = 220.0 * KNOT_M_S;
     profile.descent_1_rate_m_s = 1_500.0 * FT_MIN_M_S;

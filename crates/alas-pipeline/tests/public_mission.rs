@@ -65,13 +65,26 @@ fn public_pipeline_reports_complete_or_explicitly_partial_preset_missions() {
         let config = config_for_preset(name);
         let route = dispatched_route(&config);
         let expected_distance_m = route.total_distance_m();
-        let result = DesignPipeline::new(config)
-            .run_with_environment_and_route(
-                &options(),
-                &RunEnvironment::default(),
-                Some(route.clone()),
-            )
-            .unwrap_or_else(|error| panic!("public mission run for {name}: {error}"));
+        let run = DesignPipeline::new(config).run_with_environment_and_route(
+            &options(),
+            &RunEnvironment::default(),
+            Some(route.clone()),
+        );
+        let result = match run {
+            Ok(result) => result,
+            Err(error) if name == "ATR72-600" => {
+                assert!(
+                    error.contains("unsupported_propulsion_technology"),
+                    "pure FLOPS ATR failure must identify the unsupported propulsion technology: {error}"
+                );
+                assert!(
+                    error.contains("propeller/shaft-power"),
+                    "pure FLOPS ATR failure must explain the missing propeller/shaft-power equations: {error}"
+                );
+                continue;
+            }
+            Err(error) => panic!("public mission run for {name}: {error}"),
+        };
 
         assert_eq!(
             result.route,

@@ -42,6 +42,8 @@ mod patran;
 pub mod payload_layout_export;
 pub mod pipeline;
 pub mod plot;
+pub mod quick_analysis;
+pub mod run_manifest;
 pub mod runs;
 pub mod solver_mode;
 pub mod structural;

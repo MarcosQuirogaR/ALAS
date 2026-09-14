@@ -14,6 +14,10 @@ plotters = { workspace = true }
 plotters-backend = { workspace = true }
 resvg = { workspace = true }
 tiny-skia = { workspace = true }
+# The orthographic globe is projected pixel by pixel; the rows are independent
+# and run on the rayon pool, which is what keeps an orbit frame under the
+# display budget at desktop densities.
+rayon = { workspace = true }
 
 [dev-dependencies]
 alas-testkit = { path = "../alas-testkit" }

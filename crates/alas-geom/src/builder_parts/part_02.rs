@@ -1,12 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-
 /// `n_subdivisions` clamped to `usize`, so a negative or overflowing
-/// configuration value becomes `0` -- which [`Wing::subdivide_sections`]
-/// rejects with [`SubdivideSectionsError::RatioTooSmall`], the same outcome
-/// Python's `ratio < 2` guard produces for a negative `ratio` -- rather than
-/// wrapping to a huge unsigned value on the `as` cast.
+/// configuration value becomes `0` rather than wrapping to a huge unsigned
+/// value on the `as` cast.
+///
+/// Zero reaches [`Wing::mesh_spanwise`] as a request for fewer panels than
+/// the surface has sections, which it answers with one panel per section --
+/// the coarsest mesh that still carries every planform station. A nonsense
+/// configuration therefore degrades to the coarsest honest mesh instead of
+/// panicking or silently dropping the kink; `alas_config::validation` rejects
+/// it at the configuration boundary, which is where a user can act on it.
 fn n_subdivisions_usize(n: i64) -> usize {
     usize::try_from(n).unwrap_or(0)
 }
@@ -158,7 +162,9 @@ mod tests {
         geometry.wing.side_of_body_chord_ratio = Some(0.90);
         geometry.wing.kink_span_fraction = Some(0.40);
         geometry.wing.outboard_le_sweep_deg = Some(28.0);
-        geometry.wing.n_subdivisions = 2;
+        // Six panels, stated as a count. This used to read `2`, meaning a
+        // per-section ratio of two over three sections.
+        geometry.wing.n_subdivisions = 6;
         let builder = AircraftBuilder::new(Some(geometry));
         let dv = DesignVector::default();
         let planform = builder
@@ -172,15 +178,24 @@ mod tests {
             .expect("the explicit transport planform builds");
         let main_wing = &airplane.wings[0];
 
-        // Three original lofted panels at a subdivision ratio of two yield
-        // six sections plus the unchanged tip. The side-of-body station is
-        // the first section of the second panel.
-        assert_eq!(main_wing.xsecs.len(), 7);
-        assert!((main_wing.xsecs[2].xyz_le[1] - planform.side_of_body.unwrap().y_m).abs() < 1e-12);
-        assert!((main_wing.xsecs[2].chord - planform.side_of_body.unwrap().chord_m).abs() < 1e-12);
-        assert!((main_wing.xsecs[4].xyz_le[1] - planform.kink.y_m).abs() < 1e-12);
+        // The mesh is an absolute panel count now, so the stations are
+        // asserted by where they are rather than by which index they land on:
+        // an index is a property of the meshing, and what has to hold is that
+        // the cranked station and the kink are still exactly themselves.
+        assert_eq!(main_wing.xsecs.len() - 1, 6, "six panels were asked for");
+        let side_of_body = planform.side_of_body.expect("an explicit crank");
+        let station_at = |y: f64| {
+            main_wing
+                .xsecs
+                .iter()
+                .find(|xsec| (xsec.xyz_le[1] - y).abs() < 1e-12)
+                .unwrap_or_else(|| panic!("no cross-section at y = {y}"))
+        };
+        assert!((station_at(side_of_body.y_m).chord - side_of_body.chord_m).abs() < 1e-12);
+        assert!((station_at(planform.kink.y_m).chord - planform.kink.chord_m).abs() < 1e-12);
+        let tip = main_wing.xsecs.last().expect("a tip");
         assert!(
-            (main_wing.xsecs[6].xyz_le[0]
+            (tip.xyz_le[0]
                 - (builder.geometry.wing.root_datum_x_m + planform.tip.leading_edge_x_m))
                 .abs()
                 < 1e-12
@@ -190,16 +205,50 @@ mod tests {
     #[test]
     fn a_collinear_side_of_body_station_does_not_add_a_vlm_subdivision_block() {
         let mut geometry = GeometryConfig::default();
-        geometry.wing.n_subdivisions = 2;
+        // Six panels, stated as a count. This used to read `2`, meaning a
+        // per-section ratio of two over three sections.
+        geometry.wing.n_subdivisions = 6;
         let builder = AircraftBuilder::new(Some(geometry));
 
         let airplane = builder
             .build(Some(&DesignVector::default()), false)
             .expect("the default transport planform builds");
 
-        // Root/kink/tip is two physical panels. The derived side-of-body
-        // station lies on the inboard panel and therefore adds no mesh block.
-        assert_eq!(airplane.wings[0].xsecs.len(), 5);
+        // Root/kink/tip is two physical sections, and the derived
+        // side-of-body station lies on the inboard one, so it adds no
+        // station. Under an absolute panel count that is now visible as the
+        // property it always was: the requested count is delivered whether or
+        // not a collinear station happens to exist, which is exactly what
+        // stops a search from stepping across a discretisation change.
+        assert_eq!(airplane.wings[0].xsecs.len() - 1, 6);
+    }
+
+    #[test]
+    fn an_added_planform_station_does_not_change_the_panel_count() {
+        // The regression this guards: when the count was per-section, turning
+        // a station on added eight strips to the wing, and two adjacent
+        // candidates in a search differed by a mesh rather than by a shape.
+        let panels = 24;
+        let mut plain = GeometryConfig::default();
+        plain.wing.n_subdivisions = panels;
+        let mut cranked = plain.clone();
+        cranked.wing.side_of_body_span_fraction = Some(0.10);
+        cranked.wing.side_of_body_chord_ratio = Some(0.90);
+        cranked.wing.kink_span_fraction = Some(0.40);
+        cranked.wing.outboard_le_sweep_deg = Some(28.0);
+
+        let dv = DesignVector::default();
+        let count_of = |geometry: GeometryConfig| {
+            AircraftBuilder::new(Some(geometry))
+                .build(Some(&dv), false)
+                .expect("builds")
+                .wings[0]
+                .xsecs
+                .len()
+                - 1
+        };
+        assert_eq!(count_of(plain), panels as usize);
+        assert_eq!(count_of(cranked), panels as usize);
     }
 
     #[test]
@@ -336,14 +385,25 @@ mod tests {
     }
 
     #[test]
-    fn a_ratio_below_two_from_configuration_is_a_build_error_not_a_panic() {
-        let mut geometry = GeometryConfig::default();
-        geometry.wing.n_subdivisions = 1;
-        let builder = AircraftBuilder::new(Some(geometry));
-        let error = builder
-            .build(None, false)
-            .expect_err("n_subdivisions=1 must be rejected, not silently truncated");
-        assert!(matches!(error, BuildError::Subdivide(_)));
+    fn a_panel_count_below_the_section_count_still_keeps_every_station() {
+        // A spanwise panel count is now absolute, so a value too small to
+        // honour cannot be met -- but the planform stations are not
+        // negotiable, and the coarsest honest mesh is one panel per section.
+        // The failure this replaces was a build error; degrading to the
+        // coarsest mesh is better, because the alternative to a coarse mesh
+        // here would have been a mesh that dropped the kink.
+        for count in [0_i64, 1] {
+            let mut geometry = GeometryConfig::default();
+            geometry.wing.n_subdivisions = count;
+            let airplane = AircraftBuilder::new(Some(geometry))
+                .build(None, false)
+                .expect("a degenerate panel count still builds a usable wing");
+            let main_wing = &airplane.wings[0];
+            assert_eq!(
+                main_wing.xsecs.len(),
+                3,
+                "root/kink/tip must survive a panel count of {count}"
+            );
+        }
     }
 }
-

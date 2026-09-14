@@ -35,7 +35,7 @@ use alas_struct::nastran::{
     build_sol101_bulk, build_sol103_bulk, build_sol111_random_bulk, build_sol111_sine_bulk,
     monitor_set,
 };
-use alas_struct::sizing::size_wingbox;
+use alas_struct::sizing::size_wingbox_reference_compatibility;
 use alas_testkit::{Comparison, Tier};
 use serde::Deserialize;
 use serde_json::{Map, Value};
@@ -175,7 +175,7 @@ fn the_solution_decks_match_python_line_for_line() {
             cfg.n_modes = 30;
         }
         let [skin, web, cap, rib] = materials_for(&case.materials);
-        let sizing = size_wingbox(&wsg, &cfg, &req, skin, web, cap, rib);
+        let sizing = size_wingbox_reference_compatibility(&wsg, &cfg, &req, skin, web, cap, rib);
         let (deck, _, node_index) = build_wing_mesh_bdf(
             &wsg,
             &sizing,

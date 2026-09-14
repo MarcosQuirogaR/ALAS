@@ -11,6 +11,7 @@
 
 use alas_config::design_variables::DesignVector;
 use alas_config::ConstraintPolicy;
+use alas_mass::breakdown::{MassBreakdown, MassCoordinates};
 use alas_mass::dispatch::DispatchSolution;
 
 /// Which requirement family a [`ConstraintResidual`] belongs to.
@@ -294,8 +295,16 @@ impl ExternalPolar {
 /// One design candidate closed against the sizing mission.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SizedCandidate {
-    /// Takeoff mass the dispatch closure settled on, kg.
+    /// Analysis takeoff mass, kg: the mission-closed dispatch mass for the
+    /// two mission-sized modes, the declared MTOW for `FixedRequirement`; the
+    /// dispatch plan keeps the mission-required mass for the ceiling check.
     pub takeoff_mass_kg: f64,
+    /// `fixed_aircraft` or `coupled` (`alas_config::MassSizingBasis`).
+    pub sizing_basis: &'static str,
+    /// FLOPS design gross mass `DG` the components were evaluated at, kg.
+    pub design_gross_mass_kg: f64,
+    /// Design landing mass `WLDG` the gear was evaluated at, kg.
+    pub design_landing_mass_kg: f64,
     /// Operating empty mass at the closed takeoff mass, kg.
     pub operating_empty_mass_kg: f64,
     /// Zero-fuel mass (operating empty plus payload) at closure, kg.
@@ -339,29 +348,74 @@ pub struct SizedCandidate {
     /// The dispatch closure this candidate was sized by.
     pub dispatch: DispatchSolution,
     /// Outer sizing passes taken (fixed-point iterations of empty mass, fuel
-    /// and takeoff mass; always `1` under `MtowSizing::FixedRequirement`).
+    /// and takeoff mass; always `1` under `MtowSizing::FixedRequirement`,
+    /// up to the configured iteration limit under `MtowSizing::SizedByMission`
+    /// and `MtowSizing::Unconstrained`).
     pub sizing_iterations: usize,
     /// Whether the outer sizing loop closed within its iteration budget.
     pub sizing_closed: bool,
-    /// Trim and drag-polar re-evaluations the sizing loop performed after
-    /// the first, each triggered by a centre-of-gravity shift beyond the
+    /// Re-trims after the first, each triggered by a CG shift beyond the
     /// configured re-trim tolerance.
     pub retrim_count: usize,
-    /// Centre-of-gravity shift, percent MAC, between the last trim and the
-    /// converged mass state: the residual inconsistency the loop accepted.
+    /// CG shift, percent MAC, between the last trim and the converged state.
     pub cg_shift_pct_mac: f64,
     /// Whether the wing total includes a complete, declared primary and
-    /// secondary inventory. Clean-sheet Torenbeek movable terms are partial
-    /// by design and therefore remain false until the omitted inventory is
-    /// explicitly supplied.
+    /// secondary inventory (false while a clean-sheet inventory is partial).
     pub structural_inventory_complete: bool,
-    /// Strength-sized primary wingbox mass represented in the complete wing,
-    /// kg. This is retained for the result/report seam so a structural mass
-    /// change is observable rather than hidden behind the empirical total.
+    /// Strength-sized primary wingbox mass in the complete wing, kg, kept
+    /// so a structural change is observable beside the empirical total.
     pub structural_primary_mass_kg: f64,
     /// Reconciled non-box wing inventory represented in the complete wing,
     /// kg.
     pub structural_secondary_mass_kg: f64,
+}
+
+/// Where a [`ResolvedProductState`] came from, so a consumer can say which
+/// physical evaluation it is quoting instead of assuming every mass/CG state
+/// in the run is the same one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProductStateProvenance {
+    /// The converged mass/CG/trim fixed point of `mdo::mda::converge`, i.e.
+    /// the state the search's own hard-feasibility gate was evaluated on.
+    MissionSizedClosure,
+}
+
+impl ProductStateProvenance {
+    /// Stable identifier for reports, manifests and JSON exports.
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::MissionSizedClosure => "mdo::mda::converge",
+        }
+    }
+}
+
+/// The converged physical state a candidate's feasibility was actually
+/// decided on.
+///
+/// [`CandidateAssessment`] previously carried only scalars, so a downstream
+/// report had no way to reuse the balance state the search accepted and had
+/// to rebuild its own. Two independent rebuilds of "the same" aircraft can
+/// disagree about where it balances while agreeing on its takeoff mass, which
+/// is exactly how a hard-feasible finalist could be printed as physically
+/// infeasible. Carrying the state itself makes the two comparable, and the
+/// provenance keeps it explicit that these numbers are the search's, not a
+/// second opinion.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ResolvedProductState {
+    /// Component masses at the closed takeoff mass, kg.
+    pub masses: MassBreakdown,
+    /// Component centroids the balance was evaluated at, m.
+    pub coords: MassCoordinates,
+    /// Physical centre of gravity of `masses` at `coords`, m.
+    pub cg_x_m: f64,
+    /// Neutral point the static margin was measured against, m.
+    pub x_neutral_point_m: f64,
+    /// Mean aerodynamic chord the percentages are expressed in, m.
+    pub mac_m: f64,
+    /// Closed takeoff mass this state belongs to, kg.
+    pub takeoff_mass_kg: f64,
+    /// Which evaluation produced it.
+    pub provenance: ProductStateProvenance,
 }
 
 /// The residual table and scalar cost for one evaluated candidate.
@@ -369,6 +423,9 @@ pub struct SizedCandidate {
 pub struct CandidateAssessment {
     /// The candidate the mission was sized against.
     pub sized: SizedCandidate,
+    /// The converged mass/CG/neutral-point state the balance residuals above
+    /// were evaluated on, for a caller that must report the same aircraft.
+    pub resolved: ResolvedProductState,
     /// Every evaluated requirement, as a typed residual.
     pub residuals: Vec<ConstraintResidual>,
     /// Whether every hard-policy residual is satisfied.

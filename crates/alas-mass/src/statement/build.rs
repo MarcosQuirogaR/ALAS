@@ -13,16 +13,17 @@
 //! component becomes one or more ledger rows.
 
 use crate::breakdown::MassBreakdown;
-use crate::flops_transport::{
-    FlopsOperatingItemsBreakdown, FlopsSystemsBreakdown, FlopsTransportBreakdown,
-};
+use crate::flops_transport::FlopsTransportBreakdown;
 use crate::inertia::{
     rectangular_prism, solid_cylinder_x, thin_cylinder_shell_x, thin_plate_xy, thin_plate_xz,
 };
-use crate::ledger::{InertiaTensor, MassGroup, MassItem, MassLedger, MassMethod, MassRole};
+use crate::ledger::{
+    InertiaTensor, LedgerError, MassGroup, MassItem, MassLedger, MassMethod, MassRole,
+};
 use crate::stations::ComponentStations;
 
-use super::PayloadItemSummary;
+use super::flops_items::push_flops_systems_and_operating_items;
+use super::{LedgerMethods, PayloadItemSummary};
 
 /// Fraction of [`MassBreakdown::gear`] carried by the nose gear at static
 /// weight, the rest going to the main gear -- Raymer, *Aircraft Design: A
@@ -43,27 +44,45 @@ pub(super) fn build_ledger(
     payload_items: &[PayloadItemSummary],
     unusable_fuel_items: Vec<MassItem>,
     flops: Option<&FlopsTransportBreakdown>,
-) -> MassLedger {
+    methods: LedgerMethods,
+) -> Result<MassLedger, LedgerError> {
     let mut ledger = MassLedger::new();
-    push_structure(&mut ledger, masses, stations);
-    push_gear(&mut ledger, masses, stations);
-    push_propulsion(&mut ledger, masses, stations);
+    push_structure(&mut ledger, masses, stations, methods);
+    push_gear(&mut ledger, masses, stations, methods);
+    push_propulsion(&mut ledger, masses, stations, methods);
     match flops {
-        Some(flops) => push_flops_systems_and_operating_items(&mut ledger, masses, stations, flops),
+        Some(flops) => push_flops_systems_and_operating_items(
+            &mut ledger,
+            masses,
+            stations,
+            flops,
+            &unusable_fuel_items,
+        )?,
         None => push_lumped_systems_and_furnishings(&mut ledger, masses, stations),
     }
     for item in unusable_fuel_items {
         ledger.push(item);
     }
     push_payload(&mut ledger, masses, stations, payload_items);
-    ledger
+    Ok(ledger)
+}
+
+/// Relative tolerance for the two group-closure checks below: the
+/// systems-group residual and the unusable-fuel allocation. Both compare
+/// sums of `f64` masses that travelled through several correlations, so an
+/// exact equality test would fail on rounding alone; anything larger than
+/// this is a real disagreement and is surfaced, not absorbed.
+const CLOSURE_RELATIVE_TOLERANCE: f64 = 1.0e-6;
+
+pub(super) fn closure_tolerance(reference_kg: f64) -> f64 {
+    CLOSURE_RELATIVE_TOLERANCE * reference_kg.abs().max(1.0)
 }
 
 /// The nacelle mid-length points [`crate::stations::component_stations`]
 /// resolved, or the single legacy no-nacelle point (the wing station,
 /// `define_mass_coordinates`'s own `w_root_z - 1.0` offset) when there is no
 /// nacelle geometry to place engines at.
-fn propulsion_positions(stations: &ComponentStations) -> Vec<[f64; 3]> {
+pub(super) fn propulsion_positions(stations: &ComponentStations) -> Vec<[f64; 3]> {
     if stations.propulsion_units.is_empty() {
         vec![[
             stations.wing.position_m[0],
@@ -79,13 +98,19 @@ fn propulsion_positions(stations: &ComponentStations) -> Vec<[f64; 3]> {
     }
 }
 
-/// Wing, both tails and the fuselage, as `MassRole::Fixed` Torenbeek items.
+/// Wing, both tails and the fuselage, as `MassRole::Fixed` items tagged with
+/// whichever structural method actually produced them.
 ///
-/// The tails use the same correlation tag as the wing because
-/// `calculate_component_masses` derives all three from the identical
-/// `mass_wing` Torenbeek method; Torenbeek/fuselage attribution is the one
-/// this module's contract names explicitly.
-fn push_structure(ledger: &mut MassLedger, masses: &MassBreakdown, stations: &ComponentStations) {
+/// The tails carry the same tag as the wing: both the reference-compatible
+/// buildup (all three from the identical `mass_wing` Torenbeek method) and
+/// the FLOPS structural group derive them together.
+fn push_structure(
+    ledger: &mut MassLedger,
+    masses: &MassBreakdown,
+    stations: &ComponentStations,
+    methods: LedgerMethods,
+) {
+    let method = methods.structure;
     ledger.push(MassItem {
         id: "wing".to_owned(),
         group: MassGroup::WingStructure,
@@ -97,7 +122,7 @@ fn push_structure(ledger: &mut MassLedger, masses: &MassBreakdown, stations: &Co
             stations.wing.extent_m[0],
             stations.wing.extent_m[1],
         ),
-        method: MassMethod::Correlation("Torenbeek"),
+        method,
     });
     ledger.push(MassItem {
         id: "h_stab".to_owned(),
@@ -110,7 +135,7 @@ fn push_structure(ledger: &mut MassLedger, masses: &MassBreakdown, stations: &Co
             stations.horizontal_tail.extent_m[0],
             stations.horizontal_tail.extent_m[1],
         ),
-        method: MassMethod::Correlation("Torenbeek"),
+        method,
     });
     ledger.push(MassItem {
         id: "v_stab".to_owned(),
@@ -123,7 +148,7 @@ fn push_structure(ledger: &mut MassLedger, masses: &MassBreakdown, stations: &Co
             stations.vertical_tail.extent_m[0],
             stations.vertical_tail.extent_m[2],
         ),
-        method: MassMethod::Correlation("Torenbeek"),
+        method,
     });
     ledger.push(MassItem {
         id: "fuselage".to_owned(),
@@ -136,13 +161,18 @@ fn push_structure(ledger: &mut MassLedger, masses: &MassBreakdown, stations: &Co
             stations.fuselage.extent_m[1] / 2.0,
             stations.fuselage.extent_m[0],
         ),
-        method: MassMethod::Correlation("Torenbeek"),
+        method,
     });
 }
 
 /// Nose and main gear, split by [`NOSE_GEAR_MASS_FRACTION`], as point masses:
 /// no strut geometry is modelled, so a shape-based tensor would be invented.
-fn push_gear(ledger: &mut MassLedger, masses: &MassBreakdown, stations: &ComponentStations) {
+fn push_gear(
+    ledger: &mut MassLedger,
+    masses: &MassBreakdown,
+    stations: &ComponentStations,
+    methods: LedgerMethods,
+) {
     let nose_mass = masses.gear * NOSE_GEAR_MASS_FRACTION;
     let main_mass = masses.gear - nose_mass;
     ledger.push(MassItem {
@@ -152,7 +182,7 @@ fn push_gear(ledger: &mut MassLedger, masses: &MassBreakdown, stations: &Compone
         mass_kg: nose_mass,
         position_m: stations.nose_gear.position_m,
         local_inertia: InertiaTensor::ZERO,
-        method: MassMethod::TakeoffMassFraction,
+        method: methods.landing_gear,
     });
     ledger.push(MassItem {
         id: "main_gear".to_owned(),
@@ -161,13 +191,18 @@ fn push_gear(ledger: &mut MassLedger, masses: &MassBreakdown, stations: &Compone
         mass_kg: main_mass,
         position_m: stations.main_gear.position_m,
         local_inertia: InertiaTensor::ZERO,
-        method: MassMethod::TakeoffMassFraction,
+        method: methods.landing_gear,
     });
 }
 
 /// Propulsion mass split equally across nacelles (or the single legacy
 /// point with no nacelle geometry), each as a solid-cylinder item.
-fn push_propulsion(ledger: &mut MassLedger, masses: &MassBreakdown, stations: &ComponentStations) {
+fn push_propulsion(
+    ledger: &mut MassLedger,
+    masses: &MassBreakdown,
+    stations: &ComponentStations,
+    methods: LedgerMethods,
+) {
     let positions = propulsion_positions(stations);
     let share = masses.propulsion / positions.len() as f64;
     for (index, position_m) in positions.iter().enumerate() {
@@ -189,7 +224,7 @@ fn push_propulsion(ledger: &mut MassLedger, masses: &MassBreakdown, stations: &C
             mass_kg: share,
             position_m: *position_m,
             local_inertia,
-            method: MassMethod::Correlation("thrust-to-weight"),
+            method: methods.propulsion,
         });
     }
 }
@@ -223,7 +258,7 @@ fn push_lumped_systems_and_furnishings(
     );
 }
 
-fn push_furnishings_item(
+pub(super) fn push_furnishings_item(
     ledger: &mut MassLedger,
     mass_kg: f64,
     stations: &ComponentStations,
@@ -243,199 +278,6 @@ fn push_furnishings_item(
         ),
         method,
     });
-}
-
-/// A point-mass ledger item tagged `MassMethod::Correlation("FLOPS")`.
-///
-/// None of the individual FLOPS systems/operating-item components has a
-/// declared shape of its own, so each is a point mass at its station; only
-/// the lumped groups above (and the reduced furnishings remainder) get a
-/// prism extent.
-fn push_flops_item(
-    ledger: &mut MassLedger,
-    id: &str,
-    group: MassGroup,
-    role: MassRole,
-    mass_kg: f64,
-    position_m: [f64; 3],
-) {
-    ledger.push(MassItem {
-        id: id.to_owned(),
-        group,
-        role,
-        mass_kg,
-        position_m,
-        local_inertia: InertiaTensor::ZERO,
-        method: MassMethod::Correlation("FLOPS"),
-    });
-}
-
-/// FLOPS's nine systems-and-equipment components at the stations the
-/// module doc's placement contract names: all at the systems station
-/// except APU (0.95 fuselage length), avionics/instruments (0.10 fuselage
-/// length), anti-ice (the wing station), and surface controls (60% wing,
-/// split evenly between the two tail surfaces for the remaining 40% --
-/// FLOPS has no combined "tails" station this crate can place the tail
-/// share at once).
-fn push_flops_systems(
-    ledger: &mut MassLedger,
-    stations: &ComponentStations,
-    systems: &FlopsSystemsBreakdown,
-) {
-    let fuselage_length_m = stations.fuselage.extent_m[0];
-    let z = stations.fuselage.position_m[2];
-    let apu_station = [fuselage_length_m * 0.95, 0.0, z];
-    let forward_bay_station = [fuselage_length_m * 0.10, 0.0, z];
-    let systems_station = stations.systems.position_m;
-    let wing_station = stations.wing.position_m;
-
-    let items: [(&str, f64, [f64; 3]); 11] = [
-        ("systems-apu", systems.apu_kg, apu_station),
-        (
-            "systems-instruments",
-            systems.instruments_kg,
-            forward_bay_station,
-        ),
-        ("systems-avionics", systems.avionics_kg, forward_bay_station),
-        ("systems-anti_ice", systems.anti_ice_kg, wing_station),
-        ("systems-hydraulics", systems.hydraulics_kg, systems_station),
-        ("systems-electrical", systems.electrical_kg, systems_station),
-        (
-            "systems-furnishings",
-            systems.furnishings_kg,
-            systems_station,
-        ),
-        (
-            "systems-air_conditioning",
-            systems.air_conditioning_kg,
-            systems_station,
-        ),
-        (
-            "systems-surface_controls-wing",
-            systems.surface_controls_kg * 0.60,
-            wing_station,
-        ),
-        (
-            "systems-surface_controls-htail",
-            systems.surface_controls_kg * 0.20,
-            stations.horizontal_tail.position_m,
-        ),
-        (
-            "systems-surface_controls-vtail",
-            systems.surface_controls_kg * 0.20,
-            stations.vertical_tail.position_m,
-        ),
-    ];
-    for (id, mass_kg, position_m) in items {
-        push_flops_item(
-            ledger,
-            id,
-            MassGroup::Systems,
-            MassRole::Fixed,
-            mass_kg,
-            position_m,
-        );
-    }
-}
-
-/// The four FLOPS operating items the module doc's placement contract
-/// names (flight crew at 0.05 fuselage length, cabin crew and passenger
-/// service at the operating-items station, engine oil split across the
-/// propulsion positions). Unusable fuel and cargo containers are not
-/// placed here: unusable fuel arrives through
-/// [`super::MassStatementInputs::unusable_fuel_items`], and both remain
-/// folded into the reduced furnishings remainder
-/// [`push_flops_systems_and_operating_items`] computes, so the group total
-/// is still exact.
-///
-/// Returns the total mass placed, so the caller can size that remainder.
-fn push_flops_operating_items(
-    ledger: &mut MassLedger,
-    stations: &ComponentStations,
-    operating_items: &FlopsOperatingItemsBreakdown,
-) -> f64 {
-    let fuselage_length_m = stations.fuselage.extent_m[0];
-    let z = stations.fuselage.position_m[2];
-    let flight_crew_station = [fuselage_length_m * 0.05, 0.0, z];
-
-    let named_items: [(&str, f64, [f64; 3]); 3] = [
-        (
-            "operating-flight_crew",
-            operating_items.flight_crew_and_baggage_kg,
-            flight_crew_station,
-        ),
-        (
-            "operating-cabin_crew",
-            operating_items.cabin_crew_and_baggage_kg,
-            stations.operating_items.position_m,
-        ),
-        (
-            "operating-passenger_service",
-            operating_items.passenger_service_kg,
-            stations.operating_items.position_m,
-        ),
-    ];
-    for (id, mass_kg, position_m) in named_items {
-        push_flops_item(
-            ledger,
-            id,
-            MassGroup::OperatingItems,
-            MassRole::OperatingItem,
-            mass_kg,
-            position_m,
-        );
-    }
-
-    let oil_positions = propulsion_positions(stations);
-    let oil_share = operating_items.engine_oil_kg / oil_positions.len() as f64;
-    for (index, position_m) in oil_positions.iter().enumerate() {
-        let id = if oil_positions.len() == 1 {
-            "operating-engine_oil".to_owned()
-        } else {
-            format!("operating-engine_oil-{index}")
-        };
-        push_flops_item(
-            ledger,
-            &id,
-            MassGroup::OperatingItems,
-            MassRole::OperatingItem,
-            oil_share,
-            *position_m,
-        );
-    }
-
-    operating_items.flight_crew_and_baggage_kg
-        + operating_items.cabin_crew_and_baggage_kg
-        + operating_items.passenger_service_kg
-        + operating_items.engine_oil_kg
-}
-
-/// The FLOPS path: nine named systems items, four named operating items,
-/// and the furnishings remainder reduced so the group sums stay exact --
-/// see the module doc's FLOPS split contract.
-///
-/// `masses.furnishings` already equals FLOPS `furnishings_kg` plus the
-/// *entire* operating-items total (including unusable fuel and cargo
-/// containers, which this module does not place as their own items), so
-/// subtracting only the four explicitly placed items leaves that unusable
-/// fuel/cargo remainder inside the lumped furnishings item rather than
-/// dropping it.
-fn push_flops_systems_and_operating_items(
-    ledger: &mut MassLedger,
-    masses: &MassBreakdown,
-    stations: &ComponentStations,
-    flops: &FlopsTransportBreakdown,
-) {
-    push_flops_systems(ledger, stations, &flops.systems);
-    let placed_operating_items_kg =
-        push_flops_operating_items(ledger, stations, &flops.operating_items);
-    let reduced_furnishings_kg = masses.furnishings - placed_operating_items_kg;
-    push_furnishings_item(
-        ledger,
-        reduced_furnishings_kg,
-        stations,
-        MassMethod::Correlation("FLOPS"),
-    );
 }
 
 /// Payload: one item per [`PayloadItemSummary`], or the lumped fallback at

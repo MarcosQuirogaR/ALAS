@@ -27,10 +27,13 @@ pub(super) struct PageSection {
 pub(super) fn page_sections(group: &str) -> Option<&'static [PageSection]> {
     const MASS_MODEL: &[PageSection] = &[
         PageSection {
-            title: "Mass and propulsion",
+            title: "Mass architecture and FLOPS",
+            names: &["mass_architecture", "geometric_component_stations"],
+            default_open: true,
+        },
+        PageSection {
+            title: "Legacy comparison controls",
             names: &[
-                "structural_mass_method",
-                "propulsion_mass_method",
                 "suspended_mass_fraction",
                 "max_airspeed_for_flaps_ms",
                 "flap_deflection_angle_deg",
@@ -38,15 +41,14 @@ pub(super) fn page_sections(group: &str) -> Option<&'static [PageSection]> {
                 "propulsion_twr_factor",
                 "propulsion_installation_factor",
                 "propulsion_mass_fallback_fraction",
-            ],
-            default_open: true,
-        },
-        PageSection {
-            title: "Systems, payload and fuel",
-            names: &[
-                "systems_mass_method",
                 "systems_mass_fraction",
                 "furnishings_mass_fraction",
+            ],
+            default_open: false,
+        },
+        PageSection {
+            title: "Payload, fuel and stations",
+            names: &[
                 "cabin_payload_density_kg_m",
                 "fuel_density_kg_m3",
                 "fuel_tank_usable_fraction",
@@ -54,7 +56,7 @@ pub(super) fn page_sections(group: &str) -> Option<&'static [PageSection]> {
             default_open: true,
         },
         PageSection {
-            title: "FLOPS transport model",
+            title: "FLOPS transport inputs and technology",
             names: &["flops_transport", "flops_structure"],
             default_open: true,
         },

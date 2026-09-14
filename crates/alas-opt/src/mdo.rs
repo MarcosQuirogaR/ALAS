@@ -36,7 +36,7 @@ mod types;
 pub use mission_model::SegmentMissionModel;
 pub use types::{
     CandidateAssessment, ConstraintFamily, ConstraintResidual, ExternalPolar,
-    PolarConditionTolerance, SizedCandidate,
+    PolarConditionTolerance, ProductStateProvenance, ResolvedProductState, SizedCandidate,
 };
 
 use alas_config::design_variables::DesignVector;
@@ -52,19 +52,34 @@ use crate::objective::DesignObjective;
 /// its best-design vector. Other modes return the supplied nominal intact.
 pub(crate) fn canonical_nominal_design(
     config: &AlasConfig,
-    mut nominal: DesignVector,
+    nominal: DesignVector,
+) -> Result<DesignVector, String> {
+    canonicalize_design(config, nominal)
+}
+
+/// Materialize the design vector that the production evaluator actually
+/// builds for a candidate.
+///
+/// In a clean-sheet passenger study the fuselage length is derived from the
+/// cabin load case.  Keeping this operation at the public pipeline boundary
+/// prevents a no-optimization run (or a downstream export) from publishing
+/// the unsized default vector while the evaluator silently builds a different
+/// fuselage.  Other design modes preserve the caller's vector verbatim.
+pub fn canonicalize_design(
+    config: &AlasConfig,
+    mut design: DesignVector,
 ) -> Result<DesignVector, String> {
     if !config.optimizer.design_space.sizes_fuselage_from_cabin()
         || config.requirements.aircraft_type == "cargo"
     {
-        return Ok(nominal);
+        return Ok(design);
     }
     let mut materialized = config.clone();
-    crate::objective::apply_candidate_payload_load_case(&mut materialized, &nominal)
+    crate::objective::apply_candidate_payload_load_case(&mut materialized, &design)
         .map_err(|error| format!("cabin load case cannot be materialized: {error}"))?;
-    build::size_fuselage_from_cabin(&materialized, &mut nominal)
+    build::size_fuselage_from_cabin(&materialized, &mut design)
         .map_err(|failure| format!("fuselage cannot be sized from cabin: {}", failure.reason))?;
-    Ok(nominal)
+    Ok(design)
 }
 
 /// Evaluate a mission-sized objective for candidate design vector `x`,
@@ -105,7 +120,11 @@ pub fn evaluate_mission_sized_with_assessment(
         );
         return (cost, None);
     }
-    match sizing::run_candidate(&objective.config, x) {
+    match sizing::run_candidate_with_fuselage_policy(
+        &objective.config,
+        x,
+        objective.preserve_explicit_fuselage_length,
+    ) {
         Ok(outcome) => {
             let history = outcome.history;
             let residuals = residuals::build(
@@ -185,6 +204,31 @@ pub fn assess_candidate(
     assess_with(objective, x, None)
 }
 
+/// Re-evaluate a product finalist with the same mission-sized objective that
+/// the optimizer uses, using the finalist itself as the nominal design-space
+/// reference.
+///
+/// The optimizer returns a design vector and its history, while the pipeline
+/// still needs the closed takeoff mass to build the final report.  Replaying
+/// the typed assessment at this boundary keeps that mass, dispatch status and
+/// residual table tied to the exact vector that is exported.  Using the
+/// finalist as the nominal only avoids rejecting a valid caller-supplied
+/// starting vector because it lies outside a different preset's preferred
+/// envelope; the configured global design-space validity rules remain active.
+pub fn assess_product_candidate(
+    config: &AlasConfig,
+    design: &DesignVector,
+) -> Result<CandidateAssessment, String> {
+    if !config.mass_model.mass_architecture.is_production() {
+        return Err(
+            "the product candidate assessor requires pure_flops_transport_v1; select the explicit reference-compatibility comparison path for legacy masses"
+                .to_owned(),
+        );
+    }
+    let objective = DesignObjective::new_with_nominal(config.clone(), *design);
+    assess_candidate(&objective, &design.to_array())
+}
+
 /// [`assess_candidate`] with the cruise drag polar supplied by an external
 /// aerodynamic solver instead of the native trim: the sizing loop then keeps
 /// that polar fixed and closes mass, fuel and takeoff mass around it.
@@ -209,7 +253,12 @@ fn assess_with(
         .validate_design_space(x)
         .map_err(|_| "design_space".to_owned())?;
     let weights = objective.config.optimizer.weights.clone();
-    match sizing::run_candidate_with_polar(&objective.config, x, polar) {
+    match sizing::run_candidate_with_polar_and_fuselage_policy(
+        &objective.config,
+        x,
+        polar,
+        objective.preserve_explicit_fuselage_length,
+    ) {
         Ok(outcome) => {
             let residuals = residuals::build(
                 &outcome,

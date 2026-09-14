@@ -60,6 +60,43 @@ pub fn draw_title(scene: &mut Scene, title: &str, pal: &Palette) {
     });
 }
 
+/// Greedy word-wrap for the scene graph's font-metric-free text primitive.
+///
+/// `max_chars_per_line` is a coarse character budget, not a measured pixel
+/// width -- this scene graph deliberately has no text-layout engine (see
+/// [`draw_axes`]'s doc comment). Callers pick a budget from their own canvas
+/// width and font size. A single word longer than the budget is kept whole
+/// on its own line rather than broken mid-token, since these messages are
+/// often file paths or identifiers that must stay legible and copyable.
+///
+/// Existing newlines in `text` are treated as required paragraph breaks, so
+/// a caller-formatted message (for example one that already separates
+/// clauses at `"; "`) keeps its intended structure instead of being
+/// reflowed into one paragraph.
+pub fn wrap_text(text: &str, max_chars_per_line: usize) -> String {
+    let budget = max_chars_per_line.max(1);
+    let mut lines: Vec<String> = Vec::new();
+    for paragraph in text.split('\n') {
+        let mut current = String::new();
+        for word in paragraph.split_whitespace() {
+            let candidate_len = if current.is_empty() {
+                word.chars().count()
+            } else {
+                current.chars().count() + 1 + word.chars().count()
+            };
+            if candidate_len > budget && !current.is_empty() {
+                lines.push(std::mem::take(&mut current));
+            }
+            if !current.is_empty() {
+                current.push(' ');
+            }
+            current.push_str(word);
+        }
+        lines.push(current);
+    }
+    lines.join("\n")
+}
+
 /// Add a bounded annotation anchored to a data coordinate.
 pub fn draw_annotation(
     axes: &Axes2D,
@@ -233,7 +270,7 @@ fn draw_axes_configured(
                 stroke: Stroke::new(spine, 1.0),
             });
             scene.add(SceneElement::Text {
-                text: format_tick(value, x_step),
+                text: format_tick(value, x_step, axes.x_tick_decimals),
                 pos: [p[0], axes.top + axes.height + 7.0],
                 font_size: 8.5,
                 color: tick_color,
@@ -252,7 +289,7 @@ fn draw_axes_configured(
             stroke: Stroke::new(spine, 1.0),
         });
         scene.add(SceneElement::Text {
-            text: format_tick(value, y_step),
+            text: format_tick(value, y_step, axes.y_tick_decimals),
             pos: [axes.left - 7.0, p[1]],
             font_size: 8.5,
             color: tick_color,
@@ -278,9 +315,16 @@ fn draw_axes_configured(
         }
     }
     if let Some(label) = y_label.filter(|label| !label.trim().is_empty()) {
+        // Forced decimal precision (e.g. `CDtot`/`CDi` at two decimals) widens
+        // the numeric tick column beyond what the default offset assumes,
+        // enough for a negative value like "-0.02" to reach the rotated axis
+        // label. Give that column a few extra pixels rather than moving every
+        // ordinary (auto-formatted, usually narrower) y label.
+        let wide_ticks = axes.y_tick_decimals.is_some_and(|decimals| decimals >= 2);
+        let offset = if wide_ticks { -46.0 } else { -38.0 };
         scene.add(SceneElement::Text {
             text: label.to_owned(),
-            pos: [axes.left - 38.0, axes.top + axes.height * 0.5],
+            pos: [axes.left + offset, axes.top + axes.height * 0.5],
             font_size: 10.0,
             color: tick_color,
             align: TextAlign::Center,
@@ -371,12 +415,15 @@ fn ordered_range(min: f64, max: f64, scale: Scale) -> (f64, f64) {
     }
 }
 
-fn format_tick(value: f64, step: f64) -> String {
+fn format_tick(value: f64, step: f64, fixed_decimals: Option<usize>) -> String {
     let value = if value.abs() < step.abs() * 1e-9 {
         0.0
     } else {
         value
     };
+    if let Some(decimals) = fixed_decimals {
+        return format!("{value:.decimals$}");
+    }
     let abs_step = step.abs();
     if abs_step >= 1e6 || (abs_step > 0.0 && abs_step < 1e-4) {
         return format!("{value:.2e}");

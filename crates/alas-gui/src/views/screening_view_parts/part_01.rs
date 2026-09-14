@@ -34,44 +34,56 @@ fn show_screening_content(state: &mut AppState, ui: &mut Ui) {
     }
     ui.add_space(6.0);
 
+    show_screening_preview(&mut state.screening, ui);
+    ui.add_space(12.0);
     show_options(state, ui);
     ui.add_space(8.0);
     show_screening_actions(state, ui);
-
     ui.add_space(12.0);
-    if state.screening.result.is_some() {
-        let result = state.screening.result.clone();
-        if let Some(result) = result.as_ref() {
-            show_result(state, ui, result);
-        }
+    if let Some(result) = state.screening.result.take() {
+        show_result(state, ui, &result);
+        state.screening.result = Some(result);
     } else {
         ui.label(RichText::new(tr("Run the sweep to see ranked candidates.")).weak());
     }
 }
 
 fn resolved_mses_dir(state: &AppState) -> Option<PathBuf> {
-    let config = state.typed_config()?;
-    state
-        .tool_locator
-        .resolve_environment(
-            Path::new(&config.mses.mses_dir),
-            Path::new(&config.structures.nastran_exe_path),
-            Path::new(&config.structures.patran_exe_path),
-            Path::new(state.tool_preferences.openvsp_dir.as_deref().unwrap_or("")),
-            Path::new(state.tool_preferences.avl_exe.as_deref().unwrap_or("")),
-        )
-        .mses_dir
+    let path = state.config_values.pointer("/mses/mses_dir")?.as_str()?;
+    state.tool_locator.resolve_mses_dir(Path::new(path))
 }
 
-fn show_mses_readiness(state: &AppState, ui: &mut Ui) {
+fn show_mses_readiness(state: &mut AppState, ui: &mut Ui) {
     let configured = state
-        .typed_config()
-        .is_some_and(|config| config.mses.enabled);
-    let resolved = configured.then(|| resolved_mses_dir(state)).flatten();
+        .config_values
+        .pointer("/mses/enabled")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+    let path = state
+        .config_values
+        .pointer("/mses/mses_dir")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("");
+    state
+        .screening
+        .mses_readiness
+        .refresh(&state.tool_locator, path, configured);
+    let readiness = &state.screening.mses_readiness;
+    let resolved = &readiness.path;
+    if configured {
+        ui.ctx()
+            .request_repaint_after(std::time::Duration::from_millis(if readiness.pending() {
+                100
+            } else {
+                5000
+            }));
+    }
     let status = if !configured {
         tr("MSES was disabled or did not produce the requested export.")
-    } else if let Some(path) = &resolved {
+    } else if let Some(path) = resolved {
         path.display().to_string()
+    } else if readiness.pending() {
+        tr("Checking...")
     } else {
         tr("MSES executables not configured (Setup > External Tools)")
     };
@@ -118,19 +130,8 @@ fn show_options(state: &mut AppState, ui: &mut Ui) {
 fn show_ranking_options(ui: &mut Ui, o: &mut alas_screen::types::AirfoilScreeningOptions) {
     ui.label(RichText::new(tr("Ranking and target")).strong());
     screening_field_label(ui, "Ranking objective");
-    egui::ComboBox::from_id_salt("screening_objective")
-        .width(ui.available_width())
-        .selected_text(tr(o.objective.as_str()))
-        .show_ui(ui, |ui| {
-            for objective in [
-                ScreeningObjective::Balanced,
-                ScreeningObjective::Efficiency,
-                ScreeningObjective::FuelCapacity,
-                ScreeningObjective::Robustness,
-            ] {
-                ui.selectable_value(&mut o.objective, objective, tr(objective.as_str()));
-            }
-        });
+    o.objective = ScreeningObjective::Balanced;
+    ui.label(tr(o.objective.as_str()));
     screening_field_label(ui, "Target CL");
     let mut use_custom_cl = o.target_cl.is_some();
     if ui

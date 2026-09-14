@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "purpose": "Pinned primary sources for the ALAS FLOPS transport mass model. Durable copy of .agent/data/flops-reference-20260911/manifest.json, which is an ignored artifact directory.",
+  "retrieved_utc": "2026-09-11",
+  "local_copy_directory": ".agent/data/flops-reference-20260911/",
+  "note": "Aviary is NASA OpenMDAO, Apache-2.0. NASA/TM-2017-219627 Vol. I is the equation source; Aviary at the pinned commit is the numeric reference implementation. Neither is physical aircraft validation.",
+  "sources": [
+    {
+      "commit": "c7affbbe54dcbeded7373eae05f771882e2bb28a",
+      "retrieved_utc": "2026-09-11T15:50:44.2455596Z",
+      "path": "aviary/validation_cases/validation_data/test_data/large_single_aisle_1_FLOPS_data.py",
+      "url": "https://raw.githubusercontent.com/OpenMDAO/Aviary/c7affbbe54dcbeded7373eae05f771882e2bb28a/aviary/validation_cases/validation_data/test_data/large_single_aisle_1_FLOPS_data.py",
+      "sha256": "f259389307de05b9ec4b101accdf3f036def1a450d7d97c86d8325d4a23f572d",
+      "bytes": 17239
+    },
+    {
+      "commit": "c7affbbe54dcbeded7373eae05f771882e2bb28a",
+      "retrieved_utc": "2026-09-11T15:50:45.4758991Z",
+      "path": "aviary/validation_cases/validation_data/test_data/large_single_aisle_2_FLOPS_data.py",
+      "url": "https://raw.githubusercontent.com/OpenMDAO/Aviary/c7affbbe54dcbeded7373eae05f771882e2bb28a/aviary/validation_cases/validation_data/test_data/large_single_aisle_2_FLOPS_data.py",
+      "sha256": "52208bc13e2b9bb53cdc49db358b2857e0c3fa2c81b9ceee3137ed18266a16f1",
+      "bytes": 16946
+    },
+    {
+      "commit": "c7affbbe54dcbeded7373eae05f771882e2bb28a",
+      "retrieved_utc": "2026-09-11T15:50:46.1032016Z",
+      "path": "aviary/subsystems/mass/flops_based/distributed_prop.py",
+      "url": "https://raw.githubusercontent.com/OpenMDAO/Aviary/c7affbbe54dcbeded7373eae05f771882e2bb28a/aviary/subsystems/mass/flops_based/distributed_prop.py",
+      "sha256": "e0e592b0be3f3ad9b9e90f92abb306d436d7f3096b136788077f3100401b7a70",
+      "bytes": 3107
+    },
+    {
+      "commit": "c7affbbe54dcbeded7373eae05f771882e2bb28a",
+      "retrieved_utc": "2026-09-11T15:50:47.1756888Z",
+      "path": "aviary/subsystems/mass/flops_based/surface_controls.py",
+      "url": "https://raw.githubusercontent.com/OpenMDAO/Aviary/c7affbbe54dcbeded7373eae05f771882e2bb28a/aviary/subsystems/mass/flops_based/surface_controls.py",
+      "sha256": "aa0d0f5fb833f05e414b7ab006e2e3ac5a79f882552b0fb5cb79e6bd8aa433c9",
+      "bytes": 7002
+    },
+    {
+      "commit": "c7affbbe54dcbeded7373eae05f771882e2bb28a",
+      "retrieved_utc": "2026-09-11T15:50:47.8708628Z",
+      "path": "LICENSE",
+      "url": "https://raw.githubusercontent.com/OpenMDAO/Aviary/c7affbbe54dcbeded7373eae05f771882e2bb28a/LICENSE",
+      "sha256": "d8513e0b7b4f2311d06b4d90b464f6d2fd7e823371f1d9c164094c91ab9e947d",
+      "bytes": 681
+    },
+    {
+      "commit": null,
+      "path": "NASA-TM-2017-219627-Vol1.pdf",
+      "url": "https://ntrs.nasa.gov/api/citations/20170005851/downloads/20170005851.pdf",
+      "retrieved_utc": "2026-09-11",
+      "sha256": "819a48fc9c8f34f14595d93f3e3d54dc8454298e83e64048c14ac7bda00bb51d",
+      "bytes": 881689
+    }
+  ]
+}

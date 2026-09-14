@@ -11,8 +11,10 @@ use alas_config::design_variables::DesignVector;
 use alas_config::AlasConfig;
 use alas_geom::airfoil_library::AirfoilLibrary;
 use alas_geom::asb::spacing::linspace;
-use alas_screen::refine::refine_candidate_3d;
-use alas_screen::runner::{blend_scores, filter_names, run_airfoil_screening};
+use alas_screen::refine::refine_candidate_3d_reference_compatibility;
+use alas_screen::runner::{
+    blend_scores, filter_names, run_airfoil_screening_reference_compatibility,
+};
 use alas_screen::score::{
     cruise_condition_reference_compatibility, score_candidate_reference_compatibility,
 };
@@ -199,7 +201,9 @@ fn parity_screening() {
     let mut comp_s2 = Comparison::new("refine_candidate_3d", Tier::Closed);
     for (cand, expected) in scored_candidates.iter_mut().zip(&fixture.stage2_candidates) {
         if cand.status == "ok" {
-            refine_candidate_3d(cand, &config, &dv, mach, altitude, cl_target, None);
+            refine_candidate_3d_reference_compatibility(
+                cand, &config, &dv, mach, altitude, cl_target, None,
+            );
             comp_s2.exact(
                 &format!("{}_refined", expected.name),
                 &cand.refined,
@@ -290,8 +294,15 @@ fn parity_screening() {
         ..Default::default()
     };
 
-    let sweep_result = run_airfoil_screening(&config, Some(&dv), &options, None, None, None)
-        .expect("screening sweep");
+    let sweep_result = run_airfoil_screening_reference_compatibility(
+        &config,
+        Some(&dv),
+        &options,
+        None,
+        None,
+        None,
+    )
+    .expect("screening sweep");
 
     assert_eq!(
         sweep_result.baseline_airfoil,

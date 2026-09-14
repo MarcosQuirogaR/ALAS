@@ -345,8 +345,13 @@ fn compare_values(
     }
 }
 
-/// See the matching correction in `parity_config`: force-PSD remains the
-/// default, while the old extended 500 Hz sweep no longer is.
+/// See the matching corrections in `parity_config`: force-PSD remains the
+/// default, the old extended 500 Hz sweep no longer is, and the vortex-lattice
+/// mesh no longer meshes a cambered section as a flat plate.
+///
+/// Every loaded preset inherits the analysis defaults, so the three mesh
+/// fields appear here once per registered aircraft. Both sides stay pinned,
+/// exactly as they are for a directly constructed configuration.
 fn vibration_performance_default_correction(path: &str) -> Option<(Value, Value)> {
     if path.ends_with(".structures.run_sol_vibration_sine") {
         Some((Value::Bool(true), Value::Bool(false)))
@@ -354,6 +359,14 @@ fn vibration_performance_default_correction(path: &str) -> Option<(Value, Value)
         Some((serde_json::json!(500.0), serde_json::json!(60.0)))
     } else if path.ends_with(".structures.n_modes") {
         Some((serde_json::json!(30), serde_json::json!(16)))
+    } else if path.ends_with(".analysis.chordwise_resolution") {
+        Some((serde_json::json!(1), serde_json::json!(8)))
+    } else if path.ends_with(".analysis.fine_chordwise_resolution") {
+        Some((serde_json::json!(8), serde_json::json!(16)))
+    } else if path.ends_with(".analysis.fine_spanwise_resolution") {
+        Some((serde_json::json!(2), serde_json::json!(1)))
+    } else if path.ends_with(".geometry.wing.n_subdivisions") {
+        Some((serde_json::json!(8), serde_json::json!(24)))
     } else {
         None
     }
@@ -392,6 +405,49 @@ fn correction(
 fn preset_source_corrections() -> BTreeMap<String, SourceCorrection> {
     let mut corrections = [
         correction("A220-300.requirements.cabin_preset", "Ryanair", "Custom"),
+        // Wing-box material families assigned per preset from the airport
+        // planning documents (`alas_config::preset_structures`); the frozen
+        // files carried the database default for every type.
+        correction("A220-300.structures.skin_material", "Al 7075-T6", "CFRP QI"),
+        correction(
+            "A220-300.structures.spar_cap_material",
+            "CFRP UD",
+            "CFRP QI",
+        ),
+        correction(
+            "A220-300.structures.spar_web_material",
+            "Al 7075-T6",
+            "CFRP QI",
+        ),
+        correction(
+            "A320-200.structures.spar_cap_material",
+            "CFRP UD",
+            "Al 7075-T6",
+        ),
+        correction(
+            "A340-300.structures.spar_cap_material",
+            "CFRP UD",
+            "Al 7075-T6",
+        ),
+        correction(
+            "A380-800.structures.spar_cap_material",
+            "CFRP UD",
+            "Al 7075-T6",
+        ),
+        correction("B787-9.structures.skin_material", "Al 7075-T6", "CFRP QI"),
+        correction("B787-9.structures.spar_cap_material", "CFRP UD", "CFRP QI"),
+        correction(
+            "B787-9.structures.spar_web_material",
+            "Al 7075-T6",
+            "CFRP QI",
+        ),
+        correction(
+            "DC-10.structures.spar_cap_material",
+            "CFRP UD",
+            "Al 7075-T6",
+        ),
+        // The A320's economy seat pitch follows its cabin source (28 in).
+        correction("A320-200.cabin.passenger.economy.pitch_m", 0.79, 0.7112),
         correction("A320-200.requirements.cabin_preset", "Ryanair", "Custom"),
         correction("A340-300.requirements.cabin_preset", "Ryanair", "Custom"),
         correction("A380-800.requirements.cabin_preset", "Ryanair", "Custom"),
@@ -525,6 +581,38 @@ fn preset_source_corrections() -> BTreeMap<String, SourceCorrection> {
 fn saved_file_source_corrections() -> BTreeMap<String, SourceCorrection> {
     let mut corrections = [
         correction("preset_only.requirements.cabin_preset", "Ryanair", "Custom"),
+        // The saved-file cases load the A220-300 and B787-9 presets, whose
+        // wing-box materials are now assigned per type; see the preset table.
+        correction(
+            "preset_only.structures.skin_material",
+            "Al 7075-T6",
+            "CFRP QI",
+        ),
+        correction(
+            "preset_only.structures.spar_cap_material",
+            "CFRP UD",
+            "CFRP QI",
+        ),
+        correction(
+            "preset_only.structures.spar_web_material",
+            "Al 7075-T6",
+            "CFRP QI",
+        ),
+        correction(
+            "preset_then_field.structures.skin_material",
+            "Al 7075-T6",
+            "CFRP QI",
+        ),
+        correction(
+            "preset_then_field.structures.spar_cap_material",
+            "CFRP UD",
+            "CFRP QI",
+        ),
+        correction(
+            "preset_then_field.structures.spar_web_material",
+            "Al 7075-T6",
+            "CFRP QI",
+        ),
         correction(
             "preset_then_field.requirements.cabin_preset",
             "Ryanair",

@@ -4,9 +4,10 @@
 impl FullAnalysis {
     /// Create a new analysis orchestrator for `config`.
     pub fn new(config: AlasConfig) -> Self {
+        let reference_compatibility = config.mass_model.uses_reference_mass_methods();
         Self {
             config,
-            reference_compatibility: false,
+            reference_compatibility,
         }
     }
 
@@ -17,9 +18,10 @@ impl FullAnalysis {
     /// preserve live engine fields regardless of whether they came from CPACS,
     /// a preset, a saved configuration, or the engine designer.
     pub fn new_preserving_engine_config(config: AlasConfig) -> Self {
+        let reference_compatibility = config.mass_model.uses_reference_mass_methods();
         Self {
             config,
-            reference_compatibility: false,
+            reference_compatibility,
         }
     }
 
@@ -31,6 +33,15 @@ impl FullAnalysis {
     /// erase evidence of what the translated implementation did.
     pub fn new_reference_compatibility(mut config: AlasConfig) -> Self {
         config.geometry.engine.apply_engine_spec();
+        // The constructor is the explicit opt-in for the retained comparison
+        // buildup.  Make that intent authoritative even when the supplied
+        // configuration came from the pure-FLOPS product default; otherwise
+        // the compatibility geometry path would still ask the FLOPS evaluator
+        // for a complete transport contract.
+        config.mass_model.mass_architecture =
+            alas_config::MassArchitecture::LegacyReferenceCompatibleComparison;
+        config.mass_model.apply_architecture();
+        config.analysis.restore_reference_mesh();
         Self {
             config,
             reference_compatibility: true,
@@ -65,22 +76,22 @@ impl FullAnalysis {
         design: &DesignVector,
         airplane: Airplane,
     ) -> Result<AnalysisReport, String> {
-        let req = &self.config.requirements;
-        let analysis_mass_model = self.config.analysis_mass_model(req.mtow_kg);
+        // A cabin declared by count is the first pass's cabin too (`cabin_sync`).
+        let (declared_requirements, analysis_mass_model) = cabin_sync::declared_cabin(
+            &self.config.requirements,
+            &self.config.analysis_mass_model(self.config.requirements.mtow_kg),
+            &self.config.cabin.passenger,
+        );
+        let req = &declared_requirements;
         let mut plane = airplane;
 
-        // The explicit compatibility constructor replays the historical
-        // unfolded wing normalization.  `AircraftBuilder` now publishes the
-        // projected XY reference by default, so restore the old normalization
-        // at this pipeline boundary instead of changing the authoritative
-        // geometry API (or silently masking the product convention).
+        // The compatibility replay keeps the historical unfolded-area reference.
         if self.reference_compatibility {
             if let Some(main_wing) = plane.wings.first() {
                 plane.s_ref = main_wing.unfolded_area();
             }
         }
 
-        // First pass with lumped payload to determine OEW and approximate CG.
         let coordinate_model = if self.reference_compatibility {
             MassCoordinateModel::ReferenceCompatibility
         } else {
@@ -113,7 +124,8 @@ impl FullAnalysis {
         };
         let (masses_init, coords_init, _cg_init) =
             initial_mass_result.map_err(|error| format!("mass-coordinate error: {error}"))?;
-        let (coords_init, _) = self.station_coordinates(design, &plane, &masses_init, coords_init)?;
+        let (coords_init, _) =
+            self.station_coordinates(design, &plane, &masses_init, coords_init)?;
 
         // Second pass: build detailed interior layout and recompute mass breakdown and CG.
         let (oew, x_oew) = oew_and_cg(&masses_init, &coords_init);
@@ -134,34 +146,39 @@ impl FullAnalysis {
             cg_x: payload_layout.cg_x,
             cg_y: payload_layout.cg_y,
         });
+        // One cabin per case (see `cabin_sync`).
+        let (cabin_requirements, cabin_mass_model) =
+            cabin_sync::cabin_synchronized(req, &analysis_mass_model, &payload_layout);
 
-        let detailed_mass_result = if self.reference_compatibility {
-            alas_mass::breakdown::run_mass_analysis_with_model_checked_with_gear(
-                &plane,
-                req,
-                &self.config.geometry,
-                &self.config.cabin,
-                &self.config.control_surfaces,
-                Some(&self.config.mass_model),
-                layout_summary.as_ref(),
-                coordinate_model,
-                &self.config.landing_gear,
-            )
+        let (masses, coords, _, flops_mass_buildup) = if self.reference_compatibility {
+            let (masses, coords, cg) =
+                alas_mass::breakdown::run_mass_analysis_with_model_checked_with_gear(
+                    &plane,
+                    req,
+                    &self.config.geometry,
+                    &self.config.cabin,
+                    &self.config.control_surfaces,
+                    Some(&self.config.mass_model),
+                    layout_summary.as_ref(),
+                    coordinate_model,
+                    &self.config.landing_gear,
+                )
+                .map_err(|error| format!("mass-coordinate error: {error}"))?;
+            (masses, coords, cg, None)
         } else {
-            alas_mass::breakdown::run_mass_analysis_with_model_checked_product_with_gear(
+            alas_mass::breakdown::run_product_mass_analysis_with_groups(
                 &plane,
-                req,
+                &cabin_requirements,
                 &self.config.geometry,
                 &self.config.cabin,
                 &self.config.control_surfaces,
-                Some(&analysis_mass_model),
+                Some(&cabin_mass_model),
                 layout_summary.as_ref(),
                 coordinate_model,
                 &self.config.landing_gear,
             )
+            .map_err(|error| format!("mass-coordinate error: {error}"))?
         };
-        let (masses, coords, _) =
-            detailed_mass_result.map_err(|error| format!("mass-coordinate error: {error}"))?;
         let (coords, cg) = self.station_coordinates(design, &plane, &masses, coords)?;
         // Anchor the aerodynamic moment reference to the actual physical CG.
         plane.xyz_ref[0] = cg[0];
@@ -233,10 +250,7 @@ impl FullAnalysis {
 
         let mut geometry_summary = self.geometry_summary(&plane, design);
         if let Some(limit_kg) = effective_structural_payload_limit_kg {
-            geometry_summary.insert(
-                "effective_structural_payload_limit_kg".to_owned(),
-                limit_kg,
-            );
+            geometry_summary.insert("effective_structural_payload_limit_kg".to_owned(), limit_kg);
         }
 
         Ok(AnalysisReport {
@@ -249,6 +263,7 @@ impl FullAnalysis {
             x_neutral_point: x_np,
             geometry_summary,
             component_masses: breakdown_to_map(&masses),
+            flops_mass_buildup,
             mass_coordinates: coordinates_to_map(&coords),
             physical_cg: cg,
             payload_layout: Some(payload_layout),
@@ -257,6 +272,46 @@ impl FullAnalysis {
         })
     }
 
+    /// Run the final report at the takeoff mass closed by the mission-sized
+    /// optimizer: the declared limit stays provenance, every mass-coupled
+    /// quantity is evaluated at the closed mass (never clamped), and a fixed
+    /// aircraft keeps its declared design weights while a clean-sheet design
+    /// couples (`AlasConfig::at_closure_mass`).
+    pub fn run_at_sized_takeoff_mass(
+        &self,
+        design: &DesignVector,
+        include_engines: bool,
+        takeoff_mass_kg: f64,
+    ) -> Result<AnalysisReport, String> {
+        if !takeoff_mass_kg.is_finite() || takeoff_mass_kg <= 0.0 {
+            return Err(format!(
+                "sized takeoff mass must be finite and positive, got {takeoff_mass_kg} kg"
+            ));
+        }
+        let mtow_limit_kg = self.config.requirements.mtow_kg;
+        let design_gross_mass_kg = cabin_sync::sized_design_gross_mass_kg(&self.config, takeoff_mass_kg);
+        let sized_config = self.config.at_closure_mass(takeoff_mass_kg);
+        let sized_analysis = Self {
+            config: sized_config,
+            reference_compatibility: self.reference_compatibility,
+        };
+        let mut report = sized_analysis.run(design, include_engines)?;
+        // Provenance rides in the numeric geometry map the report schema
+        // already has, so no consumer can read the limit as the flown mass.
+        report
+            .geometry_summary
+            .insert("analysis_mass_basis_kg".to_owned(), takeoff_mass_kg);
+        report
+            .geometry_summary
+            .insert("analysis_mtow_limit_kg".to_owned(), mtow_limit_kg);
+        report
+            .geometry_summary
+            .insert("analysis_mass_basis_is_sized".to_owned(), 1.0);
+        report
+            .geometry_summary
+            .insert("analysis_design_gross_mass_kg".to_owned(), design_gross_mass_kg);
+        Ok(report)
+    }
 }
 
 /// Resolve the structural payload bound for an unchanged registered preset:
@@ -279,9 +334,11 @@ fn effective_structural_payload_limit_kg(
         return None;
     }
     let configured_limit_kg = config.requirements.max_structural_payload_kg;
-    Some(if configured_limit_kg.is_finite() && configured_limit_kg > 0.0 {
-        configured_limit_kg.min(available_payload_kg)
-    } else {
-        available_payload_kg
-    })
+    Some(
+        if configured_limit_kg.is_finite() && configured_limit_kg > 0.0 {
+            configured_limit_kg.min(available_payload_kg)
+        } else {
+            available_payload_kg
+        },
+    )
 }

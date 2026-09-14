@@ -145,6 +145,79 @@ fn output_text(output: &Output) -> String {
     )
 }
 
+#[cfg(windows)]
+#[test]
+fn packaged_executable_uses_the_windows_gui_subsystem() {
+    let executable = PathBuf::from(env!("CARGO_BIN_EXE_alas"));
+    let bytes = fs::read(&executable).expect("packaged executable is readable");
+    assert!(
+        bytes.len() >= 0x40,
+        "executable is shorter than a DOS header"
+    );
+
+    let pe_offset = u32::from_le_bytes(
+        bytes[0x3c..0x40]
+            .try_into()
+            .expect("DOS header stores a four-byte PE offset"),
+    ) as usize;
+    let signature_end = pe_offset
+        .checked_add(4)
+        .expect("PE signature offset does not overflow");
+    assert!(
+        signature_end <= bytes.len(),
+        "executable PE signature is outside the file"
+    );
+    assert_eq!(&bytes[pe_offset..signature_end], b"PE\0\0");
+
+    // The PE optional header starts after the four-byte signature, twenty-byte
+    // COFF header, and is followed by the standard `Subsystem` field at +68.
+    let optional_header = pe_offset
+        .checked_add(24)
+        .expect("PE optional-header offset does not overflow");
+    let subsystem_offset = optional_header
+        .checked_add(68)
+        .expect("PE subsystem offset does not overflow");
+    let subsystem_end = subsystem_offset
+        .checked_add(2)
+        .expect("PE subsystem field does not overflow");
+    assert!(
+        subsystem_end <= bytes.len(),
+        "executable PE subsystem field is outside the file"
+    );
+    let subsystem = u16::from_le_bytes(
+        bytes[subsystem_offset..subsystem_end]
+            .try_into()
+            .expect("PE subsystem field is two bytes"),
+    );
+    assert_eq!(
+        subsystem, 2,
+        "ALAS must be linked as IMAGE_SUBSYSTEM_WINDOWS_GUI (PE subsystem 2)"
+    );
+}
+
+#[test]
+fn packaged_cli_invocation_preserves_diagnostics_and_failure_status() {
+    let package = IsolatedPackage::new();
+    let output = run(
+        &package,
+        &[
+            "--config",
+            package
+                .root
+                .join("missing-config.yaml")
+                .to_str()
+                .expect("missing config path is valid UTF-8"),
+        ],
+    );
+
+    assert_eq!(output.status.code(), Some(1), "{}", output_text(&output));
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("Configuration Error:"),
+        "{}",
+        output_text(&output)
+    );
+}
+
 fn preset_config(preset: &str, mission_enabled: bool) -> String {
     serde_json::json!({
         "preset": preset,

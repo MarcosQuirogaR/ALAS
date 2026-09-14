@@ -18,6 +18,7 @@
 mod airframe;
 mod airframe_geometry;
 mod equations;
+mod movable_area;
 mod product;
 pub mod propulsion;
 pub mod structure;
@@ -28,7 +29,7 @@ pub use airframe::{
     FlopsAirframeRequest, FlopsAirframeSelection, FlopsAirframeSources,
 };
 pub use equations::estimate_flops_transport;
-pub use product::evaluate_product;
+pub use product::{evaluate_product, evaluate_product_at_design_gross_mass};
 pub use propulsion::{estimate_flops_propulsion, FlopsPropulsionBreakdown, FlopsPropulsionInputs};
 pub use structure::{estimate_flops_structure, FlopsStructureBreakdown, FlopsStructureInputs};
 
@@ -279,6 +280,47 @@ impl FlopsTransportUnverifiedReason {
             Self::StructureConfiguration => "structure_configuration",
             Self::DetailedWingRequiresFlopsSystems => "detailed_wing_requires_flops_systems",
             Self::DetailedWingIntegration => "detailed_wing_integration",
+        }
+    }
+
+    /// Human-readable explanation for a product-boundary diagnostic.
+    ///
+    /// The stable [`as_str`](Self::as_str) value is intentionally terse for
+    /// JSON and report keys. This companion text carries the physical
+    /// meaning to a caller that must decide whether to supply a missing input
+    /// or select the explicit legacy comparison path.
+    pub const fn description(self) -> &'static str {
+        match self {
+            Self::MaximumMach => "maximum Mach number is missing or nonpositive",
+            Self::DesignRange => "design range is missing or nonpositive",
+            Self::MissionProvenance => "mission-input provenance is missing or incomplete",
+            Self::MainWingGeometry => "the built aircraft has no valid main wing",
+            Self::FuselageGeometry => "the built aircraft has no valid primary fuselage",
+            Self::MovableSurfaceGeometry => "movable-surface geometry could not be resolved",
+            Self::FlightCrewCount => "flight crew count is missing",
+            Self::FlightAttendantCount => "cabin flight-attendant count is missing",
+            Self::GalleyCrewCount => "galley crew count is missing",
+            Self::PassengerClassCounts => "FLOPS passenger-class counts are missing or inconsistent",
+            Self::EngineMounting => "wing/fuselage engine mounting counts are missing or inconsistent",
+            Self::HydraulicPressure => "hydraulic pressure is missing or nonpositive",
+            Self::VariableSweepArchitecture => "variable-sweep architecture is missing or outside 0-1",
+            Self::FuelTankCount => "fuel-tank count is missing or zero",
+            Self::MaximumFuelCapacity => "maximum fuel capacity is missing or nonpositive",
+            Self::CabinProvenance => "cabin-input provenance is missing or incomplete",
+            Self::ArchitectureProvenance => "installed-architecture provenance is missing or incomplete",
+            Self::UnsupportedPropulsionTechnology => {
+                "selected propulsion technology is outside the translated FLOPS equations; propeller/shaft-power mass inputs are not published"
+            }
+            Self::ContainerizedCargo => "containerized cargo mass is missing or negative",
+            Self::InvalidResolvedInput => "a resolved scalar is invalid or internally inconsistent",
+            Self::TailGeometry => "the built aircraft has no valid horizontal or vertical stabilizer",
+            Self::NacelleGeometry => "no nacelle body or profile has positive diameter and length",
+            Self::WingThickness => "the main wing has no positive lofted thickness ratio",
+            Self::StructureConfiguration => "a FLOPS technology factor or override is outside its fitted range",
+            Self::DetailedWingRequiresFlopsSystems => {
+                "the detailed wing method requires the FLOPS systems group"
+            }
+            Self::DetailedWingIntegration => "detailed wing integration found no load-carrying planform",
         }
     }
 }

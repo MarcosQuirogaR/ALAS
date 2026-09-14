@@ -13,7 +13,7 @@
 //! append their items in is part of the result -- a deck plan walking the list
 //! differently would draw monuments over seats -- so it is reproduced exactly.
 
-use alas_config::{CargoDeckConfig, DesignRequirements, PassengerCabinConfig};
+use alas_config::{CargoDeckConfig, CertifiedExitLayout, DesignRequirements, PassengerCabinConfig};
 
 use super::fittings::{place_baggage, place_exits, place_monuments, place_overhead_bins};
 use super::resolve_aisle_width;
@@ -48,6 +48,8 @@ pub fn build_passenger_layout(
         true,
         None,
         &CargoDeckConfig::default(),
+        None,
+        None,
     )
 }
 
@@ -59,6 +61,10 @@ pub fn build_passenger_layout(
 /// do have that information. Passing it here lets the loader solve the
 /// longitudinal moment balance instead of accepting an aft passenger load
 /// that makes the zero-fuel aircraft unstable or unloads the nose gear.
+// Each argument is a separately configured input of the layout (geometry,
+// cabin, cargo, the empty aircraft, the balance target); bundling them would
+// hide which one a caller supplies.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn build_passenger_layout_with_aircraft_cg_target(
     g: &CabinGeometry,
     pax: &PassengerCabinConfig,
@@ -66,6 +72,8 @@ pub(crate) fn build_passenger_layout_with_aircraft_cg_target(
     oew: f64,
     x_oew: f64,
     cargo: &CargoDeckConfig,
+    source_capacity_cap: Option<i64>,
+    source_exit_layout: Option<CertifiedExitLayout>,
 ) -> PayloadLayout {
     build_passenger_layout_with_mass_semantics(
         g,
@@ -75,6 +83,8 @@ pub(crate) fn build_passenger_layout_with_aircraft_cg_target(
         true,
         Some((oew, x_oew)),
         cargo,
+        source_capacity_cap,
+        source_exit_layout,
     )
 }
 
@@ -94,9 +104,14 @@ pub fn build_passenger_layout_reference_compatibility(
         false,
         None,
         &CargoDeckConfig::default(),
+        None,
+        None,
     )
 }
 
+// The private dispatcher takes the public entry points' inputs plus the
+// cargo mass semantics they differ in.
+#[allow(clippy::too_many_arguments)]
 fn build_passenger_layout_with_mass_semantics(
     g: &CabinGeometry,
     pax: &PassengerCabinConfig,
@@ -105,12 +120,22 @@ fn build_passenger_layout_with_mass_semantics(
     product_interior: bool,
     aircraft_cg_target: Option<(f64, f64)>,
     cargo: &CargoDeckConfig,
+    source_capacity_cap: Option<i64>,
+    source_exit_layout: Option<CertifiedExitLayout>,
 ) -> PayloadLayout {
     let mut classes = resolve_classes(pax, req.num_passengers, product_interior);
     let total_pax: i64 = classes.iter().map(|class| class.config.count).sum();
     let aisle_w = resolve_aisle_width(pax, total_pax);
 
-    let mut seating = place_seats(g, pax, &mut classes, aisle_w, product_interior);
+    let mut seating = place_seats(
+        g,
+        pax,
+        &mut classes,
+        aisle_w,
+        product_interior,
+        source_capacity_cap,
+        source_exit_layout,
+    );
     let seated: i64 = classes.iter().map(|class| class.seated).sum();
 
     let mut items = std::mem::take(&mut seating.items);
@@ -127,7 +152,7 @@ fn build_passenger_layout_with_mass_semantics(
         product_interior,
     );
     items.extend(monuments);
-    let exits = place_exits(g, &seating, product_interior);
+    let exits = place_exits(g, pax, &seating, product_interior, source_exit_layout);
     items.extend(exits.items);
 
     // The bags follow the passengers, so the trim target is the seating's own
@@ -148,6 +173,19 @@ fn build_passenger_layout_with_mass_semantics(
     items.extend(bags.items);
 
     let (total_mass, cg_x, cg_y) = mass_properties(&items);
+    // A source exit sequence replaces the diameter proxy on the registered
+    // product path.  Keep that provenance visible even when its summed pair
+    // rating happens to equal the resulting ceiling; calling the value a
+    // generic geometry limit would make the source arrangement look
+    // independently derived.  A standalone source seat cap remains distinct
+    // from both the source topology and the generic proxy.
+    let capacity_binding = if source_exit_layout.is_some() {
+        "source_exit_layout"
+    } else if source_capacity_cap.is_some_and(|cap| cap < seating.geometric_deck_caps.total) {
+        "source_certified_cap"
+    } else {
+        "geometry_exit_limit"
+    };
     let summary = PassengerSummary {
         total_pax,
         seated_pax: seated,
@@ -162,8 +200,12 @@ fn build_passenger_layout_with_mass_semantics(
         wheelchair_stowages: monument_counts.wheelchair_stowages,
         exit_type: exits.exit_type,
         exit_pairs: exits.pairs,
-        exit_capacity: exits.pairs * exits.capacity_per_side * 2,
+        exit_capacity: exits.capacity_total,
         max_certifiable_capacity: seating.deck_caps.total,
+        geometric_capacity: seating.geometric_deck_caps.total,
+        source_capacity_cap,
+        source_exit_layout: source_exit_layout.map(|layout| layout.label),
+        capacity_binding,
         payload_t: total_mass / 1000.0,
         seat_mass_t: seat_mass / 1000.0,
         bag_mass_t: bags.bag_mass / 1000.0,

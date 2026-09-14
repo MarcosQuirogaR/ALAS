@@ -75,12 +75,22 @@ pub(super) fn static_thrust_to_weight(config: &AlasConfig, default: f64) -> f64 
 /// a centered, possibly multi-line, message.
 pub(super) fn status_message_scene(title: &str, message: &str, theme: Option<&str>) -> Scene {
     let pal = get_palette(theme);
-    let mut scene = Scene::new(600.0, 300.0, Some(Color::from_hex(pal.bg)));
+    // `wrap_text` reflows any caller line that is still too long for the
+    // canvas onto multiple rows; a caller-inserted `\n` remains a required
+    // paragraph break (see `wrap_text`'s doc comment).
+    let wrapped = crate::chart_kit::wrap_text(message, 84);
+    let lines = wrapped.lines().collect::<Vec<_>>();
+    const MESSAGE_TOP: f64 = 140.0;
+    const LINE_HEIGHT: f64 = 16.0;
+    const BOTTOM_MARGIN: f64 = 24.0;
+    let height =
+        (300.0_f64).max(MESSAGE_TOP + lines.len().max(1) as f64 * LINE_HEIGHT + BOTTOM_MARGIN);
+    let mut scene = Scene::new(600.0, height, Some(Color::from_hex(pal.bg)));
     scene.title = Some(title.to_owned());
-    for (i, line) in message.lines().enumerate() {
+    for (i, line) in lines.into_iter().enumerate() {
         scene.add(SceneElement::Text {
             text: line.to_owned(),
-            pos: [300.0, 140.0 + (i as f64) * 16.0],
+            pos: [300.0, MESSAGE_TOP + (i as f64) * LINE_HEIGHT],
             font_size: 12.0,
             color: Color::from_hex(pal.tick),
             align: TextAlign::Center,

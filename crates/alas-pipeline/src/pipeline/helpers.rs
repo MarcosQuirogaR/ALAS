@@ -20,7 +20,11 @@ pub(super) fn persist_mses_raw_exports(
     result: &MsesPressureResult,
     output_dir: &Path,
 ) -> std::io::Result<()> {
-    if result.raw_bl_dump.is_empty() && result.raw_flowfield_dump.is_empty() {
+    if result.raw_bl_dump.is_empty()
+        && result.raw_flowfield_dump.is_empty()
+        && result.solver_attempts.is_empty()
+        && result.status == alas_aero::mses::MsesStatus::NotRun
+    {
         return Ok(());
     }
     let directory = output_dir.join("mses");
@@ -31,7 +35,34 @@ pub(super) fn persist_mses_raw_exports(
     if !result.raw_flowfield_dump.is_empty() {
         std::fs::write(directory.join("flowfield.txt"), &result.raw_flowfield_dump)?;
     }
-    Ok(())
+    let attempts = result
+        .solver_attempts
+        .iter()
+        .map(|attempt| {
+            json!({
+                "alpha_deg": attempt.alpha_deg,
+                "purpose": attempt.purpose,
+                "status": attempt.status.as_str(),
+                "solver_output": attempt.solver_output,
+            })
+        })
+        .collect::<Vec<_>>();
+    let document = json!({
+        "status": result.status.as_str(),
+        "error": result.error,
+        "alpha_deg": result.alpha_deg,
+        "convergence_verified": result.has_convergence_evidence(),
+        "transition_model_valid": result.transition_model_is_valid(),
+        "osmap_required": result.osmap_required,
+        "osmap_status": result.osmap_status.as_str(),
+        "osmap_path": result.osmap_path,
+        "osmap_diagnostic": result.osmap_diagnostic,
+        "surface_sample_count": result.x_upper.len() + result.x_lower.len(),
+        "flowfield_sample_count": result.field_x.len(),
+        "solver_attempts": attempts,
+    });
+    let text = serde_json::to_string_pretty(&document).map_err(std::io::Error::other)?;
+    std::fs::write(directory.join("pressure_diagnostics.json"), text)
 }
 
 /// Persist the exact requested alpha schedule and MSES transcript per point.
@@ -59,11 +90,36 @@ pub(super) fn persist_mses_polar_diagnostics(
             })
         })
         .collect::<Vec<_>>();
+    let attempts = result
+        .solver_attempts
+        .iter()
+        .map(|attempt| {
+            json!({
+                "alpha_deg": attempt.alpha_deg,
+                "purpose": attempt.purpose,
+                "status": attempt.status.as_str(),
+                "solver_output": attempt.solver_output,
+            })
+        })
+        .collect::<Vec<_>>();
     let document = json!({
         "status": result.status.as_str(),
+        "airfoil_name": &result.airfoil_name,
+        "mach": result.mach,
+        "reynolds": result.reynolds,
         "requested_alpha_count": result.requested_alpha_count,
         "converged_alpha_count": result.converged_alpha_count,
+        "transition_model_valid": result.transition_model_is_valid(),
+        "osmap_required": result.osmap_required,
+        "osmap_status": result.osmap_status.as_str(),
+        "osmap_path": result.osmap_path,
+        "osmap_diagnostic": result.osmap_diagnostic,
+        "converged_alpha_deg": &result.alpha_deg,
+        "cl": &result.cl,
+        "cd": &result.cd,
+        "cdw": &result.cdw,
         "points": points,
+        "solver_attempts": attempts,
     });
     let text = serde_json::to_string_pretty(&document).map_err(std::io::Error::other)?;
     std::fs::write(directory.join("polar_diagnostics.json"), text)

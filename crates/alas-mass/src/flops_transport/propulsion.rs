@@ -2,15 +2,24 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 //! FLOPS transport propulsion-group equations: the engine count and nacelle
-//! count (73-74), scaled engine mass (75-76, 80), distributed-propulsion
-//! scaling (81-85), thrust reversers (86), engine controls and starters
-//! (87, 89, 91), the fuel system (92), the engine pod (40-41) and the group
-//! total (137) of NASA/TM-2017-219627 Vol. I.
+//! count (73-74), scaled engine mass (75-76), the separately declared inlet
+//! and nozzle (77-79) and the combined form without them (80),
+//! distributed-propulsion scaling (81-85), thrust reversers (86), engine
+//! controls and starters (87, 89, 91), the fuel system (92), the engine pod
+//! (40-41) and the group total (137) of NASA/TM-2017-219627 Vol. I.
 //!
-//! Inlet and nozzle masses (77-79) are folded into the baseline engine mass,
-//! which is how a transport engine catalogue quotes its dry mass; alternate
-//! engines (95) and alternate energy storage (96) are user-declared masses
-//! FLOPS adds without an equation and are not represented here.
+//! Equations 77-80 are a branch, not a fold. NASA/TM-2017-219627 Vol. I
+//! defines `WENGB` as the baseline engine mass that "includes inlet and
+//! nozzle weight if they are not specified separately"; when `WINLB` and
+//! `WNOZB` *are* declared, `WENGB` is the bare core and equation 79 adds the
+//! separately scaled inlet and nozzle back. Both branches are implemented:
+//! with neither declared the result is equation 80, `WENG = WENGP`, which is
+//! how an engine catalogue normally quotes a dry mass and remains the
+//! default.
+//!
+//! Alternate engines (95) and alternate energy storage (96) are
+//! user-declared masses FLOPS adds without an equation and are not
+//! represented here.
 
 use alas_units::{FOOT, POUND_FORCE, POUND_MASS};
 
@@ -45,6 +54,25 @@ pub fn scaled_engine_count(count: usize) -> f64 {
     }
 }
 
+/// Equation 85: the nacelle diameter scaled for distributed propulsion,
+/// `FNAC`, m. Four or fewer engines keep the installed average diameter;
+/// beyond four the diameter grows as half the diameter times the square root
+/// of the total engine count.
+///
+/// This is the form NASA Aviary evaluates in
+/// `aviary/subsystems/mass/flops_based/distributed_prop.py`
+/// (`distributed_nacelle_diam_factor`: `0.5 * diam_avg * total_num_eng**0.5`),
+/// the reference implementation of the same FLOPS source. The two-engine
+/// validation cases do not exercise this branch, so it is verified against
+/// that source rather than against a FLOPS run.
+pub fn scaled_nacelle_diameter_m(nacelle_diameter_m: f64, engine_count: usize) -> f64 {
+    if engine_count <= 4 {
+        nacelle_diameter_m
+    } else {
+        0.5 * nacelle_diameter_m * (engine_count as f64).sqrt()
+    }
+}
+
 /// The distributed-propulsion-scaled variables of equations 81-85.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DistributedPropulsionScaling {
@@ -69,25 +97,25 @@ pub fn distributed_scaling(
     nacelle_diameter_m: f64,
 ) -> DistributedPropulsionScaling {
     let engines = scaled_engine_count(engine_count);
-    let (thrust_per_engine_n, nacelle_diameter) = if engine_count <= 4 {
-        (rated_thrust_per_engine_n, nacelle_diameter_m)
-    } else {
-        (
-            engine_count as f64 * rated_thrust_per_engine_n / engines,
-            nacelle_diameter_m * (engine_count as f64 / 2.0).sqrt(),
-        )
-    };
     DistributedPropulsionScaling {
         engines,
         wing_engines: scaled_engine_count(wing_engines),
         fuselage_engines: scaled_engine_count(fuselage_engines),
-        thrust_per_engine_n,
-        nacelle_diameter_m: nacelle_diameter,
+        // Equation 84: the installed total thrust divided by the scaled
+        // count, which is the installed per-engine thrust for four or fewer.
+        thrust_per_engine_n: engine_count as f64 * rated_thrust_per_engine_n / engines,
+        nacelle_diameter_m: scaled_nacelle_diameter_m(nacelle_diameter_m, engine_count),
     }
 }
 
-/// Equations 75-76: the mass of one scaled engine, kg. The baseline mass is
-/// `THRSO / 5.5` in pounds when none is declared (the transport default).
+/// Equations 75-76: `WENGP`, the mass of one scaled engine before any
+/// separately declared inlet and nozzle, kg. The baseline mass is
+/// `THRSO / 5.5` in pounds when none is declared (the transport default of
+/// equation 76), which is an all-in baseline for the FLOPS engine term and
+/// already contains the inlet and nozzle.  "All-in" stops at that FLOPS term:
+/// it is not a claim for a whole installed pod.  Nacelle, pylon, mounts,
+/// starters, reversers, controls, fuel-system mass and fluids remain separate
+/// terms or unresolved installation scope unless their inputs are declared.
 pub fn scaled_engine_kg(
     rated_thrust_per_engine_n: f64,
     baseline_thrust_n: f64,
@@ -103,6 +131,34 @@ pub fn scaled_engine_kg(
         wengb + (thrust_lb - baseline_lb) * scaling_exponent
     };
     kg(wengp)
+}
+
+/// Equations 77 and 78: a baseline inlet (`WINLB`) or nozzle (`WNOZB`)
+/// scaled by the thrust ratio raised to its own exponent (`EINL`, `ENOZ`),
+/// kg. Both equations have the identical form; only the declared baseline
+/// mass and exponent differ.
+///
+/// Returns `0.0` when no baseline mass is declared, which is the equation 80
+/// branch: the inlet and nozzle are then already inside `WENGB`.
+pub fn scaled_inlet_or_nozzle_kg(
+    baseline_component_mass_kg: Option<f64>,
+    rated_thrust_per_engine_n: f64,
+    baseline_thrust_n: f64,
+    scaling_exponent: f64,
+) -> f64 {
+    let Some(baseline_kg) = baseline_component_mass_kg else {
+        return 0.0;
+    };
+    let baseline_lb = lbf(baseline_thrust_n);
+    if !baseline_lb.is_finite()
+        || baseline_lb <= 0.0
+        || !baseline_kg.is_finite()
+        || baseline_kg < 0.0
+    {
+        return 0.0;
+    }
+    let ratio = lbf(rated_thrust_per_engine_n) / baseline_lb;
+    kg(lb(baseline_kg) * ratio.powf(scaling_exponent))
 }
 
 /// Equation 86: thrust reversers for every nacelle, kg.
@@ -155,9 +211,25 @@ pub struct FlopsPropulsionInputs {
     /// Rated thrust of the baseline engine `THRSO`, N.
     pub baseline_thrust_n: f64,
     /// Declared baseline engine mass `WENGB`, kg, or the FLOPS estimate.
+    ///
+    /// When no inlet or nozzle is declared separately this is the complete
+    /// FLOPS engine term, inlet and nozzle included; when either is declared
+    /// it is the bare core, and equation 79 adds them back.  It does not mean
+    /// a whole installed pod: the nacelle, pylon, mounts, fluids and other
+    /// installation equipment are separate or unresolved.
     pub baseline_engine_mass_kg: Option<f64>,
     /// Engine mass scaling exponent `EEXP`.
     pub scaling_exponent: f64,
+    /// Separately declared baseline inlet mass `WINLB`, kg. `None` selects
+    /// equation 80: the inlet is inside `WENGB`.
+    pub baseline_inlet_mass_kg: Option<f64>,
+    /// Inlet mass scaling exponent `EINL`; the FLOPS default is 1.
+    pub inlet_scaling_exponent: f64,
+    /// Separately declared baseline nozzle mass `WNOZB`, kg. `None` selects
+    /// equation 80: the nozzle is inside `WENGB`.
+    pub baseline_nozzle_mass_kg: Option<f64>,
+    /// Nozzle mass scaling exponent `ENOZ`; the FLOPS default is 1.
+    pub nozzle_scaling_exponent: f64,
     /// Whether thrust reversers are installed.
     pub thrust_reversers_installed: bool,
     /// Maximum Mach number `VMAX`.
@@ -179,9 +251,26 @@ pub struct FlopsPropulsionBreakdown {
     pub total_nacelles: f64,
     /// Baseline engine mass `WENGB` actually used, kg.
     pub baseline_engine_mass_kg: f64,
-    /// One scaled engine `WENG`, kg.
+    /// One scaled engine term `WENGP` of equations 75-76, kg: complete within
+    /// the FLOPS engine boundary when no inlet or nozzle is declared
+    /// separately; this remains narrower than a whole installed pod.
+    pub engine_core_each_kg: f64,
+    /// One scaled inlet `WINL` of equation 77, kg; zero on the equation 80
+    /// branch where the inlet sits inside `WENGB`.
+    pub inlet_each_kg: f64,
+    /// One scaled nozzle `WNOZ` of equation 78, kg; zero on the equation 80
+    /// branch where the nozzle sits inside `WENGB`.
+    pub nozzle_each_kg: f64,
+    /// One complete scaled engine `WENG`: equation 79 when an inlet or
+    /// nozzle is declared separately, equation 80 otherwise, kg.
     pub engine_each_kg: f64,
-    /// All engines `WENG x NENG`, kg.
+    /// All engine cores `WENGP x NENG`, kg.
+    pub engine_cores_kg: f64,
+    /// All inlets `WINL x NENG`, kg.
+    pub inlets_kg: f64,
+    /// All nozzles `WNOZ x NENG`, kg.
+    pub nozzles_kg: f64,
+    /// All complete engines `WENG x NENG`, kg.
     pub engines_kg: f64,
     /// Thrust reversers `WTHR`, kg.
     pub thrust_reversers_kg: f64,
@@ -211,13 +300,32 @@ pub fn estimate_flops_propulsion(inputs: &FlopsPropulsionInputs) -> FlopsPropuls
     let baseline_engine_mass_kg = inputs
         .baseline_engine_mass_kg
         .unwrap_or(kg(lbf(inputs.baseline_thrust_n) / 5.5));
-    let engine_each_kg = scaled_engine_kg(
+    let engine_core_each_kg = scaled_engine_kg(
         inputs.rated_thrust_per_engine_n,
         inputs.baseline_thrust_n,
         inputs.baseline_engine_mass_kg,
         inputs.scaling_exponent,
     );
-    let engines_kg = engine_each_kg * inputs.engine_count as f64;
+    let inlet_each_kg = scaled_inlet_or_nozzle_kg(
+        inputs.baseline_inlet_mass_kg,
+        inputs.rated_thrust_per_engine_n,
+        inputs.baseline_thrust_n,
+        inputs.inlet_scaling_exponent,
+    );
+    let nozzle_each_kg = scaled_inlet_or_nozzle_kg(
+        inputs.baseline_nozzle_mass_kg,
+        inputs.rated_thrust_per_engine_n,
+        inputs.baseline_thrust_n,
+        inputs.nozzle_scaling_exponent,
+    );
+    // Equation 79 when either is declared separately, equation 80 otherwise
+    // (both zero terms leave `WENG = WENGP`).
+    let engine_each_kg = engine_core_each_kg + inlet_each_kg + nozzle_each_kg;
+    let count = inputs.engine_count as f64;
+    let engine_cores_kg = engine_core_each_kg * count;
+    let inlets_kg = inlet_each_kg * count;
+    let nozzles_kg = nozzle_each_kg * count;
+    let engines_kg = engine_each_kg * count;
     let thrust_reversers = if inputs.thrust_reversers_installed {
         thrust_reversers_kg(inputs.rated_thrust_per_engine_n, total_nacelles)
     } else {
@@ -239,7 +347,13 @@ pub fn estimate_flops_propulsion(inputs: &FlopsPropulsionInputs) -> FlopsPropuls
         scaling,
         total_nacelles,
         baseline_engine_mass_kg,
+        engine_core_each_kg,
+        inlet_each_kg,
+        nozzle_each_kg,
         engine_each_kg,
+        engine_cores_kg,
+        inlets_kg,
+        nozzles_kg,
         engines_kg,
         thrust_reversers_kg: thrust_reversers,
         engine_controls_kg: engine_controls,
@@ -253,6 +367,11 @@ pub fn estimate_flops_propulsion(inputs: &FlopsPropulsionInputs) -> FlopsPropuls
 /// Equations 40-41: the mass of one engine pod including its nacelle,
 /// `WPOD`, kg, for the detailed wing inertia-relief factor. The systems
 /// masses are the FLOPS instruments, electrical and hydraulics groups.
+///
+/// Equation 41's leading term is `WENG x NENG`, the **complete** scaled
+/// engine, so this reads [`FlopsPropulsionBreakdown::engines_kg`] and
+/// therefore carries any separately declared inlet and nozzle into the pod
+/// relief as well.
 pub fn pod_mass_kg(
     propulsion: &FlopsPropulsionBreakdown,
     nacelle_total_kg: f64,
@@ -285,6 +404,10 @@ mod tests {
             baseline_thrust_n: 120_000.0,
             baseline_engine_mass_kg: None,
             scaling_exponent: 1.15,
+            baseline_inlet_mass_kg: None,
+            inlet_scaling_exponent: 1.0,
+            baseline_nozzle_mass_kg: None,
+            nozzle_scaling_exponent: 1.0,
             thrust_reversers_installed: true,
             maximum_mach: 0.82,
             nacelle_diameter_m: 2.0,
@@ -308,10 +431,18 @@ mod tests {
     fn distributed_scaling_conserves_total_thrust_and_grows_the_nacelle() {
         let scaled = distributed_scaling(8, 8, 0, 50_000.0, 1.0);
         assert!((scaled.engines * scaled.thrust_per_engine_n - 8.0 * 50_000.0).abs() < 1e-6);
-        assert!((scaled.nacelle_diameter_m - 2.0).abs() < 1e-12);
+        // Equation 85 as Aviary's `distributed_nacelle_diam_factor` evaluates
+        // it: 0.5 D sqrt(N), which is sqrt(2) for eight one-metre nacelles,
+        // not the D sqrt(N/2) this port previously used.
+        assert!((scaled.nacelle_diameter_m - 0.5 * 8.0_f64.sqrt()).abs() < 1e-12);
+        assert!((scaled.nacelle_diameter_m - std::f64::consts::SQRT_2).abs() < 1e-12);
         let twin = distributed_scaling(2, 2, 0, 120_000.0, 2.0);
         assert_eq!(twin.thrust_per_engine_n, 120_000.0);
         assert_eq!(twin.nacelle_diameter_m, 2.0);
+        // The branch is continuous in neither variable at four engines, which
+        // is the published behaviour: four keeps D, five jumps to 0.5 D sqrt 5.
+        assert_eq!(scaled_nacelle_diameter_m(3.0, 4), 3.0);
+        assert!((scaled_nacelle_diameter_m(3.0, 5) - 1.5 * 5.0_f64.sqrt()).abs() < 1e-12);
     }
 
     #[test]
@@ -364,6 +495,80 @@ mod tests {
         let mut without = inputs;
         without.thrust_reversers_installed = false;
         assert_eq!(estimate_flops_propulsion(&without).thrust_reversers_kg, 0.0);
+    }
+
+    #[test]
+    fn a_separately_declared_inlet_and_nozzle_follow_equations_77_to_79() {
+        // WENGB is the bare core when WINLB and WNOZB are declared, so
+        // WENG = WENGP + WINL + WNOZ with each term scaled by its own
+        // exponent on the same thrust ratio r = THRUST / THRSO = 1.25.
+        let mut inputs = twin_inputs();
+        inputs.baseline_thrust_n = 96_000.0;
+        inputs.rated_thrust_per_engine_n = 120_000.0;
+        inputs.baseline_engine_mass_kg = Some(2_400.0);
+        inputs.scaling_exponent = 1.15;
+        inputs.baseline_inlet_mass_kg = Some(180.0);
+        inputs.inlet_scaling_exponent = 1.0;
+        inputs.baseline_nozzle_mass_kg = Some(120.0);
+        inputs.nozzle_scaling_exponent = 0.8;
+        let breakdown = estimate_flops_propulsion(&inputs);
+
+        let ratio = 120_000.0 / 96_000.0_f64;
+        assert!((ratio - 1.25).abs() < 1e-12);
+        let core = 2_400.0 * ratio.powf(1.15);
+        let inlet = 180.0 * ratio;
+        let nozzle = 120.0 * ratio.powf(0.8);
+        assert!((breakdown.engine_core_each_kg - core).abs() < 1e-9);
+        assert!((breakdown.inlet_each_kg - inlet).abs() < 1e-9);
+        assert!((breakdown.nozzle_each_kg - nozzle).abs() < 1e-9);
+        // Equation 79.
+        assert!((breakdown.engine_each_kg - (core + inlet + nozzle)).abs() < 1e-9);
+        // Group totals: two engines, each reported separately and summed.
+        assert!((breakdown.engine_cores_kg - 2.0 * core).abs() < 1e-9);
+        assert!((breakdown.inlets_kg - 2.0 * inlet).abs() < 1e-9);
+        assert!((breakdown.nozzles_kg - 2.0 * nozzle).abs() < 1e-9);
+        assert!((breakdown.engines_kg - 2.0 * (core + inlet + nozzle)).abs() < 1e-9);
+        assert!(
+            (breakdown.engines_kg
+                - (breakdown.engine_cores_kg + breakdown.inlets_kg + breakdown.nozzles_kg))
+                .abs()
+                < 1e-9
+        );
+        // Equation 137: the group total carries the complete engines.
+        let expected_total = breakdown.engines_kg
+            + breakdown.thrust_reversers_kg
+            + breakdown.misc_kg
+            + breakdown.fuel_system_kg;
+        assert!((breakdown.total_kg - expected_total).abs() < 1e-9);
+        // Equation 41 uses WENG x NENG, so the pod carries the inlet and
+        // nozzle too: exactly the separate items divided over the engines.
+        let complete = pod_mass_kg(&breakdown, 600.0, 100.0, 400.0, 300.0, 2);
+        let mut core_only = inputs;
+        core_only.baseline_inlet_mass_kg = None;
+        core_only.baseline_nozzle_mass_kg = None;
+        let bare = estimate_flops_propulsion(&core_only);
+        let bare_pod = pod_mass_kg(&bare, 600.0, 100.0, 400.0, 300.0, 2);
+        assert!((complete - bare_pod - (inlet + nozzle)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn equation_80_remains_the_default_with_no_separate_inlet_or_nozzle() {
+        // The existing catalogue-dry-mass path must be bit-for-bit unchanged.
+        let breakdown = estimate_flops_propulsion(&twin_inputs());
+        assert_eq!(breakdown.inlet_each_kg, 0.0);
+        assert_eq!(breakdown.nozzle_each_kg, 0.0);
+        assert_eq!(breakdown.inlets_kg, 0.0);
+        assert_eq!(breakdown.nozzles_kg, 0.0);
+        assert_eq!(breakdown.engine_each_kg, breakdown.engine_core_each_kg);
+        assert_eq!(breakdown.engines_kg, breakdown.engine_cores_kg);
+        // A declared baseline of zero is still the equation 79 branch and
+        // adds nothing, rather than being confused with "not declared".
+        let mut zero_items = twin_inputs();
+        zero_items.baseline_engine_mass_kg = Some(2_000.0);
+        zero_items.baseline_inlet_mass_kg = Some(0.0);
+        let zeroed = estimate_flops_propulsion(&zero_items);
+        assert_eq!(zeroed.inlet_each_kg, 0.0);
+        assert_eq!(zeroed.engine_each_kg, zeroed.engine_core_each_kg);
     }
 
     #[test]

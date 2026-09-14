@@ -87,6 +87,17 @@ impl AppState {
         options.compare_baseline = self.run_options.compare_baseline;
         options.parallel = self.run_options.parallel;
         options.save_plots = false;
+        if let Some(output_dir) = options.output_dir.take() {
+            // The GUI can be launched from a read-only install directory.  A
+            // relative path typed in Setup is resolved with the same policy as
+            // preferences and navigation data, so creating the analysis
+            // workspace never depends on the process current directory.
+            let resolved = self.tool_locator.resolve_data_path(&output_dir);
+            options.output_dir = Some(resolved.clone());
+            // Keep the storage dialog and the path field aligned with the
+            // actual run tree after a relative path is resolved.
+            self.pipeline_options.output_dir = Some(resolved);
+        }
         if !self.run_options.write_outputs {
             options.output_dir = None;
         }
@@ -219,7 +230,11 @@ impl AppState {
                     }
                     self.pipeline_result = Some(result);
                     self.update_result_scene();
-                    self.active_page = "results".to_owned();
+                    if self.sandbox.active() {
+                        self.sandbox.results_window_open = true;
+                    } else {
+                        self.active_page = "results".to_owned();
+                    }
                 }
                 Err(e) => {
                     if e.starts_with("Cancelled safely") {

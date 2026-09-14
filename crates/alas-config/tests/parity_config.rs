@@ -44,6 +44,31 @@
 //!   fields to `WingConfig`. The frozen Python schema has none of them, so the
 //!   absent upstream fields and the source-corrected Rust values/schema are
 //!   both checked explicitly below.
+//! * `MassModelConfig` now carries the versioned `mass_architecture` and
+//!   `flops_transport` product inputs. They are native additions with their
+//!   own migration and source-evidence tests; the frozen comparison remains
+//!   focused on the fields inherited from the Python configuration.
+//! * The serialized Torenbeek/fraction fields are still visible for the
+//!   explicit compatibility comparison. Their product help now says so; the
+//!   frozen help remains checked as the historical text.
+//! * `passenger_mass_kg`'s help now states the passenger-mass authority
+//!   decision: every product path prices a seated passenger of any class at
+//!   this combined mass, deriving the occupant share from the checked-bag
+//!   mass. Both the corrected and frozen prose are pinned below; the value
+//!   and every other field are unchanged.
+//! * `cabin_preset`'s help now names each passenger preset's descriptive,
+//!   airline-independent GUI label (`alas-gui/src/views/form_options.rs`)
+//!   instead of the historical airline name. The serialized identifiers
+//!   ('Ryanair', 'Iberia', 'Emirates') and every preset value are unchanged;
+//!   both the corrected and frozen prose are pinned below.
+//! * The four vortex-lattice mesh resolutions diverge in value and in help.
+//!   The frozen Python loop mesh is one chordwise panel, which samples the
+//!   mean camber line only where it is zero and so makes every section a
+//!   flat plate; the measurements behind the product values, cross-checked
+//!   against AeroSandbox on identical geometry, are in
+//!   `.agent/reports/2026-09-11-vlm-resolution-sensitivity.html` and
+//!   summarized in `alas_config::analysis`'s module doc. Both the frozen
+//!   and the corrected value are pinned below.
 //!
 //! `label` is compared always, including where it was derived from the field
 //! name: a derived label that disagrees means the name-to-label rule was
@@ -321,6 +346,33 @@ fn product_default_correction(path: &str) -> Option<(Value, Value)> {
         Some((serde_json::json!(500.0), serde_json::json!(60.0)))
     } else if path.ends_with(".n_modes") {
         Some((serde_json::json!(30), serde_json::json!(16)))
+    }
+    // The vortex-lattice mesh. Upstream evaluates the optimizer loop at one
+    // chordwise panel, which samples the mean camber line only at the leading
+    // and trailing edges -- where it is zero -- so every section is a flat
+    // plate and the search cannot see camber at all. Measured over four
+    // presets and cross-checked against AeroSandbox 4.2.8 on identical
+    // geometry (`.agent/reports/2026-09-11-vlm-resolution-sensitivity.html`):
+    // that costs 1.1-4.1 deg of cruise attitude, -14.4 to +2.9 % of L/D, and
+    // it mis-ranks neighbouring candidates (Spearman 0.77). Eight panels rank
+    // them exactly. The spanwise fields move the other way: the builder has
+    // already subdivided each surface and that is converged, so upstream's
+    // fine value of two only doubles the panel count. The frozen values stay
+    // pinned here so the divergence remains a recorded decision.
+    else if path.ends_with(".chordwise_resolution") {
+        Some((serde_json::json!(1), serde_json::json!(8)))
+    } else if path.ends_with(".fine_chordwise_resolution") {
+        Some((serde_json::json!(8), serde_json::json!(16)))
+    } else if path.ends_with(".fine_spanwise_resolution") {
+        Some((serde_json::json!(2), serde_json::json!(1)))
+    }
+    // The wing spanwise panel count, which changed meaning rather than
+    // fidelity: the frozen value is a per-section multiplier, the product one
+    // an absolute panel count across the semispan, and 24 is what the frozen
+    // three-section planform already meshed to. See
+    // `alas_geom::aircraft::spanwise`.
+    else if path.ends_with(".wing.n_subdivisions") || path == "WingConfig.n_subdivisions" {
+        Some((serde_json::json!(8), serde_json::json!(24)))
     } else {
         None
     }
@@ -353,7 +405,9 @@ fn compare_node(
                 && (node.type_name != "MassModelConfig"
                     || !matches!(
                         field.name,
-                        "systems_mass_method"
+                        "schema_version"
+                            | "mass_architecture"
+                            | "systems_mass_method"
                             | "flops_transport"
                             | "structural_mass_method"
                             | "propulsion_mass_method"
@@ -568,6 +622,29 @@ fn compare_transport_planform_schema(
 fn is_native_config_field(path: &str, key: &str) -> bool {
     (matches!(key, "fuel_policy" | "fuel_tanks")
         && (path.ends_with("AlasConfig") || path.is_empty()))
+        // Source-backed landing-gear references and heterogeneous bogie
+        // counts are native additions; the frozen Python schema predates
+        // them. Their values are checked by landing-gear unit/config tests.
+        || (matches!(
+            key,
+            "reference_wheelbase_m"
+                | "reference_station_frame"
+                | "reference_station_fuselage_length_m"
+                | "reference_nlg_x_fraction"
+                | "reference_mlg_x_fractions"
+                | "reference_body_wheelbase_m"
+                | "reference_track_m"
+                | "mlg_strut_bogie_wheels"
+        ) && (path.ends_with("LandingGearConfig") || path.ends_with(".landing_gear")))
+        // Condition-specific OEI evidence fields are native additions; the
+        // frozen Python schema predates them. Their optional/default
+        // semantics are covered by the OEI assessment tests.
+        || (matches!(
+            key,
+            "oei_condition_to_sls_thrust_ratio"
+                | "oei_asymmetric_trim_cd"
+                | "oei_windmilling_cd"
+        ) && (path.ends_with("PerformanceConfig") || path.ends_with(".performance")))
         || (matches!(key, "objective" | "design_space")
             && (path.ends_with("OptimizerConfig") || path.ends_with(".optimizer")))
         // Native speed-reference switch for the climb/descent legs. Its
@@ -589,6 +666,12 @@ fn is_native_config_field(path: &str, key: &str) -> bool {
             key,
             "use_airway_endpoint_coordinates" | "max_airway_stretch"
         ) && (path.ends_with("MissionConfig") || path.ends_with(".mission")))
+        // The versioned pure-FLOPS architecture and its physical transport
+        // inputs are native product additions. Their migration, schema and
+        // source-evidence contracts are checked by mass-architecture and
+        // preset-FLOPS tests rather than the frozen Python fixture.
+        || (matches!(key, "schema_version" | "mass_architecture" | "flops_transport")
+            && (path.ends_with("MassModelConfig") || path.ends_with(".mass_model")))
         || (matches!(
             key,
             "method" | "finite_difference_step" | "constraint_tolerance"
@@ -669,6 +752,17 @@ fn compare_field(
             &format!("{label}.label: frozen Python value"),
             &expected.get("label").and_then(Value::as_str).unwrap_or(""),
             &"Random vibration base PSD",
+        );
+    } else if let Some((source_label, frozen_label, _, _)) = oei_documentation_correction(label) {
+        comparison.exact(
+            &format!("{label}.label: source-corrected Rust value"),
+            &field.label,
+            &source_label,
+        );
+        comparison.exact(
+            &format!("{label}.label: frozen Python value"),
+            &expected.get("label").and_then(Value::as_str).unwrap_or(""),
+            &frozen_label,
         );
     } else {
         compare_string(
@@ -756,6 +850,52 @@ fn compare_field(
             &expected.get("help").and_then(Value::as_str).unwrap_or(""),
             &frozen_python,
         );
+    } else if let Some((source_corrected, frozen_python)) = mass_legacy_help_correction(label) {
+        comparison.exact(
+            &format!("{label}.help: source-corrected Rust value"),
+            &field.help,
+            &source_corrected,
+        );
+        comparison.exact(
+            &format!("{label}.help: frozen Python value"),
+            &expected.get("help").and_then(Value::as_str).unwrap_or(""),
+            &frozen_python,
+        );
+    } else if let Some((source_corrected, frozen_python)) =
+        passenger_mass_authority_help_correction(label)
+    {
+        comparison.exact(
+            &format!("{label}.help: source-corrected Rust value"),
+            &field.help,
+            &source_corrected,
+        );
+        comparison.exact(
+            &format!("{label}.help: frozen Python value"),
+            &expected.get("help").and_then(Value::as_str).unwrap_or(""),
+            &frozen_python,
+        );
+    } else if let Some((source_corrected, frozen_python)) = cabin_preset_help_correction(label) {
+        comparison.exact(
+            &format!("{label}.help: source-corrected Rust value"),
+            &field.help,
+            &source_corrected,
+        );
+        comparison.exact(
+            &format!("{label}.help: frozen Python value"),
+            &expected.get("help").and_then(Value::as_str).unwrap_or(""),
+            &frozen_python,
+        );
+    } else if let Some((_, _, source_help, frozen_help)) = oei_documentation_correction(label) {
+        comparison.exact(
+            &format!("{label}.help: source-corrected Rust value"),
+            &field.help,
+            &source_help,
+        );
+        comparison.exact(
+            &format!("{label}.help: frozen Python value"),
+            &expected.get("help").and_then(Value::as_str).unwrap_or(""),
+            &frozen_help,
+        );
     } else if declaration.is_some_and(|entry| entry.help) {
         compare_string(
             comparison,
@@ -797,6 +937,84 @@ fn is_legacy_acceleration_psd_correction(path: &str) -> bool {
     path.ends_with(".psd_base_g2_per_hz")
 }
 
+/// The Torenbeek/fraction controls remain serialized for the explicit
+/// compatibility comparison, but product help must not suggest that they own
+/// pure FLOPS production mass. Keep both the corrected and frozen prose
+/// visible in this parity test.
+fn mass_legacy_help_correction(label: &str) -> Option<(&'static str, &'static str)> {
+    match label {
+        label if label.ends_with(".suspended_mass_fraction") => Some((
+            "Legacy comparison only: fraction of MTOW treated as 'suspended' mass in the Torenbeek wing structural formula (everything the wing structure must carry other than itself). Typical commercial transport: 0.70-0.78.",
+            "Fraction of MTOW treated as 'suspended' mass in the Torenbeek wing structural formula (everything the wing structure must carry other than itself). Typical commercial transport: 0.70-0.78.",
+        )),
+        label if label.ends_with(".max_airspeed_for_flaps_ms") => Some((
+            "Legacy comparison only: design airspeed with flaps extended, fed into the Torenbeek wing-mass formula.",
+            "Design airspeed with flaps extended, fed into the Torenbeek wing-mass formula.",
+        )),
+        label if label.ends_with(".flap_deflection_angle_deg") => Some((
+            "Legacy comparison only: maximum flap deflection angle, fed into the Torenbeek wing-mass formula.",
+            "Maximum flap deflection angle, fed into the Torenbeek wing-mass formula.",
+        )),
+        label if label.ends_with(".landing_gear_mass_fraction") => Some((
+            "Legacy comparison only: landing gear mass as a fraction of MTOW. Raymer Table 15.2: ~4% for commercial jet transports.",
+            "Landing gear mass as a fraction of MTOW. Raymer Table 15.2: ~4% for commercial jet transports.",
+        )),
+        label if label.ends_with(".propulsion_twr_factor") => Some((
+            "Legacy comparison only: dry engine mass is estimated as thrust / (this factor * g). Historical engine thrust-to-weight ratios are ~5-7, so this factor is typically ~6.",
+            "Dry engine mass is estimated as thrust / (this factor * g). Historical engine thrust-to-weight ratios are ~5-7, so this factor is typically ~6.",
+        )),
+        label if label.ends_with(".propulsion_installation_factor") => Some((
+            "Legacy comparison only: multiplier on dry engine mass accounting for pylon, cowling, fire suppression and other installed accessories.",
+            "Multiplier on dry engine mass accounting for pylon, cowling, fire suppression and other installed accessories.",
+        )),
+        label if label.ends_with(".propulsion_mass_fallback_fraction") => Some((
+            "Legacy comparison only: fallback propulsion mass as a fraction of MTOW, used only if the selected engine isn't found in the database.",
+            "Fallback propulsion mass as a fraction of MTOW, used only if the selected engine isn't found in the database.",
+        )),
+        label if label.ends_with(".systems_mass_fraction") => Some((
+            "Legacy comparison only: avionics, electrical, ECS, APU, etc. as a fraction of MTOW. Raymer Table 15.2: 9-13% for commercial transports.",
+            "Avionics, electrical, ECS, APU, etc. as a fraction of MTOW. Raymer Table 15.2: 9-13% for commercial transports.",
+        )),
+        label if label.ends_with(".furnishings_mass_fraction") => Some((
+            "Legacy comparison only: passenger seats, galleys, lavatories, insulation, crew, paint, and operational empty items as a fraction of MTOW. Typically 10-14% for passenger transports.",
+            "Passenger seats, galleys, lavatories, insulation, crew, paint, and operational empty items as a fraction of MTOW. Typically 10-14% for passenger transports.",
+        )),
+        _ => None,
+    }
+}
+
+/// The native OEI fields retain the frozen names and defaults, while their
+/// documentation was tightened to distinguish conceptual fallbacks and the
+/// gear-up, high-lift configuration used by the evidence-aware helpers. Keep
+/// both texts checked explicitly so this remains a documented migration rather
+/// than silently dropping parity coverage.
+fn oei_documentation_correction(
+    label: &str,
+) -> Option<(&'static str, &'static str, &'static str, &'static str)> {
+    match label {
+        "PerformanceConfig.oei_gradient" | "ALASConfig.performance.oei_gradient" => Some((
+            "OEI 2nd-segment climb gradient (fallback)",
+            "OEI 2nd-segment climb gradient (fallback)",
+            "Conceptual fallback for an engine count outside the implemented 14 CFR 25.121(b) two/three/four-engine table. The matching chart auto-selects 0.024 (twin) / 0.027 (tri-jet) / 0.030 (quad) from the actual engine count; this fallback does not establish a Part 25 result for unsupported counts.",
+            "FAR 25.121 minimum second-segment climb gradient with one engine inoperative (OEI). The matching chart auto-selects 0.024 (twin) / 0.027 (tri-jet) / 0.030 (quad) from the actual engine count; this value is only the fallback for any other engine count.",
+        )),
+        "PerformanceConfig.oei_climb_cl" | "ALASConfig.performance.oei_climb_cl" => Some((
+            "OEI climb configuration CL",
+            "OEI climb configuration CL",
+            "Legacy constant lift coefficient for conceptual OEI second-segment climb L/D (Raymer Ch.17). A V2-based evaluation should derive CL from CLmax_TO and the selected V2/VSR or V2/VS ratio instead.",
+            "Lift coefficient assumed in the take-off configuration when evaluating OEI second-segment climb L/D (Raymer Ch.17).",
+        )),
+        "PerformanceConfig.oei_climb_delta_cd"
+        | "ALASConfig.performance.oei_climb_delta_cd" => Some((
+            "OEI climb high-lift drag increment (gear up)",
+            "OEI climb flap/gear drag increment",
+            "Parasite-drag increment added to clean CD0 for the takeoff flap/slat configuration with landing gear retracted, as required by 14 CFR 25.121(b). Asymmetric trim/control and inoperative-engine or windmilling drag require separate source values; this field does not represent them.",
+            "Parasite-drag increment added to the clean CD0 for the flap/gear-down OEI second-segment climb configuration.",
+        )),
+        _ => None,
+    }
+}
+
 fn wing_centroid_help_correction(label: &str) -> Option<(&'static str, &'static str)> {
     if label == "StructuresConfig.enabled" || label.ends_with(".structures.enabled") {
         Some((
@@ -821,9 +1039,36 @@ fn solver_agnostic_help_correction(label: &str) -> Option<(&'static str, &'stati
             "Number of alpha points in the MSES polar sweep. Kept small relative to the native VLM sweep (analysis.sweep_n_points) since each MSES point is a real viscous-compressible solve (~1-2s) rather than a linear-algebra VLM solve.",
             "Number of alpha points in the MSES polar sweep. Kept small relative to AeroSandbox's own VLM sweep (analysis.sweep_n_points) since each MSES point is a real viscous-compressible solve (~1-2s) rather than a linear-algebra VLM solve.",
         )),
+        "WingConfig.n_subdivisions"
+        | "GeometryConfig.wing.n_subdivisions"
+        | "ALASConfig.geometry.wing.n_subdivisions" => Some((
+            "Spanwise panels across the whole wing semispan for the vortex-lattice solver. This is an absolute count, not a count per section: a planform with a side-of-body station and a kink gets the same mesh density as one without, and adding a station no longer changes the panel count underneath a search. Every planform station -- root, side-of-body, kink, tip -- is always kept as a panel edge whatever the count, so refining the mesh never averages a kink away. The default of 24 is converged: a twelve-fold refinement moves the trimmed cruise attitude by 0.01 deg.",
+            "Spanwise panel refinement per wing section for the vortex-lattice solver. Higher = more accurate, slower.",
+        )),
+        "EmpennageConfig.n_subdivisions"
+        | "GeometryConfig.empennage.n_subdivisions"
+        | "ALASConfig.geometry.empennage.n_subdivisions" => Some((
+            "Spanwise panels across each tail surface for the vortex-lattice solver, as an absolute count rather than a count per section. Both stabilizers are single-section surfaces, so this is the panel count they already had; it is stated absolutely so a cranked fin later gets the same density rather than twice it.",
+            "Spanwise panel refinement per tail surface for the vortex-lattice solver.",
+        )),
+        "AnalysisConfig.spanwise_resolution"
+        | "ALASConfig.analysis.spanwise_resolution" => Some((
+            "Multiplier on each surface's built-in spanwise panel subdivision for the vortex-lattice solver. Leave at 1: the geometry builder has already subdivided every surface (24 strips per semispan on the main wing), and that is converged -- refining it further moves the trimmed cruise attitude by 0.01 deg. Values above 2 are rejected, because this multiplier re-applies a cosine spacing inside each existing strip and the induced drag then stops converging. Part of the Fidelity preset.",
+            "Multiplier on each surface's built-in spanwise panel subdivision for the vortex-lattice solver. Higher = finer mesh, slower. Part of the Fidelity preset.",
+        )),
+        "AnalysisConfig.chordwise_resolution"
+        | "ALASConfig.analysis.chordwise_resolution" => Some((
+            "Number of chordwise panels per strip for the vortex-lattice solver, used by the fast in-loop estimate the optimizer ranks candidates with; the final reported analysis uses fine_chordwise_resolution instead. This is a literal panel count, not a multiplier, and nothing else in the pipeline sets one. At 1 the mesh samples the camber line only at the leading and trailing edges, where it is zero, so the section becomes a flat plate: cruise attitude comes out 1-4 deg high, L/D wrong by -14 to +3 percent, and the four airfoil bump design variables have no effect at all. 8 ranks candidates identically to a converged mesh. Higher = finer mesh, slower. Part of the Fidelity preset.",
+            "Multiplier on each surface's built-in chordwise panel subdivision for the vortex-lattice solver. Higher = finer mesh, slower. Part of the Fidelity preset. Used by the fast in-loop estimate; the final reported analysis uses fine_chordwise_resolution instead.",
+        )),
+        "AnalysisConfig.fine_spanwise_resolution"
+        | "ALASConfig.analysis.fine_spanwise_resolution" => Some((
+            "Spanwise panel resolution used ONLY for the once-per-run final/reported analysis (drag polar, trimmed cruise point, neutral point) -- not the optimizer loop. Leave at 1 for the same reason as the in-loop field: the span is already converged, so raising this doubles the panel count to change the answer by about 1 percent. Spend the panels on fine_chordwise_resolution instead.",
+            "Spanwise panel resolution used ONLY for the once-per-run final/reported analysis (drag polar, trimmed cruise point, neutral point) -- not the optimizer loop. Higher fidelity where speed doesn't matter.",
+        )),
         "AnalysisConfig.fine_chordwise_resolution"
         | "ALASConfig.analysis.fine_chordwise_resolution" => Some((
-            "Chordwise panel resolution for the once-per-run final/reported analysis. A supercritical/cambered section needs ~8 chordwise panels for the VLM to resolve its camber line; at the coarse in-loop resolution the camber (and hence the zero-lift alpha) is under-captured, which inflates the reported cruise alpha by several degrees and under-predicts L/D by ~7%. Kept high here so the REPORTED cruise alpha (~1-4 deg) and L/D are physically accurate.",
+            "Chordwise panel resolution for the once-per-run final/reported analysis. A supercritical section needs roughly 8 chordwise panels before the VLM resolves its camber line at all, and the convergence is first-order in panel count: 8 still leaves the reported cruise attitude about 1 deg high on a supercritical wing, 16 about 0.5 deg. Kept above the in-loop value so the REPORTED cruise alpha and L/D are the more trustworthy of the two, at a cost paid once per run.",
             "Chordwise panel resolution for the once-per-run final/reported analysis. A supercritical/cambered section needs ~8 chordwise panels for the VLM to resolve its camber line; at the coarse in-loop resolution the camber (and hence the zero-lift alpha) is under-captured, which inflates the reported cruise alpha by several degrees and under-predicts L/D by ~7%. Kept high here so the REPORTED cruise alpha (~1-4 deg, matching SUAVE) and L/D are physically accurate.",
         )),
         "PropulsionCycleConfig.inlet_pressure_recovery"
@@ -851,6 +1096,38 @@ fn solver_agnostic_help_correction(label: &str) -> Option<(&'static str, &'stati
         "OptimizerConfig.solver.workers" | "ALASConfig.optimizer.solver.workers" => Some((
             "Number of native worker threads for differential-evolution candidate batches (>1 enables parallel evaluation; non-positive values are treated as 1). External evaluator adapters remain serial because they own mutable process/session state.",
             "Number of worker processes for parallel evaluation (>1 uses multiprocessing). Requires a picklable objective -- already the case for ALAS's optimizer.",
+        )),
+        _ => None,
+    }
+}
+
+/// `passenger_mass_kg` now documents the product passenger-mass authority
+/// decision: every seated passenger, of any class, is priced at this
+/// combined (occupant + checked bag) mass, and the per-class occupant slot
+/// is the derived remainder. Only the prose changed; the value and every
+/// other field are unchanged, and both texts stay pinned here.
+fn passenger_mass_authority_help_correction(label: &str) -> Option<(&'static str, &'static str)> {
+    match label {
+        "DesignRequirements.passenger_mass_kg" | "ALASConfig.requirements.passenger_mass_kg" => {
+            Some((
+                "Combined average mass per occupant (body + baggage). FAA AC 120-27E standard is 100 kg; airlines may use 90-105 kg. This is the single load-case authority for every product path (report, GUI preview, pipeline, export and the optimizer): every seated passenger, of any class, is priced at this combined mass, with cabin.passenger.checked_bag_mass_kg as the baggage share and the occupant slot the remainder. Per-class seat masses (e.g. a named cabin preset's business/economy figures) are cosmetic/geometry seeds only and are overwritten by this value.",
+                "Combined average mass per occupant (body + baggage). FAA AC 120-27E standard is 100 kg; airlines may use 90-105 kg.",
+            ))
+        }
+        _ => None,
+    }
+}
+
+/// `cabin_preset`'s help now names each passenger preset's descriptive,
+/// airline-independent GUI label (`alas-gui/src/views/form_options.rs::
+/// cabin_preset_display_name`) instead of the historical airline name. The
+/// serialized identifiers ('Ryanair', 'Iberia', 'Emirates') and every preset
+/// value are unchanged; only this prose and the combo-box display text did.
+fn cabin_preset_help_correction(label: &str) -> Option<(&'static str, &'static str)> {
+    match label {
+        "DesignRequirements.cabin_preset" | "ALASConfig.requirements.cabin_preset" => Some((
+            "Named seating/payload layout preset ('High-density single-class', 'Two-class (Business/Economy)', 'Three-class (First/Business/Economy)' for passenger; 'Max payload', 'Dense payload' for cargo). 'Custom' lets you hand-edit the Cabin & Payload tab.",
+            "Named seating/payload layout preset ('Ryanair', 'Iberia', 'Emirates' for passenger; 'Max payload', 'Dense payload' for cargo). 'Custom' lets you hand-edit the Cabin & Payload tab.",
         )),
         _ => None,
     }

@@ -64,6 +64,7 @@ mod tests {
             x_neutral_point: 16.2,
             trimmed_design_point: None,
             component_masses: HashMap::new(),
+            flops_mass_buildup: None,
             mass_coordinates: HashMap::new(),
             physical_cg: [15.0, 0.0, 0.0],
             geometry_summary: HashMap::new(),

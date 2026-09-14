@@ -9,21 +9,22 @@
 use alas_config::{presets, AlasConfig};
 use alas_geom::builder::AircraftBuilder;
 use alas_payload::cabin::{cabin_deck_segments, max_certifiable_capacity, select_exit_type};
-use alas_payload::{build_payload_layout, CabinGeometry};
+use alas_payload::{build_payload_layout, CabinGeometry, LayoutSummary};
 
 fn main() {
     println!(
-        "{:<11} {:>7} {:>7} {:>7} {:>6} {:>7} {:>6} {:>7} {:>7} {:>7}",
+        "{:<11} {:>7} {:>7} {:>11} {:>10} {:>9} {:>6} {:>7} {:>6} {:>7} {:>10}",
         "preset",
         "cab_len",
         "usable_w",
-        "exit",
+        "generic_exit",
+        "generic_cap",
+        "model_cap",
         "pairs",
-        "exitcap",
-        "req",
         "seated",
+        "req",
         "planning",
-        "cert"
+        "source"
     );
     for name in presets::available() {
         let p = presets::get(name).unwrap();
@@ -53,26 +54,22 @@ fn main() {
             .map(|s| g.usable_width(s.deck, (s.x0 + s.x1) / 2.0))
             .unwrap_or(0.0);
         let layout = build_payload_layout(&plane, &config, 0.0, 0.0).unwrap();
-        let seated: i64 = layout
-            .items
-            .iter()
-            .filter_map(|i| match &i.meta {
-                alas_payload::ItemMeta::Seat(s) => Some(s.filled),
-                _ => None,
-            })
-            .sum();
+        let LayoutSummary::Passenger(summary) = &layout.summary else {
+            panic!("registered probe preset must build a passenger layout");
+        };
         println!(
-            "{:<11} {:>7.2} {:>8.2} {:>7} {:>6} {:>7} {:>6} {:>7} {:>7} {:>7}",
+            "{:<11} {:>7.2} {:>8.2} {:>11} {:>10} {:>9} {:>6} {:>7} {:>6} {:>7} {:>10}",
             name,
             cab_len,
             usable,
             spec.name,
-            segs.len(),
             caps.total,
+            summary.max_certifiable_capacity,
+            summary.exit_pairs,
+            summary.seated_pax,
             config.requirements.num_passengers,
-            seated,
             p.reference.planning_seats.unwrap_or(-1),
-            p.reference.certified_max_seats.unwrap_or(-1),
+            summary.source_exit_layout.unwrap_or("-"),
         );
     }
 }

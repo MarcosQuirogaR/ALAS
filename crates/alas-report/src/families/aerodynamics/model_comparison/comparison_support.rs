@@ -228,7 +228,7 @@ pub(super) fn draw_avl_condition_panels(
         comparison.altitude_m.unwrap_or(f64::NAN),
     );
     let lift_axes = Axes2D::new(
-        (60.0, 650.0, 370.0, 190.0),
+        (60.0, super::ROW3_TOP, 370.0, super::ROW_HEIGHT),
         alpha_range,
         padded_range(
             comparison
@@ -241,7 +241,7 @@ pub(super) fn draw_avl_condition_panels(
     panel_title(
         scene,
         &lift_axes,
-        &format!("Lift cross-check -- {condition}"),
+        &format!("Lift cross-check: {condition}"),
         pal,
     );
     lift_axes.draw_frame_with_labels(scene, pal, "alpha [deg]", "CL");
@@ -267,7 +267,7 @@ pub(super) fn draw_avl_condition_panels(
     );
 
     let moment_axes = Axes2D::new(
-        (480.0, 650.0, 370.0, 190.0),
+        (480.0, super::ROW3_TOP, 370.0, super::ROW_HEIGHT),
         alpha_range,
         padded_range(
             comparison
@@ -304,7 +304,7 @@ pub(super) fn draw_avl_condition_panels(
         return;
     };
     let induced_axes = Axes2D::new(
-        (60.0, 910.0, 370.0, 190.0),
+        (60.0, super::ROW4_TOP, 370.0, super::ROW_HEIGHT),
         alpha_range,
         padded_range(
             comparison
@@ -313,7 +313,8 @@ pub(super) fn draw_avl_condition_panels(
                 .flat_map(|(_, vlm, avl)| [*vlm, *avl]),
             0.08,
         ),
-    );
+    )
+    .with_y_tick_decimals(2);
     panel_title(scene, &induced_axes, "Induced drag cross-check", pal);
     induced_axes.draw_frame_with_labels(scene, pal, "alpha [deg]", "CDi");
     let vlm = comparison
@@ -338,7 +339,7 @@ pub(super) fn draw_avl_condition_panels(
     );
 
     let efficiency_axes = Axes2D::new(
-        (480.0, 910.0, 370.0, 190.0),
+        (480.0, super::ROW4_TOP, 370.0, super::ROW_HEIGHT),
         alpha_range,
         padded_range(
             comparison

@@ -10,7 +10,12 @@
 
 use alas_report::scene::{Camera3D, SceneElement};
 use alas_report::{render_svg, Scene};
+use rayon::prelude::*;
 use std::sync::{Arc, OnceLock};
+
+/// A raster as width, height and premultiplied RGBA bytes, or the reason it
+/// could not be produced.
+pub type RasterResult = Result<(u32, u32, Vec<u8>), String>;
 
 /// Rasterize a scene to an RGBA PNG buffer.
 pub fn render_scene_png(scene: &Scene) -> Result<Vec<u8>, String> {
@@ -45,7 +50,11 @@ pub fn render_scene_rgba_scaled(scene: &Scene, scale: f64) -> Result<(u32, u32, 
                 if source == "embedded://nasa-blue-marble"
         )
     });
-    vector_scene.background = None;
+    // Keep `background` itself set to the true theme color so the automatic
+    // title's contrast decision (`visual_title`, called from `render_svg`)
+    // still sees it; only suppress painting the opaque rect that would
+    // otherwise hide the texture layer drawn onto `pixmap` below.
+    vector_scene.hide_background_paint();
     let svg = render_svg(&vector_scene);
     // usvg intentionally starts with an empty font database. Loading system
     // fonts on every globe orbit frame dominates raster time, so all figure
@@ -77,6 +86,38 @@ pub fn render_scene_rgba_scaled(scene: &Scene, scale: f64) -> Result<(u32, u32, 
         &mut pixmap.as_mut(),
     );
     Ok((width, height, pixmap.data().to_vec()))
+}
+
+/// Rasterize only the textured elements of `scene` -- the embedded rasters and
+/// the orthographic globe -- onto a transparent canvas at `scale` pixels per
+/// scene unit, leaving every vector element and the background undrawn.
+///
+/// This is the raster half of the interactive viewport's split rendering:
+/// the vector elements are drawn as `egui` shapes directly, and only the
+/// texture, which has no vector equivalent, still passes through a pixel
+/// buffer. On the route globe the SVG round-trip of the vector overlay cost
+/// about 80 ms per camera frame at 1.5x density while the sphere itself
+/// cost about 4 ms (2026-09-11), so this split is what makes orbiting the
+/// globe interactive. `None` when the scene has no textured element, so the
+/// caller can skip the texture entirely.
+pub fn render_scene_textures_rgba_scaled(scene: &Scene, scale: f64) -> Option<RasterResult> {
+    if !scene.elements.iter().any(|element| {
+        matches!(
+            element,
+            SceneElement::Image { .. } | SceneElement::SphericalImage { .. }
+        )
+    }) {
+        return None;
+    }
+    let scale = scale.max(1.0);
+    let width = (scene.width.max(1.0) * scale).round() as u32;
+    let height = (scene.height.max(1.0) * scale).round() as u32;
+    let Some(mut pixmap) = tiny_skia::Pixmap::new(width, height) else {
+        return Some(Err("allocate texture canvas".to_owned()));
+    };
+    draw_embedded_textures(scene, &mut pixmap, scale);
+    draw_spherical_textures(scene, &mut pixmap, scale);
+    Some(Ok((width, height, pixmap.data().to_vec())))
 }
 
 fn draw_spherical_textures(scene: &Scene, destination: &mut tiny_skia::Pixmap, scale: f64) {
@@ -129,32 +170,43 @@ fn draw_equirectangular_sphere(
     let bottom = (center_y + radius_px)
         .ceil()
         .min(f64::from(destination.height())) as u32;
-    for y in top..bottom {
-        for x in left..right {
-            let dx = (f64::from(x) + 0.5 - center_x) / radius_px;
-            let dy = (f64::from(y) + 0.5 - center_y) / radius_px;
-            let radial_sq = dx * dx + dy * dy;
-            if radial_sq > 1.0 {
-                continue;
-            }
-            let depth = (1.0 - radial_sq).sqrt();
-            let [world_x, world_y, z] = sphere_sample_direction(dx, dy, depth, camera);
-            let longitude = world_y.atan2(world_x);
-            let source_longitude = source_longitude(longitude, mirror_longitude);
-            let latitude = z.clamp(-1.0, 1.0).asin();
-            let texture_x = ((source_longitude + std::f64::consts::PI)
-                / (2.0 * std::f64::consts::PI)
-                * f64::from(texture.width() - 1))
-            .round() as u32;
-            let texture_y = ((std::f64::consts::FRAC_PI_2 - latitude) / std::f64::consts::PI
-                * f64::from(texture.height() - 1))
-            .round() as u32;
-            let source_index = ((texture_y * texture.width() + texture_x) * 4) as usize;
-            let target_index = ((y * destination.width() + x) * 4) as usize;
-            destination.data_mut()[target_index..target_index + 4]
-                .copy_from_slice(&texture.data()[source_index..source_index + 4]);
-        }
+    if bottom <= top || right <= left {
+        return;
     }
+    // Every row is projected independently and written into its own slice
+    // of the canvas, so the rows run on the rayon pool; the per-pixel
+    // arithmetic is unchanged and the result is identical to a serial pass.
+    let stride = destination.width() as usize * 4;
+    let rows = &mut destination.data_mut()[top as usize * stride..bottom as usize * stride];
+    rows.par_chunks_mut(stride)
+        .enumerate()
+        .for_each(|(offset, row)| {
+            let y = top + offset as u32;
+            let dy = (f64::from(y) + 0.5 - center_y) / radius_px;
+            for x in left..right {
+                let dx = (f64::from(x) + 0.5 - center_x) / radius_px;
+                let radial_sq = dx * dx + dy * dy;
+                if radial_sq > 1.0 {
+                    continue;
+                }
+                let depth = (1.0 - radial_sq).sqrt();
+                let [world_x, world_y, z] = sphere_sample_direction(dx, dy, depth, camera);
+                let longitude = world_y.atan2(world_x);
+                let source_longitude = source_longitude(longitude, mirror_longitude);
+                let latitude = z.clamp(-1.0, 1.0).asin();
+                let texture_x = ((source_longitude + std::f64::consts::PI)
+                    / (2.0 * std::f64::consts::PI)
+                    * f64::from(texture.width() - 1))
+                .round() as u32;
+                let texture_y = ((std::f64::consts::FRAC_PI_2 - latitude) / std::f64::consts::PI
+                    * f64::from(texture.height() - 1))
+                .round() as u32;
+                let source_index = ((texture_y * texture.width() + texture_x) * 4) as usize;
+                let target_index = x as usize * 4;
+                row[target_index..target_index + 4]
+                    .copy_from_slice(&texture.data()[source_index..source_index + 4]);
+            }
+        });
 }
 
 /// Reconstruct the unit-length globe direction under one orthographic pixel.
@@ -264,8 +316,58 @@ fn blue_marble_texture() -> Option<&'static tiny_skia::Pixmap> {
 
 #[cfg(test)]
 mod tests {
-    use super::{render_scene_png, render_scene_rgba, source_longitude, sphere_sample_direction};
+    use super::{
+        render_scene_png, render_scene_rgba, render_scene_rgba_scaled, source_longitude,
+        sphere_sample_direction,
+    };
     use alas_report::scene::{Camera3D, Color, Scene, SceneElement, TextAlign, TextBaseline};
+
+    /// Regression for the actual GUI figure-card bug: this function used to
+    /// clear `scene.background` before calling `render_svg` so the vector
+    /// layer stayed transparent over pre-painted texture content. That also
+    /// blinded `visual_title`'s contrast decision (it reads the same field),
+    /// so every automatic figure title rendered in its near-black
+    /// light-theme color on Grey and Dark, on top of a still-correctly-dark
+    /// background -- reproducing the reported "black global titles on Grey
+    /// background despite white panel titles". Panel headings were
+    /// unaffected because they are colored explicitly from the palette, not
+    /// through `visual_title`.
+    #[test]
+    fn automatic_title_stays_legible_against_dark_and_grey_backgrounds() {
+        for (theme_name, bg_hex) in [("grey", "#3a3a3a"), ("dark", "#1e1e1e")] {
+            let bg = Color::from_hex(bg_hex);
+            let mut scene = Scene::new(300.0, 120.0, Some(bg));
+            scene.title = Some("Themed Figure Title".to_owned());
+
+            let (width, _height, rgba) =
+                render_scene_rgba_scaled(&scene, 1.0).expect("raster succeeds");
+
+            // The automatic title sits at [width * 0.5, 18.0] in scene units;
+            // scan a small neighborhood for its brightest opaque pixel, since
+            // anti-aliased glyph edges vary in exact intensity.
+            let cx = (width as f64 * 0.5) as i64;
+            let mut brightest = 0u8;
+            for dy in -8i64..=8 {
+                for dx in -40i64..=40 {
+                    let (x, y) = ((cx + dx) as u32, (18 + dy) as u32);
+                    let idx = ((y * width + x) * 4) as usize;
+                    let Some(pixel) = rgba.get(idx..idx + 4) else {
+                        continue;
+                    };
+                    if pixel[3] > 10 {
+                        let luma =
+                            (u32::from(pixel[0]) + u32::from(pixel[1]) + u32::from(pixel[2])) / 3;
+                        brightest = brightest.max(luma as u8);
+                    }
+                }
+            }
+            assert!(
+                brightest > 200,
+                "theme={theme_name}: automatic title should paint near-white glyphs against \
+                 background {bg_hex}, brightest sampled luma was {brightest}"
+            );
+        }
+    }
 
     #[test]
     fn scene_rasterization_returns_a_decodable_png() {
@@ -274,6 +376,35 @@ mod tests {
 
         assert_eq!(&png[..8], b"\x89PNG\r\n\x1a\n");
         assert!(png.len() > 100);
+    }
+
+    #[test]
+    fn the_texture_layer_alone_matches_the_full_raster_of_a_texture_only_scene() {
+        let mut scene = Scene::new(65.0, 65.0, None);
+        scene.add(SceneElement::SphericalImage {
+            source: "embedded://nasa-blue-marble".to_owned(),
+            center: [32.5, 32.5],
+            radius: 30.0,
+            camera: Camera3D::front(),
+            mirror_longitude: false,
+        });
+        let full = super::render_scene_rgba_scaled(&scene, 1.5).expect("full raster");
+        let textures = super::render_scene_textures_rgba_scaled(&scene, 1.5)
+            .expect("the scene has a texture")
+            .expect("texture raster");
+        assert_eq!(textures, full);
+        assert!(textures.2.chunks_exact(4).any(|pixel| pixel[3] > 0));
+    }
+
+    #[test]
+    fn a_scene_without_textures_has_no_texture_layer() {
+        let mut scene = Scene::new(40.0, 20.0, Some(Color::rgb(0, 0, 0)));
+        scene.add(SceneElement::Line {
+            p1: [0.0, 0.0],
+            p2: [40.0, 20.0],
+            stroke: alas_report::scene::Stroke::new(Color::rgb(255, 255, 255), 1.0),
+        });
+        assert!(super::render_scene_textures_rgba_scaled(&scene, 1.0).is_none());
     }
 
     #[test]

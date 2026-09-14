@@ -13,8 +13,12 @@ different licensing consequences and are kept separate below:
   distributed here, not covered by this program's licence.
 
 Cargo dependencies are not listed individually. `cargo tree` enumerates them and
-`cargo deny` checks their licences; the workspace admits only permissive
-licences (MIT, Apache-2.0, BSD, Zlib, Unicode-3.0).
+`cargo deny` checks their declared licences against `deny.toml`. The dependency
+policy admits AGPL-3.0-or-later, Apache-2.0, Apache-2.0 WITH LLVM-exception,
+MIT, BSD-2-Clause, BSD-3-Clause, BSL-1.0, ISC, Zlib, MPL-2.0, Unicode-3.0,
+OFL-1.1 and LicenseRef-UFL-1.0; this list is a dependency-policy allowlist,
+not a claim that every embedded asset or external executable has one of these
+licences.
 
 ---
 
@@ -90,17 +94,27 @@ carried verbatim; no coordinate value is modified, reordered or resampled.
 MIT, with NeuralFoil above. Embedded as `f32` arrays converted from the
 upstream `.npz` files without retraining or modification.
 
-### DejaVu Sans
+### Fonts supplied by GUI and SVG dependencies
 
-DejaVu Fonts Team. Licensed under the DejaVu Fonts License (a permissive
-Bitstream Vera derivative). Embedded so that exported figures render
-identically on machines without it installed, and so that they remain visually
-comparable to the Python implementation's Matplotlib output.
+The repository does not contain a separately embedded DejaVu Sans file and does
+not promise Matplotlib-identical font metrics. The `egui`/`eframe` and SVG
+rendering dependency graph carries default font data and declares OFL-1.1 and
+Ubuntu Font License entries in `deny.toml`; those dependency notices apply to
+the corresponding dependency binaries. Font discovery for SVG export also
+loads fonts available on the host. See `docs/dependency-policy.md` for the
+current dependency-level audit.
 
 ### Airport and engine reference data
 
 Compiled by the author from published sources, each cited next to its entry.
 Not a redistribution of any third-party database.
+
+### NASA Blue Marble
+
+Public domain NASA raster. `assets/textures/earth_blue_marble.png` is checked
+into this repository, embedded at compile time by the route/report/pipeline
+renderers, and included in release source archives. It is not downloaded on
+demand and is not user-configurable at runtime.
 
 ---
 
@@ -115,10 +129,6 @@ Airway and fix data used for airway routing. Downloaded from a public mirror
 when the user enables real airway routing; the program falls back to
 great-circle routing when it is absent.
 
-### NASA Blue Marble
-
-Public domain. Earth surface texture for the route map and globe.
-
 ---
 
 ## Invoked executables
@@ -130,9 +140,12 @@ remain user-supplied.
 | Program | Licence | Used for |
 |---|---|---|
 | MSES (`mset`, `mses`, `mplot`) | Proprietary, per-seat from MIT | Two-dimensional viscous airfoil analysis |
+| OpenVSP / VSPAERO | NASA Open Source Agreement, as supplied by the selected OpenVSP release | Geometry export and independent three-dimensional aerodynamic checks |
 | MSC Nastran | Proprietary | Wingbox statics, normal modes, vibration |
+| MSC Patran | Proprietary | Structural preprocessing and post-processing launcher |
 | NASTRAN-95 | NOSA 1.3 | Wingbox statics and normal modes, where MSC Nastran is unavailable |
 | AVL | GPL-2.0 | Independent vortex-lattice and dynamic-mode cross-check |
+| FLOWUnsteady adapter / Julia environment | User-supplied; licence follows the selected external release | Optional lifting-surface unsteady analysis through a process boundary |
 
 NOSA 1.3 is not compatible with the GPL family. NASTRAN-95 is therefore invoked
 as a separate executable and nothing of it is linked or translated into this

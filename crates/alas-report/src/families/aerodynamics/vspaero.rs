@@ -9,7 +9,9 @@
 //! dropping the external result from the live report.
 
 use alas_aero::vspaero::VspaeroPolarPoint;
-use alas_pipeline::{VspaeroAnalysisResult, VspaeroComparisonStatus};
+use alas_pipeline::VspaeroAnalysisResult;
+#[cfg(test)]
+use alas_pipeline::VspaeroComparisonStatus;
 
 use super::support::padded_range;
 use crate::chart_kit::{draw_horizontal_legend_columns, LegendMarker};
@@ -22,11 +24,12 @@ const VISCOUS_COLOR: &str = "#56b4e9";
 const REJECTED_COLOR: &str = "#d62728";
 const ACCEPTED_COLOR: &str = "#27ae60";
 const WAKE_TOLERANCE: f64 = 1.0e-4;
+const WAKE_LEGEND_TOP: f64 = 380.0;
 
 fn title(scene: &mut Scene, axes: &Axes2D, text: &str, color: Color) {
     scene.add(SceneElement::Text {
         text: text.to_owned(),
-        pos: [axes.left, axes.top - 8.0],
+        pos: [axes.left, axes.top - 10.0],
         font_size: 10.0,
         color,
         align: TextAlign::Left,
@@ -38,8 +41,15 @@ fn title(scene: &mut Scene, axes: &Axes2D, text: &str, color: Color) {
 
 fn status_scene(title_text: &str, message: &str, ok: bool, theme: Option<&str>) -> Scene {
     let pal = get_palette(theme);
-    let mut scene = Scene::new(900.0, 300.0, Some(Color::from_hex(pal.bg)));
+    const MESSAGE_TOP: f64 = 88.0;
+    const LINE_HEIGHT: f64 = 17.0;
+    const BOTTOM_MARGIN: f64 = 16.0;
+    let wrapped = crate::chart_kit::wrap_text(message, 130);
+    let line_count = wrapped.lines().count().max(1) as f64;
+    let height = (300.0_f64).max(MESSAGE_TOP + line_count * LINE_HEIGHT + BOTTOM_MARGIN);
+    let mut scene = Scene::new(900.0, height, Some(Color::from_hex(pal.bg)));
     scene.title = Some(title_text.to_owned());
+    scene.suppress_derived_title();
     scene.add(SceneElement::Text {
         text: title_text.to_owned(),
         pos: [24.0, 42.0],
@@ -51,8 +61,8 @@ fn status_scene(title_text: &str, message: &str, ok: bool, theme: Option<&str>) 
         bold: true,
     });
     scene.add(SceneElement::Text {
-        text: message.to_owned(),
-        pos: [24.0, 88.0],
+        text: wrapped,
+        pos: [24.0, MESSAGE_TOP],
         font_size: 12.0,
         color: Color::from_hex(pal.tick),
         align: TextAlign::Left,
@@ -85,19 +95,6 @@ fn add_markers(scene: &mut Scene, axes: &Axes2D, points: &[(f64, f64)], color: C
             stroke: None,
         });
     }
-}
-
-fn comparison_note(result: &VspaeroAnalysisResult) -> String {
-    let comparison = match &result.comparison {
-        VspaeroComparisonStatus::NotEvaluated => "comparison not evaluated".to_owned(),
-        VspaeroComparisonStatus::Compatible(_) => {
-            "comparison admitted for shared quantities".to_owned()
-        }
-        VspaeroComparisonStatus::Rejected(reason) => {
-            format!("comparison rejected; native data retained ({reason})")
-        }
-    };
-    format!("native status: {}; {comparison}", result.status.as_str())
 }
 
 /// Plot the parsed VSPAERO polar without requiring the strict overlay verdict.
@@ -143,13 +140,18 @@ pub fn figure_vspaero_polar(result: &VspaeroAnalysisResult, theme: Option<&str>)
         0.08,
     );
     let ld = padded_range(points.iter().map(|point| point.lift_to_drag), 0.08);
+    // Row 2 starts 70 px below row 1's frame (was 60): row 1's x-axis title
+    // extends about 41 px below its frame and row 2's panel headings sit
+    // about 22 px above theirs, so anything under ~63 px risks the shared
+    // "alpha [deg]" label colliding with the row below it.
+    let row2_top = 375.0;
     let axes = [
         Axes2D::new((60.0, 55.0, 370.0, 250.0), alpha, cl),
-        Axes2D::new((480.0, 55.0, 370.0, 250.0), cl, cd),
-        Axes2D::new((60.0, 365.0, 370.0, 250.0), alpha, cm),
-        Axes2D::new((480.0, 365.0, 370.0, 250.0), alpha, ld),
+        Axes2D::new((480.0, 55.0, 370.0, 250.0), cl, cd).with_y_tick_decimals(2),
+        Axes2D::new((60.0, row2_top, 370.0, 250.0), alpha, cm),
+        Axes2D::new((480.0, row2_top, 370.0, 250.0), alpha, ld),
     ];
-    let mut scene = Scene::new(900.0, 720.0, Some(Color::from_hex(pal.bg)));
+    let mut scene = Scene::new(900.0, 730.0, Some(Color::from_hex(pal.bg)));
     scene.title = Some("VSPAERO Native Polar".to_owned());
     for (axis, (plot_title, x_label, y_label)) in axes.iter().zip([
         ("Native lift curve", "alpha [deg]", "CL"),
@@ -220,19 +222,9 @@ pub fn figure_vspaero_polar(result: &VspaeroAnalysisResult, theme: Option<&str>)
         viscous.clone(),
     );
 
-    scene.add(SceneElement::Text {
-        text: comparison_note(result),
-        pos: [60.0, 650.0],
-        font_size: 10.0,
-        color: Color::from_hex(pal.tick),
-        align: TextAlign::Left,
-        baseline: TextBaseline::Top,
-        angle_deg: 0.0,
-        bold: false,
-    });
     draw_horizontal_legend_columns(
         &mut scene,
-        [60.0, 680.0],
+        [60.0, 690.0],
         &[
             ("VSPAERO native".to_owned(), LegendMarker::Line(native)),
             ("Induced drag".to_owned(), LegendMarker::Line(induced)),
@@ -379,14 +371,19 @@ pub fn figure_vspaero_wake_convergence(
         .map(|case| case.rows.len() as f64)
         .fold(0.0, f64::max);
     let axes = [
-        Axes2D::new((60.0, 55.0, 370.0, 270.0), alpha, residual),
+        Axes2D::new((60.0, 55.0, 370.0, 270.0), alpha, residual)
+            .with_y_tick_decimals(2),
         Axes2D::new(
             (480.0, 55.0, 370.0, 270.0),
             alpha,
             (0.0, (max_iterations + 1.0).max(2.0)),
         ),
     ];
-    let mut scene = Scene::new(900.0, 520.0, Some(Color::from_hex(pal.bg)));
+    let mut scene = Scene::new(
+        900.0,
+        WAKE_LEGEND_TOP + 42.0,
+        Some(Color::from_hex(pal.bg)),
+    );
     scene.title = Some("VSPAERO Native Wake Convergence".to_owned());
     axes[0].draw_frame_with_labels(
         &mut scene,
@@ -439,34 +436,9 @@ pub fn figure_vspaero_wake_convergence(
         p2: axes[0].map_point(alpha.1, WAKE_TOLERANCE),
         stroke: Stroke::dashed(Color::from_hex(ACCEPTED_COLOR), 1.0, 5.0, 3.0),
     });
-    scene.add(SceneElement::Text {
-        text: format!(
-            "{} solver cases; tolerance {:.1e}; max final change {:.3e}",
-            cases.len(),
-            WAKE_TOLERANCE,
-            max_change
-        ),
-        pos: [60.0, 375.0],
-        font_size: 10.0,
-        color: Color::from_hex(pal.tick),
-        align: TextAlign::Left,
-        baseline: TextBaseline::Top,
-        angle_deg: 0.0,
-        bold: false,
-    });
-    scene.add(SceneElement::Text {
-        text: comparison_note(result),
-        pos: [60.0, 402.0],
-        font_size: 10.0,
-        color: Color::from_hex(pal.tick),
-        align: TextAlign::Left,
-        baseline: TextBaseline::Top,
-        angle_deg: 0.0,
-        bold: false,
-    });
     draw_horizontal_legend_columns(
         &mut scene,
-        [60.0, 455.0],
+        [60.0, WAKE_LEGEND_TOP],
         &[
             (
                 "native residual".to_owned(),
@@ -538,13 +510,13 @@ mod tests {
     }
 
     #[test]
-    fn native_polar_scene_keeps_a_rejected_but_parsed_result_visible() {
+    fn native_polar_scene_keeps_a_rejected_but_parsed_result_visible_without_status_prose() {
         let scene = figure_vspaero_polar(&result_with_polar(), Some("dark"));
         assert!(scene
             .elements
             .iter()
             .any(|element| matches!(element, SceneElement::Circle { .. })));
-        assert!(scene.elements.iter().any(|element| matches!(
+        assert!(!scene.elements.iter().any(|element| matches!(
             element,
             SceneElement::Text { text, .. } if text.contains("comparison rejected")
         )));
@@ -557,5 +529,78 @@ mod tests {
         assert_eq!(cases.len(), 1);
         assert_eq!(cases[0].alpha_deg, 2.0);
         assert!((final_change(&cases[0]) - 1.0e-5).abs() < 1.0e-12);
+    }
+
+    #[test]
+    fn wake_scene_limits_residual_ticks_and_keeps_legend_clear_of_x_labels() {
+        let stem = std::env::temp_dir().join(format!(
+            "alas-vspaero-wake-layout-{}",
+            std::process::id()
+        ));
+        let history_path = stem.with_extension("history");
+        let history = "# Name Value Units\n\
+            AoA_ -2.0 deg\n\
+            Solver Case: 1\n\
+             Iter Mach AoA Beta CLtot CDi CMytot\n\
+             1 0.8 -2 0 0.2 0.01 -0.05\n\
+             2 0.8 -2 0 0.2123 0.0223 -0.0377\n\
+            AoA_ 2.0 deg\n\
+            Solver Case: 2\n\
+             Iter Mach AoA Beta CLtot CDi CMytot\n\
+             1 0.8 2 0 0.2 0.01 -0.05\n\
+             2 0.8 2 0 0.2001 0.0101 -0.0499\n";
+        std::fs::write(&history_path, history).expect("write wake layout fixture");
+
+        let mut result = result_with_polar();
+        result.case_path = stem;
+        for theme in ["light", "grey", "dark"] {
+            let scene = figure_vspaero_wake_convergence(&result, Some(theme));
+
+            let x_label_y = scene
+                .elements
+                .iter()
+                .filter_map(|element| match element {
+                    SceneElement::Text { text, pos, .. } if text == "alpha [deg]" => {
+                        Some(pos[1])
+                    }
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(x_label_y, vec![354.0, 354.0]);
+
+            let residual_ticks = scene
+                .elements
+                .iter()
+                .filter_map(|element| match element {
+                    SceneElement::Text { text, pos, .. } if (pos[0] - 53.0).abs() < 1.0e-9 => {
+                        Some(text.as_str())
+                    }
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            assert!(!residual_ticks.is_empty());
+            assert!(residual_ticks.iter().all(|label| {
+                label
+                    .split_once('.')
+                    .map_or(true, |(_, fraction)| fraction.len() <= 2)
+            }));
+
+            let legend_y = scene
+                .elements
+                .iter()
+                .filter_map(|element| match element {
+                    SceneElement::Text { text, pos, .. }
+                        if matches!(
+                            text.as_str(),
+                            "Native residual" | "Iteration count" | "Acceptance tolerance"
+                        ) => Some(pos[1]),
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(legend_y, vec![WAKE_LEGEND_TOP + 4.0; 3]);
+            assert!(legend_y[0] - x_label_y[0] >= 20.0);
+            assert!(legend_y[0] < scene.height - 30.0);
+        }
+        std::fs::remove_file(&history_path).expect("remove wake layout fixture");
     }
 }

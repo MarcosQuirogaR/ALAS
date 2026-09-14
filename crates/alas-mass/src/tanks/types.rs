@@ -168,6 +168,58 @@ impl FuelTankLayout {
     pub fn unusable_fuel_kg(&self) -> f64 {
         self.tanks.iter().map(|tank| tank.unusable_kg).sum()
     }
+
+    /// Return a copy whose tank unusable-fuel allocation sums to `total_kg`.
+    ///
+    /// Tank policies provide a geometric default fraction, while the pure
+    /// FLOPS operating-items equation provides the authoritative aircraft
+    /// total.  The ledger must use that same total without losing the
+    /// resolved tank centroids, so the copy preserves every tank identity,
+    /// capacity, station and burn order and rescales only `unusable_kg`.
+    /// Existing per-tank policy proportions are retained when they are
+    /// positive; a zero-policy layout falls back to usable-capacity shares.
+    ///
+    /// # Errors
+    ///
+    /// [`TankLayoutError::InvalidUnusableFuelTotal`] is returned for a
+    /// negative or non-finite total, or when a positive total is requested
+    /// from a layout with no finite positive tank weights.
+    pub fn with_unusable_fuel_total(&self, total_kg: f64) -> Result<Self, TankLayoutError> {
+        if !total_kg.is_finite() || total_kg < 0.0 {
+            return Err(TankLayoutError::InvalidUnusableFuelTotal { total_kg });
+        }
+        let mut adjusted = self.clone();
+        if total_kg == 0.0 {
+            for tank in &mut adjusted.tanks {
+                tank.unusable_kg = 0.0;
+            }
+            return Ok(adjusted);
+        }
+
+        let policy_total = self.unusable_fuel_kg();
+        let weight_total = if policy_total.is_finite() && policy_total > 0.0 {
+            policy_total
+        } else {
+            self.tanks
+                .iter()
+                .map(|tank| tank.usable_capacity_kg)
+                .filter(|capacity| capacity.is_finite() && *capacity > 0.0)
+                .sum()
+        };
+        if !weight_total.is_finite() || weight_total <= 0.0 {
+            return Err(TankLayoutError::InvalidUnusableFuelTotal { total_kg });
+        }
+
+        for tank in &mut adjusted.tanks {
+            let weight = if policy_total.is_finite() && policy_total > 0.0 {
+                tank.unusable_kg
+            } else {
+                tank.usable_capacity_kg
+            };
+            tank.unusable_kg = total_kg * weight / weight_total;
+        }
+        Ok(adjusted)
+    }
 }
 
 /// Why a fuel-tank layout could not be resolved, or a fuel load applied to it.
@@ -205,6 +257,12 @@ pub enum TankLayoutError {
     Overflow {
         /// How far over capacity the request was, kg.
         excess_kg: f64,
+    },
+    /// A requested total unusable-fuel allocation is negative, non-finite,
+    /// or cannot be distributed across the resolved tanks.
+    InvalidUnusableFuelTotal {
+        /// The requested total, kg.
+        total_kg: f64,
     },
     /// A burn removed more fuel than the state held.
     InsufficientFuel {
@@ -268,6 +326,12 @@ impl fmt::Display for TankLayoutError {
                 write!(
                     formatter,
                     "fuel load exceeds usable capacity by {excess_kg} kg"
+                )
+            }
+            Self::InvalidUnusableFuelTotal { total_kg } => {
+                write!(
+                    formatter,
+                    "unusable fuel total {total_kg} kg is invalid or cannot be distributed"
                 )
             }
             Self::InsufficientFuel { shortfall_kg } => {

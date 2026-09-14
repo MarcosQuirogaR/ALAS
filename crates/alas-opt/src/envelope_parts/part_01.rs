@@ -5,7 +5,7 @@ use alas_config::AlasConfig;
 use alas_geom::aircraft::airplane::Airplane;
 use alas_mass::breakdown::{MassBreakdown, MassCoordinates};
 use alas_payload::oew::oew_and_cg;
-use alas_perf::landing_gear::size_landing_gear;
+use alas_perf::landing_gear::size_landing_gear_with_group_stations;
 
 /// Outcome of the frozen Python-compatible envelope check.
 ///

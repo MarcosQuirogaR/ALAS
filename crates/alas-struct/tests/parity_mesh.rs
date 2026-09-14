@@ -33,7 +33,7 @@ mod support;
 
 use alas_config::{DesignRequirements, EngineConfig, MassModelConfig};
 use alas_struct::mesh::{build_wing_mesh_bdf, MeshHealthReport, MeshNodeIndex};
-use alas_struct::sizing::size_wingbox;
+use alas_struct::sizing::size_wingbox_reference_compatibility;
 use alas_testkit::{Comparison, Tier};
 use serde_json::Value;
 use support::deck::{parse, Card};
@@ -376,7 +376,7 @@ fn build_wing_mesh_bdf_writes_the_deck_python_writes() {
         let cfg = structures_config_for(&case.config);
         let [skin, web, cap, rib] = materials_for(&case.materials);
 
-        let sizing = size_wingbox(&wsg, &cfg, &req, skin, web, cap, rib);
+        let sizing = size_wingbox_reference_compatibility(&wsg, &cfg, &req, skin, web, cap, rib);
         exact.exact(
             &format!("{}: num_ribs", case.name),
             &sizing.num_ribs,

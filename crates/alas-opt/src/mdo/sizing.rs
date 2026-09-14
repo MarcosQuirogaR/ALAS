@@ -5,12 +5,12 @@
 //! depend on the takeoff mass run once, then `mdo::mda` closes the coupled
 //! mass, centre-of-gravity, trim and mission-fuel fixed point.
 
-use alas_config::{airport_dataset, airports, AlasConfig};
+use alas_config::{airport_dataset, airports, AlasConfig, MtowSizing};
 use alas_geom::aircraft::airplane::Airplane;
 use alas_mass::breakdown::{MassBreakdown, MassCoordinates};
 use alas_payload::oew::oew_and_cg;
 
-use super::build::{build_geometry, first_mass_pass};
+use super::build::first_mass_pass;
 use super::engine::static_thrust_kn_per_engine;
 use super::mda::{converge, MdaContext, MdaState};
 use super::mission_model::{PhaseAeroLimits, SegmentMissionModel};
@@ -42,6 +42,9 @@ pub(crate) struct SizingOutcome {
     pub mac: f64,
     pub cd0: f64,
     pub induced_factor_k: f64,
+    /// Geometric aircraft-body angle at the cruise trim used by the mission
+    /// model, before the presentation-only compressibility correction.
+    pub geometric_body_alpha_deg: f64,
     pub n_engines: i64,
     pub static_thrust_kn: f64,
     pub departure: Option<&'static airports::Airport>,
@@ -84,22 +87,42 @@ pub(crate) struct SizingOutcome {
 ///
 /// [`CandidateFailure`] when the geometry, mass, payload layout or trim
 /// solve fails -- the candidate is not a physically evaluable aircraft.
+#[cfg(test)]
 pub(crate) fn run_candidate(
     config: &AlasConfig,
     x: &[f64],
 ) -> Result<SizingOutcome, CandidateFailure> {
-    run_candidate_with_polar(config, x, None)
+    run_candidate_with_polar_and_fuselage_policy(config, x, None, false)
 }
 
-/// [`run_candidate`] with an optional externally supplied cruise polar,
-/// which replaces the native trim and is held fixed through the sizing loop.
-pub(crate) fn run_candidate_with_polar(
+/// Run a candidate while preserving a caller-pinned clean-sheet fuselage
+/// coordinate.  This is used by fixed desktop/reference reviews; ordinary
+/// product optimization keeps the cabin-derived sizing behavior.
+pub(crate) fn run_candidate_with_fuselage_policy(
+    config: &AlasConfig,
+    x: &[f64],
+    preserve_explicit_fuselage_length: bool,
+) -> Result<SizingOutcome, CandidateFailure> {
+    run_candidate_with_polar_and_fuselage_policy(config, x, None, preserve_explicit_fuselage_length)
+}
+
+/// [`run_candidate_with_fuselage_policy`] with an optional externally
+/// supplied cruise polar, which replaces the native trim and is held fixed
+/// through the sizing loop.
+pub(crate) fn run_candidate_with_polar_and_fuselage_policy(
     config: &AlasConfig,
     x: &[f64],
     external: Option<&ExternalPolar>,
+    preserve_explicit_fuselage_length: bool,
 ) -> Result<SizingOutcome, CandidateFailure> {
-    let (candidate_config, dv, mut plane) = build_geometry(config, x)?;
-    let (masses0, coords0, cg0, summary, capacity, structural_reference) =
+    let (candidate_config, dv, mut plane) = super::build::build_geometry_with_fuselage_policy(
+        config,
+        x,
+        preserve_explicit_fuselage_length,
+    )?;
+    // The ceiling-mass cabin layout is consumed inside `first_mass_pass`;
+    // the closure re-places the cabin at every closed mass itself.
+    let (masses0, coords0, cg0, _summary, capacity, structural_reference) =
         first_mass_pass(&candidate_config, &dv, &plane)?;
 
     let req = &candidate_config.requirements;
@@ -218,7 +241,6 @@ pub(crate) fn run_candidate_with_polar(
     let context = MdaContext {
         config: &candidate_config,
         dv: &dv,
-        summary: &summary,
         model,
         range_m,
         tank_capacity_kg: tank_capacity,
@@ -240,8 +262,41 @@ pub(crate) fn run_candidate_with_polar(
     let polar = state.polar;
 
     let (operating_empty_mass_kg, _) = oew_and_cg(&state.masses, &state.coords);
+    // A fixed-requirement run evaluates the aircraft at its declared MTOW;
+    // the dispatch solution is the mission's required takeoff mass and is
+    // compared against that ceiling by the mass residuals.  Keeping those
+    // quantities separate prevents geometry/thrust/CG checks from using the
+    // lower mission-required mass while the component ledger is closed at
+    // the declared MTOW.  Both mission-sized modes -- `SizedByMission`,
+    // bounded above by the declared MTOW, and `Unconstrained`, which only
+    // seeds its first pass from it -- use the converged dispatch mass for
+    // both purposes instead, since there each candidate's own closure, not
+    // the declared requirement, is what the analysis mass answers to.
+    let analysis_takeoff_mass_kg =
+        if candidate_config.optimizer.objective.mtow_sizing == MtowSizing::FixedRequirement {
+            mtow_ceiling
+        } else {
+            closure.dispatch.takeoff_mass_kg
+        };
+    // The design-weight basis the ledger was closed on, made explicit so a
+    // report can say whether the components belong to the declared aircraft
+    // or to the sized one (`alas_config::MassSizingBasis`).
+    let basis = candidate_config.mass_sizing_basis();
+    let (design_gross_mass_kg, design_landing_mass_kg) = match basis {
+        alas_config::MassSizingBasis::FixedAircraft {
+            design_gross_mass_kg,
+            design_landing_mass_kg,
+        } => (design_gross_mass_kg, design_landing_mass_kg),
+        alas_config::MassSizingBasis::Coupled => (
+            analysis_takeoff_mass_kg,
+            candidate_config.landing_mass_limit_kg(analysis_takeoff_mass_kg),
+        ),
+    };
     let sized = SizedCandidate {
-        takeoff_mass_kg: closure.dispatch.takeoff_mass_kg,
+        takeoff_mass_kg: analysis_takeoff_mass_kg,
+        sizing_basis: basis.as_str(),
+        design_gross_mass_kg,
+        design_landing_mass_kg,
         operating_empty_mass_kg,
         zero_fuel_mass_kg: closure.dispatch.zero_fuel_mass_kg,
         payload_kg: state.masses.payload,
@@ -292,6 +347,7 @@ pub(crate) fn run_candidate_with_polar(
         mac,
         cd0: polar.cd0,
         induced_factor_k: polar.induced_factor_k,
+        geometric_body_alpha_deg: polar.geometric_body_alpha_deg,
         n_engines: n_engines as i64,
         static_thrust_kn,
         departure,

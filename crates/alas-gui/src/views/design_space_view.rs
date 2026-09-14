@@ -7,7 +7,7 @@
 //! A port of the reference desktop app's `DesignSpaceTable`.
 
 use alas_config::{DesignMode, VariableEnvelope, DESIGN_VARIABLE_SPECS};
-use egui::{ComboBox, DragValue, RichText, ScrollArea, Ui};
+use egui::{DragValue, RichText, ScrollArea, Ui};
 
 use crate::state::AppState;
 use crate::views::form::dynamic_form;
@@ -110,25 +110,15 @@ fn show_design_mode_card(state: &mut AppState, ui: &mut Ui) {
         ui.set_min_width(ui.available_width());
         ui.label(RichText::new(tr("Design study")).strong());
         ui.add_space(3.0);
-        let current = state.design_mode();
-        let mut selected = current;
-        ComboBox::from_id_salt("alas_design_mode")
-            .width(ui.available_width())
-            .selected_text(design_mode_display_name(current))
-            .show_ui(ui, |ui| {
-                for mode in [
-                    DesignMode::CleanSheet,
-                    DesignMode::ReferenceAdaptation,
-                    DesignMode::BaselineSandbox,
-                ] {
-                    ui.selectable_value(&mut selected, mode, design_mode_display_name(mode));
-                }
-            });
-        if selected != current {
-            state.set_design_mode(selected);
-        }
-
         let selected = state.design_mode();
+        ui.label(RichText::new(design_mode_display_name(selected)).strong());
+        ui.label(
+            RichText::new(tr(
+                "The starting design and the optimization toggle on Inputs set this mode.",
+            ))
+            .weak()
+            .small(),
+        );
         ui.label(
             RichText::new(tr(design_mode_description(selected)))
                 .weak()

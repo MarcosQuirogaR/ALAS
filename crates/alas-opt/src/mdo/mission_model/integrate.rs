@@ -43,7 +43,7 @@ use alas_prop::system::{FlightCondition, PropulsionRating};
 
 use super::profile::{ProfilePlan, Segment, SegmentKind};
 use super::SegmentMissionModel;
-use crate::mdo::propulsion::{DeckError, OperatingPoint, ThrustLimit};
+use crate::mdo::propulsion::{DeckError, DeckKind, OperatingPoint, ThrustLimit};
 
 /// Default midpoint steps per planned segment; the model can refine it.
 pub(crate) const DEFAULT_STEPS_PER_SEGMENT: usize = 4;
@@ -246,13 +246,31 @@ impl Integrator<'_> {
             };
         let mut floor = idle;
         if idle.thrust_n <= required_n && required_n <= rated.thrust_n {
-            let point = deck.at_thrust(*flight, required_n, step.cap)?;
-            if point.limit != ThrustLimit::IdleFloor || point.thrust_n <= required_n {
-                return Ok(planned(point, pending_installment, false));
+            match deck.at_thrust(*flight, required_n, step.cap) {
+                Ok(point) => {
+                    if point.limit != ThrustLimit::IdleFloor || point.thrust_n <= required_n {
+                        return Ok(planned(point, pending_installment, false));
+                    }
+                    // The deck's lowest running point is above the flight-idle
+                    // surrogate and above the request: treat it as the floor.
+                    floor = point;
+                }
+                Err(DeckError::Model(reason))
+                    if matches!(step.kind, SegmentKind::Descent | SegmentKind::Landing)
+                        && deck.kind() == DeckKind::Turboprop
+                        && reason.contains("rating map does not bracket") =>
+                {
+                    // The ATR/PW127M adapter exposes a neutral zero-force
+                    // flight-idle surrogate, but its governed propeller map
+                    // starts at a positive forward-thrust point. A small
+                    // positive request can therefore lie in the unmodelled
+                    // interval between those two points. There is no
+                    // windmilling/idle map from which to interpolate a force;
+                    // retain the declared idle point and let the combined
+                    // energy balance determine the actual descent rate.
+                }
+                Err(error) => return Err(error.into()),
             }
-            // The deck's lowest running point is above the flight-idle
-            // surrogate and above the request: treat it as the floor.
-            floor = point;
         }
         let above_rating = required_n > rated.thrust_n;
         let (bound, label) = if above_rating {
@@ -388,15 +406,22 @@ impl Integrator<'_> {
     /// across segments, but it must close before a distinct target is opened.
     /// Otherwise the schedule could report an intermediate speed as flown
     /// even though the aircraft never attained it.
+    fn transition_tolerance_j(&self, previous: f64, target: f64) -> f64 {
+        let speed_scale = previous.abs().max(target.abs());
+        let kinetic_scale = 0.5 * self.mass_kg * speed_scale * speed_scale;
+        BOUNDARY_KE_ABSOLUTE_TOLERANCE_J.max(BOUNDARY_KE_RELATIVE_TOLERANCE * kinetic_scale)
+    }
+
+    fn target_is_distinct(&self, previous: f64, target: f64) -> bool {
+        let tolerance_j = self.transition_tolerance_j(previous, target);
+        (target - previous).abs() > (2.0 * tolerance_j / self.mass_kg.max(f64::MIN_POSITIVE)).sqrt()
+    }
+
     fn open_transition(&mut self, tas_m_s: f64) -> Result<(), FlyError> {
         if let Some(previous) = self.previous_tas_m_s {
-            let speed_scale = previous.abs().max(tas_m_s.abs());
-            let kinetic_scale = 0.5 * self.mass_kg * speed_scale * speed_scale;
-            let tolerance_j = BOUNDARY_KE_ABSOLUTE_TOLERANCE_J
-                .max(BOUNDARY_KE_RELATIVE_TOLERANCE * kinetic_scale);
+            let tolerance_j = self.transition_tolerance_j(previous, tas_m_s);
             let previous_pending_j = self.pending_kinetic_j;
-            let target_is_distinct = (tas_m_s - previous).abs()
-                > (2.0 * tolerance_j / self.mass_kg.max(f64::MIN_POSITIVE)).sqrt();
+            let target_is_distinct = self.target_is_distinct(previous, tas_m_s);
             if previous_pending_j.abs() > tolerance_j && target_is_distinct {
                 return Err(FuelModelError::NotConverged(format!(
                     "speed schedule not attained before next distinct transition from {previous:.3} to {tas_m_s:.3} m/s: {pending:.3} J of kinetic energy remained unpaid (boundary tolerance {tolerance_j:.3} J)",
@@ -462,18 +487,16 @@ impl Integrator<'_> {
                 cap,
             })?;
         }
-        if self.allow_route_transition_deficit && segment.kind == SegmentKind::Cruise {
-            if let Some(deficit_m) = self.level_transition_deficit_m(segment)? {
-                return Err(FlyError::TooShort { deficit_m });
-            }
-        }
         Ok(distance_m)
     }
 
     /// Additional level distance required to close a material speed transition
-    /// at the current bound. A route attempt may lower cruise altitude and
-    /// retry when the fixed rung fraction left too little distance; direct
-    /// callers retain the strict boundary error in `open_transition`.
+    /// at the current bound. The cruise scheduler calls this before a distinct
+    /// target or after the final cruise rung; consecutive rungs at one target
+    /// are allowed to share the same budget. A route attempt may lower cruise
+    /// altitude and retry when the complete cruise allocation leaves too
+    /// little distance; direct callers retain the strict boundary error in
+    /// `open_transition`.
     fn level_transition_deficit_m(&mut self, segment: &Segment) -> Result<Option<f64>, FlyError> {
         let speed = segment.tas_m_s;
         let pending = self.pending_kinetic_j;
@@ -521,15 +544,46 @@ impl Integrator<'_> {
         cruise_distance_m: f64,
     ) -> Result<f64, FlyError> {
         let fraction_sum: f64 = plan.cruise_rungs.iter().map(|(_, f)| f).sum();
+        let mut last_cruise_segment: Option<Segment> = None;
         for &(speed, fraction) in &plan.cruise_rungs {
             let distance_m = cruise_distance_m * fraction / fraction_sum;
             if distance_m > 1.0e-6 {
-                self.fly_segment(&Segment::level(
+                let segment = Segment::level(
                     SegmentKind::Cruise,
                     plan.cruise_altitude_m,
                     speed,
                     distance_m,
-                ))?;
+                );
+                // A speed target may be split across several cruise rungs.
+                // Let a material boundary-energy budget continue through
+                // consecutive rungs at the same target; only require it to
+                // close before the next distinct target. The old check lived
+                // inside `fly_segment` and rejected every nonzero budget at
+                // the end of the first rung, even when the remaining cruise
+                // distance was ample to pay it (the ATR route at FL170).
+                if self.allow_route_transition_deficit {
+                    if let Some(previous) = last_cruise_segment {
+                        if self.target_is_distinct(previous.tas_m_s, speed) {
+                            if let Some(deficit_m) = self.level_transition_deficit_m(&previous)? {
+                                return Err(FlyError::TooShort { deficit_m });
+                            }
+                        }
+                    }
+                }
+                self.fly_segment(&segment)?;
+                last_cruise_segment = Some(segment);
+            }
+        }
+        // The descent begins at a distinct speed target. If the final cruise
+        // target still has unpaid kinetic energy, report the extra horizontal
+        // distance needed to close that boundary rather than letting the
+        // descent ladder misstate the failure. This is evaluated only after
+        // all consecutive cruise rungs have had a chance to pay it.
+        if self.allow_route_transition_deficit {
+            if let Some(last) = last_cruise_segment {
+                if let Some(deficit_m) = self.level_transition_deficit_m(&last)? {
+                    return Err(FlyError::TooShort { deficit_m });
+                }
             }
         }
         let mut descent_footprint_m = 0.0;
@@ -685,6 +739,7 @@ impl SegmentMissionModel {
 // assertion with its context rather than a production error path.
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
+    use super::super::profile::LegKind;
     use super::*;
     use crate::mdo::build::build_geometry;
     use crate::mdo::propulsion::max_climb_rate_ft_min;
@@ -742,6 +797,41 @@ mod tests {
 
     fn level(tas_m_s: f64, distance_m: f64) -> Segment {
         Segment::level(SegmentKind::Cruise, 0.0, tas_m_s, distance_m)
+    }
+
+    fn atr_model() -> SegmentMissionModel {
+        let config = AlasConfig::from_value(&serde_json::json!({"preset": "ATR72-600"}))
+            .expect("ATR preset");
+        let design = alas_config::presets::get("ATR72-600")
+            .expect("ATR preset design")
+            .design_vector;
+        let (config, _, plane) = build_geometry(&config, &design.to_array())
+            .unwrap_or_else(|failure| panic!("ATR geometry: {}", failure.reason));
+        let requirements = &config.requirements;
+        let deck = crate::mdo::propulsion::PropulsionDeck::from_engine(
+            &config.geometry.engine,
+            requirements.cruise_mach,
+            requirements.cruise_altitude_m,
+            max_climb_rate_ft_min(config.mission.profile.initial_climb_rate_m_s),
+        )
+        .expect("ATR propulsion deck");
+        let phase_limits = super::super::PhaseAeroLimits::from_config(&config);
+        SegmentMissionModel::new(
+            config.mission.profile,
+            requirements.cruise_mach,
+            requirements.cruise_altitude_m,
+            610.0,
+            8.0,
+            plane.s_ref,
+            0.024600009989746922,
+            0.030377093904043483,
+            0.002,
+            requirements.gravity_m_s2,
+            457.2,
+            phase_limits,
+            deck,
+        )
+        .expect("ATR mission model")
     }
 
     #[test]
@@ -925,5 +1015,72 @@ mod tests {
             FlyError::Fuel(FuelModelError::NotConverged(reason))
                 if reason.contains("climb energy deficit")
         ));
+    }
+
+    #[test]
+    fn turboprop_descent_idle_gap_uses_energy_balance_without_thrust_extrapolation() {
+        let model = atr_model();
+        let mass_kg = 21_359.385400976567;
+        // This is the altitude at which the ATR dispatch bracket reaches the
+        // floor of the calibrated 644.9 km profile. Select a live descent
+        // rung from that profile rather than inventing a generic test state.
+        let plan = model
+            .geometry()
+            .plan_at(LegKind::Trip, 644_890.9, 1_067.2)
+            .expect("ATR floor profile");
+        let segment = plan
+            .descent
+            .iter()
+            .find(|segment| segment.kind == SegmentKind::Descent)
+            .copied()
+            .expect("ATR descent rung");
+        let dh_m = segment.end_altitude_m - segment.start_altitude_m;
+        let planned_dt_s = segment.duration_s();
+        let tas_m_s = segment.tas_m_s;
+        let altitude_m = 0.5 * (segment.start_altitude_m + segment.end_altitude_m);
+        let flight = model
+            .propulsion
+            .flight_condition(
+                altitude_m,
+                tas_m_s,
+                model.gravity_m_s2,
+                model.isa_deviation_c,
+            )
+            .expect("ATR descent flight condition");
+        let mut probe = integrator(&model);
+        probe.mass_kg = mass_kg;
+        let drag_n = probe
+            .phase_drag_n(SegmentKind::Descent, &flight, mass_kg)
+            .expect("ATR clean descent drag");
+        let rate_thrust_n = drag_n + mass_kg * model.gravity_m_s2 * (dh_m / planned_dt_s) / tas_m_s;
+        // Five newtons is above the adapter's neutral zero-force idle
+        // surrogate and below its governed rating map in the current
+        // PW127M model. Choosing the target through the step equation keeps
+        // the test about the inverse-domain edge, not a tuned pending-energy
+        // constant.
+        let requested_n = 5.0;
+        let pending_kinetic_j = (requested_n - rate_thrust_n) * tas_m_s * planned_dt_s;
+        assert!(pending_kinetic_j.is_finite());
+        let step = StepPlan {
+            kind: SegmentKind::Descent,
+            altitude_m,
+            tas_m_s,
+            dh_m,
+            planned_dt_s,
+            remaining_steps: 1,
+            cap: PropulsionRating::MaximumClimb,
+        };
+        let mut solver = integrator(&model);
+        solver.mass_kg = mass_kg;
+        solver.pending_kinetic_j = pending_kinetic_j;
+        let solved = solver
+            .solve_step(step, &flight, mass_kg)
+            .expect("an idle-domain descent must use the declared floor");
+        assert!(solved.dt_s.is_finite() && solved.dt_s > 0.0);
+        assert!(solved.vertical_rate_m_s.is_finite() && solved.vertical_rate_m_s < 0.0);
+        assert!(solved.limited);
+        let idle = model.propulsion.idle_point(flight).expect("ATR idle point");
+        assert_eq!(solved.thrust_n, idle.thrust_n);
+        assert_eq!(solved.fuel_flow_kg_s, idle.fuel_flow_kg_s);
     }
 }

@@ -92,7 +92,11 @@ fn zero_max_iterations_records_the_initial_population_and_its_feasibility() {
     config.optimizer.solver.seed_near_initial_design = true;
 
     let initial = DesignVector::default();
-    let mut optimizer = DesignOptimizer::new(config);
+    // The product path is intentionally MADS; the historical DE initial
+    // population contract belongs to the explicit compatibility constructor.
+    // Keep this parity check on that constructor so a zero-iteration request
+    // still audits the frozen 16-member reference population.
+    let mut optimizer = DesignOptimizer::new_reference_compatibility(config);
     let result = optimizer
         .run(None, Some(&initial), None)
         .expect("the default design is feasible");

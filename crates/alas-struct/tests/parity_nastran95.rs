@@ -32,11 +32,15 @@
 //! # Scope: statics
 //!
 //! Only linear statics is cross-validated. The normal-mode check proves that a
-//! local NASTRAN-95 accepts the bounded `EIGR` deck, confirms that its lowest
-//! eigenvalue was found, and emits finite modal results. The test does not set
-//! a parity tier against MSC: the historic inverse-power method still differs
-//! on a shell-and-concentrated-mass model with singular rotational mass
-//! freedoms, so cross-solver differences remain an audit finding.
+//! local NASTRAN-95 accepts the bounded `EIGR` deck, emits finite ordered modal
+//! results, and accounts for every emitted root with a global Sturm count
+//! through the largest extracted eigenvalue. The test does not set a parity
+//! tier against MSC: the historic inverse-power method still differs on a
+//! shell-and-concentrated-mass model with singular rotational mass freedoms, so
+//! cross-solver differences remain an audit finding. NASTRAN-95 may also print
+//! message 3307 for an intermediate inverse-power shift; the live check keeps
+//! that warning as a diagnostic and uses the global count as its completeness
+//! certificate.
 
 // This file is a test binary; a failed unwrap/expect is the assertion failing.
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
@@ -57,7 +61,7 @@ use alas_struct::nastran95::{
     build_modes_deck, build_static_deck, read_displacement_tables, read_eigenvalues, run_nastran95,
     Dialect, Nastran95Solver, RunOutcome,
 };
-use alas_struct::sizing::size_wingbox;
+use alas_struct::sizing::size_wingbox_reference_compatibility;
 use serde::Deserialize;
 use support::{build_geometry, materials_for, MaterialsRecord};
 
@@ -121,7 +125,7 @@ fn wingbox(num_ribs: i64, chordwise: i64) -> Wingbox {
     };
     let wsg = build_geometry(&[0.15, 0.60], &[true, true]);
     let [skin, web, cap, rib] = materials_for(&named);
-    let sizing = size_wingbox(&wsg, &cfg, &req, skin, web, cap, rib);
+    let sizing = size_wingbox_reference_compatibility(&wsg, &cfg, &req, skin, web, cap, rib);
     let (deck, _report, node_index) = build_wing_mesh_bdf(
         &wsg,
         &sizing,
@@ -297,7 +301,8 @@ fn the_two_solvers_converge_on_the_same_static_deflection() {
 
 /// SOL 3,1 is a supported local NASTRAN-95 workflow even though its historic
 /// eigensolver cannot be held to modern low-mode parity for this mass model.
-// The opt-in live-solver check reports the observed modal band for the audit.
+/// The opt-in live-solver check reports the observed modal band and requires
+/// the global Sturm count to cover every parsed root.
 #[allow(clippy::print_stderr)]
 #[test]
 fn the_nastran95_modes_deck_returns_finite_positive_modes() {
@@ -316,14 +321,6 @@ fn the_nastran95_modes_deck_returns_finite_positive_modes() {
         RunOutcome::Failed(why) => panic!("NASTRAN-95 SOL 3,1 failed: {why}"),
     };
     let modes = read_eigenvalues(&print);
-    assert!(
-        print.contains("LOWEST EIGENVALUE FOUND"),
-        "NASTRAN-95 did not confirm that the low-frequency search found its first root"
-    );
-    assert!(
-        !print.contains("POTENTIALLY"),
-        "NASTRAN-95 reported that low-frequency roots were missed"
-    );
     assert!(
         modes.len() >= cfg.n_modes as usize,
         "NASTRAN-95 returned {} modes after requesting a reliable low-mode set",
@@ -345,11 +342,76 @@ fn the_nastran95_modes_deck_returns_finite_positive_modes() {
             .all(|mode| mode.cyclic_hz.is_finite() && mode.cyclic_hz > 0.0),
         "NASTRAN-95 SOL 3,1 emitted an invalid cyclic frequency: {modes:?}"
     );
+    assert!(
+        modes
+            .windows(2)
+            .all(|pair| pair[0].cyclic_hz < pair[1].cyclic_hz),
+        "NASTRAN-95 SOL 3,1 did not return strictly ordered roots: {modes:?}"
+    );
+    let largest_eigenvalue = modes
+        .last()
+        .map(|mode| mode.eigenvalue)
+        .expect("the positive-mode assertion above must leave a largest root");
+    let sturm_roots = sturm_root_count_through(&print, largest_eigenvalue).expect(
+        "NASTRAN-95 did not print a global Sturm ROOTS BELOW count at or above the largest extracted root",
+    );
+    assert_eq!(
+        sturm_roots,
+        modes.len(),
+        "NASTRAN-95's global Sturm count through the largest extracted root must account for every parsed root; intermediate 3307 diagnostics are not sufficient evidence of a missing root"
+    );
     eprintln!(
-        "NASTRAN-95 SOL 3,1 returned {} positive modes from {:.5} to {:.5} Hz",
+        "NASTRAN-95 SOL 3,1 returned {} positive modes from {:.5} to {:.5} Hz (global Sturm count through {:.5}={sturm_roots}; 3307={})",
         modes.len(),
         modes.first().map_or(0.0, |mode| mode.cyclic_hz),
-        modes.last().map_or(0.0, |mode| mode.cyclic_hz)
+        modes.last().map_or(0.0, |mode| mode.cyclic_hz),
+        largest_eigenvalue,
+        print.contains("POTENTIALLY")
+    );
+}
+
+/// Return the global Sturm count at the smallest printed shift that reaches the
+/// largest extracted eigenvalue. `SDCOMP` prints one count for each inverse
+/// power shift; the lines are deliberately not ordered by shift, so taking the
+/// last line would inspect a local/circular search interval rather than the
+/// requested band. A count at or above the largest emitted root covers every
+/// root below that root from the declared zero lower bound for this deck.
+fn sturm_root_count_through(print: &str, largest_eigenvalue: f64) -> Option<usize> {
+    if !largest_eigenvalue.is_finite() {
+        return None;
+    }
+    print
+        .lines()
+        .filter_map(|line| {
+            let fields: Vec<&str> = line.split_whitespace().collect();
+            if fields.len() < 4 || fields[1] != "ROOTS" || fields[2] != "BELOW" {
+                return None;
+            }
+            let count = fields[0].parse::<usize>().ok()?;
+            let shift = fields[3].parse::<f64>().ok()?;
+            (shift.is_finite() && shift >= largest_eigenvalue).then_some((shift, count))
+        })
+        .min_by(|left, right| left.0.total_cmp(&right.0))
+        .map(|(_, count)| count)
+}
+
+#[test]
+fn sturm_gate_rejects_a_parsed_list_with_an_omitted_lowest_root() {
+    let print = "\
+                          2 ROOTS BELOW   2.000000E+00\n\
+                          1 ROOTS BELOW   5.000000E-01\n\
+                                              R E A L   E I G E N V A L U E S\n\
+        1         1        1.000000E+00        1.000000E+00        1.591549E+01\n";
+    let parsed = read_eigenvalues(print);
+    assert_eq!(parsed.len(), 1, "fixture deliberately omits one lower root");
+    assert_eq!(
+        sturm_root_count_through(print, parsed[0].eigenvalue),
+        Some(2)
+    );
+    assert_ne!(
+        sturm_root_count_through(print, parsed[0].eigenvalue),
+        Some(parsed.len()),
+        "a global Sturm count above the parsed count must fail completeness"
     );
 }
 

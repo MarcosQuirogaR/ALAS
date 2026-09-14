@@ -49,7 +49,9 @@ pub fn figure_structures_stress(
     let gutter = 26.0;
     let margin_left = 60.0;
     let margin_right = 20.0;
-    let margin_top = 55.0;
+    // +10 px below the automatic figure title compared to the original 55.0,
+    // on top of that title's own existing ~28 px clearance.
+    let margin_top = 65.0;
     let margin_bottom = 55.0;
     let plot_height = 330.0;
     let n_f = n_spars.max(1) as f64;
@@ -113,7 +115,7 @@ pub fn figure_structures_stress(
         let frac = sizing.spar_fracs.get(i).copied().unwrap_or(f64::NAN);
         scene.add(SceneElement::Text {
             text: format!("Spar x/c={frac:.2}"),
-            pos: [rect.0 + rect.2 * 0.5, rect.1 - 8.0],
+            pos: [rect.0 + rect.2 * 0.5, rect.1 - 10.0],
             font_size: 11.0,
             color: Color::from_hex(pal.title),
             align: TextAlign::Center,
@@ -170,6 +172,7 @@ mod tests {
             },
             total_mass_kg: 410.0,
             sizing_load_case: "pull-up",
+            composite_declaration: None,
         };
         let spar_stress = SparStressResult {
             chord_fraction: 0.2,

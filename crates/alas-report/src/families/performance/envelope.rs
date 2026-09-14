@@ -402,6 +402,9 @@ mod tests {
             n_stall_pos: vec![0.0, 0.8, 2.5, 2.5, 2.5, 2.5, 2.5],
             n_stall_neg: vec![0.0, -0.3, -1.0, -1.0, -1.0, -1.0, -1.0],
             n_lim_pos: 2.5,
+            far25_positive_limit_load_factor_min: Some(2.5),
+            far25_positive_load_factor_status:
+                alas_perf::performance::Far25PositiveLoadFactorStatus::MeetsMinimum,
             n_lim_neg: -1.0,
             n_ult_pos: 3.75,
             n_ult_neg: -1.5,

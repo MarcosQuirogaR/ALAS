@@ -12,8 +12,8 @@ use super::sizing::SizingOutcome;
 use super::types::ConstraintFamily::Geometry;
 use super::types::ConstraintResidual;
 
-/// The span limit, wing-area cap, wing-loading floor, tail-volume window and
-/// passenger/cargo-capacity shortfall.
+/// The span limit, wing-area cap, wing-loading floor, transport body-attitude
+/// window, tail-volume window and passenger/cargo-capacity shortfall.
 pub(super) fn geometry_residuals(
     outcome: &SizingOutcome,
     config: &AlasConfig,
@@ -53,7 +53,12 @@ pub(super) fn geometry_residuals(
         policy,
     ));
 
-    let wing_loading_kg_m2 = outcome.sized.takeoff_mass_kg / plane.s_ref.max(1e-9);
+    // The requirement is a design wing loading, MTOW over area: the design
+    // gross mass the components were sized against. That is the closed
+    // takeoff mass of a coupled clean-sheet design and the declared MTOW of
+    // a fixed aircraft, which does not stop being the same wing when it is
+    // dispatched light on a short route.
+    let wing_loading_kg_m2 = outcome.sized.design_gross_mass_kg / plane.s_ref.max(1e-9);
     residuals.push(ConstraintResidual::scaled(
         "wing_loading",
         Geometry,
@@ -63,6 +68,26 @@ pub(super) fn geometry_residuals(
         req.min_wing_loading_kg_m2 - wing_loading_kg_m2,
         policy,
     ));
+
+    // The clean-sheet transport search must keep the aircraft body attitude
+    // in the configured cruise window.  This is a requirement on the
+    // three-dimensional trimmed aircraft, not a guessed local MSES alpha
+    // limit: the pipeline still maps this solved body angle through the
+    // section twist and downwash explicitly.  Registered aircraft retain
+    // their measured body attitude for parity/audit reporting; applying a
+    // generic 2--4 degree design target to them would rewrite the reference
+    // aircraft rather than test it.
+    if config.optimizer.design_space.mode == alas_config::DesignMode::CleanSheet
+        && req.aircraft_type == "passenger"
+        && weights.transport_planform_constraints_enabled
+    {
+        residuals.push(body_alpha_window_residual(
+            outcome.geometric_body_alpha_deg,
+            weights.geometric_body_alpha_min_deg,
+            weights.geometric_body_alpha_max_deg,
+            policy,
+        ));
+    }
 
     // A tail-volume window is a plausibility band, not a requirement: the
     // surveyed tools rank it as a preference (research note
@@ -93,8 +118,8 @@ pub(super) fn geometry_residuals(
         ));
     }
 
-    residuals.push(if req.aircraft_type == "cargo" {
-        ConstraintResidual::scaled(
+    if req.aircraft_type == "cargo" {
+        residuals.push(ConstraintResidual::scaled(
             "cargo_shortfall",
             Geometry,
             outcome.sized.carried_cargo_payload_kg,
@@ -102,9 +127,15 @@ pub(super) fn geometry_residuals(
             "kg",
             target_cargo_payload_kg - outcome.sized.carried_cargo_payload_kg,
             policy,
-        )
-    } else {
-        ConstraintResidual::scaled(
+        ));
+    } else if target_num_passengers > 0 {
+        // Every study -- registered aircraft or clean-sheet alike -- sizes
+        // its cabin from the class mix and fills the candidate floor; there
+        // is no copied integer passenger target to violate. This residual
+        // only appears when `DesignRequirements::min_passenger_capacity` is
+        // set: a one-sided floor check on the resolved capacity, not an
+        // equality constraint.
+        residuals.push(ConstraintResidual::scaled(
             "passenger_shortfall",
             Geometry,
             outcome.sized.carried_passengers as f64,
@@ -112,10 +143,50 @@ pub(super) fn geometry_residuals(
             "passengers",
             (target_num_passengers - outcome.sized.carried_passengers) as f64,
             policy,
-        )
-    });
+        ));
+    }
 
     residuals
+}
+
+/// A two-sided residual for the configured geometric body-attitude window.
+///
+/// The raw value is positive only outside the interval; inside, the margin
+/// to the nearer bound is reported as a negative value.  The residual uses a
+/// degree unit and the nearest violated bound so the optimizer receives a
+/// useful direction without treating the interval as a local-section solver
+/// validity claim.
+fn body_alpha_window_residual(
+    actual_deg: f64,
+    min_deg: f64,
+    max_deg: f64,
+    policy: ConstraintPolicy,
+) -> ConstraintResidual {
+    let (limit_deg, raw_residual) = if actual_deg < min_deg {
+        (min_deg, min_deg - actual_deg)
+    } else if actual_deg > max_deg {
+        (max_deg, actual_deg - max_deg)
+    } else {
+        let slack_to_min = actual_deg - min_deg;
+        let slack_to_max = max_deg - actual_deg;
+        if slack_to_min < slack_to_max {
+            (min_deg, -slack_to_min)
+        } else {
+            (max_deg, -slack_to_max)
+        }
+    };
+    // A degree interval crosses zero, so scaling by the bound's magnitude is
+    // well-defined for the configured positive transport window.  The
+    // generic constructor still protects malformed zero/negative bounds.
+    ConstraintResidual::scaled(
+        "geometric_body_alpha",
+        Geometry,
+        actual_deg,
+        limit_deg,
+        "deg",
+        raw_residual,
+        policy,
+    )
 }
 
 /// A two-sided window residual: violated below `min_coef` or above

@@ -730,7 +730,8 @@
         "num_passengers": 350,
         "passenger_mass_kg": 100.0,
         "target_static_margin": 0.1,
-        "ultimate_load_factor": 3.75
+        "ultimate_load_factor": 3.75,
+        "min_passenger_capacity": 0
       },
       "requirements_overrides": {}
     },
@@ -1468,7 +1469,8 @@
         "num_passengers": 350,
         "passenger_mass_kg": 95.0,
         "target_static_margin": 0.1,
-        "ultimate_load_factor": 3.75
+        "ultimate_load_factor": 3.75,
+        "min_passenger_capacity": 0
       },
       "requirements_overrides": {
         "aircraft_type": "cargo",
@@ -2207,7 +2209,8 @@
         "num_passengers": 350,
         "passenger_mass_kg": 100.0,
         "target_static_margin": 0.1,
-        "ultimate_load_factor": 3.75
+        "ultimate_load_factor": 3.75,
+        "min_passenger_capacity": 0
       },
       "requirements_overrides": {
         "dive_speed_m_s": 205.0

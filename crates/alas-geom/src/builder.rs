@@ -43,5 +43,7 @@
 //! widening the aircraft model's visibility for one helper (see either module's own
 //! `linspace` for the precedent).
 
+mod mesh;
+
 include!("builder_parts/part_01.rs");
 include!("builder_parts/part_02.rs");
