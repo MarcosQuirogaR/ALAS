@@ -58,9 +58,7 @@ fn native_point(objective: &mut DesignObjective, design: &[f64]) -> ConstrainedP
                     constraints: assessment
                         .residuals
                         .iter()
-                        .filter(|residual| {
-                            residual.policy == alas_config::ConstraintPolicy::Hard
-                        })
+                        .filter(|residual| residual.policy == alas_config::ConstraintPolicy::Hard)
                         .map(|residual| residual.signed_normalized())
                         .collect(),
                     valid: cost.is_finite(),
@@ -193,10 +191,7 @@ pub(super) fn run<E: ConstrainedSearch + ?Sized>(
         objective_tolerance: solver.tolerance.max(0.0),
         step_tolerance: 1.0e-4,
     };
-    let initial = initial_design
-        .copied()
-        .unwrap_or_default()
-        .to_array();
+    let initial = initial_design.copied().unwrap_or_default().to_array();
     let workers = solver.workers.max(1) as usize;
     let outcome = {
         let mut adapter = BatchAdapter { objective, workers };

@@ -19,9 +19,101 @@ use alas_atmo::Atmosphere;
 use alas_config::{presets, ActiveEngineModel, AlasConfig};
 use alas_geom::builder::AircraftBuilder;
 use alas_payload::{build_payload_layout, ItemMeta};
+use alas_perf::landing_gear::size_landing_gear_with_group_stations;
 use alas_pipeline::full_analysis::FullAnalysis;
 use alas_pipeline::{DesignPipeline, PipelineOptions, RunEnvironment};
 use serde_json::{json, Value};
+
+/// Return the independent landing-gear anchors registered for a preset.
+///
+/// These values are deliberately kept beside the model-derived output rather
+/// than fed into the sizing call.  A source wheelbase/track is a published
+/// geometry reference with its own definition; it does not supply the datum
+/// needed to move `x_nlg` or `x_mlg`.  The topology counts are likewise
+/// exported as evidence metadata so the parity harness can distinguish an
+/// aircraft reference from a preliminary ALAS layout.
+fn source_gear_reference(name: &str) -> Value {
+    match name {
+        "A220-300" => json!({
+            "status": "registered_independent_reference",
+            "source_cite": "airbus_a220_acp_2025",
+            "definition": "Airbus ACP nominal wheelbase from NLG axle to MLG axle; main-gear track",
+            "wheelbase_m": 15.23238,
+            "track_width_m": 6.731,
+            "station_frame": "nose_tip_drawing_reference",
+            "reference_fuselage_length_m": 38.68928,
+            "longitudinal_stations_m": {"nlg": 3.401568, "mlg": [18.633948, 18.633948]},
+            "station_source_definition": "Airbus A220 ACP DM BD500-A-J06-10-00AAA-030A-A Rev 2023-11-01, pp.150-156; dimensions originate at the geometric nose-tip drawing extension and are nominal (weight/CG can change wheelbase)",
+            "n_nlg_wheels": 2,
+            "n_mlg_struts": 2,
+            "mlg_wheels_per_strut": [2, 2],
+            "main_wheels_total": 4,
+            "absolute_station_status": "drawing stations present in source_frame; certified WBM/AFM datum or attachment hardpoints not asserted",
+        }),
+        "A320-200" => json!({
+            "status": "registered_independent_reference",
+            "source_cite": "easa_tcds_a064_i12",
+            "definition": "A320-family source wheelbase from NLG axle to MLG axle; main-gear track",
+            "wheelbase_m": 12.64,
+            "track_width_m": 7.59,
+            "station_frame": "nose_tip_drawing_reference",
+            "reference_fuselage_length_m": 37.57,
+            "longitudinal_stations_m": {"nlg": 5.07, "mlg": [17.71, 17.71]},
+            "station_source_definition": "Airbus AC 2-2-0 Figure 2-2-0-991-004-A01; dimensions originate at the geometric nose-tip drawing extension",
+            "n_nlg_wheels": 2,
+            "n_mlg_struts": 2,
+            "mlg_wheels_per_strut": [2, 2],
+            "main_wheels_total": 4,
+            "absolute_station_status": "drawing stations present in source_frame; certified WBM/AFM datum not asserted",
+        }),
+        "A340-300" => json!({
+            "status": "registered_independent_reference",
+            "source_cite": "airbus_ac_a340_2025",
+            "definition": "Airbus AC source wheelbase to the wing MLG bogie centre; wing-gear centreline track",
+            "wheelbase_m": 25.375,
+            "track_width_m": 10.684,
+            "centerline_wheelbase_m": 26.372,
+            "station_frame": "nose_tip_drawing_reference",
+            "reference_fuselage_length_m": 63.66,
+            "longitudinal_stations_m": {"nlg": 6.67, "mlg": [32.05, 32.05, 33.04]},
+            "station_source_definition": "Airbus AC 2-2-0 Figure 2-2-0-991-007-A01; AC 7-2-0 gives 25.375 m primary wheelbase and 26.372 m NLG-to-centreline wheelbase",
+            "n_nlg_wheels": 2,
+            "n_mlg_struts": 3,
+            "mlg_wheels_per_strut": [4, 4, 2],
+            "main_wheels_total": 10,
+            "absolute_station_status": "drawing stations present in source_frame; certified WBM/AFM datum not asserted",
+        }),
+        "A380-800" => json!({
+            "status": "registered_independent_reference",
+            "source_cite": "airbus_ac_a380_2025",
+            "definition": "Airbus AC source wheelbase to the wing-gear axle reference; wing-gear centreline track and bogie topology; body-gear wheelbase is retained separately",
+            "wheelbase_m": 28.61,
+            "body_wheelbase_m": 31.88,
+            "track_width_m": 14.34,
+            "station_frame": "nose_tip_drawing_reference",
+            "reference_fuselage_length_m": 72.73,
+            "longitudinal_stations_m": {"nlg": 4.97, "mlg": [33.58, 33.58, 36.85, 36.85]},
+            "station_source_definition": "Airbus AC 2-2-0 Figure 2-2-0-991-001-A01; 28.61 m is NLG-to-WLG and 31.88 m is NLG-to-BLG",
+            "n_nlg_wheels": 2,
+            "n_mlg_struts": 4,
+            "mlg_wheels_per_strut": [4, 4, 6, 6],
+            "main_wheels_total": 20,
+            "absolute_station_status": "drawing stations present in source_frame; certified WBM/AFM datum not asserted",
+        }),
+        _ => json!({
+            "status": "no_registered_independent_reference",
+            "source_cite": Value::Null,
+            "definition": "No source topology/position anchor is registered for this preset",
+            "wheelbase_m": Value::Null,
+            "track_width_m": Value::Null,
+            "n_nlg_wheels": Value::Null,
+            "n_mlg_struts": Value::Null,
+            "mlg_wheels_per_strut": Value::Null,
+            "main_wheels_total": Value::Null,
+            "absolute_station_status": "unavailable",
+        }),
+    }
+}
 
 fn main() {
     let out = PathBuf::from(
@@ -69,6 +161,66 @@ fn dump(name: &str) -> Result<Value, String> {
     let report = FullAnalysis::new(config.clone())
         .run(dv, false)
         .map_err(|e| e.to_string())?;
+
+    // Keep the validation export tied to the same gear sizing inputs used by
+    // the report/OpenVSP path. These are model-derived design coordinates,
+    // not claims about an operator's certified landing-gear stations.
+    let main_wing = report
+        .airplane
+        .wings
+        .first()
+        .ok_or_else(|| "model has no wing for gear sizing".to_owned())?;
+    let c_ref = report.airplane.c_ref.max(0.001);
+    let x_mac_le = main_wing.aerodynamic_center(0.25)[0] - 0.25 * c_ref;
+    let aero_aft_x = report.x_neutral_point - config.requirements.target_static_margin * c_ref;
+    let aero_fwd_x = aero_aft_x - config.requirements.cg_range_pct_mac / 100.0 * c_ref;
+    let main_fuselage = report
+        .airplane
+        .fuselages
+        .first()
+        .ok_or_else(|| "model has no fuselage for gear sizing".to_owned())?;
+    let fuselage_start_x = main_fuselage
+        .xsecs
+        .first()
+        .map_or(0.0, |section| section.xyz_c[0]);
+    let fuselage_end_x = main_fuselage
+        .xsecs
+        .last()
+        .map_or(fuselage_start_x, |section| section.xyz_c[0]);
+    let fallback_x_nlg =
+        fuselage_start_x + (fuselage_end_x - fuselage_start_x) * config.mass_model.nlg_x_fraction;
+    let fallback_x_mlg = x_mac_le + config.mass_model.mlg_x_fraction_mac * c_ref;
+    let gear_stations = config.landing_gear.resolved_station_positions(
+        fallback_x_nlg,
+        fallback_x_mlg,
+        fuselage_start_x,
+        fuselage_end_x - fuselage_start_x,
+    );
+    let gear_mass_kg: f64 = report.component_masses.values().copied().sum();
+    let gear_layout = size_landing_gear_with_group_stations(
+        gear_mass_kg,
+        gear_stations.x_nlg_m,
+        gear_stations.x_mlg_m,
+        aero_fwd_x,
+        aero_aft_x,
+        config.geometry.fuselage.diameter_m,
+        config.geometry.fuselage.diameter_m * 1.1,
+        &gear_stations.main_gear_x_m,
+        &config.landing_gear,
+    );
+
+    let centerline_wheelbase_m = (gear_layout.main_gear_x_m.len() == 3)
+        .then(|| gear_layout.main_gear_x_m[2] - gear_layout.x_nlg);
+    let body_wheelbase_m = (gear_layout.main_gear_x_m.len() >= 4).then(|| {
+        let last = gear_layout.main_gear_x_m.len();
+        (gear_layout.main_gear_x_m[last - 2] + gear_layout.main_gear_x_m[last - 1]) / 2.0
+            - gear_layout.x_nlg
+    });
+
+    // Keep the source topology order visible in the model export.  This is
+    // intentionally derived from the actual generated wheel objects and is
+    // not replaced with the source list below.
+    let model_mlg_wheels_per_strut = gear_layout.mlg_wheels_per_strut.clone();
 
     // ---- geometry -------------------------------------------------------
     let pf = config
@@ -132,6 +284,10 @@ fn dump(name: &str) -> Result<Value, String> {
         "engine_spanwise_position_m": config.geometry.engine.spanwise_positions_m.first().copied(),
         "nacelle_length_m": config.geometry.engine.nacelle_profile.last().map(|p| p.0),
         "nacelle_max_diameter_m": 2.0 * config.geometry.engine.radius_scale_m,
+        "wheelbase_m": gear_layout.wheelbase_m,
+        "wheel_track_m": gear_layout.track_width_m,
+        "centerline_wheelbase_m": centerline_wheelbase_m,
+        "body_wheelbase_m": body_wheelbase_m,
     });
 
     // ---- mass -----------------------------------------------------------
@@ -149,15 +305,116 @@ fn dump(name: &str) -> Result<Value, String> {
     .iter()
     .map(|k| masses.get(*k).copied().unwrap_or(0.0))
     .sum();
+    let component_centroids_m: BTreeMap<String, [f64; 3]> = report
+        .mass_coordinates
+        .iter()
+        .map(|(name, coordinate)| (name.clone(), *coordinate))
+        .collect();
+    let component_first_moments_kg_m: BTreeMap<String, [f64; 3]> = masses
+        .iter()
+        .filter_map(|(name, value)| {
+            report.mass_coordinates.get(name).map(|coordinate| {
+                let physical_mass = (*value).max(0.0);
+                (
+                    name.clone(),
+                    [
+                        physical_mass * coordinate[0],
+                        physical_mass * coordinate[1],
+                        physical_mass * coordinate[2],
+                    ],
+                )
+            })
+        })
+        .collect();
     let mass = json!({
         "mtow_kg": config.requirements.mtow_kg,
         "oew_kg": oew,
         "component_masses_kg": masses.iter().map(|(k, v)| (k.clone(), *v)).collect::<BTreeMap<_, _>>(),
+        "component_centroids_m": component_centroids_m,
+        "component_first_moments_kg_m": component_first_moments_kg_m,
+        "first_moment_frame": "aircraft nose-relative station; x forward, y right, z up; model estimates",
         "wing_loading_kg_m2": config.requirements.mtow_kg / s_ref,
+    });
+
+    let cg = json!({
+        "coordinate_frame": "aircraft nose-relative station, m; x forward, y right, z up",
+        "model_lemac_from_nose_m": x_lemac,
+        "model_mac_m": mac,
+        "physical_cg_x_m": report.physical_cg[0],
+        "physical_cg_y_m": report.physical_cg[1],
+        "physical_cg_z_m": report.physical_cg[2],
+        "model_loaded_percent_mac": 100.0 * (report.physical_cg[0] - x_lemac) / mac,
+        "source_planning_frame": null,
+        "source_planning_frame_status": "unavailable unless a source LEMAC and MAC frame are registered",
+    });
+
+    let gear = json!({
+        "coordinate_frame": "aircraft nose-relative station, m; x forward, y right, z up",
+        "n_nlg_wheels": gear_layout.n_nlg_wheels,
+        "n_mlg_struts": gear_layout.n_mlg_struts,
+        "wheels_per_mlg_strut": gear_layout.wheels_per_mlg_strut,
+        "mlg_wheels_per_strut": model_mlg_wheels_per_strut,
+        "main_wheels_total": gear_layout
+            .wheels
+            .iter()
+            .filter(|wheel| wheel.group == "MLG")
+            .count(),
+        "x_nlg_m": gear_layout.x_nlg,
+        "x_mlg_m": gear_layout.x_mlg,
+        "main_gear_x_m": gear_layout.main_gear_x_m,
+        "main_gear_station_frame": config
+            .landing_gear
+            .reference_station_frame
+            .as_deref()
+            .unwrap_or("aircraft_nose_relative_model"),
+        "stations_source_scaled": gear_stations.source_scaled,
+        "wheelbase_m": gear_layout.wheelbase_m,
+        "centerline_wheelbase_m": centerline_wheelbase_m,
+        "body_wheelbase_m": body_wheelbase_m,
+        "track_width_m": gear_layout.track_width_m,
+        "model_reference_geometry": {
+            "reference_wheelbase_m": gear_layout.reference_wheelbase_m,
+            "reference_body_wheelbase_m": gear_layout.reference_body_wheelbase_m,
+            "reference_track_width_m": gear_layout.reference_track_m,
+            "status": "normalized source station anchors scale the active geometry; source scalar wheelbase/track remain comparison metadata and loads still use the actual model layout",
+        },
+        "nlg_tire_class": gear_layout.nlg_tire.code,
+        "mlg_tire_class": gear_layout.mlg_tire.code,
+        "strut_material": gear_layout.strut_material,
+        "design_nlg_reaction_kg": gear_layout.r_nlg_design_kg,
+        "design_mlg_reaction_kg": gear_layout.r_mlg_total_design_kg,
+        "turnover_angle_deg": gear_layout.turnover_angle_deg,
+        "turnover_ok": gear_layout.turnover_ok,
+        "positions": gear_layout
+            .wheels
+            .iter()
+            .map(|wheel| {
+                json!({
+                    "group": wheel.group,
+                    "strut": wheel.strut_label,
+                    "x_m": wheel.x,
+                    "y_m": wheel.y,
+                    "diameter_m": wheel.diameter_m,
+                    "width_m": wheel.width_m,
+                })
+            })
+            .collect::<Vec<_>>(),
+        "source_status": "model-sized preliminary layout; normalized Airbus drawing anchors are present for A220/A320/A340/A380, while sizing loads remain preliminary",
+        "source_reference": source_gear_reference(name),
     });
 
     // ---- cabin / payload -------------------------------------------------
     let layout = build_payload_layout(&plane, &config, oew, 0.0).map_err(|e| format!("{e:?}"))?;
+    let seat_capacity = match &layout.summary {
+        alas_payload::LayoutSummary::Passenger(summary) => json!({
+            "geometry_exit_limit": summary.geometric_capacity,
+            "effective_limit": summary.max_certifiable_capacity,
+            "source_certified_cap": summary.source_capacity_cap,
+            "source_exit_layout": summary.source_exit_layout,
+            "binding": summary.capacity_binding,
+        }),
+        alas_payload::LayoutSummary::Cargo(_) => Value::Null,
+    };
     let mut seats = 0i64;
     let mut containers: Vec<(f64, f64, &str, f64)> = Vec::new();
     let mut bulk_mass = 0.0;
@@ -207,6 +464,7 @@ fn dump(name: &str) -> Result<Value, String> {
     let cabin_payload = json!({
         "seats_modelled": seats,
         "seats_requested": config.requirements.num_passengers,
+        "seat_capacity": seat_capacity,
         "container_positions_total": containers.len(),
         "available_uld_positions": capacity.uld_positions,
         "available_bulk_positions": capacity.bulk_positions,
@@ -272,6 +530,12 @@ fn dump(name: &str) -> Result<Value, String> {
         "cruise_altitude_m": config.requirements.cruise_altitude_m,
         "cl_cruise": report.design_point.cl,
         "cd_cruise": report.design_point.cd,
+        "cruise_aoa_deg": report.design_point.alpha_deg,
+        "trimmed_cruise_aoa_deg": report.trimmed_design_point.as_ref().map(|point| point.alpha_deg),
+        "trimmed_geometric_body_aoa_deg": report
+            .trimmed_design_point
+            .as_ref()
+            .map(|point| point.geometric_body_alpha_deg),
         "l_over_d_cruise": report.design_point.l_over_d,
         "l_over_d_max_in_sweep": best_ld,
         "cd0_cruise": report.polar_fit.cd0,
@@ -294,7 +558,38 @@ fn dump(name: &str) -> Result<Value, String> {
     // ---- payload / range -------------------------------------------------
     // Mirrors `alas_report::families::performance::payload_range_data`, kept
     // local so this instrument does not depend on the report crate compiling.
-    let pr = payload_range(&config, &report, oew, s_ref);
+    let mut pr = payload_range(&config, &report, oew, s_ref);
+    if let Some(payload_range) = pr.as_mut().and_then(Value::as_object_mut) {
+        let capacity_kg = payload_range
+            .get("fuel_capacity_kg")
+            .and_then(Value::as_f64);
+        let density_kg_l = preset
+            .reference
+            .fuel_density_kg_l
+            .or_else(|| Some(config.mass_model.fuel_density_kg_m3 / 1000.0));
+        let capacity_l = preset.reference.usable_fuel_volume_l.or_else(|| {
+            capacity_kg
+                .zip(density_kg_l)
+                .filter(|(_, density)| density.is_finite() && *density > 0.0)
+                .map(|(mass, density)| mass / density)
+        });
+        payload_range.insert(
+            "fuel_capacity_l".to_owned(),
+            capacity_l.map_or(Value::Null, |value| json!(value)),
+        );
+        payload_range.insert(
+            "fuel_capacity_density_kg_l".to_owned(),
+            density_kg_l.map_or(Value::Null, |value| json!(value)),
+        );
+        payload_range.insert(
+            "fuel_capacity_l_basis".to_owned(),
+            json!(if preset.reference.usable_fuel_volume_l.is_some() {
+                "registered preset reference volume"
+            } else {
+                "capacity mass divided by configured density"
+            }),
+        );
+    }
 
     // ---- propulsion ------------------------------------------------------
     let propulsion = match config.geometry.engine.active_model() {
@@ -423,6 +718,8 @@ fn dump(name: &str) -> Result<Value, String> {
         },
         "geometry": geometry,
         "mass": mass,
+        "cg": cg,
+        "gear": gear,
         "cabin_payload": cabin_payload,
         "aerodynamics": aerodynamics,
         "payload_range": pr,

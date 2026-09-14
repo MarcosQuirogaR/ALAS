@@ -88,10 +88,29 @@ pub fn validate(config: &AlasConfig) -> Vec<ValidationIssue> {
     let mut issues = cruise_point_inside_the_flight_envelope(config);
     issues.extend(atmosphere_domain_is_physical(config));
     issues.extend(fuel_properties_are_physical(config));
+    issues.extend(landing_gear_inputs_are_physical(config));
     issues.extend(empennage_tapers_toward_its_tips(config));
     issues.extend(mses_timeouts_are_positive_and_finite(config));
     issues.extend(optimizer_tokens_are_supported(config));
+    issues.extend(vlm_mesh_is_solvable(config));
     issues
+}
+
+/// Keep source-backed landing-gear dimensions and heterogeneous bogie lists
+/// valid before any sizing or preview code consumes them. A reference
+/// wheelbase is deliberately validated as metadata only: it cannot supply a
+/// missing datum for the active model's absolute gear stations.
+fn landing_gear_inputs_are_physical(config: &AlasConfig) -> Vec<ValidationIssue> {
+    config
+        .landing_gear
+        .validation_errors()
+        .into_iter()
+        .map(|(field_path, message)| ValidationIssue {
+            field_path,
+            message,
+            severity: Severity::Error,
+        })
+        .collect()
 }
 
 /// Fuel volume can only become a meaningful mass capacity when its conversion
@@ -271,6 +290,125 @@ fn empennage_tapers_toward_its_tips(config: &AlasConfig) -> Vec<ValidationIssue>
     issues
 }
 
+/// The largest spanwise subdivision multiplier that still produces a usable
+/// lattice. See [`vlm_mesh_is_solvable`] for the measurement behind it.
+const MAX_SPANWISE_RESOLUTION: i64 = 2;
+
+/// The fewest spanwise panels a surface can carry and still be a lifting
+/// surface rather than a placeholder.
+///
+/// `geometry.wing.n_subdivisions` and its empennage twin are absolute panel
+/// counts across a whole surface. Four is already far below anything usable
+/// -- the shipped wing uses 24 -- so this rejects nonsense rather than
+/// arbitrating fidelity, which is what the convergence evidence in
+/// `alas_config::analysis` is for.
+const MIN_SPANWISE_PANELS: i64 = 4;
+
+/// Keep the vortex-lattice mesh inside the range where its own induced drag
+/// converges.
+///
+/// `spanwise_resolution` is a subdivision *multiplier*, and the geometry
+/// builder has already subdivided every surface (`geometry.wing`/
+/// `geometry.empennage.n_subdivisions`). Multiplying that again re-applies a
+/// cosine spacing inside each existing strip, which leaves a two- to
+/// three-fold width discontinuity at every original station and panels thin
+/// enough that the near-field induced-drag integration stops converging.
+///
+/// Measured on the registered presets (`.agent/reports/
+/// 2026-09-11-vlm-resolution-sensitivity.html`): at a multiplier of 3 the
+/// swept presets over-predict the induced-drag factor by 4-50 %, at 6 the
+/// A320 trim solve diverges outright, and at 10 -- AeroSandbox's own default,
+/// and so a value a user may reasonably type -- the influence matrix is
+/// effectively singular while the solve still reports success, returning
+/// L/D near 1 instead of 18. That last case is the reason this is an error
+/// and not a warning: nothing downstream can detect it.
+///
+/// A multiplier of 2 is exactly a uniform halving (`cosspace` with three
+/// points is `linspace`), so it introduces no discontinuity and stays
+/// allowed. Refining the span further is a matter for `n_subdivisions`,
+/// which distributes stations uniformly across the whole surface.
+fn vlm_mesh_is_solvable(config: &AlasConfig) -> Vec<ValidationIssue> {
+    let analysis = &config.analysis;
+    let mut issues = Vec::new();
+
+    for (field, value) in [
+        ("spanwise_resolution", analysis.spanwise_resolution),
+        (
+            "fine_spanwise_resolution",
+            analysis.fine_spanwise_resolution,
+        ),
+    ] {
+        if value > MAX_SPANWISE_RESOLUTION {
+            issues.push(ValidationIssue {
+                field_path: format!("analysis.{field}"),
+                message: format!(
+                    "Spanwise panel resolution ({value}) must not exceed \
+                     {MAX_SPANWISE_RESOLUTION}. It multiplies a surface the \
+                     geometry builder has already subdivided, and above {} \
+                     the vortex lattice stops converging: the induced drag \
+                     grows without bound and the solver can return a \
+                     converged-looking answer that is not physical. Refine \
+                     the span with geometry.wing.n_subdivisions instead.",
+                    MAX_SPANWISE_RESOLUTION
+                ),
+                severity: Severity::Error,
+            });
+        }
+    }
+
+    for (field, value) in [
+        ("spanwise_resolution", analysis.spanwise_resolution),
+        ("chordwise_resolution", analysis.chordwise_resolution),
+        (
+            "fine_spanwise_resolution",
+            analysis.fine_spanwise_resolution,
+        ),
+        (
+            "fine_chordwise_resolution",
+            analysis.fine_chordwise_resolution,
+        ),
+    ] {
+        if value < 1 {
+            issues.push(ValidationIssue {
+                field_path: format!("analysis.{field}"),
+                message: format!(
+                    "Panel resolution ({value}) must be at least 1; a mesh \
+                     cannot have fewer than one panel per strip."
+                ),
+                severity: Severity::Error,
+            });
+        }
+    }
+
+    // The geometry panel counts are absolute counts across a surface, and
+    // `Wing::mesh_spanwise` answers a count too small to honour with one
+    // panel per section rather than by dropping a station. That is right for
+    // library code and the wrong thing to discover from a result, so an
+    // unusable count is reported here instead.
+    for (field, value) in [
+        (
+            "geometry.wing.n_subdivisions",
+            config.geometry.wing.n_subdivisions,
+        ),
+        (
+            "geometry.empennage.n_subdivisions",
+            config.geometry.empennage.n_subdivisions,
+        ),
+    ] {
+        if value < MIN_SPANWISE_PANELS {
+            issues.push(ValidationIssue {
+                field_path: field.to_owned(),
+                message: format!(
+                    "Spanwise panel count ({value}) must be at least                      {MIN_SPANWISE_PANELS}. This is an absolute number of                      panels across the surface, not a count per section;                      below it the lattice cannot resolve a lifting surface."
+                ),
+                severity: Severity::Error,
+            });
+        }
+    }
+
+    issues
+}
+
 /// A whole number with thousands separators, as Python's `,.0f` renders it.
 ///
 /// An altitude in metres is five digits, and five unbroken digits in the
@@ -318,6 +456,63 @@ mod tests {
             };
             assert_eq!(validate(&config), Vec::new(), "{}", preset.name);
         }
+    }
+
+    #[test]
+    fn a_spanwise_resolution_past_the_convergent_range_blocks_the_run() {
+        // 10 is AeroSandbox's own constructor default, so it is the value a
+        // user is most likely to reach for, and it is the one that returns a
+        // converged-looking non-physical solution rather than an error.
+        for field in ["spanwise_resolution", "fine_spanwise_resolution"] {
+            let mut config = AlasConfig::default();
+            if field == "spanwise_resolution" {
+                config.analysis.spanwise_resolution = 10;
+                config.analysis.fine_spanwise_resolution = 10;
+            } else {
+                config.analysis.fine_spanwise_resolution = 10;
+            }
+            let issues = validate(&config);
+            assert!(
+                issues.iter().any(|issue| {
+                    issue.field_path == format!("analysis.{field}")
+                        && issue.severity == Severity::Error
+                }),
+                "{field}: {issues:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_spanwise_resolution_of_two_is_still_allowed() {
+        // At a multiplier of two the cosine subdivision degenerates to a
+        // uniform halving, so it introduces none of the width discontinuity
+        // the rule exists to catch.
+        let mut config = AlasConfig::default();
+        config.analysis.spanwise_resolution = 2;
+        config.analysis.fine_spanwise_resolution = 2;
+        assert_eq!(validate(&config), Vec::new());
+    }
+
+    #[test]
+    fn a_resolution_below_one_is_not_a_mesh() {
+        let mut config = AlasConfig::default();
+        config.analysis.chordwise_resolution = 0;
+        let issues = validate(&config);
+        assert!(issues.iter().any(|issue| {
+            issue.field_path == "analysis.chordwise_resolution" && issue.severity == Severity::Error
+        }));
+    }
+
+    #[test]
+    fn malformed_heterogeneous_bogies_are_blocking_errors() {
+        let mut config = AlasConfig::default();
+        config.landing_gear.n_mlg_struts = 3;
+        config.landing_gear.mlg_strut_bogie_wheels = Some(vec![4, 4]);
+        let issues = validate(&config);
+        assert!(issues.iter().any(|issue| {
+            issue.field_path == "landing_gear.mlg_strut_bogie_wheels"
+                && issue.severity == Severity::Error
+        }));
     }
 
     #[test]

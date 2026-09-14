@@ -35,9 +35,10 @@ const METHOD_SET: i64 = 1;
 const NASTRAN95_MODAL_SEARCH_UPPER_HZ: f64 = 100.0;
 
 /// The inverse solver's root estimate must exceed the requested modal count.
-/// A two-to-one estimate gives it enough shift regions to locate the low
-/// roots, without applying the impractical full-band count to the old solver.
-const NASTRAN95_MODAL_ROOT_ESTIMATE_FACTOR: i64 = 2;
+/// A four-to-one estimate provides enough shift regions for the old solver to
+/// account for the low roots across the product wingbox's bounded 100 Hz band,
+/// while remaining much cheaper than a full-band extraction request.
+const NASTRAN95_MODAL_ROOT_ESTIMATE_FACTOR: i64 = 4;
 
 /// The inverse solver must extract a sufficiently broad low-frequency set even
 /// when a caller only displays a handful of modes.  A sixteen-mode floor is the

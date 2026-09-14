@@ -22,7 +22,7 @@
 //! `mses_analysis.py`, so they are baked in here at native aerodynamic model's own defaults:
 //! the `mset` inlet/outlet grid index [`MSET_IO`] and leading-edge clustering
 //! [`MSET_X`], and the `mses` critical Mach [`MSES_MCRIT`] and artificial-
-//! dissipation constant [`MSES_MUCON`]. `mset_alpha` (the angle the initial
+//! dissipation constant. `mset_alpha` (the angle the initial
 //! mesh is generated at) is passed per call, as native aerodynamic model passes it.
 
 /// MSET inlet/outlet nodes, native aerodynamic model's `mset_io` default.
@@ -35,8 +35,15 @@ const MSET_INLET_OUTLET_POINTS: i64 = 37;
 const MSET_X: f64 = 0.850;
 /// The `mses` critical Mach number (`mses_mcrit`), native aerodynamic model's default.
 const MSES_MCRIT: f64 = 0.99;
-/// The `mses` artificial-dissipation constant (`mses_mucon`), the default.
-const MSES_MUCON: f64 = -1.0;
+/// The legacy deck's artificial-dissipation constant.
+///
+/// The frozen Python parity fixture was generated with a negative value,
+/// which disables MSES second-order dissipation. Product runs pass the
+/// configured value through [`mses_case_with_mucon`] and default to `1.0`,
+/// the normal setting in the MSES user guide. Only the parity fixture reads
+/// this form, so it is compiled with the tests.
+#[cfg(test)]
+const LEGACY_MSES_MUCON: f64 = -1.0;
 
 /// The keystrokes that dump the polar summary to `mplot`'s stdout (menu path
 /// `1` -> `12` -> `0` -> `0`), which [`super::parse`] then reads.
@@ -73,6 +80,23 @@ pub fn mset_keystrokes(mset_n: i64, mset_e: f64, mset_alpha: f64) -> String {
     )
 }
 
+/// Build the named `blade.<case>` geometry file consumed by MSET.
+///
+/// A Selig `.dat` file contains only a name and coordinates, while MSET's
+/// named blade format has a second line for the far-field boundaries. The
+/// distinction matters for arbitrary optimized sections: passing a Selig file
+/// as the case name makes MSET look for `blade.<case>` and can leave the solver
+/// without a valid mesh. Keep the boundary values explicit and stable, as in
+/// the reference MSES wrapper.
+pub fn mset_blade(airfoil_name: &str, coordinates: &[(f64, f64)]) -> String {
+    let name = airfoil_name.chars().take(32).collect::<String>();
+    let mut text = format!("{name:<32}\n  -2.0    3.0    -2.5    3.5\n");
+    for &(x, y) in coordinates {
+        text.push_str(&format!("{x:14.6} {y:14.6}\n"));
+    }
+    text
+}
+
 /// The `mses` solve keystrokes: run up to `max_iter` Newton iterations, then
 /// exit the menu.
 pub fn mses_keystrokes(max_iter: i64) -> String {
@@ -91,6 +115,11 @@ pub fn mplot_dump_keystrokes(option: i64, filename: &str) -> String {
 /// verbatim; only the five leading numbers vary. `CLIFin` is always `0.0`
 /// (this program solves at prescribed alpha, never prescribed lift), matching
 /// the `ISMOM 3` / `IFFBC 2` momentum and far-field choices on the line below.
+///
+/// The frozen fixture's form, with the legacy dissipation setting; product
+/// decks come from [`mses_case_with_mucon`], so this is compiled with the
+/// parity tests only.
+#[cfg(test)]
 pub fn mses_case(
     mach: f64,
     alpha: f64,
@@ -98,6 +127,33 @@ pub fn mses_case(
     n_crit: f64,
     xtr_lower: f64,
     xtr_upper: f64,
+) -> String {
+    mses_case_with_mucon(
+        mach,
+        alpha,
+        reynolds,
+        n_crit,
+        xtr_lower,
+        xtr_upper,
+        LEGACY_MSES_MUCON,
+    )
+}
+
+/// Build an operating-point deck with an explicit artificial-dissipation
+/// coefficient.
+///
+/// `MUCON=1.0` is the normal MSES setting. Negative values are accepted for
+/// compatibility with legacy decks because MSES defines them as disabling
+/// second-order dissipation; callers should use that mode only when the
+/// provenance of the legacy run requires it.
+pub fn mses_case_with_mucon(
+    mach: f64,
+    alpha: f64,
+    reynolds: f64,
+    n_crit: f64,
+    xtr_lower: f64,
+    xtr_upper: f64,
+    mucon: f64,
 ) -> String {
     format!(
         "3  4  5  7\n\
@@ -116,7 +172,7 @@ pub fn mses_case(
         xtr_l = py_float(xtr_lower),
         xtr_u = py_float(xtr_upper),
         mcrit = py_float(MSES_MCRIT),
-        mucon = py_float(MSES_MUCON),
+        mucon = py_float(mucon),
     )
 }
 
@@ -152,9 +208,28 @@ mod tests {
     }
 
     #[test]
+    fn product_deck_can_use_normal_dissipation_without_changing_legacy_replay() {
+        let normal = mses_case_with_mucon(0.3, 3.0, 5.0e6, 9.0, 1.0, 1.0, 1.0);
+        assert!(normal.contains("0.99  1.0                      | MCRIT  MUCON"));
+        assert!(mses_case(0.3, 3.0, 5.0e6, 9.0, 1.0, 1.0)
+            .contains("0.99  -1.0                      | MCRIT  MUCON"));
+    }
+
+    #[test]
     fn mset_keystrokes_carry_the_repr_formatted_grid_settings() {
         let keys = mset_keystrokes(141, 0.4, 1.0);
         assert!(keys.starts_with("15\ncase\n7\nn 141\ne 0.4\ni 37\no 37\nx 0.85\n\n1\n1.0\n2\n"));
         assert!(keys.ends_with("\n3\n4\n0\n"));
+    }
+
+    #[test]
+    fn mset_blade_has_named_farfield_boundaries_before_coordinates() {
+        let blade = mset_blade("optimized", &[(1.0, 0.0), (0.0, 0.1)]);
+        let mut lines = blade.lines();
+        assert_eq!(lines.next(), Some(format!("{:<32}", "optimized").as_str()));
+        assert_eq!(lines.next(), Some("  -2.0    3.0    -2.5    3.5"));
+        assert_eq!(lines.next(), Some("      1.000000       0.000000"));
+        assert_eq!(lines.next(), Some("      0.000000       0.100000"));
+        assert_eq!(lines.next(), None);
     }
 }

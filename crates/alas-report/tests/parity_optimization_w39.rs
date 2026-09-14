@@ -2,7 +2,8 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 //! W3.9 optimization-history parity: the Rust scene preserves the reference
-//! L/D series, span color encoding, running-best trace, and colorbar contract.
+//! panel shape, objective series, span color encoding, running-best trace, and
+//! colorbar contract.
 
 // Invalid checked-in JSON is itself the assertion this fixture-backed test
 // needs to report, so decoding is intentionally fail-fast.
@@ -33,6 +34,11 @@ fn optimization_history_matches_the_reference_panel_and_series_contract() {
     assert_eq!(reference["available"], true);
     assert_eq!(reference["panel_count"], 2);
     assert_eq!(reference["axes"][0]["series"][0], "best so far");
+    // The checked-in W3.9 artifact records the historical L/D axis. The
+    // producer now exposes the generic objective quantity, so keep the
+    // historical value as fixture evidence while checking the current scene
+    // contract below.
+    assert_eq!(reference["axes"][0]["ylabel"], "L/D");
     assert_eq!(reference["axes"][1]["ylabel"], "span [m]");
 
     let scene = figure_optimization_history(&sample_history(), Some("light"));
@@ -50,7 +56,8 @@ fn optimization_history_matches_the_reference_panel_and_series_contract() {
         })
         .collect();
     assert!(labels.contains(&"valid evaluation #"));
-    assert!(labels.contains(&"L/D"));
+    assert!(labels.contains(&"objective"));
+    assert!(!labels.contains(&"L/D"));
     assert!(labels.contains(&"Span [m]"));
     assert!(labels.contains(&"Evaluation"));
     assert!(labels.contains(&"Best so far"));

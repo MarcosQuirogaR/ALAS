@@ -97,10 +97,15 @@ an earlier one for the same claim.
    the default 350-passenger brief seats only 349 in the default shell at the
    default design vector, and that shortfall is pinned by its own test as a
    reported finding that the optimizer's own validity flag does not see.
-8. **Route-globe fullscreen rendering is slow** (~8.4 FPS / 101.8 ms per
-   frame) after a correctness fix removed a cached-raster shortcut. A real
-   interactive-performance regression, not yet addressed.
-   (`.agent/reports/2026-08-31-route-globe-performance.html`.)
+8. **Route-globe fullscreen rendering** was slow (~8.4 FPS / 101.8 ms per
+   frame) after a correctness fix removed a cached-raster shortcut
+   (`.agent/reports/2026-08-31-route-globe-performance.html`). Resolved
+   2026-09-11: the cost was the SVG round-trip of the vector overlay (about
+   70 ms of the frame), not the sphere. Orbit views now draw the vector
+   elements as egui shapes (`SceneView::vector_overlay`) and rasterize only
+   the textured globe, whose rows run in parallel; a camera frame at 1.5x
+   density costs about 3 ms (2.7 ms texture, 0.3 ms shapes). Static cards
+   and exports keep the SVG raster path unchanged.
 
 ## Audit remediation, 2026-09-05
 
@@ -319,10 +324,16 @@ sizing loop and gradient-based driver").
   DBMEM/SYSTEM(58)/NE tuning that landed 2026-08-31. That ratio was
   measured against a NASTRAN-95 executable compiled at global `-O0` (the
   workaround for a miscompiled `mis/ifp1c.f` at `-O3`), so it compares an
-  unoptimised build with a production solver. An opt-in selective
-  optimization (`-O3` except `ifp1c.f`) exists in the sibling CMake project
-  but has not been rebuilt or re-timed on this host; see
-  `docs/NASTRAN95-BUNDLE.md`.
+  unoptimised build with a production solver. 2026-09-11: the selective
+  `-O3` option was built and fails the production SOL 101 deck (fatal 321);
+  several unrelated legacy routines miscompile. A kernel-whitelist build
+  (`-O2` with loop and aliasing guards on the decomposition, substitution,
+  multiply, transpose and eigensolver families only, everything else `-O0`)
+  passes both production decks with F06 output identical to the `-O0`
+  baseline apart from time stamps: SOL 101 13.6 s against 23.6 s, SOL 103
+  270 s against 440 s on this host. The bundle still ships the `-O0`
+  executable; see `docs/NASTRAN95-BUNDLE.md` for the build options and the
+  remaining adoption requirements.
 - **FLOWUnsteady** has no configured executable in any audited environment;
   every request returns `RequestRejected`.
 - **VSPAERO / AVL**: two real input-contract bugs were found and fixed

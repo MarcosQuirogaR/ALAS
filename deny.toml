@@ -11,6 +11,7 @@ yanked = "deny"
 ignore = [
   { id = "RUSTSEC-2026-0206", reason = "rustybuzz is transitive through the pinned resvg text renderer; tracked in docs/dependency-policy.md" },
   { id = "RUSTSEC-2026-0192", reason = "ttf-parser is transitive through egui/resvg; tracked in docs/dependency-policy.md" },
+  { id = "RUSTSEC-2024-0436", reason = "paste is an archived proc-macro used at compile time only, transitive through faer/gemm; tracked in docs/dependency-policy.md" },
 ]
 unused-ignored-advisory = "deny"
 
@@ -20,6 +21,9 @@ allow = [
   "AGPL-3.0-or-later", "Apache-2.0", "Apache-2.0 WITH LLVM-exception",
   "MIT", "BSD-2-Clause", "BSD-3-Clause", "BSL-1.0", "ISC", "Zlib",
   "MPL-2.0", "Unicode-3.0", "OFL-1.1", "LicenseRef-UFL-1.0",
+  # Public-domain dedication; reached through naga (wgpu's shader compiler)
+  # once the desktop shell moved to the wgpu painter. See docs/dependency-policy.md.
+  "CC0-1.0",
 ]
 
 [bans]

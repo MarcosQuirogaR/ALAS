@@ -29,14 +29,14 @@ pub fn figure_structures_loads(
     theme: Option<&str>,
 ) -> Scene {
     if let Some(message) = structures_unavailable_message(result) {
-        return status_message_scene("Structural Analysis -- Loads", &message, theme);
+        return status_message_scene("Structural Analysis: Loads", &message, theme);
     }
     let Some(result) = result else {
-        return status_message_scene("Structural Analysis -- Loads", "no result", theme);
+        return status_message_scene("Structural Analysis: Loads", "no result", theme);
     };
     let (Some(sizing), Some(analysis)) = (result.sizing.as_ref(), result.analysis.as_ref()) else {
         return status_message_scene(
-            "Structural Analysis -- Loads",
+            "Structural Analysis: Loads",
             "Structural analysis result is missing sizing or analytical data.",
             theme,
         );
@@ -47,7 +47,7 @@ pub fn figure_structures_loads(
         .find(|lc| lc.name == sizing.sizing_load_case)
     else {
         return status_message_scene(
-            "Structural Analysis -- Loads",
+            "Structural Analysis: Loads",
             "Sizing load case not found among the analytical load cases.",
             theme,
         );
@@ -55,7 +55,7 @@ pub fn figure_structures_loads(
 
     let pal = get_palette(theme);
     let mut scene = Scene::new(1100.0, 600.0, Some(Color::from_hex(pal.bg)));
-    scene.title = Some("Structural Analysis -- Loads".to_owned());
+    scene.title = Some("Structural Analysis: Loads".to_owned());
 
     draw_stiffness_moment_panel(
         &mut scene,

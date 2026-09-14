@@ -26,6 +26,16 @@ fn successful_mses_exports_retain_the_verbatim_mplot_tables() {
             .unwrap_or_else(|error| panic!("read retained flowfield: {error}")),
         result.raw_flowfield_dump
     );
+    let diagnostics = std::fs::read_to_string(output.join("mses/pressure_diagnostics.json"))
+        .unwrap_or_else(|error| panic!("read retained pressure diagnostics: {error}"));
+    assert!(
+        diagnostics.contains("\"status\": \"not_run\""),
+        "{diagnostics}"
+    );
+    assert!(
+        diagnostics.contains("\"convergence_verified\": false"),
+        "{diagnostics}"
+    );
     std::fs::remove_dir_all(&output)
         .unwrap_or_else(|error| panic!("remove {}: {error}", output.display()));
 }
@@ -88,18 +98,10 @@ fn an_unrepresentable_pipeline_seed_is_rejected_before_optimization() {
 fn a_named_preset_is_the_public_nominal_design() {
     let preset =
         presets::get("A220-300").unwrap_or_else(|error| panic!("registered preset: {error}"));
-    let mut config = AlasConfig {
-        preset: preset.name.to_owned(),
-        geometry: preset.geometry.clone(),
-        requirements: preset.requirements.clone(),
-        ..AlasConfig::default()
-    };
-    if let Some(mass_model) = preset.mass_model.clone() {
-        config.mass_model = mass_model;
-    }
-    if let Some(performance) = preset.performance.clone() {
-        config.performance = performance;
-    }
+    let mut config = AlasConfig::from_value(&serde_json::json!({
+        "preset": preset.name
+    }))
+    .unwrap_or_else(|error| panic!("load preset configuration: {error}"));
     config.mission.enabled = false;
     config.structures.enabled = false;
     let options = PipelineOptions {
@@ -135,7 +137,7 @@ fn a_named_preset_is_the_public_nominal_design() {
     );
 }
 
-/// A fixed-design finalist run with the native physical review enabled.
+/// A fixed-design run with the native physical review enabled.
 fn reviewed_fixed_design_config() -> AlasConfig {
     let mut config = AlasConfig::default();
     config.mission.enabled = false;
@@ -150,13 +152,13 @@ fn reviewed_fixed_design_config() -> AlasConfig {
 }
 
 #[test]
-fn optimized_pipeline_delivers_only_a_native_reviewed_finalist() {
+fn fixed_design_review_exposes_mass_constraint_without_promoting_a_finalist() {
     let mut config = reviewed_fixed_design_config();
-    // The default shell seats 349 passengers at the default design vector,
-    // one short of the default 350-passenger brief. The finalist contract is
-    // exercised on a brief the reviewed cabin can seat; the shortfall of the
-    // default brief is pinned separately below.
-    config.requirements.num_passengers = 340;
+    // The corrected pair-rated exit layout seats the complete default
+    // 350-passenger brief at the pinned shell. Keep this review load case at
+    // that exact target so the test isolates the independent mass-feasibility
+    // finding below.
+    config.requirements.num_passengers = 350;
     let design = DesignVector::default();
     let bounds = design
         .to_array()
@@ -180,20 +182,32 @@ fn optimized_pipeline_delivers_only_a_native_reviewed_finalist() {
         .unwrap_or_else(|error| panic!("fixed-design finalist run: {error}"));
 
     assert_eq!(result.optimized_design, Some(design));
-    assert!(result.feasibility.is_feasible(), "{:?}", result.feasibility.findings);
-    assert!(result
-        .solver_optimizations
-        .as_ref()
-        .is_some_and(|set| set.vlm.status == crate::SolverOptimizationStatus::Completed));
-    assert!(result
-        .optimization_result
-        .as_ref()
-        .is_some_and(|optimization| optimization.best_valid));
+    assert!(
+        result.feasibility.is_feasible(),
+        "the physical review remains usable; the sizing constraint is retained on the solver branch"
+    );
+    assert!(result.solver_optimizations.as_ref().is_some_and(|set| {
+        set.vlm.status == crate::SolverOptimizationStatus::Failed
+            && set
+                .vlm
+                .error
+                .as_deref()
+                .is_some_and(|error| error.contains("wing_loading"))
+    }));
+    assert!(result.optimization_result.is_none());
 }
 
 #[test]
 fn default_brief_seating_shortfall_is_a_reported_finding_not_a_valid_finalist() {
-    let config = reviewed_fixed_design_config();
+    let mut config = reviewed_fixed_design_config();
+    // The pinned shell seats the default 350-passenger brief but its next
+    // discrete row transition leaves the 360-passenger load one short. Use
+    // that explicit fixed-design load to exercise the shortfall finding;
+    // clean-sheet sizing itself is covered by the optimizer test.
+    config.requirements.num_passengers = 360;
+    config.mass_model.flops_transport.first_class_passenger_count = Some(0);
+    config.mass_model.flops_transport.business_class_passenger_count = Some(0);
+    config.mass_model.flops_transport.tourist_class_passenger_count = Some(360);
     let design = DesignVector::default();
     let bounds = design
         .to_array()
@@ -222,18 +236,17 @@ fn default_brief_seating_shortfall_is_a_reported_finding_not_a_valid_finalist() 
         .iter()
         .find(|finding| finding.code == crate::FindingCode::PassengerCapacityShortfall)
         .unwrap_or_else(|| panic!("{:?}", result.feasibility.findings));
-    assert_eq!(shortfall.limit, Some(350.0));
-    assert!(shortfall.actual.is_some_and(|seated| seated < 350.0));
+    assert_eq!(shortfall.limit, Some(360.0));
+    assert!(shortfall.actual.is_some_and(|seated| seated < 360.0));
     assert!(!result.feasibility.is_feasible());
-    // The search's own constraint set does not include the cabin layout, so
-    // the optimizer still returns its winner as valid; the native review is
-    // what carries the shortfall, and the finalist is delivered with it rather
-    // than replaced or marked feasible.
+    // The native review carries the shortfall, but the rejected optimizer
+    // branch never becomes a finalist or an apparently valid result.
     assert_eq!(result.optimized_design, Some(design));
+    assert!(result.optimization_result.is_none());
     assert!(result
-        .optimization_result
+        .solver_optimizations
         .as_ref()
-        .is_some_and(|optimization| optimization.best_valid));
+        .is_some_and(|set| set.vlm.status == crate::SolverOptimizationStatus::Failed));
 }
 
 #[test]
@@ -400,6 +413,26 @@ fn an_explicit_design_and_bounds_reach_the_desktop_pipeline() {
         .all(|event| event.fraction.is_none_or(|f| (0.0..=1.0).contains(&f))));
 
     assert_eq!(result.optimized_design, Some(design));
+    let fuselage = result
+        .optimized_report
+        .as_ref()
+        .and_then(|report| report.airplane.fuselages.first())
+        .unwrap_or_else(|| panic!("explicit design report has a fuselage"));
+    let rebuilt_length_m = fuselage
+        .xsecs
+        .last()
+        .unwrap_or_else(|| panic!("explicit design fuselage has an end section"))
+        .xyz_c[0]
+        - fuselage
+            .xsecs
+            .first()
+            .unwrap_or_else(|| panic!("explicit design fuselage has a start section"))
+            .xyz_c[0];
+    assert!(
+        (rebuilt_length_m - design.fuselage_length_m).abs() < 1.0e-9,
+        "reported geometry must rebuild the literal explicit fuselage: {rebuilt_length_m} vs {}",
+        design.fuselage_length_m
+    );
     assert_eq!(
         result.feasibility.fuel_loading.usable_capacity.evidence,
         crate::feasibility::FuelCapacityEvidence::GeometryEstimate,

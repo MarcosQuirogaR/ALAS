@@ -16,10 +16,11 @@
 //! (a single tool can outrun one pipe's buffer while the other blocks) and
 //! polls the child for completion until the deadline, killing it if it passes.
 
+use std::ffi::OsStr;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime};
 
@@ -122,6 +123,13 @@ pub enum RunError {
         /// The command whose output could not be read.
         command: String,
     },
+    /// The caller requested cooperative cancellation while the child was
+    /// running; the process tree was terminated before returning.
+    #[error("{command} was cancelled and terminated")]
+    Cancelled {
+        /// The command that was cancelled.
+        command: String,
+    },
     /// The caller supplied a non-finite, non-positive, or unrepresentable
     /// process timeout.
     #[error("invalid process timeout {seconds:?} s; expected a finite positive value")]
@@ -131,18 +139,55 @@ pub enum RunError {
     },
 }
 
-/// Run `exe` with `args` in `cwd`, feeding `stdin_input` and capturing output,
-/// killed if it runs past `timeout_seconds`.
-///
-/// Returns the run's exit status and streams; the caller decides whether a
-/// non-zero status is a failure (upstream's `check=True` call sites all treat
-/// it as one).
+/// [`run_tool_with_cancel`] without a cancellation flag: the form the unit
+/// tests drive the supervisor through. Product callers always carry the flag,
+/// so this is compiled with the tests only.
+#[cfg(test)]
 pub fn run_tool(
     exe: &Path,
     args: &[&str],
     cwd: &Path,
     stdin_input: &str,
     timeout_seconds: f64,
+) -> Result<ToolRun, RunError> {
+    run_tool_with_cancel(exe, args, cwd, stdin_input, timeout_seconds, None)
+}
+
+/// Run `exe` with `args` in `cwd`, feeding `stdin_input` and capturing output,
+/// killed if it runs past `timeout_seconds`, while observing an optional
+/// cooperative cancellation flag.
+///
+/// Returns the run's exit status and streams; the caller decides whether a
+/// non-zero status is a failure (upstream's `check=True` call sites all treat
+/// it as one). Cancellation kills
+/// the complete process tree and drains both pipes before returning, so a
+/// legacy launcher cannot keep MSES/MPlot descendants or file handles alive.
+pub fn run_tool_with_cancel(
+    exe: &Path,
+    args: &[&str],
+    cwd: &Path,
+    stdin_input: &str,
+    timeout_seconds: f64,
+    cancel: Option<&AtomicBool>,
+) -> Result<ToolRun, RunError> {
+    run_tool_with_env_and_cancel(exe, args, cwd, stdin_input, timeout_seconds, cancel, &[])
+}
+
+/// Run an external tool with a small, explicit set of process-local
+/// environment overrides.
+///
+/// This is used for solver resources such as MSES's `MSES_OSMAP` hook. The
+/// overrides are applied only to the child process; ALAS never changes the
+/// host environment, so one run cannot leak a map path into another project or
+/// into the user's shell.
+pub fn run_tool_with_env_and_cancel(
+    exe: &Path,
+    args: &[&str],
+    cwd: &Path,
+    stdin_input: &str,
+    timeout_seconds: f64,
+    cancel: Option<&AtomicBool>,
+    environment: &[(&str, &OsStr)],
 ) -> Result<ToolRun, RunError> {
     let timeout =
         Duration::try_from_secs_f64(timeout_seconds).map_err(|_| RunError::InvalidTimeout {
@@ -154,9 +199,11 @@ pub fn run_tool(
         });
     }
     let command = exe.display().to_string();
-    let mut child = Command::new(exe)
+    let mut command_builder = Command::new(exe);
+    let mut child = command_builder
         .args(args)
         .current_dir(cwd)
+        .envs(environment.iter().copied())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -213,6 +260,13 @@ pub fn run_tool(
         })? {
             Some(status) => break status,
             None => {
+                if cancel.is_some_and(|flag| flag.load(Ordering::Relaxed)) {
+                    kill_process_tree(child.id());
+                    let _ = child.wait();
+                    let _ = stdout_reader.join();
+                    let _ = stderr_reader.join();
+                    return Err(RunError::Cancelled { command });
+                }
                 if Instant::now() >= deadline {
                     // MSES is a launcher-style legacy executable on some
                     // installations.  Killing only the immediate process

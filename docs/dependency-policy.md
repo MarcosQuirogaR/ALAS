@@ -23,4 +23,13 @@ NASTRAN distribution checks: cargo-deny does not inspect a Fortran bundle.
 Font licenses in the graph include OFL and Ubuntu Font License through egui's
 default fonts. Preserve their notices in distributions.
 
+Two further entries date from 2026-09-11. `CC0-1.0` is allowed: the desktop
+shell's move from the Glow to the wgpu painter brings in naga, wgpu's shader
+compiler, whose `hexf-parse` dependency is a public-domain dedication; CC0 is
+compatible with the program's AGPL-3.0-or-later licence and carries no notice
+obligation. [paste RUSTSEC-2024-0436](https://rustsec.org/advisories/RUSTSEC-2024-0436)
+is ignored: `paste` is an archived proc-macro crate reached through `faer`'s
+`gemm` kernels, runs only at compile time, and ships no code in the binary; the
+exception is removed when faer drops it.
+
 Configuration semantics follow the [cargo-deny documentation](https://embarkstudios.github.io/cargo-deny/checks/index.html).

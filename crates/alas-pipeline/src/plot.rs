@@ -83,8 +83,30 @@ fn render_element(svg: &mut String, element: &Value) -> Result<(), String> {
         )),
         "Text" => render_text(svg, data)?,
         "Image" => render_image(svg, data)?,
+        // The headless bridge cannot project an equirectangular texture onto
+        // a sphere.  Keep the same stable globe silhouette as the canonical
+        // report SVG renderer instead of failing the entire plot batch when a
+        // route figure contains the optional Earth background.
+        "SphericalImage" => render_spherical_image(svg, data)?,
         _ => return Err(format!("unsupported scene element: {kind}")),
     }
+    Ok(())
+}
+
+fn render_spherical_image(svg: &mut String, data: &Value) -> Result<(), String> {
+    let center = data
+        .get("center")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "spherical image center is not a point".to_owned())?;
+    let x = number(center.first(), "spherical image center x")?;
+    let y = number(center.get(1), "spherical image center y")?;
+    let radius = field_number(data, "radius")?;
+    if radius <= 0.0 {
+        return Err("spherical image radius must be positive".to_owned());
+    }
+    svg.push_str(&format!(
+        "  <circle cx=\"{x:.2}\" cy=\"{y:.2}\" r=\"{radius:.2}\" fill=\"#08213d\"><title>Embedded Earth texture is unavailable in headless SVG; globe silhouette retained</title></circle>"
+    ));
     Ok(())
 }
 
@@ -421,5 +443,27 @@ mod tests {
 
         let svg = render_scene_svg(&scene).unwrap_or_default();
         assert!(svg.contains("viewBox=\"0.25000000 0.00000000 0.50000000 1.00000000\""));
+    }
+
+    #[test]
+    fn spherical_image_is_exported_as_a_stable_globe_placeholder() {
+        let scene = json!({
+            "width": 100.0,
+            "height": 80.0,
+            "background": null,
+            "elements": [{
+                "SphericalImage": {
+                    "source": "embedded://nasa-blue-marble",
+                    "center": [50.0, 40.0],
+                    "radius": 30.0,
+                    "camera": {"eye": [0.0, 0.0, 1.0], "target": [0.0, 0.0, 0.0], "up": [0.0, 1.0, 0.0]},
+                    "mirror_longitude": false
+                }
+            }]
+        });
+
+        let svg = render_scene_svg(&scene).unwrap_or_default();
+        assert!(svg.contains("<circle cx=\"50.00\" cy=\"40.00\" r=\"30.00\" fill=\"#08213d\""));
+        assert!(svg.contains("Embedded Earth texture is unavailable"));
     }
 }

@@ -4,7 +4,7 @@
 //! The window-level overlays: the boot splash, the first-run walkthrough, the
 //! advanced walkthrough guide, the storage dialog, and the About window.
 
-use egui::{pos2, vec2, Color32, Context, Frame, Rect, RichText, ScrollArea, Stroke, Window};
+use egui::{pos2, vec2, Color32, Context, Frame, Rect, RichText, ScrollArea, Stroke, Vec2, Window};
 
 use crate::state::AppState;
 use crate::views::guide_data::CHAPTERS;
@@ -12,6 +12,20 @@ use crate::views::tour_data::TOUR_STEPS;
 
 const WALKTHROUGH_ORDER: egui::Order = egui::Order::Foreground;
 const WALKTHROUGH_WINDOW_HIGHLIGHT_ID: &str = "walkthrough_window_highlight";
+
+/// Consistent margin, in points, between splash content and the window edge.
+const SPLASH_MARGIN: f32 = 24.0;
+/// Fixed height reserved at the bottom for the wordmark and the
+/// author/license line beneath it, so the independently centred main symbol
+/// above can never grow tall enough to overlap them.
+const SPLASH_FOOTER_HEIGHT: f32 = 96.0;
+/// Keep the central mark visually subordinate to the footer at ordinary
+/// desktop sizes. The bounds still shrink with the client area below these
+/// caps, including when Windows reports a short high-DPI client rectangle.
+const SPLASH_SYMBOL_MAX_WIDTH: f32 = 460.0;
+const SPLASH_SYMBOL_MAX_HEIGHT: f32 = 220.0;
+const SPLASH_WORDMARK_MAX_WIDTH: f32 = 320.0;
+const SPLASH_WORDMARK_MAX_HEIGHT: f32 = 56.0;
 
 fn tr(text: &str) -> String {
     alas_i18n::t(Some(text), None).into_owned()
@@ -24,19 +38,83 @@ fn tr_fields(template: &str, fields: &[(&str, String)]) -> String {
 }
 
 /// Render the boot splash while `boot_frames_remaining` is still counting down.
+///
+/// The main three-stripe symbol and the smaller symbol/wordmark footer are
+/// positioned independently -- one centred in the full client area, the
+/// other anchored to the bottom with a consistent margin -- rather than as
+/// one fused composite image, so each keeps sensible proportions as the
+/// window is resized instead of both clustering toward the top.
 pub fn show_splash(state: &mut AppState, ctx: &Context) {
     if state.boot_frames_remaining == 0 {
         return;
     }
     state.boot_frames_remaining -= 1;
     egui::CentralPanel::default().show(ctx, |ui| {
-        ui.centered_and_justified(|ui| {
-            ui.vertical_centered(|ui| {
-                ui.heading(RichText::new("ALAS").size(40.0).strong());
-                ui.label(tr("Aircraft Layout and Analysis Suite"));
+        let panel = ui.max_rect();
+
+        let footer_top = (panel.max.y - SPLASH_FOOTER_HEIGHT).max(panel.min.y);
+        let footer_rect = Rect::from_min_max(
+            pos2(panel.min.x, footer_top),
+            pos2(panel.max.x, panel.max.y - SPLASH_MARGIN),
+        );
+        ui.allocate_new_ui(egui::UiBuilder::new().max_rect(footer_rect), |ui| {
+            ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
+                ui.label(author_license_line());
+                ui.add_space(6.0);
+                if let Some(image) = crate::branding::text_logo_image(ctx) {
+                    let width =
+                        (panel.width() - 2.0 * SPLASH_MARGIN).clamp(1.0, SPLASH_WORDMARK_MAX_WIDTH);
+                    ui.add(image.max_size(vec2(width, SPLASH_WORDMARK_MAX_HEIGHT)));
+                }
             });
         });
+
+        // Centred on the full client area, but capped to whichever of the
+        // top or bottom clearance is tighter so it can never reach the
+        // footer above, even in a short window.
+        if let (Some(image), Some(natural)) = (
+            crate::branding::logo_image(ctx),
+            crate::branding::logo_natural_size(),
+        ) {
+            let size = splash_symbol_size(natural, panel, footer_top);
+            ui.put(Rect::from_center_size(panel.center(), size), image);
+        }
     });
+}
+
+/// Choose a capped symbol size that remains centred while leaving the footer
+/// clear on both sides of the client area.
+fn splash_symbol_size(natural: Vec2, panel: Rect, footer_top: f32) -> Vec2 {
+    let top_half = (panel.center().y - panel.min.y - SPLASH_MARGIN).max(0.0);
+    let bottom_half = (footer_top - SPLASH_MARGIN - panel.center().y).max(0.0);
+    let bounds = vec2(
+        (panel.width() - 2.0 * SPLASH_MARGIN).clamp(1.0, SPLASH_SYMBOL_MAX_WIDTH),
+        (2.0 * top_half.min(bottom_half)).clamp(1.0, SPLASH_SYMBOL_MAX_HEIGHT),
+    );
+    fit_within(natural, bounds)
+}
+
+/// The largest size with `natural`'s aspect ratio that still fits within
+/// `bounds` on both axes.
+fn fit_within(natural: Vec2, bounds: Vec2) -> Vec2 {
+    if natural.x <= 0.0 || natural.y <= 0.0 || bounds.x <= 0.0 || bounds.y <= 0.0 {
+        return Vec2::ZERO;
+    }
+    natural * (bounds.x / natural.x).min(bounds.y / natural.y)
+}
+
+/// The splash footer's author/license line, built from this crate's own
+/// `Cargo.toml` metadata (workspace `authors`/`license`) rather than a second
+/// hard-coded copy of it. Not routed through the translation catalog: a
+/// personal name and an SPDX license identifier have no Spanish equivalent,
+/// the same treatment the About window already gives this metadata below.
+fn author_license_line() -> String {
+    let authors = env!("CARGO_PKG_AUTHORS");
+    let author = authors
+        .split_once('<')
+        .map_or(authors, |(name, _)| name)
+        .trim();
+    format!("{author} \u{b7} {}", env!("CARGO_PKG_LICENSE"))
 }
 
 /// Render the first-run walkthrough, if it is open.
@@ -359,7 +437,10 @@ pub fn show_about(state: &mut AppState, ctx: &Context) {
         .resizable(false)
         .collapsible(false)
         .show(ctx, |ui| {
-            ui.heading(tr("ALAS - Aircraft Layout and Analysis Suite"));
+            if let Some(image) = crate::branding::text_logo_image(ctx) {
+                ui.add(image.max_size(vec2(300.0, 40.0)));
+            }
+            ui.add_space(8.0);
             ui.label(tr(
                 "Conceptual transport aircraft sizing, optimization, and multi-disciplinary analysis.",
             ));
@@ -405,8 +486,12 @@ fn format_bytes(n: u64) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{walkthrough_panel_position, WALKTHROUGH_ORDER, WALKTHROUGH_WINDOW_HIGHLIGHT_ID};
-    use egui::{pos2, vec2, Rect};
+    use super::{
+        author_license_line, fit_within, splash_symbol_size, walkthrough_panel_position,
+        SPLASH_FOOTER_HEIGHT, SPLASH_MARGIN, SPLASH_SYMBOL_MAX_HEIGHT, SPLASH_SYMBOL_MAX_WIDTH,
+        WALKTHROUGH_ORDER, WALKTHROUGH_WINDOW_HIGHLIGHT_ID,
+    };
+    use egui::{pos2, vec2, Rect, Vec2};
 
     #[test]
     fn walkthrough_panel_moves_below_a_target_when_room_exists() {
@@ -441,7 +526,6 @@ mod tests {
     fn overlay_shell_strings_have_spanish_desktop_translations() {
         let catalog = alas_i18n::es::desktop_catalog();
         for key in [
-            "Aircraft Layout and Analysis Suite",
             "Walkthrough",
             "Step {current} of {total}",
             "Skip",
@@ -477,5 +561,62 @@ mod tests {
         );
         assert_eq!(layer.order, egui::Order::Foreground);
         assert_eq!(layer.id, egui::Id::new(WALKTHROUGH_WINDOW_HIGHLIGHT_ID));
+    }
+
+    #[test]
+    fn fit_within_preserves_aspect_ratio_on_the_tighter_axis() {
+        // A wide source in a square box: width is the binding constraint.
+        let size = fit_within(vec2(1000.0, 400.0), vec2(500.0, 500.0));
+        assert!((size.x - 500.0).abs() < 1e-6);
+        assert!((size.y - 200.0).abs() < 1e-6);
+
+        // The same source in a short, wide box: height binds instead.
+        let size = fit_within(vec2(1000.0, 400.0), vec2(500.0, 100.0));
+        assert!((size.x - 250.0).abs() < 1e-6);
+        assert!((size.y - 100.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn fit_within_degrades_to_zero_for_a_degenerate_input() {
+        assert_eq!(fit_within(vec2(0.0, 400.0), vec2(500.0, 500.0)), Vec2::ZERO);
+        assert_eq!(
+            fit_within(vec2(1000.0, 400.0), vec2(0.0, 500.0)),
+            Vec2::ZERO
+        );
+    }
+
+    #[test]
+    fn author_license_line_names_the_author_and_license_without_the_email() {
+        let line = author_license_line();
+        assert_eq!(line, "Marcos Quiroga Rodriguez \u{b7} AGPL-3.0-or-later");
+        assert!(!line.contains('@'));
+        assert!(!line.contains('<'));
+    }
+
+    #[test]
+    fn splash_symbol_is_capped_and_keeps_the_footer_clear() {
+        let panel = Rect::from_min_size(pos2(0.0, 0.0), vec2(1_280.0, 820.0));
+        let footer_top = panel.max.y - SPLASH_FOOTER_HEIGHT;
+        let natural = vec2(1_511.0, 692.0);
+        let size = splash_symbol_size(natural, panel, footer_top);
+        let symbol = Rect::from_center_size(panel.center(), size);
+
+        assert_eq!(symbol.center(), panel.center());
+        assert!(size.x <= SPLASH_SYMBOL_MAX_WIDTH + f32::EPSILON);
+        assert!(size.y <= SPLASH_SYMBOL_MAX_HEIGHT + f32::EPSILON);
+        assert!(symbol.min.y >= panel.min.y + SPLASH_MARGIN - f32::EPSILON);
+        assert!(symbol.max.y <= footer_top - SPLASH_MARGIN + f32::EPSILON);
+    }
+
+    #[test]
+    fn splash_symbol_shrinks_for_a_short_client_height() {
+        let panel = Rect::from_min_size(pos2(0.0, 0.0), vec2(880.0, 320.0));
+        let footer_top = panel.max.y - SPLASH_FOOTER_HEIGHT;
+        let size = splash_symbol_size(vec2(1_511.0, 692.0), panel, footer_top);
+        let symbol = Rect::from_center_size(panel.center(), size);
+
+        assert!(symbol.min.y >= panel.min.y + SPLASH_MARGIN - f32::EPSILON);
+        assert!(symbol.max.y <= footer_top - SPLASH_MARGIN + f32::EPSILON);
+        assert!(size.y < SPLASH_SYMBOL_MAX_HEIGHT);
     }
 }

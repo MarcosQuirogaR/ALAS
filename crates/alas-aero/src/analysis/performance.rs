@@ -146,6 +146,17 @@ impl AeroAnalysis<'_> {
         )
     }
 
+    /// The mesh and factored influence matrix of `self.plane` at the
+    /// configured resolution, assembled once so that a schedule of operating
+    /// points pays the O(n^3) factorization a single time.
+    fn system(&self) -> Result<vlm::VlmSystem<'_>, VlmError> {
+        vlm::VlmSystem::assemble(
+            self.plane,
+            self.analysis.spanwise_resolution.max(1) as usize,
+            self.analysis.chordwise_resolution.max(1) as usize,
+        )
+    }
+
     /// A level operating point at `alpha_deg`: no sideslip, no rotation
     /// rates, which is every state these three entry points construct.
     fn level_op_point(atmosphere: Atmosphere, velocity: f64, alpha_deg: f64) -> OperatingPoint {
@@ -174,8 +185,9 @@ impl AeroAnalysis<'_> {
         let alpha_low = self.analysis.probe_alpha_low_deg;
         let alpha_high = self.analysis.probe_alpha_high_deg;
 
-        let low = self.run_vlm(&Self::level_op_point(atmosphere, velocity, alpha_low))?;
-        let high = self.run_vlm(&Self::level_op_point(atmosphere, velocity, alpha_high))?;
+        let system = self.system()?;
+        let low = system.solve(&Self::level_op_point(atmosphere, velocity, alpha_low))?;
+        let high = system.solve(&Self::level_op_point(atmosphere, velocity, alpha_high))?;
 
         let cl_alpha = (high.cl_lift - low.cl_lift) / (alpha_high - alpha_low);
         let alpha_required = alpha_low + (cl_target - low.cl_lift) / cl_alpha;
@@ -314,23 +326,29 @@ impl AeroAnalysis<'_> {
             l_over_d: Vec::with_capacity(alphas.len()),
         };
 
-        for alpha in &alphas {
-            let solved = self.run_vlm(&Self::level_op_point(atmosphere, velocity, *alpha))?;
-            let components = self.drag_components(
-                mach,
-                altitude_m,
-                solved.cl_lift,
-                solved.cd_drag,
-                Some(&atmosphere),
-            );
-            sweep.alpha_deg.push(*alpha);
-            sweep.cl.push(solved.cl_lift);
-            sweep.cm.push(solved.cm_pitch);
-            sweep.cd.push(components.cd_total());
-            sweep.cd_induced.push(components.cd_induced);
-            sweep.cd_wave.push(components.cd_wave);
-            sweep.cd_parasite.push(components.cd_parasite);
-            sweep.l_over_d.push(solved.cl_lift / components.cd_total());
+        // The influence matrix depends on the geometry alone, so the whole
+        // schedule shares one assembly and one factorization; each angle is
+        // a new right-hand side.
+        if !alphas.is_empty() {
+            let system = self.system()?;
+            for alpha in &alphas {
+                let solved = system.solve(&Self::level_op_point(atmosphere, velocity, *alpha))?;
+                let components = self.drag_components(
+                    mach,
+                    altitude_m,
+                    solved.cl_lift,
+                    solved.cd_drag,
+                    Some(&atmosphere),
+                );
+                sweep.alpha_deg.push(*alpha);
+                sweep.cl.push(solved.cl_lift);
+                sweep.cm.push(solved.cm_pitch);
+                sweep.cd.push(components.cd_total());
+                sweep.cd_induced.push(components.cd_induced);
+                sweep.cd_wave.push(components.cd_wave);
+                sweep.cd_parasite.push(components.cd_parasite);
+                sweep.l_over_d.push(solved.cl_lift / components.cd_total());
+            }
         }
 
         let rises = sweep.cl.len() >= 2

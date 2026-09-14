@@ -13,7 +13,7 @@
 /// the `TCA` the equations ask for.
 fn flops_wing_inputs(config: &AlasConfig, wing: &Wing) -> FlopsWingInputs {
     FlopsWingInputs {
-        design_gross_mass_kg: config.requirements.mtow_kg,
+        design_gross_mass_kg: design_gross_mass_kg(config),
         wing_area_m2: wing.reference_area(),
         wing_span_m: wing.reference_span(),
         taper_ratio: wing.taper_ratio(),
@@ -93,7 +93,7 @@ fn fixed_non_box_structure(config: &AlasConfig, wing: &Wing) -> FixedNonBoxStruc
 
 fn validate_secondary_breakdown(
     breakdown: WingSecondaryMassBreakdown,
-) -> Result<(), CandidateFailure> {
+) -> Result<(), WingReconciliationError> {
     let values = [
         breakdown.high_lift_devices_kg,
         breakdown.spoilers_and_speedbrakes_kg,
@@ -111,7 +111,7 @@ fn validate_secondary_breakdown(
     {
         Ok(())
     } else {
-        Err(structural_failure())
+        Err(WingReconciliationError::StructuralSizing)
     }
 }
 

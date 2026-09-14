@@ -67,6 +67,14 @@ struct CfgFixture {
     timeout_mses_s: f64,
     alpha_sweep_halfwidth_deg: f64,
     alpha_sweep_n_points: i64,
+    /// The historical fixture predates the explicit product setting and used
+    /// negative MUCON to disable second-order dissipation.
+    #[serde(default = "legacy_mucon")]
+    mucon: f64,
+}
+
+fn legacy_mucon() -> f64 {
+    -1.0
 }
 
 #[derive(Deserialize)]
@@ -129,6 +137,8 @@ struct PressureResultFixture {
     field_x: Vec<f64>,
     field_y: Vec<f64>,
     field_mach: Vec<f64>,
+    #[serde(default)]
+    field_cp: Vec<f64>,
     airfoil_x: Vec<f64>,
     airfoil_y: Vec<f64>,
 }
@@ -154,6 +164,7 @@ fn config(cfg: &CfgFixture, mses_dir: &Path) -> MsesConfig {
     MsesConfig {
         enabled: true,
         mses_dir: mses_dir.display().to_string(),
+        osmap_path: None,
         n_crit: cfg.n_crit,
         xtr_upper: cfg.xtr_upper,
         xtr_lower: cfg.xtr_lower,
@@ -164,6 +175,7 @@ fn config(cfg: &CfgFixture, mses_dir: &Path) -> MsesConfig {
         timeout_mses_s: cfg.timeout_mses_s,
         alpha_sweep_halfwidth_deg: cfg.alpha_sweep_halfwidth_deg,
         alpha_sweep_n_points: cfg.alpha_sweep_n_points,
+        mucon: cfg.mucon,
     }
 }
 
@@ -278,6 +290,12 @@ fn mses_runs_reproduce_the_reference_exactly() {
             .slice("field_mach", &got.field_mach, &reference.field_mach)
             .slice("airfoil_x", &got.airfoil_x, &reference.airfoil_x)
             .slice("airfoil_y", &got.airfoil_y, &reference.airfoil_y);
+        // Older fixtures predate the explicit MPlot Cp column. Keep their
+        // numeric parity contract intact, while comparing Cp whenever a
+        // regenerated fixture carries the new native export.
+        if !reference.field_cp.is_empty() {
+            compare.slice("field_cp", &got.field_cp, &reference.field_cp);
+        }
         compare.finish();
 
         assert!(!got.raw_bl_dump.is_empty());

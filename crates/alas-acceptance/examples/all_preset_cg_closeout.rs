@@ -7,11 +7,11 @@ use std::error::Error;
 use std::fs;
 use std::path::PathBuf;
 
-use alas_config::{presets, AlasConfig, PlanningMacReference};
+use alas_config::{presets, AlasConfig, MassArchitecture, PlanningMacReference};
 use alas_geom::builder::AircraftBuilder;
 use alas_mass::breakdown::{
-    calculate_physical_cg, run_mass_analysis, run_mass_analysis_with_model, MassBreakdown,
-    MassCoordinateModel, MassCoordinates, PayloadLayoutSummary,
+    calculate_physical_cg, run_mass_analysis, run_product_mass_analysis_with_groups,
+    ComponentMassError, MassBreakdown, MassCoordinateModel, MassCoordinates, PayloadLayoutSummary,
 };
 use alas_payload::build::build_payload_layout;
 use alas_payload::oew::oew_and_cg;
@@ -121,20 +121,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut aircraft = Vec::new();
     for name in presets::available() {
         let preset = presets::get(name).map_err(std::io::Error::other)?;
-        let mut config = AlasConfig {
-            preset: preset.name.to_owned(),
-            geometry: preset.geometry.clone(),
-            requirements: preset.requirements.clone(),
-            landing_gear: preset.landing_gear.clone(),
-            ..Default::default()
-        };
-        if let Some(mass_model) = &preset.mass_model {
-            config.mass_model = mass_model.clone();
-        }
-        if let Some(performance) = &preset.performance {
-            config.performance = performance.clone();
-        }
-        config.geometry.engine.apply_engine_spec();
+        let config = AlasConfig::from_value(&serde_json::json!({ "preset": name }))?;
         let airplane = AircraftBuilder::new(Some(config.geometry.clone()))
             .build(Some(&preset.design_vector), true)
             .map_err(|error| std::io::Error::other(format!("{name}: {error:?}")))?;
@@ -151,52 +138,87 @@ fn main() -> Result<(), Box<dyn Error>> {
             .planning_cg_envelope
             .map(|envelope| envelope.mac_reference);
 
+        // The frozen reference path is retained as an explicit comparison
+        // control. It must not inherit the product architecture merely
+        // because this example also evaluates the pure production path.
+        let mut legacy_config = config.clone();
+        legacy_config.mass_model.mass_architecture =
+            MassArchitecture::LegacyReferenceCompatibleComparison;
+        legacy_config.mass_model.apply_architecture();
         let (reference_initial_masses, reference_initial_coordinates, _) = run_mass_analysis(
             &airplane,
-            &config.requirements,
-            &config.geometry,
-            Some(&config.mass_model),
+            &legacy_config.requirements,
+            &legacy_config.geometry,
+            Some(&legacy_config.mass_model),
             None,
         );
         let reference_payload = payload_summary(
             &airplane,
-            &config,
+            &legacy_config,
             &reference_initial_masses,
             &reference_initial_coordinates,
         )?;
         let (reference_masses, reference_coordinates, reference_cg) = run_mass_analysis(
             &airplane,
-            &config.requirements,
-            &config.geometry,
-            Some(&config.mass_model),
+            &legacy_config.requirements,
+            &legacy_config.geometry,
+            Some(&legacy_config.mass_model),
             Some(&reference_payload),
         );
 
         let coordinate_model = MassCoordinateModel::StructuralWingbox(&config.structures);
-        let (structural_initial_masses, structural_initial_coordinates, _) =
-            run_mass_analysis_with_model(
+        let (structural_initial_masses, structural_initial_coordinates, _, _flops) =
+            match run_product_mass_analysis_with_groups(
                 &airplane,
                 &config.requirements,
                 &config.geometry,
+                &config.cabin,
+                &config.control_surfaces,
                 Some(&config.mass_model),
                 None,
                 coordinate_model,
-            )?;
+                &config.landing_gear,
+            ) {
+                Ok(result) => result,
+                Err(ComponentMassError::FlopsUnverified { reasons, .. }) => {
+                    aircraft.push(json!({
+                        "preset": name,
+                        "status": "unsupported_pure_flops",
+                        "mass_architecture": "pure_flops_transport_v1",
+                        "reasons": reasons.iter().map(|reason| reason.as_str()).collect::<Vec<_>>(),
+                    }));
+                    continue;
+                }
+                Err(error) => {
+                    return Err(std::io::Error::other(format!(
+                        "pure FLOPS mass analysis failed for {name}: {error}"
+                    ))
+                    .into());
+                }
+            };
         let structural_payload = payload_summary(
             &airplane,
             &config,
             &structural_initial_masses,
             &structural_initial_coordinates,
         )?;
-        let (structural_masses, structural_coordinates, structural_cg) =
-            run_mass_analysis_with_model(
+        let (structural_masses, structural_coordinates, structural_cg, _flops) =
+            run_product_mass_analysis_with_groups(
                 &airplane,
                 &config.requirements,
                 &config.geometry,
+                &config.cabin,
+                &config.control_surfaces,
                 Some(&config.mass_model),
                 Some(&structural_payload),
                 coordinate_model,
-            )?;
+                &config.landing_gear,
+            )
+            .map_err(|error| {
+                std::io::Error::other(format!(
+                    "pure FLOPS mass analysis after payload layout failed for {name}: {error}"
+                ))
+            })?;
 
         aircraft.push(json!({
             "preset": name,
@@ -269,13 +291,13 @@ fn main() -> Result<(), Box<dyn Error>> {
     let output = json!({
         "status": "preliminary_model_evidence_not_afm_wbm_limits",
         "generated_by": "cargo run -p alas-acceptance --example all_preset_cg_closeout",
-        "comparison": "Both paths run the real two-pass cabin/cargo builder. The reference path preserves alas/physics/mass.py; the product path integrates the configured structural wingbox. Component mass correlations and preset values are unchanged.",
+            "comparison": "Both paths run the real two-pass cabin/cargo builder. The reference path is an explicit legacy comparison control; the product path evaluates the pure FLOPS component buildup and uses the structural wingbox only for an independent coordinate diagnostic.",
         "tank_semantics": "For an unchanged registered aircraft, the published usable-fuel mass is authoritative. MTOW-residual fuel is separately reported and capped only in the tank-limited loading case; edited designs use the product's separately labeled geometry estimate.",
         "limitations": [
             "The four states are planning OEW/MZFW/MTOW/full-fuel cases, not an operational loading envelope.",
             "Seat, cargo, and ULD placements come from the current detailed payload model; operator WBM data remain authoritative.",
             "Model CG and static margin retain the built wing MAC frame. Public planning comparisons use only the source LEMAC/MAC frame registered with that manufacturer envelope.",
-            "The structural component masses normalize the wing first moment only; Torenbeek remains the aircraft wing total-mass correlation.",
+            "The structural wingbox changes only the component station/first-moment diagnostic; pure FLOPS remains the authoritative production mass buildup.",
         ],
         "aircraft": aircraft,
     });

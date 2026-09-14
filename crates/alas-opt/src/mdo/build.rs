@@ -14,32 +14,18 @@
 //! mission quantity the search is minimising.
 
 use alas_config::design_variables::{DesignVector, SPECS};
-use alas_config::optimizer::DesignMode;
 use alas_config::AlasConfig;
 use alas_geom::aircraft::airplane::Airplane;
-use alas_geom::aircraft::wing::Wing;
 use alas_geom::builder::AircraftBuilder;
 use alas_mass::breakdown::{
-    calculate_physical_cg, run_mass_analysis_with_model_checked_product_with_gear, MassBreakdown,
-    MassCoordinateModel, MassCoordinates, PayloadLayoutSummary, OEW_KEYS,
+    run_mass_analysis_with_model_checked_product_with_gear, MassBreakdown, MassCoordinateModel,
+    MassCoordinates, PayloadLayoutSummary,
 };
-use alas_mass::flops_transport::structure::{FlopsWingInputs, WingBendingFactor};
-use alas_mass::torenbeek::{
-    mass_wing_with_control_surface_area, wing_secondary_mass_breakdown_with_control_surface_area,
-    WingSecondaryMassBreakdown,
-};
-use alas_mass::wing_inventory::{
-    build_wing_inventory, FixedNonBoxStructure, MovableSurface, TorenbeekWingGroup,
-    WingInventoryInputs, WingMovableSurfaces, WingNonBoxInventory,
-};
-use alas_mass::wingbox_feedback::{
-    reconcile_clean_sheet_wing, reconcile_reference_wing, ReferenceWingMass, SizedWingboxMass,
-    WingboxFeedback,
-};
+use alas_mass::product_stations::product_mass_coordinates;
+use alas_mass::wingbox_feedback::{ReferenceWingMass, WingboxFeedback};
 use alas_payload::build::build_payload_layout;
 use alas_payload::layout::LayoutSummary;
 use alas_payload::oew::oew_and_cg;
-use alas_struct::sizing::{size_wingbox, WingboxSizing};
 
 use crate::objective::apply_candidate_payload_load_case;
 
@@ -68,29 +54,7 @@ pub(crate) struct StructuralReference {
     pub inventory: StructuralInventory,
 }
 
-/// Where the non-box part of the reconciled wing comes from.
-///
-/// Reference adaptation and the baseline sandbox freeze a measured empirical
-/// wing, so their non-box inventory is complete by construction and carries no
-/// item list. Clean-sheet runs build the enumerated
-/// [`alas_mass::wing_inventory`] list and are complete only when that list is.
-#[derive(Debug, Clone)]
-pub(crate) enum StructuralInventory {
-    /// Frozen empirical remainder of a registered reference aircraft.
-    FrozenReference,
-    /// Enumerated, sourced clean-sheet non-box inventory.
-    CleanSheet(Box<WingNonBoxInventory>),
-}
-
-impl StructuralInventory {
-    /// Whether the wing inventory may be presented as complete.
-    pub(crate) fn is_complete(&self) -> bool {
-        match self {
-            Self::FrozenReference => true,
-            Self::CleanSheet(inventory) => inventory.status().is_complete(),
-        }
-    }
-}
+pub(crate) use alas_mass::wing_reconciliation::StructuralInventory;
 
 /// Failure with the `geometry_build` reason, for every early exit below.
 fn geometry_build_failure() -> CandidateFailure {
@@ -100,19 +64,45 @@ fn geometry_build_failure() -> CandidateFailure {
 }
 
 /// Build the candidate's geometry and payload-recomputed configuration.
+///
+/// The production path builds through the structural reconciliation; this
+/// geometry-only form remains the fixture the unit tests construct their
+/// candidates with.
+#[cfg(test)]
 pub(crate) fn build_geometry(
     config: &AlasConfig,
     x: &[f64],
+) -> Result<(AlasConfig, DesignVector, Airplane), CandidateFailure> {
+    build_geometry_with_fuselage_policy(config, x, false)
+}
+
+/// Build a candidate while optionally preserving a caller-pinned fuselage
+/// length.  Clean-sheet searches use the derived cabin sizing solve; a fixed
+/// desktop/reference vector uses the literal coordinate it supplied so the
+/// downstream report and exported geometry remain the same aircraft.
+pub(crate) fn build_geometry_with_fuselage_policy(
+    config: &AlasConfig,
+    x: &[f64],
+    preserve_explicit_fuselage_length: bool,
 ) -> Result<(AlasConfig, DesignVector, Airplane), CandidateFailure> {
     let mut dv = DesignVector::from_array(x).map_err(|_| geometry_build_failure())?;
     let mut candidate_config = config.clone();
     if apply_candidate_payload_load_case(&mut candidate_config, &dv).is_err() {
         return Err(geometry_build_failure());
     }
-    size_fuselage_from_cabin(&candidate_config, &mut dv)?;
+    if !preserve_explicit_fuselage_length {
+        size_fuselage_from_cabin(&candidate_config, &mut dv)?;
+    }
     let builder = AircraftBuilder::new(Some(candidate_config.geometry.clone()));
+    // The nacelles are part of the candidate, not a reporting embellishment:
+    // `alas_mass::stations` places the propulsion group at the nacelle
+    // mid-length when the bodies are drawn and falls back to the wing station
+    // when they are not, and `alas_aero`'s parasite buildup adds a nacelle
+    // entry per drawn body. Building the search's aircraft without them made
+    // the optimizer balance and trim a different aircraft from the one
+    // `alas-pipeline`'s finalist report builds with `include_engines = true`.
     let plane = builder
-        .build(Some(&dv), false)
+        .build(Some(&dv), true)
         .map_err(|_| geometry_build_failure())?;
     if plane.s_ref <= 0.0 || plane.c_ref <= 0.0 {
         return Err(geometry_build_failure());
@@ -155,7 +145,13 @@ pub(crate) fn size_fuselage_from_cabin(
                 reason: "payload_layout",
             })?;
         match layout.summary {
-            LayoutSummary::Passenger(summary) => Ok(summary.max_certifiable_capacity),
+            // Size against the seats the detailed row packer actually lays
+            // out.  `max_certifiable_capacity` is a useful regulatory cap,
+            // but it deliberately ignores the requested class/count load
+            // case and can therefore make a bisection stop one row short
+            // (for example 339 seats for a 340-seat brief).  The production
+            // geometry must rebuild with every requested passenger seated.
+            LayoutSummary::Passenger(summary) => Ok(summary.seated_pax),
             LayoutSummary::Cargo(_) => Err(geometry_build_failure()),
         }
     };
@@ -167,19 +163,49 @@ pub(crate) fn size_fuselage_from_cabin(
     if capacity_at(upper)? < target {
         return Err(geometry_build_failure());
     }
-    // Bisection is sufficient because available cabin floor is monotone in
-    // body length for a fixed planform/class mix; the final value is kept in
-    // full precision rather than rounded to the display decimals.
+    // The detailed row packer is discrete: a small body-length change can
+    // move a row across a seat/exit boundary, so its *reported* seated count
+    // is not strictly monotone even though the available floor is.  Retain
+    // the fast bracketed solve for the usual case, but remember the capacity
+    // of its selected endpoint so we never publish a vector that rebuilds one
+    // seat short of the requested clean-sheet load case.
+    let mut selected_capacity = capacity_at(upper)?;
     for _ in 0..36 {
         let middle = 0.5 * (lower + upper);
-        if capacity_at(middle)? >= target {
+        let capacity = capacity_at(middle)?;
+        if capacity >= target {
             upper = middle;
+            selected_capacity = capacity;
         } else {
             lower = middle;
         }
     }
-    design.fuselage_length_m = upper;
-    Ok(())
+    if selected_capacity >= target {
+        design.fuselage_length_m = upper;
+        return Ok(());
+    }
+
+    // Rescue the rare non-monotone row-packing bracket.  Search the actual
+    // specification interval at a bounded 0.10 m resolution and select the
+    // first sampled length that seats the complete requested load.  This is
+    // deliberately a fallback after bisection so normal optimizer candidates
+    // retain the cheap 36-evaluation path.  The returned length is a real
+    // geometry value and is re-evaluated by the ordinary builder below.
+    const DISCRETE_CAPACITY_SCAN_STEP_M: f64 = 0.10;
+    let span = spec.upper - spec.lower;
+    let samples = (span / DISCRETE_CAPACITY_SCAN_STEP_M).ceil() as usize;
+    for index in 0..=samples {
+        let length = (spec.lower + index as f64 * DISCRETE_CAPACITY_SCAN_STEP_M).min(spec.upper);
+        if capacity_at(length)? >= target {
+            design.fuselage_length_m = length;
+            return Ok(());
+        }
+    }
+
+    // The upper endpoint was already proven feasible. Reaching this branch
+    // means the interval or the geometry builder changed between calls; keep
+    // the failure typed instead of returning a short aircraft.
+    Err(geometry_build_failure())
 }
 
 /// Run the two-pass mass analysis at `config.requirements.mtow_kg`, the
@@ -251,24 +277,43 @@ type StructuralMassAnalysis = (
     StructuralInventory,
 );
 
-fn reclose_mass(
-    mut masses: MassBreakdown,
-    mut coords: MassCoordinates,
-    requirements: &alas_config::DesignRequirements,
-    payload_summary: Option<&PayloadLayoutSummary>,
-) -> (MassBreakdown, MassCoordinates, [f64; 3]) {
-    if let Some(layout) = payload_summary.filter(|layout| layout.total_mass > 0.0) {
-        masses.payload = layout.total_mass;
-        coords.payload = [layout.cg_x, layout.cg_y, coords.payload[2]];
-    }
-    let oew: f64 = OEW_KEYS
-        .iter()
-        .map(|&key| masses.get(key).unwrap_or(0.0))
-        .sum();
-    masses.fuel = requirements.mtow_kg - oew - masses.payload;
-    let cg = calculate_physical_cg(&masses, &coords);
-    (masses, coords, cg)
-}
-
-include!("build_wing_geometry.rs");
 include!("build_structural.rs");
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn clean_sheet_sizing_rebuilds_with_every_requested_passenger_seated() {
+        let mut config = AlasConfig::default();
+        config.requirements.num_passengers = 340;
+        let mut design = DesignVector::default();
+
+        size_fuselage_from_cabin(&config, &mut design)
+            .unwrap_or_else(|failure| panic!("{}", failure.reason));
+        let plane = AircraftBuilder::new(Some(config.geometry.clone()))
+            .build(Some(&design), false)
+            .expect("sized clean-sheet geometry");
+        let layout = build_payload_layout(&plane, &config, 0.0, 0.0)
+            .expect("sized clean-sheet payload layout");
+
+        match layout.summary {
+            LayoutSummary::Passenger(summary) => {
+                // Capacity is always dynamic -- resolved from the cabin
+                // class mix and the sized fuselage's actual geometry, never
+                // forced to an exact copied count -- so the sized cabin may
+                // seat more than the 340-passenger floor `size_fuselage_
+                // from_cabin` bisected against, never fewer.
+                assert!(
+                    summary.total_pax >= 340,
+                    "the sized clean-sheet cabin must seat at least the requested passenger floor: got {}",
+                    summary.total_pax
+                );
+                assert_eq!(summary.unseated_pax, 0);
+                assert_eq!(summary.total_pax, summary.seated_pax);
+                assert!(summary.seated_pax >= config.requirements.num_passengers);
+            }
+            LayoutSummary::Cargo(_) => panic!("clean-sheet passenger sizing built cargo"),
+        }
+    }
+}

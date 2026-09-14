@@ -169,6 +169,9 @@ pub fn solve_dispatch(
 /// [`evaluate_bracketed`]. Only a model that cannot be evaluated anywhere
 /// between the zero-fuel mass and the seed, or between it and MTOW when that
 /// is checked, is reported as [`DispatchStatus::ModelFailed`].
+// Each argument is a separately reported dispatch input (masses, range,
+// reserves, the model); bundling them would hide which one a caller sets.
+#[allow(clippy::too_many_arguments)]
 pub fn solve_dispatch_with_initial_guess(
     zero_fuel_mass_kg: f64,
     initial_guess_kg: f64,
@@ -290,6 +293,9 @@ fn evaluate_bracketed(
     Ok((low, low_plan))
 }
 
+// The bracketed solve takes the same separately reported dispatch inputs as
+// its public caller, plus the bracket itself.
+#[allow(clippy::too_many_arguments)]
 fn try_solve(
     zero_fuel_mass_kg: f64,
     initial_guess_kg: f64,

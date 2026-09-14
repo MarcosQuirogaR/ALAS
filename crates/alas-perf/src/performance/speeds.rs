@@ -21,7 +21,12 @@ pub struct VSpeeds {
     pub v_stall_land_ms: f64,
     /// Minimum control speed (FAR 25.149).
     pub v_mc_ms: f64,
-    /// Decision speed (simplified, floored at `VMC`).
+    /// Conceptual decision-speed proxy (floored at airborne `VMC`).
+    ///
+    /// This is not a certified 14 CFR 25.107(a) `V1`: the product model has
+    /// no `VEF`, `VMCG`, engine-out acceleration, or pilot reaction-time
+    /// inputs, so it cannot evaluate the required `VEF + speed gained`
+    /// relation.
     pub v1_ms: f64,
     /// Rotation speed (FAR 25.107).
     pub v_r_ms: f64,
@@ -37,11 +42,11 @@ pub struct VSpeeds {
 /// `compute_v_speeds`.
 ///
 /// The multiplicative factors come from `perf_config` rather than being fixed,
-/// so they can be calibrated to a real type. `V1` and `VR` carry explicit
-/// floors: `VR` is the larger of its `VMC` and stall multiples (FAR 25.107),
-/// and `V1` is floored at `VMC` because the decision speed can never sit below
-/// minimum control speed even when a tight rotation schedule would push it
-/// there.
+/// so they can be calibrated to a real type. `VR` carries explicit floors: it
+/// is the larger of its `VMC` and stall multiples (FAR 25.107). The returned
+/// `V1` is only a conceptual proxy floored at airborne `VMC`; a certified V1
+/// requires the `VEF`, `VMCG`, engine-out acceleration, and reaction-time
+/// data required by 14 CFR 25.107(a).
 pub fn compute_v_speeds(
     mtow_kg: f64,
     wing_area_m2: f64,

@@ -24,7 +24,9 @@
 //! `inertia_tensor` equals [`InertiaTensor::matrix`] while its `Ixy` is the
 //! negative of `pxy` here.
 
-use std::fmt;
+mod error;
+
+pub use error::LedgerError;
 
 /// A symmetric inertia tensor about a stated point, in kg m^2.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
@@ -294,7 +296,11 @@ impl MassRole {
 }
 
 /// Where a ledger item's mass came from.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// Every variant is a plain tag (the correlation name is a `&'static str`),
+/// so this is `Copy`: a method label can be handed to several ledger rows
+/// without cloning.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MassMethod {
     /// A published empirical correlation, named by source.
     Correlation(&'static str),
@@ -342,55 +348,6 @@ impl MassItem {
         }
     }
 }
-
-/// Why a ledger cannot be used.
-#[derive(Debug, Clone, PartialEq)]
-pub enum LedgerError {
-    /// An item has a negative, NaN or infinite mass.
-    InvalidMass {
-        /// The offending item.
-        id: String,
-        /// Its mass.
-        mass_kg: f64,
-    },
-    /// An item has a non-finite position.
-    InvalidPosition {
-        /// The offending item.
-        id: String,
-    },
-    /// An item's centroidal tensor is not a physical tensor.
-    InvalidInertia {
-        /// The offending item.
-        id: String,
-    },
-    /// Two items share an identifier.
-    DuplicateId {
-        /// The repeated identifier.
-        id: String,
-    },
-}
-
-impl fmt::Display for LedgerError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::InvalidMass { id, mass_kg } => {
-                write!(formatter, "ledger item {id} has invalid mass {mass_kg} kg")
-            }
-            Self::InvalidPosition { id } => {
-                write!(formatter, "ledger item {id} has a non-finite position")
-            }
-            Self::InvalidInertia { id } => {
-                write!(
-                    formatter,
-                    "ledger item {id} has a non-physical inertia tensor"
-                )
-            }
-            Self::DuplicateId { id } => write!(formatter, "ledger item {id} is listed twice"),
-        }
-    }
-}
-
-impl std::error::Error for LedgerError {}
 
 /// The complete list of items.
 #[derive(Debug, Clone, PartialEq, Default)]

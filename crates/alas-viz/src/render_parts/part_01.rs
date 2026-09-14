@@ -5,7 +5,7 @@ use alas_report::scene::{
     text_line_center_offsets, visual_title, Color, Point2D, Scene, SceneElement, Stroke, TextAlign,
     TextBaseline, CSS_PIXELS_PER_POINT, TEXT_LINE_HEIGHT_EM,
 };
-use egui::epaint::{CircleShape, PathShape, RectShape, Rounding, TextShape};
+use egui::epaint::{CircleShape, Mesh, PathShape, RectShape, Rounding, TextShape};
 use egui::{pos2, vec2, Color32, FontFamily, FontId, Pos2, Rect, Shape, Stroke as EguiStroke};
 use plotters::style::{Color as PlottersColor, RGBColor, ShapeStyle, TextStyle};
 use plotters_backend::{
@@ -98,7 +98,7 @@ pub fn render_scene_to_shapes_with_context(
 ) -> Vec<Shape> {
     let mut backend = EguiBackend::new(scene, transform, context.clone());
 
-    if let Some(bg) = scene.background {
+    if let (true, Some(bg)) = (scene.paint_background, scene.background) {
         backend.fill_rect((0, 0), backend.to_coord([scene.width, scene.height]), bg);
     }
 
@@ -110,6 +110,84 @@ pub fn render_scene_to_shapes_with_context(
     }
 
     backend.shapes
+}
+
+/// The largest miter factor the egui closed-path feathering may apply before
+/// a polygon is tessellated without it. A corner whose adjacent edges turn by
+/// `theta` gets its feathering vertices displaced by `1 / cos(theta / 2)`
+/// times the feathering width; this bound keeps that under four pixels
+/// (interior angles down to about 29 degrees).
+const MAX_MITER_FACTOR: f32 = 4.0;
+
+/// Screen-space polygon vertices with consecutive duplicates removed and the
+/// closing vertex dropped, so every edge has a defined direction.
+fn sanitized_polygon(points: impl IntoIterator<Item = Pos2>) -> Vec<Pos2> {
+    const MIN_EDGE: f32 = 1e-3;
+    let mut out: Vec<Pos2> = Vec::new();
+    for p in points {
+        if !p.x.is_finite() || !p.y.is_finite() {
+            continue;
+        }
+        if out.last().is_some_and(|last| last.distance(p) < MIN_EDGE) {
+            continue;
+        }
+        out.push(p);
+    }
+    while out.len() > 1 && out[0].distance(out[out.len() - 1]) < MIN_EDGE {
+        out.pop();
+    }
+    out
+}
+
+/// Whether the egui miter feathering stays bounded on every corner.
+///
+/// egui places the feathering vertices of a closed path at
+/// `normal / |normal|^2`, where `normal` is the mean of the two adjacent
+/// edge normals. A lofted face seen edge-on projects to a sliver whose
+/// consecutive edges nearly reverse, so `normal` tends to zero and the
+/// vertices fly off the viewport (or become NaN for an exact reversal).
+fn polygon_corners_are_well_conditioned(points: &[Pos2]) -> bool {
+    let n = points.len();
+    if n < 3 {
+        return false;
+    }
+    let min_length_sq = 1.0 / (MAX_MITER_FACTOR * MAX_MITER_FACTOR);
+    (0..n).all(|i| {
+        let prev = points[(i + n - 1) % n];
+        let here = points[i];
+        let next = points[(i + 1) % n];
+        let n0 = (here - prev).normalized().rot90();
+        let n1 = (next - here).normalized().rot90();
+        let normal = (n0 + n1) * 0.5;
+        normal.length_sq() >= min_length_sq
+    })
+}
+
+/// A polygon the feathered egui path cannot tessellate safely: the fill as a
+/// fan mesh without feathering and the outline as independent segments,
+/// neither of which uses a corner miter.
+fn sliver_polygon_shapes(points: &[Pos2], fill_color: Color32, outline: EguiStroke) -> Vec<Shape> {
+    let mut shapes = Vec::new();
+    if fill_color != Color32::TRANSPARENT {
+        let mut mesh = Mesh::default();
+        for &p in points {
+            mesh.colored_vertex(p, fill_color);
+        }
+        for i in 2..points.len() as u32 {
+            mesh.add_triangle(0, i - 1, i);
+        }
+        shapes.push(Shape::mesh(mesh));
+    }
+    if outline != EguiStroke::NONE {
+        let n = points.len();
+        for i in 0..n {
+            shapes.push(Shape::line_segment(
+                [points[i], points[(i + 1) % n]],
+                outline,
+            ));
+        }
+    }
+    shapes
 }
 
 struct EguiBackend<'a> {
@@ -188,14 +266,14 @@ impl<'a> EguiBackend<'a> {
                 fill,
                 stroke,
             } => {
-                if points.len() < 3 {
+                // Sub-pixel positions: rounding to whole pixels collapses
+                // thin faces into exactly reversed edges, whose corner
+                // normals divide by zero inside the egui tessellator.
+                let egui_points =
+                    sanitized_polygon(points.iter().map(|p| self.transform.to_screen(*p)));
+                if egui_points.len() < 3 {
                     return;
                 }
-                let coords = points.iter().map(|p| self.to_coord(*p)).collect::<Vec<_>>();
-                let egui_points = coords
-                    .iter()
-                    .map(|(x, y)| pos2(*x as f32, *y as f32))
-                    .collect::<Vec<_>>();
                 let fill_color = fill
                     .map(|f| to_egui_color(&f.color))
                     .unwrap_or(Color32::TRANSPARENT);
@@ -203,11 +281,16 @@ impl<'a> EguiBackend<'a> {
                     .as_ref()
                     .map(|s| to_egui_stroke(s, self.transform.scale))
                     .unwrap_or(EguiStroke::NONE);
-                self.shapes.push(Shape::Path(PathShape::convex_polygon(
-                    egui_points,
-                    fill_color,
-                    outline,
-                )));
+                if polygon_corners_are_well_conditioned(&egui_points) {
+                    self.shapes.push(Shape::Path(PathShape::convex_polygon(
+                        egui_points,
+                        fill_color,
+                        outline,
+                    )));
+                } else {
+                    self.shapes
+                        .extend(sliver_polygon_shapes(&egui_points, fill_color, outline));
+                }
             }
             SceneElement::Rect {
                 x,

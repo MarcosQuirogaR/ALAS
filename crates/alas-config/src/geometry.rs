@@ -102,6 +102,24 @@ impl Default for GeometryConfig {
     }
 }
 
+impl GeometryConfig {
+    /// Restore the spanwise subdivision the frozen Python builder used.
+    ///
+    /// `n_subdivisions` changed meaning, not just value: the reference reads
+    /// it as a per-section multiplier, the product as an absolute panel count
+    /// across the whole surface (`alas_geom::aircraft::spanwise`). Eight
+    /// sections-worth and twenty-four panels are the same mesh on a
+    /// three-section planform and a different one everywhere else, so a
+    /// reference replay has to restore the ratio as well as the rule.
+    ///
+    /// Literals rather than a second `Default`, so that moving the product
+    /// count cannot drag the frozen fixtures along with it.
+    pub fn restore_reference_spanwise_mesh(&mut self) {
+        self.wing.n_subdivisions = 8;
+        self.empennage.n_subdivisions = 6;
+    }
+}
+
 // A test asserts on values it constructed here directly, so a failed unwrap
 // or expect is the assertion failing, not a library invariant being broken.
 #[allow(clippy::unwrap_used, clippy::expect_used)]

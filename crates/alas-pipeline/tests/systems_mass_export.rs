@@ -5,7 +5,7 @@
 
 use std::fs;
 
-use alas_config::AlasConfig;
+use alas_config::{AlasConfig, MassArchitecture};
 use alas_exec::RunEnvironment;
 use alas_pipeline::{DesignPipeline, PipelineOptions};
 
@@ -16,6 +16,11 @@ fn exported_compatibility_mass_groups_keep_fraction_provenance_and_absolute_scal
     let _ = fs::remove_dir_all(&output);
 
     let mut config = AlasConfig::default();
+    // This fixture audits the retained Torenbeek/fraction export. Make the
+    // comparison architecture explicit now that pure FLOPS owns the default
+    // production path.
+    config.mass_model.mass_architecture = MassArchitecture::LegacyReferenceCompatibleComparison;
+    config.mass_model.apply_architecture();
     config.mission.enabled = false;
     config.structures.enabled = false;
     config.mses.enabled = false;

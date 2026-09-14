@@ -350,10 +350,10 @@ pub struct WingConfig {
     )]
     pub tip_airfoil: String,
 
-    /// How finely each wing section is panelled for the vortex lattice.
+    /// How many spanwise panels the whole wing semispan is meshed into.
     #[config(
         label = "Wing VLM panel count",
-        help = "Spanwise panel refinement per wing section for the vortex-lattice solver. Higher = more accurate, slower."
+        help = "Spanwise panels across the whole wing semispan for the vortex-lattice solver. This is an absolute count, not a count per section: a planform with a side-of-body station and a kink gets the same mesh density as one without, and adding a station no longer changes the panel count underneath a search. Every planform station -- root, side-of-body, kink, tip -- is always kept as a panel edge whatever the count, so refining the mesh never averages a kink away. The default of 24 is converged: a twelve-fold refinement moves the trimmed cruise attitude by 0.01 deg."
     )]
     pub n_subdivisions: i64,
 }
@@ -381,7 +381,7 @@ impl Default for WingConfig {
             outboard_le_sweep_deg: None,
             root_airfoil: "SC2-0714".to_owned(),
             tip_airfoil: "naca2410".to_owned(),
-            n_subdivisions: 8,
+            n_subdivisions: 24,
         }
     }
 }

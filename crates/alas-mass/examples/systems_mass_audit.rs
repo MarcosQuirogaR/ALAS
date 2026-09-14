@@ -3,17 +3,18 @@
 
 //! Write a transparent cross-preset systems-mass audit.
 //!
-//! The product continues to use the reference-compatible ALAS mass fractions.
-//! This example measures those results against the separately translated
-//! mission analysis model subsystem correlation without connecting either result to the
-//! product feasibility path. Its two mission analysis model accessory cases make the reference
-//! bridge's known `"long range"` versus `"long-range"` mismatch visible.
+//! This compatibility audit measures the explicitly selected legacy
+//! reference-compatible ALAS mass fractions against the separately translated
+//! mission analysis model subsystem correlation without connecting either
+//! result to the pure-FLOPS product feasibility path. Its two mission analysis
+//! model accessory cases make the reference bridge's known `"long range"`
+//! versus `"long-range"` mismatch visible.
 
 use std::error::Error;
 use std::fs;
 use std::path::PathBuf;
 
-use alas_config::{presets, AlasConfig, SystemsMassMethod};
+use alas_config::{presets, AlasConfig, MassArchitecture, SystemsMassMethod};
 use alas_geom::builder::AircraftBuilder;
 use alas_mass::breakdown::{
     calculate_component_masses, calculate_component_masses_checked, ComponentMassError,
@@ -57,7 +58,9 @@ fn flops_selection_json(
     config: &AlasConfig,
 ) -> Value {
     let mut mass_model = config.mass_model.clone();
+    mass_model.mass_architecture = MassArchitecture::PureFlopsTransportV1;
     mass_model.systems_mass_method = SystemsMassMethod::FlopsTransportV1;
+    mass_model.apply_architecture();
     match calculate_component_masses_checked(
         airplane,
         &config.requirements,
@@ -84,6 +87,18 @@ fn flops_selection_json(
             "reasons": [format!("geometry: {error}")],
             "fallback_used": false,
         }),
+        Err(ComponentMassError::FlopsIncompleteAirframe) => json!({
+            "method": "flops_transport_v1",
+            "status": "unverified",
+            "reasons": ["incomplete_flops_airframe"],
+            "fallback_used": false,
+        }),
+        Err(ComponentMassError::IncoherentMassArchitecture { .. }) => json!({
+            "method": "flops_transport_v1",
+            "status": "unverified",
+            "reasons": ["incoherent_mass_architecture"],
+            "fallback_used": false,
+        }),
     }
 }
 
@@ -91,17 +106,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut aircraft = Vec::new();
     for preset_name in presets::available() {
         let preset = presets::get(preset_name).map_err(std::io::Error::other)?;
-        let mut config = AlasConfig {
-            preset: preset.name.to_owned(),
-            geometry: preset.geometry.clone(),
-            requirements: preset.requirements.clone(),
-            landing_gear: preset.landing_gear.clone(),
-            ..Default::default()
-        };
-        if let Some(mass_model) = &preset.mass_model {
-            config.mass_model = mass_model.clone();
-        }
-        config.geometry.engine.apply_engine_spec();
+        let config = AlasConfig::from_value(&serde_json::json!({ "preset": preset_name }))?;
 
         let airplane = AircraftBuilder::new(Some(config.geometry.clone()))
             .build(Some(&preset.design_vector), true)
@@ -151,11 +156,14 @@ fn main() -> Result<(), Box<dyn Error>> {
             main_wing.reference_area(),
         );
         let frozen_operating_items = estimate_operating_items(passengers, AccessoriesType::Other);
+        let mut legacy_mass_model = config.mass_model.clone();
+        legacy_mass_model.mass_architecture = MassArchitecture::LegacyReferenceCompatibleComparison;
+        legacy_mass_model.apply_architecture();
         let product = calculate_component_masses(
             &airplane,
             &config.requirements,
             &config.geometry,
-            Some(&config.mass_model),
+            Some(&legacy_mass_model),
         );
         let product_group_kg = product.systems + product.furnishings;
         let default_systems_kg = alas_config::MassModelConfig::default().systems_mass_fraction
@@ -187,8 +195,9 @@ fn main() -> Result<(), Box<dyn Error>> {
             "product_fraction_buildup": {
                 "method": "reference_compatible_mass_fraction_of_mtow",
                 "method_status": fraction_method_status,
-                "systems_fraction_of_mtow": config.mass_model.systems_mass_fraction,
-                "furnishings_fraction_of_mtow": config.mass_model.furnishings_mass_fraction,
+                "mass_architecture": legacy_mass_model.mass_architecture.as_str(),
+                "systems_fraction_of_mtow": legacy_mass_model.systems_mass_fraction,
+                "furnishings_fraction_of_mtow": legacy_mass_model.furnishings_mass_fraction,
                 "systems_kg": product.systems,
                 "furnishings_and_operations_kg": product.furnishings,
                 "combined_kg": product_group_kg,
@@ -231,15 +240,15 @@ fn main() -> Result<(), Box<dyn Error>> {
         "status": "compatibility_audit_with_explicit_flops_boundary",
         "generated_by": "cargo run -p alas-mass --example systems_mass_audit",
         "findings": [
-            "The product systems and furnishings groups are fractions of MTOW, not Torenbeek correlations.",
-            "Torenbeek is used by the product only for the wing, stabilizers, and simple fuselage terms.",
+            "The compatibility product column is the explicitly selected legacy reference-compatible buildup; it is not the pure-FLOPS production result.",
+            "The legacy buildup uses Torenbeek-style wing, stabilizer and fuselage terms plus its configured fraction groups.",
             "The translated mission analysis model subsystem correlation is independently parity-tested but remains diagnostic only.",
             "The NASA FLOPS transport method has a checked product entry point; missing architecture data are typed as unverified and never fall back to fractions.",
             "The source mission analysis model bridge's long range accessory string falls through to Other; the counterfactual records the magnitude without correcting or using it.",
             "The A220 preset's 13% systems and 12% furnishings fractions close an OEW gap; that is outcome calibration, not independent subsystem evidence.",
         ],
         "method_provenance": {
-            "product": "alas/physics/mass.py calculate_component_masses; frozen parity baseline",
+            "product": "alas/physics/mass.py calculate_component_masses; explicit legacy_reference_compatible_comparison baseline",
             "mission": "mission analysis model 2.5.2 New mission analysis model transport systems and operating-items correlations; translated at Tier::Closed",
             "flops_transport_v1": {
                 "source": "NASA/TM-2017-219627/Vol. I, Wells, Horvath, McCullers, 2017",

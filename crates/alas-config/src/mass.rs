@@ -4,44 +4,52 @@
 // Ported from alas/config/mass_config.py
 // Reference: alas @ rust-port-baseline.
 
-//! Empirical fractions and parameters of the mass buildup.
+//! Mass architecture and parameters of the production and comparison builds.
 //!
-//! Conceptual-design mass estimation is a set of statistical fits to aircraft
-//! that were actually built, so almost every number here is a fraction of
-//! maximum takeoff weight taken from a table rather than something derived.
-//! The defaults follow Torenbeek (*Synthesis of Subsonic Airplane Design*,
-//! Delft University Press, 1982) and Raymer (*Aircraft Design: A Conceptual
-//! Approach*, 5th ed., table 15.2) for transports certified to CS-25 or
-//! FAR-25.
-//!
-//! Fractions of maximum takeoff weight are circular by nature -- the weight
-//! depends on the fractions and the fractions are applied to the weight --
-//! which is why they are exposed: calibrating them against a known aircraft
-//! is how the buildup is made to agree with reality, and doing that in the
-//! settings beats doing it in the source.
+//! The product default is the single, checked NASA FLOPS transport
+//! architecture. The historical Torenbeek/fraction values remain serialized
+//! for an explicit reference-compatible comparison and migration, but they
+//! do not participate in production evaluation or silently fill missing FLOPS
+//! inputs.
 
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    ConfigNode, FlopsStructureConfig, FlopsTransportConfig, PropulsionMassMethod,
-    StructuralMassMethod, SystemsMassMethod,
+    legacy_mass_model_schema_version, ConfigNode, FlopsStructureConfig, FlopsTransportConfig,
+    MassArchitecture, MassArchitectureMigration, PropulsionMassMethod, StructuralMassMethod,
+    SystemsMassMethod, MASS_MODEL_SCHEMA_VERSION,
 };
 
 /// Tunable mass fractions and structural parameters.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ConfigNode)]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, from = "MassModelConfigWire")]
 pub struct MassModelConfig {
-    /// Method used for systems, equipment, and operating-item mass.
-    #[serde(
-        default,
-        skip_serializing_if = "SystemsMassMethod::is_reference_compatible"
-    )]
+    /// Version of this node's own schema; see [`MASS_MODEL_SCHEMA_VERSION`].
+    ///
+    /// A saved file that predates the single mass architecture states no
+    /// version, so it reads back as 1 and
+    /// [`MassModelConfig::normalize_architecture`] migrates it.
+    #[serde(default = "legacy_mass_model_schema_version")]
+    #[config(skip)]
+    pub schema_version: u32,
+
+    /// Which method owns every production mass group.
+    #[serde(default)]
     #[config(
         advanced,
-        options = SystemsMassMethod,
-        label = "Systems mass method",
-        help = "Versioned systems-mass method: frozen Python-compatible MTOW fractions or the NASA FLOPS transport component buildup."
+        options = MassArchitecture,
+        label = "Mass architecture",
+        help = "The one method that owns every mass group. 'Pure FLOPS transport v1' is the product model: the NASA FLOPS conventional-transport equations own the wing, tails, fuselage, gear, nacelles, propulsion, systems, furnishings and operating items, and a missing input is reported rather than replaced. 'Legacy reference-compatible comparison' is the frozen Torenbeek/fraction buildup, kept only as a comparison and regression control -- nothing falls back to it."
     )]
+    pub mass_architecture: MassArchitecture,
+
+    /// Method used for systems, equipment, and operating-item mass.
+    ///
+    /// Derived from [`Self::mass_architecture`]; not independently selectable
+    /// and no longer written to saved files. Retained as a field because the
+    /// mass buildup and the ledger labels read it per group.
+    #[serde(default, skip_serializing)]
+    #[config(skip)]
     pub systems_mass_method: SystemsMassMethod,
 
     /// Physical architecture required by the FLOPS transport method.
@@ -54,29 +62,19 @@ pub struct MassModelConfig {
     pub flops_transport: FlopsTransportConfig,
 
     /// Method used for the wing, tail, fuselage and landing-gear mass.
-    #[serde(
-        default,
-        skip_serializing_if = "StructuralMassMethod::is_reference_compatible"
-    )]
-    #[config(
-        advanced,
-        options = StructuralMassMethod,
-        label = "Structural mass method",
-        help = "Versioned structural-group method: the frozen Torenbeek wing, tail and fuselage methods with a landing-gear fraction, or the NASA FLOPS transport structural equations evaluated on the built geometry."
-    )]
+    ///
+    /// Derived from [`Self::mass_architecture`]; see
+    /// [`Self::systems_mass_method`].
+    #[serde(default, skip_serializing)]
+    #[config(skip)]
     pub structural_mass_method: StructuralMassMethod,
 
     /// Method used for the installed propulsion mass.
-    #[serde(
-        default,
-        skip_serializing_if = "PropulsionMassMethod::is_reference_compatible"
-    )]
-    #[config(
-        advanced,
-        options = PropulsionMassMethod,
-        label = "Propulsion mass method",
-        help = "Versioned propulsion-group method: the frozen thrust-to-weight correlation with an installation factor, or the NASA FLOPS scaled engine, thrust reverser, engine controls, starter and fuel-system equations."
-    )]
+    ///
+    /// Derived from [`Self::mass_architecture`]; see
+    /// [`Self::systems_mass_method`].
+    #[serde(default, skip_serializing)]
+    #[config(skip)]
     pub propulsion_mass_method: PropulsionMassMethod,
 
     /// Technology factors and overrides for the FLOPS airframe equations.
@@ -98,69 +96,69 @@ pub struct MassModelConfig {
     )]
     pub geometric_component_stations: bool,
 
-    /// Share of maximum takeoff weight the wing structure must carry.
+    /// Legacy Torenbeek share of maximum takeoff weight the wing structure must carry.
     #[config(
         label = "Wing suspended-mass fraction",
-        help = "Fraction of MTOW treated as 'suspended' mass in the Torenbeek wing structural formula (everything the wing structure must carry other than itself). Typical commercial transport: 0.70-0.78."
+        help = "Legacy comparison only: fraction of MTOW treated as 'suspended' mass in the Torenbeek wing structural formula (everything the wing structure must carry other than itself). Typical commercial transport: 0.70-0.78."
     )]
     pub suspended_mass_fraction: f64,
 
-    /// Design airspeed with the flaps out.
+    /// Legacy Torenbeek design airspeed with the flaps out.
     #[config(
         label = "Max airspeed with flaps extended",
         unit = "m/s",
-        help = "Design airspeed with flaps extended, fed into the Torenbeek wing-mass formula."
+        help = "Legacy comparison only: design airspeed with flaps extended, fed into the Torenbeek wing-mass formula."
     )]
     pub max_airspeed_for_flaps_ms: f64,
 
-    /// Maximum flap deflection.
+    /// Legacy Torenbeek maximum flap deflection.
     #[config(
         label = "Max take-off flap deflection",
         unit = "deg",
-        help = "Maximum flap deflection angle, fed into the Torenbeek wing-mass formula."
+        help = "Legacy comparison only: maximum flap deflection angle, fed into the Torenbeek wing-mass formula."
     )]
     pub flap_deflection_angle_deg: f64,
 
-    /// Landing gear mass as a share of maximum takeoff weight.
+    /// Legacy landing gear mass as a share of maximum takeoff weight.
     #[config(
         label = "Landing-gear mass fraction",
-        help = "Landing gear mass as a fraction of MTOW. Raymer Table 15.2: ~4% for commercial jet transports."
+        help = "Legacy comparison only: landing gear mass as a fraction of MTOW. Raymer Table 15.2: ~4% for commercial jet transports."
     )]
     pub landing_gear_mass_fraction: f64,
 
-    /// Engine thrust-to-weight ratio used to size dry engine mass.
+    /// Legacy engine thrust-to-weight ratio used to size dry engine mass.
     #[config(
         label = "Engine thrust-to-weight factor",
-        help = "Dry engine mass is estimated as thrust / (this factor * g). Historical engine thrust-to-weight ratios are ~5-7, so this factor is typically ~6."
+        help = "Legacy comparison only: dry engine mass is estimated as thrust / (this factor * g). Historical engine thrust-to-weight ratios are ~5-7, so this factor is typically ~6."
     )]
     pub propulsion_twr_factor: f64,
 
-    /// Multiplier on dry engine mass for everything installed around it.
+    /// Legacy multiplier on dry engine mass for everything installed around it.
     #[config(
         label = "Propulsion installation overhead",
-        help = "Multiplier on dry engine mass accounting for pylon, cowling, fire suppression and other installed accessories."
+        help = "Legacy comparison only: multiplier on dry engine mass accounting for pylon, cowling, fire suppression and other installed accessories."
     )]
     pub propulsion_installation_factor: f64,
 
-    /// Propulsion mass fraction used when the engine is not in the database.
+    /// Legacy propulsion mass fraction used when the engine is not in the database.
     #[config(
         label = "Propulsion mass fallback fraction",
-        help = "Fallback propulsion mass as a fraction of MTOW, used only if the selected engine isn't found in the database."
+        help = "Legacy comparison only: fallback propulsion mass as a fraction of MTOW, used only if the selected engine isn't found in the database."
     )]
     pub propulsion_mass_fallback_fraction: f64,
 
-    /// Systems and equipment as a share of maximum takeoff weight.
+    /// Legacy systems and equipment share of maximum takeoff weight.
     #[config(
         label = "Systems & equipment mass fraction",
-        help = "Avionics, electrical, ECS, APU, etc. as a fraction of MTOW. Raymer Table 15.2: 9-13% for commercial transports."
+        help = "Legacy comparison only: avionics, electrical, ECS, APU, etc. as a fraction of MTOW. Raymer Table 15.2: 9-13% for commercial transports."
     )]
     pub systems_mass_fraction: f64,
 
-    /// Furnishings and operational items as a share of maximum takeoff
+    /// Legacy furnishings and operational items share of maximum takeoff
     /// weight.
     #[config(
         label = "Furnishings & operations mass fraction",
-        help = "Passenger seats, galleys, lavatories, insulation, crew, paint, and operational empty items as a fraction of MTOW. Typically 10-14% for passenger transports."
+        help = "Legacy comparison only: passenger seats, galleys, lavatories, insulation, crew, paint, and operational empty items as a fraction of MTOW. Typically 10-14% for passenger transports."
     )]
     pub furnishings_mass_fraction: f64,
 
@@ -232,6 +230,126 @@ pub struct MassModelConfig {
     pub fuel_tank_usable_fraction: f64,
 }
 
+/// Deserialization representation for [`MassModelConfig`].
+///
+/// The three pre-version-2 selectors are deliberately kept in this wire
+/// object even though current files omit them.  A current file carries
+/// `mass_architecture`, so the derived selectors can be repaired immediately
+/// after decoding; a legacy file omits that field and the selectors remain
+/// available to [`MassModelConfig::normalize_architecture`] during the
+/// configuration migration path.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+struct MassModelConfigWire {
+    #[serde(default = "legacy_mass_model_schema_version")]
+    schema_version: u32,
+    mass_architecture: Option<MassArchitecture>,
+    systems_mass_method: SystemsMassMethod,
+    #[serde(default = "FlopsTransportConfig::working_default")]
+    flops_transport: FlopsTransportConfig,
+    structural_mass_method: StructuralMassMethod,
+    propulsion_mass_method: PropulsionMassMethod,
+    flops_structure: FlopsStructureConfig,
+    geometric_component_stations: bool,
+    suspended_mass_fraction: f64,
+    max_airspeed_for_flaps_ms: f64,
+    flap_deflection_angle_deg: f64,
+    landing_gear_mass_fraction: f64,
+    propulsion_twr_factor: f64,
+    propulsion_installation_factor: f64,
+    propulsion_mass_fallback_fraction: f64,
+    systems_mass_fraction: f64,
+    furnishings_mass_fraction: f64,
+    cabin_payload_density_kg_m: f64,
+    nlg_x_fraction: f64,
+    mlg_x_fraction_mac: f64,
+    pct_load_nlg_max: f64,
+    pct_load_mlg_max: f64,
+    pct_load_nlg_min: f64,
+    mlw_fraction_mtow: f64,
+    fuel_density_kg_m3: f64,
+    fuel_tank_usable_fraction: f64,
+}
+
+impl Default for MassModelConfigWire {
+    fn default() -> Self {
+        let defaults = MassModelConfig::default();
+        Self {
+            schema_version: defaults.schema_version,
+            // None lets the conversion distinguish a current architecture
+            // field from a legacy file that only has the three old selectors.
+            mass_architecture: None,
+            systems_mass_method: defaults.systems_mass_method,
+            flops_transport: defaults.flops_transport,
+            structural_mass_method: defaults.structural_mass_method,
+            propulsion_mass_method: defaults.propulsion_mass_method,
+            flops_structure: defaults.flops_structure,
+            geometric_component_stations: default_true(),
+            suspended_mass_fraction: defaults.suspended_mass_fraction,
+            max_airspeed_for_flaps_ms: defaults.max_airspeed_for_flaps_ms,
+            flap_deflection_angle_deg: defaults.flap_deflection_angle_deg,
+            landing_gear_mass_fraction: defaults.landing_gear_mass_fraction,
+            propulsion_twr_factor: defaults.propulsion_twr_factor,
+            propulsion_installation_factor: defaults.propulsion_installation_factor,
+            propulsion_mass_fallback_fraction: defaults.propulsion_mass_fallback_fraction,
+            systems_mass_fraction: defaults.systems_mass_fraction,
+            furnishings_mass_fraction: defaults.furnishings_mass_fraction,
+            cabin_payload_density_kg_m: defaults.cabin_payload_density_kg_m,
+            nlg_x_fraction: defaults.nlg_x_fraction,
+            mlg_x_fraction_mac: defaults.mlg_x_fraction_mac,
+            pct_load_nlg_max: defaults.pct_load_nlg_max,
+            pct_load_mlg_max: defaults.pct_load_mlg_max,
+            pct_load_nlg_min: defaults.pct_load_nlg_min,
+            mlw_fraction_mtow: defaults.mlw_fraction_mtow,
+            fuel_density_kg_m3: defaults.fuel_density_kg_m3,
+            fuel_tank_usable_fraction: defaults.fuel_tank_usable_fraction,
+        }
+    }
+}
+
+impl From<MassModelConfigWire> for MassModelConfig {
+    fn from(wire: MassModelConfigWire) -> Self {
+        let architecture = wire.mass_architecture.unwrap_or_default();
+        let has_current_architecture = wire.mass_architecture.is_some();
+        let mut model = Self {
+            schema_version: wire.schema_version,
+            mass_architecture: architecture,
+            systems_mass_method: wire.systems_mass_method,
+            flops_transport: wire.flops_transport,
+            structural_mass_method: wire.structural_mass_method,
+            propulsion_mass_method: wire.propulsion_mass_method,
+            flops_structure: wire.flops_structure,
+            geometric_component_stations: wire.geometric_component_stations,
+            suspended_mass_fraction: wire.suspended_mass_fraction,
+            max_airspeed_for_flaps_ms: wire.max_airspeed_for_flaps_ms,
+            flap_deflection_angle_deg: wire.flap_deflection_angle_deg,
+            landing_gear_mass_fraction: wire.landing_gear_mass_fraction,
+            propulsion_twr_factor: wire.propulsion_twr_factor,
+            propulsion_installation_factor: wire.propulsion_installation_factor,
+            propulsion_mass_fallback_fraction: wire.propulsion_mass_fallback_fraction,
+            systems_mass_fraction: wire.systems_mass_fraction,
+            furnishings_mass_fraction: wire.furnishings_mass_fraction,
+            cabin_payload_density_kg_m: wire.cabin_payload_density_kg_m,
+            nlg_x_fraction: wire.nlg_x_fraction,
+            mlg_x_fraction_mac: wire.mlg_x_fraction_mac,
+            pct_load_nlg_max: wire.pct_load_nlg_max,
+            pct_load_mlg_max: wire.pct_load_mlg_max,
+            pct_load_nlg_min: wire.pct_load_nlg_min,
+            mlw_fraction_mtow: wire.mlw_fraction_mtow,
+            fuel_density_kg_m3: wire.fuel_density_kg_m3,
+            fuel_tank_usable_fraction: wire.fuel_tank_usable_fraction,
+        };
+        // Current files carry one authoritative architecture.  Re-derive the
+        // compatibility fields so direct serde round-trips cannot create a
+        // hybrid in memory.  Legacy files intentionally retain their old
+        // selectors until `from_value_with_migration` can report the change.
+        if has_current_architecture || model.schema_version >= MASS_MODEL_SCHEMA_VERSION {
+            model.apply_architecture();
+        }
+        model
+    }
+}
+
 const fn default_true() -> bool {
     true
 }
@@ -239,20 +357,96 @@ const fn default_true() -> bool {
 impl MassModelConfig {
     /// Whether every group uses its frozen reference-compatible method, so
     /// the buildup needs none of the declared FLOPS architecture.
+    ///
+    /// This is the comparison architecture, not a product state.
     pub fn uses_reference_mass_methods(&self) -> bool {
-        self.systems_mass_method.is_reference_compatible()
-            && self.structural_mass_method.is_reference_compatible()
-            && self.propulsion_mass_method.is_reference_compatible()
+        !self.mass_architecture.is_pure_flops()
+    }
+
+    /// Force the three group selectors to agree with [`Self::mass_architecture`].
+    ///
+    /// The selectors are derived, but they are still ordinary struct fields a
+    /// caller can set directly, so the buildup asks for them here rather than
+    /// trusting that nobody did.
+    pub fn apply_architecture(&mut self) {
+        self.systems_mass_method = self.mass_architecture.systems_method();
+        self.structural_mass_method = self.mass_architecture.structural_method();
+        self.propulsion_mass_method = self.mass_architecture.propulsion_method();
+    }
+
+    /// Whether the three group selectors agree with the declared architecture.
+    ///
+    /// A production analysis must never run on a `false` here: it would mean
+    /// some group is being evaluated by a method the configuration does not
+    /// claim, and the ledger's own labels would be wrong.
+    pub fn architecture_is_coherent(&self) -> bool {
+        self.systems_mass_method == self.mass_architecture.systems_method()
+            && self.structural_mass_method == self.mass_architecture.structural_method()
+            && self.propulsion_mass_method == self.mass_architecture.propulsion_method()
+    }
+
+    /// Bring a loaded configuration up to [`MASS_MODEL_SCHEMA_VERSION`] and
+    /// report what that did to its mass method.
+    ///
+    /// A version-1 file carried three independent selectors. Reading them
+    /// back and re-deriving an architecture is the only way to honour what
+    /// the file actually asked for; a hybrid selection names no architecture
+    /// and is migrated to pure FLOPS rather than silently reconstructed as
+    /// one of its halves. The returned record is the thing a user interface
+    /// or an export shows -- this migration changes operating empty mass and
+    /// must not be invisible.
+    pub fn normalize_architecture(&mut self) -> MassArchitectureMigration {
+        let migration = if self.schema_version >= MASS_MODEL_SCHEMA_VERSION {
+            MassArchitectureMigration::None
+        } else {
+            let systems_was_flops = !self.systems_mass_method.is_reference_compatible();
+            let structure_was_flops = !self.structural_mass_method.is_reference_compatible();
+            let propulsion_was_flops = !self.propulsion_mass_method.is_reference_compatible();
+            match MassArchitecture::from_group_selection(
+                self.systems_mass_method,
+                self.structural_mass_method,
+                self.propulsion_mass_method,
+            ) {
+                Some(MassArchitecture::PureFlopsTransportV1) => {
+                    MassArchitectureMigration::LegacyPureFlopsPreserved
+                }
+                Some(MassArchitecture::LegacyReferenceCompatibleComparison) => {
+                    MassArchitectureMigration::LegacyDefaultsMovedToPureFlops
+                }
+                None => MassArchitectureMigration::LegacyHybridMigratedToPureFlops {
+                    systems_was_flops,
+                    structure_was_flops,
+                    propulsion_was_flops,
+                },
+            }
+        };
+        if migration != MassArchitectureMigration::None {
+            // Every version-1 selection lands on the production architecture.
+            // The legacy buildup stays reachable, but only by asking for it
+            // by name in a version-2 file, so an old default cannot quietly
+            // keep a run on a method the product no longer publishes.
+            self.mass_architecture = MassArchitecture::PureFlopsTransportV1;
+        }
+        self.schema_version = MASS_MODEL_SCHEMA_VERSION;
+        self.apply_architecture();
+        migration
     }
 }
 
 impl Default for MassModelConfig {
     fn default() -> Self {
+        let mass_architecture = MassArchitecture::default();
         Self {
-            systems_mass_method: SystemsMassMethod::ReferenceCompatibleFractions,
-            flops_transport: FlopsTransportConfig::default(),
-            structural_mass_method: StructuralMassMethod::ReferenceCompatible,
-            propulsion_mass_method: PropulsionMassMethod::ReferenceCompatible,
+            schema_version: MASS_MODEL_SCHEMA_VERSION,
+            mass_architecture,
+            systems_mass_method: mass_architecture.systems_method(),
+            // A product default must be runnable end to end under pure FLOPS.
+            // The transport type's own `Default` remains the empty contract
+            // so strict callers can detect missing declarations; this working
+            // scenario is explicit user-declared input with uncertainty.
+            flops_transport: FlopsTransportConfig::working_default(),
+            structural_mass_method: mass_architecture.structural_method(),
+            propulsion_mass_method: mass_architecture.propulsion_method(),
             flops_structure: FlopsStructureConfig::default(),
             geometric_component_stations: true,
             suspended_mass_fraction: 0.75,

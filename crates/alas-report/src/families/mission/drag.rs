@@ -8,7 +8,7 @@
 //! miscellaneous and total CD, overlaid vs. time.
 //!
 //! Every series reads `Conditions::drag_breakdown`, the whole drag buildup
-//! carried at each control point -- `CD_parasite`/`CD_induced`/
+//! carried at each control point. The `CD_parasite`/`CD_induced`/
 //! `CD_compressible`/`CD_miscellaneous`/`CD_total` are
 //! `db.parasite.total`/`db.induced.total`/`db.compressible.total`/
 //! `db.miscellaneous.total`/`db.total` in `export_data.py`, i.e.

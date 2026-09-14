@@ -70,7 +70,7 @@ fn parity_objective() {
     // objective replay below.
     let config = DesignObjective::new_reference_compatibility(AlasConfig::default()).config;
     let dv_default = DesignVector::default();
-    let builder = AircraftBuilder::new(Some(config.geometry.clone()));
+    let builder = AircraftBuilder::new_reference_compatibility(Some(config.geometry.clone()));
     let plane = builder
         .build(Some(&dv_default), false)
         .expect("build plane");

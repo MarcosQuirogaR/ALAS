@@ -27,6 +27,7 @@ pub(crate) mod cabin_assets;
 mod cabin_seat_map;
 mod openvsp;
 mod planform;
+mod sandbox_scene;
 mod section;
 mod shared;
 mod threeview;
@@ -39,6 +40,9 @@ pub use cabin::{figure_cabin_payload, figure_main_deck_seat_map};
 pub use cabin_3d::figure_cabin_payload_3d;
 pub use openvsp::figure_openvsp_cad_preview;
 pub use planform::{figure_design_evolution, figure_geometry, figure_planform_comparison};
+pub use sandbox_scene::{
+    figure_sandbox_exterior, SandboxSceneOptions, SceneComponent, SceneFraming,
+};
 pub use section::figure_cabin_section;
 #[doc(hidden)]
 pub use threeview::figure_asb_threeview;

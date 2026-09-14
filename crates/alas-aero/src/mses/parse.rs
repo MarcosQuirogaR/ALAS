@@ -188,22 +188,28 @@ pub fn parse_bl_dump(text: &str) -> BlDumpColumns {
     (xs, ys, arc_lengths, cps, mes)
 }
 
-/// Parse an `mplot` flowfield dump into `(x, y, local Mach)`.
+/// Parse an `mplot` flowfield dump into `(x, y, local Mach, Cp)`.
 ///
 /// Blank lines and `#` headers are skipped; a data line needs at least eight
-/// columns, of which columns 1, 2 and 8 (`x`, `y`, `M`) are kept. Upstream
+/// columns, of which columns 1, 2 and 8 (`x`, `y`, `M`) are kept. When present,
+/// column 9 (`Cp`) is retained too. Upstream
 /// appends the three fields inside one `try`, so a partial parse could
 /// misalign the arrays; this keeps a row only when all three parse, which
 /// cannot differ on a flowfield dump (every data row is numeric in those three
 /// columns) -- the same translate-the-harmless-latent-bug call `CLAUDE.md`
 /// records for the reference's `mesh_line`.
+/// The columns of an `mplot` flowfield dump -- `x`, `y`, Mach and pressure
+/// coefficient per grid point -- and the offsets at which each structured
+/// grid row starts.
+pub type FlowfieldColumns = (Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>, Vec<usize>);
+
 /// Parse a flowfield while retaining the row boundaries written by `mplot`.
 ///
 /// Option 11 separates structured grid rows with blank lines. The scalar
 /// parser intentionally exposes only values for parity with Python; figures
 /// additionally need these offsets to reconstruct filled native-grid cells.
-pub fn parse_flowfield(text: &str) -> (Vec<f64>, Vec<f64>, Vec<f64>, Vec<usize>) {
-    let (mut xs, mut ys, mut ms) = (Vec::new(), Vec::new(), Vec::new());
+pub fn parse_flowfield(text: &str) -> FlowfieldColumns {
+    let (mut xs, mut ys, mut ms, mut cps) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
     let mut row_offsets = Vec::new();
     let mut row_open = false;
     for line in text.lines() {
@@ -229,11 +235,21 @@ pub fn parse_flowfield(text: &str) -> (Vec<f64>, Vec<f64>, Vec<f64>, Vec<usize>)
                 xs.push(x);
                 ys.push(y);
                 ms.push(m);
+                // Current MPlot option 11 exports Cp as column 9. Older
+                // captures had only the first eight fields; retain their
+                // coordinates/Mach while carrying an explicit missing Cp so
+                // a Cp contour cannot silently invent values.
+                cps.push(
+                    parts
+                        .get(8)
+                        .and_then(|part| part.parse().ok())
+                        .unwrap_or(f64::NAN),
+                );
             }
             _ => continue,
         }
     }
-    (xs, ys, ms, row_offsets)
+    (xs, ys, ms, cps, row_offsets)
 }
 
 // Parser fixtures use `expect`/`expect_err` so malformed cases fail at the
@@ -329,10 +345,11 @@ mod tests {
     fn flowfield_keeps_x_y_and_mach() {
         let text = "#  x  y  rho  p  u  v  q  M  Cp\n\n\
                     -1.8506  -2.3545  1.0008  1.0011  0.99  0.041  0.99  0.29735  0.017\n";
-        let (xs, ys, ms, rows) = parse_flowfield(text);
+        let (xs, ys, ms, cps, rows) = parse_flowfield(text);
         assert_eq!(xs, vec![-1.8506]);
         assert_eq!(ys, vec![-2.3545]);
         assert_eq!(ms, vec![0.29735]);
+        assert_eq!(cps, vec![0.017]);
         assert_eq!(rows, vec![0]);
     }
 
@@ -343,8 +360,9 @@ mod tests {
                     1.0 0.0 1 1 1 0 1 0.9 0\n\n\
                     0.0 1.0 1 1 1 0 1 1.0 0\n\
                     1.0 1.0 1 1 1 0 1 1.1 0\n";
-        let (x, _, _, rows) = parse_flowfield(text);
+        let (x, _, _, cps, rows) = parse_flowfield(text);
         assert_eq!(x.len(), 4);
+        assert_eq!(cps, vec![0.0, 0.0, 0.0, 0.0]);
         assert_eq!(rows, vec![0, 2]);
     }
 }

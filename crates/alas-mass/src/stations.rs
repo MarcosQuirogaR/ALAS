@@ -28,7 +28,10 @@
 //! this module's contract is that a station exists for every candidate the
 //! ledger is built from, structural-model failures included.
 
-use alas_config::{DesignRequirements, GeometryConfig, MassModelConfig, StructuresConfig};
+use alas_config::{
+    DesignRequirements, EffectiveGearStationExt, GeometryConfig, LandingGearConfig,
+    MassModelConfig, StructuresConfig, ValidGearStation,
+};
 use alas_geom::aircraft::airplane::Airplane;
 use alas_geom::aircraft::fuselage::Fuselage;
 use alas_geom::aircraft::wing::Wing;
@@ -114,6 +117,44 @@ pub fn component_stations(
     mass_model: &MassModelConfig,
     structures: &StructuresConfig,
 ) -> Result<ComponentStations, StationError> {
+    component_stations_internal(plane, geometry, requirements, mass_model, structures, None)
+}
+
+/// Derive component stations with the active landing-gear source geometry.
+///
+/// This additive entry point keeps the original API available to standalone
+/// callers while allowing the product ledger and CG consumers to use the same
+/// normalized gear stations as performance and report code. The main-gear
+/// lumped station is a wheel-count-weighted centroid when a heterogeneous
+/// source topology is configured. Equal weighting of unlike bogies is never
+/// used; without explicit per-strut counts the primary main-gear station is
+/// retained as the conservative geometry-only fallback.
+pub fn component_stations_with_gear(
+    plane: &Airplane,
+    geometry: &GeometryConfig,
+    requirements: &DesignRequirements,
+    mass_model: &MassModelConfig,
+    structures: &StructuresConfig,
+    landing_gear: &LandingGearConfig,
+) -> Result<ComponentStations, StationError> {
+    component_stations_internal(
+        plane,
+        geometry,
+        requirements,
+        mass_model,
+        structures,
+        Some(landing_gear),
+    )
+}
+
+fn component_stations_internal(
+    plane: &Airplane,
+    geometry: &GeometryConfig,
+    requirements: &DesignRequirements,
+    mass_model: &MassModelConfig,
+    structures: &StructuresConfig,
+    landing_gear: Option<&LandingGearConfig>,
+) -> Result<ComponentStations, StationError> {
     let main_wing = plane
         .wings
         .iter()
@@ -142,8 +183,22 @@ pub fn component_stations(
         horizontal_tail: horizontal_tail_station(hstab),
         vertical_tail: vertical_tail_station(vstab),
         fuselage: fuselage_station(fuselage, geometry),
-        nose_gear: gear_station(fuselage, main_wing, geometry, mass_model, true),
-        main_gear: gear_station(fuselage, main_wing, geometry, mass_model, false),
+        nose_gear: gear_station(
+            fuselage,
+            main_wing,
+            geometry,
+            mass_model,
+            landing_gear,
+            true,
+        ),
+        main_gear: gear_station(
+            fuselage,
+            main_wing,
+            geometry,
+            mass_model,
+            landing_gear,
+            false,
+        ),
         propulsion_units: propulsion_stations(plane),
         systems: cabin_station(
             fuselage,
@@ -352,31 +407,95 @@ fn gear_station(
     main_wing: &Wing,
     geometry: &GeometryConfig,
     mass_model: &MassModelConfig,
+    landing_gear: Option<&LandingGearConfig>,
     is_nose: bool,
 ) -> ComponentStation {
     let (start_x, length, z) = fuselage_datum(fuselage);
     let diameter = geometry.fuselage.diameter_m;
     let strut_length = 0.25 * diameter;
     let ground_z = z - diameter / 2.0 - strut_length;
+    let fallback_x_nlg = start_x + length * mass_model.nlg_x_fraction;
+    let mac = main_wing.mean_aerodynamic_chord();
+    let mac_le_x = main_wing.aerodynamic_center(0.0)[0];
+    let fallback_x_mlg = mac_le_x + mass_model.mlg_x_fraction_mac * mac;
+    let resolved = landing_gear
+        .map(|config| {
+            config.resolved_station_positions(fallback_x_nlg, fallback_x_mlg, start_x, length)
+        })
+        .unwrap_or_else(|| alas_config::LandingGearStationPositions {
+            x_nlg_m: fallback_x_nlg,
+            x_mlg_m: fallback_x_mlg,
+            main_gear_x_m: vec![fallback_x_mlg],
+            source_scaled: false,
+            resolution: alas_config::effective_main_gear_station(&[fallback_x_mlg], None),
+        });
     if is_nose {
         ComponentStation {
-            position_m: [start_x + length * mass_model.nlg_x_fraction, 0.0, ground_z],
+            position_m: [resolved.x_nlg_m, 0.0, ground_z],
             extent_m: [0.0, 0.0, strut_length],
-            method: "nlg_x_fraction of fuselage length",
+            method: if resolved.source_scaled {
+                "source-scaled nose-tip NLG station"
+            } else {
+                "nlg_x_fraction of fuselage length"
+            },
         }
     } else {
-        let mac = main_wing.mean_aerodynamic_chord();
-        let mac_le_x = main_wing.aerodynamic_center(0.0)[0];
+        let outcome = weighted_main_gear_station(&resolved, landing_gear);
+        let x_main_gear = outcome.primary_station_ignoring_rejection();
         ComponentStation {
-            position_m: [
-                mac_le_x + mass_model.mlg_x_fraction_mac * mac,
-                0.0,
-                ground_z,
-            ],
+            position_m: [x_main_gear, 0.0, ground_z],
             extent_m: [0.0, 0.0, strut_length],
-            method: "mlg_x_fraction_mac aft of MAC leading edge",
+            method: if !resolved.source_scaled {
+                "mlg_x_fraction_mac aft of MAC leading edge"
+            } else {
+                match outcome {
+                    Ok(ValidGearStation::WeightedCentroid { .. }) => {
+                        "source-scaled MLG stations; wheel-count-weighted group centroid"
+                    }
+                    Ok(ValidGearStation::UnweightedMean { .. }) => {
+                        "source-scaled MLG stations; unweighted strut mean (missing per-strut wheel counts)"
+                    }
+                    Ok(ValidGearStation::UniformStation { .. }) => {
+                        "source-scaled primary MLG station"
+                    }
+                    Err(_) => "source-scaled primary MLG station; malformed bogie list rejected",
+                }
+            },
         }
     }
+}
+
+/// Return the typed main-gear mass station resolution.
+///
+/// Delegates directly to [`alas_config::effective_main_gear_station`] to ensure
+/// a single, unified domain validity gate across crates, eliminating duplicated logic.
+/// The caller must match on the returned outcome (see [`ValidGearStation`] and
+/// [`alas_config::GearStationRejection`]) rather than collapsing it to a scalar,
+/// so a rejected explicit declaration stays distinguishable from every valid
+/// outcome in the reported station `method` (gear-integration-review.md F5).
+///
+/// Physical agreement on missing counts (`None`):
+/// When per-strut bogie wheel counts are not explicitly provided on a multi-strut
+/// aircraft with distinct stations, both `alas_config` (in `resolved_station_positions`)
+/// and `alas_mass` (here) agree on the declared conceptual approximation: an unweighted
+/// arithmetic mean across all installed struts (`sum(x_i) / N`, equal strut load and mass split).
+/// This eliminates the latent 1.635 m force/moment divergence between the mass model
+/// (previously at the primary station 33.58 m) and the config/performance models (at 35.215 m)
+/// for multi-strut layouts (e.g. A380/A340), while keeping single-strut and uniform twin-gear
+/// layouts invariant at their physical axle station.
+///
+/// When explicit counts are provided:
+/// - Valid standard counts in `{2, 4, 6}` yield the wheel-count-weighted centroid.
+/// - Malformed counts are rejected by `effective_main_gear_station` with a typed
+///   rejection and fall back to the primary station.
+fn weighted_main_gear_station(
+    resolved: &alas_config::LandingGearStationPositions,
+    landing_gear: Option<&LandingGearConfig>,
+) -> alas_config::EffectiveMainGearStation {
+    alas_config::effective_main_gear_station(
+        &resolved.main_gear_x_m,
+        landing_gear.and_then(|config| config.mlg_strut_bogie_wheels.as_deref()),
+    )
 }
 
 /// One station per engine nacelle, at each nacelle's mid-length point.
@@ -533,6 +652,121 @@ mod tests {
     fn the_main_gear_sits_aft_of_the_nose_gear() {
         let stations = default_stations();
         assert!(stations.main_gear.position_m[0] > stations.nose_gear.position_m[0]);
+    }
+
+    #[test]
+    fn heterogeneous_main_gear_centroid_uses_explicit_wheel_count_weights() {
+        let config = LandingGearConfig {
+            n_mlg_struts: 4,
+            mlg_strut_bogie_wheels: Some(vec![4, 4, 6, 6]),
+            reference_station_fuselage_length_m: Some(72.73),
+            reference_nlg_x_fraction: Some(4.97 / 72.73),
+            reference_mlg_x_fractions: Some(vec![
+                33.58 / 72.73,
+                33.58 / 72.73,
+                36.85 / 72.73,
+                36.85 / 72.73,
+            ]),
+            ..Default::default()
+        };
+        let resolved = config.resolved_station_positions(4.97, 33.58, 0.0, 72.73);
+        let outcome = weighted_main_gear_station(&resolved, Some(&config));
+        let expected = (4.0 * 33.58 + 4.0 * 33.58 + 6.0 * 36.85 + 6.0 * 36.85) / 20.0;
+        let unweighted = (33.58 + 33.58 + 36.85 + 36.85) / 4.0;
+        match outcome {
+            Ok(ValidGearStation::WeightedCentroid { station_m, .. }) => {
+                assert!((station_m - expected).abs() < 1.0e-12);
+                assert!((station_m - unweighted).abs() > 1.0e-3);
+            }
+            other => panic!("expected a valid WeightedCentroid outcome, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn multi_strut_with_none_counts_yields_identical_station_across_crates() {
+        // Negative-control test required by Packet 4:
+        // When per-strut counts are None on a multi-strut aircraft with distinct stations
+        // (e.g. A380 geometry: wing gear at 33.58 m, body gear at 36.85 m),
+        // both alas_config (resolved.x_mlg_m) and alas_mass (weighted_main_gear_station)
+        // must yield the exact SAME station (the declared unweighted mean 35.215 m).
+        //
+        // BEFORE THIS FIX:
+        // - alas_config resolved.x_mlg_m was 35.215 m (unweighted mean)
+        // - alas_mass weighted_main_gear_station returned 33.58 m (primary_mlg_x_m)
+        // creating a 1.635 m behavioral divergence across crates.
+        let config = LandingGearConfig {
+            n_mlg_struts: 4,
+            mlg_strut_bogie_wheels: None,
+            reference_station_fuselage_length_m: Some(72.73),
+            reference_nlg_x_fraction: Some(4.97 / 72.73),
+            reference_mlg_x_fractions: Some(vec![
+                33.58 / 72.73,
+                33.58 / 72.73,
+                36.85 / 72.73,
+                36.85 / 72.73,
+            ]),
+            ..Default::default()
+        };
+        let resolved = config.resolved_station_positions(4.97, 33.58, 0.0, 72.73);
+        let outcome = weighted_main_gear_station(&resolved, Some(&config));
+
+        let expected_unweighted_mean = (33.58 * 2.0 + 36.85 * 2.0) / 4.0; // 35.215 m
+
+        let mass_station = match outcome {
+            Ok(ValidGearStation::UnweightedMean { station_m, .. }) => station_m,
+            other => panic!("missing counts must yield UnweightedMean, got {other:?}"),
+        };
+        assert!(
+            (resolved.x_mlg_m - expected_unweighted_mean).abs() < 1.0e-12,
+            "alas_config resolved.x_mlg_m was {}, expected {}",
+            resolved.x_mlg_m,
+            expected_unweighted_mean
+        );
+        assert!(
+            (mass_station - expected_unweighted_mean).abs() < 1.0e-12,
+            "alas_mass station was {}, expected {}",
+            mass_station,
+            expected_unweighted_mean
+        );
+        // CRITICAL CROSS-CRATE AGREEMENT ASSERTION:
+        assert_eq!(
+            mass_station, resolved.x_mlg_m,
+            "Cross-crate divergence! alas_mass ({mass_station}) != alas_config ({})",
+            resolved.x_mlg_m
+        );
+    }
+
+    #[test]
+    fn malformed_bogie_weights_fall_back_unweighted_to_primary_station() {
+        let config = LandingGearConfig {
+            n_mlg_struts: 4,
+            mlg_strut_bogie_wheels: Some(vec![4, 3, 6, 6]), // 3 is non-standard
+            reference_station_fuselage_length_m: Some(72.73),
+            reference_nlg_x_fraction: Some(4.97 / 72.73),
+            reference_mlg_x_fractions: Some(vec![
+                33.58 / 72.73,
+                33.58 / 72.73,
+                36.85 / 72.73,
+                36.85 / 72.73,
+            ]),
+            ..Default::default()
+        };
+        let resolved = config.resolved_station_positions(4.97, 33.58, 0.0, 72.73);
+        let outcome = weighted_main_gear_station(&resolved, Some(&config));
+        match outcome {
+            Err(rejection) => {
+                assert!(
+                    rejection.reason().contains("non-standard"),
+                    "unexpected rejection reason: {}",
+                    rejection.reason()
+                );
+                assert_eq!(
+                    rejection.primary_station_ignoring_rejection(),
+                    resolved.primary_mlg_x_m()
+                );
+            }
+            other => panic!("malformed bogie counts must be rejected, got {other:?}"),
+        }
     }
 
     #[test]

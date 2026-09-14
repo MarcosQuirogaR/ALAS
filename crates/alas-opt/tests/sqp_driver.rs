@@ -24,7 +24,13 @@ fn a_delegated_smooth_objective_is_minimised_to_its_known_centre() {
     config.optimizer.solver.tolerance = 1e-9;
     config.optimizer.solver.finite_difference_step = 1e-5;
     let mut optimizer = DesignOptimizer::new(config);
-    let mut bounds = vec![(0.0, 0.0); alas_config::DESIGN_VARIABLE_SPECS.len()];
+    // Pin every unused coordinate at its declared nominal value. A zero
+    // bound is outside the physical chord/sweep envelopes and should be
+    // rejected by the public optimizer boundary before the delegated probe.
+    let mut bounds: Vec<_> = alas_config::DESIGN_VARIABLE_SPECS
+        .iter()
+        .map(|spec| (spec.default, spec.default))
+        .collect();
     bounds[0] = (60.0, 80.0);
     bounds[1] = (12.0, 19.0);
     let mut evaluator = |design: &DesignVector| ObjectiveEvaluation {

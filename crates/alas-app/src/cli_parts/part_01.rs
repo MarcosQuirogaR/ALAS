@@ -363,13 +363,39 @@ pub fn run_cli(args: &[String]) -> i32 {
         Path::new(avl_exe.as_deref().unwrap_or("")),
     );
 
-    let result = match pipeline.run_with_environment(&options, &environment) {
+    // The pipeline already measures every stage; collecting the events is
+    // what turns "the run took 882 s" into a per-stage account of where that
+    // time went. The callback only appends, so it cannot change the run.
+    let collected_events: std::sync::Mutex<Vec<alas_pipeline::runs::RunEvent>> =
+        std::sync::Mutex::new(Vec::new());
+    let record_event = |event: alas_pipeline::runs::RunEvent| {
+        if let Ok(mut events) = collected_events.lock() {
+            events.push(event);
+        }
+    };
+    let result = match pipeline.run_with_environment_and_events(&options, &environment, &record_event)
+    {
         Ok(res) => res,
         Err(e) => {
             eprintln!("Pipeline Execution Error: {e}");
             return 1;
         }
     };
+
+    // A manifest that cannot be written is reported and does not fail the
+    // run: the design results are already valid without it.
+    if let Some(output_dir) = options.output_dir.as_deref() {
+        let events = collected_events
+            .lock()
+            .map(|events| events.clone())
+            .unwrap_or_default();
+        let manifest = alas_pipeline::run_manifest::RunManifest::from_run(&result, &events);
+        match manifest.write(output_dir) {
+            Ok(path) if !cli.quiet => println!("Wrote run manifest to {}.", path.display()),
+            Ok(_) => {}
+            Err(error) => eprintln!("Run Manifest Error: {error}"),
+        }
+    }
 
     if options.save_plots {
         match save_result_plots(&result, options.output_dir.as_deref()) {

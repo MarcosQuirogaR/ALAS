@@ -44,6 +44,18 @@ pub struct MsesConfig {
     )]
     pub mses_dir: String,
 
+    /// Optional double-precision Orr--Sommerfeld database used by MSES when
+    /// transition is left free.  The path is intentionally hidden from the
+    /// ordinary setup form: it is an advanced, installation-specific resource
+    /// and is resolved relative to `mses_dir` when it is not absolute.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[config(
+        hidden,
+        label = "MSES Orr-Sommerfeld database",
+        help = "Optional path to the double-precision osmapDP.dat resource used by MSES free-transition calculations. If empty, ALAS looks beside the MSES executables. The selected path and compatibility check are recorded in the run manifest; a single-precision osmap.dat is rejected."
+    )]
+    pub osmap_path: Option<String>,
+
     /// How long one mesh-generation call may take.
     #[config(
         label = "MSET timeout",
@@ -116,6 +128,29 @@ pub struct MsesConfig {
         help = "Streamwise grid stretching parameter for the MSET mesh -- larger values cluster more points near the airfoil."
     )]
     pub mset_e: f64,
+
+    /// Artificial-dissipation coefficient used by MSES.
+    ///
+    /// MSES's user guide describes `1.0` as the normal second-order
+    /// dissipation setting. A negative value disables second-order
+    /// dissipation and is retained only when replaying a frozen legacy
+    /// parity fixture; it is not a general product default.
+    #[serde(default = "default_mucon", skip_serializing_if = "is_default_mucon")]
+    #[config(
+        hidden,
+        help = "MSES artificial-dissipation coefficient. 1.0 is its normal second-order setting; a negative value disables second-order dissipation and is reserved for legacy parity replay."
+    )]
+    pub mucon: f64,
+}
+
+const DEFAULT_MUCON: f64 = 1.0;
+
+fn default_mucon() -> f64 {
+    DEFAULT_MUCON
+}
+
+fn is_default_mucon(value: &f64) -> bool {
+    *value == DEFAULT_MUCON
 }
 
 impl Default for MsesConfig {
@@ -123,6 +158,7 @@ impl Default for MsesConfig {
         Self {
             enabled: true,
             mses_dir: "external tools/MSES".to_owned(),
+            osmap_path: None,
             timeout_mset_s: 30.0,
             timeout_mses_s: 60.0,
             max_iterations: 100,
@@ -133,6 +169,7 @@ impl Default for MsesConfig {
             alpha_sweep_n_points: 7,
             mset_n: 141,
             mset_e: 0.4,
+            mucon: DEFAULT_MUCON,
         }
     }
 }
@@ -163,5 +200,17 @@ mod tests {
     fn a_shown_field_reaches_the_form_with_its_unit() {
         let schema = MsesConfig::default().schema();
         assert_eq!(schema.field("timeout_mset_s").unwrap().unit, "s");
+    }
+
+    #[test]
+    fn normal_dissipation_is_the_default_and_old_saved_configs_load_it() {
+        let config = MsesConfig::default();
+        assert_eq!(config.mucon, DEFAULT_MUCON);
+
+        let mut saved = serde_json::to_value(&config).unwrap();
+        assert!(saved.get("mucon").is_none());
+        saved.as_object_mut().unwrap().remove("mucon");
+        let restored: MsesConfig = serde_json::from_value(saved).unwrap();
+        assert_eq!(restored.mucon, DEFAULT_MUCON);
     }
 }

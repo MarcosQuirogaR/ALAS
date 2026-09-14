@@ -83,9 +83,6 @@ pub(super) fn show_external_images(
         .data_mut(|data| data.insert_temp(selection_id, selected));
 
     let (source, native_width, native_height) = images[selected];
-    if let Some(label) = labels.get(selected) {
-        ui.label(RichText::new(*label).strong());
-    }
     let max_height = (available_height - if images.len() > 1 { 54.0 } else { 24.0 }).max(120.0);
     let panel_width = available_width.max(240.0);
     let panel_height = (panel_width * native_height as f32 / native_width as f32)
@@ -94,6 +91,9 @@ pub(super) fn show_external_images(
     let panel_width = (panel_height * native_width as f32 / native_height as f32).min(panel_width);
     match load_external_texture(state, ui.ctx(), source) {
         Some(texture) => {
+            if let Some(label) = labels.get(selected) {
+                ui.label(RichText::new(*label).strong());
+            }
             if ui
                 .add(
                     egui::Image::from_texture(&texture)
@@ -112,7 +112,8 @@ pub(super) fn show_external_images(
                         "External image unavailable:\n{path}",
                         &[("path", source.to_string())],
                     ))
-                    .weak(),
+                    .color(egui::Color32::from_rgb(192, 57, 43))
+                    .strong(),
                 ),
             );
         }

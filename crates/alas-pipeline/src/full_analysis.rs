@@ -23,7 +23,7 @@ use alas_config::design_variables::DesignVector;
 use alas_config::{presets, AlasConfig};
 use alas_geom::aircraft::airplane::Airplane;
 use alas_geom::builder::AircraftBuilder;
-use alas_mass::breakdown::{MassBreakdown, MassCoordinateModel, MassCoordinates};
+use alas_mass::breakdown::{FlopsMassBuildup, MassBreakdown, MassCoordinateModel, MassCoordinates};
 use alas_math::lstsq::least_squares;
 use alas_opt::envelope::{assess_model_cg_envelope, check_cg_envelope};
 use alas_payload::build::{build_payload_layout, build_payload_layout_reference_compatibility};
@@ -142,6 +142,11 @@ pub struct AnalysisReport {
     pub geometry_summary: HashMap<String, f64>,
     /// Breakdown of masses by component name, in kg.
     pub component_masses: HashMap<String, f64>,
+    /// The verified pure-FLOPS groups that produced `component_masses`, when
+    /// this report used the production architecture. Keeping the grouped
+    /// evaluation on the report lets the item-level ledger consume the same
+    /// result instead of re-running or relabelling a lumped approximation.
+    pub flops_mass_buildup: Option<Box<FlopsMassBuildup>>,
     /// Centroid positions by component name, in meters `[x, y, z]`.
     pub mass_coordinates: HashMap<String, [f64; 3]>,
     /// Global mass-weighted center of gravity `[x, y, z]`, in meters.
@@ -180,6 +185,8 @@ pub struct FullAnalysis {
 
 mod station_coordinates;
 pub(crate) use station_coordinates::station_coordinates_for;
+
+mod cabin_sync;
 
 include!("full_analysis_parts/part_01.rs");
 include!("full_analysis_parts/part_02.rs");

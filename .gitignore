@@ -23,6 +23,11 @@
 /visual_check/
 /visual_check2/
 
+# Local Airfoil CFD study/environment preferences (machine-specific paths).
+/airfoil-cfd-environment.json
+/airfoil-cfd-study.json
+/airfoil-cfd-sweep.json
+
 # Downloaded-on-demand assets: navigation data (GPL-3.0) and the Blue Marble
 # texture are fetched at runtime, never redistributed from this tree.
 /assets/navdata/
@@ -34,3 +39,9 @@
 
 # Session hand-off notes, kept local: working scratch, not project record.
 /NOTE.md
+
+# Scratch outputs of hand-run MSES sessions inside the bundled tool directory.
+/external tools/Mses3.12c-win32/*.png
+/external tools/Mses3.12c-win32/*.ps
+/external tools/Mses3.12c-win32/*.csv
+/external tools/Mses3.12c-win32/mdat.*

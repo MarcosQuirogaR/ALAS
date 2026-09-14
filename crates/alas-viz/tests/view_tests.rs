@@ -264,3 +264,90 @@ fn scene_view_state_keeps_the_pointer_canvas_position_fixed_while_zooming() {
     assert!((canvas_after.x - pointer.x).abs() < 1e-5);
     assert!((canvas_after.y - pointer.y).abs() < 1e-5);
 }
+
+/// Tessellate the shapes of a scene the way the desktop painter does and
+/// return the vertex bounds and the count of non-finite vertices.
+fn tessellated_bounds(scene: &Scene, rect: egui::Rect) -> (egui::Rect, usize) {
+    let transform = ViewportTransform::fit(scene.width, scene.height, rect);
+    let shapes = render_scene_to_shapes(scene, &transform);
+    let mut tessellator = egui::epaint::tessellator::Tessellator::new(
+        1.0,
+        egui::epaint::TessellationOptions::default(),
+        [0, 0],
+        vec![],
+    );
+    let mut mesh = egui::epaint::Mesh::default();
+    for shape in shapes {
+        tessellator.tessellate_shape(shape, &mut mesh);
+    }
+    let mut bounds = egui::Rect::NOTHING;
+    let mut non_finite = 0;
+    for v in &mesh.vertices {
+        if v.pos.x.is_finite() && v.pos.y.is_finite() {
+            bounds = bounds.union(egui::Rect::from_min_max(v.pos, v.pos));
+        } else {
+            non_finite += 1;
+        }
+    }
+    (bounds, non_finite)
+}
+
+#[test]
+fn sliver_polygons_tessellate_inside_their_own_bounds() {
+    // Lofted faces seen edge-on: a hairline quad, an exactly reversed quad
+    // (two coincident edges), one with repeated trailing-edge points and a
+    // needle triangle.
+    let face = |points: Vec<[f64; 2]>| SceneElement::Polygon {
+        points,
+        fill: Some(Fill::new(Color::rgb(40, 90, 200))),
+        stroke: Some(Stroke::new(Color::rgb(200, 200, 200), 0.35)),
+    };
+    let mut scene = Scene::new(600.0, 500.0, Some(Color::rgb(10, 10, 10)));
+    scene.render_title = false;
+    scene.add(face(vec![
+        [100.0, 100.0],
+        [400.0, 300.0],
+        [400.0, 300.02],
+        [100.0, 100.01],
+    ]));
+    scene.add(face(vec![
+        [120.0, 380.0],
+        [420.0, 120.0],
+        [120.0, 380.0],
+        [420.0, 120.0],
+    ]));
+    scene.add(face(vec![
+        [50.0, 50.0],
+        [50.0, 50.0],
+        [300.0, 52.0],
+        [300.0, 52.0],
+        [50.0, 50.0],
+    ]));
+    scene.add(face(vec![[200.0, 200.0], [260.0, 205.0], [200.0, 200.3]]));
+    let rect = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(600.0, 500.0));
+    let (bounds, non_finite) = tessellated_bounds(&scene, rect);
+    assert_eq!(non_finite, 0, "tessellation produced non-finite vertices");
+    assert!(
+        rect.expand(6.0).contains_rect(bounds),
+        "sliver faces escaped their canvas: {bounds:?}"
+    );
+}
+
+#[test]
+fn well_conditioned_polygons_keep_the_feathered_convex_path() {
+    let mut scene = Scene::new(300.0, 300.0, None);
+    scene.render_title = false;
+    scene.add(SceneElement::Polygon {
+        points: vec![[20.0, 20.0], [200.0, 30.0], [210.0, 220.0], [30.0, 200.0]],
+        fill: Some(Fill::new(Color::rgb(1, 2, 3))),
+        stroke: None,
+    });
+    let rect = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(300.0, 300.0));
+    let transform = ViewportTransform::fit(scene.width, scene.height, rect);
+    let shapes = render_scene_to_shapes(&scene, &transform);
+    assert!(
+        shapes.iter().any(|s| matches!(s, egui::Shape::Path(_))),
+        "a convex quad still uses the anti-aliased egui path"
+    );
+    assert!(!shapes.iter().any(|s| matches!(s, egui::Shape::Mesh(_))));
+}

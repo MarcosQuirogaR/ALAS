@@ -113,6 +113,14 @@ pub struct FlopsWingBreakdown {
 }
 
 /// Equation 10 with 11-17: the simplified equivalent bending material factor.
+///
+/// The grouping is the one the April 2018 errata to NASA/TM-2017-219627
+/// Vol. I prints, not the main body's: the `EMS` power applies to the
+/// planform ratio alone and `CAYL * TCA` divides the product. The errata's
+/// base is `SPAN^2 / SW`, which differs from the aspect ratio `AR` only
+/// through the glove and bat area `GLOV` of equation 9 (`AR = SPAN^2 /
+/// (SW - GLOV)`). ALAS builds no glove, so the single `aspect_ratio`
+/// argument is both quantities; a gloved planform would need them split.
 pub fn simplified_bending_factor(
     aspect_ratio: f64,
     taper_ratio: f64,
@@ -129,8 +137,8 @@ pub fn simplified_bending_factor(
     let caya = (aspect_ratio - 5.0).max(0.0);
     let cayl = (1.0 - slam * slam) * (1.0 + c6 * slam * slam + 0.03 * caya * c4 * slam);
     let ems = 1.0 - 0.25 * strut_bracing;
-    // Fortran precedence in the FLOPS source: the power applies to the
-    // aspect ratio alone and the sweep and thickness factors divide it.
+    // The April 2018 errata grouping: the power applies to the planform
+    // ratio alone and the sweep and thickness factors divide it.
     0.215 * (0.37 + 0.7 * taper_ratio) * aspect_ratio.powf(ems) / (cayl * thickness_to_chord)
 }
 
@@ -382,13 +390,16 @@ pub fn estimate_flops_structure(inputs: &FlopsStructureInputs) -> FlopsStructure
         inputs.vertical_tail_count,
         dg_kg,
     );
+    // Equation 56 multiplies by `NFUSE` linearly. The wing inputs carry the
+    // single declared fuselage count (equation 34's `CAYF` reads the same
+    // one), so the two equations cannot disagree about the architecture.
     let fuselage = fuselage_kg(
         inputs.fuselage_length_m,
         inputs.fuselage_width_m,
         inputs.fuselage_depth_m,
         inputs.scaled_fuselage_engines,
         inputs.military_cargo_floor,
-        1,
+        inputs.wing.fuselage_count.max(1),
     );
     let main_gear = main_gear_kg(
         inputs.design_landing_mass_kg,

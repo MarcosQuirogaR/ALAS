@@ -31,10 +31,11 @@
 
 use std::collections::VecDeque;
 
-use alas_config::{PassengerCabinConfig, SeatClassConfig};
+use alas_config::{CertifiedExitLayout, PassengerCabinConfig, SeatClassConfig};
 
 use super::{
-    abreast, abreast_and_aisles, cabin_deck_segments, ceil_div, max_certifiable_capacity,
+    abreast, abreast_and_aisles, cabin_deck_segments, ceil_div, effective_pair_capacity,
+    max_certifiable_capacity_reference_compatibility, max_certifiable_capacity_with_source_layout,
     min_exit_pairs, seat_blocks, select_exit_type, Bay, DeckCapacities, MIN_PITCH, MIN_SEAT_WIDTH,
     MONUMENT_LEN, SEAT_BOX_H,
 };
@@ -69,6 +70,8 @@ pub(super) struct Seating {
     pub max_aisles: i64,
     /// The exit-derived ceiling the seating was truncated against.
     pub deck_caps: DeckCapacities,
+    /// The exit and available-floor ceiling before an aircraft-source cap.
+    pub geometric_deck_caps: DeckCapacities,
 }
 
 impl Seating {
@@ -138,14 +141,28 @@ pub(super) fn place_seats(
     classes: &mut [CabinClass],
     aisle_w: f64,
     product_exit_capacity: bool,
+    source_capacity_cap: Option<i64>,
+    source_exit_layout: Option<CertifiedExitLayout>,
 ) -> Seating {
-    let deck_caps = max_certifiable_capacity(g, pax);
+    let geometric_deck_caps = if product_exit_capacity {
+        max_certifiable_capacity_with_source_layout(g, pax, source_exit_layout, None)
+    } else {
+        max_certifiable_capacity_reference_compatibility(g, pax)
+    };
+    let deck_caps = geometric_deck_caps.with_source_cap(source_capacity_cap);
     let segments = cabin_deck_segments(g);
     let exit_spec = select_exit_type(g.diameter_m);
-    let est_cap = if product_exit_capacity {
-        exit_spec.capacity_per_side * 2
+    let est_cap = if let Some(source_exit_layout) = source_exit_layout {
+        source_exit_layout
+            .pairs
+            .iter()
+            .map(|pair| pair.capacity_per_pair)
+            .max()
+            .unwrap_or(1)
+    } else if product_exit_capacity {
+        effective_pair_capacity(exit_spec, pax)
     } else {
-        exit_spec.capacity_per_side
+        exit_spec.capacity_per_pair
     };
 
     let mut items = Vec::new();
@@ -289,6 +306,7 @@ pub(super) fn place_seats(
         max_abreast,
         max_aisles,
         deck_caps,
+        geometric_deck_caps,
     }
 }
 

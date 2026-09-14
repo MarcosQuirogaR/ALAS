@@ -20,7 +20,7 @@ use super::cards::{Cbar, Conm2, Deck, Pbarl, Shell};
 use super::nodes::{NodeMap, Surface};
 use super::te_rib_selected;
 use crate::loads;
-use crate::sizing::{cap_taper, WingboxSizing};
+use crate::sizing::WingboxSizing;
 use std::collections::HashSet;
 
 /// Material identifiers, one per wingbox material.
@@ -278,15 +278,12 @@ pub(super) fn add_spar_caps(
     spar_upper: &[Vec<i64>],
     spar_lower: &[Vec<i64>],
     sizing: &WingboxSizing,
-    cfg: &StructuresConfig,
     wsg: &WingStructureGeometry,
 ) {
     for (spar, (upper, lower)) in spar_upper.iter().zip(spar_lower).enumerate() {
         let Some(root_sizing) = sizing.spars.get(spar) else {
             continue;
         };
-        let width_root = root_sizing.w_cap.first().copied().unwrap_or(0.0);
-        let thickness_root = root_sizing.t_cap.first().copied().unwrap_or(0.0);
         let family = PID_CAP_BASE + spar as i64 * 1000;
 
         for index in 0..upper.len().saturating_sub(1) {
@@ -301,16 +298,13 @@ pub(super) fn add_spar_caps(
                 .sqrt()
                 .max(0.05);
 
-            let taper = cap_taper(
-                &[eta_mid],
-                cfg.cap_taper_eta_lock,
-                cfg.cap_taper_tip_fraction,
-            )
-            .first()
-            .copied()
-            .unwrap_or(1.0);
-            let flange_thickness = (thickness_root * taper).min(height / 3.0);
-            let flange_width = (width_root * taper).max(flange_thickness);
+            // The flange the sizing carried at this station -- the tapered
+            // root section, sized up wherever the local moment demanded more
+            // -- so the mesh and the sizing describe the same cap.
+            let sized_thickness = station_value(eta_mid, &sizing.eta_stations, &root_sizing.t_cap);
+            let sized_width = station_value(eta_mid, &sizing.eta_stations, &root_sizing.w_cap);
+            let flange_thickness = sized_thickness.min(height / 3.0);
+            let flange_width = sized_width.max(flange_thickness);
 
             let pid = family + index as i64;
             deck.bar_properties.push(Pbarl {
@@ -405,4 +399,29 @@ pub(super) fn add_engine_masses(
 /// rib's truncated cut reaches none of them.
 pub(super) fn last_spar_point(station: &RibStation) -> i64 {
     station.j_spars.last().map_or(-1, |&point| i64::from(point))
+}
+
+/// A sizing quantity sampled at `eta` by linear interpolation over the
+/// sizing's own station grid, held at the end values outside it.
+fn station_value(eta: f64, stations: &[f64], values: &[f64]) -> f64 {
+    let n = stations.len().min(values.len());
+    if n == 0 {
+        return 0.0;
+    }
+    if eta <= stations[0] {
+        return values[0];
+    }
+    if eta >= stations[n - 1] {
+        return values[n - 1];
+    }
+    let upper = stations[..n]
+        .partition_point(|&station| station < eta)
+        .min(n - 1);
+    let lower = upper.saturating_sub(1);
+    let span = stations[upper] - stations[lower];
+    if span <= 0.0 {
+        return values[upper];
+    }
+    let t = (eta - stations[lower]) / span;
+    values[lower] + t * (values[upper] - values[lower])
 }

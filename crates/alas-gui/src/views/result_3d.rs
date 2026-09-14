@@ -72,6 +72,11 @@ pub(crate) fn show_orbit_view(
             // cached PNG and moves the screen-anchored colorbar out of view.
             .wheel_zoom(false)
             .raster_scale(if maximized { 1.5 } else { 1.25 })
+            // Only the globe texture is rasterized per camera frame; the
+            // route, labels and colorbar are drawn as egui shapes. The SVG
+            // round-trip of that overlay was the 80 ms that made orbiting
+            // the globe run at 8 frames per second.
+            .vector_overlay(true)
             .cache_key(view_key)
             // The view key already captures run/config/theme. Camera bits are
             // a cheap revision and avoid hashing the dense globe scene every frame.

@@ -14,7 +14,7 @@
 //! `drag_coefficient` directly, `L_over_D` is `CL / CD` (`nan` where `CD` is
 //! zero, matching `export_data.py`'s own guard), `Throttle` is
 //! `c.propulsion.throttle`, and `Lift_N`/`Drag_N`/`Thrust_N` are the wind- and
-//! body-frame force components -- lift and drag negated because mission analysis model stores
+//! body-frame force components. Lift and drag are negated because the mission analysis model stores
 //! them along `-z`/`-x` in their own frames.
 
 use super::{collect_series, draw_time_axis_label, draw_time_panel, time_domain};

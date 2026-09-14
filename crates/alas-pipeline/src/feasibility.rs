@@ -19,8 +19,9 @@ use alas_mass::breakdown::{
 use alas_mission::MissionResult;
 use alas_opt::{assess_model_cg_envelope, ModelCgConstraint, ModelCgEnvelopeAssessment};
 use alas_perf::performance::{
-    compute_field_performance_at_masses, density_ratio, far25_oei_gradient, tw_cruise_constraint,
-    tw_oei_climb_constraint, tw_takeoff_constraint, ws_landing_limit,
+    assess_oei_climb, compute_field_performance_at_masses, compute_v_speeds_at_masses,
+    density_ratio, far25_oei_gradient, tw_cruise_constraint, tw_takeoff_constraint,
+    ws_landing_limit, OeiClimbStatus, OeiV2Condition,
 };
 
 use crate::full_analysis::AnalysisReport;
@@ -32,18 +33,18 @@ mod fuel;
 mod mass_balance;
 mod planning;
 mod report_format;
+mod reported_attitude;
 mod structural_mass;
 mod types;
 
 pub(crate) use cruise_equilibrium::assess as assess_cruise_equilibrium;
 pub use cruise_equilibrium::CruiseEquilibriumAssessment;
 pub use dispatch::{DispatchAssessment, DispatchOutcome};
-pub(crate) use fuel::plan_fuel_loading;
 pub use fuel::{
     assess_fuel_capacity, CarriedFuelBasis, FuelCapacityAssessment, FuelCapacityEvidence,
     FuelLoadingAssessment, MissionFuelAssessment, MissionFuelStatus,
 };
-pub(crate) use mass_balance::tank_reference;
+pub(crate) use fuel::{plan_fuel_loading, report_mass_basis_kg};
 pub use mass_balance::{
     takeoff_mass_properties, LedgerItemSummary, MassBalanceAssessment, MassStateSummary,
     TankSummary,
@@ -182,9 +183,8 @@ fn append_model_cg_findings(
 
 /// Evaluate conservation laws and configured limits on a completed run.
 ///
-/// Without a selected load case the analyzed fuel is the takeoff-mass
-/// closure remainder, which is what a caller that did not fly the mission
-/// has to work with.
+/// Without a selected load case the analyzed fuel is the takeoff-mass closure
+/// remainder, which is what a caller that did not fly the mission has to use.
 pub fn assess_physical_feasibility(
     config: &AlasConfig,
     design: &DesignVector,
@@ -249,10 +249,9 @@ pub fn assess_physical_feasibility_with_load_case(
             ));
         }
     }
-    // Public planning limits apply to the load that is actually carried. A
-    // mass-closure remainder can exceed the usable tank capacity, so using
-    // `report.physical_cg` here would compare a capped mass case with a CG
-    // that still contains the uncarried fuel remainder.
+    // Public planning limits apply to the load actually carried: a mass-closure
+    // remainder can exceed usable tank capacity, so `report.physical_cg` would
+    // compare a capped mass case against a CG still holding uncarried fuel.
     let cg_envelope =
         assess_public_cg_reference(config, report, fuel_loading.analyzed_carried_fuel_kg);
     fuel_loading.mission = fuel::assess_mission_fuel(config.mission.enabled, mission);
@@ -338,6 +337,7 @@ pub fn assess_physical_feasibility_with_load_case(
         ));
     }
 
+    findings.extend(reported_attitude::assess(config, report));
     let trim_is_finite = report.trimmed_design_point.as_ref().is_some_and(|trim| {
         trim.alpha_deg.is_finite()
             && trim.geometric_body_alpha_deg.is_finite()
@@ -374,9 +374,9 @@ pub fn assess_physical_feasibility_with_load_case(
         ));
     }
 
-    // Field performance is a feasibility check, not a report-only chart. Use
-    // the selected engine rating for static thrust and use arrival telemetry
-    // when available rather than silently evaluating landing at MTOW.
+    // Field performance is a feasibility check, not a report-only chart: use the
+    // selected engine rating for static thrust, and arrival telemetry when it
+    // exists, rather than silently evaluating landing at MTOW.
     let wing_area_m2 = report
         .geometry_summary
         .get("wing_area_m2")
@@ -445,32 +445,82 @@ pub fn assess_physical_feasibility_with_load_case(
         .copied()
         .unwrap_or(f64::NAN);
         let n_engines_i64 = config.geometry.engine.spanwise_positions_m.len() as i64;
-        let oei_gradient =
-            far25_oei_gradient(n_engines_i64).unwrap_or(config.performance.oei_gradient);
-        let oei_required_tw = tw_oei_climb_constraint(
+        let certified_oei_gradient = far25_oei_gradient(n_engines_i64);
+        let oei_condition = alas_config::airports::get(&config.departure_airport)
+            .ok()
+            .map(|departure| {
+                let speeds = compute_v_speeds_at_masses(
+                    takeoff_mass_kg,
+                    takeoff_mass_kg,
+                    wing_area_m2,
+                    departure,
+                    config.performance.cl_max_to,
+                    config.performance.cl_max_land,
+                    &config.performance,
+                );
+                OeiV2Condition {
+                    departure_elevation_m: departure.elevation_m,
+                    departure_isa_deviation_c: departure.isa_deviation_c,
+                    v2_over_vstall: speeds.v2_ms / speeds.v_stall_to_ms,
+                    condition_to_sls_thrust_ratio: config
+                        .performance
+                        .oei_condition_to_sls_thrust_ratio,
+                    asymmetric_trim_cd: config.performance.oei_asymmetric_trim_cd,
+                    windmilling_cd: config.performance.oei_windmilling_cd,
+                }
+            });
+        let oei_assessment = assess_oei_climb(
             report.polar_fit.cd0,
             report.polar_fit.k,
             n_engines_i64,
-            oei_gradient,
+            certified_oei_gradient.unwrap_or(config.performance.oei_gradient),
             config.performance.oei_climb_cl,
             config.performance.oei_climb_delta_cd,
+            config.performance.cl_max_to,
+            oei_condition,
         );
-        for (label, required_tw) in [
-            ("cruise", cruise_required_tw),
-            ("engine-out second-segment climb", oei_required_tw),
-        ] {
-            if required_tw.is_finite() && static_tw < required_tw {
+        if cruise_required_tw.is_finite() && static_tw < cruise_required_tw {
+            findings.push(error(
+                FindingCode::ThrustMarginViolation,
+                format!(
+                    "cruise requires static T/W {:.4}, but the configured rating provides {:.4}",
+                    cruise_required_tw, static_tw
+                ),
+                Some(static_tw),
+                Some(cruise_required_tw),
+                "T/W",
+            ));
+        }
+        // An in-flight OEI estimate is useful as a diagnostic, but it is not
+        // dimensionally comparable with the SLS axis used here. Only the
+        // shared assessor's condition-specific SLS result may create a hard
+        // thrust-margin finding. Surface the missing evidence as a warning so
+        // callers do not mistake a conceptual fallback for Part 25 evidence.
+        if let Some(required_sls_tw) = oei_assessment.required_sls_tw {
+            if required_sls_tw.is_finite() && static_tw < required_sls_tw {
                 findings.push(error(
                     FindingCode::ThrustMarginViolation,
                     format!(
-                        "{label} requires static T/W {:.4}, but the configured rating provides {:.4}",
-                        required_tw, static_tw
+                        "engine-out second-segment climb requires static T/W {:.4}, but the configured rating provides {:.4}",
+                        required_sls_tw, static_tw
                     ),
                     Some(static_tw),
-                    Some(required_tw),
+                    Some(required_sls_tw),
                     "T/W",
                 ));
             }
+        } else if !matches!(
+            oei_assessment.status,
+            OeiClimbStatus::NotApplicable | OeiClimbStatus::ConceptualInflight
+        ) {
+            findings.push(PhysicalFinding {
+                code: FindingCode::FieldPerformanceUnavailable,
+                severity: FindingSeverity::Warning,
+                message: oei_assessment.diagnostic.to_owned(),
+                actual: None,
+                limit: None,
+                unit: "",
+            });
         }
     }
     for (airport_name, role) in [

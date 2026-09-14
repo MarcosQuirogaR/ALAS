@@ -5,6 +5,7 @@
 
 use alas_units::{FOOT, POUND_FORCE, POUND_MASS, PSI};
 
+use super::propulsion::{scaled_engine_count, scaled_nacelle_diameter_m};
 use super::{
     FlopsOperatingItemsBreakdown, FlopsSystemsBreakdown, FlopsTransportBreakdown,
     FlopsTransportInputError, FlopsTransportInputs,
@@ -25,29 +26,31 @@ pub(super) fn apu_kg(fuselage_planform_area_m2: f64, passengers: usize) -> f64 {
     pounds_to_kg(54.0 * area_ft2.powf(0.3) + 5.4 * (passengers as f64).powf(0.9))
 }
 
+/// Equation 102. `wing_engines` and `fuselage_engines` are the
+/// distributed-propulsion-scaled counts `FNEW` and `FNEF` of equations 82-83,
+/// not the raw installed counts; they coincide for four or fewer engines in
+/// the group.
 pub(super) fn instruments_kg(
     fuselage_planform_area_m2: f64,
     maximum_mach: f64,
     flight_crew: usize,
-    wing_engines: usize,
-    fuselage_engines: usize,
+    wing_engines: f64,
+    fuselage_engines: f64,
 ) -> f64 {
     let area_ft2 = fuselage_planform_area_m2 / FOOT.powi(2);
     pounds_to_kg(
         0.48 * area_ft2.powf(0.57)
             * maximum_mach.sqrt()
-            * (10.0
-                + 2.5 * flight_crew as f64
-                + wing_engines as f64
-                + 1.5 * fuselage_engines as f64),
+            * (10.0 + 2.5 * flight_crew as f64 + wing_engines + 1.5 * fuselage_engines),
     )
 }
 
+/// Equation 103, with the scaled counts `FNEW` and `FNEF`.
 pub(super) fn hydraulics_kg(
     fuselage_planform_area_m2: f64,
     wing_area_m2: f64,
-    wing_engines: usize,
-    fuselage_engines: usize,
+    wing_engines: f64,
+    fuselage_engines: f64,
     hydraulic_pressure_pa: f64,
     variable_sweep_penalty: f64,
     maximum_mach: f64,
@@ -57,18 +60,19 @@ pub(super) fn hydraulics_kg(
     let pressure_psi = hydraulic_pressure_pa / PSI;
     pounds_to_kg(
         0.57 * (fuselage_area_ft2 + 0.27 * wing_area_ft2)
-            * (1.0 + 0.03 * wing_engines as f64 + 0.05 * fuselage_engines as f64)
+            * (1.0 + 0.03 * wing_engines + 0.05 * fuselage_engines)
             * (3000.0 / pressure_psi).powf(0.35)
             * (1.0 + 0.04 * variable_sweep_penalty)
             * maximum_mach.powf(0.33),
     )
 }
 
+/// Equation 104, with the scaled total engine count `FNENG`.
 pub(super) fn electrical_kg(
     fuselage_length_m: f64,
     fuselage_width_m: f64,
     fuselage_count: usize,
-    engine_count: usize,
+    engine_count: f64,
     flight_crew: usize,
     passengers: usize,
 ) -> f64 {
@@ -76,7 +80,7 @@ pub(super) fn electrical_kg(
         92.0 * (fuselage_length_m / FOOT).powf(0.4)
             * (fuselage_width_m / FOOT).powf(0.14)
             * (fuselage_count as f64).powf(0.27)
-            * (engine_count as f64).powf(0.69)
+            * engine_count.powf(0.69)
             * (1.0 + 0.044 * flight_crew as f64 + 0.0015 * passengers as f64),
     )
 }
@@ -134,16 +138,18 @@ pub(super) fn air_conditioning_kg(
     )
 }
 
+/// Equation 113. `nacelle_diameter_m` is the scaled diameter `FNAC` of
+/// equation 85 and `engine_count` the scaled count `FNENG`.
 pub(super) fn anti_ice_kg(
     span_m: f64,
     sweep_deg: f64,
     nacelle_diameter_m: f64,
-    engine_count: usize,
+    engine_count: f64,
     fuselage_width_m: f64,
 ) -> f64 {
     pounds_to_kg(
         (span_m / FOOT) / sweep_deg.to_radians().cos()
-            + 3.8 * (nacelle_diameter_m / FOOT) * engine_count as f64
+            + 3.8 * (nacelle_diameter_m / FOOT) * engine_count
             + 1.5 * (fuselage_width_m / FOOT),
     )
 }
@@ -156,22 +162,25 @@ pub(super) fn flight_crew_and_baggage_kg(flight_crew: usize) -> f64 {
     pounds_to_kg(225.0 * flight_crew as f64)
 }
 
+/// Equation 121. `engine_count` is the scaled count `FNENG` and `thrust_n`
+/// the scaled thrust per engine `FTHRST` of equation 84.
 pub(super) fn unusable_fuel_kg(
-    engine_count: usize,
+    engine_count: f64,
     thrust_n: f64,
     wing_area_m2: f64,
     tank_count: usize,
     maximum_fuel_capacity_kg: f64,
 ) -> f64 {
     pounds_to_kg(
-        11.5 * engine_count as f64 * (thrust_n / POUND_FORCE).powf(0.2)
+        11.5 * engine_count * (thrust_n / POUND_FORCE).powf(0.2)
             + 0.07 * (wing_area_m2 / FOOT.powi(2))
             + 1.6 * tank_count as f64 * (maximum_fuel_capacity_kg / POUND_MASS).powf(0.28),
     )
 }
 
-pub(super) fn engine_oil_kg(engine_count: usize, thrust_n: f64) -> f64 {
-    pounds_to_kg(0.082 * engine_count as f64 * (thrust_n / POUND_FORCE).powf(0.65))
+/// Equation 122, with the scaled count `FNENG` and scaled thrust `FTHRST`.
+pub(super) fn engine_oil_kg(engine_count: f64, thrust_n: f64) -> f64 {
+    pounds_to_kg(0.082 * engine_count * (thrust_n / POUND_FORCE).powf(0.65))
 }
 
 pub(super) fn passenger_service_kg(
@@ -281,6 +290,17 @@ pub fn estimate_flops_transport(
     let fuselage_planform_area_m2 =
         inputs.fuselage_count as f64 * inputs.fuselage_length_m * inputs.fuselage_width_m;
     let passengers = inputs.passenger_count();
+    // Equations 81-85. The inputs record the installed architecture; every
+    // equation below that reads an engine count, a per-engine thrust or a
+    // nacelle diameter reads the distributed-propulsion-scaled variable, which
+    // equals the installed one for four or fewer engines in its group.
+    let scaled_engines = scaled_engine_count(inputs.engine_count);
+    let scaled_wing_engines = scaled_engine_count(inputs.wing_mounted_engine_count);
+    let scaled_fuselage_engines = scaled_engine_count(inputs.fuselage_mounted_engine_count);
+    let scaled_thrust_per_engine_n =
+        inputs.engine_count as f64 * inputs.rated_thrust_per_engine_n / scaled_engines;
+    let scaled_nacelle_diameter =
+        scaled_nacelle_diameter_m(inputs.nacelle_diameter_m, inputs.engine_count);
     let surface_controls = surface_controls_kg(
         inputs.maximum_mach,
         inputs.movable_surface_area_m2,
@@ -291,14 +311,14 @@ pub fn estimate_flops_transport(
         fuselage_planform_area_m2,
         inputs.maximum_mach,
         inputs.flight_crew_count,
-        inputs.wing_mounted_engine_count,
-        inputs.fuselage_mounted_engine_count,
+        scaled_wing_engines,
+        scaled_fuselage_engines,
     );
     let hydraulics = hydraulics_kg(
         fuselage_planform_area_m2,
         inputs.wing_area_m2,
-        inputs.wing_mounted_engine_count,
-        inputs.fuselage_mounted_engine_count,
+        scaled_wing_engines,
+        scaled_fuselage_engines,
         inputs.hydraulic_pressure_pa,
         inputs.variable_sweep_penalty,
         inputs.maximum_mach,
@@ -307,7 +327,7 @@ pub fn estimate_flops_transport(
         inputs.fuselage_length_m,
         inputs.fuselage_width_m,
         inputs.fuselage_count,
-        inputs.engine_count,
+        scaled_engines,
         inputs.flight_crew_count,
         passengers,
     );
@@ -336,8 +356,8 @@ pub fn estimate_flops_transport(
     let anti_ice = anti_ice_kg(
         inputs.wing_span_m,
         inputs.quarter_chord_sweep_deg,
-        inputs.nacelle_diameter_m,
-        inputs.engine_count,
+        scaled_nacelle_diameter,
+        scaled_engines,
         inputs.fuselage_width_m,
     );
 
@@ -369,13 +389,13 @@ pub fn estimate_flops_transport(
         cabin_crew_and_baggage_kg(inputs.flight_attendant_count, inputs.galley_crew_count);
     let flight_crew_and_baggage = flight_crew_and_baggage_kg(inputs.flight_crew_count);
     let unusable_fuel = unusable_fuel_kg(
-        inputs.engine_count,
-        inputs.rated_thrust_per_engine_n,
+        scaled_engines,
+        scaled_thrust_per_engine_n,
         inputs.wing_area_m2,
         inputs.fuel_tank_count,
         inputs.maximum_fuel_capacity_kg,
     );
-    let engine_oil = engine_oil_kg(inputs.engine_count, inputs.rated_thrust_per_engine_n);
+    let engine_oil = engine_oil_kg(scaled_engines, scaled_thrust_per_engine_n);
     let passenger_service = passenger_service_kg(
         inputs.first_class_passenger_count,
         inputs.business_class_passenger_count,
@@ -461,6 +481,131 @@ mod tests {
         );
         assert_ne!(first.systems.avionics_kg, second.systems.avionics_kg);
         assert_ne!(first.systems.electrical_kg, second.systems.electrical_kg);
+    }
+
+    /// Equations 81-85 reach the systems and operating-item equations that
+    /// read an engine count, a per-engine thrust or a nacelle diameter.
+    ///
+    /// A sixteen-engine distributed installation of the same total thrust is
+    /// compared against the closed forms evaluated by hand, so a regression
+    /// that fed a raw count or an unscaled nacelle diameter fails here. The
+    /// two-engine FLOPS validation cases cannot exercise this branch.
+    #[test]
+    fn the_distributed_propulsion_variables_reach_every_equation_that_reads_them() {
+        let mut distributed = representative_inputs();
+        distributed.wing_mounted_engine_count = 16;
+        distributed.fuselage_mounted_engine_count = 0;
+        distributed.engine_count = 16;
+        distributed.rated_thrust_per_engine_n = 2.0 * 250_000.0 / 16.0;
+        let breakdown = estimate_flops_transport(&distributed).expect("valid distributed inputs");
+
+        // Equations 81-85 evaluated directly.
+        let fneng = 4.0 + 2.0 * (12.0_f64 / 3.0).atan();
+        let fthrst = 16.0 * distributed.rated_thrust_per_engine_n / fneng;
+        let fnac = 0.5 * distributed.nacelle_diameter_m * 16.0_f64.sqrt();
+        assert!((fneng - scaled_engine_count(16)).abs() < 1e-12);
+        assert!(
+            (fnac - scaled_nacelle_diameter_m(distributed.nacelle_diameter_m, 16)).abs() < 1e-12
+        );
+        // The saturating count is well below sixteen, which is the whole
+        // point of the branch; the wing count saturates the same way.
+        assert!(fneng > 4.0 && fneng < 7.0);
+
+        // Equation 106: electrical reads FNENG, not NENG.
+        let expected_electrical = electrical_kg(
+            distributed.fuselage_length_m,
+            distributed.fuselage_width_m,
+            1,
+            fneng,
+            distributed.flight_crew_count,
+            distributed.passenger_count(),
+        );
+        assert!((breakdown.systems.electrical_kg - expected_electrical).abs() < 1e-9);
+        let raw_electrical = electrical_kg(
+            distributed.fuselage_length_m,
+            distributed.fuselage_width_m,
+            1,
+            16.0,
+            distributed.flight_crew_count,
+            distributed.passenger_count(),
+        );
+        assert!(
+            raw_electrical > 1.5 * expected_electrical,
+            "the raw count would be a materially different mass"
+        );
+
+        // Equation 115: anti-icing reads FNAC and FNENG.
+        let expected_anti_ice = anti_ice_kg(
+            distributed.wing_span_m,
+            distributed.quarter_chord_sweep_deg,
+            fnac,
+            fneng,
+            distributed.fuselage_width_m,
+        );
+        assert!((breakdown.systems.anti_ice_kg - expected_anti_ice).abs() < 1e-9);
+
+        // Equations 121 and 123: unusable fuel and oil read FNENG and FTHRST.
+        let expected_unusable = unusable_fuel_kg(
+            fneng,
+            fthrst,
+            distributed.wing_area_m2,
+            distributed.fuel_tank_count,
+            distributed.maximum_fuel_capacity_kg,
+        );
+        assert!((breakdown.operating_items.unusable_fuel_kg - expected_unusable).abs() < 1e-9);
+        assert!(
+            (breakdown.operating_items.engine_oil_kg - engine_oil_kg(fneng, fthrst)).abs() < 1e-9
+        );
+
+        // Equations 102 and 104 read FNEW and FNEF, each saturating on its
+        // own count, so they do not sum to FNENG.
+        let fnew = scaled_engine_count(16);
+        assert!(
+            (breakdown.systems.instruments_kg
+                - instruments_kg(
+                    1.0 * distributed.fuselage_length_m * distributed.fuselage_width_m,
+                    distributed.maximum_mach,
+                    distributed.flight_crew_count,
+                    fnew,
+                    0.0,
+                ))
+            .abs()
+                < 1e-9
+        );
+    }
+
+    /// Four or fewer engines leave every scaled variable at its installed
+    /// value, so the whole validated twin-engine buildup is untouched.
+    #[test]
+    fn four_or_fewer_engines_are_unchanged_by_the_distributed_branch() {
+        let baseline = representative_inputs();
+        let breakdown = estimate_flops_transport(&baseline).expect("valid inputs");
+        assert!(
+            (breakdown.operating_items.engine_oil_kg
+                - engine_oil_kg(2.0, baseline.rated_thrust_per_engine_n))
+            .abs()
+                < 1e-12
+        );
+        assert!(
+            (breakdown.systems.anti_ice_kg
+                - anti_ice_kg(
+                    baseline.wing_span_m,
+                    baseline.quarter_chord_sweep_deg,
+                    baseline.nacelle_diameter_m,
+                    2.0,
+                    baseline.fuselage_width_m,
+                ))
+            .abs()
+                < 1e-12
+        );
+        let mut quad = baseline;
+        quad.wing_mounted_engine_count = 4;
+        quad.engine_count = 4;
+        assert_eq!(scaled_engine_count(4), 4.0);
+        assert_eq!(
+            scaled_nacelle_diameter_m(quad.nacelle_diameter_m, 4),
+            quad.nacelle_diameter_m
+        );
     }
 
     #[test]
