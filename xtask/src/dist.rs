@@ -707,16 +707,15 @@ fn write_release_manifest(
     let commit = git_output(root, &["rev-parse", "HEAD"]).unwrap_or_else(|| "unknown".to_owned());
     let dirty =
         git_output(root, &["status", "--porcelain"]).is_some_and(|text| !text.trim().is_empty());
-    // A Cargo version alone does not mean that a package has been approved
-    // for publication. Until a release process explicitly changes this
-    // policy, the GA-looking development version remains labelled as such;
-    // pre-release versions carry a more specific channel for review tooling.
+    // The release command is run only for an explicitly selected package.
+    // A plain semantic version is therefore the GA channel; pre-release
+    // versions retain their specific channel for review tooling.
     let release_channel = if PACKAGE_VERSION.contains("-rc.") {
         "release_candidate"
     } else if PACKAGE_VERSION.contains('-') {
         "pre_release"
     } else {
-        "development"
+        "release"
     };
 
     let mut json = String::from("{\n");

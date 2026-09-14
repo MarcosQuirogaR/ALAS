@@ -355,7 +355,8 @@ mod tests {
                         continue;
                     };
                     if pixel[3] > 10 {
-                        let luma = (u32::from(pixel[0]) + u32::from(pixel[1]) + u32::from(pixel[2])) / 3;
+                        let luma =
+                            (u32::from(pixel[0]) + u32::from(pixel[1]) + u32::from(pixel[2])) / 3;
                         brightest = brightest.max(luma as u8);
                     }
                 }

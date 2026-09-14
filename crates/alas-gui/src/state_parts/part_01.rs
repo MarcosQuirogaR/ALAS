@@ -280,6 +280,8 @@ pub struct AppState {
     pub guide_chapter: usize,
     /// The airfoil-screening sweep's own run state.
     pub screening: crate::screening::ScreeningState,
+    /// Independent OpenFOAM airfoil study window and worker state.
+    pub cfd: crate::cfd::AirfoilCfdState,
     /// Independent fixed-wing UAV inputs, selections, and latest outcome.
     pub uav: crate::uav::UavWorkflowState,
     /// The clean-sheet sandbox session and workspace mode.
@@ -339,6 +341,7 @@ impl Default for AppState {
             output_dir: Some(tool_locator.resolve_data_path(Path::new("outputs"))),
             ..PipelineOptions::default()
         };
+        let cfd = crate::cfd::AirfoilCfdState::new(&tool_locator);
 
         let mut state = Self {
             config_values,
@@ -415,6 +418,7 @@ impl Default for AppState {
             show_advanced_guide: false,
             guide_chapter: 0,
             screening: crate::screening::ScreeningState::default(),
+            cfd,
             uav: crate::uav::UavWorkflowState::default(),
             sandbox: crate::sandbox::SandboxSession::default(),
             boot_frames_remaining: 40,

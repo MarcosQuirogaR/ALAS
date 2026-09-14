@@ -3,7 +3,7 @@ resolver = "2"
 members = ["crates/*", "xtask"]
 
 [workspace.package]
-version = "0.1.0"
+version = "1.1.0"
 edition = "2021"
 license = "AGPL-3.0-or-later"
 authors = ["Marcos Quiroga Rodriguez <marcos.quiroga.rodriguez@gmail.com>"]
@@ -35,7 +35,7 @@ egui = "0.29"
 # legacy OpenGL 1.1 compatibility context (the Glow painter requires OpenGL
 # 2.0+).  The GUI's scene path is egui-image based, so it does not require the
 # Glow-specific paint callback API.
-eframe = { version = "0.29", default-features = false, features = ["default_fonts", "wgpu"] }
+eframe = { version = "0.29", default-features = false, features = ["default_fonts", "wgpu", "x11", "wayland"] }
 # Plotters is the common plotting API.  The GUI uses its drawing primitives
 # through an egui-backed adapter, so figures do not cross the UI boundary as
 # encoded SVG or raster buffers.

@@ -33,6 +33,12 @@ enum ScreeningMessage {
 
 /// The airfoil-screening page's run state.
 pub struct ScreeningState {
+    /// Whether the screening workspace is shown in its detached native window.
+    ///
+    /// The screening page remains available through the navigation tree for
+    /// compatibility; the top-bar action uses this flag to show the same
+    /// renderer in a separate viewport.
+    pub window_open: bool,
     pub(crate) mses_readiness: MsesReadiness,
     /// Inspection state only: never applied to the aircraft configuration.
     pub preview: ScreeningPreview,
@@ -57,6 +63,7 @@ pub struct ScreeningState {
 impl Default for ScreeningState {
     fn default() -> Self {
         Self {
+            window_open: false,
             mses_readiness: MsesReadiness::default(),
             preview: ScreeningPreview::default(),
             options: AirfoilScreeningOptions::default(),
@@ -173,9 +180,8 @@ impl ScreeningPreview {
             return;
         }
         static NAMES: std::sync::OnceLock<Vec<&'static str>> = std::sync::OnceLock::new();
-        let names = NAMES.get_or_init(
-            alas_geom::airfoil_library::AirfoilLibrary::get_available_airfoils,
-        );
+        let names =
+            NAMES.get_or_init(alas_geom::airfoil_library::AirfoilLibrary::get_available_airfoils);
         self.filtered_names = alas_screen::runner::filter_names(names, filter);
         self.filter = Some(filter.to_owned());
     }

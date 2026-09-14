@@ -8,7 +8,7 @@
 use crate::scene::{Color, Scene, SceneElement, TextAlign, TextBaseline};
 use crate::theme::get_palette;
 
-/// A deliberately minimal, chart-sized status note -- for surfacing *why* an
+/// A deliberately minimal, chart-sized status note that surfaces *why* an
 /// optional analysis (MSES, mission analysis model mission, a VLM solve that failed) is
 /// missing from a results tab instead of silently omitting it with no
 /// explanation. Red/left-aligned text for a failure, green for an
@@ -22,7 +22,7 @@ pub fn figure_status_message(title: &str, message: &str, ok: bool, theme: Option
     // Upstream wraps the message text (`wrap=True`); this scene graph has no
     // text-layout engine, so `wrap_text` reflows it onto multiple explicit
     // rows from a character budget derived from the canvas width instead of
-    // measured glyphs -- close enough at this font size to stay inside the
+    // measured glyphs. This is close enough at this font size to stay inside the
     // figure instead of running off its right edge.
     let wrapped = crate::chart_kit::wrap_text(message, 78);
     let line_count = wrapped.lines().count().max(1) as f64;

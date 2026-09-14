@@ -189,7 +189,7 @@ fn model_comparison_overlays_only_compatible_avl_lift_and_moment() {
         &svg,
         &[
             "Athena AVL (cross-check)",
-            "Lift cross-check -- takeoff climb midpoint",
+            "Lift cross-check: takeoff climb midpoint",
             "Pitching-moment cross-check",
             "Induced drag cross-check",
             "Span efficiency cross-check",

@@ -4,12 +4,13 @@
 //! The full-window sandbox workspace.
 //!
 //! The standard navigation, content pane, preview dock and run-log dock are
-//! replaced by: a menu bar with the actions the sandbox needs, the Parameter
-//! Panel on the left, the central 3D viewport, the estimates strip on the
-//! right, and a bottom bar with the derived geometry metrics on the left and
-//! the Quick Analysis and Full Analysis actions on the right. Floating
-//! windows carry the Discipline Windows, Advanced Settings, the run log and
-//! the Full Analysis results.
+//! replaced by: a menu bar with the actions the sandbox needs and the
+//! Advanced Settings action, the central 3D viewport with its floating
+//! controls (camera presets, geometry-category buttons and the parameter
+//! search), the estimates strip on the right, and a bottom bar with the
+//! derived geometry metrics on the left and the Quick Analysis and Full
+//! Analysis actions on the right. Floating windows carry the Discipline
+//! Windows, Advanced Settings, the run log and the Full Analysis results.
 
 use egui::{menu, Context, Frame as EguiFrame, RichText, SidePanel, TopBottomPanel, Ui};
 
@@ -18,9 +19,8 @@ use crate::state::AppState;
 use crate::view_controls::render_view_options;
 use crate::views::{overlays, tr};
 
-use super::advanced::show_advanced_settings_window;
+use super::advanced::{show_advanced_settings_window, show_menu_action};
 use super::estimates::show_estimates_strip;
-use super::panel::show_parameter_panel;
 use super::scene::geometry_metrics;
 use super::viewport::show_viewport;
 use super::windows::{
@@ -72,12 +72,6 @@ fn show_menu_bar(state: &mut AppState, ctx: &Context, ui: &mut Ui) {
         if let Some(image) = crate::branding::text_logo_image(ctx) {
             ui.add(image.max_width(132.0).max_height(20.0));
         }
-        ui.separator();
-        ui.label(
-            RichText::new(tr("Sandbox"))
-                .strong()
-                .color(ui.visuals().hyperlink_color),
-        );
         ui.separator();
         ui.menu_button(tr("File"), |ui| {
             ui.horizontal(|ui| {
@@ -133,6 +127,8 @@ fn show_menu_bar(state: &mut AppState, ctx: &Context, ui: &mut Ui) {
                 ui.close_menu();
             }
         });
+        ui.separator();
+        show_menu_action(state, ui);
     });
 }
 
@@ -240,14 +236,6 @@ pub fn show_sandbox_workspace(state: &mut AppState, ctx: &Context) {
         .show(ctx, |ui| show_menu_bar(state, ctx, ui));
 
     TopBottomPanel::bottom("sandbox_bottom_bar").show(ctx, |ui| show_bottom_bar(state, ui));
-
-    let panel_width = state.sandbox.layout.parameter_panel_width;
-    let parameters = SidePanel::left("sandbox_parameter_panel")
-        .resizable(true)
-        .default_width(panel_width)
-        .width_range(240.0..=520.0)
-        .show(ctx, |ui| show_parameter_panel(state, ui));
-    state.sandbox.layout.parameter_panel_width = parameters.response.rect.width();
 
     if state.sandbox.layout.estimates_open {
         let estimates = SidePanel::right("sandbox_estimates_strip")

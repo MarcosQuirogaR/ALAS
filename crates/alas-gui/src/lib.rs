@@ -8,12 +8,14 @@
 
 pub mod app;
 mod branding;
+pub mod cfd;
 pub mod config_edit;
 pub mod export;
 pub mod feedback;
 pub mod layout;
 #[cfg(debug_assertions)]
 mod layout_debug;
+pub(crate) mod native_viewport;
 pub mod nav;
 mod nav_overlay;
 pub mod path_picker;
@@ -25,9 +27,9 @@ pub mod state;
 pub mod theme;
 pub mod uav;
 mod view_controls;
-mod walkthrough_state;
 pub mod viewport;
 pub mod views;
+mod walkthrough_state;
 
 pub use app::AlasApp;
 pub use branding::native_options;

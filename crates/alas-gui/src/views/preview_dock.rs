@@ -8,10 +8,14 @@
 
 use alas_report::scene::Scene;
 use alas_viz::SceneView;
-use egui::{vec2, Align, Area, Color32, Frame, Id, Key, Layout, Order, RichText, Ui};
+use egui::{vec2, Color32, Frame, Id, RichText, Ui};
 
 use crate::state::{AppState, PreviewCamera, PreviewTab};
 use crate::views::tr;
+
+#[path = "fullscreen_preview.rs"]
+mod fullscreen_preview;
+use fullscreen_preview::show_fullscreen_preview;
 
 const AIRCRAFT_CAMERA_ID: &str = "aircraft_3d";
 const AIRCRAFT_VIEW_KEY: &str = "preview_dock::aircraft_3d";
@@ -320,92 +324,6 @@ fn open_fullscreen_preview(
         .preview_cameras
         .insert(fullscreen_camera_key(camera_id), camera);
     set_fullscreen(ctx, view_key, true);
-}
-
-fn show_fullscreen_preview(
-    state: &mut AppState,
-    ctx: &egui::Context,
-    scene: &Scene,
-    camera_id: &str,
-    view_key: &str,
-    preset: &str,
-) {
-    if ctx.input(|input| input.key_pressed(Key::Escape)) {
-        close_fullscreen_preview(state, ctx, view_key, camera_id);
-        return;
-    }
-
-    let fullscreen_view = fullscreen_view_key(view_key);
-    let fullscreen_camera = fullscreen_camera_key(camera_id);
-    let camera = (*state.preview_camera_mut(&fullscreen_camera)).into();
-    let figure_id = match state.preview_tab {
-        PreviewTab::Exterior => state.selected_preview_id.as_str(),
-        PreviewTab::Cabin => "cabin_3d",
-    };
-    let fullscreen_scene =
-        crate::scene::build_page_preview_with_camera(state, figure_id, Some(camera));
-    let active_scene = fullscreen_scene.as_ref().unwrap_or(scene).clone();
-    let active_scene = preview_scene_for_tab(active_scene, state.preview_tab);
-    let screen = ctx.screen_rect();
-    let screen_size = screen.size();
-    Area::new(Id::new(("alas_preview_fullscreen_area", view_key)))
-        .order(Order::Foreground)
-        .default_size(screen.size())
-        .constrain_to(screen)
-        .pivot(egui::Align2::LEFT_TOP)
-        .fixed_pos(screen.min)
-        .show(ctx, |ui| {
-            // A foreground Area otherwise takes its child content's height,
-            // which makes a so-called maximized preview stop mid-window.
-            ui.set_min_size(screen_size);
-            Frame::default()
-                .fill(Color32::from_black_alpha(220))
-                .inner_margin(egui::Margin::same(18.0))
-                .show(ui, |ui| {
-                    ui.set_min_size(ui.available_size());
-                    ui.horizontal(|ui| {
-                        ui.heading(tr("3D Live Preview"));
-                        ui.label(RichText::new(preset).weak().small());
-                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            if crate::theme::close_icon_button(ui, tr("Close")).clicked() {
-                                close_fullscreen_preview(state, ctx, view_key, camera_id);
-                            }
-                        });
-                    });
-                    let available = ui.available_size();
-                    let available = vec2(available.x.max(320.0), available.y.max(180.0));
-                    let scene_revision = state.preview_scene_revision;
-                    let response = ui.add(
-                        SceneView::new(
-                            &active_scene,
-                            state.view_state_mut(fullscreen_view.clone()),
-                        )
-                        .desired_size(available)
-                        .orbit_only()
-                        .raster_scale(1.5)
-                        .show_toolbar(false)
-                        .cache_key(&fullscreen_view)
-                        .cache_revision(scene_revision),
-                    );
-                    let response =
-                        response.on_hover_text(tr("Drag to orbit the camera; scroll to zoom"));
-                    let changed = handle_camera_response(state, &response, &fullscreen_camera)
-                        || show_aircraft_viewer_controls(
-                            state,
-                            ui,
-                            response.rect,
-                            &fullscreen_camera,
-                            &fullscreen_view,
-                        );
-                    if state.preview_tab == PreviewTab::Cabin {
-                        show_cabin_legend(ui, response.rect);
-                    }
-                    if changed {
-                        state.update_preview_scene();
-                        ctx.request_repaint();
-                    }
-                });
-        });
 }
 
 fn close_fullscreen_preview(

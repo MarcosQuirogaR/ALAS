@@ -660,6 +660,7 @@ figure registry survive as library concerns, listed above.
 | `alas-atmo::differentiable` | AeroSandbox, MIT | `linalg` | green — `golden/atmo/differentiable.json` |
 | `alas-atmo::atmosphere` | AeroSandbox, MIT | `linalg` | green — `golden/atmo/differentiable.json`, `golden/atmo/isa.json` |
 | `alas-atmo::us1976` | SUAVE, LGPL-2.1 | `closed` | green — `golden/atmo/us1976.json` |
+| `alas-cfd` | OpenCFD OpenFOAM v2606 and Gmsh 4.15.2; no Python counterpart | `native` | native — reusable two-dimensional airfoil study contract, Gmsh extrusion, OpenFOAM lifecycle, parsers and surface results |
 | `alas-exec` | — | — | todo |
 | `alas-testkit` | — | — | native |
 | `alas-acceptance` | — | — | todo |

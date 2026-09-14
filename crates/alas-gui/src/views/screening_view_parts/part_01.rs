@@ -34,12 +34,11 @@ fn show_screening_content(state: &mut AppState, ui: &mut Ui) {
     }
     ui.add_space(6.0);
 
+    show_screening_preview(&mut state.screening, ui);
+    ui.add_space(12.0);
     show_options(state, ui);
     ui.add_space(8.0);
     show_screening_actions(state, ui);
-
-    ui.add_space(12.0);
-    show_screening_preview(&mut state.screening, ui);
     ui.add_space(12.0);
     if let Some(result) = state.screening.result.take() {
         show_result(state, ui, &result);

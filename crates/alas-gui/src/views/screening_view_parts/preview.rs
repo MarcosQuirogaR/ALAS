@@ -12,7 +12,6 @@ fn show_screening_preview(screening: &mut crate::screening::ScreeningState, ui: 
     }
     crate::theme::card_frame(ui).show(ui, |ui| {
         ui.label(RichText::new(tr("Airfoil outline")).strong());
-        ui.label(RichText::new(tr("Inspect a library section without changing the aircraft. Coordinates are x/c and y/c at equal scale.")).weak().small());
         egui::ComboBox::from_id_salt("screening_preview_airfoil")
             .width(ui.available_width().min(320.0))
             .selected_text(screening.preview.selected().unwrap_or("-"))
@@ -301,6 +300,49 @@ mod preview_tests {
                     && point.y <= 900.0));
             }
         }
+    }
+
+    #[test]
+    fn screening_preview_is_first_card_and_has_no_removed_subtitle() {
+        let ctx = egui::Context::default();
+        let mut state = crate::state::AppState::default();
+        let output = ctx.run(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    vec2(1400.0, 1200.0),
+                )),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default()
+                    .show(ctx, |ui| show_screening_content(&mut state, ui));
+            },
+        );
+
+        let text_position = |text: &str| {
+            output
+                .shapes
+                .iter()
+                .find_map(|shape| match &shape.shape {
+                    egui::Shape::Text(text_shape) if text_shape.galley.job.text == text => {
+                        Some(text_shape.pos)
+                    }
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("missing rendered text: {text}"))
+        };
+
+        assert!(text_position("Airfoil outline").y < text_position("Options").y);
+        assert!(text_position("Airfoil outline").y < text_position("Run screening").y);
+        assert!(!output.shapes.iter().any(|shape| {
+            matches!(
+                &shape.shape,
+                egui::Shape::Text(text_shape)
+                    if text_shape.galley.job.text
+                        == "Inspect a library section without changing the aircraft. Coordinates are x/c and y/c at equal scale."
+            )
+        }));
     }
 
     #[test]

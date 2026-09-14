@@ -10,8 +10,9 @@
 //! edit. A registered preset's geometry stays read-only here as everywhere
 //! else in the guided workspace.
 
-use egui::{Context, Id, RichText, ScrollArea, Window};
+use egui::{vec2, Context, RichText, ScrollArea, ViewportBuilder};
 
+use crate::native_viewport::show_native_viewport;
 use crate::nav::{self, PageKind};
 use crate::state::AppState;
 use crate::views::{form_page, tr};
@@ -38,13 +39,16 @@ pub fn show_advanced_settings_window(state: &mut AppState, ctx: &Context) {
             state.sandbox.advanced_tab = first.id.to_owned();
         }
     }
-    let mut open = true;
-    Window::new(tr("Advanced Settings"))
-        .id(Id::new("advanced_settings_window"))
-        .open(&mut open)
-        .resizable(true)
-        .default_size(egui::vec2(760.0, 560.0))
-        .show(ctx, |ui| {
+    let response = show_native_viewport(
+        ctx,
+        "advanced_settings",
+        tr("Advanced Settings"),
+        ViewportBuilder::default()
+            .with_title(tr("Advanced Settings"))
+            .with_inner_size(vec2(760.0, 560.0))
+            .with_min_inner_size(vec2(560.0, 380.0))
+            .with_resizable(true),
+        |_child_ctx, ui, _class| {
             ui.horizontal_wrapped(|ui| {
                 for page in &pages {
                     let selected = state.sandbox.advanced_tab == page.id;
@@ -57,7 +61,10 @@ pub fn show_advanced_settings_window(state: &mut AppState, ctx: &Context) {
                 }
                 let run_selected = state.sandbox.advanced_tab == "run_options";
                 if ui
-                    .add(crate::theme::selectable_button(tr("Run options"), run_selected))
+                    .add(crate::theme::selectable_button(
+                        tr("Run options"),
+                        run_selected,
+                    ))
                     .clicked()
                 {
                     state.sandbox.advanced_tab = "run_options".to_owned();
@@ -91,13 +98,16 @@ pub fn show_advanced_settings_window(state: &mut AppState, ctx: &Context) {
                         form_page::show_form_page(state, ui, page);
                     });
                 });
-        });
-    state.sandbox.layout.advanced_settings_open = open;
+        },
+    );
+    if response.close_requested {
+        state.sandbox.layout.advanced_settings_open = false;
+    }
 }
 
 /// The top-bar action that opens the window.
 pub fn show_menu_action(state: &mut AppState, ui: &mut egui::Ui) {
-    if ui.button(tr("Advanced Settings...")).clicked() {
+    if ui.button(tr("Advanced Settings")).clicked() {
         state.sandbox.layout.advanced_settings_open = true;
     }
 }

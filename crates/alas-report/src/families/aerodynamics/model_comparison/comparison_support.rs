@@ -241,7 +241,7 @@ pub(super) fn draw_avl_condition_panels(
     panel_title(
         scene,
         &lift_axes,
-        &format!("Lift cross-check -- {condition}"),
+        &format!("Lift cross-check: {condition}"),
         pal,
     );
     lift_axes.draw_frame_with_labels(scene, pal, "alpha [deg]", "CL");

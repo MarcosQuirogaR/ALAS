@@ -24,6 +24,7 @@ const VISCOUS_COLOR: &str = "#56b4e9";
 const REJECTED_COLOR: &str = "#d62728";
 const ACCEPTED_COLOR: &str = "#27ae60";
 const WAKE_TOLERANCE: f64 = 1.0e-4;
+const WAKE_LEGEND_TOP: f64 = 380.0;
 
 fn title(scene: &mut Scene, axes: &Axes2D, text: &str, color: Color) {
     scene.add(SceneElement::Text {
@@ -370,14 +371,19 @@ pub fn figure_vspaero_wake_convergence(
         .map(|case| case.rows.len() as f64)
         .fold(0.0, f64::max);
     let axes = [
-        Axes2D::new((60.0, 55.0, 370.0, 270.0), alpha, residual),
+        Axes2D::new((60.0, 55.0, 370.0, 270.0), alpha, residual)
+            .with_y_tick_decimals(2),
         Axes2D::new(
             (480.0, 55.0, 370.0, 270.0),
             alpha,
             (0.0, (max_iterations + 1.0).max(2.0)),
         ),
     ];
-    let mut scene = Scene::new(900.0, 520.0, Some(Color::from_hex(pal.bg)));
+    let mut scene = Scene::new(
+        900.0,
+        WAKE_LEGEND_TOP + 42.0,
+        Some(Color::from_hex(pal.bg)),
+    );
     scene.title = Some("VSPAERO Native Wake Convergence".to_owned());
     axes[0].draw_frame_with_labels(
         &mut scene,
@@ -432,7 +438,7 @@ pub fn figure_vspaero_wake_convergence(
     });
     draw_horizontal_legend_columns(
         &mut scene,
-        [60.0, 455.0],
+        [60.0, WAKE_LEGEND_TOP],
         &[
             (
                 "native residual".to_owned(),
@@ -523,5 +529,78 @@ mod tests {
         assert_eq!(cases.len(), 1);
         assert_eq!(cases[0].alpha_deg, 2.0);
         assert!((final_change(&cases[0]) - 1.0e-5).abs() < 1.0e-12);
+    }
+
+    #[test]
+    fn wake_scene_limits_residual_ticks_and_keeps_legend_clear_of_x_labels() {
+        let stem = std::env::temp_dir().join(format!(
+            "alas-vspaero-wake-layout-{}",
+            std::process::id()
+        ));
+        let history_path = stem.with_extension("history");
+        let history = "# Name Value Units\n\
+            AoA_ -2.0 deg\n\
+            Solver Case: 1\n\
+             Iter Mach AoA Beta CLtot CDi CMytot\n\
+             1 0.8 -2 0 0.2 0.01 -0.05\n\
+             2 0.8 -2 0 0.2123 0.0223 -0.0377\n\
+            AoA_ 2.0 deg\n\
+            Solver Case: 2\n\
+             Iter Mach AoA Beta CLtot CDi CMytot\n\
+             1 0.8 2 0 0.2 0.01 -0.05\n\
+             2 0.8 2 0 0.2001 0.0101 -0.0499\n";
+        std::fs::write(&history_path, history).expect("write wake layout fixture");
+
+        let mut result = result_with_polar();
+        result.case_path = stem;
+        for theme in ["light", "grey", "dark"] {
+            let scene = figure_vspaero_wake_convergence(&result, Some(theme));
+
+            let x_label_y = scene
+                .elements
+                .iter()
+                .filter_map(|element| match element {
+                    SceneElement::Text { text, pos, .. } if text == "alpha [deg]" => {
+                        Some(pos[1])
+                    }
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(x_label_y, vec![354.0, 354.0]);
+
+            let residual_ticks = scene
+                .elements
+                .iter()
+                .filter_map(|element| match element {
+                    SceneElement::Text { text, pos, .. } if (pos[0] - 53.0).abs() < 1.0e-9 => {
+                        Some(text.as_str())
+                    }
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            assert!(!residual_ticks.is_empty());
+            assert!(residual_ticks.iter().all(|label| {
+                label
+                    .split_once('.')
+                    .map_or(true, |(_, fraction)| fraction.len() <= 2)
+            }));
+
+            let legend_y = scene
+                .elements
+                .iter()
+                .filter_map(|element| match element {
+                    SceneElement::Text { text, pos, .. }
+                        if matches!(
+                            text.as_str(),
+                            "Native residual" | "Iteration count" | "Acceptance tolerance"
+                        ) => Some(pos[1]),
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(legend_y, vec![WAKE_LEGEND_TOP + 4.0; 3]);
+            assert!(legend_y[0] - x_label_y[0] >= 20.0);
+            assert!(legend_y[0] < scene.height - 30.0);
+        }
+        std::fs::remove_file(&history_path).expect("remove wake layout fixture");
     }
 }

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! The sandbox's floating windows: Discipline Windows, the run log, the
-//! Full Analysis results, and the leave-sandbox prompt.
+//! The sandbox's detached windows: Discipline Windows, the run log, the Full
+//! Analysis results, and the leave-sandbox prompt.
 //!
 //! A Discipline Window shows the same grouped editors as the Parameter
 //! Panel; the fuselage window adds the section editor. Pressing the pointer
@@ -11,8 +11,9 @@
 //! opens when a sandbox analysis starts, and can be minimized (collapsed),
 //! closed and reopened without touching the run.
 
-use egui::{Context, Id, RichText, ScrollArea, Window};
+use egui::{vec2, Context, Id, RichText, ScrollArea, ViewportBuilder, Window};
 
+use crate::native_viewport::show_native_viewport;
 use crate::state::AppState;
 use crate::views::{show_results_view, show_run_log, tr};
 
@@ -30,15 +31,17 @@ pub fn show_discipline_windows(state: &mut AppState, ctx: &Context) {
             state.sandbox.layout.open_disciplines.retain(|d| *d != id);
             continue;
         };
-        let mut open = true;
         let groups = grouped(&fields, discipline);
-        let response = Window::new(tr(discipline.title()))
-            .id(Id::new(("sandbox_discipline_window", discipline.id())))
-            .open(&mut open)
-            .default_width(380.0)
-            .default_height(460.0)
-            .resizable(true)
-            .show(ctx, |ui| {
+        let response = show_native_viewport(
+            ctx,
+            ("sandbox_discipline", discipline.id()),
+            tr(discipline.title()),
+            ViewportBuilder::default()
+                .with_title(tr(discipline.title()))
+                .with_inner_size(vec2(380.0, 460.0))
+                .with_min_inner_size(vec2(300.0, 260.0))
+                .with_resizable(true),
+            |_child_ctx, ui, _class| {
                 let focused = state.sandbox.focus() == Some(discipline);
                 ui.horizontal(|ui| {
                     if ui
@@ -79,18 +82,13 @@ pub fn show_discipline_windows(state: &mut AppState, ctx: &Context) {
                             );
                         }
                     });
-            });
-        if let Some(response) = response {
-            let pressed = ctx.input(|i| i.pointer.any_pressed());
-            if pressed
-                && response.response.contains_pointer()
-                && state.sandbox.focus() != Some(discipline)
-            {
-                state.sandbox.set_focus(Some(discipline));
-                state.reproject_sandbox_scene();
-            }
+            },
+        );
+        if response.pointer_pressed && state.sandbox.focus() != Some(discipline) {
+            state.sandbox.set_focus(Some(discipline));
+            state.reproject_sandbox_scene();
         }
-        if !open {
+        if response.close_requested {
             state.sandbox.layout.open_disciplines.retain(|d| *d != id);
         }
     }
@@ -138,7 +136,7 @@ pub fn show_exit_prompt(state: &mut AppState, ctx: &Context) {
     }
 }
 
-/// Render the floating run log, opening it when a sandbox run starts.
+/// Render the detached native run log, opening it when a sandbox run starts.
 pub fn show_log_window(state: &mut AppState, ctx: &Context) {
     if state.is_running && state.sandbox.log_auto_open_for_run != Some(state.run_identity) {
         state.sandbox.log_auto_open_for_run = Some(state.run_identity);
@@ -147,17 +145,22 @@ pub fn show_log_window(state: &mut AppState, ctx: &Context) {
     if !state.sandbox.layout.log_window_open {
         return;
     }
-    let mut open = true;
-    Window::new(tr("Run Log"))
-        .id(Id::new("sandbox_run_log_window"))
-        .open(&mut open)
-        .collapsible(true)
-        .resizable(true)
-        .default_size(egui::vec2(640.0, 260.0))
-        .show(ctx, |ui| {
+    let response = show_native_viewport(
+        ctx,
+        "sandbox_run_log",
+        tr("Run Log"),
+        ViewportBuilder::default()
+            .with_title(tr("Run Log"))
+            .with_inner_size(vec2(640.0, 260.0))
+            .with_min_inner_size(vec2(420.0, 180.0))
+            .with_resizable(true),
+        |_child_ctx, ui, _class| {
             show_run_log(state, ui);
-        });
-    state.sandbox.layout.log_window_open = open;
+        },
+    );
+    if response.close_requested {
+        state.sandbox.layout.log_window_open = false;
+    }
 }
 
 /// Render the Full Analysis results window.
@@ -165,13 +168,16 @@ pub fn show_results_window(state: &mut AppState, ctx: &Context) {
     if !state.sandbox.results_window_open {
         return;
     }
-    let mut open = true;
-    Window::new(tr("Full Analysis results"))
-        .id(Id::new("sandbox_results_window"))
-        .open(&mut open)
-        .resizable(true)
-        .default_size(egui::vec2(900.0, 620.0))
-        .show(ctx, |ui| {
+    let response = show_native_viewport(
+        ctx,
+        "sandbox_results",
+        tr("Full Analysis results"),
+        ViewportBuilder::default()
+            .with_title(tr("Full Analysis results"))
+            .with_inner_size(vec2(900.0, 620.0))
+            .with_min_inner_size(vec2(620.0, 420.0))
+            .with_resizable(true),
+        |_child_ctx, ui, _class| {
             if state.sandbox.full_analysis_revision != Some(state.sandbox.revision) {
                 ui.label(
                     RichText::new(tr(
@@ -185,6 +191,9 @@ pub fn show_results_window(state: &mut AppState, ctx: &Context) {
                 .id_salt("sandbox_results_scroll")
                 .auto_shrink([false, false])
                 .show(ui, |ui| show_results_view(state, ui));
-        });
-    state.sandbox.results_window_open = open;
+        },
+    );
+    if response.close_requested {
+        state.sandbox.results_window_open = false;
+    }
 }

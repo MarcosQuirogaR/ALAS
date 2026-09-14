@@ -6,7 +6,7 @@ use std::path::Path;
 use eframe::{App, Frame};
 use egui::{
     menu, pos2, vec2, Align, Area, CentralPanel, Context, Frame as EguiFrame, Layout, Order,
-    RichText, ScrollArea, Sense, SidePanel, TopBottomPanel, Ui, Window,
+    RichText, ScrollArea, Sense, SidePanel, TopBottomPanel, Ui,
 };
 
 use crate::layout;
@@ -76,6 +76,17 @@ impl App for AlasApp {
         self.state.poll_navdata_download();
         self.state.poll_worker();
         self.state.screening.poll();
+        for event in self.state.cfd.poll() {
+            let level = match event.severity {
+                alas_cfd::CfdEventSeverity::Info => LogKind::Info,
+                alas_cfd::CfdEventSeverity::Warning => LogKind::Warn,
+                alas_cfd::CfdEventSeverity::Error => LogKind::Error,
+            };
+            self.state.log(
+                format!("CFD {}: {}", event.stage.as_str(), event.message),
+                level,
+            );
+        }
         self.state.uav.poll();
         if self.state.zoom_auto {
             let automatic_zoom = auto_zoom_factor(ctx);
@@ -86,6 +97,13 @@ impl App for AlasApp {
         handle_zoom_shortcuts(ctx, &mut self.state.zoom, &mut self.state.zoom_auto);
         if let Some(delay) = self.state.flush_parameter_feedback() {
             ctx.request_repaint_after(delay);
+        }
+        if self.state.cfd.running || self.state.cfd.probing {
+            // CFD events and provisional solver output arrive through a
+            // detached worker. Ten updates per second keep the log/results
+            // responsive during a multi-minute solve without spinning the UI
+            // at display refresh rate.
+            ctx.request_repaint_after(std::time::Duration::from_millis(100));
         }
         if self.state.is_running
             || self.state.screening.running
@@ -111,6 +129,13 @@ impl App for AlasApp {
         }
 
         if crate::sandbox::workspace::show_if_active(&mut self.state, ctx) {
+            // Standalone analyses remain owned by the shared AppState even
+            // while the full-window Sandbox is active.  Keep their native
+            // viewport dispatch on this fast path so a CFD study opened from
+            // the guided workspace does not disappear when the user enters
+            // Sandbox (and reappears when they leave it).
+            crate::views::cfd_view::show_cfd_window(&mut self.state, ctx);
+            crate::views::screening_window::show_screening_window(&mut self.state, ctx);
             return self.show_detached_view_panel(ctx);
         }
         self.state.prepare_walkthrough_step();
@@ -133,6 +158,7 @@ impl App for AlasApp {
                     ui.separator();
                     self.render_file_menu(ui);
                     self.render_view_menu(ctx, ui);
+                    self.render_analysis_menu(ui);
                     crate::sandbox::advanced::show_menu_action(&mut self.state, ui);
                     self.render_help_menu(ui);
                 });
@@ -281,6 +307,8 @@ impl App for AlasApp {
         overlays::show_storage_dialog(&mut self.state, ctx);
         overlays::show_about(&mut self.state, ctx);
         crate::sandbox::advanced::show_advanced_settings_window(&mut self.state, ctx);
+        crate::views::cfd_view::show_cfd_window(&mut self.state, ctx);
+        crate::views::screening_window::show_screening_window(&mut self.state, ctx);
         self.show_detached_view_panel(ctx);
         #[cfg(debug_assertions)]
         self.layout_debug.finish_frame(ctx);
@@ -430,7 +458,11 @@ fn route_page(state: &mut AppState, ui: &mut Ui) {
         PageKind::Results => crate::views::show_results_view(state, ui),
         PageKind::Setup => crate::views::show_tools_view(state, ui),
         PageKind::Analyses => crate::views::show_analyses_view(state, ui),
-        PageKind::AirfoilScreening => crate::views::show_screening_view(state, ui),
+        PageKind::AirfoilScreening => {
+            if !state.screening.window_open {
+                crate::views::show_screening_view(state, ui);
+            }
+        }
         PageKind::Uav => crate::views::show_uav_view(state, ui),
         PageKind::Form => {
             ScrollArea::vertical()

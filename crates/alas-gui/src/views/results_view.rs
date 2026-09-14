@@ -11,14 +11,17 @@ use crate::theme::selectable_button;
 use crate::views::result_3d;
 use crate::views::{tr, tr_fields};
 use alas_report::scene::Scene;
-use egui::{vec2, Align2, Area, Color32, Frame, Id, Key, Layout, Order, RichText, ScrollArea, Ui};
+use egui::{vec2, Id, RichText, ScrollArea, Ui};
 
 mod summary;
 use summary::show_summary;
 mod external;
+#[path = "fullscreen_result.rs"]
+mod fullscreen_result;
 mod images;
 mod solver;
 use external::show_external_tools_result;
+use fullscreen_result::show_fullscreen_result;
 #[cfg(test)]
 use images::scene_has_external_images;
 pub use solver::SolverResultView;
@@ -396,7 +399,7 @@ fn figure_tile(
 }
 
 fn fullscreen_id(view_key: &str) -> Id {
-    Id::new(("alas_result_fullscreen", view_key))
+    Id::new(("alas_result_fullscreen", fullscreen_slot_key(view_key)))
 }
 
 fn fullscreen_open(ctx: &egui::Context, view_key: &str) -> bool {
@@ -409,7 +412,7 @@ fn set_fullscreen(ctx: &egui::Context, view_key: &str, open: bool) {
 }
 
 fn fullscreen_view_key(view_key: &str) -> String {
-    format!("fullscreen_view::{view_key}")
+    format!("fullscreen_view::{}", fullscreen_slot_key(view_key))
 }
 
 fn fullscreen_camera_key(camera_key: &str) -> String {
@@ -417,7 +420,22 @@ fn fullscreen_camera_key(camera_key: &str) -> String {
 }
 
 fn fullscreen_cache_key(view_key: &str) -> String {
-    format!("fullscreen_scene::{view_key}")
+    format!("fullscreen_scene::{}", fullscreen_slot_key(view_key))
+}
+
+/// Remove display-only dimensions from a figure identity used by detached
+/// state.  A language or theme change must update the visible title/content
+/// while keeping the same native viewport, camera, and cache slot alive.
+fn fullscreen_slot_key(view_key: &str) -> String {
+    let stable_parts: Vec<_> = view_key
+        .split(';')
+        .filter(|part| !part.starts_with("theme=") && !part.starts_with("language="))
+        .collect();
+    if stable_parts.is_empty() {
+        view_key.to_owned()
+    } else {
+        stable_parts.join(";")
+    }
 }
 
 /// Open an isolated copy of a gallery figure.  The card remains its own view
@@ -450,113 +468,6 @@ struct FullscreenFigure<'a> {
     title: &'a str,
     description: &'a str,
     orbitable: bool,
-}
-
-fn show_fullscreen_result(state: &mut AppState, ctx: &egui::Context, figure: FullscreenFigure<'_>) {
-    let FullscreenFigure {
-        scene,
-        config,
-        theme,
-        camera_key,
-        view_key,
-        title,
-        description,
-        orbitable,
-    } = figure;
-    if ctx.input(|input| input.key_pressed(Key::Escape)) {
-        close_fullscreen_result(state, ctx, view_key, camera_key);
-        return;
-    }
-
-    let fullscreen_view = fullscreen_view_key(view_key);
-    let fullscreen_camera = fullscreen_camera_key(camera_key);
-    let fullscreen_cache = fullscreen_cache_key(view_key);
-    let fullscreen_scene = if orbitable {
-        let camera = (*state.result_camera_mut(&fullscreen_camera)).into();
-        state.cached_result_figure_with_camera(
-            &fullscreen_cache,
-            result_3d::MISSION_ROUTE_3D,
-            config,
-            theme,
-            Some(camera),
-        )
-    } else {
-        None
-    };
-    let active_scene = fullscreen_scene.as_deref().unwrap_or(scene);
-    let screen = ctx.screen_rect();
-    let screen_size = screen.size();
-    Area::new(Id::new(("alas_result_fullscreen_area", view_key)))
-        .order(Order::Foreground)
-        .default_size(screen.size())
-        .constrain_to(screen)
-        .pivot(Align2::LEFT_TOP)
-        .fixed_pos(screen.min)
-        .show(ctx, |ui| {
-            // Area defaults to the size its content requests. A figure was
-            // therefore able to create a short overlay on a tall monitor.
-            // Establish the full screen before the frame measures itself.
-            ui.set_min_size(screen_size);
-            Frame::default()
-                .fill(Color32::from_black_alpha(220))
-                .inner_margin(egui::Margin::same(18.0))
-                .show(ui, |ui| {
-                    ui.set_min_size(ui.available_size());
-                    ui.horizontal(|ui| {
-                        ui.heading(tr(title)).on_hover_text(tr(description));
-                        ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
-                            if crate::theme::close_icon_button(ui, tr("Close")).clicked() {
-                                close_fullscreen_result(state, ctx, view_key, camera_key);
-                            }
-                        });
-                    });
-                    ui.add_space(6.0);
-                    // Keep the scene above the footer and inside the inset
-                    // frame, including on the smallest supported window.
-                    let available = ui.available_size();
-                    let available = vec2(available.x.max(320.0), (available.y - 28.0).max(180.0));
-                    if images::scene_has_external_images(active_scene) {
-                        let _ = images::show_external_images(
-                            state,
-                            ui,
-                            active_scene,
-                            available.x,
-                            available.y,
-                            true,
-                        );
-                    } else if orbitable {
-                        let interaction = result_3d::show_orbit_view(
-                            state,
-                            ui,
-                            active_scene,
-                            &fullscreen_camera,
-                            &fullscreen_view,
-                            vec2(available.x, available.y.max(180.0)),
-                            true,
-                        );
-                        if interaction.camera_changed {
-                            result_3d::rebuild_scene(
-                                state,
-                                &fullscreen_cache,
-                                &fullscreen_camera,
-                                config,
-                                theme,
-                            );
-                            ctx.request_repaint();
-                        }
-                    } else {
-                        ui.add(
-                            alas_viz::SceneView::new(
-                                active_scene,
-                                state.view_state_mut(fullscreen_view.clone()),
-                            )
-                            .wheel_zoom(true)
-                            .show_toolbar(false)
-                            .desired_size(available),
-                        );
-                    }
-                });
-        });
 }
 
 fn close_fullscreen_result(

@@ -103,7 +103,8 @@ fn show_starting_design_card(state: &mut AppState, ui: &mut Ui) {
     });
 }
 
-fn show_aircraft_card(state: &mut AppState, ui: &mut Ui) {    let response = card(ui, "Aircraft Configuration", |ui| {
+fn show_aircraft_card(state: &mut AppState, ui: &mut Ui) {
+    let response = card(ui, "Aircraft Configuration", |ui| {
         ui.horizontal_wrapped(|ui| {
             ui.label(tr("Preset:"));
             let names = state.preset_names.clone();
@@ -115,18 +116,18 @@ fn show_aircraft_card(state: &mut AppState, ui: &mut Ui) {    let response = car
             let mut chosen = None;
             let preset_mode = state.starting_design() == StartingDesign::PresetAircraft;
             ui.add_enabled_ui(preset_mode, |ui| {
-            ComboBox::from_id_salt("inputs_preset_combo")
-                .selected_text(current_display)
-                .show_ui(ui, |ui| {
-                    for (name, display) in &names {
-                        if ui
-                            .selectable_label(*name == state.active_preset, display)
-                            .clicked()
-                        {
-                            chosen = Some(name.clone());
+                ComboBox::from_id_salt("inputs_preset_combo")
+                    .selected_text(current_display)
+                    .show_ui(ui, |ui| {
+                        for (name, display) in &names {
+                            if ui
+                                .selectable_label(*name == state.active_preset, display)
+                                .clicked()
+                            {
+                                chosen = Some(name.clone());
+                            }
                         }
-                    }
-                });
+                    });
             });
             if let Some(name) = chosen {
                 state.load_preset(&name);
@@ -487,8 +488,8 @@ fn apply_optimize_choice(state: &mut AppState, optimize: bool) {
 
 fn show_run_content_options(state: &mut AppState, ui: &mut Ui) {
     ui.label(RichText::new(tr("Run contents")).strong());
-    let mut optimize = state.run_options.optimize
-        && state.design_mode() != DesignMode::BaselineSandbox;
+    let mut optimize =
+        state.run_options.optimize && state.design_mode() != DesignMode::BaselineSandbox;
     if ui
         .checkbox(&mut optimize, tr("Optimize design space"))
         .on_hover_text(tr(
@@ -532,7 +533,8 @@ fn show_run_content_options(state: &mut AppState, ui: &mut Ui) {
 
 /// The solver backend selections, shown in the Advanced Settings window.
 pub(crate) fn show_run_evaluation_options(state: &mut AppState, ui: &mut Ui) {
-    ui.label(RichText::new(tr("Aerodynamic solvers")).strong());    ui.add_space(4.0);
+    ui.label(RichText::new(tr("Aerodynamic solvers")).strong());
+    ui.add_space(4.0);
     ui.label(RichText::new(tr("Aero evaluation backend")).weak().small());
     ComboBox::from_id_salt("alas_optimization_solver")
         .width(ui.available_width())
