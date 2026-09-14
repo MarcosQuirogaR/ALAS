@@ -223,11 +223,22 @@ pub struct MeshQuality {
     pub min_volume_m3: Option<f64>,
     /// Raw quality output retained for audit/export.
     pub raw_output: String,
+    /// Percentile summaries computed from native OpenFOAM cell-quality fields.
+    ///
+    /// An empty vector means that `checkMesh` returned only scalar summaries or
+    /// that the requested fields were not emitted.  The values are never
+    /// reconstructed from the max/min values in the text log.
+    #[serde(default)]
+    pub distributions: Vec<ScalarDistribution>,
     /// Measured wall resolution from the solver-attached yPlus function
     /// object.  This remains optional because a failed or preflight-only case
     /// may never produce a turbulence field.
     #[serde(default)]
     pub near_wall: Option<NearWallDiagnostics>,
+    /// Percentile summary of the solved wall-face y+ field, kept separate from
+    /// cell-quality distributions because it is a solution diagnostic.
+    #[serde(default)]
+    pub near_wall_distribution: Option<ScalarDistribution>,
 }
 
 impl Default for MeshQuality {
@@ -239,9 +250,40 @@ impl Default for MeshQuality {
             max_skewness: None,
             min_volume_m3: None,
             raw_output: String::new(),
+            distributions: Vec::new(),
             near_wall: None,
+            near_wall_distribution: None,
         }
     }
+}
+
+/// Finite-value percentile evidence read from a native OpenFOAM scalar field.
+///
+/// Percentiles are stored instead of the full cell vector so result artifacts
+/// remain compact while retaining a traceable distribution shape.  The source
+/// path and sample count identify the exact field used for the summary.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ScalarDistribution {
+    /// Native field object name, such as `aspectRatio` or `yPlus`.
+    pub field: String,
+    /// Human-readable quantity label.
+    pub label: String,
+    /// SI or dimensionless unit recorded for the field.
+    pub unit: String,
+    /// Relative path to the native OpenFOAM field.
+    pub source: String,
+    /// Number of finite values represented by the summary.
+    pub sample_count: usize,
+    /// Minimum finite value.
+    pub min: f64,
+    /// Arithmetic mean of finite values.
+    pub mean: f64,
+    /// Maximum finite value.
+    pub max: f64,
+    /// Percentile coordinates in percent, paired with `values`.
+    pub percentiles: Vec<f64>,
+    /// Interpolated finite values at `percentiles`.
+    pub values: Vec<f64>,
 }
 
 /// Measured and configured near-wall resolution for the airfoil patch.

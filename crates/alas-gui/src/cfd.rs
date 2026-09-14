@@ -8,6 +8,7 @@
 //! state, cancellation, and the revision gate that prevents a late worker
 //! result from replacing a result for newer inputs.
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::mpsc::Receiver;
@@ -313,6 +314,15 @@ pub struct AirfoilCfdState {
     pub last_case_dir: Option<PathBuf>,
     /// Field artifact selected for inspection in the Results tab.
     pub selected_field: Option<String>,
+    /// Decoded native contour figures keyed by their exact artifact path.
+    /// The cache is process-local UI state; the source PNGs remain in the
+    /// reproducible case directory and are never synthesized by the GUI.
+    pub contour_textures: BTreeMap<String, egui::TextureHandle>,
+    /// Editable path used to import a previously completed, reproducible
+    /// `results.json` artifact into the detached window.  Keeping this
+    /// explicit lets a user inspect a production case after restarting ALAS
+    /// without reconstructing or rerunning it.
+    pub result_json_path: String,
     /// Revision incremented whenever any study input changes.
     pub input_revision: u64,
     /// Monotonic ID for worker runs.  IDs are never reused during a session.

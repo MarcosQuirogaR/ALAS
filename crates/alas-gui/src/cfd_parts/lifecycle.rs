@@ -13,6 +13,43 @@ use std::sync::mpsc::channel;
 use std::thread;
 
 impl AirfoilCfdState {
+    /// Load actual, persisted OpenFOAM evidence from a prior isolated case.
+    ///
+    /// This does not reinterpret values or turn an unconverged result into a
+    /// qualified one.  It restores the exact stored status, input provenance,
+    /// force history and native field-artifact paths so the Results tab can
+    /// inspect a completed production case after an application restart.
+    pub fn load_result_json(&mut self, path: &Path) -> Result<(), String> {
+        if self.running {
+            return Err("Cannot load a CFD result while a study is running.".to_owned());
+        }
+        let text = std::fs::read_to_string(path)
+            .map_err(|error| format!("cannot read CFD results {}: {error}", path.display()))?;
+        let result: alas_cfd::CfdResults = serde_json::from_str(&text)
+            .map_err(|error| format!("cannot decode CFD results {}: {error}", path.display()))?;
+        if result.case_dir.as_os_str().is_empty() {
+            return Err("The CFD result has no case directory provenance.".to_owned());
+        }
+        // Importing a persisted result replaces the study contract.  Advance
+        // the same revision gate used by interactive edits so a queued worker
+        // can never install evidence for the previous contract after this
+        // load completes.
+        self.input_revision = self.input_revision.wrapping_add(1);
+        self.run_input_revision = self.input_revision;
+        self.result_json_path = path.display().to_string();
+        self.last_case_dir = Some(result.case_dir.clone());
+        self.config = result.provenance.config.clone();
+        self.refresh_preview();
+        self.result = Some(result);
+        self.sweep_results.clear();
+        self.selected_field = None;
+        self.contour_textures.clear();
+        self.error = None;
+        self.tab = CfdTab::Results;
+        self.status = "Loaded persisted OpenFOAM result evidence.".to_owned();
+        Ok(())
+    }
+
     /// Start a non-blocking OpenFOAM utility/version probe.
     pub fn start_probe(&mut self) {
         if self.probing || self.running {
@@ -58,6 +95,7 @@ impl AirfoilCfdState {
         self.sweep_running = false;
         self.error = None;
         self.selected_field = None;
+        self.contour_textures.clear();
         self.status = format!("Starting Airfoil CFD run #{}...", self.run_id);
         self.cancel_flag.store(false, Ordering::Relaxed);
         let run_id = self.run_id;
@@ -133,6 +171,7 @@ impl AirfoilCfdState {
             .collect();
         self.error = None;
         self.selected_field = None;
+        self.contour_textures.clear();
         self.status = format!(
             "Starting {} sweep with {} points...",
             self.sweep_settings.variable.label(),

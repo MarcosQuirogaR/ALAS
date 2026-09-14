@@ -203,6 +203,7 @@ fn control_dict(config: &CfdStudyConfig) -> String {
         patches (airfoil);
         writeFields yes;
         executeControl writeTime;
+        writeControl writeTime;
     }
     yPlus
     {
@@ -211,6 +212,7 @@ fn control_dict(config: &CfdStudyConfig) -> String {
         patches (airfoil);
         writeFields yes;
         executeControl writeTime;
+        writeControl writeTime;
     }
     #include "sampleDict"
 "#;
@@ -371,7 +373,7 @@ fn initial_nut(config: &CfdStudyConfig) -> String {
 fn case_readme(config: &CfdStudyConfig, airfoil: &AirfoilSnapshot) -> String {
     let turbulence = config.effective_turbulence();
     format!(
-        "# ALAS OpenFOAM airfoil case\n\nTemplate: `{TEMPLATE_VERSION}`\nAirfoil: `{}`\nCoordinate hash: `{}`\nChord: `{:.8} m`\nAngle of attack: `{:.6} deg`\nSpeed: `{:.8} m/s`\nReynolds number: `{:.8e}`\nDensity: `{:.8} kg/m^3`\nDynamic viscosity: `{:.8e} Pa s`\n\nFreestream turbulence specification: `{}`\nTurbulence intensity: `{:.6e}`\nConfigured length scale: `{:.8e} m`\nConfigured nu_t/nu ratio: `{:.8e}`\nEffective k: `{:.8e} m^2/s^2`\nEffective omega: `{:.8e} 1/s`\nEffective nu_t: `{:.8e} m^2/s`\nEffective nu_t/nu: `{:.8e}`\nEffective length implied by omega: `{:.8e} m`\n\nThe section frame is chord +x, normal +y and extrusion +z. Positive angle rotates the freestream velocity toward +y. Drag is positive along the freestream and lift is positive normal to it. The force reference is x/c = 0.25 and Aref = chord times the explicit extrusion span. The initial template uses incompressible steady k-omega SST RANS and is not validated for low-Reynolds transition, stall, transonic compressibility or unsteady shedding.\n",
+        "# ALAS OpenFOAM airfoil case\n\nTemplate: `{TEMPLATE_VERSION}`\nAirfoil: `{}`\nCoordinate hash: `{}`\nChord: `{:.8} m`\nAngle of attack: `{:.6} deg`\nSpeed: `{:.8} m/s`\nReynolds number: `{:.8e}`\nDensity: `{:.8} kg/m^3`\nDynamic viscosity: `{:.8e} Pa s`\nStatic temperature: `{:.8} K`\nDry-air speed of sound: `{:.8} m/s`\nFreestream Mach number: `{:.8}`\n\nFreestream turbulence specification: `{}`\nTurbulence intensity: `{:.6e}`\nConfigured length scale: `{:.8e} m`\nConfigured nu_t/nu ratio: `{:.8e}`\nEffective k: `{:.8e} m^2/s^2`\nEffective omega: `{:.8e} 1/s`\nEffective nu_t: `{:.8e} m^2/s`\nEffective nu_t/nu: `{:.8e}`\nEffective length implied by omega: `{:.8e} m`\n\nThe section frame is chord +x, normal +y and extrusion +z. Positive angle rotates the freestream velocity toward +y. Drag is positive along the freestream and lift is positive normal to it. The force reference is x/c = 0.25 and Aref = chord times the explicit extrusion span. Mach is `U/sqrt(gamma R T)` using dry-air gamma 1.4, R = 287.05287 J/(kg K), and the declared static temperature. The initial template uses incompressible steady k-omega SST RANS and is not validated for low-Reynolds transition, stall, transonic compressibility or unsteady shedding.\n",
         airfoil.name,
         airfoil.coordinate_hash,
         config.chord_m,
@@ -380,6 +382,9 @@ fn case_readme(config: &CfdStudyConfig, airfoil: &AirfoilSnapshot) -> String {
         config.effective_reynolds(),
         config.density_kg_m3,
         config.dynamic_viscosity_pa_s,
+        config.freestream_temperature_k,
+        config.speed_of_sound_m_s(),
+        config.mach_number(),
         config.turbulence_specification.as_str(),
         turbulence.intensity_fraction,
         turbulence.configured_length_m,

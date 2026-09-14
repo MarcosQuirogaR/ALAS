@@ -7,6 +7,7 @@ use super::super::*;
 use alas_cfd::CfdStudyConfig;
 use alas_exec::openfoam::OpenFoamPreferences;
 use alas_exec::ToolLocator;
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -85,6 +86,8 @@ impl AirfoilCfdState {
             paraview_executable: environment.paraview_executable,
             last_case_dir: None,
             selected_field: None,
+            contour_textures: BTreeMap::new(),
+            result_json_path: String::new(),
             input_revision: 0,
             run_id: 0,
             run_input_revision: 0,
@@ -126,6 +129,8 @@ impl Default for AirfoilCfdState {
             paraview_executable: None,
             last_case_dir: None,
             selected_field: None,
+            contour_textures: BTreeMap::new(),
+            result_json_path: String::new(),
             input_revision: 0,
             run_id: 0,
             run_input_revision: 0,

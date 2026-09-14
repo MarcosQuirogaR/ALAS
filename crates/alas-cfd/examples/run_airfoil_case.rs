@@ -11,7 +11,7 @@
 //! $env:ALAS_OPENFOAM_BIN = 'C:/.../platforms/win64MingwDPInt32Opt/bin'
 //! $env:ALAS_OPENFOAM_PROJECT = 'C:/.../OpenFOAM-v2606'
 //! $env:ALAS_GMSH = 'C:/.../gmsh.exe'
-//! cargo run -p alas-cfd --example run_airfoil_case -- .agent/airfoil-run naca0012
+//! cargo run -p alas-cfd --example run_airfoil_case -- .agent/airfoil-run naca0012 0
 //! ```
 
 use std::env;
@@ -32,9 +32,16 @@ fn main() {
         .next()
         .and_then(|value| value.into_string().ok())
         .unwrap_or_else(|| "SC2-0714".to_owned());
+    let angle_of_attack_deg = args
+        .next()
+        .and_then(|value| value.into_string().ok())
+        .and_then(|value| value.parse::<f64>().ok());
 
     let mut config = CfdStudyConfig::default();
     config.airfoil_name = airfoil;
+    if let Some(angle_of_attack_deg) = angle_of_attack_deg {
+        config.angle_of_attack_deg = angle_of_attack_deg;
+    }
     config.mesh.preset = MeshPreset::Coarse;
     let max_iterations_was_set = if let Some(value) = env::var("ALAS_CFD_MAX_ITERATIONS")
         .ok()

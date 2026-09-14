@@ -371,19 +371,14 @@ pub fn figure_vspaero_wake_convergence(
         .map(|case| case.rows.len() as f64)
         .fold(0.0, f64::max);
     let axes = [
-        Axes2D::new((60.0, 55.0, 370.0, 270.0), alpha, residual)
-            .with_y_tick_decimals(2),
+        Axes2D::new((60.0, 55.0, 370.0, 270.0), alpha, residual).with_y_tick_decimals(2),
         Axes2D::new(
             (480.0, 55.0, 370.0, 270.0),
             alpha,
             (0.0, (max_iterations + 1.0).max(2.0)),
         ),
     ];
-    let mut scene = Scene::new(
-        900.0,
-        WAKE_LEGEND_TOP + 42.0,
-        Some(Color::from_hex(pal.bg)),
-    );
+    let mut scene = Scene::new(900.0, WAKE_LEGEND_TOP + 42.0, Some(Color::from_hex(pal.bg)));
     scene.title = Some("VSPAERO Native Wake Convergence".to_owned());
     axes[0].draw_frame_with_labels(
         &mut scene,
@@ -533,10 +528,8 @@ mod tests {
 
     #[test]
     fn wake_scene_limits_residual_ticks_and_keeps_legend_clear_of_x_labels() {
-        let stem = std::env::temp_dir().join(format!(
-            "alas-vspaero-wake-layout-{}",
-            std::process::id()
-        ));
+        let stem =
+            std::env::temp_dir().join(format!("alas-vspaero-wake-layout-{}", std::process::id()));
         let history_path = stem.with_extension("history");
         let history = "# Name Value Units\n\
             AoA_ -2.0 deg\n\
@@ -560,9 +553,7 @@ mod tests {
                 .elements
                 .iter()
                 .filter_map(|element| match element {
-                    SceneElement::Text { text, pos, .. } if text == "alpha [deg]" => {
-                        Some(pos[1])
-                    }
+                    SceneElement::Text { text, pos, .. } if text == "alpha [deg]" => Some(pos[1]),
                     _ => None,
                 })
                 .collect::<Vec<_>>();
@@ -593,7 +584,10 @@ mod tests {
                         if matches!(
                             text.as_str(),
                             "Native residual" | "Iteration count" | "Acceptance tolerance"
-                        ) => Some(pos[1]),
+                        ) =>
+                    {
+                        Some(pos[1])
+                    }
                     _ => None,
                 })
                 .collect::<Vec<_>>();

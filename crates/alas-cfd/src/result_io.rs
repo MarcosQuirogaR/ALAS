@@ -54,12 +54,15 @@ pub(crate) fn read_force_decomposition(case_dir: &Path) -> Vec<ForceDecompositio
 /// the latter can exit successfully while warning that no turbulence model is
 /// available and writing an all-zero field.  The native field list is used
 /// only to recover a face-value count and to make the source auditable.
+/// OpenCFD may place a row whose solved `Time` is 10 in
+/// `postProcessing/yPlus/0/` when the function object writes at `writeTime`,
+/// so the output directory name is deliberately not compared with the row.
 pub(crate) fn read_y_plus_summary(case_dir: &Path, patch_name: &str) -> Option<ParsedYPlusSummary> {
     if patch_name.trim().is_empty() {
         return None;
     }
     let root = case_dir.join("postProcessing/yPlus");
-    for (time, directory) in numeric_time_dirs(&root).into_iter().rev() {
+    for (_output_directory_time, directory) in numeric_time_dirs(&root).into_iter().rev() {
         let path = directory.join("yPlus.dat");
         let Ok(text) = fs::read_to_string(&path) else {
             continue;
@@ -77,7 +80,6 @@ pub(crate) fn read_y_plus_summary(case_dir: &Path, patch_name: &str) -> Option<P
         let (row_time, min_y_plus, max_y_plus, average_y_plus) =
             (row.time, row.min_y_plus, row.max_y_plus, row.average_y_plus);
         if row_time.is_finite()
-            && (row_time - time).abs() <= 1.0e-8 * row_time.abs().max(1.0)
             && min_y_plus.is_finite()
             && max_y_plus.is_finite()
             && average_y_plus.is_finite()
@@ -114,6 +116,149 @@ pub(crate) fn read_y_plus_summary(case_dir: &Path, patch_name: &str) -> Option<P
         // caller receives None if no finite, ordered summary can be trusted.
     }
     None
+}
+
+/// Read cell-quality fields emitted by `checkMesh -writeAllFields`.
+///
+/// The fields are native `volScalarField` data.  Only finite internal-cell
+/// values are summarized, so a missing field or malformed list remains
+/// unavailable rather than being inferred from a max/min line in the log.  If
+/// a case contains several written times, the latest native field containing
+/// each metric is selected.
+pub(crate) fn read_mesh_quality_distributions(case_dir: &Path) -> Vec<ScalarDistribution> {
+    const FIELDS: [(&str, &str, &str); 4] = [
+        ("nonOrthoAngle", "non-orthogonality", "deg"),
+        ("skewness", "skewness", "-"),
+        ("aspectRatio", "aspect ratio", "-"),
+        ("cellVolume", "cell volume", "m^3"),
+    ];
+    let time_directories = numeric_time_dirs(case_dir);
+    FIELDS
+        .into_iter()
+        .filter_map(|(field, label, unit)| {
+            time_directories.iter().rev().find_map(|(_, directory)| {
+                let path = directory.join(field);
+                let text = fs::read_to_string(&path).ok()?;
+                let values = parse_scalar_list(&text, "internalField")?;
+                scalar_distribution(field, label, unit, relative_path(case_dir, &path), values)
+            })
+        })
+        .collect()
+}
+
+/// Read the solved wall-face y+ field for a named patch.
+///
+/// The y+ field is kept separate from cell-quality distributions because it is
+/// a solution diagnostic and its values live on the wall faces.  The latest
+/// native time containing a finite patch list is selected.
+pub(crate) fn read_y_plus_distribution(
+    case_dir: &Path,
+    patch_name: &str,
+) -> Option<ScalarDistribution> {
+    if patch_name.trim().is_empty() {
+        return None;
+    }
+    numeric_time_dirs(case_dir)
+        .into_iter()
+        .rev()
+        .find_map(|(_, directory)| {
+            let path = directory.join("yPlus");
+            let text = fs::read_to_string(&path).ok()?;
+            let values = parse_scalar_list(&text, patch_name)?;
+            scalar_distribution(
+                "yPlus",
+                "wall y+",
+                "-",
+                relative_path(case_dir, &path),
+                values,
+            )
+        })
+}
+
+const DISTRIBUTION_PERCENTILES: [f64; 21] = [
+    0.0, 5.0, 10.0, 15.0, 20.0, 25.0, 30.0, 35.0, 40.0, 45.0, 50.0, 55.0, 60.0, 65.0, 70.0, 75.0,
+    80.0, 85.0, 90.0, 95.0, 100.0,
+];
+
+fn scalar_distribution(
+    field: &str,
+    label: &str,
+    unit: &str,
+    source: String,
+    values: Vec<f64>,
+) -> Option<ScalarDistribution> {
+    let mut finite = values
+        .into_iter()
+        .filter(|value| value.is_finite())
+        .collect::<Vec<_>>();
+    if finite.is_empty() {
+        return None;
+    }
+    finite.sort_by(f64::total_cmp);
+    let mean = finite.iter().sum::<f64>() / finite.len() as f64;
+    let values = DISTRIBUTION_PERCENTILES
+        .into_iter()
+        .map(|percentile| quantile(&finite, percentile / 100.0))
+        .collect();
+    Some(ScalarDistribution {
+        field: field.to_owned(),
+        label: label.to_owned(),
+        unit: unit.to_owned(),
+        source,
+        sample_count: finite.len(),
+        min: finite[0],
+        mean,
+        max: finite[finite.len() - 1],
+        percentiles: DISTRIBUTION_PERCENTILES.to_vec(),
+        values,
+    })
+}
+
+fn quantile(sorted: &[f64], fraction: f64) -> f64 {
+    if sorted.len() == 1 {
+        return sorted[0];
+    }
+    let position = fraction.clamp(0.0, 1.0) * (sorted.len() - 1) as f64;
+    let lower = position.floor() as usize;
+    let upper = position.ceil() as usize;
+    if lower == upper {
+        sorted[lower]
+    } else {
+        let ratio = position - lower as f64;
+        sorted[lower] + ratio * (sorted[upper] - sorted[lower])
+    }
+}
+
+/// Parse a nonuniform scalar list below a named OpenFOAM dictionary entry.
+///
+/// Both `internalField` and a patch `value` entry use the same list grammar.
+/// The declared count is checked when present, preventing a truncated file
+/// from becoming a plausible-looking distribution.
+fn parse_scalar_list(text: &str, marker: &str) -> Option<Vec<f64>> {
+    let start = text.find(marker)?;
+    let tail = &text[start..];
+    let nonuniform_offset = tail.find("nonuniform")?;
+    let after = &tail[nonuniform_offset + "nonuniform".len()..];
+    let open = after.find('(')?;
+    let expected = after[..open]
+        .split_whitespace()
+        .find_map(|token| token.parse::<usize>().ok());
+    let close = after[open + 1..].find(')')? + open + 1;
+    let values = after[open + 1..close]
+        .split_whitespace()
+        .filter_map(|token| token.parse::<f64>().ok())
+        .collect::<Vec<_>>();
+    if expected.is_some_and(|count| count != values.len()) {
+        return None;
+    }
+    (!values.is_empty()).then_some(values)
+}
+
+fn relative_path(root: &Path, path: &Path) -> String {
+    path.strip_prefix(root)
+        .unwrap_or(path)
+        .to_string_lossy()
+        .replace('\\', "/")
 }
 
 /// Parsed yPlus data before configured study values are attached.
@@ -312,7 +457,10 @@ mod tests {
     #[test]
     fn y_plus_summary_requires_requested_patch_and_recovers_native_count() {
         let case = case_dir();
-        let summary = case.join("postProcessing/yPlus/7");
+        // OpenFOAM groups a write-time row under the function object's start
+        // directory when writeControl is writeTime.  The row's Time value is
+        // the solved field time and need not equal that directory name.
+        let summary = case.join("postProcessing/yPlus/0");
         fs::create_dir_all(&summary).expect("summary directory");
         fs::create_dir_all(case.join("7")).expect("native time directory");
         fs::write(
@@ -336,7 +484,7 @@ mod tests {
     #[test]
     fn y_plus_summary_rejects_all_zero_diagnostic() {
         let case = case_dir();
-        let summary = case.join("postProcessing/yPlus/7");
+        let summary = case.join("postProcessing/yPlus/0");
         fs::create_dir_all(&summary).expect("summary directory");
         fs::write(
             summary.join("yPlus.dat"),
@@ -344,6 +492,65 @@ mod tests {
         )
         .expect("summary output");
         assert!(read_y_plus_summary(&case, "airfoil").is_none());
+        let _ = fs::remove_dir_all(case);
+    }
+
+    #[test]
+    fn native_quality_fields_produce_actual_percentile_distributions() {
+        let case = case_dir();
+        let time = case.join("0");
+        fs::create_dir_all(&time).expect("quality field directory");
+        let field = |name: &str, values: &str| {
+            fs::write(
+                time.join(name),
+                format!(
+                    "FoamFile {{ class volScalarField; }}\ninternalField nonuniform List<scalar>\n4\n(\n{values}\n)\nboundaryField {{}}\n"
+                ),
+            )
+            .expect("quality field");
+        };
+        field("nonOrthoAngle", "1\n2\n3\n4");
+        field("skewness", "0.1\n0.2\n0.3\n0.4");
+        field("aspectRatio", "2\n4\n6\n8");
+        field("cellVolume", "1e-6\n2e-6\n3e-6\n4e-6");
+        let later = case.join("12");
+        fs::create_dir_all(&later).expect("later quality field directory");
+        fs::write(
+            later.join("aspectRatio"),
+            "FoamFile { class volScalarField; }\ninternalField nonuniform List<scalar>\n4\n(\n10\n20\n30\n40\n)\nboundaryField {}\n",
+        )
+        .expect("later aspect ratio field");
+        let distributions = read_mesh_quality_distributions(&case);
+        assert_eq!(distributions.len(), 4);
+        let aspect = distributions
+            .iter()
+            .find(|distribution| distribution.field == "aspectRatio")
+            .expect("aspect ratio distribution");
+        assert_eq!(aspect.sample_count, 4);
+        assert_eq!(aspect.min, 10.0);
+        assert_eq!(aspect.max, 40.0);
+        assert_eq!(aspect.values[10], 25.0);
+        assert_eq!(aspect.source, "12/aspectRatio");
+        let _ = fs::remove_dir_all(case);
+    }
+
+    #[test]
+    fn native_y_plus_distribution_is_separate_from_mesh_quality() {
+        let case = case_dir();
+        let time = case.join("12");
+        fs::create_dir_all(&time).expect("y plus field directory");
+        fs::write(
+            time.join("yPlus"),
+            "FoamFile { class volScalarField; }\nboundaryField\n{\n    farField { value uniform 0; }\n    airfoil\n    {\n        value nonuniform List<scalar>\n        4\n        (\n            0.5\n            1.0\n            2.0\n            4.0\n        )\n    }\n}\n",
+        )
+        .expect("y plus field");
+        let distribution =
+            read_y_plus_distribution(&case, "airfoil").expect("wall y plus distribution");
+        assert_eq!(distribution.field, "yPlus");
+        assert_eq!(distribution.sample_count, 4);
+        assert_eq!(distribution.min, 0.5);
+        assert_eq!(distribution.max, 4.0);
+        assert_eq!(distribution.source, "12/yPlus");
         let _ = fs::remove_dir_all(case);
     }
 }

@@ -22,7 +22,7 @@ use alas_config::{AlasConfig, DesignVector};
 use alas_geom::aircraft::airplane::Airplane;
 use alas_geom::builder::AircraftBuilder;
 use alas_report::families::geometry::{
-    figure_sandbox_exterior, SandboxSceneOptions, SceneComponent, SceneFraming,
+    SandboxSceneModel, SandboxSceneOptions, SceneComponent, SceneFraming,
 };
 use alas_report::scene::Scene;
 
@@ -34,6 +34,10 @@ use super::fields::Discipline;
 pub const SANDBOX_CAMERA_ID: &str = "sandbox_3d";
 /// Viewport key of the sandbox canvas.
 pub const SANDBOX_VIEW_KEY: &str = "sandbox::aircraft_3d";
+/// Outline points per lofted section in the interactive preview.
+pub const SECTION_POINTS: usize = 40;
+/// The canvas drawn before the viewport has reported its size, in points.
+pub const DEFAULT_CANVAS: (f64, f64) = (600.0, 500.0);
 
 /// The component a discipline isolates in the preview.
 pub fn discipline_component(discipline: Discipline) -> SceneComponent {
@@ -66,28 +70,44 @@ pub fn build_sandbox_airplane(state: &AppState) -> Option<(Airplane, DesignVecto
     Some((plane, design))
 }
 
-/// Build the sandbox scene for the current camera and focus.
-pub fn build_sandbox_scene(state: &AppState) -> Option<(Scene, SceneFraming)> {
-    let (plane, _) = build_sandbox_airplane(state)?;
-    Some(project_sandbox_scene(state, &plane))
+/// Loft and partition an aircraft for drawing, once per geometry.
+pub fn build_sandbox_model(plane: &Airplane) -> SandboxSceneModel {
+    SandboxSceneModel::new(plane, SECTION_POINTS)
 }
 
-/// Project an already built aircraft for the current camera and focus.
-pub fn project_sandbox_scene(state: &AppState, plane: &Airplane) -> (Scene, SceneFraming) {
+/// Build the sandbox scene for the current camera, focus, theme, viewport
+/// and kept framing.
+pub fn build_sandbox_scene(state: &AppState) -> Option<(Scene, SceneFraming)> {
+    let (plane, _) = build_sandbox_airplane(state)?;
+    Some(project_sandbox_model(state, &build_sandbox_model(&plane)))
+}
+
+/// The drawing options the current state asks for: the isolated component,
+/// the viewport-sized canvas and the framing kept across camera motion and
+/// edits (fitted to the shown components when none is kept).
+pub fn scene_options(state: &AppState) -> SandboxSceneOptions {
+    SandboxSceneOptions {
+        isolate: state.sandbox.focus().map(discipline_component),
+        max_section_points: SECTION_POINTS,
+        canvas: state
+            .sandbox
+            .viewport_size
+            .map_or(DEFAULT_CANVAS, |(w, h)| (f64::from(w), f64::from(h))),
+        reference: state.sandbox.framing,
+    }
+}
+
+/// Draw an already partitioned aircraft for the current camera and options.
+pub fn project_sandbox_model(state: &AppState, model: &SandboxSceneModel) -> (Scene, SceneFraming) {
     let camera = state
         .preview_cameras
         .get(SANDBOX_CAMERA_ID)
         .copied()
         .unwrap_or_default();
-    let options = SandboxSceneOptions {
-        isolate: state.sandbox.focus().map(discipline_component),
-        ..SandboxSceneOptions::default()
-    };
-    figure_sandbox_exterior(
-        plane,
+    model.render(
         Some(camera.into()),
         Some(state.theme.figure_theme_name()),
-        &options,
+        &scene_options(state),
     )
 }
 

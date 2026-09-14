@@ -8,7 +8,7 @@
 
 use alas_report::scene::Scene;
 use alas_viz::SceneView;
-use egui::{vec2, Color32, Frame, Id, RichText, Ui};
+use egui::{vec2, Align, Color32, FontId, Frame, Id, Layout, RichText, TextStyle, Ui};
 
 use crate::state::{AppState, PreviewCamera, PreviewTab};
 use crate::views::tr;
@@ -122,8 +122,10 @@ fn show_aircraft_viewer_controls(
             .fill(ui.visuals().panel_fill)
             .inner_margin(egui::Margin::symmetric(5.0, 3.0))
             .show(ui, |ui| {
-                ui.horizontal_centered(|ui| {
-                    ui.spacing_mut().item_spacing.x = 5.0;
+                ui.spacing_mut().item_spacing.x = 5.0;
+                let row_width = controls_row_width(ui);
+                let row_height = ui.spacing().interact_size.y;
+                centered_row(ui, row_width, row_height, |ui| {
                     if ui
                         .selectable_label(current == PreviewTab::Exterior, tr("Exterior"))
                         .on_hover_text(tr("Show the complete aircraft exterior"))
@@ -159,11 +161,79 @@ fn show_aircraft_viewer_controls(
 }
 
 fn legend_item(ui: &mut Ui, color: Color32, label: &str) {
-    ui.horizontal(|ui| {
-        let (rect, _) = ui.allocate_exact_size(vec2(10.0, 10.0), egui::Sense::hover());
-        ui.painter().rect_filled(rect, 2.0, color);
-        ui.label(RichText::new(tr(label)).size(11.0));
-    });
+    let (rect, _) = ui.allocate_exact_size(vec2(10.0, 10.0), egui::Sense::hover());
+    ui.painter().rect_filled(rect, 2.0, color);
+    ui.label(RichText::new(tr(label)).size(11.0));
+}
+
+/// Allocate a horizontal row around its measured contents so the controls and
+/// their labels stay centred even when the overlay is wider than the row.
+fn centered_row<R>(
+    ui: &mut Ui,
+    row_width: f32,
+    row_height: f32,
+    add_contents: impl FnOnce(&mut Ui) -> R,
+) -> egui::InnerResponse<R> {
+    let available = ui.available_rect_before_wrap();
+    let rect = egui::Rect::from_min_size(
+        egui::pos2(
+            available.center().x - row_width.max(1.0) * 0.5,
+            available.top(),
+        ),
+        vec2(row_width.max(1.0), row_height.max(1.0)),
+    );
+    let layout = if ui.layout().prefer_right_to_left() {
+        Layout::right_to_left(Align::Center)
+    } else {
+        Layout::left_to_right(Align::Center)
+    };
+    ui.allocate_new_ui(
+        egui::UiBuilder::new().max_rect(rect).layout(layout),
+        add_contents,
+    )
+}
+
+fn text_width(ui: &Ui, text: &str, font_id: FontId) -> f32 {
+    let text_color = ui.visuals().text_color();
+    ui.fonts(|fonts| {
+        fonts
+            .layout_no_wrap(text.to_owned(), font_id, text_color)
+            .size()
+            .x
+    })
+}
+
+fn controls_row_width(ui: &Ui) -> f32 {
+    let button_padding = ui.spacing().button_padding.x;
+    let reset_padding = if ui.visuals().button_frame {
+        button_padding
+    } else {
+        0.0
+    };
+    let exterior = text_width(ui, &tr("Exterior"), TextStyle::Button.resolve(ui.style()))
+        + 2.0 * button_padding;
+    let interior = text_width(ui, &tr("Interior"), TextStyle::Button.resolve(ui.style()))
+        + 2.0 * button_padding;
+    let reset =
+        text_width(ui, &tr("Reset"), TextStyle::Body.resolve(ui.style())) + 2.0 * reset_padding;
+    exterior + interior + reset + 2.0 * ui.spacing().item_spacing.x
+}
+
+fn legend_item_width(ui: &Ui, label: &str) -> f32 {
+    10.0 + ui.spacing().item_spacing.x + text_width(ui, &tr(label), FontId::proportional(11.0))
+}
+
+fn legend_row_width(ui: &Ui, labels: &[&str]) -> f32 {
+    labels
+        .iter()
+        .map(|label| legend_item_width(ui, label))
+        .sum::<f32>()
+        + ui.spacing().item_spacing.x * labels.len().saturating_sub(1) as f32
+}
+
+fn legend_row_height(ui: &Ui) -> f32 {
+    ui.fonts(|fonts| fonts.row_height(&FontId::proportional(11.0)))
+        .max(10.0)
 }
 
 /// Draw a readable screen-space key that never follows the 3-D camera.
@@ -184,12 +254,16 @@ fn show_cabin_legend(ui: &mut Ui, viewport: egui::Rect) {
                     // 300-point dock while preserving a visible gap between
                     // each swatch/label pair.
                     ui.spacing_mut().item_spacing = vec2(4.0, 3.0);
-                    ui.horizontal_centered(|ui| {
+                    let row_height = legend_row_height(ui);
+                    let first_row_width =
+                        legend_row_width(ui, &["First class", "Business class", "Economy class"]);
+                    centered_row(ui, first_row_width, row_height, |ui| {
                         legend_item(ui, Color32::from_rgb(142, 68, 173), "First class");
                         legend_item(ui, Color32::from_rgb(41, 128, 185), "Business class");
                         legend_item(ui, Color32::from_rgb(39, 174, 96), "Economy class");
                     });
-                    ui.horizontal_centered(|ui| {
+                    let second_row_width = legend_row_width(ui, &["Galley", "Lavatory", "Exit"]);
+                    centered_row(ui, second_row_width, row_height, |ui| {
                         legend_item(ui, Color32::from_rgb(230, 126, 34), "Galley");
                         legend_item(ui, Color32::from_rgb(93, 173, 226), "Lavatory");
                         legend_item(ui, Color32::from_rgb(231, 76, 60), "Exit");
@@ -449,3 +523,7 @@ mod tests {
         assert!(scene.render_title);
     }
 }
+
+#[cfg(test)]
+#[path = "preview_dock_cabin_tests.rs"]
+mod cabin_layout_tests;

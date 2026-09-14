@@ -48,10 +48,7 @@ pub fn show_discipline_windows(state: &mut AppState, ctx: &Context) {
                         .add(crate::theme::selectable_button(tr("Focus"), focused))
                         .clicked()
                     {
-                        state
-                            .sandbox
-                            .set_focus(if focused { None } else { Some(discipline) });
-                        state.reproject_sandbox_scene();
+                        state.set_sandbox_focus(if focused { None } else { Some(discipline) });
                     }
                     ui.label(
                         RichText::new(tr("Edits apply on commit and update the preview."))
@@ -85,8 +82,7 @@ pub fn show_discipline_windows(state: &mut AppState, ctx: &Context) {
             },
         );
         if response.pointer_pressed && state.sandbox.focus() != Some(discipline) {
-            state.sandbox.set_focus(Some(discipline));
-            state.reproject_sandbox_scene();
+            state.set_sandbox_focus(Some(discipline));
         }
         if response.close_requested {
             state.sandbox.layout.open_disciplines.retain(|d| *d != id);

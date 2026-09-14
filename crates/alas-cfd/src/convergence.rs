@@ -33,7 +33,9 @@ pub fn parse_mesh_quality(output: &str) -> MeshQuality {
         max_skewness,
         min_volume_m3,
         raw_output: output.to_owned(),
+        distributions: Vec::new(),
         near_wall: None,
+        near_wall_distribution: None,
     }
 }
 
@@ -210,11 +212,15 @@ pub fn classify_convergence(
                 .to_owned(),
         );
     }
-    let window = config.solver.force_window.min(forces.len());
-    if window < 3 {
+    let window = config.solver.force_window;
+    if forces.len() < window {
         return (
             CfdOutcome::Unconverged,
-            "Fewer than three force samples are available for stabilization.".to_owned(),
+            format!(
+                "Only {} of the configured {} force samples are available for stabilization.",
+                forces.len(),
+                window
+            ),
         );
     }
     let tail = &forces[forces.len() - window..];

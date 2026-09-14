@@ -12,6 +12,20 @@ fn default_turbulence_viscosity_ratio() -> f64 {
     0.009
 }
 
+/// Ratio of specific heats used only to derive a Mach diagnostic from the
+/// imposed incompressible-flow velocity.  The governing equations remain
+/// incompressible; this constant must not be interpreted as enabling a
+/// compressible model.
+pub const DRY_AIR_GAMMA: f64 = 1.4;
+
+/// Specific gas constant for dry air in J/(kg K), used with
+/// [`DRY_AIR_GAMMA`] for the Mach diagnostic.
+pub const DRY_AIR_GAS_CONSTANT_J_KG_K: f64 = 287.052_87;
+
+fn default_freestream_temperature_k() -> f64 {
+    288.15
+}
+
 /// Source used to determine the dimensional velocity.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -217,6 +231,12 @@ pub struct CfdStudyConfig {
     pub density_kg_m3: f64,
     /// Dynamic viscosity in Pa s.
     pub dynamic_viscosity_pa_s: f64,
+    /// Static freestream temperature in K.  This is used to calculate the
+    /// reported Mach number as `U / sqrt(gamma R T)` and makes the
+    /// incompressible-model validity gate traceable to an explicit thermal
+    /// state rather than a fixed sea-level sound speed.
+    #[serde(default = "default_freestream_temperature_k")]
+    pub freestream_temperature_k: f64,
     /// Turbulence intensity as a fraction, e.g. 0.01 for 1%.
     pub turbulence_intensity: f64,
     /// Input form used to derive the freestream omega field.
@@ -250,6 +270,7 @@ impl Default for CfdStudyConfig {
             reynolds: 3.5e6,
             density_kg_m3: 1.225,
             dynamic_viscosity_pa_s: 1.81e-5,
+            freestream_temperature_k: default_freestream_temperature_k(),
             // NASA/TMBWG turbulent NACA validation cases use 0.052% free
             // stream intensity and a 0.009 turbulent/molecular viscosity
             // ratio.  Keep these values explicit rather than implying that a
@@ -288,11 +309,20 @@ impl CfdStudyConfig {
         }
     }
 
-    /// Freestream Mach number using a fixed sea-level sound speed for the
-    /// incompressible validity warning; no compressible thermodynamics are
-    /// silently inferred by the template.
-    pub fn approximate_mach(&self) -> f64 {
-        self.effective_speed_m_s() / 340.294
+    /// Dry-air speed of sound in m/s for the explicitly declared static
+    /// freestream temperature.  This is a reporting/validity quantity; the
+    /// current governing equations are still incompressible.
+    pub fn speed_of_sound_m_s(&self) -> f64 {
+        (DRY_AIR_GAMMA * DRY_AIR_GAS_CONSTANT_J_KG_K * self.freestream_temperature_k).sqrt()
+    }
+
+    /// Freestream Mach number `M = U/a`, where
+    /// `a = sqrt(gamma R T)` for dry air.  It is deliberately not called
+    /// "approximate": the stated thermodynamic convention makes this
+    /// quantity reproducible even though the solution model is
+    /// incompressible.
+    pub fn mach_number(&self) -> f64 {
+        self.effective_speed_m_s() / self.speed_of_sound_m_s()
     }
 
     /// Derive the complete freestream turbulence state in SI units.
@@ -334,6 +364,7 @@ impl CfdStudyConfig {
             ("Reynolds number", self.reynolds),
             ("density", self.density_kg_m3),
             ("dynamic viscosity", self.dynamic_viscosity_pa_s),
+            ("freestream temperature", self.freestream_temperature_k),
         ] {
             if !value.is_finite() || value <= 0.0 {
                 errors.push(format!("{name} must be finite and greater than zero."));
@@ -368,7 +399,12 @@ impl CfdStudyConfig {
         if !(1.0e3..=1.0e9).contains(&self.effective_reynolds()) {
             errors.push("The effective Reynolds number must be between 1e3 and 1e9.".to_owned());
         }
-        if self.approximate_mach() > 0.3 {
+        let speed_of_sound = self.speed_of_sound_m_s();
+        if !speed_of_sound.is_finite() || speed_of_sound <= 0.0 {
+            errors.push(
+                "Freestream temperature must produce a finite positive speed of sound.".to_owned(),
+            );
+        } else if self.mach_number() > 0.3 {
             errors.push(
                 "The incompressible template is limited to approximately Mach 0.3; reduce speed or use a validated compressible study.".to_owned(),
             );

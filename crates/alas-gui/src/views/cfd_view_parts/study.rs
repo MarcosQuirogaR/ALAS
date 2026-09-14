@@ -9,7 +9,7 @@ use super::drawing::paint_airfoil_outline;
 use crate::cfd::{AirfoilCfdState, CfdSweepVariable};
 use crate::state::{AppState, LogKind};
 use crate::views::{tr, tr_fields};
-use alas_cfd::{CfdStudyConfig, FarFieldCondition, MeshPreset, OperatingInput};
+use alas_cfd::{CfdStudyConfig, ConvectionScheme, FarFieldCondition, MeshPreset, OperatingInput};
 use egui::{ComboBox, DragValue, Grid, RichText, ScrollArea, Sense, Ui};
 
 pub(crate) fn show_study_tab(state: &mut AppState, ui: &mut Ui) {
@@ -146,6 +146,9 @@ fn show_routine_card(state: &mut AppState, ui: &mut Ui) {
                 label_with_help(ui, "Dynamic viscosity [Pa\u{00b7}s]", "Dynamic viscosity used to derive kinematic viscosity and Reynolds number.");
                 ui.add(DragValue::new(&mut config.dynamic_viscosity_pa_s).speed(1.0e-7).range(1.0e-8..=1.0));
                 ui.end_row();
+                label_with_help(ui, "Static temperature [K]", "Used only for the Mach diagnostic: a = sqrt(gamma R T), M = U/a with dry-air gamma = 1.4 and R = 287.05287 J/(kg K). The present solver remains incompressible.");
+                ui.add(DragValue::new(&mut config.freestream_temperature_k).speed(0.5).range(100.0..=2_000.0));
+                ui.end_row();
                 label_with_help(ui, "Turbulence intensity [%]", "Freestream turbulence intensity used to initialize k and omega for the selected SST model.");
                 let mut turbulence_percent = config.turbulence_intensity * 100.0;
                 if ui.add(DragValue::new(&mut turbulence_percent).speed(0.1).range(0.0..=30.0)).changed() {
@@ -180,7 +183,11 @@ fn show_routine_card(state: &mut AppState, ui: &mut Ui) {
             ui.separator();
             ui.label(format!("Re = {:.4e}", config.effective_reynolds()));
             ui.separator();
-            ui.label(format!("Mach \u{2248} {:.3}", config.approximate_mach()));
+            ui.label(format!("T = {:.2} K", config.freestream_temperature_k));
+            ui.separator();
+            ui.label(format!("a = {:.3} m/s", config.speed_of_sound_m_s()));
+            ui.separator();
+            ui.label(format!("Mach = {:.4}", config.mach_number()));
         });
         ui.label(
             RichText::new(tr(
@@ -359,7 +366,7 @@ pub(crate) fn show_advanced_tab(state: &mut AppState, ui: &mut Ui) {
             crate::theme::card_frame(ui).show(ui, |ui| {
                 ui.label(RichText::new(tr("Mesh settings")).strong().size(16.0));
                 ui.label(
-                    RichText::new(tr("The topology is versioned and regenerated when the section or compatible settings change. Boundary-layer extrusion remains disabled until its template is validated."))
+                    RichText::new(tr("The topology is versioned and regenerated when the section or compatible settings change. Gmsh generates the selected boundary-layer prism stack when enabled; qualification uses achieved y+ and sensitivity evidence, not the configured target alone."))
                         .weak()
                         .small(),
                 );
@@ -406,7 +413,10 @@ pub(crate) fn show_advanced_tab(state: &mut AppState, ui: &mut Ui) {
                         ui.end_row();
                     });
                 if mesh.boundary_layers {
-                    ui.colored_label(ui.visuals().warn_fg_color, tr("Boundary layers are not supported by the initial validated template; disable them before running."));
+                    ui.colored_label(
+                        crate::theme::success_color(ui.visuals()),
+                        tr("Boundary-layer prisms are generated. Treat the configured target as sizing input; use the solved y+ statistics in Results to qualify wall resolution."),
+                    );
                 }
             });
             ui.add_space(8.0);
@@ -438,8 +448,30 @@ pub(crate) fn show_advanced_tab(state: &mut AppState, ui: &mut Ui) {
                         ui.label(tr("Write interval"));
                         ui.add(DragValue::new(&mut solver.write_interval).range(1..=100_000));
                         ui.end_row();
+                        ui.label(tr("Final convection scheme"));
+                        ComboBox::from_id_salt("airfoil_cfd_convection_scheme")
+                            .selected_text(tr(solver.convection_scheme.as_str()))
+                            .show_ui(ui, |ui| {
+                                ui.selectable_value(
+                                    &mut solver.convection_scheme,
+                                    ConvectionScheme::BoundedUpwind,
+                                    tr(ConvectionScheme::BoundedUpwind.as_str()),
+                                );
+                                ui.selectable_value(
+                                    &mut solver.convection_scheme,
+                                    ConvectionScheme::BoundedLinearUpwind,
+                                    tr(ConvectionScheme::BoundedLinearUpwind.as_str()),
+                                );
+                            });
+                        ui.end_row();
+                        ui.label(tr("Upwind startup iterations"));
+                        ui.add_enabled(
+                            solver.convection_scheme != ConvectionScheme::BoundedUpwind,
+                            DragValue::new(&mut solver.startup_iterations).range(0..=100_000),
+                        );
+                        ui.end_row();
                     });
-                ui.label(RichText::new(tr("Convergence requires residuals, stabilized lift/drag/moment histories, and continuity evidence. A successful process exit alone is not presented as a converged result." )).weak().small());
+                ui.label(RichText::new(tr("Residual, force-stability, and continuity thresholds classify numerical status and remain visible as diagnostics. Finite native force histories and sweep points remain inspectable when a run is labelled unconverged." )).weak().small());
             });
             ui.add_space(8.0);
             show_effective_configuration(&state.cfd.config, ui);
@@ -453,7 +485,7 @@ fn show_effective_configuration(config: &CfdStudyConfig, ui: &mut Ui) {
     crate::theme::card_frame(ui).show(ui, |ui| {
         ui.label(RichText::new(tr("Effective configuration")).strong().size(16.0));
         ui.monospace(format!(
-            "airfoil={}\nchord={:.8} m\nalpha={:.5} deg\nU={:.8} m/s\nRe={:.8e}\nrho={:.8} kg/m^3\nmu={:.8e} Pa s\nmodel={}\nfarField={:?}\nmesh={:?}\niterations={}",
+            "airfoil={}\nchord={:.8} m\nalpha={:.5} deg\nU={:.8} m/s\nRe={:.8e}\nrho={:.8} kg/m^3\nmu={:.8e} Pa s\nT={:.5} K\na={:.5} m/s\nMach={:.6}\nmodel={}\nfarField={:?}\nmesh={:?}\niterations={}",
             config.airfoil_name,
             config.chord_m,
             config.angle_of_attack_deg,
@@ -461,6 +493,9 @@ fn show_effective_configuration(config: &CfdStudyConfig, ui: &mut Ui) {
             config.effective_reynolds(),
             config.density_kg_m3,
             config.dynamic_viscosity_pa_s,
+            config.freestream_temperature_k,
+            config.speed_of_sound_m_s(),
+            config.mach_number(),
             config.turbulence_model,
             config.boundaries.far_field,
             config.mesh.preset,

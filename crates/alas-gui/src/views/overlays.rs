@@ -77,7 +77,16 @@ pub fn show_splash(state: &mut AppState, ctx: &Context) {
             crate::branding::logo_natural_size(),
         ) {
             let size = splash_symbol_size(natural, panel, footer_top);
-            ui.put(Rect::from_center_size(panel.center(), size), image);
+            // `Image::from_texture` uses `ImageFit::Exact(texture_size)` with
+            // an unlimited `max_size`.  A surrounding `ui.put` rectangle is
+            // therefore only a placement hint: egui lets the image keep its
+            // native texture dimensions and it overflows that rectangle.  A
+            // real image bound is required to make the computed splash size
+            // reach the painter while retaining the source aspect ratio.
+            ui.put(
+                Rect::from_center_size(panel.center(), size),
+                image.max_size(size),
+            );
         }
     });
 }
@@ -491,7 +500,7 @@ mod tests {
         SPLASH_FOOTER_HEIGHT, SPLASH_MARGIN, SPLASH_SYMBOL_MAX_HEIGHT, SPLASH_SYMBOL_MAX_WIDTH,
         WALKTHROUGH_ORDER, WALKTHROUGH_WINDOW_HIGHLIGHT_ID,
     };
-    use egui::{pos2, vec2, Rect, Vec2};
+    use egui::{pos2, vec2, Pos2, Rect, Vec2};
 
     #[test]
     fn walkthrough_panel_moves_below_a_target_when_room_exists() {
@@ -618,5 +627,117 @@ mod tests {
         assert!(symbol.min.y >= panel.min.y + SPLASH_MARGIN - f32::EPSILON);
         assert!(symbol.max.y <= footer_top - SPLASH_MARGIN + f32::EPSILON);
         assert!(size.y < SPLASH_SYMBOL_MAX_HEIGHT);
+    }
+
+    /// Run the same egui widget path as the desktop splash and return the
+    /// tessellated bounds of its two embedded image textures.  This catches
+    /// widget-level overflow that a pure `splash_symbol_size` test cannot see.
+    fn rendered_splash_bounds(
+        viewport_size: Vec2,
+        native_pixels_per_point: f32,
+        zoom_factor: f32,
+    ) -> (Rect, Vec<Rect>) {
+        let mut state = crate::state::AppState::default();
+        state.boot_frames_remaining = 1;
+        let ctx = egui::Context::default();
+        let raw_input = || {
+            let mut input = egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, viewport_size)),
+                ..Default::default()
+            };
+            input
+                .viewports
+                .get_mut(&egui::ViewportId::ROOT)
+                .expect("root viewport")
+                .native_pixels_per_point = Some(native_pixels_per_point);
+            input
+        };
+
+        // A real native zoom change takes effect at the next egui pass.  Feed
+        // one setup pass so the test exercises that same DPI/zoom transition.
+        if (zoom_factor - 1.0).abs() > f32::EPSILON {
+            let _ = ctx.run(raw_input(), |_| {});
+            ctx.set_zoom_factor(zoom_factor);
+        }
+        let output = ctx.run(raw_input(), |ctx| super::show_splash(&mut state, ctx));
+        let panel = ctx.screen_rect();
+        let mut bounds = Vec::new();
+        for primitive in ctx.tessellate(output.shapes, output.pixels_per_point) {
+            let egui::epaint::Primitive::Mesh(mesh) = primitive.primitive else {
+                continue;
+            };
+            // TextureId::default() is egui's font atlas.  The remaining two
+            // meshes are the supplied wordmark and main symbol.
+            if mesh.texture_id == egui::TextureId::default() {
+                continue;
+            }
+            let Some(first) = mesh.vertices.first() else {
+                continue;
+            };
+            let mut rect = Rect::from_min_max(first.pos, first.pos);
+            for vertex in &mesh.vertices[1..] {
+                rect = rect.union(Rect::from_min_max(vertex.pos, vertex.pos));
+            }
+            bounds.push(rect);
+        }
+        (panel, bounds)
+    }
+
+    #[test]
+    fn rendered_splash_contains_the_main_symbol_at_supported_sizes_and_zooms() {
+        let natural = crate::branding::logo_natural_size().expect("embedded logo size");
+        for (viewport_size, native_ppp, zoom_factor) in [
+            (vec2(640.0, 360.0), 1.0, 1.0),
+            (vec2(1_280.0, 820.0), 1.0, 1.0),
+            (vec2(1_920.0, 1_080.0), 1.0, 1.0),
+            (vec2(1_280.0, 820.0), 1.5, 1.0),
+            (vec2(1_280.0, 820.0), 2.0, 1.5),
+        ] {
+            let (panel, mut bounds) =
+                rendered_splash_bounds(viewport_size, native_ppp, zoom_factor);
+            assert_eq!(bounds.len(), 2, "expected main symbol and footer image");
+
+            let footer_top = (panel.max.y - SPLASH_FOOTER_HEIGHT).max(panel.min.y);
+            let expected_size = splash_symbol_size(natural, panel, footer_top);
+            let expected_rect = Rect::from_center_size(panel.center(), expected_size);
+            let main_index = bounds
+                .iter()
+                .position(|rect| (rect.center().y - panel.center().y).abs() < 2.0)
+                .expect("main symbol mesh centered in the client area");
+            let main = bounds.swap_remove(main_index);
+            let footer = bounds.pop().expect("footer mesh");
+
+            // Tessellation rounds image vertices to roughly half a point; a
+            // large excess here means the Image widget escaped its ui.put box.
+            assert!(
+                expected_rect.expand(1.5).contains_rect(main),
+                "main image {:?} escaped its fitted rect {:?} for {:?}, dpi {}, zoom {}",
+                main,
+                expected_rect,
+                viewport_size,
+                native_ppp,
+                zoom_factor
+            );
+            assert!((main.center().x - panel.center().x).abs() < 1.0);
+            assert!((main.center().y - panel.center().y).abs() < 1.0);
+            assert!(
+                ((main.width() / main.height()) - (natural.x / natural.y)).abs() < 0.02,
+                "main image aspect ratio changed: {:?} vs {:?}",
+                main.size(),
+                natural
+            );
+
+            assert!((footer.center().x - panel.center().x).abs() < 1.0);
+            assert!(footer.max.y <= panel.max.y - SPLASH_MARGIN + 1.0);
+            assert!(
+                main.max.y + 1.0 <= footer.min.y,
+                "main symbol {:?} overlaps footer {:?} for {:?}, dpi {}, zoom {}",
+                main,
+                footer,
+                viewport_size,
+                native_ppp,
+                zoom_factor
+            );
+        }
     }
 }

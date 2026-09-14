@@ -23,7 +23,7 @@ use std::collections::BTreeMap;
 
 use alas_config::optimizer::DesignMode;
 use alas_config::{presets, validate, AlasConfig, DESIGN_VARIABLE_SPECS};
-use alas_report::families::geometry::SceneFraming;
+use alas_report::families::geometry::{FramingReference, SandboxSceneModel, SceneFraming};
 use alas_report::scene::Scene;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -117,6 +117,14 @@ pub struct SandboxSession {
     pub scene: Option<(Scene, SceneFraming)>,
     /// Monotonic generation of `scene` for the viewport texture cache.
     pub scene_revision: u64,
+    /// The last built aircraft prepared for drawing (faces and painter
+    /// partition), reused for every camera frame.
+    pub model: Option<SandboxSceneModel>,
+    /// The framing kept across camera motion and geometry edits; `None`
+    /// until the next redraw fits the shown components.
+    pub framing: Option<FramingReference>,
+    /// The viewport size the scene canvas is drawn for, in points.
+    pub viewport_size: Option<(f32, f32)>,
     /// The message of the last rejected edit, shown until the next valid one.
     pub rejected_edit: Option<String>,
     /// Search text of the Parameter Panel.
@@ -240,6 +248,8 @@ impl AppState {
         if let Some(config) = self.typed_config() {
             self.validation_findings = validate(&config);
         }
+        // A replaced aircraft is framed afresh; edits keep the framing.
+        self.sandbox.framing = None;
         self.refresh_sandbox_scene();
     }
 
@@ -467,6 +477,7 @@ impl AppState {
     pub fn refresh_sandbox_scene(&mut self) {
         match super::scene::build_sandbox_airplane(self) {
             Some((plane, _)) => {
+                self.sandbox.model = Some(super::scene::build_sandbox_model(&plane));
                 self.sandbox.airplane = Some(plane);
                 self.sandbox.rejected_edit = None;
                 self.reproject_sandbox_scene();
@@ -481,14 +492,48 @@ impl AppState {
         }
     }
 
-    /// Redraw the cached aircraft for the current camera and focus without
-    /// rebuilding its geometry.
+    /// Redraw the cached aircraft for the current camera, focus, theme and
+    /// viewport without rebuilding its geometry. The framing in use is
+    /// kept; a cleared framing is fitted to the shown components and kept
+    /// from then on.
     pub fn reproject_sandbox_scene(&mut self) {
-        if let Some(plane) = &self.sandbox.airplane {
-            let built = super::scene::project_sandbox_scene(self, plane);
+        if let Some(model) = &self.sandbox.model {
+            let built = super::scene::project_sandbox_model(self, model);
+            self.sandbox.framing = Some(built.1.reference());
             self.sandbox.scene = Some(built);
             self.sandbox.scene_revision = self.sandbox.scene_revision.wrapping_add(1);
         }
+    }
+
+    /// Fit the framing to the components now shown and redraw: the explicit
+    /// Fit action, and the deliberate reframe on a focus change or a new
+    /// design. Camera presets, orbit, zoom, resizing and geometry edits
+    /// never call this, so the pixels per metre they show stay comparable.
+    pub fn refit_sandbox_framing(&mut self) {
+        self.sandbox.framing = None;
+        self.reproject_sandbox_scene();
+    }
+
+    /// Focus one discipline (isolating it in the preview) or return to the
+    /// overview, refitting the framing to what is now shown.
+    pub fn set_sandbox_focus(&mut self, discipline: Option<Discipline>) {
+        self.sandbox.set_focus(discipline);
+        self.refit_sandbox_framing();
+    }
+
+    /// Record the viewport size the scene is drawn for. A changed size
+    /// redraws the kept framing on the new canvas, so the model scales
+    /// with the viewport's smaller side and nothing is refitted.
+    pub fn set_sandbox_viewport_size(&mut self, size: (f32, f32)) -> bool {
+        let changed = self
+            .sandbox
+            .viewport_size
+            .is_none_or(|(w, h)| (w - size.0).abs() > 0.5 || (h - size.1).abs() > 0.5);
+        if changed {
+            self.sandbox.viewport_size = Some(size);
+            self.reproject_sandbox_scene();
+        }
+        changed
     }
 }
 

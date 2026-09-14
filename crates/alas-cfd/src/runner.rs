@@ -153,7 +153,7 @@ where
         &mut mesh_output,
         CfdStage::QualityGate,
         "checkMesh",
-        Vec::new(),
+        vec!["-writeAllFields".into()],
     ) {
         Ok(status) => status,
         Err(error) => {

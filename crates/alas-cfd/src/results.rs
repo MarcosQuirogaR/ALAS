@@ -27,6 +27,7 @@ pub(crate) fn build_results_with_quality(
     process_status: OpenFoamProcessStatus,
 ) -> CfdResults {
     let mut mesh_quality = mesh_quality;
+    mesh_quality.distributions = result_io::read_mesh_quality_distributions(&generated.path);
     mesh_quality.near_wall =
         result_io::read_y_plus_summary(&generated.path, "airfoil").map(|summary| {
             let sizing = mesh::boundary_layer_sizing(config).ok();
@@ -43,6 +44,8 @@ pub(crate) fn build_results_with_quality(
                 source: summary.source,
             }
         });
+    mesh_quality.near_wall_distribution =
+        result_io::read_y_plus_distribution(&generated.path, "airfoil");
     let solution_log = logs_with_prefix(&command_logs, "simpleFoam");
     let mut residuals = parse_residuals(&solution_log);
     let post_log = logs_with_prefix(&command_logs, "simpleFoam-postProcess");
@@ -278,7 +281,7 @@ fn forces_for_final_stage(
 
 fn first_solver_time(log: &str) -> Option<f64> {
     log.lines().find_map(|line| {
-        let (_, tail) = line.split_once("Time =")?;
+        let tail = line.trim_start().strip_prefix("Time =")?;
         tail.split_whitespace()
             .find_map(|token| token.parse::<f64>().ok())
     })
@@ -384,7 +387,7 @@ pub(crate) fn write_result_artifacts(results: &CfdResults) -> Result<(), String>
     fs::write(results.case_dir.join("results.json"), json)
         .map_err(|error| format!("cannot write CFD results: {error}"))?;
     let report = format!(
-        "# ALAS OpenFOAM result\n\nOutcome: **{}**\n\nStatus: {}\n\nAirfoil: `{}`\nCoordinate hash: `{}`\nTemplate: `{}`\nBackend: `{}`\nOpenFOAM version: `{}`\nReproducibility hashes: `{}`\nSpeed: `{:.8} m/s`\nReynolds: `{:.8e}`\nChord: `{:.8} m`\nAngle of attack: `{:.6} deg`\n\nMesh passed: `{}`\nCells: `{}`\nMax non-orthogonality: `{}`\nMax skewness: `{}`\nMinimum cell volume: `{}`\nNear-wall y+: `{}`\nResidual samples: `{}`\nForce samples: `{}`\nContinuity samples: `{}`\nField artifacts: `{}`\n\nThis report records numerical evidence from the generated case. It does not claim physical validation against experiment. Review the captured logs and the documented model limits in README.md before using coefficients.\n",
+        "# ALAS OpenFOAM result\n\nOutcome: **{}**\n\nStatus: {}\n\nAirfoil: `{}`\nCoordinate hash: `{}`\nTemplate: `{}`\nBackend: `{}`\nOpenFOAM version: `{}`\nReproducibility hashes: `{}`\nSpeed: `{:.8} m/s`\nReynolds: `{:.8e}`\nChord: `{:.8} m`\nAngle of attack: `{:.6} deg`\nTemperature: `{:.8} K`\nDiagnostic Mach: `{:.8}`\n\nMesh passed: `{}`\nCells: `{}`\nMax non-orthogonality: `{}`\nMax skewness: `{}`\nMinimum cell volume: `{}`\nNative quality distributions: `{}`\nNear-wall y+: `{}`\nNear-wall distribution: `{}`\nResidual samples: `{}`\nForce samples: `{}`\nContinuity samples: `{}`\nField artifacts: `{}`\n\nThis report records numerical evidence from the generated case. It does not claim physical validation against experiment. Review the captured logs and the documented model limits in README.md before using coefficients.\n",
         results.outcome.as_str(),
         results.status_detail,
         results.provenance.airfoil.name,
@@ -401,6 +404,8 @@ pub(crate) fn write_result_artifacts(results: &CfdResults) -> Result<(), String>
         results.provenance.effective_reynolds,
         results.provenance.config.chord_m,
         results.provenance.config.angle_of_attack_deg,
+        results.provenance.config.freestream_temperature_k,
+        results.provenance.config.mach_number(),
         results.mesh_quality.passed,
         results.mesh_quality
             .cells
@@ -417,6 +422,7 @@ pub(crate) fn write_result_artifacts(results: &CfdResults) -> Result<(), String>
             || "unknown".to_owned(),
             |value| format!("{value:.8e}")
         ),
+        results.mesh_quality.distributions.len(),
         results.mesh_quality.near_wall.as_ref().map_or_else(
             || "unavailable".to_owned(),
             |value| format!(
@@ -427,6 +433,10 @@ pub(crate) fn write_result_artifacts(results: &CfdResults) -> Result<(), String>
                 value.average_y_plus,
                 value.target_y_plus,
             ),
+        ),
+        results.mesh_quality.near_wall_distribution.as_ref().map_or_else(
+            || "unavailable".to_owned(),
+            |value| format!("{} ({} finite wall faces)", value.source, value.sample_count),
         ),
         results.residuals.len(),
         results.forces.len(),

@@ -23,20 +23,93 @@ const PREVIEW_HEIGHT: f64 = 540.0;
 const MAX_MESH_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_PROJECTED_FACES: usize = 5_000;
 
+// Keep diagnostic text inside a real content box.  The scene graph has no
+// font measurement, so the budget below is deliberately conservative for a
+// 12 pt proportional sans-serif body at the 760 px status canvas width.  In
+// particular, it is also applied to a single unbreakable token such as a
+// Windows path; retaining that token on one line would defeat the lateral
+// margins even when ordinary prose wraps correctly.
+const STATUS_WIDTH: f64 = 760.0;
+const STATUS_LEFT_MARGIN: f64 = 32.0;
+const STATUS_RIGHT_MARGIN: f64 = 32.0;
+const STATUS_BODY_FONT_SIZE: f64 = 12.0;
+const STATUS_BODY_MAX_CHARS: usize = 43;
+
+fn status_char_budget() -> usize {
+    // Treat one em as the maximum advance of a sans-serif glyph.  The
+    // resulting floor still leaves a few pixels inside the content box.
+    let content_width = STATUS_WIDTH - STATUS_LEFT_MARGIN - STATUS_RIGHT_MARGIN;
+    let conservative_char_width = STATUS_BODY_FONT_SIZE * (96.0 / 72.0);
+    let geometry_budget = (content_width / conservative_char_width).floor().max(1.0) as usize;
+    STATUS_BODY_MAX_CHARS.min(geometry_budget).max(1)
+}
+
+/// Wrap status prose to the placeholder's content box, including tokens that
+/// contain no whitespace (paths, IDs, and solver diagnostics).  Existing
+/// paragraph breaks are retained, and every character remains visible on a
+/// subsequent line instead of being clipped or discarded.
+fn wrap_status_message(message: &str) -> String {
+    let budget = status_char_budget();
+    let mut lines = Vec::new();
+
+    for paragraph in message.split('\n') {
+        let mut current = String::new();
+        for word in paragraph.split_whitespace() {
+            let word_len = word.chars().count();
+            if word_len > budget {
+                if !current.is_empty() {
+                    lines.push(std::mem::take(&mut current));
+                }
+                let mut remaining = word;
+                while remaining.chars().count() > budget {
+                    let split_at = remaining
+                        .char_indices()
+                        .nth(budget)
+                        .map_or(remaining.len(), |(index, _)| index);
+                    let (chunk, rest) = remaining.split_at(split_at);
+                    lines.push(chunk.to_owned());
+                    remaining = rest;
+                }
+                current.push_str(remaining);
+                continue;
+            }
+
+            let candidate_len = if current.is_empty() {
+                word_len
+            } else {
+                current.chars().count() + 1 + word_len
+            };
+            if candidate_len > budget && !current.is_empty() {
+                lines.push(std::mem::take(&mut current));
+            }
+            if !current.is_empty() {
+                current.push(' ');
+            }
+            current.push_str(word);
+        }
+        lines.push(current);
+    }
+
+    lines.join("\n")
+}
+
 fn status_scene(title: &str, message: &str, ok: bool, theme: Option<&str>) -> Scene {
     let pal = get_palette(theme);
     const MESSAGE_TOP: f64 = 82.0;
-    const LINE_HEIGHT: f64 = 17.0;
-    const BOTTOM_MARGIN: f64 = 16.0;
-    let wrapped = crate::chart_kit::wrap_text(message, 100);
+    const LINE_HEIGHT: f64 = STATUS_BODY_FONT_SIZE * (96.0 / 72.0) * 1.2;
+    // TextBaseline::Top anchors each line by its line-box center.  Reserve a
+    // little more than one line-box of descent so the final diagnostic row
+    // stays inside the scene after SVG and raster font layout.
+    const BOTTOM_MARGIN: f64 = 24.0;
+    let wrapped = wrap_status_message(message);
     let line_count = wrapped.lines().count().max(1) as f64;
     let height = (240.0_f64).max(MESSAGE_TOP + line_count * LINE_HEIGHT + BOTTOM_MARGIN);
-    let mut scene = Scene::new(760.0, height, Some(Color::from_hex(pal.bg)));
+    let mut scene = Scene::new(STATUS_WIDTH, height, Some(Color::from_hex(pal.bg)));
     scene.title = Some(title.to_owned());
     scene.suppress_derived_title();
     scene.add(SceneElement::Text {
         text: title.to_owned(),
-        pos: [24.0, 34.0],
+        pos: [STATUS_LEFT_MARGIN, 34.0],
         font_size: 16.0,
         color: Color::from_hex(if ok { "#27ae60" } else { "#c0392b" }),
         align: TextAlign::Left,
@@ -46,8 +119,8 @@ fn status_scene(title: &str, message: &str, ok: bool, theme: Option<&str>) -> Sc
     });
     scene.add(SceneElement::Text {
         text: wrapped,
-        pos: [24.0, MESSAGE_TOP],
-        font_size: 12.0,
+        pos: [STATUS_LEFT_MARGIN, MESSAGE_TOP],
+        font_size: STATUS_BODY_FONT_SIZE,
         color: Color::from_hex(pal.tick),
         align: TextAlign::Left,
         baseline: TextBaseline::Top,
@@ -471,6 +544,53 @@ mod tests {
             })
             .collect::<Vec<_>>();
         assert_eq!(title_elements, vec![(Color::from_hex("#c0392b"), true)]);
+    }
+
+    #[test]
+    fn unavailable_diagnostics_wrap_inside_the_content_box() {
+        let long_path = format!(r"C:\runs\{}\aircraft.preview.png", "diagnostic".repeat(40));
+        let message = format!("status=runtime_rejected; expected artifact: {long_path}");
+        let scene = status_scene(
+            "OpenVSP CAD preview unavailable",
+            &message,
+            false,
+            Some("grey"),
+        );
+        let body = scene
+            .elements
+            .iter()
+            .find_map(|element| match element {
+                SceneElement::Text {
+                    text,
+                    pos,
+                    font_size,
+                    align: TextAlign::Left,
+                    ..
+                } if (*pos)[1] >= 82.0 => Some((text.as_str(), *pos, *font_size)),
+                _ => None,
+            })
+            .expect("unavailable diagnostic body");
+
+        let budget = status_char_budget();
+        assert!(
+            body.0.lines().count() > 2,
+            "long path should use multiple rows"
+        );
+        assert!(body.0.lines().all(|line| line.chars().count() <= budget));
+        assert_eq!(body.1[0], STATUS_LEFT_MARGIN);
+        let conservative_width = body
+            .0
+            .lines()
+            .map(|line| line.chars().count() as f64 * body.2 * (96.0 / 72.0))
+            .fold(0.0, f64::max);
+        assert!(
+            body.1[0] + conservative_width <= STATUS_WIDTH - STATUS_RIGHT_MARGIN,
+            "diagnostic extends outside the status content box"
+        );
+
+        let svg = crate::svg::render_svg(&scene);
+        assert!(svg.contains("viewBox=\"0 0 760.0"));
+        assert!(svg.matches("x=\"32.00\"").count() >= body.0.lines().count());
     }
 
     #[test]

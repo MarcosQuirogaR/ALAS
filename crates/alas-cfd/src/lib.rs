@@ -94,6 +94,23 @@ mod tests {
     }
 
     #[test]
+    fn mach_diagnostic_uses_the_declared_static_temperature() {
+        let mut config = CfdStudyConfig::default();
+        config.speed_m_s = 51.0;
+        config.freestream_temperature_k = 288.15;
+        let expected_sound_speed = (1.4 * 287.052_87 * 288.15_f64).sqrt();
+        assert!((config.speed_of_sound_m_s() - expected_sound_speed).abs() < 1.0e-12);
+        assert!((config.mach_number() - 51.0 / expected_sound_speed).abs() < 1.0e-12);
+        config.freestream_temperature_k = 0.0;
+        let errors = config
+            .validate()
+            .expect_err("zero static temperature is invalid");
+        assert!(errors
+            .iter()
+            .any(|error| error.contains("freestream temperature")));
+    }
+
+    #[test]
     fn default_turbulence_state_matches_external_flow_ratio() {
         let config = CfdStudyConfig::default();
         let state = config.effective_turbulence();
@@ -140,6 +157,13 @@ mod tests {
         assert!(control.contains("endTime 2050;"));
         assert!(control.contains("writeInterval 2050;"));
         assert_eq!(control.matches("writeInterval 1;").count(), 2);
+        assert_eq!(
+            control
+                .matches("executeControl writeTime;\n        writeControl writeTime;")
+                .count(),
+            2,
+            "solver-attached yPlus and wall-shear fields must only write at controlDict write times"
+        );
         let _ = fs::remove_dir_all(path);
     }
 
@@ -326,6 +350,15 @@ mod tests {
         assert_eq!(rows.len(), 5);
         assert!(rows[..4].iter().all(|row| row.iteration == 41));
         assert_eq!(rows[4].iteration, 42);
+    }
+
+    #[test]
+    fn residual_parser_does_not_treat_execution_time_as_outer_iteration() {
+        let rows = parse_residuals(
+            "Time = 7\nSolving for Ux, Initial residual = 2e-4, Final residual = 2e-6\nExecutionTime = 8 s  ClockTime = 8 s\nSolving for p, Initial residual = 9e-4, Final residual = 3e-6\n",
+        );
+        assert_eq!(rows.len(), 2);
+        assert!(rows.iter().all(|row| row.iteration == 7));
     }
 
     #[test]

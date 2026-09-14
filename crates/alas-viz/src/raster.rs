@@ -20,9 +20,21 @@ pub type RasterResult = Result<(u32, u32, Vec<u8>), String>;
 /// Rasterize a scene to an RGBA PNG buffer.
 pub fn render_scene_png(scene: &Scene) -> Result<Vec<u8>, String> {
     let (width, height, pixels) = render_scene_rgba(scene)?;
+    encode_png_rgba(width, height, &pixels)
+}
+
+/// Encode premultiplied RGBA pixels (the layout every raster here returns)
+/// as a PNG buffer.
+pub fn encode_png_rgba(width: u32, height: u32, pixels: &[u8]) -> Result<Vec<u8>, String> {
     let mut pixmap = tiny_skia::Pixmap::new(width, height)
         .ok_or_else(|| "allocate figure PNG canvas".to_owned())?;
-    pixmap.data_mut().copy_from_slice(&pixels);
+    if pixmap.data().len() != pixels.len() {
+        return Err(format!(
+            "encode figure PNG: {} bytes for {width} x {height}",
+            pixels.len()
+        ));
+    }
+    pixmap.data_mut().copy_from_slice(pixels);
     pixmap
         .encode_png()
         .map_err(|error| format!("encode figure PNG: {error}"))

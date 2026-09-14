@@ -9,7 +9,7 @@ pub fn parse_residuals(log: &str) -> Vec<ResidualSample> {
     let mut fallback_iteration = 0_u64;
     let mut outer_iteration = None;
     for line in log.lines() {
-        if let Some(time) = number_after(line, "Time =") {
+        if let Some(time) = outer_time_after(line) {
             if time.is_finite() && time >= 0.0 && time <= u64::MAX as f64 {
                 outer_iteration = Some(time.round() as u64);
             }
@@ -297,7 +297,7 @@ pub fn parse_mass_balance(log: &str) -> Vec<MassBalanceSample> {
     let mut rows = Vec::new();
     let mut outer_time = None;
     for line in log.lines() {
-        if let Some(time) = number_after(line, "Time =") {
+        if let Some(time) = outer_time_after(line) {
             if time.is_finite() {
                 outer_time = Some(time);
             }
@@ -322,6 +322,20 @@ pub fn parse_mass_balance(log: &str) -> Vec<MassBalanceSample> {
 fn number_after(text: &str, marker: &str) -> Option<f64> {
     let (_, rest) = text.split_once(marker)?;
     rest.split_whitespace().find_map(|token| {
+        token
+            .trim_matches(|ch: char| {
+                !(ch.is_ascii_digit() || matches!(ch, '+' | '-' | '.' | 'e' | 'E'))
+            })
+            .parse::<f64>()
+            .ok()
+    })
+}
+
+/// Parse an OpenFOAM outer-iteration marker without matching
+/// `ExecutionTime = ...` lines, which contain the same `Time =` substring.
+fn outer_time_after(line: &str) -> Option<f64> {
+    let tail = line.trim_start().strip_prefix("Time =")?;
+    tail.split_whitespace().find_map(|token| {
         token
             .trim_matches(|ch: char| {
                 !(ch.is_ascii_digit() || matches!(ch, '+' | '-' | '.' | 'e' | 'E'))

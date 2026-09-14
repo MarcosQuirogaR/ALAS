@@ -261,6 +261,41 @@ fn default_state_can_save_relative_study_and_sweep_paths() {
 }
 
 #[test]
+fn persisted_openfoam_result_loads_without_restarting_a_solver() {
+    let root = std::env::temp_dir().join(format!(
+        "alas-cfd-gui-result-import-{}-{}",
+        std::process::id(),
+        NEXT_CASE_COUNTER.load(Ordering::Relaxed)
+    ));
+    std::fs::create_dir_all(&root).expect("create result-import directory");
+    let path = root.join("results.json");
+    let fixture = test_result_fixture();
+    std::fs::write(
+        &path,
+        serde_json::to_string_pretty(&fixture).expect("encode CFD result fixture"),
+    )
+    .expect("write CFD result fixture");
+
+    let mut state = AirfoilCfdState::default();
+    state.input_revision = 11;
+    let revision = state.input_revision;
+    state
+        .load_result_json(&path)
+        .expect("load CFD result fixture");
+
+    assert_eq!(
+        state.result.as_ref().map(|result| result.outcome),
+        Some(CfdOutcome::Unconverged)
+    );
+    assert_eq!(state.tab, CfdTab::Results);
+    assert_eq!(state.result_json_path, path.display().to_string());
+    assert!(!state.running);
+    assert!(state.input_revision > revision);
+    assert_eq!(state.run_input_revision, state.input_revision);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
 fn independent_states_allocate_distinct_case_directories_and_retain_old_cases() {
     let root = std::env::temp_dir().join(format!(
         "alas-cfd-gui-case-allocation-{}-{}",
