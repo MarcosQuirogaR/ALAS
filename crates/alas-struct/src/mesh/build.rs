@@ -158,15 +158,7 @@ pub fn build_wing_mesh_bdf(
     }
     elements::add_rib_panels(&mut deck, &mut eid, &stations, &nodes, &regions);
     elements::add_trailing_edge(&mut deck, &mut eid, &stations, &nodes, &regions, cfg, wsg);
-    elements::add_spar_caps(
-        &mut deck,
-        &mut eid,
-        &spar_upper,
-        &spar_lower,
-        sizing,
-        cfg,
-        wsg,
-    );
+    elements::add_spar_caps(&mut deck, &mut eid, &spar_upper, &spar_lower, sizing, wsg);
 
     let root_nodes = elements::root_constraint_nodes(&stations, &nodes);
     deck.constraints.push(Spc1 {

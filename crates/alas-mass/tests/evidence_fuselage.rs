@@ -13,7 +13,9 @@
 // field being decoded instead of turning every comparison helper into a Result.
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
-use alas_config::{DesignRequirements, GeometryConfig, MassModelConfig};
+use alas_config::{
+    DesignRequirements, FlopsTransportConfig, GeometryConfig, MassArchitecture, MassModelConfig,
+};
 use alas_geom::builder::AircraftBuilder;
 use alas_mass::breakdown::calculate_component_masses;
 use alas_mass::torenbeek::mass_fuselage_simple;
@@ -184,7 +186,16 @@ fn requirements_for(overrides: &Map<String, Value>) -> DesignRequirements {
 }
 
 fn mass_model_for(overrides: &Map<String, Value>) -> MassModelConfig {
-    let mut value = MassModelConfig::default();
+    // W6.3 is a frozen Torenbeek correlation fixture.  The production
+    // default is pure FLOPS now, so select the legacy method explicitly and
+    // keep its FLOPS-only node empty before comparing the historical wire
+    // representation below.
+    let mut value = MassModelConfig {
+        mass_architecture: MassArchitecture::LegacyReferenceCompatibleComparison,
+        flops_transport: FlopsTransportConfig::default(),
+        ..MassModelConfig::default()
+    };
+    value.apply_architecture();
     for (key, item) in overrides {
         match key.as_str() {
             "systems_mass_fraction" => value.systems_mass_fraction = item.as_f64().unwrap(),
@@ -380,9 +391,17 @@ fn fuselage_mass_evidence_matches_in_input_and_correlation_order() {
             "first W6.3 divergence in {} at requirements",
             case.name
         );
+        let mut mass_model_view = serde_json::to_value(&mass_model).unwrap();
+        mass_model_view
+            .as_object_mut()
+            .expect("mass model serializes as an object")
+            .remove("mass_architecture");
+        mass_model_view
+            .as_object_mut()
+            .expect("mass model serializes as an object")
+            .remove("schema_version");
         assert_eq!(
-            serde_json::to_value(&mass_model).unwrap(),
-            case.mass_model,
+            mass_model_view, case.mass_model,
             "first W6.3 divergence in {} at mass_model",
             case.name
         );

@@ -5,6 +5,10 @@
 
 use super::*;
 
+mod openfoam;
+
+pub(super) use openfoam::openfoam_card;
+
 pub(super) fn routing_card(state: &mut AppState, ui: &mut Ui) {
     card(ui, "Mission routing", "https://www.simbrief.com/", |ui| {
         ui.label(RichText::new(tr("SimBrief flight plan")).strong());

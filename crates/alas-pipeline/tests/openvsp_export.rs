@@ -44,6 +44,12 @@ fn an_output_run_writes_a_supported_openvsp_script_without_claiming_runtime_succ
     );
     assert!(export.script_path.is_file());
     assert!(!export.vsp3_path.exists());
+    assert_eq!(
+        export.preview_path,
+        export.script_path.with_extension("preview.png")
+    );
+    assert!(!export.preview_available);
+    assert!(export.preview_error.is_none());
     assert_eq!(export.component_count, 6);
     assert!(export.wheel_count >= 3);
     assert!(!export.unsupported.is_empty());

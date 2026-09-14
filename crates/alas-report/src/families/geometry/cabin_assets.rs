@@ -185,6 +185,57 @@ mod tests {
     }
 
     #[test]
+    fn lower_outboard_corner_tapers_and_port_side_is_reflected() {
+        let starboard = asset_for_item(&item(
+            ItemKind::Uld,
+            ItemMeta::Container(ContainerMeta {
+                uld: "AKE",
+                fill: 0.6,
+                color: "#e74c3c",
+                net: Some(800.0),
+            }),
+        ))
+        .expect("starboard ULD has an asset");
+        let mut port_item = item(
+            ItemKind::Uld,
+            ItemMeta::Container(ContainerMeta {
+                uld: "AKE",
+                fill: 0.6,
+                color: "#e74c3c",
+                net: Some(800.0),
+            }),
+        );
+        port_item.y = -port_item.y;
+        let port = asset_for_item(&port_item).expect("port ULD has an asset");
+
+        let starboard_bottom_y = starboard
+            .profile_yz
+            .iter()
+            .filter(|point| (point[1] - (starboard.profile_yz[0][1])).abs() < 1e-12)
+            .map(|point| point[0])
+            .fold(f64::NEG_INFINITY, f64::max);
+        let port_bottom_y = port
+            .profile_yz
+            .iter()
+            .filter(|point| (point[1] - (port.profile_yz[0][1])).abs() < 1e-12)
+            .map(|point| point[0])
+            .fold(f64::INFINITY, f64::min);
+        let starboard_max_y = starboard
+            .profile_yz
+            .iter()
+            .map(|point| point[0])
+            .fold(f64::NEG_INFINITY, f64::max);
+        let port_min_y = port
+            .profile_yz
+            .iter()
+            .map(|point| point[0])
+            .fold(f64::INFINITY, f64::min);
+
+        assert!(starboard_bottom_y < starboard_max_y);
+        assert!(port_bottom_y > port_min_y);
+    }
+
+    #[test]
     fn bins_share_their_six_vertex_section_with_eight_face_extrusion() {
         let asset = asset_for_item(&item(
             ItemKind::OverheadBin,

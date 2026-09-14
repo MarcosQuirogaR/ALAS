@@ -12,7 +12,7 @@ use super::vector3::{
 
 /// `blend_with_another_airfoil`'s `n_points_per_side`, upstream's default and
 /// the only value [`Wing::subdivide_sections`] ever calls it with.
-const SUBDIVIDE_BLEND_N_POINTS_PER_SIDE: usize = 100;
+pub(super) const SUBDIVIDE_BLEND_N_POINTS_PER_SIDE: usize = 100;
 
 /// A wing cross-section: leading-edge position, chord, twist and airfoil --
 /// `WingXSec`, scoped to the fields this program uses (no control surfaces,
@@ -85,7 +85,7 @@ pub enum SpacingFunction {
 
 impl SpacingFunction {
     /// `num` points from `start` to `stop` under this spacing.
-    fn spaced(self, start: f64, stop: f64, num: usize) -> Vec<f64> {
+    pub(super) fn spaced(self, start: f64, stop: f64, num: usize) -> Vec<f64> {
         match self {
             Self::Linspace => linspace(start, stop, num),
             Self::Cosspace => cosspace(start, stop, num),

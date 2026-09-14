@@ -93,7 +93,12 @@ const fn required_stage_for_id(id: &str) -> RequiredStage {
         RequiredStage::Optimization
     } else if any_id(
         id,
-        &["mses_pressure", "mses_mach_contours", "mses_convergence"],
+        &[
+            "mses_pressure",
+            "mses_mach_contours",
+            "mses_cp_contours",
+            "mses_convergence",
+        ],
     ) {
         RequiredStage::Mses
     } else if any_id(

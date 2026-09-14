@@ -209,6 +209,40 @@ pub fn aero_from_kulfan_airfoil(
     ))
 }
 
+/// [`aero_from_kulfan_airfoil`] over a schedule of conditions, with the
+/// network run once over the whole batch. The results are, in order, what
+/// the single-condition entry point returns for each condition.
+///
+/// # Errors
+///
+/// See [`aero_from_kulfan_airfoil`].
+pub fn aero_from_kulfan_airfoil_sweep(
+    airfoil: &KulfanAirfoil,
+    conditions: &[Conditions],
+    mach: f64,
+    size: ModelSize,
+) -> Result<Vec<Aero>, NeuralFoilError> {
+    let wrapped: Vec<Conditions> = conditions
+        .iter()
+        .map(|conditions| conditions.at_alpha(wrap_alpha(conditions.alpha_deg)))
+        .collect();
+    let raw = network::evaluate_sweep(airfoil, &wrapped, size)?;
+    let t_over_c = airfoil.max_thickness(&linspace(0.0, 1.0, THICKNESS_SAMPLE_POINTS));
+    Ok(raw
+        .into_iter()
+        .zip(&wrapped)
+        .map(|(raw, conditions)| {
+            corrections::apply(
+                raw,
+                t_over_c,
+                conditions.alpha_deg,
+                conditions.reynolds,
+                mach,
+            )
+        })
+        .collect())
+}
+
 /// The surrogate on a section given as coordinates, with compressibility and
 /// post-stall behaviour applied -- `Airfoil.get_aero_from_neuralfoil`, which
 /// is what `alas/analysis/airfoil_screening.py` calls.
@@ -223,11 +257,83 @@ pub fn aero_from_airfoil(
     mach: f64,
     size: ModelSize,
 ) -> Result<Aero, NeuralFoilError> {
-    let framed = Framed::of(airfoil)?;
-    let mut aero =
-        aero_from_kulfan_airfoil(&framed.airfoil, &framed.conditions(conditions), mach, size)?;
-    aero.cm += framed.moment_correction(aero.cl, aero.cd);
-    Ok(aero)
+    PreparedAirfoil::prepare(airfoil)?.aero(conditions, mach, size)
+}
+
+/// An airfoil normalized and fitted once, ready to be evaluated at many
+/// flight conditions.
+///
+/// [`aero_from_airfoil`] normalizes the section and fits its Kulfan weights
+/// on every call, and that fit -- a least-squares solve over a few hundred
+/// vertices -- costs more than the network it feeds (about 210 us against
+/// 140 us per call, 2026-09-11). A caller sweeping angle of attack over one
+/// section, as the airfoil screening does, prepares once and evaluates per
+/// angle; the result is identical to calling [`aero_from_airfoil`] each time.
+pub struct PreparedAirfoil {
+    framed: Framed,
+}
+
+impl PreparedAirfoil {
+    /// Normalize and fit `airfoil`.
+    ///
+    /// # Errors
+    ///
+    /// The same as [`aero_from_airfoil`]: the fit refuses a section with too
+    /// few vertices or one it cannot fit at full rank.
+    pub fn prepare(airfoil: &Airfoil) -> Result<Self, NeuralFoilError> {
+        Ok(Self {
+            framed: Framed::of(airfoil)?,
+        })
+    }
+
+    /// The section's fitted Kulfan parameters, in the normalized frame.
+    pub fn kulfan(&self) -> &KulfanAirfoil {
+        &self.framed.airfoil
+    }
+
+    /// Evaluate at `conditions` -- exactly what [`aero_from_airfoil`] returns
+    /// for the same section and conditions.
+    ///
+    /// # Errors
+    ///
+    /// See [`aero_from_kulfan_airfoil`].
+    pub fn aero(
+        &self,
+        conditions: &Conditions,
+        mach: f64,
+        size: ModelSize,
+    ) -> Result<Aero, NeuralFoilError> {
+        let framed = &self.framed;
+        let mut aero =
+            aero_from_kulfan_airfoil(&framed.airfoil, &framed.conditions(conditions), mach, size)?;
+        aero.cm += framed.moment_correction(aero.cl, aero.cd);
+        Ok(aero)
+    }
+
+    /// Evaluate at every condition of a schedule with one batched network
+    /// pass -- in order, exactly what [`Self::aero`] returns for each.
+    ///
+    /// # Errors
+    ///
+    /// See [`aero_from_kulfan_airfoil`].
+    pub fn aero_sweep(
+        &self,
+        conditions: &[Conditions],
+        mach: f64,
+        size: ModelSize,
+    ) -> Result<Vec<Aero>, NeuralFoilError> {
+        let framed = &self.framed;
+        let framed_conditions: Vec<Conditions> = conditions
+            .iter()
+            .map(|conditions| framed.conditions(conditions))
+            .collect();
+        let mut aeros =
+            aero_from_kulfan_airfoil_sweep(&framed.airfoil, &framed_conditions, mach, size)?;
+        for aero in &mut aeros {
+            aero.cm += framed.moment_correction(aero.cl, aero.cd);
+        }
+        Ok(aeros)
+    }
 }
 
 /// The raw network on a section given as coordinates --

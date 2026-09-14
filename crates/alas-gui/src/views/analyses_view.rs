@@ -14,7 +14,19 @@ use crate::views::tr;
 
 /// Render the Analyses page.
 pub fn show_analyses_view(state: &mut AppState, ui: &mut Ui) {
-    ui.heading(tr("Analyses"));
+    ui.horizontal_wrapped(|ui| {
+        ui.heading(tr("Analyses"));
+        if ui
+            .button(tr("Open Airfoil CFD"))
+            .on_hover_text(tr(
+                "Open the standalone 2-D OpenFOAM study for any database airfoil.",
+            ))
+            .clicked()
+        {
+            state.cfd.window_open = true;
+            state.cfd.tab = crate::cfd::CfdTab::Study;
+        }
+    });
     ui.label(
         RichText::new(tr(
             "Choose which analysis disciplines a Run performs. Everything is on by default; \

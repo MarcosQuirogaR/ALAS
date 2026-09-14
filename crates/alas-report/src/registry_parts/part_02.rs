@@ -133,6 +133,12 @@ pub static RESULT_FIGURES: &[FigureDescriptor] = &[
         "MSES surface and flowfield Mach contours.",
     ),
     descriptor(
+        "mses_cp_contours",
+        "MSES Cp Contours",
+        "Aerodynamics",
+        "MSES flowfield pressure-coefficient contours from the native MPlot grid.",
+    ),
+    descriptor(
         "mses_convergence",
         "MSES Sweep Convergence",
         "Aerodynamics",

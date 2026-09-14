@@ -38,6 +38,58 @@ impl Leaf for SystemsMassMethod {
     }
 }
 
+/// What kind of knowledge a family of declared FLOPS inputs rests on.
+///
+/// Provenance strings say *where* a number came from; this says *what it is*.
+/// The distinction matters because a run can be complete and still be built
+/// largely on declared study values, and a coverage report that cannot tell
+/// a certification datum from an engineering estimate is not a coverage
+/// report. Nothing here ranks accuracy -- a source-backed input can still be
+/// the wrong quantity for the variant, which is what the applicability
+/// statement is for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FlopsInputEvidence {
+    /// Read from a manufacturer, certification-authority or NASA document,
+    /// for this variant, at the locator the provenance names.
+    SourceBacked,
+    /// Chosen by whoever configured this run. Legitimate for a notional
+    /// design and for a study scenario; it is not an aircraft fact.
+    UserDeclared,
+    /// A default printed in NASA/TM-2017-219627 itself, used as the source
+    /// intends rather than as a substitute for a missing measurement.
+    PublishedFlopsDefault,
+    /// An engineering estimate with no document behind it. The weakest
+    /// category, and the default, so an undeclared evidence kind can never
+    /// read as stronger than it is.
+    #[default]
+    UncertainEngineeringEstimate,
+}
+
+impl FlopsInputEvidence {
+    /// Stable machine-readable name for exports and evidence artifacts.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::SourceBacked => "source_backed",
+            Self::UserDeclared => "user_declared",
+            Self::PublishedFlopsDefault => "published_flops_default",
+            Self::UncertainEngineeringEstimate => "uncertain_engineering_estimate",
+        }
+    }
+
+    /// Whether this family may be described as aircraft data rather than as
+    /// a choice made for the run.
+    pub const fn is_aircraft_data(self) -> bool {
+        matches!(self, Self::SourceBacked)
+    }
+}
+
+impl Leaf for FlopsInputEvidence {
+    fn kind(&self, _name: &str) -> Kind {
+        Kind::Str
+    }
+}
+
 /// Revision-locked evidence for one family of FLOPS inputs.
 ///
 /// A document title alone cannot show that its numbers apply to the configured
@@ -74,15 +126,45 @@ pub struct FlopsInputProvenance {
         help = "Variant, installation, or mission applicability of the cited source."
     )]
     pub applicability: String,
+    /// What kind of knowledge this family rests on.
+    #[config(
+        advanced,
+        options = FlopsInputEvidence,
+        label = "Evidence kind",
+        help = "Whether these values are read from a manufacturer, certification or NASA document for this variant, declared by whoever configured the run, a published FLOPS default, or an uncertain engineering estimate. The weakest kind is assumed when none is stated."
+    )]
+    pub evidence: FlopsInputEvidence,
+    /// Stated uncertainty, or why none can be stated.
+    ///
+    /// Free text because the families mix units: a Mach number, a seat count
+    /// and a hydraulic pressure do not share a band. An empty string is
+    /// itself a finding -- it means the run cannot say how wrong these
+    /// numbers might be.
+    #[config(
+        advanced,
+        label = "Stated uncertainty",
+        help = "Uncertainty band for this input family, in its own units, or an explicit statement that none could be established. Left blank, the coverage report records that this family carries no uncertainty statement."
+    )]
+    pub uncertainty: String,
 }
 
 impl FlopsInputProvenance {
     /// Whether every field needed to audit an input family is present.
+    ///
+    /// The evidence kind is deliberately *not* part of this test. A run built
+    /// on declared study values is auditable and may proceed; what it may not
+    /// do is present those values as aircraft data, which is what
+    /// [`Self::evidence`] and the coverage report are for.
     pub fn is_declared(&self) -> bool {
         !self.document.trim().is_empty()
             && !self.revision.trim().is_empty()
             && !self.location.trim().is_empty()
             && !self.applicability.trim().is_empty()
+    }
+
+    /// Whether this family states how uncertain it is.
+    pub fn states_uncertainty(&self) -> bool {
+        !self.uncertainty.trim().is_empty()
     }
 }
 
@@ -114,9 +196,38 @@ pub struct FlopsTransportProvenance {
 }
 
 impl FlopsTransportProvenance {
-    /// Whether every non-geometric FLOPS input family is source-backed.
+    /// Whether every non-geometric FLOPS input family carries its evidence.
     pub fn is_complete(&self) -> bool {
         self.mission.is_declared() && self.cabin.is_declared() && self.architecture.is_declared()
+    }
+
+    /// The three families, named, in the order the coverage report lists them.
+    pub fn families(&self) -> [(&'static str, &FlopsInputProvenance); 3] {
+        [
+            ("mission", &self.mission),
+            ("cabin", &self.cabin),
+            ("architecture", &self.architecture),
+        ]
+    }
+
+    /// Whether every family is read from a document for this variant.
+    ///
+    /// This is the only condition under which a run's non-geometric inputs
+    /// may be described as aircraft data. Anything else is a scenario, and
+    /// calling it otherwise is the mistake this method exists to prevent.
+    pub fn is_entirely_source_backed(&self) -> bool {
+        self.families()
+            .iter()
+            .all(|(_, family)| family.evidence.is_aircraft_data())
+    }
+
+    /// Names of the families that state no uncertainty.
+    pub fn families_without_uncertainty(&self) -> Vec<&'static str> {
+        self.families()
+            .iter()
+            .filter(|(_, family)| !family.states_uncertainty())
+            .map(|(name, _)| *name)
+            .collect()
     }
 }
 
@@ -249,9 +360,62 @@ pub struct FlopsTransportConfig {
 }
 
 impl FlopsTransportConfig {
+    /// A complete conventional transport scenario for an unconfigured run.
+    ///
+    /// [`Default::default`] intentionally remains the empty contract: callers
+    /// that want to prove a configuration has declared every physical datum
+    /// can still construct it and receive typed blockers.  The product-level
+    /// [`crate::MassModelConfig`] uses this constructor for its default so a
+    /// new run is executable end to end.  Every value here is marked as
+    /// `UserDeclared` and carries an uncertainty statement; these are explicit
+    /// study inputs, not aircraft facts and not a fallback to the legacy
+    /// fraction method.
+    pub fn working_default() -> Self {
+        Self {
+            maximum_mach: Some(0.90),
+            design_range_nmi: Some(7_600.0),
+            flight_crew_count: Some(2),
+            flight_attendant_count: Some(7),
+            galley_crew_count: Some(0),
+            first_class_passenger_count: Some(0),
+            business_class_passenger_count: Some(0),
+            tourist_class_passenger_count: Some(350),
+            hydraulic_pressure_pa: Some(3_000.0 * 6_894.757_293_168),
+            variable_sweep_penalty: Some(0.0),
+            wing_mounted_engine_count: Some(2),
+            fuselage_mounted_engine_count: Some(0),
+            fuel_tank_count: Some(3),
+            maximum_fuel_capacity_kg: Some(200_000.0),
+            containerized_cargo_kg: Some(0.0),
+            provenance: FlopsTransportProvenance {
+                mission: conventional_default_provenance(
+                    "mission speed and range are a notional conventional-transport scenario",
+                ),
+                cabin: conventional_default_provenance(
+                    "the cabin is an all-economy 350-seat study scenario",
+                ),
+                architecture: conventional_default_provenance(
+                    "twin wing-mounted engines, fixed wing, three tanks and 3,000 psi are study inputs",
+                ),
+            },
+        }
+    }
+
     /// Whether no FLOPS-specific physical datum has been declared.
     pub fn is_unspecified(&self) -> bool {
         self == &Self::default()
+    }
+}
+
+/// Provenance attached to each family in [`FlopsTransportConfig::working_default`].
+fn conventional_default_provenance(uncertainty: &str) -> FlopsInputProvenance {
+    FlopsInputProvenance {
+        document: "ALAS pure FLOPS conventional transport default".to_owned(),
+        revision: "ALAS 2026-09-11".to_owned(),
+        location: "FlopsTransportConfig::working_default".to_owned(),
+        applicability: "generic notional transport; configured run must replace with aircraft evidence when available".to_owned(),
+        evidence: FlopsInputEvidence::UserDeclared,
+        uncertainty: uncertainty.to_owned(),
     }
 }
 
@@ -290,6 +454,8 @@ mod tests {
             revision: "Rev 1".to_owned(),
             location: "p. 2".to_owned(),
             applicability: "configured weight variant".to_owned(),
+            evidence: FlopsInputEvidence::SourceBacked,
+            uncertainty: "published variant value".to_owned(),
         };
         assert!(complete.is_declared());
     }

@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 use std::collections::BTreeMap;
+use std::path::Path;
 use std::sync::atomic::AtomicBool;
 use std::sync::mpsc::Receiver;
 use std::sync::Arc;
@@ -12,7 +13,7 @@ use crate::path_picker::PathPicker;
 use crate::theme::AppTheme;
 pub use crate::viewport::PreviewCamera;
 use crate::views::results_view::SolverResultView;
-use crate::views::tour_data::{TourTarget, TOUR_STEPS};
+use crate::views::tour_data::TourTarget;
 use alas_config::{
     airports, engines, presets, validate, AlasConfig, ConfigNode, DesignVector, Node, Severity,
     ValidationIssue, DESIGN_VARIABLE_SPECS,
@@ -25,10 +26,10 @@ use serde_json::Value;
 #[derive(Debug, Clone)]
 /// Shell state temporarily replaced while the walkthrough exposes its targets.
 pub struct WalkthroughRestore {
-    active_page: String,
-    nav_pinned: bool,
-    nav_hover_open: bool,
-    preview_open: bool,
+    pub(crate) active_page: String,
+    pub(crate) nav_pinned: bool,
+    pub(crate) nav_hover_open: bool,
+    pub(crate) preview_open: bool,
 }
 
 /// Supported user interface languages.
@@ -279,8 +280,12 @@ pub struct AppState {
     pub guide_chapter: usize,
     /// The airfoil-screening sweep's own run state.
     pub screening: crate::screening::ScreeningState,
+    /// Independent OpenFOAM airfoil study window and worker state.
+    pub cfd: crate::cfd::AirfoilCfdState,
     /// Independent fixed-wing UAV inputs, selections, and latest outcome.
     pub uav: crate::uav::UavWorkflowState,
+    /// The clean-sheet sandbox session and workspace mode.
+    pub sandbox: crate::sandbox::SandboxSession,
     /// Frames remaining for the boot splash. The reference's `Splash` bridges
     /// a real network wait for a cold-starting Python sidecar; this port calls
     /// the library directly and has nothing to wait for, so this is a short,
@@ -325,6 +330,19 @@ impl Default for AppState {
 
         let findings = validate(&config);
 
+        // A desktop shortcut commonly starts in a read-only installation
+        // directory (or in `C:\Windows\System32`).  Keep the GUI's default
+        // artifact tree in the same per-user data root used for preferences;
+        // development checkouts still resolve to their existing `outputs`
+        // directory when it is present.  The CLI retains its explicit
+        // working-directory default because its output path is a command-line
+        // contract.
+        let pipeline_options = PipelineOptions {
+            output_dir: Some(tool_locator.resolve_data_path(Path::new("outputs"))),
+            ..PipelineOptions::default()
+        };
+        let cfd = crate::cfd::AirfoilCfdState::new(&tool_locator);
+
         let mut state = Self {
             config_values,
             schema,
@@ -348,7 +366,7 @@ impl Default for AppState {
             preview_cameras: BTreeMap::new(),
             result_cameras: BTreeMap::new(),
             run_options: RunOptions::default(),
-            pipeline_options: PipelineOptions::default(),
+            pipeline_options,
             is_running: false,
             status_message: "Ready.".to_owned(),
             parameter_feedback: None,
@@ -400,7 +418,9 @@ impl Default for AppState {
             show_advanced_guide: false,
             guide_chapter: 0,
             screening: crate::screening::ScreeningState::default(),
+            cfd,
             uav: crate::uav::UavWorkflowState::default(),
+            sandbox: crate::sandbox::SandboxSession::default(),
             boot_frames_remaining: 40,
         };
 

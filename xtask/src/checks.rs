@@ -115,6 +115,17 @@ fn check_license_header(display: &str, lines: &[&str]) -> Vec<String> {
     }
 }
 
+/// Whether `phrase` occurs in `text` as whole words. A match that begins or
+/// ends inside a longer word -- the tail of "was", the tail of "where" -- is
+/// ordinary prose, not change narration.
+fn contains_phrase(text: &str, phrase: &str) -> bool {
+    text.match_indices(phrase).any(|(start, matched)| {
+        let before = text[..start].chars().next_back();
+        let after = text[start + matched.len()..].chars().next();
+        !before.is_some_and(char::is_alphanumeric) && !after.is_some_and(char::is_alphanumeric)
+    })
+}
+
 fn check_banned_phrases(display: &str, lines: &[&str]) -> Vec<String> {
     let mut findings = Vec::new();
     for (i, line) in lines.iter().enumerate() {
@@ -123,7 +134,7 @@ fn check_banned_phrases(display: &str, lines: &[&str]) -> Vec<String> {
         }
         let lowered = line.to_lowercase();
         for phrase in BANNED_PHRASES {
-            if lowered.contains(phrase) {
+            if contains_phrase(&lowered, phrase) {
                 findings.push(format!(
                     "{display}:{}: comment narrates the change: \"{phrase}\"",
                     i + 1
@@ -196,6 +207,15 @@ mod tests {
     fn rejects_non_ascii() {
         let text = format!("{HEADER}// alpha is \u{3b1}\n");
         assert!(check(&text).iter().any(|f| f.contains("non-ASCII")));
+    }
+
+    #[test]
+    fn a_banned_phrase_inside_a_longer_word_is_ordinary_prose() {
+        let text = format!(
+            "{HEADER}// Free transition was requested but no map resolved.\n\
+             // A uniform station where weighting is invariant.\n"
+        );
+        assert!(!check(&text).iter().any(|f| f.contains("narrates")));
     }
 
     #[test]

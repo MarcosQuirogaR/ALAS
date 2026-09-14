@@ -76,6 +76,8 @@ fn preset_switching_updates_the_json_configuration_and_scene() {
     assert_eq!(config.departure_airport, "Riga (EVRA)");
     assert_eq!(config.arrival_airport, "Stockholm Arlanda (ESSA)");
     assert!(config.mission.profile.cruise_1_air_speed_m_s < 240.0);
+    assert_eq!(config.cabin.passenger.business.share_pct, 0.0);
+    assert_eq!(config.cabin.passenger.economy.share_pct, 100.0);
 }
 
 #[test]

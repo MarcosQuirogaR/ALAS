@@ -21,7 +21,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use alas_aero::mses::{
-    run_mses_polar, run_mses_pressure_distribution, MsesPolarResult, MsesPressureResult,
+    run_mses_polar_with_cancel, run_mses_pressure_distribution_with_checkpoint_and_cancel,
+    MsesPolarResult, MsesPressureResult,
 };
 use alas_config::airports::get as get_airport;
 use alas_config::design_variables::DesignVector;
@@ -692,6 +693,32 @@ impl DesignPipeline {
         self.run(options, environment)
     }
 
+    /// Execute the same run as [`Self::run_with_environment`] while reporting
+    /// typed lifecycle events.
+    ///
+    /// The event stream is where a run's per-stage `elapsed_ms`/`duration_ms`
+    /// already live; before this seam existed only the desktop
+    /// design-space entry point could observe them, so a command-line run had
+    /// no record of where its wall time went. The run itself is unchanged --
+    /// the callback is the only added argument.
+    pub fn run_with_environment_and_events(
+        &self,
+        options: &PipelineOptions,
+        environment: &RunEnvironment,
+        events: &(dyn Fn(RunEvent) + Sync),
+    ) -> Result<PipelineResult, String> {
+        self.run_inner(
+            options,
+            environment,
+            None,
+            None,
+            None,
+            None,
+            Some(events),
+            None,
+        )
+    }
+
     /// Execute a run with an optional already-fetched dispatch route.
     ///
     /// The application owns HTTPS transport; this method is the input seam
@@ -840,7 +867,14 @@ impl DesignPipeline {
             .map_err(|error| format!("analysis workspace creation failed: {error}"))?;
         report("Analysis workspace ready");
         emit_diagnostic(events, run_clock, "setup", "Analysis workspace ready");
+        // The desktop design editor owns an explicit vector.  Preserve it
+        // verbatim for the reference/full-analysis path; the optimizer has
+        // its own canonical nominal step when it actually searches a
+        // cabin-derived clean-sheet space.  Mutating the vector here would
+        // make the values shown in the editor differ from the aircraft being
+        // reviewed, and would also rewrite a named preset on a no-opt run.
         let nominal_design = initial_design.unwrap_or_else(|| self.configured_nominal_design());
+        let fixed_design_review = bounds.is_some_and(bounds_are_fixed);
 
         // Stage 0: Baseline W&B + stability estimation.
         report("Stage 1/7: baseline weight, balance, and stability");
@@ -889,20 +923,40 @@ impl DesignPipeline {
         } else {
             None
         };
-        let (optimized_design, optimization_result, branch_report) =
-            if let Some(solutions) = solver_optimizations.as_ref() {
-                let selected = solutions.selected(options.optimization_solver)?;
-                let design = selected
-                    .design
-                    .ok_or_else(|| "selected optimizer returned no design".to_owned())?;
-                (
-                    design,
-                    selected.optimization.clone(),
-                    selected.report.clone(),
-                )
-            } else {
-                (nominal_design, None, None)
-            };
+        let (optimized_design, optimization_result, branch_report) = if let Some(solutions) =
+            solver_optimizations.as_ref()
+        {
+            match solutions.selected(options.optimization_solver) {
+                Ok(selected) => {
+                    let design = selected
+                        .design
+                        .ok_or_else(|| "selected optimizer returned no design".to_owned())?;
+                    (
+                        design,
+                        selected.optimization.clone(),
+                        selected.report.clone(),
+                    )
+                }
+                Err(error) if fixed_design_review && fixed_review_error_is_reportable(&error) => {
+                    // A fully pinned desktop vector is a fixed-design
+                    // physical review, even when the active optimizer
+                    // constraints reject it. Keep the solver failure and
+                    // its provenance in the result, then run every
+                    // analysis stage so the user gets the actual masses,
+                    // geometry, and typed feasibility findings needed to
+                    // correct the design. An invalid vector is never
+                    // promoted to an optimizer finalist.
+                    tracing::warn!(%error, "fixed design review has no feasible optimizer finalist");
+                    report(&format!(
+                        "Optimizer finalist unavailable; reviewing the pinned design ({error})"
+                    ));
+                    (nominal_design, None, None)
+                }
+                Err(error) => return Err(error),
+            }
+        } else {
+            (nominal_design, None, None)
+        };
         finish_stage(events, run_clock, stage_clock, 2, "optimization");
         check_cancelled(cancel)?;
 
@@ -927,6 +981,67 @@ impl DesignPipeline {
                 None => full.run(&optimized_design, true)?,
             },
         };
+        if options.optimize
+            && optimization_result.is_some()
+            && self.aircraft_override.is_none()
+            && !optimized_report
+                .geometry_summary
+                .contains_key("analysis_mass_basis_is_sized")
+        {
+            // The optimizer's product objective closes the mass/dispatch
+            // fixed point below the configured MTOW limit.  A branch report
+            // built directly at `requirements.mtow_kg` would consequently
+            // calculate cruise lift, trim and component fuel for a heavier
+            // aircraft than the one that actually won the search.  Replay
+            // the typed finalist assessment and bind the report to its
+            // closed takeoff mass before any export or downstream tool sees
+            // it.  A disagreement is a real integration error, not a reason
+            // to silently fall back to the ceiling-mass report.
+            let assessment = alas_opt::assess_product_candidate(&self.config, &optimized_design)
+                .map_err(|error| {
+                    format!(
+                        "optimized finalist could not be re-evaluated at its exported design: {error}"
+                    )
+                })?;
+            if !assessment.hard_feasible {
+                let violations = assessment.violated_hard_ids().join(", ");
+                return Err(format!(
+                    "optimized finalist is not hard-feasible on replay: {}",
+                    if violations.is_empty() {
+                        "unidentified hard residual".to_owned()
+                    } else {
+                        violations
+                    }
+                ));
+            }
+            optimized_report = full.run_at_sized_takeoff_mass(
+                &optimized_design,
+                true,
+                assessment.sized.takeoff_mass_kg,
+            )?;
+            emit_diagnostic(
+                events,
+                run_clock,
+                "full_analysis",
+                &format!(
+                    "Finalist report bound to mission-sized takeoff mass {:.3} kg (MTOW limit {:.3} kg)",
+                    assessment.sized.takeoff_mass_kg,
+                    self.config.requirements.mtow_kg,
+                ),
+            );
+        }
+        emit_diagnostic(
+            events,
+            run_clock,
+            "full_analysis",
+            &format!(
+                "Partial result available: alpha={:.3} deg, CL={:.5}, CD={:.5}, L/D={:.2}",
+                optimized_report.design_point.alpha_deg,
+                optimized_report.design_point.cl,
+                optimized_report.design_point.cd,
+                optimized_report.design_point.l_over_d,
+            ),
+        );
         finish_stage(events, run_clock, stage_clock, 3, "full_analysis");
         check_cancelled(cancel)?;
 
@@ -1117,7 +1232,52 @@ impl DesignPipeline {
         let run_mses = || {
             let stage_clock =
                 begin_component(events, run_clock, "downstream/mses", "MSES analysis");
-            let result = self.run_mses_stage(&optimized_report, environment.mses_dir.as_deref());
+            let result =
+                self.run_mses_stage(&optimized_report, environment.mses_dir.as_deref(), cancel);
+            let (polar, pressure) = &result;
+            let polar_summary = polar.as_ref().map_or_else(
+                || "unavailable".to_owned(),
+                |value| {
+                    let alpha_range = finite_range(&value.alpha_deg)
+                        .map_or_else(|| "none".to_owned(), |(lo, hi)| format!("{lo:.3}..{hi:.3}"));
+                    let cl_range = finite_range(&value.cl)
+                        .map_or_else(|| "none".to_owned(), |(lo, hi)| format!("{lo:.4}..{hi:.4}"));
+                    let cd_range = finite_range(&value.cd)
+                        .map_or_else(|| "none".to_owned(), |(lo, hi)| format!("{lo:.5}..{hi:.5}"));
+                    format!(
+                        "{}/{} alpha points, status={}, OSMAP={}, alpha={alpha_range} deg, CL={cl_range}, CD={cd_range}",
+                        value.converged_alpha_count,
+                        value.requested_alpha_count,
+                        value.status.as_str(),
+                        value.osmap_status.as_str(),
+                    )
+                },
+            );
+            let pressure_summary = pressure.as_ref().map_or_else(
+                || "unavailable".to_owned(),
+                |value| {
+                    let mach_range = finite_range(&value.field_mach)
+                        .map_or_else(|| "none".to_owned(), |(lo, hi)| format!("{lo:.3}..{hi:.3}"));
+                    let cp_range = finite_range(&value.field_cp)
+                        .map_or_else(|| "none".to_owned(), |(lo, hi)| format!("{lo:.4}..{hi:.4}"));
+                    format!(
+                        "status={}, upper={}, lower={}, Mach field={}, Cp field={}, Mach={mach_range}, Cp={cp_range}, OSMAP={} ({})",
+                        value.status.as_str(),
+                        value.cp_upper.len(),
+                        value.cp_lower.len(),
+                        value.field_mach.len(),
+                        value.field_cp.iter().filter(|cp| cp.is_finite()).count(),
+                        value.osmap_status.as_str(),
+                        if value.transition_model_is_valid() { "valid" } else { "unverified" },
+                    )
+                },
+            );
+            emit_diagnostic(
+                events,
+                run_clock,
+                "downstream/mses",
+                &format!("MSES polar {polar_summary}; pressure {pressure_summary}"),
+            );
             finish_component(
                 events,
                 run_clock,
@@ -1140,9 +1300,26 @@ impl DesignPipeline {
             );
             if self.config.structures.enabled {
                 let work_dir = Some(analysis_dir.join("structures"));
+                // Structural load cards are sized against the same takeoff
+                // mass that built the selected report.  For a mission-sized
+                // finalist the configured MTOW remains the upper limit, but
+                // using that larger limit here would make the wingbox and
+                // NASTRAN deck describe a different aircraft than the mass,
+                // CG and mission records above.
+                let structural_config = config_for_report_mass(&self.config, &optimized_report);
+                emit_diagnostic(
+                    events,
+                    run_clock,
+                    "downstream/structural",
+                    &format!(
+                        "Structural loads use report mass basis {:.3} kg (configured MTOW limit {:.3} kg)",
+                        report_mass_basis_kg(&optimized_report, self.config.requirements.mtow_kg),
+                        self.config.requirements.mtow_kg,
+                    ),
+                );
                 let result = Some(
                     crate::structural::run_structural_analysis_with_environment_events(
-                        &self.config,
+                        &structural_config,
                         &optimized_report,
                         work_dir.as_deref(),
                         environment,
@@ -1399,6 +1576,18 @@ impl DesignPipeline {
                 if let Some(result) = &mses_result {
                     stages.insert("mses".to_owned(), result.status.as_str().to_owned());
                 }
+                // The polar and pressure solves are supervised separately.
+                // A polar can legitimately stop outside its converged domain
+                // while the fixed-point pressure solve still returns a
+                // native flowfield for the contour figures. Keep both
+                // statuses in the manifest instead of collapsing that useful
+                // distinction into one red/green value.
+                if let Some(result) = &mses_pressure {
+                    stages.insert(
+                        "mses_pressure".to_owned(),
+                        result.status.as_str().to_owned(),
+                    );
+                }
                 if let Some(result) = &structural_result {
                     stages.insert("structures".to_owned(), result.status.clone());
                     if let Some(nastran) = result.nastran.as_ref() {
@@ -1457,12 +1646,11 @@ impl DesignPipeline {
                         "openvsp_project",
                         &openvsp.vsp3_path,
                     );
-                    let preview = openvsp.script_path.with_extension("preview.png");
                     add_manifest_artifact_if_exists(
                         &mut artifacts,
                         out_dir,
                         "openvsp_cad_preview",
-                        &preview,
+                        &openvsp.preview_path,
                     );
                     add_manifest_artifact_if_exists(
                         &mut artifacts,
@@ -1553,6 +1741,10 @@ impl DesignPipeline {
                     (
                         "mses_polar_diagnostics",
                         out_dir.join("mses/polar_diagnostics.json"),
+                    ),
+                    (
+                        "mses_pressure_diagnostics",
+                        out_dir.join("mses/pressure_diagnostics.json"),
                     ),
                     ("mses_bl_dump", out_dir.join("mses/bl_dump.txt")),
                     ("mses_flowfield", out_dir.join("mses/flowfield.txt")),
@@ -1758,6 +1950,7 @@ impl DesignPipeline {
         &self,
         report: &AnalysisReport,
         mses_dir: Option<&Path>,
+        cancel: Option<&AtomicBool>,
     ) -> (Option<MsesPolarResult>, Option<MsesPressureResult>) {
         if !self.config.mses.enabled {
             return (None, None);
@@ -1802,15 +1995,17 @@ impl DesignPipeline {
             None => return (None, None),
         };
 
-        let polar = run_mses_polar(
+        let polar = run_mses_polar_with_cancel(
             root_airfoil,
             condition.mach,
             condition.reynolds,
             condition.alpha_deg,
             &self.config.mses,
             dir,
+            cancel,
         );
-        let pressure = run_mses_pressure_distribution(
+        let best_checkpoint = polar.closest_checkpoint(condition.alpha_deg);
+        let pressure = run_mses_pressure_distribution_with_checkpoint_and_cancel(
             root_airfoil,
             condition.mach,
             condition.reynolds,
@@ -1818,6 +2013,8 @@ impl DesignPipeline {
             &self.config.mses,
             dir,
             None,
+            best_checkpoint,
+            cancel,
         );
 
         (Some(polar), Some(pressure))
@@ -1834,6 +2031,65 @@ impl DesignPipeline {
             None => "No analysis report available.".to_owned(),
         }
     }
+}
+
+/// Read the report's explicit mass provenance without treating a missing or
+/// malformed value as a new mass limit. `fallback_kg` is the configured
+/// MTOW, which is the appropriate basis for reference and fixed requirement
+/// reports.
+fn report_mass_basis_kg(report: &AnalysisReport, fallback_kg: f64) -> f64 {
+    let is_sized = report
+        .geometry_summary
+        .get("analysis_mass_basis_is_sized")
+        .is_some_and(|value| value.is_finite() && *value > 0.5);
+    let sized = report
+        .geometry_summary
+        .get("analysis_mass_basis_kg")
+        .copied()
+        .filter(|value| value.is_finite() && *value > 0.0);
+    if is_sized {
+        if let Some(value) = sized {
+            return value;
+        }
+    }
+    fallback_kg
+}
+
+/// Clone the public configuration for a downstream discipline that consumes
+/// the report's actual mass. The configured MTOW is retained by the caller as
+/// a limit and remains in the final result; only the structural load cards
+/// need the closed mission-sized value as their working mass.
+fn config_for_report_mass(config: &AlasConfig, report: &AnalysisReport) -> AlasConfig {
+    config.at_closure_mass(report_mass_basis_kg(report, config.requirements.mtow_kg))
+}
+
+fn finite_range(values: &[f64]) -> Option<(f64, f64)> {
+    let mut finite = values.iter().copied().filter(|value| value.is_finite());
+    let first = finite.next()?;
+    let mut range = (first, first);
+    for value in finite {
+        range.0 = range.0.min(value);
+        range.1 = range.1.max(value);
+    }
+    Some(range)
+}
+
+/// Whether a design-space call pins every coordinate to one literal value.
+///
+/// This is the explicit review contract used by the desktop when it asks the
+/// pipeline to analyse a design without a feasible search winner.  A
+/// partially bounded optimization still has to return an error rather than
+/// silently publishing an infeasible candidate.
+fn bounds_are_fixed(bounds: &[(f64, f64)]) -> bool {
+    !bounds.is_empty() && bounds.iter().all(|&(lower, upper)| lower == upper)
+}
+
+/// Whether a failed single-point search still leaves a useful fixed-aircraft
+/// review to run. Sizing and layout misses are reportable on the concrete
+/// aircraft, while an invalid trim requirement prevents the native analysis
+/// from constructing a physical operating point at all.
+fn fixed_review_error_is_reportable(error: &str) -> bool {
+    error.contains("no feasible design") && !error.contains("trim_cruise_cl_exceeds_max")
 }
 
 /// Enforce the blocking cross-field configuration contract at the public

@@ -16,7 +16,9 @@
 use alas_config::{AlasConfig, ConstraintPolicy, ObjectiveKind};
 
 use super::sizing::SizingOutcome;
-use super::types::{CandidateAssessment, ConstraintResidual};
+use super::types::{
+    CandidateAssessment, ConstraintResidual, ProductStateProvenance, ResolvedProductState,
+};
 
 /// Fraction of the takeoff-mass ceiling used to normalize a block-fuel
 /// objective.
@@ -88,8 +90,23 @@ pub(crate) fn assemble(
         cost += 1.0 + hard_violation_sum;
     }
 
+    // Captured before `outcome.sized` is moved: this is the same state
+    // `mdo::residuals::balance_residuals` just evaluated the hard CG and
+    // gear constraints on, so a report bound to this candidate can quote it
+    // instead of rebuilding a second, independently placed aircraft.
+    let resolved = ResolvedProductState {
+        masses: outcome.masses,
+        coords: outcome.coords,
+        cg_x_m: outcome.cg_x,
+        x_neutral_point_m: outcome.x_np,
+        mac_m: outcome.mac,
+        takeoff_mass_kg: outcome.sized.takeoff_mass_kg,
+        provenance: ProductStateProvenance::MissionSizedClosure,
+    };
+
     CandidateAssessment {
         sized: outcome.sized,
+        resolved,
         residuals,
         hard_feasible,
         hard_violation_sum,

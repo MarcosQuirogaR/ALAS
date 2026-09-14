@@ -84,7 +84,7 @@ fn malformed_design_vectors_record_the_failure_cost_in_objective_history() {
     assert_eq!(objective.history.valid, vec![false]);
     assert_eq!(
         objective.history.reject_reason,
-        vec!["geometry_build".to_owned()]
+        vec!["design_space".to_owned()]
     );
 }
 

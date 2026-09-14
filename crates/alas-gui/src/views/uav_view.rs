@@ -32,12 +32,16 @@ use results::{aircraft_bom, electrical_mission};
 use sections::{component_inputs, mission_inputs, propulsion_inputs};
 use uav_fields::{result_measure, result_value};
 use workflow::{
-    action_bar, execution_status, outcome_is_verified, section_intro, topology_selector,
-    workflow_header,
+    action_bar, execution_status, outcome_is_verified, release_blocker, section_intro,
+    topology_selector, workflow_header, UAV_RELEASE_BLOCKED,
 };
 
 /// Render the complete fixed-wing UAV workflow.
 pub fn show_uav_view(state: &mut AppState, ui: &mut Ui) {
+    if UAV_RELEASE_BLOCKED {
+        release_blocker(ui);
+        return;
+    }
     ScrollArea::vertical()
         .id_salt("uav_workflow_scroll")
         .auto_shrink([false, false])

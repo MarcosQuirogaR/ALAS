@@ -12,7 +12,7 @@
 //! column `export_data.py` writes: `Altitude_m` is `c.freestream.altitude`,
 //! `Mass_kg` is `c.weights.total_mass`, `TAS_m_s` is `c.freestream.velocity`,
 //! and `SFC_kg_kgf_hr` is computed inline there as
-//! `(mdot * 3600) / (thrust / g0)` -- not a stored mission analysis model field either side.
+//! `(mdot * 3600) / (thrust / g0)`, which is not a stored mission analysis model field.
 
 use super::{collect_series, draw_time_axis_label, draw_time_panel, time_domain, G0};
 use crate::scene::{Color, Scene, SceneElement, Stroke, TextAlign, TextBaseline};

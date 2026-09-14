@@ -28,6 +28,10 @@ pub enum ToolPathTarget {
     RoutesDirectory,
     AvlExecutable,
     OpenVspDirectory,
+    OpenFoamNativeBinDirectory,
+    OpenFoamNativeProjectDirectory,
+    GmshExecutable,
+    ParaViewExecutable,
 }
 
 /// A completed native selection, cancellation, or launcher error.

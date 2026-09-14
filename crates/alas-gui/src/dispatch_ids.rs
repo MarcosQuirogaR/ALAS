@@ -45,6 +45,7 @@ pub const RESULT_DISPATCH_IDS: &[&str] = &[
     "airfoil_reynolds",
     "mses_pressure",
     "mses_mach_contours",
+    "mses_cp_contours",
     "mses_convergence",
     "vspaero_polar",
     "vspaero_wake_convergence",

@@ -13,21 +13,26 @@
 //! its tanks in the burn order the arrangement declares, so the centre of
 //! gravity of each state is the tanks', not a single wing point.
 
-use alas_config::{presets, AlasConfig, DesignVector};
+use alas_config::{AlasConfig, DesignVector};
 use alas_mass::breakdown::{
     calculate_physical_cg, MassBreakdown, MassCoordinates, FUEL, FURNISHINGS, FUSELAGE, GEAR,
     H_STAB, PAYLOAD, PROPULSION, SYSTEMS, V_STAB, WING,
 };
-use alas_mass::ledger::{InertiaTensor, MassItem, MassProperties};
+use alas_mass::ledger::{MassItem, MassProperties};
 use alas_mass::statement::{
-    LoadState, MassStatement, MassStatementInputs, PayloadItemSummary, RadiiComparison,
+    LedgerMethods, LoadState, MassStatement, MassStatementInputs, PayloadItemSummary,
 };
-use alas_mass::stations::component_stations;
-use alas_mass::tanks::{FuelCgPoint, FuelTankLayout};
+use alas_mass::stations::component_stations_with_gear;
+use alas_mass::tanks::FuelTankLayout;
 
 use crate::full_analysis::AnalysisReport;
 
-use super::{FindingCode, FindingSeverity, FuelLoadingAssessment, PhysicalFinding};
+mod summaries;
+pub use summaries::{LedgerItemSummary, MassBalanceAssessment, MassStateSummary, TankSummary};
+
+use super::{
+    report_mass_basis_kg, FindingCode, FindingSeverity, FuelLoadingAssessment, PhysicalFinding,
+};
 
 /// Fraction of the takeoff fuel assumed to remain at landing when no flown
 /// mission supplies a landing mass; the same operational-reserve convention
@@ -40,77 +45,6 @@ const CG_DISAGREEMENT_PCT_MAC: f64 = 5.0;
 
 /// Fuel-load steps of the reported centre-of-gravity travel curve.
 const FUEL_CG_CURVE_STEPS: usize = 24;
-
-/// One named loading state of the statement.
-#[derive(Debug, Clone, PartialEq)]
-pub struct MassStateSummary {
-    /// Stable report label.
-    pub label: &'static str,
-    /// Total mass, kg.
-    pub mass_kg: f64,
-    /// Centre of gravity in the geometry frame, m.
-    pub cg_m: [f64; 3],
-    /// Longitudinal centre of gravity in percent of the model MAC.
-    pub cg_pct_mac: f64,
-    /// Inertia tensor about the centre of gravity, kg m^2.
-    pub inertia_cg: InertiaTensor,
-}
-
-/// One resolved tank.
-#[derive(Debug, Clone, PartialEq)]
-pub struct TankSummary {
-    /// Stable identifier.
-    pub id: String,
-    /// Tank family.
-    pub kind: &'static str,
-    /// Usable capacity at the declared density, kg.
-    pub usable_capacity_kg: f64,
-    /// Unusable fuel, kg.
-    pub unusable_kg: f64,
-    /// Volume centroid, m.
-    pub centroid_m: [f64; 3],
-    /// Where the capacity came from.
-    pub capacity_source: &'static str,
-    /// Burn order, lower first.
-    pub burn_priority: i64,
-}
-
-/// One ledger row.
-#[derive(Debug, Clone, PartialEq)]
-pub struct LedgerItemSummary {
-    /// Stable identifier.
-    pub id: String,
-    /// Functional group label.
-    pub group: &'static str,
-    /// Mass, kg.
-    pub mass_kg: f64,
-    /// Reference point, m.
-    pub position_m: [f64; 3],
-}
-
-/// The mass statement of the run.
-#[derive(Debug, Clone, PartialEq)]
-pub struct MassBalanceAssessment {
-    /// Named loading states, in the order they are listed in the report.
-    pub states: Vec<MassStateSummary>,
-    /// The tanks resolved on the built geometry.
-    pub tanks: Vec<TankSummary>,
-    /// Sum of usable tank capacity, kg.
-    pub usable_capacity_kg: f64,
-    /// Sum of unusable fuel, kg; part of the operating empty mass.
-    pub unusable_fuel_kg: f64,
-    /// Factor applied to geometric tank estimates to meet a published total.
-    pub geometric_calibration_factor: f64,
-    /// Centre of gravity as fuel is loaded in the reverse of the burn order.
-    pub fuel_cg_curve: Vec<FuelCgPoint>,
-    /// Ledger radii of gyration at the flown takeoff state against Raymer's
-    /// jet-transport reference.
-    pub radii_check: RadiiComparison,
-    /// Every ledger row, fuel excluded.
-    pub ledger_items: Vec<LedgerItemSummary>,
-    /// Lumped-model takeoff centre of gravity, percent MAC, for comparison.
-    pub lumped_takeoff_cg_pct_mac: f64,
-}
 
 /// Build the statement and append its findings.
 ///
@@ -134,12 +68,13 @@ pub(super) fn assess_mass_balance(
             unit: "",
         });
     };
-    let stations = match component_stations(
+    let stations = match component_stations_with_gear(
         &report.airplane,
         &config.geometry,
         &config.requirements,
         &config.mass_model,
         &config.structures,
+        &config.landing_gear,
     ) {
         Ok(stations) => stations,
         Err(error) => {
@@ -152,7 +87,7 @@ pub(super) fn assess_mass_balance(
         }
     };
     let (density_kg_m3, published_total_l) = tank_reference(config, design);
-    let tanks = match FuelTankLayout::resolve(
+    let resolved_tanks = match FuelTankLayout::resolve(
         &report.airplane,
         &config.geometry,
         &config.structures,
@@ -170,6 +105,40 @@ pub(super) fn assess_mass_balance(
             );
             return None;
         }
+    };
+    // A pure FLOPS report carries the authoritative unusable-fuel total from
+    // equation 121.  Keep the resolved tank positions and capacities, but
+    // make their per-tank unusable rows sum to that same total so the ledger
+    // cannot compare a policy fraction with the FLOPS operating-item slot.
+    let flops_groups = report
+        .flops_mass_buildup
+        .as_deref()
+        .map(|buildup| &buildup.systems_and_operating_items);
+    if config.mass_model.mass_architecture.is_pure_flops() && flops_groups.is_none() {
+        warn(
+            findings,
+            FindingCode::MassLedgerUnavailable,
+            "the pure FLOPS mass report carries no grouped systems evaluation for the ledger"
+                .to_owned(),
+        );
+        return None;
+    }
+    let tanks = if let Some(flops) = flops_groups {
+        match resolved_tanks.with_unusable_fuel_total(flops.operating_items.unusable_fuel_kg) {
+            Ok(tanks) => tanks,
+            Err(error) => {
+                warn(
+                    findings,
+                    FindingCode::FuelTankLayoutUnavailable,
+                    format!(
+                        "the FLOPS unusable-fuel total could not be placed in the tanks: {error}"
+                    ),
+                );
+                return None;
+            }
+        }
+    } else {
+        resolved_tanks
     };
     let Some(masses) = lumped_masses(report) else {
         warn(
@@ -208,15 +177,22 @@ pub(super) fn assess_mass_balance(
                 return None;
             }
         };
-    let statement = match MassStatement::build(MassStatementInputs {
-        masses: &masses,
-        stations: &stations,
-        payload_items: &payload_items,
-        takeoff_fuel_items,
-        landing_fuel_items,
-        unusable_fuel_items: tanks.unusable_items(),
-        flops: None,
-    }) {
+    // The lumped breakdown this stage receives carries whichever methods the
+    // configuration selected.  A pure FLOPS report also carries the grouped
+    // evaluation that produced those slots; pass that same object through so
+    // the ledger cannot relabel a lumped approximation as a FLOPS buildup.
+    let statement = match MassStatement::build_with_methods(
+        MassStatementInputs {
+            masses: &masses,
+            stations: &stations,
+            payload_items: &payload_items,
+            takeoff_fuel_items,
+            landing_fuel_items,
+            unusable_fuel_items: tanks.unusable_items(),
+            flops: flops_groups,
+        },
+        LedgerMethods::from_mass_model(&config.mass_model),
+    ) {
         Ok(statement) => statement,
         Err(error) => {
             warn(
@@ -336,16 +312,17 @@ pub fn takeoff_mass_properties(
     config: &AlasConfig,
     report: &AnalysisReport,
 ) -> Option<MassProperties> {
-    let stations = component_stations(
+    let stations = component_stations_with_gear(
         &report.airplane,
         &config.geometry,
         &config.requirements,
         &config.mass_model,
         &config.structures,
+        &config.landing_gear,
     )
     .ok()?;
     let (density_kg_m3, published_total_l) = tank_reference(config, &report.design);
-    let tanks = FuelTankLayout::resolve(
+    let resolved_tanks = FuelTankLayout::resolve(
         &report.airplane,
         &config.geometry,
         &config.structures,
@@ -355,22 +332,40 @@ pub fn takeoff_mass_properties(
         published_total_l,
     )
     .ok()?;
+    let flops_groups = report
+        .flops_mass_buildup
+        .as_deref()
+        .map(|buildup| &buildup.systems_and_operating_items);
+    if config.mass_model.mass_architecture.is_pure_flops() && flops_groups.is_none() {
+        return None;
+    }
+    let tanks = if let Some(flops) = flops_groups {
+        resolved_tanks
+            .with_unusable_fuel_total(flops.operating_items.unusable_fuel_kg)
+            .ok()?
+    } else {
+        resolved_tanks
+    };
     let masses = lumped_masses(report)?;
-    let zero_fuel_mass_kg = config.requirements.mtow_kg - masses.fuel;
+    let mass_basis_kg = report_mass_basis_kg(config, report);
+    let zero_fuel_mass_kg = mass_basis_kg - masses.fuel;
     let fuel_kg = tanks
         .usable_capacity_kg()
-        .min((config.requirements.mtow_kg - zero_fuel_mass_kg).max(0.0));
+        .min((mass_basis_kg - zero_fuel_mass_kg).max(0.0));
     let fuel_items = tanks.distribute(fuel_kg).ok()?.mass_items(&tanks);
     let payload_items = payload_items(report);
-    let statement = MassStatement::build(MassStatementInputs {
-        masses: &masses,
-        stations: &stations,
-        payload_items: &payload_items,
-        takeoff_fuel_items: fuel_items,
-        landing_fuel_items: Vec::new(),
-        unusable_fuel_items: tanks.unusable_items(),
-        flops: None,
-    })
+    let statement = MassStatement::build_with_methods(
+        MassStatementInputs {
+            masses: &masses,
+            stations: &stations,
+            payload_items: &payload_items,
+            takeoff_fuel_items: fuel_items,
+            landing_fuel_items: Vec::new(),
+            unusable_fuel_items: tanks.unusable_items(),
+            flops: flops_groups,
+        },
+        LedgerMethods::from_mass_model(&config.mass_model),
+    )
     .ok()?;
     Some(statement.state(LoadState::Takeoff))
 }
@@ -378,20 +373,11 @@ pub fn takeoff_mass_properties(
 /// Density and published total volume for the tank resolution: the
 /// registered aircraft's own when the design is the unchanged preset, the
 /// configured density and no published total otherwise.
-pub(crate) fn tank_reference(config: &AlasConfig, design: &DesignVector) -> (f64, Option<f64>) {
-    let configured_density = config.mass_model.fuel_density_kg_m3;
-    let Ok(preset) = presets::get(&config.preset) else {
-        return (configured_density, None);
-    };
-    if *design != preset.design_vector {
-        return (configured_density, None);
-    }
-    let density = preset
-        .reference
-        .fuel_density_kg_l
-        .map_or(configured_density, |kg_l| kg_l * 1_000.0);
-    (density, preset.reference.usable_fuel_volume_l)
-}
+///
+/// The rule itself lives in [`alas_mass::product_stations`] so the
+/// optimizer's search-time fuel placement resolves the same tanks this
+/// report does.
+pub(crate) use alas_mass::product_stations::tank_reference;
 
 fn lumped_masses(report: &AnalysisReport) -> Option<MassBreakdown> {
     let mass = |name: &str| report.component_masses.get(name).copied();

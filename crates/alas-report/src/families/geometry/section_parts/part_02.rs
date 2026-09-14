@@ -53,7 +53,16 @@ fn cargo_ring(item: &CargoItem) -> (Ring, bool) {
             false,
         );
     };
-    let contour: Ring = uld.normalized_contour_yz.iter().map(|p| [p.y, p.z]).collect();
+    // The resolved DeckItem retains the aircraft-frame lateral centre but not
+    // the original loading orientation. Mirror the canonical contour for a
+    // port-side item, matching the live 3D asset path; the source metadata
+    // still controls whether a profile is mirrorable.
+    let mirror_for_port = envelope.center_y_m < 0.0 && uld.mirrorable;
+    let contour: Ring = uld
+        .normalized_contour_yz
+        .iter()
+        .map(|p| [if mirror_for_port { -p.y } else { p.y }, p.z])
+        .collect();
     if contour.len() < 3 {
         return (
             rectangle(

@@ -27,7 +27,7 @@ use alas_geom::wing_structure::WingStructureGeometry;
 use alas_struct::analytical::{
     analyze_structure_reference_compatibility, LoadCaseResult, StructuralAnalysisReport,
 };
-use alas_struct::sizing::size_wingbox;
+use alas_struct::sizing::size_wingbox_reference_compatibility;
 use alas_testkit::{Comparison, Tier};
 use serde::Deserialize;
 use serde_json::{Map, Value};
@@ -280,7 +280,9 @@ fn analyze_structure_matches_python_across_structures_config_cases() {
         let cap_mat = materials::get(&case.materials.cap).expect("cap material resolves");
         let rib_mat = materials::get(&case.materials.rib).expect("rib material resolves");
 
-        let sizing = size_wingbox(&wsg, &cfg, &req, skin_mat, web_mat, cap_mat, rib_mat);
+        let sizing = size_wingbox_reference_compatibility(
+            &wsg, &cfg, &req, skin_mat, web_mat, cap_mat, rib_mat,
+        );
         let report = analyze_structure_reference_compatibility(
             &wsg,
             &sizing,

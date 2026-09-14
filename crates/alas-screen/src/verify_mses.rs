@@ -7,8 +7,9 @@
 //! Stage 3: MSES coupled viscous/inviscid Euler analysis for transonic verification.
 
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 
-use alas_aero::mses::{run_mses_polar, MsesStatus};
+use alas_aero::mses::{run_mses_polar_with_cancel, MsesStatus};
 use alas_atmo::Atmosphere;
 use alas_config::design_variables::DesignVector;
 use alas_config::AlasConfig;
@@ -27,7 +28,7 @@ pub fn verify_candidate_mses(
     altitude: f64,
     cl_target: f64,
     mses_dir: &Path,
-    should_cancel: Option<&dyn Fn() -> bool>,
+    should_cancel: Option<&AtomicBool>,
 ) {
     if !config.mses.enabled {
         candidate.mses_status = Some("error".to_string());
@@ -61,7 +62,7 @@ pub fn verify_candidate_mses(
         .alpha_deg
         .unwrap_or(candidate.alpha_3d_deg.unwrap_or(0.0));
 
-    if should_cancel.is_some_and(|cancel_fn| cancel_fn()) {
+    if should_cancel.is_some_and(|cancel_flag| cancel_flag.load(Ordering::Relaxed)) {
         candidate.mses_status = Some("cancelled".to_string());
         return;
     }
@@ -70,13 +71,14 @@ pub fn verify_candidate_mses(
     // exactly once. Widening it after an inconvenient result changes the
     // analysis request and can make a candidate look verified by a different
     // condition than every other candidate.
-    let polar = run_mses_polar(
+    let polar = run_mses_polar_with_cancel(
         &section,
         m_effective,
         reynolds,
         bracket_alpha,
         &config.mses,
         mses_dir,
+        should_cancel,
     );
 
     candidate.mses_status = Some(polar.status.as_str().to_string());

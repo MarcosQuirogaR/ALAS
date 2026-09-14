@@ -278,7 +278,13 @@ pub(super) fn structures_unavailable_message(
 /// a local copy rather than a dependency on one.
 pub(super) fn status_message_scene(title: &str, message: &str, theme: Option<&str>) -> Scene {
     let pal = get_palette(theme);
-    let mut scene = Scene::new(700.0, 170.0, Some(Color::from_hex(pal.bg)));
+    const MESSAGE_TOP: f64 = 66.0;
+    const LINE_HEIGHT: f64 = 16.0;
+    const BOTTOM_MARGIN: f64 = 16.0;
+    let wrapped = crate::chart_kit::wrap_text(message, 100);
+    let line_count = wrapped.lines().count().max(1) as f64;
+    let height = (170.0_f64).max(MESSAGE_TOP + line_count * LINE_HEIGHT + BOTTOM_MARGIN);
+    let mut scene = Scene::new(700.0, height, Some(Color::from_hex(pal.bg)));
     scene.add(SceneElement::Text {
         text: title.to_owned(),
         pos: [8.0, 26.0],
@@ -290,8 +296,8 @@ pub(super) fn status_message_scene(title: &str, message: &str, theme: Option<&st
         bold: true,
     });
     scene.add(SceneElement::Text {
-        text: message.to_owned(),
-        pos: [8.0, 66.0],
+        text: wrapped,
+        pos: [8.0, MESSAGE_TOP],
         font_size: 11.0,
         color: Color::from_hex(pal.tick),
         align: TextAlign::Left,

@@ -197,6 +197,7 @@ mod tests {
             x_neutral_point: 0.0,
             geometry_summary: HashMap::new(),
             component_masses: HashMap::new(),
+            flops_mass_buildup: None,
             mass_coordinates: HashMap::new(),
             physical_cg: [5.2, 0.0, 0.0],
             payload_layout: None,

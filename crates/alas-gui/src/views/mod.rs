@@ -4,6 +4,7 @@
 //! View components for every navigable page and shell panel.
 
 pub mod analyses_view;
+pub mod cfd_view;
 pub mod control_bar;
 pub mod design_space_view;
 pub mod form;
@@ -16,6 +17,7 @@ mod result_3d;
 pub mod results_view;
 pub mod run_log;
 pub mod screening_view;
+pub(crate) mod screening_window;
 pub mod tools_view;
 pub mod tour_data;
 pub mod uav_view;

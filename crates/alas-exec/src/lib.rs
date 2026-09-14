@@ -23,6 +23,7 @@
 pub mod avl;
 pub mod download;
 pub mod flowunsteady;
+pub mod openfoam;
 pub mod process;
 pub mod tools;
 pub mod vspaero;

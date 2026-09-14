@@ -30,19 +30,52 @@ pub use presets::{
     apply_cabin_preset, apply_cabin_preset_reference_compatibility, CabinPresetError,
 };
 
-use alas_config::{AlasConfig, PassengerCabinConfig, SeatClassConfig};
+use alas_config::{AlasConfig, CertifiedExitLayout, PassengerCabinConfig, SeatClassConfig};
 use alas_geom::aircraft::airplane::Airplane;
 
 use crate::cabin::{
     abreast, build_passenger_layout_reference_compatibility,
     build_passenger_layout_with_aircraft_cg_target, cabin_deck_segments, ceil_div,
-    max_certifiable_capacity, min_exit_pairs, resolve_aisle_width, select_exit_type,
-    service_reserve_len, MIN_PITCH, MONUMENT_LEN,
+    effective_pair_capacity, max_certifiable_capacity_reference_compatibility,
+    max_certifiable_capacity_with_source_layout, min_exit_pairs, resolve_aisle_width,
+    select_exit_type, service_reserve_len, MIN_PITCH, MONUMENT_LEN,
 };
 use crate::cargo::{build_cargo_layout, build_cargo_layout_reference_compatibility};
 use crate::geometry::{CabinGeometry, CabinGeometryError};
-use crate::layout::PayloadLayout;
+use crate::layout::{LayoutSummary, PayloadLayout};
 use crate::numeric::round_half_even;
+
+/// Resolve the immutable passenger capacity declared for a registered
+/// aircraft.  A clean-sheet or unknown-preset configuration has no source
+/// limit to apply, and the frozen compatibility path deliberately preserves
+/// its historical geometry-only result.
+pub(crate) fn registered_source_capacity_cap(
+    config: &AlasConfig,
+    reference_compatibility: bool,
+) -> Option<i64> {
+    if reference_compatibility || config.requirements.aircraft_type == "cargo" {
+        return None;
+    }
+    alas_config::presets::get(&config.preset)
+        .ok()
+        .and_then(|preset| preset.reference.certified_max_seats)
+        .filter(|cap| *cap > 0)
+}
+
+/// Resolve the source-defined exit arrangement for a registered passenger
+/// preset.  Clean-sheet and frozen compatibility callers deliberately retain
+/// the generic diameter-based exit proxy.
+pub(crate) fn registered_source_exit_layout(
+    config: &AlasConfig,
+    reference_compatibility: bool,
+) -> Option<CertifiedExitLayout> {
+    if reference_compatibility || config.requirements.aircraft_type == "cargo" {
+        return None;
+    }
+    alas_config::presets::get(&config.preset)
+        .ok()
+        .and_then(|preset| preset.reference.certified_exit_layout)
+}
 
 /// The class slots, forward to aft. The auto-sizer walks them in this order
 /// whatever order the mix was written in, so two mixes naming the same shares
@@ -114,11 +147,27 @@ fn build_payload_layout_with_mass_semantics(
             config.cabin.passenger.wall_thickness_m,
         )?
     };
-    let requested_passengers =
-        (!reference_compatibility).then_some(config.requirements.num_passengers);
+    let source_capacity_cap = registered_source_capacity_cap(config, reference_compatibility);
+    let source_exit_layout = registered_source_exit_layout(config, reference_compatibility);
     let mut effective = config.clone();
     if !reference_compatibility {
-        presets::apply_cabin_preset_to_geometry(&mut effective, &g);
+        presets::apply_cabin_preset_to_geometry(
+            &mut effective,
+            &g,
+            source_capacity_cap,
+            source_exit_layout,
+        );
+        // `requirements.passenger_mass_kg` is the single product load-case
+        // authority (occupant plus checked bag, the same for every class):
+        // reprice each class slot after the preset wrote its geometry seed,
+        // so every product path agrees with the optimizer's
+        // `apply_candidate_payload_load_case`; the reference-compatibility
+        // branch keeps the frozen per-class masses.
+        let requirements = effective.requirements.clone();
+        effective
+            .cabin
+            .passenger
+            .apply_passenger_mass_authority(&requirements);
     }
     let config = if reference_compatibility {
         config
@@ -140,11 +189,11 @@ fn build_payload_layout_with_mass_semantics(
         Ok(layout)
     } else {
         // The selected cabin geometry determines the class proportions and
-        // seat geometry, but the requirements' passenger count is the load
-        // case authority. Materializing a Custom cabin used to overwrite it
-        // with the shell's geometric capacity; that made an A320 preset turn
-        // into a 106-passenger aircraft and a 787 into a 303-passenger one,
-        // so the reported payload no longer matched the preset or its MZFW.
+        // seat geometry. Every study -- a registered aircraft or a
+        // clean-sheet one alike -- is sized from its class shares and fills
+        // the usable floor; there is no explicit passenger target for the
+        // solver to hit. Materializing a Custom cabin therefore must not
+        // replace the computed capacity with a stale copied count.
         let layout = if reference_compatibility {
             build_passenger_layout_reference_compatibility(
                 &g,
@@ -153,20 +202,48 @@ fn build_payload_layout_with_mass_semantics(
             )
         } else {
             let mut product_config = config.clone();
-            let requested = requested_passengers.unwrap_or_default();
-            product_config
-                .cabin
-                .passenger
-                .set_fixed_passenger_count(requested);
-            product_config.requirements.num_passengers = requested;
-            build_passenger_layout_with_aircraft_cg_target(
+            let mut layout = build_passenger_layout_with_aircraft_cg_target(
                 &g,
                 &product_config.cabin.passenger,
                 &product_config.requirements,
                 oew,
                 x_oew,
                 &product_config.cabin.cargo,
-            )
+                source_capacity_cap,
+                source_exit_layout,
+            );
+
+            // The fast capacity solver and the detailed row packer share the
+            // same geometry rules, but row placement still has a few discrete
+            // edge cases (most visibly at a class boundary on a 787). No
+            // study carries an explicit passenger target to fall back on, so
+            // every candidate must never expose an unseated passenger: close
+            // that last-row gap against the actual product layout.
+            for _ in 0..4 {
+                let LayoutSummary::Passenger(summary) = &layout.summary else {
+                    break;
+                };
+                if summary.unseated_pax == 0 {
+                    break;
+                }
+                let target = summary.seated_pax;
+                product_config
+                    .cabin
+                    .passenger
+                    .set_fixed_passenger_count(target);
+                product_config.requirements.num_passengers = target;
+                layout = build_passenger_layout_with_aircraft_cg_target(
+                    &g,
+                    &product_config.cabin.passenger,
+                    &product_config.requirements,
+                    oew,
+                    x_oew,
+                    &product_config.cabin.cargo,
+                    source_capacity_cap,
+                    source_exit_layout,
+                );
+            }
+            layout
         };
         Ok(layout)
     }
@@ -224,7 +301,7 @@ pub fn simulate_passenger_counts(
     pax: &PassengerCabinConfig,
     mix: &[(&str, f64)],
 ) -> PassengerCounts {
-    simulate_passenger_counts_with_exit_semantics(g, pax, mix, false)
+    simulate_passenger_counts_with_exit_semantics(g, pax, mix, false, None, None)
 }
 
 /// Product cabin sizing with the evacuation capacity of a complete exit pair.
@@ -238,8 +315,17 @@ fn simulate_passenger_counts_product(
     g: &CabinGeometry,
     pax: &PassengerCabinConfig,
     mix: &[(&str, f64)],
+    source_capacity_cap: Option<i64>,
+    source_exit_layout: Option<CertifiedExitLayout>,
 ) -> PassengerCounts {
-    simulate_passenger_counts_with_exit_semantics(g, pax, mix, true)
+    simulate_passenger_counts_with_exit_semantics(
+        g,
+        pax,
+        mix,
+        true,
+        source_capacity_cap,
+        source_exit_layout,
+    )
 }
 
 fn simulate_passenger_counts_with_exit_semantics(
@@ -247,15 +333,28 @@ fn simulate_passenger_counts_with_exit_semantics(
     pax: &PassengerCabinConfig,
     mix: &[(&str, f64)],
     product_exit_capacity: bool,
+    source_capacity_cap: Option<i64>,
+    source_exit_layout: Option<CertifiedExitLayout>,
 ) -> PassengerCounts {
     let mut counts = PassengerCounts::default();
     let aisle_w = resolve_aisle_width(pax, TRANSPORT_CATEGORY_PAX);
-    let deck_caps = max_certifiable_capacity(g, pax);
-    let exit_spec = select_exit_type(g.diameter_m);
-    let exit_cap = if product_exit_capacity {
-        exit_spec.capacity_per_side * 2
+    let deck_caps = if product_exit_capacity {
+        max_certifiable_capacity_with_source_layout(g, pax, source_exit_layout, source_capacity_cap)
     } else {
-        exit_spec.capacity_per_side
+        max_certifiable_capacity_reference_compatibility(g, pax)
+    };
+    let exit_spec = select_exit_type(g.diameter_m);
+    let exit_cap = if let Some(source_exit_layout) = source_exit_layout {
+        source_exit_layout
+            .pairs
+            .iter()
+            .map(|pair| pair.capacity_per_pair.max(1))
+            .max()
+            .unwrap_or(1)
+    } else if product_exit_capacity {
+        effective_pair_capacity(exit_spec, pax)
+    } else {
+        exit_spec.capacity_per_pair
     };
 
     for segment in cabin_deck_segments(g) {
@@ -315,14 +414,30 @@ pub fn simulate_passenger_counts_for_seat_mix(
     pax: &PassengerCabinConfig,
     target_mix: &[(&str, f64)],
 ) -> PassengerCounts {
-    let length_mix = length_mix_for_seat_targets(g, pax, target_mix);
-    simulate_passenger_counts_product(g, pax, &length_mix)
+    simulate_passenger_counts_for_seat_mix_with_source_cap(g, pax, target_mix, None, None)
+}
+
+/// Product cabin sizing for a registered aircraft, with its immutable source
+/// passenger cap applied during the inverse mix solve and the final row
+/// packing.  The public three-argument helper retains the clean-sheet API.
+pub(crate) fn simulate_passenger_counts_for_seat_mix_with_source_cap(
+    g: &CabinGeometry,
+    pax: &PassengerCabinConfig,
+    target_mix: &[(&str, f64)],
+    source_capacity_cap: Option<i64>,
+    source_exit_layout: Option<CertifiedExitLayout>,
+) -> PassengerCounts {
+    let length_mix =
+        length_mix_for_seat_targets(g, pax, target_mix, source_capacity_cap, source_exit_layout);
+    simulate_passenger_counts_product(g, pax, &length_mix, source_capacity_cap, source_exit_layout)
 }
 
 fn length_mix_for_seat_targets<'a>(
     g: &CabinGeometry,
     pax: &PassengerCabinConfig,
     target_mix: &[(&'a str, f64)],
+    source_capacity_cap: Option<i64>,
+    source_exit_layout: Option<CertifiedExitLayout>,
 ) -> Vec<(&'a str, f64)> {
     let mut weights = target_mix
         .iter()
@@ -344,7 +459,13 @@ fn length_mix_for_seat_targets<'a>(
     // correction is both more stable and more honest than pretending there is
     // a closed form. Twenty passes is tiny beside one geometry build.
     for _ in 0..20 {
-        let counts = simulate_passenger_counts_product(g, pax, &weights);
+        let counts = simulate_passenger_counts_product(
+            g,
+            pax,
+            &weights,
+            source_capacity_cap,
+            source_exit_layout,
+        );
         let total = counts.total().max(1) as f64;
         for (name, weight) in &mut weights {
             let target = target_mix
@@ -456,6 +577,7 @@ fn class_config<'a>(pax: &'a PassengerCabinConfig, name: &str) -> &'a SeatClassC
 #[cfg(test)]
 mod product_tests {
     use super::*;
+    use crate::cabin::max_certifiable_capacity;
     use crate::layout::LayoutSummary;
     use alas_config::{presets, GeometryConfig};
     use alas_geom::builder::AircraftBuilder;
@@ -487,7 +609,7 @@ mod product_tests {
     }
 
     #[test]
-    fn product_layout_preserves_the_requested_passenger_load_case() {
+    fn product_layout_reports_registered_capacity_or_an_explicit_source_gap() {
         for name in [
             "AVE",
             "A220-300",
@@ -510,20 +632,56 @@ mod product_tests {
                 panic!("passenger preset selected a cargo layout");
             };
             assert_eq!(
-                summary.total_pax, preset.requirements.num_passengers,
-                "{name} layout changed the requested load case"
+                summary.unseated_pax, 0,
+                "{name} preset left passengers without seats"
             );
+            assert_eq!(
+                summary.total_pax, summary.seated_pax,
+                "{name} preset reported a passenger shortfall"
+            );
+            if matches!(name, "ATR72-600" | "DC-10") {
+                // These source records publish planning/typical seat counts
+                // without a revision-locked exit-pair arrangement and LOPA
+                // that this generic cabin can reproduce.  Keep the corrected
+                // complete-pair proxy visible as a source/layout gap instead
+                // of silently doubling a pair rating or treating a planning
+                // count as a hard floor-fill target.  The common assertions
+                // above still require a physically consistent row pack: no
+                // passenger is reported seated without a mass-bearing row.
+                assert_eq!(summary.source_exit_layout, None);
+                assert_eq!(summary.capacity_binding, "geometry_exit_limit");
+                assert!(
+                    summary.total_pax < preset.requirements.num_passengers,
+                    "{name} source/layout gap was hidden by a planning-count pin"
+                );
+            } else {
+                assert!(
+                    summary.total_pax >= preset.requirements.num_passengers,
+                    "{name} preset capacity regressed below its published planning load"
+                );
+            }
         }
     }
 
     #[test]
-    fn product_sizing_counts_a_complete_exit_pair() {
+    fn product_sizing_uses_complete_exit_pair_ratings() {
         let g = geometry();
         let pax = PassengerCabinConfig::default();
-        let mix = pax.length_share_mix();
-        let compatibility = simulate_passenger_counts(&g, &pax, &mix);
-        let product = simulate_passenger_counts_product(&g, &pax, &mix);
+        let spec = select_exit_type(g.diameter_m);
 
-        assert!(product.total() > compatibility.total());
+        // The regulatory Type-A value is already the rating of a complete
+        // pair.  The serialized 0.478 field is the legacy half-pair form;
+        // the product conversion makes its effective pair utilization
+        // explicit and bounded at 0.956.
+        assert_eq!(spec.name, "A");
+        assert_eq!(spec.capacity_per_pair, 110);
+        assert_eq!(effective_pair_capacity(spec, &pax), 105);
+        assert!((2.0 * pax.exit_capacity_realism_factor) <= 1.0);
+
+        // Five geometry-derived pairs therefore produce 525 seats.  A
+        // product pair must never be doubled again merely because two door
+        // cut-outs are emitted for it.
+        let caps = max_certifiable_capacity(&g, &pax);
+        assert_eq!(caps.total, 5 * effective_pair_capacity(spec, &pax));
     }
 }

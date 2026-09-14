@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-
 impl ToolLocator {
     /// Create a locator with explicit roots. This constructor also makes
     /// packaged-path behavior testable without changing process globals.
@@ -194,10 +193,9 @@ impl ToolLocator {
     /// Resolve an MSES directory, preferring an explicit configured path and
     /// then the conventional `external tools/MSES` beside the executable.
     pub fn resolve_mses_dir(&self, configured: &Path) -> Option<PathBuf> {
-        match self.discover_mses(configured) {
-            MsesDiscovery::Ready(path) => Some(path),
-            MsesDiscovery::Absent | MsesDiscovery::Incomplete { .. } => None,
-        }
+        self.discover_mses(configured)
+            .ready_path()
+            .map(Path::to_path_buf)
     }
 
     /// Inspect the configured MSES directory and then adjacent packaged
@@ -208,9 +206,12 @@ impl ToolLocator {
     /// back to the ordinary absent state.
     pub fn discover_mses(&self, configured: &Path) -> MsesDiscovery {
         let mut incomplete = None;
-        for candidate in self.mses_candidates(configured) {
+        for (candidate, source) in self.mses_candidates(configured) {
             if is_mses_dir(&candidate) {
-                return MsesDiscovery::Ready(candidate);
+                return MsesDiscovery::Ready {
+                    directory: candidate,
+                    source,
+                };
             }
             if candidate.is_dir() && incomplete.is_none() {
                 let missing = missing_mses_programs(&candidate);
@@ -255,22 +256,24 @@ impl ToolLocator {
             }
         }
 
-        let tools = self.app_root.join("external tools");
-        if let Some(path) = names
-            .iter()
-            .map(|name| tools.join(name))
-            .find(|path| path.is_file())
-        {
-            return ExecutableDiscovery::Ready(path);
-        }
-        for directory in tool_directories {
-            let candidate = tools.join(directory);
-            if !candidates.contains(&candidate) {
-                candidates.push(candidate);
+        for root in self.adjacent_tool_roots() {
+            let tools = root.join("external tools");
+            if let Some(path) = names
+                .iter()
+                .map(|name| tools.join(name))
+                .find(|path| path.is_file())
+            {
+                return ExecutableDiscovery::Ready(path);
             }
-            for versioned in versioned_directories(&tools, directory) {
-                if !candidates.contains(&versioned) {
-                    candidates.push(versioned);
+            for directory in tool_directories {
+                let candidate = tools.join(directory);
+                if !candidates.contains(&candidate) {
+                    candidates.push(candidate);
+                }
+                for versioned in versioned_directories(&tools, directory) {
+                    if !candidates.contains(&versioned) {
+                        candidates.push(versioned);
+                    }
                 }
             }
         }
@@ -334,20 +337,23 @@ impl ToolLocator {
         None
     }
 
-    fn mses_candidates(&self, configured: &Path) -> Vec<PathBuf> {
+    fn mses_candidates(&self, configured: &Path) -> Vec<(PathBuf, MsesSource)> {
         let mut candidates = Vec::new();
         if let Some(path) = self.resolve_directory(configured) {
-            candidates.push(path);
+            candidates.push((path, MsesSource::Configured));
         }
-        for name in ["MSES", "mses"] {
-            let path = self.app_root.join("external tools").join(name);
-            if !candidates.contains(&path) {
-                candidates.push(path);
+        for root in self.adjacent_tool_roots() {
+            let tools = root.join("external tools");
+            for name in ["MSES", "mses"] {
+                let path = tools.join(name);
+                if !candidates.iter().any(|(candidate, _)| candidate == &path) {
+                    candidates.push((path, MsesSource::Adjacent { root: root.clone() }));
+                }
             }
-        }
-        for path in versioned_directories(&self.app_root.join("external tools"), "mses") {
-            if !candidates.contains(&path) {
-                candidates.push(path);
+            for path in versioned_directories(&tools, "mses") {
+                if !candidates.iter().any(|(candidate, _)| candidate == &path) {
+                    candidates.push((path, MsesSource::Adjacent { root: root.clone() }));
+                }
             }
         }
         candidates
@@ -370,6 +376,32 @@ impl ToolLocator {
         let mut roots = vec![self.app_root.clone(), self.app_root.join("bin")];
         if let Some(parent) = self.app_root.parent() {
             roots.push(parent.to_path_buf());
+        }
+        if !roots.contains(&self.user_data_root) {
+            roots.push(self.user_data_root.clone());
+        }
+        roots
+    }
+
+    /// Return bounded application roots for adjacent-tool discovery.
+    ///
+    /// A release binary normally lives below `target/release`, while a
+    /// development checkout keeps its external tools beside the repository's
+    /// `Cargo.toml`. Walking only to that marker recovers the checkout layout
+    /// without searching arbitrary directories on the host. Packaged installs
+    /// have no marker, so the walk remains limited to their parent chain and
+    /// the per-user data root.
+    fn adjacent_tool_roots(&self) -> Vec<PathBuf> {
+        let mut roots = Vec::new();
+        let mut current = Some(self.app_root.as_path());
+        while let Some(root) = current {
+            if !roots.iter().any(|candidate| candidate == root) {
+                roots.push(root.to_path_buf());
+            }
+            if root.join("Cargo.toml").is_file() {
+                break;
+            }
+            current = root.parent();
         }
         if !roots.contains(&self.user_data_root) {
             roots.push(self.user_data_root.clone());

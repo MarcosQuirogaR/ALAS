@@ -89,24 +89,24 @@ mod tests {
     }
 
     #[test]
-    fn no_preset_overrides_the_reference_compatible_mass_methods() {
-        // `flops_transport::airframe::evaluate_airframe_product`'s
-        // `mlw_fraction_mtow` fallback (a plain fraction, not the mode-aware
-        // `AlasConfig::landing_mass_limit_kg`) is reachable only when
-        // `mass_model.uses_reference_mass_methods()` is false. This asserts
-        // the evidence that gap currently relies on: every registered
-        // preset's shipped mass model keeps the reference-compatible
-        // methods, so no preset reaches that fallback in any design mode
-        // through its own defaults. A preset that fails this in the future
-        // must have the FLOPS landing-mass fallback revisited alongside it.
+    fn every_preset_uses_one_coherent_pure_flops_architecture() {
+        // A registered preset may carry legacy fraction values for an
+        // explicitly requested comparison, but its normal product route is
+        // the single pure-FLOPS architecture. The three derived selectors
+        // must agree with that architecture instead of creating a hybrid.
         for preset in registry() {
             let mass_model = preset
                 .mass_model
                 .clone()
                 .unwrap_or_else(crate::MassModelConfig::default);
             assert!(
-                mass_model.uses_reference_mass_methods(),
-                "{} ships a non-reference-compatible mass method",
+                mass_model.mass_architecture.is_pure_flops(),
+                "{} does not select pure FLOPS",
+                preset.name
+            );
+            assert!(
+                mass_model.architecture_is_coherent(),
+                "{} ships a hybrid mass architecture",
                 preset.name
             );
         }

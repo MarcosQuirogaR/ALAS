@@ -29,6 +29,10 @@ alas-math = { path = "../alas-math" }
 # exactly this row and `alas-struct::nastran`.
 alas-exec = { path = "../alas-exec" }
 thiserror = { workspace = true }
+# The influence-matrix assembly and the induced-velocity evaluation are
+# O(n^2) loops whose rows are independent; `vlm::system` fills them on the
+# rayon pool. Same arithmetic per entry, bit-identical to the serial loop.
+rayon = { workspace = true }
 
 [dev-dependencies]
 alas-testkit = { path = "../alas-testkit" }

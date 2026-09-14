@@ -22,6 +22,10 @@ pub const NAV_PANEL_MIN_WIDTH: f32 = 200.0;
 pub const NAV_PANEL_MAX_WIDTH: f32 = 360.0;
 /// Minimum menu width required by Spanish labels at 100% zoom.
 pub const MENU_MIN_WIDTH: f32 = 190.0;
+/// Vertical inset around the top-level menu buttons. The menu bar itself uses
+/// the interaction height, so this inset keeps hover/open fills around the
+/// labels instead of welding them to the bar's top and bottom edges.
+pub const MENU_BAR_VERTICAL_INSET: f32 = 6.0;
 
 /// Minimum run-log height, including its panel frame.
 pub const RUN_LOG_MIN_HEIGHT: f32 = 76.0;
@@ -57,16 +61,15 @@ pub fn preview_placement(_available_width: f32) -> PreviewPlacement {
     PreviewPlacement::Side
 }
 
-/// Return a usable width range for the right-side preview dock.
+/// Return the user-resizable width range for the right-side preview dock.
 ///
-/// A narrow client area gets a compact dock, but never a bottom-dock
-/// promotion. The fixed minimum keeps the controls and canvas readable while
-/// the clamp protects embedded and test contexts from invalid egui ranges.
-pub fn preview_width_range(available_width: f32) -> std::ops::RangeInclusive<f32> {
-    let maximum = (available_width * 0.42)
-        .clamp(PREVIEW_DOCK_MIN_WIDTH, PREVIEW_DOCK_MAX_WIDTH)
-        .max(PREVIEW_DOCK_MIN_WIDTH);
-    PREVIEW_DOCK_MIN_WIDTH..=maximum
+/// Keep this range independent of the current client width. `SidePanel` stores
+/// the dragged width between frames; deriving the maximum from a changing
+/// `available_width` would clamp that stored value on the next frame and make
+/// the dock appear to snap back while it is being resized. The side panel and
+/// its central content already handle the available space clamp separately.
+pub fn preview_width_range(_available_width: f32) -> std::ops::RangeInclusive<f32> {
+    PREVIEW_DOCK_MIN_WIDTH..=PREVIEW_DOCK_MAX_WIDTH
 }
 
 /// Return the largest usable run-log height for a viewport in egui points.
@@ -95,10 +98,10 @@ mod tests {
     }
 
     #[test]
-    fn preview_width_is_bounded_without_responsive_bottom_promotion() {
+    fn preview_width_stays_user_resizable_without_responsive_bottom_promotion() {
         let narrow = preview_width_range(640.0);
         assert_eq!(*narrow.start(), 300.0);
-        assert_eq!(*narrow.end(), 300.0);
+        assert_eq!(*narrow.end(), 520.0);
 
         let wide = preview_width_range(1_600.0);
         assert_eq!(*wide.start(), 300.0);

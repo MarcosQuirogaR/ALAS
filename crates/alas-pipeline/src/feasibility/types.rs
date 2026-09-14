@@ -41,6 +41,10 @@ pub enum FindingCode {
     InsufficientStaticMargin,
     /// The built wing reference area exceeds its configured maximum.
     WingAreaLimit,
+    /// The reported cruise attitude left the window the optimizer selected
+    /// the candidate inside, because the two are measured on different
+    /// panel meshes.
+    ReportedCruiseAttitudeOutsideWindow,
     /// A requested mission produced no telemetry.
     MissionUnavailable,
     /// At least one mission segment did not converge.

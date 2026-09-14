@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-
 /// The displacement vector for each subcase, keyed by grid.
 ///
 /// A subcase's table is printed as a contiguous run of grid rows in ascending
@@ -226,11 +225,79 @@ mod tests {
     }
 
     #[test]
+    fn a_stale_runtime_preference_uses_the_adjacent_solver_bundle() {
+        let root = std::env::temp_dir().join(format!(
+            "alas-nastran95-adjacent-runtime-{}",
+            std::process::id()
+        ));
+        let executable = root.join("build/bin/nastran.exe");
+        let rf = root.join("rf");
+        let runtime = root.join("runtime");
+        let stale = root.join("old-msys2/mingw64/bin");
+        std::fs::create_dir_all(executable.parent().expect("fixture executable parent"))
+            .expect("fixture executable directory creates");
+        std::fs::create_dir_all(&rf).expect("fixture RF directory creates");
+        std::fs::create_dir_all(&runtime).expect("fixture runtime directory creates");
+        std::fs::write(&executable, b"solver fixture").expect("fixture executable writes");
+        std::fs::write(rf.join("NASINFO"), b"NASINFO").expect("fixture RF writes");
+
+        let solver = Nastran95Solver::from_paths(&root, Some(&stale), None, None)
+            .expect("solver fixture resolves");
+        assert_eq!(solver.runtime, Some(runtime.clone()));
+        assert_eq!(
+            solver.runtime_source,
+            Nastran95RuntimeSource::Adjacent { root: root.clone() }
+        );
+        let warning = solver
+            .runtime_warning()
+            .expect("a stale runtime must be observable");
+        assert!(warning.contains("using adjacent runtime"), "{warning}");
+        assert!(warning.contains("runtime"), "{warning}");
+        assert!(
+            warning.contains(
+                root.file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .as_ref()
+            ),
+            "{warning}"
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn an_existing_runtime_preference_remains_authoritative() {
+        let root = std::env::temp_dir().join(format!(
+            "alas-nastran95-configured-runtime-{}",
+            std::process::id()
+        ));
+        let executable = root.join("build/bin/nastran.exe");
+        let rf = root.join("rf");
+        let configured = root.join("configured-runtime");
+        let adjacent = root.join("runtime");
+        std::fs::create_dir_all(executable.parent().expect("fixture executable parent"))
+            .expect("fixture executable directory creates");
+        std::fs::create_dir_all(&rf).expect("fixture RF directory creates");
+        std::fs::create_dir_all(&configured).expect("configured runtime creates");
+        std::fs::create_dir_all(&adjacent).expect("adjacent runtime creates");
+        std::fs::write(&executable, b"solver fixture").expect("fixture executable writes");
+        std::fs::write(rf.join("NASINFO"), b"NASINFO").expect("fixture RF writes");
+
+        let solver = Nastran95Solver::from_paths(&root, Some(&configured), None, None)
+            .expect("solver fixture resolves");
+        assert_eq!(solver.runtime, Some(configured.clone()));
+        assert_eq!(solver.runtime_source, Nastran95RuntimeSource::Configured);
+        assert!(solver.runtime_warning().is_none());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn a_configured_rf_stage_moves_transient_work_out_of_a_long_artifact_tree() {
         let solver = Nastran95Solver {
             exe: PathBuf::from("unused-nastran95.exe"),
             rf_source: PathBuf::from("unused-rf"),
             runtime: None,
+            runtime_source: Nastran95RuntimeSource::Unspecified,
             rf_stage: Some(PathBuf::from("C:/nas-rf")),
             open_core_words: None,
             max_open_core_words: LEGACY_MAX_OPEN_CORE_WORDS,
@@ -262,6 +329,7 @@ mod tests {
             exe: PathBuf::from("unused-nastran95.exe"),
             rf_source: PathBuf::from("unused-rf"),
             runtime: None,
+            runtime_source: Nastran95RuntimeSource::Unspecified,
             rf_stage: None,
             open_core_words: None,
             max_open_core_words: LEGACY_MAX_OPEN_CORE_WORDS,
@@ -281,6 +349,7 @@ mod tests {
             exe: PathBuf::from("unused-nastran95.exe"),
             rf_source: PathBuf::from("unused-rf"),
             runtime: None,
+            runtime_source: Nastran95RuntimeSource::Unspecified,
             rf_stage: None,
             open_core_words: Some("32000000".to_owned()),
             max_open_core_words: LEGACY_MAX_OPEN_CORE_WORDS,
@@ -392,6 +461,86 @@ mod tests {
         assert!(read_eigenvalues("nothing here").is_empty());
     }
 
+    #[cfg(windows)]
+    #[test]
+    fn an_imported_gnu_runtime_is_rejected_before_a_child_can_show_a_loader_dialog() {
+        let root = std::env::temp_dir().join(format!(
+            "alas-nastran95-runtime-missing-{}",
+            std::process::id()
+        ));
+        let executable = root.join("nastran.exe");
+        std::fs::create_dir_all(&root).expect("runtime fixture directory creates");
+        std::fs::write(
+            &executable,
+            b"PE fixture libgcc_s_seh-1.dll libgfortran-5.dll",
+        )
+        .expect("runtime fixture writes");
+
+        // The validator also searches the inherited PATH, and a host that
+        // carries a GNU runtime there (Git's own mingw64/bin ships
+        // libgcc_s_seh-1.dll) resolves that import legitimately. The
+        // expectation therefore follows the host: an import is reported
+        // missing exactly when no PATH entry provides it.
+        let on_path = |name: &str| {
+            std::env::var_os("PATH").is_some_and(|path| {
+                std::env::split_paths(&path).any(|directory| directory.join(name).is_file())
+            })
+        };
+        let fixture = ["libgcc_s_seh-1.dll", "libgfortran-5.dll"];
+        if fixture.iter().all(|name| on_path(name)) {
+            let _ = std::fs::remove_dir_all(root);
+            return;
+        }
+        let error = validate_runtime_dependencies(&executable, Some(&root.join("missing")))
+            .expect_err("missing imported DLLs must fail before spawn");
+        for name in fixture {
+            assert_eq!(error.contains(name), !on_path(name), "{name}: {error}");
+        }
+        assert!(error.contains("no solver process was spawned"), "{error}");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn imported_gnu_runtime_is_accepted_when_the_configured_directory_is_complete() {
+        let root = std::env::temp_dir().join(format!(
+            "alas-nastran95-runtime-present-{}",
+            std::process::id()
+        ));
+        let executable = root.join("nastran.exe");
+        let runtime = root.join("runtime");
+        std::fs::create_dir_all(&runtime).expect("runtime fixture directory creates");
+        std::fs::write(
+            &executable,
+            b"PE fixture libgcc_s_seh-1.dll libgfortran-5.dll",
+        )
+        .expect("runtime fixture writes");
+        for name in ["libgcc_s_seh-1.dll", "libgfortran-5.dll"] {
+            std::fs::write(runtime.join(name), b"DLL fixture").expect("DLL fixture writes");
+        }
+
+        validate_runtime_dependencies(&executable, Some(&runtime))
+            .expect("all imported runtime DLLs are present");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_static_or_differently_built_solver_does_not_require_gnu_runtime_files() {
+        let root = std::env::temp_dir().join(format!(
+            "alas-nastran95-runtime-static-{}",
+            std::process::id()
+        ));
+        let executable = root.join("nastran.exe");
+        std::fs::create_dir_all(&root).expect("runtime fixture directory creates");
+        std::fs::write(&executable, b"PE fixture with no GNU imports")
+            .expect("runtime fixture writes");
+
+        validate_runtime_dependencies(&executable, None)
+            .expect("no imported GNU DLLs means no runtime preflight is needed");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
     #[test]
     fn a_fatal_message_across_a_form_feed_is_found() {
         let print = "some output\u{c}   *** USER FATAL MESSAGE 9994 (IFP)   ";
@@ -419,4 +568,3 @@ mod tests {
         command
     }
 }
-

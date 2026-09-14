@@ -1570,6 +1570,7 @@
           "max_cruise_cl": 0.95,
           "max_structural_payload_kg": 0.0,
           "max_wing_area_m2": 535.0,
+          "min_passenger_capacity": 0,
           "min_physical_static_margin": 0.05,
           "min_wing_loading_kg_m2": 485.0,
           "mtow_kg": 358670.0,
@@ -1737,6 +1738,15 @@
                 "name": "max_structural_payload_kg",
                 "unit": "kg",
                 "value": 0.0
+              },
+              {
+                "advanced": true,
+                "help": "Hard floor on the geometry-resolved passenger capacity: a candidate whose class-mix and geometry produce fewer than this many seats is scored infeasible under the configured geometry constraint policy. 0 = disabled (the default) -- capacity is otherwise always dynamic, whatever the configured cabin class-mix percentages and the candidate's actual fuselage/cabin geometry produce, with no minimum.",
+                "kind": "int",
+                "label": "Minimum passenger capacity",
+                "name": "min_passenger_capacity",
+                "unit": "",
+                "value": 0
               },
               {
                 "advanced": true,
@@ -11413,6 +11423,7 @@
         "max_cruise_cl": 0.95,
         "max_structural_payload_kg": 0.0,
         "max_wing_area_m2": 535.0,
+        "min_passenger_capacity": 0,
         "min_physical_static_margin": 0.05,
         "min_wing_loading_kg_m2": 485.0,
         "mtow_kg": 358670.0,
@@ -11527,6 +11538,15 @@
             "name": "max_structural_payload_kg",
             "unit": "kg",
             "value": 0.0
+          },
+          {
+            "advanced": true,
+            "help": "Hard floor on the geometry-resolved passenger capacity: a candidate whose class-mix and geometry produce fewer than this many seats is scored infeasible under the configured geometry constraint policy. 0 = disabled (the default) -- capacity is otherwise always dynamic, whatever the configured cabin class-mix percentages and the candidate's actual fuselage/cabin geometry produce, with no minimum.",
+            "kind": "int",
+            "label": "Minimum passenger capacity",
+            "name": "min_passenger_capacity",
+            "unit": "",
+            "value": 0
           },
           {
             "advanced": true,

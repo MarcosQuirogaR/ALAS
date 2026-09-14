@@ -8,14 +8,14 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use alas_config::AlasConfig;
 use alas_exec::process::{kill_process_tree, NewProcessGroup, NoConsoleWindow};
 use alas_geom::aircraft::airplane::Airplane;
 use alas_geom::aircraft::fuselage::Fuselage;
 use alas_geom::aircraft::wing::Wing;
-use alas_perf::landing_gear::{size_landing_gear, LandingGearLayout};
+use alas_perf::landing_gear::{size_landing_gear_with_group_stations, LandingGearLayout};
 
 use crate::full_analysis::AnalysisReport;
 
@@ -58,8 +58,30 @@ pub struct OpenVspExportResult {
     pub script_path: PathBuf,
     /// Project path the script passes to OpenVSP's `WriteVSPFile` API.
     pub vsp3_path: PathBuf,
-    /// Thin lifting-surface mesh written by `VSPAEROComputeGeometry`.
+    /// Thin lifting-surface mesh written by `VSPAEROComputeGeometry` for the
+    /// solver's `ThinGeomSet`. This is the exact geometry an installed
+    /// VSPAERO run solves; it intentionally excludes the fuselage and
+    /// landing-gear bodies, which are not thin lifting surfaces.
     pub vspaero_geometry_path: PathBuf,
+    /// Full outer-mold-line project written a second time for the CAD
+    /// preview only (`SET_ALL`, distinct file). Never read by the solver.
+    pub cad_preview_vsp3_path: PathBuf,
+    /// Full outer-mold-line mesh (thin wings plus thick fuselage and
+    /// landing-gear bodies) written by a second, preview-only
+    /// `VSPAEROComputeGeometry` call. This is CAD display evidence, not
+    /// solver input: it is never passed to the native VSPAERO executable.
+    pub cad_preview_geometry_path: PathBuf,
+    /// True only when the current runtime produced a fresh, valid full
+    /// outer-mold-line mesh at `cad_preview_geometry_path`.
+    pub cad_preview_geometry_available: bool,
+    /// Explanation when the full outer-mold-line preview mesh was not produced.
+    pub cad_preview_geometry_error: Option<String>,
+    /// Expected native CAD screenshot path produced by OpenVSP's `ScreenGrab`.
+    pub preview_path: PathBuf,
+    /// True only when the current runtime produced a fresh, structurally valid PNG.
+    pub preview_available: bool,
+    /// Explanation when the native CAD screenshot was not produced.
+    pub preview_error: Option<String>,
     /// First-hand runtime validation state.
     pub status: OpenVspExportStatus,
     /// Executable used for first-hand materialization, when one was attempted.
@@ -99,13 +121,25 @@ pub fn export_openvsp_script(
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or("optimized_aircraft.vsp3");
+    let cad_preview_vsp3_path = script_path.with_extension("cad_preview.vsp3");
+    let cad_preview_geometry_path = script_path.with_extension("cad_preview.vspgeom");
+    let cad_preview_vsp3_name = cad_preview_vsp3_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("optimized_aircraft.cad_preview.vsp3");
     let preview_file = script_path.with_extension("preview.png");
     let preview_name = preview_file
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or("optimized_aircraft.preview.png");
     let gear = landing_gear_for_report(report, config);
-    let script = render_script(&report.airplane, Some(&gear), vsp3_name, preview_name);
+    let script = render_script(
+        &report.airplane,
+        Some(&gear),
+        vsp3_name,
+        cad_preview_vsp3_name,
+        preview_name,
+    );
     validate_script(&script).map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
     fs::write(script_path, script)?;
 
@@ -113,6 +147,13 @@ pub fn export_openvsp_script(
         script_path: script_path.to_path_buf(),
         vsp3_path,
         vspaero_geometry_path,
+        cad_preview_vsp3_path,
+        cad_preview_geometry_path,
+        cad_preview_geometry_available: false,
+        cad_preview_geometry_error: None,
+        preview_path: preview_file,
+        preview_available: false,
+        preview_error: None,
         status: OpenVspExportStatus::ScriptWrittenRuntimeUnverified,
         runtime_executable: None,
         runtime_error: None,
@@ -147,12 +188,69 @@ pub fn materialize_openvsp_project(
     timeout_seconds: f64,
 ) -> OpenVspExportResult {
     export.runtime_executable = Some(executable.to_path_buf());
+    export.preview_available = false;
+    export.preview_error = None;
+    export.cad_preview_geometry_available = false;
+    export.cad_preview_geometry_error = None;
     let Some(work_dir) = export.script_path.parent().map(Path::to_path_buf) else {
         return reject_runtime(export, "OpenVSP script has no working directory".to_owned());
     };
     let Some(script_name) = export.script_path.file_name().map(ToOwned::to_owned) else {
         return reject_runtime(export, "OpenVSP script has no file name".to_owned());
     };
+    if !export.script_path.is_file() {
+        let script_path = export.script_path.display().to_string();
+        return reject_runtime(
+            export,
+            format!("OpenVSP script does not exist: {script_path}"),
+        );
+    }
+    let expected_vsp3_path = export.script_path.with_extension("vsp3");
+    if export.vsp3_path != expected_vsp3_path {
+        let expected_vsp3 = expected_vsp3_path.display().to_string();
+        let actual_vsp3 = export.vsp3_path.display().to_string();
+        return reject_runtime(
+            export,
+            format!("OpenVSP project path must be the script sibling {expected_vsp3}; got {actual_vsp3}"),
+        );
+    }
+    let expected_vspaero_geometry_path = export.script_path.with_extension("vspgeom");
+    if export.vspaero_geometry_path != expected_vspaero_geometry_path {
+        let expected_vspaero_geometry = expected_vspaero_geometry_path.display().to_string();
+        let actual_vspaero_geometry = export.vspaero_geometry_path.display().to_string();
+        return reject_runtime(
+            export,
+            format!("VSPAERO geometry path must be the script sibling {expected_vspaero_geometry}; got {actual_vspaero_geometry}"),
+        );
+    }
+    let expected_preview_path = export.script_path.with_extension("preview.png");
+    if export.preview_path != expected_preview_path {
+        let expected_preview = expected_preview_path.display().to_string();
+        let actual_preview = export.preview_path.display().to_string();
+        return reject_runtime(
+            export,
+            format!("OpenVSP preview path must be the script sibling {expected_preview}; got {actual_preview}"),
+        );
+    }
+    let expected_cad_preview_vsp3_path = export.script_path.with_extension("cad_preview.vsp3");
+    if export.cad_preview_vsp3_path != expected_cad_preview_vsp3_path {
+        let expected_cad_preview_vsp3 = expected_cad_preview_vsp3_path.display().to_string();
+        let actual_cad_preview_vsp3 = export.cad_preview_vsp3_path.display().to_string();
+        return reject_runtime(
+            export,
+            format!("OpenVSP CAD preview project path must be the script sibling {expected_cad_preview_vsp3}; got {actual_cad_preview_vsp3}"),
+        );
+    }
+    let expected_cad_preview_geometry_path =
+        export.script_path.with_extension("cad_preview.vspgeom");
+    if export.cad_preview_geometry_path != expected_cad_preview_geometry_path {
+        let expected_cad_preview_geometry = expected_cad_preview_geometry_path.display().to_string();
+        let actual_cad_preview_geometry = export.cad_preview_geometry_path.display().to_string();
+        return reject_runtime(
+            export,
+            format!("OpenVSP CAD preview geometry path must be the script sibling {expected_cad_preview_geometry}; got {actual_cad_preview_geometry}"),
+        );
+    }
     if export.vsp3_path.exists() {
         if let Err(error) = fs::remove_file(&export.vsp3_path) {
             let detail = format!(
@@ -171,10 +269,30 @@ pub fn materialize_openvsp_project(
             return reject_runtime(export, detail);
         }
     }
-    let preview_path = export.script_path.with_extension("preview.png");
-    if preview_path.exists() {
-        if let Err(error) = fs::remove_file(&preview_path) {
-            let detail = format!("cannot remove stale {}: {error}", preview_path.display());
+    if export.preview_path.exists() {
+        if let Err(error) = fs::remove_file(&export.preview_path) {
+            let detail = format!(
+                "cannot remove stale {}: {error}",
+                export.preview_path.display()
+            );
+            return reject_runtime(export, detail);
+        }
+    }
+    if export.cad_preview_vsp3_path.exists() {
+        if let Err(error) = fs::remove_file(&export.cad_preview_vsp3_path) {
+            let detail = format!(
+                "cannot remove stale {}: {error}",
+                export.cad_preview_vsp3_path.display()
+            );
+            return reject_runtime(export, detail);
+        }
+    }
+    if export.cad_preview_geometry_path.exists() {
+        if let Err(error) = fs::remove_file(&export.cad_preview_geometry_path) {
+            let detail = format!(
+                "cannot remove stale {}: {error}",
+                export.cad_preview_geometry_path.display()
+            );
             return reject_runtime(export, detail);
         }
     }
@@ -202,6 +320,7 @@ pub fn materialize_openvsp_project(
         }
     };
 
+    let run_started = SystemTime::now();
     let mut command = Command::new(executable);
     command
         .args(["-script"])
@@ -268,22 +387,39 @@ pub fn materialize_openvsp_project(
             ),
         );
     }
-    if !is_native_vsp3(&export.vsp3_path) {
+    if !is_fresh_native_vsp3(&export.vsp3_path, run_started) {
         let detail = format!(
-            "OpenVSP reported completion but {} is absent or not a native VSP3 XML document",
+            "OpenVSP reported completion but {} is absent, stale, or not a native VSP3 XML document",
             export.vsp3_path.display()
         );
         return reject_runtime(export, detail);
     }
-    if !is_native_vspgeom(&export.vspaero_geometry_path) {
+    if !is_fresh_native_vspgeom(&export.vspaero_geometry_path, run_started) {
         let detail = format!(
-            "OpenVSP reported completion but {} is absent or not a native VSP geometry mesh",
+            "OpenVSP reported completion but {} is absent, stale, or not a native VSP geometry mesh",
             export.vspaero_geometry_path.display()
         );
         return reject_runtime(export, detail);
     }
     export.status = OpenVspExportStatus::Vsp3Materialized;
     export.runtime_error = None;
+    if is_fresh_native_png(&export.preview_path, run_started) {
+        export.preview_available = true;
+    } else {
+        export.preview_error = Some(preview_failure_reason(&stdout, &export.preview_path));
+    }
+    // The full outer-mold-line mesh is a best-effort CAD-preview artifact
+    // produced by a second, independent VSPAERO geometry call (see
+    // render_script). Its absence never revokes the solver-facing
+    // Vsp3Materialized status determined above from the thin-surface mesh.
+    if is_fresh_native_vspgeom(&export.cad_preview_geometry_path, run_started) {
+        export.cad_preview_geometry_available = true;
+    } else {
+        export.cad_preview_geometry_error = Some(format!(
+            "OpenVSP completed the solver-facing export, but no fresh full outer-mold-line preview mesh was written to {}",
+            export.cad_preview_geometry_path.display()
+        ));
+    }
     export
 }
 
@@ -301,6 +437,10 @@ fn is_native_vsp3(path: &Path) -> bool {
         && String::from_utf8_lossy(&bytes[..bytes.len().min(8192)]).contains("<Vsp_Geometry>")
 }
 
+fn is_fresh_native_vsp3(path: &Path, run_started: SystemTime) -> bool {
+    is_fresh_file(path, run_started) && is_native_vsp3(path)
+}
+
 fn is_native_vspgeom(path: &Path) -> bool {
     let Ok(bytes) = fs::read(path) else {
         return false;
@@ -311,6 +451,92 @@ fn is_native_vspgeom(path: &Path) -> bool {
             .lines()
             .next()
             .is_some_and(|line| line.trim() == "# vspgeom v3")
+}
+
+fn is_fresh_native_vspgeom(path: &Path, run_started: SystemTime) -> bool {
+    is_fresh_file(path, run_started) && is_native_vspgeom(path)
+}
+
+fn is_fresh_native_png(path: &Path, run_started: SystemTime) -> bool {
+    if !is_fresh_file(path, run_started) {
+        return false;
+    }
+    let Ok(bytes) = fs::read(path) else {
+        return false;
+    };
+    if bytes.len() < 33 || bytes[..8] != *b"\x89PNG\r\n\x1a\n" {
+        return false;
+    }
+    let mut offset: usize = 8;
+    let mut saw_ihdr = false;
+    while offset.checked_add(12).is_some_and(|end| end <= bytes.len()) {
+        let chunk_length = u32::from_be_bytes([
+            bytes[offset],
+            bytes[offset + 1],
+            bytes[offset + 2],
+            bytes[offset + 3],
+        ]) as usize;
+        let data_start = offset + 8;
+        let Some(data_end) = data_start.checked_add(chunk_length) else {
+            return false;
+        };
+        let Some(chunk_end) = data_end.checked_add(4) else {
+            return false;
+        };
+        if chunk_end > bytes.len() {
+            return false;
+        }
+        let chunk_type = &bytes[offset + 4..offset + 8];
+        if !saw_ihdr {
+            if chunk_type != b"IHDR" || chunk_length != 13 {
+                return false;
+            }
+            let width = u32::from_be_bytes([
+                bytes[data_start],
+                bytes[data_start + 1],
+                bytes[data_start + 2],
+                bytes[data_start + 3],
+            ]);
+            let height = u32::from_be_bytes([
+                bytes[data_start + 4],
+                bytes[data_start + 5],
+                bytes[data_start + 6],
+                bytes[data_start + 7],
+            ]);
+            if width == 0 || height == 0 {
+                return false;
+            }
+            saw_ihdr = true;
+        }
+        if chunk_type == b"IEND" {
+            return saw_ihdr && chunk_length == 0 && chunk_end == bytes.len();
+        }
+        offset = chunk_end;
+    }
+    false
+}
+
+fn is_fresh_file(path: &Path, run_started: SystemTime) -> bool {
+    let Ok(modified) = fs::metadata(path).and_then(|metadata| metadata.modified()) else {
+        return false;
+    };
+    let earliest_allowed = run_started
+        .checked_sub(Duration::from_secs(2))
+        .unwrap_or(run_started);
+    modified >= earliest_allowed
+}
+
+fn preview_failure_reason(stdout: &str, path: &Path) -> String {
+    if stdout.contains("ALAS_OPENVSP_PREVIEW_UNAVAILABLE") {
+        return format!(
+            "OpenVSP completed the native project, but its runtime has no graphics-capable GUI build; no CAD preview was written to {}",
+            path.display()
+        );
+    }
+    format!(
+        "OpenVSP completed the native project, but no fresh valid PNG preview was written to {}",
+        path.display()
+    )
 }
 
 fn text_tail(text: &str) -> String {
@@ -340,19 +566,26 @@ fn landing_gear_for_report(report: &AnalysisReport, config: &AlasConfig) -> Land
         .xsecs
         .last()
         .map_or(fus_start, |section| section.xyz_c[0]);
-    let x_nlg = fus_start + (fus_end - fus_start) * config.mass_model.nlg_x_fraction;
-    let x_mlg = x_mac_le + config.mass_model.mlg_x_fraction_mac * mac;
+    let fallback_x_nlg = fus_start + (fus_end - fus_start) * config.mass_model.nlg_x_fraction;
+    let fallback_x_mlg = x_mac_le + config.mass_model.mlg_x_fraction_mac * mac;
+    let stations = config.landing_gear.resolved_station_positions(
+        fallback_x_nlg,
+        fallback_x_mlg,
+        fus_start,
+        fus_end - fus_start,
+    );
     let mass_kg = report.component_masses.values().copied().sum();
     let diameter_m = config.geometry.fuselage.diameter_m;
 
-    size_landing_gear(
+    size_landing_gear_with_group_stations(
         mass_kg,
-        x_nlg,
-        x_mlg,
+        stations.x_nlg_m,
+        stations.x_mlg_m,
         aero_fwd_x,
         aero_aft_x,
         diameter_m,
         diameter_m * 1.1,
+        &stations.main_gear_x_m,
         &config.landing_gear,
     )
 }
@@ -361,6 +594,7 @@ fn render_script(
     airplane: &Airplane,
     landing_gear: Option<&LandingGearLayout>,
     vsp3_name: &str,
+    cad_preview_vsp3_name: &str,
     preview_name: &str,
 ) -> String {
     let mut script = String::new();
@@ -414,21 +648,58 @@ fn render_script(
          \x20       Print( err.GetErrorString() );\n\
          \x20   }\n\
          \x20   if ( alas_model_error_count == 0 )\n\
-         \x20   {\n\
-         \x20       // ScreenGrab can report a graphics-context warning in\n\
-         \x20       // headless runs. Keep that warning separate from model\n\
-         \x20       // validity so a valid VSP3 export remains usable.\n",
+         \x20   {\n",
+    );
+    script.push_str(
+        "         \x20   // The thin-surface mesh above is exactly what the native\n\
+         \x20   // VSPAERO solver reads and is never modified for display\n\
+         \x20   // purposes. This second, independent export adds the fuselage\n\
+         \x20   // and landing-gear bodies as thick VSPAERO panels so the\n\
+         \x20   // report/GUI CAD preview can show the whole outer mold line.\n\
+         \x20   // A failure here is cosmetic and must not affect the solver\n\
+         \x20   // export accepted above.\n",
     );
     let _ = writeln!(
         script,
-        "    ScreenGrab(\"{}\", 1600, 900, true, true);",
+        "    \x20   WriteVSPFile(\"{}\", SET_ALL);",
+        script_string(cad_preview_vsp3_name)
+    );
+    script.push_str(
+        "    \x20   string alas_cad_preview_geometry_analysis = \"VSPAEROComputeGeometry\";\n\
+         \x20       SetAnalysisInputDefaults( alas_cad_preview_geometry_analysis );\n\
+         \x20       SetIntAnalysisInput( alas_cad_preview_geometry_analysis, \"GeomSet\", { 4 }, 0 );\n\
+         \x20       SetIntAnalysisInput( alas_cad_preview_geometry_analysis, \"ThinGeomSet\", { 3 }, 0 );\n\
+         \x20       string alas_cad_preview_geometry_result = ExecAnalysis( alas_cad_preview_geometry_analysis );\n\
+         \x20       if ( alas_cad_preview_geometry_result.length() > 0 )\n\
+         \x20       {\n\
+         \x20           Print( string( \"ALAS_OPENVSP_CAD_PREVIEW_GEOMETRY_COMPLETE\\n\" ) );\n\
+         \x20       }\n\
+         \x20       while ( GetNumTotalErrors() > 0 )\n\
+         \x20       {\n\
+         \x20           ErrorObj preview_geometry_error = PopLastError();\n\
+         \x20           Print( string( \"ALAS_OPENVSP_CAD_PREVIEW_WARNING: \" ) + preview_geometry_error.GetErrorString() );\n\
+         \x20       }\n\
+         \x20       // ScreenGrab requires OpenVSP's GUI build and an available\n\
+         \x20       // graphics context. Keep that optional artifact separate\n\
+         \x20       // from model validity so headless export stays truthful.\n\
+         \x20       if ( IsGUIBuild() )\n\
+         \x20       {\n",
+    );
+    let _ = writeln!(
+        script,
+        "         \x20       ScreenGrab(\"{}\", 1600, 900, true, true);",
         script_string(preview_name)
     );
     script.push_str(
-        "         \x20   while ( GetNumTotalErrors() > 0 )\n\
+        "         \x20       while ( GetNumTotalErrors() > 0 )\n\
          \x20       {\n\
          \x20           ErrorObj preview_error = PopLastError();\n\
          \x20           Print( string( \"ALAS_OPENVSP_PREVIEW_WARNING: \" ) + preview_error.GetErrorString() );\n\
+         \x20       }\n\
+         \x20       }\n\
+         \x20       else\n\
+         \x20       {\n\
+         \x20           Print( string( \"ALAS_OPENVSP_PREVIEW_UNAVAILABLE: runtime has no graphics-capable GUI build\\n\" ) );\n\
          \x20       }\n\
          \x20       Print( string( \"ALAS_OPENVSP_EXPORT_COMPLETE\\n\" ) );\n\
          \x20       return 0;\n\
@@ -449,6 +720,7 @@ fn emit_fuselage(script: &mut String, index: usize, fuselage: &Fuselage) {
     let last = fuselage.xsecs[fuselage.xsecs.len() - 1];
     let length = (last.xyz_c[0] - first.xyz_c[0]).abs().max(1.0e-6);
     let _ = writeln!(script, "    string {id} = AddGeom( \"FUSELAGE\", \"\" );");
+    let _ = writeln!(script, "    SetSetFlag( {id}, 4, true );");
     let _ = writeln!(
         script,
         "    SetGeomName( {id}, \"{}\" );",

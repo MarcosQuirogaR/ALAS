@@ -5,7 +5,9 @@
 //!
 //! The artifact compares the frozen Python-compatible wing point with the
 //! structural-wingbox centroid at OEW, MZFW, MTOW-residual fuel, and the
-//! published-usable-fuel limit. Payload remains the mass model's explicit
+//! published-usable-fuel limit. Both coordinate views use the same pure FLOPS
+//! component buildup; the structural wingbox remains a coordinate diagnostic,
+//! not a replacement mass estimate. Payload remains the mass model's explicit
 //! lumped planning load; this example does not claim an operational loading
 //! envelope or replace the aircraft WBM.
 
@@ -16,8 +18,8 @@ use std::path::PathBuf;
 use alas_config::{presets, AlasConfig, PlanningMacReference};
 use alas_geom::builder::AircraftBuilder;
 use alas_mass::breakdown::{
-    calculate_component_masses, calculate_physical_cg, define_mass_coordinates,
-    define_mass_coordinates_with_model, MassBreakdown, MassCoordinateModel, MassCoordinates,
+    calculate_physical_cg, run_product_mass_analysis_with_groups, ComponentMassError,
+    MassBreakdown, MassCoordinateModel, MassCoordinates,
 };
 use alas_mass::wing_centroid::wing_structural_centroid;
 use serde_json::{json, Value};
@@ -57,17 +59,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut aircraft = Vec::new();
     for preset_name in presets::available() {
         let preset = presets::get(preset_name).map_err(std::io::Error::other)?;
-        let mut config = AlasConfig {
-            preset: preset.name.to_owned(),
-            geometry: preset.geometry.clone(),
-            requirements: preset.requirements.clone(),
-            landing_gear: preset.landing_gear.clone(),
-            ..Default::default()
-        };
-        if let Some(mass_model) = &preset.mass_model {
-            config.mass_model = mass_model.clone();
-        }
-        config.geometry.engine.apply_engine_spec();
+        let config = AlasConfig::from_value(&serde_json::json!({ "preset": preset_name }))?;
 
         let airplane = AircraftBuilder::new(Some(config.geometry.clone()))
             .build(Some(&preset.design_vector), true)
@@ -79,25 +71,52 @@ fn main() -> Result<(), Box<dyn Error>> {
             .iter()
             .find(|wing| wing.name == "Main Wing")
             .ok_or_else(|| std::io::Error::other(format!("{preset_name} has no main wing")))?;
-        let masses = calculate_component_masses(
-            &airplane,
-            &config.requirements,
-            &config.geometry,
-            Some(&config.mass_model),
-        );
-        let reference_coordinates = define_mass_coordinates(
-            &airplane,
-            &config.geometry,
-            Some(&config.requirements),
-            Some(&config.mass_model),
-        );
-        let structural_coordinates = define_mass_coordinates_with_model(
-            &airplane,
-            &config.geometry,
-            Some(&config.requirements),
-            Some(&config.mass_model),
-            MassCoordinateModel::StructuralWingbox(&config.structures),
-        )?;
+        let (masses, reference_coordinates, _reference_cg, _flops) =
+            match run_product_mass_analysis_with_groups(
+                &airplane,
+                &config.requirements,
+                &config.geometry,
+                &config.cabin,
+                &config.control_surfaces,
+                Some(&config.mass_model),
+                None,
+                MassCoordinateModel::ReferenceCompatibility,
+                &config.landing_gear,
+            ) {
+                Ok(result) => result,
+                Err(ComponentMassError::FlopsUnverified { reasons, .. }) => {
+                    aircraft.push(json!({
+                        "preset": preset_name,
+                        "status": "unsupported_pure_flops",
+                        "mass_architecture": "pure_flops_transport_v1",
+                        "reasons": reasons.iter().map(|reason| reason.as_str()).collect::<Vec<_>>(),
+                    }));
+                    continue;
+                }
+                Err(error) => {
+                    return Err(std::io::Error::other(format!(
+                        "pure FLOPS mass analysis failed for {preset_name}: {error}"
+                    ))
+                    .into());
+                }
+            };
+        let (_, structural_coordinates, _structural_cg, _flops) =
+            run_product_mass_analysis_with_groups(
+                &airplane,
+                &config.requirements,
+                &config.geometry,
+                &config.cabin,
+                &config.control_surfaces,
+                Some(&config.mass_model),
+                None,
+                MassCoordinateModel::StructuralWingbox(&config.structures),
+                &config.landing_gear,
+            )
+            .map_err(|error| {
+                std::io::Error::other(format!(
+                    "structural-coordinate analysis failed for {preset_name}: {error}"
+                ))
+            })?;
         let structural_centroid =
             wing_structural_centroid(wing, &config.requirements, &config.structures)?;
 
@@ -206,7 +225,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         "generated_by": "cargo run -p alas-mass --example all_preset_cg",
         "coordinate_models": {
             "reference_compatibility": "Frozen alas/physics/mass.py wing point: aerodynamic center plus 20% root chord.",
-            "structural_wingbox": "Integrated first moment of configured spar caps, webs, wingbox skins, and ribs; Torenbeek total wing mass remains unchanged.",
+            "structural_wingbox": "Integrated first moment of configured spar caps, webs, wingbox skins, and ribs; pure FLOPS component masses remain unchanged.",
         },
         "load_case_semantics": "OEW excludes payload and fuel; MZFW adds the preset planning payload; MTOW residual adds max(0, MTOW-OEW-payload); published-tank-limited full fuel caps only that residual by the unchanged preset's published usable-fuel mass.",
         "limitations": [

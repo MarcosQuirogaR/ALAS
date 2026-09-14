@@ -469,9 +469,7 @@ impl SegmentMissionModel {
         };
         match self.fly(mass_kg, &plan) {
             Ok(flown) => return Ok(flown),
-            Err(FlyError::Fuel(error)) if !is_altitude_recoverable(&error) => {
-                return Err(error)
-            }
+            Err(FlyError::Fuel(error)) if !is_altitude_recoverable(&error) => return Err(error),
             Err(FlyError::Fuel(_) | FlyError::TooShort { .. }) => {}
         }
         let mut low = geometry.floor_cruise_m(leg).min(plan.cruise_altitude_m);
@@ -1287,5 +1285,59 @@ mod tests {
         }
         assert!(refinements[3].0 <= 0.5 * refinements[0].0);
         assert!(refinements[3].1 <= 0.5 * refinements[0].1);
+    }
+
+    /// The ATR report-derived dispatch bracket is a reachable 644.9 km
+    /// sector at the bracket mass (21,359.3854 kg). Three consecutive cruise
+    /// rungs share the same 140.673 m/s target. A boundary-energy budget left
+    /// at the end of the first rung must therefore be allowed to continue
+    /// through the remaining same-target distance; treating every rung end
+    /// as a route rejection incorrectly pushed altitude recovery to the floor
+    /// and reported a multi-megametre footprint. The active regression keeps
+    /// that closure rule separate from the genuine idle-domain rejection
+    /// covered by the integration test in `integrate.rs`.
+    #[test]
+    fn atr_dispatch_bracket_flies_report_derived_sector_at_configured_altitude() {
+        let config = AlasConfig::from_value(&serde_json::json!({"preset": "ATR72-600"}))
+            .unwrap_or_else(|error| panic!("preset: {error}"));
+        let design = alas_config::presets::get("ATR72-600")
+            .unwrap_or_else(|error| panic!("preset: {error}"))
+            .design_vector;
+        let (built_config, _, plane) = build_geometry(&config, &design.to_array())
+            .unwrap_or_else(|failure| panic!("geometry: {}", failure.reason));
+        let req = &built_config.requirements;
+        let deck = PropulsionDeck::from_engine(
+            &built_config.geometry.engine,
+            req.cruise_mach,
+            req.cruise_altitude_m,
+            max_climb_rate_ft_min(built_config.mission.profile.initial_climb_rate_m_s),
+        )
+        .unwrap_or_else(|error| panic!("deck: {error}"));
+        let model = SegmentMissionModel::new(
+            built_config.mission.profile.clone(),
+            req.cruise_mach,
+            req.cruise_altitude_m,
+            610.0, // LEMD elevation, m
+            8.0,   // LEPA elevation, m
+            plane.s_ref,
+            0.024600009989746922, // real report-derived cd0
+            0.030377093904043483, // real report-derived k
+            0.002,
+            req.gravity_m_s2,
+            457.2,
+            PhaseAeroLimits::from_config(&built_config),
+            deck,
+        )
+        .unwrap_or_else(|error| panic!("model: {error}"));
+
+        let flown = model
+            .fly_trip(21_359.385400976567, 644_890.9)
+            .unwrap_or_else(|error| panic!("ATR dispatch sector must close: {error}"));
+        assert!(flown.leg.fuel_kg > 0.0 && flown.leg.fuel_kg < 0.2 * 21_359.385400976567);
+        assert!(flown.leg.time_s.is_finite() && flown.leg.time_s > 0.0);
+        assert_eq!(flown.cruise_altitude_m, req.cruise_altitude_m);
+        assert!(!flown.adapted);
+        assert!((flown.flown_distance_m - 644_890.9).abs() <= 10.0);
+        assert_ledger_closes(&flown);
     }
 }

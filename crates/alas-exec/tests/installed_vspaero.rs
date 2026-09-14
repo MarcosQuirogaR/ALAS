@@ -50,6 +50,10 @@ fn installed_native_solver_produces_a_fresh_polar_without_wrapper_result_keys() 
         .polar_path
         .metadata()
         .is_ok_and(|meta| meta.len() > 100));
+    assert_eq!(
+        result.wake_mode,
+        result.wake_settings.map(|settings| settings.mode())
+    );
     let stdout = fs::read_to_string(&result.stdout_path)
         .unwrap_or_else(|error| panic!("read {}: {error}", result.stdout_path.display()));
     assert!(stdout.contains("VSPAERO v.7.2.2"));

@@ -154,6 +154,17 @@ pub fn build_result_figure_with_camera(
                 .clone();
             figure_mses_mach_contours(result.mses_pressure.as_ref()?, Some(&airfoil), Some(theme))
         }
+        "mses_cp_contours" => {
+            let airfoil = report
+                .airplane
+                .wings
+                .first()?
+                .xsecs
+                .first()?
+                .airfoil
+                .clone();
+            figure_mses_cp_contours(result.mses_pressure.as_ref()?, Some(&airfoil), Some(theme))
+        }
         "mses_convergence" => figure_mses_convergence(result.mses_result.as_ref()?, Some(theme)),
         "vspaero_polar" => figure_vspaero_polar(result.vspaero_result.as_ref()?, Some(theme)),
         "vspaero_wake_convergence" => {

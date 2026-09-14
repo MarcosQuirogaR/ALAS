@@ -120,11 +120,29 @@ fn number_to_f64(n: Number) -> f64 {
     }
 }
 
+/// Descriptive, airline-independent labels for the historical cabin-preset
+/// identifiers. The identifier itself is the serialized `cabin_preset` value
+/// (also the key `alas-payload/src/build/presets.rs` matches on to write
+/// preset geometry) and must not change; this only substitutes what the combo
+/// box displays for it. Names describe each preset's actual seat mix
+/// (`passenger_preset_mix` in that module): Ryanair is a single, all-economy
+/// class at a tight pitch; Iberia writes Business and Economy shares only;
+/// Emirates is the only preset that also populates First.
+fn cabin_preset_display_name(value: &str) -> Option<&'static str> {
+    match value {
+        "Ryanair" => Some("High-density single-class"),
+        "Iberia" => Some("Two-class (Business/Economy)"),
+        "Emirates" => Some("Three-class (First/Business/Economy)"),
+        _ => None,
+    }
+}
+
 /// Present fixed option values as sentence-cased UI text without changing the
 /// serialized configuration value. This keeps values such as `passenger` and
 /// `auto` readable while preserving their lower-case data contracts.
 pub(super) fn display_option(value: &str) -> String {
-    let localized = alas_i18n::t(Some(value), None).into_owned();
+    let source = cabin_preset_display_name(value).unwrap_or(value);
+    let localized = alas_i18n::t(Some(source), None).into_owned();
     let mut chars = localized.chars();
     let Some(first) = chars.next() else {
         return localized;

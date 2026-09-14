@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! The mass statement: legacy component masses plus stations plus loadable
-//! items, turned into an item-level ledger and named mass states.
+//! The mass statement: component masses plus stations plus loadable items,
+//! turned into an item-level ledger and named mass states.
 //!
 //! [`crate::breakdown`] answers "how much does the wing weigh"; this module
 //! answers "what is the aircraft's mass, centre of gravity and inertia
-//! tensor at takeoff". [`MassStatement::build`] places every
+//! tensor at takeoff". [`MassStatement::build`] places every product
 //! [`crate::breakdown::MassBreakdown`] component at its
 //! [`crate::stations::ComponentStations`] station as a [`MassItem`], with a
 //! centroidal tensor from [`crate::inertia`]'s closed-form solids ([`build`]
@@ -17,12 +17,95 @@
 //! zero-fuel ledger, so a CG-vs-fuel sweep never has to rebuild it.
 
 mod build;
+mod flops_items;
+
+use alas_config::MassModelConfig;
 
 use crate::breakdown::MassBreakdown;
 use crate::flops_transport::FlopsTransportBreakdown;
 use crate::inertia::RadiiOfGyration;
-use crate::ledger::{LedgerError, MassGroup, MassItem, MassLedger, MassProperties};
+use crate::ledger::{LedgerError, MassGroup, MassItem, MassLedger, MassMethod, MassProperties};
 use crate::stations::ComponentStations;
+
+/// Which mass method actually produced each replaceable ledger group.
+///
+/// The ledger labels every row with a [`MassMethod`] so an audit can tell a
+/// Torenbeek correlation from a FLOPS equation. Those labels are derived from
+/// the authoritative [`MassModelConfig::mass_architecture`], not from the
+/// compatibility selector mirrors. A single architecture keeps all three
+/// replaceable groups on one method family, so a stale selector cannot create
+/// a hybrid ledger label.
+///
+/// [`Self::default`] is the explicit reference-compatible labelling for a
+/// lumped statement. A statement carrying a verified FLOPS systems buildup
+/// uses [`Self::pure_flops`] automatically through [`MassStatement::build`].
+/// Callers holding an [`alas_config::MassModelConfig`] should use
+/// [`Self::from_mass_model`] with [`MassStatement::build_with_methods`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LedgerMethods {
+    /// Wing, both tails and the fuselage.
+    pub structure: MassMethod,
+    /// Nose and main landing gear.
+    pub landing_gear: MassMethod,
+    /// Installed propulsion, including nacelles.
+    pub propulsion: MassMethod,
+}
+
+impl Default for LedgerMethods {
+    fn default() -> Self {
+        Self {
+            structure: MassMethod::Correlation("Torenbeek"),
+            landing_gear: MassMethod::TakeoffMassFraction,
+            propulsion: MassMethod::Correlation("thrust-to-weight"),
+        }
+    }
+}
+
+impl LedgerMethods {
+    /// Labels for a complete pure-FLOPS component statement.
+    ///
+    /// A FLOPS structural result owns the wing, tails, fuselage and landing
+    /// gear together, while its propulsion result owns the installed engines
+    /// and nacelles. Keeping this as one constructor prevents a caller that
+    /// supplies the FLOPS subsystem buildup from accidentally retaining the
+    /// legacy labels on the other groups.
+    pub const fn pure_flops() -> Self {
+        Self {
+            structure: MassMethod::Correlation("FLOPS"),
+            landing_gear: MassMethod::Correlation("FLOPS"),
+            propulsion: MassMethod::Correlation("FLOPS"),
+        }
+    }
+
+    /// The labels the selected mass methods imply.
+    ///
+    /// The FLOPS structural group covers the wing, both tails, the fuselage
+    /// and the landing gear (equation 136), so selecting it relabels all
+    /// five. The propulsion selection relabels the installed propulsion
+    /// group alone.
+    pub fn from_mass_model(model: &MassModelConfig) -> Self {
+        let reference = Self::default();
+        let flops_structure = model.mass_architecture.is_pure_flops();
+        let flops_propulsion = model.mass_architecture.is_pure_flops();
+        Self {
+            structure: if flops_structure {
+                MassMethod::Correlation("FLOPS")
+            } else {
+                reference.structure
+            },
+            landing_gear: if flops_structure {
+                MassMethod::Correlation("FLOPS")
+            } else {
+                reference.landing_gear
+            },
+            propulsion: if flops_propulsion {
+                MassMethod::Correlation("FLOPS")
+            } else {
+                reference.propulsion
+            },
+        }
+    }
+}
 
 /// A payload item's mass, position and extent, independent of
 /// `alas-payload`'s `DeckItem` so this crate does not depend on it.
@@ -56,7 +139,7 @@ pub enum LoadState {
 
 /// Everything [`MassStatement::build`] needs to construct a ledger.
 pub struct MassStatementInputs<'a> {
-    /// The legacy ten-group component masses.
+    /// The ten-group component masses from the selected architecture.
     pub masses: &'a MassBreakdown,
     /// Geometry-derived placement and extent for every component.
     pub stations: &'a ComponentStations,
@@ -102,15 +185,39 @@ impl MassStatement {
     ///
     /// [`LedgerError`] if any item (including a caller-supplied payload or
     /// fuel item) has an invalid mass, position, inertia tensor, or a
-    /// duplicate id.
+    /// duplicate id, or if supplied unusable-fuel rows disagree with the
+    /// selected method's own unusable-fuel allocation.
     pub fn build(inputs: MassStatementInputs<'_>) -> Result<Self, LedgerError> {
+        let methods = if inputs.flops.is_some() {
+            LedgerMethods::pure_flops()
+        } else {
+            LedgerMethods::default()
+        };
+        Self::build_with_methods(inputs, methods)
+    }
+
+    /// [`Self::build`] with explicit per-group method labels.
+    ///
+    /// Only the [`MassMethod`] tag on the structural, landing-gear and
+    /// propulsion rows changes; no mass moves. Use this wherever the
+    /// selected [`alas_config::MassModelConfig`] is in scope, so the ledger
+    /// does not describe a FLOPS structural group as a Torenbeek one.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::build`].
+    pub fn build_with_methods(
+        inputs: MassStatementInputs<'_>,
+        methods: LedgerMethods,
+    ) -> Result<Self, LedgerError> {
         let ledger = build::build_ledger(
             inputs.masses,
             inputs.stations,
             inputs.payload_items,
             inputs.unusable_fuel_items,
             inputs.flops,
-        );
+            methods,
+        )?;
         ledger.validate()?;
         Ok(Self {
             ledger,

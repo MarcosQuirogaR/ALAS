@@ -59,10 +59,7 @@ fn show_openvsp(result: &PipelineResult, ui: &mut Ui) {
     let mut artifacts = vec![
         ("AngelScript export".to_owned(), export.script_path.clone()),
         ("OpenVSP project".to_owned(), export.vsp3_path.clone()),
-        (
-            "native CAD preview".to_owned(),
-            export.script_path.with_extension("preview.png"),
-        ),
+        ("native CAD preview".to_owned(), export.preview_path.clone()),
         (
             "VSPAERO geometry".to_owned(),
             export.vspaero_geometry_path.clone(),
@@ -74,11 +71,30 @@ fn show_openvsp(result: &PipelineResult, ui: &mut Ui) {
     if let Some(path) = export.runtime_stderr_path.as_ref() {
         artifacts.push(("runtime stderr".to_owned(), path.clone()));
     }
+    let preview_detail = if export.preview_available {
+        format!(
+            "native CAD preview: available at {}",
+            export.preview_path.display()
+        )
+    } else {
+        format!(
+            "native CAD preview: unavailable ({})",
+            export
+                .preview_error
+                .as_deref()
+                .unwrap_or("OpenVSP did not produce a fresh PNG")
+        )
+    };
+    let detail = export
+        .runtime_error
+        .as_deref()
+        .map(|runtime| format!("{runtime}; {preview_detail}"))
+        .unwrap_or(preview_detail);
     tool_card(
         ui,
         "OpenVSP geometry",
         export.status.as_str(),
-        export.runtime_error.as_deref(),
+        Some(&detail),
         artifacts,
     );
 }
@@ -164,22 +180,57 @@ fn show_flowunsteady(result: &PipelineResult, ui: &mut Ui) {
 }
 
 fn show_mses(result: &PipelineResult, ui: &mut Ui) {
-    let (status, detail) = match result.mses_result.as_ref() {
-        Some(mses) => (
-            mses.status.as_str().to_owned(),
-            Some(format!(
-                "{} converged of {} requested{}",
-                mses.converged_alpha_count,
-                mses.requested_alpha_count,
-                mses.error
-                    .as_deref()
-                    .map(|error| format!("; {error}"))
-                    .unwrap_or_default()
-            )),
-        ),
-        None => ("not_run".to_owned(), None),
+    let Some(mses) = result.mses_result.as_ref() else {
+        tool_card(ui, "MSES", "not_run", None, Vec::new());
+        return;
     };
-    tool_card(ui, "MSES", &status, detail.as_deref(), Vec::new());
+    let pressure = result.mses_pressure.as_ref();
+    let pressure_ok = pressure.is_some_and(|value| {
+        value.status.as_str() == "ok"
+            && value.transition_model_is_valid()
+            && value.has_convergence_evidence()
+    });
+    // Keep the polar status authoritative, but make a separately successful
+    // fixed-point pressure solve visible. This is the common useful partial
+    // result when a requested high-alpha polar leaves MSES's convergence
+    // domain: the Mach/Cp contour figures remain backed by native mplot data.
+    let status = if pressure_ok && mses.status.as_str() == "error" {
+        "partial_convergence"
+    } else {
+        mses.status.as_str()
+    };
+    let mut detail = format!(
+        "polar: {} converged of {} requested",
+        mses.converged_alpha_count, mses.requested_alpha_count
+    );
+    if let Some(error) = mses.error.as_deref().filter(|error| !error.is_empty()) {
+        detail.push_str(&format!("; {error}"));
+    }
+    if let Some(pressure) = pressure {
+        detail.push_str(&format!(
+            "; pressure: {} at alpha {:.3} deg (upper {}, lower {}, field {})",
+            pressure.status.as_str(),
+            pressure.alpha_deg,
+            pressure.cp_upper.len(),
+            pressure.cp_lower.len(),
+            pressure.field_mach.len(),
+        ));
+        if let Some(error) = pressure.error.as_deref().filter(|error| !error.is_empty()) {
+            detail.push_str(&format!(" ({error})"));
+        }
+        if !pressure.transition_model_is_valid() {
+            detail.push_str(&format!(
+                "; transition model unverified: {}",
+                pressure
+                    .osmap_diagnostic
+                    .as_deref()
+                    .unwrap_or("no compatible OSMAP resource was resolved")
+            ));
+        } else if pressure.status.as_str() == "ok" && !pressure.has_convergence_evidence() {
+            detail.push_str("; native convergence evidence unavailable");
+        }
+    }
+    tool_card(ui, "MSES", status, Some(&detail), Vec::new());
 }
 
 fn show_structures(result: &PipelineResult, ui: &mut Ui) {

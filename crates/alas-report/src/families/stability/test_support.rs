@@ -126,6 +126,7 @@ pub fn probe_report(airplane: Airplane) -> AnalysisReport {
         x_neutral_point: x_ref + 1.0,
         geometry_summary: HashMap::new(),
         component_masses,
+        flops_mass_buildup: None,
         mass_coordinates: HashMap::new(),
         payload_layout: None,
         // Dynamic-mode figures are explicitly gated on a solved trim point.

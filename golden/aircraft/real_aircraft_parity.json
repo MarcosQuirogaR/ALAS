@@ -1,0 +1,3109 @@
+{
+  "schema": "aircraft-real-parity-contract/v1",
+  "generated_utc": "2026-09-09",
+  "purpose": "Independent, source-backed comparison contracts for the real-aircraft presets. Values in this file are evidence anchors; they are never copied from the ALAS model dump.",
+  "scope": {
+    "included_presets": [
+      "A220-300",
+      "A320-200",
+      "A340-300",
+      "A380-800",
+      "ATR72-600",
+      "B787-9",
+      "DC-10"
+    ],
+    "excluded_preset": "AVE is a synthetic ALAS design and has no real-aircraft parity target.",
+    "status_semantics": {
+      "within_tolerance": "A source-backed numeric value and model value are available, the stated condition is matched, and the difference is within the field tolerance. This is a comparison result, not certification validation.",
+      "out_of_tolerance": "A source-backed numeric value and model value are available under a matched condition and the difference exceeds the field tolerance.",
+      "diagnostic": "Both values are available, but source evidence is secondary/estimated or the source/model conditions, variant, reference area, or metric definition are not identical. It is excluded from a release score.",
+      "unsupported": "A source-backed target exists, but the model dump does not export the requested quantity.",
+      "evidence_gap": "No trustworthy public numeric target exists for the requested quantity or the source explicitly withholds it.",
+      "source_conflict": "The optional local evidence bundle disagrees with this immutable contract anchor; neither value is used to score the model."
+    },
+    "tolerance_policy": {
+      "geometry_length": {
+        "absolute": 0.05,
+        "relative": 0.005,
+        "unit": "m",
+        "basis": "public dimensions are commonly rounded to centimetres or inches"
+      },
+      "geometry_area": {
+        "absolute": 0.75,
+        "relative": 0.005,
+        "unit": "m^2",
+        "basis": "reference-area convention and rounding"
+      },
+      "mass_limit": {
+        "absolute": 50,
+        "relative": 0.001,
+        "unit": "kg",
+        "basis": "certified variant mass table and conversion rounding"
+      },
+      "mass_oew": {
+        "absolute": 2000,
+        "relative": 0.03,
+        "unit": "kg",
+        "basis": "cabin fit and operator equipment make OEW configuration-dependent"
+      },
+      "fuel_mass": {
+        "absolute": 500,
+        "relative": 0.005,
+        "unit": "kg",
+        "basis": "usable definition and density convention"
+      },
+      "fuel_volume": {
+        "absolute": 200,
+        "relative": 0.005,
+        "unit": "L",
+        "basis": "tank definition and rounding"
+      },
+      "mach": {
+        "absolute": 0.005,
+        "relative": 0.005,
+        "unit": "1",
+        "basis": "published Mach rounding"
+      },
+      "altitude": {
+        "absolute": 100,
+        "relative": 0.01,
+        "unit": "m",
+        "basis": "flight-level and source rounding"
+      },
+      "performance_ratio": {
+        "absolute": 0.5,
+        "relative": 0.05,
+        "unit": "1",
+        "basis": "analytical/reference-model spread; always diagnostic unless exact test conditions are supplied"
+      },
+      "drag_coefficient": {
+        "absolute": 0.0015,
+        "relative": 0.1,
+        "unit": "1",
+        "basis": "reference area and configuration sensitivity; always diagnostic for the current sources"
+      },
+      "lift_curve_slope": {
+        "absolute": 0.5,
+        "relative": 0.1,
+        "unit": "1/rad",
+        "basis": "hand-estimated or wing-only references; always diagnostic"
+      },
+      "mission_fuel": {
+        "absolute": 300,
+        "relative": 0.1,
+        "unit": "kg",
+        "basis": "route, reserves, payload and weather differences; always diagnostic"
+      },
+      "gear_count": {
+        "absolute": 0,
+        "relative": 0,
+        "unit": "count",
+        "basis": "topology must match exactly"
+      },
+      "gear_position": {
+        "absolute": 0.15,
+        "relative": 0.02,
+        "unit": "m",
+        "basis": "airport-planning dimension rounding"
+      }
+    }
+  },
+  "sources": {
+    "easa_tcds_ima570_i25": {
+      "title": "EASA IM.A.570 BD-500 TCDS, Issue 25",
+      "authority": "EASA",
+      "url": "https://www.easa.europa.eu/en/downloads/20964/en"
+    },
+    "easa_tcds_ima570_i12": {
+      "title": "EASA IM.A.570 BD-500 TCDS, legacy weight issue used by the preset",
+      "authority": "EASA",
+      "url": "https://www.easa.europa.eu/en/downloads/20964/en"
+    },
+    "csa_wbm_a220_2021": {
+      "title": "Czech Airlines / Smartwings A220-300 Weight and Balance Manual, Revision 1",
+      "authority": "Operator WBM reproducing Airbus data",
+      "url": "https://dspace.cvut.cz/bitstream/handle/10467/95619/F6-DP-2021-Wagnerova-Lucie-priloha-WBM_A220.pdf"
+    },
+    "airbus_a220_acp_2025": {
+      "title": "Airbus A220 Aircraft Characteristics — Airport and Maintenance Planning, ACP Issue 013",
+      "authority": "Airbus",
+      "url": "https://www.aircraft.airbus.com/sites/g/files/jlcbta126/files/2025-12/A220-ACP-Issue013-00-27Nov2025.pdf"
+    },
+    "airbus_ac_a320_2024": {
+      "title": "Airbus A320 Aircraft Characteristics, Revision 01 June 2024",
+      "authority": "Airbus",
+      "url": "https://www.aircraft.airbus.com/sites/g/files/jlcbta126/files/2025-01/AC_A320_0624.pdf"
+    },
+    "easa_tcds_a064_i12": {
+      "title": "EASA A.064 A318/A319/A320/A321 TCDS, Issue 12",
+      "authority": "EASA",
+      "url": "https://www.easa.europa.eu/en/downloads/16507/en"
+    },
+    "sun_dragpolar_2020": {
+      "title": "Estimating Aircraft Drag Polar Using Open Flight Surveillance Data and a Stochastic Total Energy Model",
+      "authority": "Peer-reviewed method and OpenAP data release",
+      "url": "https://doi.org/10.1016/j.trc.2020.01.026"
+    },
+    "openap_2020": {
+      "title": "OpenAP: An Open-Source Aircraft Performance Model for Air Transportation Studies and Simulations",
+      "authority": "Peer-reviewed method and data release",
+      "url": "https://doi.org/10.3390/aerospace7080104"
+    },
+    "ac_a320_guide_i44": {
+      "title": "Aircraft Owner's and Operator's Guide: A320 Family, Issue 44",
+      "authority": "Aircraft Commerce trade press",
+      "url": "https://www.aircraft-commerce.com/wp-content/uploads/aircraft-commerce-docs/Aircraft%20guides/A320%20FAMILY/ISSUE%2044-A320%20GUIDE.pdf"
+    },
+    "airbus_ac_a340_2025": {
+      "title": "Airbus A340-200/-300 Aircraft Characteristics, Revision 01 December 2025",
+      "authority": "Airbus",
+      "url": "https://www.aircraft.airbus.com/sites/g/files/jlcbta126/files/2025-12/AC_A340-200-300_20251201.pdf"
+    },
+    "easa_tcds_a015_i28": {
+      "title": "EASA A.015 Airbus A340 TCDS, Issue 28",
+      "authority": "EASA",
+      "url": "https://www.easa.europa.eu/en/downloads/19823/en"
+    },
+    "airbus_ac_a380_2024": {
+      "title": "Airbus A380 Aircraft Characteristics, Revision 01 November 2024",
+      "authority": "Airbus",
+      "url": "https://www.aircraft.airbus.com/sites/g/files/jlcbta126/files/2024-11/AC_A380_1124.pdf"
+    },
+    "airbus_ac_a380_2025": {
+      "title": "Airbus A380 Aircraft Characteristics, Revision 01 December 2025",
+      "authority": "Airbus",
+      "url": "https://www.aircraft.airbus.com/sites/g/files/jlcbta126/files/2025-12/AC_A380_20251201.pdf"
+    },
+    "easa_tcds_a110_a380": {
+      "title": "EASA A.110 Airbus A380 TCDS, Issue 17 (05 August 2026)",
+      "authority": "EASA",
+      "url": "https://www.easa.europa.eu/en/downloads/7309/en"
+    },
+    "airbus_a380_facts_figures_2022": {
+      "title": "Airbus A380 Facts and Figures",
+      "authority": "Airbus",
+      "url": "https://www.airbus.com/sites/g/files/jlcbta136/files/2022-02/Airbus-A380-Facts-and-Figures-February-2022.pdf"
+    },
+    "airbus_a380_dimensions_key_data": {
+      "title": "A380 Dimensions and Key Data",
+      "authority": "Airbus",
+      "url": "https://downloads.regulations.gov/TSA-2013-0004-5585/attachment_20.pdf"
+    },
+    "poll_schumann_2025_part3": {
+      "title": "Poll and Schumann, aircraft characteristic parameters, Part 3",
+      "authority": "Peer-reviewed Aeronautical Journal",
+      "url": "https://doi.org/10.1017/aer.2024.141"
+    },
+    "poll_schumann_2020_part2": {
+      "title": "Poll and Schumann, aircraft characteristic parameters, Part 2",
+      "authority": "Peer-reviewed Aeronautical Journal",
+      "url": "https://doi.org/10.1017/aer.2020.124"
+    },
+    "aircraft_commerce_trent_fuel_2012": {
+      "title": "A380 route fuel study",
+      "authority": "Aircraft Commerce trade press",
+      "url": "https://www.aircraft-commerce.com/"
+    },
+    "easa_tcds_ima115_i30_2025": {
+      "title": "EASA IM.A.115 Boeing 787 TCDS, Issue 30",
+      "authority": "EASA",
+      "url": "https://www.easa.europa.eu/en/downloads/7302/en"
+    },
+    "boeing_acap787_revq_2025": {
+      "title": "787 Airplane Characteristics for Airport Planning, Revision Q",
+      "authority": "Boeing",
+      "url": "https://www.boeing.com/content/dam/boeing/v2/airports/acaps/787_ACAP_Rev_Q.pdf"
+    },
+    "boeing_acap787_revl_2015": {
+      "title": "787 Airplane Characteristics for Airport Planning, Revision L",
+      "authority": "Boeing",
+      "url": "https://www.boeing.com/content/dam/boeing/v2/airports/acaps/787_ACAP_Rev_Q.pdf"
+    },
+    "lissys_piano787_2005": {
+      "title": "Lissys Piano Boeing 787-8 sample analysis",
+      "authority": "Commercial performance model",
+      "url": "https://www.lissys.uk/samp1/index.html"
+    },
+    "eurocontrol_apd_b789": {
+      "title": "EUROCONTROL Aircraft Performance Database, B789",
+      "authority": "EUROCONTROL",
+      "url": "https://learningzone.eurocontrol.int/ilp/customs/ATCPFDB/details.aspx?ICAO=B789"
+    },
+    "atr_factsheet_72600_2020": {
+      "title": "ATR 72-600 Factsheet",
+      "authority": "ATR manufacturer",
+      "url": "https://www.atr-aircraft.com/wp-content/uploads/2020/07/Factsheets_-_ATR_72-600.pdf"
+    },
+    "atr_factsheet_72600_current_2026": {
+      "title": "ATR 72-600 Factsheet at current manufacturer URL (PW127XT-M digital edition)",
+      "authority": "ATR manufacturer",
+      "url": "https://www.atr-aircraft.com/wp-content/uploads/2022/06/ATR_Fiche72-600-3.pdf"
+    },
+    "atr_factsheet_72600f_2022": {
+      "title": "ATR 72-600F Freighter Factsheet (PW127XT-M)",
+      "authority": "ATR manufacturer",
+      "url": "https://www.atr-aircraft.com/wp-content/uploads/2022/06/ATR_Fiche72-600F-3.pdf"
+    },
+    "atr_datasheet_72600_2012": {
+      "title": "ATR 72-600 Data Sheet",
+      "authority": "ATR manufacturer document, third-party hosted copy",
+      "url": "https://www.pista73.com/media/2012/07/ATR_72-600.pdf"
+    },
+    "easa_tcds_a084_i14_2026": {
+      "title": "EASA A.084 ATR 42/ATR 72 TCDS, Issue 14",
+      "authority": "EASA",
+      "url": "https://www.easa.europa.eu/en/downloads/7358/en"
+    },
+    "atr72600_fcom_limitations": {
+      "title": "ATR 72-600 FCOM limitations secondary compilation",
+      "authority": "Operator training material",
+      "url": "https://www.coursehero.com/file/123550210/ATR72-600-LIMITATIONSpdf/"
+    },
+    "nita_scholz_atr72_2008": {
+      "title": "Aircraft Design Studies Based on the ATR 72",
+      "authority": "HAW Hamburg design study",
+      "url": "https://www.fzt.haw-hamburg.de/pers/Scholz/arbeiten/TextNita.pdf"
+    },
+    "boeing_acap_dc10_2004": {
+      "title": "DC/MD-10 Airplane Characteristics for Airport Planning, Revision A",
+      "authority": "Douglas/Boeing",
+      "url": "https://www.boeing.com/content/dam/boeing/v2/airports/acaps/DC10.pdf"
+    },
+    "easa_tcds_ima210_2024": {
+      "title": "EASA IM.A.210 DC-10 and MD-11 TCDS, Issue 2",
+      "authority": "EASA",
+      "url": "https://www.easa.europa.eu/en/downloads/7242/en"
+    },
+    "nasa_cr3677_winglets_1984": {
+      "title": "NASA CR-3677 Results of Winglet Development Studies for DC-10 Derivatives",
+      "authority": "NASA",
+      "url": "https://ntrs.nasa.gov/api/citations/19850002628/downloads/19850002628.pdf"
+    },
+    "eurocontrol_apd_dc10": {
+      "title": "EUROCONTROL Aircraft Performance Database, DC10",
+      "authority": "EUROCONTROL",
+      "url": "https://learningzone.eurocontrol.int/ilp/customs/ATCPFDB/details.aspx?ICAO=DC10"
+    },
+    "erebus_dc10_specs": {
+      "title": "DC-10-30 specifications",
+      "authority": "Secondary reference",
+      "url": "https://www.erebus.co.nz/"
+    },
+    "alas_preset_input": {
+      "title": "ALAS preset registration values supplied with the validation task",
+      "authority": "ALAS project evidence bundle",
+      "url": ""
+    },
+    "flugzeuginfo_a320": {
+      "title": "Airbus A320 specifications and technical data",
+      "authority": "flugzeuginfo.net secondary database",
+      "url": "https://www.flugzeuginfo.net/acdata_php/acdata_a320_en.php"
+    },
+    "aviapages_a320_fhdrf": {
+      "title": "Airbus A320 F-HDRF aircraft specification sheet",
+      "authority": "Aviapages operator specification",
+      "url": "https://md.aviapages.com/media/2025/02/07/EN-A320-F-HDRF.pdf"
+    },
+    "eurocontrol_apd_a320": {
+      "title": "EUROCONTROL Aircraft Performance Database — A320",
+      "authority": "EUROCONTROL",
+      "url": "https://learningzone.eurocontrol.int/ilp/customs/ATCPFDB/details.aspx?ICAO=A320&NameFilter=a320"
+    },
+    "aviationhunt_a320_ata06": {
+      "title": "Airbus A320 ATA 06 dimensions and areas technical notes",
+      "authority": "AviationHunt secondary restatement",
+      "url": "https://www.aviationhunt.com/airbus-a320-ata-06/"
+    },
+    "flugzeuginfo_a380": {
+      "title": "Airbus A380 specifications and technical data",
+      "authority": "flugzeuginfo.net secondary database",
+      "url": "https://www.flugzeuginfo.net/acdata_php/acdata_a380_en.php"
+    },
+    "wikipedia_a380": {
+      "title": "Airbus A380",
+      "authority": "Wikipedia secondary summary",
+      "url": "https://en.wikipedia.org/wiki/Airbus_A380"
+    },
+    "atr72600_wb_training": {
+      "title": "ATR 72-600 Weight and Balance training document",
+      "authority": "Unattributed operator/training document",
+      "url": "https://www.scribd.com/document/592768171/3-Weight-Balance-Atr-72-600"
+    },
+    "boeing_787_techspecs_2026": {
+      "title": "787 Dreamliner technical specifications",
+      "authority": "Boeing Commercial Airplanes",
+      "url": "https://www.boeing.com/commercial/787"
+    },
+    "flugzeuginfo_b7879": {
+      "title": "Boeing 787-9 specifications and technical data",
+      "authority": "flugzeuginfo.net secondary database",
+      "url": "https://www.flugzeuginfo.net/acdata_php/acdata_boeing_7879_en.php"
+    },
+    "nasa_cr3119_gilkey_1979": {
+      "title": "NASA CR-3119 Design and Wind Tunnel Tests of Winglets on a DC-10 Wing",
+      "authority": "NASA",
+      "url": "https://ntrs.nasa.gov/api/citations/19810018508/downloads/19810018508.pdf"
+    },
+    "wikipedia_dc10": {
+      "title": "McDonnell Douglas DC-10",
+      "authority": "Wikipedia secondary summary",
+      "url": "https://en.wikipedia.org/wiki/McDonnell_Douglas_DC-10"
+    },
+    "dhl_dc10_dimensions": {
+      "title": "DC-10-30F aircraft dimension sheet",
+      "authority": "DHL Aviation secondary operator sheet",
+      "url": "https://aviationcargo.dhl.com/sites/default/files/aircraft_dimension_sheets/dc10.pdf"
+    },
+    "airbus_ac_a320_2026": {
+      "title": "Airbus A320 Aircraft Characteristics, Revision 01 July 2026",
+      "authority": "Airbus",
+      "url": "https://mediaassets.airbus.com/pm_38_916_916266-iujedqawwy.pdf?fileName=aca32001-jul-2026-2.pdf"
+    }
+  },
+  "regulatory": [
+    {
+      "id": "14_CFR_25.21",
+      "title": "Proof of compliance",
+      "url": "https://ecfr.io/Title-14/Section-25.21",
+      "implication": "Certification performance and handling requirements must cover each appropriate weight/CG combination, with testing or calculations of test-equivalent accuracy; model parity cannot replace this evidence."
+    },
+    {
+      "id": "14_CFR_25.25",
+      "title": "Weight limits",
+      "url": "https://ecfr.io/Title-14/Section-25.25",
+      "implication": "Maximum weights depend on operating, environmental and loading conditions; a single MTOW scalar is not a complete design-space boundary."
+    },
+    {
+      "id": "14_CFR_25.27",
+      "title": "Center of gravity limits",
+      "url": "https://ecfr.io/Title-14/Section-25.27",
+      "implication": "Forward and aft CG limits must be established for each practically separable operating condition and bounded by structural and flight compliance evidence."
+    },
+    {
+      "id": "14_CFR_25.29",
+      "title": "Empty weight and corresponding center of gravity",
+      "url": "https://ecfr.io/Title-14/Section-25.29",
+      "implication": "OEW/CG needs a repeatable weighed configuration including unusable fuel and operating fluids; an estimated component sum is not a measured OEW/CG."
+    },
+    {
+      "id": "14_CFR_25.101",
+      "title": "General performance conditions",
+      "url": "https://ecfr.io/Title-14/Section-25.101",
+      "implication": "Performance comparisons need declared atmosphere, humidity, still-air and applicant-selected configurations, plus repeatable procedures."
+    },
+    {
+      "id": "14_CFR_25.103",
+      "title": "Stall speed",
+      "url": "https://ecfr.io/Title-14/Section-25.103",
+      "implication": "VSR is tied to load-factor-corrected CLMAX, weight, reference area, configuration and the CG producing the highest VSR; a generic cruise polar is not a certification stall result."
+    },
+    {
+      "id": "14_CFR_25.121",
+      "title": "Climb: one-engine-inoperative",
+      "url": "https://ecfr.io/Title-14/Section-25.121",
+      "implication": "OEI gradients must be checked by engine count and configuration: takeoff gear retracted 2.4/2.7/3.0%, final takeoff 1.2/1.5/1.7%, and approach 2.1/2.4/2.7% for two/three/four engines."
+    },
+    {
+      "id": "14_CFR_25.123",
+      "title": "En-route flight paths",
+      "url": "https://ecfr.io/Title-14/Section-25.123",
+      "implication": "OEI en-route paths require the most unfavorable CG, critical engine(s) inoperative and maximum continuous thrust; net reductions are 1.1/1.4/1.6% for two/three/four-engine aircraft."
+    },
+    {
+      "id": "14_CFR_25.305",
+      "title": "Strength and deformation",
+      "url": "https://ecfr.io/Title-14/Section-25.305",
+      "implication": "Limit loads may not cause detrimental permanent deformation and ultimate loads require the stated strength/deformation treatment; a SOL101 run needs a defined load case and material/constraint basis."
+    },
+    {
+      "id": "14_CFR_25.307",
+      "title": "Proof of structure",
+      "url": "https://ecfr.io/Title-14/Section-25.307",
+      "implication": "Structural analysis is acceptable only where the method is reliable for the structure; otherwise substantiating tests are required for critical loading conditions."
+    },
+    {
+      "id": "EASA_CS25.121",
+      "title": "CS-25 OEI climb",
+      "url": "https://www.easa.europa.eu/en/document-library/easy-access-rules/online-publications/easy-access-rules-large-aeroplanes-cs-25?page=6&pubDate=20260413",
+      "implication": "EASA CS-25 carries the same engine-count-dependent OEI gradients and expects consideration of the critical CG/trajectory; this is the relevant design-space gate for transport-category presets."
+    }
+  ],
+  "aircraft": {
+    "A220-300": {
+      "evidence_file": ".agent/validation/A220-300.json",
+      "variant": "BD-500-1A11 legacy 67,585 kg preset weight; PW1500G",
+      "checks": [
+        {
+          "id": "geometry.span_m",
+          "category": "geometry",
+          "model_path": "geometry.span_m",
+          "source_path": "geometry.span_m",
+          "source_value": 35.1,
+          "unit": "m",
+          "evidence": "primary",
+          "condition": "wing span, 115 ft 1 in",
+          "cite": "easa_tcds_ima570_i25",
+          "tolerance": "geometry_length"
+        },
+        {
+          "id": "geometry.wing_area_m2",
+          "category": "geometry",
+          "model_path": "geometry.wing_area_m2",
+          "source_path": "geometry.wing_area_m2",
+          "source_value": 112.3,
+          "unit": "m^2",
+          "evidence": "secondary",
+          "condition": "gross reference wing area convention",
+          "cite": "alas_preset_input",
+          "tolerance": "geometry_area"
+        },
+        {
+          "id": "geometry.mac_m",
+          "category": "geometry",
+          "model_path": "geometry.mac_m",
+          "source_path": "geometry.mac_m",
+          "source_value": 3.781,
+          "unit": "m",
+          "evidence": "secondary",
+          "condition": "MAC used for %MAC balance, operator WBM Table 1-5",
+          "cite": "csa_wbm_a220_2021",
+          "tolerance": "geometry_length"
+        },
+        {
+          "id": "geometry.lemac_from_nose_m",
+          "category": "geometry",
+          "model_path": "geometry.lemac_from_nose_m",
+          "source_path": "geometry.lemac_from_nose_m",
+          "source_value": 16.536,
+          "unit": "m",
+          "evidence": "estimated",
+          "condition": "LEMAC derived from WBM FS 20.803 minus nose FS 4.267",
+          "cite": "csa_wbm_a220_2021",
+          "tolerance": "geometry_length"
+        },
+        {
+          "id": "geometry.fuselage_length_m",
+          "category": "geometry",
+          "model_path": "geometry.fuselage_length_m",
+          "source_path": "geometry.fuselage_length_m",
+          "source_value": 38.7,
+          "unit": "m",
+          "evidence": "primary",
+          "condition": "overall aeroplane length",
+          "cite": "easa_tcds_ima570_i25",
+          "tolerance": "geometry_length"
+        },
+        {
+          "id": "geometry.wheelbase_m",
+          "category": "geometry",
+          "model_path": "geometry.wheelbase_m",
+          "source_path": "geometry.wheelbase_m",
+          "source_value": 15.23238,
+          "unit": "m",
+          "evidence": "primary",
+          "condition": "nominal NLG axle to MLG axle, A220-300 S/N 55001-59999 ACP drawing",
+          "cite": "airbus_a220_acp_2025",
+          "tolerance": "gear_position"
+        },
+        {
+          "id": "geometry.wheel_track_m",
+          "category": "geometry",
+          "model_path": "geometry.wheel_track_m",
+          "source_path": "geometry.wheel_track_m",
+          "source_value": 6.731,
+          "unit": "m",
+          "evidence": "primary",
+          "condition": "nominal main-gear track, A220-300 S/N 55001-59999 ACP drawing",
+          "cite": "airbus_a220_acp_2025",
+          "tolerance": "gear_position"
+        },
+        {
+          "id": "mass.mtow_kg",
+          "category": "mass",
+          "model_path": "mass.mtow_kg",
+          "source_path": "mass.mtow_kg",
+          "source_value": 67585,
+          "unit": "kg",
+          "evidence": "primary",
+          "condition": "legacy preset weight variant",
+          "cite": "easa_tcds_ima570_i12",
+          "tolerance": "mass_limit"
+        },
+        {
+          "id": "mass.oew_kg",
+          "category": "mass",
+          "model_path": "mass.oew_kg",
+          "source_path": "mass.oew_kg",
+          "source_value": 37149,
+          "unit": "kg",
+          "evidence": "secondary",
+          "condition": "typical operating empty weight; cabin fit dependent",
+          "cite": "alas_preset_input",
+          "condition_match": false,
+          "tolerance": "mass_oew"
+        },
+        {
+          "id": "mass.max_payload_kg",
+          "category": "mass",
+          "model_path": "payload_range.max_payload_kg",
+          "source_path": "mass.max_payload_kg",
+          "source_value": 18643,
+          "unit": "kg",
+          "evidence": "estimated",
+          "condition": "MZFW minus typical OEW",
+          "cite": "alas_preset_input",
+          "condition_match": false,
+          "tolerance": "mass_limit"
+        },
+        {
+          "id": "mass.usable_fuel_kg",
+          "category": "mass",
+          "model_path": "payload_range.fuel_capacity_kg",
+          "source_path": "mass.usable_fuel_kg",
+          "source_value": 17400,
+          "unit": "kg",
+          "evidence": "secondary",
+          "condition": "WBM three-tank capacity at 0.809 kg/L",
+          "cite": "csa_wbm_a220_2021",
+          "tolerance": "fuel_mass"
+        },
+        {
+          "id": "aero.cruise_mach",
+          "category": "aero",
+          "model_path": "aerodynamics.cruise_mach",
+          "source_path": "aerodynamics.cruise_mach",
+          "source_available": false,
+          "unit": "1",
+          "evidence": "unavailable",
+          "note": "No primary or peer-reviewed cruise Mach obtained; MMO is a limit, not a cruise condition."
+        },
+        {
+          "id": "aero.max_mach",
+          "category": "aero",
+          "model_path": "aerodynamics.mmo",
+          "source_path": "aerodynamics.mmo",
+          "source_value": 0.82,
+          "unit": "1",
+          "evidence": "primary",
+          "condition": "MMO above 27,500 ft",
+          "cite": "easa_tcds_ima570_i25",
+          "tolerance": "mach"
+        },
+        {
+          "id": "aero.max_operating_altitude_m",
+          "category": "aero",
+          "model_path": "aerodynamics.max_operating_altitude_m",
+          "source_path": "aerodynamics.max_operating_altitude_m",
+          "source_value": 12497,
+          "unit": "m",
+          "evidence": "primary",
+          "condition": "en-route maximum operating altitude 41,000 ft",
+          "cite": "easa_tcds_ima570_i25",
+          "tolerance": "altitude"
+        },
+        {
+          "id": "aero.l_over_d_cruise",
+          "category": "aero",
+          "model_path": "aerodynamics.l_over_d_cruise",
+          "source_path": null,
+          "source_value": 18.52,
+          "unit": "1",
+          "evidence": "estimated",
+          "condition": "Poll-Schumann BCS3 design optimum; source area/span caveat",
+          "cite": "poll_schumann_2025_part3",
+          "condition_match": false,
+          "tolerance": "performance_ratio"
+        },
+        {
+          "id": "aero.l_over_d_max",
+          "category": "aero",
+          "model_path": "aerodynamics.l_over_d_max_in_sweep",
+          "source_path": null,
+          "source_value": 18.52,
+          "unit": "1",
+          "evidence": "estimated",
+          "condition": "Poll-Schumann design optimum, not an unconstrained aircraft L/D maximum",
+          "cite": "poll_schumann_2025_part3",
+          "condition_match": false,
+          "tolerance": "performance_ratio"
+        },
+        {
+          "id": "aero.cd0_cruise",
+          "category": "aero",
+          "model_path": "aerodynamics.cd0_cruise",
+          "source_path": null,
+          "source_value": 0.017205,
+          "unit": "1",
+          "evidence": "estimated",
+          "condition": "Poll-Schumann BCS3 design optimum; reference area differs from preset convention",
+          "cite": "poll_schumann_2025_part3",
+          "condition_match": false,
+          "tolerance": "drag_coefficient"
+        },
+        {
+          "id": "aero.oswald_e",
+          "category": "aero",
+          "model_path": "aerodynamics.oswald_e",
+          "source_path": null,
+          "source_value": 0.8524,
+          "unit": "1",
+          "evidence": "estimated",
+          "condition": "Poll-Schumann lumped lift-dependent drag factor; source area/span caveat",
+          "cite": "poll_schumann_2025_part3",
+          "condition_match": false,
+          "tolerance": "performance_ratio"
+        },
+        {
+          "id": "aero.critical_mach",
+          "category": "aero",
+          "model_path": "aerodynamics.critical_mach",
+          "source_path": null,
+          "source_value": 0.6819,
+          "unit": "1",
+          "evidence": "estimated",
+          "condition": "Poll-Schumann CL-dependent drag-rise onset, not classical airfoil Mcrit",
+          "cite": "poll_schumann_2025_part3",
+          "condition_match": false,
+          "tolerance": "mach"
+        },
+        {
+          "id": "aero.cl_vs_aoa",
+          "category": "aero",
+          "model_path": "aerodynamics.cruise_polar_cl",
+          "source_available": false,
+          "evidence": "unavailable",
+          "note": "No trustworthy public A220 CL(alpha) curve or measured three-dimensional lift slope obtained."
+        },
+        {
+          "id": "aero.cruise_aoa",
+          "category": "aero",
+          "model_path": "aerodynamics.cruise_aoa_deg",
+          "source_available": false,
+          "evidence": "unavailable",
+          "note": "No public A220 trimmed cruise angle-of-attack target; the model exports a polar axis but no selected cruise trim angle."
+        },
+        {
+          "id": "performance.payload_range_corners",
+          "category": "mission",
+          "model_path": "payload_range.corners",
+          "source_available": false,
+          "evidence": "unavailable",
+          "note": "Airbus APP payload/range chart was not numerically recoverable; no payload/reserve corner is asserted."
+        },
+        {
+          "id": "performance.block_fuel",
+          "category": "mission",
+          "model_path": "route.trip_fuel_kg",
+          "source_available": false,
+          "evidence": "unavailable",
+          "note": "No source block-fuel point with a complete, matching route and reserve contract obtained."
+        },
+        {
+          "id": "performance.service_ceiling_m",
+          "category": "performance",
+          "model_path": "performance.service_ceiling_m",
+          "source_available": false,
+          "evidence": "unavailable",
+          "note": "Only the certified operating altitude is public; it is not a weight-dependent performance ceiling."
+        },
+        {
+          "id": "mass.subsystem_masses",
+          "category": "mass",
+          "model_path": "mass.component_masses_kg",
+          "source_available": false,
+          "evidence": "unavailable",
+          "note": "No public A220 subsystem mass breakdown with matching variant/configuration."
+        },
+        {
+          "id": "mass.cg_envelope",
+          "category": "mass",
+          "model_path": "cg.planning_envelope",
+          "source_kind": "descriptive",
+          "source_available": true,
+          "evidence": "secondary",
+          "condition": "A220 planning CG envelope in WBM; source MAC/LEMAC frame and vertices are available locally",
+          "cite": "csa_wbm_a220_2021",
+          "note": "Exporting model CG in a source-declared frame is required before a numeric comparison."
+        },
+        {
+          "id": "mass.cruise_cg",
+          "category": "mass",
+          "model_path": "cg.cruise_percent_mac",
+          "source_available": false,
+          "evidence": "unavailable",
+          "note": "No public cruise loading CG point for the exact preset variant."
+        },
+        {
+          "id": "gear.n_nlg_wheels",
+          "category": "gear",
+          "model_path": "gear.n_nlg_wheels",
+          "source_value": 2,
+          "unit": "count",
+          "evidence": "primary",
+          "condition": "two nose wheels, A220-300 S/N 55001-59999 ACP footprint",
+          "cite": "airbus_a220_acp_2025",
+          "tolerance": "gear_count"
+        },
+        {
+          "id": "gear.n_mlg_struts",
+          "category": "gear",
+          "model_path": "gear.n_mlg_struts",
+          "source_value": 2,
+          "unit": "count",
+          "evidence": "primary",
+          "condition": "two main gear struts, A220-300 S/N 55001-59999 ACP footprint",
+          "cite": "airbus_a220_acp_2025",
+          "tolerance": "gear_count"
+        },
+        {
+          "id": "gear.wheels_per_mlg_strut",
+          "category": "gear",
+          "model_path": "gear.wheels_per_mlg_strut",
+          "source_value": 2,
+          "unit": "count",
+          "evidence": "primary",
+          "condition": "two wheels per main strut, A220-300 S/N 55001-59999 ACP footprint",
+          "cite": "airbus_a220_acp_2025",
+          "tolerance": "gear_count"
+        },
+        {
+          "id": "gear.x_nlg_m",
+          "category": "gear",
+          "model_path": "gear.x_nlg_m",
+          "source_value": 3.401568,
+          "unit": "m",
+          "evidence": "primary",
+          "condition": "nominal NLG axle station from geometric nose-tip drawing reference, A220-300 S/N 55001-59999 ACP",
+          "cite": "airbus_a220_acp_2025",
+          "tolerance": "gear_position",
+          "note": "ACP Table 3/continuation and Figure 1; source dimensions vary with weight/CG and do not define a certified WBM/AFM datum or attachment hardpoint."
+        },
+        {
+          "id": "gear.main_gear_x_m",
+          "category": "gear",
+          "model_path": "gear.main_gear_x_m",
+          "source_value": [
+            18.633948,
+            18.633948
+          ],
+          "unit": "m",
+          "evidence": "primary",
+          "condition": "nominal left/right MLG axle stations from geometric nose-tip drawing reference, A220-300 S/N 55001-59999 ACP",
+          "cite": "airbus_a220_acp_2025",
+          "tolerance": "gear_position",
+          "note": "Derived as NLG station 3.401568 m plus source wheelbase 15.232380 m; source dimensions vary with weight/CG and do not define certified attachment points."
+        },
+        {
+          "id": "gear.position",
+          "category": "gear",
+          "model_path": "gear.positions",
+          "source_kind": "descriptive",
+          "source_available": true,
+          "evidence": "primary",
+          "condition": "nominal normalized nose-tip drawing stations, wheelbase and track above; model frame is declared in gear.main_gear_station_frame",
+          "cite": "airbus_a220_acp_2025",
+          "note": "The ACP drawing uses a geometric nose-tip reference and nominal ground geometry; dimensions vary with weight/CG. It is separate from certified WBM/AFM station frames and does not publish 3-D gear attachment hardpoints."
+        },
+        {
+          "id": "structures.SOL101_deformation",
+          "category": "structures",
+          "model_path": "structures.sol101",
+          "source_available": false,
+          "evidence": "unavailable",
+          "note": "No public, trustworthy A220 load case plus deformation/strain measurement reference was obtained; do not score a SOL101 run."
+        }
+      ]
+    },
+    "A320-200": {
+      "evidence_file": ".agent/validation/A320-200.json",
+      "variant": "A320-214 WV017 / CFM56-5B4/3 / Sharklets",
+      "checks": [
+        {
+          "id": "geometry.span_m",
+          "category": "geometry",
+          "model_path": "geometry.span_m",
+          "source_path": "geometry.span_m",
+          "source_value": 35.8,
+          "unit": "m",
+          "evidence": "primary",
+          "condition": "Sharklet-equipped geometric wing span",
+          "cite": "easa_tcds_a064_i12",
+          "tolerance": "geometry_length"
+        },
+        {
+          "id": "geometry.wing_area_m2",
+          "category": "geometry",
+          "model_path": "geometry.wing_area_m2",
+          "source_path": "geometry.wing_area_m2",
+          "source_value": 122.6,
+          "unit": "m^2",
+          "evidence": "secondary",
+          "condition": "gross reference area; Airbus does not publish a numeric area in the ACAP",
+          "cite": "flugzeuginfo_a320",
+          "tolerance": "geometry_area"
+        },
+        {
+          "id": "geometry.mac_m",
+          "category": "geometry",
+          "model_path": "geometry.mac_m",
+          "source_path": "geometry.mac_m",
+          "source_value": 4.1935,
+          "unit": "m",
+          "evidence": "primary",
+          "condition": "certified balance MAC",
+          "cite": "easa_tcds_a064_i12",
+          "tolerance": "geometry_length"
+        },
+        {
+          "id": "geometry.fuselage_length_m",
+          "category": "geometry",
+          "model_path": "geometry.fuselage_length_m",
+          "source_path": "geometry.fuselage_length_m",
+          "source_value": 37.57,
+          "unit": "m",
+          "evidence": "primary",
+          "condition": "overall aircraft length",
+          "cite": "easa_tcds_a064_i12",
+          "tolerance": "geometry_length"
+        },
+        {
+          "id": "geometry.wheelbase_m",
+          "category": "geometry",
+          "model_path": "geometry.wheelbase_m",
+          "source_path": "geometry.wheelbase_m",
+          "source_value": 12.64,
+          "unit": "m",
+          "evidence": "primary",
+          "condition": "nose gear to main gear",
+          "cite": "easa_tcds_a064_i12",
+          "tolerance": "gear_position"
+        },
+        {
+          "id": "geometry.wheel_track_m",
+          "category": "geometry",
+          "model_path": "geometry.wheel_track_m",
+          "source_path": "geometry.wheel_track_m",
+          "source_value": 7.59,
+          "unit": "m",
+          "evidence": "primary",
+          "condition": "main gear track",
+          "cite": "easa_tcds_a064_i12",
+          "tolerance": "gear_position"
+        },
+        {
+          "id": "geometry.engine_spanwise_position_m",
+          "category": "geometry",
+          "model_path": "geometry.engine_spanwise_position_m",
+          "source_path": "geometry.engine_spanwise_position_m",
+          "source_value": 5.755,
+          "unit": "m",
+          "evidence": "primary",
+          "condition": "engine axis offset from centreline, half of 11.51 m",
+          "cite": "easa_tcds_a064_i12",
+          "tolerance": "geometry_length"
+        },
+        {
+          "id": "mass.mtow_kg",
+          "category": "mass",
+          "model_path": "mass.mtow_kg",
+          "source_path": "mass.mtow_kg",
+          "source_value": 78000,
+          "unit": "kg",
+          "evidence": "primary",
+          "condition": "WV017",
+          "cite": "easa_tcds_a064_i12",
+          "tolerance": "mass_limit"
+        },
+        {
+          "id": "mass.oew_kg",
+          "category": "mass",
+          "model_path": "mass.oew_kg",
+          "source_path": "mass.oew_kg",
+          "source_value": 41052,
+          "unit": "kg",
+          "evidence": "secondary",
+          "condition": "specific pre-Sharklet A320-214 operator configuration",
+          "cite": "aviapages_a320_fhdrf",
+          "condition_match": false,
+          "tolerance": "mass_oew"
+        },
+        {
+          "id": "mass.max_payload_kg",
+          "category": "mass",
+          "model_path": "payload_range.max_payload_kg",
+          "source_path": "mass.max_payload_kg",
+          "source_value": 21448,
+          "unit": "kg",
+          "evidence": "estimated",
+          "condition": "MZFW minus selected OEW",
+          "cite": "easa_tcds_a064_i12",
+          "condition_match": false,
+          "tolerance": "mass_limit"
+        },
+        {
+          "id": "mass.usable_fuel_kg",
+          "category": "mass",
+          "model_path": "payload_range.fuel_capacity_kg",
+          "source_path": "mass.usable_fuel_kg",
+          "source_value": 19004,
+          "unit": "kg",
+          "evidence": "primary",
+          "condition": "24,209 L at 0.785 kg/L, no ACT",
+          "cite": "airbus_ac_a320_2024",
+          "tolerance": "fuel_mass"
+        },
+        {
+          "id": "mass.usable_fuel_l",
+          "category": "mass",
+          "model_path": "payload_range.fuel_capacity_l",
+          "source_path": "mass.usable_fuel_l",
+          "source_value": 24209,
+          "unit": "L",
+          "evidence": "primary",
+          "condition": "three-tank aircraft without ACT",
+          "cite": "airbus_ac_a320_2024",
+          "tolerance": "fuel_volume"
+        },
+        {
+          "id": "aero.cruise_mach",
+          "category": "aero",
+          "model_path": "aerodynamics.cruise_mach",
+          "source_path": "aerodynamics.cruise_mach",
+          "source_value": 0.79,
+          "unit": "1",
+          "evidence": "secondary",
+          "condition": "EUROCONTROL operational cruise entry",
+          "cite": "eurocontrol_apd_a320",
+          "tolerance": "mach"
+        },
+        {
+          "id": "aero.max_mach",
+          "category": "aero",
+          "model_path": "aerodynamics.mmo",
+          "source_path": "aerodynamics.mmo",
+          "source_value": 0.82,
+          "unit": "1",
+          "evidence": "primary",
+          "condition": "maximum operating Mach",
+          "cite": "easa_tcds_a064_i12",
+          "tolerance": "mach"
+        },
+        {
+          "id": "aero.max_operating_altitude_m",
+          "category": "aero",
+          "model_path": "aerodynamics.max_operating_altitude_m",
+          "source_path": "aerodynamics.max_operating_altitude_m",
+          "source_value": 12131,
+          "unit": "m",
+          "evidence": "primary",
+          "condition": "39,800 ft with MOD 30748",
+          "cite": "easa_tcds_a064_i12",
+          "tolerance": "altitude"
+        },
+        {
+          "id": "aero.l_over_d_cruise",
+          "category": "aero",
+          "model_path": "aerodynamics.l_over_d_cruise",
+          "source_path": "aerodynamics.l_over_d_cruise",
+          "source_value": 18.1,
+          "unit": "1",
+          "evidence": "estimated",
+          "condition": "FL350, M0.78, ISA, 65,000 kg, clean; ADS-B-derived A320-family drag polar",
+          "cite": "sun_dragpolar_2020",
+          "condition_match": false,
+          "tolerance": "performance_ratio"
+        },
+        {
+          "id": "aero.l_over_d_max",
+          "category": "aero",
+          "model_path": "aerodynamics.l_over_d_max_in_sweep",
+          "source_path": "aerodynamics.l_over_d_max",
+          "source_value": 18.9,
+          "unit": "1",
+          "evidence": "estimated",
+          "condition": "incompressible optimum of an ADS-B-derived clean polar",
+          "cite": "sun_dragpolar_2020",
+          "condition_match": false,
+          "tolerance": "performance_ratio"
+        },
+        {
+          "id": "aero.cd0_cruise",
+          "category": "aero",
+          "model_path": "aerodynamics.cd0_cruise",
+          "source_path": "aerodynamics.cd0_cruise",
+          "source_value": 0.018,
+          "unit": "1",
+          "evidence": "secondary",
+          "condition": "clean polar; no explicit Mach dependence",
+          "cite": "sun_dragpolar_2020",
+          "condition_match": false,
+          "tolerance": "drag_coefficient"
+        },
+        {
+          "id": "aero.oswald_e",
+          "category": "aero",
+          "model_path": "aerodynamics.oswald_e",
+          "source_path": "aerodynamics.oswald_e",
+          "source_value": 0.799,
+          "unit": "1",
+          "evidence": "secondary",
+          "condition": "effective e paired with k=0.039 in source polar",
+          "cite": "sun_dragpolar_2020",
+          "condition_match": false,
+          "tolerance": "performance_ratio"
+        },
+        {
+          "id": "aero.cl_alpha_per_rad",
+          "category": "aero",
+          "model_path": "aerodynamics.cl_alpha_per_rad",
+          "source_path": "aerodynamics.cl_alpha_per_rad",
+          "source_value": 4.87,
+          "unit": "1/rad",
+          "evidence": "estimated",
+          "condition": "rigid wing-only low-speed DATCOM/Polhamus estimate",
+          "cite": "aviationhunt_a320_ata06",
+          "condition_match": false,
+          "tolerance": "lift_curve_slope"
+        },
+        {
+          "id": "aero.critical_mach",
+          "category": "aero",
+          "model_path": "aerodynamics.critical_mach",
+          "source_path": null,
+          "source_value": 0.6497,
+          "unit": "1",
+          "evidence": "estimated",
+          "condition": "Poll-Schumann CL-dependent drag-rise onset; not classical airfoil Mcrit",
+          "cite": "poll_schumann_2025_part3",
+          "condition_match": false,
+          "tolerance": "mach"
+        },
+        {
+          "id": "aero.cl_vs_aoa",
+          "category": "aero",
+          "model_path": "aerodynamics.cruise_polar_cl",
+          "source_available": false,
+          "evidence": "unavailable",
+          "note": "No measured or public A320 three-dimensional CL(alpha) curve; the single hand-estimated slope above is not a curve."
+        },
+        {
+          "id": "aero.cruise_aoa",
+          "category": "aero",
+          "model_path": "aerodynamics.cruise_aoa_deg",
+          "source_available": false,
+          "evidence": "unavailable",
+          "note": "No public A320 trimmed cruise angle-of-attack target; the model exports a polar axis but no selected cruise trim angle."
+        },
+        {
+          "id": "performance.payload_range_corners",
+          "category": "mission",
+          "model_path": "payload_range.corners",
+          "source_available": false,
+          "evidence": "unavailable",
+          "note": "Airbus chart axes are recoverable but break points and payload/reserve conditions are not numerically recoverable."
+        },
+        {
+          "id": "performance.block_fuel",
+          "category": "mission",
+          "model_path": "route.trip_fuel_kg",
+          "source_value": 3400,
+          "unit": "kg",
+          "evidence": "secondary",
+          "condition": "EGLL-EDDM, 536 NM tracked, 150 passengers, 77,000 kg, CFM56-5B4, pre-Sharklet",
+          "cite": "ac_a320_guide_i44",
+          "condition_match": false,
+          "tolerance": "mission_fuel"
+        },
+        {
+          "id": "performance.service_ceiling_m",
+          "category": "performance",
+          "model_path": "performance.service_ceiling_m",
+          "source_available": false,
+          "evidence": "unavailable",
+          "note": "Published 12,131 m is an operating limit, not a weight-dependent service ceiling."
+        },
+        {
+          "id": "mass.subsystem_masses",
+          "category": "mass",
+          "model_path": "mass.component_masses_kg",
+          "source_available": false,
+          "evidence": "unavailable",
+          "note": "No public, exact-variant subsystem mass breakdown."
+        },
+        {
+          "id": "mass.cg_envelope",
+          "category": "mass",
+          "model_path": "cg.planning_envelope",
+          "source_available": false,
+          "evidence": "unavailable",
+          "note": "A320 AFM/WBM CG envelope is not public in numeric form."
+        },
+        {
+          "id": "mass.cruise_cg",
+          "category": "mass",
+          "model_path": "cg.cruise_percent_mac",
+          "source_available": false,
+          "evidence": "unavailable",
+          "note": "No public cruise CG point for the exact WV017/cabin condition."
+        },
+        {
+          "id": "gear.n_nlg_wheels",
+          "category": "gear",
+          "model_path": "gear.n_nlg_wheels",
+          "source_value": 2,
+          "unit": "count",
+          "evidence": "primary",
+          "condition": "two nose wheels",
+          "cite": "easa_tcds_a064_i12",
+          "tolerance": "gear_count"
+        },
+        {
+          "id": "gear.n_mlg_struts",
+          "category": "gear",
+          "model_path": "gear.n_mlg_struts",
+          "source_value": 2,
+          "unit": "count",
+          "evidence": "primary",
+          "condition": "two main gear struts",
+          "cite": "easa_tcds_a064_i12",
+          "tolerance": "gear_count"
+        },
+        {
+          "id": "gear.wheels_per_mlg_strut",
+          "category": "gear",
+          "model_path": "gear.wheels_per_mlg_strut",
+          "source_value": 2,
+          "unit": "count",
+          "evidence": "primary",
+          "condition": "two wheels per main strut",
+          "cite": "easa_tcds_a064_i12",
+          "tolerance": "gear_count"
+        },
+        {
+          "id": "gear.x_nlg_m",
+          "category": "gear",
+          "model_path": "gear.x_nlg_m",
+          "source_value": 5.07,
+          "unit": "m",
+          "evidence": "primary",
+          "condition": "Airbus AC 2-2-0 drawing station from geometric nose-tip reference to NLG axle",
+          "cite": "airbus_ac_a320_2026",
+          "tolerance": "gear_position"
+        },
+        {
+          "id": "gear.main_gear_x_m",
+          "category": "gear",
+          "model_path": "gear.main_gear_x_m",
+          "source_value": [
+            17.71,
+            17.71
+          ],
+          "unit": "m",
+          "evidence": "primary",
+          "condition": "Airbus AC 2-2-0 drawing stations from geometric nose-tip reference to left/right MLG axles",
+          "cite": "airbus_ac_a320_2026",
+          "tolerance": "gear_position",
+          "note": "Array order is left wing MLG, right wing MLG."
+        },
+        {
+          "id": "gear.position",
+          "category": "gear",
+          "model_path": "gear.positions",
+          "source_kind": "descriptive",
+          "source_available": true,
+          "evidence": "primary",
+          "condition": "normalized nose-tip drawing stations, wheelbase and main track above; model frame is declared in gear.main_gear_station_frame",
+          "cite": "easa_tcds_a064_i12",
+          "note": "The source drawing frame is geometric nose-tip reference; it is separate from certified WBM/AFM station frames."
+        },
+        {
+          "id": "structures.SOL101_deformation",
+          "category": "structures",
+          "model_path": "structures.sol101",
+          "source_available": false,
+          "evidence": "unavailable",
+          "note": "No public A320 load case plus deformation/strain measurement reference with matching configuration."
+        }
+      ]
+    },
+    "A340-300": {
+      "evidence_file": ".agent/validation/A340-300.json",
+      "variant": "A340-312 WV029 / CFM56-5C3",
+      "checks": [
+        {
+          "id": "geometry.span_m",
+          "category": "geometry",
+          "model_path": "geometry.span_m",
+          "source_path": "geometry.span_m",
+          "source_value": 60.3,
+          "unit": "m",
+          "evidence": "primary",
+          "condition": "wingtip fence to wingtip fence",
+          "cite": "easa_tcds_a015_i28",
+          "tolerance": "geometry_length"
+        },
+        {
+          "id": "geometry.wing_area_m2",
+          "category": "geometry",
+          "model_path": "geometry.wing_area_m2",
+          "source_path": "geometry.wing_area_m2",
+          "source_value": 361.6,
+          "unit": "m^2",
+          "evidence": "secondary",
+          "condition": "gross reference area convention",
+          "cite": "alas_preset_input",
+          "tolerance": "geometry_area"
+        },
+        {
+          "id": "geometry.mac_m",
+          "category": "geometry",
+          "model_path": "geometry.mac_m",
+          "source_path": "geometry.mac_m",
+          "source_value": 7.27,
+          "unit": "m",
+          "evidence": "primary",
+          "condition": "A340-200/-300 MAC; TCDS correction from 7.290 m",
+          "cite": "easa_tcds_a015_i28",
+          "tolerance": "geometry_length"
+        },
+        {
+          "id": "geometry.fuselage_length_m",
+          "category": "geometry",
+          "model_path": "geometry.fuselage_length_m",
+          "source_path": "geometry.fuselage_length_m",
+          "source_value": 63.66,
+          "unit": "m",
+          "evidence": "primary",
+          "condition": "overall aeroplane length",
+          "cite": "easa_tcds_a015_i28",
+          "tolerance": "geometry_length"
+        },
+        {
+          "id": "geometry.wheelbase_m",
+          "category": "geometry",
+          "model_path": "geometry.wheelbase_m",
+          "source_path": "geometry.wheelbase_m",
+          "source_value": 25.375,
+          "unit": "m",
+          "evidence": "primary",
+          "condition": "NLG axle to wing MLG bogie centre",
+          "cite": "airbus_ac_a340_2025",
+          "tolerance": "gear_position"
+        },
+        {
+          "id": "geometry.wheel_track_m",
+          "category": "geometry",
+          "model_path": "geometry.wheel_track_m",
+          "source_path": "geometry.wheel_track_m",
+          "source_value": 10.684,
+          "unit": "m",
+          "evidence": "primary",
+          "condition": "wing MLG track",
+          "cite": "airbus_ac_a340_2025",
+          "tolerance": "gear_position"
+        },
+        {
+          "id": "geometry.engine_spanwise_position_m",
+          "category": "geometry",
+          "model_path": "geometry.engine_spanwise_position_m",
+          "source_path": "geometry.engine_spanwise_position_m",
+          "source_value": 9.37,
+          "unit": "m",
+          "evidence": "estimated",
+          "condition": "inboard-engine axis offset inferred from AC front-view dimension chain",
+          "cite": "airbus_ac_a340_2025",
+          "tolerance": "geometry_length"
+        },
+        {
+          "id": "mass.mtow_kg",
+          "category": "mass",
+          "model_path": "mass.mtow_kg",
+          "source_path": "mass.mtow_kg",
+          "source_value": 260000,
+          "unit": "kg",
+          "evidence": "primary",
+          "condition": "WV029",
+          "cite": "airbus_ac_a340_2025",
+          "tolerance": "mass_limit"
+        },
+        {
+          "id": "mass.oew_kg",
+          "category": "mass",
+          "model_path": "mass.oew_kg",
+          "source_path": "mass.oew_kg",
+          "source_value": 131215,
+          "unit": "kg",
+          "evidence": "primary",
+          "condition": "typical A340-300 OEW in AC jacking section, not WV029-specific",
+          "cite": "airbus_ac_a340_2025",
+          "condition_match": false,
+          "tolerance": "mass_oew"
+        },
+        {
+          "id": "mass.max_payload_kg",
+          "category": "mass",
+          "model_path": "payload_range.max_payload_kg",
+          "source_path": "mass.max_payload_kg",
+          "source_value": 46785,
+          "unit": "kg",
+          "evidence": "estimated",
+          "condition": "MZFW minus typical OEW",
+          "cite": "airbus_ac_a340_2025",
+          "condition_match": false,
+          "tolerance": "mass_limit"
+        },
+        {
+          "id": "mass.usable_fuel_kg",
+          "category": "mass",
+          "model_path": "payload_range.fuel_capacity_kg",
+          "source_path": "mass.usable_fuel_kg",
+          "source_value": 113200,
+          "unit": "kg",
+          "evidence": "primary",
+          "condition": "WV029 three-tank capacity at 0.8 kg/L",
+          "cite": "easa_tcds_a015_i28",
+          "tolerance": "fuel_mass"
+        },
+        {
+          "id": "mass.usable_fuel_l",
+          "category": "mass",
+          "model_path": "payload_range.fuel_capacity_l",
+          "source_path": "mass.usable_fuel_l",
+          "source_value": 141500,
+          "unit": "L",
+          "evidence": "primary",
+          "condition": "WV029 usable fuel",
+          "cite": "easa_tcds_a015_i28",
+          "tolerance": "fuel_volume"
+        },
+        {
+          "id": "aero.cruise_mach",
+          "category": "aero",
+          "model_path": "aerodynamics.cruise_mach",
+          "source_path": "aerodynamics.cruise_mach",
+          "source_value": 0.82,
+          "unit": "1",
+          "evidence": "primary",
+          "condition": "CFM56-5C3 payload/range chart, ISA, FL390",
+          "cite": "airbus_ac_a340_2025",
+          "tolerance": "mach"
+        },
+        {
+          "id": "aero.max_mach",
+          "category": "aero",
+          "model_path": "aerodynamics.mmo",
+          "source_available": false,
+          "evidence": "unavailable",
+          "note": "TCDS defers MMO to the approved AFM; public 0.86 claims were not accepted as primary."
+        },
+        {
+          "id": "aero.max_operating_altitude_m",
+          "category": "aero",
+          "model_path": "aerodynamics.max_operating_altitude_m",
+          "source_path": "aerodynamics.max_operating_altitude_m",
+          "source_value": 12634,
+          "unit": "m",
+          "evidence": "primary",
+          "condition": "maximum flight level 41,450 ft",
+          "cite": "easa_tcds_a015_i28",
+          "tolerance": "altitude"
+        },
+        {
+          "id": "aero.l_over_d_cruise",
+          "category": "aero",
+          "model_path": "aerodynamics.l_over_d_cruise",
+          "source_path": null,
+          "source_value": 19.99,
+          "unit": "1",
+          "evidence": "estimated",
+          "condition": "Poll-Schumann A343 design optimum; source analytical parameter set",
+          "cite": "poll_schumann_2025_part3",
+          "condition_match": false,
+          "tolerance": "performance_ratio"
+        },
+        {
+          "id": "aero.l_over_d_max",
+          "category": "aero",
+          "model_path": "aerodynamics.l_over_d_max_in_sweep",
+          "source_path": null,
+          "source_value": 19.99,
+          "unit": "1",
+          "evidence": "estimated",
+          "condition": "Poll-Schumann design optimum, not unconstrained aircraft L/D maximum",
+          "cite": "poll_schumann_2025_part3",
+          "condition_match": false,
+          "tolerance": "performance_ratio"
+        },
+        {
+          "id": "aero.cd0_cruise",
+          "category": "aero",
+          "model_path": "aerodynamics.cd0_cruise",
+          "source_path": null,
+          "source_value": 0.014794,
+          "unit": "1",
+          "evidence": "estimated",
+          "condition": "Poll-Schumann design optimum; clean zero-lift coefficient",
+          "cite": "poll_schumann_2025_part3",
+          "condition_match": false,
+          "tolerance": "drag_coefficient"
+        },
+        {
+          "id": "aero.oswald_e",
+          "category": "aero",
+          "model_path": "aerodynamics.oswald_e",
+          "source_path": null,
+          "source_value": 0.8005,
+          "unit": "1",
+          "evidence": "estimated",
+          "condition": "Poll-Schumann lumped lift-dependent drag factor",
+          "cite": "poll_schumann_2025_part3",
+          "condition_match": false,
+          "tolerance": "performance_ratio"
+        },
+        {
+          "id": "aero.critical_mach",
+          "category": "aero",
+          "model_path": "aerodynamics.critical_mach",
+          "source_path": null,
+          "source_value": 0.6853,
+          "unit": "1",
+          "evidence": "estimated",
+          "condition": "Poll-Schumann CL-dependent drag-rise onset, not classical airfoil Mcrit",
+          "cite": "poll_schumann_2025_part3",
+          "condition_match": false,
+          "tolerance": "mach"
+        },
+        {
+          "id": "aero.cl_vs_aoa",
+          "category": "aero",
+          "model_path": "aerodynamics.cruise_polar_cl",
+          "source_available": false,
+          "evidence": "unavailable",
+          "note": "No trustworthy public A340 three-dimensional CL(alpha) curve or lift slope."
+        },
+        {
+          "id": "aero.cruise_aoa",
+          "category": "aero",
+          "model_path": "aerodynamics.cruise_aoa_deg",
+          "source_available": false,
+          "evidence": "unavailable",
+          "note": "No public A340 trimmed cruise angle-of-attack target; the model exports a polar axis but no selected cruise trim angle."
+        },
+        {
+          "id": "performance.payload_range_corners",
+          "category": "mission",
+          "model_path": "payload_range.corners",
+          "source_available": false,
+          "evidence": "unavailable",
+          "note": "Airbus AC chart is explicitly informational and curve break points were not recoverable."
+        },
+        {
+          "id": "performance.block_fuel",
+          "category": "mission",
+          "model_path": "route.trip_fuel_kg",
+          "source_value": 99700,
+          "unit": "kg",
+          "evidence": "estimated",
+          "condition": "AC nominal-range turn-round refuel quantity; sector length and reserve contract unspecified",
+          "cite": "airbus_ac_a340_2025",
+          "condition_match": false,
+          "tolerance": "mission_fuel"
+        },
+        {
+          "id": "performance.service_ceiling_m",
+          "category": "performance",
+          "model_path": "performance.service_ceiling_m",
+          "source_available": false,
+          "evidence": "unavailable",
+          "note": "Only maximum operating altitude is public; it is not a performance ceiling."
+        },
+        {
+          "id": "mass.subsystem_masses",
+          "category": "mass",
+          "model_path": "mass.component_masses_kg",
+          "source_available": false,
+          "evidence": "unavailable",
+          "note": "No public exact-variant subsystem mass breakdown."
+        },
+        {
+          "id": "mass.cg_envelope",
+          "category": "mass",
+          "model_path": "cg.planning_envelope",
+          "source_available": false,
+          "evidence": "unavailable",
+          "note": "A340 AFM/WBM CG envelope is not public in numeric form."
+        },
+        {
+          "id": "mass.cruise_cg",
+          "category": "mass",
+          "model_path": "cg.cruise_percent_mac",
+          "source_available": false,
+          "evidence": "unavailable",
+          "note": "No public cruise CG point for A340-312 WV029."
+        },
+        {
+          "id": "gear.n_nlg_wheels",
+          "category": "gear",
+          "model_path": "gear.n_nlg_wheels",
+          "source_value": 2,
+          "unit": "count",
+          "evidence": "primary",
+          "condition": "two nose wheels",
+          "cite": "airbus_ac_a340_2025",
+          "tolerance": "gear_count"
+        },
+        {
+          "id": "gear.n_mlg_struts",
+          "category": "gear",
+          "model_path": "gear.n_mlg_struts",
+          "source_value": 3,
+          "unit": "count",
+          "evidence": "primary",
+          "condition": "two wing bogies plus one centre gear",
+          "cite": "airbus_ac_a340_2025",
+          "tolerance": "gear_count"
+        },
+        {
+          "id": "gear.main_wheels_total",
+          "category": "gear",
+          "model_path": "gear.main_wheels_total",
+          "source_value": 10,
+          "unit": "count",
+          "evidence": "primary",
+          "condition": "4 + 2 + 4 wheels on three main gear units",
+          "cite": "airbus_ac_a340_2025",
+          "tolerance": "gear_count"
+        },
+        {
+          "id": "gear.x_nlg_m",
+          "category": "gear",
+          "model_path": "gear.x_nlg_m",
+          "source_value": 6.67,
+          "unit": "m",
+          "evidence": "primary",
+          "condition": "Airbus AC 2-2-0 drawing station from geometric nose-tip reference to NLG axle",
+          "cite": "airbus_ac_a340_2025",
+          "tolerance": "gear_position"
+        },
+        {
+          "id": "gear.main_gear_x_m",
+          "category": "gear",
+          "model_path": "gear.main_gear_x_m",
+          "source_value": [
+            32.05,
+            32.05,
+            33.04
+          ],
+          "unit": "m",
+          "evidence": "primary",
+          "condition": "Airbus AC 2-2-0 drawing stations from geometric nose-tip reference; two wing MLG and one centreline gear",
+          "cite": "airbus_ac_a340_2025",
+          "tolerance": "gear_position",
+          "note": "Array order is left wing MLG, right wing MLG, centreline gear; drawing dimensions are rounded to 0.01 m."
+        },
+        {
+          "id": "gear.centerline_wheelbase_m",
+          "category": "gear",
+          "model_path": "gear.centerline_wheelbase_m",
+          "source_value": 26.372,
+          "unit": "m",
+          "evidence": "primary",
+          "condition": "NLG axle to centreline gear; AC 7-2-0 precise source value",
+          "cite": "airbus_ac_a340_2025",
+          "tolerance": "gear_position"
+        },
+        {
+          "id": "gear.mlg_wheels_per_strut",
+          "category": "gear",
+          "model_path": "gear.mlg_wheels_per_strut",
+          "source_value": [
+            4,
+            4,
+            2
+          ],
+          "unit": "count",
+          "evidence": "primary",
+          "condition": "Airbus AC 2-9-0 two four-wheel wing bogies plus one twin-wheel centreline gear",
+          "cite": "airbus_ac_a340_2025",
+          "tolerance": "gear_count",
+          "note": "Array order is left wing MLG, right wing MLG, centreline gear."
+        },
+        {
+          "id": "gear.position",
+          "category": "gear",
+          "model_path": "gear.positions",
+          "source_kind": "descriptive",
+          "source_available": true,
+          "evidence": "primary",
+          "condition": "normalized nose-tip drawing stations, wing/centreline wheelbase and wing MLG track above; model frame is declared in gear.main_gear_station_frame",
+          "cite": "airbus_ac_a340_2025",
+          "note": "The source drawing frame is geometric nose-tip reference; it is separate from certified WBM/AFM station frames."
+        },
+        {
+          "id": "structures.SOL101_deformation",
+          "category": "structures",
+          "model_path": "structures.sol101",
+          "source_available": false,
+          "evidence": "unavailable",
+          "note": "No public A340 load/measurement reference with matching mass, fuel and configuration."
+        }
+      ]
+    },
+    "A380-800": {
+      "evidence_file": ".agent/validation/A380-800.json",
+      "variant": "A380-800 WV000; engine-specific variant not asserted",
+      "checks": [
+        {
+          "id": "geometry.span_m",
+          "category": "geometry",
+          "model_path": "geometry.span_m",
+          "source_path": "geometry.span_m",
+          "source_value": 79.75,
+          "unit": "m",
+          "evidence": "primary",
+          "condition": "wing span, unloaded wing on ground",
+          "cite": "airbus_ac_a380_2025",
+          "tolerance": "geometry_length"
+        },
+        {
+          "id": "geometry.wing_area_m2",
+          "category": "geometry",
+          "model_path": "geometry.wing_area_m2",
+          "source_path": "geometry.wing_area_m2",
+          "source_value": 845,
+          "unit": "m^2",
+          "evidence": "primary",
+          "condition": "gross reference wing area",
+          "cite": "airbus_a380_facts_figures_2022",
+          "tolerance": "geometry_area"
+        },
+        {
+          "id": "geometry.mac_m",
+          "category": "geometry",
+          "model_path": "geometry.mac_m",
+          "source_available": false,
+          "evidence": "unavailable",
+          "note": "No trustworthy public numeric A380 reference MAC was recovered for the WV000 geometry."
+        },
+        {
+          "id": "geometry.fuselage_length_m",
+          "category": "geometry",
+          "model_path": "geometry.fuselage_length_m",
+          "source_path": "geometry.fuselage_length_m",
+          "source_value": 72.72,
+          "unit": "m",
+          "evidence": "primary",
+          "condition": "overall aircraft length",
+          "cite": "airbus_a380_dimensions_key_data",
+          "tolerance": "geometry_length"
+        },
+        {
+          "id": "geometry.wheelbase_m",
+          "category": "geometry",
+          "model_path": "geometry.wheelbase_m",
+          "source_path": "geometry.wheelbase_m",
+          "source_value": 28.61,
+          "unit": "m",
+          "evidence": "primary",
+          "condition": "nose gear to wing main gear (WLG), Airbus AC 2-2-0",
+          "cite": "airbus_ac_a380_2025",
+          "tolerance": "gear_position"
+        },
+        {
+          "id": "geometry.wheel_track_m",
+          "category": "geometry",
+          "model_path": "geometry.wheel_track_m",
+          "source_path": "geometry.wheel_track_m",
+          "source_value": 14.34,
+          "unit": "m",
+          "evidence": "primary",
+          "condition": "wing landing gear track",
+          "cite": "airbus_a380_dimensions_key_data",
+          "tolerance": "gear_position"
+        },
+        {
+          "id": "geometry.overall_height_m",
+          "category": "geometry",
+          "model_path": "geometry.overall_height_m",
+          "source_path": "geometry.overall_height_m",
+          "source_value": 24.09,
+          "unit": "m",
+          "evidence": "primary",
+          "condition": "top of fin on ground",
+          "cite": "airbus_a380_dimensions_key_data",
+          "tolerance": "geometry_length"
+        },
+        {
+          "id": "mass.mtow_kg",
+          "category": "mass",
+          "model_path": "mass.mtow_kg",
+          "source_path": "mass.mtow_kg",
+          "source_value": 560000,
+          "unit": "kg",
+          "evidence": "primary",
+          "condition": "WV000",
+          "cite": "airbus_ac_a380_2024",
+          "tolerance": "mass_limit"
+        },
+        {
+          "id": "mass.oew_kg",
+          "category": "mass",
+          "model_path": "mass.oew_kg",
+          "source_path": "mass.oew_kg",
+          "source_value": 277000,
+          "unit": "kg",
+          "evidence": "secondary",
+          "condition": "typical 3-class ~500-seat cabin",
+          "cite": "flugzeuginfo_a380",
+          "condition_match": false,
+          "tolerance": "mass_oew"
+        },
+        {
+          "id": "mass.max_payload_kg",
+          "category": "mass",
+          "model_path": "payload_range.max_payload_kg",
+          "source_path": "mass.max_payload_kg",
+          "source_value": 84000,
+          "unit": "kg",
+          "evidence": "estimated",
+          "condition": "MZFW minus typical OEW",
+          "cite": "airbus_ac_a380_2024",
+          "condition_match": false,
+          "tolerance": "mass_limit"
+        },
+        {
+          "id": "mass.usable_fuel_kg",
+          "category": "mass",
+          "model_path": "payload_range.fuel_capacity_kg",
+          "source_path": "mass.usable_fuel_kg",
+          "source_value": 253983,
+          "unit": "kg",
+          "evidence": "primary",
+          "condition": "Airbus AC tank-only usable fuel: 323,546 L at the AC reference density 0.785 kg/L; excludes the 793 L usable systems inventory listed by EASA TCDS",
+          "cite": "airbus_ac_a380_2024",
+          "condition_match": false,
+          "tolerance": "fuel_mass"
+        },
+        {
+          "id": "mass.usable_fuel_l",
+          "category": "mass",
+          "model_path": "payload_range.fuel_capacity_l",
+          "source_path": "mass.usable_fuel_l",
+          "source_value": 323546,
+          "unit": "L",
+          "evidence": "primary",
+          "condition": "Airbus AC tank-only usable fuel: wing and trim tanks; excludes the 793 L usable systems inventory listed by EASA TCDS",
+          "cite": "airbus_ac_a380_2024",
+          "condition_match": false,
+          "tolerance": "fuel_volume"
+        },
+        {
+          "id": "mass.usable_fuel_total_kg_tcds",
+          "category": "mass",
+          "model_path": "payload_range.fuel_capacity_kg",
+          "source_path": "mass.usable_fuel_total_kg_tcds",
+          "source_value": 259471,
+          "unit": "kg",
+          "evidence": "primary",
+          "condition": "EASA TCDS total usable fuel, including 793 L usable systems inventory; 324,339 L at the TCDS 0.800 kg/L convention",
+          "cite": "easa_tcds_a110_a380",
+          "tolerance": "fuel_mass"
+        },
+        {
+          "id": "mass.usable_fuel_total_l_tcds",
+          "category": "mass",
+          "model_path": "payload_range.fuel_capacity_l",
+          "source_path": "mass.usable_fuel_total_l_tcds",
+          "source_value": 324339,
+          "unit": "L",
+          "evidence": "primary",
+          "condition": "EASA TCDS total usable fuel, including wing, trim and 793 L systems inventory",
+          "cite": "easa_tcds_a110_a380",
+          "tolerance": "fuel_volume"
+        },
+        {
+          "id": "aero.cruise_mach",
+          "category": "aero",
+          "model_path": "aerodynamics.cruise_mach",
+          "source_path": "aerodynamics.cruise_mach",
+          "source_value": 0.85,
+          "unit": "1",
+          "evidence": "primary",
+          "condition": "long-range cruise",
+          "cite": "airbus_a380_facts_figures_2022",
+          "tolerance": "mach"
+        },
+        {
+          "id": "aero.max_mach",
+          "category": "aero",
+          "model_path": "aerodynamics.mmo",
+          "source_path": "aerodynamics.mmo",
+          "source_value": 0.89,
+          "unit": "1",
+          "evidence": "primary",
+          "condition": "maximum operating Mach",
+          "cite": "airbus_a380_dimensions_key_data",
+          "tolerance": "mach"
+        },
+        {
+          "id": "aero.max_operating_altitude_m",
+          "category": "aero",
+          "model_path": "aerodynamics.max_operating_altitude_m",
+          "source_path": "aerodynamics.max_operating_altitude_m",
+          "source_value": 13137,
+          "unit": "m",
+          "evidence": "secondary",
+          "condition": "43,100 ft operating limit; TCDS defers to AFM",
+          "cite": "wikipedia_a380",
+          "tolerance": "altitude"
+        },
+        {
+          "id": "aero.l_over_d_cruise",
+          "category": "aero",
+          "model_path": "aerodynamics.l_over_d_cruise",
+          "source_path": "aerodynamics.l_over_d_cruise",
+          "source_value": 20.1,
+          "unit": "1",
+          "evidence": "estimated",
+          "condition": "FL350, M0.85, ISA, 450,000 kg, Poll-Schumann model",
+          "cite": "poll_schumann_2020_part2",
+          "condition_match": false,
+          "tolerance": "performance_ratio"
+        },
+        {
+          "id": "aero.l_over_d_max",
+          "category": "aero",
+          "model_path": "aerodynamics.l_over_d_max_in_sweep",
+          "source_path": "aerodynamics.l_over_d_max",
+          "source_value": 20.8,
+          "unit": "1",
+          "evidence": "estimated",
+          "condition": "FL350, M0.80, ISA, analytical model optimum",
+          "cite": "poll_schumann_2020_part2",
+          "condition_match": false,
+          "tolerance": "performance_ratio"
+        },
+        {
+          "id": "aero.cd0_cruise",
+          "category": "aero",
+          "model_path": "aerodynamics.cd0_cruise",
+          "source_path": "aerodynamics.cd0_cruise",
+          "source_value": 0.0114,
+          "unit": "1",
+          "evidence": "estimated",
+          "condition": "FL350, M0.85, clean zero-lift coefficient",
+          "cite": "poll_schumann_2020_part2",
+          "condition_match": false,
+          "tolerance": "drag_coefficient"
+        },
+        {
+          "id": "aero.oswald_e",
+          "category": "aero",
+          "model_path": "aerodynamics.oswald_e",
+          "source_path": "aerodynamics.oswald_e",
+          "source_value": 0.86,
+          "unit": "1",
+          "evidence": "estimated",
+          "condition": "Poll-Schumann lumped lift-dependent drag factor",
+          "cite": "poll_schumann_2020_part2",
+          "condition_match": false,
+          "tolerance": "performance_ratio"
+        },
+        {
+          "id": "aero.critical_mach",
+          "category": "aero",
+          "model_path": "aerodynamics.critical_mach",
+          "source_path": "aerodynamics.critical_mach",
+          "source_value": 0.745,
+          "unit": "1",
+          "evidence": "estimated",
+          "condition": "CL-dependent Poll-Schumann drag-rise onset, not classical airfoil Mcrit",
+          "cite": "poll_schumann_2020_part2",
+          "condition_match": false,
+          "tolerance": "mach"
+        },
+        {
+          "id": "aero.cl_vs_aoa",
+          "category": "aero",
+          "model_path": "aerodynamics.cruise_polar_cl",
+          "source_available": false,
+          "evidence": "unavailable",
+          "note": "No trustworthy public A380 three-dimensional CL(alpha) curve or lift slope."
+        },
+        {
+          "id": "aero.cruise_aoa",
+          "category": "aero",
+          "model_path": "aerodynamics.cruise_aoa_deg",
+          "source_available": false,
+          "evidence": "unavailable",
+          "note": "No public A380 trimmed cruise angle-of-attack target; the model exports a polar axis but no selected cruise trim angle."
+        },
+        {
+          "id": "performance.payload_range_corners",
+          "category": "mission",
+          "model_path": "payload_range.corners",
+          "source_available": false,
+          "evidence": "unavailable",
+          "note": "Airbus AC curve break points are not numerically recoverable; marketing range is not a payload-range corner."
+        },
+        {
+          "id": "performance.block_fuel",
+          "category": "mission",
+          "model_path": "route.trip_fuel_kg",
+          "source_value": 172500,
+          "unit": "kg",
+          "evidence": "secondary",
+          "condition": "SIN-LHR 6,037 NM tracked, 486-seat 3-class, 90.7 t payload, MTOW 560 t, reserves/taxi as trade study",
+          "cite": "aircraft_commerce_trent_fuel_2012",
+          "condition_match": false,
+          "tolerance": "mission_fuel"
+        },
+        {
+          "id": "performance.service_ceiling_m",
+          "category": "performance",
+          "model_path": "performance.service_ceiling_m",
+          "source_available": false,
+          "evidence": "unavailable",
+          "note": "13,137 m is a maximum operating limit, not a weight-dependent service ceiling."
+        },
+        {
+          "id": "mass.subsystem_masses",
+          "category": "mass",
+          "model_path": "mass.component_masses_kg",
+          "source_available": false,
+          "evidence": "unavailable",
+          "note": "No public exact-variant subsystem mass breakdown."
+        },
+        {
+          "id": "mass.cg_envelope",
+          "category": "mass",
+          "model_path": "cg.planning_envelope",
+          "source_available": false,
+          "evidence": "unavailable",
+          "note": "A380 AFM/WBM CG envelope is not public in numeric form."
+        },
+        {
+          "id": "mass.cruise_cg",
+          "category": "mass",
+          "model_path": "cg.cruise_percent_mac",
+          "source_available": false,
+          "evidence": "unavailable",
+          "note": "No public cruise CG point for WV000."
+        },
+        {
+          "id": "gear.n_nlg_wheels",
+          "category": "gear",
+          "model_path": "gear.n_nlg_wheels",
+          "evidence": "primary",
+          "source_value": 2,
+          "unit": "count",
+          "condition": "Airbus AC 2-9-0 twin nose gear",
+          "cite": "airbus_ac_a380_2025",
+          "tolerance": "gear_count"
+        },
+        {
+          "id": "gear.n_mlg_struts",
+          "category": "gear",
+          "model_path": "gear.n_mlg_struts",
+          "evidence": "primary",
+          "source_value": 4,
+          "unit": "count",
+          "condition": "Airbus AC 2-9-0 two WLG and two BLG units",
+          "cite": "airbus_ac_a380_2025",
+          "tolerance": "gear_count"
+        },
+        {
+          "id": "gear.x_nlg_m",
+          "category": "gear",
+          "model_path": "gear.x_nlg_m",
+          "source_value": 4.97,
+          "unit": "m",
+          "evidence": "primary",
+          "condition": "Airbus AC 2-2-0 drawing station from geometric nose-tip reference to NLG axle",
+          "cite": "airbus_ac_a380_2025",
+          "tolerance": "gear_position"
+        },
+        {
+          "id": "gear.main_gear_x_m",
+          "category": "gear",
+          "model_path": "gear.main_gear_x_m",
+          "source_value": [
+            33.58,
+            33.58,
+            36.85,
+            36.85
+          ],
+          "unit": "m",
+          "evidence": "primary",
+          "condition": "Airbus AC 2-2-0 drawing stations from geometric nose-tip reference; WLG then BLG",
+          "cite": "airbus_ac_a380_2025",
+          "tolerance": "gear_position",
+          "note": "Array order is left WLG, right WLG, left BLG, right BLG; drawing dimensions are rounded to 0.01 m."
+        },
+        {
+          "id": "gear.body_wheelbase_m",
+          "category": "gear",
+          "model_path": "gear.body_wheelbase_m",
+          "source_value": 31.88,
+          "unit": "m",
+          "evidence": "primary",
+          "condition": "NLG axle to BLG; Airbus AC 2-2-0 source definition",
+          "cite": "airbus_ac_a380_2025",
+          "tolerance": "gear_position"
+        },
+        {
+          "id": "gear.mlg_wheels_per_strut",
+          "category": "gear",
+          "model_path": "gear.mlg_wheels_per_strut",
+          "source_value": [
+            4,
+            4,
+            6,
+            6
+          ],
+          "unit": "count",
+          "evidence": "primary",
+          "condition": "Airbus AC 2-9-0 four-wheel WLG and six-wheel BLG bogies",
+          "cite": "airbus_ac_a380_2025",
+          "tolerance": "gear_count",
+          "note": "Array order is left WLG, right WLG, left BLG, right BLG."
+        },
+        {
+          "id": "gear.main_wheels_total",
+          "category": "gear",
+          "model_path": "gear.main_wheels_total",
+          "source_value": 20,
+          "unit": "count",
+          "evidence": "primary",
+          "condition": "Airbus AC 2-9-0 total main wheel count from 4 + 4 + 6 + 6 bogies",
+          "cite": "airbus_ac_a380_2025",
+          "tolerance": "gear_count"
+        },
+        {
+          "id": "gear.position",
+          "category": "gear",
+          "model_path": "gear.positions",
+          "source_kind": "descriptive",
+          "source_available": true,
+          "evidence": "primary",
+          "condition": "NLG-to-WLG wheelbase and wing-gear track above; NLG-to-BLG body wheelbase is reported separately",
+          "cite": "airbus_ac_a380_2025",
+          "note": "The source drawing frame is geometric nose-tip reference; it is separate from certified WBM/AFM station frames."
+        },
+        {
+          "id": "structures.SOL101_deformation",
+          "category": "structures",
+          "model_path": "structures.sol101",
+          "source_available": false,
+          "evidence": "unavailable",
+          "note": "No public A380 load case plus deformation/strain measurement reference with matching configuration."
+        }
+      ]
+    },
+    "ATR72-600": {
+      "evidence_file": ".agent/validation/ATR72-600.json",
+      "variant": "ATR 72-212A / PW127M / 23,000 kg option",
+      "checks": [
+        {
+          "id": "geometry.span_m",
+          "category": "geometry",
+          "model_path": "geometry.span_m",
+          "source_path": "geometry.span_m",
+          "source_value": 27.05,
+          "unit": "m",
+          "evidence": "primary",
+          "condition": "overall wing span",
+          "cite": "atr_factsheet_72600_2020",
+          "tolerance": "geometry_length"
+        },
+        {
+          "id": "geometry.wing_area_m2",
+          "category": "geometry",
+          "model_path": "geometry.wing_area_m2",
+          "source_path": "geometry.wing_area_m2",
+          "source_value": 61,
+          "unit": "m^2",
+          "evidence": "primary",
+          "condition": "ATR published reference wing area",
+          "cite": "atr_factsheet_72600_2020",
+          "tolerance": "geometry_area"
+        },
+        {
+          "id": "geometry.mac_m",
+          "category": "geometry",
+          "model_path": "geometry.mac_m",
+          "source_path": "geometry.mac_m",
+          "source_value": 2.303,
+          "unit": "m",
+          "evidence": "secondary",
+          "condition": "operator/training W&B MAC; low provenance",
+          "cite": "atr72600_wb_training",
+          "tolerance": "geometry_length"
+        },
+        {
+          "id": "geometry.fuselage_length_m",
+          "category": "geometry",
+          "model_path": "geometry.fuselage_length_m",
+          "source_path": "geometry.fuselage_length_m",
+          "source_value": 27.166,
+          "unit": "m",
+          "evidence": "primary",
+          "condition": "overall length",
+          "cite": "atr_factsheet_72600_2020",
+          "tolerance": "geometry_length"
+        },
+        {
+          "id": "geometry.wheelbase_m",
+          "category": "geometry",
+          "model_path": "geometry.wheelbase_m",
+          "source_path": "geometry.wheelbase_m",
+          "source_value": 10.77,
+          "unit": "m",
+          "evidence": "secondary",
+          "condition": "three-view dimension association inferred",
+          "cite": "atr_factsheet_72600_2020",
+          "tolerance": "gear_position"
+        },
+        {
+          "id": "geometry.wheel_track_m",
+          "category": "geometry",
+          "model_path": "geometry.wheel_track_m",
+          "source_path": "geometry.wheel_track_m",
+          "source_value": 4.1,
+          "unit": "m",
+          "evidence": "secondary",
+          "condition": "three-view dimension association inferred",
+          "cite": "atr_factsheet_72600_2020",
+          "tolerance": "gear_position"
+        },
+        {
+          "id": "geometry.overall_height_m",
+          "category": "geometry",
+          "model_path": "geometry.overall_height_m",
+          "source_path": "geometry.overall_height_m",
+          "source_value": 7.65,
+          "unit": "m",
+          "evidence": "primary",
+          "condition": "overall height on ground",
+          "cite": "atr_factsheet_72600_2020",
+          "tolerance": "geometry_length"
+        },
+        {
+          "id": "mass.mtow_kg",
+          "category": "mass",
+          "model_path": "mass.mtow_kg",
+          "source_path": "mass.mtow_kg",
+          "source_value": 23000,
+          "unit": "kg",
+          "evidence": "primary",
+          "condition": "23,000 kg option",
+          "cite": "easa_tcds_a084_i14_2026",
+          "tolerance": "mass_limit"
+        },
+        {
+          "id": "mass.oew_kg",
+          "category": "mass",
+          "model_path": "mass.oew_kg",
+          "source_path": "mass.oew_kg",
+          "source_value": 13450,
+          "unit": "kg",
+          "evidence": "primary",
+          "condition": "typical in-service OEW",
+          "cite": "atr_factsheet_72600_2020",
+          "tolerance": "mass_oew"
+        },
+        {
+          "id": "mass.max_payload_kg",
+          "category": "mass",
+          "model_path": "payload_range.max_payload_kg",
+          "source_path": "mass.max_payload_kg",
+          "source_value": 7550,
+          "unit": "kg",
+          "evidence": "primary",
+          "condition": "MZFW(21,000) minus typical in-service OEW",
+          "cite": "atr_factsheet_72600_2020",
+          "tolerance": "mass_limit"
+        },
+        {
+          "id": "mass.usable_fuel_kg",
+          "category": "mass",
+          "model_path": "payload_range.fuel_capacity_kg",
+          "source_path": "mass.usable_fuel_kg",
+          "source_value": 5000,
+          "unit": "kg",
+          "evidence": "primary",
+          "condition": "normal refuelling; high-level refuelling 5,050 kg",
+          "cite": "easa_tcds_a084_i14_2026",
+          "tolerance": "fuel_mass"
+        },
+        {
+          "id": "mass.usable_fuel_l",
+          "category": "mass",
+          "model_path": "payload_range.fuel_capacity_l",
+          "source_path": "mass.usable_fuel_l",
+          "source_value": 6360,
+          "unit": "L",
+          "evidence": "primary",
+          "condition": "high-level volume corresponding to 5,050 kg",
+          "cite": "easa_tcds_a084_i14_2026",
+          "condition_match": false,
+          "tolerance": "fuel_volume"
+        },
+        {
+          "id": "aero.cruise_mach",
+          "category": "aero",
+          "model_path": "aerodynamics.cruise_mach",
+          "source_path": "aerodynamics.cruise_mach",
+          "source_value": 0.447,
+          "unit": "1",
+          "evidence": "estimated",
+          "condition": "275 KTAS at assumed FL200 ISA",
+          "cite": "atr_datasheet_72600_2012",
+          "condition_match": false,
+          "tolerance": "mach"
+        },
+        {
+          "id": "aero.max_mach",
+          "category": "aero",
+          "model_path": "aerodynamics.mmo",
+          "source_path": "aerodynamics.mmo",
+          "source_value": 0.55,
+          "unit": "1",
+          "evidence": "secondary",
+          "condition": "AFM/FCOM VMO/MMO compilation",
+          "cite": "atr72600_fcom_limitations",
+          "tolerance": "mach"
+        },
+        {
+          "id": "aero.max_operating_altitude_m",
+          "category": "aero",
+          "model_path": "aerodynamics.max_operating_altitude_m",
+          "source_path": "aerodynamics.max_operating_altitude_m",
+          "source_value": 7620,
+          "unit": "m",
+          "evidence": "secondary",
+          "condition": "25,000 ft AFM/FCOM compilation",
+          "cite": "atr72600_fcom_limitations",
+          "tolerance": "altitude"
+        },
+        {
+          "id": "aero.l_over_d_max",
+          "category": "aero",
+          "model_path": "aerodynamics.l_over_d_max_in_sweep",
+          "source_path": "aerodynamics.l_over_d_max",
+          "source_value": 19.71,
+          "unit": "1",
+          "evidence": "secondary",
+          "condition": "academic ATR 72 design study handbook estimate",
+          "cite": "nita_scholz_atr72_2008",
+          "condition_match": false,
+          "tolerance": "performance_ratio"
+        },
+        {
+          "id": "aero.cd0_cruise",
+          "category": "aero",
+          "model_path": "aerodynamics.cd0_cruise",
+          "source_path": "aerodynamics.cd0_cruise",
+          "source_value": 0.0182,
+          "unit": "1",
+          "evidence": "estimated",
+          "condition": "back-derived from study L/Dmax/e; not measured",
+          "cite": "nita_scholz_atr72_2008",
+          "condition_match": false,
+          "tolerance": "drag_coefficient"
+        },
+        {
+          "id": "aero.oswald_e",
+          "category": "aero",
+          "model_path": "aerodynamics.oswald_e",
+          "source_path": "aerodynamics.oswald_e",
+          "source_value": 0.75,
+          "unit": "1",
+          "evidence": "secondary",
+          "condition": "handbook assumption in academic study",
+          "cite": "nita_scholz_atr72_2008",
+          "condition_match": false,
+          "tolerance": "performance_ratio"
+        },
+        {
+          "id": "aero.cl_vs_aoa",
+          "category": "aero",
+          "model_path": "aerodynamics.cruise_polar_cl",
+          "source_available": false,
+          "evidence": "unavailable",
+          "note": "No trustworthy public ATR three-dimensional CL(alpha) curve or lift slope."
+        },
+        {
+          "id": "aero.cruise_aoa",
+          "category": "aero",
+          "model_path": "aerodynamics.cruise_aoa_deg",
+          "source_available": false,
+          "evidence": "unavailable",
+          "note": "No public ATR 72-600 trimmed cruise angle-of-attack target; the model exports a polar axis but no selected cruise trim angle."
+        },
+        {
+          "id": "aero.critical_mach",
+          "category": "aero",
+          "model_path": "aerodynamics.critical_mach",
+          "source_available": false,
+          "evidence": "unavailable",
+          "note": "No critical Mach source; MMO is far below transonic drag-rise conditions."
+        },
+        {
+          "id": "performance.payload_range_corners",
+          "category": "mission",
+          "model_path": "payload_range.corners",
+          "source_available": false,
+          "evidence": "unavailable",
+          "note": "825 NM/758 NM marketing points lack payload, reserve and profile definitions and cannot be used as corners."
+        },
+        {
+          "id": "performance.block_fuel",
+          "category": "mission",
+          "model_path": "route.trip_fuel_kg",
+          "source_value": 859,
+          "unit": "kg",
+          "evidence": "primary",
+          "condition": "300 NM stage, 78.5 min block, ATR 2012 datasheet conditions incomplete",
+          "cite": "atr_datasheet_72600_2012",
+          "condition_match": false,
+          "tolerance": "mission_fuel"
+        },
+        {
+          "id": "performance.service_ceiling_m",
+          "category": "performance",
+          "model_path": "performance.service_ceiling_m",
+          "source_available": false,
+          "evidence": "unavailable",
+          "note": "25,000 ft source is an operating limit; the ATR factsheet also gives a distinct 10,000 ft OEI ceiling."
+        },
+        {
+          "id": "mass.subsystem_masses",
+          "category": "mass",
+          "model_path": "mass.component_masses_kg",
+          "source_available": false,
+          "evidence": "unavailable",
+          "note": "No public exact-variant subsystem mass breakdown."
+        },
+        {
+          "id": "mass.cg_envelope",
+          "category": "mass",
+          "model_path": "cg.planning_envelope",
+          "source_available": false,
+          "evidence": "unavailable",
+          "note": "ATR AFM/WBM CG envelope not obtained; the training lead is not verified."
+        },
+        {
+          "id": "mass.cruise_cg",
+          "category": "mass",
+          "model_path": "cg.cruise_percent_mac",
+          "source_available": false,
+          "evidence": "unavailable",
+          "note": "No public cruise CG point."
+        },
+        {
+          "id": "gear.n_nlg_wheels",
+          "category": "gear",
+          "model_path": "gear.n_nlg_wheels",
+          "source_available": false,
+          "evidence": "unavailable",
+          "note": "The public factsheet dimensions do not independently establish wheel topology."
+        },
+        {
+          "id": "gear.n_mlg_struts",
+          "category": "gear",
+          "model_path": "gear.n_mlg_struts",
+          "source_available": false,
+          "evidence": "unavailable",
+          "note": "The public factsheet dimensions do not independently establish wheel topology."
+        },
+        {
+          "id": "gear.position",
+          "category": "gear",
+          "model_path": "gear.positions",
+          "source_kind": "descriptive",
+          "source_available": true,
+          "evidence": "secondary",
+          "condition": "wheelbase and track above; dimension labels require source PDF review",
+          "cite": "atr_factsheet_72600_2020"
+        },
+        {
+          "id": "structures.SOL101_deformation",
+          "category": "structures",
+          "model_path": "structures.sol101",
+          "source_available": false,
+          "evidence": "unavailable",
+          "note": "No public ATR load case plus deformation/strain measurement reference with matching configuration."
+        }
+      ]
+    },
+    "B787-9": {
+      "evidence_file": ".agent/validation/B787-9.json",
+      "variant": "legacy 787-9 / GEnx-1B family / 254,692 kg MTOW",
+      "checks": [
+        {
+          "id": "geometry.span_m",
+          "category": "geometry",
+          "model_path": "geometry.span_m",
+          "source_path": "geometry.span_m",
+          "source_value": 60.1218,
+          "unit": "m",
+          "evidence": "primary",
+          "condition": "tip-to-tip including raked wingtips",
+          "cite": "easa_tcds_ima115_i30_2025",
+          "tolerance": "geometry_length"
+        },
+        {
+          "id": "geometry.wing_area_m2",
+          "category": "geometry",
+          "model_path": "geometry.wing_area_m2",
+          "source_path": "geometry.wing_area_m2",
+          "source_value": 377,
+          "unit": "m^2",
+          "evidence": "secondary",
+          "condition": "OpenAP/B789 gross reference area convention; Boeing does not publish a numeric area",
+          "cite": "openap_2020",
+          "tolerance": "geometry_area"
+        },
+        {
+          "id": "geometry.mac_m",
+          "category": "geometry",
+          "model_path": "geometry.mac_m",
+          "source_path": "geometry.mac_m",
+          "source_value": 6.27126,
+          "unit": "m",
+          "evidence": "primary",
+          "condition": "certified reference MAC",
+          "cite": "easa_tcds_ima115_i30_2025",
+          "tolerance": "geometry_length"
+        },
+        {
+          "id": "geometry.fuselage_length_m",
+          "category": "geometry",
+          "model_path": "geometry.fuselage_length_m",
+          "source_path": "geometry.fuselage_length_m",
+          "source_value": 62.81,
+          "unit": "m",
+          "evidence": "primary",
+          "condition": "overall length, not fuselage shell length",
+          "cite": "boeing_787_techspecs_2026",
+          "tolerance": "geometry_length"
+        },
+        {
+          "id": "geometry.wheelbase_m",
+          "category": "geometry",
+          "model_path": "geometry.wheelbase_m",
+          "source_path": "geometry.wheelbase_m",
+          "source_value": 25.83,
+          "unit": "m",
+          "evidence": "secondary",
+          "condition": "aggregator value; ACAP raster requires re-check",
+          "cite": "flugzeuginfo_b7879",
+          "tolerance": "gear_position"
+        },
+        {
+          "id": "geometry.wheel_track_m",
+          "category": "geometry",
+          "model_path": "geometry.wheel_track_m",
+          "source_path": "geometry.wheel_track_m",
+          "source_value": 9.8,
+          "unit": "m",
+          "evidence": "secondary",
+          "condition": "aggregator value; ACAP raster requires re-check",
+          "cite": "flugzeuginfo_b7879",
+          "tolerance": "gear_position"
+        },
+        {
+          "id": "geometry.overall_height_m",
+          "category": "geometry",
+          "model_path": "geometry.overall_height_m",
+          "source_path": "geometry.overall_height_m",
+          "source_value": 17,
+          "unit": "m",
+          "evidence": "primary",
+          "condition": "top of fin",
+          "cite": "boeing_787_techspecs_2026",
+          "tolerance": "geometry_length"
+        },
+        {
+          "id": "mass.mtow_kg",
+          "category": "mass",
+          "model_path": "mass.mtow_kg",
+          "source_path": "mass.mtow_kg",
+          "source_value": 254692,
+          "unit": "kg",
+          "evidence": "primary",
+          "condition": "legacy 561,500 lb 787-9",
+          "cite": "boeing_acap787_revq_2025",
+          "tolerance": "mass_limit"
+        },
+        {
+          "id": "mass.oew_kg",
+          "category": "mass",
+          "model_path": "mass.oew_kg",
+          "source_path": "mass.oew_kg",
+          "source_value": 128850,
+          "unit": "kg",
+          "evidence": "secondary",
+          "condition": "typical 2-class OEW from superseded ACAP revision",
+          "cite": "boeing_acap787_revl_2015",
+          "condition_match": false,
+          "tolerance": "mass_oew"
+        },
+        {
+          "id": "mass.max_payload_kg",
+          "category": "mass",
+          "model_path": "payload_range.max_payload_kg",
+          "source_path": "mass.max_payload_kg",
+          "source_value": 52586,
+          "unit": "kg",
+          "evidence": "estimated",
+          "condition": "MZFW minus typical OEW",
+          "cite": "boeing_acap787_revq_2025",
+          "condition_match": false,
+          "tolerance": "mass_limit"
+        },
+        {
+          "id": "mass.usable_fuel_kg",
+          "category": "mass",
+          "model_path": "payload_range.fuel_capacity_kg",
+          "source_path": "mass.usable_fuel_kg",
+          "source_value": 101522,
+          "unit": "kg",
+          "evidence": "primary",
+          "condition": "standard tank configuration",
+          "cite": "boeing_acap787_revq_2025",
+          "tolerance": "fuel_mass"
+        },
+        {
+          "id": "mass.usable_fuel_l",
+          "category": "mass",
+          "model_path": "payload_range.fuel_capacity_l",
+          "source_path": "mass.usable_fuel_l",
+          "source_value": 126429,
+          "unit": "L",
+          "evidence": "primary",
+          "condition": "33,399 US gal standard tank configuration",
+          "cite": "boeing_acap787_revq_2025",
+          "tolerance": "fuel_volume"
+        },
+        {
+          "id": "aero.cruise_mach",
+          "category": "aero",
+          "model_path": "aerodynamics.cruise_mach",
+          "source_path": "aerodynamics.cruise_mach",
+          "source_value": 0.85,
+          "unit": "1",
+          "evidence": "secondary",
+          "condition": "typical/design long-range cruise",
+          "cite": "lissys_piano787_2005",
+          "tolerance": "mach"
+        },
+        {
+          "id": "aero.max_mach",
+          "category": "aero",
+          "model_path": "aerodynamics.mmo",
+          "source_path": "aerodynamics.mmo",
+          "source_value": 0.9,
+          "unit": "1",
+          "evidence": "primary",
+          "condition": "certificated MMO",
+          "cite": "easa_tcds_ima115_i30_2025",
+          "tolerance": "mach"
+        },
+        {
+          "id": "aero.max_operating_altitude_m",
+          "category": "aero",
+          "model_path": "aerodynamics.max_operating_altitude_m",
+          "source_path": "aerodynamics.max_operating_altitude_m",
+          "source_value": 13137,
+          "unit": "m",
+          "evidence": "primary",
+          "condition": "43,100 ft certificated maximum operating altitude",
+          "cite": "easa_tcds_ima115_i30_2025",
+          "tolerance": "altitude"
+        },
+        {
+          "id": "aero.l_over_d_cruise",
+          "category": "aero",
+          "model_path": "aerodynamics.l_over_d_cruise",
+          "source_path": "aerodynamics.l_over_d_cruise",
+          "source_value": 20.8,
+          "unit": "1",
+          "evidence": "secondary",
+          "condition": "787-8 Piano model, M0.85, CL0.50, FL370",
+          "cite": "lissys_piano787_2005",
+          "condition_match": false,
+          "tolerance": "performance_ratio"
+        },
+        {
+          "id": "aero.l_over_d_max",
+          "category": "aero",
+          "model_path": "aerodynamics.l_over_d_max_in_sweep",
+          "source_available": false,
+          "evidence": "unavailable",
+          "note": "Source table does not provide an unconstrained L/D maximum for the 787-9."
+        },
+        {
+          "id": "aero.cd0_cruise",
+          "category": "aero",
+          "model_path": "aerodynamics.cd0_cruise",
+          "source_path": "aerodynamics.cd0_cruise",
+          "source_value": 0.01279,
+          "unit": "1",
+          "evidence": "secondary",
+          "condition": "787-8 Piano model, M0.85, CL0.50, Boeing-Wimpress area",
+          "cite": "lissys_piano787_2005",
+          "condition_match": false,
+          "tolerance": "drag_coefficient"
+        },
+        {
+          "id": "aero.oswald_e",
+          "category": "aero",
+          "model_path": "aerodynamics.oswald_e",
+          "source_path": "aerodynamics.oswald_e",
+          "source_value": 0.84,
+          "unit": "1",
+          "evidence": "estimated",
+          "condition": "787-8 Piano lift-dependent drag breakdown",
+          "cite": "lissys_piano787_2005",
+          "condition_match": false,
+          "tolerance": "performance_ratio"
+        },
+        {
+          "id": "aero.cl_alpha_per_rad",
+          "category": "aero",
+          "model_path": "aerodynamics.cl_alpha_per_rad",
+          "source_path": "aerodynamics.cl_alpha_per_rad",
+          "source_value": 6.26,
+          "unit": "1/rad",
+          "evidence": "estimated",
+          "condition": "rigid wing-only DATCOM/Helmbold estimate at M0.85",
+          "cite": "openap_2020",
+          "condition_match": false,
+          "tolerance": "lift_curve_slope"
+        },
+        {
+          "id": "aero.critical_mach",
+          "category": "aero",
+          "model_path": "aerodynamics.critical_mach",
+          "source_available": false,
+          "evidence": "unavailable",
+          "note": "Piano divergence/buffet Mach values are not classical Mcrit and are not substituted."
+        },
+        {
+          "id": "aero.cl_vs_aoa",
+          "category": "aero",
+          "model_path": "aerodynamics.cruise_polar_cl",
+          "source_available": false,
+          "evidence": "unavailable",
+          "note": "No trustworthy public 787-9 three-dimensional CL(alpha) curve."
+        },
+        {
+          "id": "aero.cruise_aoa",
+          "category": "aero",
+          "model_path": "aerodynamics.cruise_aoa_deg",
+          "source_available": false,
+          "evidence": "unavailable",
+          "note": "No public 787-9 trimmed cruise angle-of-attack target; the model exports a polar axis but no selected cruise trim angle."
+        },
+        {
+          "id": "performance.payload_range_corners",
+          "category": "mission",
+          "model_path": "payload_range.corners",
+          "source_available": false,
+          "evidence": "unavailable",
+          "note": "Boeing ACAP payload/range curve is raster and numerical corner/reserve data were not recoverable."
+        },
+        {
+          "id": "performance.block_fuel",
+          "category": "mission",
+          "model_path": "route.trip_fuel_kg",
+          "source_available": false,
+          "evidence": "unavailable",
+          "note": "Boeing publishes no complete block-fuel point; ICAO CO2 data is the future preferred source."
+        },
+        {
+          "id": "performance.service_ceiling_m",
+          "category": "performance",
+          "model_path": "performance.service_ceiling_m",
+          "source_available": false,
+          "evidence": "unavailable",
+          "note": "13,137 m is a certified operating limit, not a weight-dependent performance ceiling."
+        },
+        {
+          "id": "mass.subsystem_masses",
+          "category": "mass",
+          "model_path": "mass.component_masses_kg",
+          "source_available": false,
+          "evidence": "unavailable",
+          "note": "No public exact-variant subsystem mass breakdown."
+        },
+        {
+          "id": "mass.cg_envelope",
+          "category": "mass",
+          "model_path": "cg.planning_envelope",
+          "source_available": false,
+          "evidence": "unavailable",
+          "note": "787 AFM/WBM CG envelope is not public in numeric form."
+        },
+        {
+          "id": "mass.cruise_cg",
+          "category": "mass",
+          "model_path": "cg.cruise_percent_mac",
+          "source_available": false,
+          "evidence": "unavailable",
+          "note": "No public cruise CG point."
+        },
+        {
+          "id": "gear.n_nlg_wheels",
+          "category": "gear",
+          "model_path": "gear.n_nlg_wheels",
+          "source_available": false,
+          "evidence": "unavailable",
+          "note": "ACAP gear figures are raster; secondary count was not accepted as an independent fixture."
+        },
+        {
+          "id": "gear.n_mlg_struts",
+          "category": "gear",
+          "model_path": "gear.n_mlg_struts",
+          "source_available": false,
+          "evidence": "unavailable",
+          "note": "ACAP gear figures are raster; secondary count was not accepted as an independent fixture."
+        },
+        {
+          "id": "gear.position",
+          "category": "gear",
+          "model_path": "gear.positions",
+          "source_kind": "descriptive",
+          "source_available": true,
+          "evidence": "secondary",
+          "condition": "wheelbase and track are low-confidence ACAP/aggregator values",
+          "cite": "flugzeuginfo_b7879"
+        },
+        {
+          "id": "structures.SOL101_deformation",
+          "category": "structures",
+          "model_path": "structures.sol101",
+          "source_available": false,
+          "evidence": "unavailable",
+          "note": "No public 787-9 load case plus deformation/strain measurement reference."
+        }
+      ]
+    },
+    "DC-10": {
+      "evidence_file": ".agent/validation/DC-10.json",
+      "variant": "DC-10-30 high-gross-weight option / CF6-50",
+      "checks": [
+        {
+          "id": "geometry.span_m",
+          "category": "geometry",
+          "model_path": "geometry.span_m",
+          "source_path": "geometry.span_m",
+          "source_value": 50.39,
+          "unit": "m",
+          "evidence": "primary",
+          "condition": "Series 30/40 wing span; EASA rounds to 50.4 m",
+          "cite": "easa_tcds_ima210_2024",
+          "tolerance": "geometry_length"
+        },
+        {
+          "id": "geometry.wing_area_m2",
+          "category": "geometry",
+          "model_path": "geometry.wing_area_m2",
+          "source_path": "geometry.wing_area_m2",
+          "source_value": 338.8,
+          "unit": "m^2",
+          "evidence": "primary",
+          "condition": "trapezoidal reference area, not gross Yehudi area",
+          "cite": "easa_tcds_ima210_2024",
+          "tolerance": "geometry_area"
+        },
+        {
+          "id": "geometry.mac_m",
+          "category": "geometry",
+          "model_path": "geometry.mac_m",
+          "source_path": "geometry.mac_m",
+          "source_value": 7.51,
+          "unit": "m",
+          "evidence": "estimated",
+          "condition": "NASA scaled Series 30/40 trapezoidal wing MAC",
+          "cite": "nasa_cr3119_gilkey_1979",
+          "tolerance": "geometry_length"
+        },
+        {
+          "id": "geometry.fuselage_length_m",
+          "category": "geometry",
+          "model_path": "geometry.fuselage_length_m",
+          "source_path": "geometry.fuselage_length_m",
+          "source_value": 55.35,
+          "unit": "m",
+          "evidence": "primary",
+          "condition": "overall aircraft length",
+          "cite": "easa_tcds_ima210_2024",
+          "tolerance": "geometry_length"
+        },
+        {
+          "id": "geometry.wheelbase_m",
+          "category": "geometry",
+          "model_path": "geometry.wheelbase_m",
+          "source_path": "geometry.wheelbase_m",
+          "source_value": 22.07,
+          "unit": "m",
+          "evidence": "secondary",
+          "condition": "DC-10-30 NLG to MLG centroid; gear definition needs confirmation",
+          "cite": "wikipedia_dc10",
+          "tolerance": "gear_position"
+        },
+        {
+          "id": "mass.mtow_kg",
+          "category": "mass",
+          "model_path": "mass.mtow_kg",
+          "source_path": "mass.mtow_kg",
+          "source_value": 259455,
+          "unit": "kg",
+          "evidence": "secondary",
+          "condition": "572,000 lb high-gross-weight option",
+          "cite": "dhl_dc10_dimensions",
+          "tolerance": "mass_limit"
+        },
+        {
+          "id": "mass.oew_kg",
+          "category": "mass",
+          "model_path": "mass.oew_kg",
+          "source_path": "mass.oew_kg",
+          "source_value": 121904,
+          "unit": "kg",
+          "evidence": "primary",
+          "condition": "passenger Series 30 ACAP OWE; standard 555,000 lb table variant",
+          "cite": "boeing_acap_dc10_2004",
+          "condition_match": false,
+          "tolerance": "mass_oew"
+        },
+        {
+          "id": "mass.max_payload_kg",
+          "category": "mass",
+          "model_path": "payload_range.max_payload_kg",
+          "source_path": "mass.max_payload_kg",
+          "source_value": 55451,
+          "unit": "kg",
+          "evidence": "primary",
+          "condition": "passenger Series 30 standard ACAP MZFW/OEW pair",
+          "cite": "boeing_acap_dc10_2004",
+          "condition_match": false,
+          "tolerance": "mass_limit"
+        },
+        {
+          "id": "mass.usable_fuel_kg",
+          "category": "mass",
+          "model_path": "payload_range.fuel_capacity_kg",
+          "source_path": "mass.usable_fuel_kg",
+          "source_value": 110007,
+          "unit": "kg",
+          "evidence": "estimated",
+          "condition": "137,509 L at assumed 0.800 kg/L",
+          "cite": "boeing_acap_dc10_2004",
+          "condition_match": false,
+          "tolerance": "fuel_mass"
+        },
+        {
+          "id": "mass.usable_fuel_l",
+          "category": "mass",
+          "model_path": "payload_range.fuel_capacity_l",
+          "source_path": "mass.usable_fuel_l",
+          "source_value": 137509,
+          "unit": "L",
+          "evidence": "primary",
+          "condition": "36,652 US gal usable fuel",
+          "cite": "boeing_acap_dc10_2004",
+          "tolerance": "fuel_volume"
+        },
+        {
+          "id": "aero.cruise_mach",
+          "category": "aero",
+          "model_path": "aerodynamics.cruise_mach",
+          "source_path": "aerodynamics.cruise_mach",
+          "source_value": 0.82,
+          "unit": "1",
+          "evidence": "primary",
+          "condition": "design cruise Mach in NASA winglet work",
+          "cite": "nasa_cr3677_winglets_1984",
+          "tolerance": "mach"
+        },
+        {
+          "id": "aero.max_mach",
+          "category": "aero",
+          "model_path": "aerodynamics.mmo",
+          "source_path": "aerodynamics.mmo",
+          "source_value": 0.88,
+          "unit": "1",
+          "evidence": "secondary",
+          "condition": "maximum operating Mach; confirm against FAA TCDS/AFM",
+          "cite": "wikipedia_dc10",
+          "tolerance": "mach"
+        },
+        {
+          "id": "aero.max_operating_altitude_m",
+          "category": "aero",
+          "model_path": "aerodynamics.max_operating_altitude_m",
+          "source_path": "aerodynamics.max_operating_altitude_m",
+          "source_value": 12497,
+          "unit": "m",
+          "evidence": "secondary",
+          "condition": "FL410 EUROCONTROL performance entry",
+          "cite": "eurocontrol_apd_dc10",
+          "tolerance": "altitude"
+        },
+        {
+          "id": "aero.cruise_cl",
+          "category": "aero",
+          "model_path": "aerodynamics.cl_cruise",
+          "source_path": "aerodynamics.cruise_cl",
+          "source_value": 0.5,
+          "unit": "1",
+          "evidence": "primary",
+          "condition": "NASA DC-10 cruise design point at M0.82",
+          "cite": "nasa_cr3677_winglets_1984",
+          "condition_match": false,
+          "tolerance": "performance_ratio"
+        },
+        {
+          "id": "aero.cl_vs_aoa",
+          "category": "aero",
+          "model_path": "aerodynamics.cruise_polar_cl",
+          "source_available": false,
+          "evidence": "unavailable",
+          "note": "NASA reports provide incremental drag only; no public DC-10 CL(alpha) curve."
+        },
+        {
+          "id": "aero.cruise_aoa",
+          "category": "aero",
+          "model_path": "aerodynamics.cruise_aoa_deg",
+          "source_available": false,
+          "evidence": "unavailable",
+          "note": "No public DC-10 trimmed cruise angle-of-attack target; the model exports a polar axis but no selected cruise trim angle."
+        },
+        {
+          "id": "aero.l_over_d_cruise",
+          "category": "aero",
+          "model_path": "aerodynamics.l_over_d_cruise",
+          "source_available": false,
+          "evidence": "unavailable",
+          "note": "No absolute DC-10 drag polar or L/D source found."
+        },
+        {
+          "id": "aero.l_over_d_max",
+          "category": "aero",
+          "model_path": "aerodynamics.l_over_d_max_in_sweep",
+          "source_available": false,
+          "evidence": "unavailable",
+          "note": "No absolute DC-10 drag polar or L/D source found."
+        },
+        {
+          "id": "aero.cd0_cruise",
+          "category": "aero",
+          "model_path": "aerodynamics.cd0_cruise",
+          "source_available": false,
+          "evidence": "unavailable",
+          "note": "NASA reports publish increments, not absolute CD0."
+        },
+        {
+          "id": "aero.oswald_e",
+          "category": "aero",
+          "model_path": "aerodynamics.oswald_e",
+          "source_available": false,
+          "evidence": "unavailable",
+          "note": "No absolute DC-10 induced-drag factor source found."
+        },
+        {
+          "id": "aero.critical_mach",
+          "category": "aero",
+          "model_path": "aerodynamics.critical_mach",
+          "source_available": false,
+          "evidence": "unavailable",
+          "note": "No critical Mach source found."
+        },
+        {
+          "id": "performance.payload_range_corners",
+          "category": "mission",
+          "model_path": "payload_range.corners",
+          "source_available": false,
+          "evidence": "unavailable",
+          "note": "DC-10 ACAP payload/range curves were not numerically recoverable and secondary range claims lack payload/reserve definitions."
+        },
+        {
+          "id": "performance.block_fuel",
+          "category": "mission",
+          "model_path": "route.trip_fuel_kg",
+          "source_available": false,
+          "evidence": "unavailable",
+          "note": "No complete public DC-10 block-fuel point with route and reserve conditions."
+        },
+        {
+          "id": "performance.service_ceiling_m",
+          "category": "performance",
+          "model_path": "performance.service_ceiling_m",
+          "source_available": false,
+          "evidence": "unavailable",
+          "note": "42,000 ft/FL410 claims are operating-limit or agency-summary values, not a weight-dependent service ceiling."
+        },
+        {
+          "id": "mass.subsystem_masses",
+          "category": "mass",
+          "model_path": "mass.component_masses_kg",
+          "source_available": false,
+          "evidence": "unavailable",
+          "note": "No public exact-variant subsystem mass breakdown."
+        },
+        {
+          "id": "mass.cg_envelope",
+          "category": "mass",
+          "model_path": "cg.planning_envelope",
+          "source_available": false,
+          "evidence": "unavailable",
+          "note": "FAA TCDS/AFM CG data were not obtained."
+        },
+        {
+          "id": "mass.cruise_cg",
+          "category": "mass",
+          "model_path": "cg.cruise_percent_mac",
+          "source_available": false,
+          "evidence": "unavailable",
+          "note": "No public cruise CG point."
+        },
+        {
+          "id": "gear.n_nlg_wheels",
+          "category": "gear",
+          "model_path": "gear.n_nlg_wheels",
+          "source_available": false,
+          "evidence": "unavailable",
+          "note": "Public TCDS defers gear arrangement; DC-10-30 includes a centreline main gear variant detail."
+        },
+        {
+          "id": "gear.n_mlg_struts",
+          "category": "gear",
+          "model_path": "gear.n_mlg_struts",
+          "source_available": false,
+          "evidence": "unavailable",
+          "note": "Public TCDS defers gear arrangement; DC-10-30 includes a centreline main gear variant detail."
+        },
+        {
+          "id": "gear.position",
+          "category": "gear",
+          "model_path": "gear.positions",
+          "source_available": false,
+          "evidence": "unavailable",
+          "note": "Wheelbase source is secondary and not enough to establish all gear positions."
+        },
+        {
+          "id": "structures.SOL101_deformation",
+          "category": "structures",
+          "model_path": "structures.sol101",
+          "source_available": false,
+          "evidence": "unavailable",
+          "note": "No public DC-10 load case plus deformation/strain measurement reference with matching configuration."
+        }
+      ]
+    }
+  }
+}

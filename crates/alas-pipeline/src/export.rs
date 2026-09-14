@@ -77,13 +77,36 @@ pub fn report_to_database(report: &AnalysisReport, config: &AlasConfig) -> Desig
 
     let weights = serde_json::json!({
         "mtow_kg": req.mtow_kg,
-        "systems_mass_method": config.mass_model.systems_mass_method,
-        "systems_mass_status": match config.mass_model.systems_mass_method {
-            alas_config::SystemsMassMethod::ReferenceCompatibleFractions => {
-                "compatibility_only"
-            }
-            alas_config::SystemsMassMethod::FlopsTransportV1 => "verified_architecture",
+        "mtow_limit_kg": report
+            .geometry_summary
+            .get("analysis_mtow_limit_kg")
+            .copied()
+            .unwrap_or(req.mtow_kg),
+        "analysis_mass_basis_kg": report
+            .geometry_summary
+            .get("analysis_mass_basis_kg")
+            .copied()
+            .unwrap_or(req.mtow_kg),
+        "analysis_mass_basis": if report
+            .geometry_summary
+            .get("analysis_mass_basis_is_sized")
+            .is_some_and(|value| *value > 0.5)
+        {
+            "mission_sized_finalist"
+        } else {
+            "configured_mtow"
         },
+        "mass_architecture": config.mass_model.mass_architecture.as_str(),
+        "systems_mass_method": config.mass_model.systems_mass_method,
+        "systems_mass_status": if config.mass_model.mass_architecture.is_pure_flops() {
+            "verified_architecture"
+        } else {
+            "compatibility_only"
+        },
+        "flops_mass_buildup": report
+            .flops_mass_buildup
+            .as_deref()
+            .map(flops_mass_buildup_to_json),
         "physical_cg_m": report.physical_cg,
         "component_masses_kg": report.component_masses,
         "mass_coordinates_m": report.mass_coordinates,
@@ -98,6 +121,93 @@ pub fn report_to_database(report: &AnalysisReport, config: &AlasConfig) -> Desig
         feasibility: serde_json::Value::Null,
         cpacs: None,
     }
+}
+
+/// Export the grouped FLOPS result that produced the report's lumped slots.
+///
+/// The equation inputs and airframe breakdown are intentionally kept as
+/// separate objects: the former records the resolved SI quantities and the
+/// latter records the ownership boundary used by the ledger.  Provenance is
+/// copied verbatim from the completed evaluation so a user-declared scenario
+/// cannot be mistaken for source-backed aircraft data downstream.
+fn flops_mass_buildup_to_json(
+    buildup: &alas_mass::breakdown::FlopsMassBuildup,
+) -> serde_json::Value {
+    let systems = &buildup.systems_and_operating_items.systems;
+    let operating = &buildup.systems_and_operating_items.operating_items;
+    let airframe = &buildup.airframe;
+    serde_json::json!({
+        "provenance": &*buildup.provenance,
+        "inputs": {
+            "maximum_mach": buildup.inputs.maximum_mach,
+            "design_range_nmi": buildup.inputs.design_range_nmi,
+            "design_gross_mass_kg": buildup.inputs.design_gross_mass_kg,
+            "wing_area_m2": buildup.inputs.wing_area_m2,
+            "movable_surface_area_m2": buildup.inputs.movable_surface_area_m2,
+            "wing_span_m": buildup.inputs.wing_span_m,
+            "quarter_chord_sweep_deg": buildup.inputs.quarter_chord_sweep_deg,
+            "fuselage_length_m": buildup.inputs.fuselage_length_m,
+            "fuselage_width_m": buildup.inputs.fuselage_width_m,
+            "fuselage_depth_m": buildup.inputs.fuselage_depth_m,
+            "fuselage_count": buildup.inputs.fuselage_count,
+            "passenger_compartment_length_m": buildup.inputs.passenger_compartment_length_m,
+            "first_class_passenger_count": buildup.inputs.first_class_passenger_count,
+            "business_class_passenger_count": buildup.inputs.business_class_passenger_count,
+            "tourist_class_passenger_count": buildup.inputs.tourist_class_passenger_count,
+            "flight_crew_count": buildup.inputs.flight_crew_count,
+            "flight_attendant_count": buildup.inputs.flight_attendant_count,
+            "galley_crew_count": buildup.inputs.galley_crew_count,
+            "wing_mounted_engine_count": buildup.inputs.wing_mounted_engine_count,
+            "fuselage_mounted_engine_count": buildup.inputs.fuselage_mounted_engine_count,
+            "engine_count": buildup.inputs.engine_count,
+            "rated_thrust_per_engine_n": buildup.inputs.rated_thrust_per_engine_n,
+            "nacelle_diameter_m": buildup.inputs.nacelle_diameter_m,
+            "hydraulic_pressure_pa": buildup.inputs.hydraulic_pressure_pa,
+            "variable_sweep_penalty": buildup.inputs.variable_sweep_penalty,
+            "maximum_fuel_capacity_kg": buildup.inputs.maximum_fuel_capacity_kg,
+            "fuel_tank_count": buildup.inputs.fuel_tank_count,
+            "containerized_cargo_kg": buildup.inputs.containerized_cargo_kg,
+        },
+        "systems_kg": {
+            "surface_controls": systems.surface_controls_kg,
+            "apu": systems.apu_kg,
+            "instruments": systems.instruments_kg,
+            "hydraulics": systems.hydraulics_kg,
+            "electrical": systems.electrical_kg,
+            "avionics": systems.avionics_kg,
+            "furnishings": systems.furnishings_kg,
+            "air_conditioning": systems.air_conditioning_kg,
+            "anti_ice": systems.anti_ice_kg,
+            "total": systems.total_kg,
+        },
+        "operating_items_kg": {
+            "cabin_crew_and_baggage": operating.cabin_crew_and_baggage_kg,
+            "flight_crew_and_baggage": operating.flight_crew_and_baggage_kg,
+            "unusable_fuel": operating.unusable_fuel_kg,
+            "engine_oil": operating.engine_oil_kg,
+            "passenger_service": operating.passenger_service_kg,
+            "cargo_containers": operating.cargo_containers_kg,
+            "total": operating.total_kg,
+        },
+        "airframe_ownership": {
+            "nacelle_kg": airframe.structure.as_ref().map(|group| group.nacelle_kg),
+            "propulsion_without_nacelles_kg": airframe.propulsion.as_ref().map(|group| group.total_kg),
+            "nacelles_owned_by": "propulsion",
+            "nacelles_counted_once": true,
+        },
+        "component_masses_kg": {
+            "Wing": buildup.masses.wing,
+            "H-Stab": buildup.masses.h_stab,
+            "V-Stab": buildup.masses.v_stab,
+            "Fuselage": buildup.masses.fuselage,
+            "Gear": buildup.masses.gear,
+            "Propulsion": buildup.masses.propulsion,
+            "Systems": buildup.masses.systems,
+            "Furnishings": buildup.masses.furnishings,
+            "Payload": buildup.masses.payload,
+            "Fuel": buildup.masses.fuel,
+        },
+    })
 }
 
 /// Add the load-case evidence that is unavailable until mission evaluation completes.
@@ -407,22 +517,28 @@ pub fn format_summary(report: &AnalysisReport, config: Option<&AlasConfig>) -> S
             cfg.requirements.mtow_kg
         ));
     }
+    if let Some(mass_basis) = g.get("analysis_mass_basis_kg") {
+        lines.push(format!(
+            "  Analysis mass    : {:>10.0} kg (mission-sized finalist)",
+            mass_basis
+        ));
+    }
+    let system_method = config.map(|cfg| cfg.mass_model.systems_mass_method);
+    let system_status = config
+        .map(|cfg| {
+            if cfg.mass_model.mass_architecture.is_pure_flops() {
+                "FLOPS architecture"
+            } else {
+                "compatibility-only fractions"
+            }
+        })
+        .unwrap_or("mass architecture unavailable");
     lines.extend([
         format!("  MTOW (computed)  : {:>10.0} kg", m_total),
         format!("  OEW              : {:>10.0} kg", m_oew),
         format!(
             "  Systems mass     : {:?} ({})",
-            config
-                .map(|cfg| cfg.mass_model.systems_mass_method)
-                .unwrap_or(alas_config::SystemsMassMethod::ReferenceCompatibleFractions),
-            config
-                .map(|cfg| match cfg.mass_model.systems_mass_method {
-                    alas_config::SystemsMassMethod::ReferenceCompatibleFractions => {
-                        "compatibility-only fractions"
-                    }
-                    alas_config::SystemsMassMethod::FlopsTransportV1 => "FLOPS architecture",
-                })
-                .unwrap_or("compatibility-only fractions")
+            system_method, system_status
         ),
         format!(
             "  Payload          : {:>10.0} kg",
@@ -537,6 +653,7 @@ mod tests {
             x_neutral_point: 0.0,
             geometry_summary: HashMap::new(),
             component_masses: HashMap::new(),
+            flops_mass_buildup: None,
             mass_coordinates: HashMap::new(),
             physical_cg: [0.0, 0.0, 0.0],
             payload_layout: None,

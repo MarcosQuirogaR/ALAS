@@ -44,10 +44,31 @@ pub(super) const MODEL_LINE_WIDTH: f64 = 1.8;
 /// executable. The Fourier model is available on every normal ALAS run.
 const LOCAL_FOURIER_LIFTING_LINE_LABEL: &str = "ALAS local Fourier lifting-line";
 
+/// Minimum vertical gap between one row's x-axis title (which extends about
+/// 41 px below its frame: numeric ticks at +7, the axis title at +29 plus its
+/// own line height) and the next row's panel headings (about 22 px above
+/// their frame). A smaller gap let the shared "alpha [deg]" label collide
+/// with the row below it.
+const ROW_GAP: f64 = 70.0;
+/// Row 1 (drag polar / lift curve). Also +10 px below the automatic figure
+/// title compared to the original 55.0 top, on top of that title's own
+/// existing ~28 px clearance.
+pub(super) const ROW1_TOP: f64 = 65.0;
+pub(super) const ROW1_HEIGHT: f64 = 260.0;
+/// Row 2 (pitching moment / efficiency).
+pub(super) const ROW2_TOP: f64 = ROW1_TOP + ROW1_HEIGHT + ROW_GAP;
+pub(super) const ROW2_HEIGHT: f64 = 230.0;
+/// Row 3 / row 4 (AVL cross-check panels), drawn by
+/// `comparison_support::draw_avl_condition_panels`; shared here so both
+/// modules stay in step instead of duplicating the same magic numbers.
+pub(super) const ROW3_TOP: f64 = ROW2_TOP + ROW2_HEIGHT + ROW_GAP;
+pub(super) const ROW4_TOP: f64 = ROW3_TOP + ROW_HEIGHT + ROW_GAP;
+pub(super) const ROW_HEIGHT: f64 = 190.0;
+
 fn title(scene: &mut Scene, axes: &Axes2D, text: &str, color: Color) {
     scene.add(crate::scene::SceneElement::Text {
         text: text.to_owned(),
-        pos: [axes.left, axes.top - 8.0],
+        pos: [axes.left, axes.top - 10.0],
         font_size: 10.0,
         color,
         align: TextAlign::Left,
@@ -85,12 +106,17 @@ pub fn figure_model_comparison(
 ) -> Scene {
     let pal = get_palette(theme);
     let solver_comparison = build_solver_comparison(report, avl);
+    // Row tops below must stay in step with `comparison_support::
+    // draw_avl_condition_panels`'s ROW3_TOP/ROW4_TOP: both sides need at
+    // least ROW_GAP between one row's x-axis title (which extends about 41 px
+    // below its frame) and the next row's panel headings (about 22 px above
+    // theirs), or the alpha-axis label collides with the row below it.
     let legend_y = if solver_comparison.induced.is_some() {
-        1155.0
+        ROW4_TOP + ROW_HEIGHT + ROW_GAP
     } else if !solver_comparison.coefficient_points.is_empty() {
-        895.0
+        ROW3_TOP + ROW_HEIGHT + ROW_GAP
     } else {
-        650.0
+        ROW2_TOP + ROW2_HEIGHT + ROW_GAP
     };
     let scene_height = legend_y + 55.0;
     let mut scene = Scene::new(900.0, scene_height, Some(Color::from_hex(pal.bg)));
@@ -189,10 +215,10 @@ pub fn figure_model_comparison(
     );
 
     let axes = [
-        Axes2D::new((60.0, 55.0, 370.0, 260.0), x_drag, y_cl),
-        Axes2D::new((480.0, 55.0, 370.0, 260.0), x_alpha, y_cl),
-        Axes2D::new((60.0, 365.0, 370.0, 230.0), x_alpha, y_cm),
-        Axes2D::new((480.0, 365.0, 370.0, 230.0), x_alpha, y_ld),
+        Axes2D::new((60.0, ROW1_TOP, 370.0, ROW1_HEIGHT), x_drag, y_cl),
+        Axes2D::new((480.0, ROW1_TOP, 370.0, ROW1_HEIGHT), x_alpha, y_cl),
+        Axes2D::new((60.0, ROW2_TOP, 370.0, ROW2_HEIGHT), x_alpha, y_cm),
+        Axes2D::new((480.0, ROW2_TOP, 370.0, ROW2_HEIGHT), x_alpha, y_ld),
     ];
     for (axis, (title_text, x_label, y_label)) in axes.iter().zip([
         ("Drag polar", "CD", "CL"),

@@ -106,6 +106,7 @@ fn test_report(masses: HashMap<String, f64>) -> AnalysisReport {
         x_neutral_point: 18.0,
         trimmed_design_point: None,
         component_masses: masses,
+        flops_mass_buildup: None,
         mass_coordinates: HashMap::new(),
         physical_cg: [17.0, 0.0, 0.0],
         geometry_summary: HashMap::new(),

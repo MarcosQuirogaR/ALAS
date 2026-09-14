@@ -31,5 +31,8 @@ thiserror = { workspace = true }
 [dev-dependencies]
 alas-testkit = { path = "../alas-testkit" }
 
+[build-dependencies]
+winresource = { workspace = true }
+
 [lints]
 workspace = true

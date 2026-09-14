@@ -99,6 +99,7 @@ pub fn quick_preview_report(
         x_neutral_point: f64::NAN,
         geometry_summary: HashMap::new(),
         component_masses,
+        flops_mass_buildup: None,
         mass_coordinates,
         physical_cg,
         payload_layout: None,

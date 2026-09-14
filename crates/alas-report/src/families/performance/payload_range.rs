@@ -202,11 +202,7 @@ pub fn figure_payload_range(
     });
     scene.add(SceneElement::Text {
         text: format!(
-            "{}; payload basis: {}   |   capacity evidence: {}   |   usable fuel {} kg   |   OEW {} kg   |   MTOW {} kg   |   NOT AN AFM/WBM OPERATIONAL ENVELOPE",
-            data.method_note,
-            data.payload_basis,
-            data.fuel_capacity_limit,
-            format_thousands(data.fuel_capacity_kg),
+            "OEW: {} kg   |   MTOW: {} kg",
             format_thousands(data.oew_kg),
             format_thousands(data.mtow_kg)
         ),

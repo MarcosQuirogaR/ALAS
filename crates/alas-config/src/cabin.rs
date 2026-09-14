@@ -25,7 +25,7 @@ pub use seat_class::SeatClassConfig;
 
 use serde::{Deserialize, Serialize};
 
-use crate::ConfigNode;
+use crate::{ConfigNode, DesignRequirements};
 
 /// The three product class slots, forward to aft. Naming them once keeps the layout
 /// order and the share mix from disagreeing about which cabin comes first.
@@ -140,17 +140,50 @@ impl PassengerCabinConfig {
         self.classes().iter().map(|(_, class)| class.count).sum()
     }
 
-    /// Set the same per-passenger mass on every class slot.
+    /// Set every class slot's occupant mass from one combined passenger mass.
     ///
     /// A requirements-first passenger mass is a single load-case authority,
-    /// even when a named cabin preset supplies the class geometry. Keeping
-    /// this operation on the cabin type lets callers restore that authority
-    /// after materialising a preset without duplicating field-by-field writes.
-    pub fn set_passenger_mass_kg(&mut self, mass_per_passenger_kg: f64) {
-        self.first.mass_per_pax_kg = mass_per_passenger_kg;
-        self.business.mass_per_pax_kg = mass_per_passenger_kg;
-        self.premium.mass_per_pax_kg = mass_per_passenger_kg;
-        self.economy.mass_per_pax_kg = mass_per_passenger_kg;
+    /// even when a named cabin preset supplies the class geometry. That
+    /// authority is defined as body plus baggage (`passenger_mass_kg`'s 100 kg
+    /// standard), while the layout charges checked baggage separately per
+    /// seated passenger through `checked_bag_mass_kg`. The per-class slot is
+    /// therefore the occupant remainder: writing the combined mass into it as
+    /// well counted every checked bag twice on the optimizer path (116 kg per
+    /// seat against the 100 kg the report path carried for the same cabin).
+    pub fn set_passenger_mass_kg(&mut self, combined_mass_per_passenger_kg: f64) {
+        let occupant_kg =
+            (combined_mass_per_passenger_kg - self.checked_bag_mass_kg.max(0.0)).max(0.0);
+        self.first.mass_per_pax_kg = occupant_kg;
+        self.business.mass_per_pax_kg = occupant_kg;
+        self.premium.mass_per_pax_kg = occupant_kg;
+        self.economy.mass_per_pax_kg = occupant_kg;
+    }
+
+    /// The single load-case authority for what one seated passenger costs the
+    /// zero-fuel mass, of any class.
+    ///
+    /// `requirements.passenger_mass_kg` is FAA AC 120-27E / EASA standard
+    /// mass: occupant plus checked baggage combined, and combined masses do
+    /// not vary by class. A named cabin preset (or a hand-edited class) may
+    /// still declare its own `mass_per_pax_kg` for display and for the seat
+    /// geometry it seeds, but every product path -- report, GUI preview,
+    /// pipeline, export, acceptance and the optimizer -- must reprice each
+    /// seated passenger, whatever class fills the seat, as this combined
+    /// mass: occupant = `passenger_mass_kg` - `checked_bag_mass_kg` (floored
+    /// at zero), plus the bag. Calling this after a preset or a hand edit has
+    /// written its own class masses is what removes the per-class premium
+    /// (a business seat priced richer than an economy one) from the payload
+    /// ledger; the reference-compatibility paths intentionally never call it,
+    /// so the frozen Python parity fixtures keep their historical per-class
+    /// masses unchanged.
+    pub fn apply_passenger_mass_authority(&mut self, requirements: &DesignRequirements) {
+        self.set_passenger_mass_kg(requirements.passenger_mass_kg);
+    }
+
+    /// Occupant plus checked baggage for one seat of `class`, kg: the mass a
+    /// seated passenger adds to the zero-fuel mass.
+    pub fn combined_mass_per_pax_kg(&self, class: &SeatClassConfig) -> f64 {
+        class.mass_per_pax_kg + self.checked_bag_mass_kg.max(0.0)
     }
 
     /// Fix the total number of seats for a transient requirements load case.
@@ -357,6 +390,19 @@ mod tests {
         cabin.economy.count = 150;
         assert_eq!(cabin.classes().len(), 2);
         assert_eq!(cabin.total_seats(), 170);
+    }
+
+    #[test]
+    fn the_combined_passenger_mass_is_split_between_occupant_and_checked_bag() {
+        let mut cabin = PassengerCabinConfig::default();
+        assert_eq!(cabin.checked_bag_mass_kg, 16.0);
+        cabin.set_passenger_mass_kg(100.0);
+        for (_, class) in cabin.classes() {
+            assert_eq!(class.mass_per_pax_kg, 84.0);
+            assert_eq!(cabin.combined_mass_per_pax_kg(class), 100.0);
+        }
+        cabin.set_passenger_mass_kg(10.0);
+        assert_eq!(cabin.economy.mass_per_pax_kg, 0.0);
     }
 
     #[test]

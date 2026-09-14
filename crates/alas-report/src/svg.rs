@@ -22,8 +22,11 @@ pub fn render_svg(scene: &Scene) -> String {
     ));
     out.push('\n');
 
-    // Background rect if specified.
-    if let Some(bg) = scene.background {
+    // Background rect if specified and this layer should paint it (a scene
+    // composited over pre-drawn raster content keeps `background` set for
+    // `visual_title`'s contrast decision while suppressing the opaque rect
+    // that would otherwise hide that content).
+    if let (true, Some(bg)) = (scene.paint_background, scene.background) {
         out.push_str(&format!(
             r#"  <rect width="{w:.1}" height="{h:.1}" fill="{fill}" fill-opacity="{alpha:.3}"/>"#,
             w = scene.width,
@@ -317,6 +320,40 @@ mod tests {
         assert!(svg.ends_with("</svg>\n"));
         assert!(svg.contains("viewBox=\"0 0 400.0 300.0\""));
         assert!(svg.contains("fill=\"#ffffff\""));
+    }
+
+    #[test]
+    fn hidden_background_paint_keeps_the_automatic_title_theme_aware() {
+        // Regression for a bug where the GUI's static raster preview
+        // (alas-viz::raster::render_scene_rgba_scaled) cleared
+        // `scene.background` to `None` to keep the vector layer transparent
+        // over pre-painted texture content. `visual_title` reads that same
+        // field for its contrast decision, so every automatic figure title
+        // silently fell back to its light-background (near-black) color on
+        // Grey and Dark, regardless of the actual theme -- while explicitly
+        // colored panel headings, driven by the palette directly, stayed
+        // correct. `hide_background_paint` must suppress the rect without
+        // blinding that decision.
+        let dark_bg = Color::from_hex("#1e1e1e");
+        let mut scene = Scene::new(200.0, 100.0, Some(dark_bg));
+        scene.title = Some("Dark theme title".to_owned());
+        scene.hide_background_paint();
+
+        let svg = render_svg(&scene);
+
+        assert!(
+            !svg.contains("<rect"),
+            "a hidden background must not paint an opaque rect: {svg}"
+        );
+        let title_line = svg
+            .lines()
+            .find(|line| line.contains("tspan") && line.contains("Dark theme title"))
+            .expect("automatic title text element");
+        assert!(
+            title_line.contains("fill=\"#ffffff\""),
+            "the automatic title must still contrast against the true (unpainted) \
+             background instead of falling back to its light-theme color: {title_line}"
+        );
     }
 
     #[test]

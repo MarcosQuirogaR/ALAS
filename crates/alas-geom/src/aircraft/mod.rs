@@ -12,11 +12,13 @@ pub mod airfoil;
 pub mod airplane;
 pub mod fuselage;
 pub mod mesh;
+pub mod section_outline;
 // The spacing helper has its own endpoint-fixup behavior, so it stays in this
 // tree rather than moving to
 // `alas-math`, which is documented as holding primitives with no upstream
 // module of their own. It is public because `alas-aero::kulfan` reconstructs a
 // coordinate airfoil on the same cosine spacing `Airfoil::repanel` uses.
 pub mod spacing;
+pub mod spanwise;
 mod vector3;
 pub mod wing;

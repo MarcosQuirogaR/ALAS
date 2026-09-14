@@ -28,7 +28,7 @@ use alas_config::materials;
 use alas_config::{DesignRequirements, DesignVector, StructuresConfig, WingConfig};
 use alas_geom::airfoil_library::{build_section, AirfoilLibrary};
 use alas_geom::wing_structure::WingStructureGeometry;
-use alas_struct::sizing::{size_wingbox, WingboxSizing};
+use alas_struct::sizing::{size_wingbox_reference_compatibility, WingboxSizing};
 use alas_testkit::{Comparison, Tier};
 use serde::Deserialize;
 use serde_json::{Map, Value};
@@ -264,7 +264,9 @@ fn size_wingbox_matches_python_across_structures_config_cases() {
         let cap_mat = materials::get(&case.materials.cap).expect("cap material resolves");
         let rib_mat = materials::get(&case.materials.rib).expect("rib material resolves");
 
-        let sizing = size_wingbox(&wsg, &cfg, &req, skin_mat, web_mat, cap_mat, rib_mat);
+        let sizing = size_wingbox_reference_compatibility(
+            &wsg, &cfg, &req, skin_mat, web_mat, cap_mat, rib_mat,
+        );
         compare(&mut comparison, &case.name, &sizing, &case.sizing);
     }
     comparison.finish();

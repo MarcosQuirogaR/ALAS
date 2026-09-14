@@ -29,6 +29,10 @@ mod tests {
                 exit_pairs: 4,
                 exit_capacity: 220,
                 max_certifiable_capacity: 220,
+                geometric_capacity: 220,
+                source_capacity_cap: None,
+                source_exit_layout: None,
+                capacity_binding: "geometry_exit_limit",
                 payload_t: 21.0,
                 seat_mass_t: 17.5,
                 bag_mass_t: 2.8,
@@ -85,4 +89,3 @@ mod tests {
         );
     }
 }
-

@@ -11,8 +11,10 @@
 //! through a sequence of points, the interpolating cubic B-spline, the
 //! interpolating bicubic surface over a rectangular grid, NumPy's
 //! piecewise-linear [`interp`], and the two dense solves everything above is
-//! built on: [`linalg::solve`], the square Gaussian elimination the splines'
-//! collocation systems and a vortex-lattice AIC matrix both use, and
+//! built on: [`linalg::solve`], the square dense LU solve the splines'
+//! collocation systems and a vortex-lattice AIC matrix both use (with
+//! [`linalg::LuFactorization`] for callers that solve one matrix against many
+//! right-hand sides), and
 //! [`lstsq::least_squares`], the overdetermined Householder-QR fit that a
 //! curve-fitting caller needs and that a square solve cannot answer.
 //!

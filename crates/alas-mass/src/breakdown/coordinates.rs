@@ -14,10 +14,9 @@ use crate::wing_centroid::WingCentroidError;
 
 use super::{
     calculate_component_masses, calculate_component_masses_checked,
-    calculate_component_masses_checked_product_with_gear,
-    calculate_component_masses_checked_with_gear, mean, wing_named_or_first, ComponentMassError,
-    MassBreakdown, MassCoordinateModel, MassCoordinates, PayloadLayoutSummary,
-    AERODYNAMIC_CENTER_CHORD_FRACTION,
+    calculate_component_masses_checked_with_gear, calculate_flops_mass_buildup, mean,
+    wing_named_or_first, ComponentMassError, FlopsMassBuildup, MassBreakdown, MassCoordinateModel,
+    MassCoordinates, PayloadLayoutSummary, ProductMassBuildup, AERODYNAMIC_CENTER_CHORD_FRACTION,
 };
 
 /// Determine the X, Y, Z physical locations of the centroid of each component
@@ -351,7 +350,53 @@ pub fn run_mass_analysis_with_model_checked_product_with_gear(
     coordinate_model: MassCoordinateModel<'_>,
     landing_gear: &LandingGearConfig,
 ) -> Result<(MassBreakdown, MassCoordinates, [f64; 3]), ComponentMassError> {
-    let masses = calculate_component_masses_checked_product_with_gear(
+    let (masses, coordinates, cg, _) = run_product_mass_analysis_with_groups(
+        plane,
+        requirements,
+        geometry_config,
+        cabin_config,
+        control_surfaces,
+        mass_model,
+        payload_layout,
+        coordinate_model,
+        landing_gear,
+    )?;
+    Ok((masses, coordinates, cg))
+}
+
+/// The grouped product analysis: the eight lumped slots, their stations,
+/// the physical CG and the pure-FLOPS buildup they came from.
+pub type GroupedProductMassAnalysis = (
+    MassBreakdown,
+    MassCoordinates,
+    [f64; 3],
+    Option<Box<FlopsMassBuildup>>,
+);
+
+/// [`run_mass_analysis_with_model_checked_product_with_gear`], also returning
+/// the FLOPS component groups when the production architecture produced them.
+///
+/// The item-level ledger needs the groups. Building it from the eight lumped
+/// slots alone forces it to label its rows from the configuration rather than
+/// from what was evaluated, which is how a run could claim FLOPS provenance
+/// for a single lumped systems row it had never been given the buildup for.
+///
+/// # Errors
+///
+/// As [`run_mass_analysis_with_model_checked_product_with_gear`].
+#[allow(clippy::too_many_arguments)]
+pub fn run_product_mass_analysis_with_groups(
+    plane: &Airplane,
+    requirements: &DesignRequirements,
+    geometry_config: &GeometryConfig,
+    cabin_config: &CabinConfig,
+    control_surfaces: &ControlSurfacesConfig,
+    mass_model: Option<&MassModelConfig>,
+    payload_layout: Option<&PayloadLayoutSummary>,
+    coordinate_model: MassCoordinateModel<'_>,
+    landing_gear: &LandingGearConfig,
+) -> Result<GroupedProductMassAnalysis, ComponentMassError> {
+    let built = calculate_flops_mass_buildup(
         plane,
         requirements,
         geometry_config,
@@ -360,6 +405,10 @@ pub fn run_mass_analysis_with_model_checked_product_with_gear(
         landing_gear,
         cabin_config,
     )?;
+    let (masses, mut flops) = match built {
+        ProductMassBuildup::PureFlops(flops) => (flops.masses, Some(flops)),
+        ProductMassBuildup::LegacyComparison(masses) => (masses, None),
+    };
     let coordinates = define_mass_coordinates_with_model(
         plane,
         geometry_config,
@@ -368,10 +417,16 @@ pub fn run_mass_analysis_with_model_checked_product_with_gear(
         coordinate_model,
     )
     .map_err(ComponentMassError::Geometry)?;
-    Ok(complete_mass_analysis(
-        masses,
-        coordinates,
-        requirements,
-        payload_layout,
-    ))
+    let (masses, coordinates, cg) =
+        complete_mass_analysis(masses, coordinates, requirements, payload_layout);
+    // `complete_mass_analysis` may replace the lumped payload and fuel with
+    // the detailed load-case values.  Keep the grouped result synchronized
+    // with the lumped slots returned beside it; otherwise the report would
+    // expose a pre-layout payload while its component map exposed the final
+    // one, making the supposedly single ledger disagree across export and
+    // analysis consumers.
+    if let Some(buildup) = flops.as_deref_mut() {
+        buildup.masses = masses;
+    }
+    Ok((masses, coordinates, cg, flops))
 }

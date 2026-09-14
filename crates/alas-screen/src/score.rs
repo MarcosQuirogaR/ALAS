@@ -6,7 +6,7 @@
 
 //! Stage 1: Fast 2-D NeuralFoil surrogate scoring across the airfoil database.
 
-use alas_aero::neuralfoil::{aero_from_airfoil, Conditions, ModelSize};
+use alas_aero::neuralfoil::{Conditions, ModelSize, PreparedAirfoil};
 use alas_atmo::Atmosphere;
 use alas_config::design_variables::DesignVector;
 use alas_config::AlasConfig;
@@ -222,34 +222,50 @@ pub(crate) fn score_candidate_with_geometry(
     let mut cd_vec = Vec::with_capacity(alphas_deg.len());
     let mut confidence_min = f64::INFINITY;
 
-    for &alpha in alphas_deg {
-        let cond = Conditions::new(alpha, reynolds);
-        match aero_from_airfoil(airfoil, &cond, mach, model_size) {
-            Ok(aero) => {
-                if !aero.analysis_confidence.is_finite() {
-                    return AirfoilCandidateResult {
-                        name: name.to_string(),
-                        status: "error".to_string(),
-                        error: Some(
-                            "NeuralFoil returned non-finite analysis confidence".to_string(),
-                        ),
-                        analysis_confidence: Some(aero.analysis_confidence),
-                        ..Default::default()
-                    };
-                }
-                confidence_min = confidence_min.min(aero.analysis_confidence);
-                cl_vec.push(aero.cl);
-                cd_vec.push(aero.cd);
-            }
-            Err(e) => {
-                return AirfoilCandidateResult {
-                    name: name.to_string(),
-                    status: "error".to_string(),
-                    error: Some(e.to_string()),
-                    ..Default::default()
-                };
-            }
+    // Normalize and fit the section once; the sweep only changes the flight
+    // condition. Same numbers as fitting inside the loop, at a fraction of
+    // the cost.
+    let prepared = match PreparedAirfoil::prepare(airfoil) {
+        Ok(prepared) => prepared,
+        Err(e) => {
+            return AirfoilCandidateResult {
+                name: name.to_string(),
+                status: "error".to_string(),
+                error: Some(e.to_string()),
+                ..Default::default()
+            };
         }
+    };
+    // One batched network pass over the whole angle schedule: the same
+    // numbers as one call per angle, with every weight read once per layer.
+    let conditions: Vec<Conditions> = alphas_deg
+        .iter()
+        .map(|&alpha| Conditions::new(alpha, reynolds))
+        .collect();
+    let aeros = match prepared.aero_sweep(&conditions, mach, model_size) {
+        Ok(aeros) => aeros,
+        Err(e) => {
+            return AirfoilCandidateResult {
+                name: name.to_string(),
+                status: "error".to_string(),
+                error: Some(e.to_string()),
+                ..Default::default()
+            };
+        }
+    };
+    for aero in aeros {
+        if !aero.analysis_confidence.is_finite() {
+            return AirfoilCandidateResult {
+                name: name.to_string(),
+                status: "error".to_string(),
+                error: Some("NeuralFoil returned non-finite analysis confidence".to_string()),
+                analysis_confidence: Some(aero.analysis_confidence),
+                ..Default::default()
+            };
+        }
+        confidence_min = confidence_min.min(aero.analysis_confidence);
+        cl_vec.push(aero.cl);
+        cd_vec.push(aero.cd);
     }
 
     if !confidence_min.is_finite() || confidence_min < MIN_NEURALFOIL_ANALYSIS_CONFIDENCE {

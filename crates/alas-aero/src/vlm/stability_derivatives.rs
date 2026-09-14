@@ -39,7 +39,7 @@
 
 use alas_geom::aircraft::airplane::Airplane;
 
-use super::{run, VlmError, VlmResult};
+use super::{VlmError, VlmResult, VlmSystem};
 use crate::operating_point::OperatingPoint;
 
 /// The finite-difference step upstream perturbs `alpha` and `beta` by, in
@@ -51,14 +51,34 @@ const ANGLE_STEP_DEG: f64 = 0.001;
 /// `0.001 * (2 * velocity) / b_ref`.
 const RATE_STEP_FRACTION: f64 = 0.001;
 
-type VlmSolver = fn(&Airplane, &OperatingPoint, usize, usize) -> Result<VlmResult, VlmError>;
+/// Which point the rotation-induced velocity is evaluated about: the product
+/// convention (`airplane.xyz_ref`, as [`super::run`]) or the frozen reference
+/// convention (the geometry origin, as [`super::run_reference_compatibility`]).
+#[derive(Clone, Copy)]
+enum RotationReference {
+    Product,
+    Origin,
+}
+
+impl RotationReference {
+    fn solve(
+        self,
+        system: &VlmSystem<'_>,
+        op_point: &OperatingPoint,
+    ) -> Result<VlmResult, VlmError> {
+        match self {
+            Self::Product => system.solve(op_point),
+            Self::Origin => system.solve_reference_compatibility(op_point),
+        }
+    }
+}
 
 /// The run and finite-difference choices for one derivative sweep.
 #[derive(Clone, Copy)]
 struct DerivativePolicy {
     angle_step_deg: f64,
     rate_step_fraction: f64,
-    solver: VlmSolver,
+    rotation: RotationReference,
     central_difference: bool,
 }
 
@@ -153,11 +173,9 @@ fn central_differences(
 /// the product central difference, depending on whether `minus_point` is
 /// supplied.
 struct DerivativeEvaluation<'a> {
-    solver: VlmSolver,
-    airplane: &'a Airplane,
+    system: &'a VlmSystem<'a>,
+    rotation: RotationReference,
     base: &'a VlmResult,
-    spanwise_resolution: usize,
-    chordwise_resolution: usize,
 }
 
 impl DerivativeEvaluation<'_> {
@@ -168,20 +186,10 @@ impl DerivativeEvaluation<'_> {
         step: f64,
         scale: f64,
     ) -> Result<CoefficientDerivatives, VlmError> {
-        let plus = (self.solver)(
-            self.airplane,
-            plus_point,
-            self.spanwise_resolution,
-            self.chordwise_resolution,
-        )?;
+        let plus = self.rotation.solve(self.system, plus_point)?;
         match minus_point {
             Some(minus_point) => {
-                let minus = (self.solver)(
-                    self.airplane,
-                    minus_point,
-                    self.spanwise_resolution,
-                    self.chordwise_resolution,
-                )?;
+                let minus = self.rotation.solve(self.system, minus_point)?;
                 Ok(central_differences(&plus, &minus, step, scale))
             }
             None => Ok(forward_differences(self.base, &plus, step, scale)),
@@ -234,7 +242,7 @@ pub fn run_with_stability_derivatives_with_steps(
         DerivativePolicy {
             angle_step_deg,
             rate_step_fraction,
-            solver: run,
+            rotation: RotationReference::Product,
             central_difference: true,
         },
     )
@@ -262,7 +270,7 @@ pub fn run_with_stability_derivatives_reference_compatibility(
         DerivativePolicy {
             angle_step_deg: ANGLE_STEP_DEG,
             rate_step_fraction: RATE_STEP_FRACTION,
-            solver: super::run_reference_compatibility,
+            rotation: RotationReference::Origin,
             central_difference: false,
         },
     )
@@ -284,12 +292,11 @@ fn run_with_stability_derivatives_options(
     {
         return Err(VlmError::InvalidDerivativeStep);
     }
-    let base = (policy.solver)(
-        airplane,
-        op_point,
-        spanwise_resolution,
-        chordwise_resolution,
-    )?;
+    // One mesh and one factorization serve the base point and every
+    // perturbation: the stencil changes the operating point, never the
+    // geometry.
+    let system = VlmSystem::assemble(airplane, spanwise_resolution, chordwise_resolution)?;
+    let base = policy.rotation.solve(&system, op_point)?;
 
     // Upstream's step sizes and scale factors, transcribed. The angle steps
     // are in degrees (op_point.alpha/beta are degrees); the rate steps and
@@ -368,11 +375,9 @@ fn run_with_stability_derivatives_options(
     };
 
     let evaluation = DerivativeEvaluation {
-        solver: policy.solver,
-        airplane,
+        system: &system,
+        rotation: policy.rotation,
         base: &base,
-        spanwise_resolution,
-        chordwise_resolution,
     };
     let d_alpha = evaluation.evaluate(&alpha_point, alpha_minus, angle_step_deg, angle_scale)?;
     let d_beta = evaluation.evaluate(&beta_point, beta_minus, angle_step_deg, angle_scale)?;

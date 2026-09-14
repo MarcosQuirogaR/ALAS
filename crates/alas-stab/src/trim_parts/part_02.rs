@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-
 /// Horizontal and vertical tail volume coefficients `(Vh, Vv)` --
 /// `tail_volume_coefficients`. `Vh = Sh Lh / (S c_bar)`,
 /// `Vv = Sv Lv / (S b)`, with the moment arms taken from the wings' quarter-
@@ -59,22 +58,30 @@ fn tail_volume_coefficients_with_reference_mode(
 /// One low-side/high-side VLM probe: a level operating point (no sideslip, no
 /// rotation) at `alpha_deg`, solved at the analysis mesh resolution.
 fn probe(
-    airplane: &Airplane,
-    analysis: &AnalysisConfig,
+    system: &VlmSystem<'_>,
     atmosphere: Atmosphere,
     velocity: f64,
     alpha_deg: f64,
 ) -> Result<VlmResult, VlmError> {
     let op_point = OperatingPoint::new(atmosphere, velocity, alpha_deg, 0.0, 0.0, 0.0, 0.0);
-    vlm::run(
+    system.solve(&op_point)
+}
+
+/// The mesh and factored influence matrix of `airplane` at the configured
+/// resolution. Probes that share a geometry share one of these: the O(n^3)
+/// factorization is paid once and each probe is an O(n^2) solve.
+fn assemble<'a>(
+    airplane: &'a Airplane,
+    analysis: &AnalysisConfig,
+) -> Result<VlmSystem<'a>, VlmError> {
+    VlmSystem::assemble(
         airplane,
-        &op_point,
         resolution(analysis.spanwise_resolution),
         resolution(analysis.chordwise_resolution),
     )
 }
 
-/// The configuration's `i64` mesh resolution as the `usize` [`vlm::run`]
+/// The configuration's `i64` mesh resolution as the `usize` [`VlmSystem::assemble`]
 /// takes -- floored at one, as `alas-aero::analysis` does: a zero or negative
 /// resolution is not a mesh, and both fields are documented multipliers of at
 /// least one.
@@ -137,13 +144,8 @@ fn refine_trim(
 
     for _ in 0..MAX_ITERATIONS {
         let at_incidence = with_hstab_twist(airplane, incidence_deg);
-        let base = probe(
-            &at_incidence,
-            analysis,
-            atmosphere,
-            velocity,
-            alpha_deg,
-        )?;
+        let at_incidence = assemble(&at_incidence, analysis)?;
+        let base = probe(&at_incidence, atmosphere, velocity, alpha_deg)?;
         let residual_cl = base.cl_lift - cl_target;
         let residual_cm = base.cm_pitch;
         if residual_cl.is_finite()
@@ -155,15 +157,13 @@ fn refine_trim(
 
         let alpha_probe = probe(
             &at_incidence,
-            analysis,
             atmosphere,
             velocity,
             alpha_deg + ALPHA_STEP_DEG,
         )?;
         let incidence_probe = with_hstab_twist(airplane, incidence_deg + INCIDENCE_STEP_DEG);
         let incidence_probe = probe(
-            &incidence_probe,
-            analysis,
+            &assemble(&incidence_probe, analysis)?,
             atmosphere,
             velocity,
             alpha_deg,

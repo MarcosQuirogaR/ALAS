@@ -78,6 +78,24 @@ fn installed_openvsp_materializes_and_validates_the_native_project() {
     let stdout = fs::read_to_string(&stdout_path)
         .unwrap_or_else(|error| panic!("read {}: {error}", stdout_path.display()));
     assert!(stdout.contains("ALAS_OPENVSP_EXPORT_COMPLETE"));
+    assert_eq!(
+        export.preview_path,
+        export.script_path.with_extension("preview.png")
+    );
+    if export.preview_available {
+        assert!(export.preview_path.is_file());
+    } else {
+        assert!(!export.preview_path.exists());
+        assert!(export
+            .preview_error
+            .as_deref()
+            .is_some_and(|error| error.contains("no graphics-capable GUI build")
+                || error.contains("no fresh valid PNG preview")));
+        assert!(
+            stdout.contains("ALAS_OPENVSP_PREVIEW_UNAVAILABLE")
+                || stdout.contains("ALAS_OPENVSP_PREVIEW_WARNING")
+        );
+    }
 
     if !retained {
         fs::remove_dir_all(&output)

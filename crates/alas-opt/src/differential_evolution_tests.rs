@@ -383,6 +383,36 @@ fn delegated_objective_keeps_the_optimizer_history_contract() {
 }
 
 #[test]
+fn clean_sheet_optimizer_publishes_the_cabin_sized_fuselage() {
+    let mut config = AlasConfig::default();
+    config.optimizer.solver.max_iterations = 0;
+    config.optimizer.solver.population_size = 1;
+    config.optimizer.solver.seed = Some(42);
+    let expected = crate::mdo::canonicalize_design(&config, DesignVector::default())
+        .expect("the default clean-sheet load case has a sized fuselage");
+    let mut optimizer = DesignOptimizer::new(config);
+    let mut evaluator = |design: &DesignVector| ObjectiveEvaluation {
+        cost: design.fuselage_length_m,
+        valid: true,
+        l_over_d: 10.0,
+        span_m: design.span_m,
+        alpha_deg: 2.0,
+        area_m2: design.root_chord_m * design.span_m,
+        trim_ih_deg: 0.0,
+        reject_reason: String::new(),
+    };
+
+    let result = optimizer
+        .run_with_evaluator(None, None, &mut evaluator, None)
+        .expect("the synthetic evaluator accepts the canonical point");
+
+    assert_eq!(
+        result.best_design.fuselage_length_m,
+        expected.fuselage_length_m
+    );
+}
+
+#[test]
 fn native_worker_batches_merge_history_in_candidate_order() {
     let mut objective = DesignObjective::new(AlasConfig::default());
     let candidates = vec![Vec::new(), Vec::new(), Vec::new(), Vec::new()];

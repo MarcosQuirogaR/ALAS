@@ -21,7 +21,7 @@ use crate::theme::get_palette;
 fn title(scene: &mut Scene, axes: &Axes2D, text: &str, color: Color) {
     scene.add(SceneElement::Text {
         text: text.to_owned(),
-        pos: [axes.left, axes.top - 8.0],
+        pos: [axes.left, axes.top - 10.0],
         font_size: 10.0,
         color,
         align: TextAlign::Left,
@@ -186,24 +186,26 @@ pub fn figure_optimized_aircraft_comparison(
 
     let cl_axes = Axes2D::new((55.0, 80.0, 380.0, 235.0), alpha_range, cl_range);
     let cm_axes = Axes2D::new((475.0, 80.0, 380.0, 235.0), alpha_range, cm_range);
-    let cdi_axes = Axes2D::new((55.0, 390.0, 380.0, 235.0), alpha_range, cdi_range);
+    let cdi_axes =
+        Axes2D::new((55.0, 390.0, 380.0, 235.0), alpha_range, cdi_range).with_y_tick_decimals(2);
+    let title_color = Color::from_hex(pal.title);
     title(
         &mut scene,
         &cl_axes,
         "Lift: both optimized geometries",
-        vlm_color,
+        title_color,
     );
     title(
         &mut scene,
         &cm_axes,
         "Pitching moment: both optimized geometries",
-        vlm_color,
+        title_color,
     );
     title(
         &mut scene,
         &cdi_axes,
         "Induced drag: both optimized geometries",
-        vlm_color,
+        title_color,
     );
     cl_axes.draw_frame_with_labels(&mut scene, pal, "alpha [deg]", "CL");
     cm_axes.draw_frame_with_labels(&mut scene, pal, "alpha [deg]", "Cm");

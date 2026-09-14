@@ -19,8 +19,6 @@ pub enum TourTarget {
     PreviewDock,
     /// The active central content panel.
     Content,
-    /// The control-bar randomizer group.
-    Randomizer,
     /// The control-bar run group.
     Run,
     /// The resizable run-log panel.
@@ -57,7 +55,7 @@ pub const TOUR_STEPS: &[TourStep] = &[
     },
     TourStep {
         title: "Set your requirements",
-        body: "On the Inputs page pick a preset and engine, then edit the mission requirements. Every field is validated live; error-severity issues block a Run until fixed.",
+        body: "On the Inputs page choose Clean sheet design, which opens the full-window sandbox, or Preset aircraft with protected geometry; then pick the engine and edit the mission requirements. Every field is validated live; error-severity issues block a Run until fixed.",
         page: Some("inputs"),
         target: Some(TourTarget::AircraftConfig),
     },
@@ -81,15 +79,9 @@ pub const TOUR_STEPS: &[TourStep] = &[
     },
     TourStep {
         title: "Tune the design space",
-        body: "The Design Space table holds the optimizer's search variables. Edit the initial value and the lower/upper bounds; loading a preset recenters them. DOE Sample draws a random point here.",
+        body: "The optimizer's search variables. Edit the Initial Value (nominal/starting design) and the Lower/Upper bounds; loading a preset recenters these around its design vector.",
         page: Some("design_space"),
         target: Some(TourTarget::Content),
-    },
-    TourStep {
-        title: "Randomize or explore",
-        body: "DOE Sample draws one design within the bounds. Random draws +/-30% beyond them and runs immediately -- handy for probing edge cases.",
-        page: None,
-        target: Some(TourTarget::Randomizer),
     },
     TourStep {
         title: "Choose your analyses",
@@ -105,7 +97,7 @@ pub const TOUR_STEPS: &[TourStep] = &[
     },
     TourStep {
         title: "Run the pipeline",
-        body: "Run uses the single MADS optimizer, runs the aerodynamic analysis, and performs every discipline enabled under Setup > Analyses -- one pass. A stage label and status appear while it runs. Analyze reference selects the fixed-aircraft baseline sandbox and skips redesign.",
+        body: "Run uses the single MADS optimizer when Optimize design space is on, runs the aerodynamic analysis, and performs every discipline enabled under Setup > Analyses -- one pass. A stage label and status appear while it runs. With optimization off, or through Analyze reference, the current design is analysed as drawn.",
         page: None,
         target: Some(TourTarget::Run),
     },
@@ -147,6 +139,16 @@ mod tests {
                 "missing body: {}",
                 step.body
             );
+        }
+    }
+
+    #[test]
+    fn walkthrough_omits_removed_randomizer_controls() {
+        for step in TOUR_STEPS {
+            assert!(!step.title.contains("DOE"));
+            assert!(!step.title.contains("Random"));
+            assert!(!step.body.contains("DOE"));
+            assert!(!step.body.contains("Random"));
         }
     }
 }

@@ -39,7 +39,7 @@ pub(super) fn cell_edges_linear(centers: &[f64]) -> Vec<f64> {
 }
 
 /// The same construction as [`cell_edges_linear`], but the interior edges are
-/// the *geometric* mean of each adjacent pair -- the natural midpoint on a
+/// the *geometric* mean of each adjacent pair, which is the natural midpoint on a
 /// log-scaled axis, matching the Reynolds-number axis this crate's contour
 /// figures use.
 pub(super) fn cell_edges_log(centers: &[f64]) -> Vec<f64> {
@@ -61,7 +61,7 @@ fn cell_edges(centers: &[f64], midpoint: impl Fn(f64, f64) -> f64) -> Vec<f64> {
 
 /// Draw one colored rectangle per grid cell, as [`Axes2D::add_heatmap_grid`]
 /// does, except a non-finite `values` entry draws nothing rather than the
-/// colormap's floor color -- the NeuralFoil sweep can genuinely fail to
+/// colormap's floor color. The NeuralFoil sweep can genuinely fail to
 /// converge at a given (Re, alpha), and a blank cell says so; a colored one
 /// would claim a value that was never computed.
 #[allow(clippy::too_many_arguments)]

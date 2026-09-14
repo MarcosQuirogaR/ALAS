@@ -2,7 +2,7 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 use super::*;
-use alas_config::SystemsMassMethod;
+use alas_config::{FlopsTransportConfig, MassArchitecture};
 use alas_geom::aircraft::airfoil::Airfoil;
 use alas_geom::aircraft::fuselage::{Fuselage, FuselageXSec};
 use alas_geom::aircraft::wing::WingXSec;
@@ -276,7 +276,11 @@ fn the_reference_mass_method_remains_the_explicit_checked_default() {
     let geometry = GeometryConfig::default();
     let requirements = DesignRequirements::default();
     let plane = plane_with_fuselages(vec![simple_fuselage("Fuselage", 0.0, 76.72)]);
-    let model = MassModelConfig::default();
+    let mut model = MassModelConfig {
+        mass_architecture: MassArchitecture::LegacyReferenceCompatibleComparison,
+        ..MassModelConfig::default()
+    };
+    model.apply_architecture();
 
     let checked = calculate_component_masses_checked(
         &plane,
@@ -286,7 +290,7 @@ fn the_reference_mass_method_remains_the_explicit_checked_default() {
         &ControlSurfacesConfig::default(),
         Some(&model),
     )
-    .expect("reference-compatible method is always resolvable");
+    .expect("explicit reference-compatible method is always resolvable");
     let reference = calculate_component_masses(&plane, &requirements, &geometry, Some(&model));
 
     assert_eq!(checked, reference);
@@ -298,7 +302,7 @@ fn the_selected_flops_method_returns_typed_unverified_without_architecture_input
     let requirements = DesignRequirements::default();
     let plane = plane_with_fuselages(vec![simple_fuselage("Fuselage", 0.0, 76.72)]);
     let model = MassModelConfig {
-        systems_mass_method: SystemsMassMethod::FlopsTransportV1,
+        flops_transport: FlopsTransportConfig::default(),
         ..MassModelConfig::default()
     };
 
@@ -314,5 +318,21 @@ fn the_selected_flops_method_returns_typed_unverified_without_architecture_input
         panic!("incomplete FLOPS architecture must not fall back to fractions");
     };
     assert!(!reasons.is_empty());
-    assert!(reasons.contains(&FlopsTransportUnverifiedReason::MovableSurfaceGeometry));
+    // The probe has a wing and a fuselage but no declared FLOPS
+    // architecture, so the blockers are the declared inputs. `SFLAP` is a
+    // wing-only quantity, so a missing empennage is not one of them.
+    for expected in [
+        FlopsTransportUnverifiedReason::MaximumMach,
+        FlopsTransportUnverifiedReason::DesignRange,
+        FlopsTransportUnverifiedReason::MissionProvenance,
+        FlopsTransportUnverifiedReason::FlightCrewCount,
+        FlopsTransportUnverifiedReason::EngineMounting,
+        FlopsTransportUnverifiedReason::HydraulicPressure,
+        FlopsTransportUnverifiedReason::FuelTankCount,
+        FlopsTransportUnverifiedReason::MaximumFuelCapacity,
+        FlopsTransportUnverifiedReason::ArchitectureProvenance,
+    ] {
+        assert!(reasons.contains(&expected), "missing blocker {expected:?}");
+    }
+    assert!(!reasons.contains(&FlopsTransportUnverifiedReason::MovableSurfaceGeometry));
 }

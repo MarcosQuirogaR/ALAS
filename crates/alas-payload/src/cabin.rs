@@ -27,7 +27,7 @@
 //!
 //! # References
 //!
-//! * FAR/CS-25.807(g): exit classification, per-side capacity and minimum
+//! * FAR/CS-25.807(g): exit classification, pair capacity and minimum
 //!   cutout dimensions.
 //! * FAR/CS-25.815: minimum main-aisle width.
 //! * FAR/CS-25.817: no more than three seats between any passenger and an
@@ -40,7 +40,7 @@ mod seating;
 pub(crate) use engine::build_passenger_layout_with_aircraft_cg_target;
 pub use engine::{build_passenger_layout, build_passenger_layout_reference_compatibility};
 
-use alas_config::PassengerCabinConfig;
+use alas_config::{CertifiedExitLayout, PassengerCabinConfig};
 
 use crate::geometry::{CabinGeometry, DeckSpec};
 use crate::numeric::{floor_div, round_half_even};
@@ -51,8 +51,12 @@ use crate::numeric::{floor_div, round_half_even};
 pub struct ExitSpec {
     /// The type letter, which is what a deck plan labels the door with.
     pub name: &'static str,
-    /// Seats this type is rated for, per fuselage side.
-    pub capacity_per_side: i64,
+    /// Seats this type is rated for, per complete exit pair.
+    ///
+    /// The value is already the rating for the two physical exits in one
+    /// pair.  It must not be doubled when the pair's two door cut-outs are
+    /// emitted.
+    pub capacity_per_pair: i64,
     /// Minimum door width, which lies along the fuselage x-axis in plan.
     pub width_m: f64,
     /// Minimum door height.
@@ -63,43 +67,43 @@ pub struct ExitSpec {
 pub static EXIT_TYPES: [ExitSpec; 7] = [
     ExitSpec {
         name: "A",
-        capacity_per_side: 110,
+        capacity_per_pair: 110,
         width_m: 1.07,
         height_m: 1.83,
     },
     ExitSpec {
         name: "B",
-        capacity_per_side: 75,
+        capacity_per_pair: 75,
         width_m: 0.81,
         height_m: 1.83,
     },
     ExitSpec {
         name: "C",
-        capacity_per_side: 55,
+        capacity_per_pair: 55,
         width_m: 0.76,
         height_m: 1.22,
     },
     ExitSpec {
         name: "I",
-        capacity_per_side: 45,
+        capacity_per_pair: 45,
         width_m: 0.61,
         height_m: 1.22,
     },
     ExitSpec {
         name: "II",
-        capacity_per_side: 40,
+        capacity_per_pair: 40,
         width_m: 0.51,
         height_m: 1.12,
     },
     ExitSpec {
         name: "III",
-        capacity_per_side: 35,
+        capacity_per_pair: 35,
         width_m: 0.51,
         height_m: 0.91,
     },
     ExitSpec {
         name: "IV",
-        capacity_per_side: 9,
+        capacity_per_pair: 9,
         width_m: 0.48,
         height_m: 0.66,
     },
@@ -264,37 +268,150 @@ impl DeckCapacities {
             .find(|(deck, _)| *deck == name)
             .map_or(self.total, |&(_, seats)| seats)
     }
+
+    /// Apply an aircraft-source passenger limit without changing the
+    /// geometry-derived cap of any deck that remains below it.
+    ///
+    /// The limit is allocated in deck order.  That is deterministic for a
+    /// double-deck aircraft and exact for the single-deck aircraft for which
+    /// the public source limits in the registry are currently available.  The
+    /// returned per-deck values are the values the row packer must use; a
+    /// caller cannot accidentally seat the source-capped total and then trim
+    /// the count afterwards.
+    pub fn with_source_cap(&self, source_capacity_cap: Option<i64>) -> Self {
+        let Some(source_capacity_cap) = source_capacity_cap.filter(|cap| *cap >= 0) else {
+            return self.clone();
+        };
+
+        let mut remaining = source_capacity_cap;
+        let mut per_deck = Vec::with_capacity(self.per_deck.len());
+        for &(deck, geometric_cap) in &self.per_deck {
+            let effective_cap = geometric_cap.min(remaining).max(0);
+            per_deck.push((deck, effective_cap));
+            remaining -= effective_cap;
+        }
+        let total = per_deck.iter().map(|&(_, cap)| cap).sum();
+        Self { per_deck, total }
+    }
 }
 
-/// The maximum passenger count CS-25.807 will certify for this body.
+/// The maximum passenger count used by the product cabin model.
 ///
 /// Each deck gets one exit pair per [`PassengerCabinConfig::min_exit_pair_spacing_m`]
 /// of its length, at least one and at most [`MAX_EXIT_PAIRS_PER_DECK`], and the
-/// ceiling is what those pairs are rated to evacuate.
+/// ceiling is what those pairs are rated to evacuate.  The generic rule is a
+/// modelling proxy: a registered aircraft with a source-defined arrangement
+/// supplies that arrangement explicitly through
+/// [`max_certifiable_capacity_with_source_layout`].
 ///
-/// Only Type A is derated. Its nominal 110 per side is far above what a real
-/// evacuation demonstration achieves once several such doors interact over long
-/// widebody aisles -- the 787-9's four Type-A pairs give an exit limit of 420,
-/// not the naive 880 -- while the smaller types, with shorter aisles behind
-/// them, were found to track their nominal rating.
+/// Exit table values are complete-pair ratings.  Type A retains the legacy
+/// product utilization heuristic as an explicit pair utilization so the
+/// historical widebody calibration remains reproducible without changing the
+/// unit of the regulatory rating.  The heuristic is not a certification
+/// demonstration.
 pub fn max_certifiable_capacity(g: &CabinGeometry, pax: &PassengerCabinConfig) -> DeckCapacities {
+    max_certifiable_capacity_with_source_layout(g, pax, None, None)
+}
+
+/// The geometry-derived passenger ceiling further limited by an applicable
+/// source-certified maximum, if one is registered for the selected aircraft.
+///
+/// `None` preserves the geometry-only behaviour used by clean-sheet studies,
+/// the public low-level API, and the frozen Python compatibility path.
+pub fn max_certifiable_capacity_with_source_cap(
+    g: &CabinGeometry,
+    pax: &PassengerCabinConfig,
+    source_capacity_cap: Option<i64>,
+) -> DeckCapacities {
+    max_certifiable_capacity_with_source_layout(g, pax, None, source_capacity_cap)
+}
+
+/// The product capacity calculation with a source-defined exit arrangement.
+///
+/// `source_layout` is used only for a registered product preset.  Its pair
+/// ratings replace the diameter heuristic on the first passenger deck; the
+/// source maximum is then applied as a separate upper bound.  Passing `None`
+/// retains the geometry-only product proxy used by clean-sheet callers.
+pub(crate) fn max_certifiable_capacity_with_source_layout(
+    g: &CabinGeometry,
+    pax: &PassengerCabinConfig,
+    source_layout: Option<CertifiedExitLayout>,
+    source_capacity_cap: Option<i64>,
+) -> DeckCapacities {
     let spec = select_exit_type(g.diameter_m);
-    let mut cap_per_side = spec.capacity_per_side as f64;
-    if spec.name == "A" {
-        cap_per_side *= pax.exit_capacity_realism_factor.max(0.01);
-    }
     let spacing = pax.min_exit_pair_spacing_m.max(1.0);
 
     let mut per_deck = Vec::new();
     let mut total = 0;
+    for (deck_index, segment) in cabin_deck_segments(g).into_iter().enumerate() {
+        let deck_len = (segment.x1 - segment.x0).max(0.0);
+        let deck_cap = if deck_index == 0 {
+            if let Some(source_layout) = source_layout {
+                source_layout
+                    .pairs
+                    .iter()
+                    .map(|pair| pair.capacity_per_pair.max(0))
+                    .sum::<i64>()
+            } else {
+                let n_pairs =
+                    (floor_div(deck_len, spacing) as i64).clamp(1, MAX_EXIT_PAIRS_PER_DECK);
+                n_pairs * effective_pair_capacity(spec, pax)
+            }
+        } else {
+            let n_pairs = (floor_div(deck_len, spacing) as i64).clamp(1, MAX_EXIT_PAIRS_PER_DECK);
+            n_pairs * effective_pair_capacity(spec, pax)
+        };
+        per_deck.push((segment.deck.name, deck_cap));
+        total += deck_cap;
+    }
+    DeckCapacities { per_deck, total }.with_source_cap(source_capacity_cap)
+}
+
+/// The historical capacity proxy used only by the frozen Python
+/// compatibility path.  The old fixture treated the pair table as a
+/// per-side quantity and doubled it; keeping this isolated means the public
+/// product path can use the corrected pair unit without rewriting the frozen
+/// evidence fixture.
+pub(crate) fn max_certifiable_capacity_reference_compatibility(
+    g: &CabinGeometry,
+    pax: &PassengerCabinConfig,
+) -> DeckCapacities {
+    let spec = select_exit_type(g.diameter_m);
+    let mut per_deck = Vec::new();
+    let mut total = 0;
     for segment in cabin_deck_segments(g) {
         let deck_len = (segment.x1 - segment.x0).max(0.0);
-        let n_pairs = (floor_div(deck_len, spacing) as i64).clamp(1, MAX_EXIT_PAIRS_PER_DECK);
-        let deck_cap = (n_pairs as f64 * cap_per_side * 2.0) as i64;
+        let n_pairs = (floor_div(deck_len, pax.min_exit_pair_spacing_m.max(1.0)) as i64)
+            .clamp(1, MAX_EXIT_PAIRS_PER_DECK);
+        let mut historical_per_side = spec.capacity_per_pair as f64;
+        if spec.name == "A" {
+            historical_per_side *= pax.exit_capacity_realism_factor.max(0.01);
+        }
+        let deck_cap = (n_pairs as f64 * historical_per_side * 2.0) as i64;
         per_deck.push((segment.deck.name, deck_cap));
         total += deck_cap;
     }
     DeckCapacities { per_deck, total }
+}
+
+/// Effective capacity for one pair on the product path.
+///
+/// The serialized `exit_capacity_realism_factor` predates the pair-unit
+/// correction and stores half of the intended Type-A utilization (`0.478`).
+/// Doubling that legacy field here makes the conversion explicit and keeps the
+/// resulting utilization bounded at one.  Smaller exit classes use their
+/// complete-pair table rating directly.
+pub(crate) fn effective_pair_capacity(spec: &ExitSpec, pax: &PassengerCabinConfig) -> i64 {
+    if spec.name != "A" {
+        return spec.capacity_per_pair.max(0);
+    }
+    let legacy_factor = if pax.exit_capacity_realism_factor.is_finite() {
+        pax.exit_capacity_realism_factor.max(0.0)
+    } else {
+        0.0
+    };
+    let pair_utilization = (2.0 * legacy_factor).clamp(0.0, 1.0);
+    (spec.capacity_per_pair as f64 * pair_utilization).floor() as i64
 }
 
 /// Seats abreast and aisle count for one class at station `x`.
@@ -631,6 +748,22 @@ mod tests {
         };
         assert_eq!(caps.for_deck("main"), 400);
         assert_eq!(caps.for_deck("upper"), 400);
+    }
+
+    #[test]
+    fn a_source_cap_is_allocated_across_decks_without_posthoc_truncation() {
+        let caps = DeckCapacities {
+            per_deck: vec![("main", 200), ("upper", 100)],
+            total: 300,
+        };
+        let capped = caps.with_source_cap(Some(245));
+        assert_eq!(capped.per_deck, vec![("main", 200), ("upper", 45)]);
+        assert_eq!(capped.total, 245);
+
+        // A non-binding source limit leaves the geometry-derived allocation
+        // unchanged, which is the A220 case in the current preset geometry.
+        let unchanged = caps.with_source_cap(Some(320));
+        assert_eq!(unchanged, caps);
     }
 
     #[test]

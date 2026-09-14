@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
+use super::*;
 
 /// Calculate the masses of all primary aircraft components in kg --
 /// `calculate_component_masses`.
@@ -165,6 +166,14 @@ pub fn calculate_component_masses_checked_with_gear(
 ) -> Result<MassBreakdown, ComponentMassError> {
     let default_mass_model = MassModelConfig::default();
     let mm = mass_model.unwrap_or(&default_mass_model);
+    if !mm.architecture_is_coherent() {
+        return Err(ComponentMassError::IncoherentMassArchitecture {
+            architecture: mm.mass_architecture,
+            systems: mm.systems_mass_method,
+            structure: mm.structural_mass_method,
+            propulsion: mm.propulsion_mass_method,
+        });
+    }
     if mm.uses_reference_mass_methods() {
         return Ok(calculate_component_masses(
             plane,
@@ -185,13 +194,12 @@ pub fn calculate_component_masses_checked_with_gear(
     )
 }
 
-/// Product mass buildup with configured flap area and gear architecture,
-/// retaining the selected systems-mass method's validation semantics.
+/// Product mass buildup with configured flap area and gear architecture.
 ///
-/// This is separate from [`calculate_component_masses_checked_with_gear`] so
-/// the latter can remain the explicit reference-compatible API when the
-/// frozen fraction method is selected. Product analyses opt into this seam
-/// even when they intentionally retain those historical systems fractions.
+/// Under the production architecture this is the pure FLOPS buildup and the
+/// frozen Torenbeek/fraction relations are not evaluated at all. Under the
+/// comparison architecture it is the frozen buildup with the configured
+/// control surfaces and gear layout reflected in the wing.
 #[allow(clippy::too_many_arguments)]
 pub fn calculate_component_masses_checked_product_with_gear(
     plane: &Airplane,
@@ -200,33 +208,112 @@ pub fn calculate_component_masses_checked_product_with_gear(
     control_surfaces: &ControlSurfacesConfig,
     mass_model: Option<&MassModelConfig>,
     landing_gear: &LandingGearConfig,
-    _cabin_config: &CabinConfig,
+    cabin_config: &CabinConfig,
 ) -> Result<MassBreakdown, ComponentMassError> {
+    calculate_flops_mass_buildup(
+        plane,
+        requirements,
+        geometry_config,
+        control_surfaces,
+        mass_model,
+        landing_gear,
+        cabin_config,
+    )
+    .map(|built| match built {
+        ProductMassBuildup::PureFlops(flops) => flops.masses,
+        ProductMassBuildup::LegacyComparison(masses) => masses,
+    })
+}
+
+/// Which architecture produced a product mass buildup, with its groups.
+///
+/// The FLOPS variant carries the component groups the item-level ledger
+/// needs. Handing the ledger only the eight lumped slots is what let it label
+/// rows "FLOPS" from the configuration while placing a single lumped systems
+/// row it had never been given the buildup for.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ProductMassBuildup {
+    /// Every group is a FLOPS equation.
+    PureFlops(Box<FlopsMassBuildup>),
+    /// The frozen Torenbeek/fraction control, for comparison evidence only.
+    LegacyComparison(MassBreakdown),
+}
+
+impl ProductMassBuildup {
+    /// The eight operating-empty slots plus payload and fuel.
+    pub fn masses(&self) -> &MassBreakdown {
+        match self {
+            Self::PureFlops(flops) => &flops.masses,
+            Self::LegacyComparison(masses) => masses,
+        }
+    }
+
+    /// The FLOPS groups, when this is a FLOPS buildup.
+    pub fn flops(&self) -> Option<&FlopsMassBuildup> {
+        match self {
+            Self::PureFlops(flops) => Some(flops),
+            Self::LegacyComparison(_) => None,
+        }
+    }
+}
+
+/// The product mass buildup, with the FLOPS component groups when the
+/// production architecture produced it.
+///
+/// # Errors
+///
+/// [`ComponentMassError`] when a selected FLOPS input is missing or the
+/// airframe evaluation is incomplete. There is no fallback to the comparison
+/// architecture.
+#[allow(clippy::too_many_arguments)]
+pub fn calculate_flops_mass_buildup(
+    plane: &Airplane,
+    requirements: &DesignRequirements,
+    geometry_config: &GeometryConfig,
+    control_surfaces: &ControlSurfacesConfig,
+    mass_model: Option<&MassModelConfig>,
+    landing_gear: &LandingGearConfig,
+    _cabin_config: &CabinConfig,
+) -> Result<ProductMassBuildup, ComponentMassError> {
     let default_mass_model = MassModelConfig::default();
     let mm = mass_model.unwrap_or(&default_mass_model);
 
-    let masses = calculate_component_masses_with_product_configuration(
-        plane,
-        requirements,
-        geometry_config,
-        mass_model,
-        control_surfaces,
-        landing_gear,
-    );
-    if mm.uses_reference_mass_methods() {
-        return Ok(masses);
+    if !mm.architecture_is_coherent() {
+        return Err(ComponentMassError::IncoherentMassArchitecture {
+            architecture: mm.mass_architecture,
+            systems: mm.systems_mass_method,
+            structure: mm.structural_mass_method,
+            propulsion: mm.propulsion_mass_method,
+        });
     }
-    flops_methods::apply_selected_methods(
-        plane,
-        requirements,
-        geometry_config,
-        control_surfaces,
-        mm,
-        masses,
-    )
+
+    if mm.mass_architecture.is_pure_flops() {
+        // The frozen buildup is not evaluated here at all: under the pure
+        // architecture there is nothing for it to contribute, and computing
+        // it first is how a legacy value used to survive into a group FLOPS
+        // was supposed to own.
+        return flops_methods::build_pure_flops(
+            plane,
+            requirements,
+            geometry_config,
+            control_surfaces,
+            mm,
+        )
+        .map(|built| ProductMassBuildup::PureFlops(Box::new(built)));
+    }
+
+    Ok(ProductMassBuildup::LegacyComparison(
+        calculate_component_masses_with_product_configuration(
+            plane,
+            requirements,
+            geometry_config,
+            mass_model,
+            control_surfaces,
+            landing_gear,
+        ),
+    ))
 }
 
 #[cfg(test)]
 #[path = "../breakdown_tests.rs"]
 mod tests;
-

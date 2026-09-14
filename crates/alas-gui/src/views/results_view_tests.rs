@@ -3,8 +3,9 @@
 
 use super::{
     figure_gallery_layout, format_cg_pct_mac, fullscreen_camera_key, fullscreen_id,
-    fullscreen_open, fullscreen_view_key, open_fullscreen_result, responsive_card_layout,
-    scene_has_external_images, set_fullscreen, unavailable_reason, CARD_GAP, CARD_MIN_WIDTH,
+    fullscreen_open, fullscreen_slot_key, fullscreen_view_key, open_fullscreen_result,
+    responsive_card_layout, scene_has_external_images, set_fullscreen, unavailable_reason,
+    CARD_GAP, CARD_MIN_WIDTH,
 };
 use crate::state::{AppState, PreviewCamera};
 use alas_report::scene::{Scene, SceneElement};
@@ -33,6 +34,24 @@ fn result_fullscreen_state_is_keyed_by_the_figure_cache_identity() {
     assert_ne!(
         fullscreen_id("run=1;figure=mass_breakdown"),
         fullscreen_id("run=1;figure=mass_distribution")
+    );
+}
+
+#[test]
+fn result_fullscreen_state_keeps_one_slot_when_display_language_or_theme_changes() {
+    let original = "run=1;solver=Vlm;theme=Dark;language=en;figure=mission_route_3d";
+    let translated = "run=1;solver=Vlm;theme=Light;language=es;figure=mission_route_3d";
+    let ctx = Context::default();
+    set_fullscreen(&ctx, original, true);
+
+    assert!(fullscreen_open(&ctx, translated));
+    assert_eq!(
+        fullscreen_slot_key(original),
+        fullscreen_slot_key(translated)
+    );
+    assert_eq!(
+        fullscreen_view_key(original),
+        fullscreen_view_key(translated)
     );
 }
 

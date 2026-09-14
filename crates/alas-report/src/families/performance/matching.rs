@@ -7,7 +7,10 @@
 //! The configuration- and report-driven aircraft sizing matching chart.
 
 use alas_config::AlasConfig;
-use alas_perf::performance::{build_matching_chart, far25_oei_gradient, MatchingChartData};
+use alas_perf::performance::{
+    assess_oei_climb, build_matching_chart, compute_v_speeds, far25_oei_gradient,
+    MatchingChartData, OeiV2Condition,
+};
 use alas_pipeline::full_analysis::AnalysisReport;
 
 use crate::chart_kit::{draw_legend, draw_title, LegendMarker};
@@ -72,7 +75,7 @@ pub fn figure_matching_chart(
     let n_engines = config.geometry.engine.spanwise_positions_m.len() as i64;
     let oei_gradient = far25_oei_gradient(n_engines).unwrap_or(performance.oei_gradient);
     let tw_design = static_thrust_to_weight(config, 0.30);
-    let data = build_matching_chart(
+    let mut data = build_matching_chart(
         report.polar_fit.cd0,
         report.polar_fit.k,
         requirements.cruise_mach,
@@ -94,6 +97,35 @@ pub fn figure_matching_chart(
         Some(performance.ws_max_pa),
     );
 
+    // The chart's y-axis is installed sea-level-static T/W.  A generic cruise
+    // lapse is not a valid conversion for the OEI V2 condition, so only use a
+    // condition-specific ratio when departure/V2 evidence is present.
+    let v_speeds = compute_v_speeds(
+        requirements.mtow_kg,
+        wing_area,
+        departure,
+        performance.cl_max_to,
+        performance.cl_max_land,
+        performance,
+    );
+    data.oei_climb_assessment = assess_oei_climb(
+        report.polar_fit.cd0,
+        report.polar_fit.k,
+        n_engines,
+        oei_gradient,
+        performance.oei_climb_cl,
+        performance.oei_climb_delta_cd,
+        performance.cl_max_to,
+        Some(OeiV2Condition {
+            departure_elevation_m: departure.elevation_m,
+            departure_isa_deviation_c: departure.isa_deviation_c,
+            v2_over_vstall: v_speeds.v2_ms / v_speeds.v_stall_to_ms,
+            condition_to_sls_thrust_ratio: performance.oei_condition_to_sls_thrust_ratio,
+            asymmetric_trim_cd: performance.oei_asymmetric_trim_cd,
+            windmilling_cd: performance.oei_windmilling_cd,
+        }),
+    );
+
     draw_matching_chart(&data, oei_gradient, theme)
 }
 
@@ -108,9 +140,15 @@ fn draw_matching_chart(data: &MatchingChartData, oei_gradient: f64, theme: Optio
     }
 
     let ws_kg: Vec<f64> = data.ws_pa.iter().map(|ws| ws / 9.81).collect();
+    let oei_sls_floor = data
+        .oei_climb_assessment
+        .required_sls_tw
+        .filter(|value| value.is_finite() && *value >= 0.0);
     let mut tw_floor = data.tw_cruise.clone();
-    for value in &mut tw_floor {
-        *value = value.max(data.tw_oei_climb);
+    if let Some(oei_sls_floor) = oei_sls_floor {
+        for value in &mut tw_floor {
+            *value = value.max(oei_sls_floor);
+        }
     }
     for (_, curve) in &data.tw_takeoff {
         for (floor, value) in tw_floor.iter_mut().zip(curve) {
@@ -121,7 +159,7 @@ fn draw_matching_chart(data: &MatchingChartData, oei_gradient: f64, theme: Optio
         .iter()
         .copied()
         .filter(|value| value.is_finite())
-        .fold(data.tw_oei_climb.max(0.0), f64::max);
+        .fold(oei_sls_floor.unwrap_or(0.0), f64::max);
     // Preserve f64::min/max NaN handling used by the translated calculation.
     #[allow(clippy::manual_clamp)]
     let y_max = (floor_max * 1.4).min(0.6).max(0.1);
@@ -145,14 +183,16 @@ fn draw_matching_chart(data: &MatchingChartData, oei_gradient: f64, theme: Optio
             .collect::<Vec<_>>(),
         Stroke::new(Color::from_hex("#3498db"), 2.0),
     );
-    axes.add_line_series(
-        &mut scene,
-        &[
-            (ws_kg[0], data.tw_oei_climb),
-            (*ws_kg.last().unwrap_or(&ws_kg[0]), data.tw_oei_climb),
-        ],
-        Stroke::dashed(Color::from_hex("#9b59b6"), 1.8, 5.0, 4.0),
-    );
+    if let Some(oei_sls_floor) = oei_sls_floor {
+        axes.add_line_series(
+            &mut scene,
+            &[
+                (ws_kg[0], oei_sls_floor),
+                (*ws_kg.last().unwrap_or(&ws_kg[0]), oei_sls_floor),
+            ],
+            Stroke::dashed(Color::from_hex("#9b59b6"), 1.8, 5.0, 4.0),
+        );
+    }
     for (index, (name, curve)) in data.tw_takeoff.iter().enumerate() {
         let colour = Color::from_hex(AIRPORT_COLOURS[index % AIRPORT_COLOURS.len()]);
         axes.add_line_series(
@@ -216,16 +256,16 @@ fn draw_matching_chart(data: &MatchingChartData, oei_gradient: f64, theme: Optio
         bold: true,
     });
 
-    let mut legend = vec![
-        (
-            "Cruise (T/W0 floor)".to_owned(),
-            LegendMarker::Line(Stroke::new(Color::from_hex("#3498db"), 2.0)),
-        ),
-        (
-            format!("OEI climb >= {:.1}%", oei_gradient * 100.0),
+    let mut legend = vec![(
+        "Cruise (T/W0 floor)".to_owned(),
+        LegendMarker::Line(Stroke::new(Color::from_hex("#3498db"), 2.0)),
+    )];
+    if oei_sls_floor.is_some() {
+        legend.push((
+            format!("OEI climb >= {:.1}% (SLS-equivalent)", oei_gradient * 100.0),
             LegendMarker::Line(Stroke::dashed(Color::from_hex("#9b59b6"), 1.8, 5.0, 4.0)),
-        ),
-    ];
+        ));
+    }
     for (index, (name, _)) in data.tw_takeoff.iter().enumerate() {
         let colour = Color::from_hex(AIRPORT_COLOURS[index % AIRPORT_COLOURS.len()]);
         legend.push((
@@ -238,6 +278,16 @@ fn draw_matching_chart(data: &MatchingChartData, oei_gradient: f64, theme: Optio
         ));
     }
     draw_legend(&mut scene, [675.0, 70.0], &legend, pal, 8.0);
+    scene.add(SceneElement::Text {
+        text: data.oei_climb_assessment.diagnostic.to_owned(),
+        pos: [675.0, 190.0],
+        font_size: 9.0,
+        color: Color::from_hex(pal.tick),
+        align: TextAlign::Left,
+        baseline: TextBaseline::Top,
+        angle_deg: 0.0,
+        bold: false,
+    });
     scene
 }
 
@@ -267,6 +317,7 @@ fn add_axis_labels(scene: &mut Scene, axes: &Axes2D, pal: &crate::theme::Palette
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alas_perf::performance::OeiClimbStatus;
 
     #[test]
     fn a_matching_chart_with_no_points_degrades_to_a_status_scene() {
@@ -275,6 +326,12 @@ mod tests {
                 ws_pa: Vec::new(),
                 tw_cruise: Vec::new(),
                 tw_oei_climb: 0.0,
+                oei_climb_assessment: alas_perf::performance::OeiClimbAssessment {
+                    status: OeiClimbStatus::NotApplicable,
+                    required_inflight_tw: None,
+                    required_sls_tw: None,
+                    diagnostic: "not applicable",
+                },
                 tw_takeoff: Vec::new(),
                 ws_land_limits: Vec::new(),
                 design_ws_pa: None,
@@ -284,5 +341,39 @@ mod tests {
             None,
         );
         assert_eq!(scene.title.as_deref(), Some("Matching Chart"));
+    }
+
+    #[test]
+    fn conceptual_oei_estimate_is_not_plotted_on_the_sls_axis() {
+        let scene = draw_matching_chart(
+            &MatchingChartData {
+                ws_pa: vec![2_000.0, 10_000.0],
+                tw_cruise: vec![0.12, 0.18],
+                // Deliberately large: this compatibility value must not set
+                // the SLS chart floor when its condition evidence is absent.
+                tw_oei_climb: 0.90,
+                oei_climb_assessment: alas_perf::performance::OeiClimbAssessment {
+                    status: OeiClimbStatus::ConceptualInflight,
+                    required_inflight_tw: Some(0.90),
+                    required_sls_tw: None,
+                    diagnostic: "conceptual in-flight only",
+                },
+                tw_takeoff: Vec::new(),
+                ws_land_limits: Vec::new(),
+                design_ws_pa: None,
+                design_tw: None,
+            },
+            0.024,
+            None,
+        );
+        assert!(scene.elements.iter().any(|element| matches!(
+            element,
+            SceneElement::Text { text, .. }
+                if text.contains("conceptual in-flight only")
+        )));
+        assert!(!scene.elements.iter().any(|element| matches!(
+            element,
+            SceneElement::Text { text, .. } if text.contains("OEI climb >=")
+        )));
     }
 }

@@ -84,7 +84,72 @@ fn versioned_mses_distribution_is_discovered_without_a_hard_coded_release() {
     let locator = ToolLocator::new(&root, root.join("prefs"));
     assert_eq!(
         locator.discover_mses(Path::new("external tools/MSES")),
-        MsesDiscovery::Ready(directory)
+        MsesDiscovery::Ready {
+            directory: directory.clone(),
+            source: MsesSource::Adjacent { root: root.clone() },
+        }
+    );
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn stale_mses_preference_falls_back_to_the_checkout_and_keeps_provenance() -> Result<(), &'static str> {
+    let root = std::env::temp_dir().join(format!("alas-relocated-mses-{}", std::process::id()));
+    let app_root = root.join("target/release");
+    let directory = root.join("external tools/Mses3.12c-win32");
+    let stale = root.join("old-checkout/external tools/Mses3.12c-win32");
+    let _ = fs::create_dir_all(&directory);
+    let _ = fs::write(root.join("Cargo.toml"), b"[package]\nname = \"fixture\"\n");
+    for name in ["mset.exe", "mses.exe", "mplot.exe"] {
+        let _ = fs::write(directory.join(name), b"test");
+    }
+    let locator = ToolLocator::new(&app_root, root.join("prefs"));
+
+    let discovery = locator.discover_mses(&stale);
+    assert_eq!(
+        discovery,
+        MsesDiscovery::Ready {
+            directory: directory.clone(),
+            source: MsesSource::Adjacent { root: root.clone() },
+        }
+    );
+    let warning = discovery
+        .fallback_warning()
+        .ok_or("a stale preference must be observable as a fallback")?;
+    assert!(warning.contains("using adjacent installation"), "{warning}");
+    assert!(warning.contains("Mses3.12c-win32"), "{warning}");
+    assert!(
+        warning.contains(
+            root.file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .as_ref()
+        ),
+        "{warning}"
+    );
+    let _ = fs::remove_dir_all(root);
+    Ok(())
+}
+
+#[test]
+fn valid_mses_preference_wins_over_an_adjacent_bundle() {
+    let root = std::env::temp_dir().join(format!("alas-configured-mses-{}", std::process::id()));
+    let configured = root.join("configured/MSES");
+    let adjacent = root.join("external tools/Mses3.12c-win32");
+    let _ = fs::create_dir_all(&configured);
+    let _ = fs::create_dir_all(&adjacent);
+    for name in ["mset.exe", "mses.exe", "mplot.exe"] {
+        let _ = fs::write(configured.join(name), b"configured");
+        let _ = fs::write(adjacent.join(name), b"adjacent");
+    }
+    let locator = ToolLocator::new(&root, root.join("prefs"));
+
+    assert_eq!(
+        locator.discover_mses(&configured),
+        MsesDiscovery::Ready {
+            directory: configured,
+            source: MsesSource::Configured,
+        }
     );
     let _ = fs::remove_dir_all(root);
 }
@@ -95,7 +160,8 @@ fn student_edition_layout_resolves_nastran_and_patran_separately() {
     let edition = root.join("20261");
     let nastran = edition.join("Nastran/bin/nastran.exe");
     let patran = edition.join("Patran/bin/patran.exe");
-    let solver = edition.join("Patran/mscnastran_files/20261/servermode/msc20261/win64i8/analysis.exe");
+    let solver =
+        edition.join("Patran/mscnastran_files/20261/servermode/msc20261/win64i8/analysis.exe");
     let _ = fs::create_dir_all(nastran.parent().unwrap_or(Path::new(".")));
     let _ = fs::create_dir_all(patran.parent().unwrap_or(Path::new(".")));
     let _ = fs::create_dir_all(solver.parent().unwrap_or(Path::new(".")));
@@ -125,16 +191,12 @@ fn student_edition_layout_resolves_nastran_and_patran_separately() {
 
 #[test]
 fn automatic_student_edition_resolution_prefers_the_versioned_nastran_launcher() {
-    let root = std::env::temp_dir().join(format!(
-        "alas-msc-inner-launcher-{}",
-        std::process::id()
-    ));
+    let root = std::env::temp_dir().join(format!("alas-msc-inner-launcher-{}", std::process::id()));
     let edition = root.join("20261");
     let visible = edition.join("Nastran/bin/nastran.exe");
     let inner = edition.join("Nastran/msc20261/win64i8/nastran.exe");
-    let solver = edition.join(
-        "Patran/mscnastran_files/20261/servermode/msc20261/win64i8/analysis.exe",
-    );
+    let solver =
+        edition.join("Patran/mscnastran_files/20261/servermode/msc20261/win64i8/analysis.exe");
     let _ = fs::create_dir_all(visible.parent().unwrap_or(Path::new(".")));
     let _ = fs::create_dir_all(inner.parent().unwrap_or(Path::new(".")));
     let _ = fs::create_dir_all(solver.parent().unwrap_or(Path::new(".")));

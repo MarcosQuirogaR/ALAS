@@ -14,11 +14,40 @@
 //! which is why the fine resolutions are separate fields rather than a
 //! multiplier someone remembers to raise.
 //!
-//! The chordwise resolution is the one that bites. A supercritical section
-//! needs roughly eight chordwise panels before the vortex-lattice method
-//! resolves its camber line at all; below that the zero-lift angle is
-//! under-captured, which inflates the reported cruise angle of attack by
-//! several degrees and costs about seven percent of the lift-to-drag ratio.
+//! # Why the two meshes differ in cost and not in kind
+//!
+//! The chordwise resolution is the one that bites, and only the chordwise
+//! one. `Wing::mesh_thin_surface` cuts `cosspace(0, 1, chordwise + 1)`
+//! stations and samples the mean camber line at each, so at a resolution of
+//! one the only stations are the leading and trailing edges -- where every
+//! mean line is zero -- and the panel is the flat chord line. The camber is
+//! not approximated coarsely; it is absent.
+//!
+//! Measured across four registered presets (`.agent/reports/
+//! 2026-09-11-vlm-resolution-sensitivity.html`, cross-checked against
+//! AeroSandbox 4.2.8 on identical geometry): at one chordwise panel the
+//! trimmed cruise attitude is 1.1 to 4.1 degrees high depending on how much
+//! camber the section carries, the induced-drag factor is wrong by -5 to
+//! +35 %, and the lift-to-drag ratio by -14.4 to +2.9 % -- the sign differs
+//! between airframes, so no calibration constant can absorb it. Ranked over
+//! neighbouring candidates the search then mis-orders them (Spearman 0.77
+//! against a converged mesh) and under-predicts sized block fuel by about
+//! 7 %. At eight chordwise panels the ranking is exact and the induced
+//! factor is within 1.5 %; sixteen halves the residual attitude error again.
+//! The four Hicks-Henne bump design variables produce *bit-identical* forces
+//! at one panel, so a search run there cannot see a third of its own design
+//! space.
+//!
+//! The spanwise resolution is a different animal: it is a subdivision
+//! *multiplier* applied to a surface `AircraftBuilder` has already
+//! subdivided, so a value of one already means 24 strips per semispan on the
+//! main wing. Refining that cleanly (through `n_subdivisions`) moves the
+//! trimmed attitude by 0.011 degrees and the induced factor by 0.4 % over a
+//! twelve-fold range -- it is converged. Refining it through *this*
+//! multiplier instead re-applies a cosine spacing inside each existing strip
+//! and destroys the answer; `validation::vlm_mesh_is_solvable` rejects
+//! anything above two for that reason. So both spanwise fields default to
+//! one: not to save time, but because that is the converged value.
 
 use serde::{Deserialize, Serialize};
 
@@ -54,28 +83,28 @@ pub struct AnalysisConfig {
     /// Spanwise panel multiplier for the in-loop estimate.
     #[config(
         label = "VLM spanwise panel resolution",
-        help = "Multiplier on each surface's built-in spanwise panel subdivision for the vortex-lattice solver. Higher = finer mesh, slower. Part of the Fidelity preset."
+        help = "Multiplier on each surface's built-in spanwise panel subdivision for the vortex-lattice solver. Leave at 1: the geometry builder has already subdivided every surface (24 strips per semispan on the main wing), and that is converged -- refining it further moves the trimmed cruise attitude by 0.01 deg. Values above 2 are rejected, because this multiplier re-applies a cosine spacing inside each existing strip and the induced drag then stops converging. Part of the Fidelity preset."
     )]
     pub spanwise_resolution: i64,
 
     /// Chordwise panel multiplier for the in-loop estimate.
     #[config(
         label = "VLM chordwise panel resolution",
-        help = "Multiplier on each surface's built-in chordwise panel subdivision for the vortex-lattice solver. Higher = finer mesh, slower. Part of the Fidelity preset. Used by the fast in-loop estimate; the final reported analysis uses fine_chordwise_resolution instead."
+        help = "Number of chordwise panels per strip for the vortex-lattice solver, used by the fast in-loop estimate the optimizer ranks candidates with; the final reported analysis uses fine_chordwise_resolution instead. This is a literal panel count, not a multiplier, and nothing else in the pipeline sets one. At 1 the mesh samples the camber line only at the leading and trailing edges, where it is zero, so the section becomes a flat plate: cruise attitude comes out 1-4 deg high, L/D wrong by -14 to +3 percent, and the four airfoil bump design variables have no effect at all. 8 ranks candidates identically to a converged mesh. Higher = finer mesh, slower. Part of the Fidelity preset."
     )]
     pub chordwise_resolution: i64,
 
     /// Spanwise panel multiplier for the once-per-run final analysis.
     #[config(
         label = "Fine VLM spanwise resolution (final analysis)",
-        help = "Spanwise panel resolution used ONLY for the once-per-run final/reported analysis (drag polar, trimmed cruise point, neutral point) -- not the optimizer loop. Higher fidelity where speed doesn't matter."
+        help = "Spanwise panel resolution used ONLY for the once-per-run final/reported analysis (drag polar, trimmed cruise point, neutral point) -- not the optimizer loop. Leave at 1 for the same reason as the in-loop field: the span is already converged, so raising this doubles the panel count to change the answer by about 1 percent. Spend the panels on fine_chordwise_resolution instead."
     )]
     pub fine_spanwise_resolution: i64,
 
     /// Chordwise panel multiplier for the once-per-run final analysis.
     #[config(
         label = "Fine VLM chordwise resolution (final analysis)",
-        help = "Chordwise panel resolution for the once-per-run final/reported analysis. A supercritical/cambered section needs ~8 chordwise panels for the VLM to resolve its camber line; at the coarse in-loop resolution the camber (and hence the zero-lift alpha) is under-captured, which inflates the reported cruise alpha by several degrees and under-predicts L/D by ~7%. Kept high here so the REPORTED cruise alpha (~1-4 deg) and L/D are physically accurate."
+        help = "Chordwise panel resolution for the once-per-run final/reported analysis. A supercritical section needs roughly 8 chordwise panels before the VLM resolves its camber line at all, and the convergence is first-order in panel count: 8 still leaves the reported cruise attitude about 1 deg high on a supercritical wing, 16 about 0.5 deg. Kept above the in-loop value so the REPORTED cruise alpha and L/D are the more trustworthy of the two, at a cost paid once per run."
     )]
     pub fine_chordwise_resolution: i64,
 
@@ -170,16 +199,40 @@ pub struct AnalysisConfig {
     pub polar_fit_cl_max_fallback: f64,
 }
 
+impl AnalysisConfig {
+    /// Restore the vortex-lattice mesh the frozen Python implementation used.
+    ///
+    /// The product defaults deliberately differ (see the module doc): the
+    /// reference evaluates its search at one chordwise panel, which samples
+    /// the mean camber line only at the leading and trailing edges -- where
+    /// every mean line is zero -- and spends its reported-analysis budget
+    /// spanwise, on a surface the builder has already converged.
+    ///
+    /// Every reference-compatibility replay calls this. A fixture pinned
+    /// against the Python model is evidence about the *port* only if this
+    /// side meshes the way the reference did; inheriting the product default
+    /// would quietly re-point those fixtures at a different aerodynamic
+    /// model. The four values are literals here rather than a second
+    /// `Default` impl so that changing the product mesh cannot move them.
+    pub fn restore_reference_mesh(&mut self) {
+        self.spanwise_resolution = 1;
+        self.chordwise_resolution = 1;
+        self.fine_spanwise_resolution = 2;
+        self.fine_chordwise_resolution = 8;
+    }
+}
+
 impl Default for AnalysisConfig {
     fn default() -> Self {
         Self {
             sweep_alpha_min_deg: -4.0,
             sweep_alpha_max_deg: 10.0,
             sweep_n_points: 15,
+            // See the module doc for the measurements these four come from.
             spanwise_resolution: 1,
-            chordwise_resolution: 1,
-            fine_spanwise_resolution: 2,
-            fine_chordwise_resolution: 8,
+            chordwise_resolution: 8,
+            fine_spanwise_resolution: 1,
+            fine_chordwise_resolution: 16,
             probe_alpha_low_deg: 2.0,
             probe_alpha_high_deg: 3.0,
             trim_incidence_probe_delta_deg: 1.0,

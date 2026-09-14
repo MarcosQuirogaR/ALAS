@@ -10,7 +10,7 @@
 //! performance and geometry families are large enough on their own that they
 //! live in `mdo::residuals_performance` and `mdo::residuals_geometry`.
 
-use alas_config::{AlasConfig, ConstraintPolicy, ObjectiveConfig, ObjectiveWeights};
+use alas_config::{AlasConfig, ConstraintPolicy, MtowSizing, ObjectiveConfig, ObjectiveWeights};
 
 use crate::envelope::{
     assess_model_cg_envelope, ModelCgConstraint, ModelCgConstraintAssessment,
@@ -33,7 +33,7 @@ pub(crate) fn build(
 ) -> Vec<ConstraintResidual> {
     let objective = &config.optimizer.objective;
     let mut residuals = Vec::new();
-    residuals.extend(mass_residuals(outcome, objective, config));
+    residuals.extend(mass_residuals(outcome, objective));
     residuals.extend(balance_residuals(
         outcome,
         config,
@@ -57,11 +57,7 @@ pub(crate) fn build(
 
 /// The fuel-capacity, takeoff-mass-ceiling, landing-mass and sizing-closure
 /// residuals.
-fn mass_residuals(
-    outcome: &SizingOutcome,
-    objective: &ObjectiveConfig,
-    config: &AlasConfig,
-) -> Vec<ConstraintResidual> {
+fn mass_residuals(outcome: &SizingOutcome, objective: &ObjectiveConfig) -> Vec<ConstraintResidual> {
     let policy = objective.mass_constraints;
     if policy == ConstraintPolicy::Off {
         return Vec::new();
@@ -110,19 +106,36 @@ fn mass_residuals(
         ));
     }
 
-    let required_takeoff_mass_kg =
-        sized.dispatch.zero_fuel_mass_kg + sized.dispatch.plan.takeoff_fuel_kg();
-    residuals.push(ConstraintResidual::scaled(
-        "mtow_ceiling",
-        Mass,
-        required_takeoff_mass_kg,
-        outcome.mtow_ceiling,
-        "kg",
-        required_takeoff_mass_kg - outcome.mtow_ceiling,
-        policy,
-    ));
+    let unconstrained = objective.mtow_sizing == MtowSizing::Unconstrained;
 
-    let mlw_kg = config.landing_mass_limit_kg(outcome.mtow_ceiling);
+    // `MtowSizing::Unconstrained` uses the declared requirement only to seed
+    // the closure (see `mdo::mda`); it declares no ceiling for the
+    // free-converged mass to be checked against, so there is no residual to
+    // push here. Pushing one against the seed value would reject any
+    // candidate whose free-converged mass exceeded it under the default hard
+    // policy, defeating the entire point of the mode.
+    if !unconstrained {
+        let required_takeoff_mass_kg =
+            sized.dispatch.zero_fuel_mass_kg + sized.dispatch.plan.takeoff_fuel_kg();
+        residuals.push(ConstraintResidual::scaled(
+            "mtow_ceiling",
+            Mass,
+            required_takeoff_mass_kg,
+            outcome.mtow_ceiling,
+            "kg",
+            required_takeoff_mass_kg - outcome.mtow_ceiling,
+            policy,
+        ));
+    }
+
+    // The landing-mass limit is the sizing basis's own `design_landing_mass_kg`
+    // (`alas_config::MassSizingBasis`, computed once in `mdo::sizing` and
+    // carried on `SizedCandidate` as the single reported value): the declared
+    // `WLDG` in every mode for a fixed aircraft, unaffected by `MtowSizing`,
+    // and the configured fraction of the closed takeoff mass for a coupled
+    // clean-sheet design, consistent with `mdo::mda::converge`'s own per-pass
+    // recomputation there.
+    let mlw_kg = sized.design_landing_mass_kg;
     residuals.push(ConstraintResidual::scaled(
         "landing_mass",
         Mass,

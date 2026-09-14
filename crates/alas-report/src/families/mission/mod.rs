@@ -17,9 +17,9 @@
 //! [`drag::figure_mission_drag_components`] (the five CD components).
 //!
 //! Every panel reads a scalar off [`alas_mission::Conditions`] at each
-//! control point of each segment, exactly as `export_data.py`'s
-//! `export_simulation_results` -- the CSV writer `mission.columns` is parsed
-//! from -- reads it off `segment.conditions...`; see each submodule's doc
+//! control point of each segment, matching the way `export_data.py`'s
+//! `export_simulation_results` CSV writer reads `mission.columns` from
+//! `segment.conditions...`; see each submodule's doc
 //! for the field it mirrors. `EAS_m_s` and `SFC_kg_kgf_hr` are not stored
 //! columns either side: both are computed inline by `export_data.py`
 //! (`tas * sqrt(density / 1.225)` and `(mdot * 3600) / (thrust / g0)`), so
@@ -56,8 +56,8 @@ pub(super) const G0: f64 = 9.80665;
 /// Mission time in minutes at one control point, matching `_mission_time_min`
 /// (`np.asarray(mission.time_s) / 60.0`, where `mission.time_s` is the CSV's
 /// `Time_s` column). `Conditions::time_s` is already absolute along the whole
-/// mission -- `initialize_time` shifts each segment onto the end of the one
-/// before it -- so no per-segment offset is needed here.
+/// mission. `initialize_time` shifts each segment onto the end of the preceding
+/// one, so no per-segment offset is needed here.
 fn time_min_at(cond: &Conditions, i: usize) -> f64 {
     cond.time_s[i] / 60.0
 }
@@ -131,7 +131,7 @@ fn add_series_with_gaps(axes: &Axes2D, scene: &mut Scene, pts: &[(f64, f64)], st
 }
 
 /// Draw one panel's frame, one or more overlaid series, and a bold
-/// left-aligned title above the axes -- the panel-identity convention
+/// left-aligned title above the axes. This follows the panel-identity convention
 /// `figure_mission_profile` establishes upstream in place of a rotated
 /// y-axis label (see that function's module doc for why). Y range is
 /// autoscaled from every series' finite values combined; X range is shared
@@ -208,7 +208,7 @@ pub(super) fn draw_time_axis_label(scene: &mut Scene, pal: &Palette, rect: (f64,
 /// Shared across every submodule's unit tests as `crate::families::mission::
 /// test_support::sample_mission` (each figure submodule is a descendant of
 /// this one, so its `pub(in crate::families::mission)` visibility already
-/// reaches them -- no re-export needed).
+/// reaches them, so no re-export is needed.
 #[cfg(test)]
 mod test_support {
     use alas_aero::drag_buildup::{ComponentParasiteDrag, DragBreakdown};
@@ -317,7 +317,7 @@ mod test_support {
 
     /// A mission of two three-point cruise segments back to back, joined so
     /// `time_s`/`total_mass_kg`/`aircraft_range_m` stay monotonic across the
-    /// seam -- the invariant [`Conditions::time_s`]'s own doc states -- so a
+    /// seam. This follows the invariant documented for [`Conditions::time_s`], so a
     /// test can check that a figure's series concatenates across segment
     /// boundaries rather than only rendering the first one.
     pub(in crate::families::mission) fn sample_mission() -> MissionResult {

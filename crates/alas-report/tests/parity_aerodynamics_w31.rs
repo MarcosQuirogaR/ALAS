@@ -66,6 +66,7 @@ fn report() -> AnalysisReport {
         x_neutral_point: 4.0,
         trimmed_design_point: None,
         component_masses: HashMap::new(),
+        flops_mass_buildup: None,
         mass_coordinates: HashMap::new(),
         physical_cg: [0.0, 0.0, 0.0],
         geometry_summary: HashMap::new(),
@@ -188,7 +189,7 @@ fn model_comparison_overlays_only_compatible_avl_lift_and_moment() {
         &svg,
         &[
             "Athena AVL (cross-check)",
-            "Lift cross-check -- takeoff climb midpoint",
+            "Lift cross-check: takeoff climb midpoint",
             "Pitching-moment cross-check",
             "Induced drag cross-check",
             "Span efficiency cross-check",

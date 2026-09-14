@@ -19,6 +19,10 @@ use crate::state::AppState;
 use crate::views::{tr, tr_fields};
 
 mod cards;
+mod cfd;
+mod status;
+
+pub(crate) use cfd::save_cfd_environment_preferences;
 
 /// Render the External Tools page.
 pub fn show_tools_view(state: &mut AppState, ui: &mut Ui) {
@@ -53,6 +57,8 @@ pub fn show_tools_view(state: &mut AppState, ui: &mut Ui) {
                     cards::mses_card(state, &mut left[0]);
                     cards::openvsp_card(state, &mut right[0]);
                 });
+                ui.add_space(8.0);
+                cards::openfoam_card(state, ui);
             } else {
                 cards::nastran_card(state, ui);
                 ui.add_space(8.0);
@@ -61,6 +67,8 @@ pub fn show_tools_view(state: &mut AppState, ui: &mut Ui) {
                 cards::mses_card(state, ui);
                 ui.add_space(8.0);
                 cards::openvsp_card(state, ui);
+                ui.add_space(8.0);
+                cards::openfoam_card(state, ui);
             }
             ui.add_space(8.0);
             cards::avl_card(state, ui);
@@ -150,6 +158,12 @@ fn apply_completed_path_selection(state: &mut AppState) {
             return;
         }
     };
+
+    if let Some(label) = cfd::apply_path_selection(state, target, &path) {
+        state.on_config_modified();
+        state.note_parameter_modified(tr(label), path);
+        return;
+    }
 
     let label = match target {
         ToolPathTarget::NastranExecutable => {
@@ -247,6 +261,7 @@ fn apply_completed_path_selection(state: &mut AppState) {
             save_direct_tool_preferences(state);
             "Install directory"
         }
+        _ => return,
     };
     state.on_config_modified();
     state.note_parameter_modified(tr(label), path);
@@ -267,7 +282,7 @@ fn save_direct_tool_preferences(state: &mut AppState) {
 /// Open the user-entered location without writing to it. The path remains an
 /// explicit editable preference: discovery never guesses an installation as a
 /// successful solver run.
-fn open_in_file_explorer(value: &str, directory: bool) -> Result<(), String> {
+pub(crate) fn open_in_file_explorer(value: &str, directory: bool) -> Result<(), String> {
     let (target, select_file) = explorer_target(value, directory)?;
     #[cfg(target_os = "windows")]
     {
@@ -351,91 +366,8 @@ fn set_bool(config: &mut Value, group: &str, name: &str, value: bool) {
 fn status_card(state: &AppState, ui: &mut Ui) {
     crate::theme::card_frame(ui).show(ui, |ui| {
         ui.set_min_width(ui.available_width());
-        resolved_status(state, ui);
+        status::resolved_status(state, ui);
     });
-}
-
-fn resolved_status(state: &AppState, ui: &mut Ui) {
-    let Some(config) = state.typed_config() else {
-        return;
-    };
-    let environment = state.tool_locator.resolve_environment(
-        std::path::Path::new(&config.mses.mses_dir),
-        std::path::Path::new(&config.structures.nastran_exe_path),
-        std::path::Path::new(&config.structures.patran_exe_path),
-        std::path::Path::new(state.tool_preferences.openvsp_dir.as_deref().unwrap_or("")),
-        std::path::Path::new(state.tool_preferences.avl_exe.as_deref().unwrap_or("")),
-    );
-    egui::Grid::new("external_tools_status")
-        .num_columns(2)
-        .spacing([12.0, 4.0])
-        .show(ui, |ui| {
-            status_row(
-                ui,
-                "MSES",
-                environment
-                    .mses_dir
-                    .as_deref()
-                    .map_or_else(|| tr("not found"), |path| path.display().to_string()),
-            );
-            status_row(
-                ui,
-                "Local navigation data",
-                describe_optional_directory(&config.mission.navdata_dir),
-            );
-            status_row(
-                ui,
-                "Saved routes",
-                describe_optional_directory(&config.mission.routes_dir),
-            );
-            status_row(
-                ui,
-                "NASTRAN",
-                describe_executable(
-                    &state.tool_locator.discover_nastran(std::path::Path::new(
-                        &config.structures.nastran_exe_path,
-                    )),
-                ),
-            );
-            status_row(
-                ui,
-                "MSC solver override",
-                describe_nastran_solver(
-                    &config.structures.nastran_solver_path,
-                    environment.nastran_solver.as_deref(),
-                ),
-            );
-            status_row(
-                ui,
-                "Patran",
-                describe_executable(
-                    &state
-                        .tool_locator
-                        .discover_patran(std::path::Path::new(&config.structures.patran_exe_path)),
-                ),
-            );
-            status_row(
-                ui,
-                "OpenVSP script runner",
-                describe_executable(&state.tool_locator.discover_openvsp(std::path::Path::new(
-                    state.tool_preferences.openvsp_dir.as_deref().unwrap_or(""),
-                ))),
-            );
-            status_row(
-                ui,
-                "VSPAERO solver",
-                describe_executable(&state.tool_locator.discover_vspaero(std::path::Path::new(
-                    state.tool_preferences.openvsp_dir.as_deref().unwrap_or(""),
-                ))),
-            );
-            status_row(
-                ui,
-                "Athena AVL",
-                describe_executable(&state.tool_locator.discover_avl(std::path::Path::new(
-                    state.tool_preferences.avl_exe.as_deref().unwrap_or(""),
-                ))),
-            );
-        });
 }
 
 fn status_row(ui: &mut Ui, label: &str, value: String) {

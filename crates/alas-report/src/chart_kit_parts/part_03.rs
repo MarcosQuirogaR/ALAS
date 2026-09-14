@@ -1,12 +1,41 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::scene::Scene;
     use crate::theme::PALETTE_LIGHT;
+
+    #[test]
+    fn wrap_text_keeps_every_word_and_never_exceeds_the_budget() {
+        let long_message = "status=CompletedNotComparable; expected artifact (native screenshot): \
+             C:/runs/optimized_aircraft.preview.png; ScreenGrab produced no output within the \
+             configured timeout and the headless fallback mesh projection was also unavailable";
+        let wrapped = wrap_text(long_message, 40);
+        for line in wrapped.lines() {
+            assert!(
+                line.chars().count() <= 40 || !line.contains(' '),
+                "line exceeds the budget and could have wrapped: {line:?}"
+            );
+        }
+        let rejoined = wrapped.split_whitespace().collect::<Vec<_>>().join(" ");
+        let original = long_message.split_whitespace().collect::<Vec<_>>().join(" ");
+        assert_eq!(rejoined, original, "wrapping must not drop or reorder words");
+        assert!(wrapped.lines().count() > 1, "a long message should wrap onto multiple rows");
+    }
+
+    #[test]
+    fn wrap_text_preserves_caller_formatted_paragraph_breaks() {
+        let message = "first clause\nsecond clause";
+        assert_eq!(wrap_text(message, 80), "first clause\nsecond clause");
+    }
+
+    #[test]
+    fn wrap_text_keeps_an_overlong_single_word_intact() {
+        let path = "C:/very/long/path/that/exceeds/the/per-line/character/budget/artifact.png";
+        assert_eq!(wrap_text(path, 10), path);
+    }
 
     #[test]
     fn colorbar_emits_gradient_border_and_three_ticks_plus_label() {
@@ -181,6 +210,26 @@ mod tests {
     }
 
     #[test]
+    fn fixed_y_tick_precision_keeps_two_decimal_coefficient_labels() {
+        let axes =
+            Axes2D::new((60.0, 20.0, 240.0, 150.0), (0.0, 1.0), (0.0, 0.2)).with_y_tick_decimals(2);
+        let mut scene = Scene::new(360.0, 240.0, None);
+        draw_axes(&axes, &mut scene, &PALETTE_LIGHT, None, Some("CDtot"));
+
+        let labels = scene
+            .elements
+            .iter()
+            .filter_map(|element| match element {
+                SceneElement::Text { text, pos, .. } if pos[0] < axes.left => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(labels.contains(&"0.00"));
+        assert!(labels.contains(&"0.10"));
+        assert!(!labels.contains(&"0.1"));
+    }
+
+    #[test]
     fn chart_chrome_supports_titles_annotations_categories_and_responsive_margins() {
         let margins = ChartMargins::for_canvas(320.0, 220.0);
         let rect = margins.plot_rect(320.0, 220.0);
@@ -203,4 +252,3 @@ mod tests {
         )));
     }
 }
-

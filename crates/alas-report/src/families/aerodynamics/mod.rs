@@ -35,7 +35,8 @@ mod vspaero_lod;
 pub use drag_preview::figure_drag_preview;
 pub use model_comparison::{figure_model_comparison, figure_optimized_aircraft_comparison};
 pub use mses::{
-    figure_mses_convergence, figure_mses_mach_contours, figure_mses_pressure_distribution,
+    figure_mses_convergence, figure_mses_cp_contours, figure_mses_mach_contours,
+    figure_mses_pressure_distribution,
 };
 pub use polar::{figure_aero_panel, figure_drag_breakdown, figure_polar_comparison};
 pub use reynolds::figure_airfoil_reynolds;
