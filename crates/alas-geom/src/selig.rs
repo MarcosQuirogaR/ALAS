@@ -14,7 +14,7 @@
 //! embeds the same 1,665 entries as one text file, `data/selig.txt`, so that
 //! reading the corpus costs no zip-decompression dependency: each entry is
 //! stored behind a delimiter line `@<stem>`, followed by that `.dat` file's
-//! bytes verbatim -- including the name/header line the parser below skips
+//! bytes verbatim, including the name/header line the parser below skips
 //! over, because storing the parsed numbers instead would retire the
 //! upstream reader's "skip a line that fails to parse" behaviour to the
 //! extraction script rather than translating it into this module.
@@ -45,7 +45,7 @@ struct Entry {
     /// The zip entry's stem in its original case, e.g. `"naca2410"`.
     stem: &'static str,
     /// The bytes stored after this entry's `@stem` line, up to the next
-    /// one or the end of the corpus -- exactly what `data/selig.txt` holds,
+    /// one or the end of the corpus, exactly what `data/selig.txt` holds,
     /// including the header line [`parse_coordinates`] skips. Kept mainly
     /// for `tests/parity_selig.rs`, which hashes it against the archive's
     /// digest manifest to prove the corpus has not drifted.
@@ -63,7 +63,7 @@ fn corpus() -> &'static HashMap<String, Entry> {
 ///
 /// `data/selig.txt` guarantees every entry ends in a newline, so an
 /// entry's content runs from immediately after its own `@stem` line to the
-/// byte just before the next `@stem` line (or the end of the file) -- a
+/// byte just before the next `@stem` line (or the end of the file): a
 /// plain substring, which is what keeps this a slice into `CORPUS` rather
 /// than a copy.
 fn parse_corpus(text: &'static str) -> HashMap<String, Entry> {
@@ -101,7 +101,7 @@ fn parse_corpus(text: &'static str) -> HashMap<String, Entry> {
 
 /// Reproduce the zip-branch of `AirfoilLibrary.get`: skip the header line,
 /// then read each remaining line's first two whitespace-separated fields as
-/// floats, silently dropping any line where that fails -- matching Python's
+/// floats, silently dropping any line where that fails, matching Python's
 /// `try: ... except ValueError: continue`, which drops the whole line rather
 /// than keeping whichever of the two fields did parse.
 fn parse_coordinates(raw: &str) -> Vec<(f64, f64)> {
@@ -121,7 +121,7 @@ fn parse_coordinates(raw: &str) -> Vec<(f64, f64)> {
 /// Look up an entry by name, case-insensitively.
 ///
 /// Returns the stem in its original case and its `(x, y)` coordinate pairs
-/// in file order -- not normalized into any particular winding, which is
+/// in file order, not normalized into any particular winding, which is
 /// `AirfoilLibrary.normalize_coordinates`'s job in a later module.
 pub fn get(name: &str) -> Option<(&'static str, &'static [(f64, f64)])> {
     corpus()
@@ -170,7 +170,7 @@ mod tests {
     fn get_returns_none_for_a_name_the_corpus_does_not_have() {
         // The reference archive spells the NACA 0012 stem "n0012"; the
         // canonical name is not in it, and this module reports that rather
-        // than guessing -- native aerodynamic model's NACA generator is a later branch of
+        // than guessing: native aerodynamic model's NACA generator is a later branch of
         // `AirfoilLibrary.get`, not this module's concern.
         assert!(get("naca0012").is_none());
         assert!(get("not-a-real-airfoil-stem").is_none());

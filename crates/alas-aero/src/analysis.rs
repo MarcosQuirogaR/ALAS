@@ -10,9 +10,9 @@
 //!
 //! [`crate::vlm`] gives lift, induced drag and pitching moment, and is
 //! blind to two things that decide a transonic transport's cruise efficiency:
-//! skin friction and the shock rise. This module supplies both -- Raymer's
+//! skin friction and the shock rise. This module supplies both: Raymer's
 //! flat-plate component buildup in [`AeroAnalysis::parasite_drag`], the Korn
-//! equation in [`AeroAnalysis::wave_drag`] -- and hands back a corrected drag
+//! equation in [`AeroAnalysis::wave_drag`], and hands back a corrected drag
 //! polar. Every empirical coefficient comes from `DragModelConfig`; the sweep
 //! and the section thickness come from the geometry actually being analysed,
 //! not from a constant.
@@ -26,7 +26,7 @@
 //!
 //! native aerodynamic model's vortex lattice is incompressible, so at transonic cruise it
 //! under-predicts the lift-curve slope and therefore over-predicts the
-//! geometric alpha a given `CL` needs -- a supercritical widebody reads 4-6
+//! geometric alpha a given `CL` needs: a supercritical widebody reads 4-6
 //! degrees where the real aircraft shows 1-4. [`compressible_report_alpha`]
 //! compresses the *reported* angle toward the zero-lift angle by the
 //! Prandtl-Glauert factor. Only the angle moves: the drag polar stays on the
@@ -38,7 +38,7 @@
 //! # Scope
 //!
 //! [`AeroAnalysis::trimmed_performance`] takes a `StabilityTrimResult`
-//! upstream -- an `alas-stab` type, which is P7 and therefore above this row.
+//! upstream: an `alas-stab` type, which is P7 and therefore above this row.
 //! It reads exactly three fields off it, so it takes those three here as
 //! [`TrimPoint`] and P7 converts. This is the scoping `alas-perf`'s
 //! `build_vn_diagram` already uses for its airplane argument: a function that
@@ -67,9 +67,9 @@ pub use performance::{PolarSweep, QuickPerformance, TrimPoint, TrimmedPerformanc
 /// Upstream reaches it through a bare `except` around
 /// `plane.wings[0].xsecs[0].airfoil.max_thickness()`, so it is what an
 /// airplane with no wings gets. That is not a configuration this program
-/// builds, but the value is observable -- [`AeroAnalysis::wave_drag`] is the
-/// one consumer of the section thickness that is not itself a sum over wings
-/// -- so it is reproduced rather than turned into an error.
+/// builds, but the value is observable ([`AeroAnalysis::wave_drag`] is the
+/// one consumer of the section thickness that is not itself a sum over wings)
+/// so it is reproduced rather than turned into an error.
 const SECTION_THICKNESS_FALLBACK: f64 = 0.12;
 
 /// The number of chordwise stations `Airfoil.max_thickness` samples at, which
@@ -80,7 +80,7 @@ const MAX_THICKNESS_SAMPLES: usize = 101;
 /// singularity at 1.
 const MACH_NORMAL_CEILING: f64 = 0.95;
 
-/// Breakdown of the drag estimate at a single operating point --
+/// Breakdown of the drag estimate at a single operating point:
 /// `DragComponents`.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DragComponents {
@@ -132,8 +132,8 @@ pub fn compressible_report_alpha(
     alpha_0l_deg + beta * (alpha_incompressible_deg - alpha_0l_deg)
 }
 
-/// Hybrid vortex-lattice plus empirical-correction analysis of one aircraft
-/// -- `AeroAnalysis`.
+/// Hybrid vortex-lattice plus empirical-correction analysis of one aircraft:
+/// `AeroAnalysis`.
 ///
 /// Borrows the airplane rather than owning it, because every call site
 /// upstream builds one aircraft and analyses it from several angles; a
@@ -162,7 +162,7 @@ pub struct AeroAnalysis<'a> {
 
 impl<'a> AeroAnalysis<'a> {
     /// A new analysis of `plane` at `sweep_deg`, each configuration group
-    /// defaulting when `None` -- `AeroAnalysis.__init__`.
+    /// defaulting when `None`: `AeroAnalysis.__init__`.
     pub fn new(
         plane: &'a Airplane,
         sweep_deg: f64,
@@ -242,7 +242,7 @@ impl<'a> AeroAnalysis<'a> {
     /// Raymer's component buildup for the total parasite drag coefficient.
     ///
     /// `atmosphere` and `section_thickness` let a caller that has already
-    /// computed either pass it in rather than have this rebuild it --
+    /// computed either pass it in rather than have this rebuild it:
     /// [`AeroAnalysis::drag_components`] runs once per candidate evaluation,
     /// or once per angle in a sweep, and would otherwise construct the same
     /// atmosphere twice each time. A direct caller passes `None` for both and
@@ -318,7 +318,7 @@ impl<'a> AeroAnalysis<'a> {
 
         // The primary body: length from its end stations, diameter from the
         // configuration rather than from the built cross-sections. No form
-        // factor is applied to it, nor to the nacelles below -- upstream
+        // factor is applied to it, nor to the nacelles below: upstream
         // carries the slenderness effect inside its wetted-area factors.
         if let Some(fuselage) = self.plane.fuselages.first() {
             let length = Self::body_length(fuselage);
@@ -359,7 +359,7 @@ impl<'a> AeroAnalysis<'a> {
     ///
     /// Zero below the configured onset Mach, and zero again above it while
     /// the drag-divergence Mach the section, sweep and lift coefficient set
-    /// has not been passed -- which is where the nominal cruise point of this
+    /// has not been passed, which is where the nominal cruise point of this
     /// program's own default aircraft actually sits.
     pub fn wave_drag(&self, mach: f64, cl: f64, section_thickness: Option<f64>) -> f64 {
         if mach < self.drag.wave_drag_onset_mach {
@@ -378,7 +378,7 @@ impl<'a> AeroAnalysis<'a> {
     }
 
     /// The three drag terms at one operating point, with `cd_induced` as the
-    /// vortex-lattice solve reported it -- `drag_components`.
+    /// vortex-lattice solve reported it: `drag_components`.
     ///
     /// Resolves the atmosphere and the section thickness once and passes both
     /// down, which is the whole reason the two arguments exist.
@@ -462,7 +462,7 @@ mod tests {
         // The 0.95 ceiling on M cos(sweep) leaves a radicand of at least
         // 0.0975, so upstream's max(1e-3, ...) never binds. Stated here
         // rather than given a fixture case that would only pretend to reach
-        // it -- see swept_pg_beta's own doc.
+        // it, see swept_pg_beta's own doc.
         let smallest = (1.0 - MACH_NORMAL_CEILING * MACH_NORMAL_CEILING).sqrt();
         assert!(smallest > 1e-3_f64.sqrt());
         for mach in [1.0, 2.0, 50.0] {

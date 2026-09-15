@@ -13,7 +13,7 @@ impl Wing {
         }
     }
 
-    /// A copy of this wing translated by `xyz` -- `Wing.translate`.
+    /// A copy of this wing translated by `xyz`: `Wing.translate`.
     pub fn translate(&self, xyz: [f64; 3]) -> Self {
         Self {
             name: self.name.clone(),
@@ -24,7 +24,7 @@ impl Wing {
 
     /// A new wing splitting each of this wing's `n - 1` lofted sections into
     /// `ratio` smaller ones, by inserting cross-sections interpolated along
-    /// each interval at the stations `spacing_function` gives -- `Wing.
+    /// each interval at the stations `spacing_function` gives, `Wing.
     /// subdivide_sections`. See the module doc for which callers use which
     /// [`SpacingFunction`].
     ///
@@ -44,7 +44,7 @@ impl Wing {
         }
 
         // `spacing_function(0, 1, ratio + 1)[:-1]`: `ratio` fractions
-        // covering [0, 1) -- the final fraction (exactly 1) is dropped
+        // covering [0, 1): the final fraction (exactly 1) is dropped
         // because the outer xsec it would reproduce is appended separately,
         // unchanged, after the loop.
         let full = spacing_function.spaced(0.0, 1.0, ratio + 1);
@@ -96,7 +96,7 @@ impl Wing {
         })
     }
 
-    /// The quarter-chord point of every cross-section, root to tip --
+    /// The quarter-chord point of every cross-section, root to tip:
     /// `Wing._compute_xyz_of_WingXSec(i, x_nondim=0.25, z_nondim=0)` for each
     /// `i`, factored out because [`Wing::span`], [`Wing::area`],
     /// [`Wing::mean_aerodynamic_chord`] and [`Wing::aerodynamic_center`] all
@@ -108,7 +108,7 @@ impl Wing {
     }
 
     /// The point at `x_nondim` chord fraction and `z_nondim` (airfoil-frame)
-    /// height of cross-section `index` -- `Wing._compute_xyz_of_WingXSec`.
+    /// height of cross-section `index`: `Wing._compute_xyz_of_WingXSec`.
     ///
     /// `pub(crate)` rather than private: [`super::mesh`] reuses this exact
     /// coordinate computation for `mesh_line` rather than duplicating it.
@@ -126,7 +126,7 @@ impl Wing {
     }
 
     /// The local `(xg, yg, zg)` reference frame of cross-section `index`, in
-    /// geometry axes -- `Wing._compute_frame_of_WingXSec`.
+    /// geometry axes: `Wing._compute_frame_of_WingXSec`.
     ///
     /// The root and tip cross-sections take their spanwise (`yg`) direction
     /// from the one adjacent segment they have; an interior cross-section
@@ -172,7 +172,7 @@ impl Wing {
         (xg_local, yg_local, zg_local)
     }
 
-    /// Each lofted section's span, projected onto the YZ plane -- the
+    /// Each lofted section's span, projected onto the YZ plane: the
     /// internal `_sectional=True, type="yz"` path both [`Wing::span`] and
     /// [`Wing::area`] read.
     fn sectional_spans_yz(&self) -> Vec<f64> {
@@ -187,7 +187,7 @@ impl Wing {
     }
 
     /// The wing's unfolded geometric span, root to tip, doubled if
-    /// [`Wing::symmetric`] -- the compatibility `Wing.span()` quantity at its
+    /// [`Wing::symmetric`]: the compatibility `Wing.span()` quantity at its
     /// defaults (`type="yz"`, no centerline distance, not sectional).
     ///
     /// This is the distance along the loft's YZ quarter-chord path.  It is
@@ -269,7 +269,7 @@ impl Wing {
         self.projected_area()
     }
 
-    /// Each lofted section's planform area -- the internal
+    /// Each lofted section's planform area: the internal
     /// `_sectional=True, type="planform"` path [`Wing::mean_aerodynamic_chord`]
     /// and [`Wing::aerodynamic_center`] both read.
     fn sectional_areas(&self) -> Vec<f64> {
@@ -282,7 +282,7 @@ impl Wing {
             .collect()
     }
 
-    /// The wing's unfolded planform area, doubled if [`Wing::symmetric`] --
+    /// The wing's unfolded planform area, doubled if [`Wing::symmetric`]:
     /// compatibility `Wing.area()` at its defaults (`type="planform"`, no
     /// centerline distance, not sectional).
     ///
@@ -304,7 +304,7 @@ impl Wing {
     }
 
     /// Each lofted section's mean-aerodynamic-chord length, from its taper
-    /// ratio -- the shared computation inside `Wing.mean_aerodynamic_chord`
+    /// ratio: the shared computation inside `Wing.mean_aerodynamic_chord`
     /// and `Wing.aerodynamic_center`.
     fn sectional_mac_lengths(&self) -> Vec<f64> {
         self.xsecs
@@ -316,7 +316,7 @@ impl Wing {
             .collect()
     }
 
-    /// The area-weighted mean aerodynamic chord length of the wing --
+    /// The area-weighted mean aerodynamic chord length of the wing:
     /// `Wing.mean_aerodynamic_chord`. See upstream's cited methodology,
     /// <https://core.ac.uk/download/pdf/79175663.pdf>.
     pub fn mean_aerodynamic_chord(&self) -> f64 {
@@ -332,7 +332,7 @@ impl Wing {
     }
 
     /// The area-weighted aerodynamic center of the wing, at `chord_fraction`
-    /// of each section's local MAC -- `Wing.aerodynamic_center`. See the
+    /// of each section's local MAC: `Wing.aerodynamic_center`. See the
     /// module doc for the un-rotated chordwise offset this reproduces
     /// faithfully from upstream.
     pub fn aerodynamic_center(&self, chord_fraction: f64) -> [f64; 3] {
@@ -370,14 +370,14 @@ impl Wing {
         center
     }
 
-    /// The ratio of the tip chord to the root chord -- `Wing.taper_ratio`.
+    /// The ratio of the tip chord to the root chord: `Wing.taper_ratio`.
     /// Only meaningful for a trapezoidal wing, as upstream notes.
     pub fn taper_ratio(&self) -> f64 {
         let last = self.xsecs.len() - 1;
         self.xsecs[last].chord / self.xsecs[0].chord
     }
 
-    /// The geometric aspect ratio, `span^2 / area` -- `Wing.aspect_ratio` at
+    /// The geometric aspect ratio, `span^2 / area`: `Wing.aspect_ratio` at
     /// its default `type="geometric"`; the `effective` branch is unreached and
     /// untranslated, like every other non-default argument here.
     pub fn aspect_ratio(&self) -> f64 {
@@ -385,7 +385,7 @@ impl Wing {
     }
 
     /// The mean sweep angle (in degrees) of the `x_nondim` chordwise station
-    /// from root to tip, relative to the X axis -- `Wing.mean_sweep_angle`.
+    /// from root to tip, relative to the X axis: `Wing.mean_sweep_angle`.
     /// Positive is swept back. Measured directly from the root and tip
     /// cross-sections only, with no regard for the sweep of any
     /// cross-section in between.
@@ -400,7 +400,7 @@ impl Wing {
         vector_norm[0].asin().to_degrees()
     }
 
-    /// The total area of the wing's control surfaces -- see the module doc
+    /// The total area of the wing's control surfaces, see the module doc
     /// for why this is always `0.0` in this crate.
     pub fn control_surface_area(&self) -> f64 {
         0.0

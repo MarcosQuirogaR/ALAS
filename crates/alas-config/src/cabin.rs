@@ -7,7 +7,7 @@
 //! What the aircraft carries, and where in the fuselage it sits.
 //!
 //! This drives the detailed payload layout, which is built afresh for every
-//! candidate the optimizer evaluates -- not only for the final design -- so
+//! candidate the optimizer evaluates (not only for the final design) so
 //! that the centre of gravity checked against the envelope is the one the
 //! real seating and loading produce rather than a lumped estimate.
 //!
@@ -166,8 +166,8 @@ impl PassengerCabinConfig {
     /// mass: occupant plus checked baggage combined, and combined masses do
     /// not vary by class. A named cabin preset (or a hand-edited class) may
     /// still declare its own `mass_per_pax_kg` for display and for the seat
-    /// geometry it seeds, but every product path -- report, GUI preview,
-    /// pipeline, export, acceptance and the optimizer -- must reprice each
+    /// geometry it seeds, but every product path (report, GUI preview,
+    /// pipeline, export, acceptance and the optimizer) must reprice each
     /// seated passenger, whatever class fills the seat, as this combined
     /// mass: occupant = `passenger_mass_kg` - `checked_bag_mass_kg` (floored
     /// at zero), plus the bag. Calling this after a preset or a hand edit has

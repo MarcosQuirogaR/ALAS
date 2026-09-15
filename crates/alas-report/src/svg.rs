@@ -7,8 +7,8 @@
 //! without requiring any external drawing or graphical library dependencies.
 
 use crate::scene::{
-    text_line_center_offsets, visual_title, Fill, Scene, SceneElement, Stroke, TextAlign,
-    CSS_PIXELS_PER_POINT, TEXT_LINE_HEIGHT_EM,
+    text_line_center_offsets, visual_title, wrap_text_to_width, Fill, Scene, SceneElement, Stroke,
+    TextAlign, TextBaseline, CSS_PIXELS_PER_POINT, TEXT_LINE_HEIGHT_EM,
 };
 
 /// Render a complete [`Scene`] to a standalone XML SVG string.
@@ -183,6 +183,38 @@ fn render_element(out: &mut String, elem: &SceneElement) {
                 anchor,
                 weight,
                 rot,
+            ));
+            for (line, center) in lines.iter().zip(centers) {
+                out.push_str(&format!(
+                    r#"<tspan x="{:.2}" y="{:.2}">{}</tspan>"#,
+                    pos[0],
+                    pos[1] + center,
+                    escape_xml(line),
+                ));
+            }
+            out.push_str("</text>");
+        }
+        SceneElement::TextBlock {
+            text,
+            pos,
+            width,
+            font_size,
+            color,
+            bold,
+        } => {
+            // SVG has no metric-aware wrapping the viewer applies itself, so
+            // reflow with the conservative budget and emit one row per line.
+            let weight = if *bold { r#" font-weight="bold""# } else { "" };
+            let wrapped = wrap_text_to_width(text, *font_size, *width);
+            let lines = wrapped.lines().collect::<Vec<_>>();
+            let line_height = font_size * CSS_PIXELS_PER_POINT * TEXT_LINE_HEIGHT_EM;
+            let centers = text_line_center_offsets(lines.len(), line_height, TextBaseline::Top);
+            out.push_str(&format!(
+                r#"  <text font-family="sans-serif" font-size="{:.1}pt" fill="{}" fill-opacity="{:.3}" text-anchor="start" dominant-baseline="central"{}>"#,
+                font_size,
+                color.to_hex_rgb(),
+                color.alpha_f64(),
+                weight,
             ));
             for (line, center) in lines.iter().zip(centers) {
                 out.push_str(&format!(

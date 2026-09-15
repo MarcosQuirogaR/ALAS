@@ -11,7 +11,7 @@
 //! # Why the deck is laid out twice
 //!
 //! The mid-cabin monument bays sit at the door stations, and how many doors a
-//! deck needs depends on how many people end up seated on it -- which depends
+//! deck needs depends on how many people end up seated on it, which depends
 //! on how much floor the bays took. The pass below breaks that circle the way
 //! upstream does: a simulation seats the deck with no mid-cabin bays to find
 //! out how many door pairs it will want, the bays are charged against the
@@ -22,7 +22,7 @@
 //!
 //! # Why the pitch is stretched
 //!
-//! Every deck's pitch is scaled up -- never down -- so the seated block spans
+//! Every deck's pitch is scaled up (never down) so the seated block spans
 //! the whole available floor. A real high-density layout spreads its seats
 //! across the entire cabin up to whichever limit binds; it does not bunch them
 //! forward and leave bare floor at the back. Where the requested count already

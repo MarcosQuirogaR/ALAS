@@ -1,4 +1,4 @@
-ALAS -- Aircraft Layout, Analysis and Sizing
+ALAS: Aircraft Layout, Analysis and Sizing
 Native implementation
 Copyright (C) 2026 Marcos Quiroga Rodríguez
 
@@ -34,7 +34,7 @@ Network use
 Section 13 of the AGPL concerns making a modified version available to users
 over a network. This program is a single desktop executable: it runs no server
 and accepts no inbound connections. It makes outbound requests only when the
-user asks it to -- fetching a flight plan, navigation data, or a map texture --
+user asks it to (fetching a flight plan, navigation data, or a map texture)
 which does not engage section 13.
 
 The Python implementation did run a loopback HTTP server, and its NOTICE
@@ -46,9 +46,9 @@ Authorship
 -------------------------------------------------------------------------------
 
 Under Spanish copyright law (Real Decreto Legislativo 1/1996, Texto Refundido
-de la Ley de Propiedad Intelectual, article 14), the author's moral rights --
+de la Ley de Propiedad Intelectual, article 14), the author's moral rights,
 in particular the right to be recognised as author of the work and the right to
-the integrity of the work -- are unwaivable and inalienable. They are retained
+the integrity of the work, are unwaivable and inalienable. They are retained
 regardless of the licence granted above and are not transferred by it.
 
 Attribution to Marcos Quiroga Rodríguez must be preserved in redistributions
@@ -82,8 +82,8 @@ rights in the software, not in the name: a fork may copy, modify and
 redistribute the code, but may not present itself as ALAS or use the name or
 logo in a way suggesting endorsement by, or affiliation with, this project.
 
-Nominative use -- stating accurately that software is derived from, compatible
-with, or based on ALAS -- is expressly permitted.
+Nominative use (stating accurately that software is derived from, compatible
+with, or based on ALAS) is expressly permitted.
 
 
 -------------------------------------------------------------------------------
@@ -98,12 +98,12 @@ they are the ones a reader is most likely to question:
   * Modules translated from SUAVE (LGPL-2.1) carry that licence. LGPL-2.1
     section 3 permits a recipient to treat a copy under the ordinary GPL
     version 2 or any later version, which is compatible with AGPL-3.0, and this
-    program relies on that route. Unlike the Python implementation -- which
+    program relies on that route. Unlike the Python implementation, which
     invoked SUAVE as a separate process and could argue it never combined with
-    it -- this program links translated SUAVE code directly, so the combination
+    it, this program links translated SUAVE code directly, so the combination
     rests on licence compatibility alone.
 
-  * External solvers -- MSES, MSC Nastran, AVL, NASTRAN-95 -- are separate
+  * External solvers (MSES, MSC Nastran, AVL, NASTRAN-95) are separate
     executables and are not covered by this licence. The Windows release
     carries GPL AVL 3.52 and may carry NOSA-licensed NASTRAN-95 as adjacent
     child programs, each with its own licence and corresponding source. The

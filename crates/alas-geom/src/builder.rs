@@ -4,7 +4,7 @@
 // Ported from alas/geometry/aircraft_builder.py
 // Reference: alas @ rust-port-baseline.
 
-//! Turns a `(DesignVector, GeometryConfig)` pair into an [`Airplane`] --
+//! Turns a `(DesignVector, GeometryConfig)` pair into an [`Airplane`]:
 //! `AircraftBuilder`. This is ALAS's own assembly logic, not a translation of
 //! a third-party library, which is why it lives here rather than under
 //! aircraft model: every geometry decision reads from the config objects, and the
@@ -15,7 +15,7 @@
 //! [`AircraftBuilder::build`] is where every other module in this crate
 //! meets: [`crate::airfoil_library::AirfoilLibrary::get`] resolves the three
 //! configured airfoil names (through all three of its branches on the
-//! default aircraft -- see `docs/PORTING.md`'s Geometry section),
+//! default aircraft, see `docs/PORTING.md`'s Geometry section),
 //! [`crate::airfoil_library::build_section`] shapes the root section from the
 //! design vector, and [`crate::aircraft::wing::Wing`] /
 //! [`crate::aircraft::fuselage::Fuselage`] loft the results into the returned

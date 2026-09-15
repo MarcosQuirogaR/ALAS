@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-/// Horizontal and vertical tail volume coefficients `(Vh, Vv)` --
+/// Horizontal and vertical tail volume coefficients `(Vh, Vv)`:
 /// `tail_volume_coefficients`. `Vh = Sh Lh / (S c_bar)`,
 /// `Vv = Sv Lv / (S b)`, with the moment arms taken from the wings' quarter-
 /// MAC aerodynamic centres. `None` for either when the airplane has fewer than
@@ -82,14 +82,14 @@ fn assemble<'a>(
 }
 
 /// The configuration's `i64` mesh resolution as the `usize` [`VlmSystem::assemble`]
-/// takes -- floored at one, as `alas-aero::analysis` does: a zero or negative
+/// takes: floored at one, as `alas-aero::analysis` does: a zero or negative
 /// resolution is not a mesh, and both fields are documented multipliers of at
 /// least one.
 fn resolution(value: i64) -> usize {
     value.max(1) as usize
 }
 
-/// The main wing (or the first wing when none is named [`MAIN_WING_NAME`]) --
+/// The main wing (or the first wing when none is named [`MAIN_WING_NAME`]):
 /// upstream's `next((w ... if w.name == "Main Wing"), airplane.wings[0])`.
 fn main_wing(airplane: &Airplane) -> &Wing {
     airplane
@@ -105,7 +105,7 @@ fn hstab(airplane: &Airplane) -> Option<&Wing> {
 }
 
 /// A clone of `airplane` with every [`HSTAB_NAME`] section's twist set to
-/// `twist_deg` -- the rigid stabilizer perturbation, on a copy. See the module
+/// `twist_deg`: the rigid stabilizer perturbation, on a copy. See the module
 /// doc for why this is a clone rather than a mutate-and-restore.
 fn with_hstab_twist(airplane: &Airplane, twist_deg: f64) -> Airplane {
     let mut plane = airplane.clone();
@@ -221,7 +221,7 @@ mod tests {
 
     /// A short circular fuselage spanning past the wing trailing edge, so
     /// [`fuselage_cm_alpha`] reaches both its fore-body and after-body
-    /// branches -- what the VLM-fed functions need present (upstream's
+    /// branches: what the VLM-fed functions need present (upstream's
     /// `fuselages[0]` would `IndexError` on an airplane with none).
     fn probe_fuselage() -> Fuselage {
         let station = |x: f64, r: f64| {
@@ -307,7 +307,7 @@ mod tests {
     #[test]
     fn static_margin_is_nan_when_the_two_probes_carry_the_same_lift() {
         // Coincident probe alphas make dCL exactly zero, reaching the
-        // degeneracy guard -- the branch no real geometry reaches.
+        // degeneracy guard: the branch no real geometry reaches.
         let plane = probe_airplane(true);
         let analysis = AnalysisConfig {
             autobalance_alpha_low_deg: 2.0,
@@ -366,7 +366,7 @@ mod tests {
     #[test]
     fn stability_and_trim_leaves_the_stabilizer_twist_unchanged() {
         // The perturbation is a clone, so the caller's aircraft comes back as
-        // it went in -- the property that keeps repeated evaluations from
+        // it went in: the property that keeps repeated evaluations from
         // drifting onto altered geometry.
         let plane = probe_airplane(true);
         let before = plane.clone();

@@ -5,8 +5,8 @@
 //! do.
 //!
 //! A run's per-stage timings and its search's evaluation count are both
-//! already computed -- the stage timings ride on [`crate::runs::RunEvent`] and
-//! the search metadata on [`alas_opt::OptimizationResult`] -- but neither was
+//! already computed: the stage timings ride on [`crate::runs::RunEvent`] and
+//! the search metadata on [`alas_opt::OptimizationResult`], but neither was
 //! ever written to disk, so a slow run could only be diagnosed by rerunning it
 //! under observation. This manifest persists them beside the design database.
 //!

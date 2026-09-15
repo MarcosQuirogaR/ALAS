@@ -8,7 +8,7 @@
 //!
 //! The table itself is not Rust source. `alas/config/materials.py` is a
 //! sequence of constructor calls registering immutable records of published
-//! material properties -- data written as code because a constructor is the
+//! material properties: data written as code because a constructor is the
 //! shortest thing to hand in Python, not because anything about it is
 //! executable. It lives here as `data/materials.json`, embedded in the crate
 //! and parsed the first time it is asked for, which keeps a table reviewable
@@ -29,7 +29,7 @@ use std::sync::OnceLock;
 use serde::{Deserialize, Serialize};
 
 // `env!("CARGO_MANIFEST_DIR")` at compile time is what makes this path
-// resolve the same way regardless of the caller's working directory --
+// resolve the same way regardless of the caller's working directory:
 // `include_str!` itself only accepts a path relative to this source file, so
 // the manifest-dir prefix is for readers, not for the compiler.
 const MATERIALS_JSON: &str =

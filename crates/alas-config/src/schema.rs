@@ -10,7 +10,7 @@
 //! by `#[derive(ConfigNode)]` rather than written by hand. The shape follows
 //! the reference implementation's: an ordered list of fields, each carrying
 //! what to call it, what unit it is in, what it means, and either its current
-//! value or -- when the field is itself a configuration group -- the same
+//! value or (when the field is itself a configuration group) the same
 //! description one level down.
 //!
 //! Two things the reference does at this boundary are deliberately not done
@@ -141,7 +141,7 @@ pub enum Kind {
     Optional,
     /// A list of numbers.
     NumberList,
-    /// A list of number pairs -- a small table.
+    /// A list of number pairs: a small table.
     TupleList,
     /// A nested configuration group.
     ///
@@ -158,8 +158,8 @@ pub enum Kind {
 
 /// Where a string field's accepted values come from.
 ///
-/// Most of these lists are owned by crates that sit above this one -- the
-/// airfoil library, the engine deck, the material database -- so this names
+/// Most of these lists are owned by crates that sit above this one (the
+/// airfoil library, the engine deck, the material database) so this names
 /// the list and something that can see both resolves it. The lists that
 /// depend on nothing are resolved by [`OptionSource::options`] here.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

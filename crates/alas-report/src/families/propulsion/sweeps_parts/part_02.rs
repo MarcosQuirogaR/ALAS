@@ -146,7 +146,7 @@ pub fn figure_propulsion_bpr_sensitivity(config: &AlasConfig, theme: Option<&str
     );
 
     // Right-axis (TSFC) tick labels, placed and colored manually per this
-    // family's dual-axis convention -- see the module doc.
+    // family's dual-axis convention, see the module doc.
     let (rx, ry, rw, rh) = rect;
     for frac in [0.0, 0.5, 1.0] {
         let val = tsfc_lo + frac * (tsfc_hi - tsfc_lo);

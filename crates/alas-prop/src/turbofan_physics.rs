@@ -10,7 +10,7 @@
 //! balances follow the one-dimensional equations used by Mattingly.
 //!
 //! The implemented temperature domain is deliberately restricted to
-//! 200--2000 K, although the source species fits extend to 6000 K. That upper
+//! 200 to 2000 K, although the source species fits extend to 6000 K. That upper
 //! limit covers the intended transport-engine cycle range without implying a
 //! dissociation or equilibrium-combustion model.
 

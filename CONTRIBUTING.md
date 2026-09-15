@@ -102,16 +102,16 @@ constant has that value, why an obvious simpler approach fails, what invariant
 must hold. Anything else is maintenance burden.
 
 ```rust
-// Good -- explains a non-obvious constraint
+// Good: explains a non-obvious constraint
 // The trailing legs extend along the freestream, so the influence matrix
 // depends on alpha only through this direction. Perturbing alpha for the
 // stability derivatives therefore changes the right-hand side and not the
 // matrix, which is what lets one factorization serve all six runs.
 
-// Bad -- narrates history
+// Bad: narrates history
 // Previously this used f32; changed to f64 after the parity test failed.
 
-// Bad -- restates the code
+// Bad: restates the code
 // Increment the counter
 counter += 1;
 ```

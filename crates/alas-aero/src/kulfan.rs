@@ -11,8 +11,8 @@
 //! stand for a whole airfoil, and the least-squares fit that finds them.
 //!
 //! An airfoil arrives here as a few hundred vertices. NeuralFoil will not take
-//! vertices -- it is trained on Kulfan weights, and nothing else is a valid
-//! input to it -- so every path from a shape to a polar runs through this
+//! vertices; it is trained on Kulfan weights, and nothing else is a valid
+//! input to it, so every path from a shape to a polar runs through this
 //! module first. Without it the airfoil surrogate has no front door, and the
 //! airfoil screening sweep (`alas/analysis/airfoil_screening.py`) has nothing
 //! to score.
@@ -37,12 +37,12 @@
 //! # Why the fit is linear, and what that buys
 //!
 //! Every unknown enters `y` linearly, so the fit is not an optimization
-//! problem at all -- it is one overdetermined linear system, one row per
+//! problem at all; it is one overdetermined linear system, one row per
 //! vertex, eighteen columns for the eight-per-side default. Upstream offers
 //! both readings: a `method="opti"` branch that hands the same objective to an
 //! NLP solver, and the `method="least_squares"` default that writes the matrix
 //! down. Only the default is reached (`Airfoil.to_kulfan_airfoil` does not pass
-//! `method`), and only the default is translated -- the `opti` branch would
+//! `method`), and only the default is translated: the `opti` branch would
 //! need an interior-point solver to reproduce an answer this one gets in
 //! closed form.
 //!
@@ -54,9 +54,9 @@
 //!
 //! # Scope
 //!
-//! Both call sites that reach NeuralFoil -- `airfoil_screening.py:251` through
+//! Both call sites that reach NeuralFoil: `airfoil_screening.py:251` through
 //! `Airfoil.get_aero_from_neuralfoil`, and `visualization.py:2013` through
-//! `neuralfoil.get_aero_from_coordinates` -- normalize the airfoil first and
+//! `neuralfoil.get_aero_from_coordinates`: normalize the airfoil first and
 //! then fit with `normalize_coordinates=False`, so [`KulfanAirfoil::fit`]
 //! takes coordinates that are already normalized and does not renormalize.
 //! That is not only a scope decision but a correctness one: the class function
@@ -77,9 +77,9 @@
 //! `get_kulfan_parameters` takes `use_leading_edge_modification` and the
 //! least-squares branch never reads it: the LEM column is in the matrix
 //! whether or not it was asked for. Only the `opti` branch honours the flag.
-//! Reproduced faithfully -- [`KulfanAirfoil::fit`] has no such parameter,
+//! Reproduced faithfully: [`KulfanAirfoil::fit`] has no such parameter,
 //! since offering one that changed nothing would be worse than not offering
-//! it -- and recorded as a `deviation-candidate` in `docs/PORTING.md`.
+//! it, and recorded as a `deviation-candidate` in `docs/PORTING.md`.
 
 use alas_geom::aircraft::airfoil::Airfoil;
 use alas_geom::aircraft::spacing::cosspace;
@@ -111,7 +111,7 @@ pub enum KulfanError {
 /// The two weight vectors are the Bernstein coefficients of each surface's
 /// shape function; `leading_edge_weight` scales the single leading-edge
 /// modification mode, and `te_thickness` is the trailing-edge gap in `y/c`.
-/// `n1` and `n2` are the class function's exponents -- 0.5 and 1.0 for a
+/// `n1` and `n2` are the class function's exponents: 0.5 and 1.0 for a
 /// conventional airfoil, which is the only combination anything here uses and
 /// the only one NeuralFoil is trained on.
 #[derive(Debug, Clone, PartialEq)]
@@ -134,8 +134,8 @@ impl KulfanAirfoil {
     /// Fit Kulfan parameters to already-normalized coordinates, as
     /// `get_kulfan_parameters(..., method="least_squares")` does.
     ///
-    /// `coordinates` run in Selig order -- upper-surface trailing edge, around
-    /// the leading edge, lower-surface trailing edge -- with the leading edge
+    /// `coordinates` run in Selig order (upper-surface trailing edge, around
+    /// the leading edge, lower-surface trailing edge) with the leading edge
     /// identified as the first vertex of least `x`, exactly as upstream's
     /// `np.argmin` identifies it.
     ///
@@ -144,7 +144,7 @@ impl KulfanAirfoil {
     /// trailing edge is closed. Upstream detects that after the fact and
     /// re-solves without the thickness column, pinning it to zero; so does
     /// this. The second solve is a different problem on a different matrix,
-    /// not a clamp on the first one's answer -- every other weight moves too.
+    /// not a clamp on the first one's answer, every other weight moves too.
     ///
     /// # Errors
     ///
@@ -196,7 +196,7 @@ impl KulfanAirfoil {
             lower_weights: solved[..n_weights_per_side].to_vec(),
             upper_weights: solved[n_weights_per_side..2 * n_weights_per_side].to_vec(),
             // The dropped column was the last one, so the leading-edge mode is
-            // now the final unknown -- the same absolute index it occupied
+            // now the final unknown: the same absolute index it occupied
             // before, which is why upstream's `x[-2]` and `x[-1]` name it in
             // the two branches.
             leading_edge_weight: solved[unknowns - 2],
@@ -216,7 +216,7 @@ impl KulfanAirfoil {
         self.surface(x_over_c, &self.lower_weights, -1.0)
     }
 
-    /// The section's thickness at each `x/c` station -- `local_thickness`.
+    /// The section's thickness at each `x/c` station: `local_thickness`.
     ///
     /// `KulfanAirfoil` inherits `Airfoil.local_thickness`'s name and overrides
     /// what is underneath it: this samples the two class-times-shape surfaces
@@ -236,7 +236,7 @@ impl KulfanAirfoil {
     }
 
     /// The maximum of [`KulfanAirfoil::local_thickness`] over
-    /// `x_over_c_sample` -- `max_thickness`.
+    /// `x_over_c_sample`: `max_thickness`.
     ///
     /// Upstream defaults the sample to `np.linspace(0, 1, 101)`; a caller
     /// that wants that grid builds it, as `alas-geom::aircraft::airfoil`'s
@@ -429,8 +429,8 @@ mod tests {
 
     #[test]
     fn a_crossed_trailing_edge_pins_the_thickness_to_zero_rather_than_going_negative() {
-        // The analytic section above ends open. Closing it past zero -- the
-        // surfaces cross near the trailing edge -- is what drives the
+        // The analytic section above ends open. Closing it past zero (the
+        // surfaces cross near the trailing edge) is what drives the
         // unconstrained fit's last unknown negative, which is the only way to
         // reach the re-solve branch. Real sections reach it too, more gently:
         // `e63` and `sd7037` in this row's fixture both do.

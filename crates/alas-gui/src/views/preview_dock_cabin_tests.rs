@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-use super::{centered_row, controls_row_width, preview_overlay_rects, show_cabin_legend};
+use super::{
+    centered_row, controls_row_width, preview_overlay_rects, remembered_row_width,
+    show_cabin_legend,
+};
 use crate::theme::{apply_theme, AppTheme};
-use egui::{pos2, vec2, Align, Color32, Context, Frame, FullOutput, Rect};
+use egui::{pos2, vec2, Align, Color32, Context, Frame, FullOutput, Id, Rect};
 
 fn raw_input(viewport: Rect, scale: f32) -> egui::RawInput {
     let mut raw_input = egui::RawInput {
@@ -57,7 +60,8 @@ fn render_control_row(
                     ui.spacing_mut().item_spacing.x = 5.0;
                     let row_width = controls_row_width(ui);
                     let row_height = ui.spacing().interact_size.y;
-                    centered_row(ui, row_width, row_height, |ui| {
+                    let row_id = Id::new("test_controls_row");
+                    centered_row(ui, row_id, row_width, row_height, |ui| {
                         let exterior = ui.selectable_label(false, super::tr("Exterior"));
                         let interior = ui.selectable_label(false, super::tr("Interior"));
                         let reset = ui.add(egui::Button::new(super::tr("Reset")).small());
@@ -112,10 +116,11 @@ fn cabin_controls_and_labels_stay_centered_across_viewports_scales_languages_and
     alas_i18n::set_language(Some("en"));
 }
 
-fn render_cabin_legend(theme: AppTheme, viewport: Rect, scale: f32) -> FullOutput {
+fn render_cabin_legend(theme: AppTheme, viewport: Rect, scale: f32) -> (FullOutput, Color32) {
     let ctx = Context::default();
     apply_theme(theme, &ctx);
-    ctx.run(raw_input(viewport, scale), |ctx| {
+    let panel_fill = ctx.style().visuals.panel_fill;
+    let output = ctx.run(raw_input(viewport, scale), |ctx| {
         egui::CentralPanel::default()
             .frame(Frame::default())
             .show(ctx, |ui| {
@@ -123,7 +128,8 @@ fn render_cabin_legend(theme: AppTheme, viewport: Rect, scale: f32) -> FullOutpu
                     show_cabin_legend(ui, viewport)
                 });
             });
-    })
+    });
+    (output, panel_fill)
 }
 
 #[test]
@@ -131,10 +137,11 @@ fn cabin_legend_rows_are_centered_and_contained_after_translation() {
     alas_i18n::es::install();
     alas_i18n::set_language(Some("es"));
     for theme in [AppTheme::Light, AppTheme::Grey, AppTheme::Dark] {
-        for (width, scale) in [(300.0, 1.0), (420.0, 2.0)] {
+        for (width, scale) in [(300.0, 1.0), (360.0, 1.5), (420.0, 2.0)] {
             let viewport = Rect::from_min_size(pos2(0.0, 0.0), vec2(width, 240.0));
-            let output = render_cabin_legend(theme, viewport, scale);
-            let (_, legend_rect) = preview_overlay_rects(viewport, crate::state::PreviewTab::Cabin);
+            let (output, panel_fill) = render_cabin_legend(theme, viewport, scale);
+            let (controls_rect, legend_rect) =
+                preview_overlay_rects(viewport, crate::state::PreviewTab::Cabin);
             let colors = [
                 Color32::from_rgb(142, 68, 173),
                 Color32::from_rgb(41, 128, 185),
@@ -183,7 +190,165 @@ fn cabin_legend_rows_are_centered_and_contained_after_translation() {
                 "{theme:?} width={width} scale={scale}: first={first_row:?}, second={second_row:?}, legend={legend_rect:?}"
             );
             assert_eq!(output.pixels_per_point, scale);
+
+            // The card hugs the bottom edge of the viewport, clear of the
+            // controls, with the title and both rows inside its margin.
+            let card = painted_card(&output, panel_fill, first_row.union(second_row));
+            let context = format!("{theme:?} width={width} scale={scale}: card={card:?}");
+            assert!(
+                (viewport.bottom() - card.bottom() - 8.0).abs() < 0.6,
+                "{context} does not sit on the bottom margin of {viewport:?}"
+            );
+            assert!(
+                (card.center().x - viewport.center().x).abs() < 0.6,
+                "{context}"
+            );
+            assert!(
+                card.top() >= controls_rect.bottom() + 5.0 - 0.6,
+                "{context}"
+            );
+            assert!(card.top() >= legend_rect.top() - 0.6, "{context}");
+            let title = rendered_text_rect(&output, super::tr("Cabin legend").as_ref());
+            assert!(
+                title.top() >= card.top() + 7.0 - 0.6,
+                "{context} title={title:?}"
+            );
+            assert!(
+                first_row.top() >= title.bottom() - 0.6,
+                "{context} title={title:?}"
+            );
+            assert!(
+                second_row.bottom() <= card.bottom() - 7.0 + 0.6,
+                "{context}"
+            );
         }
     }
     alas_i18n::set_language(Some("en"));
+}
+
+/// The group frame painted behind an overlay card: the widest panel-filled
+/// rectangle that contains `anchor`.
+fn painted_card(output: &FullOutput, panel_fill: Color32, anchor: Rect) -> Rect {
+    output
+        .shapes
+        .iter()
+        .filter_map(|shape| match &shape.shape {
+            egui::Shape::Rect(rect)
+                if rect.fill == panel_fill && rect.rect.contains_rect(anchor) =>
+            {
+                Some(rect.rect)
+            }
+            _ => None,
+        })
+        .max_by(|a, b| a.width().total_cmp(&b.width()))
+        .expect("missing painted card frame")
+}
+
+fn render_controls_card(
+    theme: AppTheme,
+    tab: crate::state::PreviewTab,
+    viewport: Rect,
+    scale: f32,
+) -> (FullOutput, Color32) {
+    let ctx = Context::default();
+    apply_theme(theme, &ctx);
+    let panel_fill = ctx.style().visuals.panel_fill;
+    let mut state = crate::state::AppState {
+        preview_tab: tab,
+        ..Default::default()
+    };
+    let output = ctx.run(raw_input(viewport, scale), |ctx| {
+        egui::CentralPanel::default()
+            .frame(Frame::default())
+            .show(ctx, |ui| {
+                super::show_aircraft_viewer_controls(&mut state, ui, viewport, "cam", "view");
+            });
+    });
+    (output, panel_fill)
+}
+
+#[test]
+fn controls_card_is_centered_on_the_viewport_and_its_buttons_inside_the_card() {
+    alas_i18n::es::install();
+    for language in ["en", "es"] {
+        alas_i18n::set_language(Some(language));
+        for theme in [AppTheme::Light, AppTheme::Grey, AppTheme::Dark] {
+            for tab in [
+                crate::state::PreviewTab::Exterior,
+                crate::state::PreviewTab::Cabin,
+            ] {
+                for (width, scale) in [(300.0, 1.0), (420.0, 1.5), (720.0, 2.0)] {
+                    let viewport = Rect::from_min_size(pos2(30.0, 10.0), vec2(width, 300.0));
+                    let (output, panel_fill) = render_controls_card(theme, tab, viewport, scale);
+                    let labels = union_rects(&[
+                        rendered_text_rect(&output, super::tr("Exterior").as_ref()),
+                        rendered_text_rect(&output, super::tr("Interior").as_ref()),
+                        rendered_text_rect(&output, super::tr("Reset").as_ref()),
+                    ]);
+                    let card = painted_card(&output, panel_fill, labels);
+                    let (controls, _) = preview_overlay_rects(viewport, tab);
+                    let context = format!("{language}/{theme:?}/{tab:?} {width}px x{scale}");
+                    assert!(
+                        (card.center().x - viewport.center().x).abs() < 0.6,
+                        "{context}: card {card:?} is not centered on viewport {viewport:?}"
+                    );
+                    assert!(
+                        (labels.center().x - card.center().x).abs() < 0.6,
+                        "{context}: labels {labels:?} are not centered in card {card:?}"
+                    );
+                    assert!(
+                        (card.top() - controls.top()).abs() < 0.6,
+                        "{context}: card {card:?} does not hang from the controls region {controls:?}"
+                    );
+                    assert!(card.left() >= viewport.left() && card.right() <= viewport.right());
+                    assert!(labels.left() > card.left() && labels.right() < card.right());
+                }
+            }
+        }
+    }
+    alas_i18n::set_language(Some("en"));
+}
+
+#[test]
+fn centered_row_recentres_itself_after_a_wrong_width_estimate() {
+    alas_i18n::set_language(Some("en"));
+    let viewport = Rect::from_min_size(pos2(0.0, 0.0), vec2(360.0, 80.0));
+    let ctx = Context::default();
+    apply_theme(AppTheme::Light, &ctx);
+    let mut offsets = Vec::new();
+    for _ in 0..2 {
+        let mut bounds = None;
+        let _ = ctx.run(raw_input(viewport, 1.0), |ctx| {
+            egui::CentralPanel::default()
+                .frame(Frame::default())
+                .show(ctx, |ui| {
+                    ui.allocate_new_ui(egui::UiBuilder::new().max_rect(viewport), |ui| {
+                        ui.spacing_mut().item_spacing.x = 5.0;
+                        let row_height = ui.spacing().interact_size.y;
+                        // Deliberately underestimate the row so the first frame
+                        // starts the widgets at the centre instead of around it.
+                        let row_id = Id::new("test_recentre_row");
+                        let row_width = remembered_row_width(ui, row_id, 1.0);
+                        let inner = centered_row(ui, row_id, row_width, row_height, |ui| {
+                            let exterior = ui.selectable_label(false, super::tr("Exterior"));
+                            let interior = ui.selectable_label(false, super::tr("Interior"));
+                            let reset = ui.add(egui::Button::new(super::tr("Reset")).small());
+                            union_rects(&[exterior.rect, interior.rect, reset.rect])
+                        });
+                        bounds = Some(inner.inner);
+                    });
+                });
+        });
+        offsets.push(bounds.expect("row bounds").center().x - viewport.center().x);
+    }
+    assert!(
+        offsets[0] > 20.0,
+        "first frame should be visibly off-centre, offset {}",
+        offsets[0]
+    );
+    assert!(
+        offsets[1].abs() < 0.6,
+        "second frame should be recentred, offset {}",
+        offsets[1]
+    );
 }

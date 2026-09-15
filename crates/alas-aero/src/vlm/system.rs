@@ -39,19 +39,19 @@ use crate::vector3::{add3, cross3, dot3, norm3, scale3, sub3};
 const PARALLEL_PANEL_THRESHOLD: usize = 128;
 
 /// The largest `max |pivot| / min |pivot|` a solve may report and still be
-/// treated as a flow field -- see [`VlmError::IllConditionedAic`].
+/// treated as a flow field, see [`VlmError::IllConditionedAic`].
 ///
 /// Measured across the registered presets at every mesh from 1x1 to 10x16
 /// (`.agent/reports/2026-09-11-vlm-resolution-sensitivity.html`): meshes whose
 /// lift is correct report 2 to 60, and every mesh that returns a negative or
-/// absurd lift coefficient reports above 1e4 -- the A320 at a spanwise
+/// absurd lift coefficient reports above 1e4: the A320 at a spanwise
 /// resolution of ten and one chordwise panel reports 9.1e7 and a lift
 /// coefficient of -2.1e7. Two orders of margin above the usable range keeps
 /// this a backstop against collapse rather than a second opinion on meshing.
 const MAX_PIVOT_RATIO: f64 = 1.0e4;
 
 /// One panel's four quad-mesh corners and the vortex-lattice quantities
-/// derived from them -- the per-panel arrays `run` builds and consumes,
+/// derived from them: the per-panel arrays `run` builds and consumes,
 /// grouped so the assembly loop reads as one step per panel rather than
 /// eight parallel index operations.
 pub(super) struct Panel {
@@ -62,7 +62,7 @@ pub(super) struct Panel {
     vortex_bound_leg: [f64; 3],
     collocation_point: [f64; 3],
     /// Kept alongside the derived quantities above so [`VlmResult::panels`]
-    /// can report the raw mesh, not just what the AIC assembly needs -- see
+    /// can report the raw mesh, not just what the AIC assembly needs, see
     /// [`PanelSample`].
     front_left: [f64; 3],
     back_left: [f64; 3],
@@ -160,7 +160,7 @@ fn mesh_panels(
 
 /// The velocity every horseshoe vortex (strength `vortex_strengths[j]`)
 /// induces at `points[i]`, summed over every panel, plus the freestream and
-/// rotation-induced velocity at that point -- `get_velocity_at_points`
+/// rotation-induced velocity at that point: `get_velocity_at_points`
 /// (through `get_induced_velocity_at_points`), scoped to the internal use
 /// the solve makes of it. Parallel over points; the sum over panels for one
 /// point is sequential and in panel order, so the result does not depend on
@@ -211,9 +211,9 @@ fn velocity_at_points(
 /// resolution, ready to solve at any operating point.
 ///
 /// [`super::run`] is `assemble` followed by one [`VlmSystem::solve`]. A
-/// caller with a schedule of operating points over the same geometry -- a
+/// caller with a schedule of operating points over the same geometry (a
 /// polar sweep, the probes of a neutral-point or trim estimate, the
-/// finite-difference stencil of the stability derivatives -- assembles once
+/// finite-difference stencil of the stability derivatives) assembles once
 /// and solves repeatedly.
 pub struct VlmSystem<'a> {
     airplane: &'a Airplane,
@@ -282,7 +282,7 @@ impl<'a> VlmSystem<'a> {
     }
 
     /// Solve at `op_point` with the product rotation reference,
-    /// `airplane.xyz_ref` -- what [`super::run`] does.
+    /// `airplane.xyz_ref`: what [`super::run`] does.
     ///
     /// # Errors
     ///
@@ -292,7 +292,7 @@ impl<'a> VlmSystem<'a> {
     }
 
     /// Solve at `op_point` with the frozen reference convention, rotation
-    /// about the geometry origin -- what [`super::run_reference_compatibility`]
+    /// about the geometry origin: what [`super::run_reference_compatibility`]
     /// does. For parity fixtures only.
     ///
     /// # Errors
@@ -359,8 +359,8 @@ impl<'a> VlmSystem<'a> {
         let density = op_point.atmosphere.density();
         let mut force_geometry = [0.0; 3];
         let mut moment_geometry = [0.0; 3];
-        // Recorded per panel as the loop goes, alongside the running totals
-        // -- same operations in the same order, so the totals are unaffected;
+        // Recorded per panel as the loop goes, alongside the running totals:
+        // same operations in the same order, so the totals are unaffected;
         // this is only an additional read-out.
         let mut panel_forces_geometry = Vec::with_capacity(n);
         for ((panel, &gamma), &v_center) in panels.iter().zip(&vortex_strengths).zip(&v_centers) {

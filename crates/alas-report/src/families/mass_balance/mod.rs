@@ -8,7 +8,7 @@
 //!
 //! `figure_cg_envelope` and `figure_mass_distribution` alone translate close
 //! to 980 lines of `visualization.py`, past what one file under this crate's
-//! 500-line limit can hold, so this became a directory module -- the same
+//! 500-line limit can hold, so this became a directory module: the same
 //! split `alas-geom::aircraft::airfoil` already uses. [`cg_envelope`] and
 //! [`mass_distribution`] hold those two.
 //!
@@ -111,7 +111,7 @@ pub fn quick_preview_report(
 use crate::scene::{Color, Scene, SceneElement, TextAlign, TextBaseline};
 use crate::theme::Palette;
 
-/// Fade a color's alpha channel to `alpha` (`0.0`-`1.0`) -- shared by the CG
+/// Fade a color's alpha channel to `alpha` (`0.0`-`1.0`): shared by the CG
 /// envelope's dotted/translucent reference lines and the mass distribution's
 /// translucent wing/fuselage/nacelle fills, matching matplotlib's per-artist
 /// `alpha=` kwarg both Python figures set throughout.
@@ -126,7 +126,7 @@ fn with_alpha(color: Color, alpha: f64) -> Color {
     )
 }
 
-/// Centered placeholder text for a figure with no mass/coordinate data yet --
+/// Centered placeholder text for a figure with no mass/coordinate data yet:
 /// the Python side's early-return `ax.text(0.5, 0.5, ..., ha="center", va="center")`.
 fn no_data_scene(mut scene: Scene, pal: &Palette, message: &str) -> Scene {
     scene.add(SceneElement::Text {

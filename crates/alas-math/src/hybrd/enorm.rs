@@ -8,8 +8,8 @@
 
 //! MINPACK's Euclidean norm, which is not `x.iter().map(sq).sum().sqrt()`.
 //!
-//! It splits the vector into three magnitude classes -- below `3.834e-20`,
-//! above `1.304e19 / n`, and the ordinary range between -- and accumulates
+//! It splits the vector into three magnitude classes: below `3.834e-20`,
+//! above `1.304e19 / n`, and the ordinary range between, and accumulates
 //! each with its own running maximum, so that a vector containing one huge or
 //! one tiny component neither overflows nor loses the rest to underflow.
 //!

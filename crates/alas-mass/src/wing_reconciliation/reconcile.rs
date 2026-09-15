@@ -195,8 +195,8 @@ fn reference_wing(config: &AlasConfig) -> Result<ReferenceWingMass, WingReconcil
 /// Build the enumerated clean-sheet non-box wing inventory.
 ///
 /// The Torenbeek movable terms and the complete Torenbeek wing group come from
-/// the same call arguments, so the group's basic structure -- the empirical
-/// counterpart of the analytically sized box -- follows as their difference
+/// the same call arguments, so the group's basic structure (the empirical
+/// counterpart of the analytically sized box) follows as their difference
 /// without duplicating any private Appendix C coefficient. The FLOPS inputs
 /// describe the same built wing; `alas-config` carries no FLOPS composite
 /// utilisation, aeroelastic tailoring or strut-bracing datum, so those are

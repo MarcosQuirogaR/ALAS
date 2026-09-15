@@ -10,8 +10,8 @@
 //! for the sibling `alas-stab::trim`, and both halves are compared there.
 //! `compute_dynamic_modes` earns it outright: every eigenvalue it reports is a
 //! function of finite differences of dense VLM AIC solves, and the finite
-//! differencing amplifies the sub-`linalg` LAPACK-vs-Gaussian residual besides
-//! -- the spiral eigenvalue, the smallest and most sensitive, lands about
+//! differencing amplifies the sub-`linalg` LAPACK-vs-Gaussian residual besides:
+//! the spiral eigenvalue, the smallest and most sensitive, lands about
 //! 1.9e-11 from the reference, two orders inside `linalg` and just past
 //! `closed`. `estimate_inertia` is closed-form geometry and agrees far tighter
 //! than `linalg`; comparing it at the row's declared `linalg` is a less-tight
@@ -152,7 +152,7 @@ fn estimate_inertia_matches_python() {
 
     // Closed-form geometry (radii of gyration times mass, no solve): it
     // agrees far tighter than the row's `linalg`, but the row is single-tier,
-    // so it is compared there -- a less-tight bound than it could bear, never
+    // so it is compared there: a less-tight bound than it could bear, never
     // a loosening. See the module doc.
     let mut comparison = Comparison::new("dynamics.estimate_inertia", Tier::Linalg);
     for name in names(&fixture.estimate_inertia) {

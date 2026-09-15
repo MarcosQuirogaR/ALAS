@@ -137,8 +137,8 @@ impl AppState {
 
     /// The typed configuration the JSON edit buffer currently represents.
     ///
-    /// Returns `None` while the buffer is transiently unreadable -- a numeric
-    /// field left mid-edit, say -- which is the same tolerance the reference's
+    /// Returns `None` while the buffer is transiently unreadable (a numeric
+    /// field left mid-edit, say) which is the same tolerance the reference's
     /// debounced validation showed by wrapping every read in a `try`.
     pub fn typed_config(&self) -> Option<AlasConfig> {
         serde_json::from_value(self.config_values.clone()).ok()

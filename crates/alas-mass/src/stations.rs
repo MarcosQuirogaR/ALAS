@@ -80,7 +80,7 @@ pub struct ComponentStations {
     pub systems: ComponentStation,
     /// Seats, monuments, insulation and cabin equipment.
     pub furnishings: ComponentStation,
-    /// Crew, oil, catering and other operating items -- the same physical
+    /// Crew, oil, catering and other operating items: the same physical
     /// station as [`Self::furnishings`], named separately so a ledger builder
     /// can place operating items without implying they are furnishings.
     pub operating_items: ComponentStation,
@@ -235,7 +235,7 @@ fn fuselage_datum(fuselage: &Fuselage) -> (f64, f64, f64) {
     (start_x, end_x - start_x, z)
 }
 
-/// Root chord times root thickness-to-chord ratio, m -- the wing (and, by
+/// Root chord times root thickness-to-chord ratio, m: the wing (and, by
 /// the same lifting-surface reasoning, horizontal-tail) height extent.
 fn root_thickness_m(wing: &Wing) -> f64 {
     match wing.xsecs.first() {
@@ -246,7 +246,7 @@ fn root_thickness_m(wing: &Wing) -> f64 {
 
 /// The point at `chord_fraction` of `wing`'s overall mean aerodynamic chord
 /// aft of its leading edge, at `span_fraction` of the way from root to tip
-/// along the loft -- Raymer's conceptual component centre-of-gravity rule
+/// along the loft: Raymer's conceptual component centre-of-gravity rule
 /// (ch. 15: 40% MAC at 35% semispan for the wing, 42% MAC at 38% semispan
 /// for a tail).
 ///
@@ -399,8 +399,8 @@ fn fuselage_station(fuselage: &Fuselage, geometry: &GeometryConfig) -> Component
 /// `x_nlg`/`x_mlg` reproduce the exact convention `alas-perf::landing_gear`
 /// is fed under: the nose gear at a fraction of fuselage length from the
 /// nose, the main gear at a fraction of the MAC aft of the MAC leading
-/// edge. Vertical placement -- fuselage bottom less a strut length of 0.25
-/// fuselage diameters -- is a conceptual-design assumption stated here
+/// edge. Vertical placement (fuselage bottom less a strut length of 0.25
+/// fuselage diameters) is a conceptual-design assumption stated here
 /// because neither gear leg's real strut geometry is modelled.
 fn gear_station(
     fuselage: &Fuselage,

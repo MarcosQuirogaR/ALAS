@@ -6,7 +6,7 @@
 /// value on the `as` cast.
 ///
 /// Zero reaches [`Wing::mesh_spanwise`] as a request for fewer panels than
-/// the surface has sections, which it answers with one panel per section --
+/// the surface has sections, which it answers with one panel per section:
 /// the coarsest mesh that still carries every planform station. A nonsense
 /// configuration therefore degrades to the coarsest honest mesh instead of
 /// panicking or silently dropping the kink; `alas_config::validation` rejects
@@ -15,7 +15,7 @@ fn n_subdivisions_usize(n: i64) -> usize {
     usize::try_from(n).unwrap_or(0)
 }
 
-/// Evenly spaced points from `start` to `stop`, inclusive -- NumPy's
+/// Evenly spaced points from `start` to `stop`, inclusive: NumPy's
 /// `linspace(start, stop, num, endpoint=True)`. Duplicated from
 /// `aircraft::spacing::linspace`; see the module doc.
 fn linspace(start: f64, stop: f64, num: usize) -> Vec<f64> {
@@ -32,7 +32,7 @@ fn linspace(start: f64, stop: f64, num: usize) -> Vec<f64> {
     values
 }
 
-/// Sine-spaced points from `start` to `stop`, bunched near `start` --
+/// Sine-spaced points from `start` to `stop`, bunched near `start`:
 /// `native aerodynamic model.numpy.spacing.sinspace` at its default `reverse_spacing =
 /// False`: `start + (stop - start) * (1 - cos(linspace(0, pi/2, num)))`, with
 /// both endpoints then forced exact to correct the trigonometric round trip,
@@ -78,8 +78,8 @@ mod tests {
 
     #[test]
     fn a_centerline_engine_is_named_and_placed_on_the_tailcone() {
-        // No default configuration reaches `y_pos == 0.0` -- see the module
-        // doc -- so this is exercised directly on a synthetic geometry.
+        // No default configuration reaches `y_pos == 0.0` (see the module
+        // doc) so this is exercised directly on a synthetic geometry.
         let mut geometry = GeometryConfig::default();
         geometry.engine.spanwise_positions_m = vec![0.0];
         let builder = AircraftBuilder::new(Some(geometry));
@@ -387,7 +387,7 @@ mod tests {
     #[test]
     fn a_panel_count_below_the_section_count_still_keeps_every_station() {
         // A spanwise panel count is now absolute, so a value too small to
-        // honour cannot be met -- but the planform stations are not
+        // honour cannot be met, but the planform stations are not
         // negotiable, and the coarsest honest mesh is one panel per section.
         // The failure this replaces was a build error; degrading to the
         // coarsest mesh is better, because the alternative to a coarse mesh

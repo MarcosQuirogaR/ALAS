@@ -37,8 +37,8 @@ pub const CHAPTERS: &[Chapter] = &[
             Section {
                 heading: "The five stages",
                 body: &[
-                    "A Run walks a fixed pipeline. Stage 0 analyses the baseline design you started from -- weight, balance and static margin -- so you can sanity-check a preset before spending time optimising it. Stage 1 searches the design space. Stage 2 re-analyses the winner at high fidelity. Stage 3 exports. Stage 4 draws the figures. Stage 5 flies the mission natively.",
-                    "Everything after Stage 2 is additive: mission analysis, MSES and the structural solve are downstream consumers of the design. They never feed back into it, so switching them off changes what you see, never what the optimizer chose.",
+                    "A full run walks a fixed pipeline. Stage 0 analyses the design you started from (weight, balance and static margin) so a preset or a promoted sandbox design can be checked before any optimisation. Stage 1 searches the design space when Optimize design space is on. Stage 2 re-analyses the winner at high fidelity. Stage 3 exports. Stage 4 draws the figures. Stage 5 flies the mission natively in every full run.",
+                    "Everything after Stage 2 is additive: mission analysis, MSES and the structural solve are downstream consumers of the design. They never feed back into it, so the optional analyses chosen on Analyses change what you see, never what the optimizer chose.",
                 ],
             },
             Section {
@@ -64,7 +64,7 @@ pub const CHAPTERS: &[Chapter] = &[
             Section {
                 heading: "Requirements are targets and limits",
                 body: &[
-                    "Cruise Mach, altitude and MTOW anchor the whole sizing. Maximum wing area and maximum cruise CL are hard constraints; minimum wing loading remains a graded design preference. Target static margin and CG range define the stability envelope every candidate is checked against.",
+                    "Cruise Mach, altitude and MTOW anchor the whole sizing. Maximum wing area and maximum cruise CL are hard constraints; minimum wing loading remains a graded design preference. Target static margin and CG range define the stability envelope every candidate is checked against. The starting design is chosen on Inputs: a preset aircraft keeps its geometry protected while the optimizer may vary its design variables inside a bounded envelope around the preset, and the clean-sheet sandbox lets you edit the geometry directly.",
                     "Maximum wing area and maximum cruise CL are genuine feasibility gates, not preferences: a candidate that exceeds either is rejected outright rather than scored badly.",
                 ],
             },
@@ -72,13 +72,13 @@ pub const CHAPTERS: &[Chapter] = &[
                 heading: "The design space table",
                 body: &[
                     "Each row is one degree of freedom the optimizer may vary, with an initial value and lower/upper bounds. The initial value does double duty: it is the design analysed when you skip optimisation, and the baseline the optimised result is compared against.",
-                    "Loading a preset recentres the bounds around that aircraft. Widening bounds explores more but takes longer and produces more invalid candidates; narrowing them is how you ask 'what is the best version of roughly this aeroplane'.",
+                    "Loading a preset recentres the bounds around that aircraft, and in preset mode the optimizer bounds are anchored to the preset reference envelope before every run. Widening bounds explores more but takes longer and produces more invalid candidates; narrowing them is how you ask what the best version of roughly this aeroplane is.",
                 ],
             },
             Section {
                 heading: "Cabin by percentage, not seat count",
                 body: &[
-                    "Class mix is specified as a share of cabin floor length, and seat counts are solved from that share together with each class's pitch, seats abreast and the real fuselage geometry. This matches how a cabin is actually specified -- you cannot pick a seat count independently of the geometry that has to hold it.",
+                    "Class mix is specified as a share of cabin floor length, and seat counts are solved from that share together with each class's pitch, seats abreast and the real fuselage geometry. This matches how a cabin is actually specified; you cannot pick a seat count independently of the geometry that has to hold it.",
                     "Switch Class mix mode to 'count' when you need to pin exact numbers instead.",
                 ],
             },
@@ -92,7 +92,7 @@ pub const CHAPTERS: &[Chapter] = &[
             Section {
                 heading: "The objective",
                 body: &[
-                    "The search minimises a mission quantity: block fuel by default, or takeoff mass, operating empty mass or fuel per seat-kilometre. Each candidate is closed by the design mission under the fuel policy, so the objective is what a converged, trimmed aircraft actually burns or weighs, not a proxy such as lift-to-drag.",
+                    "The search minimises a mission quantity: block fuel by default, or takeoff mass, operating empty mass or fuel per seat-kilometre. Each candidate is closed by the design mission under the fuel policy, so the objective is what a converged, trimmed aircraft actually burns or weighs, not a proxy such as lift-to-drag. Whether a run optimises at all is the Optimize design space choice on Inputs; the search settings live under Advanced Settings > Optimizer.",
                     "The requirements are constraints, not prices. Mass and fuel capacity, the CG envelope and gear reactions, the CS-25 climb and field requirements, and the planform limits each form a family whose policy you set: hard, soft, diagnostic or off. The frozen weight table from the Python reference only serves the parity fixtures.",
                 ],
             },
@@ -132,7 +132,7 @@ pub const CHAPTERS: &[Chapter] = &[
             Section {
                 heading: "Static margin and the neutral point",
                 body: &[
-                    "Static margin is the distance from the centre of gravity to the neutral point, as a fraction of mean aerodynamic chord. Positive means pitch-stable. The app distinguishes the aerodynamic reference point from the real mass-model CG, and enforces the minimum against the physical one -- the honest test.",
+                    "Static margin is the distance from the centre of gravity to the neutral point, as a fraction of mean aerodynamic chord. Positive means pitch-stable. The app distinguishes the aerodynamic reference point from the real mass-model CG, and enforces the minimum against the physical one: the honest test.",
                     "Tail efficiency and the fuselage's destabilising contribution both move the neutral point. Turning off the fuselage term will flatter your stability; it is on by default for a reason.",
                 ],
             },
@@ -154,13 +154,13 @@ pub const CHAPTERS: &[Chapter] = &[
             Section {
                 heading: "The reference sections",
                 body: &[
-                    "A curated set of real, wind-tunnel-validated transonic sections -- the NASA SC(2) family, the original Whitcomb airfoil, RAE 2822 -- is forced through every stage regardless of its score, and marked with a star. They are there as a physical anchor: they tell you how the algorithm's picks compare against sections known to work on real jets, rather than only against each other.",
+                    "A curated set of real, wind-tunnel-validated transonic sections (the NASA SC(2) family, the original Whitcomb airfoil and RAE 2822) is forced through every stage regardless of its score, and marked with a star. They are there as a physical anchor: they tell you how the algorithm's picks compare against sections known to work on real jets, rather than only against each other.",
                 ],
             },
             Section {
                 heading: "Reading the result honestly",
                 body: &[
-                    "This is a shortlisting tool. The correct workflow is to take the top few candidates and verify them with a real Run, not to adopt the winner directly. At a transonic cruise Mach the app says so explicitly.",
+                    "This is a shortlisting tool, opened from the top bar's Airfoil Screening window; its ranking is always Balanced, weighing aerodynamic efficiency first and then wing fuel capacity and drag-bucket robustness. The correct workflow is to take the top few candidates and verify them with a real Run, not to adopt the winner directly. At a transonic cruise Mach the app says so explicitly.",
                     "Off-design robustness is worth enabling: a section that wins only at exactly the design CL is fragile, because real cruise CL wanders with weight and altitude.",
                 ],
             },
@@ -174,20 +174,20 @@ pub const CHAPTERS: &[Chapter] = &[
             Section {
                 heading: "The mass build-up",
                 body: &[
-                    "Structural component masses use Torenbeek and Raymer statistical relations driven by MTOW, geometry and load factors. The compatibility baseline keeps systems/equipment and furnishings/operations as explicit MTOW fractions; selecting NASA FLOPS instead requires declared architecture and builds avionics, electrical, hydraulics, cabin and operating items separately. The detailed interior -- a real seat map or ULD load -- is built and its true mass-weighted CG overrides the lumped estimate.",
+                    "Structural component masses use Torenbeek and Raymer statistical relations driven by MTOW, geometry and load factors. The compatibility baseline keeps systems/equipment and furnishings/operations as explicit MTOW fractions; selecting NASA FLOPS instead requires declared architecture and builds avionics, electrical, hydraulics, cabin and operating items separately. The detailed interior (a real seat map or ULD load) is built and its true mass-weighted CG overrides the lumped estimate.",
                     "That detail matters: the lumped payload CG (the geometric centre of the occupied cabin) can differ from the real one by several percent MAC, which is enough to move a design from inside the CG envelope to outside it.",
                 ],
             },
             Section {
                 heading: "The CG envelope",
                 body: &[
-                    "The envelope is bounded by stability at the aft limit and by landing-gear load limits -- maximum nose and main gear strength, and the minimum nose load needed for steering authority. A design is only compliant if every loading state, from empty to maximum take-off, sits inside it.",
+                    "The envelope is bounded by stability at the aft limit and by landing-gear load limits: maximum nose and main gear strength, and the minimum nose load needed for steering authority. A design is only compliant if every loading state, from empty to maximum take-off, sits inside it.",
                 ],
             },
             Section {
                 heading: "The wingbox",
                 body: &[
-                    "The structural solve sizes a generic wingbox -- skin, spars, ribs -- from strength requirements, then computes deflections, stresses and natural frequencies analytically. NASTRAN is optional: without it you still get every analytical result.",
+                    "The structural solve sizes a generic wingbox (skin, spars, ribs) from strength requirements, then computes deflections, stresses and natural frequencies analytically. NASTRAN is optional: without it you still get every analytical result.",
                     "It is a downstream analysis. It does not feed the mass model, so a heavy wingbox will not change the optimizer's answer; compare it against the Torenbeek estimate shown beside it as an accuracy check.",
                 ],
             },
@@ -201,14 +201,14 @@ pub const CHAPTERS: &[Chapter] = &[
             Section {
                 heading: "Mission analysis",
                 body: &[
-                    "The native mission flies a full climb/cruise/descent profile for the chosen design over your airport pair, returning fuel burn, block time and complete telemetry. If it cannot complete you get a status and a reason, not fabricated telemetry.",
+                    "The native mission flies a full climb/cruise/descent profile for the chosen design over your airport pair, returning fuel burn, block time and complete telemetry. It runs in every full run; the sandbox Quick Analysis is a separate reduced estimate. If it cannot complete you get a status and a reason, not fabricated telemetry.",
                 ],
             },
             Section {
                 heading: "Routing has four tiers",
                 body: &[
                     "In order: your live SimBrief flight plan, a manually exported SimBrief KML, an open airway graph, and finally a great circle. Each falls through to the next, so a route always renders.",
-                    "When SimBrief returns a plan for a different city pair than the one selected, it takes precedence by default and the mission is sized against the airports actually flown -- a real dispatched plan is the most accurate routing available.",
+                    "When SimBrief returns a plan for a different city pair than the one selected, it takes precedence by default and the mission is sized against the airports actually flown: a real dispatched plan is the most accurate routing available.",
                 ],
             },
             Section {
@@ -227,7 +227,7 @@ pub const CHAPTERS: &[Chapter] = &[
             Section {
                 heading: "Start from a preset",
                 body: &[
-                    "Presets are calibrated so their nominal design and the all-variables-at-minimum corner both stay feasible. Run Analyze reference first and confirm the CG and static margin look sane -- if the baseline is wrong, everything downstream is wrong.",
+                    "Presets are calibrated so their nominal design and the all-variables-at-minimum corner both stay feasible. Run once with Optimize design space off and confirm the CG and static margin look sane; if the baseline is wrong, everything downstream is wrong.",
                 ],
             },
             Section {

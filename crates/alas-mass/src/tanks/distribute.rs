@@ -77,7 +77,7 @@ impl FuelTankLayout {
         let mut remaining_kg = usable_fuel_kg;
         // Tanks that share a burn priority (mirrored left/right pairs, most
         // often) split their group's fill by capacity share rather than
-        // sequentially by index -- a stable sort on equal keys would
+        // sequentially by index: a stable sort on equal keys would
         // otherwise always saturate the first-listed tank of the tie before
         // touching the other, biasing every partial load toward one side of
         // a symmetric aircraft with no physical cause.

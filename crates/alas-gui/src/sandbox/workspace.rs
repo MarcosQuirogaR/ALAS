@@ -8,8 +8,9 @@
 //! Advanced Settings action, the central 3D viewport with every other
 //! control floating inside it (camera presets, geometry-category buttons,
 //! the parameter search, the action row with Quick Analysis, Full
-//! Analysis, Undo, Redo and Run log, and the derived geometry metrics), and
-//! the estimates strip on the right. Native windows carry the Discipline
+//! Analysis, Undo, Redo and Run log, and the Summary button that lists the
+//! derived geometry metrics on demand), and the estimates strip on the
+//! right once Quick Analysis has opened it. Native windows carry the Discipline
 //! Windows, Advanced Settings, the run log and the Full Analysis results.
 
 use egui::{menu, Context, Frame as EguiFrame, SidePanel, TopBottomPanel, Ui};

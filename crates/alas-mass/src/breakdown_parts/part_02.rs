@@ -3,7 +3,7 @@
 
 use super::*;
 
-/// Calculate the masses of all primary aircraft components in kg --
+/// Calculate the masses of all primary aircraft components in kg:
 /// `calculate_component_masses`.
 ///
 /// Uses Torenbeek empirical methods calibrated for CS-25/FAR-25 class
@@ -107,7 +107,7 @@ pub fn calculate_component_masses(
     let m_furn = mm.furnishings_mass_fraction * mtow_target;
     let m_payload = requirements.payload_kg();
 
-    // OEW, MZFW, fuel -- named the same as upstream's own intermediates so
+    // OEW, MZFW, fuel: named the same as upstream's own intermediates so
     // the summation order (and therefore the last-bit rounding) matches.
     let m_str = m_wing + m_hstab + m_vstab + m_fus + m_gear;
     let m_oew = m_str + m_prop + m_sys + m_furn;

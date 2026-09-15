@@ -3,13 +3,13 @@
 
 //! Sandbox framing and overlay layout: the drawn scale must not change
 //! with the camera orientation or with a geometry edit, the theme must
-//! reach the live preview, and the floating action block, metric rows and
-//! category stack must sit where the layout promises on wide and narrow
+//! reach the live preview, and the floating action block, category stack
+//! and Summary card must sit where the layout promises on wide and narrow
 //! viewports without taking the orbit gesture.
 
 mod common;
 
-use alas_gui::sandbox::overlays::{action_block_rect, metrics_per_row};
+use alas_gui::sandbox::overlays::{action_block_rect, metric_chips};
 use alas_gui::sandbox::scene::SANDBOX_CAMERA_ID;
 use alas_gui::sandbox::viewport::{
     overlay_rect_tagged, overlay_rects, overlay_rects_tagged, pointer_over_overlay, viewport_rect,
@@ -228,7 +228,7 @@ fn span(rects: &[Rect]) -> (f32, f32) {
 }
 
 #[test]
-fn actions_and_metrics_float_centred_at_the_bottom_and_the_stack_is_centred_on_the_left() {
+fn actions_float_centred_at_the_bottom_and_the_stack_with_summary_is_centred_on_the_left() {
     for size in [WIDE, NARROW, SHORT] {
         let (ctx, _state) = settled(AppTheme::Dark, size);
         let viewport = viewport_rect(&ctx).expect("viewport");
@@ -236,9 +236,9 @@ fn actions_and_metrics_float_centred_at_the_bottom_and_the_stack_is_centred_on_t
         assert!((block.bottom() - (viewport.bottom() - 8.0)).abs() < 1e-3);
         let actions = overlay_rects_tagged(&ctx, "action");
         assert!(actions.len() >= 5, "{size:?}: {actions:?}");
-        let metrics = overlay_rects_tagged(&ctx, "metric");
-        assert_eq!(metrics.len(), 8, "{size:?}");
-        for rect in actions.iter().chain(&metrics) {
+        // No metric rows: the metrics are behind the Summary button.
+        assert!(overlay_rects_tagged(&ctx, "metric").is_empty(), "{size:?}");
+        for rect in &actions {
             assert!(
                 block.expand(1.0).contains_rect(*rect),
                 "{size:?}: {rect:?} outside {block:?}"
@@ -258,24 +258,6 @@ fn actions_and_metrics_float_centred_at_the_bottom_and_the_stack_is_centred_on_t
                 ((left + right) * 0.5 - viewport.center().x).abs() < 2.0,
                 "{size:?}"
             );
-        }
-        // Two metric rows of four (four of two when narrow), each centred,
-        // all beneath the actions.
-        let per_row = metrics_per_row(viewport.width());
-        let metric_rows = rows_of(&metrics);
-        assert_eq!(metric_rows.len(), 8 / per_row, "{size:?}");
-        let actions_bottom = actions
-            .iter()
-            .map(|r| r.bottom())
-            .fold(f32::NEG_INFINITY, f32::max);
-        for row in &metric_rows {
-            assert_eq!(row.len(), per_row, "{size:?}");
-            let (left, right) = span(row);
-            assert!(
-                ((left + right) * 0.5 - viewport.center().x).abs() < 2.0,
-                "{size:?}"
-            );
-            assert!(row.iter().all(|r| r.top() >= actions_bottom), "{size:?}");
         }
         // The category stack: on the left, centred about the viewport's
         // horizontal centreline, clear of the camera row and the block.
@@ -303,15 +285,24 @@ fn actions_and_metrics_float_centred_at_the_bottom_and_the_stack_is_centred_on_t
         }
         let search = overlay_rect_tagged(&ctx, "search").expect("search");
         assert!(stack.contains_rect(search), "{size:?}");
+        // The Summary button is the last of the stack, below Propulsion, and
+        // its card is closed until pressed.
+        let summary = overlay_rect_tagged(&ctx, "summary").expect("summary");
+        let propulsion = overlay_rect_tagged(&ctx, "category:propulsion").expect("propulsion");
+        assert!(stack.contains_rect(summary), "{size:?}");
+        assert!(summary.top() >= propulsion.bottom(), "{size:?}");
+        assert!(
+            overlay_rect_tagged(&ctx, "summary_card").is_none(),
+            "{size:?}"
+        );
     }
 }
 
 #[test]
-fn gestures_on_the_action_and_metric_boxes_never_orbit_and_actions_still_act() {
+fn gestures_on_the_action_boxes_never_orbit_and_actions_still_act() {
     let (ctx, mut state) = settled(AppTheme::Dark, WIDE);
     let actions = overlay_rects_tagged(&ctx, "action");
-    let metrics = overlay_rects_tagged(&ctx, "metric");
-    for rect in [actions[0], actions[2], metrics[0], metrics[7]] {
+    for rect in [actions[0], actions[2]] {
         let before = *state.preview_camera_mut(SANDBOX_CAMERA_ID);
         drag_on(&ctx, &mut state, WIDE, rect.center());
         assert_eq!(
@@ -331,6 +322,10 @@ fn gestures_on_the_action_and_metric_boxes_never_orbit_and_actions_still_act() {
     let revision = state.sandbox.revision;
     click_on(&ctx, &mut state, WIDE, actions[2].center());
     assert_eq!(state.sandbox.revision, revision);
+    // Closing the log again leaves the design space beside the block
+    // empty, and a drag there still orbits.
+    click_on(&ctx, &mut state, WIDE, run_log.center());
+    assert_eq!(state.sandbox.layout.log_window_open, open);
     // The empty design space beside the block still orbits.
     let viewport = viewport_rect(&ctx).expect("viewport");
     let empty = pos2(viewport.right() - 40.0, viewport.center().y);
@@ -341,6 +336,41 @@ fn gestures_on_the_action_and_metric_boxes_never_orbit_and_actions_still_act() {
         before.yaw_deg,
         state.preview_camera_mut(SANDBOX_CAMERA_ID).yaw_deg
     );
+}
+
+#[test]
+fn the_summary_button_toggles_the_metric_card_beside_the_stack_without_orbiting() {
+    let (ctx, mut state) = settled(AppTheme::Dark, WIDE);
+    assert!(!state.sandbox.layout.summary_open);
+    let summary = overlay_rect_tagged(&ctx, "summary").expect("summary");
+    click_on(&ctx, &mut state, WIDE, summary.center());
+    assert!(state.sandbox.layout.summary_open);
+    frame_on(&ctx, &mut state, WIDE, vec![]);
+    let viewport = viewport_rect(&ctx).expect("viewport");
+    let stack = overlay_rect_tagged(&ctx, "stack").expect("stack");
+    let card = overlay_rect_tagged(&ctx, "summary_card").expect("card");
+    let metrics = overlay_rects_tagged(&ctx, "metric");
+    assert_eq!(metrics.len(), 8);
+    assert!(card.left() >= stack.right(), "{card:?} vs {stack:?}");
+    assert!(viewport.contains_rect(card), "{card:?} in {viewport:?}");
+    let block = action_block_rect(&ctx, viewport);
+    assert!(card.bottom() <= block.top() + 1.0, "{card:?} vs {block:?}");
+    for rect in &metrics {
+        assert!(card.contains_rect(*rect), "{rect:?} in {card:?}");
+    }
+    let texts = metric_chips(&state);
+    assert_eq!(texts.len(), 8);
+    assert!(texts[0].starts_with("S_ref ") && texts[2].starts_with("MAC "));
+    // A drag on a metric row never orbits.
+    let before = *state.preview_camera_mut(SANDBOX_CAMERA_ID);
+    drag_on(&ctx, &mut state, WIDE, metrics[3].center());
+    assert_eq!(before, *state.preview_camera_mut(SANDBOX_CAMERA_ID));
+    // Pressing Summary again hides the card and its rows.
+    click_on(&ctx, &mut state, WIDE, summary.center());
+    assert!(!state.sandbox.layout.summary_open);
+    frame_on(&ctx, &mut state, WIDE, vec![]);
+    assert!(overlay_rect_tagged(&ctx, "summary_card").is_none());
+    assert!(overlay_rects_tagged(&ctx, "metric").is_empty());
 }
 
 /// Writes headless workspace renders for the three themes in English and

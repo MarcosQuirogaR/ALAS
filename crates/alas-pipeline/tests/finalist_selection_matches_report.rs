@@ -22,8 +22,8 @@
 //! mass groups with the frozen reference-compatibility fractions and built its
 //! candidate without nacelle bodies; the report placed them on the geometric
 //! stations of an aircraft built with engines. For the r5 nominal run's own
-//! finalist that was worth 0.56 m of centre of gravity -- 7.2 percent of the
-//! mean aerodynamic chord -- which is how a candidate the search accepted as
+//! finalist that was worth 0.56 m of centre of gravity: 7.2 percent of the
+//! mean aerodynamic chord, which is how a candidate the search accepted as
 //! hard-feasible could print as physically INFEASIBLE in its own final report.
 //!
 //! Both paths are required to resolve their stations through
@@ -132,7 +132,7 @@ fn the_search_and_the_report_place_every_geometric_mass_group_identically() {
         for axis in 0..3 {
             assert!(
                 (search_station[axis] - report_station[axis]).abs() < 1.0e-6,
-                "{name} axis {axis}: the search places it at {} m and the report at {} m -- \
+                "{name} axis {axis}: the search places it at {} m and the report at {} m, \
                  both must resolve through \
                  `alas_mass::product_stations::product_mass_coordinates` on the same built \
                  aircraft",
@@ -152,11 +152,11 @@ fn the_search_and_the_report_agree_on_where_the_finalist_balances() {
     // Every item mass, not just the total. The total agrees by construction
     // (the report is bound to the search's own closed takeoff mass), so a
     // scalar check would pass while a heavier wing and a lighter fuel load
-    // cancelled inside it -- which is exactly what happened while the two
+    // cancelled inside it, which is exactly what happened while the two
     // paths published different wing groups.
     //
-    // The bound is relative because the fuel item is a closure remainder --
-    // `takeoff_mass - operating_empty - payload` -- and the two paths reach
+    // The bound is relative because the fuel item is a closure remainder:
+    // `takeoff_mass - operating_empty - payload`, and the two paths reach
     // that subtraction by summing the same nine items in different orders, so
     // it carries f64 accumulation error proportional to the takeoff mass and
     // nothing else. 1e-7 of the takeoff mass is ~0.02 kg here. For scale, the
@@ -183,7 +183,7 @@ fn the_search_and_the_report_agree_on_where_the_finalist_balances() {
     // derive separately is the payload station, and its effect on the whole
     // aircraft's centre of gravity is bounded by
     // `payload_mass / takeoff_mass * payload station difference`. That is the
-    // bound asserted here -- computed from this run's own numbers rather than
+    // bound asserted here: computed from this run's own numbers rather than
     // a fixed percentage, so it tightens automatically when the payload
     // divergence is closed and cannot hide a new one.
     let payload_station_difference_m =

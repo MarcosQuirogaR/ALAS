@@ -9,9 +9,9 @@
 //! shares no code with the writer, and the cards that come out are what get
 //! compared against the ones `pyNastran` read out of the reference's file.
 //!
-//! All three field layouts the format defines are handled -- eight-column
+//! All three field layouts the format defines are handled: eight-column
 //! small field, sixteen-column large field marked by `*`, and comma-separated
-//! free field -- because a later row writes its case-control decks free-field
+//! free field, because a later row writes its case-control decks free-field
 //! while this one writes the mesh large-field, and a reader that only
 //! understood one of them would be checking the writer against itself.
 
@@ -104,8 +104,8 @@ pub fn parse(text: &str) -> Vec<Card> {
 
 /// The fields on one physical line, after its eight-column opener.
 ///
-/// A fixed-field line always carries its full complement -- four large or eight
-/// small -- however short the text is: the format is columnar, so a line that
+/// A fixed-field line always carries its full complement (four large or eight
+/// small) however short the text is: the format is columnar, so a line that
 /// stops early has left those columns blank rather than omitted them. Getting
 /// this wrong silently shifts every field after a card's reserved columns.
 fn fields_of(line: &str, wide: bool) -> Vec<String> {

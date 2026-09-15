@@ -6,8 +6,8 @@
 //! The first mass pass has to run before a cabin exists, so it evaluates the
 //! registered or declared passenger counts. Once the detailed layout has
 //! seated the cabin, the furnishings, passenger-service, cabin-crew and
-//! air-conditioning terms must describe *that* cabin -- the one whose
-//! occupants are in the zero-fuel mass -- and not a seed count the dynamic
+//! air-conditioning terms must describe *that* cabin: the one whose
+//! occupants are in the zero-fuel mass, and not a seed count the dynamic
 //! capacity solve has since replaced. Before this seam the product report
 //! could carry a 150-seat operating empty mass under a 180-seat payload.
 //!

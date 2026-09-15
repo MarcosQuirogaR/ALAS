@@ -1,6 +1,6 @@
 """Run the private report's KC-135 Winglet study with native OpenFOAM.
 
-The report used NeuralFoil/Karman--Tsien rather than a CFD solver.  This
+The report used NeuralFoil/Karman-Tsien rather than a CFD solver.  This
 driver creates a separate dimensional, compressible ``rhoSimpleFoam`` case
 for the report's three operating points and alpha sweep.  It deliberately
 keeps the report's contradictory M=0, U~=50 m/s reference as a named case and
@@ -47,7 +47,7 @@ CP_AIR = 1005.0
 PR_AIR = 0.71
 MOL_WEIGHT = 28.9
 
-# Values transcribed from informe_tecnico_P1.md lines 36--61.  The report
+# Values transcribed from informe_tecnico_P1.md lines 36 to 61.  The report
 # gives rho and nu to four significant figures; using their product for mu
 # preserves its stated Reynolds numbers and is recorded as an assumption.
 ALTITUDE_M = 7000.0

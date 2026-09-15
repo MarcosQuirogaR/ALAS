@@ -6,8 +6,8 @@
 /// static-margin-floor constraints apply.
 ///
 /// The contract treats bare OEW ([`ModelCgLoadingState::OperatingEmpty`]) as
-/// a ground-only reference condition -- it carries no payload or fuel, so it
-/// is not one of the loaded flight/dispatch cases this envelope bounds --
+/// a ground-only reference condition (it carries no payload or fuel, so it
+/// is not one of the loaded flight/dispatch cases this envelope bounds)
 /// and it is the only state excluded here. Every other named state (analyzed
 /// ZFW, the explicit mid-mission/reserve fuel cases, and analyzed TOW) is a
 /// loaded flight/dispatch case and remains fully gated.
@@ -40,7 +40,7 @@ fn ground_reaction_constraint(constraint: ModelCgConstraint) -> bool {
 ///
 /// This model's applicability contract treats bare operating-empty weight
 /// ([`ModelCgLoadingState::OperatingEmpty`]) as a ground-only reference
-/// condition -- it carries no payload or fuel -- while the loaded
+/// condition (it carries no payload or fuel) while the loaded
 /// flight/dispatch cases (analyzed ZFW, the mid-mission/reserve fuel cases,
 /// and analyzed TOW) retain the flight constraints. OEW's flight
 /// center-of-gravity range and static-margin-floor constraints are
@@ -49,7 +49,7 @@ fn ground_reaction_constraint(constraint: ModelCgConstraint) -> bool {
 /// see [`ground_reaction_constraint`]) remain in force, so an OEW state that
 /// fails ground equilibrium is still caught. See
 /// `.agent/reports/2026-09-09-a220-five-state-cg-replay.html`, which traced
-/// a `ConfiguredForwardCgRange` finding to bare OEW alone -- a loaded-flight
+/// a `ConfiguredForwardCgRange` finding to bare OEW alone: a loaded-flight
 /// constraint this ground-only reference condition was not meant to be
 /// gated by.
 #[allow(clippy::too_many_arguments)] // mirrors the reference-compatible seam beside it

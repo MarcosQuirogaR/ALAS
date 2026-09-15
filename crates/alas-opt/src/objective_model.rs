@@ -208,8 +208,8 @@ pub struct DesignObjective {
     /// Hard floor on geometry-resolved passenger capacity
     /// ([`alas_config::DesignRequirements::min_passenger_capacity`]), or zero
     /// when no floor is configured. This does not force the cabin to hit an
-    /// exact count -- capacity is always resolved dynamically from the cabin
-    /// class mix and the candidate's geometry -- it only feeds the
+    /// exact count (capacity is always resolved dynamically from the cabin
+    /// class mix and the candidate's geometry) it only feeds the
     /// `passenger_shortfall` residual/penalty so a candidate whose resolved
     /// capacity falls short of the floor is scored accordingly.
     pub target_num_passengers: i64,
@@ -299,7 +299,7 @@ impl DesignObjective {
             // geometry's own spanwise subdivision is not restored here: it
             // changed meaning rather than value, and only a builder can
             // interpret it, so `AircraftBuilder::new_reference_compatibility`
-            // owns that -- which is the builder this path uses below.
+            // owns that, which is the builder this path uses below.
             config.analysis.restore_reference_mesh();
         }
         if reference_mass_coordinates {

@@ -50,7 +50,7 @@ fn push_flops_item(
 /// the module doc's placement contract names: all at the systems station
 /// except APU (0.95 fuselage length), avionics/instruments (0.10 fuselage
 /// length), anti-ice (the wing station), and surface controls (60% wing,
-/// split evenly between the two tail surfaces for the remaining 40% --
+/// split evenly between the two tail surfaces for the remaining 40%:
 /// FLOPS has no combined "tails" station this crate can place the tail
 /// share at once).
 ///
@@ -195,7 +195,7 @@ fn push_flops_operating_items(
 
 /// The FLOPS path: eight named systems items, the systems-group residual,
 /// four named operating items, and the furnishings item reduced so every
-/// group sum closes exactly -- see the module doc's placement contract.
+/// group sum closes exactly, see the module doc's placement contract.
 ///
 /// Three closures are enforced here rather than assumed.
 ///

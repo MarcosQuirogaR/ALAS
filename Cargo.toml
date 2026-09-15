@@ -14,12 +14,17 @@ rust-version = "1.85"
 [workspace.dependencies]
 # Build-only Windows SDK discovery and resource linking avoids bespoke toolchain plumbing.
 winresource = { version = "0.1.31", default-features = false }
+# Safe wrapper over Windows Job Objects, built on the `windows` crate already in
+# the graph. `alas-exec` assigns every external solver ALAS launches to one
+# kill-on-close job, so ending the application, however it ends, ends them too.
+# Held below 2.0.3, which moves to `windows` 0.61 and would add a second copy.
+win32job = ">=2.0.2, <2.0.3"
 serde = { version = "1", features = ["derive"] }
 # Direct DOM parsing keeps CPACS UID/reference validation separate from rendering.
 roxmltree = "0.20"
 # `float_roundtrip` is not optional here, it is what makes `exact` mean anything.
-# serde_json's default float parser is fast but not always correctly rounded --
-# its own documentation names the trade-off -- and a fixture value that lands one
+# serde_json's default float parser is fast but not always correctly rounded:
+# its own documentation names the trade-off, and a fixture value that lands one
 # ulp from the double Python wrote is a reference the port cannot match no matter
 # how right it is. Declared workspace-wide rather than per crate because the
 # feature is unified across whatever happens to be in the build graph: with it on
@@ -52,9 +57,9 @@ tiny-skia = "0.11"
 # 2026-09-11). faer is a blocked, SIMD, multithreaded LU of LAPACK class in
 # pure Rust, so `unsafe_code = "forbid"` still holds in every crate here.
 # Default features are off: no sparse solvers, no random matrices, no `.npy`
-# I/O -- only the dense factorizations and the rayon pool behind them.
+# I/O, only the dense factorizations and the rayon pool behind them.
 faer = { version = "0.24", default-features = false, features = ["std", "linalg", "rayon"] }
-# Data parallelism for numerical loops whose iterations are independent -- the
+# Data parallelism for numerical loops whose iterations are independent: the
 # vortex-lattice influence-matrix assembly first. Already in the graph through
 # faer; declared here so a crate can use it directly.
 rayon = "1"
@@ -68,7 +73,7 @@ quote = "1"
 syn = { version = "2", features = ["full"] }
 
 # The lint set is deliberately narrow. It encodes decisions that would otherwise
-# be re-argued in review -- panics, stray printing, unsafe -- and stops there.
+# be re-argued in review (panics, stray printing, unsafe) and stops there.
 # Clippy's stylistic catalogue is not enabled: this project reviews numerical
 # behaviour, and a lint queue full of idiom preferences competes for the same
 # attention.

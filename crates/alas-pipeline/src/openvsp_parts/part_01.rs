@@ -331,7 +331,7 @@ pub fn materialize_openvsp_project(
         .stderr(Stdio::from(stderr_file))
         .no_window()
         .new_process_group();
-    let mut child = match command.spawn() {
+    let mut child = match alas_exec::SupervisedSpawn::spawn_supervised(&mut command, "OpenVSP") {
         Ok(child) => child,
         Err(error) => {
             export.status = OpenVspExportStatus::RuntimeLaunchFailed;

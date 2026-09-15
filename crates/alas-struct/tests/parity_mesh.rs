@@ -5,24 +5,24 @@
 //! `golden/generators/gen_struct_mesh.py`.
 //!
 //! **The comparison is between two written decks, not two object graphs.** The
-//! generator writes the reference's `BDF` with `write_bdf(size=16)` -- the same
-//! call the solve orchestration makes -- and records what `pyNastran` read back
+//! generator writes the reference's `BDF` with `write_bdf(size=16)`: the same
+//! call the solve orchestration makes, and records what `pyNastran` read back
 //! out of that file; this test writes the port's own deck, reads it back with
 //! `support::deck`, and compares the cards. What is being checked is therefore
 //! the file a NASTRAN run would consume.
 //!
-//! Two tiers, and the split is the point of the row. Everything discrete --
+//! Two tiers, and the split is the point of the row. Everything discrete,
 //! which cards exist, what identifier each one got, which grids an element
 //! names, the property and material each one points at, the constrained grid
-//! list, the rivets' topology, the counts and the warning text -- is compared
+//! list, the rivets' topology, the counts and the warning text, is compared
 //! at [`Tier::Exact`], because an element that moved to a different grid is not
 //! a tolerance question. Every value on those cards is compared at
 //! [`Tier::Linalg`]: the grid coordinates come from
 //! `alas-geom::wing_structure`'s rib surfaces, which are a spline evaluation
 //! and are themselves a `linalg` quantity in their own green row, so a deck
 //! that reproduced them bitwise would be asserting something the surfaces
-//! underneath it do not claim. The closed-form numbers riding the same tier --
-//! the material constants, the skin thickness -- agree far tighter, exactly as
+//! underneath it do not claim. The closed-form numbers riding the same tier:
+//! the material constants, the skin thickness: agree far tighter, exactly as
 //! `alas-stab::trim`'s single tier does.
 
 // This file is itself a test binary, so an unwrap or expect that fails is

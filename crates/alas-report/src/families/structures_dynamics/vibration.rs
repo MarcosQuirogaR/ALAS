@@ -25,7 +25,7 @@ use crate::scene::{
 };
 use crate::theme::get_palette;
 
-const TITLE: &str = "Structural Analysis -- Vibration";
+const TITLE: &str = "Structural Analysis: Vibration";
 const BLUE: Color = Color::rgba(31, 119, 180, 224);
 const RED: Color = Color::rgba(214, 39, 40, 224);
 
@@ -330,7 +330,7 @@ mod tests {
         };
         let scene = figure_structures_vibration(Some(&result), None);
         assert!(scene.elements.iter().any(|element| {
-            matches!(element, SceneElement::Text { text, .. } if text.contains("NASTRAN"))
+            matches!(element, SceneElement::Text { text, .. } | SceneElement::TextBlock { text, .. } if text.contains("NASTRAN"))
         }));
     }
 

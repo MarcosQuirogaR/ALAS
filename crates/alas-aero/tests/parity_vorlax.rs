@@ -298,7 +298,7 @@ fn the_vortex_distribution_matches_panel_for_panel() {
 ///
 /// `gamma` and `CP` are compared as well as the eight coefficients, because
 /// a wrong influence matrix can still integrate to a coincidentally close
-/// total -- the same reasoning `alas-aero::asb_vlm`'s own fixture records for
+/// total: the same reasoning `alas-aero::asb_vlm`'s own fixture records for
 /// recording its vortex strengths.
 #[test]
 fn every_single_condition_solve_matches() {

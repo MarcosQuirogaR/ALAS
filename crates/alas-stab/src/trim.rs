@@ -16,7 +16,7 @@
 //! [`autobalance`] shifts the CG by the static margin those produce.
 //! [`munk_apparent_mass_factor`], [`fuselage_cm_alpha`] and
 //! [`tail_volume_coefficients`] are closed-form `f64` arithmetic over the
-//! geometry and a published table -- no factorization anywhere in them, though
+//! geometry and a published table, no factorization anywhere in them, though
 //! two of the three are reached *from inside* the VLM-fed functions and so see
 //! a VLM-derived slope as an input.
 //!
@@ -27,7 +27,7 @@
 //! every stabilizer section's twist in place and restores it in a `finally`;
 //! this port solves on a [`Airplane::clone`]d, perturbed copy
 //! ([`with_hstab_twist`]) instead. The result is identical and the aircraft a
-//! caller holds comes back unchanged either way -- and it is also why
+//! caller holds comes back unchanged either way, and it is also why
 //! upstream's restore quirk (it writes `xsecs[0]`'s twist back to *all* the
 //! sections, losing any spanwise variation) has nothing to reproduce here: no
 //! section of the caller's airplane is ever written to. `alas-aero::analysis`'s

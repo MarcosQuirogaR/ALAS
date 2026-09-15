@@ -287,7 +287,7 @@ fn build_analyses_with_mode(
 }
 
 /// Convert the explicitly configured initial-climb rate to the units used by
-/// the OpenAP/Bartel--Young maximum-climb correlation. Missing or invalid
+/// the OpenAP/Bartel-Young maximum-climb correlation. Missing or invalid
 /// configuration is represented as `None`; no universal aircraft-independent
 /// climb rate is invented at the propulsion boundary.
 fn configured_max_climb_rate_ft_min(config: &AlasConfig) -> Option<f64> {

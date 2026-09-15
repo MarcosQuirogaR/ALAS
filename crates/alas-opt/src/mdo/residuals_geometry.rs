@@ -75,7 +75,7 @@ pub(super) fn geometry_residuals(
     // limit: the pipeline still maps this solved body angle through the
     // section twist and downwash explicitly.  Registered aircraft retain
     // their measured body attitude for parity/audit reporting; applying a
-    // generic 2--4 degree design target to them would rewrite the reference
+    // generic 2 to 4 degree design target to them would rewrite the reference
     // aircraft rather than test it.
     if config.optimizer.design_space.mode == alas_config::DesignMode::CleanSheet
         && req.aircraft_type == "passenger"
@@ -129,7 +129,7 @@ pub(super) fn geometry_residuals(
             policy,
         ));
     } else if target_num_passengers > 0 {
-        // Every study -- registered aircraft or clean-sheet alike -- sizes
+        // Every study (registered aircraft or clean-sheet alike) sizes
         // its cabin from the class mix and fills the candidate floor; there
         // is no copied integer passenger target to violate. This residual
         // only appears when `DesignRequirements::min_passenger_capacity` is

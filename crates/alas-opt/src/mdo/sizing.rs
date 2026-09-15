@@ -86,7 +86,7 @@ pub(crate) struct SizingOutcome {
 /// # Errors
 ///
 /// [`CandidateFailure`] when the geometry, mass, payload layout or trim
-/// solve fails -- the candidate is not a physically evaluable aircraft.
+/// solve fails: the candidate is not a physically evaluable aircraft.
 #[cfg(test)]
 pub(crate) fn run_candidate(
     config: &AlasConfig,
@@ -267,9 +267,9 @@ pub(crate) fn run_candidate_with_polar_and_fuselage_policy(
     // compared against that ceiling by the mass residuals.  Keeping those
     // quantities separate prevents geometry/thrust/CG checks from using the
     // lower mission-required mass while the component ledger is closed at
-    // the declared MTOW.  Both mission-sized modes -- `SizedByMission`,
+    // the declared MTOW.  Both mission-sized modes (`SizedByMission`,
     // bounded above by the declared MTOW, and `Unconstrained`, which only
-    // seeds its first pass from it -- use the converged dispatch mass for
+    // seeds its first pass from it) use the converged dispatch mass for
     // both purposes instead, since there each candidate's own closure, not
     // the declared requirement, is what the analysis mass answers to.
     let analysis_takeoff_mass_kg =

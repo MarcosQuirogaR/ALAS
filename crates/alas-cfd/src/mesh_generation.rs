@@ -8,6 +8,7 @@ use super::{
 };
 #[path = "mesh_render.rs"]
 mod render;
+pub(super) use render::{characteristic_lengths, domain_bounds, leading_edge_size, wake_box};
 
 /// Build an exact polygonal Gmsh source and evidence report.
 ///
@@ -275,7 +276,7 @@ fn validated_points(
     Ok(points)
 }
 
-fn validate_mesh_geometry_controls(config: &CfdStudyConfig) -> Result<(), MeshError> {
+pub(super) fn validate_mesh_geometry_controls(config: &CfdStudyConfig) -> Result<(), MeshError> {
     for (name, value) in [
         ("upstream domain extent", config.mesh.upstream_chords),
         ("downstream domain extent", config.mesh.downstream_chords),
@@ -294,6 +295,11 @@ fn validate_mesh_geometry_controls(config: &CfdStudyConfig) -> Result<(), MeshEr
     if config.mesh.wake_refinement > 6 {
         return Err(MeshError::InvalidInput(
             "wake refinement must be between zero and six".to_owned(),
+        ));
+    }
+    if config.mesh.leading_edge_refinement > 6 {
+        return Err(MeshError::InvalidInput(
+            "leading-edge refinement must be between zero and six".to_owned(),
         ));
     }
     Ok(())
@@ -345,7 +351,7 @@ pub(super) fn geometric_layer_sum(first: f64, ratio: f64, n_layers: u32) -> f64 
     first * (ratio.powi(n_layers as i32) - 1.0) / (ratio - 1.0)
 }
 
-fn positive_finite(value: f64, name: &str) -> Result<f64, MeshError> {
+pub(super) fn positive_finite(value: f64, name: &str) -> Result<f64, MeshError> {
     if value.is_finite() && value > 0.0 {
         Ok(value)
     } else {
@@ -355,7 +361,7 @@ fn positive_finite(value: f64, name: &str) -> Result<f64, MeshError> {
     }
 }
 
-fn bounds(points: &[(f64, f64)]) -> (f64, f64, f64, f64) {
+pub(super) fn bounds(points: &[(f64, f64)]) -> (f64, f64, f64, f64) {
     points.iter().fold(
         (
             f64::INFINITY,
@@ -369,7 +375,7 @@ fn bounds(points: &[(f64, f64)]) -> (f64, f64, f64, f64) {
     )
 }
 
-fn vertical_gap(values: &[f64]) -> f64 {
+pub(super) fn vertical_gap(values: &[f64]) -> f64 {
     let Some(minimum) = values.iter().copied().reduce(f64::min) else {
         return 0.0;
     };
@@ -379,7 +385,7 @@ fn vertical_gap(values: &[f64]) -> f64 {
     maximum - minimum
 }
 
-fn signed_area(points: &[(f64, f64)]) -> f64 {
+pub(super) fn signed_area(points: &[(f64, f64)]) -> f64 {
     points
         .iter()
         .zip(points.iter().cycle().skip(1))
@@ -389,7 +395,7 @@ fn signed_area(points: &[(f64, f64)]) -> f64 {
         * 0.5
 }
 
-fn distance_sq(a: (f64, f64), b: (f64, f64)) -> f64 {
+pub(super) fn distance_sq(a: (f64, f64), b: (f64, f64)) -> f64 {
     (a.0 - b.0).mul_add(a.0 - b.0, (a.1 - b.1) * (a.1 - b.1))
 }
 

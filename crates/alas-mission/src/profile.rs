@@ -9,8 +9,8 @@
 //! Cruise altitude comes from the design requirements; the departure and
 //! arrival field elevations and the departure ISA deviation come from the two
 //! airports the route runs between; the route distance is supplied by whoever
-//! computed the route (see `alas-route`). The flown profile -- every climb,
-//! cruise and descent speed and rate -- is the user-editable
+//! computed the route (see `alas-route`). The flown profile, every climb,
+//! cruise and descent speed and rate, is the user-editable
 //! [`MissionProfileConfig`] carried straight through, because those numbers are
 //! a configuration the operator tunes rather than anything this builder
 //! derives.

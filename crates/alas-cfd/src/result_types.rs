@@ -22,10 +22,10 @@ impl Default for FrameConvention {
             axes: "chord +x, section normal +y, extrusion +z".to_owned(),
             angle_of_attack:
                 "freestream U=(U cos(alpha), U sin(alpha), 0), positive alpha toward +y".to_owned(),
-            forces: "drag positive along freestream; lift positive 90 deg counter-clockwise in x-y"
+            forces: "drag positive along freestream; lift positive 90 deg counter-clockwise in x-y; q = rho U^2/2, Aref = chord x extrusion span, lRef = chord"
                 .to_owned(),
             moment_reference:
-                "quarter-chord at the extrusion mid-plane (x/c=0.25, y=0, z=span/2); forceCoeffs reports Cm about -z"
+                "quarter-chord at the extrusion mid-plane (x/c=0.25, y=0, z=span/2); Cm positive nose-up (leading edge toward +y), forceCoeffs pitchAxis (0 0 -1)"
                     .to_owned(),
         }
     }
@@ -46,6 +46,11 @@ pub struct StudyProvenance {
     pub effective_reynolds: f64,
     /// Axes/sign/reference conventions.
     pub frame: FrameConvention,
+    /// Numeric reference lengths, directions and moment point used by the
+    /// generated dictionaries and the result normalisation.  `None` only for
+    /// records written before the typed conventions existed.
+    #[serde(default)]
+    pub reference: Option<ReferenceConventions>,
     /// Backend actually selected for the run, when an external process was
     /// reached.  `None` is retained for locally generated or preflight-only
     /// cases that never resolved a runnable backend.

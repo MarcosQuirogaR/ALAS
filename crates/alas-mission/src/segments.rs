@@ -12,10 +12,10 @@
 //! One leg of a mission, and the two-unknown system that flies it.
 //!
 //! A segment is a boundary-value problem stated as an algebraic one. The
-//! trajectory is *given* -- a climb is sixteen points evenly spaced in
+//! trajectory is *given*: a climb is sixteen points evenly spaced in
 //! altitude between two altitudes, flown at a fixed true airspeed and a fixed
 //! rate; a cruise is sixteen points evenly spaced in time across a fixed
-//! distance at a fixed altitude -- and what is unknown is how the aeroplane
+//! distance at a fixed altitude, and what is unknown is how the aeroplane
 //! has to be flown to follow it: a throttle and a body angle at each point.
 //! Two unknowns per point, two force residuals per point, thirty-two of each
 //! over the sixteen points [`crate::Numerics`] discretizes on.
@@ -101,7 +101,7 @@ pub struct SegmentSpec {
     /// True or calibrated airspeed, m/s, per `air_speed_reference`.
     pub air_speed_m_s: f64,
     /// Whether `air_speed_m_s` above is a true airspeed (the legacy, and
-    /// still default, semantics -- flown unchanged at every control point)
+    /// still default, semantics: flown unchanged at every control point)
     /// or a calibrated airspeed. A calibrated [`SegmentKind::Climb`] or
     /// [`SegmentKind::Descent`] resolves the true airspeed actually flown at
     /// *each control point's own altitude* from the real ambient pressure
@@ -210,7 +210,7 @@ impl Segment {
     ///
     /// That is `expand_state`, then
     /// `initialize_differentials_dimensionless`, then the kind's own
-    /// `initialize_conditions`, then -- for a climb or descent only --
+    /// `initialize_conditions`, then (for a climb or descent only)
     /// `update_differentials_altitude`, which is what turns a trajectory
     /// discretized in altitude into one that knows how long it takes.
     ///
@@ -315,9 +315,9 @@ impl Segment {
     /// resolved to a true airspeed independently *at each control point's own
     /// altitude*, against the real ambient pressure and temperature there
     /// ([`alas_atmo::us1976_compute_values`] at this segment's own ISA
-    /// deviation), so the true airspeed -- and with it the horizontal
+    /// deviation), so the true airspeed, and with it the horizontal
     /// velocity and, through [`crate::segments::frames::update_acceleration`]
-    /// downstream, the along-track acceleration the residual solve sees --
+    /// downstream, the along-track acceleration the residual solve sees,
     /// varies continuously along the ramp instead of being one constant
     /// value for the whole segment. This is the genuine per-live-altitude
     /// resolution the mission-scope integration calls for, not a
@@ -377,7 +377,7 @@ impl Segment {
     ///
     /// The overall time is the dimensionless integration operator's last row,
     /// scaled by the altitude change, contracted against the reciprocal of the
-    /// vertical velocity -- a quadrature of `dz / vz` -- and the node grid is
+    /// vertical velocity (a quadrature of `dz / vz`) and the node grid is
     /// then that time. Written exactly as upstream contracts it, because the
     /// factor `dz` is folded into the operator row before the contraction
     /// rather than after.
@@ -462,8 +462,8 @@ impl Segment {
     /// The force that did not balance, per unit mass.
     ///
     /// A climb or descent compares the `x` and `z` forces against the
-    /// accelerations the trajectory implies. A cruise has no acceleration term
-    /// -- its chain never computed one. Product analyses use the signed `x`
+    /// accelerations the trajectory implies. A cruise has no acceleration term:
+    /// its chain never computed one. Product analyses use the signed `x`
     /// component; the frozen compatibility path retains the historical
     /// horizontal-force magnitude residual.
     fn update_residuals(&mut self, signed_cruise_force_residual: bool) {
@@ -748,7 +748,7 @@ mod tests {
     /// International knot in m/s.
     const KNOT: f64 = 1852.0 / 3600.0;
 
-    /// 170 KCAS -- the ATR 72-600 factsheet climb speed -- flown as a
+    /// 170 KCAS (the ATR 72-600 factsheet climb speed) flown as a
     /// calibrated climb from a 610 m field (Madrid-Barajas' elevation) to
     /// 4000 m at 6 m/s.
     fn cas_climb_spec() -> SegmentSpec {

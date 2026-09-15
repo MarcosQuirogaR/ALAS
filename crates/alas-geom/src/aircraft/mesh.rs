@@ -19,15 +19,15 @@
 //! time it runs, and `alas/physics/aerodynamics.py`'s `_run_vlm` constructs
 //! and runs exactly that solver. That makes this row a P5 prerequisite (of
 //! `alas-aero::vlm`, which will call [`Wing::mesh_thin_surface`] the same
-//! way), not a P11-only row -- see `docs/PORTING.md`'s corrected paragraph
+//! way), not a P11-only row, see `docs/PORTING.md`'s corrected paragraph
 //! for this crate's Geometry section.
 //!
 //! # Scoped to `method="quad"`
 //!
 //! Upstream's `mesh_thin_surface` takes a `method: "tri" | "quad"`
 //! parameter; `add_face`'s `"tri"` branch splits each quadrilateral into two
-//! triangles. `VortexLatticeMethod.run()` -- the only caller this crate's
-//! inputs reach -- always passes `method="quad"`, so [`Wing::mesh_thin_surface`]
+//! triangles. `VortexLatticeMethod.run()`: the only caller this crate's
+//! inputs reach, always passes `method="quad"`, so [`Wing::mesh_thin_surface`]
 //! has no `method` parameter at all rather than one nothing ever sets to
 //! `"tri"`.
 //!
@@ -38,11 +38,11 @@
 //! List[float]]`); [`XsecStation`] carries that same choice. For each
 //! cross-section `i`, upstream resolves `xsec_x_nondim = x_nondim[i]` (or
 //! falls back to the bare `x_nondim` if that indexing fails, i.e. `x_nondim`
-//! was a scalar) -- and then, when `add_camber` is set, looks the camber up
+//! was a scalar), and then, when `add_camber` is set, looks the camber up
 //! with `xsec.airfoil.local_camber(x_over_c=x_nondim)`, the *un-indexed*
 //! outer parameter, not `xsec_x_nondim`. At `mesh_thin_surface`'s one call
 //! site `x_nondim` is always a bare scalar, so `x_nondim == xsec_x_nondim`
-//! there and the two reads are indistinguishable -- `CLAUDE.md` already
+//! there and the two reads are indistinguishable: `CLAUDE.md` already
 //! flags this as "harmless where it is called." [`Wing::mesh_line`] here uses
 //! the correct per-cross-section value (`xsec_x_nondim`, called `x` in the
 //! loop below) for the camber lookup rather than the outer parameter. This is
@@ -75,7 +75,7 @@
 //!
 //! `points` is laid out one spanwise strip (one cross-section's worth of
 //! chordwise-mesh points, in root-to-tip order) per chordwise station, in
-//! increasing-chordwise-station order -- point `i + j * num_xsecs` is
+//! increasing-chordwise-station order: point `i + j * num_xsecs` is
 //! cross-section `i`'s point at chordwise station `j`. `tests/parity_geom_aircraft_mesh.rs`
 //! and this file's own unit tests both pin this layout down directly against
 //! computed index arrays, not just against the fixture's specific numbers.
@@ -85,7 +85,7 @@ use super::wing::Wing;
 
 /// The value [`Wing::mesh_line`] places at every cross-section along one
 /// coordinate: a single value shared by every cross-section, or one value
-/// per cross-section -- upstream's `Union[float, List[float]]`.
+/// per cross-section: upstream's `Union[float, List[float]]`.
 #[derive(Debug, Clone, PartialEq)]
 pub enum XsecStation {
     /// The same value at every cross-section.
@@ -96,7 +96,7 @@ pub enum XsecStation {
 }
 
 /// [`Wing::mesh_line`] rejects a [`XsecStation::PerXsec`] whose length does
-/// not match the wing's cross-section count -- the same condition upstream's
+/// not match the wing's cross-section count: the same condition upstream's
 /// `raise ValueError("If \`x_nondim\` is an iterable, it should be the same
 /// length as \`Wing.xsecs\`...")` guards, restated as a typed error since
 /// this crate does not panic (`CONTRIBUTING.md`).
@@ -131,7 +131,7 @@ fn resolve_station(
 impl Wing {
     /// A point through each of this wing's cross-sections, root to tip, at
     /// `x_nondim` chord fraction and `z_nondim` (airfoil-frame) height, each
-    /// optionally offset by that cross-section's own mean camber --
+    /// optionally offset by that cross-section's own mean camber:
     /// `Wing.mesh_line`. Ignores wing symmetry, giving only the one side this
     /// wing's own cross-sections describe, exactly as upstream does.
     ///
@@ -156,7 +156,7 @@ impl Wing {
     }
 
     /// [`Wing::mesh_line`]'s body, once `x_nondim`/`z_nondim` are already one
-    /// value per cross-section -- shared with [`Wing::mesh_thin_surface`],
+    /// value per cross-section: shared with [`Wing::mesh_thin_surface`],
     /// which always calls with a scalar station broadcast to every
     /// cross-section and so cannot hit [`MeshLineError`].
     fn mesh_line_resolved(
@@ -173,7 +173,7 @@ impl Wing {
                 let mut z = z_values[index];
                 if add_camber {
                     // Uses `x` (this cross-section's own station), not the
-                    // outer, un-indexed parameter -- see the module doc.
+                    // outer, un-indexed parameter, see the module doc.
                     z += xsec.airfoil.local_camber(&[x])[0];
                 }
                 self.xyz_of_xsec(index, x, z)
@@ -182,7 +182,7 @@ impl Wing {
     }
 
     /// Meshes the mean camber surface of the wing as a thin sheet of
-    /// quadrilaterals -- `Wing.mesh_thin_surface(method="quad", ...)`, the
+    /// quadrilaterals: `Wing.mesh_thin_surface(method="quad", ...)`, the
     /// only `method` this crate's one caller ever uses (see the module doc).
     ///
     /// `chordwise_resolution` chordwise panels are cut with
@@ -314,7 +314,7 @@ mod tests {
     #[test]
     fn mesh_thin_surface_without_camber_lies_on_the_flat_planform() {
         // With add_camber=false and z_nondim=0, every meshed point should
-        // fall exactly on xyz_of_xsec's own quarter-of-chord-free output --
+        // fall exactly on xyz_of_xsec's own quarter-of-chord-free output:
         // a property `local_camber`'s specific values cannot mask.
         let wing = two_xsec_wing(false);
         let (points, _) = wing.mesh_thin_surface(1, false);
@@ -340,7 +340,7 @@ mod tests {
     #[test]
     fn mesh_line_uses_each_cross_sections_own_x_nondim_for_its_camber_lookup() {
         // naca4412 is asymmetrically cambered, so local_camber differs
-        // meaningfully between x/c = 0.2 and x/c = 0.8 -- the fixed lookup
+        // meaningfully between x/c = 0.2 and x/c = 0.8: the fixed lookup
         // must read each cross-section's own station, not a shared one.
         let airfoil = naca("naca4412");
         let wing = Wing::new(
@@ -373,7 +373,7 @@ mod tests {
         // The upstream bug this port does not reproduce would instead look
         // camber up at the outer, un-indexed `x_nondim` for every
         // cross-section; had that happened here, xsec 1's z would have come
-        // from `camber_at_02`, not `camber_at_08` -- these differ, so this
+        // from `camber_at_02`, not `camber_at_08`; these differ, so this
         // also confirms the fixed value was actually used.
         assert_ne!(points[1], wing.xyz_of_xsec(1, 0.8, camber_at_02));
     }

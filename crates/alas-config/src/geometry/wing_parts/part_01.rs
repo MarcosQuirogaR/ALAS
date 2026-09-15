@@ -237,7 +237,7 @@ pub struct WingConfig {
     #[config(
         label = "Wing root X position",
         unit = "m",
-        help = "Fuselage-station X of the wing-root leading-edge datum -- how far aft of the nose the wing sits."
+        help = "Fuselage-station X of the wing-root leading-edge datum: how far aft of the nose the wing sits."
     )]
     pub root_datum_x_m: f64,
 
@@ -353,7 +353,7 @@ pub struct WingConfig {
     /// How many spanwise panels the whole wing semispan is meshed into.
     #[config(
         label = "Wing VLM panel count",
-        help = "Spanwise panels across the whole wing semispan for the vortex-lattice solver. This is an absolute count, not a count per section: a planform with a side-of-body station and a kink gets the same mesh density as one without, and adding a station no longer changes the panel count underneath a search. Every planform station -- root, side-of-body, kink, tip -- is always kept as a panel edge whatever the count, so refining the mesh never averages a kink away. The default of 24 is converged: a twelve-fold refinement moves the trimmed cruise attitude by 0.01 deg."
+        help = "Spanwise panels across the whole wing semispan for the vortex-lattice solver. This is an absolute count, not a count per section: a planform with a side-of-body station and a kink gets the same mesh density as one without, and adding a station no longer changes the panel count underneath a search. Every planform station (root, side-of-body, kink, tip) is always kept as a panel edge whatever the count, so refining the mesh never averages a kink away. The default of 24 is converged: a twelve-fold refinement moves the trimmed cruise attitude by 0.01 deg."
     )]
     pub n_subdivisions: i64,
 }

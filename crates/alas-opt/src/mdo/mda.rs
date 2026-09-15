@@ -23,7 +23,7 @@
 //! `SizedByMission` keeps it as the dispatch ceiling and as the Aitken
 //! extrapolation's admissibility bound on every pass, while `Unconstrained`
 //! drops both after the seed, so the requirement never reappears as a limit
-//! anywhere in the closure -- only the freely converging dispatch mass does.
+//! anywhere in the closure, only the freely converging dispatch mass does.
 
 use alas_config::design_variables::DesignVector;
 use alas_config::{AlasConfig, MassSizingBasis, MtowSizing};
@@ -222,8 +222,8 @@ pub(crate) fn converge(
     // aircraft (`BaselineSandbox`, `ReferenceAdaptation`, or any mode with a
     // declared `flops_structure.design_gross_mass_kg` override) is designed
     // to one landing weight regardless of what the dispatch mass converges
-    // to, so every pass -- under `FixedRequirement`, `SizedByMission` and
-    // `Unconstrained` alike -- uses the sizing basis's own
+    // to, so every pass (under `FixedRequirement`, `SizedByMission` and
+    // `Unconstrained` alike) uses the sizing basis's own
     // `design_landing_mass_kg`. Only a coupled clean-sheet closure recomputes
     // the limit from the current takeoff-mass iterate, because there the
     // landing mass is defined as a fraction of whatever the design converges

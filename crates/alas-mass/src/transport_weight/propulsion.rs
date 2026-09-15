@@ -17,14 +17,14 @@
 
 use alas_units::{POUND_FORCE, POUND_MASS};
 
-/// The dry weight of one jet engine given its sea-level static thrust --
+/// The dry weight of one jet engine given its sea-level static thrust:
 /// `engine_jet`, a correlation over a set of production engines.
 pub(crate) fn engine_jet(sealevel_static_thrust_n: f64) -> f64 {
     let thrust_sls_lbf = sealevel_static_thrust_n / POUND_FORCE;
     (0.4054 * thrust_sls_lbf.powf(0.9255)) * POUND_MASS
 }
 
-/// The whole propulsion system's weight -- `integrated_propulsion`. Upstream
+/// The whole propulsion system's weight: `integrated_propulsion`. Upstream
 /// assumes the installed system (engines, exhaust, reversers, starting,
 /// controls, lubrication, fuel system, nacelles and pylons) is a fixed 60%
 /// heavier than the dry engines alone (`engine_wt_factor` default 1.6, never

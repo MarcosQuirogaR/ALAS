@@ -3,8 +3,8 @@
 
 //! The fuel-burn models the pipeline prices a fuel policy with.
 //!
-//! A fuel policy needs four physical answers -- what a trip burns, what a
-//! diversion burns, what holding costs and what taxiing costs -- and the
+//! A fuel policy needs four physical answers: what a trip burns, what a
+//! diversion burns, what holding costs and what taxiing costs, and the
 //! pipeline has two sources for them. The native segment mission is the
 //! authoritative trip, but it is a pseudospectral solve and knows nothing
 //! about a hold at 1,500 ft. The analytic Breguet model built here from the

@@ -54,15 +54,15 @@ pub(crate) fn build_results_with_quality(
     mass_balance.extend(parse_mass_balance(&post_log));
     let mut forces = result_io::read_force_history(&generated.path);
     let decomposition = result_io::read_force_decomposition(&generated.path);
-    let alpha = config.angle_of_attack_deg.to_radians();
+    let reference = ReferenceConventions::from_config(config);
     apply_force_decomposition(
         &mut forces,
         &decomposition,
         config.density_kg_m3,
-        config.effective_speed_m_s(),
-        reference_area_m2(config),
-        [alpha.cos(), alpha.sin(), 0.0],
-        [-alpha.sin(), alpha.cos(), 0.0],
+        reference.speed_m_s,
+        reference.area_m2,
+        reference.drag_direction,
+        reference.lift_direction,
     );
     let final_stage_forces = forces_for_final_stage(&forces, &command_logs);
     let (outcome, computed_status_detail) = classify_convergence(
@@ -82,13 +82,9 @@ pub(crate) fn build_results_with_quality(
         speed_m_s: config.effective_speed_m_s(),
         chord_m: config.chord_m,
         angle_of_attack_deg: config.angle_of_attack_deg,
-        reference_area_m2: reference_area_m2(config),
+        reference_area_m2: reference.area_m2,
         pressure_reference_pa: config.boundaries.pressure_reference_pa,
-        moment_reference_m: [
-            0.25 * config.chord_m,
-            0.0,
-            0.5 * config.chord_m * EXTRUSION_SPAN_TO_CHORD,
-        ],
+        moment_reference_m: reference.moment_reference_m,
     };
     let (surface, surface_error) =
         match surface::parse_surface_case(&generated.path, "latest", &surface_reference) {
@@ -116,6 +112,7 @@ pub(crate) fn build_results_with_quality(
             effective_speed_m_s: generated.effective_speed_m_s,
             effective_reynolds: generated.effective_reynolds,
             frame: FrameConvention::default(),
+            reference: Some(reference),
             backend,
             openfoam_version,
             file_hashes,
@@ -250,10 +247,6 @@ fn logs_with_prefix(logs: &BTreeMap<String, String>, prefix: &str) -> String {
         combined.push_str(log);
     }
     combined
-}
-
-fn reference_area_m2(config: &CfdStudyConfig) -> f64 {
-    config.chord_m * (config.chord_m * EXTRUSION_SPAN_TO_CHORD)
 }
 
 fn forces_for_final_stage(

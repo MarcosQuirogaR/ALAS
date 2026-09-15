@@ -6,7 +6,7 @@
 
 //! Wingbox planform (spar lines + faint rib-station lines), the semi-wing
 //! mass breakdown as a pie chart, and a FEM-vs-Torenbeek wing mass
-//! comparison bar chart -- a read-only accuracy check against
+//! comparison bar chart: a read-only accuracy check against
 //! `physics.mass`'s own Torenbeek estimate for this same design, not a
 //! feedback loop.
 
@@ -70,14 +70,14 @@ pub fn figure_structures_sizing(
     let pal = get_palette(theme);
     let mut scene = Scene::new(1300.0, 520.0, Some(Color::from_hex(pal.bg)));
     let title = format!(
-        "Wingbox Sizing -- governing load case: {}",
+        "Wingbox Sizing, governing load case: {}",
         sizing.sizing_load_case
     );
     scene.title = Some(title.clone());
     draw_title(&mut scene, &title, pal);
     scene.suppress_derived_title();
 
-    // -- left: planform + rib stations -------------------------------------
+    // left: planform + rib stations
     let y = &sizing.y_stations;
     let le: Vec<f64> = sizing.eta_stations.iter().map(|&e| wsg.x_le(e)).collect();
     let te: Vec<f64> = le.iter().zip(&sizing.chord).map(|(&l, &c)| l + c).collect();
@@ -162,7 +162,7 @@ pub fn figure_structures_sizing(
         });
     }
 
-    // -- middle: mass-breakdown pie chart ------------------------------------
+    // middle: mass-breakdown pie chart
     let pie_center = (620.0, 250.0);
     let pie_radius = 140.0;
     let items = mass_breakdown_items(&sizing.mass_breakdown_kg);
@@ -181,7 +181,7 @@ pub fn figure_structures_sizing(
         bold: true,
     });
 
-    // -- right: FEM vs Torenbeek bar chart ------------------------------------
+    // right: FEM vs Torenbeek bar chart
     let fem_full_wing = 2.0 * sizing.total_mass_kg;
     let torenbeek = result.torenbeek_wing_mass_kg;
     draw_fem_torenbeek_bars(
@@ -197,7 +197,7 @@ pub fn figure_structures_sizing(
 
 /// The pie chart: one wedge per `(label, value)` entry, tab-colored in
 /// `SPAR_COLORS` order, with a white percentage label inside the wedge and
-/// the component name outside it -- `ax_pie.pie(..., autopct="%1.0f%%")`.
+/// the component name outside it: `ax_pie.pie(..., autopct="%1.0f%%")`.
 fn draw_pie(
     scene: &mut Scene,
     pal: &Palette,
@@ -399,7 +399,7 @@ mod tests {
         let has_status_text = scene
             .elements
             .iter()
-            .any(|e| matches!(e, SceneElement::Text { text, .. } if text.contains("not run")));
+            .any(|e| matches!(e, SceneElement::Text { text, .. } | SceneElement::TextBlock { text, .. } if text.contains("not run")));
         assert!(has_status_text);
     }
 
@@ -412,7 +412,7 @@ mod tests {
         };
         let scene = figure_structures_sizing(Some(&failed), None);
         let has_error_text = scene.elements.iter().any(
-            |e| matches!(e, SceneElement::Text { text, .. } if text.contains("bad spar layout")),
+            |e| matches!(e, SceneElement::Text { text, .. } | SceneElement::TextBlock { text, .. } if text.contains("bad spar layout")),
         );
         assert!(has_error_text);
     }

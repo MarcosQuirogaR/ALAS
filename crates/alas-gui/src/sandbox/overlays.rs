@@ -1,18 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! The action row and the geometry metric rows floating inside the bottom
-//! of the viewport.
+//! The action row floating inside the bottom of the viewport, and the
+//! derived geometry metrics shown by the Summary card of [`super::panel`].
 //!
 //! There is no footer: the actions (Quick Analysis, Full Analysis, Cancel
 //! while a run is in flight, Undo, Redo, Run log, Results) are floating
-//! buttons in one row centred like the camera row, and the derived metrics
-//! sit beneath them in two centred rows of individual chips (four rows of
-//! two, or eight of one, on a narrow viewport; the actions likewise split
-//! into a launch row and an edit row when one row would not fit). Every
-//! box registers itself as an overlay, so
-//! a gesture on it never orbits the aircraft. The block is inset from the
-//! viewport bottom and its rectangle is reserved from the other overlays.
+//! buttons in one row centred like the camera row (a launch row over an
+//! edit row when one row would not fit). Every box registers itself as an
+//! overlay, so a gesture on it never orbits the aircraft. The block is
+//! inset from the viewport bottom and its rectangle is reserved from the
+//! other overlays. The metrics are not drawn beneath the actions: they are
+//! listed on demand behind the Summary button below the category stack.
 //!
 //! Metric conventions are those of [`super::scene`]: `S_ref` projected
 //! main-wing planform area including the carry-through, m2; `b` projected
@@ -22,7 +21,7 @@
 //! lofted sections, deg; `taper` tip over root chord; `L_fus` overall
 //! fuselage length, m.
 
-use egui::{pos2, Context, Rect, RichText, Sense, Ui};
+use egui::{pos2, Context, Rect, RichText, Ui};
 
 use crate::state::AppState;
 use crate::views::tr;
@@ -35,40 +34,13 @@ use super::workspace::{start_full_analysis, start_quick_analysis};
 
 /// Height of the action row, in points.
 pub const ACTION_ROW_HEIGHT: f32 = 30.0;
-/// Height of one metric row, in points.
-pub const METRIC_ROW_HEIGHT: f32 = 22.0;
 /// Vertical gap between the rows of the block, in points.
 pub const ROW_GAP: f32 = 4.0;
-/// Nominal width of one metric chip, used to decide how many fit per row.
-const METRIC_CHIP_WIDTH: f32 = 132.0;
 /// Nominal width of the full action row (Quick Analysis, Full Analysis,
 /// Undo, Redo, Run log, Results), used to decide whether it splits.
 const ACTIONS_WIDTH: f32 = 470.0;
-const METRIC_COUNT: usize = 8;
-const METRIC_ROW_KEYS: [&str; 8] = [
-    "metrics_0",
-    "metrics_1",
-    "metrics_2",
-    "metrics_3",
-    "metrics_4",
-    "metrics_5",
-    "metrics_6",
-    "metrics_7",
-];
-const CONVENTIONS: &str = "S_ref: projected planform area of the main wing including the carry-through, m2. b: projected tip-to-tip span, m. MAC: mean aerodynamic chord, m. LE sweep: inboard leading-edge sweep design variable, deg, positive aft. c/4 sweep: area-weighted mean quarter-chord sweep of the lofted sections, deg. AR: b^2 / S_ref. taper: tip chord over root chord. L_fus: overall fuselage length, m. Axes: x aft, y right, z up.";
-
-/// Metric chips per row for a viewport width: four (two rows) when four
-/// fit, two (four rows) when two fit, otherwise one.
-pub fn metrics_per_row(viewport_width: f32) -> usize {
-    let available = viewport_width - 2.0 * OVERLAY_INSET;
-    if available >= 4.0 * METRIC_CHIP_WIDTH + 3.0 * 6.0 {
-        4
-    } else if available >= 2.0 * METRIC_CHIP_WIDTH + 6.0 {
-        2
-    } else {
-        1
-    }
-}
+/// Hover text of every metric row: the conventions of the eight values.
+pub(super) const CONVENTIONS: &str = "S_ref: projected planform area of the main wing including the carry-through, m2. b: projected tip-to-tip span, m. MAC: mean aerodynamic chord, m. LE sweep: inboard leading-edge sweep design variable, deg, positive aft. c/4 sweep: area-weighted mean quarter-chord sweep of the lofted sections, deg. AR: b^2 / S_ref. taper: tip chord over root chord. L_fus: overall fuselage length, m. Axes: x aft, y right, z up.";
 
 /// Action rows for a viewport width: one, or a launch row over an edit
 /// row when the full row would not fit.
@@ -81,20 +53,12 @@ pub fn action_rows(viewport_width: f32) -> usize {
 }
 
 /// The rows of the block from the top, each with its key and minimum
-/// height: the action row (or the launch and edit rows), then the metric
-/// rows.
+/// height: the action row, or the launch and edit rows.
 fn block_rows(viewport_width: f32) -> Vec<(&'static str, f32)> {
     let mut rows = vec![("actions", ACTION_ROW_HEIGHT)];
     if action_rows(viewport_width) == 2 {
         rows.push(("actions_edit", ACTION_ROW_HEIGHT));
     }
-    let metric_rows = METRIC_COUNT.div_ceil(metrics_per_row(viewport_width));
-    rows.extend(
-        METRIC_ROW_KEYS
-            .iter()
-            .take(metric_rows)
-            .map(|key| (*key, METRIC_ROW_HEIGHT)),
-    );
     rows
 }
 
@@ -120,7 +84,7 @@ pub fn action_block_rect(ctx: &Context, viewport: Rect) -> Rect {
     )
 }
 
-/// The metric chip texts in display order.
+/// The metric texts in display order, each a symbol, value and unit.
 pub fn metric_chips(state: &AppState) -> Vec<String> {
     let (Some(plane), Some(design)) = (&state.sandbox.airplane, state.current_design()) else {
         return Vec::new();
@@ -138,7 +102,7 @@ pub fn metric_chips(state: &AppState) -> Vec<String> {
     ]
 }
 
-/// Render the action row and the metric rows; returns the block rectangle.
+/// Render the action row; returns the block rectangle.
 pub fn show_action_block(state: &mut AppState, ui: &mut Ui, viewport: Rect) -> Rect {
     let ctx = ui.ctx().clone();
     let block = action_block_rect(&ctx, viewport);
@@ -164,22 +128,6 @@ pub fn show_action_block(state: &mut AppState, ui: &mut Ui, viewport: Rect) -> R
         let at = advance("actions_edit", ACTION_ROW_HEIGHT);
         centered_row(ui, "actions_edit", viewport, at, ACTION_ROW_HEIGHT, |ui| {
             show_edit_actions(state, ui);
-        });
-    }
-    let per_row = metrics_per_row(viewport.width());
-    let chips = metric_chips(state);
-    for (row, chunk) in chips.chunks(per_row).enumerate() {
-        let Some(key) = METRIC_ROW_KEYS.get(row) else {
-            break;
-        };
-        let at = advance(key, METRIC_ROW_HEIGHT);
-        centered_row(ui, key, viewport, at, METRIC_ROW_HEIGHT, |ui| {
-            for text in chunk {
-                let chip = egui::Button::new(RichText::new(text).monospace())
-                    .small()
-                    .sense(Sense::hover());
-                floating_control(ui, "metric", true, chip).on_hover_text(tr(CONVENTIONS));
-            }
         });
     }
     block
@@ -267,10 +215,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn narrow_viewports_fall_back_to_two_chips_per_row() {
-        assert_eq!(metrics_per_row(1280.0), 4);
-        assert_eq!(metrics_per_row(400.0), 2);
-        assert_eq!(metrics_per_row(250.0), 1);
+    fn narrow_viewports_split_the_action_row_and_no_metric_rows_are_reserved() {
         assert_eq!(action_rows(1280.0), 1);
         assert_eq!(action_rows(400.0), 2);
         let ctx = Context::default();
@@ -280,11 +225,8 @@ mod tests {
         );
         let narrow =
             action_block_rect(&ctx, Rect::from_min_max(pos2(0.0, 0.0), pos2(400.0, 800.0)));
-        assert!(
-            (wide.height() - (ACTION_ROW_HEIGHT + 2.0 * (ROW_GAP + METRIC_ROW_HEIGHT))).abs()
-                < 1e-6
-        );
-        assert!(narrow.height() > wide.height());
+        assert!((wide.height() - ACTION_ROW_HEIGHT).abs() < 1e-6);
+        assert!((narrow.height() - (2.0 * ACTION_ROW_HEIGHT + ROW_GAP)).abs() < 1e-6);
         assert!((wide.bottom() - (800.0 - OVERLAY_INSET)).abs() < 1e-6);
     }
 

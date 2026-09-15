@@ -217,7 +217,7 @@ pub fn evaluate_preset(preset_name: &str) -> Result<PresetAcceptanceResult, Stri
     // with a lie-flat business block spends enough pitch to lose thirteen
     // seats on an A320 and eighteen on an A220. Every "passenger payload
     // leaves N requested passengers without seats" finding in this matrix was
-    // that mix, not the aeroplane -- selected properly, all eight presets seat
+    // that mix, not the aeroplane: selected properly, all eight presets seat
     // exactly what they ask for. This is the same class of defect as the
     // engine binding: a config assembled by hand skips a step the loader does.
     let config = AlasConfig::from_value(&serde_json::json!({ "preset": preset.name }))

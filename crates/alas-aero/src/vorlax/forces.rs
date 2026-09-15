@@ -19,7 +19,7 @@
 //!
 //! The panelization is stored in `f32` and several of the quantities here are
 //! derived from it *within* single precision before being used in a double
-//! expression -- `1/CHORD`, the leading and trailing edge sweep tangents, the
+//! expression: `1/CHORD`, the leading and trailing edge sweep tangents, the
 //! camber slope less the strip incidence and its `1 + t^2` denominator, the
 //! sine and cosine of the strip incidence, and the strip's own half-span and
 //! area. Each is marked at the point it happens. They are not stylistic: a
@@ -36,7 +36,7 @@
 //! as `0.5`, so a thickness model can find it.
 //!
 //! And the leading-edge suction is computed for linear chordwise spacing,
-//! which VORLAX itself skips -- VORLAX evaluates `CLE` only for cosine
+//! which VORLAX itself skips: VORLAX evaluates `CLE` only for cosine
 //! chordwise spacing. mission analysis model forces the calculation anyway, on the recorded
 //! grounds that the trend is right even though the magnitude is understated.
 //! That is a deliberate deviation of mission analysis model's from VORLAX, and this port
@@ -365,7 +365,7 @@ fn sweep_tangent_te(vd: &VortexDistribution, i: usize) -> f32 {
 ///
 /// Two terms. The first is the circulation's own, scaled by the panel count
 /// and the strip chord so that it is a pressure difference rather than a
-/// strength, and multiplied by the axial onset flow -- freestream plus
+/// strength, and multiplied by the axial onset flow: freestream plus
 /// whatever the body rotation adds at that station. The second, `DCPSID`, is
 /// what sideslip adds: a flow with a lateral component runs partly *along* a
 /// swept strip, and the resulting spanwise load needs the circulation
@@ -430,9 +430,9 @@ struct Rotation {
 /// the circulation field's contribution, in the sending panels' dihedral
 /// frame; what has to be subtracted is the onset flow's own component along
 /// the camber-line normal, `EFFINC`. That differs from the boundary
-/// condition `ALOC` in exactly one term -- the streamwise offset from the
+/// condition `ALOC` in exactly one term (the streamwise offset from the
 /// rotation centre is measured to the leading edge rather than to the
-/// control point -- which is why [`super::rhs`] hands over the pieces rather
+/// control point) which is why [`super::rhs`] hands over the pieces rather
 /// than the result.
 fn rotation_effects(
     case: &LoadCase<'_>,

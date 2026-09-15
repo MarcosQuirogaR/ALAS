@@ -147,18 +147,17 @@ fn render_preview(
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        engine_editor_model, is_external_tools_field, optimizer_ui_fields, EngineEditorModel,
-    };
+    use super::placement::{optimizer_ui_fields, relocated_paths};
+    use super::{engine_editor_model, EngineEditorModel};
     use alas_config::ConfigNode;
 
     #[test]
     fn mission_locations_are_managed_only_on_the_external_tools_page() {
         for name in ["navdata_dir", "texture_path", "routes_dir"] {
-            assert!(is_external_tools_field("mission", name));
+            assert!(relocated_paths("mission").contains(&name));
         }
-        assert!(!is_external_tools_field("mission", "great_circle_points"));
-        assert!(!is_external_tools_field("mses", "mses_dir"));
+        assert!(!relocated_paths("mission").contains(&"great_circle_points"));
+        assert!(!relocated_paths("mses").contains(&"mses_dir"));
     }
 
     #[test]

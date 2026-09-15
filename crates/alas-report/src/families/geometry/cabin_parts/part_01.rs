@@ -150,19 +150,7 @@ fn centered_text(
 }
 
 pub(super) fn empty(theme: Option<&str>, message: &str) -> Scene {
-    let pal = get_palette(theme);
-    let mut scene = Scene::new(800.0, 500.0, Some(Color::from_hex(pal.bg)));
-    scene.add(SceneElement::Text {
-        text: message.to_owned(),
-        pos: [400.0, 250.0],
-        font_size: 12.0,
-        color: Color::from_hex(pal.title),
-        align: TextAlign::Center,
-        baseline: TextBaseline::Middle,
-        angle_deg: 0.0,
-        bold: false,
-    });
-    scene
+    crate::status_figure::figure_status_message(message, "", false, theme)
 }
 
 /// Draw a plan view of every placed payload item over the actual fuselage.

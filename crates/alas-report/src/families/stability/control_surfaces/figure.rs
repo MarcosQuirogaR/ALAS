@@ -249,7 +249,7 @@ fn draw_vstab_side_view(
         legend.push(("Rudder".to_owned(), Color::from_hex("#e67e22")));
     }
     // Computed and discarded, matching upstream's own dead `rows.append` on
-    // the rudder -- see the module doc.
+    // the rudder, see the module doc.
     let _ = cs_surface_area(
         &vstab.xsecs,
         2,

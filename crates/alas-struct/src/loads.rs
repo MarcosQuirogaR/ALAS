@@ -8,9 +8,9 @@
 //!
 //! One elliptic-lift (+ optional inertial-relief) distributed load, integrated
 //! to shear and bending moment via a cantilever (tip -> root) numerical
-//! integral. Used by BOTH the strength-sizing model (load only, **no** relief
-//! -- the conservative choice, matching the reference's own `00_sizing.py`)
-//! and the analytical deflection estimate (**with** relief -- matching the
+//! integral. Used by BOTH the strength-sizing model (load only, **no** relief:
+//! the conservative choice, matching the reference's own `00_sizing.py`)
+//! and the analytical deflection estimate (**with** relief, matching the
 //! reference's `05_validation.py`, which added relief specifically to get a
 //! closer match to real NASTRAN deflections). Keeping one shared
 //! load-integration primitive is what guarantees sizing, the analytical
@@ -31,7 +31,7 @@ const CENTERLINE_Y_THRESHOLD_M: f64 = 1e-6;
 pub struct LoadCase {
     /// `"pull-up"`, `"push-down"` or `"level"`.
     pub name: &'static str,
-    /// The signed ultimate load factor n -- already including any additional
+    /// The signed ultimate load factor n, already including any additional
     /// safety factor.
     pub load_factor: f64,
     /// The signed total aerodynamic force on this semi-wing,
@@ -44,7 +44,7 @@ pub struct LoadCase {
 /// Reuses [`DesignRequirements`]' own `ultimate_load_factor` /
 /// `limit_load_factor_neg` fields with *exactly* the same derivation
 /// `alas/physics/performance.py`'s V-n diagram uses (`n_ult_pos =
-/// ultimate_load_factor`, `n_ult_neg = limit_load_factor_neg * 1.5`) -- so the
+/// ultimate_load_factor`, `n_ult_neg = limit_load_factor_neg * 1.5`), so the
 /// structural loads always match the V-n diagram shown elsewhere in the app,
 /// not a second, independently-tuned load case. (`performance.py` is not yet
 /// ported; the derivation is reproduced here from the requirement fields
@@ -95,7 +95,7 @@ pub fn elliptic_distributed_load(y: &[f64], semi_span: f64, total_force_n: f64) 
 /// tip, fixed at the root) under a net distributed load `q_net` [N/m] sampled
 /// at `y`, via cumulative trapezoidal integration from tip to root.
 ///
-/// The root reaction is never referenced directly -- V/M at `y = 0` fall out
+/// The root reaction is never referenced directly: V/M at `y = 0` fall out
 /// of the integral, matching the reference's own approach. The accumulation
 /// runs from the last segment down to the first, reproducing the summation
 /// order of NumPy's `np.cumsum(seg[::-1])[::-1]` exactly, which is what keeps
@@ -144,7 +144,7 @@ pub fn cantilever_shear_moment(y: &[f64], q_net: &[f64]) -> (Vec<f64>, Vec<f64>)
 ///
 /// `spanwise_positions_m` lists BOTH wings' engines for the full aircraft (a
 /// symmetric twin is `(9.8, -9.8)`); since the FEM only models one semi-wing,
-/// only `y > 0` stations are returned -- otherwise a symmetric pair would
+/// only `y > 0` stations are returned, otherwise a symmetric pair would
 /// double-count one engine's mass onto a single semi-wing (both `+9.8` and
 /// `-9.8` are the same distance from the root). A `y == 0` entry is a
 /// centerline/tail-mounted engine, which loads neither wing and is skipped the

@@ -5,7 +5,7 @@
 //!
 //! The optimizer constrains the trimmed body attitude to
 //! `[geometric_body_alpha_min_deg, geometric_body_alpha_max_deg]`, and it does
-//! so on `AnalysisConfig::spanwise_resolution`/`chordwise_resolution` -- the
+//! so on `AnalysisConfig::spanwise_resolution`/`chordwise_resolution`: the
 //! in-loop mesh. The published analysis then re-solves the winner on the
 //! finer `fine_*` mesh and prints that number instead. The two do not agree,
 //! and the difference is not small: the chordwise convergence is first-order
@@ -23,8 +23,8 @@
 //!
 //! Scope matches the optimizer's own: clean-sheet passenger searches with the
 //! transport planform constraints active. A registered aircraft keeps its
-//! measured attitude for audit -- applying a generic design target to a real
-//! airframe would rewrite the reference rather than test it -- and so does a
+//! measured attitude for audit, applying a generic design target to a real
+//! airframe would rewrite the reference rather than test it, and so does a
 //! run whose constraints are switched off.
 
 use alas_config::{AlasConfig, DesignMode};

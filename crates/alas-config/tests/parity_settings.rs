@@ -5,8 +5,8 @@
 //! configuration a saved file turns into, and which files are refused.
 //!
 //! `parity_config.rs` already checks what a freshly constructed aggregate
-//! holds. What is checked here is the step that turns a file into a run --
-//! applying a named preset, then laying the file's own keys over it -- and it
+//! holds. What is checked here is the step that turns a file into a run,
+//! applying a named preset, then laying the file's own keys over it, and it
 //! is checked by comparing the whole resulting configuration rather than the
 //! fields each file names. A port that applied the two in the other order, or
 //! that skipped a preset's own mass-model and high-lift calibrations because

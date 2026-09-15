@@ -100,8 +100,8 @@ pub fn render_scene_rgba_scaled(scene: &Scene, scale: f64) -> Result<(u32, u32, 
     Ok((width, height, pixmap.data().to_vec()))
 }
 
-/// Rasterize only the textured elements of `scene` -- the embedded rasters and
-/// the orthographic globe -- onto a transparent canvas at `scale` pixels per
+/// Rasterize only the textured elements of `scene` (the embedded rasters and
+/// the orthographic globe) onto a transparent canvas at `scale` pixels per
 /// scene unit, leaving every vector element and the background undrawn.
 ///
 /// This is the raster half of the interactive viewport's split rendering:
@@ -340,7 +340,7 @@ mod tests {
     /// blinded `visual_title`'s contrast decision (it reads the same field),
     /// so every automatic figure title rendered in its near-black
     /// light-theme color on Grey and Dark, on top of a still-correctly-dark
-    /// background -- reproducing the reported "black global titles on Grey
+    /// background, reproducing the reported "black global titles on Grey
     /// background despite white panel titles". Panel headings were
     /// unaffected because they are colored explicitly from the palette, not
     /// through `visual_title`.

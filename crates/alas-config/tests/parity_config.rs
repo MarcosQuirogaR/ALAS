@@ -6,7 +6,7 @@
 //! interface about each of its fields.
 //!
 //! Both halves are compared at `exact`. A default is copied, not computed, so
-//! any difference at all is a transposed digit -- and a transposed digit here
+//! any difference at all is a transposed digit, and a transposed digit here
 //! produces a plausible aircraft rather than a failure, which is the worst
 //! kind of defect this program can have. The form description is compared for
 //! the same reason one step removed: a field offered with the wrong unit or
@@ -192,7 +192,7 @@ fn checked_types() -> Vec<(&'static str, Box<dyn Checkable>)> {
         // those fields. See the note in `golden/generators/gen_config.py`.
         ("EngineConfig", Box::new(EngineConfig::default())),
         // The aggregate. Its own fields are the preset name and the two
-        // airports; what this entry pins down is the composition -- which
+        // airports; what this entry pins down is the composition, which
         // groups a run is made of, in which order the settings screen lists
         // them, and that each arrives at its own defaults.
         ("ALASConfig", Box::new(AlasConfig::default())),
@@ -349,7 +349,7 @@ fn product_default_correction(path: &str) -> Option<(Value, Value)> {
     }
     // The vortex-lattice mesh. Upstream evaluates the optimizer loop at one
     // chordwise panel, which samples the mean camber line only at the leading
-    // and trailing edges -- where it is zero -- so every section is a flat
+    // and trailing edges (where it is zero) so every section is a flat
     // plate and the search cannot see camber at all. Measured over four
     // presets and cross-checked against AeroSandbox 4.2.8 on identical
     // geometry (`.agent/reports/2026-09-11-vlm-resolution-sensitivity.html`):
@@ -393,7 +393,7 @@ fn compare_node(
     compare_transport_planform_schema(comparison, label, node, expected_fields);
 
     // A field the interface never shows is omitted by both sides, so the two
-    // lists are directly comparable -- and a field one side hides and the
+    // lists are directly comparable, and a field one side hides and the
     // other does not shows up here as an ordering disagreement, which is
     // exactly what it is.
     let fields: Vec<&Field> = node
@@ -794,7 +794,7 @@ fn compare_field(
     // required to add, so what is checked instead is that it was added.
     if label.ends_with(".fuel_volume_penalty_scale") {
         assert_eq!(field.help, "Deprecated compatibility field. MTOW minus zero-fuel mass is a mass allowance, not mission-required fuel, so it is no longer used by the optimizer. Tank capacity will be constrained against mission fuel plus the selected reserve policy.");
-        assert_eq!(expected["help"], "Penalizes the wing's physical usable fuel-tank volume (physics.performance.wing_fuel_volume_m3, Torenbeek geometric estimate) being too small to hold the fuel mass the weight & balance analysis says this design actually needs -- a wing that's too thin/small/tapered to carry its own required fuel is not a buildable aircraft, independent of whether the MTOW fuel-mass budget itself closes. Quadratic on the fractional shortfall (required_fuel - tank_capacity) / required_fuel.");
+        assert_eq!(expected["help"], "Penalizes the wing's physical usable fuel-tank volume (physics.performance.wing_fuel_volume_m3, Torenbeek geometric estimate) being too small to hold the fuel mass the weight & balance analysis says this design actually needs: a wing that's too thin/small/tapered to carry its own required fuel is not a buildable aircraft, independent of whether the MTOW fuel-mass budget itself closes. Quadratic on the fractional shortfall (required_fuel - tank_capacity) / required_fuel.");
     } else if label.ends_with(".share_pct") {
         comparison.exact(
             &format!("{label}.help: product seat-share semantics"),
@@ -1019,7 +1019,7 @@ fn wing_centroid_help_correction(label: &str) -> Option<(&'static str, &'static 
     if label == "StructuresConfig.enabled" || label.ends_with(".structures.enabled") {
         Some((
             "Size a generic wingbox (skin/spars/ribs) for the optimized design's main wing, write NASTRAN .bdf files, and compute theoretical (no-NASTRAN) deformations/stresses/frequencies as part of a normal Run, populating the Structural Analysis Results tab. This switch controls the downstream structural solve; the configured spars, materials, and gauges still define the main-wing mass centroid used by weight and balance, without replacing the Torenbeek total wing mass.",
-            "Size a generic wingbox (skin/spars/ribs) for the optimized design's main wing, write NASTRAN .bdf files, and compute theoretical (no-NASTRAN) deformations/stresses/frequencies as part of a normal Run, populating the Structural Analysis Results tab. Does not affect the mass model, CG, or optimizer -- purely a downstream analysis, like MSES/Propulsion Analysis.",
+            "Size a generic wingbox (skin/spars/ribs) for the optimized design's main wing, write NASTRAN .bdf files, and compute theoretical (no-NASTRAN) deformations/stresses/frequencies as part of a normal Run, populating the Structural Analysis Results tab. Does not affect the mass model, CG, or optimizer, purely a downstream analysis, like MSES/Propulsion Analysis.",
         ))
     } else if label == "StructuresConfig.spanwise_stations"
         || label.ends_with(".structures.spanwise_stations")
@@ -1042,7 +1042,7 @@ fn solver_agnostic_help_correction(label: &str) -> Option<(&'static str, &'stati
         "WingConfig.n_subdivisions"
         | "GeometryConfig.wing.n_subdivisions"
         | "ALASConfig.geometry.wing.n_subdivisions" => Some((
-            "Spanwise panels across the whole wing semispan for the vortex-lattice solver. This is an absolute count, not a count per section: a planform with a side-of-body station and a kink gets the same mesh density as one without, and adding a station no longer changes the panel count underneath a search. Every planform station -- root, side-of-body, kink, tip -- is always kept as a panel edge whatever the count, so refining the mesh never averages a kink away. The default of 24 is converged: a twelve-fold refinement moves the trimmed cruise attitude by 0.01 deg.",
+            "Spanwise panels across the whole wing semispan for the vortex-lattice solver. This is an absolute count, not a count per section: a planform with a side-of-body station and a kink gets the same mesh density as one without, and adding a station no longer changes the panel count underneath a search. Every planform station (root, side-of-body, kink, tip) is always kept as a panel edge whatever the count, so refining the mesh never averages a kink away. The default of 24 is converged: a twelve-fold refinement moves the trimmed cruise attitude by 0.01 deg.",
             "Spanwise panel refinement per wing section for the vortex-lattice solver. Higher = more accurate, slower.",
         )),
         "EmpennageConfig.n_subdivisions"
@@ -1053,7 +1053,7 @@ fn solver_agnostic_help_correction(label: &str) -> Option<(&'static str, &'stati
         )),
         "AnalysisConfig.spanwise_resolution"
         | "ALASConfig.analysis.spanwise_resolution" => Some((
-            "Multiplier on each surface's built-in spanwise panel subdivision for the vortex-lattice solver. Leave at 1: the geometry builder has already subdivided every surface (24 strips per semispan on the main wing), and that is converged -- refining it further moves the trimmed cruise attitude by 0.01 deg. Values above 2 are rejected, because this multiplier re-applies a cosine spacing inside each existing strip and the induced drag then stops converging. Part of the Fidelity preset.",
+            "Multiplier on each surface's built-in spanwise panel subdivision for the vortex-lattice solver. Leave at 1: the geometry builder has already subdivided every surface (24 strips per semispan on the main wing), and that is converged, refining it further moves the trimmed cruise attitude by 0.01 deg. Values above 2 are rejected, because this multiplier re-applies a cosine spacing inside each existing strip and the induced drag then stops converging. Part of the Fidelity preset.",
             "Multiplier on each surface's built-in spanwise panel subdivision for the vortex-lattice solver. Higher = finer mesh, slower. Part of the Fidelity preset.",
         )),
         "AnalysisConfig.chordwise_resolution"
@@ -1063,8 +1063,8 @@ fn solver_agnostic_help_correction(label: &str) -> Option<(&'static str, &'stati
         )),
         "AnalysisConfig.fine_spanwise_resolution"
         | "ALASConfig.analysis.fine_spanwise_resolution" => Some((
-            "Spanwise panel resolution used ONLY for the once-per-run final/reported analysis (drag polar, trimmed cruise point, neutral point) -- not the optimizer loop. Leave at 1 for the same reason as the in-loop field: the span is already converged, so raising this doubles the panel count to change the answer by about 1 percent. Spend the panels on fine_chordwise_resolution instead.",
-            "Spanwise panel resolution used ONLY for the once-per-run final/reported analysis (drag polar, trimmed cruise point, neutral point) -- not the optimizer loop. Higher fidelity where speed doesn't matter.",
+            "Spanwise panel resolution used ONLY for the once-per-run final/reported analysis (drag polar, trimmed cruise point, neutral point), not the optimizer loop. Leave at 1 for the same reason as the in-loop field: the span is already converged, so raising this doubles the panel count to change the answer by about 1 percent. Spend the panels on fine_chordwise_resolution instead.",
+            "Spanwise panel resolution used ONLY for the once-per-run final/reported analysis (drag polar, trimmed cruise point, neutral point), not the optimizer loop. Higher fidelity where speed doesn't matter.",
         )),
         "AnalysisConfig.fine_chordwise_resolution"
         | "ALASConfig.analysis.fine_chordwise_resolution" => Some((
@@ -1095,7 +1095,7 @@ fn solver_agnostic_help_correction(label: &str) -> Option<(&'static str, &'stati
         )),
         "OptimizerConfig.solver.workers" | "ALASConfig.optimizer.solver.workers" => Some((
             "Number of native worker threads for differential-evolution candidate batches (>1 enables parallel evaluation; non-positive values are treated as 1). External evaluator adapters remain serial because they own mutable process/session state.",
-            "Number of worker processes for parallel evaluation (>1 uses multiprocessing). Requires a picklable objective -- already the case for ALAS's optimizer.",
+            "Number of worker processes for parallel evaluation (>1 uses multiprocessing). Requires a picklable objective, already the case for ALAS's optimizer.",
         )),
         _ => None,
     }

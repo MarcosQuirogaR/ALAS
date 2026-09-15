@@ -64,7 +64,7 @@ fn default_de_returns_the_valid_candidate_when_invalid_is_cheaper() {
     // outside the global `[60, 80]` m span spec and are now rejected before
     // the evaluator ever runs. Every coordinate is pinned at its default
     // value except `span_m`, which is left free across its own global
-    // envelope -- an envelope-intersecting request that still lets the
+    // envelope: an envelope-intersecting request that still lets the
     // search choose between a low, valid span and a high, cheaper-but-
     // rejected one, which is the behavior under test.
     let mut config = AlasConfig::default();

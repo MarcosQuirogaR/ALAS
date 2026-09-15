@@ -7,7 +7,7 @@
 //! configuration; this one is about running `alas-screen`'s multi-stage sweep
 //! and holding its result, the same separation the reference desktop app drew
 //! by lifting `AirfoilSweepScreen`'s run state up into `App.tsx` rather than
-//! leaving it component-local -- so navigating away mid-sweep does not lose it.
+//! leaving it component-local, so navigating away mid-sweep does not lose it.
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};

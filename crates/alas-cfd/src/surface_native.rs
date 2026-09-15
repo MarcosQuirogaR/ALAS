@@ -9,6 +9,8 @@ use std::path::Path;
 
 #[path = "surface_native_geometry.rs"]
 mod geometry;
+#[cfg(test)]
+pub(crate) use geometry::integrate;
 #[path = "surface_native_mesh.rs"]
 mod mesh;
 #[path = "surface_native_raw.rs"]

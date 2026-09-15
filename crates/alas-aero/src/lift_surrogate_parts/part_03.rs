@@ -131,7 +131,7 @@ mod tests {
     fn the_training_grid_is_flattened_mach_major_and_reshaped_back() {
         // A transposed reshape would still produce a smooth surface, so the
         // check is that lift grows with angle of attack at fixed Mach and
-        // barely moves with Mach at fixed angle -- which is the wrong way
+        // barely moves with Mach at fixed angle, which is the wrong way
         // round for a transposed table.
         let surrogate = trained();
         let table = &surrogate.training().lift_coefficient;

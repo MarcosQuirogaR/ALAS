@@ -15,8 +15,8 @@
 //! comes out of the altitude; the freestream comes out of the atmosphere and
 //! the velocity; the two analyses turn that plus the two unknowns into a
 //! thrust and a drag polar; and the mass falls by the integral of the fuel
-//! flow. What is left over -- the force that does not balance the
-//! acceleration -- is the residual the solver drives to zero.
+//! flow. What is left over: the force that does not balance the
+//! acceleration, is the residual the solver drives to zero.
 
 use alas_atmo::Us1976Values;
 
@@ -69,7 +69,7 @@ pub fn update_gravity(conditions: &mut Conditions) {
 ///
 /// The speed is formed as the square root of the summed squares of all three
 /// components and the dynamic pressure from the *squared* magnitude before the
-/// root, which is how upstream writes it -- `q` is `0.5 * rho * Vmag2`, not
+/// root, which is how upstream writes it: `q` is `0.5 * rho * Vmag2`, not
 /// `0.5 * rho * Vmag * Vmag`.
 pub fn update_freestream(conditions: &mut Conditions) {
     for point in 0..conditions.len() {
@@ -165,7 +165,7 @@ pub fn update_aerodynamics(conditions: &mut Conditions, analyses: &MissionAnalys
 /// Shift the mass array so it begins where the previous segment ended.
 ///
 /// With no predecessor the segment starts at `takeoff_mass_kg`, which is the
-/// one number the weights analysis is reached for from inside a segment --
+/// one number the weights analysis is reached for from inside a segment:
 /// taken as that number rather than as the analysis, the same "take the
 /// fields you read" scoping [`crate::numerics`] already uses for the segment
 /// state it hangs off.
@@ -189,7 +189,7 @@ pub fn initialize_weights(
 
 /// Integrate the fuel flow into the mass, and turn the mass into a weight.
 ///
-/// Row zero of the mass is deliberately left alone -- upstream writes
+/// Row zero of the mass is deliberately left alone: upstream writes
 /// `total_mass[1:, 0]`, because row zero is what
 /// [`initialize_weights`] pinned to the previous segment's final mass and the
 /// integral is defined relative to it. The weight, by contrast, is formed from

@@ -13,8 +13,8 @@
 //!
 //! A configuration struct derives [`ConfigNode`], which gives it a
 //! [`Node`]: its fields in declaration order, each with a label, a unit, an
-//! explanation, and either its value or -- for a field that is itself a
-//! group -- the same description one level down. That description is what the
+//! explanation, and either its value or, for a field that is itself a
+//! group: the same description one level down. That description is what the
 //! settings interface renders, so a field is documented once, next to its
 //! type, rather than in a form definition somewhere else that drifts.
 //!
@@ -57,6 +57,7 @@ pub mod performance_presets;
 pub mod physics;
 pub mod preset_flops;
 pub mod preset_fuel_tanks;
+pub mod preset_policy;
 pub mod preset_structures;
 pub mod presets;
 pub mod propulsion;
@@ -135,7 +136,7 @@ pub use presets::{
 };
 pub use propulsion::PropulsionCycleConfig;
 pub use requirements::{DesignRequirements, RequirementsError};
-pub use settings::{AlasConfig, WORKSPACE_ENVELOPE_KEY};
+pub use settings::{legacy_mission_disabled, AlasConfig, ConfigLoadNotes, WORKSPACE_ENVELOPE_KEY};
 pub use solver_presets::{SolverPreset, UnknownSolverPreset};
 pub use structures::StructuresConfig;
 pub use systems_mass::{

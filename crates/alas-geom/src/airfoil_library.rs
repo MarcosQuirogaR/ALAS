@@ -32,7 +32,7 @@ use alas_config::DesignVector;
 use alas_math::CubicSplineError;
 
 /// The chordwise centres (x/c) of the four bump functions [`apply_bumps`]
-/// applies -- `_BUMP_CENTERS` in the Python source.
+/// applies: `_BUMP_CENTERS` in the Python source.
 struct BumpCenters {
     upper_front: f64,
     upper_rear: f64,
@@ -62,7 +62,7 @@ pub const DEFAULT_MORPH_N_POINTS: usize = 150;
 pub struct AirfoilLibrary;
 
 impl AirfoilLibrary {
-    /// Return an airfoil by name -- `AirfoilLibrary.get`.
+    /// Return an airfoil by name: `AirfoilLibrary.get`.
     ///
     /// Tries, in order: the Selig zip corpus (case-insensitive), the
     /// built-in named reference sections (exact case), and native aerodynamic model's
@@ -70,9 +70,9 @@ impl AirfoilLibrary {
     /// [`normalize_coordinates`] before being returned.
     ///
     /// Returns `None` when none of the three resolve `name`. Upstream's
-    /// third branch does not raise on an unresolved name either --
+    /// third branch does not raise on an unresolved name either:
     /// The reference `Airfoil(name)` constructor there constructs an `Airfoil` whose
-    /// `coordinates` is `None` -- but this crate's scoped
+    /// `coordinates` is `None`, but this crate's scoped
     /// [`Airfoil::from_name`] already collapses that outcome to `None`
     /// rather than a placeholder object, so propagating it here is the
     /// faithful continuation of the same collapse, not a new one. Every
@@ -112,12 +112,12 @@ impl AirfoilLibrary {
 }
 
 /// The index of `coords`'s leading-edge point: the smallest `x`, first
-/// occurrence on a tie -- `np.argmin(coords[:, 0])`.
+/// occurrence on a tie: `np.argmin(coords[:, 0])`.
 ///
 /// A free function rather than a method on [`Airfoil`], because both
 /// [`normalize_coordinates`] and [`morph_airfoil`] apply it to a raw
-/// coordinate slice that may not be in an `Airfoil`'s stored convention yet
-/// -- that is the point of calling it at all.
+/// coordinate slice that may not be in an `Airfoil`'s stored convention yet:
+/// that is the point of calling it at all.
 fn le_index(coords: &[(f64, f64)]) -> usize {
     let mut best_index = 0;
     let mut best_x = f64::INFINITY;
@@ -130,7 +130,7 @@ fn le_index(coords: &[(f64, f64)]) -> usize {
     best_index
 }
 
-/// `coords` sorted ascending by `x` -- `points[np.argsort(points[:, 0])]`.
+/// `coords` sorted ascending by `x`: `points[np.argsort(points[:, 0])]`.
 ///
 /// A stable sort. NumPy's default `argsort` is not guaranteed stable, but
 /// every caller here only relies on the sort to place equal-`x` points
@@ -174,7 +174,7 @@ fn numpy_interp(x: f64, xp: &[f64], fp: &[f64]) -> f64 {
     fp[last]
 }
 
-/// Evenly spaced points from `start` to `stop`, inclusive -- NumPy's
+/// Evenly spaced points from `start` to `stop`, inclusive: NumPy's
 /// `linspace(start, stop, num, endpoint=True)`. Duplicated from
 /// `aircraft::spacing::linspace`, which is private to the aircraft module and not
 /// reachable from here.
@@ -192,14 +192,14 @@ fn linspace(start: f64, stop: f64, num: usize) -> Vec<f64> {
     values
 }
 
-/// The Euclidean distance between two coordinate pairs -- `np.linalg.norm`
+/// The Euclidean distance between two coordinate pairs: `np.linalg.norm`
 /// applied to their difference.
 fn distance(a: (f64, f64), b: (f64, f64)) -> f64 {
     ((a.0 - b.0).powi(2) + (a.1 - b.1).powi(2)).sqrt()
 }
 
 /// Reorder an arbitrary-order coordinate array into upper TE -> LE -> lower
-/// TE -- `AirfoilLibrary.normalize_coordinates`.
+/// TE: `AirfoilLibrary.normalize_coordinates`.
 ///
 /// Splits `coords` into two segments at its leading-edge index (the
 /// smallest `x`), independently re-sorts each by ascending `x` to find its
@@ -212,7 +212,7 @@ fn distance(a: (f64, f64), b: (f64, f64)) -> f64 {
 ///
 /// Because both segments are built to include `coords[le_idx]` (`seg1 =
 /// coords[..=le_idx]`, `seg2 = coords[le_idx..]`), those two "innermost
-/// points" are the same leading-edge row read out of each segment -- so this
+/// points" are the same leading-edge row read out of each segment, so this
 /// check is, in practice, always true for real input; it is translated as
 /// the ordinary runtime comparison Python performs, not special-cased away.
 pub fn normalize_coordinates(coords: &[(f64, f64)]) -> Vec<(f64, f64)> {
@@ -255,7 +255,7 @@ pub fn normalize_coordinates(coords: &[(f64, f64)]) -> Vec<(f64, f64)> {
 }
 
 /// One Hicks-Henne-style bump: `amp * sin(pi*x)^2.5 * exp(-10*(x-center)^2)`,
-/// added only where `0.01 < x < 0.99` -- the inner loop of `apply_bumps`'s
+/// added only where `0.01 < x < 0.99`: the inner loop of `apply_bumps`'s
 /// `add_bump`.
 ///
 /// `amp == 0.0` returns `y_arr` unchanged without evaluating the
@@ -283,18 +283,18 @@ fn add_bump(x_arr: &[f64], y_arr: &[f64], amp: f64, center_x: f64) -> Vec<f64> {
         .collect()
 }
 
-/// Add Hicks-Henne-style bumps to the upper and lower surfaces --
+/// Add Hicks-Henne-style bumps to the upper and lower surfaces:
 /// `apply_bumps`.
 ///
 /// `bumps_upper` is `[front, rear]` at `x/c` 0.25 and 0.75; `bumps_lower` is
-/// `[mid, rear]` at `x/c` 0.40 and 0.85 -- [`BUMP_CENTERS`]. `coords` is
+/// `[mid, rear]` at `x/c` 0.40 and 0.85: [`BUMP_CENTERS`]. `coords` is
 /// repaneled to `n_points_per_side` points per surface first
 /// ([`Airfoil::repanel`]), so the bump math always runs on a known,
 /// cosine-spaced grid regardless of the input's original panelling.
 ///
 /// # Errors
 ///
-/// [`CubicSplineError`] if `repanel` fails -- see [`Airfoil::repanel`].
+/// [`CubicSplineError`] if `repanel` fails, see [`Airfoil::repanel`].
 pub fn apply_bumps(
     coords: &[(f64, f64)],
     bumps_upper: [f64; 2],
@@ -342,10 +342,10 @@ pub fn apply_bumps(
     Ok(Airfoil::from_coordinates("bumped", coords_new))
 }
 
-/// Scale an airfoil's thickness and camber independently -- `morph_airfoil`.
+/// Scale an airfoil's thickness and camber independently: `morph_airfoil`.
 ///
 /// Splits `coords` at its leading-edge index (raw slicing, like
-/// [`normalize_coordinates`]'s split -- not [`Airfoil::upper_coordinates`],
+/// [`normalize_coordinates`]'s split, not [`Airfoil::upper_coordinates`],
 /// since `coords` here is a raw array that may not share an `Airfoil`'s
 /// storage convention), resamples both halves onto a shared
 /// `linspace(0, 1, n_points)` grid, decomposes into thickness and camber,
@@ -407,7 +407,7 @@ pub fn morph_airfoil(
     Airfoil::from_coordinates("morphed", coordinates)
 }
 
-/// Produce the working wing section from a design vector -- `build_section`.
+/// Produce the working wing section from a design vector: `build_section`.
 ///
 /// Pipeline: `base_coords` -> [`apply_bumps`] -> [`morph_airfoil`], reading
 /// the four bump amplitudes and the two morph scales off `dv`. This is the
@@ -475,7 +475,7 @@ mod tests {
         // Both split segments contain coords[le_idx], double-counting it, so
         // the two segments together hold one more point than `coords` does
         // (3 + 3 = 6 for this 5-point loop). The drop branch removes exactly
-        // that one duplicate, landing back at `coords.len()` -- not fewer
+        // that one duplicate, landing back at `coords.len()`, not fewer
         // (which would mean a real point was lost) and not that
         // uncorrected `+1` (which would mean the duplicate survived).
         let coords = vec![

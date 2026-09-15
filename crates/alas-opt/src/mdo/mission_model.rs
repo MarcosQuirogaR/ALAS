@@ -443,8 +443,8 @@ impl SegmentMissionModel {
     /// requirement at the same TAS and phase), so a single level-flight
     /// deficit at the configured altitude is not read as a route rejection.
     /// Only that one failure mode is treated this way: a climb or descent
-    /// energy deficit, or any other typed rejection, still returns directly
-    /// -- those bound a flight requirement at the configured schedule, not a
+    /// energy deficit, or any other typed rejection, still returns directly;
+    /// those bound a flight requirement at the configured schedule, not a
     /// preferred altitude, and are not loosened by this search. See
     /// [`is_altitude_recoverable`].
     fn fly_leg(
@@ -539,15 +539,15 @@ fn deck_error(error: DeckError) -> FuelModelError {
 }
 
 /// Whether `error` is specifically a *level-flight* (cruise) rating shortfall
-/// at the configured altitude -- the one case where trying a lower initial
+/// at the configured altitude: the one case where trying a lower initial
 /// cruise level is existing, physically ordinary dispatch practice (a weight-
 /// limited step-climb schedule), not a relaxation of a flight requirement.
 ///
 /// This deliberately excludes the integrator's climb and descent energy
 /// deficits (`"climb energy deficit"`, `"descent energy deficit"`) and every
 /// other typed rejection (`"polar validity"`, a non-finite input): those are
-/// hard requirements against the configured schedule -- a climb-rate or
-/// obstacle-clearance shortfall, for instance -- and must still surface as a
+/// hard requirements against the configured schedule (a climb-rate or
+/// obstacle-clearance shortfall, for instance) and must still surface as a
 /// direct rejection rather than being silently absorbed into a lower level.
 fn is_altitude_recoverable(error: &FuelModelError) -> bool {
     matches!(
@@ -1174,9 +1174,9 @@ mod tests {
     /// one 140 -> 113 KCAS on the 600 ft/min final segment) cannot all be
     /// shed at idle, because the landing configuration's drag is represented
     /// only by the takeoff-configuration increment. Depending on the exact
-    /// flight condition at that boundary -- which moves with legitimate
+    /// flight condition at that boundary, which moves with legitimate
     /// upstream corrections such as the ATR wing's s_ref fix, not with
-    /// anything in this profile -- the deck reports either the integrator's
+    /// anything in this profile, the deck reports either the integrator's
     /// typed "speed schedule not attained" outcome (unrealized kinetic
     /// energy at the boundary) or its own typed "rating map does not
     /// bracket" outcome (the near-zero idle-descent thrust this point needs
@@ -1225,8 +1225,8 @@ mod tests {
         let (jet_model, _) = model_for(&jet_default, &design);
         // The jet-default schedule (128.6-250 m/s true airspeed) is still
         // rejected on the turboprop deck; the typed outcome is either a
-        // climb/cruise/descent energy deficit, or -- since the ATR wing's
-        // s_ref correction -- a step whose required thrust falls outside the
+        // climb/cruise/descent energy deficit, or (since the ATR wing's
+        // s_ref correction) a step whose required thrust falls outside the
         // deck's own idle-to-rating bracket entirely (a schedule so far off
         // the deck's domain the inverse-thrust solve has no bracket to
         // search, not a numeric coincidence). Both are typed

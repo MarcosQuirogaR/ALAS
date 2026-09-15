@@ -13,21 +13,21 @@
 //! [`converge_root`] is the whole of mission analysis model's solver interface: pack the
 //! unknowns, hand the residual to a root finder, and record whether it
 //! converged. The root finder is `scipy.optimize.fsolve`, which is MINPACK's
-//! `hybrd` -- [`alas_math::hybrd`]'s own green row -- called with the
+//! `hybrd` ([`alas_math::hybrd`]'s own green row) called with the
 //! segment's `tolerance_solution` and with SciPy's substitutions for the two
 //! settings mission analysis model leaves unset.
 //!
 //! [`Mission::evaluate`] is `Sequential_Segments`: each segment is initialized
 //! against the one before it, solved on its own, finalized, and its final
-//! state handed forward. There is no outer iteration -- a segment's answer is
-//! never revisited once the next one has started -- which is what makes the
+//! state handed forward. There is no outer iteration: a segment's answer is
+//! never revisited once the next one has started, which is what makes the
 //! mass at the end of each segment the entire coupling between them.
 //!
 //! # Why the failure exits are kept apart
 //!
 //! `converge_root` collapses MINPACK's four unhappy exits into one: it prints
-//! the message and sets `converged = False`. That is reproduced -- a segment
-//! either converged or did not -- but the [`alas_math::hybrd::Status`] is kept
+//! the message and sets `converged = False`. That is reproduced: a segment
+//! either converged or did not, but the [`alas_math::hybrd::Status`] is kept
 //! alongside, because the four say different things about what to do next, and
 //! a mission that stops converging is diagnosed from them.
 
@@ -38,7 +38,7 @@ use crate::segments::{MissionAnalyses, Segment, SegmentError, SegmentSpec};
 /// How one segment's solve came out.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SegmentSolution {
-    /// Whether the root finder reported success -- the only thing upstream
+    /// Whether the root finder reported success: the only thing upstream
     /// keeps.
     pub converged: bool,
     /// Which of MINPACK's five exits it took.

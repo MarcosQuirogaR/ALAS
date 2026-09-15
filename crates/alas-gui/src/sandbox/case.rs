@@ -42,8 +42,11 @@ pub struct CaseSnapshot {
 pub struct SandboxLayout {
     /// Parameter Panel width in points.
     pub parameter_panel_width: f32,
-    /// Whether the estimates strip is expanded.
+    /// Whether the estimates strip is expanded. Closed on every sandbox
+    /// entry; Quick Analysis opens it.
     pub estimates_open: bool,
+    /// Whether the Summary card of derived geometry metrics is shown.
+    pub summary_open: bool,
     /// Estimates strip width in points.
     pub estimates_width: f32,
     /// Whether the run log window is shown.
@@ -62,7 +65,8 @@ impl Default for SandboxLayout {
     fn default() -> Self {
         Self {
             parameter_panel_width: 300.0,
-            estimates_open: true,
+            estimates_open: false,
+            summary_open: false,
             estimates_width: 300.0,
             log_window_open: false,
             log_window_minimized: false,

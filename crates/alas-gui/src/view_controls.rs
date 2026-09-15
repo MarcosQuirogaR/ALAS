@@ -51,12 +51,6 @@ pub(crate) fn render_view_options(
     {
         state.preview_open = !state.preview_open;
     }
-    if ui
-        .selectable_label(state.help_verbose, tr("Learn-more help"))
-        .clicked()
-    {
-        state.help_verbose = !state.help_verbose;
-    }
     ui.separator();
     for (lang, label) in [(Language::En, "English"), (Language::Es, "Spanish")] {
         if ui

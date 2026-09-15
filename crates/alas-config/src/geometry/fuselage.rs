@@ -7,7 +7,7 @@
 //! The fuselage, as the stations its surface is lofted through.
 //!
 //! Total length is a design variable; what is here is how that length is
-//! divided and how the body is shaped along it -- where the nose taper ends,
+//! divided and how the body is shaped along it, where the nose taper ends,
 //! how long the tailcone is, and how far the nose and tail tips sit off the
 //! centerline. Those three vertical offsets are what give the body its droop
 //! and its tail upsweep, which is ground clearance at rotation rather than
@@ -29,7 +29,7 @@ pub struct FuselageConfig {
     #[config(
         label = "Fuselage diameter (width)",
         unit = "m",
-        help = "Maximum fuselage cross-sectional diameter -- the main driver of cabin width and wetted area. Best judged on the 3-view preview's front/isometric panels, not the top view."
+        help = "Maximum fuselage cross-sectional diameter: the main driver of cabin width and wetted area. Best judged on the 3-view preview's front/isometric panels, not the top view."
     )]
     pub diameter_m: f64,
 

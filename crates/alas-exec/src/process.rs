@@ -13,15 +13,15 @@
 //! `CREATE_NO_WINDOW` into a single `subprocess` call.
 //!
 //! Upstream also carries `install_no_console_default`, which monkeypatches
-//! `subprocess.Popen.__init__` process-wide so that spawns it does *not* own --
-//! the ones issued from inside native aerodynamic model's own MSES wrapper -- also run
+//! `subprocess.Popen.__init__` process-wide so that spawns it does *not* own:
+//! the ones issued from inside native aerodynamic model's own MSES wrapper, also run
 //! windowless. That has no counterpart here and needs none: this port drives
 //! the external binaries itself, through this crate, rather than through a
 //! third-party library that spawns its own processes. There is no spawn outside
 //! this crate's reach to patch, so reproducing the global patch would mean
 //! reproducing a workaround for a problem the translation removes. The guard
-//! logic that patch carried -- respect an explicit `startupinfo`, never combine
-//! the flag with `CREATE_NEW_CONSOLE`/`DETACHED_PROCESS` -- guarded exactly the
+//! logic that patch carried: respect an explicit `startupinfo`, never combine
+//! the flag with `CREATE_NEW_CONSOLE`/`DETACHED_PROCESS`: guarded exactly the
 //! third-party spawns that are gone with it.
 //!
 //! Capturing output, feeding stdin and enforcing a timeout stay at the call
@@ -31,7 +31,7 @@
 //! [`kill_process_tree`] is the other half this crate owns, and it is here for
 //! the same reason the windowless flag is: it is a property of *how a process
 //! is spawned*, not of what any one tool does with its output. Killing a child
-//! is not enough for the tools this workspace drives -- `nastran.exe` is a
+//! is not enough for the tools this workspace drives: `nastran.exe` is a
 //! launcher that forks the real solver, and upstream records having watched the
 //! orphan keep burning CPU and holding a licence seat after the parent was
 //! killed. A tree kill needs the spawn to have been set up for it on Unix,
@@ -65,7 +65,7 @@ pub trait NoConsoleWindow {
     /// Sets [`CREATE_NO_WINDOW`] on Windows; a no-op on every other platform,
     /// where no such flag exists. Returns `self` so it reads the same in a
     /// builder chain on either platform. Only a spawn that genuinely wants a
-    /// console should skip it -- none in this workspace do.
+    /// console should skip it, none in this workspace do.
     fn no_window(&mut self) -> &mut Self;
 }
 
@@ -120,7 +120,7 @@ impl NewProcessGroup for Command {
 ///
 /// * Windows runs `taskkill /F /T`, whose `/T` is its own recursive tree kill.
 ///   This is upstream's approach, and upstream's reason for it holds here
-///   too -- there is no `psutil` equivalent in the dependency set, and a tree
+///   too; there is no `psutil` equivalent in the dependency set, and a tree
 ///   walk is not worth one.
 /// * Unix signals the process group `pid` leads, which is the group
 ///   [`NewProcessGroup::new_process_group`] arranged at spawn. It shells out to
@@ -131,7 +131,7 @@ impl NewProcessGroup for Command {
 /// Best effort, and returns nothing: the caller is on a path where the child
 /// has already failed its timeout, and there is no better outcome available if
 /// the kill itself cannot be issued. A child that has already exited is not an
-/// error -- that is a race this is expected to lose sometimes.
+/// error: that is a race this is expected to lose sometimes.
 pub fn kill_process_tree(pid: u32) {
     let mut command = if cfg!(windows) {
         let mut command = Command::new("taskkill");
@@ -194,7 +194,7 @@ mod tests {
     fn a_windowless_command_still_runs_and_preserves_its_exit_status() {
         // Whether a window actually appears is unobservable from a test, so
         // this pins the other half of the contract: applying the flag must not
-        // change what the command does -- it still spawns and its exit status
+        // change what the command does; it still spawns and its exit status
         // is preserved.
         let mut command = trivially_successful_command();
         let status = command
@@ -241,7 +241,7 @@ mod tests {
 
     #[test]
     fn killing_a_tree_stops_the_process_that_leads_it() {
-        // The descendant half of the contract cannot be observed portably --
+        // The descendant half of the contract cannot be observed portably;
         // it needs a launcher that forks a solver, which is the very thing this
         // machine has no install of. What is observable is that the call
         // reaches the right process at all: a child that would otherwise run

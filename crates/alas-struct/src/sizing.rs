@@ -6,15 +6,15 @@
 
 //! Direct strength-based wingbox sizing.
 //!
-//! [`size_wingbox`] sizes the spar caps directly from strength -- margin of
-//! safety zero by construction at the root, the bending-critical station --
+//! [`size_wingbox`] sizes the spar caps directly from strength: margin of
+//! safety zero by construction at the root, the bending-critical station,
 //! with no mass-target bisection, then applies the spar-cap taper law and the
 //! geometric cap width/height limits, sizes the webs from root shear, fixes
 //! the skin at its configured minimum, and derives the rib spacing from a
 //! panel-buckling criterion.
 //!
 //! Loads come from [`crate::loads`] (elliptic distribution, no inertial
-//! relief -- the conservative choice for strength sizing). Moment and shear
+//! relief: the conservative choice for strength sizing). Moment and shear
 //! are split across the spars weighted by each spar's local section depth, so
 //! a deeper spar carries proportionally more of the bending moment and a
 //! partial-span spar, zeroed outboard of the break, carries none of it there.
@@ -61,7 +61,7 @@ pub struct SparSizing {
     pub t_web: f64,
     /// Bending-moment fraction this spar carries at each station.
     pub frac_moment: Vec<f64>,
-    /// Margin of safety at each station -- `+inf` where the local demand is
+    /// Margin of safety at each station: `+inf` where the local demand is
     /// below 1 N.m (near the tip). Expected `>= 0` near the root.
     pub margin_of_safety: Vec<f64>,
 }
@@ -154,8 +154,8 @@ impl WingboxSizing {
     /// The station that controls [`Self::minimum_margin_of_safety`], with its
     /// location, for diagnostics.
     ///
-    /// Rounding the controlling margin to a fixed number of decimals -- as a
-    /// failure message meant for humans naturally does -- collapses every
+    /// Rounding the controlling margin to a fixed number of decimals (as a
+    /// failure message meant for humans naturally does) collapses every
     /// value between roughly `-5e-7` and `0` to the same displayed
     /// `-0.000000`, hiding whether the shortfall is floating-point noise at
     /// the active root boundary or a real, if small, structural deficit.
@@ -277,7 +277,7 @@ fn rib_count_from_max_spacing(semi_span_m: f64, max_spacing_m: f64) -> i64 {
 }
 
 /// The spar-cap taper law: full section up to `eta_lock`, then linear taper to
-/// `tip_fraction` at the tip -- `_cap_taper`.
+/// `tip_fraction` at the tip: `_cap_taper`.
 ///
 /// Visible to `crate::mesh` as well: the mesh re-derives cap dimensions on its
 /// own, finer station grid rather than sampling this module's arrays, and has
@@ -300,8 +300,8 @@ pub(crate) fn cap_taper(eta: &[f64], eta_lock: f64, tip_fraction: f64) -> Vec<f6
 ///
 /// The flange starts at the lesser of half the chord and 0.6 of the spar
 /// height, and its thickness is capped at a fifth of the spar height so the
-/// caps never fill the web. When that thickness clip binds -- a shallow rear
-/// spar with a low-allowable alloy at a high root moment does it -- the same
+/// caps never fill the web. When that thickness clip binds (a shallow rear
+/// spar with a low-allowable alloy at a high root moment does it) the same
 /// area is spread over a wider flange, up to the half-chord bound, rather
 /// than left short: the box skins are what carry a wide flange in a real wing,
 /// and an under-strength root would contradict the zero root margin this
@@ -336,7 +336,7 @@ enum SizingLaw {
     Frozen,
 }
 
-/// Size the wingbox directly from strength -- `size_wingbox`.
+/// Size the wingbox directly from strength: `size_wingbox`.
 ///
 /// The load cases come from [`crate::loads::load_cases`]; the box is sized to
 /// whichever produces the larger root bending moment. Every station is left
@@ -487,8 +487,8 @@ fn size_wingbox_with_law(
 
         // Taper outboard; keep width >= thickness and thickness <= H_local/3.
         // The tapered section is the floor: where the local moment demands
-        // more than it carries -- a shallow spar whose height falls faster
-        // than the moment inboard of the taper lock -- the station is sized
+        // more than it carries (a shallow spar whose height falls faster
+        // than the moment inboard of the taper lock) the station is sized
         // up to its own demand, thickness first within the H/3 clip and
         // then width within the half-chord bound, so no station is left
         // short by construction. A station whose tapered flange already
@@ -783,7 +783,7 @@ mod tests {
         assert!((controlling.chord_fraction - 0.75).abs() < 1e-12);
         assert_eq!(controlling.y_m, 0.0);
         assert_eq!(controlling.eta, 0.0);
-        // The raw value survives at full precision -- this is exactly what a
+        // The raw value survives at full precision; this is exactly what a
         // `{:.6}`-rounded display collapses to the ambiguous "-0.000000".
         assert_ne!(controlling.margin, 0.0);
         assert_eq!(sizing.minimum_margin_of_safety(), controlling.margin);

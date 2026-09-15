@@ -12,7 +12,7 @@ use alas_pipeline::full_analysis::{AnalysisReport, DesignPoint, PolarFit, PolarF
 use std::collections::HashMap;
 /// A fully real (built, mass-analyzed) `AnalysisReport`, the same
 /// pipeline shape `full_analysis.rs` produces, minus the expensive VLM
-/// polar/trim/neutral-point solve -- `static_margin` is set to a
+/// polar/trim/neutral-point solve: `static_margin` is set to a
 /// plausible constant rather than re-derived, matching how
 /// `characterization_figures.rs`'s own `sample_report` stays a fixture,
 /// not a second implementation of the physics under test here.

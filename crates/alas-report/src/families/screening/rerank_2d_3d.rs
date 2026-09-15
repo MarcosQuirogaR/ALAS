@@ -5,7 +5,7 @@
 // Reference: alas @ rust-port-baseline.
 
 //! 2-D proxy L/D vs 3-D-wing L/D for the refined shortlist, against a `y=x`
-//! reference -- points below the diagonal are the sections the 2-D screen
+//! reference: points below the diagonal are the sections the 2-D screen
 //! over-rated, once induced and wave drag on the real planform are counted.
 
 use std::collections::HashSet;
@@ -17,7 +17,7 @@ use alas_screen::AirfoilScreeningResult;
 
 use super::{mark_references, refined_candidates, REFERENCE_MARKER_COLOR};
 
-/// `None` when no candidate reached Stage 2 (3-D) refinement -- Stage 2 was
+/// `None` when no candidate reached Stage 2 (3-D) refinement: Stage 2 was
 /// disabled, or every attempt failed.
 pub fn fig_rerank_2d_3d(result: &AirfoilScreeningResult, theme: Option<&str>) -> Option<Scene> {
     let cands = refined_candidates(result);
@@ -56,8 +56,8 @@ pub fn fig_rerank_2d_3d(result: &AirfoilScreeningResult, theme: Option<&str>) ->
         });
     }
 
-    // Label only the two candidates whose 2-D -> 3-D gap is largest -- the
-    // ones the 2-D screen over-rated most -- skipping the baseline and any
+    // Label only the two candidates whose 2-D -> 3-D gap is largest (the
+    // ones the 2-D screen over-rated most) skipping the baseline and any
     // reference section, which get their own labels below.
     let mut gap_order: Vec<usize> = (0..cands.len()).collect();
     gap_order.sort_by(|&a, &b| (xs[b] - ys[b]).total_cmp(&(xs[a] - ys[a])));

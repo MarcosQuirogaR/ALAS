@@ -44,7 +44,7 @@ impl Leaf for SystemsMassMethod {
 /// The distinction matters because a run can be complete and still be built
 /// largely on declared study values, and a coverage report that cannot tell
 /// a certification datum from an engineering estimate is not a coverage
-/// report. Nothing here ranks accuracy -- a source-backed input can still be
+/// report. Nothing here ranks accuracy: a source-backed input can still be
 /// the wrong quantity for the variant, which is what the applicability
 /// statement is for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -138,7 +138,7 @@ pub struct FlopsInputProvenance {
     ///
     /// Free text because the families mix units: a Mach number, a seat count
     /// and a hydraulic pressure do not share a band. An empty string is
-    /// itself a finding -- it means the run cannot say how wrong these
+    /// itself a finding; it means the run cannot say how wrong these
     /// numbers might be.
     #[config(
         advanced,

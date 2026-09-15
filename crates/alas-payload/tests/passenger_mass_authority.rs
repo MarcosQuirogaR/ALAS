@@ -47,7 +47,7 @@ fn a_mixed_class_cabin_prices_every_seat_at_the_same_combined_mass() {
     // The B787-9 preset seeds a two-class (business/economy) percent-mode
     // cabin from `PassengerCabinConfig::default`, whose per-class seed masses
     // (90 kg business, 84 kg economy) differ before the authority is applied.
-    // After it, every seated passenger -- whichever class -- costs the same
+    // After it, every seated passenger (whichever class) costs the same
     // combined `passenger_mass_kg`.
     let (config, plane) = b787_config();
     assert_eq!(config.requirements.passenger_mass_kg, 100.0);

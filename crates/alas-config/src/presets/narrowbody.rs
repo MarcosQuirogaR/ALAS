@@ -13,7 +13,7 @@
 //!
 //! Mass first. Structural, systems and furnishings mass does not scale
 //! linearly with takeoff weight, so the widebody-calibrated Torenbeek
-//! fractions under-predict a small aircraft's operating empty weight -- by
+//! fractions under-predict a small aircraft's operating empty weight, by
 //! about 2.8 t on the A220-300, which is most of a revenue payload's worth of
 //! error in the wrong direction. Its entry carries fractions of its own.
 //!
@@ -162,7 +162,7 @@ pub fn a320_200() -> AircraftPreset {
             ..LandingGearConfig::default()
         },
         // The four planform numbers below are not read off a specification
-        // sheet -- Airbus does not publish centreline, kink and tip chords --
+        // sheet (Airbus does not publish centreline, kink and tip chords)
         // but they are not free either. They are the one chord set that closes
         // three published quantities at once: the 122.6 m^2 reference area,
         // the 4.1935 m mean aerodynamic chord of EASA.A.064, and a 25.0 deg
@@ -177,7 +177,7 @@ pub fn a320_200() -> AircraftPreset {
         // 6.07 m Airbus prints on the plan view. Its mean aerodynamic chord
         // also lands 3.377 m aft of the root leading edge, which puts the
         // leading edge of MAC 16.29 m aft of the nose for the `root_datum_x_m`
-        // below -- the same 16.29 m the same drawing dimensions.
+        // below: the same 16.29 m the same drawing dimensions.
         design_vector: DesignVector {
             span_m: 35.80,
             root_chord_m: 7.333,
@@ -218,7 +218,7 @@ pub fn a320_200() -> AircraftPreset {
                 // Stating it is not decoration. Left derived, it is clipped by
                 // the rule that refuses an exposed trailing edge running
                 // forward of the kink, which on this planform takes 0.54 m off
-                // the chord and 3.3 m^2 off the reference area -- the built
+                // the chord and 3.3 m^2 off the reference area: the built
                 // wing came out at 119.31 m^2 against the published 122.6.
                 // The clip is guarding a real infidelity that this preset
                 // cannot remove: an A320's inboard trailing edge is unswept,

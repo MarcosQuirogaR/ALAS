@@ -208,7 +208,7 @@ fn show_requirements_card(state: &mut AppState, ui: &mut Ui) {
 
 /// Whether the passenger-count input below is meaningful for `config`.
 ///
-/// Passenger capacity is always dynamic -- resolved from the cabin class-mix
+/// Passenger capacity is always dynamic: resolved from the cabin class-mix
 /// percentages and the candidate's actual geometry, for every study,
 /// registered aircraft or clean-sheet alike. A `Custom` cabin's starting
 /// count is the one passenger value a person can still hand-edit, exactly
@@ -493,7 +493,7 @@ fn show_run_content_options(state: &mut AppState, ui: &mut Ui) {
     if ui
         .checkbox(&mut optimize, tr("Optimize design space"))
         .on_hover_text(tr(
-            "On: the single MADS optimizer searches the design space before analysis. Off: the current design is analysed as drawn.",
+            "On: the optimizer searches the design space before analysis. Off: the current design is analysed as drawn.",
         ))
         .changed()
     {

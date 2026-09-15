@@ -8,8 +8,8 @@
 //! and the distance flown along it.
 //!
 //! Altitude is left on the ground for a generated route. The route's job is the
-//! *lateral* path -- a great circle, real jet airways, or an imported dispatch
-//! plan -- and the vertical profile is the mission's, blended in later against
+//! *lateral* path: a great circle, real jet airways, or an imported dispatch
+//! plan, and the vertical profile is the mission's, blended in later against
 //! a simulated altitude-against-distance curve rather than guessed at here as a
 //! climb and descent ramp.
 //!
@@ -104,7 +104,7 @@ pub struct Route {
     ///
     /// Normally `None`, meaning "unchanged from what was passed in". A fetched
     /// dispatch plan is allowed to override the pair, because a real dispatched
-    /// plan outranks a manually-selected one -- and the caller must then size
+    /// plan outranks a manually-selected one, and the caller must then size
     /// the mission against the airports actually flown rather than the ones
     /// left selected on the page.
     pub origin_airport: Option<Airport>,

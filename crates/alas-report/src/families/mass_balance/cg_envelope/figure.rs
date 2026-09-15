@@ -173,7 +173,7 @@ pub fn figure_cg_envelope(
     let tip_over_pct = to_pct(x_mlg);
 
     // Gear strength limits: the same wheel/tire-derived values the optimizer's
-    // CG check enforces, computed from the aerodynamic limits above -- so this
+    // CG check enforces, computed from the aerodynamic limits above, so this
     // plot shows exactly the boundary a design is actually held to. Python
     // wraps this in a `try/except`, falling back to `MassModelConfig`'s fixed
     // fractions on any failure; `size_landing_gear` here is infallible given

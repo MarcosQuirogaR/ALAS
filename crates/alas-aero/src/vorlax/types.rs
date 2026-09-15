@@ -11,7 +11,7 @@
 //! Upstream these are untyped `Data()` bags with about ninety keys between
 //! them, half of which are `np.empty` placeholders for branches this program
 //! never reaches. What survives here is what the reached path reads, named
-//! the same so that a reader can hold the two side by side -- including the
+//! the same so that a reader can hold the two side by side, including the
 //! fully-capitalized names, which upstream's own docstring says mark a
 //! variable it took from VORLAX itself.
 //!
@@ -241,7 +241,7 @@ pub struct PanelCoordinates {
 
 /// The panelization of a whole vehicle: upstream's `VD`.
 ///
-/// A "surface" here is one side of a wing -- a symmetric wing contributes
+/// A "surface" here is one side of a wing: a symmetric wing contributes
 /// two, which is why [`Self::n_w`] is five for a three-wing aircraft with two
 /// symmetric wings. A "strip" is one chordwise column of panels.
 #[derive(Debug, Clone, Default, PartialEq)]

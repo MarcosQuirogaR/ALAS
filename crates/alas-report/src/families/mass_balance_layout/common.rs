@@ -5,7 +5,7 @@ use crate::scene::{Axes2D, Color, Fill, Scene, SceneElement, Stroke, TextAlign, 
 
 pub(super) const BAR_HEIGHT: f64 = 0.5;
 /// Greedily assign a row index to each (already x-sorted) label so any two
-/// labels sharing a row are at least `min_sep` apart -- `_assign_label_rows`.
+/// labels sharing a row are at least `min_sep` apart: `_assign_label_rows`.
 pub(super) fn assign_label_rows(xs: &[f64], min_sep: f64) -> Vec<usize> {
     let mut last_x_per_row: Vec<f64> = Vec::new();
     let mut rows = Vec::with_capacity(xs.len());

@@ -19,14 +19,14 @@ use super::{
     MassCoordinates, PayloadLayoutSummary, ProductMassBuildup, AERODYNAMIC_CENTER_CHORD_FRACTION,
 };
 
-/// Determine the X, Y, Z physical locations of the centroid of each component
-/// -- `define_mass_coordinates`.
+/// Determine the X, Y, Z physical locations of the centroid of each component:
+/// `define_mass_coordinates`.
 ///
 /// Payload is placed at the centre of the *occupied* cabin length (payload
 /// mass / `mass_model.cabin_payload_density_kg_m`, capped at the full
 /// available cabin) rather than always the full available cabin. This means
 /// that stretching the fuselage beyond what the required payload physically
-/// needs does NOT shift the payload CG aft for free -- the optimizer must pay
+/// needs does NOT shift the payload CG aft for free: the optimizer must pay
 /// a CG-mismatch penalty for unrealistic stretch.
 pub fn define_mass_coordinates(
     plane: &Airplane,
@@ -57,7 +57,7 @@ pub fn define_mass_coordinates(
     // actually needs at the configured linear density, capped at what's
     // physically available. A fuselage stretched beyond that need does not
     // move the payload centroid (and therefore the CG) aft "for free". This
-    // must stay scoped to Payload only -- Systems and Furnishings are OEW
+    // must stay scoped to Payload only: Systems and Furnishings are OEW
     // (installed-equipment) components below and use the full cabin_len
     // instead: they are physically present over the whole installed cabin
     // regardless of how many of those seats a particular run happens to book,
@@ -73,9 +73,9 @@ pub fn define_mass_coordinates(
 
     // Systems (avionics, ECS, APU) are concentrated in the forward equipment
     // bay and central cabin zone, including APU. Scaled with the full
-    // installed cabin length (NOT occupied_len -- see note above).
+    // installed cabin length (NOT occupied_len, see note above).
     let x_systems = cabin_start + 0.45 * cabin_len;
-    // Furnishings (seats, galleys, etc.) and operational items -- also
+    // Furnishings (seats, galleys, etc.) and operational items, also
     // installed over the full cabin, not the currently-booked payload.
     let x_furn = cabin_start + 0.50 * cabin_len;
     // Payload CG at the centre of the occupied cabin section (the one place
@@ -161,7 +161,7 @@ pub fn define_mass_coordinates_with_model(
     Ok(coordinates)
 }
 
-/// Calculate the global center of gravity location `[X, Y, Z]` in meters --
+/// Calculate the global center of gravity location `[X, Y, Z]` in meters:
 /// `calculate_physical_cg`.
 pub fn calculate_physical_cg(masses: &MassBreakdown, coords: &MassCoordinates) -> [f64; 3] {
     let mut moment = [0.0; 3];
@@ -190,7 +190,7 @@ pub fn calculate_physical_cg(masses: &MassBreakdown, coords: &MassCoordinates) -
     ]
 }
 
-/// Execute the full weight and balance analysis -- `run_mass_analysis`.
+/// Execute the full weight and balance analysis: `run_mass_analysis`.
 ///
 /// A positive [`PayloadLayoutSummary`] replaces lumped payload and recomputes
 /// [`super::FUEL`], so the optimizer's final CG reflects the detailed layout.

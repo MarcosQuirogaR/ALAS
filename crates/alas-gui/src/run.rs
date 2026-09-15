@@ -16,7 +16,11 @@ use std::path::Path;
 use crate::state::{AppState, LogKind, WorkerMessage};
 use crate::views::{tr, tr_fields};
 use alas_config::DesignMode;
-use alas_pipeline::{RunEventKind, RunEventSeverity};
+use alas_exec::supervise::{launches_after, LaunchRecord};
+
+#[path = "run/preset_barrier.rs"]
+mod preset_barrier;
+use alas_pipeline::{RunEvent, RunEventKind, RunEventSeverity};
 
 impl AppState {
     /// Launch a full or baseline-only pipeline run in the background.
@@ -32,7 +36,7 @@ impl AppState {
         }
         let baseline_only = baseline_only || self.design_mode() == DesignMode::BaselineSandbox;
         self.enforce_design_space_fixed_variables();
-        let config = match self.typed_config() {
+        let mut config = match self.typed_config() {
             Some(c) => c,
             None => {
                 self.log(
@@ -42,7 +46,7 @@ impl AppState {
                 return;
             }
         };
-        let initial_design = match self.current_design() {
+        let mut initial_design = match self.current_design() {
             Some(design) => design,
             None => {
                 self.log(
@@ -52,7 +56,7 @@ impl AppState {
                 return;
             }
         };
-        let bounds = match self.current_design_bounds() {
+        let mut bounds = match self.current_design_bounds() {
             Some(bounds) => bounds,
             None => {
                 self.log(
@@ -62,6 +66,7 @@ impl AppState {
                 return;
             }
         };
+        self.apply_preset_dispatch_policy(&mut config, &mut initial_design, &mut bounds);
 
         self.is_running = true;
         self.run_started = Some(Instant::now());
@@ -150,7 +155,23 @@ impl AppState {
                 return;
             }
             let event_tx = tx.clone();
-            let report = move |event| {
+            // Solver processes launched since the previous event are logged
+            // ahead of it, so the run log ties every PID Task Manager shows to
+            // the stage that started it.
+            let launches_shown = std::sync::Mutex::new(0_u64);
+            let report = move |event: RunEvent| {
+                if !matches!(event.kind, RunEventKind::Progress) {
+                    let mut shown = launches_shown
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner());
+                    let launches = launches_after(*shown);
+                    if let Some(last) = launches.last() {
+                        *shown = last.sequence;
+                    }
+                    for line in launch_events(&event, &launches) {
+                        let _ = event_tx.send(WorkerMessage::Event(line));
+                    }
+                }
                 let _ = event_tx.send(WorkerMessage::Event(event));
             };
             let result = pipeline.run_with_design_space_events(
@@ -267,5 +288,110 @@ impl AppState {
             "Cancellation requested; the active stage or supervised external tool will finish first.",
             LogKind::Warn,
         );
+    }
+}
+
+/// One run-log line per task that launched solver processes before `event`:
+/// the program, the PIDs Task Manager shows, and whether they end with ALAS.
+fn launch_events(event: &RunEvent, launches: &[LaunchRecord]) -> Vec<RunEvent> {
+    let mut groups: Vec<(&LaunchRecord, Vec<u32>)> = Vec::new();
+    for launch in launches {
+        match groups
+            .iter_mut()
+            .find(|(first, _)| first.role == launch.role && first.supervised == launch.supervised)
+        {
+            Some((_, pids)) => pids.push(launch.pid),
+            None => groups.push((launch, vec![launch.pid])),
+        }
+    }
+    groups
+        .into_iter()
+        .map(|(first, pids)| {
+            let program = Path::new(&first.program)
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_else(|| first.program.clone());
+            let pids = pids
+                .iter()
+                .map(u32::to_string)
+                .collect::<Vec<_>>()
+                .join(", ");
+            let lifetime = if first.supervised {
+                "ends with ALAS"
+            } else {
+                "not supervised; outlives a forced ALAS exit"
+            };
+            RunEvent {
+                stage: event.stage.clone(),
+                message: format!("{} launched {program}, PID {pids} ({lifetime})", first.role),
+                fraction: None,
+                kind: RunEventKind::Diagnostic,
+                severity: RunEventSeverity::Info,
+                stage_index: None,
+                stage_count: None,
+                elapsed_ms: event.elapsed_ms,
+                duration_ms: None,
+            }
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::SystemTime;
+
+    fn launch(sequence: u64, pid: u32, role: &str, supervised: bool) -> LaunchRecord {
+        LaunchRecord {
+            sequence,
+            pid,
+            role: role.to_owned(),
+            program: format!("C:/tools/{}.exe", role.split(' ').next().unwrap_or("tool")),
+            started: SystemTime::UNIX_EPOCH,
+            supervised,
+        }
+    }
+
+    fn stage_completed(stage: &str) -> RunEvent {
+        RunEvent {
+            stage: stage.to_owned(),
+            message: "Completed in 1.000 s".to_owned(),
+            fraction: Some(1.0),
+            kind: RunEventKind::StageCompleted,
+            severity: RunEventSeverity::Info,
+            stage_index: None,
+            stage_count: None,
+            elapsed_ms: 1_000,
+            duration_ms: Some(1_000),
+        }
+    }
+
+    #[test]
+    fn launches_are_grouped_by_task_and_listed_by_pid() {
+        let event = stage_completed("downstream/mses");
+        let launches = [
+            launch(1, 100, "MSES mset", true),
+            launch(2, 104, "MSES mses", true),
+            launch(3, 110, "MSES mses", true),
+            launch(4, 120, "MSES mses", false),
+        ];
+        let lines = launch_events(&event, &launches);
+        let messages: Vec<&str> = lines.iter().map(|line| line.message.as_str()).collect();
+        assert_eq!(
+            messages,
+            [
+                "MSES mset launched MSES.exe, PID 100 (ends with ALAS)",
+                "MSES mses launched MSES.exe, PID 104, 110 (ends with ALAS)",
+                "MSES mses launched MSES.exe, PID 120 (not supervised; outlives a forced ALAS exit)",
+            ]
+        );
+        assert!(lines.iter().all(|line| line.stage == "downstream/mses"
+            && line.kind == RunEventKind::Diagnostic
+            && line.elapsed_ms == 1_000));
+    }
+
+    #[test]
+    fn no_launches_means_no_lines() {
+        assert!(launch_events(&stage_completed("baseline"), &[]).is_empty());
     }
 }

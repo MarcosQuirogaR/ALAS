@@ -42,7 +42,7 @@ later adopts another A380 variant, its full class counts must be sourced anew.
 - [EASA CS-25 Amendment 28](https://www.easa.europa.eu/en/document-library/certification-specifications/cs-25-amendment-28)
   is the current official source selected for European large-aeroplane
   certification screening. Relevant sections include CS 25.785 (seats,
-  berths, safety belts and harnesses), 25.803 (emergency evacuation), 25.807--
+  berths, safety belts and harnesses), 25.803 (emergency evacuation), 25.807 to
   25.813 (exits and access), 25.815 (aisle width), 25.817 (maximum seats
   abreast), 25.787 (stowage), and 25.853/Appendix F (interior fireworthiness).
 - The [FAA eCFR Part 25](https://www.ecfr.gov/current/title-14/chapter-I/subchapter-C/part-25)

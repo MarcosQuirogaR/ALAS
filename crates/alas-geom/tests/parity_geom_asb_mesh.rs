@@ -7,7 +7,7 @@
 //!
 //! `points` and `mesh_line`'s output are closed-form arithmetic over
 //! already-`closed`-tier wing geometry (no factorization, spline or solve in
-//! this row -- `Airfoil::local_camber`'s `np.interp` is the same
+//! this row: `Airfoil::local_camber`'s `np.interp` is the same
 //! interpolation `local_thickness` already uses at `closed`), checked at
 //! `Tier::Closed`, the tier `docs/PORTING.md` names for this row. `faces` is
 //! an integer index array and is checked at `Tier::Exact`.

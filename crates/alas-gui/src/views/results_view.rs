@@ -20,7 +20,6 @@ mod external;
 mod fullscreen_result;
 mod images;
 mod solver;
-use external::show_external_tools_result;
 use fullscreen_result::show_fullscreen_result;
 #[cfg(test)]
 use images::scene_has_external_images;
@@ -81,11 +80,6 @@ const TABS: &[Tab] = &[
         id: "model",
         title: "Model Comparison",
         category: "Model Comparison",
-    },
-    Tab {
-        id: "external",
-        title: "External Tools",
-        category: "External Tools",
     },
 ];
 
@@ -193,14 +187,6 @@ pub fn show_results_view(state: &mut AppState, ui: &mut Ui) {
                     crate::layout_debug::RegionKind::Scroll,
                 );
                 show_summary(state, ui, result);
-            });
-        return;
-    }
-    if state.results_tab == "external" {
-        ScrollArea::vertical()
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
-                show_external_tools_result(ui, result);
             });
         return;
     }

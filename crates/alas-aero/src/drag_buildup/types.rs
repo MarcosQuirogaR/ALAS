@@ -12,8 +12,8 @@
 /// the drag chain reads.
 ///
 /// The numeric fields' defaults are that analysis's own, because
-/// `mission_builder.py:85-87` -- the only place in the reference that builds
-/// one -- attaches it to a vehicle and overrides nothing. The
+/// `mission_builder.py:85-87` (the only place in the reference that builds
+/// one) attaches it to a vehicle and overrides nothing. The
 /// `area_weighted_compressibility` field is an explicit product/reference
 /// policy seam: product default is force-conserving, while
 /// `reference_compatibility()` replays the frozen direct sum. Carrying both
@@ -78,7 +78,7 @@ impl DragSettings {
 ///
 /// Taken as data rather than computed from an altitude. Upstream reads these
 /// three off `state.conditions.freestream`, which a mission segment fills from
-/// `mission analysis model.Analyses.Atmospheric.US_Standard_1976` -- `alas-atmo::us1976`'s own
+/// `mission analysis model.Analyses.Atmospheric.US_Standard_1976`: `alas-atmo::us1976`'s own
 /// green row here. Re-deriving them inside this module would make every drag
 /// number a function of an atmosphere model as well as of a drag correlation,
 /// and a disagreement in the first would be reported as a disagreement in the
@@ -100,7 +100,7 @@ pub struct Freestream {
 /// The last two fields are the vortex lattice's, not this module's. With
 /// `span_efficiency` at its `None` default the inviscid induced drag *is*
 /// `drag_breakdown.induced.inviscid_wings[tag]`, which
-/// `mission analysis model.Analyses.Aerodynamics.Vortex_Lattice` writes -- so this row takes
+/// `mission analysis model.Analyses.Aerodynamics.Vortex_Lattice` writes, so this row takes
 /// the lift solution as input, the same way `alas-mass::transport_weight`
 /// takes `sealevel_static_thrust` from `turbofan_sizing`.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -189,7 +189,7 @@ pub struct ComponentParasiteDrag {
     ///
     /// On its own reference area as `parasite_drag_wing` and friends return
     /// it, then rescaled to the vehicle reference area in place by
-    /// `parasite_total` -- see [`super::parasite::scale_to_vehicle_reference`].
+    /// `parasite_total`, see [`super::parasite::scale_to_vehicle_reference`].
     pub parasite_drag_coefficient: f64,
     /// The skin-friction coefficient, averaged over the two surfaces for a
     /// wing and taken directly for everything else.

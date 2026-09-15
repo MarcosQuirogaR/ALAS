@@ -16,7 +16,7 @@
 //! [`install`] runs.
 //!
 //! That embedded copy is deliberately distinct from `golden/i18n/es_catalog.json`,
-//! the parity fixture -- a shipped binary must not need `golden/` to exist on
+//! the parity fixture: a shipped binary must not need `golden/` to exist on
 //! disk, so this crate carries its own copy rather than reading the test
 //! fixture at runtime. `tests/parity_es.rs` is what keeps the two from
 //! drifting apart.
@@ -25,7 +25,7 @@ use std::collections::HashMap;
 use std::sync::OnceLock;
 
 // `env!("CARGO_MANIFEST_DIR")` at compile time is what makes this path
-// resolve the same way regardless of the caller's working directory --
+// resolve the same way regardless of the caller's working directory:
 // `include_str!` itself only accepts a path relative to this source file, so
 // the manifest-dir prefix is for readers, not for the compiler.
 const CATALOG_JSON: &str =
@@ -58,8 +58,8 @@ pub fn catalog() -> &'static HashMap<String, String> {
         // empty rather than letting the exception propagate ("a broken/absent
         // catalog must never break the app"). This file is generated and
         // checked in, so a parse failure here should never happen, but the
-        // same fallback -- log it, then behave as if no catalog were
-        // installed -- is what keeps this a reported condition rather than a
+        // same fallback (log it, then behave as if no catalog were
+        // installed) is what keeps this a reported condition rather than a
         // panic if it ever does.
         serde_json::from_str(CATALOG_JSON).unwrap_or_else(|error| {
             tracing::error!(%error, "crates/alas-i18n/data/es_catalog.json failed to parse");
@@ -112,7 +112,7 @@ pub fn native_desktop_catalog() -> &'static HashMap<String, String> {
 
 /// Register the Spanish catalog with [`crate::register_catalog`].
 ///
-/// Nothing in this crate calls this automatically -- see the crate's module
+/// Nothing in this crate calls this automatically, see the crate's module
 /// doc. Whatever assembles the running application calls it once, at
 /// startup, if Spanish support is wanted; a headless build that never calls
 /// it behaves exactly as if Spanish had no catalog at all, which is the safe
@@ -225,7 +225,7 @@ mod tests {
         );
         assert_eq!(
             native_desktop_catalog()
-                .get("Stage 2 (3-D wing): {done}/{total} re-simulated -- {ok} ok")
+                .get("Stage 2 (3-D wing): {done}/{total} re-simulated ({ok} ok)")
                 .map(String::as_str),
             Some("Etapa 2 (ala 3-D): {done}/{total} resimulados; {ok} correctos")
         );

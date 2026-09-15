@@ -214,8 +214,8 @@ fn apply_custom(
         registered_source_exit_layout(config, semantics.uses_reference_geometry());
     // In percent mode the shares are the input and the counts are derived, so
     // a Custom cabin has to be re-solved whenever the shares change. Returning
-    // early on "already has seats" -- which is right in count mode, where the
-    // counts *are* the input -- would freeze the layout at whatever the first
+    // early on "already has seats", which is right in count mode, where the
+    // counts *are* the input, would freeze the layout at whatever the first
     // solve produced and silently ignore every later share edit.
     // A `count` cabin with seats declared is an input, not a seed: the
     // registered or user-declared per-class counts are the cabin the case
@@ -257,7 +257,7 @@ fn apply_custom(
     // All it does is fill in a sensible non-zero starting point the first time
     // Custom is selected with nothing configured, so switching to it never
     // leaves the cabin silently empty with no way to change it. The repeated
-    // case -- every optimizer evaluation -- returns here before building
+    // case (every optimizer evaluation) returns here before building
     // anything, and has to stay that cheap.
     let already_configured = if config.requirements.aircraft_type == "cargo" {
         config.requirements.cargo_payload_kg > 0.0

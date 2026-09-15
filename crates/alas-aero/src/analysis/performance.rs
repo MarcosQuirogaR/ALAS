@@ -5,7 +5,7 @@
 // Reference: alas @ rust-port-baseline.
 
 //! The three entry points that run the vortex lattice and correct what it
-//! returns -- `AeroAnalysis`' "performance estimates" section.
+//! returns: `AeroAnalysis`' "performance estimates" section.
 //!
 //! Each is a different budget. [`AeroAnalysis::quick_performance`] runs two
 //! probe solves and linearizes between them, which is what the optimizer can
@@ -40,7 +40,7 @@ const CL_ALPHA_FLOOR: f64 = 1e-9;
 /// solve.
 ///
 /// Upstream passes a whole `StabilityTrimResult`, which is an `alas-stab`
-/// type and therefore P7 -- above this row. See `crate::analysis`'s module
+/// type and therefore P7: above this row. See `crate::analysis`'s module
 /// doc for why this takes the fields instead of the type.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TrimPoint {
@@ -54,7 +54,7 @@ pub struct TrimPoint {
     pub cl_alpha: f64,
 }
 
-/// What the two-point cruise estimate reports -- `quick_performance`'s dict.
+/// What the two-point cruise estimate reports: `quick_performance`'s dict.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct QuickPerformance {
     /// Lift-to-drag ratio at the target lift coefficient.
@@ -67,7 +67,7 @@ pub struct QuickPerformance {
     pub cl: f64,
 }
 
-/// What the single trimmed solve reports -- `trimmed_performance`'s dict.
+/// What the single trimmed solve reports: `trimmed_performance`'s dict.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TrimmedPerformance {
     /// Lift-to-drag ratio at the trimmed condition.
@@ -92,7 +92,7 @@ pub struct TrimmedPerformance {
     pub cm_residual: f64,
 }
 
-/// The corrected drag polar and stability curve over the angle schedule --
+/// The corrected drag polar and stability curve over the angle schedule:
 /// `run_sweep`'s dict of arrays. Every field has one entry per angle, in
 /// schedule order.
 #[derive(Debug, Clone, PartialEq)]
@@ -102,7 +102,7 @@ pub struct PolarSweep {
     pub alpha_deg: Vec<f64>,
     /// The geometric angle of attack used for each VLM solve, in degrees.
     ///
-    /// The reporting axis above may be relabeled by the Prandtl--Glauert
+    /// The reporting axis above may be relabeled by the Prandtl-Glauert
     /// correction without recomputing the coefficients. External solvers and
     /// cross-model comparisons must use this native state axis.
     pub geometric_alpha_deg: Vec<f64>,
@@ -123,12 +123,12 @@ pub struct PolarSweep {
 }
 
 impl AeroAnalysis<'_> {
-    /// One vortex-lattice solve at `op_point` -- `_run_vlm`.
+    /// One vortex-lattice solve at `op_point`: `_run_vlm`.
     fn run_vlm(&self, op_point: &OperatingPoint) -> Result<VlmResult, VlmError> {
         self.run_vlm_on(self.plane, op_point)
     }
 
-    /// The same solve, on a specific airplane -- which is only ever a
+    /// The same solve, on a specific airplane, which is only ever a
     /// modified copy of `self.plane`, in [`Self::trimmed_performance`].
     fn run_vlm_on(
         &self,
@@ -163,7 +163,7 @@ impl AeroAnalysis<'_> {
         OperatingPoint::new(atmosphere, velocity, alpha_deg, 0.0, 0.0, 0.0, 0.0)
     }
 
-    /// The fast two-point cruise estimate the optimization loop runs --
+    /// The fast two-point cruise estimate the optimization loop runs:
     /// `quick_performance`.
     ///
     /// Two probe solves fix a lift-curve slope; the angle that reaches
@@ -214,12 +214,12 @@ impl AeroAnalysis<'_> {
         })
     }
 
-    /// Evaluate the genuinely trimmed cruise condition a trim solve settled
-    /// -- `trimmed_performance`.
+    /// Evaluate the genuinely trimmed cruise condition a trim solve settled:
+    /// `trimmed_performance`.
     ///
     /// One solve, at `trim`'s angle and stabilizer incidence. Whatever tail
     /// lift or download the trim requires shows up in the solve's own induced
-    /// drag, which *is* the trim drag -- no separate trim-drag formula is
+    /// drag, which *is* the trim drag, no separate trim-drag formula is
     /// added on top.
     ///
     /// # Errors
@@ -238,7 +238,7 @@ impl AeroAnalysis<'_> {
         // Upstream overwrites every stabilizer section's twist in place and
         // restores it in a `finally`. A copy for the duration of the solve
         // is the same thing without the window in which an exception would
-        // leave the aircraft altered -- and it is also why the restore's own
+        // leave the aircraft altered, and it is also why the restore's own
         // quirk (it writes `xsecs[0]`'s twist back to all of them, losing any
         // spanwise variation) has nothing to reproduce here: no section of
         // `self.plane` is ever written to.
@@ -252,8 +252,8 @@ impl AeroAnalysis<'_> {
         let components =
             self.drag_components(mach, altitude_m, cl_trim, solved.cd_drag, Some(&atmosphere));
 
-        // The solve ran at the incompressible trim angle, so CL and CD -- and
-        // therefore L/D and the trim drag -- are already right; only the
+        // The solve ran at the incompressible trim angle, so CL and CD, and
+        // therefore L/D and the trim drag, are already right; only the
         // angle is reported corrected.
         let alpha_report = if trim.cl_alpha.abs() > CL_ALPHA_FLOOR {
             let alpha_zero_lift = trim.trim_alpha_deg - cl_trim / trim.cl_alpha;
@@ -293,13 +293,13 @@ impl AeroAnalysis<'_> {
     }
 
     /// The full angle sweep: the corrected drag polar and the stability
-    /// curve -- `run_sweep`.
+    /// curve: `run_sweep`.
     ///
     /// The reported angle axis is compressibility-corrected as a whole at the
     /// end, about the zero-lift angle read off the computed polar. That
     /// correction is skipped when the polar cannot supply a zero-lift
-    /// angle -- fewer than two points, or a lift coefficient that does not
-    /// rise across the schedule -- and then the geometric angles are reported
+    /// angle (fewer than two points, or a lift coefficient that does not
+    /// rise across the schedule) and then the geometric angles are reported
     /// as they were flown.
     ///
     /// # Errors

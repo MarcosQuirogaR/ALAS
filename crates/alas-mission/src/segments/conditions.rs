@@ -17,7 +17,7 @@
 //!
 //! **The container is persistent state, not a return value.** Three of the
 //! four `initials` methods and `update_weights` all read what the *previous*
-//! iteration left behind -- `initialize_time` shifts the existing time array
+//! iteration left behind: `initialize_time` shifts the existing time array
 //! rather than rebuilding it, and `update_weights` writes rows 1 onward while
 //! deliberately leaving row 0 alone. A segment solve is a sequence of
 //! iterations over one of these, and rebuilding it per iteration would quietly
@@ -50,7 +50,7 @@ pub type Matrix3 = [[f64; 3]; 3];
 /// `initialize` and then rewritten by each pass of its `iterate`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Conditions {
-    // -- frames.inertial --------------------------------------------------
+    // frames.inertial
     /// Time at each control point, seconds. Absolute along the mission, not
     /// relative to the segment: `initialize_time` shifts it onto the end of
     /// the previous segment.
@@ -70,7 +70,7 @@ pub struct Conditions {
     /// Ground distance flown since the start of the mission, metres.
     pub aircraft_range_m: Vec<f64>,
 
-    // -- frames.body ------------------------------------------------------
+    // frames.body
     /// Body Euler angles relative to the inertial frame, radians, as
     /// `[roll, pitch, yaw]`. Only the pitch is ever set: it is one of the two
     /// unknowns.
@@ -80,7 +80,7 @@ pub struct Conditions {
     /// Thrust in the body frame, N, along `x`.
     pub thrust_force_vector_n: Vec<Vector3>,
 
-    // -- frames.wind ------------------------------------------------------
+    // frames.wind
     /// Lift in the wind frame, N, along `-z`.
     pub wind_lift_force_vector_n: Vec<Vector3>,
     /// Drag in the wind frame, N, along `-x`.
@@ -88,7 +88,7 @@ pub struct Conditions {
     /// The wind-to-inertial transform, as `update_orientations` forms it.
     pub transform_wind_to_inertial: Vec<Matrix3>,
 
-    // -- frames.planet ----------------------------------------------------
+    // frames.planet
     /// Latitude. Upstream integrates a rate in radians per second and then
     /// divides by the degree factor before adding it to a value in radians,
     /// so this quantity is not in a single unit; see
@@ -97,7 +97,7 @@ pub struct Conditions {
     /// Longitude, carrying the same mixed units as the latitude.
     pub longitude_deg: Vec<f64>,
 
-    // -- freestream -------------------------------------------------------
+    // freestream
     /// Geometric altitude, metres.
     pub altitude_m: Vec<f64>,
     /// Static pressure, Pa.
@@ -121,7 +121,7 @@ pub struct Conditions {
     /// Dynamic pressure, Pa.
     pub dynamic_pressure_pa: Vec<f64>,
 
-    // -- aerodynamics -----------------------------------------------------
+    // aerodynamics
     /// Angle of attack, radians.
     pub angle_of_attack_rad: Vec<f64>,
     /// Side-slip angle, radians. Zero throughout a planar mission, carried
@@ -147,13 +147,13 @@ pub struct Conditions {
     /// product policy code can reject or label those points explicitly.
     pub surrogate_domain: Vec<SurrogateDomainStatus>,
 
-    // -- propulsion -------------------------------------------------------
+    // propulsion
     /// Throttle: one of the two unknowns.
     pub throttle: Vec<f64>,
     /// The whole `thrust.outputs` bag at each point.
     pub thrust: Vec<ThrustOutput>,
 
-    // -- weights ----------------------------------------------------------
+    // weights
     /// Vehicle mass, kg, falling through the segment as fuel burns.
     pub total_mass_kg: Vec<f64>,
     /// Fuel flow, kg/s, as a positive rate of mass *loss*.
@@ -225,7 +225,7 @@ impl Conditions {
 /// Upstream a segment holds a live reference to the previous segment's whole
 /// `State`, and the four `initials` methods each read one *last row* out of
 /// it. Those five numbers are the entire coupling between two segments, so
-/// they are what is carried here -- which is also what makes one segment
+/// they are what is carried here, which is also what makes one segment
 /// reproducible from a fixture without re-solving every segment before it.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Initials {

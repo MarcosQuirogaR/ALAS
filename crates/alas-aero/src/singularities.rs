@@ -6,17 +6,17 @@
 // Upstream: native aerodynamic model 4.2.8, MIT.
 // Reference: alas @ rust-port-baseline.
 
-//! The induced-velocity kernel of a single horseshoe vortex --
-//! `calculate_induced_velocity_horseshoe` -- the potential-flow element
+//! The induced-velocity kernel of a single horseshoe vortex:
+//! `calculate_induced_velocity_horseshoe`: the potential-flow element
 //! [`crate::vlm`] panels every wing into.
 //!
 //! Upstream's function is written for NumPy broadcasting: every argument can
 //! be a scalar or an array, and the field point and the vortex vertices
 //! broadcast against each other to fill an `N x M` matrix of results in one
 //! call. `alas-aero::vlm` is the only caller here, and it needs the same
-//! *values* -- one field point against many panels for the AIC matrix, one
+//! *values*, one field point against many panels for the AIC matrix, one
 //! field point against many gamma-weighted panels for the near-field
-//! velocity -- but reaches them with an explicit loop rather than array
+//! velocity, but reaches them with an explicit loop rather than array
 //! broadcasting, matching how [`crate::operating_point::OperatingPoint::rotation_velocity_geometry_axes`]
 //! resolves the same upstream broadcasting pattern one point at a time. This
 //! module therefore has one scalar entry point,
@@ -27,8 +27,8 @@
 //! # `vortex_core_radius` and the branch this program never takes
 //!
 //! `smoothed_inv`'s `vortex_core_radius == 0` branch (plain `1/x`, upstream's
-//! own default) is translated -- it costs nothing and keeps this function a
-//! complete port of the one upstream function it stands in for -- but no
+//! own default) is translated; it costs nothing and keeps this function a
+//! complete port of the one upstream function it stands in for, but no
 //! input this crate constructs ever reaches it: `VortexLatticeMethod`'s
 //! constructor default is `1e-8`, and its two call sites in
 //! `alas/physics/aerodynamics.py` and `alas/physics/stability.py` never
@@ -46,7 +46,7 @@
 use crate::vector3::{cross3, dot3, norm3, sub3};
 
 /// `1 / x`, smoothed near `x = 0` by a Kaufmann vortex core model when
-/// `vortex_core_radius != 0` -- `smoothed_inv` in the upstream module,
+/// `vortex_core_radius != 0`: `smoothed_inv` in the upstream module,
 /// inlined as a closure there and named here for the same reason every other
 /// port in this crate turns a nested Python function into a named one: it is
 /// called several times per field point and reads better named than repeated.
@@ -58,9 +58,9 @@ fn smoothed_inv(x: f64, vortex_core_radius: f64) -> f64 {
     }
 }
 
-/// The velocity a single horseshoe vortex -- bound leg from `left` to
+/// The velocity a single horseshoe vortex (bound leg from `left` to
 /// `right`, trailing legs extending along `trailing_vortex_direction` from
-/// each end -- induces at `field`, for a filament of strength `gamma` --
+/// each end) induces at `field`, for a filament of strength `gamma`:
 /// `calculate_induced_velocity_horseshoe`, one field point and one horseshoe
 /// at a time (see the module doc).
 ///

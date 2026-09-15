@@ -19,7 +19,7 @@
 //! second copy that can drift, so they are read from the one that already
 //! exists and the provenance cites the preset's own source.
 //!
-//! **Declared.** Quantities nothing in the configuration carries -- maximum
+//! **Declared.** Quantities nothing in the configuration carries: maximum
 //! operating Mach, hydraulic working pressure, minimum flight crew, engine
 //! mounting, variable-sweep architecture. Each is written out per aircraft
 //! with the document, revision and locator it came from.
@@ -140,8 +140,8 @@ impl Evidence {
 /// A wing cell is one tank per side, because that is what the aircraft has
 /// and what the arrangement's own symmetric volume describes; the centre,
 /// trim and auxiliary cells are one each. Where the aircraft's published fuel
-/// system has a finer split than the arrangement models -- the A380's four
-/// feed tanks are carried inside its inner and mid cells here -- the preset
+/// system has a finer split than the arrangement models (the A380's four
+/// feed tanks are carried inside its inner and mid cells here) the preset
 /// declares the published count instead and this derivation is not used.
 fn tank_count_from_layout(layout: &FuelTankLayoutConfig) -> usize {
     let wing_cells = [&layout.inner_wing, &layout.mid_wing, &layout.outer_wing]

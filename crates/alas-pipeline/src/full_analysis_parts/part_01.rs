@@ -319,7 +319,7 @@ impl FullAnalysis {
 /// and `MZFW - modeled OEW`, because the modeled OEW can be heavier than the
 /// source OEW and the layout would otherwise respect the cap while producing
 /// an overweight zero-fuel mass. Notional designs inherit no published MZFW.
-fn effective_structural_payload_limit_kg(
+pub(crate) fn effective_structural_payload_limit_kg(
     config: &AlasConfig,
     design: &DesignVector,
     modeled_oew_kg: f64,

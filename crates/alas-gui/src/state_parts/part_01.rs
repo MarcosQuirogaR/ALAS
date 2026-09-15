@@ -356,7 +356,9 @@ impl Default for AppState {
             active_page: "inputs".to_owned(),
             theme: AppTheme::Dark,
             language: Language::En,
-            help_verbose: false,
+            // Fresh settings show the explanatory help by default. An
+            // explicitly constructed state keeps the caller's preference.
+            help_verbose: true,
             preview_open: true,
             nav_pinned: false,
             nav_hover_open: false,
@@ -434,7 +436,7 @@ impl Default for AppState {
         }
 
         // Show the tour on a launch that has never seen it, and mark it seen
-        // right away -- matching the reference's "seen" semantics, which flip
+        // right away, matching the reference's "seen" semantics, which flip
         // on first display rather than on completion.
         let onboarding_marker = state
             .tool_locator

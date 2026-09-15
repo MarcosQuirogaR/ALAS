@@ -6,9 +6,9 @@
 //!
 //! What is checked for each preset is its whole resulting configuration, not
 //! only the fields its constructor named. A preset is defined as much by what
-//! it leaves alone as by what it sets -- the performance registry must not
+//! it leaves alone as by what it sets: the performance registry must not
 //! move the matching chart's axes, the fidelity registry must not touch an
-//! assumption the user tuned -- and a preset that overreached would agree
+//! assumption the user tuned, and a preset that overreached would agree
 //! field for field on everything it meant to set while silently resetting
 //! something else. Comparing the full configuration is what makes that
 //! visible.
@@ -18,12 +18,12 @@
 //! running.
 //!
 //! Compared at `exact`: a preset's values are copied, not computed, so any
-//! difference at all is a transposed digit -- and one here produces a
+//! difference at all is a transposed digit, and one here produces a
 //! plausible aircraft rather than a failure.//!
 //! One deliberate divergence: the four vortex-lattice mesh resolutions.
 //! The frozen registry meshes the optimizer loop at one chordwise panel,
 //! which samples the mean camber line only at the leading and trailing
-//! edges -- where it is zero -- so every section is a flat plate, and it
+//! edges (where it is zero) so every section is a flat plate, and it
 //! spends its high-fidelity budget spanwise, where the builder has already
 //! converged the discretisation. Measured in
 //! `.agent/reports/2026-09-11-vlm-resolution-sensitivity.html` and
@@ -251,10 +251,10 @@ fn compare_settings(
 /// The frozen fidelity-registry value for a vortex-lattice mesh field this
 /// port deliberately moved, or `None` for every other field.
 ///
-/// The registry's own unit tests pin what the product values must satisfy --
+/// The registry's own unit tests pin what the product values must satisfy,
 /// no preset may mesh a section as a flat plate, none may exceed the spanwise
 /// resolution `validation` accepts, and the three must be ordered coarsest to
-/// finest -- so the product side is checked by property here rather than by a
+/// finest, so the product side is checked by property here rather than by a
 /// second copy of the literals. What remains worth pinning is the frozen
 /// value, so the divergence stays a recorded decision.
 fn mesh_resolution_correction(path: &str, key: &str) -> Option<Value> {

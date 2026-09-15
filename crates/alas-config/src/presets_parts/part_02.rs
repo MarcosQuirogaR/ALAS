@@ -44,7 +44,7 @@ fn build() -> Vec<AircraftPreset> {
     // makes the two agree for the other five, and is upstream's `__post_init__`.
     //
     // Copying the name is not enough on its own. `EngineConfig::default()` is
-    // a materialized GE9X -- thrust, cycle, nacelle and all -- because a bare
+    // a materialized GE9X (thrust, cycle, nacelle and all) because a bare
     // config has to describe some real engine before anything reads it. A
     // preset that only renamed that default therefore declared a CFM56 and
     // was still weighed, drawn and flown as a 467 kN GE9X: the propulsion
@@ -179,7 +179,7 @@ mod tests {
 
     #[test]
     fn a_preset_is_bound_to_the_engine_it_names_before_anything_reads_it() {
-        // This test used to assert the opposite -- that an A320 left the
+        // This test used to assert the opposite: that an A320 left the
         // registry carrying 467 kN of GE9X, to be resolved later at
         // "configuration loading". Only one caller resolved it. The geometry
         // builder, the full analysis and the acceptance matrix all take
@@ -232,7 +232,7 @@ mod tests {
     #[test]
     fn every_engine_the_presets_name_is_one_the_table_carries() {
         // The name is a selector, and one the table does not carry leaves the
-        // GE9X fallback in place for good -- a silent widebody engine on
+        // GE9X fallback in place for good: a silent widebody engine on
         // whatever type mistyped it. Every technology now has a typed binding;
         // no preset may rely on a different engine's fallback physics.
         for preset in registry() {

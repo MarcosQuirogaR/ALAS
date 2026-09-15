@@ -10,12 +10,12 @@
 //! methods panel the wings this crate returns, the mass estimates measure its
 //! fuselage, and the structural mesh is cut from its wingbox. That is the
 //! point of collecting it here rather than letting each discipline build the
-//! aircraft it happens to need -- two disciplines that each build their own
+//! aircraft it happens to need, two disciplines that each build their own
 //! wing agree until the day one of them is edited.
 //!
 //! # What lives here, and what does not
 //!
-//! Two layers share the crate. `alas/geometry/` is this program's own code --
+//! Two layers share the crate. `alas/geometry/` is this program's own code:
 //! the airfoil library, the parametric shaping, the builder, the wingbox. The
 //! `aircraft` facade exposes the common aircraft data model used by production
 //! consumers; its compatibility implementation remains private to that

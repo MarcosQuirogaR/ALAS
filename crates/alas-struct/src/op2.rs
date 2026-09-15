@@ -8,7 +8,7 @@
 //! `OP2.read_op2` and reads values off the object it gets back. There is no Rust
 //! pyNastran, and taking an external dependency on one does not exist, so the
 //! reader is written here. What it must agree with is therefore pyNastran's
-//! reader -- given the same bytes, recover the same numbers -- which is exactly
+//! reader (given the same bytes, recover the same numbers) which is exactly
 //! what `parity_op2.rs` holds it to, on files pyNastran itself wrote.
 //!
 //! It is scoped to the four tables those readers ask for, and no further:

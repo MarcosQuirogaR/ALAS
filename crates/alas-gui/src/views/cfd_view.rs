@@ -17,9 +17,10 @@ use crate::native_viewport::show_native_viewport;
 use crate::state::AppState;
 use crate::views::tr;
 
+use cfd_view_parts::advanced::show_advanced_tab;
 use cfd_view_parts::log::show_log_tab;
 use cfd_view_parts::results::show_results_tab;
-use cfd_view_parts::study::{show_advanced_tab, show_study_tab};
+use cfd_view_parts::study::show_study_tab;
 
 /// Render the detached Airfoil CFD study window when it is open.
 pub fn show_cfd_window(state: &mut AppState, ctx: &egui::Context) {

@@ -4,7 +4,7 @@
 //! Scratch probe: numeric agreement between the internal VLM and native AVL.
 //!
 //! `classify_avl_comparison` only decides whether the two are *admissible* to
-//! compare -- same references, frames, alpha schedule and Prandtl-Glauert
+//! compare: same references, frames, alpha schedule and Prandtl-Glauert
 //! domain. Nothing in the tree then computes how far apart they actually are.
 #![allow(clippy::print_stdout, missing_docs)]
 // Standalone fixture diagnostics fail immediately when their curated inputs are invalid.

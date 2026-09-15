@@ -10,11 +10,11 @@
 //! sized wingbox: the Euler-Bernoulli spanwise deflection curve via the
 //! unit-load theorem, the per-spar cap bending stress and margin of safety,
 //! and the first cantilever bending-mode frequencies via the Rayleigh
-//! quotient. These are always available -- no NASTRAN install is required.
+//! quotient. These are always available, no NASTRAN install is required.
 //!
 //! Unlike [`crate::sizing`] (which omits inertial relief for a conservative
-//! strength check), this module includes relief -- the sized structure's own
-//! distributed weight plus wing-mounted engine point masses -- since that is
+//! strength check), this module includes relief: the sized structure's own
+//! distributed weight plus wing-mounted engine point masses, since that is
 //! what makes the analytical deflection track a real NASTRAN result.
 
 use alas_config::materials::MaterialSpec;
@@ -24,7 +24,7 @@ use alas_geom::wing_structure::WingStructureGeometry;
 use crate::loads;
 use crate::sizing::WingboxSizing;
 
-/// `(beta*L, sigma)` for the first four cantilever bending modes -- the
+/// `(beta*L, sigma)` for the first four cantilever bending modes: the
 /// classical clamped-free eigenvalues and their trial-shape coefficients.
 const CANTILEVER_MODES: [(f64, f64); 4] = [
     (1.8751, 0.7341),
@@ -35,7 +35,7 @@ const CANTILEVER_MODES: [(f64, f64); 4] = [
 
 /// NumPy `trapezoid(y, x)`: the trapezoidal integral of `y` over `x`.
 /// Duplicated from [`crate::sizing`]'s private helper for the reason that
-/// module keeps its own copy -- it is not part of either module's public
+/// module keeps its own copy; it is not part of either module's public
 /// surface.
 fn trapezoid(y: &[f64], x: &[f64]) -> f64 {
     let mut acc = 0.0;
@@ -52,7 +52,7 @@ pub struct SparStressResult {
     pub chord_fraction: f64,
     /// Cap bending stress at each station, Pa.
     pub stress_pa: Vec<f64>,
-    /// Margin of safety at each station -- `+inf` where the demand is below
+    /// Margin of safety at each station: `+inf` where the demand is below
     /// 1 N.m.
     pub margin_of_safety: Vec<f64>,
 }
@@ -94,7 +94,7 @@ pub struct ModalResult {
 pub struct StructuralAnalysisReport {
     /// Spanwise stations, m.
     pub y: Vec<f64>,
-    /// Static bending stiffness `EI(y)`, N.m^2 -- independent of load case.
+    /// Static bending stiffness `EI(y)`, N.m^2: independent of load case.
     pub ei_nm2: Vec<f64>,
     /// One result per load case, in the load-case order.
     pub load_cases: Vec<LoadCaseResult>,
@@ -102,7 +102,7 @@ pub struct StructuralAnalysisReport {
     pub modal: ModalResult,
 }
 
-/// Area moment of inertia of a symmetric I-section about its own centroid --
+/// Area moment of inertia of a symmetric I-section about its own centroid:
 /// `_I_section`.
 fn i_section(h: &[f64], bf: &[f64], tf: &[f64], tw: f64) -> Vec<f64> {
     (0..h.len())
@@ -118,7 +118,7 @@ fn i_section(h: &[f64], bf: &[f64], tf: &[f64], tw: f64) -> Vec<f64> {
         .collect()
 }
 
-/// Distributed mass per unit span, kg/m -- `_mass_per_length`.
+/// Distributed mass per unit span, kg/m: `_mass_per_length`.
 fn mass_per_length(
     sizing: &WingboxSizing,
     cap_rho: f64,
@@ -157,7 +157,7 @@ fn mass_per_length(
     m_y
 }
 
-/// Combined bending stiffness `EI(y)`, N.m^2 -- `_EI_curve`.
+/// Combined bending stiffness `EI(y)`, N.m^2: `_EI_curve`.
 fn ei_curve(sizing: &WingboxSizing, cap_mat: &MaterialSpec, skin_mat: &MaterialSpec) -> Vec<f64> {
     let n = sizing.y_stations.len();
     let mut ei = vec![0.0; n];
@@ -190,7 +190,7 @@ fn ei_curve(sizing: &WingboxSizing, cap_mat: &MaterialSpec, skin_mat: &MaterialS
 }
 
 /// Spanwise deflection via the unit-load (virtual work) theorem at every
-/// station -- `_deflection_curve`, O(N^2).
+/// station: `_deflection_curve`, O(N^2).
 fn deflection_curve(y: &[f64], m: &[f64], ei: &[f64]) -> Vec<f64> {
     let n = y.len();
     let mut delta = vec![0.0; n];
@@ -209,7 +209,7 @@ fn deflection_curve(y: &[f64], m: &[f64], ei: &[f64]) -> Vec<f64> {
 }
 
 /// The first `n_modes` cantilever bending-mode frequencies and shapes via the
-/// Rayleigh quotient with classical trial shapes -- `_rayleigh_frequencies`.
+/// Rayleigh quotient with classical trial shapes: `_rayleigh_frequencies`.
 fn rayleigh_frequencies(
     y: &[f64],
     ei: &[f64],
@@ -253,7 +253,7 @@ fn rayleigh_frequencies(
     (freqs, shapes)
 }
 
-/// Analyze the sized wingbox: deflection, stress and modal response --
+/// Analyze the sized wingbox: deflection, stress and modal response:
 /// `analyze_structure`.
 #[allow(clippy::too_many_arguments)] // mirrors upstream's own signature
 pub fn analyze_structure(

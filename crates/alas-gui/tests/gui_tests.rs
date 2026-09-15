@@ -249,14 +249,15 @@ fn python_geometry_preview_id_dispatches_to_the_three_view_scene() {
 }
 
 #[test]
-fn drag_model_menu_uses_the_python_preview_registry_id() {
+fn aerodynamics_menu_uses_the_python_drag_preview_registry_id() {
     let page = nav::NAV
         .iter()
         .flat_map(|group| group.subgroups)
         .flat_map(|subgroup| subgroup.pages)
-        .find(|page| page.id == "drag_model")
-        .expect("drag model page");
+        .find(|page| page.group == Some("drag_model"))
+        .expect("aerodynamics page over the drag model");
 
+    assert_eq!(page.id, "aerodynamics");
     assert_eq!(page.preview, Some("drag"));
 }
 

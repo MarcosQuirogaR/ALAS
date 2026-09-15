@@ -7,16 +7,16 @@
 //!
 //! Every case goes through `build_payload_layout`, the entry point every
 //! consumer uses, on an aircraft built from a shipped preset's own design
-//! vector -- so what is compared is the interior of a real aeroplane rather
+//! vector, so what is compared is the interior of a real aeroplane rather
 //! than of a synthetic probe.
 //!
 //! The *whole item sequence* is compared, in placement order, and not only the
 //! totals. A layout is a sequence: two implementations that place the same
 //! seats, monuments and containers in a different order have not agreed, and a
 //! deck plan walking one of them would draw monuments over seats. The totals
-//! alone would also hide every branch that matters -- the exit-derived cap
+//! alone would also hide every branch that matters: the exit-derived cap
 //! binding before the floor does, a bay narrowing its monuments rather than
-//! overlapping them, a hold degrading to a shorter container -- since each of
+//! overlapping them, a hold degrading to a shorter container, since each of
 //! those moves items about while leaving the mass where it was.
 //!
 //! # Two tiers, and why the row carries both
@@ -24,8 +24,8 @@
 //! Everything discrete is compared at `Tier::Exact`: the kind and deck of every
 //! item, its label, the item ordering, every seat and exit and container count,
 //! the class names, the chosen exit type and container code. That is where the
-//! failures of this module actually live -- a seat abreast off by one, a bay
-//! visited in the wrong order, a fallback container not reached -- and none of
+//! failures of this module actually live: a seat abreast off by one, a bay
+//! visited in the wrong order, a fallback container not reached, and none of
 //! them is a rounding question.
 //!
 //! Every position, mass and fraction is compared at `Tier::Closed`. These are

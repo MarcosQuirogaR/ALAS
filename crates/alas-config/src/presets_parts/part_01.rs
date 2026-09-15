@@ -427,7 +427,7 @@ impl AircraftPreset {
                 // ATR 72-600 factsheet's 275 KTAS at 95% MTOW/ISA/optimum FL
                 // (~273.5 KTAS at 17,000 ft ISA), but the factsheet does not
                 // state which FL is "optimum," so that agreement is not
-                // evidence of validation -- see
+                // evidence of validation, see
                 // `.agent/reports/2026-09-07-atr-physics.html`.
                 0.44,
                 "Representative European regional-sector default; operational example only, not an ATR design-mission claim",
@@ -569,7 +569,7 @@ pub fn atr72_600_takeoff_speed_m_s(mtow_kg: f64, wing_area_m2: f64, cl_max_takeo
 ///   flies [`atr72_600_takeoff_speed_m_s`], a speed derived from the
 ///   preset's own MTOW, reference wing area and configured takeoff lift
 ///   limit, with the published minimum kept only as a floor;
-/// - approach speed 113 KIAS -- an *indicated* airspeed, not a published
+/// - approach speed 113 KIAS: an *indicated* airspeed, not a published
 ///   CAS. The landing leg flies 113 KCAS as an operational approximation
 ///   that ASSUMES ZERO position and instrument error (unsourced; on a
 ///   transport aircraft the difference is of the order of one to a few
@@ -583,7 +583,7 @@ pub fn atr72_600_takeoff_speed_m_s(mtow_kg: f64, wing_area_m2: f64, cl_max_takeo
 /// operationally plausible for a 23 t turboprop cruising at FL170 and
 /// labelled as such: the 1,500 ft AGL takeoff-segment top (a typical
 /// acceleration altitude), the en-route climb rates, the whole descent
-/// ladder (altitudes, calibrated speeds and rates -- the factsheet publishes
+/// ladder (altitudes, calibrated speeds and rates: the factsheet publishes
 /// no altitude-resolved climb or descent table) and the 3-degree-like
 /// approach rate. None of it is calibrated to the factsheet's block fuel or
 /// time figures; see `.agent/reports/2026-09-07-speed-schedule-integration.html`

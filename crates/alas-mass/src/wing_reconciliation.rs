@@ -15,7 +15,7 @@
 //! reason [`crate::product_stations`] does. While the reconciliation was
 //! private to the optimizer, the search sized every candidate against the
 //! reconciled wing while the final report published the empirical total for
-//! the same aircraft -- about 1.2 t apart on the r5 nominal finalist, with the
+//! the same aircraft, about 1.2 t apart on the r5 nominal finalist, with the
 //! fuel closure silently absorbing the difference. Two numbers for one wing is
 //! not a reporting detail: it is the operating empty mass the run is
 //! ultimately judged on.

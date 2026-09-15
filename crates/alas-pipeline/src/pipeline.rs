@@ -71,8 +71,8 @@ mod helpers;
 #[cfg(test)]
 use helpers::optimizer_config;
 use helpers::{
-    add_manifest_artifact, add_manifest_artifact_if_exists, persist_mses_polar_diagnostics,
-    persist_mses_raw_exports, validate_bounds,
+    add_manifest_artifact, add_manifest_artifact_if_exists, check_preset_policy,
+    persist_mses_polar_diagnostics, persist_mses_raw_exports, validate_bounds,
 };
 
 /// The 2-D section condition sent to MSES for a 3-D swept-wing cruise case.
@@ -699,7 +699,7 @@ impl DesignPipeline {
     /// The event stream is where a run's per-stage `elapsed_ms`/`duration_ms`
     /// already live; before this seam existed only the desktop
     /// design-space entry point could observe them, so a command-line run had
-    /// no record of where its wall time went. The run itself is unchanged --
+    /// no record of where its wall time went. The run itself is unchanged:
     /// the callback is the only added argument.
     pub fn run_with_environment_and_events(
         &self,
@@ -840,7 +840,7 @@ impl DesignPipeline {
         };
         report("Validating run configuration");
         check_cancelled(cancel)?;
-        validate_run_configuration(&self.config)?;
+        validate_run_configuration(&self.config, initial_design.as_ref(), bounds)?;
         if self.aircraft_override.is_some() && options.optimize {
             return Err(
                 "CPACS-backed runs currently require --no-optimize; design variables cannot replace imported geometry"
@@ -2095,14 +2095,12 @@ fn fixed_review_error_is_reportable(error: &str) -> bool {
 /// Enforce the blocking cross-field configuration contract at the public
 /// execution boundary. The GUI performs the same check for button state, but
 /// library and CLI callers must receive it even when they bypass that UI.
-fn validate_run_configuration(config: &AlasConfig) -> Result<(), String> {
-    if !config.preset.is_empty() {
-        presets::get(&config.preset).map_err(|error| {
-            format!(
-                "configuration preset identity is not registered: {error}; clear the preset field or select a registered aircraft preset"
-            )
-        })?;
-    }
+fn validate_run_configuration(
+    config: &AlasConfig,
+    initial_design: Option<&DesignVector>,
+    bounds: Option<&[(f64, f64)]>,
+) -> Result<(), String> {
+    check_preset_policy(config, initial_design, bounds)?;
     let errors = alas_config::validate(config)
         .into_iter()
         .filter(|issue| issue.severity == Severity::Error)

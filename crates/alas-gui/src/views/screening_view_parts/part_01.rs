@@ -85,7 +85,7 @@ fn show_mses_readiness(state: &mut AppState, ui: &mut Ui) {
     } else if readiness.pending() {
         tr("Checking...")
     } else {
-        tr("MSES executables not configured (Setup > External Tools)")
+        tr("MSES executables not configured (Advanced Settings > External Tools)")
     };
     let color = if resolved.is_some() {
         crate::theme::success_color(ui.visuals())

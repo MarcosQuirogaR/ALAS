@@ -20,7 +20,7 @@ use crate::chart_kit::{draw_legend, draw_title, LegendMarker};
 use crate::scene::{Axes2D, Color, Fill, Scene, SceneElement, Stroke, TextAlign, TextBaseline};
 use crate::theme::get_palette;
 
-const TITLE: &str = "Structural Analysis -- Modes";
+const TITLE: &str = "Structural Analysis: Modes";
 const BLUE: &str = "tab:blue";
 const RED: &str = "tab:red";
 const ORANGE: &str = "tab:orange";

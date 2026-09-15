@@ -192,7 +192,7 @@ pub fn load_config(args: &CliArgs) -> Result<AlasConfig, String> {
             serde_yaml::from_str(&content)
                 .map_err(|e| format!("failed to parse config YAML: {e}"))?
         };
-        AlasConfig::from_value(&value).map_err(|e| format!("invalid config structure: {e:?}"))?
+        crate::config_load::load_config_value(&value)?
     } else {
         AlasConfig::default()
     };

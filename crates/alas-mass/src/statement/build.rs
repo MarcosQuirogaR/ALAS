@@ -26,7 +26,7 @@ use super::flops_items::push_flops_systems_and_operating_items;
 use super::{LedgerMethods, PayloadItemSummary};
 
 /// Fraction of [`MassBreakdown::gear`] carried by the nose gear at static
-/// weight, the rest going to the main gear -- Raymer, *Aircraft Design: A
+/// weight, the rest going to the main gear: Raymer, *Aircraft Design: A
 /// Conceptual Approach*, 6th ed., ch. 11, typical nose/main static load
 /// split (roughly 8-15% nose for a tricycle transport). This is a mass
 /// split assumption, not a measured load: [`crate::stations`]'s gear

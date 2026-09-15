@@ -24,7 +24,11 @@ pub struct GeneratedCase {
 pub fn generate_case(config: &CfdStudyConfig, case_dir: &Path) -> Result<GeneratedCase, String> {
     config.validate().map_err(|errors| errors.join(" "))?;
     let airfoil = resolve_airfoil(&config.airfoil_name)?;
-    let gmsh = mesh::build_gmsh_geo(config, &airfoil).map_err(|error| error.to_string())?;
+    let mesh::MeshPreflightBundle { manifest, geo } =
+        mesh::run_mesh_preflight(config, &airfoil).map_err(|error| error.to_string())?;
+    let Some(gmsh) = geo.filter(|_| manifest.is_ready()) else {
+        return Err(manifest.blocking_summary());
+    };
     if case_dir.exists() {
         let mut entries = fs::read_dir(case_dir)
             .map_err(|error| format!("cannot inspect existing case directory: {error}"))?;
@@ -58,6 +62,15 @@ pub fn generate_case(config: &CfdStudyConfig, case_dir: &Path) -> Result<Generat
     let mesh_report = serde_json::to_string_pretty(&gmsh.report)
         .map_err(|error| format!("cannot encode mesh report: {error}"))?;
     write_case_file(case_dir, "system/mesh-report.json", mesh_report, &mut files)?;
+    let manifest_json = manifest
+        .to_json_pretty()
+        .map_err(|error| error.to_string())?;
+    write_case_file(
+        case_dir,
+        mesh::MESH_MANIFEST_FILE,
+        manifest_json,
+        &mut files,
+    )?;
     write_case_file(
         case_dir,
         "system/fvSchemes",
@@ -101,6 +114,7 @@ pub fn generate_case(config: &CfdStudyConfig, case_dir: &Path) -> Result<Generat
         effective_speed_m_s: config.effective_speed_m_s(),
         effective_reynolds: config.effective_reynolds(),
         frame: FrameConvention::default(),
+        reference: Some(ReferenceConventions::from_config(config)),
         backend: None,
         openfoam_version: None,
         file_hashes: BTreeMap::new(),
@@ -172,24 +186,24 @@ fn fv_solution(config: &CfdStudyConfig) -> String {
 }
 
 fn control_dict(config: &CfdStudyConfig) -> String {
-    let alpha = config.angle_of_attack_deg.to_radians();
-    let drag = (alpha.cos(), alpha.sin(), 0.0);
-    let lift = (-alpha.sin(), alpha.cos(), 0.0);
-    let span = config.chord_m * EXTRUSION_SPAN_TO_CHORD;
+    let reference = ReferenceConventions::from_config(config);
     let mut out = format!(
-        "FoamFile\n{{\n    version 2.0;\n    format ascii;\n    class dictionary;\n    object controlDict;\n}}\n\napplication simpleFoam;\nstartFrom startTime;\nstartTime 0;\nstopAt endTime;\nendTime {end};\ndeltaT 1;\nwriteControl timeStep;\nwriteInterval {write};\npurgeWrite 0;\nwriteFormat ascii;\nwritePrecision 12;\nwriteCompression off;\ntimeFormat general;\ntimePrecision 8;\nrunTimeModifiable true;\n\nfunctions\n{{\n    forceCoeffs\n    {{\n        type forceCoeffs;\n        libs (forces);\n        patches (airfoil);\n        rho rhoInf;\n        rhoInf {rho:.16e};\n        CofR ({quarter:.16e} 0 {midspan:.16e});\n        liftDir ({lx:.16e} {ly:.16e} 0);\n        dragDir ({dx:.16e} {dy:.16e} 0);\n        pitchAxis (0 0 1);\n        magUInf {speed:.16e};\n        lRef {chord:.16e};\n        Aref {area:.16e};\n        writeControl timeStep;\n        writeInterval 1;\n    }}\n    forces\n    {{\n        type forces;\n        libs (forces);\n        patches (airfoil);\n        rho rhoInf;\n        rhoInf {rho:.16e};\n        CofR ({quarter:.16e} 0 {midspan:.16e});\n        writeControl timeStep;\n        writeInterval 1;\n        log off;\n    }}\n}}\n",
+        "FoamFile\n{{\n    version 2.0;\n    format ascii;\n    class dictionary;\n    object controlDict;\n}}\n\napplication simpleFoam;\nstartFrom startTime;\nstartTime 0;\nstopAt endTime;\nendTime {end};\ndeltaT 1;\nwriteControl timeStep;\nwriteInterval {write};\npurgeWrite 0;\nwriteFormat ascii;\nwritePrecision 12;\nwriteCompression off;\ntimeFormat general;\ntimePrecision 8;\nrunTimeModifiable true;\n\nfunctions\n{{\n    forceCoeffs\n    {{\n        type forceCoeffs;\n        libs (forces);\n        patches (airfoil);\n        rho rhoInf;\n        rhoInf {rho:.16e};\n        CofR ({quarter:.16e} 0 {midspan:.16e});\n        liftDir ({lx:.16e} {ly:.16e} 0);\n        dragDir ({dx:.16e} {dy:.16e} 0);\n        pitchAxis ({px} {py} {pz});\n        magUInf {speed:.16e};\n        lRef {chord:.16e};\n        Aref {area:.16e};\n        writeControl timeStep;\n        writeInterval 1;\n    }}\n    forces\n    {{\n        type forces;\n        libs (forces);\n        patches (airfoil);\n        rho rhoInf;\n        rhoInf {rho:.16e};\n        CofR ({quarter:.16e} 0 {midspan:.16e});\n        writeControl timeStep;\n        writeInterval 1;\n        log off;\n    }}\n}}\n",
         end = config.solver.max_iterations,
         write = config.solver.write_interval.max(1),
         rho = config.density_kg_m3,
-        quarter = 0.25 * config.chord_m,
-        midspan = 0.5 * span,
-        lx = lift.0,
-        ly = lift.1,
-        dx = drag.0,
-        dy = drag.1,
-        speed = config.effective_speed_m_s(),
-        chord = config.chord_m,
-        area = config.chord_m * span,
+        quarter = reference.moment_reference_m[0],
+        midspan = reference.moment_reference_m[2],
+        lx = reference.lift_direction[0],
+        ly = reference.lift_direction[1],
+        dx = reference.drag_direction[0],
+        dy = reference.drag_direction[1],
+        px = reference.pitch_axis[0],
+        py = reference.pitch_axis[1],
+        pz = reference.pitch_axis[2],
+        speed = reference.speed_m_s,
+        chord = reference.chord_m,
+        area = reference.area_m2,
     );
     // These solver-side function objects write wallShearStress and yPlus
     // with the active turbulence model. Running generic postProcess without
@@ -238,11 +252,8 @@ fn turbulence_properties() -> String {
 }
 
 fn velocity_components(config: &CfdStudyConfig) -> (f64, f64) {
-    let alpha = config.angle_of_attack_deg.to_radians();
-    (
-        config.effective_speed_m_s() * alpha.cos(),
-        config.effective_speed_m_s() * alpha.sin(),
-    )
+    let velocity = ReferenceConventions::from_config(config).freestream_velocity_m_s;
+    (velocity[0], velocity[1])
 }
 
 fn initial_u(config: &CfdStudyConfig) -> String {
@@ -373,7 +384,7 @@ fn initial_nut(config: &CfdStudyConfig) -> String {
 fn case_readme(config: &CfdStudyConfig, airfoil: &AirfoilSnapshot) -> String {
     let turbulence = config.effective_turbulence();
     format!(
-        "# ALAS OpenFOAM airfoil case\n\nTemplate: `{TEMPLATE_VERSION}`\nAirfoil: `{}`\nCoordinate hash: `{}`\nChord: `{:.8} m`\nAngle of attack: `{:.6} deg`\nSpeed: `{:.8} m/s`\nReynolds number: `{:.8e}`\nDensity: `{:.8} kg/m^3`\nDynamic viscosity: `{:.8e} Pa s`\nStatic temperature: `{:.8} K`\nDry-air speed of sound: `{:.8} m/s`\nFreestream Mach number: `{:.8}`\n\nFreestream turbulence specification: `{}`\nTurbulence intensity: `{:.6e}`\nConfigured length scale: `{:.8e} m`\nConfigured nu_t/nu ratio: `{:.8e}`\nEffective k: `{:.8e} m^2/s^2`\nEffective omega: `{:.8e} 1/s`\nEffective nu_t: `{:.8e} m^2/s`\nEffective nu_t/nu: `{:.8e}`\nEffective length implied by omega: `{:.8e} m`\n\nThe section frame is chord +x, normal +y and extrusion +z. Positive angle rotates the freestream velocity toward +y. Drag is positive along the freestream and lift is positive normal to it. The force reference is x/c = 0.25 and Aref = chord times the explicit extrusion span. Mach is `U/sqrt(gamma R T)` using dry-air gamma 1.4, R = 287.05287 J/(kg K), and the declared static temperature. The initial template uses incompressible steady k-omega SST RANS and is not validated for low-Reynolds transition, stall, transonic compressibility or unsteady shedding.\n",
+        "# ALAS OpenFOAM airfoil case\n\nTemplate: `{TEMPLATE_VERSION}`\nAirfoil: `{}`\nCoordinate hash: `{}`\nChord: `{:.8} m`\nAngle of attack: `{:.6} deg`\nSpeed: `{:.8} m/s`\nReynolds number: `{:.8e}`\nDensity: `{:.8} kg/m^3`\nDynamic viscosity: `{:.8e} Pa s`\nStatic temperature: `{:.8} K`\nDry-air speed of sound: `{:.8} m/s`\nFreestream Mach number: `{:.8}`\n\nFreestream turbulence specification: `{}`\nTurbulence intensity: `{:.6e}`\nConfigured length scale: `{:.8e} m`\nConfigured nu_t/nu ratio: `{:.8e}`\nEffective k: `{:.8e} m^2/s^2`\nEffective omega: `{:.8e} 1/s`\nEffective nu_t: `{:.8e} m^2/s`\nEffective nu_t/nu: `{:.8e}`\nEffective length implied by omega: `{:.8e} m`\n\nThe section frame is chord +x, normal +y and extrusion +z. Positive angle rotates the freestream velocity toward +y. Drag is positive along the freestream and lift is positive 90 degrees counter-clockwise from it. The moment reference is x/c = 0.25 on the extrusion mid-plane, Cm is positive nose-up (leading edge toward +y) through the forceCoeffs pitch axis (0 0 -1), lRef is the chord and Aref = chord times the explicit extrusion span. Mach is `U/sqrt(gamma R T)` using dry-air gamma 1.4, R = 287.05287 J/(kg K), and the declared static temperature. The initial template uses incompressible steady k-omega SST RANS and is not validated for low-Reynolds transition, stall, transonic compressibility or unsteady shedding.\n",
         airfoil.name,
         airfoil.coordinate_hash,
         config.chord_m,

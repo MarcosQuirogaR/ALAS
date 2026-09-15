@@ -6,6 +6,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::boundary::BoundarySettings;
+use super::conventions::INCOMPRESSIBLE_LIMIT_MACH;
 use super::turbulence::{TurbulenceSpecification, TurbulenceState};
 
 fn default_turbulence_viscosity_ratio() -> f64 {
@@ -27,37 +28,27 @@ fn default_freestream_temperature_k() -> f64 {
 }
 
 /// Source used to determine the dimensional velocity.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum OperatingInput {
     /// The user enters speed; Reynolds number is derived.
+    #[default]
     Speed,
     /// The user enters Reynolds number; speed is derived.
     Reynolds,
 }
 
-impl Default for OperatingInput {
-    fn default() -> Self {
-        Self::Speed
-    }
-}
-
 /// Repeatable mesh density preset.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MeshPreset {
     /// Fast preflight with a coarse outer block and surface refinement.
     Coarse,
     /// Default engineering setup.
+    #[default]
     Medium,
     /// Higher resolution for sensitivity checks.
     Fine,
-}
-
-impl Default for MeshPreset {
-    fn default() -> Self {
-        Self::Medium
-    }
 }
 
 impl MeshPreset {
@@ -81,19 +72,14 @@ impl MeshPreset {
 }
 
 /// How the far-field patch receives the freestream state.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FarFieldCondition {
     /// A fixed velocity and zero-gradient pressure condition.
+    #[default]
     FixedValue,
     /// OpenFOAM's `freestream` mixed condition.
     Freestream,
-}
-
-impl Default for FarFieldCondition {
-    fn default() -> Self {
-        Self::FixedValue
-    }
 }
 
 /// Background and near-wall mesh controls.
@@ -119,6 +105,9 @@ pub struct MeshSettings {
     pub n_layers: u32,
     /// Surface refinement multiplier for the wake region.
     pub wake_refinement: u32,
+    /// Leading-edge refinement level: each level halves the surface size
+    /// around the leading edge.  Zero keeps the qualified template output.
+    pub leading_edge_refinement: u32,
 }
 
 impl Default for MeshSettings {
@@ -133,6 +122,7 @@ impl Default for MeshSettings {
             boundary_layers: true,
             n_layers: 25,
             wake_refinement: 2,
+            leading_edge_refinement: 0,
         }
     }
 }
@@ -404,7 +394,7 @@ impl CfdStudyConfig {
             errors.push(
                 "Freestream temperature must produce a finite positive speed of sound.".to_owned(),
             );
-        } else if self.mach_number() > 0.3 {
+        } else if self.mach_number() > INCOMPRESSIBLE_LIMIT_MACH {
             errors.push(
                 "The incompressible template is limited to approximately Mach 0.3; reduce speed or use a validated compressible study.".to_owned(),
             );
@@ -448,6 +438,9 @@ impl MeshSettings {
         }
         if self.wake_refinement > 6 {
             errors.push("Wake refinement must be between 0 and 6.".to_owned());
+        }
+        if self.leading_edge_refinement > 6 {
+            errors.push("Leading-edge refinement must be between 0 and 6.".to_owned());
         }
         ok_if_empty(errors)
     }

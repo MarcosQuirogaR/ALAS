@@ -27,8 +27,10 @@ use serde::{Deserialize, Serialize};
 
 use super::{AirfoilSnapshot, CfdStudyConfig};
 
-/// Version of the native Gmsh geometry contract.
-pub const GMSH_TEMPLATE_VERSION: &str = "alas-airfoil-gmsh-openfoam-v1";
+/// Version of the native Gmsh geometry contract.  `v2` adds the optional
+/// leading-edge refinement field; at refinement level zero the emitted
+/// source is identical to `v1` apart from this header line.
+pub const GMSH_TEMPLATE_VERSION: &str = "alas-airfoil-gmsh-openfoam-v2";
 
 /// Expansion ratio used by the generated boundary-layer field.
 pub const BOUNDARY_LAYER_EXPANSION_RATIO: f64 = 1.2;
@@ -216,17 +218,46 @@ pub struct BoundaryPatchReport {
 }
 #[path = "mesh_boundary.rs"]
 mod boundary;
+#[path = "mesh_domain.rs"]
+mod domain;
 #[path = "mesh_generation.rs"]
 mod generation;
+#[path = "mesh_geometry.rs"]
+mod geometry_audit;
+#[path = "mesh_preflight.rs"]
+mod preflight;
+#[path = "mesh_presets.rs"]
+mod presets;
 
 pub use boundary::{
     ensure_boundary_patch_types, inspect_boundary_patch_types, required_boundary_types,
+};
+pub use domain::{
+    domain_template, patch_contract, DomainExtents, DomainTemplate, FrameStatement, PatchRole,
+    PatchSpec, WakeBox, DOMAIN_TEMPLATE_VERSION, MAX_RECOMMENDED_BLOCKAGE,
+    RECOMMENDED_DOWNSTREAM_CHORDS, RECOMMENDED_HALF_HEIGHT_CHORDS, RECOMMENDED_UPSTREAM_CHORDS,
 };
 pub use generation::{
     boundary_layer_sizing, build_gmsh_geo, derive_first_layer_wall_distance_m, generate_gmsh_geo,
 };
 #[cfg(test)]
 use generation::{coordinate_hash, geometric_layer_sum};
+pub use geometry_audit::{
+    audit_airfoil_geometry, AirfoilGeometryAudit, ClosureKind, GeometryIssue, GeometryIssueCode,
+    IssueSeverity, SectionMetrics, TrailingEdgeMeshing, TrailingEdgeTreatment, Winding,
+    GEOMETRY_AUDIT_VERSION, MAX_THICKNESS_RATIO, MAX_TRAILING_EDGE_GAP, MIN_LOOP_POINTS,
+    MIN_THICKNESS_RATIO, NEGLIGIBLE_SEGMENT,
+};
+pub use preflight::{
+    run_mesh_preflight, write_mesh_manifest, ExpectedArtifacts, MeshPreflight, MeshPreflightBundle,
+    MeshQualityThresholds, PreflightIssue, PreflightIssueSource, PreflightStatus,
+    ToolchainExpectation, MESH_MANIFEST_FILE, MESH_MANIFEST_VERSION,
+};
+pub use presets::{
+    mesh_resolution, preset_catalogue, InflationSpec, MeshResolutionSpec, PresetSummary,
+    RefinementSpec, YPlusConsistency, MAX_RECOMMENDED_INFLATION_CHORDS, PRESET_CATALOGUE_VERSION,
+    Y_PLUS_CONSISTENCY_BAND,
+};
 #[cfg(test)]
 mod tests {
     use super::*;

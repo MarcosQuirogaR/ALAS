@@ -542,3 +542,41 @@ fn an_unregistered_preset_identity_is_rejected_at_the_public_run_boundary() {
         "{error}"
     );
 }
+
+#[test]
+fn drifted_preset_geometry_is_rejected_at_dispatch_in_preset_mode_only() {
+    let mut config = AlasConfig::from_value(&serde_json::json!({ "preset": "A320-200" }))
+        .expect("registered preset loads");
+    config.optimizer.design_space.mode = alas_config::optimizer::DesignMode::BaselineSandbox;
+    config.geometry.wing.root_z_m += 0.5;
+    let options = PipelineOptions {
+        optimize: false,
+        compare_baseline: false,
+        parallel: false,
+        output_dir: None,
+        save_plots: false,
+        quiet: true,
+        ..PipelineOptions::default()
+    };
+    let error = match DesignPipeline::new(config.clone()).run(&options, &RunEnvironment::default())
+    {
+        Err(error) => error,
+        Ok(_) => panic!("a drifted locked geometry must not run in preset mode"),
+    };
+    assert!(error.contains("protected in preset mode"), "{error}");
+    assert!(error.contains("geometry/wing/root_z_m"), "{error}");
+    // The barrier reads the design point and bounds the desktop supplies.
+    let preset = presets::get("A320-200").expect("A320");
+    let mut clean = config.clone();
+    clean.geometry = preset.geometry.clone();
+    clean.geometry.engine.apply_engine_spec();
+    let mut drifted_design = preset.design_vector;
+    drifted_design.span_m += 1.0;
+    let error = check_preset_policy(&clean, Some(&drifted_design), None)
+        .expect_err("a drifted initial point is rejected");
+    assert!(error.contains("span_m"), "{error}");
+    assert!(check_preset_policy(&clean, Some(&preset.design_vector), None).is_ok());
+    // A clean-sheet study starting from the same shape is not preset mode.
+    config.optimizer.design_space.mode = alas_config::optimizer::DesignMode::CleanSheet;
+    assert!(check_preset_policy(&config, None, None).is_ok());
+}

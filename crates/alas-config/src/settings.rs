@@ -15,7 +15,7 @@
 //! # Loading is where a file becomes a run
 //!
 //! [`AlasConfig::from_value`] is the whole loading path, and it does two
-//! things in an order that matters. It first applies the named preset --
+//! things in an order that matters. It first applies the named preset,
 //! copying that aircraft's geometry and requirements in, and, where the preset
 //! carries them, its mass-model and field-performance calibrations. Then it
 //! lays the file's own keys over the result, so a file may start from a real
@@ -33,8 +33,8 @@
 //! # Where the file formats went
 //!
 //! Upstream this module also opens and writes YAML and JSON files. Both are
-//! thin codecs over the single dictionary representation below -- its own
-//! comment says so -- and that representation is what lives here, as
+//! thin codecs over the single dictionary representation below: its own
+//! comment says so, and that representation is what lives here, as
 //! `serde_json::Value`. Reading and writing a path is the concern of the crate
 //! that owns paths, and putting a serialization-format dependency in the
 //! configuration model would put it in every crate that reads a setting.
@@ -67,7 +67,7 @@ pub struct AlasConfig {
     /// What the aircraft has to do.
     #[config(
         nested,
-        help = "The mission targets the design must meet -- the inputs, as distinct from the modelling assumptions in every other group."
+        help = "The mission targets the design must meet: the inputs, as distinct from the modelling assumptions in every other group."
     )]
     pub requirements: DesignRequirements,
 
@@ -81,7 +81,7 @@ pub struct AlasConfig {
     /// What the search is looking for, and how hard it looks.
     #[config(
         nested,
-        help = "What the design search optimizes for and how it is run -- the objective weights and the differential-evolution solver settings."
+        help = "What the design search optimizes for and how it is run: the objective weights and the differential-evolution solver settings."
     )]
     pub optimizer: OptimizerConfig,
 
@@ -95,7 +95,7 @@ pub struct AlasConfig {
     /// The parasite and induced drag build-up.
     #[config(
         nested,
-        help = "Drag model assumptions -- form factors, interference factors and the margins applied to the parasite-drag buildup."
+        help = "Drag model assumptions: form factors, interference factors and the margins applied to the parasite-drag buildup."
     )]
     pub drag_model: DragModelConfig,
 
@@ -244,20 +244,15 @@ impl AlasConfig {
         Self::from_value_with_migration(data).map(|(config, _)| config)
     }
 
-    /// [`Self::from_value`], also reporting what loading did to the mass
-    /// method.
-    ///
-    /// The mass architecture is the one configuration decision whose
-    /// migration changes a published number -- operating empty mass -- so it
-    /// is returned rather than logged. A front end shows it, an export
-    /// records it, and a headless run can assert on it.
+    /// [`Self::from_value`], also reporting what loading changed about the
+    /// document (see [`ConfigLoadNotes`]).
     ///
     /// # Errors
     ///
     /// As [`Self::from_value`].
-    pub fn from_value_with_migration(
+    pub fn from_value_with_notes(
         data: &serde_json::Value,
-    ) -> Result<(Self, crate::MassArchitectureMigration), OverlayError> {
+    ) -> Result<(Self, ConfigLoadNotes), OverlayError> {
         // A workspace file carries the desktop session envelope next to the
         // aircraft configuration. The envelope is not aircraft data, so it is
         // removed before the strict overlay sees the document; a file with no
@@ -409,13 +404,13 @@ impl AlasConfig {
         // explicit version-2 selection (as the settings form does), so it
         // must remain selectable rather than being mistaken for an old file.
         let migration = loaded.mass_model.normalize_architecture();
-        Ok((loaded, migration))
+        Ok(load_notes::finish(loaded, migration, data))
     }
 
     /// The maximum landing mass to enforce for `candidate_mtow_kg`.
     ///
     /// In [`crate::optimizer::DesignMode::BaselineSandbox`], a valid declared
-    /// reference MLW -- the registered preset's own certified limit -- governs
+    /// reference MLW (the registered preset's own certified limit) governs
     /// as a fixed aircraft limit and does not scale with `candidate_mtow_kg`:
     /// BaselineSandbox replays that certified airframe unchanged, so its
     /// certified MLW does not move because a candidate MTOW does.
@@ -466,7 +461,7 @@ impl AlasConfig {
     /// it; they have no `DesignMode`/preset identity to resolve a reference
     /// MLW themselves. `mlw_fraction_mtow` is this method's only way to carry
     /// [`Self::landing_mass_limit_kg`]'s mode-aware result through that
-    /// existing slot -- it is not a new scalable design fraction. In
+    /// existing slot; it is not a new scalable design fraction. In
     /// BaselineSandbox/ReferenceAdaptation it is a fixed reference MLW
     /// divided by whatever `candidate_mtow_kg` is, so it changes if
     /// `candidate_mtow_kg` does and must be recomputed per call rather than
@@ -493,6 +488,10 @@ impl AlasConfig {
 fn is_valid_declared_mass_kg(mass_kg: f64) -> bool {
     mass_kg.is_finite() && mass_kg > 0.0
 }
+
+#[path = "settings_load_notes.rs"]
+mod load_notes;
+pub use load_notes::{legacy_mission_disabled, ConfigLoadNotes};
 
 // A test asserts on values it constructed here directly, so a failed unwrap
 // or expect is the assertion failing, not a library invariant being broken.
@@ -606,7 +605,7 @@ mod tests {
             config.optimizer.design_space.mode = mode;
             // Two different adapted MTOWs must still imply the same 22_350 kg
             // reference landing mass once the derived fraction is applied
-            // back to the candidate it was built from -- the ratio itself is
+            // back to the candidate it was built from: the ratio itself is
             // only the transport format, not a new scalable constraint.
             for candidate_mtow_kg in [20_000.0, 23_000.0, 30_000.0] {
                 let model = config.analysis_mass_model(candidate_mtow_kg);

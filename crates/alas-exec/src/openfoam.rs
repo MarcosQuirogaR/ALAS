@@ -84,6 +84,13 @@ pub struct OpenFoamPreferences {
     /// Optional native/WSL Gmsh executable used for the verified 2-D mesh
     /// route. A blank value falls back to `gmsh`/`gmsh.exe` on PATH.
     pub gmsh_executable: Option<String>,
+    /// Optional environment launcher inside WSL2 that receives the utility
+    /// and its arguments, for example `openfoam2306` from the openfoam.com
+    /// Ubuntu packages or `/usr/lib/openfoam/openfoam2306/etc/openfoam`.
+    /// `wsl.exe --exec` bypasses login shells, so without a launcher the
+    /// utilities must already resolve their shared libraries on their own; a
+    /// bin directory alone does not initialise the OpenFOAM environment.
+    pub wsl_launcher: Option<String>,
     /// Per-command time limit in seconds.
     pub timeout_seconds: u64,
     /// Maximum simultaneous solver processes exposed to future sweeps.
@@ -99,6 +106,7 @@ impl Default for OpenFoamPreferences {
             wsl_distribution: None,
             wsl_bin_dir: None,
             gmsh_executable: None,
+            wsl_launcher: None,
             timeout_seconds: 1_800,
             max_parallel: 1,
         }
@@ -132,6 +140,12 @@ pub struct OpenFoamCapabilities {
     pub available: bool,
     /// Actionable probe detail suitable for the setup page and run log.
     pub detail: String,
+    /// Structured version identity behind `version`, when one was parsed.
+    #[serde(default)]
+    pub parsed_version: Option<OpenFoamVersion>,
+    /// Compatibility of the identified version with the airfoil template.
+    #[serde(default)]
+    pub version_support: OpenFoamVersionAssessment,
 }
 
 impl OpenFoamCapabilities {
@@ -143,6 +157,23 @@ impl OpenFoamCapabilities {
         } else {
             format!("{} unavailable ({version})", self.backend.display_name())
         }
+    }
+
+    /// Whether utilities are present and the version is not known to lack
+    /// a required contract. `Untested` versions remain usable.
+    pub fn usable(&self) -> bool {
+        self.available && self.version_support.level != OpenFoamSupportLevel::Unsupported
+    }
+
+    /// Distribution and support line for the setup card.
+    pub fn support_summary(&self) -> String {
+        let family = self
+            .parsed_version
+            .as_ref()
+            .map_or("unknown distribution", |version| {
+                version.distribution.display_name()
+            });
+        format!("{}: {family}", self.version_support.level.display_name())
     }
 }
 
@@ -211,6 +242,13 @@ pub struct OpenFoamAdapter {
 mod adapter;
 #[path = "openfoam_parts/process.rs"]
 mod process_runner;
+#[path = "openfoam_parts/version.rs"]
+mod version;
+
+pub use version::{
+    version_from_directory, OpenFoamDistribution, OpenFoamSupportLevel, OpenFoamVersion,
+    OpenFoamVersionAssessment, FOUNDATION_LAST_RELEASE_WITH_SIMPLEFOAM, TEMPLATE_BASELINE_RELEASE,
+};
 
 /// Probe from preferences in one call for setup cards and tests.
 pub fn probe_openfoam(preferences: OpenFoamPreferences) -> OpenFoamCapabilities {
@@ -290,24 +328,44 @@ fn command_in_path(tool: &str) -> Option<PathBuf> {
     }
 }
 
+fn configured_wsl_value(value: Option<&str>) -> Option<&str> {
+    value.map(str::trim).filter(|value| !value.is_empty())
+}
+
+/// Whether the preferences name a WSL launcher or bin directory, in which
+/// case utilities are resolved explicitly instead of through a login shell.
+fn wsl_environment_configured(preferences: &OpenFoamPreferences) -> bool {
+    configured_wsl_value(preferences.wsl_launcher.as_deref()).is_some()
+        || configured_wsl_value(preferences.wsl_bin_dir.as_deref()).is_some()
+}
+
+/// Argument vector of the cheapest probe that proves the WSL backend can run
+/// the configured environment: `/bin/true` when a launcher or bin directory
+/// is configured, otherwise a login-shell lookup of the required solver.
+fn wsl_candidate_args(preferences: &OpenFoamPreferences) -> Vec<OsString> {
+    let mut args = Vec::new();
+    if let Some(distribution) = configured_wsl_value(preferences.wsl_distribution.as_deref()) {
+        args.push(OsString::from("--distribution"));
+        args.push(OsString::from(distribution));
+    }
+    args.push(OsString::from("--exec"));
+    if wsl_environment_configured(preferences) {
+        args.push(OsString::from("/bin/true"));
+    } else {
+        args.extend(
+            ["sh", "-lc", "command -v simpleFoam"]
+                .into_iter()
+                .map(OsString::from),
+        );
+    }
+    args
+}
+
 fn wsl_candidate(preferences: &OpenFoamPreferences) -> bool {
     if !cfg!(windows) {
         return false;
     }
-    let mut args = Vec::new();
-    if let Some(distribution) = preferences
-        .wsl_distribution
-        .as_deref()
-        .filter(|value| !value.trim().is_empty())
-    {
-        args.push(OsString::from("--distribution"));
-        args.push(OsString::from(distribution));
-    }
-    args.extend(
-        ["--exec", "sh", "-lc", "command -v blockMesh"]
-            .into_iter()
-            .map(OsString::from),
-    );
+    let args = wsl_candidate_args(preferences);
     let command = OpenFoamCommand {
         program: PathBuf::from("wsl.exe"),
         args,
@@ -361,23 +419,31 @@ fn run_command(
 ) -> OpenFoamProcessResult {
     process_runner::run_command_with_callback(command, cancel, timeout, |_stream, _chunk| {})
 }
-fn extract_version(output: &str) -> Option<String> {
-    if let Some(index) = output.find("OpenFOAM-") {
-        let token = output[index..]
-            .split_whitespace()
-            .next()
-            .unwrap_or("")
-            .trim_matches(|ch: char| !ch.is_ascii_alphanumeric() && ch != '-');
-        if !token.is_empty() {
-            return Some(token.to_owned());
-        }
-    }
-    output.split_whitespace().find_map(|token| {
-        let clean = token.trim_matches(|ch: char| !ch.is_ascii_alphanumeric() && ch != '.');
-        let has_digit = clean.chars().any(|ch| ch.is_ascii_digit());
-        let has_separator = clean.contains('.') || clean.starts_with('v');
-        (has_digit && has_separator).then_some(clean.to_owned())
-    })
+/// Parse a utility banner or `foamVersion` output into a typed version.
+fn extract_version(output: &str) -> Option<OpenFoamVersion> {
+    OpenFoamVersion::parse(output)
+}
+
+/// Version implied by the configured project, bin or launcher path, used
+/// only when no utility banner exposed one.
+fn configured_directory_version(preferences: &OpenFoamPreferences) -> Option<OpenFoamVersion> {
+    let candidates = [
+        preferences.native_project_dir.as_deref(),
+        preferences.native_bin_dir.as_deref(),
+        preferences.wsl_bin_dir.as_deref(),
+        preferences.wsl_launcher.as_deref(),
+    ];
+    candidates
+        .into_iter()
+        .filter_map(configured_wsl_value)
+        .find_map(|value| {
+            // `.../OpenFOAM-v2306/platforms/.../bin` and
+            // `/usr/lib/openfoam/openfoam2306/etc/openfoam` both carry the
+            // release name in an ancestor rather than the last component.
+            Path::new(value)
+                .ancestors()
+                .find_map(version_from_directory)
+        })
 }
 
 fn project_version(project: &str) -> String {
@@ -431,6 +497,43 @@ fn wsl_executable_path(configured: Option<&str>, bin_dir: Option<&str>, fallback
 fn is_windows_drive_path(value: &str) -> bool {
     let bytes = value.as_bytes();
     bytes.len() >= 2 && bytes[1] == b':' && bytes[0].is_ascii_alphabetic()
+}
+
+/// `wsl.exe` argument vector for one OpenFOAM utility: optional
+/// distribution, case directory, the configured environment launcher, the
+/// utility resolved against the optional bin directory, `-case .` and the
+/// caller's arguments.  No shell is involved, so spaces and Unicode in the
+/// case path pass through unchanged.
+fn wsl_tool_args(
+    preferences: &OpenFoamPreferences,
+    tool: &str,
+    case_dir: Option<&Path>,
+    extra_args: &[OsString],
+) -> Vec<OsString> {
+    let mut args = Vec::with_capacity(extra_args.len() + 10);
+    if let Some(distribution) = configured_wsl_value(preferences.wsl_distribution.as_deref()) {
+        args.push(OsString::from("--distribution"));
+        args.push(OsString::from(distribution));
+    }
+    if let Some(case_dir) = case_dir {
+        args.push(OsString::from("--cd"));
+        args.push(OsString::from(wsl_path(case_dir)));
+    }
+    args.push(OsString::from("--exec"));
+    if let Some(launcher) = configured_wsl_value(preferences.wsl_launcher.as_deref()) {
+        args.push(OsString::from(wsl_path(Path::new(launcher))));
+    }
+    let wsl_tool = configured_wsl_value(preferences.wsl_bin_dir.as_deref()).map_or_else(
+        || tool.to_owned(),
+        |bin| format!("{}/{tool}", wsl_path(Path::new(bin))),
+    );
+    args.push(OsString::from(wsl_tool));
+    if case_dir.is_some() {
+        args.push(OsString::from("-case"));
+        args.push(OsString::from("."));
+    }
+    args.extend(extra_args.iter().cloned());
+    args
 }
 
 #[cfg(test)]
@@ -488,11 +591,98 @@ mod tests {
         );
     }
 
+    fn rendered(args: &[OsString]) -> Vec<String> {
+        args.iter()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect()
+    }
+
     #[test]
     fn preferences_round_trip_with_legacy_defaults() {
         let parsed: OpenFoamPreferences = serde_json::from_str("{}").unwrap_or_default();
         assert_eq!(parsed.backend, OpenFoamBackend::Auto);
         assert_eq!(parsed.max_parallel, 1);
+        assert_eq!(parsed.wsl_launcher, None);
+    }
+
+    #[test]
+    fn legacy_capability_records_deserialize_with_an_unassessed_version() {
+        let json = r#"{"backend":"native","version":"OpenFOAM-v2306","commands":{},"available":true,"detail":"ok"}"#;
+        let parsed: OpenFoamCapabilities = serde_json::from_str(json).expect("legacy record");
+        assert_eq!(parsed.parsed_version, None);
+        assert_eq!(parsed.version_support.level, OpenFoamSupportLevel::Untested);
+        assert!(parsed.usable());
+    }
+
+    #[test]
+    fn wsl_commands_prefix_the_configured_environment_launcher() {
+        let preferences = OpenFoamPreferences {
+            backend: OpenFoamBackend::Wsl2,
+            wsl_distribution: Some("Ubuntu-24.04".to_owned()),
+            wsl_launcher: Some("openfoam2306".to_owned()),
+            ..OpenFoamPreferences::default()
+        };
+        let args = wsl_tool_args(
+            &preferences,
+            "simpleFoam",
+            Some(Path::new(r"C:\cases\run 1")),
+            &[OsString::from("-postProcess")],
+        );
+        assert_eq!(
+            rendered(&args),
+            [
+                "--distribution",
+                "Ubuntu-24.04",
+                "--cd",
+                "/mnt/c/cases/run 1",
+                "--exec",
+                "openfoam2306",
+                "simpleFoam",
+                "-case",
+                ".",
+                "-postProcess",
+            ]
+        );
+        assert_eq!(
+            rendered(&wsl_candidate_args(&preferences)),
+            ["--distribution", "Ubuntu-24.04", "--exec", "/bin/true"]
+        );
+    }
+
+    #[test]
+    fn wsl_without_launcher_or_bin_dir_probes_the_login_shell_for_simplefoam() {
+        assert_eq!(
+            rendered(&wsl_candidate_args(&OpenFoamPreferences::default())),
+            ["--exec", "sh", "-lc", "command -v simpleFoam"]
+        );
+        let preferences = OpenFoamPreferences {
+            wsl_bin_dir: Some("/opt/OpenFOAM-v2306/bin".to_owned()),
+            ..OpenFoamPreferences::default()
+        };
+        let args = rendered(&wsl_tool_args(&preferences, "checkMesh", None, &[]));
+        assert_eq!(args, ["--exec", "/opt/OpenFOAM-v2306/bin/checkMesh"]);
+    }
+
+    #[test]
+    fn configured_directories_supply_a_fallback_version() {
+        let preferences = OpenFoamPreferences {
+            native_bin_dir: Some(
+                r"C:\OpenFOAM\OpenFOAM-v2312\platforms\win64MingwDPInt32Opt\bin".to_owned(),
+            ),
+            ..OpenFoamPreferences::default()
+        };
+        let version = configured_directory_version(&preferences).expect("directory version");
+        assert_eq!(version.label, "v2312");
+        assert_eq!(version.assess().level, OpenFoamSupportLevel::Supported);
+        let launcher = OpenFoamPreferences {
+            wsl_launcher: Some("/usr/lib/openfoam/openfoam2306/etc/openfoam".to_owned()),
+            ..OpenFoamPreferences::default()
+        };
+        assert_eq!(
+            configured_directory_version(&launcher).map(|version| version.release),
+            Some(Some(2306))
+        );
+        assert!(configured_directory_version(&OpenFoamPreferences::default()).is_none());
     }
 
     #[test]

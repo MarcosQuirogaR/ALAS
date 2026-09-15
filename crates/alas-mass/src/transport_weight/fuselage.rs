@@ -28,7 +28,7 @@ pub struct Fuselage {
     pub area_wetted_m2: f64,
 }
 
-/// The mass of a fuselage in the tube-and-wing configuration -- `tube`.
+/// The mass of a fuselage in the tube-and-wing configuration: `tube`.
 ///
 /// `wt_wing_kg`/`wt_propulsion_kg` are the already-computed main-wing and
 /// total-propulsion masses; upstream subtracts both from the zero-fuel weight

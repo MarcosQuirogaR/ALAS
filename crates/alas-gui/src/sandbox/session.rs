@@ -303,6 +303,8 @@ impl AppState {
         let prior = self.take_case();
         self.sandbox.prior_case = Some(prior);
         self.sandbox.mode = WorkspaceMode::Sandbox;
+        // The estimates strip never appears on entry; Quick Analysis opens it.
+        self.sandbox.layout.estimates_open = false;
         self.install_sandbox_design(design, line);
         true
     }

@@ -13,7 +13,7 @@
 //! component the stagnation state of the one before it, in an order fixed by
 //! the shafts rather than by the flow, and then hands the thrust process what
 //! the two nozzles and the burner produced. [`walk_network`] is that wiring,
-//! and it is shared -- `turbofan_sizing` runs it twice, at cruise and at
+//! and it is shared, `turbofan_sizing` runs it twice, at cruise and at
 //! sea-level-static, and a mission segment runs it once per control point.
 //!
 //! It lives apart from [`super`] only so the module that drives it stays under
@@ -29,8 +29,8 @@ use super::{
 
 /// Build the network's freestream from an already-computed atmosphere.
 ///
-/// The gas properties are the `Ram` component's -- the [`components`] fits at
-/// the *static* temperature, and the fixed air gas constant -- and the two
+/// The gas properties are the `Ram` component's (the [`components`] fits at
+/// the *static* temperature, and the fixed air gas constant) and the two
 /// stagnation quantities are `Ram`'s outputs, restated on the freestream
 /// because every expansion nozzle reads them as its reference state.
 ///

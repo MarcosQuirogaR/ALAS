@@ -18,7 +18,7 @@
 //! The `fine_spanwise` case is the only one with `spanwise_resolution > 1`
 //! and is therefore the only one exercising
 //! `Wing::subdivide_sections`'s `SpacingFunction::Cosspace` branch through
-//! this row -- see `alas-geom::asb::wing`'s module doc for the branch this
+//! this row, see `alas-geom::asb::wing`'s module doc for the branch this
 //! closes.
 //!
 //! # Forces and moments a symmetric condition drives to an exact zero
@@ -26,7 +26,7 @@
 //! A symmetric aircraft at zero sideslip and zero roll/yaw rate carries no
 //! side force and no rolling or yawing moment: those quantities are exactly
 //! zero in closed-form arithmetic (the `baseline` case is that condition).
-//! In floating point they are not -- and the residual is *not* bounded by
+//! In floating point they are not, and the residual is *not* bounded by
 //! this row's `Tier::Linalg` relative bound, because the reference value it
 //! would be relative to is itself only machine-epsilon-scale noise. The AIC
 //! solve agrees with LAPACK to far better than `Tier::Linalg` (the
@@ -34,11 +34,11 @@
 //! near machine epsilon relative to the O(10^4 N) panel forces the near-field
 //! integration is built from, still lands as an *absolute* difference around
 //! 1e-12 N or Nm once ~15 panels' worth of those terms cancel to what should
-//! be nothing -- and the moment terms, position-weighted, cancel from an even
+//! be nothing, and the moment terms, position-weighted, cancel from an even
 //! larger magnitude. Comparing two independent near-zero floating-point sums
 //! by relative tolerance is not a meaningful question; both sides clearing
-//! [`NEGLIGIBLE`] -- a floor set eight orders of magnitude below any force or
-//! moment of physical interest here, and six above the observed noise -- is.
+//! [`NEGLIGIBLE`]: a floor set eight orders of magnitude below any force or
+//! moment of physical interest here, and six above the observed noise, is.
 //! This is a comparison-methodology decision local to this test, not a change
 //! to the tier or its bounds; the non-degenerate cases (`sideslip`,
 //! `rotation_rates`, `negative`, `fine_spanwise`, all with nonzero sideslip)
@@ -135,7 +135,7 @@ struct Fixture {
 }
 
 /// The same small 3-wing airplane `gen_aero_vlm.py`'s `_build_airplane`
-/// constructs, kept in exact correspondence with it -- geometry this small
+/// constructs, kept in exact correspondence with it: geometry this small
 /// is reproduced literally rather than loaded from a shared fixture, the
 /// same choice `gen_geom_asb_mesh.py` makes for its own probe wings.
 fn build_airplane(fixture: &Fixture) -> Airplane {
@@ -192,11 +192,11 @@ fn build_op_point(inputs: &Inputs) -> OperatingPoint {
 
 /// Below this magnitude a force (N) or moment (Nm) is floating-point noise
 /// around a value a symmetric, no-sideslip condition drives to an exact zero
-/// in closed form -- see the module doc.
+/// in closed form, see the module doc.
 const NEGLIGIBLE: f64 = 1e-6;
 
 /// Compare one value, treating "both sides are noise around zero" as
-/// agreement rather than asking a meaningless relative question -- see the
+/// agreement rather than asking a meaningless relative question, see the
 /// module doc.
 fn compare_scalar(comparison: &mut Comparison, name: &str, actual: f64, expected: f64) {
     if actual.abs() < NEGLIGIBLE && expected.abs() < NEGLIGIBLE {
@@ -379,7 +379,7 @@ fn run_matches_aerosandbox_for_every_case() {
 /// Compare one axis's six coefficient derivatives. Every entry is
 /// structurally nonzero for the fixture's alpha=4/beta=3 base point (the
 /// smallest is a few times 1e-3, orders above `Tier::Linalg`'s absolute
-/// floor), so a plain relative comparison frames each one -- no near-zero
+/// floor), so a plain relative comparison frames each one, no near-zero
 /// methodology is needed here, unlike the degenerate `run` cases above.
 fn compare_derivatives(
     comparison: &mut Comparison,
@@ -434,7 +434,7 @@ fn run_with_stability_derivatives_matches_aerosandbox() {
 #[test]
 fn the_fixture_exercises_the_cosspace_subdivide_branch() {
     // A fixture that never used spanwise_resolution > 1 would not catch a
-    // wrong spacing function in Wing::subdivide_sections -- see the module
+    // wrong spacing function in Wing::subdivide_sections, see the module
     // doc and CLAUDE.md's brief for this row.
     let fixture: Fixture = alas_testkit::load("aero", "asb_vlm");
     assert!(

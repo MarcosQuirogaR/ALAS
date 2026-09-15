@@ -14,9 +14,9 @@
 //! `base_analysis` attaches six analyses to every configuration: weights,
 //! aerodynamics, stability, energy, a planet and an atmosphere. Four of them
 //! are reached from inside a segment iteration and are what this struct holds.
-//! The stability analysis is not one of them -- `update_stability` runs, and
+//! The stability analysis is not one of them: `update_stability` runs, and
 //! `mission analysis model.Analyses.Stability.Fidelity_Zero` reports nothing any residual, any
-//! force or any exported column reads -- and the weights analysis is reached
+//! force or any exported column reads, and the weights analysis is reached
 //! for exactly one number, the takeoff mass the first segment starts at.
 //!
 //! # Why the vehicle arrives as data

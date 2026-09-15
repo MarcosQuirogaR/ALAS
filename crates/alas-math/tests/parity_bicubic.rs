@@ -14,7 +14,7 @@
 //!
 //! Comparing the values alone would be weaker than it looks. An
 //! implementation that placed the knots at the wrong data points still
-//! reproduces every grid value exactly -- interpolation is interpolation --
+//! reproduces every grid value exactly (interpolation is interpolation)
 //! and disagrees only between the nodes, which is most of where the mission
 //! actually samples the surface.
 

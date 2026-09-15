@@ -18,7 +18,7 @@
 //! touches, an airport past the transition limit, and two paths between the
 //! same pair whose lengths differ by a tenth of a percent.
 //!
-//! `Tier::Closed` for the distances and coordinates -- closed-form spherical
+//! `Tier::Closed` for the distances and coordinates: closed-form spherical
 //! trigonometry over `f64`, which is what the tier is for. `Tier::Exact` for
 //! everything discrete: which fixes the graph parsed, which fix indices each
 //! airway joined, the identifier on each waypoint, the route's source, and

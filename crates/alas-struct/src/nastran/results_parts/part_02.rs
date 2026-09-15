@@ -150,7 +150,7 @@ mod tests {
 
         let rms = read_force_psd_rms(&op2, monitors, 3.0).expect("valid force PSD RMS");
 
-        // |H|^2 S_F = 2^2 * 3 = 12 m^2/Hz; its 1--3 Hz integral is
+        // |H|^2 S_F = 2^2 * 3 = 12 m^2/Hz; its 1 to 3 Hz integral is
         // 24 m^2, so every aliased monitor reports sqrt(24) metres.
         for label in ["root", "kink", "engine", "tip"] {
             assert!((rms.get(label).unwrap_or(f64::NAN) - 24.0_f64.sqrt()).abs() < 1e-12);

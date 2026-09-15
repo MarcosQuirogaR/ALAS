@@ -3,8 +3,8 @@
 
 //! What the design search minimises, and which requirements bound it.
 //!
-//! A conceptual transport is sized by a mission -- payload over a design
-//! range under a reserve policy -- and judged by what that mission costs,
+//! A conceptual transport is sized by a mission: payload over a design
+//! range under a reserve policy, and judged by what that mission costs,
 //! with the certification and operating requirements as boundaries rather
 //! than as prices. This group selects that formulation. The objective is a
 //! mission quantity such as block fuel or takeoff mass; the maximum takeoff
@@ -70,7 +70,7 @@ pub enum MtowSizing {
     /// never re-applied as a dispatch ceiling, an Aitken-extrapolation
     /// admissibility bound, or a landing-mass-fraction basis on any later
     /// pass, and the mission-required mass is not checked against it. This
-    /// is a calibration/validation mode -- it asks what the closure lands on
+    /// is a calibration/validation mode; it asks what the closure lands on
     /// with nothing but the seed pinned to the declared aircraft, not a
     /// sizing mode for producing a certifiable design against a declared
     /// requirement.

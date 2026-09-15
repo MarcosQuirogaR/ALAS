@@ -16,7 +16,7 @@
 //! theorem, and does nothing else.
 //!
 //! Axes are the geometry frame every other crate uses: `x` positive aft,
-//! `y` positive starboard, `z` positive up -- JSBSim's structural frame.
+//! `y` positive starboard, `z` positive up: JSBSim's structural frame.
 //! Products of inertia are stored as the integrals `P_xy = int x y dm`
 //! (JSBSim with `negated_crossproduct_inertia="false"`) and appear negated
 //! on the off-diagonal of [`InertiaTensor::matrix`]. AeroSandbox stores the

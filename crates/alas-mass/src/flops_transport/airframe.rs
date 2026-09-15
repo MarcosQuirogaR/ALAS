@@ -254,9 +254,9 @@ pub fn evaluate_airframe_product(request: &FlopsAirframeRequest<'_>) -> FlopsAir
     );
 
     // The structural design gross mass is the declared override when the
-    // configuration carries one -- a weight-variant declaration, or the
+    // configuration carries one (a weight-variant declaration, or the
     // fixed-aircraft basis `AlasConfig::at_closure_mass` writes so a mission
-    // closure cannot re-size a registered aircraft -- and otherwise the
+    // closure cannot re-size a registered aircraft) and otherwise the
     // takeoff-mass requirement of the case being evaluated.
     let (design_gross_mass_kg, design_gross_source) = match technology.design_gross_mass_kg {
         Some(value) => (value, "declared"),

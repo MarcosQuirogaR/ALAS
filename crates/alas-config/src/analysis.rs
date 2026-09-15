@@ -10,7 +10,7 @@
 //! evaluates thousands of candidates and needs an estimate it can afford; the
 //! final analysis runs once on the winner and is what gets reported. Sharing
 //! one resolution between them means either an optimizer that takes hours or
-//! a reported cruise point that is wrong -- and the second failure is silent,
+//! a reported cruise point that is wrong, and the second failure is silent,
 //! which is why the fine resolutions are separate fields rather than a
 //! multiplier someone remembers to raise.
 //!
@@ -19,8 +19,8 @@
 //! The chordwise resolution is the one that bites, and only the chordwise
 //! one. `Wing::mesh_thin_surface` cuts `cosspace(0, 1, chordwise + 1)`
 //! stations and samples the mean camber line at each, so at a resolution of
-//! one the only stations are the leading and trailing edges -- where every
-//! mean line is zero -- and the panel is the flat chord line. The camber is
+//! one the only stations are the leading and trailing edges, where every
+//! mean line is zero, and the panel is the flat chord line. The camber is
 //! not approximated coarsely; it is absent.
 //!
 //! Measured across four registered presets (`.agent/reports/
@@ -28,7 +28,7 @@
 //! AeroSandbox 4.2.8 on identical geometry): at one chordwise panel the
 //! trimmed cruise attitude is 1.1 to 4.1 degrees high depending on how much
 //! camber the section carries, the induced-drag factor is wrong by -5 to
-//! +35 %, and the lift-to-drag ratio by -14.4 to +2.9 % -- the sign differs
+//! +35 %, and the lift-to-drag ratio by -14.4 to +2.9 %: the sign differs
 //! between airframes, so no calibration constant can absorb it. Ranked over
 //! neighbouring candidates the search then mis-orders them (Spearman 0.77
 //! against a converged mesh) and under-predicts sized block fuel by about
@@ -43,7 +43,7 @@
 //! subdivided, so a value of one already means 24 strips per semispan on the
 //! main wing. Refining that cleanly (through `n_subdivisions`) moves the
 //! trimmed attitude by 0.011 degrees and the induced factor by 0.4 % over a
-//! twelve-fold range -- it is converged. Refining it through *this*
+//! twelve-fold range; it is converged. Refining it through *this*
 //! multiplier instead re-applies a cosine spacing inside each existing strip
 //! and destroys the answer; `validation::vlm_mesh_is_solvable` rejects
 //! anything above two for that reason. So both spanwise fields default to
@@ -83,7 +83,7 @@ pub struct AnalysisConfig {
     /// Spanwise panel multiplier for the in-loop estimate.
     #[config(
         label = "VLM spanwise panel resolution",
-        help = "Multiplier on each surface's built-in spanwise panel subdivision for the vortex-lattice solver. Leave at 1: the geometry builder has already subdivided every surface (24 strips per semispan on the main wing), and that is converged -- refining it further moves the trimmed cruise attitude by 0.01 deg. Values above 2 are rejected, because this multiplier re-applies a cosine spacing inside each existing strip and the induced drag then stops converging. Part of the Fidelity preset."
+        help = "Multiplier on each surface's built-in spanwise panel subdivision for the vortex-lattice solver. Leave at 1: the geometry builder has already subdivided every surface (24 strips per semispan on the main wing), and that is converged, refining it further moves the trimmed cruise attitude by 0.01 deg. Values above 2 are rejected, because this multiplier re-applies a cosine spacing inside each existing strip and the induced drag then stops converging. Part of the Fidelity preset."
     )]
     pub spanwise_resolution: i64,
 
@@ -97,7 +97,7 @@ pub struct AnalysisConfig {
     /// Spanwise panel multiplier for the once-per-run final analysis.
     #[config(
         label = "Fine VLM spanwise resolution (final analysis)",
-        help = "Spanwise panel resolution used ONLY for the once-per-run final/reported analysis (drag polar, trimmed cruise point, neutral point) -- not the optimizer loop. Leave at 1 for the same reason as the in-loop field: the span is already converged, so raising this doubles the panel count to change the answer by about 1 percent. Spend the panels on fine_chordwise_resolution instead."
+        help = "Spanwise panel resolution used ONLY for the once-per-run final/reported analysis (drag polar, trimmed cruise point, neutral point), not the optimizer loop. Leave at 1 for the same reason as the in-loop field: the span is already converged, so raising this doubles the panel count to change the answer by about 1 percent. Spend the panels on fine_chordwise_resolution instead."
     )]
     pub fine_spanwise_resolution: i64,
 
@@ -204,8 +204,8 @@ impl AnalysisConfig {
     ///
     /// The product defaults deliberately differ (see the module doc): the
     /// reference evaluates its search at one chordwise panel, which samples
-    /// the mean camber line only at the leading and trailing edges -- where
-    /// every mean line is zero -- and spends its reported-analysis budget
+    /// the mean camber line only at the leading and trailing edges (where
+    /// every mean line is zero) and spends its reported-analysis budget
     /// spanwise, on a surface the builder has already converged.
     ///
     /// Every reference-compatibility replay calls this. A fixture pinned

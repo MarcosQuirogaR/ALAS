@@ -27,14 +27,18 @@ use serde::{Deserialize, Serialize};
 pub mod mesh;
 pub mod surface;
 
-/// Version of the generated topology and dictionary contract.
-pub const TEMPLATE_VERSION: &str = "alas-airfoil-2d-openfoam-gmsh-v2";
+/// Version of the generated topology and dictionary contract.  `v3` fixed
+/// the `forceCoeffs` pitch axis to `(0 0 -1)` so the reported `Cm` is
+/// positive nose-up, matching the recorded frame convention and the native
+/// surface integration; `v2` cases report `Cm` with the opposite sign.
+pub const TEMPLATE_VERSION: &str = "alas-airfoil-2d-openfoam-gmsh-v3";
 /// Nominal span of the thin 2-D extrusion, relative to chord.
 pub const EXTRUSION_SPAN_TO_CHORD: f64 = 0.01;
 
 mod boundary;
 mod case;
 mod config;
+mod conventions;
 mod convergence;
 mod geometry;
 mod parser;
@@ -49,6 +53,7 @@ pub use boundary::*;
 pub(crate) use case::fv_schemes;
 pub use case::{generate_case, GeneratedCase};
 pub use config::*;
+pub use conventions::*;
 pub use convergence::{classify_convergence, parse_mesh_quality};
 pub use geometry::{resolve_airfoil, validate_coordinates, AirfoilSnapshot};
 pub(crate) use parser::extract_numeric_values;

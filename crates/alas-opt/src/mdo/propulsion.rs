@@ -4,7 +4,7 @@
 //! The off-design propulsion deck every candidate mission is priced with.
 //!
 //! One constructor, [`product_orchestrator`], builds the selected catalogue
-//! engine's typed off-design model (the Bartel--Young/OpenAP turbofan deck
+//! engine's typed off-design model (the Bartel-Young/OpenAP turbofan deck
 //! anchored on ICAO LTO fuel flow and the cruise reference point, or the
 //! PW127M/568F turboprop surrogate) and is shared with the native mission
 //! stage in `alas-pipeline`, so the optimizer's segment model, the dispatch

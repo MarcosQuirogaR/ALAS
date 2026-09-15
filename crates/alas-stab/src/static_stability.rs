@@ -23,7 +23,7 @@
 //!
 //! Everything after upstream's `if np.count_nonzero(...moments_of_inertia
 //! .tensor) > 0:` is the dynamic-stability block, and it is dead code for every
-//! aircraft this program builds -- the tensor it is gated on is never populated
+//! aircraft this program builds: the tensor it is gated on is never populated
 //! (`docs/PORTING.md`'s Mission section records this independently). It is not
 //! translated and is not a `deviation-candidate`, since it can never run.
 //!
@@ -33,8 +33,8 @@
 //! `external tools/mission_runner/mission_builder.py:89-91`, which sets
 //! `stability.geometry = vehicle`. So this row is scoped, like
 //! `alas-mass::torenbeek`, to the fields each function actually reads off that
-//! vehicle and off the synthetic `conditions` -- a flat [`StaticStabilityInput`]
-//! -- rather than to the whole mission reference `Vehicle`/`Data` shape.
+//! vehicle and off the synthetic `conditions` (a flat [`StaticStabilityInput`])
+//! rather than to the whole mission reference `Vehicle`/`Data` shape.
 //!
 //! # Every centre of gravity in this file is the origin
 //!
@@ -46,7 +46,7 @@
 //!   is never set, so `x_ac_surf` (`taw_cmalpha`) and `ac_vLE` (`taw_cnbeta`)
 //!   are `0.0`. This is the already-recorded `deviation-candidate`: the static
 //!   margin is measured against the wing *origins*, not their aerodynamic
-//!   centres -- which is why the fixture's static margins are large and
+//!   centres, which is why the fixture's static margins are large and
 //!   unphysical, faithfully reproducing upstream.
 //! - **`compute_mission_center_of_gravity`** (the CG `taw_cmalpha` builds) is a
 //!   weighted average of `zero_fuel_center_of_gravity` and the fuel component's
@@ -57,9 +57,9 @@
 //!   the origin *regardless of the masses*, and this CG is `0.0`; its two mass
 //!   inputs (`conditions.weights.total_mass`,
 //!   `mass_properties.max_zero_fuel`) therefore do not appear in this port.
-//! - **`mass_properties.center_of_gravity`** -- the vehicle's own design CG,
+//! - **`mass_properties.center_of_gravity`**: the vehicle's own design CG,
 //!   feeding [`neutral_point`](StaticStabilityResult::neutral_point) and
-//!   `taw_cnbeta`'s `x_cg` -- is never set either, staying `[[0, 0, 0]]`. It is
+//!   `taw_cnbeta`'s `x_cg`, is never set either, staying `[[0, 0, 0]]`. It is
 //!   carried here as a real [`StaticStabilityInput::cg_x_m`] input (always
 //!   `0.0` in every fixture case) so the formula is general, not hardcoded;
 //!   a unit test exercises a nonzero value.
@@ -67,8 +67,8 @@
 //! `Fidelity_Zero.__call__` reads that last vector as `center_of_gravity[0]`
 //! (a whole row) where every other reader in mission reference uses `[0][0]` (the scalar
 //! x); with `center_of_gravity` never populated its y/z are `0.0` too, so the
-//! distinction never shows numerically. That is a harmless latent indexing bug
-//! -- the same category as CLAUDE.md's `mesh_line` note -- and this port takes
+//! distinction never shows numerically. That is a harmless latent indexing bug:
+//! the same category as CLAUDE.md's `mesh_line` note, and this port takes
 //! the scalar x, not the broadcast row.
 //!
 //! # Other always-default fields, hardcoded with a note
@@ -77,7 +77,7 @@
 //! (zero-angle lift/moment coefficients) are `0.0`. The vertical tail's
 //! `exposed_root_chord_offset` defaults to `0.0` and is never set, so
 //! [`extend_to_ref_area`] reduces to an identity for the single, `symmetric =
-//! false` fin this program builds -- but the general trapezoid formula is
+//! false` fin this program builds, but the general trapezoid formula is
 //! translated anyway, and a unit test pins the identity.
 //!
 //! # Unread `conditions` fields
@@ -124,7 +124,7 @@ pub struct StabilityWing {
 pub struct MainWing {
     /// The fields shared with every surface.
     pub wing: StabilityWing,
-    /// `origin[0][2]`, metres -- the wing vertical position `taw_cnbeta` reads.
+    /// `origin[0][2]`, metres: the wing vertical position `taw_cnbeta` reads.
     pub origin_z_m: f64,
     /// `chords.root`, metres.
     pub chord_root_m: f64,
@@ -187,7 +187,7 @@ pub struct StaticStabilityInput {
     pub density_kg_m3: f64,
     /// `freestream.dynamic_viscosity`, pascal-seconds (read by `taw_cnbeta`).
     pub dynamic_viscosity_pa_s: f64,
-    /// `mass_properties.center_of_gravity[0][0]`, metres -- always `0.0` in
+    /// `mass_properties.center_of_gravity[0][0]`, metres, always `0.0` in
     /// this program; see the module doc.
     pub cg_x_m: f64,
     /// `reference_area`, square metres.
@@ -225,7 +225,7 @@ pub struct StaticStabilityResult {
 }
 
 /// The DATCOM 3D lift-curve slope `dCL/dalpha` [per rad] for a subsonic
-/// trapezoidal surface -- `datcom`. `aspect_ratio` is passed explicitly so the
+/// trapezoidal surface: `datcom`. `aspect_ratio` is passed explicitly so the
 /// caller can supply the vertical tail's *extended* value (see the module doc);
 /// every other input is the surface's own.
 pub fn datcom(aspect_ratio: f64, sweep_quarter_chord_rad: f64, taper: f64, mach: f64) -> f64 {
@@ -251,7 +251,7 @@ pub fn datcom(aspect_ratio: f64, sweep_quarter_chord_rad: f64, taper: f64, mach:
     2.0 * PI * aspect_ratio / (2.0 + radicand.sqrt())
 }
 
-/// Convert a quarter-chord sweep to half-chord sweep -- `convert_sweep(wing,
+/// Convert a quarter-chord sweep to half-chord sweep, `convert_sweep(wing,
 /// 0.25, 0.5)`, the one call DATCOM makes. The `old_ref_chord_fraction == 0.0`
 /// branch (which reads `sweeps.leading_edge`) is never reached from here, so it
 /// is not translated. Radians in and out.
@@ -266,7 +266,7 @@ fn convert_sweep_quarter_to_half(
     (sweep_le.tan() - 0.5 * term).atan()
 }
 
-/// The downwash gradient `d(epsilon)/d(alpha)` -- `ep_alpha`. Blakelock's
+/// The downwash gradient `d(epsilon)/d(alpha)`: `ep_alpha`. Blakelock's
 /// `2 CL_alpha / (pi * (span^2 / Sref))`, with `span = sqrt(AR * Sref)` as the
 /// caller (`Fidelity_Zero.__call__`'s loop) derives it, not the projected span.
 pub fn ep_alpha(cl_alpha: f64, area_ref: f64, aspect_ratio: f64) -> f64 {
@@ -274,11 +274,11 @@ pub fn ep_alpha(cl_alpha: f64, area_ref: f64, aspect_ratio: f64) -> f64 {
     2.0 * cl_alpha / PI / (span * span / area_ref)
 }
 
-/// The extended-to-centreline reference trapezoid of a vertical tail --
+/// The extended-to-centreline reference trapezoid of a vertical tail:
 /// `extend_to_ref_area`, returning `(aspect_ratio, area, span, root_le_shift)`.
 /// `exposed_root_chord_offset` is `0.0` (never set; see the module doc), so for
-/// the single `symmetric = false` fin this reduces to the surface's own values
-/// -- but the general formula is translated. `spans.exposed` is absent, so the
+/// the single `symmetric = false` fin this reduces to the surface's own values,
+/// but the general formula is translated. `spans.exposed` is absent, so the
 /// projected-span branch is the one taken.
 pub fn extend_to_ref_area(
     span_m: f64,
@@ -302,10 +302,10 @@ pub fn extend_to_ref_area(
 }
 
 /// The tube-and-wing pitching-moment slope and zero-alpha moment
-/// `(Cm_alpha, Cm0)` -- `taw_cmalpha`, minus the `CM` term (the caller forms
+/// `(Cm_alpha, Cm0)`: `taw_cmalpha`, minus the `CM` term (the caller forms
 /// it). `cl_alpha` values per surface are `datcom`; `x_ac_surf` and the mission
 /// CG are `0.0` (see the module doc). `surfaces` is main, horizontal
-/// stabilizer, then vertical stabilizer -- upstream's `wings` order.
+/// stabilizer, then vertical stabilizer: upstream's `wings` order.
 fn taw_cmalpha(input: &StaticStabilityInput, surfaces: &[StabilityWing]) -> (f64, f64) {
     let s_ref = input.reference_area_m2;
     let mac = input.main_wing.mac_m;
@@ -353,7 +353,7 @@ fn taw_cmalpha(input: &StaticStabilityInput, surfaces: &[StabilityWing]) -> (f64
     (cm_alpha_surf + cm_alpha_body, cm0_surf)
 }
 
-/// The tube-and-wing yaw-moment slope `Cn_beta` -- `taw_cnbeta`. Reads the
+/// The tube-and-wing yaw-moment slope `Cn_beta`: `taw_cnbeta`. Reads the
 /// vertical tail through [`extend_to_ref_area`], adds the fuselage
 /// contribution, and takes `ac_vLE` and `x_cg` from the module doc's zero
 /// findings (`x_cg` is the caller's `cg_x`, always `0.0`). Upstream reads the
@@ -375,7 +375,7 @@ fn taw_cnbeta(input: &StaticStabilityInput, vstab: &VerticalStabilizer) -> f64 {
         vstab.symmetric,
     );
     let x_v = vstab.wing.origin_x_m + dx_le;
-    // `vert.aerodynamic_center[0]` -- never populated (see the module doc).
+    // `vert.aerodynamic_center[0]`, never populated (see the module doc).
     let ac_vle = 0.0;
 
     let Some(fus) = input.fuselage else {
@@ -399,7 +399,7 @@ fn taw_cnbeta(input: &StaticStabilityInput, vstab: &VerticalStabilizer) -> f64 {
 
     let l_v = x_v + ac_vle - x_cg;
     // `datcom(vert, M)` reads the *extended* aspect ratio but the fin's own
-    // (unmodified) taper -- `extend_to_ref_area` does not touch `taper`.
+    // (unmodified) taper: `extend_to_ref_area` does not touch `taper`.
     let cla_v = datcom(
         extended_ar,
         vstab.wing.sweep_quarter_chord_rad,
@@ -439,7 +439,7 @@ pub fn static_stability(input: &StaticStabilityInput) -> StaticStabilityResult {
         input.mach,
     );
 
-    // `for surf in geometry.wings` -- main, horizontal stabilizer, vertical
+    // `for surf in geometry.wings`: main, horizontal stabilizer, vertical
     // stabilizer, in that order.
     let mut surfaces = vec![input.main_wing.wing, input.horizontal_stabilizer];
     if let Some(v) = &input.vertical_stabilizer {

@@ -5,7 +5,7 @@
 // Reference: alas @ rust-port-baseline.
 
 //! Trade map: cruise L/D vs resulting wing fuel-tank capacity, coloured by
-//! section thickness -- the two design levers the ranking blends, plotted
+//! section thickness: the two design levers the ranking blends, plotted
 //! directly as axes so the Pareto front is visible at a glance.
 
 use crate::chart_kit::{draw_colorbar, draw_legend, LegendMarker};
@@ -16,7 +16,7 @@ use alas_screen::AirfoilScreeningResult;
 
 use super::{mark_references, ok_candidates, refined_candidates, REFERENCE_MARKER_COLOR};
 
-/// Cruise L/D vs wing fuel-tank capacity, coloured by section thickness --
+/// Cruise L/D vs wing fuel-tank capacity, coloured by section thickness:
 /// `fig_trade_map`. Uses the 3-D L/D once any candidate was refined, else
 /// the 2-D proxy. `None` when screening found no usable candidate.
 pub fn fig_trade_map(result: &AirfoilScreeningResult, theme: Option<&str>) -> Option<Scene> {
@@ -46,7 +46,7 @@ pub fn fig_trade_map(result: &AirfoilScreeningResult, theme: Option<&str>) -> Op
 
     let pal = get_palette(theme);
     let mut scene = Scene::new(680.0, 440.0, Some(Color::from_hex(pal.bg)));
-    scene.title = Some("Trade map -- L/D vs fuel capacity".to_owned());
+    scene.title = Some("Trade map: L/D vs fuel capacity".to_owned());
 
     let (x_lo, x_hi) = padded_range(&xs, 0.08);
     let (y_lo, y_hi) = padded_range(&ys, 0.08);
@@ -85,7 +85,7 @@ pub fn fig_trade_map(result: &AirfoilScreeningResult, theme: Option<&str>) -> Op
         pal,
     );
 
-    // Top pick label -- `cands[0]` (result order is best-rank-first).
+    // Top pick label: `cands[0]` (result order is best-rank-first).
     let top_p = axes.map_point(xs[0], ys[0]);
     scene.add(SceneElement::Text {
         text: format!("{} (best)", cands[0].name),

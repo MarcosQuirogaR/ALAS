@@ -5,8 +5,8 @@
 //!
 //! A segment that does not converge, or that needs more than full throttle,
 //! is not a flown segment. Rather than propagating it, the flight replans
-//! the failed leg from the propulsion envelope -- a shallower climb, a slower
-//! cruise, a gentler descent -- closes the route distance again, and flies
+//! the failed leg from the propulsion envelope: a shallower climb, a slower
+//! cruise, a gentler descent: closes the route distance again, and flies
 //! once more, up to a bounded number of revisions. The same loop serves the
 //! dispatch closure, which flies the route at several takeoff masses, and
 //! the final flight the pipeline reports.

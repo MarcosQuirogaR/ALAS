@@ -53,7 +53,7 @@
       }
     },
     "asb_mesh": {
-      "description": "aerosandbox.geometry.wing.Wing.mesh_thin_surface (method='quad', add_camber=True) and Wing.mesh_line, on the same main_wing/vstab geometry gen_geom_asb_wing.py builds -- the meshing VortexLatticeMethod.run() performs on every wing, every VLM solve",
+      "description": "aerosandbox.geometry.wing.Wing.mesh_thin_surface (method='quad', add_camber=True) and Wing.mesh_line, on the same main_wing/vstab geometry gen_geom_asb_wing.py builds: the meshing VortexLatticeMethod.run() performs on every wing, every VLM solve",
       "generator": "gen_geom_asb_mesh.py",
       "runtime": "alas",
       "alas_commit": "7d1555c1f4db5110cf6cd187c156718e1a033b50",
@@ -79,7 +79,7 @@
       }
     },
     "builder": {
-      "description": "alas.geometry.aircraft_builder.AircraftBuilder(GeometryConfig()).build(dv=None, include_engines=...) -- the actual nominal aircraft, with every wing's full xsec/airfoil structure, every fuselage's xsec list, and the returned Airplane's reference quantities, for both include_engines=True and False",
+      "description": "alas.geometry.aircraft_builder.AircraftBuilder(GeometryConfig()).build(dv=None, include_engines=...): the actual nominal aircraft, with every wing's full xsec/airfoil structure, every fuselage's xsec list, and the returned Airplane's reference quantities, for both include_engines=True and False",
       "generator": "gen_geom_builder.py",
       "runtime": "alas",
       "alas_commit": "7d1555c1f4db5110cf6cd187c156718e1a033b50",

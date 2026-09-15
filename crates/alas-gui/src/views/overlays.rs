@@ -40,8 +40,8 @@ fn tr_fields(template: &str, fields: &[(&str, String)]) -> String {
 /// Render the boot splash while `boot_frames_remaining` is still counting down.
 ///
 /// The main three-stripe symbol and the smaller symbol/wordmark footer are
-/// positioned independently -- one centred in the full client area, the
-/// other anchored to the bottom with a consistent margin -- rather than as
+/// positioned independently (one centred in the full client area, the
+/// other anchored to the bottom with a consistent margin) rather than as
 /// one fused composite image, so each keeps sensible proportions as the
 /// window is resized instead of both clustering toward the top.
 pub fn show_splash(state: &mut AppState, ctx: &Context) {
@@ -313,6 +313,9 @@ fn walkthrough_panel_position(
 }
 
 /// Render the advanced walkthrough guide window, if it is open.
+/// Reading measure of the Advanced Walkthrough body.
+const GUIDE_MEASURE_WIDTH: f32 = 640.0;
+
 pub fn show_advanced_guide(state: &mut AppState, ctx: &Context) {
     if !state.show_advanced_guide {
         return;
@@ -347,13 +350,15 @@ pub fn show_advanced_guide(state: &mut AppState, ctx: &Context) {
                     ScrollArea::vertical()
                         .id_salt("guide_content")
                         .show(ui, |ui| {
-                            ui.heading(tr(chapter.title));
+                            ui.set_max_width(GUIDE_MEASURE_WIDTH);
+                            ui.label(RichText::new(tr(chapter.title)).strong().size(22.0));
+                            ui.label(RichText::new(tr(chapter.blurb)).italics());
                             for section in chapter.sections {
-                                ui.add_space(8.0);
-                                ui.label(RichText::new(tr(section.heading)).strong());
+                                ui.add_space(14.0);
+                                ui.label(RichText::new(tr(section.heading)).strong().size(16.0));
                                 for para in section.body {
-                                    ui.add_space(4.0);
-                                    ui.label(tr(para));
+                                    ui.add_space(6.0);
+                                    ui.add(egui::Label::new(tr(para)).wrap());
                                 }
                             }
                             ui.add_space(16.0);

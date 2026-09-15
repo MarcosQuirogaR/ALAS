@@ -89,13 +89,13 @@ pub fn parse_polar_summary(raw: &str) -> Result<HashMap<String, f64>, String> {
 ///
 /// For each occurrence of `" = "`, the key is the token immediately to its left
 /// (skipping intervening spaces, stopping at a space or newline) and the value
-/// the token immediately to its right, cast to `f64` with a NaN on failure --
+/// the token immediately to its right, cast to `f64` with a NaN on failure,
 /// exactly upstream's back-scan/forward-scan. Two faithful-translation notes,
 /// neither reachable from `mplot`'s summary: upstream keeps the *first* value
 /// for a repeated key only if asked (its default raises), and this keeps the
 /// first without raising, since the summary has no repeated key; and upstream's
 /// scan reads `s[-1]` (a Python wrap) if a delimiter has no token before it,
-/// where this stops at the string start instead -- the two agree on every line
+/// where this stops at the string start instead: the two agree on every line
 /// `mplot` actually emits, none of which is that malformed.
 pub fn parse_unformatted_data_output(input: &str) -> HashMap<String, f64> {
     const ID: &str = " = ";
@@ -196,10 +196,10 @@ pub fn parse_bl_dump(text: &str) -> BlDumpColumns {
 /// appends the three fields inside one `try`, so a partial parse could
 /// misalign the arrays; this keeps a row only when all three parse, which
 /// cannot differ on a flowfield dump (every data row is numeric in those three
-/// columns) -- the same translate-the-harmless-latent-bug call `CLAUDE.md`
+/// columns): the same translate-the-harmless-latent-bug call `CLAUDE.md`
 /// records for the reference's `mesh_line`.
-/// The columns of an `mplot` flowfield dump -- `x`, `y`, Mach and pressure
-/// coefficient per grid point -- and the offsets at which each structured
+/// The columns of an `mplot` flowfield dump (`x`, `y`, Mach and pressure
+/// coefficient per grid point) and the offsets at which each structured
 /// grid row starts.
 pub type FlowfieldColumns = (Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>, Vec<usize>);
 

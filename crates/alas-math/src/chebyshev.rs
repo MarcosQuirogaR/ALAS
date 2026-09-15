@@ -57,8 +57,8 @@ pub enum ChebyshevError {
     #[error("N = {0}, must be >= 2 to define a spectral interval")]
     TooFewNodes(i64),
     /// The `(N - 1) x (N - 1)` submatrix of `differentiation` could not be
-    /// inverted. Not expected to occur for the construction above -- it is
-    /// the classical, well-conditioned Chebyshev quadrature matrix -- but
+    /// inverted. Not expected to occur for the construction above (it is
+    /// the classical, well-conditioned Chebyshev quadrature matrix) but
     /// library code does not panic on a numerical surprise, so a caller sees
     /// this instead.
     #[error(
@@ -116,9 +116,9 @@ fn cosine_spaced_points(n: usize) -> Vec<f64> {
 
 /// The dense differentiation matrix for nodes `x`.
 ///
-/// Follows the source's exact sequence of operations -- weights, a pairwise
+/// Follows the source's exact sequence of operations (weights, a pairwise
 /// distance matrix with its diagonal forced away from zero, an
-/// elementwise divide, then a row-sum correction of the diagonal -- rather
+/// elementwise divide, then a row-sum correction of the diagonal) rather
 /// than a shorter but differently-ordered equivalent, so the two accumulate
 /// rounding error the same way.
 fn differentiation_matrix(x: &[f64]) -> Vec<Vec<f64>> {
@@ -162,7 +162,7 @@ fn differentiation_matrix(x: &[f64]) -> Vec<Vec<f64>> {
 ///
 /// Dropping the first row and column pins the integral's constant of
 /// integration to zero at `x[0]`, which is what makes the remaining
-/// `(N-1) x (N-1)` block invertible -- `differentiation` itself is singular,
+/// `(N-1) x (N-1)` block invertible: `differentiation` itself is singular,
 /// since differentiating any constant gives zero.
 fn integration_matrix(differentiation: &[Vec<f64>]) -> Result<Vec<Vec<f64>>, ChebyshevError> {
     let n = differentiation.len();
@@ -184,7 +184,7 @@ fn integration_matrix(differentiation: &[Vec<f64>]) -> Result<Vec<Vec<f64>>, Che
 
 /// Inverts a square matrix by Gauss-Jordan elimination with partial pivoting.
 ///
-/// `m` is small -- the caller uses it for `N - 1` up to 15 -- so a hand-rolled
+/// `m` is small (the caller uses it for `N - 1` up to 15) so a hand-rolled
 /// dense inverse is in scope; pulling in a linear-algebra crate for one-off
 /// inverses this size would be a larger dependency than the problem needs.
 fn invert(matrix: &[Vec<f64>]) -> Result<Vec<Vec<f64>>, ChebyshevError> {

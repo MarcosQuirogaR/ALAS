@@ -5,16 +5,16 @@
 //! be held to converge on each other.
 //!
 //! Both decks are produced here, from the same mesh, differing only where the
-//! two dialects genuinely differ -- which is the point, because a difference the
+//! two dialects genuinely differ, which is the point, because a difference the
 //! two solvers then report is one of *those* differences and nothing else. The
 //! shared bulk is emitted once, in fixed eight-column fields, and the [`Dialect`]
 //! selects the handful of cards that change:
 //!
 //! * **Executive and case control.** NASTRAN-95 opens `APP DISPLACEMENT` and
 //!   `SOL 1,1`/`SOL 3,1`; the modern deck is `SOL 101`/`SOL 103`.
-//! * **`PARAM,AUTOSPC`** is the integer `1` for NASTRAN-95 -- what gives its
+//! * **`PARAM,AUTOSPC`** is the integer `1` for NASTRAN-95: what gives its
 //!   `CQUAD4` the drilling stiffness that keeps the stiffness matrix
-//!   non-singular -- and `YES` for the modern solver.
+//!   non-singular, and `YES` for the modern solver.
 //! * **`RBE3` is `CRBE3`** in NASTRAN-95: the same element, the same fields,
 //!   a different name, as that solver's own manual documents.
 //! * **The eigensolver.** The modern `EIGRL` extracts the lowest modes of a

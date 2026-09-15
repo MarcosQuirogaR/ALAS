@@ -6,7 +6,7 @@
 //! caller.
 //!
 //! [`solve`] began inside `bspline.rs`, written against that module's own
-//! collocation systems -- a few tens of rows, and banded, since a B-spline's
+//! collocation systems: a few tens of rows, and banded, since a B-spline's
 //! basis functions are locally supported. [`crate::BicubicSpline`] took it as
 //! a second, in-crate caller without moving it, since both lived in the same
 //! crate already. `alas-aero::vlm`'s AIC matrix is a third caller, and not
@@ -29,15 +29,15 @@
 //! that dominates the full analysis. `faer` is a kernel of that class in pure
 //! Rust: blocked LU with partial pivoting, SIMD inner kernels, and a rayon
 //! pool for the trailing update. It picks the same pivots partial pivoting
-//! always picks -- the largest magnitude in the column -- so results agree
+//! always picks (the largest magnitude in the column) so results agree
 //! with the previous elimination to rounding, well inside the `linalg`
 //! parity tier.
 //!
 //! # Factor once, solve many
 //!
 //! [`LuFactorization`] exists because a caller that changes only the
-//! right-hand side -- a polar sweep over angle of attack, where the influence
-//! matrix depends on geometry alone -- should pay the O(n^3) factorization
+//! right-hand side: a polar sweep over angle of attack, where the influence
+//! matrix depends on geometry alone, should pay the O(n^3) factorization
 //! once and the O(n^2) substitution per point. [`solve`] and
 //! [`solve_with_diagnostics`] are the one-shot form over the same kernel.
 //!
@@ -54,7 +54,7 @@
 //! faer's default is to spread the trailing update over a rayon pool. On a
 //! 16-thread desktop that was measured slower than the sequential kernel at
 //! every size this program factors (n = 200: 3.3 ms against 0.42 ms;
-//! n = 800: 25 ms against 12 ms; 2026-09-11) -- the matrices are too small
+//! n = 800: 25 ms against 12 ms; 2026-09-11): the matrices are too small
 //! for the fork/join to pay for itself, and callers already parallelize
 //! above this level (the screening's candidates, the optimizers' batches).
 //! The kernel is therefore pinned to [`faer::Par::Seq`] once, before the
@@ -220,7 +220,7 @@ impl LuFactorization {
     }
 
     /// Solve `A X = B` for a many-columned `b`, given and returned as `n`
-    /// rows of `k` entries -- the layout [`solve`] takes.
+    /// rows of `k` entries: the layout [`solve`] takes.
     pub fn solve_columns(&self, b: &[Vec<f64>]) -> (Vec<Vec<f64>>, SolveDiagnostics) {
         let n = self.dimension();
         let k = b.first().map_or(0, Vec::len);
@@ -293,7 +293,7 @@ pub fn solve_with_diagnostics(
 /// Solve `a * result = b` for a square `a` and a many-columned `b`. The
 /// error is the elimination step that found no usable pivot.
 ///
-/// General dense LU, with no assumption of bandedness or a particular size --
+/// General dense LU, with no assumption of bandedness or a particular size:
 /// the two conditions its first caller's collocation systems happened to
 /// satisfy, but which nothing in this implementation relies on.
 pub fn solve(a: &[Vec<f64>], b: &[Vec<f64>]) -> Result<Vec<Vec<f64>>, usize> {

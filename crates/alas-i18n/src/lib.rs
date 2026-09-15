@@ -22,13 +22,13 @@
 //! The reference implementation keeps the active language in a
 //! `contextvars.ContextVar`. Its sidecar serves HTTP requests concurrently on
 //! worker threads and renders figures from a thread pool, and a `ContextVar`
-//! gives each request's call graph its own value -- inherited by whatever it
-//! spawns -- without every request racing over one process-wide setting.
+//! gives each request's call graph its own value: inherited by whatever it
+//! spawns, without every request racing over one process-wide setting.
 //!
 //! This workspace has no request, or worker-thread pool to route a value
 //! through yet: the desktop interface and the pipeline that would eventually
 //! drive one are both still unbuilt (`docs/PORTING.md`). What carries over is
-//! the reason a bare global was wrong upstream, not the mechanism -- two units
+//! the reason a bare global was wrong upstream, not the mechanism, two units
 //! of concurrent work must not see each other's language. [`std::thread_local!`]
 //! gives every OS thread its own cell, which is that same guarantee restated
 //! for the unit of concurrency this program has today (a thread) instead of
@@ -42,7 +42,7 @@
 //!
 //! A catalog is one language's string table: English source text mapped to
 //! its translation. [`register_catalog`] is the only way one is installed,
-//! and nothing in this crate calls it -- the Spanish catalog (ported from
+//! and nothing in this crate calls it: the Spanish catalog (ported from
 //! `alas/translations/es.py` as `alas_i18n::es`, tracked separately in
 //! `docs/PORTING.md`) is expected to call it once, when it exists. Until it
 //! does, or for any language a catalog does not cover an entry for, [`t`]
@@ -64,7 +64,7 @@ pub const DEFAULT_LANGUAGE: &str = "en";
 /// [`DEFAULT_LANGUAGE`].
 pub const SUPPORTED_LANGUAGES: [&str; 2] = ["en", "es"];
 
-/// Map anything a caller might send -- `"es-ES"`, `"ES"`, `"es_MX"`, absent --
+/// Map anything a caller might send: `"es-ES"`, `"ES"`, `"es_MX"`, absent:
 /// onto a supported code, falling back to [`DEFAULT_LANGUAGE`] rather than
 /// rejecting it.
 ///
@@ -130,7 +130,7 @@ pub(crate) fn reset_registry_for_test() {
 /// Install `entries` as the string table for `lang`, replacing whatever was
 /// registered for it before.
 ///
-/// This is the plug-in point a catalog module calls at startup -- `alas-i18n`
+/// This is the plug-in point a catalog module calls at startup: `alas-i18n`
 /// itself never calls it, which is what lets it build and pass its tests with
 /// no Spanish catalog present at all. See the module doc.
 pub fn register_catalog<I>(lang: &str, entries: I)
@@ -177,7 +177,7 @@ fn translated(lang: &str, text: &str) -> Option<String> {
 /// treatment of `None`/`""` as nothing to translate. Otherwise the text comes
 /// back unchanged for [`DEFAULT_LANGUAGE`], and for any other language it is
 /// looked up in that language's catalog and returned as-is if the catalog is
-/// absent or has no entry for it -- a partial catalog is therefore always
+/// absent or has no entry for it: a partial catalog is therefore always
 /// safe to ship, and a newly written English string shows up untranslated
 /// instead of missing.
 ///

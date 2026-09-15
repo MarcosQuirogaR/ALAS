@@ -20,7 +20,7 @@ use std::f64::consts::PI;
 // figure_landing_gear_planform
 // ---------------------------------------------------------------------------
 
-/// The fill color for one gear group -- upstream's `group_colors.get(...,
+/// The fill color for one gear group: upstream's `group_colors.get(...,
 /// "#9b59b6")`.
 pub(super) fn gear_color(strut_label: &str) -> &'static str {
     match strut_label {
@@ -53,7 +53,7 @@ pub(super) fn ellipse_polygon(
         .collect()
 }
 
-/// Top-down planform view of the aircraft with the sized landing gear --
+/// Top-down planform view of the aircraft with the sized landing gear:
 /// `figure_landing_gear_planform`. Every wheel is drawn individually (NLG
 /// vs. MLG-L/R/Body distinguished by color) at its real position and true
 /// tire size, over the wing/fuselage outline; nose at the top, matching
@@ -96,7 +96,7 @@ pub fn figure_landing_gear_planform(
         fus.xsecs.iter().map(|s| s.width).fold(f64::MIN, f64::max)
     };
 
-    // Aerodynamic (gear-independent) CG limits -- the same worst-case loads
+    // Aerodynamic (gear-independent) CG limits: the same worst-case loads
     // the optimizer's CG check sizes the gear against.
     let sm_val = if report.static_margin.is_nan() {
         0.10

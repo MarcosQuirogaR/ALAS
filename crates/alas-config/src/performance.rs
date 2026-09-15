@@ -46,14 +46,14 @@ pub struct PerformanceConfig {
     /// Maximum lift coefficient with the high-lift system stowed.
     #[config(
         label = "Max lift coefficient, clean (CLmax_clean)",
-        help = "Maximum lift coefficient in clean (flaps/slats up) configuration -- the true aerodynamic stall limit used for the V-n diagram's stall boundary, distinct from the flaps-down CLmax_TO/CLmax_L above."
+        help = "Maximum lift coefficient in clean (flaps/slats up) configuration: the true aerodynamic stall limit used for the V-n diagram's stall boundary, distinct from the flaps-down CLmax_TO/CLmax_L above."
     )]
     pub cl_max_clean: f64,
 
     /// Most negative lift coefficient the clean wing reaches.
     #[config(
         label = "Min lift coefficient, clean (CLmin_clean)",
-        help = "Most negative (inverted-flight) lift coefficient in clean configuration -- the negative stall boundary on the V-n diagram."
+        help = "Most negative (inverted-flight) lift coefficient in clean configuration: the negative stall boundary on the V-n diagram."
     )]
     pub cl_min_clean: f64,
 
@@ -200,7 +200,7 @@ pub struct PerformanceConfig {
     /// How finely the matching chart's constraint curves are drawn.
     #[config(
         label = "Matching chart plot resolution",
-        help = "Number of wing-loading points swept when drawing the matching-chart constraint curves (Results -> Matching Chart). Purely a plotting resolution knob -- higher gives smoother curves at extra compute cost. Not part of the Performance preset (it isn't a physical assumption)."
+        help = "Number of wing-loading points swept when drawing the matching-chart constraint curves (Results -> Matching Chart). Purely a plotting resolution knob: higher gives smoother curves at extra compute cost. Not part of the Performance preset (it isn't a physical assumption)."
     )]
     pub matching_chart_resolution: i64,
 }

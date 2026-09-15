@@ -151,6 +151,13 @@ the full flag list — it includes `--no-optimize`, `--no-mission`,
 The built executable lands at `target\release\alas.exe` and is standalone —
 copy it anywhere, no installation, no Python.
 
+On Windows, every solver ALAS launches (AVL, VSPAERO, MSES, OpenVSP, NASTRAN,
+Patran, FLOWUnsteady) is placed in a kill-on-close Job Object owned by the
+ALAS process, so ending ALAS from Task Manager, or a crash, ends those solvers
+and anything they started. Task Manager lists them under their own executable
+names; the Run Log records each launch with its PID and the ALAS task behind
+it. Viewers opened on results, such as ParaView, are not owned and stay open.
+
 ---
 
 ## Regenerating reference data

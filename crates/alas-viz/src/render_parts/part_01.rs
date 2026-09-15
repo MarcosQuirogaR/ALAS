@@ -390,6 +390,44 @@ impl<'a> EguiBackend<'a> {
                     *bold,
                 );
             }
+            SceneElement::TextBlock {
+                text,
+                pos,
+                width,
+                font_size,
+                color,
+                bold,
+            } => self.draw_text_block(text, *pos, *width, *font_size, *color, *bold),
+        }
+    }
+
+    /// Lay out a paragraph with the context's real glyph metrics, wrapped to
+    /// the block width in screen pixels, so it never extends past its box
+    /// however the scene is scaled into the card.
+    fn draw_text_block(
+        &mut self,
+        text: &str,
+        pos: Point2D,
+        width: f64,
+        font_size: f64,
+        color: Color,
+        bold: bool,
+    ) {
+        let color = to_egui_color(&color);
+        let font_id = FontId::new(
+            self.screen_font_size(font_size) as f32,
+            FontFamily::Proportional,
+        );
+        let wrap_width = (width.max(0.0) as f32 * self.transform.scale).max(1.0);
+        let galley = self
+            .context
+            .fonts(|fonts| fonts.layout(text.to_owned(), font_id.clone(), color, wrap_width));
+        let text_shape = TextShape::new(self.transform.to_screen(pos), galley, color);
+        self.shapes.push(Shape::Text(text_shape.clone()));
+        if bold {
+            let mut weight = text_shape;
+            weight.pos += vec2(0.35, 0.0);
+            self.shapes.push(Shape::Text(weight));
         }
     }
 

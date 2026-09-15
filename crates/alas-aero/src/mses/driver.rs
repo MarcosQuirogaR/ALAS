@@ -9,14 +9,14 @@
 
 //! The [`Mses`] driver: mesh once, solve each angle in turn, read the result.
 //!
-//! This reproduces native aerodynamic model's `MSES.run` loop -- generate a mesh with
+//! This reproduces native aerodynamic model's `MSES.run` loop: generate a mesh with
 //! `mset` at the first angle, then for each angle write the `mses.case` deck,
 //! run `mses`, and if it converged dump the summary with `mplot` and parse it.
 //! A non-converged angle reinitializes the mesh at the next angle and moves on,
 //! upstream's `behavior_after_unconverged_run="reinitialize"` default. The
 //! solve continues from the previous converged state within one sweep (the
 //! working directory keeps the flow solution between angles), which is why a
-//! swept angle and the same angle solved alone can differ -- and why the driver
+//! swept angle and the same angle solved alone can differ, and why the driver
 //! must keep one working directory for the whole sweep.
 //!
 //! native aerodynamic model's `run` ends by popping `"Ma"` out of its accumulated results,

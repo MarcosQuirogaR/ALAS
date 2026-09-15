@@ -9,6 +9,8 @@
 
 #[path = "surface_native.rs"]
 mod surface_native;
+#[cfg(test)]
+pub(crate) use surface_native::integrate;
 
 use serde::{Deserialize, Serialize};
 use std::error::Error;

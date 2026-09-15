@@ -445,7 +445,7 @@ mod tests {
             "  Tapas de larguero: 5,470 kg"
         );
         assert_eq!(
-            localize_scene_text("Landing Gear Planform -- NLG: 2xHeavy"),
+            localize_scene_text("Landing Gear Planform: NLG: 2xHeavy"),
             "Planta del tren de aterrizaje: NLG: 2xHeavy"
         );
     }

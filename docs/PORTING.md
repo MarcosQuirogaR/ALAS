@@ -162,8 +162,8 @@ since its stations are derived from the nacelle length rather than stored.
 dataclass at run time to build the form description. Doing it at expansion
 time instead means a field that says nothing about itself does not compile,
 which is the rule CONTRIBUTING.md states and which the reference had no way to
-enforce. A good many of the reference's fields are in exactly that state --
-the whole of `MissionProfileConfig`, most of `PropulsionCycleConfig` -- and
+enforce. A good many of the reference's fields are in exactly that state:
+the whole of `MissionProfileConfig`, most of `PropulsionCycleConfig`, and
 this port supplies their explanations. That adds prose and changes no value,
 and the parity test is written accordingly: `label` is compared always, including
 where it was derived from the field name, and `help` only where the dataclass
@@ -182,8 +182,8 @@ through `OptionSource` and a crate that can see both resolves it. The parity
 test checks the lists this crate can resolve and defers the rest to where the
 resolution happens.
 
-The three named-preset registries -- `::solver_presets`,
-`::performance_presets`, `::fidelity_presets` -- stay code rather than
+The three named-preset registries (`::solver_presets`,
+`::performance_presets`, `::fidelity_presets`) stay code rather than
 becoming data, unlike the three tables above. Each entry is one configuration
 struct with a handful of fields overridden, so as data it would be a document
 that had to repeat every field it did not change or invent a patch format;
@@ -196,7 +196,7 @@ else.
 
 `deviation-candidate` at that boundary: `fidelity_presets` states that it is
 scoped to three fields of `AnalysisConfig` precisely so that asking for a
-finer mesh cannot clobber an assumption the user has tuned -- and then hands
+finer mesh cannot clobber an assumption the user has tuned, and then hands
 its consumer the whole struct, which clobbers them. The two are consistent
 today only because every preset leaves the other sixteen fields at their
 defaults, which `parity_presets.rs` and a unit test both check. The port
@@ -204,7 +204,7 @@ reproduces what the registry holds and does not decide the question; whoever
 writes the consumer does.
 
 `alas-config::geometry` hides its engine group from the generated form, as
-upstream does -- the engine has a dedicated editor, and two forms writing the
+upstream does: the engine has a dedicated editor, and two forms writing the
 same fields is how the two come to disagree. That leaves thirteen fields no
 type in the fixture would otherwise describe, so `EngineConfig` is captured as
 a fixture entry of its own rather than left unverified: a label or a unit
@@ -215,7 +215,7 @@ defaults are the GE9X entry of the engine table written out longhand, because
 a bare `EngineConfig` exists before anything has selected an engine and has to
 answer a request for thrust with a real number. The written-out nacelle
 silhouette is the same shape as the one selecting GE9X produces, rounded to a
-decimetre -- the table's stations are fractions of the nacelle length (0.624 m,
+decimetre: the table's stations are fractions of the nacelle length (0.624 m,
 1.17 m) and the fallback carries them rounded (0.6 m, 1.2 m). Same overall
 length, same radius fractions, so the two draw the same nacelle; a unit test
 states the bound rather than asserting an equality that does not hold.
@@ -233,8 +233,8 @@ looking for and how hard it looks, as two nested groups of one
 `OptimizerConfig`. Its `ObjectiveWeights` is where the reference's rule for
 offering a positive real as a ratio slider actually bites: the rule keys off
 the field's name ending in `_scale`, `_per_m`, `_weight`, `_floor`, `_cost` or
-`_floor_m`, and four of the fields it catches -- `thickness_floor`,
-`fuselage_floor_m`, `failure_cost` and `instability_failure_cost` -- are
+`_floor_m`, and four of the fields it catches (`thickness_floor`,
+`fuselage_floor_m`, `failure_cost` and `instability_failure_cost`) are
 physical thresholds and flat costs rather than relative weights, so a slider
 whose position means nothing on its own is the wrong control for them.
 Reproduced rather than corrected; `deviation-candidate`.
@@ -332,15 +332,15 @@ chordwise offset by section twist, matching an acknowledged upstream omission.
 
 `alas-geom::asb::wing`'s `mean_sweep_angle` and `control_surface_area`, and
 `alas-geom::asb::fuselage`'s `area_wetted`, were added when `alas-mass::torenbeek`
-(below) reached them -- this row's scope grew to match, and its fixture is
+(below) reached them; this row's scope grew to match, and its fixture is
 unchanged since the geometry it already covers exercises the same wings and
 fuselage these methods run on.
 
 `alas-geom::asb::mesh` stays `todo` and does not block phase P4 opening. A
 prior grep of the whole `alas/` package found exactly two AeroSandbox meshing
-entry points this program ever calls onto a `Wing`/`Fuselage` --
+entry points this program ever calls onto a `Wing`/`Fuselage`:
 `mesh_thin_surface` (bucketing a VLM run's own output for a span-loading
-plot) and `draw_wireframe` (3D preview) -- and both call sites live in
+plot) and `draw_wireframe` (3D preview), and both call sites live in
 `alas/reporting/visualization.py` and `alas/sidecar/figures.py`, i.e. P11
 (Figures), which opens only after P10. Nothing in P4 through P9 reaches this
 row, so it is left `todo` here rather than pulled forward; whoever starts
@@ -432,14 +432,14 @@ P14 study, not a translation decision.
 | — | — | `alas-prop::suave_turbofan` | SUAVE, LGPL-2.1 | `closed` | todo |
 
 `alas-mass::torenbeek` is scoped to the two entry points `alas/physics/mass.py`
-(not yet ported) calls: `mass_wing` -- which itself composes three private
+(not yet ported) calls: `mass_wing`, which itself composes three private
 helpers, `mass_wing_high_lift_devices`, `mass_wing_basic_structure` and
 `mass_wing_spoilers_and_speedbrakes`, all translated as part of that
-computation -- and `mass_fuselage_simple`. A grep of the whole `alas/`
+computation, and `mass_fuselage_simple`. A grep of the whole `alas/`
 package, not only `mass.py`, found no other caller. Left untranslated:
 `mass_wing_simple` (a cruder wing weight model, superseded everywhere by the
 Appendix C method this module implements), `mass_fuselage` (dead code
-upstream -- it raises `NotImplementedError` partway through, after
+upstream; it raises `NotImplementedError` partway through, after
 referencing `S_g`, `W_str` and `W_fr`, none of which it ever assigns; not a
 `deviation-candidate`, since there is no behaviour to reproduce from code that
 cannot run), and `mass_propeller` (unused; this program's engines are
@@ -455,7 +455,7 @@ This row also adds `Wing::mean_sweep_angle`, `Wing::control_surface_area` and
 previously out of that row's scope. `control_surface_area` always returns
 `0.0`: this crate's `WingXSec` carries no `control_surfaces` field at all
 (`alas-geom::asb::wing`'s own module doc), so upstream's summing loop is
-always empty on every wing this program builds -- confirmed against the
+always empty on every wing this program builds: confirmed against the
 fixture, where every AeroSandbox-side `mass_wing_high_lift_devices` case
 also computes zero for the same reason.
 
@@ -463,7 +463,7 @@ also computes zero for the same reason.
 things and only two of them have landed. `alas-payload::geometry`
 (`DeckSpec`, `CabinGeometry`) and `alas-payload::oew` (`oew_and_cg`) are
 translated and compared against `golden/payload/layout.json` by
-`tests/parity_geometry.rs` -- the deck table at `exact`, since those fractions
+`tests/parity_geometry.rs`: the deck table at `exact`, since those fractions
 are transcribed constants, and every sampler at `closed`.
 `alas-payload::layout` (`DeckItem`, `PayloadLayout`) is the vocabulary both
 engines produce and carries unit tests but no parity of its own, since nothing
@@ -477,9 +477,9 @@ already records what the reference produces for all three modules: the cabin
 frame on four fuselages, the *entire item sequence and summary* of seventeen
 passenger and freighter layouts, `simulate_passenger_counts` across the shipped
 class mixes, and every branch of `apply_cabin_preset`. The item list is
-recorded in placement order because a layout is a sequence -- two
-implementations that place the same items in a different order have not agreed
--- and the cases were chosen to reach the branches that are invisible from the
+recorded in placement order because a layout is a sequence, two
+implementations that place the same items in a different order have not agreed,
+and the cases were chosen to reach the branches that are invisible from the
 totals: the exit-derived capacity ceiling binding before the floor does, the
 monument count exceeding the bay count so `_stack_y` narrows rather than
 overlaps, the bulk-overflow guard, all four cargo loading strategies, and a
@@ -492,7 +492,7 @@ two `Dict`s, which makes upstream's "a component has a mass and no coordinate"
 branch unreachable by construction instead of incidentally: all three callers
 pass `calculate_component_masses` and `define_mass_coordinates` together and
 those always populate the same ten names. The negative-mass guard is kept,
-because that one *is* reachable -- an empirical weight correlation on a
+because that one *is* reachable: an empirical weight correlation on a
 degenerate candidate can go below zero, and the optimizer evaluates those.
 And `alas-payload::numeric` reproduces CPython's float `//` and `round` and
 NumPy's `interp` from those implementations' own sources rather than from
@@ -515,7 +515,7 @@ because the upstream aerodynamic centre is left at the origin.
 input of which already exists in P4: `density_ratio`, the four matching-chart
 constraint curves, `build_matching_chart`, the FAR-25 V-speed schedule
 (`compute_v_speeds`), `compute_field_performance`, `breguet_range_m` and
-`build_vn_diagram`. All agree at `closed` -- the `asb.Atmosphere(...)` calls
+`build_vn_diagram`. All agree at `closed`: the `asb.Atmosphere(...)` calls
 map to `Atmosphere::new`, the same fitted model `alas-prop::cycle` already
 rides at this tier, and everything else is algebra over its result. Two
 faithful-translation details are recorded in the code: `density_ratio` uses a
@@ -688,8 +688,8 @@ altitudes, and that is what `alas/physics/propulsion.py`,
 construct. It is not a refinement of the closed form: over 0-25 km it
 disagrees with the ISA by up to 1.1% in temperature, 0.4% in density and
 0.6% in the speed of sound. Substituting `alas-atmo::isa` wherever upstream
-wrote the default -- which is what a reader who knew only that this program
-uses "the standard atmosphere" would do -- puts every P4 through P7 result
+wrote the default, which is what a reader who knew only that this program
+uses "the standard atmosphere" would do: puts every P4 through P7 result
 nine orders of magnitude outside its own tier before any physics happens.
 
 Reproducing it needed a spline this project did not have. `alas-math::spline`
@@ -712,7 +712,7 @@ gets re-argued later:
 
 *The tier is `linalg`, not `closed`.* Every case in the fixture in fact agrees
 to better than 1e-12, which is what keeps `closed` reachable for the
-disciplines built on top of it -- but a tier states what the construction is,
+disciplines built on top of it, but a tier states what the construction is,
 and this one is a spline fit through a solve, which is the case the tier table
 names outright. A grid spanning seven million metres is not a place to bet on
 the last two digits surviving another platform's `pow`.
@@ -720,9 +720,9 @@ the last two digits surviving another platform's `pow`.
 *The altitude grid is compared at two tiers.* It is computed here from
 upstream's construction (a hand-picked list plus two geometric fans) rather
 than transcribed as thirty-eight literals, so that what it is stays legible.
-Thirty-seven of the thirty-eight are bit-identical to NumPy's. One --
+Thirty-seven of the thirty-eight are bit-identical to NumPy's. One:
 418,445.4 m, a knot 400 km up that exists only to keep an optimizer's
-gradients finite -- lands one ulp away, because `10**x` is evaluated by two
+gradients finite: lands one ulp away, because `10**x` is evaluated by two
 different libm implementations. The altitudes upstream *assigns* (the
 hand-picked list, and each fan's endpoints, which `geomspace` overwrites after
 its logarithmic pass) are still compared at `exact`; the interior fan points
@@ -743,8 +743,8 @@ longer being made. Its fixture's verdicts are unchanged, which
 workspace, so the edge introduces no layering.
 
 `alas-units` is compared at `closed` rather than `exact`, which its row would
-otherwise call for. Its values are written as the exact legal definitions --
-the international yard and pound, standard gravity -- while SUAVE reaches
+otherwise call for. Its values are written as the exact legal definitions:
+the international yard and pound, standard gravity; while SUAVE reaches
 several of the same quantities by division: its inch is a twelfth of its foot,
 which lands one bit away from 0.0254. Every factor agrees to within two ulps.
 
@@ -757,6 +757,6 @@ once.
 One finding from generating that fixture, recorded because it would be an
 expensive thing to assume: SUAVE's unit table reads the name `g` as a gram,
 not as gravitational acceleration. Nothing this program calls asks it for
-gravity -- the only use is an emission index in grams per kilogram, on a path
-that is never taken -- but a translator who assumed otherwise would be wrong by
+gravity (the only use is an emission index in grams per kilogram, on a path
+that is never taken) but a translator who assumed otherwise would be wrong by
 four orders of magnitude.

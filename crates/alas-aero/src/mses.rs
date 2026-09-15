@@ -8,9 +8,9 @@
 //! on the optimized design's root section for the model-comparison view.
 //!
 //! MSES (Mark Drela, MIT) is an external compiled tool, not a library. This
-//! module drives it the way `alas/physics/mses_analysis.py` does -- through
+//! module drives it the way `alas/physics/mses_analysis.py` does: through
 //! native aerodynamic model's own `mset`/`mses`/`mplot` keystroke choreography, reproduced
-//! here in [`driver::Mses`] -- and it is P9 rather than P5 for that reason: the
+//! here in [`driver::Mses`], and it is P9 rather than P5 for that reason: the
 //! numbers come out of a binary, not out of arithmetic this crate performs.
 //! The `exact` tier holds because MSES is deterministic: an identical mesh and
 //! `mses.case` deck produce byte-identical output, so a Rust-built deck driving

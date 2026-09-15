@@ -14,7 +14,7 @@
 //!
 //! Zero means "work it out" for every position field: a door position of zero
 //! is not a door at the nose, it is a door the layout places. That convention
-//! is upstream's and is reproduced, including its one sharp edge -- a target
+//! is upstream's and is reproduced, including its one sharp edge: a target
 //! centre of gravity at or below zero means the centre of the envelope, so
 //! there is no way to ask for a trim point at the datum itself.
 //!
@@ -37,7 +37,7 @@ pub struct CargoDeckConfig {
 
     /// Which container the main deck is loaded with.
     #[config(
-        help = "Unit load device code for the main deck -- the pallets and boxes a freighter's main deck takes, which are far larger than anything that fits a lower hold."
+        help = "Unit load device code for the main deck: the pallets and boxes a freighter's main deck takes, which are far larger than anything that fits a lower hold."
     )]
     pub main_deck_uld: String,
 

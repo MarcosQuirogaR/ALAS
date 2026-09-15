@@ -39,7 +39,7 @@ pub struct MassModelConfig {
         advanced,
         options = MassArchitecture,
         label = "Mass architecture",
-        help = "The one method that owns every mass group. 'Pure FLOPS transport v1' is the product model: the NASA FLOPS conventional-transport equations own the wing, tails, fuselage, gear, nacelles, propulsion, systems, furnishings and operating items, and a missing input is reported rather than replaced. 'Legacy reference-compatible comparison' is the frozen Torenbeek/fraction buildup, kept only as a comparison and regression control -- nothing falls back to it."
+        help = "The one method that owns every mass group. 'Pure FLOPS transport v1' is the product model: the NASA FLOPS conventional-transport equations own the wing, tails, fuselage, gear, nacelles, propulsion, systems, furnishings and operating items, and a missing input is reported rather than replaced. 'Legacy reference-compatible comparison' is the frozen Torenbeek/fraction buildup, kept only as a comparison and regression control, nothing falls back to it."
     )]
     pub mass_architecture: MassArchitecture,
 
@@ -166,7 +166,7 @@ pub struct MassModelConfig {
     #[config(
         label = "Payload linear density",
         unit = "kg/m",
-        help = "How much payload mass occupies one metre of cabin length. Used only to derive the payload/systems CG position (the occupied cabin length), not the payload mass itself -- so stretching the fuselage beyond what the payload needs doesn't shift the CG aft 'for free'."
+        help = "How much payload mass occupies one metre of cabin length. Used only to derive the payload/systems CG position (the occupied cabin length), not the payload mass itself, so stretching the fuselage beyond what the payload needs doesn't shift the CG aft 'for free'."
     )]
     pub cabin_payload_density_kg_m: f64,
 
@@ -189,21 +189,21 @@ pub struct MassModelConfig {
     /// Most weight the nose gear is rated to carry.
     #[config(
         label = "Max nose-gear load fraction",
-        help = "Maximum fraction of total aircraft weight the nose gear is rated to carry -- sets the 'NLG Max Strength' CG-envelope boundary."
+        help = "Maximum fraction of total aircraft weight the nose gear is rated to carry: sets the 'NLG Max Strength' CG-envelope boundary."
     )]
     pub pct_load_nlg_max: f64,
 
     /// Most weight the main gear is rated to carry.
     #[config(
         label = "Max main-gear load fraction",
-        help = "Maximum fraction of total aircraft weight the main gear is rated to carry -- sets the 'MLG Max Strength' CG-envelope boundary."
+        help = "Maximum fraction of total aircraft weight the main gear is rated to carry: sets the 'MLG Max Strength' CG-envelope boundary."
     )]
     pub pct_load_mlg_max: f64,
 
     /// Least weight the nose gear needs for steering authority.
     #[config(
         label = "Min nose-gear load fraction",
-        help = "Minimum fraction of weight that must be on the nose gear for adequate steering authority -- sets the 'Min Nose Load' CG-envelope boundary (the aft-most safe CG at each weight)."
+        help = "Minimum fraction of weight that must be on the nose gear for adequate steering authority: sets the 'Min Nose Load' CG-envelope boundary (the aft-most safe CG at each weight)."
     )]
     pub pct_load_nlg_min: f64,
 
@@ -393,7 +393,7 @@ impl MassModelConfig {
     /// the file actually asked for; a hybrid selection names no architecture
     /// and is migrated to pure FLOPS rather than silently reconstructed as
     /// one of its halves. The returned record is the thing a user interface
-    /// or an export shows -- this migration changes operating empty mass and
+    /// or an export shows; this migration changes operating empty mass and
     /// must not be invisible.
     pub fn normalize_architecture(&mut self) -> MassArchitectureMigration {
         let migration = if self.schema_version >= MASS_MODEL_SCHEMA_VERSION {
@@ -513,7 +513,7 @@ mod tests {
     fn a_unit_the_field_name_cannot_express_is_stated_explicitly() {
         // `_kg_m3` is not one of the recognized suffixes and `_ms` is not
         // `_m_s`, so both of these would derive nothing without the explicit
-        // unit -- and a density shown without one is a number nobody can
+        // unit, and a density shown without one is a number nobody can
         // check.
         let schema = MassModelConfig::default().schema();
         assert_eq!(schema.field("fuel_density_kg_m3").unwrap().unit, "kg/m^3");

@@ -9,6 +9,7 @@
 //! [`cli`] ports `alas/cli.py`: command-line argument parsing and headless workflow dispatch.
 
 pub mod cli;
+pub mod config_load;
 pub mod paths;
 
 pub use cli::{load_config, parse_args, run_cli, CliArgs};

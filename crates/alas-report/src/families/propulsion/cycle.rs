@@ -179,14 +179,14 @@ pub fn figure_engine_designer_preview(config: &AlasConfig, theme: Option<&str>) 
     scene
 }
 
-/// Text lines for the on-design cycle summary panel -- shared by
+/// Text lines for the on-design cycle summary panel: shared by
 /// [`figure_propulsion_cycle_summary`] (wide, `verbose = true`) and
 /// [`figure_engine_designer_preview`] (compact, `verbose = false`), matching
 /// `_propulsion_cycle_summary_lines`'s reason for existing: the two can never
 /// silently drift into showing different numbers for the same design.
 ///
 /// Upstream's docstring says `verbose = False` also drops "the
-/// per-efficiency-term breakout lines" -- but the function body only ever
+/// per-efficiency-term breakout lines", but the function body only ever
 /// guards the fuel-air-ratio line with `if verbose:`; the three efficiency
 /// lines are unconditional in both callers. Reproduced as written, not as
 /// documented.
@@ -272,7 +272,7 @@ fn propulsion_cycle_summary_lines(
 
 /// Nacelle silhouette: mirrored top/bottom edges through `nacelle_profile`'s
 /// control points, filled between, with each control point marked and
-/// annotated -- ported from `figure_engine_designer_preview`'s `ax_nacelle`
+/// annotated: ported from `figure_engine_designer_preview`'s `ax_nacelle`
 /// block. No `set_aspect("equal")` primitive exists here, so the axes rect is
 /// sized to match the data's own aspect ratio instead, which reads the same.
 fn draw_nacelle_silhouette(scene: &mut Scene, pal: &Palette, eng: &EngineConfig) {
@@ -513,7 +513,7 @@ mod tests {
         assert!(verbose.iter().any(|l| l.contains("Fuel-air ratio")));
         assert!(!compact.iter().any(|l| l.contains("Fuel-air ratio")));
         // The efficiency lines are unconditional in both, per the upstream
-        // function body (not its docstring) -- see this module's own note.
+        // function body (not its docstring), see this module's own note.
         for eff in [
             "Thermal efficiency",
             "Propulsive efficiency",

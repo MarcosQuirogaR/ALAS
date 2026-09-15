@@ -73,7 +73,7 @@ impl SectionMap {
 
 /// Fills and strokes that stay semantic across themes.
 ///
-/// Component colour carries meaning here -- class, ULD, structure, lining -- so
+/// Component colour carries meaning here (class, ULD, structure, lining) so
 /// it does not follow the palette. What follows the palette is the page: the
 /// background, the text, and the interior tone the drawing sits on.
 struct SectionInk {

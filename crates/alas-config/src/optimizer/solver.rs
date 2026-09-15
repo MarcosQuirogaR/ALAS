@@ -69,7 +69,7 @@ pub struct SolverSettings {
     #[config(
         options = Strategy,
         label = "DE mutation/crossover strategy",
-        help = "SciPy differential_evolution strategy name (e.g. 'best1bin', 'rand1bin', 'best2bin') -- controls how new candidate designs are generated from the population each generation."
+        help = "SciPy differential_evolution strategy name (e.g. 'best1bin', 'rand1bin', 'best2bin'): controls how new candidate designs are generated from the population each generation."
     )]
     pub strategy: String,
 
@@ -83,7 +83,7 @@ pub struct SolverSettings {
     /// Population size, as a multiple of the number of design variables.
     #[config(
         label = "Population size multiplier",
-        help = "Population size as a multiplier on the number of design variables -- more candidates per generation explores more broadly but costs more evaluations."
+        help = "Population size as a multiplier on the number of design variables: more candidates per generation explores more broadly but costs more evaluations."
     )]
     pub population_size: i64,
 

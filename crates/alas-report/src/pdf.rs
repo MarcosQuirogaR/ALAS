@@ -135,6 +135,12 @@ fn element_is_finite(element: &SceneElement) -> bool {
             angle_deg,
             ..
         } => points_are_finite(&[*pos]) && font_size.is_finite() && angle_deg.is_finite(),
+        SceneElement::TextBlock {
+            pos,
+            width,
+            font_size,
+            ..
+        } => points_are_finite(&[*pos]) && width.is_finite() && font_size.is_finite(),
     }
 }
 

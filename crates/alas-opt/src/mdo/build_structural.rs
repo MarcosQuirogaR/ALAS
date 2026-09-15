@@ -215,7 +215,7 @@ mod structural_tests {
     fn a_genuinely_invalid_structure_still_rejects_regardless_of_the_downstream_solve_flag() {
         // Fewer than two spanwise stations cannot be strength-sized; this
         // must still reject the candidate whether or not the downstream
-        // solve is enabled -- the `enabled` flag controls the optional
+        // solve is enabled: the `enabled` flag controls the optional
         // report stage, not the acceptance gate.
         let (mut config, dv, plane) = clean_sheet_candidate();
         config.structures.spanwise_stations = 1;

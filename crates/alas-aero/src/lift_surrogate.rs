@@ -27,7 +27,7 @@
 //!
 //! # Scope
 //!
-//! `Vortex_Lattice` carries three regimes -- subsonic, supersonic, and a
+//! `Vortex_Lattice` carries three regimes: subsonic, supersonic, and a
 //! transonic interpolant blended between them by a `Cubic_Spline_Blender`
 //! over two Mach bands. Only the first is reached.
 //! `Vortex_Lattice.__defaults__` trains on sixteen Mach numbers of which
@@ -35,7 +35,7 @@
 //! that grid** with `[0.0, 0.1, 0.2, 0.3, 0.5, 0.75, 0.85, 0.9]`. With the
 //! supersonic training block empty, `build_surrogate` builds neither the
 //! supersonic nor the transonic surface, and `evaluate_surrogate` takes its
-//! `CL_surrogate_sup == None` branch -- one spline evaluation, no blending.
+//! `CL_surrogate_sup == None` branch, one spline evaluation, no blending.
 //! `gen_aero_lift_surrogate.py` refuses to write a fixture in which either
 //! absent surrogate has become a surface.
 //!

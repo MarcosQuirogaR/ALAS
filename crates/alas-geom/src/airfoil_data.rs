@@ -8,13 +8,13 @@
 //!
 //! This module holds *reference* airfoil geometries (raw section
 //! coordinates). These are physical reference data, not user-tunable design
-//! parameters -- the user shapes airfoils through the morphing/bump
+//! parameters: the user shapes airfoils through the morphing/bump
 //! parameters in the design vector (see `alas-geom::airfoil_library`, not
 //! yet translated), not by editing these numbers.
 //!
 //! Coordinates follow the Selig convention: a single closed loop starting at
 //! the trailing edge, running forward over the upper surface to the leading
-//! edge, then aft over the lower surface back to the trailing edge -- raw,
+//! edge, then aft over the lower surface back to the trailing edge: raw,
 //! not normalized into any particular winding, matching what
 //! `alas-geom::selig::get` returns for the same reason.
 //!
@@ -241,7 +241,7 @@ const COORDS_SC2_0714: &[(f64, f64)] = &[
     (1.0, -0.0165),
 ];
 
-/// Registry of built-in reference sections, addressable by name --
+/// Registry of built-in reference sections, addressable by name:
 /// `NAMED_COORDINATES` in the Python source. `(name, coordinates)` pairs in
 /// declaration order.
 const NAMED_COORDINATES: &[(&str, &[(f64, f64)])] = &[("SC2-0714", COORDS_SC2_0714)];
@@ -267,7 +267,7 @@ fn sorted_names() -> &'static [&'static str] {
 /// Python dict lookup is exact-match, not case-folded, unlike
 /// `selig::get`).
 ///
-/// Returns its `(x, y)` coordinate pairs in file order -- not normalized
+/// Returns its `(x, y)` coordinate pairs in file order, not normalized
 /// into any particular winding, which is `AirfoilLibrary.normalize_coordinates`'s
 /// job in a later module, `alas-geom::airfoil_library`.
 pub fn get(name: &str) -> Option<&'static [(f64, f64)]> {

@@ -72,16 +72,16 @@ pub(crate) const TRIM_CRUISE_CL_EXCEEDS_MAX: &str = "trim_cruise_cl_exceeds_max"
 /// fidelity.
 ///
 /// Measured margin at the default `AlasConfig` and `DesignVector`:
-/// `CL = 0.676474279595`, `CL_target = 0.676474279634`, relative `5.7e-11`
-/// -- eight orders inside this tolerance, so it rejects a genuinely
+/// `CL = 0.676474279595`, `CL_target = 0.676474279634`, relative `5.7e-11`:
+/// eight orders inside this tolerance, so it rejects a genuinely
 /// untrimmed point rather than trading against solver noise.
 const CL_TARGET_RELATIVE_TOLERANCE: f64 = 1.0e-3;
 
 /// Absolute tolerance on the trimmed pitching-moment coefficient.
 ///
 /// `AeroAnalysis::trimmed_performance` documents `cm_residual` as purely
-/// diagnostic -- "it should be near zero, and nothing penalizes it if it is
-/// not" -- so this is the only place an untrimmed aircraft is caught. The
+/// diagnostic; "it should be near zero, and nothing penalizes it if it is
+/// not", so this is the only place an untrimmed aircraft is caught. The
 /// solver's own converged residual is `1e-7`; `1e-3` is the largest moment
 /// coefficient still negligible against a transport's trimmed tail load
 /// (0.1 % of `q S c_bar`, inside the linear VLM's own error), and anything
@@ -197,7 +197,7 @@ fn trim_solve_failure() -> CandidateFailure {
 /// # Errors
 ///
 /// [`TRIM_CRUISE_CL_EXCEEDS_MAX`] when the requested cruise point needs more
-/// lift than `max_cruise_cl` allows -- a physical infeasibility of the
+/// lift than `max_cruise_cl` allows: a physical infeasibility of the
 /// requested mass/speed/altitude combination, not a solver failure.
 /// [`TRIM_SOLVE_FAILURE`] for every numerical failure: a degenerate cruise
 /// lift target, a solver error, a solve that did not converge, a non-finite

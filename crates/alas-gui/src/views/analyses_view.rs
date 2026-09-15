@@ -31,7 +31,7 @@ pub fn show_analyses_view(state: &mut AppState, ui: &mut Ui) {
         RichText::new(tr(
             "Choose which analysis disciplines a Run performs. Everything is on by default; \
              disabling an optional discipline skips its pipeline stage. Fine-grained settings \
-             live under Advanced Settings; external-tool paths under Setup > External Tools.",
+             live under Advanced Settings; external-tool paths under Advanced Settings > External Tools.",
         ))
         .weak(),
     );
@@ -43,7 +43,7 @@ pub fn show_analyses_view(state: &mut AppState, ui: &mut Ui) {
             ui.label(RichText::new(tr("Core (every run)")).strong());
             locked_row(
                 ui,
-                "Aerodynamics -- VLM + drag build-up",
+                "Aerodynamics: VLM + drag build-up",
                 "Native vortex-lattice analysis, drag polar, span loading, V-n envelope and \
              dynamic modes of the optimized design. The pipeline's backbone; cannot be skipped.",
             );
@@ -55,16 +55,16 @@ pub fn show_analyses_view(state: &mut AppState, ui: &mut Ui) {
              cabin/payload layout.",
             );
             locked_row(
-            ui,
-            "Propulsion cycle",
-            "On-design turbofan cycle analysis of the selected engine -- cycle summary, carpet \
+                ui,
+                "Propulsion cycle",
+                "On-design turbofan cycle analysis of the selected engine: cycle summary, carpet \
              plot, efficiency decomposition and sweeps on the Propulsion results tab.",
-        );
+            );
             locked_row(
             ui,
             "Field performance",
             "V-speeds, balanced field length and landing distances for the selected departure/ \
-             arrival airports -- the Matching Chart and Landing & Take-Off results tabs.",
+             arrival airports: the Matching Chart and Landing & Take-Off results tabs.",
         );
 
             ui.add_space(6.0);
@@ -73,7 +73,7 @@ pub fn show_analyses_view(state: &mut AppState, ui: &mut Ui) {
                 state,
                 ui,
                 "mission",
-                "Mission analysis -- native",
+                "Mission analysis (native)",
                 "Flies the full route natively: fuel burn, flight profile, aero coefficient \
              histories and the 3D route globe. Degrades gracefully when the environment is \
              missing.",
@@ -82,7 +82,7 @@ pub fn show_analyses_view(state: &mut AppState, ui: &mut Ui) {
                 state,
                 ui,
                 "mses",
-                "2-D airfoil analysis -- MSES",
+                "2-D airfoil analysis (MSES)",
                 "High-fidelity viscous/transonic polar and pressure/Mach-contour analysis of the \
              optimized root section. Sweep settings under Advanced Settings > MSES Analysis.",
             );
@@ -90,11 +90,47 @@ pub fn show_analyses_view(state: &mut AppState, ui: &mut Ui) {
                 state,
                 ui,
                 "structures",
-                "Structures -- wingbox FEM",
-                "Sizes a generic wingbox from strength requirements -- always available \
-             analytically; add a NASTRAN path under External Tools for a real solve.",
+                "Structures (wingbox FEM)",
+                "Sizes a generic wingbox from strength requirements, always available \
+             analytically; add a NASTRAN path under Advanced Settings > External Tools for a real solve.",
             );
+            structures_case_rows(state, ui);
         });
+}
+
+/// Solver-case selection for the structural analysis, kept on Analyses next
+/// to the discipline toggle; model settings stay under Modeling and Advanced
+/// Settings > Structures.
+fn structures_case_rows(state: &mut AppState, ui: &mut Ui) {
+    let enabled = state
+        .config_values
+        .get("structures")
+        .and_then(|g| g.get("enabled"))
+        .and_then(Value::as_bool)
+        .unwrap_or(true);
+    ui.add_enabled_ui(enabled, |ui| {
+        ui.indent("structures_cases", |ui| {
+            ui.label(
+                RichText::new(tr("Structural solver cases"))
+                    .strong()
+                    .small(),
+            );
+            for (name, label) in crate::views::form_page::placement::STRUCTURES_CASES {
+                let mut checked = state
+                    .config_values
+                    .get("structures")
+                    .and_then(|g| g.get(name))
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false);
+                if ui.checkbox(&mut checked, tr(label)).changed() {
+                    if let Some(values) = state.config_values.get_mut("structures") {
+                        crate::views::form_page::placement::toggle_bool(values, name, checked);
+                    }
+                    state.on_config_modified();
+                }
+            }
+        });
+    });
 }
 
 fn locked_row(ui: &mut Ui, title: &str, desc: &str) {

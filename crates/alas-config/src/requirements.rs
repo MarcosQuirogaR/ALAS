@@ -54,7 +54,7 @@ pub struct DesignRequirements {
     /// The speed the aircraft is sized around.
     #[config(
         label = "Cruise Mach number",
-        help = "Design cruise Mach number -- the primary speed target the optimizer sizes the aircraft around."
+        help = "Design cruise Mach number: the primary speed target the optimizer sizes the aircraft around."
     )]
     pub cruise_mach: f64,
 
@@ -70,7 +70,7 @@ pub struct DesignRequirements {
     #[config(
         label = "Max take-off weight (MTOW)",
         unit = "kg",
-        help = "Target maximum take-off weight -- anchors the whole weight & balance / sizing pipeline."
+        help = "Target maximum take-off weight: anchors the whole weight & balance / sizing pipeline."
     )]
     pub mtow_kg: f64,
 
@@ -78,7 +78,7 @@ pub struct DesignRequirements {
     #[config(
         options = AircraftType,
         label = "Aircraft type",
-        help = "'passenger' or 'cargo' -- switches which cabin-preset list and payload model apply."
+        help = "'passenger' or 'cargo': switches which cabin-preset list and payload model apply."
     )]
     pub aircraft_type: String,
 
@@ -104,7 +104,7 @@ pub struct DesignRequirements {
     /// Derived passenger capacity, retained in the serialized model.
     #[config(
         hidden,
-        help = "Target passenger count (if aircraft_type is 'passenger'). Auto-recomputed when a cabin preset is active -- only editable with cabin_preset set to 'Custom'."
+        help = "Target passenger count (if aircraft_type is 'passenger'). Auto-recomputed when a cabin preset is active, only editable with cabin_preset set to 'Custom'."
     )]
     pub num_passengers: i64,
 
@@ -113,7 +113,7 @@ pub struct DesignRequirements {
         label = "Cargo payload capacity",
         unit = "kg",
         readonly_unless(field = "cabin_preset", value = "Custom"),
-        help = "Target cargo payload capacity (if aircraft_type is 'cargo'). Auto-recomputed when a cabin preset is active -- only editable with cabin_preset set to 'Custom'."
+        help = "Target cargo payload capacity (if aircraft_type is 'cargo'). Auto-recomputed when a cabin preset is active, only editable with cabin_preset set to 'Custom'."
     )]
     pub cargo_payload_kg: f64,
 
@@ -122,7 +122,7 @@ pub struct DesignRequirements {
         advanced,
         label = "Max structural payload",
         unit = "kg",
-        help = "Maximum structural payload (= MZFW - OEW), i.e. the most the airframe may carry regardless of how much the belly could physically hold. In passenger mode the detailed layout fills the lower-deck belly with revenue freight (on top of passengers + checked bags) up to this structural limit, so the payload -- and therefore the residual fuel (MTOW - OEW - payload) -- matches the real aircraft's max-payload point. A widebody belly can volumetrically hold far more than this structural cap, so without it 'fill the belly' overshoots. 0 = disabled (use the explicit Cabin & Payload belly_cargo_kg instead)."
+        help = "Maximum structural payload (= MZFW - OEW), i.e. the most the airframe may carry regardless of how much the belly could physically hold. In passenger mode the detailed layout fills the lower-deck belly with revenue freight (on top of passengers + checked bags) up to this structural limit, so the payload, and therefore the residual fuel (MTOW - OEW - payload), matches the real aircraft's max-payload point. A widebody belly can volumetrically hold far more than this structural cap, so without it 'fill the belly' overshoots. 0 = disabled (use the explicit Cabin & Payload belly_cargo_kg instead)."
     )]
     pub max_structural_payload_kg: f64,
 
@@ -130,7 +130,7 @@ pub struct DesignRequirements {
     #[config(
         advanced,
         label = "Minimum passenger capacity",
-        help = "Hard floor on the geometry-resolved passenger capacity: a candidate whose class-mix and geometry produce fewer than this many seats is scored infeasible under the configured geometry constraint policy. 0 = disabled (the default) -- capacity is otherwise always dynamic, whatever the configured cabin class-mix percentages and the candidate's actual fuselage/cabin geometry produce, with no minimum."
+        help = "Hard floor on the geometry-resolved passenger capacity: a candidate whose class-mix and geometry produce fewer than this many seats is scored infeasible under the configured geometry constraint policy. 0 = disabled (the default): capacity is otherwise always dynamic, whatever the configured cabin class-mix percentages and the candidate's actual fuselage/cabin geometry produce, with no minimum."
     )]
     pub min_passenger_capacity: i64,
 
@@ -173,7 +173,7 @@ pub struct DesignRequirements {
         advanced,
         label = "Minimum wing loading (MTOW/S)",
         unit = "kg/m^2",
-        help = "Lower bound on wing loading (MTOW / wing area) -- keeps the wing from being sized too large for the mass it carries."
+        help = "Lower bound on wing loading (MTOW / wing area): keeps the wing from being sized too large for the mass it carries."
     )]
     pub min_wing_loading_kg_m2: f64,
 
@@ -280,7 +280,7 @@ impl DesignRequirements {
     /// configuration anything downstream can act on: the payload model
     /// selected by the type would be reading a layout meant for the other
     /// one. Upstream does this when a requirements object is constructed,
-    /// and reproducing where it happens matters -- laying a partial
+    /// and reproducing where it happens matters, laying a partial
     /// configuration over an existing one does *not* re-run it there, so a
     /// file that sets only the aircraft type leaves a mismatched preset in
     /// place, and this port must not quietly fix that.

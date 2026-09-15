@@ -8,7 +8,7 @@
 //! shear and bending moment along a cantilever semi-wing (tip to root), the
 //! three design load cases that scale it, and the per-engine point loads that
 //! relieve it. Strength sizing and the analytical deflection solve land
-//! alongside it, in their own modules, as they are ported -- all three sharing
+//! alongside it, in their own modules, as they are ported, all three sharing
 //! this one load model so they can never disagree about it.
 //!
 //! [`mesh`] and [`nastran`] are the finite-element half: the first builds the

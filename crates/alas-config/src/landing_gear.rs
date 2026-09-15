@@ -29,7 +29,7 @@ pub struct LandingGearConfig {
     /// Margin left in the rated tire load after the static reaction.
     #[config(
         label = "Tire load safety factor",
-        help = "Margin applied to the static reaction load when selecting/verifying tire count -- real gear is sized so the rated tire load is never fully consumed by static load alone, leaving margin for dynamic (braking, turning, rough-field) loads. Raymer: ~1.07 typical for a preliminary sizing pass."
+        help = "Margin applied to the static reaction load when selecting/verifying tire count: real gear is sized so the rated tire load is never fully consumed by static load alone, leaving margin for dynamic (braking, turning, rough-field) loads. Raymer: ~1.07 typical for a preliminary sizing pass."
     )]
     pub tire_safety_factor: f64,
 
@@ -44,14 +44,14 @@ pub struct LandingGearConfig {
     #[config(
         label = "MTOW threshold for dual nose wheels",
         unit = "kg",
-        help = "Auto-sizing switches from a single to a dual (twin) nose wheel above this MTOW -- below it, transport-category aircraft still commonly fly single nose wheels."
+        help = "Auto-sizing switches from a single to a dual (twin) nose wheel above this MTOW: below it, transport-category aircraft still commonly fly single nose wheels."
     )]
     pub nlg_dual_wheel_mtow_kg: f64,
 
     /// Main-gear legs, left and right combined, or zero to size them.
     #[config(
         label = "Main-gear strut count (0 = auto)",
-        help = "Number of main-gear legs (each with its own wheel bogie), left+right combined. 0 = auto: 2 (one per side) below mlg_body_gear_mtow_kg, 4 (adds centreline body gear, e.g. A380/747-class) above it -- real widebodies above roughly 300 t add body gear because a two-leg bogie would need an impractically large tire count/track width to carry the load within tire-pressure limits."
+        help = "Number of main-gear legs (each with its own wheel bogie), left+right combined. 0 = auto: 2 (one per side) below mlg_body_gear_mtow_kg, 4 (adds centreline body gear, e.g. A380/747-class) above it: real widebodies above roughly 300 t add body gear because a two-leg bogie would need an impractically large tire count/track width to carry the load within tire-pressure limits."
     )]
     pub n_mlg_struts: i64,
 
@@ -73,7 +73,7 @@ pub struct LandingGearConfig {
     /// Main-gear track as a multiple of fuselage diameter.
     #[config(
         label = "Main-gear track / fuselage-diameter factor",
-        help = "Main-gear lateral track width, as a multiple of fuselage diameter. Real transports with wing-root-mounted main gear run track/diameter ~1.75-2.0 (777-300ER 2.03, 787-9 1.90, A340-300 1.91, A380-800 2.00, A320-200 1.92, DC-10-30 1.77) -- 1.85 is the fleet-average calibration. An earlier default (1.15) understated real track width by roughly a factor of 1.6, which fed directly into the lateral-turnover check (physics.landing_gear) reading artificially safe."
+        help = "Main-gear lateral track width, as a multiple of fuselage diameter. Real transports with wing-root-mounted main gear run track/diameter ~1.75-2.0 (777-300ER 2.03, 787-9 1.90, A340-300 1.91, A380-800 2.00, A320-200 1.92, DC-10-30 1.77): 1.85 is the fleet-average calibration. An earlier default (1.15) understated real track width by roughly a factor of 1.6, which fed directly into the lateral-turnover check (physics.landing_gear) reading artificially safe."
     )]
     pub track_diameter_factor: f64,
 
@@ -165,7 +165,7 @@ pub struct LandingGearConfig {
     #[config(
         options = TireClass,
         label = "Tire class",
-        help = "Which reference tire (see physics.landing_gear.TIRE_DATABASE) to size with -- 'auto' picks the smallest class whose rated load, combined with a realistic wheel count (<=6/strut), covers the aircraft's static gear loads. Options: auto, light, narrowbody, widebody, heavy."
+        help = "Which reference tire (see physics.landing_gear.TIRE_DATABASE) to size with: 'auto' picks the smallest class whose rated load, combined with a realistic wheel count (<=6/strut), covers the aircraft's static gear loads. Options: auto, light, narrowbody, widebody, heavy."
     )]
     pub tire_class: String,
 
@@ -173,7 +173,7 @@ pub struct LandingGearConfig {
     #[config(
         options = StrutMaterial,
         label = "Strut material",
-        help = "Landing-gear strut/piston material, shown on the planform diagram and in the design report. 'auto' selects by MTOW class (see physics.landing_gear.STRUT_MATERIALS): high-strength steel (300M-class) for larger transports, an aluminium/steel combination for light aircraft. Informational/labelling only -- this preliminary-design tool does not run a structural (FEA) stress analysis of the strut itself."
+        help = "Landing-gear strut/piston material, shown on the planform diagram and in the design report. 'auto' selects by MTOW class (see physics.landing_gear.STRUT_MATERIALS): high-strength steel (300M-class) for larger transports, an aluminium/steel combination for light aircraft. Informational/labelling only; this preliminary-design tool does not run a structural (FEA) stress analysis of the strut itself."
     )]
     pub strut_material: String,
 

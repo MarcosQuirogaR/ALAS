@@ -10,8 +10,8 @@
 //!
 //! Each factory mirrors Python's `fn(result, theme) -> Figure | None`
 //! (`SWEEP_FIGURES` in the reference): `None` means "no data for this
-//! figure" -- an empty candidate list, no Stage-2 refinement, or no Stage-3
-//! MSES verification -- which a caller turns into an empty gallery slot
+//! figure": an empty candidate list, no Stage-2 refinement, or no Stage-3
+//! MSES verification, which a caller turns into an empty gallery slot
 //! rather than a panic or a fabricated chart.
 
 mod mses_verification;
@@ -31,7 +31,7 @@ use alas_screen::{AirfoilCandidateResult, AirfoilScreeningResult};
 use crate::scene::{Axes2D, Color, Fill, Scene, SceneElement, Stroke, TextAlign, TextBaseline};
 use crate::theme::Palette;
 
-/// Candidates that survived screening, best-rank first (result order) -- `_ok`.
+/// Candidates that survived screening, best-rank first (result order): `_ok`.
 fn ok_candidates(result: &AirfoilScreeningResult) -> Vec<&AirfoilCandidateResult> {
     result
         .candidates
@@ -40,7 +40,7 @@ fn ok_candidates(result: &AirfoilScreeningResult) -> Vec<&AirfoilCandidateResult
         .collect()
 }
 
-/// Refined (Stage-2, 3-D) survivors among the ok candidates -- `_refined`.
+/// Refined (Stage-2, 3-D) survivors among the ok candidates: `_refined`.
 fn refined_candidates(result: &AirfoilScreeningResult) -> Vec<&AirfoilCandidateResult> {
     ok_candidates(result)
         .into_iter()
@@ -48,7 +48,7 @@ fn refined_candidates(result: &AirfoilScreeningResult) -> Vec<&AirfoilCandidateR
         .collect()
 }
 
-/// MSES-verified (Stage-3) survivors among the ok candidates -- `_mses_verified`.
+/// MSES-verified (Stage-3) survivors among the ok candidates: `_mses_verified`.
 fn mses_verified_candidates(result: &AirfoilScreeningResult) -> Vec<&AirfoilCandidateResult> {
     ok_candidates(result)
         .into_iter()
@@ -56,7 +56,7 @@ fn mses_verified_candidates(result: &AirfoilScreeningResult) -> Vec<&AirfoilCand
         .collect()
 }
 
-/// Marker color for a real, wind-tunnel-validated reference section --
+/// Marker color for a real, wind-tunnel-validated reference section:
 /// `_REFERENCE_MARKER_COLOR`. The reference's five-pointed star has no
 /// equivalent primitive in [`SceneElement`]; [`mark_references`]
 /// approximates it with a filled circle, the same substitution every other
@@ -64,7 +64,7 @@ fn mses_verified_candidates(result: &AirfoilScreeningResult) -> Vec<&AirfoilCand
 pub(super) const REFERENCE_MARKER_COLOR: &str = "#f5c518";
 
 /// Overlay a marker + name label on every `is_reference` candidate among
-/// `cands`, already plotted by the caller at `(xs[i], ys[i])` --
+/// `cands`, already plotted by the caller at `(xs[i], ys[i])`:
 /// `_mark_references`. Returns whether any reference candidate was found, so
 /// callers can decide whether to add the matching legend entry.
 pub(super) fn mark_references(

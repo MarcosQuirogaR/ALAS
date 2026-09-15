@@ -7,8 +7,8 @@
 //! What the design search is looking for, and how hard it looks.
 //!
 //! The halves are deliberately separate. [`ObjectiveConfig`] says what a
-//! good aircraft is -- the mission quantity minimised and the policy of every
-//! requirement family that bounds it -- and changing one of those changes
+//! good aircraft is: the mission quantity minimised and the policy of every
+//! requirement family that bounds it, and changing one of those changes
 //! which design the search converges on. [`SolverSettings`] says how the
 //! search is run, and changing one of those changes how thoroughly the same
 //! target is approached, not what the target is. Two runs that differ only in
@@ -56,7 +56,7 @@ pub struct OptimizerConfig {
     #[serde(default, skip_serializing_if = "ObjectiveConfig::is_default")]
     #[config(
         nested,
-        help = "The mission-sized objective -- block fuel, takeoff mass, empty mass or fuel per seat-kilometre over the design range under the fuel policy -- the takeoff-mass closure, and the hard, soft or diagnostic policy of every requirement family that bounds it."
+        help = "The mission-sized objective (block fuel, takeoff mass, empty mass or fuel per seat-kilometre over the design range under the fuel policy) the takeoff-mass closure, and the hard, soft or diagnostic policy of every requirement family that bounds it."
     )]
     pub objective: ObjectiveConfig,
 
@@ -81,8 +81,8 @@ mod tests {
     fn what_is_searched_for_and_how_it_is_searched_reach_the_form_as_separate_groups() {
         // A run that changed a weight and a run that changed a generation
         // count are not comparable, and the form is where that distinction
-        // has to be visible. The mission-sized objective is a third question
-        // -- what is being minimised at all -- and gets its own group.
+        // has to be visible. The mission-sized objective is a third question:
+        // what is being minimised at all, and gets its own group.
         let schema = OptimizerConfig::default().schema();
         let names: Vec<&str> = schema.fields.iter().map(|field| field.name).collect();
         assert_eq!(

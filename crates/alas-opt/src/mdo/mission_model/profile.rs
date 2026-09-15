@@ -211,7 +211,7 @@ impl ProfileGeometry<'_> {
     /// A climbing or descending leg from `start_m` to `end_m` flown at
     /// constant calibrated airspeed `cas_m_s`: `subdivisions` segments, each
     /// with true airspeed resolved from `cas_m_s` at its own midpoint
-    /// altitude's real ambient pressure and temperature -- a *discretized*
+    /// altitude's real ambient pressure and temperature: a *discretized*
     /// approximation of constant CAS (each sub-rung still flies one constant
     /// true airspeed), not the continuous exact quantity; see
     /// [`ProfileGeometry::plan`]'s callers for the refinement test showing
@@ -264,8 +264,8 @@ impl ProfileGeometry<'_> {
 
     /// Lowest cruise altitude the ladders can be built at, m.
     pub fn floor_cruise_m(&self, leg: LegKind) -> f64 {
-        // Both legs open with the configured takeoff band -- the diversion
-        // is a go-around from the arrival field, see `diversion_ladders` --
+        // Both legs open with the configured takeoff band (the diversion
+        // is a go-around from the arrival field, see `diversion_ladders`)
         // so neither may cruise below the top of that band. A floor at the
         // field elevation itself let a short alternate distance plan the
         // diversion cruise at 8 m above sea level at the literal cruise true

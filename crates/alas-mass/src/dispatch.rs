@@ -105,7 +105,7 @@ pub struct DispatchSolution {
     pub status: DispatchStatus,
     /// The zero-fuel mass the closure was solved for, kg.
     pub zero_fuel_mass_kg: f64,
-    /// The takeoff mass the solution represents, kg -- clamped to MTOW when
+    /// The takeoff mass the solution represents, kg: clamped to MTOW when
     /// [`DispatchStatus::MtowLimited`].
     pub takeoff_mass_kg: f64,
     /// Takeoff mass plus taxi fuel, kg.
@@ -228,8 +228,8 @@ fn is_mass_bracketable(error: &FuelModelError) -> bool {
     }
 }
 
-/// Evaluate the plan at `candidate_kg`, or -- if the burn model fails there
-/// with a mass-bracketable error (see [`is_mass_bracketable`]) -- at the
+/// Evaluate the plan at `candidate_kg`, or, if the burn model fails there
+/// with a mass-bracketable error (see [`is_mass_bracketable`]), at the
 /// highest mass between `zero_fuel_mass_kg` and `candidate_kg` where it
 /// succeeds, by bisection.
 ///
@@ -238,8 +238,8 @@ fn is_mass_bracketable(error: &FuelModelError) -> bool {
 /// stops a rating/energy shortfall strictly above a feasible root (an
 /// overshoot during the Picard iteration, or a seed placed in an
 /// unevaluable region) from blocking that root. A route, polar/validity, or
-/// invalid-input failure -- at the candidate or anywhere the bisection
-/// probes -- is returned immediately as that typed failure, not silently
+/// invalid-input failure (at the candidate or anywhere the bisection
+/// probes) is returned immediately as that typed failure, not silently
 /// treated as "too heavy, try lighter".
 ///
 /// The bisection assumes the evaluable set is a single contiguous region
@@ -247,8 +247,8 @@ fn is_mass_bracketable(error: &FuelModelError) -> bool {
 /// power margin than a lighter one at the same condition, so a mass-
 /// dependent deficit above some threshold does not reappear below it). It
 /// does not sample every mass in `[zero_fuel_mass_kg, candidate_kg]`, so a
-/// failure at both endpoints is read *under that assumption* -- not as an
-/// exhaustive proof the model is unevaluable at every point in between --
+/// failure at both endpoints is read *under that assumption* (not as an
+/// exhaustive proof the model is unevaluable at every point in between)
 /// and reported as such.
 fn evaluate_bracketed(
     policy: &FuelPolicyConfig,
@@ -378,8 +378,8 @@ fn try_solve(
         // itself is not evaluable (a rating/energy deficit right at the
         // structural boundary), reporting a plan clipped below it as if it
         // were "at MTOW" would be a false, ambiguous physical claim. Only
-        // fall back to `NotConverged` -- carrying the best evaluable
-        // evidence -- when that lower point *itself* still demonstrates a
+        // fall back to `NotConverged` (carrying the best evaluable
+        // evidence) when that lower point *itself* still demonstrates a
         // requirement over MTOW; otherwise this is a boundary evaluation
         // failure, not a demonstrated structural limit, and is reported as
         // the typed `ModelFailed` every other unrecoverable failure is.
@@ -693,7 +693,7 @@ mod tests {
     }
 
     /// A toy model that fails above a fixed mass, with a *mass-bracketable*
-    /// [`FuelModelError::NotConverged`] naming a rating/energy deficit --
+    /// [`FuelModelError::NotConverged`] naming a rating/energy deficit,
     /// exactly the shape a real off-design deck failure takes.
     struct FailAboveMassModel {
         trip_fraction: f64,
@@ -743,7 +743,7 @@ mod tests {
     }
 
     /// As [`FailAboveMassModel`], but the above-mass failure is a
-    /// [`FuelModelError::RouteTooShort`] -- a typed, non-mass-dependent
+    /// [`FuelModelError::RouteTooShort`]: a typed, non-mass-dependent
     /// failure that [`is_mass_bracketable`] must never bisect past.
     struct FailAboveMassWithRouteError {
         trip_fraction: f64,
@@ -978,8 +978,8 @@ mod tests {
     /// The model is evaluable only up to 60 t; MTOW is declared at 100 t and
     /// is therefore never evaluable. Even the best point the model supports
     /// (~60 t) demonstrably needs far more fuel than MTOW admits (90%
-    /// trip fraction), so this is real evidence of an MTOW-class shortfall
-    /// -- but the solution must not claim `MtowLimited` with a plan
+    /// trip fraction), so this is real evidence of an MTOW-class shortfall,
+    /// but the solution must not claim `MtowLimited` with a plan
     /// "evaluated at exactly MTOW" it never actually produced. It must
     /// report `NotConverged` with `takeoff_mass_kg` at the mass it actually
     /// evaluated (well below the declared MTOW), not a false clamp to it.
@@ -1084,7 +1084,7 @@ mod tests {
     }
 
     /// As [`FailAboveMassWithRouteError`], but the above-mass failure is
-    /// [`FuelModelError::InvalidModel`] -- another typed, non-mass-dependent
+    /// [`FuelModelError::InvalidModel`]: another typed, non-mass-dependent
     /// failure `is_mass_bracketable` must reject outright.
     struct FailAboveMassWithInvalidModel {
         trip_fraction: f64,

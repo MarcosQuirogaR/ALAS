@@ -6,14 +6,14 @@
 //! Each case names a preset whose full-analysis report the fixture recorded.
 //! The parity test rebuilds `AlasConfig::from_value({"preset": name})` and
 //! applies the engine spec the way `AircraftBuilder::build` does before the
-//! request is assembled -- the reference's report was produced by building the
+//! request is assembled: the reference's report was produced by building the
 //! aircraft, which mutates `config.geometry.engine` to the selected engine's
-//! cycle in place -- then feeds the recorded `ReportView` and compares the
+//! cycle in place, then feeds the recorded `ReportView` and compares the
 //! request `build_vehicle_request` assembles.
 //!
 //! The comparison walks the two documents in parallel: strings at `exact`, and
-//! every number -- the derived cruise thrust, the mass, the whole geometry
-//! configuration and the engine and requirements blocks -- at `closed`. The
+//! every number: the derived cruise thrust, the mass, the whole geometry
+//! configuration and the engine and requirements blocks, at `closed`. The
 //! three report passthroughs are echoed unchanged, so they compare trivially;
 //! the check that earns the fixture is the cruise-thrust derivation and the
 //! geometry serialization.

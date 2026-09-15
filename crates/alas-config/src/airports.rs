@@ -6,8 +6,8 @@
 
 //! Aerodromes the field-performance check and the route are evaluated at.
 //!
-//! Ten major hubs and ten airports that are hard to operate out of -- high
-//! elevation, short runways, hot days -- because a design that meets its
+//! Ten major hubs and ten airports that are hard to operate out of: high
+//! elevation, short runways, hot days, because a design that meets its
 //! field length at sea level on a standard day may not meet it anywhere
 //! interesting. The figures come from published aerodrome charts.
 //!

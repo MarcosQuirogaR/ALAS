@@ -12,7 +12,7 @@
 //!
 //! Every string here has to be byte-identical to what native aerodynamic model's `MSES`
 //! wrapper writes, because the binaries parse fixed columns and a menu driven
-//! by exact keystrokes -- a deck that differs by one space or one digit meshes
+//! by exact keystrokes: a deck that differs by one space or one digit meshes
 //! or solves a different problem, and the `exact`-tier parity test would catch
 //! it as forty wrong numbers rather than one wrong line. The one non-obvious
 //! part is [`py_float`]: the deck embeds its floats through Python's f-string,
@@ -49,7 +49,7 @@ const LEGACY_MSES_MUCON: f64 = -1.0;
 /// `1` -> `12` -> `0` -> `0`), which [`super::parse`] then reads.
 pub const MPLOT_POLAR_KEYSTROKES: &str = "1\n12\n0\n0\n";
 
-/// A float formatted as Python's `repr` renders it -- the form its f-strings
+/// A float formatted as Python's `repr` renders it: the form its f-strings
 /// embed in a deck.
 ///
 /// Rust's `{}` already produces the shortest decimal that round-trips, which is
@@ -194,7 +194,7 @@ mod tests {
     #[test]
     fn mses_case_matches_native_aerodynamic_model_byte_for_byte() {
         // The exact deck native aerodynamic model wrote for naca2412 at mach 0.3, alpha 3,
-        // Re 5e6, n_crit 9, free transition -- captured in golden/aero/mses.json.
+        // Re 5e6, n_crit 9, free transition: captured in golden/aero/mses.json.
         let expected = "3  4  5  7\n\
              3  4  5  7\n\
              0.3   0.0   3.0 | MACHin  CLIFin  ALFAin\n\

@@ -123,7 +123,7 @@ pub fn atr72_600() -> AircraftPreset {
                 break_twist_deg: 0.0,
                 break_span_fraction: 0.32,
                 kink_span_fraction: None,
-                // 2.9615 m over the 4.0158 m centreline chord -- model
+                // 2.9615 m over the 4.0158 m centreline chord: model
                 // geometry, not a measured manufacturer station. This is the
                 // side-of-body chord `WingConfig::transport_planform` already
                 // derives for these chords: the straight-trailing-edge clip
@@ -133,16 +133,16 @@ pub fn atr72_600() -> AircraftPreset {
                 // (~0.906 root-chord ratio) would give. Left derived (the
                 // WingConfig default), the station is computed by
                 // `transport_planform` but never meshed into the production
-                // wing -- only an explicit ratio drives `build_main_wing`'s
+                // wing, only an explicit ratio drives `build_main_wing`'s
                 // side-of-body xsec (see
                 // `crates/alas-geom/src/builder_parts/part_01.rs`). Leaving
                 // it unset (as this preset originally did) skips the clip
                 // that the chords above were fit to close: the built wing
                 // came out at 63.926 m^2 against the published 61 m^2
                 // three-view area. Pinning the exact ratio the closure test
-                // in `preset_dimension_corrections.rs` already assumes -- as
+                // in `preset_dimension_corrections.rs` already assumes (as
                 // A320-200/A380-800/DC-10 already do for their own
-                // side-of-body clips -- makes the production `s_ref` close
+                // side-of-body clips) makes the production `s_ref` close
                 // the published area instead of silently skipping the clip.
                 // `transport_planform`/the closure test remain the
                 // authoritative computation of this value; the literal below

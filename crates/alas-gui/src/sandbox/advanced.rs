@@ -17,15 +17,10 @@ use crate::nav::{self, PageKind};
 use crate::state::AppState;
 use crate::views::{form_page, tr};
 
-/// The pages the window offers, in tab order.
-fn pages() -> Vec<&'static nav::Page> {
-    nav::NAV
-        .iter()
-        .filter(|group| group.title == "Advanced Settings")
-        .flat_map(|group| group.subgroups.iter())
-        .flat_map(|subgroup| subgroup.pages.iter())
-        .filter(|page| page.kind == PageKind::Form)
-        .collect()
+/// The pages the window offers, in tab order: every Advanced Settings tab
+/// (discipline forms, Airfoil Screening and External Tools) plus Run options.
+pub fn pages() -> Vec<&'static nav::Page> {
+    nav::ADVANCED_SETTINGS_PAGES.iter().collect()
 }
 
 /// Render the window when it is open.
@@ -83,6 +78,21 @@ pub fn show_advanced_settings_window(state: &mut AppState, ctx: &Context) {
                     let Some(page) = pages.iter().find(|p| p.id == active).cloned() else {
                         return;
                     };
+                    match page.kind {
+                        PageKind::Setup => {
+                            crate::views::show_tools_view(state, ui);
+                            return;
+                        }
+                        PageKind::AirfoilScreening => {
+                            if state.screening.window_open {
+                                ui.label(tr("Airfoil Screening is open in its own window."));
+                            } else {
+                                crate::views::show_screening_view(state, ui);
+                            }
+                            return;
+                        }
+                        _ => {}
+                    }
                     let locked = state.manual_geometry_locked()
                         && matches!(page.group, Some("geometry") | Some("control_surfaces"));
                     if locked {

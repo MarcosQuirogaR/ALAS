@@ -44,7 +44,7 @@ for the parity fixtures.
 Grouped by configuration group. "Default" is what a fresh configuration
 holds; presets override the physical inputs.
 
-### `optimizer.objective` -- what is minimised and how it is bounded
+### `optimizer.objective`: what is minimised and how it is bounded
 
 | Field | Role | Default |
 | --- | --- | --- |
@@ -57,7 +57,7 @@ holds; presets override the physical inputs.
 | `max_span_m`, `max_approach_speed_kt` | aerodrome span limit, approach-category speed limit (zero disables) | 80 m, 0 |
 | `soft_penalty_weight` | weight of the soft-residual sum against the objective | 10 |
 
-### `optimizer.solver` -- how the search is run
+### `optimizer.solver`: how the search is run
 
 `method`, `max_iterations`, `population_size` (multiplier on the sixteen
 variables), `tolerance`, `seed`, `workers`, `seed_near_initial_design` and
@@ -65,14 +65,14 @@ variables), `tolerance`, `seed`, `workers`, `seed_near_initial_design` and
 (fraction of each bound range) and `constraint_tolerance` (normalised). The
 `strategy` field is the differential-evolution mutation scheme.
 
-### `optimizer.weights` -- replay table
+### `optimizer.weights`: replay table
 
 Only `failure_cost` (the cost of a candidate that cannot be built, trimmed
 or sized) and the tail-volume window (`min/max_hstab_volume_coef`,
 `min/max_vstab_volume_coef`, a soft plausibility band) are read. Every
 other weight belongs to the frozen reference objective.
 
-### `requirements` -- the brief
+### `requirements`: the brief
 
 `mtow_kg` (ceiling of the sized takeoff mass and the mass the first trim is
 made at), `cruise_mach` and `cruise_altitude_m` (the cruise point of the

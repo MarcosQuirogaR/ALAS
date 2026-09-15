@@ -166,6 +166,7 @@ version = "1.1.0"
 dependencies = [
  "serde",
  "serde_json",
+ "win32job",
 ]
 
 [[package]]
@@ -4495,6 +4496,16 @@ name = "widestring"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72069c3113ab32ab29e5584db3c6ec55d416895e60715417b5b883a357c3e471"
+
+[[package]]
+name = "win32job"
+version = "2.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "15165faeb072f2dc68597de0d7d2071fa8ace463ec85b4a86063c0100c33bcc1"
+dependencies = [
+ "thiserror 1.0.69",
+ "windows",
+]
 
 [[package]]
 name = "winapi"

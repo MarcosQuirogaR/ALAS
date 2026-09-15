@@ -17,7 +17,7 @@ pub enum BuildError {
     /// configuration names. Every airfoil `alas-config::geometry` can name is
     /// checked (`docs/PORTING.md`, Geometry) to resolve through one of that
     /// method's three branches, so this is not reached by this program's own
-    /// configuration -- it exists because the lookup is fallible, not
+    /// configuration; it exists because the lookup is fallible, not
     /// because a real input takes it.
     #[error("airfoil {0:?} did not resolve")]
     UnresolvedAirfoil(String),
@@ -52,8 +52,8 @@ enum GeometryContract {
     ReferenceCompatibility,
 }
 
-/// Builds parametric aircraft from design variables and a geometry scaffold
-/// -- `AircraftBuilder`.
+/// Builds parametric aircraft from design variables and a geometry scaffold:
+/// `AircraftBuilder`.
 pub struct AircraftBuilder {
     /// The geometry scaffold every build reads from.
     pub geometry: GeometryConfig,
@@ -62,7 +62,7 @@ pub struct AircraftBuilder {
 
 impl AircraftBuilder {
     /// A new builder over `geometry`, defaulting to [`GeometryConfig::default`]
-    /// when `None` -- `AircraftBuilder.__init__`.
+    /// when `None`: `AircraftBuilder.__init__`.
     ///
     /// Product geometry consumes the live engine configuration verbatim.
     /// Engine selection is resolved when a preset is selected; reapplying the
@@ -99,7 +99,7 @@ impl AircraftBuilder {
         }
     }
 
-    /// Assemble the full aircraft for `dv` -- `AircraftBuilder.build`.
+    /// Assemble the full aircraft for `dv`: `AircraftBuilder.build`.
     ///
     /// `dv = None` builds the nominal reference aircraft
     /// ([`DesignVector::default`]). `include_engines` controls whether the
@@ -167,7 +167,7 @@ impl AircraftBuilder {
     }
 
     /// The main wing: root/break/tip cross-sections, translated to the wing's
-    /// fuselage-station datum and subdivided -- `_build_main_wing`.
+    /// fuselage-station datum and subdivided, `_build_main_wing`.
     fn build_main_wing(
         &self,
         dv: &DesignVector,
@@ -239,7 +239,7 @@ impl AircraftBuilder {
     }
 
     /// The horizontal stabilizer: root/tip cross-sections at the design
-    /// vector's tail scale, translated aft to the tail datum --
+    /// vector's tail scale, translated aft to the tail datum:
     /// `_build_hstab`.
     fn build_hstab(&self, dv: &DesignVector, tail_airfoil: &Airfoil) -> Result<Wing, BuildError> {
         let g = &self.geometry.empennage;
@@ -257,7 +257,7 @@ impl AircraftBuilder {
                     tail_airfoil.clone(),
                 ),
                 // Only the in-plane (x, y) tip offset scales with the tail
-                // scale; the vertical placement does not -- `tip_le[2]`
+                // scale; the vertical placement does not: `tip_le[2]`
                 // reproduced unscaled from the Python source.
                 WingXSec::new(
                     [tip_x * ts, tip_y * ts, tip_z],
@@ -277,7 +277,7 @@ impl AircraftBuilder {
     }
 
     /// The vertical stabilizer: root/tip cross-sections at the design
-    /// vector's tail scale, translated aft to the tail datum --
+    /// vector's tail scale, translated aft to the tail datum:
     /// `_build_vstab`.
     fn build_vstab(&self, dv: &DesignVector, tail_airfoil: &Airfoil) -> Result<Wing, BuildError> {
         let g = &self.geometry.empennage;
@@ -295,7 +295,7 @@ impl AircraftBuilder {
                     tail_airfoil.clone(),
                 ),
                 // Only the in-plane (x, z) tip offset scales with the tail
-                // scale; the spanwise placement does not -- `tip_le[1]`
+                // scale; the spanwise placement does not: `tip_le[1]`
                 // reproduced unscaled from the Python source (the fin grows
                 // in Z, not Y).
                 WingXSec::new(
@@ -315,7 +315,7 @@ impl AircraftBuilder {
         Ok(wing)
     }
 
-    /// The fuselage body of revolution (or ovoid) -- `_build_fuselage`.
+    /// The fuselage body of revolution (or ovoid): `_build_fuselage`.
     ///
     /// Ten `sinspace`-spaced nose stations resolving the curved ellipsoid
     /// rounding, two cabin stations, and ten `linspace`-spaced tailcone
@@ -375,7 +375,7 @@ impl AircraftBuilder {
         Ok(Fuselage::new("Fuselage", stations))
     }
 
-    /// The podded engines, one small [`Fuselage`] per spanwise position --
+    /// The podded engines, one small [`Fuselage`] per spanwise position:
     /// `_build_engines`. See the module doc for the two placement branches.
     fn build_engines(&self, dv: &DesignVector) -> Result<Vec<Fuselage>, BuildError> {
         let g = &self.geometry.engine;

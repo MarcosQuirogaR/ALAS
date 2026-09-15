@@ -137,7 +137,7 @@ pub struct FuelLoadingAssessment {
     /// [`plan_from_values`] means "nothing left to reserve, by construction"
     /// (a tank-agnostic caller). `None`, produced only by
     /// [`plan_fuel_loading`]'s real [`FuelTankLayout::resolve`] attempt
-    /// failing, means the reservation could not be verified at all -- in
+    /// failing, means the reservation could not be verified at all, in
     /// that case [`findings`] raises [`FindingCode::FuelTankLayoutUnavailable`]
     /// rather than silently treating the unresolved mass as a verified zero.
     pub unusable_fuel_kg: Option<f64>,
@@ -213,7 +213,7 @@ pub(crate) fn report_mass_basis_kg(config: &AlasConfig, report: &AnalysisReport)
 /// The tank-physical mass permanently unusable to the engines, from the same
 /// [`FuelTankLayout`] inventory [`super::mass_balance::assess_mass_balance`]
 /// resolves for the CG ledger (same geometry, same
-/// [`super::mass_balance::tank_reference`] density/published-volume pair) --
+/// [`super::mass_balance::tank_reference`] density/published-volume pair),
 /// not a separate wing-volume approximation. `None` when the layout cannot
 /// be resolved; the caller must not treat that the same as a verified zero
 /// (see [`findings`]'s [`FindingCode::FuelTankLayoutUnavailable`] check).
@@ -252,7 +252,7 @@ fn resolved_unusable_fuel_kg(
 /// Build a load-case fuel contract from already-resolved values.
 ///
 /// This is the tank-agnostic core: it does not itself attempt to resolve a
-/// [`FuelTankLayout`], so it reports `unusable_fuel_kg: Some(0.0)` -- callers
+/// [`FuelTankLayout`], so it reports `unusable_fuel_kg: Some(0.0)`: callers
 /// that bypass tank resolution (direct unit tests, or any caller that has
 /// already netted out unusable fuel from `mtow_closure_fuel_kg` itself) are
 /// asserting there is nothing left to reserve, which is different from
@@ -377,7 +377,7 @@ pub(super) fn findings(mtow_kg: f64, fuel_loading: &FuelLoadingAssessment) -> Ve
         // The tank inventory that would reserve unusable fuel out of the
         // MTOW closure budget could not be resolved. `mtow_closure_fuel_kg`
         // therefore carries the *gross* remainder unreserved, same as the
-        // pre-fix behavior -- flagged here rather than silently treated as a
+        // pre-fix behavior: flagged here rather than silently treated as a
         // verified zero-unusable-fuel aircraft.
         findings.push(PhysicalFinding {
             code: FindingCode::FuelTankLayoutUnavailable,
@@ -569,15 +569,15 @@ mod tests {
         let fuel_loading = plan_fuel_loading(&config, &preset.design_vector, &report);
 
         // The resolution succeeded, so this is a verified reservation, not a
-        // silent fallback -- no `FuelTankLayoutUnavailable` finding.
+        // silent fallback, no `FuelTankLayoutUnavailable` finding.
         assert_eq!(fuel_loading.unusable_fuel_kg, Some(unusable_fuel_kg));
         assert!(!findings(config.requirements.mtow_kg, &fuel_loading)
             .iter()
             .any(|finding| finding.code == FindingCode::FuelTankLayoutUnavailable));
 
         // The usable-fuel closure budget is the gross remainder minus the
-        // unusable mass the tank layout separately charges in the CG ledger
-        // -- reserved exactly once, not compensated with a coefficient.
+        // unusable mass the tank layout separately charges in the CG ledger:
+        // reserved exactly once, not compensated with a coefficient.
         assert!(
             (fuel_loading.mtow_closure_fuel_kg - (gross_fuel_kg - unusable_fuel_kg)).abs() < 1.0e-6
         );
@@ -601,7 +601,7 @@ mod tests {
         // Before this fix, `zero_fuel_mass_kg` was built from the gross
         // remainder without reserving unusable fuel, so
         // `zero_fuel_mass_kg + gross_fuel_kg == mtow` looked closed on its
-        // own -- but the CG ledger separately adds `unusable_fuel_kg` as
+        // own, but the CG ledger separately adds `unusable_fuel_kg` as
         // real extra mass on top, so the aircraft it actually described
         // weighed `mtow + unusable_fuel_kg`. The assertion above is that
         // exact overshoot's regression check.
@@ -610,7 +610,7 @@ mod tests {
     #[test]
     fn an_unresolved_tank_layout_is_a_flagged_finding_not_a_silent_zero() {
         // `plan_from_values` never attempts tank resolution, so it always
-        // reports `unusable_fuel_kg: Some(0.0)` -- a verified "nothing to
+        // reports `unusable_fuel_kg: Some(0.0)`: a verified "nothing to
         // reserve", not an unresolved unknown. `findings` must therefore stay
         // silent on this axis for every existing `plan_from_values` caller.
         let loading = plan_from_values(10_000.0, 2_000.0, FuelCapacityAssessment::default());

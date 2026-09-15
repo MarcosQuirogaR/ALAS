@@ -39,37 +39,7 @@ pub(super) fn panel_title(
 }
 
 pub(super) fn unavailable(theme: Option<&str>, reason: &str) -> Scene {
-    let pal = get_palette(theme);
-    const MESSAGE_TOP: f64 = 82.0;
-    const LINE_HEIGHT: f64 = 17.0;
-    const BOTTOM_MARGIN: f64 = 16.0;
-    let wrapped = crate::chart_kit::wrap_text(reason, 100);
-    let line_count = wrapped.lines().count().max(1) as f64;
-    let height = (420.0_f64).max(MESSAGE_TOP + line_count * LINE_HEIGHT + BOTTOM_MARGIN);
-    let mut scene = Scene::new(760.0, height, Some(Color::from_hex(pal.bg)));
-    scene.title = Some("MSES figure unavailable".to_owned());
-    scene.suppress_derived_title();
-    scene.add(SceneElement::Text {
-        text: "MSES figure unavailable".to_owned(),
-        pos: [24.0, 34.0],
-        font_size: 16.0,
-        color: Color::from_hex("#c0392b"),
-        align: TextAlign::Left,
-        baseline: TextBaseline::Top,
-        angle_deg: 0.0,
-        bold: true,
-    });
-    scene.add(SceneElement::Text {
-        text: wrapped,
-        pos: [24.0, MESSAGE_TOP],
-        font_size: 12.0,
-        color: Color::from_hex(pal.tick),
-        align: TextAlign::Left,
-        baseline: TextBaseline::Top,
-        angle_deg: 0.0,
-        bold: false,
-    });
-    scene
+    crate::status_figure::figure_status_message("MSES figure unavailable", reason, false, theme)
 }
 
 #[cfg(test)]
@@ -96,7 +66,7 @@ mod tests {
         );
         assert!(scene.elements.iter().any(|element| matches!(
             element,
-            SceneElement::Text { text, .. } if text == "solver diagnostics"
+            SceneElement::TextBlock { text, .. } if text == "solver diagnostics"
         )));
     }
 }

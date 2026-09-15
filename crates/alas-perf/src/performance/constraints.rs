@@ -12,7 +12,7 @@ use alas_config::PerformanceConfig;
 
 use super::{far25_engine_count_supported, linspace, M_TO_FT, PA_TO_PSF};
 
-/// Cruise thrust-to-weight constraint, sea-level static -- `tw_cruise_constraint`.
+/// Cruise thrust-to-weight constraint, sea-level static: `tw_cruise_constraint`.
 ///
 /// Solves level flight (`L = W`, `T = D`) at the cruise design point and
 /// converts the required altitude `T/W` to sea-level static through a fixed
@@ -40,8 +40,8 @@ pub fn tw_cruise_constraint(
         .collect()
 }
 
-/// Engine-out second-segment climb thrust-to-weight, constant in wing loading
-/// -- `tw_oei_climb_constraint`.
+/// Engine-out second-segment climb thrust-to-weight, constant in wing loading:
+/// `tw_oei_climb_constraint`.
 ///
 /// This compatibility function returns the required *in-flight* all-engine
 /// equivalent `T/W` at the specified condition. It does not convert from the
@@ -451,7 +451,7 @@ pub fn assess_oei_climb(
     }
 }
 
-/// Take-off field-length thrust-to-weight constraint -- `tw_takeoff_constraint`
+/// Take-off field-length thrust-to-weight constraint: `tw_takeoff_constraint`
 /// (Raymer Ch. 17, empirical).
 ///
 /// ```text
@@ -469,7 +469,7 @@ pub fn tw_takeoff_constraint(ws_pa: &[f64], toda_m: f64, sigma: f64, cl_max_to: 
         .collect()
 }
 
-/// Maximum wing loading [Pa] the landing-distance constraint allows --
+/// Maximum wing loading [Pa] the landing-distance constraint allows:
 /// `ws_landing_limit`.
 ///
 /// ```text
@@ -479,7 +479,7 @@ pub fn ws_landing_limit(lda_m: f64, sigma: f64, cl_max_land: f64, k_factor: f64)
     lda_m * sigma * cl_max_land / k_factor
 }
 
-/// Pre-computed constraint curves ready for plotting -- `MatchingChartData`.
+/// Pre-computed constraint curves ready for plotting: `MatchingChartData`.
 ///
 /// `tw_takeoff` and `ws_land_limits` are keyed by aerodrome name in the order
 /// the aerodromes were supplied (upstream's insertion-ordered `dict`); a
@@ -506,11 +506,11 @@ pub struct MatchingChartData {
     pub design_tw: Option<f64>,
 }
 
-/// Assemble every matching-chart constraint curve for a set of aerodromes --
+/// Assemble every matching-chart constraint curve for a set of aerodromes:
 /// `build_matching_chart`.
 ///
 /// Each `Option` argument falls back to a fresh [`PerformanceConfig`]'s field
-/// of the same name, exactly as upstream's `None`-defaulted keywords do -- one
+/// of the same name, exactly as upstream's `None`-defaulted keywords do, one
 /// place the defaults live, so an omitted argument cannot drift from the
 /// configuration. `tw_design` alone has no configuration counterpart and is
 /// passed straight through. `n_ws_points` sets the wing-loading resolution;

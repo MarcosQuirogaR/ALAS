@@ -1,16 +1,19 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-
 #[cfg(test)]
 mod tests {
-    use super::{finding_margin, mass_triplet_kg, payload_summary_metrics};
+    use super::findings::finding_margin;
+    use super::{
+        fuel_margin_rows, mass_triplet_kg, payload_summary_metrics, static_margin_rows,
+        takeoff_mass_margin,
+    };
     use alas_payload::layout::{LayoutSummary, PassengerSummary, PayloadLayout};
+    use alas_pipeline::feasibility::MissionFuelStatus;
     use alas_pipeline::FindingCode;
 
-    #[test]
-    fn passenger_summary_metrics_come_from_the_built_layout() {
-        let layout = PayloadLayout {
+    fn passenger_layout() -> PayloadLayout {
+        PayloadLayout {
             mode: alas_payload::layout::Mode::Passenger,
             items: Vec::new(),
             total_mass: 21_000.0,
@@ -47,20 +50,80 @@ mod tests {
                 cg_pct_mac: 25.4,
                 double_deck: false,
             })),
-        };
-        let metrics = payload_summary_metrics(&layout);
-        assert!(metrics.iter().any(|(label, value)| {
-            *label == "Seating capacity" && value == "198 / 204 seats requested"
-        }));
+        }
+    }
+
+    #[test]
+    fn passenger_summary_metrics_come_from_the_built_layout_one_value_per_row() {
+        let metrics = payload_summary_metrics(&passenger_layout());
+        for (label, value) in [
+            ("Seated passengers", "198"),
+            ("Requested passengers", "204"),
+            ("Hold load", "3.5 t"),
+            ("Hold capacity", "8.0 t"),
+            ("Hold ULDs", "5"),
+            ("Galleys", "3"),
+            ("Lavatories", "4"),
+            ("Exit pairs", "4"),
+            ("Accessible lavatories", "1"),
+            ("Seats abreast", "6"),
+        ] {
+            assert!(
+                metrics
+                    .iter()
+                    .any(|(candidate, candidate_value)| *candidate == label
+                        && candidate_value == value),
+                "{label} = {value} missing from {metrics:?}"
+            );
+        }
         assert!(metrics
             .iter()
             .any(|(label, value)| *label == "Cabin class mix" && value.contains("Business 18")));
-        assert!(metrics
-            .iter()
-            .any(|(label, value)| *label == "Hold loading" && value.contains("3.5 / 8.0 t")));
-        assert!(metrics.iter().any(|(label, value)| {
-            *label == "Accessibility provisions" && value.contains("1 accessible lavatory")
-        }));
+        assert!(
+            metrics.iter().all(|(_, value)| !value.contains(" / ")),
+            "slash-joined value remains: {metrics:?}"
+        );
+    }
+
+    #[test]
+    fn static_margins_are_shown_together_in_percent_mac_with_an_explicit_missing_case() {
+        let rows = static_margin_rows(Some(0.052), Some(0.081));
+        assert_eq!(
+            rows[0],
+            ("Static margin (baseline)", "5.2 % MAC".to_owned())
+        );
+        assert_eq!(
+            rows[1],
+            ("Static margin (optimized)", "8.1 % MAC".to_owned())
+        );
+        let rows = static_margin_rows(Some(0.052), None);
+        assert_eq!(rows[1].0, "Static margin (optimized)");
+        assert_eq!(rows[1].1, "No optimized design in this run");
+    }
+
+    #[test]
+    fn fuel_margin_rows_split_mass_and_share_and_name_the_stop_case() {
+        let rows = fuel_margin_rows(MissionFuelStatus::Completed, 20_000.0, Some(15_000.0));
+        assert_eq!(
+            rows[0],
+            ("Fuel margin at destination", "+5.00 t".to_owned())
+        );
+        assert_eq!(
+            rows[1],
+            ("Fuel margin, share of carried fuel", "+25.0 %".to_owned())
+        );
+        let rows = fuel_margin_rows(MissionFuelStatus::Exhausted, 20_000.0, Some(20_000.0));
+        assert_eq!(rows[0].0, "Fuel margin at stop");
+        let rows = fuel_margin_rows(MissionFuelStatus::NotRequested, f64::NAN, None);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].1, "Not evaluated");
+    }
+
+    #[test]
+    fn takeoff_mass_margin_reads_as_one_value() {
+        assert_eq!(takeoff_mass_margin(0.2), "At MTOW");
+        assert_eq!(takeoff_mass_margin(1_250.0), "1.25 t below MTOW");
+        assert_eq!(takeoff_mass_margin(f64::NAN), "Not established");
     }
 
     #[test]

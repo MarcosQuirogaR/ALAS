@@ -11,7 +11,7 @@
 //!
 //! Compared at the `closed` tier rather than exactly. The factors here are
 //! written as their legal definitions, and SUAVE reaches a few of the same
-//! quantities by division -- its inch is a twelfth of its foot -- so the two
+//! quantities by division (its inch is a twelfth of its foot) so the two
 //! differ in the last bit or two. That is a difference between an exact
 //! definition and a rounded division, not a translation error, and the tier
 //! that admits a couple of ulps is the one that says so.

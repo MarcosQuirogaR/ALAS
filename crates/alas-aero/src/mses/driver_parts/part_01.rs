@@ -70,7 +70,7 @@ enum CheckpointAttempt {
     /// The checkpoint could not be turned into a converged exact-target
     /// result (restore failure, bridge exhaustion, or a non-converged
     /// exact-target solve); the caller should fall back to the existing
-    /// cold-start search rather than discard the checkpoint's evidence --
+    /// cold-start search rather than discard the checkpoint's evidence;
     /// there was none to discard, since nothing here was ever presented as
     /// this call's result.
     NotUsable,
@@ -521,7 +521,7 @@ impl Mses {
     /// [`MsesConvergedCheckpoint::matches`] via [`Mses::checkpoint_matches`]),
     /// it is tried first: the checkpoint's converged flowfield is restored
     /// and bridged toward the exact requested angle in bounded <=0.5 deg
-    /// steps -- cheaper than the cold clean-mesh retry-offset search below
+    /// steps: cheaper than the cold clean-mesh retry-offset search below
     /// (no `mset` call at all), and it reuses the same bounded mechanism
     /// rather than inventing new solving logic. A `None` checkpoint, a
     /// mismatched one, or one that does not lead to a converged exact-target
@@ -719,9 +719,9 @@ impl Mses {
     /// converged `mdat.case` at `converged_alpha`, and fold them into
     /// `result`.
     ///
-    /// Shared by every path that can produce a converged pressure state --
+    /// Shared by every path that can produce a converged pressure state:
     /// the cold-start retry-offset search, its bridge-back recovery, and the
-    /// checkpoint-anchored warm start -- so MPlot extraction always runs
+    /// checkpoint-anchored warm start, so MPlot extraction always runs
     /// against whichever state actually ended up converged, never against an
     /// intermediate or mismatched one.
     fn finish_pressure_result(
@@ -1228,8 +1228,8 @@ impl Mses {
     /// warm-up: it is appended to `solver_attempts` for audit, but it is
     /// never a candidate for a requested point's own diagnostic or
     /// coefficients. A step that fails to converge is retried once at half
-    /// its size from the same last-known-good state -- a bounded retry, not
-    /// an ever-shrinking search -- before the whole bridge gives up and
+    /// its size from the same last-known-good state (a bounded retry, not
+    /// an ever-shrinking search) before the whole bridge gives up and
     /// restores `mdat.case` to `from_alpha`'s state for the caller.
     ///
     /// Eight parameters (matching the existing
@@ -1360,10 +1360,10 @@ impl Mses {
     /// Whether this driver instance may safely reuse `checkpoint` as a
     /// warm-start anchor for a solve at `mach`/`reynolds`.
     ///
-    /// Every field that affects the physical solve -- geometry, the solver
+    /// Every field that affects the physical solve: geometry, the solver
     /// knobs baked into the deck (`n_crit`, transition, `mset_n`/`mset_e`,
     /// `mucon`, the iteration cap), Mach, Reynolds, and the resolved OSMAP
-    /// path -- must match exactly. There is no tolerance: a mismatch on any
+    /// path, must match exactly. There is no tolerance: a mismatch on any
     /// of these means the checkpoint's `mdat.case` was built for a different
     /// problem, and reusing it would be exactly the stale-foreign-mdat reuse
     /// this check exists to prevent.

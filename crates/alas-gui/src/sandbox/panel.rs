@@ -13,7 +13,10 @@
 //! sits the Search box; while it holds text, the matching fields are listed
 //! in a transient results card with the shared editors, so a parameter can
 //! be edited from a search hit without a permanent duplicate of every
-//! editor. Clearing the search removes the card.
+//! editor. Clearing the search removes the card. Below the category buttons
+//! sits the Summary button: it toggles a card beside the stack listing the
+//! derived geometry metrics (`S_ref`, `b`, `MAC`, `AR`, sweeps, taper and
+//! fuselage length), so they no longer clutter the action block.
 
 use egui::{pos2, vec2, Rect, RichText, ScrollArea, TextEdit, Ui};
 
@@ -22,6 +25,7 @@ use crate::views::tr;
 
 use super::editors::show_field;
 use super::fields::{grouped, Discipline, SandboxField};
+use super::overlays::{metric_chips, CONVENTIONS};
 use super::viewport::{
     floating_button, register_overlay_rect, was_lit, OVERLAY_INSET, REST_OPACITY,
 };
@@ -32,6 +36,10 @@ pub const CATEGORY_COLUMN_WIDTH: f32 = 168.0;
 pub const CATEGORY_SPACING: f32 = 10.0;
 /// Width of the search results card, in points.
 const RESULTS_WIDTH: f32 = 400.0;
+/// Width of the Summary card, in points.
+const SUMMARY_WIDTH: f32 = 220.0;
+/// Nominal height of the Summary card, used to keep it inside the free band.
+const SUMMARY_HEIGHT: f32 = 210.0;
 
 /// The matching fields of a search, grouped by discipline and group.
 type Hits = Vec<(Discipline, Vec<(&'static str, Vec<SandboxField>)>)>;
@@ -108,6 +116,7 @@ pub fn show_parameter_access(
         ),
     );
     let mut results_top = free_top;
+    let mut summary_top = free_top;
     let stack = ui.allocate_new_ui(egui::UiBuilder::new().max_rect(column), |ui| {
         ui.spacing_mut().item_spacing.y = CATEGORY_SPACING;
         show_search_box(state, ui, width);
@@ -121,6 +130,16 @@ pub fn show_parameter_access(
                 open_discipline_window(state, discipline);
             }
         }
+        summary_top = ui.cursor().top();
+        let summary = egui::Button::new(tr("Summary")).min_size(vec2(width, 0.0));
+        if floating_button(ui, "summary", summary)
+            .on_hover_text(tr(
+                "Show or hide the derived geometry metrics of the drawn aircraft.",
+            ))
+            .clicked()
+        {
+            state.sandbox.layout.summary_open = !state.sandbox.layout.summary_open;
+        }
     });
     let used = stack.response.rect;
     register_overlay_rect(&ctx, "stack", used);
@@ -129,16 +148,48 @@ pub fn show_parameter_access(
         ctx.data_mut(|d| d.insert_temp(stack_height_id(), height));
         ctx.request_repaint();
     }
-    if !state.sandbox.search.trim().is_empty() {
-        show_search_results(
-            state,
-            ui,
-            viewport,
-            column.right() + OVERLAY_INSET,
-            results_top,
-            free_bottom,
-        );
+    let search_active = !state.sandbox.search.trim().is_empty();
+    let mut summary_left = column.right() + OVERLAY_INSET;
+    if search_active {
+        show_search_results(state, ui, viewport, summary_left, results_top, free_bottom);
+        summary_left += RESULTS_WIDTH
+            .min((viewport.right() - OVERLAY_INSET - summary_left).max(1.0))
+            + OVERLAY_INSET;
     }
+    if state.sandbox.layout.summary_open {
+        let top = summary_top.min(free_bottom - SUMMARY_HEIGHT).max(free_top);
+        show_summary_card(state, ui, viewport, summary_left, top, free_bottom);
+    }
+}
+
+/// The Summary card: the derived geometry metrics of the drawn aircraft,
+/// one monospace row each with the conventions as hover text, in a card
+/// beside the category stack (beside the search results while a search is
+/// active). Each row registers as a `metric` overlay and the card as
+/// `summary_card`, so a gesture on it never orbits.
+fn show_summary_card(
+    state: &AppState,
+    ui: &mut Ui,
+    viewport: Rect,
+    left: f32,
+    top: f32,
+    bottom: f32,
+) {
+    let width = SUMMARY_WIDTH.min((viewport.right() - OVERLAY_INSET - left).max(1.0));
+    let card = Rect::from_min_max(pos2(left, top), pos2(left + width, bottom.max(top + 40.0)));
+    let chips = metric_chips(state);
+    let response = ui.allocate_new_ui(egui::UiBuilder::new().max_rect(card), |ui| {
+        egui::Frame::popup(ui.style()).show(ui, |ui| {
+            ui.set_width(width - 2.0 * ui.spacing().window_margin.left);
+            ui.label(RichText::new(tr("Summary")).strong());
+            for text in &chips {
+                let row = ui.label(RichText::new(text).monospace());
+                register_overlay_rect(ui.ctx(), "metric", row.rect);
+                row.on_hover_text(tr(CONVENTIONS));
+            }
+        });
+    });
+    register_overlay_rect(ui.ctx(), "summary_card", response.response.rect);
 }
 
 /// The Search box: its own box only, dimmed like the buttons until it is

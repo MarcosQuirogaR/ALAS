@@ -132,13 +132,41 @@ pub(super) fn render_geo(
         dist_min = if sizing.enabled { sizing.total_thickness_m.max(config.chord_m * 0.005) } else { config.chord_m * 0.005 },
         dist_max = config.chord_m * 0.75,
     ));
+    let (_, _, wake_y_min_m, wake_y_max_m) = wake_box(config);
     out.push_str("Field[4] = Box;\n");
     out.push_str(&format!(
         "Field[4].VIn = {wake_size_m:.16e};\nField[4].VOut = {far_size_m:.16e};\nField[4].XMin = 0;\nField[4].XMax = {domain_max_x_m:.16e};\nField[4].YMin = {y_min:.16e};\nField[4].YMax = {y_max:.16e};\nField[4].ZMin = 0;\nField[4].ZMax = {extrusion_span_m:.16e};\n",
-        y_min = -2.0 * config.chord_m,
-        y_max = 2.0 * config.chord_m,
+        y_min = wake_y_min_m,
+        y_max = wake_y_max_m,
     ));
-    out.push_str("Field[5] = Min;\nField[5].FieldsList = {3, 4};\nBackground Field = 5;\n\n");
+    let le_size_m = leading_edge_size(config, surface_size_m);
+    if config.mesh.leading_edge_refinement > 0 && le_size_m < surface_size_m {
+        // Optional leading-edge refinement (template v2): a Distance/Threshold
+        // pair around the minimum-x coordinate, combined through the same Min
+        // field.  At level zero this block is absent and the source is
+        // identical to template v1.
+        let le_index = points
+            .iter()
+            .enumerate()
+            .min_by(|left, right| left.1 .0.total_cmp(&right.1 .0))
+            .map_or(0, |(index, _)| index);
+        out.push_str("Field[6] = Distance;\n");
+        out.push_str(&format!(
+            "Field[6].PointsList = {{{}}};\n",
+            point_offset + le_index as i32
+        ));
+        out.push_str("Field[7] = Threshold;\nField[7].InField = 6;\n");
+        out.push_str(&format!(
+            "Field[7].SizeMin = {le_size_m:.16e};\nField[7].SizeMax = {surface_size_m:.16e};\nField[7].DistMin = {dist_min:.16e};\nField[7].DistMax = {dist_max:.16e};\n",
+            dist_min = LEADING_EDGE_REFINEMENT_INNER_CHORDS * config.chord_m,
+            dist_max = LEADING_EDGE_REFINEMENT_OUTER_CHORDS * config.chord_m,
+        ));
+        out.push_str(
+            "Field[5] = Min;\nField[5].FieldsList = {3, 4, 7};\nBackground Field = 5;\n\n",
+        );
+    } else {
+        out.push_str("Field[5] = Min;\nField[5].FieldsList = {3, 4};\nBackground Field = 5;\n\n");
+    }
 
     if sizing.enabled {
         out.push_str("// SI boundary-layer field: Size is first-cell thickness, twice wall-centre distance.\n");
@@ -193,7 +221,10 @@ pub(super) fn render_geo(
     out
 }
 
-pub(super) fn characteristic_lengths(config: &CfdStudyConfig, chord: f64) -> (f64, f64, f64) {
+pub(in crate::mesh) fn characteristic_lengths(
+    config: &CfdStudyConfig,
+    chord: f64,
+) -> (f64, f64, f64) {
     // Keep spacing tied to the chord and preset.  If the outer rectangle is
     // enlarged, the physical resolution must remain unchanged; deriving it
     // from domain width would silently coarsen the wake and far field.  The
@@ -215,7 +246,7 @@ pub(super) fn characteristic_lengths(config: &CfdStudyConfig, chord: f64) -> (f6
     (far_size_m, wake_size_m, surface_size_m)
 }
 
-pub(super) fn domain_bounds(config: &CfdStudyConfig) -> (f64, f64, f64, f64) {
+pub(in crate::mesh) fn domain_bounds(config: &CfdStudyConfig) -> (f64, f64, f64, f64) {
     let chord = config.chord_m;
     (
         -config.mesh.upstream_chords * chord,
@@ -223,4 +254,27 @@ pub(super) fn domain_bounds(config: &CfdStudyConfig) -> (f64, f64, f64, f64) {
         -config.mesh.half_height_chords * chord,
         config.mesh.half_height_chords * chord,
     )
+}
+
+/// Radius (chords) inside which the leading-edge refinement size applies.
+pub(super) const LEADING_EDGE_REFINEMENT_INNER_CHORDS: f64 = 0.02;
+/// Radius (chords) beyond which the surface size applies again.
+pub(super) const LEADING_EDGE_REFINEMENT_OUTER_CHORDS: f64 = 0.15;
+/// Smallest leading-edge size, as a chord fraction.
+pub(super) const MIN_LEADING_EDGE_SIZE_CHORDS: f64 = 0.0005;
+
+/// Leading-edge target size in metres for the configured refinement level.
+///
+/// Level zero returns the surface size unchanged; each level halves it,
+/// bounded below by [`MIN_LEADING_EDGE_SIZE_CHORDS`].
+pub(in crate::mesh) fn leading_edge_size(config: &CfdStudyConfig, surface_size_m: f64) -> f64 {
+    let divisor = 2_f64.powi(config.mesh.leading_edge_refinement as i32);
+    (surface_size_m / divisor).max(MIN_LEADING_EDGE_SIZE_CHORDS * config.chord_m)
+}
+
+/// Wake refinement box `(x_min, x_max, y_min, y_max)` in metres: from the
+/// trailing-edge plane to the outlet, two chords above and below the chord line.
+pub(in crate::mesh) fn wake_box(config: &CfdStudyConfig) -> (f64, f64, f64, f64) {
+    let (_, max_x, _, _) = domain_bounds(config);
+    (0.0, max_x, -2.0 * config.chord_m, 2.0 * config.chord_m)
 }

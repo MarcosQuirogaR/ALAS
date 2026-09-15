@@ -11,7 +11,7 @@
 //! Turning a wing into the span breaks the panelizer discretizes between.
 //!
 //! A *span break* is a spanwise station where the planform is allowed to
-//! change: the root, the tip, a segment boundary, or -- upstream -- either
+//! change: the root, the tip, a segment boundary, or (upstream) either
 //! edge of a control surface. Between two of them the surface is a trapezoid,
 //! and that trapezoid is what
 //! [`super::distribution`] lays panels on.
@@ -27,12 +27,12 @@
 //! `discretize_control_surfaces = False` and the mission runner overrides
 //! nothing, so `populate_control_sections` is never called, no segment ever
 //! acquires a control surface, and both `LE_breaks` and `TE_breaks` are empty
-//! at the merge -- which reduces the merge to "the segment breaks, in order"
+//! at the merge, which reduces the merge to "the segment breaks, in order"
 //! and the cut arrays to their `[[0, 0], [1, 1]]` defaults.
 //!
 //! What remains is the other path: a wing with no `Segments` at all, which is
 //! every wing the mission runner builds. `convert_to_segmented_wing` gives it
-//! exactly two -- root and tip -- and this module produces the two span
+//! exactly two (root and tip) and this module produces the two span
 //! breaks that follow from them.
 //!
 //! Left untranslated for the same reason: the `All_Moving_Surface` branch (no
@@ -45,7 +45,7 @@
 ///
 /// The `cuts` array upstream carries is absent: with no control surface
 /// discretized it is `[[0, 0], [1, 1]]` on every break, which makes the
-/// leading-edge cut 0 and the trailing-edge cut 1 -- that is, no cut -- and
+/// leading-edge cut 0 and the trailing-edge cut 1 (that is, no cut) and
 /// the panelizer's `np.interp` between them the identity.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SpanBreak {
@@ -74,7 +74,7 @@ pub struct SpanBreak {
 /// single place.
 ///
 /// Two details are upstream's and are reproduced rather than tidied. The tip
-/// break's local chord is `taper * chords.root` and not `chords.tip` -- the
+/// break's local chord is `taper * chords.root` and not `chords.tip`: the
 /// reformatting loop overwrites the chord `convert_to_segmented_wing` had
 /// just set from `chords.tip`, so a wing whose taper and tip chord disagree
 /// is panelized on the taper. And the tip break's outboard sweep is set to
@@ -138,8 +138,8 @@ pub fn span_breaks(wing: &super::types::VlmWing) -> [SpanBreak; 2] {
 /// What `make_VLM_wings` writes onto the outboard sweep of the last segment.
 ///
 /// It is not a small sweep angle; it is a marker that stands in for "there is
-/// nothing outboard of here". The panelizer never reads it -- `break_sweep`
-/// is set to zero on the last break -- so the value has no effect and is
+/// nothing outboard of here". The panelizer never reads it (`break_sweep`
+/// is set to zero on the last break) so the value has no effect and is
 /// carried only so the two implementations hold the same object.
 const TIP_SWEEP_PLACEHOLDER: f64 = 1e-8;
 

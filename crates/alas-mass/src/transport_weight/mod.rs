@@ -6,14 +6,14 @@
 // Upstream: mission reference 2.5.2, LGPL-2.1.
 // Reference: alas @ rust-port-baseline.
 
-//! mission reference's transport-category empty-weight buildup --
+//! mission reference's transport-category empty-weight buildup:
 //! `Weights_Transport.evaluate()`, which unpacks a built `Vehicle` and calls
 //! `empty_weight(vehicle, settings, method_type="New mission reference")`. `"New mission reference"`
 //! is the only `method_type` `evaluate()` ever passes (its own default
 //! argument), and the only place in the whole reference that constructs a
 //! `Weights_Transport` is the mission runner's
 //! `external tools/mission_runner/mission_builder.py`'s `base_analysis`, whose
-//! `weights.vehicle = vehicle` is always a sized `Config` --
+//! `weights.vehicle = vehicle` is always a sized `Config`:
 //! `mission_builder.simple_sizing`'s output, not `vehicle_builder.build_vehicle`'s
 //! raw one. That ordering matters for two fields this module takes as plain
 //! data rather than recomputing: see `TransportVehicle::max_zero_fuel_kg` and
@@ -39,7 +39,7 @@
 //!
 //! `empty_weight`'s `settings.weight_reduction_factors` (`main_wing`,
 //! `empennage`, `fuselage`, `structural`, `systems`) are `Weights_Transport`'s
-//! own `__defaults__` -- all zero -- and no reachable caller ever constructs
+//! own `__defaults__` (all zero) and no reachable caller ever constructs
 //! one with anything else (a grep of the whole reference finds no assignment
 //! to `weights.settings`). Every `wt_x * (1 - wt_factors.y)` in the original
 //! is therefore multiplication by exactly `1.0`, and this port omits the
@@ -52,20 +52,20 @@
 //! upstream's own `if wt_prop_data is None` branches make
 //! `output.structures.nacelle`, `.propulsion_breakdown.engines`,
 //! `.thrust_reversers`, `.miscellaneous` and `.fuel_system` all exactly
-//! `0.0` -- reproduced as hardcoded zeros in [`WeightBreakdown`] rather than
+//! `0.0`: reproduced as hardcoded zeros in [`WeightBreakdown`] rather than
 //! as unused fields threaded through every call.
 //!
 //! # A naming quirk, reproduced rather than fixed
 //!
 //! `Weights_Transport.evaluate()` sets
-//! `vehicle.mass_properties.operating_empty = results.empty` -- the
+//! `vehicle.mass_properties.operating_empty = results.empty`: the
 //! structures + propulsion + systems subtotal, *not* `results.operating_empty`
 //! (which additionally carries flight crew, attendants and the other
 //! operating items). The same substitution appears in the base
 //! `mission reference.Analyses.Weights.Weights.evaluate()`, so it is an established
 //! naming choice upstream and not a one-off slip. [`WeightBreakdown::empty_kg`]
 //! is therefore the field that corresponds to what a caller reading
-//! `vehicle.mass_properties.operating_empty` after `evaluate()` would see --
+//! `vehicle.mass_properties.operating_empty` after `evaluate()` would see,
 //! not [`WeightBreakdown::operating_empty_kg`], despite the name.
 //!
 //! # `wing.Segments` is always empty
@@ -75,7 +75,7 @@
 //! `external tools/mission_runner/vehicle_builder.py` never calls
 //! `wing.append_segment`, so every wing this program's mission reference bridge builds
 //! has an empty `Segments` container and the traditional (`else`) formula is
-//! the only one ever reached -- confirmed against every case in
+//! the only one ever reached: confirmed against every case in
 //! `golden/mass/transport_weight.json`. The segmented branch and its
 //! `big_integral` helper (a closed-form bending integral over a
 //! piecewise-linear thickness distribution, evaluated through complex
@@ -97,14 +97,14 @@ pub use wing::{HorizontalTail, MainWing, VerticalTail};
 
 /// One `Main_Wing`, `Horizontal_Tail` or `Vertical_Tail` reached by
 /// [`empty_weight`], and the fuselage, engines and vehicle-level mass/
-/// envelope figures the correlations read off it -- narrowed to the fields
+/// envelope figures the correlations read off it: narrowed to the fields
 /// they actually touch, the same scoping [`super::torenbeek`] uses for its
 /// own inputs. Not the whole `mission reference.Vehicle`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TransportVehicle {
     /// `vehicle.mass_properties.max_takeoff`, kg.
     pub mtow_kg: f64,
-    /// `vehicle.mass_properties.max_zero_fuel`, kg -- taken as given rather
+    /// `vehicle.mass_properties.max_zero_fuel`, kg: taken as given rather
     /// than recomputed, because the value `Weights_Transport` actually reads
     /// is set by `mission_builder.simple_sizing` (`0.73 * max_takeoff`)
     /// *after* `vehicle_builder.build_vehicle` has already computed its own
@@ -115,7 +115,7 @@ pub struct TransportVehicle {
     pub cargo_kg: f64,
     /// `vehicle.passengers`.
     pub passenger_count: u32,
-    /// `vehicle.reference_area`, m^2 -- the main wing's own `areas.reference`
+    /// `vehicle.reference_area`, m^2: the main wing's own `areas.reference`
     /// in every vehicle this program's mission reference bridge builds, but read
     /// separately since `systems`/`tail_vertical` read it off the vehicle,
     /// not off a wing.
@@ -128,11 +128,11 @@ pub struct TransportVehicle {
     pub control_type: ControlSystemType,
     /// `vehicle.systems.accessories`.
     pub accessories_type: AccessoriesType,
-    /// `sum(prop.number_of_engines for prop in vehicle.networks)` --
+    /// `sum(prop.number_of_engines for prop in vehicle.networks)`:
     /// narrowed to the one `Turbofan` network every vehicle this program's
     /// bridge builds carries.
     pub engine_count: u32,
-    /// `turbofan.sealevel_static_thrust`, N, per engine -- a
+    /// `turbofan.sealevel_static_thrust`, N, per engine: a
     /// `turbofan_sizing()` output (`alas-prop::mission_turbofan`'s own row,
     /// not yet translated), taken here as plain data exactly as
     /// [`super::torenbeek`]'s `mass_wing` takes `design_mass_togw`.
@@ -163,7 +163,7 @@ pub enum TransportPropulsionMassBasis {
     },
 }
 
-/// `output.structures` -- the airframe's structural mass, kg.
+/// `output.structures`: the airframe's structural mass, kg.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct StructuresBreakdown {
     /// Main wing structural mass.
@@ -178,10 +178,10 @@ pub struct StructuresBreakdown {
     pub main_landing_gear_kg: f64,
     /// Nose landing gear mass.
     pub nose_landing_gear_kg: f64,
-    /// Nacelle structural mass -- always `0.0` on the `New mission reference` path; see
+    /// Nacelle structural mass, always `0.0` on the `New mission reference` path; see
     /// the module doc.
     pub nacelle_kg: f64,
-    /// Paint mass -- always `0.0` for any `method_type` other than FLOPS.
+    /// Paint mass, always `0.0` for any `method_type` other than FLOPS.
     pub paint_kg: f64,
     /// Sum of all the structural masses above.
     pub total_kg: f64,
@@ -192,13 +192,13 @@ pub struct StructuresBreakdown {
 /// `New mission reference` path; see the module doc.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PropulsionBreakdown {
-    /// Dry engine mass -- always `0.0`; see the struct doc.
+    /// Dry engine mass, always `0.0`; see the struct doc.
     pub engines_kg: f64,
-    /// Thrust-reverser mass -- always `0.0`; see the struct doc.
+    /// Thrust-reverser mass, always `0.0`; see the struct doc.
     pub thrust_reversers_kg: f64,
-    /// Miscellaneous propulsion mass -- always `0.0`; see the struct doc.
+    /// Miscellaneous propulsion mass, always `0.0`; see the struct doc.
     pub miscellaneous_kg: f64,
-    /// Fuel-system mass -- always `0.0`; see the struct doc.
+    /// Fuel-system mass, always `0.0`; see the struct doc.
     pub fuel_system_kg: f64,
     /// The whole integrated propulsion system's mass.
     pub total_kg: f64,
@@ -253,7 +253,7 @@ pub struct OperationalItems {
     pub total_kg: f64,
 }
 
-/// `empty_weight`'s return value -- the whole weight breakdown `output`.
+/// `empty_weight`'s return value: the whole weight breakdown `output`.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct WeightBreakdown {
     /// The airframe structural masses.
@@ -266,18 +266,18 @@ pub struct WeightBreakdown {
     pub payload: PayloadBreakdown,
     /// The operating-item and crew masses.
     pub operational_items: OperationalItems,
-    /// `output.empty` -- structures + propulsion + systems. This, not
+    /// `output.empty`: structures + propulsion + systems. This, not
     /// [`Self::operating_empty_kg`], is what
     /// `vehicle.mass_properties.operating_empty` is set to after
     /// `Weights_Transport.evaluate()`; see the module doc.
     pub empty_kg: f64,
-    /// `output.operating_empty` -- `empty_kg` plus the operational items.
+    /// `output.operating_empty`: `empty_kg` plus the operational items.
     pub operating_empty_kg: f64,
-    /// `output.zero_fuel_weight` -- `operating_empty_kg` plus the payload.
+    /// `output.zero_fuel_weight`: `operating_empty_kg` plus the payload.
     pub zero_fuel_weight_kg: f64,
-    /// `output.fuel` -- `max_takeoff_kg` minus the zero-fuel weight.
+    /// `output.fuel`: `max_takeoff_kg` minus the zero-fuel weight.
     pub fuel_kg: f64,
-    /// `output.max_takeoff` -- the vehicle's `max_takeoff` mass, echoed back.
+    /// `output.max_takeoff`: the vehicle's `max_takeoff` mass, echoed back.
     pub max_takeoff_kg: f64,
 }
 

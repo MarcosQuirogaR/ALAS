@@ -25,8 +25,8 @@ use crate::views::{tr, tr_fields};
 /// JSON directly and needs every schema field present to find it back.
 ///
 /// `fuel_policy` and `fuel_tanks` skip serialization when they equal their
-/// default, so a fresh or reloaded configuration -- which starts at that
-/// default -- would otherwise be missing both keys entirely.
+/// default, so a fresh or reloaded configuration, which starts at that
+/// default, would otherwise be missing both keys entirely.
 pub(crate) fn full_config_values(config: &AlasConfig) -> Value {
     let mut value = serde_json::to_value(config).unwrap_or(Value::Null);
     if let Some(map) = value.as_object_mut() {
@@ -276,7 +276,7 @@ impl AppState {
 
     /// Apply one aux-preset (the Py6-era fidelity/solver/performance pickers)
     /// on top of the current configuration, overwriting only the group or
-    /// sub-group it names -- unlike an aircraft preset, which replaces the
+    /// sub-group it names, unlike an aircraft preset, which replaces the
     /// whole configuration.
     pub fn apply_aux_preset(&mut self, kind: PresetKind, name: &str) {
         let applied = match kind {

@@ -232,7 +232,7 @@ fn cruise_point_inside_the_flight_envelope(config: &AlasConfig) -> Vec<Validatio
             message: format!(
                 "Cruise design point ({cruise_eas_m_s:.0} m/s EAS at Mach \
                  {:.2} / {} m) exceeds the design dive speed VD \
-                 ({dive_speed:.0} m/s EAS) -- the aircraft would cruise \
+                 ({dive_speed:.0} m/s EAS): the aircraft would cruise \
                  outside its own structural flight envelope.",
                 requirements.cruise_mach,
                 grouped(requirements.cruise_altitude_m),
@@ -245,7 +245,7 @@ fn cruise_point_inside_the_flight_envelope(config: &AlasConfig) -> Vec<Validatio
             field_path: "requirements.dive_speed_m_s".to_owned(),
             message: format!(
                 "Cruise design point ({cruise_eas_m_s:.0} m/s EAS) is above VC \
-                 ({design_cruise_speed:.0} m/s EAS = VD/1.25) -- the aircraft \
+                 ({design_cruise_speed:.0} m/s EAS = VD/1.25): the aircraft \
                  cruises in the V-n diagram's caution band, not normal \
                  operation."
             ),
@@ -298,8 +298,8 @@ const MAX_SPANWISE_RESOLUTION: i64 = 2;
 /// surface rather than a placeholder.
 ///
 /// `geometry.wing.n_subdivisions` and its empennage twin are absolute panel
-/// counts across a whole surface. Four is already far below anything usable
-/// -- the shipped wing uses 24 -- so this rejects nonsense rather than
+/// counts across a whole surface. Four is already far below anything usable:
+/// the shipped wing uses 24, so this rejects nonsense rather than
 /// arbitrating fidelity, which is what the convergence evidence in
 /// `alas_config::analysis` is for.
 const MIN_SPANWISE_PANELS: i64 = 4;
@@ -317,8 +317,8 @@ const MIN_SPANWISE_PANELS: i64 = 4;
 /// Measured on the registered presets (`.agent/reports/
 /// 2026-09-11-vlm-resolution-sensitivity.html`): at a multiplier of 3 the
 /// swept presets over-predict the induced-drag factor by 4-50 %, at 6 the
-/// A320 trim solve diverges outright, and at 10 -- AeroSandbox's own default,
-/// and so a value a user may reasonably type -- the influence matrix is
+/// A320 trim solve diverges outright, and at 10 (AeroSandbox's own default,
+/// and so a value a user may reasonably type) the influence matrix is
 /// effectively singular while the solve still reports success, returning
 /// L/D near 1 instead of 18. That last case is the reason this is an error
 /// and not a warning: nothing downstream can detect it.

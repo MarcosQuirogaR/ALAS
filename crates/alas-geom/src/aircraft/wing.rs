@@ -33,20 +33,20 @@
 //! `_compute_frame_of_section` (meshing only), `xsec_area`, and every
 //! non-default argument of the methods that are translated (`type=`,
 //! `_sectional=` as a public parameter, `include_centerline_distance=`,
-//! `control_surface_area`'s `by_name=`). `mesh_thin_surface` and `mesh_line`
-//! -- also meshing, but reached through reference geometry's own
+//! `control_surface_area`'s `by_name=`). `mesh_thin_surface` and `mesh_line`,
+//! also meshing, but reached through reference geometry's own
 //! `VortexLatticeMethod.run()` rather than through this program's own
-//! source -- are translated in [`super::mesh`], not here.
+//! source, are translated in [`super::mesh`], not here.
 //!
 //! [`Wing::control_surface_area`] always returns `0.0`: `WingXSec` here has no
 //! `control_surfaces` field at all (see above), so upstream's summing loop is
-//! always empty -- the same result its formula gives a wing with none defined.
+//! always empty: the same result its formula gives a wing with none defined.
 //!
 //! # Airfoil identity vs. structural equality
 //!
 //! [`Wing::subdivide_sections`] branches on whether two adjacent `WingXSec`s
 //! share the same airfoil, which upstream tests with Python's default
-//! `__eq__` -- object identity, true exactly when the same `Airfoil` object
+//! `__eq__`: object identity, true exactly when the same `Airfoil` object
 //! was passed to both constructors. This crate's `Airfoil` values are owned,
 //! not shared references, so there is no identity to compare; this port uses
 //! [`Airfoil`]'s `#[derive(PartialEq)]` (structural equality: same name, same
@@ -60,7 +60,7 @@
 //! # `aerodynamic_center`'s un-rotated chordwise offset
 //!
 //! [`Wing::aerodynamic_center`] adds `chord_fraction * section_MAC_length`
-//! straight onto the X axis without rotating it by the section's twist --
+//! straight onto the X axis without rotating it by the section's twist:
 //! upstream's own `# TODO`. Reproduced exactly; `docs/PORTING.md` records it as
 //! a `deviation-candidate`.
 //!

@@ -189,8 +189,8 @@ fn build_payload_layout_with_mass_semantics(
         Ok(layout)
     } else {
         // The selected cabin geometry determines the class proportions and
-        // seat geometry. Every study -- a registered aircraft or a
-        // clean-sheet one alike -- is sized from its class shares and fills
+        // seat geometry. Every study (a registered aircraft or a
+        // clean-sheet one alike) is sized from its class shares and fills
         // the usable floor; there is no explicit passenger target for the
         // solver to hit. Materializing a Custom cabin therefore must not
         // replace the computed capacity with a stale copied count.
@@ -294,7 +294,7 @@ impl PassengerCounts {
 /// lumped payload mass every caller sees before the real cabin is built. It is
 /// capped per deck at [`max_certifiable_capacity`] for the same reason the
 /// detailed engine is: without that cap a high-density preset on a large body
-/// would report a count limited only by floor space -- 1,400 seats on an
+/// would report a count limited only by floor space: 1,400 seats on an
 /// A380-sized shell against the 853 the real aircraft is certified for.
 pub fn simulate_passenger_counts(
     g: &CabinGeometry,
@@ -511,7 +511,7 @@ struct Deck<'a> {
 /// which compounds to several rows across a four-class cabin. Earlier classes
 /// take their share rounded to the nearest whole row, so the rounding averages
 /// out instead of always undershooting, and the last class absorbs whatever is
-/// left -- which is how an airline actually sets an exact business row count
+/// left, which is how an airline actually sets an exact business row count
 /// and lets economy fill the rest.
 fn count_deck(
     deck: &Deck<'_>,

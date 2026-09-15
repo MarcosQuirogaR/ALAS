@@ -12,7 +12,7 @@
 //! Each function returns the component's coefficient on *its own* reference
 //! area, which is what upstream's per-component methods return.
 //! [`scale_to_vehicle_reference`] then rescales it to the vehicle reference
-//! area, reproducing the in-place rewrite `parasite_total` performs -- a
+//! area, reproducing the in-place rewrite `parasite_total` performs: a
 //! detail that is not cosmetic, because the induced-drag buildup reads the
 //! rescaled value back out.
 
@@ -44,7 +44,7 @@ pub fn blend_to_sonic(mach: f64) -> f64 {
 /// Scoped to the unsegmented branch: `parasite_drag_wing` sums over
 /// `wing.Segments` when there are any, and `vehicle_builder.py` never appends
 /// one, which `gen_aero_drag_buildup.py` refuses to write a fixture without
-/// confirming. The wetted-area recalculation is likewise unreached --
+/// confirming. The wetted-area recalculation is likewise unreached:
 /// `recalculate_total_wetted_area` is `false` in `Fidelity_Zero`'s defaults
 /// and `simple_sizing` sets every `areas.wetted` to a nonzero value before
 /// the analysis runs, so upstream's `or wing.areas.wetted == 0.` fallback
@@ -237,7 +237,7 @@ mod tests {
     #[test]
     fn the_blend_is_monotone_and_flat_at_both_ends_of_the_band() {
         // A cubic Hermite patch, so its first derivative vanishes at each
-        // end -- which is the whole reason upstream uses one instead of a
+        // end, which is the whole reason upstream uses one instead of a
         // straight line, and what stops the form factor kinking at Mach 0.95.
         let mut previous = 1.0;
         for step in 0..=50 {

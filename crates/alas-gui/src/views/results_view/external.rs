@@ -1,363 +1,418 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! Run-scoped external-tool evidence shown beside the scientific figures.
+//! Per-tool status cards for the Summary tab.
 //!
-//! This is intentionally a small artifact browser, not another solver page:
-//! native files are opened in the user's file explorer and the status shown
-//! here comes from the pipeline's process, parser, and comparison boundaries.
-
-use std::path::{Path, PathBuf};
+//! One compact card per external analysis: the tool name, a colour-coded
+//! class (success, warning, failure, skipped, unavailable) and a short status
+//! label so colour is never the only signal. The full solver diagnostics stay
+//! in the Run Log and the discipline figures; the card keeps only a hover
+//! detail taken from the pipeline's own status and error strings.
 
 use alas_pipeline::PipelineResult;
 use egui::{Color32, RichText, Ui};
 
 use crate::views::tr;
 
-pub(super) fn show_external_tools_result(ui: &mut Ui, result: &PipelineResult) {
-    ui.heading(tr("External tool evidence"));
-    ui.label(
-        RichText::new(tr(
-            "Run-scoped native statuses and retained files. A parseable artifact can still be marked not comparable when its physical contract is not satisfied.",
-        ))
-        .weak(),
-    );
-    ui.add_space(8.0);
-
-    if ui.available_width() >= 920.0 {
-        ui.columns(2, |columns| {
-            let (left, right) = columns.split_at_mut(1);
-            show_openvsp(result, &mut left[0]);
-            show_vspaero(result, &mut right[0]);
-        });
-        ui.add_space(8.0);
-        ui.columns(2, |columns| {
-            let (left, right) = columns.split_at_mut(1);
-            show_avl(result, &mut left[0]);
-            show_flowunsteady(result, &mut right[0]);
-        });
-    } else {
-        show_openvsp(result, ui);
-        ui.add_space(8.0);
-        show_vspaero(result, ui);
-        ui.add_space(8.0);
-        show_avl(result, ui);
-        ui.add_space(8.0);
-        show_flowunsteady(result, ui);
-    }
-    ui.add_space(8.0);
-    show_mses(result, ui);
-    ui.add_space(8.0);
-    show_structures(result, ui);
+/// Outcome class shared by every external-analysis card.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ToolStatusClass {
+    /// The analysis ran and its result is usable.
+    Success,
+    /// The analysis ran but its result is partial or not comparable.
+    Warning,
+    /// The analysis was attempted and failed.
+    Failure,
+    /// The analysis was not requested for this run.
+    Skipped,
+    /// The analysis was requested but no usable installation was found.
+    Unavailable,
 }
 
-fn show_openvsp(result: &PipelineResult, ui: &mut Ui) {
-    let Some(export) = result.openvsp_export.as_ref() else {
-        tool_card(ui, "OpenVSP", "not_run", None, Vec::new());
-        return;
-    };
-    let mut artifacts = vec![
-        ("AngelScript export".to_owned(), export.script_path.clone()),
-        ("OpenVSP project".to_owned(), export.vsp3_path.clone()),
-        ("native CAD preview".to_owned(), export.preview_path.clone()),
-        (
-            "VSPAERO geometry".to_owned(),
-            export.vspaero_geometry_path.clone(),
-        ),
-    ];
-    if let Some(path) = export.runtime_stdout_path.as_ref() {
-        artifacts.push(("runtime stdout".to_owned(), path.clone()));
-    }
-    if let Some(path) = export.runtime_stderr_path.as_ref() {
-        artifacts.push(("runtime stderr".to_owned(), path.clone()));
-    }
-    let preview_detail = if export.preview_available {
-        format!(
-            "native CAD preview: available at {}",
-            export.preview_path.display()
-        )
-    } else {
-        format!(
-            "native CAD preview: unavailable ({})",
-            export
-                .preview_error
-                .as_deref()
-                .unwrap_or("OpenVSP did not produce a fresh PNG")
-        )
-    };
-    let detail = export
-        .runtime_error
-        .as_deref()
-        .map(|runtime| format!("{runtime}; {preview_detail}"))
-        .unwrap_or(preview_detail);
-    tool_card(
-        ui,
-        "OpenVSP geometry",
-        export.status.as_str(),
-        Some(&detail),
-        artifacts,
-    );
-}
-
-fn show_vspaero(result: &PipelineResult, ui: &mut Ui) {
-    let Some(vspaero) = result.vspaero_result.as_ref() else {
-        tool_card(ui, "VSPAERO", "not_run", None, Vec::new());
-        return;
-    };
-    let mut artifacts = vec![
-        ("native geometry".to_owned(), vspaero.geometry_path.clone()),
-        ("setup".to_owned(), vspaero.setup_path.clone()),
-        ("polar".to_owned(), vspaero.polar_path.clone()),
-        (
-            "wake history".to_owned(),
-            vspaero.case_path.with_extension("history"),
-        ),
-        (
-            "native load distribution".to_owned(),
-            vspaero.case_path.with_extension("lod"),
-        ),
-        ("stdout".to_owned(), vspaero.stdout_path.clone()),
-        ("stderr".to_owned(), vspaero.stderr_path.clone()),
-    ];
-    if !artifacts.iter().any(|(_, path)| path.is_file()) {
-        artifacts.clear();
-    }
-    tool_card(
-        ui,
-        "VSPAERO",
-        vspaero.status.as_str(),
-        vspaero.error.as_deref(),
-        artifacts,
-    );
-}
-
-fn show_avl(result: &PipelineResult, ui: &mut Ui) {
-    let Some(avl) = result.avl_result.as_ref() else {
-        tool_card(ui, "Athena AVL", "not_run", None, Vec::new());
-        return;
-    };
-    let mut artifacts = vec![
-        ("geometry deck".to_owned(), avl.geometry_path.clone()),
-        ("session".to_owned(), avl.session_path.clone()),
-        ("stdout".to_owned(), avl.stdout_path.clone()),
-        ("stderr".to_owned(), avl.stderr_path.clone()),
-    ];
-    if let (Some(first), Some(last)) = (avl.force_paths.first(), avl.force_paths.last()) {
-        artifacts.push((
-            format!("force files ({} retained)", avl.force_paths.len()),
-            first.clone(),
-        ));
-        if first != last {
-            artifacts.push(("last force file".to_owned(), last.clone()));
+impl ToolStatusClass {
+    /// Short class word shown beside the colour marker.
+    pub(super) fn label(self) -> &'static str {
+        match self {
+            Self::Success => "Success",
+            Self::Warning => "Warning",
+            Self::Failure => "Failure",
+            Self::Skipped => "Skipped",
+            Self::Unavailable => "Unavailable",
         }
     }
-    tool_card(
-        ui,
-        "Athena AVL",
-        avl.status.as_str(),
-        avl.error.as_deref(),
-        artifacts,
-    );
-}
 
-fn show_flowunsteady(result: &PipelineResult, ui: &mut Ui) {
-    let Some(flow) = result.flowunsteady_result.as_ref() else {
-        tool_card(ui, "FLOWUnsteady", "not_run", None, Vec::new());
-        return;
-    };
-    tool_card(
-        ui,
-        "FLOWUnsteady",
-        flow.status.as_str(),
-        flow.error.as_deref(),
-        vec![
-            ("request".to_owned(), flow.request_path.clone()),
-            ("result".to_owned(), flow.result_path.clone()),
-            ("stdout".to_owned(), flow.stdout_path.clone()),
-            ("stderr".to_owned(), flow.stderr_path.clone()),
-        ],
-    );
-}
-
-fn show_mses(result: &PipelineResult, ui: &mut Ui) {
-    let Some(mses) = result.mses_result.as_ref() else {
-        tool_card(ui, "MSES", "not_run", None, Vec::new());
-        return;
-    };
-    let pressure = result.mses_pressure.as_ref();
-    let pressure_ok = pressure.is_some_and(|value| {
-        value.status.as_str() == "ok"
-            && value.transition_model_is_valid()
-            && value.has_convergence_evidence()
-    });
-    // Keep the polar status authoritative, but make a separately successful
-    // fixed-point pressure solve visible. This is the common useful partial
-    // result when a requested high-alpha polar leaves MSES's convergence
-    // domain: the Mach/Cp contour figures remain backed by native mplot data.
-    let status = if pressure_ok && mses.status.as_str() == "error" {
-        "partial_convergence"
-    } else {
-        mses.status.as_str()
-    };
-    let mut detail = format!(
-        "polar: {} converged of {} requested",
-        mses.converged_alpha_count, mses.requested_alpha_count
-    );
-    if let Some(error) = mses.error.as_deref().filter(|error| !error.is_empty()) {
-        detail.push_str(&format!("; {error}"));
-    }
-    if let Some(pressure) = pressure {
-        detail.push_str(&format!(
-            "; pressure: {} at alpha {:.3} deg (upper {}, lower {}, field {})",
-            pressure.status.as_str(),
-            pressure.alpha_deg,
-            pressure.cp_upper.len(),
-            pressure.cp_lower.len(),
-            pressure.field_mach.len(),
-        ));
-        if let Some(error) = pressure.error.as_deref().filter(|error| !error.is_empty()) {
-            detail.push_str(&format!(" ({error})"));
-        }
-        if !pressure.transition_model_is_valid() {
-            detail.push_str(&format!(
-                "; transition model unverified: {}",
-                pressure
-                    .osmap_diagnostic
-                    .as_deref()
-                    .unwrap_or("no compatible OSMAP resource was resolved")
-            ));
-        } else if pressure.status.as_str() == "ok" && !pressure.has_convergence_evidence() {
-            detail.push_str("; native convergence evidence unavailable");
+    fn color(self, ui: &Ui) -> Color32 {
+        match self {
+            Self::Success => crate::theme::success_color(ui.visuals()),
+            Self::Warning => Color32::from_rgb(220, 125, 35),
+            Self::Failure => ui.visuals().error_fg_color,
+            Self::Skipped => ui.visuals().weak_text_color(),
+            Self::Unavailable => Color32::from_rgb(220, 160, 40),
         }
     }
-    tool_card(ui, "MSES", status, Some(&detail), Vec::new());
 }
 
-fn show_structures(result: &PipelineResult, ui: &mut Ui) {
-    let Some(structures) = result.structural_result.as_ref() else {
-        tool_card(ui, "Structures / Nastran", "not_run", None, Vec::new());
-        return;
-    };
-    tool_card(
-        ui,
-        "Structures / Nastran",
-        &structures.status,
-        structures.error.as_deref(),
-        Vec::new(),
-    );
-    if let Some(nastran) = structures.nastran.as_ref() {
-        ui.label(
-            RichText::new(format!(
-                "MSC: static={}, modes={}, vibration={}",
-                nastran.static_solve.status.as_str(),
-                nastran.modes.status.as_str(),
-                nastran.vibration.status.as_str()
-            ))
-            .weak()
-            .small(),
-        );
-    }
-    if let Some(nastran95) = structures.nastran95.as_ref() {
-        ui.label(
-            RichText::new(format!(
-                "NASTRAN-95: static={}, modes={}, vibration={}",
-                nastran95.static_solve.status.as_str(),
-                nastran95.modes.status.as_str(),
-                nastran95.vibration.status.as_str()
-            ))
-            .weak()
-            .small(),
-        );
+/// One card's content.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct ToolStatus {
+    /// Tool or analysis name (catalogued literal).
+    pub tool: &'static str,
+    /// Outcome class.
+    pub class: ToolStatusClass,
+    /// Short status phrase (catalogued literal).
+    pub label: &'static str,
+    /// Retained diagnostic shown on hover, empty when there is none.
+    pub detail: String,
+}
+
+/// Classify the shared runtime statuses of VSPAERO, AVL and FLOWUnsteady.
+pub(super) fn classify_runtime(status: &str) -> (ToolStatusClass, &'static str) {
+    match status {
+        "completed_comparable" => (ToolStatusClass::Success, "Completed, comparable"),
+        "completed_not_comparable" => (ToolStatusClass::Warning, "Completed, not comparable"),
+        "not_configured" => (ToolStatusClass::Unavailable, "Executable not configured"),
+        "timed_out" => (ToolStatusClass::Failure, "Timed out"),
+        "launch_failed" => (ToolStatusClass::Failure, "Launch failed"),
+        "solver_failed" => (ToolStatusClass::Failure, "Solver failed"),
+        "output_missing" => (ToolStatusClass::Failure, "Output missing"),
+        "parse_failed" => (ToolStatusClass::Failure, "Output not parseable"),
+        "geometry_unavailable" => (ToolStatusClass::Failure, "Geometry unavailable"),
+        _ => (ToolStatusClass::Failure, "Request rejected"),
     }
 }
 
-fn tool_card(
-    ui: &mut Ui,
-    title: &str,
+/// Classify an MSES polar status, with the fixed-point pressure solve as a
+/// separately successful partial result.
+pub(super) fn classify_mses(
+    polar_status: &str,
+    pressure_ok: bool,
+) -> (ToolStatusClass, &'static str) {
+    match polar_status {
+        "ok" => (ToolStatusClass::Success, "Converged"),
+        "partial_convergence" => (ToolStatusClass::Warning, "Partially converged"),
+        "error" if pressure_ok => (ToolStatusClass::Warning, "Pressure solve only"),
+        "not_run" | "disabled" => (ToolStatusClass::Skipped, "Not requested"),
+        "absent" => (ToolStatusClass::Unavailable, "Installation not found"),
+        "incomplete" => (ToolStatusClass::Unavailable, "Installation incomplete"),
+        "launch_failure" => (ToolStatusClass::Failure, "Launch failed"),
+        "timeout" => (ToolStatusClass::Failure, "Timed out"),
+        "parse_failure" => (ToolStatusClass::Failure, "Output not parseable"),
+        _ => (ToolStatusClass::Failure, "Did not converge"),
+    }
+}
+
+/// Classify the OpenVSP geometry export.
+pub(super) fn classify_openvsp(status: &str) -> (ToolStatusClass, &'static str) {
+    match status {
+        "vsp3_materialized" => (ToolStatusClass::Success, "Project written"),
+        "script_written_runtime_unverified" => {
+            (ToolStatusClass::Unavailable, "Executable not configured")
+        }
+        "runtime_launch_failed" => (ToolStatusClass::Failure, "Launch failed"),
+        "runtime_timed_out" => (ToolStatusClass::Failure, "Timed out"),
+        _ => (ToolStatusClass::Failure, "Runtime rejected the script"),
+    }
+}
+
+/// Classify the structural stage from its overall status and the FEM solves.
+pub(super) fn classify_structures(
     status: &str,
-    detail: Option<&str>,
-    artifacts: Vec<(String, PathBuf)>,
-) {
-    crate::theme::card_frame(ui).show(ui, |ui| {
-        ui.set_min_width(ui.available_width());
-        ui.horizontal(|ui| {
-            ui.label(RichText::new(tr(title)).strong().size(16.0));
-            ui.label(RichText::new(status).strong().color(status_color(status)));
-        });
-        if let Some(detail) = detail.filter(|detail| !detail.trim().is_empty()) {
-            ui.label(RichText::new(detail).weak().small());
+    fem_solves: &[&str],
+) -> (ToolStatusClass, &'static str) {
+    let fem_solves: Vec<&str> = fem_solves
+        .iter()
+        .copied()
+        .filter(|solve| *solve != "not_run")
+        .collect();
+    match status {
+        "not_run" => (ToolStatusClass::Skipped, "Not requested"),
+        "ok" if fem_solves.is_empty() => (ToolStatusClass::Success, "Analytical sizing"),
+        "ok" if fem_solves.iter().all(|solve| *solve == "ok") => {
+            (ToolStatusClass::Success, "FEM solves completed")
         }
-        for (role, path) in artifacts {
-            artifact_row(ui, &role, &path);
-        }
-    });
+        "ok" => (ToolStatusClass::Warning, "FEM solve incomplete"),
+        _ => (ToolStatusClass::Failure, "Structural stage failed"),
+    }
 }
 
-fn artifact_row(ui: &mut Ui, role: &str, path: &Path) {
-    let exists = path.is_file();
-    ui.horizontal_wrapped(|ui| {
-        ui.label(
-            RichText::new(format!("{role}: {}", path.display()))
-                .weak()
-                .small(),
-        );
-        if ui
-            .add_enabled(
-                exists || path.parent().is_some_and(Path::is_dir),
-                egui::Button::new(tr("Reveal")).small(),
-            )
-            .clicked()
-        {
-            if let Err(error) = reveal_path(path) {
-                ui.colored_label(status_color("error"), error);
+/// Classify the Patran deformation-render export.
+pub(super) fn classify_patran(status: &str) -> (ToolStatusClass, &'static str) {
+    match status {
+        "ok" => (ToolStatusClass::Success, "Renders exported"),
+        "not_run" => (ToolStatusClass::Skipped, "Not requested"),
+        _ => (ToolStatusClass::Failure, "Export failed"),
+    }
+}
+
+fn skipped(tool: &'static str) -> ToolStatus {
+    ToolStatus {
+        tool,
+        class: ToolStatusClass::Skipped,
+        label: "Not requested",
+        detail: String::new(),
+    }
+}
+
+fn runtime_status(tool: &'static str, status: &str, error: Option<&str>) -> ToolStatus {
+    let (class, label) = classify_runtime(status);
+    ToolStatus {
+        tool,
+        class,
+        label,
+        detail: error.unwrap_or_default().to_owned(),
+    }
+}
+
+/// Every external analysis of the run, in display order.
+pub(super) fn tool_statuses(result: &PipelineResult) -> Vec<ToolStatus> {
+    let openvsp = result.openvsp_export.as_ref().map_or_else(
+        || skipped("OpenVSP geometry"),
+        |export| {
+            let (class, label) = classify_openvsp(export.status.as_str());
+            let mut detail = export.runtime_error.clone().unwrap_or_default();
+            if !export.preview_available {
+                if !detail.is_empty() {
+                    detail.push_str("; ");
+                }
+                detail.push_str(
+                    export
+                        .preview_error
+                        .as_deref()
+                        .unwrap_or("OpenVSP did not produce a fresh PNG"),
+                );
             }
-        }
-        if !exists {
-            ui.label(RichText::new(tr("missing")).weak().small());
-        }
+            ToolStatus {
+                tool: "OpenVSP geometry",
+                class,
+                label,
+                detail,
+            }
+        },
+    );
+    let vspaero = result.vspaero_result.as_ref().map_or_else(
+        || skipped("VSPAERO"),
+        |value| runtime_status("VSPAERO", value.status.as_str(), value.error.as_deref()),
+    );
+    let avl = result.avl_result.as_ref().map_or_else(
+        || skipped("Athena AVL"),
+        |value| runtime_status("Athena AVL", value.status.as_str(), value.error.as_deref()),
+    );
+    let flowunsteady = result.flowunsteady_result.as_ref().map_or_else(
+        || skipped("FLOWUnsteady"),
+        |value| {
+            runtime_status(
+                "FLOWUnsteady",
+                value.status.as_str(),
+                value.error.as_deref(),
+            )
+        },
+    );
+    let mses = result.mses_result.as_ref().map_or_else(
+        || skipped("MSES"),
+        |polar| {
+            let pressure = result.mses_pressure.as_ref();
+            let pressure_ok = pressure.is_some_and(|value| {
+                value.status.as_str() == "ok"
+                    && value.transition_model_is_valid()
+                    && value.has_convergence_evidence()
+            });
+            let (class, label) = classify_mses(polar.status.as_str(), pressure_ok);
+            let mut detail = format!(
+                "{} of {} polar points converged",
+                polar.converged_alpha_count, polar.requested_alpha_count
+            );
+            if let Some(error) = polar.error.as_deref().filter(|error| !error.is_empty()) {
+                detail.push_str("; ");
+                detail.push_str(error);
+            }
+            if let Some(error) = pressure
+                .and_then(|value| value.error.as_deref())
+                .filter(|error| !error.is_empty())
+            {
+                detail.push_str("; pressure: ");
+                detail.push_str(error);
+            }
+            ToolStatus {
+                tool: "MSES",
+                class,
+                label,
+                detail,
+            }
+        },
+    );
+    let (structures, patran) = result.structural_result.as_ref().map_or_else(
+        || (skipped("Structures / Nastran"), skipped("Patran renders")),
+        |structural| {
+            let mut fem = Vec::new();
+            for solves in [structural.nastran.as_ref(), structural.nastran95.as_ref()]
+                .into_iter()
+                .flatten()
+            {
+                fem.push(solves.static_solve.status.as_str());
+                fem.push(solves.modes.status.as_str());
+                fem.push(solves.vibration.status.as_str());
+            }
+            let (class, label) = classify_structures(&structural.status, &fem);
+            let patran = structural.patran.as_ref().map_or_else(
+                || skipped("Patran renders"),
+                |export| {
+                    let (class, label) = classify_patran(&export.status);
+                    ToolStatus {
+                        tool: "Patran renders",
+                        class,
+                        label,
+                        detail: export.error.clone().unwrap_or_default(),
+                    }
+                },
+            );
+            (
+                ToolStatus {
+                    tool: "Structures / Nastran",
+                    class,
+                    label,
+                    detail: structural.error.clone().unwrap_or_default(),
+                },
+                patran,
+            )
+        },
+    );
+    vec![
+        openvsp,
+        vspaero,
+        avl,
+        flowunsteady,
+        mses,
+        structures,
+        patran,
+    ]
+}
+
+/// Render the per-tool status cards in a responsive grid.
+pub(super) fn show_tool_status_cards(ui: &mut Ui, result: &PipelineResult) {
+    let statuses = tool_statuses(result);
+    let columns = ((ui.available_width() / 245.0).floor() as usize)
+        .clamp(1, 4)
+        .min(statuses.len().max(1));
+    for row in statuses.chunks(columns) {
+        ui.columns(columns, |column_uis| {
+            for (index, status) in row.iter().enumerate() {
+                show_tool_status_card(&mut column_uis[index], status);
+            }
+        });
+        ui.add_space(8.0);
+    }
+}
+
+fn show_tool_status_card(ui: &mut Ui, status: &ToolStatus) {
+    let color = status.class.color(ui);
+    let response = crate::theme::card_frame(ui).show(ui, |ui| {
+        ui.set_min_width(ui.available_width());
+        ui.vertical(|ui| {
+            ui.label(RichText::new(tr(status.tool)).strong());
+            ui.horizontal_wrapped(|ui| {
+                ui.label(RichText::new(">").strong().color(color));
+                ui.label(
+                    RichText::new(tr(status.class.label()))
+                        .strong()
+                        .color(color),
+                );
+            });
+            ui.add(egui::Label::new(RichText::new(tr(status.label)).small()).wrap());
+        });
     });
-}
-
-fn status_color(status: &str) -> Color32 {
-    if matches!(status, "ok" | "completed_comparable" | "vsp3_materialized") {
-        Color32::from_rgb(39, 174, 96)
-    } else if matches!(status, "not_run" | "not_configured" | "disabled") {
-        Color32::from_rgb(220, 160, 40)
-    } else if status.contains("partial") || status.contains("not_comparable") {
-        Color32::from_rgb(220, 125, 35)
-    } else {
-        Color32::from_rgb(214, 39, 40)
+    if !status.detail.trim().is_empty() {
+        response.response.on_hover_text(tr(&status.detail));
     }
 }
 
-fn reveal_path(path: &Path) -> Result<(), String> {
-    #[cfg(target_os = "windows")]
-    {
-        let mut command = std::process::Command::new("explorer.exe");
-        if path.is_file() {
-            command.arg(format!("/select,{}", path.display()));
-        } else {
-            command.arg(path);
+#[cfg(test)]
+mod tests {
+    use super::{
+        classify_mses, classify_openvsp, classify_patran, classify_runtime, classify_structures,
+        ToolStatusClass,
+    };
+
+    #[test]
+    fn runtime_statuses_distinguish_success_warning_failure_and_unavailable() {
+        assert_eq!(
+            classify_runtime("completed_comparable").0,
+            ToolStatusClass::Success
+        );
+        assert_eq!(
+            classify_runtime("completed_not_comparable").0,
+            ToolStatusClass::Warning
+        );
+        assert_eq!(
+            classify_runtime("not_configured").0,
+            ToolStatusClass::Unavailable
+        );
+        for failure in [
+            "timed_out",
+            "launch_failed",
+            "solver_failed",
+            "output_missing",
+            "parse_failed",
+            "geometry_unavailable",
+            "deck_rejected",
+            "setup_rejected",
+            "request_rejected",
+        ] {
+            assert_eq!(
+                classify_runtime(failure).0,
+                ToolStatusClass::Failure,
+                "{failure}"
+            );
         }
-        command
-            .spawn()
-            .map(|_| ())
-            .map_err(|error| error.to_string())
     }
-    #[cfg(target_os = "macos")]
-    {
-        std::process::Command::new("open")
-            .arg(path)
-            .spawn()
-            .map(|_| ())
-            .map_err(|error| error.to_string())
+
+    #[test]
+    fn mses_polar_error_with_a_valid_pressure_solve_is_a_warning_not_a_failure() {
+        assert_eq!(classify_mses("error", true).0, ToolStatusClass::Warning);
+        assert_eq!(classify_mses("error", false).0, ToolStatusClass::Failure);
+        assert_eq!(classify_mses("disabled", false).0, ToolStatusClass::Skipped);
+        assert_eq!(
+            classify_mses("absent", false).0,
+            ToolStatusClass::Unavailable
+        );
+        assert_eq!(classify_mses("ok", false).0, ToolStatusClass::Success);
     }
-    #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
-    {
-        std::process::Command::new("xdg-open")
-            .arg(path)
-            .spawn()
-            .map(|_| ())
-            .map_err(|error| error.to_string())
+
+    #[test]
+    fn openvsp_without_a_runtime_is_unavailable_rather_than_failed() {
+        assert_eq!(
+            classify_openvsp("script_written_runtime_unverified").0,
+            ToolStatusClass::Unavailable
+        );
+        assert_eq!(
+            classify_openvsp("vsp3_materialized").0,
+            ToolStatusClass::Success
+        );
+        assert_eq!(
+            classify_openvsp("runtime_rejected").0,
+            ToolStatusClass::Failure
+        );
+    }
+
+    #[test]
+    fn structures_and_patran_statuses_follow_the_fem_solves() {
+        assert_eq!(classify_structures("ok", &[]).1, "Analytical sizing");
+        assert_eq!(
+            classify_structures("ok", &["ok", "ok", "ok"]).0,
+            ToolStatusClass::Success
+        );
+        assert_eq!(
+            classify_structures("ok", &["ok", "error", "ok"]).0,
+            ToolStatusClass::Warning
+        );
+        assert_eq!(
+            classify_structures("error", &[]).0,
+            ToolStatusClass::Failure
+        );
+        assert_eq!(
+            classify_structures("not_run", &[]).0,
+            ToolStatusClass::Skipped
+        );
+        assert_eq!(classify_patran("not_run").0, ToolStatusClass::Skipped);
+        assert_eq!(classify_patran("error").0, ToolStatusClass::Failure);
     }
 }

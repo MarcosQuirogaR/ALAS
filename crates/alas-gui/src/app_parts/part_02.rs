@@ -136,6 +136,19 @@ impl AlasApp {
                 ui.close_menu();
             }
             ui.separator();
+            if ui
+                .selectable_label(self.state.help_verbose, tr("Learn-more help"))
+                .clicked()
+            {
+                self.state.help_verbose = !self.state.help_verbose;
+                ui.close_menu();
+            }
+            if ui.button(tr("Documentation")).clicked() {
+                ui.ctx()
+                    .open_url(egui::OpenUrl::new_tab(ALAS_DOCUMENTATION_URL));
+                ui.close_menu();
+            }
+            ui.separator();
             if ui.button(tr("About ALAS")).clicked() {
                 self.state.show_about = true;
                 ui.close_menu();
@@ -143,6 +156,9 @@ impl AlasApp {
         });
     }
 }
+
+/// Official ALAS documentation opened from Help > Documentation.
+const ALAS_DOCUMENTATION_URL: &str = "https://alas.uvigo.es/docs/";
 
 /// Export ordered SVG figure sources as a user-facing archive.
 fn export_figures(state: &mut AppState) {
@@ -192,7 +208,7 @@ fn export_report(state: &mut AppState) {
 
 #[cfg(test)]
 mod tests {
-    use super::AlasApp;
+    use super::{AlasApp, ALAS_DOCUMENTATION_URL};
     use crate::state::{AppState, Language};
     use crate::view_controls::{
         auto_zoom_factor, auto_zoom_for_physical_size, zoom_after_command, ZoomCommand,
@@ -224,7 +240,6 @@ mod tests {
             "Light",
             "Grey",
             "3D Live Preview",
-            "Learn-more help",
             "Automatic zoom",
             "English",
             "Spanish",
@@ -234,6 +249,8 @@ mod tests {
             "Help",
             "Replay Walkthrough",
             "Advanced Walkthrough...",
+            "Learn-more help",
+            "Documentation",
             "About ALAS",
             "Figure archive with {count} SVG sources written to {path}.",
             "Figure archive failed: {error}",
@@ -252,6 +269,26 @@ mod tests {
         let _app = AlasApp::from_state(state);
 
         assert_eq!(alas_i18n::get_language(), "es");
+        alas_i18n::set_language(Some("en"));
+    }
+
+    #[test]
+    fn documentation_menu_target_is_the_official_alas_docs_url() {
+        assert_eq!(ALAS_DOCUMENTATION_URL, "https://alas.uvigo.es/docs/");
+    }
+
+    #[test]
+    fn fresh_state_enables_explanatory_help_by_default() {
+        assert!(AppState::default().help_verbose);
+    }
+
+    #[test]
+    fn explicit_help_preference_survives_explicit_state_constructor() {
+        let mut state = AppState::default();
+        state.help_verbose = false;
+        let app = AlasApp::from_state(state);
+
+        assert!(!app.state.help_verbose);
         alas_i18n::set_language(Some("en"));
     }
 

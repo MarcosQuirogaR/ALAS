@@ -3,7 +3,7 @@
 
 //! The sandbox's central 3D viewport: orbit and zoom, the floating controls
 //! over the design space (camera presets, geometry-category buttons, the
-//! parameter search, the action row and the metric rows) and the parameter
+//! parameter search, the action row and the Summary card) and the parameter
 //! drag handles.
 //!
 //! Floating controls have no enclosing panel or toolbar background: each
@@ -16,7 +16,8 @@
 //! Layout of one frame, from the top: the camera row centred at the top;
 //! the category stack on the left, centred about the viewport's horizontal
 //! centreline within the space the other overlays leave free; the action
-//! row and the two metric rows centred at the bottom ([`super::overlays`]).
+//! row centred at the bottom ([`super::overlays`]). The derived geometry
+//! metrics are behind the Summary button of the stack ([`super::panel`]).
 //!
 //! Framing: the scene canvas is the viewport itself, so a resize redraws
 //! the kept framing on the new canvas (pixels per metre follow the smaller
@@ -44,7 +45,7 @@ pub const REST_OPACITY: f32 = 0.6;
 pub const OVERLAY_INSET: f32 = 8.0;
 /// Height reserved for the camera row at the top of the viewport, in points.
 pub const CAMERA_ROW_HEIGHT: f32 = 28.0;
-/// Height of one line of the status or rejected-edit message, in points.
+/// Height of one line of the rejected-edit message, in points.
 const MESSAGE_LINE_HEIGHT: f32 = 16.0;
 
 /// The floating-control rectangles registered while rendering one frame.
@@ -370,16 +371,9 @@ pub fn show_viewport(state: &mut AppState, ui: &mut Ui) {
         );
         painter.line_segment([center, tip], Stroke::new(1.5_f32, fill));
     }
-    match &hovered_handle {
-        Some(handle) => {
-            response.clone().on_hover_text(hover_text(handle));
-        }
-        None if pointer.is_some() => {
-            response.clone().on_hover_text(tr(
-                "Drag to orbit the camera; scroll to zoom; drag a handle to change its parameter",
-            ));
-        }
-        None => {}
+    // Only a handle explains itself; the empty design space has no tooltip.
+    if let Some(handle) = &hovered_handle {
+        response.clone().on_hover_text(hover_text(handle));
     }
     if let Some(drag) = &state.sandbox.drag {
         painter.text(
@@ -393,22 +387,17 @@ pub fn show_viewport(state: &mut AppState, ui: &mut Ui) {
 
     let block = show_action_block(state, ui, rect);
     let camera_row = show_viewport_controls(state, ui, rect, &mut camera_changed);
-    // The status and rejected-edit messages sit above the action block,
-    // left-aligned; the category stack keeps clear of them.
+    // A rejected-edit message sits above the action block, left-aligned;
+    // the category stack keeps clear of it. Run status is not painted here:
+    // the run log window and the estimates strip carry it.
     let mut message_bottom = block.top() - 6.0;
-    let messages: Vec<(String, Color32)> = [
-        state
-            .sandbox
-            .rejected_edit
-            .clone()
-            .map(|m| (m, ui.visuals().warn_fg_color)),
-        Some(tr(&state.status_message))
-            .filter(|s| !s.trim().is_empty())
-            .map(|s| (s, ui.visuals().weak_text_color())),
-    ]
-    .into_iter()
-    .flatten()
-    .collect();
+    let messages: Vec<(String, Color32)> = state
+        .sandbox
+        .rejected_edit
+        .clone()
+        .map(|m| (m, ui.visuals().warn_fg_color))
+        .into_iter()
+        .collect();
     for (message, color) in &messages {
         painter.text(
             pos2(rect.left() + 12.0, message_bottom),

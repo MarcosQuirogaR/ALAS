@@ -7,7 +7,7 @@
 //! `write_bdf(size=16, is_double=False)`, so the file a solve reads is
 //! large-field: eight columns of sixteen characters, continued on lines that
 //! open with `*`. That is reproduced here rather than the eight-character small
-//! field, and for the reason the reference chose it -- a small field carries
+//! field, and for the reason the reference chose it: a small field carries
 //! about eight significant digits, which is not enough to describe a node
 //! coordinate that a spline produced.
 //!
@@ -242,7 +242,7 @@ fn card(out: &mut String, name: &str, fields: &[Field]) {
 /// it can.
 ///
 /// NASTRAN accepts a real in fixed notation (`-2.1`, `.006`, `71000000000.`)
-/// or with an exponent (`1.0E+300`), and requires a decimal point in either --
+/// or with an exponent (`1.0E+300`), and requires a decimal point in either:
 /// a bare `500` is read as an integer and rejects the card. Both forms are
 /// tried at every precision that fits, and the one whose text reads back
 /// closest to `value` wins, shortest first on a tie. That is a few dozen
@@ -275,8 +275,8 @@ fn real_field(value: f64) -> String {
     }
     // Every finite double has at least one representation that fits: a mantissa
     // of one digit and three decimals plus a signed three-digit exponent is
-    // fifteen characters. A non-finite one cannot reach this module -- the
-    // builder's arithmetic is over measured geometry -- and is written as zero
+    // fifteen characters. A non-finite one cannot reach this module (the
+    // builder's arithmetic is over measured geometry) and is written as zero
     // rather than as text no solver would read.
     best.map_or_else(|| "0.".to_string(), |(_, text)| text)
 }
@@ -299,7 +299,7 @@ fn fixed(value: f64, precision: usize) -> Option<String> {
     Some(text)
 }
 
-/// `value` in exponent notation, with the exponent's sign always written --
+/// `value` in exponent notation, with the exponent's sign always written:
 /// classic NASTRAN readers differ on whether an unsigned exponent is legal.
 fn scientific(value: f64, precision: usize) -> Option<String> {
     if precision == 0 {
@@ -316,8 +316,8 @@ mod tests {
     use super::*;
     use crate::mesh::cards::{Grid, Rbe3, Shell};
 
-    /// Values spanning what a wingbox deck actually carries -- node
-    /// coordinates, thicknesses, moduli -- plus round powers of ten far outside
+    /// Values spanning what a wingbox deck actually carries (node
+    /// coordinates, thicknesses, moduli) plus round powers of ten far outside
     /// it.
     const SAMPLES: &[f64] = &[
         -2.1,
@@ -365,8 +365,8 @@ mod tests {
     fn a_three_digit_exponent_costs_digits_and_that_is_the_formats_limit() {
         // Sixteen columns cannot hold both a full mantissa and an exponent
         // near the end of the range, so precision there is what is left over.
-        // Nothing in a wingbox deck -- a length, a thickness, a modulus, a
-        // mass -- comes within two hundred decades of this.
+        // Nothing in a wingbox deck (a length, a thickness, a modulus, a
+        // mass) comes within two hundred decades of this.
         let text = real_field(f64::MIN_POSITIVE);
         let parsed: f64 = text.parse().unwrap();
         assert!(text.len() <= FIELD_WIDTH);

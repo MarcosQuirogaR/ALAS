@@ -218,6 +218,8 @@ fn changing_environment_inputs_discards_the_previous_probe_result() {
         commands: std::collections::BTreeMap::new(),
         available: true,
         detail: "test probe".to_owned(),
+        parsed_version: None,
+        version_support: alas_exec::openfoam::OpenFoamVersionAssessment::default(),
     });
     state.status = "Native Windows (OpenFOAM-test)".to_owned();
     let (tx, rx) = channel();
@@ -348,6 +350,7 @@ fn test_result_fixture() -> CfdResults {
             effective_speed_m_s: config.effective_speed_m_s(),
             effective_reynolds: config.effective_reynolds(),
             frame: alas_cfd::FrameConvention::default(),
+            reference: None,
             backend: None,
             openfoam_version: None,
             file_hashes: std::collections::BTreeMap::new(),

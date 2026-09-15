@@ -111,7 +111,7 @@ impl LiftSurrogate {
     /// This is upstream's `build_surrogate` on its own: the half of
     /// [`Self::train`] that turns the sampled grid into splines, without the
     /// vortex-lattice sweep that produced it. `initialize` never calls one
-    /// without the other, so this is not a second way to reach a surrogate --
+    /// without the other, so this is not a second way to reach a surrogate;
     /// it is the seam that lets a caller *supply* the samples instead of
     /// solving for them.
     ///
@@ -313,8 +313,8 @@ impl LiftSurrogate {
 /// The rest of `Fidelity_Zero`'s lift chain, which is one multiplication.
 ///
 /// `compute.lift.vortex` is `mission analysis model.Methods.skip`, `compute.lift.fuselage` is
-/// `fuselage_correction` -- the whole of which is
-/// `CL * settings.fuselage_lift_correction`, overwriting the same field --
+/// `fuselage_correction` (the whole of which is
+/// `CL * settings.fuselage_lift_correction`, overwriting the same field)
 /// and `compute.lift.total` is `aircraft_total`, which returns what it was
 /// handed. They are here rather than in a module of their own because
 /// together they are three lines, and because the correction factor is the

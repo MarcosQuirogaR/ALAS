@@ -14,7 +14,7 @@
       }
     },
     "asb_vlm": {
-      "description": "aerosandbox.aerodynamics.aero_3D.vortex_lattice_method.VortexLatticeMethod.run() on a small hand-built 3-wing airplane, across five operating points -- one of them at spanwise_resolution=2 to exercise Wing.subdivide_sections' cosspace branch -- recording the full result dict plus the solved vortex_strengths, plus one run_with_stability_derivatives sweep recording every force/moment coefficient derivative and both neutral points",
+      "description": "aerosandbox.aerodynamics.aero_3D.vortex_lattice_method.VortexLatticeMethod.run() on a small hand-built 3-wing airplane, across five operating points (one of them at spanwise_resolution=2 to exercise Wing.subdivide_sections' cosspace branch) recording the full result dict plus the solved vortex_strengths, plus one run_with_stability_derivatives sweep recording every force/moment coefficient derivative and both neutral points",
       "generator": "gen_aero_vlm.py",
       "runtime": "alas",
       "alas_commit": "7d1555c1f4db5110cf6cd187c156718e1a033b50",
@@ -97,7 +97,7 @@
       }
     },
     "neuralfoil": {
-      "description": "NeuralFoil's airfoil surrogate: FNV-1a digests of the five exported parameter blobs (proving crates/alas-aero/data/ against the installed package), the raw network's 198 outputs, KulfanAirfoil.get_aero_from_neuralfoil across the wave-drag schedule and the post-stall blend, and both reached entry points -- Airfoil.get_aero_from_neuralfoil and neuralfoil.get_aero_from_coordinates",
+      "description": "NeuralFoil's airfoil surrogate: FNV-1a digests of the five exported parameter blobs (proving crates/alas-aero/data/ against the installed package), the raw network's 198 outputs, KulfanAirfoil.get_aero_from_neuralfoil across the wave-drag schedule and the post-stall blend, and both reached entry points: Airfoil.get_aero_from_neuralfoil and neuralfoil.get_aero_from_coordinates",
       "generator": "gen_aero_neuralfoil.py",
       "runtime": "alas",
       "alas_commit": "7d1555c1f4db5110cf6cd187c156718e1a033b50",

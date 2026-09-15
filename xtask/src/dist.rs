@@ -76,7 +76,7 @@ const SOURCE_GOLDEN_FIXTURE_FILES: [&str; 8] = [
 // otherwise-excluded `golden/` evidence, not a directory-prefix rule. It was
 // read in full and reviewed for this entry: every numeric anchor is a short
 // factual value (dimension, mass, count) with a `cite` key into a `sources`
-// bibliography whose entries carry only `title`/`authority`/`url` -- no
+// bibliography whose entries carry only `title`/`authority`/`url`, no
 // excerpted, quoted or reproduced manufacturer document text, no images, no
 // secrets. `tools/aircraft_parity.cjs`, itself part of this source snapshot,
 // requires this exact file to run at all. Add a sibling file here only after
@@ -1688,7 +1688,7 @@ mod tests {
         // runtime via `alas_testkit::golden_dir`/`load_json`, not
         // `include_str!`/`include_bytes!`) is a distinct, still-excluded
         // category, per file, pending an individual provenance review of each
-        // fixture -- admitting it is a deliberate reproducibility trade
+        // fixture, admitting it is a deliberate reproducibility trade
         // documented in docs/release-packaging.md, not a silent gap in this
         // task's compile-time closure.
         assert!(!source_path_allowed("golden/generators/gen_config.py"));
@@ -1705,7 +1705,7 @@ mod tests {
         // Reviewed and admitted (see SOURCE_REVIEWED_EVIDENCE_FILES's doc
         // comment): every numeric anchor is a short factual value with a
         // `cite` key into a `sources` bibliography of title/authority/url
-        // only -- no reproduced manufacturer document text. Required by
+        // only, no reproduced manufacturer document text. Required by
         // `tools/aircraft_parity.cjs`, itself part of this source snapshot.
         assert!(source_path_allowed(
             "golden/aircraft/real_aircraft_parity.json"

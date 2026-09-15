@@ -60,7 +60,7 @@ fn installation_message(directory: &Path, status: MsesStatus) -> String {
     }
 }
 
-/// Read a file as text, replacing invalid bytes rather than failing -- the
+/// Read a file as text, replacing invalid bytes rather than failing: the
 /// counterpart of upstream's `open(..., errors="replace")`. The dump files are
 /// ASCII, so the replacement never fires; it is faithfulness, not a fix.
 fn read_lossy(path: &Path) -> String {
@@ -256,7 +256,7 @@ mod tests {
         let mut attempts = Vec::new();
 
         // A 2.0 deg gap is well past MAX_CONTINUATION_STEP_DEG, so a live
-        // bridge would need at least one intermediate hop -- if cancellation
+        // bridge would need at least one intermediate hop; if cancellation
         // were not checked first, this would try to spawn `mses.exe` at a
         // path that does not exist.
         let outcome = driver

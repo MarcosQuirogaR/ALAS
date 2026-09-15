@@ -45,7 +45,7 @@ fn screening_scenes_keep_reference_labels_and_series_in_both_themes() {
     for theme in ["light", "dark"] {
         let trade = render_svg(&fig_trade_map(&result, Some(theme)).expect("trade data"));
         for label in [
-            "Trade map -- L/D vs fuel capacity",
+            "Trade map: L/D vs fuel capacity",
             "Cruise L/D (3-D wing)",
             "Wing fuel-tank capacity (kg)",
             "Section t/c (%)",

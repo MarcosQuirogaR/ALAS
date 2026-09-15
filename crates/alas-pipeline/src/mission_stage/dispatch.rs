@@ -5,8 +5,8 @@
 //!
 //! The frozen mission burned whatever fuel the takeoff-mass closure left
 //! over, which answers "can the tanks reach the destination" and nothing
-//! else. An operator flies the fuel the policy requires for the route --
-//! taxi, trip, contingency, alternate and final reserve -- and no more, and
+//! else. An operator flies the fuel the policy requires for the route:
+//! taxi, trip, contingency, alternate and final reserve, and no more, and
 //! that requirement depends on the takeoff mass it produces. This module
 //! solves that fixed point against the native mission: the analytic model
 //! supplies a first closure cheaply, the native mission then re-flies the

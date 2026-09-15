@@ -111,7 +111,7 @@ pub fn evaluate_product(
 /// separately from the takeoff-mass requirement.
 ///
 /// `None` sizes at `requirements.mtow_kg`, the takeoff mass of the case being
-/// evaluated. `Some` is the declared structural design weight -- the
+/// evaluated. `Some` is the declared structural design weight: the
 /// `flops_structure.design_gross_mass_kg` override, which is also how a
 /// fixed-aircraft mission closure keeps the surface-controls term at the
 /// aircraft's design weight while the closure mass moves.

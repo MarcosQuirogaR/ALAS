@@ -10,7 +10,7 @@
 //! any vortex is switched on.
 //!
 //! The circulation solve asks for the strengths that cancel the onset flow's
-//! component through every panel, so this module produces that component --
+//! component through every panel, so this module produces that component:
 //! the freestream resolved by angle of attack and sideslip, plus the local
 //! velocity a rigid-body rotation adds at a control point away from the
 //! rotation centre.
@@ -20,9 +20,9 @@
 //! `build_RHS` computes both and picks between them on
 //! `settings.use_VORLAX_matrix_calculation`. The default, and the only one
 //! reached here, is mission analysis model's: the unit velocity vector dotted with the panel's
-//! own unit normal. VORLAX's own -- `ALOC`, built from direction cosines that
+//! own unit normal. VORLAX's own: `ALOC`, built from direction cosines that
 //! use the *strip leading edge's* camber, twist and dihedral for every panel
-//! in the strip -- exists so a developer can compare against VORLAX one
+//! in the strip: exists so a developer can compare against VORLAX one
 //! number at a time, and is not translated.
 //!
 //! Four of its byproducts *are*, because the leading-edge suction term in
@@ -38,7 +38,7 @@
 //! propeller's and lift rotor's slipstream to the onset flow.
 //! `Fidelity_Zero.__defaults__` sets it false, the mission runner overrides
 //! nothing, and the vehicle's one network is a turbofan with neither
-//! `propellers` nor `lift_rotors` -- so the induced-velocity totals are three
+//! `propellers` nor `lift_rotors`, so the induced-velocity totals are three
 //! arrays of zeros that are added to the freestream and change nothing.
 
 use super::types::{VlmCondition, VortexDistribution};
@@ -81,7 +81,7 @@ pub struct RhsTerms {
 /// precision and then widened, because the multiplication by a row of ones
 /// that widens it happens *after* the `arctan`; `delta`'s denominator is
 /// widened *before* the division, so its `arctan` runs in double. Reproducing
-/// that asymmetry is not pedantry -- `phi` feeds the sine and cosine of the
+/// that asymmetry is not pedantry: `phi` feeds the sine and cosine of the
 /// dihedral, which multiply every side force in the integration.
 pub struct TangencyAngles {
     /// Panel dihedral angle.
@@ -123,8 +123,8 @@ pub fn build(
     let alfa = condition.angle_of_attack_rad;
     let psi = condition.side_slip_angle_rad;
     // VORLAX's `COSCOS`. Its `SINALF` and `COSIN` siblings are computed here
-    // upstream too, and feed only `ALOC` -- the untranslated boundary
-    // condition -- so they are absent.
+    // upstream too, and feed only `ALOC` (the untranslated boundary
+    // condition) so they are absent.
     let coscos = alfa.cos() * psi.cos();
 
     // The rates made dimensionless by the freestream speed. Upstream forms

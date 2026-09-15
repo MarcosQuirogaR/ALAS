@@ -6,9 +6,9 @@
 
 //! Component efficiencies and losses of the on-design turbofan cycle.
 //!
-//! The cycle model walks the engine station by station -- inlet, fan,
-//! boosters, high-pressure compressor, combustor, both turbines, both nozzles
-//! -- and each station needs an efficiency or a pressure ratio. These are
+//! The cycle model walks the engine station by station: inlet, fan,
+//! boosters, high-pressure compressor, combustor, both turbines, both nozzles,
+//! and each station needs an efficiency or a pressure ratio. These are
 //! those numbers.
 //!
 //! They deliberately reproduce the assumptions the mission's own engine model
@@ -18,8 +18,8 @@
 //! it buys is that someone auditing whether the two agree finds the same
 //! numbers in both places rather than having to reconstruct one of them.
 //!
-//! Several fields declare no explanation upstream -- a polytropic efficiency
-//! is largely self-describing to whoever is editing one -- and the
+//! Several fields declare no explanation upstream: a polytropic efficiency
+//! is largely self-describing to whoever is editing one, and the
 //! explanations here are this port's, as CONTRIBUTING.md requires. They
 //! change no value.
 
@@ -187,7 +187,7 @@ pub struct PropulsionCycleConfig {
     #[config(
         label = "Assumed fan-face Mach number (static anchor)",
         unit = "-",
-        help = "Used only to sanity-check the design mass flow implied by anchoring the cycle to the engine's rated static thrust -- a conceptual-design-level assumption, not a real corrected-flow schedule."
+        help = "Used only to sanity-check the design mass flow implied by anchoring the cycle to the engine's rated static thrust: a conceptual-design-level assumption, not a real corrected-flow schedule."
     )]
     pub fan_face_mach: f64,
 }
