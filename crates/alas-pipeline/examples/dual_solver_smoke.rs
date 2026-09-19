@@ -59,6 +59,7 @@ fn main() -> Result<(), String> {
         &preset.design_vector,
         Some(&alas_config::design_variables::DesignVector::bounds()),
         Some(&output),
+        None,
     );
     write_summary(&output, &set)?;
     tracing::info!(

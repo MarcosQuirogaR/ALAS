@@ -381,6 +381,29 @@ mod tests {
     }
 
     #[test]
+    fn a_failed_preview_is_titled_after_the_figure_it_replaces() {
+        // One `Err` arm serves three previews. It used to title all of them
+        // "Mass and balance preview unavailable", so the Landing Gear page
+        // reported a failure of a different artefact.
+        let gear = super::preview_unavailable_title("landing_gear");
+        let envelope = super::preview_unavailable_title("mass_cg");
+        let surfaces = super::preview_unavailable_title("control_surfaces");
+        for (id, title) in [
+            ("Landing-gear planform", &gear),
+            ("CG envelope (illustrative)", &envelope),
+            ("Control-surface layout", &surfaces),
+        ] {
+            assert!(
+                title.contains(&crate::views::tr(id)),
+                "{title} does not name {id}"
+            );
+        }
+        assert_ne!(gear, envelope);
+        assert_ne!(gear, surfaces);
+        assert_ne!(envelope, surfaces);
+    }
+
+    #[test]
     fn layout_counts_keep_values_while_translating_their_units() {
         alas_i18n::es::install();
         alas_i18n::set_language(Some("es"));

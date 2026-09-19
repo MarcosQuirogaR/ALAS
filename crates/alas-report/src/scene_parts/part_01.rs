@@ -361,6 +361,10 @@ pub enum SceneElement {
         /// Whether the source longitude is reflected to match globe geometry
         /// that presents geographic east on the visual right.
         mirror_longitude: bool,
+        /// Figure area `[x, y, width, height]` outside which a sphere zoomed
+        /// past its own framing must not paint.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        clip: Option<[f64; 4]>,
     },
     /// Text label with typographic alignment and rotation.
     Text {

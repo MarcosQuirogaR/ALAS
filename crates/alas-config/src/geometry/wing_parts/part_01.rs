@@ -229,6 +229,87 @@ impl MainWingPanel {
     }
 }
 
+/// An additional user-controlled station on the right main-wing semispan.
+///
+/// The span fraction is measured from the centerline to the tip. The section
+/// is lofted with the stations supplied here; its airfoil name is resolved by
+/// `alas-geom` without changing a preset's locked geometry.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WingSection {
+    /// Position from the centerline as a fraction of semispan, in `(0, 1)`.
+    pub span_fraction: f64,
+    /// Leading-edge X offset from the root leading-edge datum, in metres.
+    pub leading_edge_x_m: f64,
+    /// Local aerodynamic chord, in metres.
+    pub chord_m: f64,
+    /// Leading-edge vertical position, in metres.
+    pub z_m: f64,
+    /// Geometric section twist, in degrees.
+    pub twist_deg: f64,
+    /// Airfoil name resolved through the shared airfoil library.
+    pub airfoil: String,
+}
+
+/// Why a user-defined wing station cannot be lofted safely.
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
+pub enum WingSectionError {
+    /// A geometric field is not finite.
+    #[error("custom wing section {index} field {field} must be finite, got {value}")]
+    NonFinite {
+        /// Zero-based section index.
+        index: usize,
+        /// Field name.
+        field: &'static str,
+        /// Invalid value.
+        value: f64,
+    },
+    /// A chord is zero or negative.
+    #[error("custom wing section {index} chord must be positive, got {value}")]
+    NonPositiveChord {
+        /// Zero-based section index.
+        index: usize,
+        /// Invalid chord, in metres.
+        value: f64,
+    },
+    /// The station lies at or beyond a defining root/tip section.
+    #[error("custom wing section {index} span fraction must lie strictly in (0, 1), got {value}")]
+    SpanOutOfRange {
+        /// Zero-based section index.
+        index: usize,
+        /// Invalid semispan fraction.
+        value: f64,
+    },
+    /// Stations must be supplied in centerline-to-tip order.
+    #[error("custom wing sections must have strictly increasing span fractions; section {index} has {current} after {previous}")]
+    InvalidOrder {
+        /// Zero-based section index of the later station.
+        index: usize,
+        /// Previous span fraction.
+        previous: f64,
+        /// Current span fraction.
+        current: f64,
+    },
+    /// A custom station would duplicate an existing planform edge.
+    #[error("custom wing section at span fraction {span_fraction} duplicates the {kind:?} planform station")]
+    DuplicatePlanformStation {
+        /// Duplicate span fraction.
+        span_fraction: f64,
+        /// Existing station identity.
+        kind: MainWingStationKind,
+    },
+    /// A custom chord would reverse the transport taper.
+    #[error("custom wing chord increases outboard from {inboard} m to {outboard} m")]
+    NonMonotoneChord {
+        /// Inboard chord, in metres.
+        inboard: f64,
+        /// Outboard chord, in metres.
+        outboard: f64,
+    },
+    /// The airfoil lookup key is empty.
+    #[error("custom wing section {0} needs a non-empty airfoil name")]
+    EmptyAirfoil(usize),
+}
+
 /// Main-wing scaffold not covered by the design vector.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ConfigNode)]
 #[serde(deny_unknown_fields)]
@@ -350,6 +431,16 @@ pub struct WingConfig {
     )]
     pub tip_airfoil: String,
 
+    /// Optional user-defined stations lofted between the defining planform
+    /// edges. Preset geometry remains locked by the application while this
+    /// list is available for a clean-sheet/custom geometry configuration.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[config(
+        hidden,
+        help = "Additional validated wing sections supplied by the user; edited by the custom-geometry editor rather than the generated scalar form."
+    )]
+    pub custom_sections: Vec<WingSection>,
+
     /// How many spanwise panels the whole wing semispan is meshed into.
     #[config(
         label = "Wing VLM panel count",
@@ -381,6 +472,7 @@ impl Default for WingConfig {
             outboard_le_sweep_deg: None,
             root_airfoil: "SC2-0714".to_owned(),
             tip_airfoil: "naca2410".to_owned(),
+            custom_sections: Vec::new(),
             n_subdivisions: 24,
         }
     }

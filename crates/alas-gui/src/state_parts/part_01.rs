@@ -145,6 +145,19 @@ pub struct AppState {
     pub engine_names: Vec<String>,
     /// Every selectable aerodrome display name.
     pub airport_names: Vec<String>,
+    /// Draft values in the custom-airport editor.
+    pub custom_airport_draft: crate::airport_editor::CustomAirportDraft,
+    /// Whether the detached custom-airport editor is open, and which route
+    /// selector opened it.
+    pub custom_airport_window: crate::views::airport_window::CustomAirportWindow,
+    /// Path used by airport import/export actions.
+    pub custom_airport_file_path: String,
+    /// Latest custom-airport action status.
+    pub custom_airport_status: Option<String>,
+    /// Path used by custom-airfoil import actions.
+    pub custom_airfoil_file_path: String,
+    /// Latest custom-airfoil action status.
+    pub custom_airfoil_status: Option<String>,
     /// The nominal/starting value of each design variable, keyed by its name.
     pub design_values: BTreeMap<String, f64>,
     /// The optimizer's lower/upper bound for each design variable.
@@ -200,8 +213,7 @@ pub struct AppState {
     /// The channel a running pipeline reports over.
     pub worker_rx: Option<Receiver<WorkerMessage>>,
     /// Completion channel for the optional navigation-data download.
-    pub navdata_download_rx:
-        Option<Receiver<Result<alas_exec::download::DownloadReport, String>>>,
+    pub navdata_download_rx: Option<Receiver<Result<alas_exec::download::DownloadReport, String>>>,
     /// Whether a navigation-data transfer is currently running.
     pub navdata_download_in_progress: bool,
     /// The flag that asks a running pipeline to stop.
@@ -224,6 +236,8 @@ pub struct AppState {
     pub run_log_tab: RunLogTab,
     /// The run-log dock height in points, retained while the app is open.
     pub run_log_height: f32,
+    /// Whether the guided-workspace run-log dock is visible.
+    pub run_log_open: bool,
     /// The current validation findings.
     pub validation_findings: Vec<ValidationIssue>,
     /// The preview figure selected in the dock's exterior tab.
@@ -316,7 +330,7 @@ impl Default for AppState {
             .map(|(name, display)| (name.to_owned(), display.to_owned()))
             .collect();
         let engine_names = engines::available().iter().map(|s| s.to_string()).collect();
-        let airport_names = airports::database()
+        let airport_names = airports::database_with_custom()
             .iter()
             .map(|a| a.name.clone())
             .collect();
@@ -350,6 +364,12 @@ impl Default for AppState {
             preset_names,
             engine_names,
             airport_names,
+            custom_airport_draft: crate::airport_editor::CustomAirportDraft::default(),
+            custom_airport_window: crate::views::airport_window::CustomAirportWindow::default(),
+            custom_airport_file_path: "alas-airports.json".to_owned(),
+            custom_airport_status: None,
+            custom_airfoil_file_path: "custom-airfoil.dat".to_owned(),
+            custom_airfoil_status: None,
             design_values,
             bounds,
             selected_aux_preset: BTreeMap::new(),
@@ -396,6 +416,7 @@ impl Default for AppState {
             run_log_export_status: None,
             run_log_tab: RunLogTab::Console,
             run_log_height: 220.0,
+            run_log_open: false,
             validation_findings: findings,
             selected_preview_id: "exterior_3d".to_owned(),
             preview_scene: None,

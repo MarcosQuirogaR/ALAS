@@ -78,15 +78,21 @@ pub(super) fn fly_with_guidance(
                     })
                 }
                 SegmentKind::Descent { .. } => {
-                    adapt_failed_descent(&mut schedule, index).map(|change| {
-                        tracing::info!(
-                            segment = %segment_tag,
-                            revision,
-                            old_rate_m_s = change.old_rate_m_s,
-                            new_rate_m_s = change.new_rate_m_s,
-                            "replanned unconverged descent from idle-thrust excess drag"
-                        );
-                    })
+                    // The refusal's own cause chooses the direction: a rung
+                    // the engine cannot hold *down* to needs to be flown more
+                    // shallowly, and every other failure needs it steeper.
+                    adapt_failed_descent(&mut schedule, index, solution.idle_floor_limited).map(
+                        |change| {
+                            tracing::info!(
+                                segment = %segment_tag,
+                                revision,
+                                old_rate_m_s = change.old_rate_m_s,
+                                new_rate_m_s = change.new_rate_m_s,
+                                below_idle = solution.idle_floor_limited,
+                                "replanned unconverged descent from the available propulsion envelope"
+                            );
+                        },
+                    )
                 }
             }
         } else {

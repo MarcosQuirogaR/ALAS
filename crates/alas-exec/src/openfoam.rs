@@ -125,6 +125,7 @@ pub const OPTIONAL_COMMANDS: &[&str] = &[
     "snappyHexMesh",
     "surfaceFeatureExtract",
     "potentialFoam",
+    "rhoSimpleFoam",
 ];
 
 /// Result of probing one OpenFOAM environment.

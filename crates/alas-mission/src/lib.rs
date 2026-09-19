@@ -41,7 +41,10 @@ pub mod solve;
 pub mod vehicle;
 
 pub use numerics::Numerics;
-pub use profile::{build_mission_request, MissionRequest};
+pub use profile::{
+    build_mission_request, check_profile_for_route, propose_profile_for_route,
+    route_cruise_altitude_m, MissionProfileProposal, MissionProfileRouteCheck, MissionRequest,
+};
 pub use segments::{
     Conditions, Initials, MissionAnalyses, Segment, SegmentError, SegmentKind, SegmentSpec,
 };

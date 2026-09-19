@@ -148,6 +148,35 @@ pub(super) const ATR_FACTSHEET: OewSource = OewSource {
     tier: OewSourceTier::ManufacturerPlanningDocument,
 };
 
+/// Jenkinson, Simpkin & Rhodes, *Civil Jet Aircraft Design* companion site,
+/// Appendix Data A Table 1 (weights).
+///
+/// A published textbook compilation, not a manufacturer document: the site's
+/// own `word-of-caution` page states that the data *"still originates from
+/// manufacturers sources"* and *"requires careful interpretation since each
+/// manufacturer may define the data in a different way"*, and the row is
+/// labelled *"Operational empty"* with **no inclusion list anywhere on the
+/// site**. It is therefore registered at [`OewSourceTier::Aggregator`] — the
+/// tier defined as a compilation with no primary document behind it — and only
+/// ever as a secondary anchor in `other_published_values`, never as a record's
+/// comparable value. All Data A quantities are SI.
+///
+/// The one row that must **not** be taken from this book is `A3XX-100`: it is a
+/// pre-programme-launch projected configuration (817 m^2 wing, 540 t MTOW, 555
+/// three-class seats) and is not the A380-800. It is deliberately absent here.
+pub(super) const ELSEVIER_DATA_A: OewSource = OewSource {
+    document: "Civil Jet Aircraft Design (Jenkinson, Simpkin & Rhodes), companion site Appendix Data A, Table 1",
+    publisher: "Elsevier / Butterworth-Heinemann (ISBN 9780340741528)",
+    revision: "companion site as published",
+    date: "",
+    locator: "data-a/table-1/table.htm, row 'Operational empty'",
+    url: "https://booksite.elsevier.com/9780340741528/appendices/default.htm",
+    local_path: "",
+    retrieved: "2026-09-16",
+    quote: "The data in these table has been validated where possible but it still originates from manufacturers sources. The information requires careful interpretation since each manufacturer may define the data in a different way.",
+    tier: OewSourceTier::Aggregator,
+};
+
 pub(super) const B777X_ACAP_REV_G: OewSource = OewSource {
     document: "777-9 Airplane Characteristics for Airport Planning, D6-86073",
     publisher: "Boeing",

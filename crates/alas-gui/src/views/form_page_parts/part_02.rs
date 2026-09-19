@@ -27,7 +27,7 @@ fn render_engine_designer_form(
         (
             "Combustor",
             &["combustor_pressure_ratio", "combustor_efficiency"],
-            false,
+            true,
         ),
         (
             "Turbines",
@@ -36,7 +36,7 @@ fn render_engine_designer_form(
                 "lpt_polytropic_efficiency",
                 "turbine_mechanical_efficiency",
             ],
-            false,
+            true,
         ),
         (
             "Nozzles",
@@ -46,7 +46,7 @@ fn render_engine_designer_form(
                 "core_nozzle_efficiency",
                 "fan_nozzle_efficiency",
             ],
-            false,
+            true,
         ),
     ];
 
@@ -91,7 +91,7 @@ fn render_engine_designer_form(
         crate::theme::card_frame(ui).show(ui, |ui| {
             egui::CollapsingHeader::new(RichText::new(tr("Other parameters")).strong())
                 .id_salt("propulsion_cycle::other")
-                .default_open(false)
+                .default_open(true)
                 .show(ui, |ui| {
                     edits.extend(dynamic_form(
                         ui,
@@ -105,6 +105,33 @@ fn render_engine_designer_form(
         });
     }
     edits
+}
+
+/// The smallest and largest height a page preview is drawn at, in points.
+const PREVIEW_MIN_HEIGHT: f32 = 240.0;
+const PREVIEW_MAX_HEIGHT: f32 = 480.0;
+
+/// The size a page preview widget is given, in points.
+///
+/// The widget used to take the container's full width with a height capped at
+/// 420 points, so a wide Advanced Settings window drew the three-view schematic
+/// height-limited inside a box four times wider than the drawing: about 72% of
+/// the container was empty background and the axis labels rendered 4-7 px tall.
+/// Sizing the widget to the *scene's own aspect* makes the drawing as large as
+/// the height budget allows and removes the empty band, because the widget is
+/// no longer wider than what it draws.
+fn preview_size(available_width: f32, screen_height: f32, scene: (f64, f64)) -> egui::Vec2 {
+    let available_width = available_width.max(220.0);
+    let aspect = if scene.1 > 0.0 && scene.0 > 0.0 {
+        (scene.0 / scene.1) as f32
+    } else {
+        1.6
+    };
+    let ceiling = (screen_height * 0.6).clamp(PREVIEW_MIN_HEIGHT, PREVIEW_MAX_HEIGHT);
+    let floor = PREVIEW_MIN_HEIGHT.min(ceiling);
+    let height = (available_width / aspect).clamp(floor, ceiling);
+    let width = (height * aspect).min(available_width);
+    vec2(width, height)
 }
 
 fn render_preview(
@@ -132,12 +159,20 @@ fn render_preview(
     match crate::scene::build_page_preview(state, preview_id) {
         Some(scene) => {
             let view_key = format!("page_preview::{preview_id}");
-            let height = (ui.available_width() * 0.62).clamp(240.0, 420.0);
+            let size = preview_size(
+                ui.available_width(),
+                ui.ctx().screen_rect().height(),
+                (scene.width, scene.height),
+            );
             let view = alas_viz::SceneView::new(&scene, state.view_state_mut(view_key))
                 .static_view()
                 .show_toolbar(false)
-                .desired_size(vec2(ui.available_width().max(220.0), height));
-            ui.add(view);
+                .desired_size(size);
+            // Centred, and only as wide as the drawing: the widget used to
+            // claim the whole container and letterbox the figure inside it.
+            ui.vertical_centered(|ui| {
+                ui.add(view);
+            });
         }
         None => {
             ui.label(RichText::new(tr("Preview needs a completed run.")).weak());
@@ -150,6 +185,34 @@ mod tests {
     use super::placement::{optimizer_ui_fields, relocated_paths};
     use super::{engine_editor_model, EngineEditorModel};
     use alas_config::ConfigNode;
+
+    #[test]
+    fn a_page_preview_is_as_wide_as_the_drawing_and_no_wider() {
+        // `22-advanced-settings-window.png`: the three-view raster occupied
+        // x 558-990 inside a container spanning x 10-1540, so ~72% of the
+        // container width was empty and the axis labels were illegible.
+        let three_view = (900.0, 700.0);
+        let size = super::preview_size(1530.0, 973.0, three_view);
+        let aspect = size.x / size.y;
+        assert!(
+            (aspect - (three_view.0 / three_view.1) as f32).abs() < 0.01,
+            "the widget must carry the scene's aspect, got {aspect}"
+        );
+        assert!(size.x <= 1530.0, "never wider than the container");
+        // The drawing is drawn larger than the old height-limited raster.
+        assert!(size.x > 600.0, "three-view width {} is too small", size.x);
+        // A narrow container is width-limited instead, and still fits.
+        let narrow = super::preview_size(320.0, 973.0, three_view);
+        assert!(narrow.x <= 320.0);
+        assert!(narrow.y >= super::PREVIEW_MIN_HEIGHT - 0.01);
+        // A short window never asks for more height than it has.
+        let short = super::preview_size(1530.0, 560.0, three_view);
+        assert!(short.y <= 560.0 * 0.6 + 0.01);
+        // A degenerate scene falls back instead of dividing by zero.
+        let degenerate = super::preview_size(800.0, 900.0, (0.0, 0.0));
+        assert!(degenerate.x.is_finite() && degenerate.y.is_finite());
+        assert!(degenerate.x > 0.0 && degenerate.y > 0.0);
+    }
 
     #[test]
     fn mission_locations_are_managed_only_on_the_external_tools_page() {

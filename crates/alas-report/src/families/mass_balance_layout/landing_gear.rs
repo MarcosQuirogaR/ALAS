@@ -4,8 +4,10 @@
 // Ported from alas/reporting/visualization.py:figure_landing_gear_planform (L2836-3017)
 // Reference: alas @ rust-port-baseline.
 
+use super::common::missing_datum_scene;
 use super::mass_breakdown::AC_CHORD_FRACTION;
 use crate::chart_kit::LegendMarker;
+use crate::families::MAIN_GEAR_STATION_NOT_MEASURED;
 use crate::scene::{
     Axes2D, Color, Fill, Point2D, Scene, SceneElement, Stroke, TextAlign, TextBaseline,
 };
@@ -84,8 +86,27 @@ pub fn figure_landing_gear_planform(
     let fus_len = fus_end_x - fus_start_x;
     let fallback_x_nlg = fus_start_x + fus_len * mm.nlg_x_fraction;
     let fallback_x_mlg = x_mac_le + mm.mlg_x_fraction_mac * mac;
-    let gear_stations =
-        gear_cfg.resolved_station_positions(fallback_x_nlg, fallback_x_mlg, fus_start_x, fus_len);
+    // Resolved through the shared gate rather than from a fallback rebuilt
+    // here. This figure draws every wheel at its station; an aircraft whose
+    // main-gear station the mass model refuses has none to draw, and a
+    // planform with legs under the wing root would be the most convincing
+    // possible statement of a datum nobody measured.
+    let Ok(gear_stations) = alas_pipeline::gear_stations::resolved_gear_stations(
+        config,
+        plane,
+        fallback_x_nlg,
+        fallback_x_mlg,
+        fus_start_x,
+        fus_len,
+    ) else {
+        return missing_datum_scene(
+            520.0,
+            640.0,
+            "Landing-Gear Planform",
+            pal,
+            MAIN_GEAR_STATION_NOT_MEASURED,
+        );
+    };
     let x_nlg = gear_stations.x_nlg_m;
     let x_mlg = gear_stations.x_mlg_m;
     let fus_diam = if config.geometry.fuselage.diameter_m > 0.0 {

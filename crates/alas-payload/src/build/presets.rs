@@ -128,6 +128,15 @@ fn apply_cabin_preset_with_semantics(
 
         let manager = CargoLoadManager::new(&cg_geom, config.cabin.cargo.clone());
         let capacity = manager.total_capacity();
+        // A cabin preset owns the *capacity*: what this deck configuration
+        // can hold, and therefore what the load case asks the hold for. It
+        // deliberately never writes `requirements.cargo_objective_kg`, the
+        // mass the user asked the design to match (clarified ledger App
+        // Features 2, decision D10): a request a preset overwrote would not
+        // be a requirement, and the objective's deviation would collapse to
+        // zero on every candidate. The two quantities stay separate here and
+        // are only brought together in the scoring, by
+        // `DesignRequirements::cargo_target_kg`.
         match preset.as_str() {
             "Max payload" => config.requirements.cargo_payload_kg = capacity,
             "Dense payload" => {

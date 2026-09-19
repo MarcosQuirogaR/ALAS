@@ -21,6 +21,7 @@
 //! user-declared masses FLOPS adds without an equation and are not
 //! represented here.
 
+use alas_config::PylonMassMethod;
 use alas_units::{FOOT, POUND_FORCE, POUND_MASS};
 
 fn lb(kilograms: f64) -> f64 {
@@ -197,6 +198,32 @@ pub fn fuel_system_kg(
         * maximum_mach.powf(0.34))
 }
 
+/// Engine pylons for a podded installation, kg.
+///
+/// FLOPS has no pylon equation, so this is a declared addition to the
+/// published boundary rather than one of its terms; see
+/// [`PylonMassMethod`] for the source and the validity domain. The count is
+/// the wing-mounted engine count: the relation was fitted on wing pylons, and
+/// a tail-mounted centre engine's mounting structure is fuselage and fin
+/// structure it was not fitted on.
+pub fn pylon_mass_kg(
+    method: PylonMassMethod,
+    wing_mounted_engine_count: usize,
+    rated_thrust_per_engine_n: f64,
+) -> f64 {
+    match method {
+        PylonMassMethod::None => 0.0,
+        PylonMassMethod::LthBoxBeamV1 => {
+            if !rated_thrust_per_engine_n.is_finite() || rated_thrust_per_engine_n <= 0.0 {
+                return 0.0;
+            }
+            // LTH MA 401 12-01 B: `m = n x 0.2648 x SLST^0.6517`, thrust in
+            // newtons and mass in kilograms, so no unit conversion applies.
+            wing_mounted_engine_count as f64 * 0.2648 * rated_thrust_per_engine_n.powf(0.6517)
+        }
+    }
+}
+
 /// SI inputs to the propulsion group.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FlopsPropulsionInputs {
@@ -240,6 +267,9 @@ pub struct FlopsPropulsionInputs {
     pub maximum_fuel_capacity_kg: f64,
     /// Declared miscellaneous propulsion mass `WPMISC`, kg.
     pub misc_propulsion_mass_kg: f64,
+    /// Which method prices the engine pylons, which the published FLOPS
+    /// transport equations do not contain at all.
+    pub pylon_mass_method: PylonMassMethod,
 }
 
 /// The propulsion group, kg.
@@ -283,7 +313,11 @@ pub struct FlopsPropulsionBreakdown {
     pub misc_kg: f64,
     /// Fuel system, tanks and plumbing `WFSYS`, kg.
     pub fuel_system_kg: f64,
-    /// Equation 137 without alternate engines and energy storage, kg.
+    /// Engine pylons, kg, which are **outside** the published FLOPS
+    /// propulsion group and are zero unless a method is declared.
+    pub pylons_kg: f64,
+    /// Equation 137 without alternate engines and energy storage, plus any
+    /// declared pylon mass, kg.
     pub total_kg: f64,
 }
 
@@ -343,6 +377,11 @@ pub fn estimate_flops_propulsion(inputs: &FlopsPropulsionInputs) -> FlopsPropuls
         scaling.engines,
         inputs.maximum_mach,
     );
+    let pylons = pylon_mass_kg(
+        inputs.pylon_mass_method,
+        inputs.wing_mounted_engine_count,
+        inputs.rated_thrust_per_engine_n,
+    );
     FlopsPropulsionBreakdown {
         scaling,
         total_nacelles,
@@ -360,7 +399,11 @@ pub fn estimate_flops_propulsion(inputs: &FlopsPropulsionInputs) -> FlopsPropuls
         starters_kg: starters,
         misc_kg: misc,
         fuel_system_kg: fuel_system,
-        total_kg: engines_kg + thrust_reversers + misc + fuel_system,
+        pylons_kg: pylons,
+        // Equation 137 is `WENG x NENG + WTHR + WPMSC + WFSYS`. The pylon is
+        // not one of its terms and is zero unless a method is declared, so
+        // the published sum is still reproducible by leaving it off.
+        total_kg: engines_kg + thrust_reversers + misc + fuel_system + pylons,
     }
 }
 
@@ -413,6 +456,7 @@ mod tests {
             nacelle_diameter_m: 2.0,
             maximum_fuel_capacity_kg: 20_000.0,
             misc_propulsion_mass_kg: 0.0,
+            pylon_mass_method: PylonMassMethod::None,
         }
     }
 

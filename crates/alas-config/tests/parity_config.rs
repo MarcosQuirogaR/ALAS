@@ -340,9 +340,7 @@ fn compare_values(comparison: &mut Comparison, path: &str, actual: &Value, expec
 /// configuration. The reference values remain checked explicitly so a product
 /// optimization cannot silently become a parity drift.
 fn product_default_correction(path: &str) -> Option<(Value, Value)> {
-    if path.ends_with(".run_sol_vibration_sine") {
-        Some((Value::Bool(true), Value::Bool(false)))
-    } else if path.ends_with(".freq_sweep_max_hz") {
+    if path.ends_with(".freq_sweep_max_hz") {
         Some((serde_json::json!(500.0), serde_json::json!(60.0)))
     } else if path.ends_with(".n_modes") {
         Some((serde_json::json!(30), serde_json::json!(16)))
@@ -373,6 +371,21 @@ fn product_default_correction(path: &str) -> Option<(Value, Value)> {
     // `alas_geom::aircraft::spanwise`.
     else if path.ends_with(".wing.n_subdivisions") || path == "WingConfig.n_subdivisions" {
         Some((serde_json::json!(8), serde_json::json!(24)))
+    }
+    // The native worker count. The frozen value is a literal one; the product
+    // default is `0`, meaning "resolve against this machine", which the staged
+    // MADS search uses to evaluate a poll block in parallel (measured 2.24x on
+    // the B787-9 and 2.76x on AVE at eight workers, with the evaluation count
+    // and the winner unchanged). Differential evolution is deliberately *not*
+    // covered by that: its generation loop batches only when a configuration
+    // explicitly asks for more than one worker, because a batched generation
+    // defers the population update and is a different algorithm from the
+    // serial one. See `SolverSettings::resolved_workers` and the guard in
+    // `alas_opt::DesignOptimizer::run_search`.
+    else if path.ends_with(".optimizer.solver.workers")
+        || path == "OptimizerConfig.solver.workers"
+    {
+        Some((serde_json::json!(1), serde_json::json!(0)))
     } else {
         None
     }
@@ -412,6 +425,7 @@ fn compare_node(
                             | "structural_mass_method"
                             | "propulsion_mass_method"
                             | "flops_structure"
+                            | "flops_turboprop"
                             | "geometric_component_stations"
                     ))
         })
@@ -645,8 +659,15 @@ fn is_native_config_field(path: &str, key: &str) -> bool {
                 | "oei_asymmetric_trim_cd"
                 | "oei_windmilling_cd"
         ) && (path.ends_with("PerformanceConfig") || path.ends_with(".performance")))
-        || (matches!(key, "objective" | "design_space")
-            && (path.ends_with("OptimizerConfig") || path.ends_with(".optimizer")))
+        // The mission-sized objective, the design-space boundary, the
+        // correlation validity domain and the D01-D03 relaxation policy are
+        // native product additions; the frozen Python optimizer schema
+        // predates all four. Their values, bounds and review are checked by
+        // the optimizer config tests and by `optimizer::policy_review`.
+        || (matches!(
+            key,
+            "objective" | "design_space" | "plausibility" | "relaxation"
+        ) && (path.ends_with("OptimizerConfig") || path.ends_with(".optimizer")))
         // Native speed-reference switch for the climb/descent legs. Its
         // serialization skips the `TrueAirspeed` default, so a legacy file
         // and the frozen default tree round-trip unchanged.
@@ -670,7 +691,10 @@ fn is_native_config_field(path: &str, key: &str) -> bool {
         // inputs are native product additions. Their migration, schema and
         // source-evidence contracts are checked by mass-architecture and
         // preset-FLOPS tests rather than the frozen Python fixture.
-        || (matches!(key, "schema_version" | "mass_architecture" | "flops_transport")
+        || (matches!(
+            key,
+            "schema_version" | "mass_architecture" | "flops_transport" | "flops_turboprop"
+        )
             && (path.ends_with("MassModelConfig") || path.ends_with(".mass_model")))
         || (matches!(
             key,
@@ -678,7 +702,12 @@ fn is_native_config_field(path: &str, key: &str) -> bool {
         ) && (path.ends_with("SolverSettings") || path.ends_with(".solver")))
         || (key == "random_force_psd_n2_per_hz"
             && (path.ends_with("StructuresConfig") || path.ends_with(".structures")))
-        || (key == "optimize_passenger_capacity"
+        // The cargo capacity objective (clarified ledger App Features 2,
+        // decision D10) is a native product addition; the frozen Python
+        // requirements schema predates it. Its default, valid domain,
+        // round-trip and schema entry are checked by the
+        // `DesignRequirements` unit tests.
+        || (matches!(key, "optimize_passenger_capacity" | "cargo_objective_kg")
             && (path.ends_with("DesignRequirements") || path.ends_with(".requirements")))
         || (matches!(
             key,
@@ -1093,8 +1122,20 @@ fn solver_agnostic_help_correction(label: &str) -> Option<(&'static str, &'stati
             "Total pressure ratio through the core compressors (LPC x HPC combined, NOT including the fan). Feeds mission compressor sizing (split into a fixed LPC ratio + a solved HPC ratio) and the Propulsion Analysis cycle's compressor_pressure_ratio.",
             "Total pressure ratio through the core compressors (LPC x HPC combined, NOT including the fan). Feeds SUAVE's compressor sizing (split into a fixed LPC ratio + a solved HPC ratio) and the Propulsion Analysis cycle's compressor_pressure_ratio.",
         )),
+        // The corrected prose no longer says parallel evaluation is free,
+        // because it is not. Differential evolution's generation loop batches
+        // only when a configuration explicitly asks for more than one worker:
+        // a batched generation defers the population update, so an accepted
+        // trial stops influencing later trial vectors in the same generation,
+        // which is a different algorithm with a different winner. Resolving
+        // the automatic setting against the machine moved the frozen replay
+        // off the reference interleaving and made its result core-count
+        // dependent, which `seeded_example_replays_the_python_winner` catches.
+        // The staged MADS search is the case where the count really does
+        // change only the wall time, and the text now says so of that search
+        // alone.
         "OptimizerConfig.solver.workers" | "ALASConfig.optimizer.solver.workers" => Some((
-            "Number of native worker threads for differential-evolution candidate batches (>1 enables parallel evaluation; non-positive values are treated as 1). External evaluator adapters remain serial because they own mutable process/session state.",
+            "Number of native worker threads for candidate batches. 0 (the default) picks a count from the machine's available parallelism; a positive value is used exactly as written; negative values are treated as 1. For the staged MADS search this changes only how long a poll block takes, not which points are evaluated or the winner. Differential evolution is different: asking for more than one worker builds a whole generation before evaluating it, so an accepted trial no longer influences later trial vectors in the same generation, which is a different algorithm and a different result. External evaluator adapters remain serial because they own mutable process/session state.",
             "Number of worker processes for parallel evaluation (>1 uses multiprocessing). Requires a picklable objective, already the case for ALAS's optimizer.",
         )),
         _ => None,

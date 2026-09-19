@@ -13,335 +13,94 @@
 //! the skin at its configured minimum, and derives the rib spacing from a
 //! panel-buckling criterion.
 //!
-//! Loads come from [`crate::loads`] (elliptic distribution, no inertial
-//! relief: the conservative choice for strength sizing). Moment and shear
-//! are split across the spars weighted by each spar's local section depth, so
-//! a deeper spar carries proportionally more of the bending moment and a
-//! partial-span spar, zeroed outboard of the break, carries none of it there.
+//! Loads come from [`crate::loads`]: an elliptic aerodynamic distribution less
+//! the inertia of the mass the wing carries itself, which is the wing-bending
+//! design case (see [`crate::loads::WingInertiaRelief`] for why the no-relief
+//! form is a different aircraft rather than a conservative version of this
+//! one). Moment and shear are split across the spars weighted by each spar's
+//! local section depth, so a deeper spar carries proportionally more of the
+//! bending moment and a partial-span spar, zeroed outboard of the break,
+//! carries none of it there.
+//!
+//! The relieved mass is the sized box itself plus the fuel in the integral
+//! tanks the box encloses ([`crate::tanks`]). The box relieves its own loads,
+//! so the product law solves that fixed point rather than reading a declared
+//! wing mass: [`RELIEF_PASSES`] passes, each sizing against the previous pass's
+//! running mass. It is a contraction - more relief gives a lighter box, which
+//! gives less relief - and converges to well inside a kilogram.
+//!
+//! [`size_wingbox_reference_compatibility`] keeps the frozen no-relief,
+//! whole-chord law the parity fixtures pin.
+//!
+//! None of these entry points says what loading envelope it sized to.
+//! [`size_wingbox_with_scope`] returns the same box with a
+//! [`crate::scope::SizingScope`] beside it: whether the relieving fuel was
+//! bounded by a declared zero-fuel limit or assumed, which wing-carried items
+//! could not be resolved, that no gust case was evaluated, and whether the
+//! relieved-load fixed point settled. A consumer that publishes a box, a margin
+//! or a solved deck should take that form.
 
 use alas_config::materials::MaterialSpec;
 use alas_config::{DesignRequirements, StructuresConfig};
 use alas_geom::wing_structure::WingStructureGeometry;
 
-use crate::loads::{self, LoadCase};
+use crate::loads::WingInertiaRelief;
+use crate::tanks;
 
-/// Material-modelling qualification carried when a wingbox sizing result
-/// uses composite materials under an effective isotropic proxy.
+mod law;
+mod scoped;
+mod solve;
+mod types;
+
+pub use scoped::{size_wingbox_with_scope, SizedWingbox, WingFuelRelief};
+pub use types::{
+    margin_is_structurally_non_negative, CompositeProxyDeclaration, ControllingMargin,
+    MassBreakdown, SparSizing, WingboxSizing, MARGIN_NUMERICAL_ZERO,
+};
+
+pub(crate) use law::gradient_unit;
+use law::{linspace, SizingLaw};
+use solve::size_wingbox_with_law;
+
+/// How many relieved-load passes the product law takes.
 ///
-/// An effective isotropic proxy is appropriate for preliminary sizing passes,
-/// but must never be confused with or presented as a certified laminate
-/// stress analysis.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct CompositeProxyDeclaration {
-    /// Material-family evidence tier and citation.
-    pub source: &'static str,
-    /// Model applicability and non-certification disclosure.
-    pub applicability: &'static str,
-    /// Calibrated relative uncertainty if known/calibrated, or `None` if uncalibrated.
-    ///
-    /// Per strict audit override, uncalibrated uncertainty must be represented
-    /// explicitly as unknown (`None`), not as zero or a fabricated numeric figure.
-    pub relative_uncertainty: Option<f64>,
-}
-
-/// Per-spar sizing result, sampled at [`WingboxSizing::y_stations`].
-#[derive(Debug, Clone, PartialEq)]
-pub struct SparSizing {
-    /// The spar's chordwise position, as a fraction of local chord.
-    pub chord_fraction: f64,
-    /// Free web height at each station, m.
-    pub h: Vec<f64>,
-    /// Cap flange width (tapered) at each station, m.
-    pub w_cap: Vec<f64>,
-    /// Cap flange thickness (tapered) at each station, m.
-    pub t_cap: Vec<f64>,
-    /// One-flange cap area at each station, m^2.
-    pub a_cap: Vec<f64>,
-    /// Uniform web thickness, m.
-    pub t_web: f64,
-    /// Bending-moment fraction this spar carries at each station.
-    pub frac_moment: Vec<f64>,
-    /// Margin of safety at each station: `+inf` where the local demand is
-    /// below 1 N.m (near the tip). Expected `>= 0` near the root.
-    pub margin_of_safety: Vec<f64>,
-}
-
-/// The station returned by [`WingboxSizing::controlling_margin`].
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct ControllingMargin {
-    /// Raw margin of safety at the controlling station, full precision.
-    pub margin: f64,
-    /// Index into [`WingboxSizing::spars`] and [`WingboxSizing::spar_fracs`].
-    pub spar_index: usize,
-    /// The spar's chordwise position, as a fraction of local chord.
-    pub chord_fraction: f64,
-    /// Index into [`WingboxSizing::y_stations`] and
-    /// [`WingboxSizing::eta_stations`].
-    pub station_index: usize,
-    /// Spanwise station, m.
-    pub y_m: f64,
-    /// Normalized spanwise station, `y / semi_span`.
-    pub eta: f64,
-}
-
-/// The sized wingbox: per-station geometry, rib layout and mass breakdown.
-#[derive(Debug, Clone, PartialEq)]
-pub struct WingboxSizing {
-    /// Spanwise stations, m.
-    pub y_stations: Vec<f64>,
-    /// Normalized spanwise stations, `y / semi_span`.
-    pub eta_stations: Vec<f64>,
-    /// Local chord at each station, m.
-    pub chord: Vec<f64>,
-    /// The spar chordwise fractions, in the geometry's sorted order.
-    pub spar_fracs: Vec<f64>,
-    /// Per-spar sizing.
-    pub spars: Vec<SparSizing>,
-    /// Skin thickness, m.
-    pub t_skin: f64,
-    /// Number of ribs.
-    pub num_ribs: i64,
-    /// Panel-buckling allowable rib spacing, m.
-    pub rib_spacing_m: f64,
-    /// Semi-wing mass by component, kg.
-    pub mass_breakdown_kg: MassBreakdown,
-    /// Total semi-wing structural mass, kg.
-    pub total_mass_kg: f64,
-    /// The name of the load case that sized the box.
-    pub sizing_load_case: &'static str,
-    /// Material qualification declaration, present whenever any wingbox
-    /// material is composite. `None` for all-metallic wings.
-    pub composite_declaration: Option<CompositeProxyDeclaration>,
-}
-
-impl WingboxSizing {
-    /// Installed spanwise pitch between adjacent ribs, including the root and
-    /// tip ribs. This is distinct from [`Self::rib_spacing_m`], which is the
-    /// maximum pitch permitted by the panel-buckling calculation and may be
-    /// larger or smaller than the pitch selected by an explicit rib-count
-    /// override.
-    pub fn installed_rib_spacing_m(&self) -> f64 {
-        if self.num_ribs > 1 {
-            let first = self.y_stations.first().copied().unwrap_or(f64::NAN);
-            let last = self.y_stations.last().copied().unwrap_or(f64::NAN);
-            (last - first) / (self.num_ribs - 1) as f64
-        } else {
-            f64::NAN
-        }
-    }
-
-    /// Whether the selected rib count satisfies the panel-buckling limit.
-    ///
-    /// Automatically sized layouts obey this by construction. An explicit
-    /// rib-count override is still checked here so a diagnostic sizing result
-    /// cannot be promoted to a structural success when its installed bays
-    /// are wider than the applicable allowable spacing.
-    pub fn rib_spacing_pass(&self) -> bool {
-        let installed = self.installed_rib_spacing_m();
-        installed.is_finite() && self.rib_spacing_m.is_finite() && installed <= self.rib_spacing_m
-    }
-
-    /// The smallest strength margin found in the sized spars.
-    ///
-    /// A NaN margin is returned as `NaN` so callers cannot mistake an
-    /// incomplete sizing calculation for a successful one. Positive infinity
-    /// is a valid margin for a station whose demand is below the numerical
-    /// reporting threshold.
-    pub fn minimum_margin_of_safety(&self) -> f64 {
-        self.controlling_margin().map_or(f64::NAN, |c| c.margin)
-    }
-
-    /// The station that controls [`Self::minimum_margin_of_safety`], with its
-    /// location, for diagnostics.
-    ///
-    /// Rounding the controlling margin to a fixed number of decimals (as a
-    /// failure message meant for humans naturally does) collapses every
-    /// value between roughly `-5e-7` and `0` to the same displayed
-    /// `-0.000000`, hiding whether the shortfall is floating-point noise at
-    /// the active root boundary or a real, if small, structural deficit.
-    /// Callers that need to tell those apart must use the raw
-    /// [`ControllingMargin::margin`] here, not a display-rounded value.
-    ///
-    /// `None` only when there are no spar stations at all. As with
-    /// [`Self::minimum_margin_of_safety`], a NaN margin takes priority over
-    /// any finite one so an incomplete calculation is never reported as a
-    /// located structural result.
-    pub fn controlling_margin(&self) -> Option<ControllingMargin> {
-        let mut best: Option<ControllingMargin> = None;
-        for (spar_index, spar) in self.spars.iter().enumerate() {
-            for (station_index, &margin) in spar.margin_of_safety.iter().enumerate() {
-                let candidate = ControllingMargin {
-                    margin,
-                    spar_index,
-                    chord_fraction: self.spar_fracs.get(spar_index).copied().unwrap_or(f64::NAN),
-                    station_index,
-                    y_m: self
-                        .y_stations
-                        .get(station_index)
-                        .copied()
-                        .unwrap_or(f64::NAN),
-                    eta: self
-                        .eta_stations
-                        .get(station_index)
-                        .copied()
-                        .unwrap_or(f64::NAN),
-                };
-                let replace = match &best {
-                    None => true,
-                    Some(current) if current.margin.is_nan() => false,
-                    Some(current) => margin.is_nan() || margin < current.margin,
-                };
-                if replace {
-                    best = Some(candidate);
-                }
-            }
-        }
-        best
-    }
-
-    /// Whether every sized spar station has a non-NaN non-negative margin.
-    pub fn strength_margins_pass(&self) -> bool {
-        !self.spars.is_empty()
-            && self.spars.iter().all(|spar| {
-                !spar.margin_of_safety.is_empty()
-                    && spar
-                        .margin_of_safety
-                        .iter()
-                        .all(|&margin| !margin.is_nan() && margin >= 0.0)
-            })
-    }
-}
-
-/// The four semi-wing mass components upstream keys by name in its
-/// `mass_breakdown_kg` dict.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct MassBreakdown {
-    /// Spar caps, kg.
-    pub spar_caps: f64,
-    /// Spar webs, kg.
-    pub spar_webs: f64,
-    /// Skin, kg.
-    pub skin: f64,
-    /// Ribs, kg.
-    pub ribs: f64,
-}
-
-/// NumPy `linspace(start, stop, n)` with `endpoint=True`: `n` evenly spaced
-/// points, the last pinned exactly to `stop`.
-fn linspace(start: f64, stop: f64, n: usize) -> Vec<f64> {
-    if n == 0 {
-        return Vec::new();
-    }
-    if n == 1 {
-        return vec![start];
-    }
-    let step = (stop - start) / (n - 1) as f64;
-    let mut values: Vec<f64> = (0..n).map(|i| start + i as f64 * step).collect();
-    values[n - 1] = stop;
-    values
-}
-
-/// NumPy `gradient(f)` at unit spacing, `edge_order=1`: central differences
-/// interior, one-sided at the two ends. For a uniform `y` this is the constant
-/// station spacing, but the general form is reproduced so the arithmetic
-/// matches upstream bit for bit.
-pub(crate) fn gradient_unit(f: &[f64]) -> Vec<f64> {
-    let n = f.len();
-    let mut g = vec![0.0; n];
-    if n < 2 {
-        return g;
-    }
-    for i in 1..n - 1 {
-        g[i] = (f[i + 1] - f[i - 1]) / 2.0;
-    }
-    g[0] = f[1] - f[0];
-    g[n - 1] = f[n - 1] - f[n - 2];
-    g
-}
-
-/// NumPy `trapezoid(y, x)`: the trapezoidal integral of `y` over the sample
-/// points `x`.
-fn trapezoid(y: &[f64], x: &[f64]) -> f64 {
-    let mut acc = 0.0;
-    for i in 0..y.len().saturating_sub(1) {
-        acc += (x[i + 1] - x[i]) * (y[i + 1] + y[i]) / 2.0;
-    }
-    acc
-}
-
-/// The number of stations needed to keep every uniform rib panel at or below
-/// the maximum spacing. Both the root and tip are ribs, so panels plus one is
-/// the count. This is the count form of the panel-buckling sizing rule.
-fn rib_count_from_max_spacing(semi_span_m: f64, max_spacing_m: f64) -> i64 {
-    (semi_span_m / max_spacing_m).ceil() as i64 + 1
-}
-
-/// The spar-cap taper law: full section up to `eta_lock`, then linear taper to
-/// `tip_fraction` at the tip: `_cap_taper`.
+/// The box relieves its own bending, so its mass appears on both sides of the
+/// sizing equation. The iteration is a strong contraction - the structure is
+/// under a tenth of the relieved mass and the moment responds to it linearly -
+/// so the total settles to inside a milligramme within the budget on every
+/// registered aircraft.
 ///
-/// Visible to `crate::mesh` as well: the mesh re-derives cap dimensions on its
-/// own, finer station grid rather than sampling this module's arrays, and has
-/// to apply the same law to do it.
-pub(crate) fn cap_taper(eta: &[f64], eta_lock: f64, tip_fraction: f64) -> Vec<f64> {
-    let denom = (1.0 - eta_lock).max(1e-9);
-    eta.iter()
-        .map(|&e| {
-            if e <= eta_lock {
-                1.0
-            } else {
-                1.0 - (1.0 - tip_fraction) * (e - eta_lock) / denom
-            }
-        })
-        .collect()
-}
+/// **Two of them do not reach `RELIEF_TOLERANCE` inside it.** Measured at
+/// their own nominal designs, the A340-300 is still moving by `4.10e-9` of its
+/// box mass at the eighth pass and the A380-800 by `4.87e-9`, against a `1e-9`
+/// relative tolerance - `6.1e-5 kg` and `1.3e-4 kg` in absolute terms, which is
+/// structurally nothing and is why this was not visible before. Neither
+/// constant is tuned to cover it: [`size_wingbox_with_scope`] reports the
+/// verdict as [`crate::scope::ReliefConvergence`], so a box that did not settle
+/// is published as one that did not settle rather than assumed to have.
+pub const RELIEF_PASSES: usize = 8;
 
-/// The root cap flange width and thickness, m, that carry the required cap
-/// area `a_cap0` on a spar of height `h0` at a station of chord `chord0`.
-///
-/// The flange starts at the lesser of half the chord and 0.6 of the spar
-/// height, and its thickness is capped at a fifth of the spar height so the
-/// caps never fill the web. When that thickness clip binds (a shallow rear
-/// spar with a low-allowable alloy at a high root moment does it) the same
-/// area is spread over a wider flange, up to the half-chord bound, rather
-/// than left short: the box skins are what carry a wide flange in a real wing,
-/// and an under-strength root would contradict the zero root margin this
-/// routine sizes to. Only past the half-chord bound is the root reported
-/// under strength, which is then a genuine infeasibility.
-///
-/// Shared with `crate::mesh`, which re-derives the cap dimensions on its own
-/// station grid and has to apply the same law.
-pub(crate) fn root_cap_dimensions(a_cap0: f64, chord0: f64, h0: f64) -> (f64, f64) {
-    let w_max = (0.5 * chord0).max(1e-6);
-    let t_max = h0 * 0.20;
-    let mut w_cap0 = w_max.min(h0 * 0.6).max(1e-6);
-    let mut t_cap0 = (a_cap0 / w_cap0).min(t_max);
-    if a_cap0 / w_cap0 > t_max && t_max > 0.0 {
-        w_cap0 = (a_cap0 / t_max).min(w_max).max(w_cap0);
-        t_cap0 = (a_cap0 / w_cap0).min(t_max);
-    }
-    (w_cap0, t_cap0)
-}
-
-/// Which cap-sizing law a solve applies.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SizingLaw {
-    /// Every station carries its own bending moment: the root flange widens
-    /// when its thickness clip binds and an outboard station whose tapered
-    /// flange falls short of the local moment is sized up to it.
-    Product,
-    /// The frozen reference law: the root cap alone is sized, its thickness
-    /// clipped at a fifth of the spar height, and the outboard caps follow the
-    /// taper whatever the local moment. A shallow spar can be left under
-    /// strength, which the fixtures record.
-    Frozen,
-}
+/// Relative change in total box mass below which the relieved-load fixed point
+/// is taken as converged.
+const RELIEF_TOLERANCE: f64 = 1.0e-9;
 
 /// Size the wingbox directly from strength: `size_wingbox`.
 ///
-/// The load cases come from [`crate::loads::load_cases`]; the box is sized to
-/// whichever produces the larger root bending moment. Every station is left
-/// with a non-negative strength margin wherever the section geometry admits
-/// one; see [`size_wingbox_reference_compatibility`] for the frozen law.
+/// The load cases come from [`crate::loads::load_cases`], net of the inertia of
+/// the mass the wing carries itself ([`crate::loads::WingInertiaRelief`]): the
+/// sized box and the fuel in the integral tanks it encloses. The box is sized
+/// to whichever case produces the larger relieved root bending moment, and
+/// every station is left with a non-negative strength margin wherever the
+/// section geometry admits one.
+///
+/// Wing-mounted engines, pylons and gear are **not** relieved here: this entry
+/// point is not given the powerplant or gear configuration, so their relief is
+/// omitted and the box comes out heavier than it would with it. That is a
+/// recorded conservatism, not an approximation of zero. A caller that holds
+/// the aircraft's powerplant layout, or its manufacturer-published wing-tank
+/// capacity, should use [`size_wingbox_with_wing_carried_mass`] instead.
+///
+/// See [`size_wingbox_reference_compatibility`] for the frozen law.
 #[allow(clippy::too_many_arguments)] // mirrors upstream's own signature
 pub fn size_wingbox(
     wsg: &WingStructureGeometry,
@@ -352,7 +111,7 @@ pub fn size_wingbox(
     cap_mat: &MaterialSpec,
     rib_mat: &MaterialSpec,
 ) -> WingboxSizing {
-    size_wingbox_with_law(
+    size_wingbox_with_wing_carried_mass(
         wsg,
         cfg,
         req,
@@ -360,8 +119,62 @@ pub fn size_wingbox(
         web_mat,
         cap_mat,
         rib_mat,
-        SizingLaw::Product,
+        None,
+        &[],
     )
+}
+
+/// [`size_wingbox`] with the wing-carried masses the default entry point
+/// cannot see.
+///
+/// `integral_fuel_kg_m` replaces the geometric tank estimate of
+/// [`crate::tanks`] with the caller's own running fuel mass, kg/m, on the
+/// sizing station grid: an aircraft whose manufacturer publishes a usable
+/// wing-tank capacity should distribute that capacity rather than accept a
+/// volume estimate that lands anywhere between two thirds and four thirds of
+/// it across the registered fleet. A length other than `cfg.spanwise_stations`
+/// is ignored in favour of the geometric estimate rather than silently
+/// truncated.
+///
+/// `wing_mounted_point_masses` are `(spanwise station m, mass kg)` for the
+/// modelled positive-`y` semi-wing only - the engines, pylons, nacelles and
+/// wing-mounted gear legs. Passing the full aircraft's symmetric pair would
+/// relieve one semi-wing with both of them;
+/// [`crate::loads::engine_point_loads_n`] already applies that filter.
+#[allow(clippy::too_many_arguments)] // mirrors upstream's own signature
+pub fn size_wingbox_with_wing_carried_mass(
+    wsg: &WingStructureGeometry,
+    cfg: &StructuresConfig,
+    req: &DesignRequirements,
+    skin_mat: &MaterialSpec,
+    web_mat: &MaterialSpec,
+    cap_mat: &MaterialSpec,
+    rib_mat: &MaterialSpec,
+    integral_fuel_kg_m: Option<&[f64]>,
+    wing_mounted_point_masses: &[(f64, f64)],
+) -> WingboxSizing {
+    let n = cfg.spanwise_stations.max(0) as usize;
+    let y = linspace(0.0, wsg.semi_span, n);
+    let (front, rear) = box_chord_band(wsg);
+    let fuel = match integral_fuel_kg_m {
+        Some(declared) if declared.len() == n => declared.to_vec(),
+        _ => tanks::integral_fuel_running_mass_kg_m(wsg, &y, front, rear),
+    };
+
+    scoped::solve_relieved(
+        wsg,
+        cfg,
+        req,
+        skin_mat,
+        web_mat,
+        cap_mat,
+        rib_mat,
+        &fuel,
+        wing_mounted_point_masses,
+        front,
+        rear,
+    )
+    .0
 }
 
 /// The frozen reference form of [`size_wingbox`], for the parity fixtures.
@@ -369,9 +182,10 @@ pub fn size_wingbox(
 /// The reference sizes the root cap only, with its thickness clipped at a
 /// fifth of the spar height, and tapers the outboard caps regardless of the
 /// local moment, so a shallow spar with a low-allowable alloy at a high root
-/// moment comes out under strength; the fixtures pin that behaviour. Product
-/// callers use [`size_wingbox`], whose result the mass reconciliation gate
-/// accepts only with non-negative margins.
+/// moment comes out under strength; the fixtures pin that behaviour. It also
+/// carries no inertia relief and charges skin and rib area over the whole
+/// chord rather than over the box. Product callers use [`size_wingbox`], whose
+/// result the mass reconciliation gate accepts only with non-negative margins.
 #[allow(clippy::too_many_arguments)] // mirrors upstream's own signature
 pub fn size_wingbox_reference_compatibility(
     wsg: &WingStructureGeometry,
@@ -391,262 +205,77 @@ pub fn size_wingbox_reference_compatibility(
         cap_mat,
         rib_mat,
         SizingLaw::Frozen,
+        &WingInertiaRelief::default(),
     )
 }
 
-// The public entry points' signature plus the law they differ in.
-#[allow(clippy::too_many_arguments)]
-fn size_wingbox_with_law(
-    wsg: &WingStructureGeometry,
-    cfg: &StructuresConfig,
-    req: &DesignRequirements,
-    skin_mat: &MaterialSpec,
-    web_mat: &MaterialSpec,
-    cap_mat: &MaterialSpec,
-    rib_mat: &MaterialSpec,
-    law: SizingLaw,
-) -> WingboxSizing {
-    let n = cfg.spanwise_stations.max(0) as usize;
-    let y = linspace(0.0, wsg.semi_span, n);
-    let eta: Vec<f64> = y.iter().map(|&yi| yi / wsg.semi_span).collect();
-    let chord: Vec<f64> = eta.iter().map(|&e| wsg.local_chord(e)).collect();
+/// The spanwise station grid the sizing integrals run on.
+///
+/// A caller assembling a running mass for
+/// [`size_wingbox_with_wing_carried_mass`] has to sample it on exactly the grid
+/// the sizer will use, or the length check there rejects it and silently falls
+/// back to the geometric estimate. This is that grid, so the two cannot be
+/// derived independently and drift.
+pub fn sizing_stations(wsg: &WingStructureGeometry, cfg: &StructuresConfig) -> Vec<f64> {
+    linspace(0.0, wsg.semi_span, cfg.spanwise_stations.max(0) as usize)
+}
 
-    let cases = loads::load_cases(req, cfg.additional_safety_factor);
-    // Sized by whichever case has the larger |root moment|; for an elliptic
-    // cantilever this is the largest |total_force_n|, but comparing moments is
-    // robust to future load-model changes.
-    let mut worst_idx = 0usize;
-    let mut worst_m0 = -1.0;
-    let mut case_moments: Vec<(Vec<f64>, Vec<f64>)> = Vec::with_capacity(cases.len());
-    for (idx, case) in cases.iter().enumerate() {
-        let q = loads::elliptic_distributed_load(&y, wsg.semi_span, case.total_force_n);
-        let (_, m) = loads::cantilever_shear_moment(&y, &q);
-        if m[0].abs() > worst_m0 {
-            worst_m0 = m[0].abs();
-            worst_idx = idx;
-        }
-        case_moments.push((q, m));
-    }
-    let worst_case: &LoadCase = &cases[worst_idx];
-    let (q_sizing, m_sizing) = &case_moments[worst_idx];
-    let (v_sizing, _) = loads::cantilever_shear_moment(&y, q_sizing);
-
-    // Per-spar section height (n_spars x n), with a partial-span spar zeroed
-    // outboard of the break so it carries no moment, shear or mass there.
-    let mut h_all: Vec<Vec<f64>> = wsg
-        .spar_fracs
-        .iter()
-        .map(|&f| eta.iter().map(|&e| wsg.spar_height(e, f)).collect())
-        .collect();
-    for (i, &full_span) in wsg.spar_full_span.iter().enumerate() {
-        if !full_span {
-            for j in 0..n {
-                if eta[j] > wsg.break_eta + 1e-9 {
-                    h_all[i][j] = 0.0;
-                }
-            }
-        }
-    }
-    let h_sum: Vec<f64> = (0..n)
-        .map(|j| {
-            let s: f64 = h_all.iter().map(|h| h[j]).sum();
-            if s > 1e-9 {
-                s
-            } else {
-                1e-9
-            }
-        })
-        .collect();
-    let frac_moment_all: Vec<Vec<f64>> = h_all
-        .iter()
-        .map(|h| (0..n).map(|j| h[j] / h_sum[j]).collect())
-        .collect();
-
-    let tau_allow_web = web_mat.f_allow_pa / (2.0 * 3.0_f64.sqrt());
-    let taper = cap_taper(&eta, cfg.cap_taper_eta_lock, cfg.cap_taper_tip_fraction);
-
-    let m0 = m_sizing[0].abs();
-    let v0 = v_sizing[0].abs();
-
-    let mut spars: Vec<SparSizing> = Vec::with_capacity(wsg.spar_fracs.len());
-    for (i, &frac_c) in wsg.spar_fracs.iter().enumerate() {
-        let h_i = &h_all[i];
-        let frac_m = &frac_moment_all[i];
-        let h_eff: Vec<f64> = h_i.iter().map(|&h| h * 0.85).collect();
-
-        // Root cap: MS = 0 by construction.
-        let h_eff0 = h_eff[0].max(1e-6);
-        let a_cap0 = (frac_m[0] * m0) / (cap_mat.f_allow_pa * h_eff0);
-        let (w_cap0, t_cap0) = match law {
-            SizingLaw::Product => root_cap_dimensions(a_cap0, chord[0], h_i[0]),
-            SizingLaw::Frozen => {
-                let w_cap0 = (0.5 * chord[0]).min(h_i[0] * 0.6).max(1e-6);
-                (w_cap0, (a_cap0 / w_cap0).min(h_i[0] * 0.20))
-            }
-        };
-
-        // Taper outboard; keep width >= thickness and thickness <= H_local/3.
-        // The tapered section is the floor: where the local moment demands
-        // more than it carries (a shallow spar whose height falls faster
-        // than the moment inboard of the taper lock) the station is sized
-        // up to its own demand, thickness first within the H/3 clip and
-        // then width within the half-chord bound, so no station is left
-        // short by construction. A station whose tapered flange already
-        // carries its moment is untouched.
-        let mut t_cap = Vec::with_capacity(n);
-        let mut w_cap = Vec::with_capacity(n);
-        for j in 0..n {
-            let mut t = (t_cap0 * taper[j]).min(h_i[j] / 3.0);
-            let mut w = (w_cap0 * taper[j]).max(t);
-            let demand = (frac_m[j] * m_sizing[j]).abs();
-            if law == SizingLaw::Product && demand > 1.0 {
-                let a_req = demand / (cap_mat.f_allow_pa * h_eff[j].max(1e-6));
-                if w * t < a_req {
-                    t = (a_req / w).min(h_i[j] / 3.0);
-                    if w * t < a_req && t > 0.0 {
-                        w = (a_req / t).min((0.5 * chord[j]).max(w));
-                    }
-                }
-            }
-            t_cap.push(t);
-            w_cap.push(w);
-        }
-        let a_cap: Vec<f64> = (0..n).map(|j| w_cap[j] * t_cap[j]).collect();
-
-        // Web: uniform thickness sized from root shear.
-        let t_web = cfg
-            .t_web_min_m
-            .max((frac_m[0] * v0) / (tau_allow_web * h_eff0));
-
-        // Margin of safety at every station.
-        let margin_of_safety: Vec<f64> = (0..n)
-            .map(|j| {
-                let m_adm = a_cap[j] * cap_mat.f_allow_pa * h_eff[j];
-                let demand = (frac_m[j] * m_sizing[j]).abs();
-                if demand > 1.0 {
-                    m_adm / demand - 1.0
-                } else {
-                    f64::INFINITY
-                }
-            })
-            .collect();
-
-        spars.push(SparSizing {
-            chord_fraction: frac_c,
-            h: h_i.clone(),
-            w_cap,
-            t_cap,
-            a_cap,
-            t_web,
-            frac_moment: frac_m.clone(),
-            margin_of_safety,
-        });
-    }
-
-    // Skin fixed at the configured minimum (no torsional shear-flow upsizing,
-    // the same fidelity the analytical model uses).
-    let t_skin = cfg.t_skin_min_m;
-
-    // Rib spacing: Euler panel-buckling on the skin between the outermost two
-    // spars.
-    let frac_min = wsg.spar_fracs.iter().copied().fold(f64::INFINITY, f64::min);
-    let frac_max = wsg
+/// The chordwise band the structural box occupies: the outermost two spars.
+pub fn box_chord_band(wsg: &WingStructureGeometry) -> (f64, f64) {
+    let front = wsg.spar_fracs.iter().copied().fold(f64::INFINITY, f64::min);
+    let rear = wsg
         .spar_fracs
         .iter()
         .copied()
         .fold(f64::NEG_INFINITY, f64::max);
-    let b_box_root = (frac_max - frac_min) * chord[0];
-    let h_root_mid = wsg.spar_height(0.0, 0.5 * (frac_min + frac_max));
-    let nx = (m_sizing[0].abs() / h_root_mid.max(1e-6)) / b_box_root.max(1e-6);
-    let sig_panel = (nx / t_skin).max(1e6);
-    let l_rib = (cfg.rib_radius_of_gyration_m
-        * (cfg.rib_buckling_coeff * std::f64::consts::PI.powi(2) * skin_mat.e_pa / sig_panel)
-            .sqrt())
-    .max(0.5);
-    let num_ribs = match cfg.num_ribs_override {
-        Some(value) => value,
-        None => rib_count_from_max_spacing(wsg.semi_span, l_rib).max(10),
+    (front, rear)
+}
+
+/// Running mass of a sized box, kg/m, at its own stations.
+///
+/// The four terms are the per-station integrands of
+/// [`WingboxSizing::mass_breakdown_kg`], so the mass this reports and the mass
+/// the sizing integrates are one quantity rather than two statements of it.
+/// The ribs are discrete and are conserved as a uniform spanwise density, the
+/// same convention [`crate::analytical`] uses for inertial relief and for the
+/// Rayleigh modal denominator.
+pub fn box_running_mass_kg_m(
+    sizing: &WingboxSizing,
+    skin_mat: &MaterialSpec,
+    web_mat: &MaterialSpec,
+    cap_mat: &MaterialSpec,
+    front: f64,
+    rear: f64,
+) -> Vec<f64> {
+    let n = sizing.chord.len();
+    let skin_width = (rear - front).max(0.0);
+    let mut running: Vec<f64> = (0..n)
+        .map(|j| 2.0 * skin_width * sizing.chord[j] * sizing.t_skin * skin_mat.rho_kg_m3)
+        .collect();
+    for spar in &sizing.spars {
+        for (mass, (&h, &a)) in running.iter_mut().zip(spar.h.iter().zip(&spar.a_cap)) {
+            *mass += spar.t_web * h * web_mat.rho_kg_m3 + 2.0 * a * cap_mat.rho_kg_m3;
+        }
+    }
+    let span = match (sizing.y_stations.first(), sizing.y_stations.last()) {
+        (Some(&first), Some(&last)) => last - first,
+        _ => 0.0,
     };
-
-    // Mass breakdown (semi-wing).
-    let dy = gradient_unit(&y);
-    let mut m_caps = 0.0;
-    let mut m_webs = 0.0;
-    for s in &spars {
-        let caps: f64 = (0..n)
-            .map(|j| 2.0 * s.a_cap[j] * cap_mat.rho_kg_m3 * dy[j])
-            .sum();
-        let webs: f64 = (0..n)
-            .map(|j| s.t_web * s.h[j] * web_mat.rho_kg_m3 * dy[j])
-            .sum();
-        m_caps += caps;
-        m_webs += webs;
+    if span > 0.0 && sizing.mass_breakdown_kg.ribs.is_finite() {
+        let rib_density = sizing.mass_breakdown_kg.ribs / span;
+        for mass in &mut running {
+            *mass += rib_density;
+        }
     }
-    let m_skin: f64 = (0..n)
-        .map(|j| 2.0 * chord[j] * t_skin * skin_mat.rho_kg_m3 * dy[j])
-        .sum();
-
-    let xc_full = linspace(0.01, 0.99, 60);
-    let mut m_ribs = 0.0;
-    for &eta_r in &linspace(0.0, 1.0, num_ribs.max(2) as usize) {
-        let c_r = wsg.local_chord(eta_r);
-        let heights: Vec<f64> = xc_full
-            .iter()
-            .map(|&xc| {
-                let (zu, zl) = wsg.airfoil_zu_zl(eta_r, xc);
-                (zu - zl) * c_r
-            })
-            .collect();
-        let x: Vec<f64> = xc_full.iter().map(|&xc| xc * c_r).collect();
-        m_ribs += trapezoid(&heights, &x) * cfg.t_rib_m * rib_mat.rho_kg_m3;
-    }
-
-    let total = m_caps + m_webs + m_skin + m_ribs;
-
-    let any_composite = [skin_mat, web_mat, cap_mat, rib_mat]
-        .iter()
-        .any(|m| m.category == "composite");
-
-    let composite_declaration = if any_composite {
-        Some(CompositeProxyDeclaration {
-            source: "Open source gap: the real wing box is composite, but no document in .agent/evidence/ \
-                     states it. Assigned as an effective isotropic proxy, not a verified material.",
-            applicability: "Effective isotropic proxy for a laminate wing box. f_allow is a single \
-                            strength-based design allowable, not a laminate allowable; no ply schedule, \
-                            stacking sequence, compression-after-impact knockdown, inter-laminar check \
-                            or aeroelastic tailoring is modelled. Not a certified laminate analysis. \
-                            Gauge is a declared class assumption, not a measured gauge.",
-            // Represent uncalibrated relative uncertainty explicitly as unknown (None),
-            // never inventing a spurious number or 0.0 per strict audit instructions.
-            relative_uncertainty: None,
-        })
-    } else {
-        None
-    };
-
-    WingboxSizing {
-        y_stations: y,
-        eta_stations: eta,
-        chord,
-        spar_fracs: wsg.spar_fracs.clone(),
-        spars,
-        t_skin,
-        num_ribs,
-        rib_spacing_m: l_rib,
-        mass_breakdown_kg: MassBreakdown {
-            spar_caps: m_caps,
-            spar_webs: m_webs,
-            skin: m_skin,
-            ribs: m_ribs,
-        },
-        total_mass_kg: total,
-        sizing_load_case: worst_case.name,
-        composite_declaration,
-    }
+    running
 }
 
 #[cfg(test)]
 mod tests {
+    use super::law::{
+        cap_taper, gradient_unit, linspace, rib_count_from_max_spacing, root_cap_dimensions,
+        trapezoid,
+    };
     use super::*;
 
     #[test]
@@ -838,6 +467,241 @@ mod tests {
         };
         assert!(decl.relative_uncertainty.is_none());
         assert!(decl.applicability.contains("Effective isotropic proxy"));
+    }
+
+    // --- The relieved, box-extent product law -------------------------------
+
+    /// A transport-sized wing with a two-spar box, enough to exercise the
+    /// product law against the frozen one on the same geometry.
+    fn probe_case() -> (
+        WingStructureGeometry,
+        StructuresConfig,
+        DesignRequirements,
+        &'static MaterialSpec,
+    ) {
+        use alas_config::{DesignVector, WingConfig};
+        use alas_geom::airfoil_library::AirfoilLibrary;
+        let section = AirfoilLibrary::get("naca2412").expect("the reference section resolves");
+        let wsg = WingStructureGeometry::new(
+            &DesignVector::default(),
+            &WingConfig::default(),
+            &section,
+            &section,
+            &[0.25, 0.70],
+            None,
+        )
+        .unwrap_or_else(|error| panic!("{error}"));
+        let cfg = StructuresConfig {
+            spanwise_stations: 120,
+            ..StructuresConfig::default()
+        };
+        let requirements = DesignRequirements::default();
+        let aluminium =
+            alas_config::materials::get("Al 7075-T6").unwrap_or_else(|error| panic!("{error}"));
+        (wsg, cfg, requirements, aluminium)
+    }
+
+    #[test]
+    fn the_zero_margin_noise_floor_accepts_round_off_and_rejects_a_real_deficit() {
+        // The two values a fully stressed box actually produces, and the one
+        // and a half units in the last place between them.
+        assert!(margin_is_structurally_non_negative(-f64::EPSILON));
+        assert!(margin_is_structurally_non_negative(-1.5 * f64::EPSILON));
+        assert!(margin_is_structurally_non_negative(-0.5 * f64::EPSILON));
+        assert!(margin_is_structurally_non_negative(0.0));
+        assert!(margin_is_structurally_non_negative(1.0));
+        // The band is exactly four units in the last place and stops there.
+        assert!(margin_is_structurally_non_negative(-MARGIN_NUMERICAL_ZERO));
+        assert!(!margin_is_structurally_non_negative(
+            -MARGIN_NUMERICAL_ZERO * 1.001
+        ));
+        // Anything a reader would call a small deficit still fails, by nine
+        // orders of magnitude or more.
+        for deficit in [-1.0e-15, -1.0e-12, -1.0e-9, -1.0e-3, -0.14] {
+            assert!(
+                !margin_is_structurally_non_negative(deficit),
+                "{deficit} must not be accepted"
+            );
+        }
+        // An incomplete calculation is never a pass.
+        assert!(!margin_is_structurally_non_negative(f64::NAN));
+        // The band is four units in the last place of unity, nothing else.
+        assert!((MARGIN_NUMERICAL_ZERO - 8.881_784_197_001_252e-16).abs() < 1.0e-30);
+    }
+
+    #[test]
+    fn a_fully_stressed_box_passes_its_own_strength_gate() {
+        // Every station of a fully stressed box sits on the zero-margin
+        // boundary, so a predicate written as `margin >= 0.0` rejects a
+        // correctly sized wing on the sign of a rounding error. That is what
+        // was making the pipeline report an infeasible wingbox and skip
+        // NASTRAN and Patran on aircraft whose structure is exactly as
+        // designed.
+        let (wsg, cfg, req, al) = probe_case();
+        let sized = size_wingbox(&wsg, &cfg, &req, al, al, al, al);
+        let minimum = sized.minimum_margin_of_safety();
+        assert!(minimum < 0.0, "expected the boundary, got {minimum}");
+        assert!(
+            minimum >= -MARGIN_NUMERICAL_ZERO,
+            "round-off exceeded its derived band: {minimum}"
+        );
+        assert!(sized.strength_margins_pass());
+        assert!(sized.controlling_margin_is_numerical_zero());
+        // The exact predicate the band replaced would have rejected it.
+        let exact_predicate = sized
+            .spars
+            .iter()
+            .flat_map(|spar| spar.margin_of_safety.iter())
+            .all(|&margin| !margin.is_nan() && margin >= 0.0);
+        assert!(!exact_predicate, "the regression this band exists for");
+    }
+
+    #[test]
+    fn a_genuinely_under_strength_station_still_fails_and_is_not_called_numerical() {
+        let mut sized = test_sizing();
+        sized.spars = vec![SparSizing {
+            chord_fraction: 0.25,
+            h: vec![1.0],
+            w_cap: vec![1.0],
+            t_cap: vec![1.0],
+            a_cap: vec![1.0],
+            t_web: 0.1,
+            frac_moment: vec![1.0],
+            margin_of_safety: vec![-0.14],
+        }];
+        assert!(!sized.strength_margins_pass());
+        assert!(!sized.controlling_margin_is_numerical_zero());
+    }
+
+    #[test]
+    fn the_relieved_product_box_is_lighter_than_the_frozen_unrelieved_one() {
+        let (wsg, cfg, req, al) = probe_case();
+        let product = size_wingbox(&wsg, &cfg, &req, al, al, al, al);
+        let frozen = size_wingbox_reference_compatibility(&wsg, &cfg, &req, al, al, al, al);
+        assert!(
+            product.total_mass_kg < frozen.total_mass_kg,
+            "product {} kg vs frozen {} kg",
+            product.total_mass_kg,
+            frozen.total_mass_kg
+        );
+        // Every station still carries its own load: the relieved box is not
+        // simply a scaled-down version left under strength. The root is sized
+        // to a margin of exactly zero, so the tolerance here is the same
+        // round-off allowance the mass reconciliation gate applies at that
+        // boundary, not a weakened acceptance.
+        let minimum = product.minimum_margin_of_safety();
+        assert!(
+            !minimum.is_nan() && minimum >= -1.0e-10,
+            "minimum margin {minimum}"
+        );
+    }
+
+    #[test]
+    fn the_product_box_charges_skin_and_ribs_over_the_box_not_the_whole_chord() {
+        let (wsg, cfg, req, al) = probe_case();
+        let product = size_wingbox(&wsg, &cfg, &req, al, al, al, al);
+        let frozen = size_wingbox_reference_compatibility(&wsg, &cfg, &req, al, al, al, al);
+        // The spars sit at 0.25 and 0.70, so the cover is 45 % of the chord
+        // the frozen law charges. Skin is linear in that width.
+        let ratio = product.mass_breakdown_kg.skin / frozen.mass_breakdown_kg.skin;
+        assert!((ratio - 0.45).abs() < 1e-9, "skin ratio {ratio}");
+        // Ribs are the section area between the spars rather than the whole
+        // aerofoil, which is a smaller share but not a fixed one.
+        assert!(
+            product.mass_breakdown_kg.ribs < frozen.mass_breakdown_kg.ribs,
+            "product ribs {} vs frozen {}",
+            product.mass_breakdown_kg.ribs,
+            frozen.mass_breakdown_kg.ribs
+        );
+    }
+
+    #[test]
+    fn declared_wing_carried_mass_relieves_more_than_the_geometric_estimate_alone() {
+        let (wsg, cfg, req, al) = probe_case();
+        let default = size_wingbox(&wsg, &cfg, &req, al, al, al, al);
+        // A wing-mounted engine at a third of the semi-span relieves the root.
+        let engine = [(wsg.semi_span / 3.0, 6_000.0)];
+        let with_engine =
+            size_wingbox_with_wing_carried_mass(&wsg, &cfg, &req, al, al, al, al, None, &engine);
+        assert!(
+            with_engine.total_mass_kg < default.total_mass_kg,
+            "with engine {} kg vs without {} kg",
+            with_engine.total_mass_kg,
+            default.total_mass_kg
+        );
+        // A declared fuel distribution of the wrong length falls back to the
+        // geometric estimate rather than silently disabling the relief.
+        let short = vec![0.0; 3];
+        let fallback = size_wingbox_with_wing_carried_mass(
+            &wsg,
+            &cfg,
+            &req,
+            al,
+            al,
+            al,
+            al,
+            Some(&short),
+            &[],
+        );
+        assert!((fallback.total_mass_kg - default.total_mass_kg).abs() < 1e-9);
+        // A declared dry wing is heavier than one carrying its own fuel.
+        let dry = vec![0.0; cfg.spanwise_stations as usize];
+        let dry_wing =
+            size_wingbox_with_wing_carried_mass(&wsg, &cfg, &req, al, al, al, al, Some(&dry), &[]);
+        assert!(dry_wing.total_mass_kg > default.total_mass_kg);
+    }
+
+    #[test]
+    fn the_relieved_load_fixed_point_has_settled_by_the_time_it_is_reported() {
+        // The box relieves its own bending, so the reported result must be a
+        // fixed point of that map: resizing it against its own running mass
+        // must return the same box.
+        let (wsg, cfg, req, al) = probe_case();
+        let sized = size_wingbox(&wsg, &cfg, &req, al, al, al, al);
+        let (front, rear) = box_chord_band(&wsg);
+        let fuel = tanks::integral_fuel_running_mass_kg_m(&wsg, &sized.y_stations, front, rear);
+        let structure = box_running_mass_kg_m(&sized, al, al, al, front, rear);
+        let relief = WingInertiaRelief {
+            running_mass_kg_m: fuel.iter().zip(&structure).map(|(&f, &s)| f + s).collect(),
+            point_masses_kg: Vec::new(),
+        };
+        let resized = size_wingbox_with_law(
+            &wsg,
+            &cfg,
+            &req,
+            al,
+            al,
+            al,
+            al,
+            SizingLaw::Product,
+            &relief,
+        );
+        let drift = (resized.total_mass_kg - sized.total_mass_kg).abs() / sized.total_mass_kg;
+        assert!(drift < 1.0e-6, "relief fixed point drifted by {drift}");
+    }
+
+    #[test]
+    fn an_outboard_cap_is_floored_at_the_minimum_gauge_rather_than_at_the_root_taper() {
+        let (wsg, cfg, req, al) = probe_case();
+        let product = size_wingbox(&wsg, &cfg, &req, al, al, al, al);
+        let frozen = size_wingbox_reference_compatibility(&wsg, &cfg, &req, al, al, al, al);
+        let tip = product.y_stations.len() - 1;
+        for spar in &product.spars {
+            assert!(
+                spar.t_cap[tip] >= cfg.t_skin_min_m - 1e-12
+                    || spar.t_cap[tip] >= spar.h[tip] / 3.0 - 1e-12,
+                "tip cap {} m is below the minimum gauge",
+                spar.t_cap[tip]
+            );
+        }
+        // The frozen law leaves a fifth of the root flange at the tip, which
+        // is what makes its caps the heavier of the two.
+        let product_caps = product.mass_breakdown_kg.spar_caps;
+        let frozen_caps = frozen.mass_breakdown_kg.spar_caps;
+        assert!(
+            product_caps < frozen_caps,
+            "product caps {product_caps} kg vs frozen {frozen_caps} kg"
+        );
     }
 
     fn test_sizing() -> WingboxSizing {

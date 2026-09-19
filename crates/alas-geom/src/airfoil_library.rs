@@ -7,9 +7,10 @@
 //! Airfoil name resolution and parametric shaping.
 //!
 //! [`AirfoilLibrary::get`] is `AirfoilLibrary.get`: resolve a name through
-//! the Selig zip corpus ([`crate::selig`]), then the built-in reference
-//! sections ([`crate::airfoil_data`]), then native aerodynamic model's NACA fallback
-//! ([`crate::aircraft::airfoil::Airfoil::from_name`]), normalizing whichever one
+//! the user registry, the Selig zip corpus ([`crate::selig`]), the built-in
+//! reference sections ([`crate::airfoil_data`]), then native aerodynamic
+//! model's NACA fallback ([`crate::aircraft::airfoil::Airfoil::from_name`]),
+//! normalizing whichever one
 //! answers. [`apply_bumps`] adds four localized Hicks-Henne-style
 //! perturbations; [`morph_airfoil`] scales thickness and camber
 //! independently; [`build_section`] is the pipeline the wing root and break
@@ -27,6 +28,7 @@
 
 use crate::aircraft::airfoil::Airfoil;
 use crate::airfoil_data;
+use crate::airfoil_io;
 use crate::selig;
 use alas_config::DesignVector;
 use alas_math::CubicSplineError;
@@ -64,23 +66,26 @@ pub struct AirfoilLibrary;
 impl AirfoilLibrary {
     /// Return an airfoil by name: `AirfoilLibrary.get`.
     ///
-    /// Tries, in order: the Selig zip corpus (case-insensitive), the
-    /// built-in named reference sections (exact case), and native aerodynamic model's
-    /// NACA-only fallback. Each hit is normalized with
+    /// Tries, in order: registered custom airfoils (case-insensitive), the
+    /// Selig zip corpus (case-insensitive), built-in named reference sections
+    /// (exact case), and native aerodynamic model's NACA-only fallback. Each hit is normalized with
     /// [`normalize_coordinates`] before being returned.
     ///
-    /// Returns `None` when none of the three resolve `name`. Upstream's
-    /// third branch does not raise on an unresolved name either:
+    /// Returns `None` when none of the four resolve `name`. Upstream's
+    /// fourth branch does not raise on an unresolved name either:
     /// The reference `Airfoil(name)` constructor there constructs an `Airfoil` whose
     /// `coordinates` is `None`, but this crate's scoped
     /// [`Airfoil::from_name`] already collapses that outcome to `None`
     /// rather than a placeholder object, so propagating it here is the
     /// faithful continuation of the same collapse, not a new one. Every
     /// name this program's own configuration ever resolves through
-    /// `AirfoilLibrary.get` reaches one of the first three branches (see
+    /// `AirfoilLibrary.get` reaches one of the first four branches (see
     /// `docs/PORTING.md`, Geometry), so this path is not reachable from this
     /// program's own inputs.
     pub fn get(name: &str) -> Option<Airfoil> {
+        if let Some(airfoil) = airfoil_io::get(name) {
+            return Some(airfoil);
+        }
         if let Some((stem, coordinates)) = selig::get(name) {
             return Some(Airfoil::from_coordinates(
                 stem,
@@ -102,9 +107,12 @@ impl AirfoilLibrary {
 
     /// Return the list of all available airfoil names in the Selig corpus and named registry.
     pub fn get_available_airfoils() -> Vec<&'static str> {
-        let mut names = Vec::with_capacity(selig::stems().len() + airfoil_data::names().len());
+        let mut names = Vec::with_capacity(
+            selig::stems().len() + airfoil_data::names().len() + airfoil_io::names().len(),
+        );
         names.extend(selig::stems());
         names.extend_from_slice(airfoil_data::names());
+        names.extend(airfoil_io::names());
         names.sort_unstable();
         names.dedup();
         names
@@ -175,9 +183,10 @@ fn numpy_interp(x: f64, xp: &[f64], fp: &[f64]) -> f64 {
 }
 
 /// Evenly spaced points from `start` to `stop`, inclusive: NumPy's
-/// `linspace(start, stop, num, endpoint=True)`. Duplicated from
-/// `aircraft::spacing::linspace`, which is private to the aircraft module and not
-/// reachable from here.
+/// `linspace(start, stop, num, endpoint=True)`. A copy of
+/// `aircraft::spacing::linspace`, which is reachable from here and from other
+/// crates — the copy is historical, not a visibility workaround, and collapsing
+/// the three copies in this crate is a separate change with its own parity run.
 fn linspace(start: f64, stop: f64, num: usize) -> Vec<f64> {
     if num == 0 {
         return Vec::new();
@@ -439,12 +448,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn get_returns_none_for_a_name_none_of_the_three_branches_resolve() {
+    fn get_returns_none_for_a_name_none_of_the_four_branches_resolve() {
         assert!(AirfoilLibrary::get("not-a-real-airfoil-name").is_none());
     }
 
     #[test]
-    fn get_resolves_each_of_the_three_branches() {
+    fn get_resolves_corpus_reference_and_naca_branches() {
         // Selig zip corpus (case-insensitive).
         let tip = AirfoilLibrary::get("NACA2410").expect("naca2410 is in the selig corpus");
         assert_eq!(tip.name, "naca2410");

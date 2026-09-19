@@ -7,7 +7,7 @@ identity, the exact coordinate snapshot and hash, the SI operating point, the
 boundary and mesh settings, the solver settings, and the versioned case
 template in `study.json`.
 
-The current template is `alas-airfoil-2d-openfoam-gmsh-v2`.  Gmsh creates an
+The current template is `alas-airfoil-2d-openfoam-gmsh-v5`.  Gmsh creates an
 exact straight-edge polygon from the section coordinates, a chord-scaled outer
 domain, and a one-layer extrusion.  `gmshToFoam` converts the mesh and the
 runner enforces these patch contracts:
@@ -35,7 +35,8 @@ to `/mnt/<drive>/...`.  Commands are passed as argument vectors, so spaces and
 Unicode in a case path do not depend on shell quoting.
 
 The required OpenFOAM utilities are `gmshToFoam`, `checkMesh`, `simpleFoam`,
-and `postProcess`.  The runner invokes `checkMesh -writeAllFields` so native
+`rhoSimpleFoam`, and `postProcess`; the selected solver depends on the
+Mach-derived regime.  The runner invokes `checkMesh -writeAllFields` so native
 cell-quality fields (`nonOrthoAngle`, `skewness`, `aspectRatio`, and
 `cellVolume`) are retained for distribution plots.  Gmsh is a separate required dependency for the current
 mesh route.  `potentialFoam` is optional: when available, the runner executes
@@ -96,14 +97,25 @@ integrator.  Pressure in the incompressible `p` field is kinematic pressure in
 `m^2/s^2`; the GUI accepts a physical pressure reference in Pa and the case
 converts it by dividing by density.
 
-The study also records static freestream temperature in K and reports the
-dry-air diagnostic `a = sqrt(gamma R T)` and `M = U/a`, with `gamma = 1.4`
-and `R = 287.05287 J/(kg K)`.  This makes the low-Mach applicability check
-reproducible; it does not add compressible governing equations.  The template
-rejects `M > 0.3`.  A Mach contour exported from this workflow is therefore a
-derived field `|U|/a` and is meaningful only within that incompressible,
-low-Mach validity domain.  A pressure contour in Pa is gauge pressure
-`rho * p_kinematic`, relative to the explicitly stored pressure reference.
+The study also records static freestream temperature in K and derives the
+dry-air speed of sound `a = sqrt(gamma R T)` and Mach `M = U/a`, with
+`gamma = 1.4` and `R = 287.05287 J/(kg K)`.  Below `M = 0.3`, the case uses
+the incompressible steady `simpleFoam` path.  At and above `M = 0.3`, it
+automatically selects `rhoSimpleFoam`, `hePsiThermo` with a perfect-gas
+equation of state, absolute pressure and temperature fields, density/energy
+residuals, and bounded shock-safe transport.  The `M = 0.8 .. 1.2` band is
+reported as transonic; it receives a longer SIMPLE budget, bounded-upwind
+startup, limited gradients, GAMG pressure, PBiCGStab/DILU transport solves,
+and damped relaxation.  The steady contract is bounded at `M <= 2.0` and
+reports a blocking input error above that limit.
+
+A Mach contour exported from this workflow is a derived field `|U|/a` in the
+incompressible path and uses local solved temperature in the compressible
+path.  In low-Mach cases a pressure contour in Pa is gauge pressure
+`rho * p_kinematic`, relative to the stored reference; in compressible cases
+it is `p_absolute - p_reference`.  The selected solver, regime, static
+pressure and automatic controls are written to the case README, the effective
+configuration view and `study.json`.
 The supplied `tools/openfoam_render_fields.py` batch renderer evaluates these
 definitions on the native solved `U` and `p` fields with ParaView's
 `pvpython`, writing `postProcessing/alas-field-figures/mach-contour.png` and
@@ -129,8 +141,8 @@ python tools/openfoam_parafoam_render.py <case-directory> 1.225 288.15 `
 The wrapper does not alter the solution; it writes only the `.foam` marker
 and derived display artifacts under the case's `postProcessing` directory.
 
-The initial solver is incompressible steady `kOmegaSST`.  The default
-external-flow turbulence input is intensity `0.052%` and turbulent-to-molecular
+Both paths use steady `kOmegaSST`.  The default external-flow turbulence input
+is intensity `0.052%` and turbulent-to-molecular
 viscosity ratio `0.009`; the generated `k`, `omega`, estimated eddy viscosity,
 and implied length scale are recorded in the case README.  A length-scale
 input remains available for tunnel or inflow data specified that way.  The
@@ -140,13 +152,14 @@ first-cell-centre target of `1e-5 m`, and target `y+ = 1`.  The flat-plate
 estimate is sizing evidence only.  The solved yPlus summary is retained in
 `MeshQuality.near_wall` when the solver emitted a finite patch result.
 
-The initial model is intended for attached or mildly separated turbulent
-section flow at low Mach number.  It does not silently claim validity for
-laminar or transition-sensitive flow, low-Reynolds separation, stall,
-transonic compressibility, or unsteady shedding.  Domain extents and
-turbulence inputs remain engineering settings; they require a grid/domain
-study and matched validation data before coefficients are used for a design
-decision.
+The model is intended for attached or mildly separated turbulent section flow.
+The compressible path supports the numerical transonic equation set, but this
+does not claim physical validation for shock position, drag divergence,
+buffet, laminar or transition-sensitive flow, low-Reynolds separation, stall,
+or unsteady shedding.  Domain extents, turbulence inputs, the perfect-gas
+assumption and steady RANS closure remain engineering settings; they require
+grid/domain and Mach sensitivity studies plus matched validation data before
+coefficients are used for a design decision.
 
 ## Lifecycle and acceptance
 
@@ -162,7 +175,8 @@ Numerical status reports all of the following evidence from the same latest
 outer SIMPLE iteration when available:
 
 * finite initial and inner linear-solver residuals for `p`, `Ux`, `Uy`, `k`,
-  and `omega`, with the initial residuals below the configured tolerance;
+  and `omega` on the incompressible path, with `e` added on the compressible
+  path, and with the initial residuals below the configured tolerance;
 * a stabilized final-stage `Cd`, `Cl`, and `Cm` force window, excluding
   inherited startup samples after a staged restart;
 * finite force coefficients and latest local/global continuity errors within

@@ -74,15 +74,31 @@ pub(crate) fn assess(config: &AlasConfig, report: &AnalysisReport) -> Vec<Physic
     let side = if alpha < min { "below" } else { "above" };
     vec![PhysicalFinding {
         code: FindingCode::ReportedCruiseAttitudeOutsideWindow,
-        severity: FindingSeverity::Error,
+        // A *design-preference* window, not a statement that the aircraft
+        // cannot fly. `[2.0, 4.0]` deg is a configurable convention for a
+        // transport's cruise floor attitude, and six of the eight registered
+        // aircraft miss it at their own nominal design with no optimizer
+        // running: a check that rejects six real aeroplanes is measuring the
+        // convention, not the aeroplanes. An aircraft trimmed at 1.7 deg body
+        // attitude is trimmed. So this is reported, prominently and with its
+        // numbers, as a warning rather than as physical infeasibility.
+        //
+        // This is not a relaxation and nothing about the search changes: the
+        // `geometric_body_alpha` residual stays in the optimizer's Geometry
+        // family under that family's configured policy, hard by default, so a
+        // candidate outside the window is still rejected by the search.
+        severity: FindingSeverity::Warning,
         message: format!(
             "the reported cruise body attitude ({alpha:.2} deg) lies {side} the \
-             design window [{min:.2}, {max:.2}] deg the candidate was selected \
-             inside. The optimizer evaluates that window on the in-loop panel \
-             mesh and this analysis re-solves it on the finer reported mesh, so \
-             the two disagree by roughly the mesh error of the coarser one; \
-             raise analysis.chordwise_resolution toward \
-             analysis.fine_chordwise_resolution to close the gap."
+             design window [{min:.2}, {max:.2}] deg this configuration declares. \
+             That window is a design preference for a transport's cruise \
+             attitude, not a flight limit. When a search runs it evaluates the \
+             window on the in-loop panel mesh while this analysis re-solves it \
+             on the finer reported mesh, so a candidate selected inside the \
+             window can be reported outside it by roughly the coarser mesh's \
+             own error; raise analysis.chordwise_resolution toward \
+             analysis.fine_chordwise_resolution to close that gap. Without a \
+             search this is simply the analysed design's own reported attitude."
         ),
         actual: Some(alpha),
         limit: Some(limit),

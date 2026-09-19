@@ -41,6 +41,18 @@ pub(super) fn render_geo(
     // Frontal-Delaunay variant (algorithm 6).  The distinction is material
     // after extrusion: algorithm 6 can leave high-skew TE side faces even
     // when the 2-D surface itself has no invalid cells.
+    // Pin the meshing RNG so the only remaining source of run-to-run variation
+    // is named rather than anonymous.  Measured on this host with Gmsh 4.15.2,
+    // single-threaded, on a byte-identical `.geo`
+    // (`.agent/opus-cfd-convergence-20260916/q16/`): three runs gave 89 794 /
+    // 89 732 / 89 902 nodes.  Pinning the seed does NOT remove that, and
+    // neither does `Mesh.Optimize = 0`, `Mesh.OptimizeNetgen = 0`,
+    // `Mesh.RandomFactor`, nor `Mesh.Algorithm = 6`.  Deleting
+    // `BoundaryLayer Field` does: three runs then produce bit-identical meshes
+    // (77 556 nodes each, identical md5).  The non-determinism is inside Gmsh's
+    // `BoundaryLayer` field, so the seed is necessary hygiene and the real fix
+    // is an explicit prism-layer construction that does not use that field.
+    out.push_str("Mesh.RandomSeed = 1;\n");
     out.push_str("Mesh.Algorithm = 5;\n");
     out.push_str("Mesh.Algorithm3D = 1;\n");
     out.push_str("Mesh.ElementOrder = 1;\n");
@@ -157,7 +169,21 @@ pub(super) fn render_geo(
         ));
         out.push_str("Field[7] = Threshold;\nField[7].InField = 6;\n");
         out.push_str(&format!(
-            "Field[7].SizeMin = {le_size_m:.16e};\nField[7].SizeMax = {surface_size_m:.16e};\nField[7].DistMin = {dist_min:.16e};\nField[7].DistMax = {dist_max:.16e};\n",
+            // `SizeMax` must be the FAR-FIELD size, not the surface size.
+            // `Field[5]` is `Min{3, 4, 7}` and a `Threshold` returns its
+            // `SizeMax` everywhere beyond `DistMax`, so a leading-edge field
+            // that relaxes only to the surface size clamps the whole domain to
+            // it: `Field[3]` and `Field[4]` both relax to `far_size_m`, and the
+            // `Min` then throws that away.  Measured on this host with the
+            // medium preset at level 2 — surface `1.0e-2 m`, far field
+            // `1.667e-1 m`, domain 30 m by 20 m — the background cell size
+            // outside the leading-edge ball fell by 16.7x, which is a 280x
+            // area-density increase over roughly 600 m^2; Gmsh 4.15.2 reached
+            // 2.6 GB of resident memory and had produced no mesh after eight
+            // minutes, against ten seconds at level 0.  Relaxing to
+            // `far_size_m` makes the field impose nothing outside its own ball,
+            // which is what "leading-edge refinement" is supposed to mean.
+            "Field[7].SizeMin = {le_size_m:.16e};\nField[7].SizeMax = {far_size_m:.16e};\nField[7].DistMin = {dist_min:.16e};\nField[7].DistMax = {dist_max:.16e};\n",
             dist_min = LEADING_EDGE_REFINEMENT_INNER_CHORDS * config.chord_m,
             dist_max = LEADING_EDGE_REFINEMENT_OUTER_CHORDS * config.chord_m,
         ));
@@ -181,21 +207,56 @@ pub(super) fn render_geo(
             ratio = sizing.expansion_ratio,
             n_layers = sizing.n_layers,
         ));
-        // A fan is used only for a genuinely sharp TE.  Blunt TE faces have
-        // two separate endpoints and are left to the normal boundary-layer
-        // intersection handling to avoid degenerate quads.
-        if topology.trailing_edge == EdgeKind::Sharp {
-            if let Some((te_index, _)) = points
+        // Both trailing-edge corners are convex corners of the fluid domain, and
+        // the prism stack has to turn through them.  Told to fan, Gmsh sweeps
+        // the layers around the corner; left alone, it stitches the upper and
+        // lower stacks together behind the section with whatever elements close
+        // the gap, and those elements are the worst in the mesh.
+        //
+        // A blunt edge used to be excluded here, on the assumption that its two
+        // separate endpoints would make fanned quads degenerate.  **Measured,
+        // that assumption is wrong and the exclusion was the defect.** On
+        // `n0012` (blunt), fanning both corners and changing nothing else:
+        //
+        // | preset | max non-orthogonality | max skewness |
+        // |---|---|---|
+        // | coarse | 37.891 -> 37.321 deg | 1.8138 -> 0.6441 |
+        // | medium | 46.185 -> 50.235 deg | 1.8138 -> 0.5948 |
+        // | **fine** | **71.369 -> 39.812 deg** | 1.8138 -> 0.6013 |
+        //
+        // The fine preset violated the declared `70 deg` limit before and clears
+        // it by 30 deg after.  The identical `1.8138019812` skewness at all
+        // three presets was the stitched region itself, and it is gone.  Cell
+        // count and meshing time are unchanged to within 0.1 %, aspect ratio to
+        // within 0.3 %, and `checkMesh` reports `Mesh OK` in every case.  No
+        // size field, layer count, layer thickness, first-layer height or
+        // coordinate changed: this is a local topology correction only.
+        let fan_points: Vec<i32> = match topology.trailing_edge {
+            // The closing point of a sharp edge is the single rearmost point.
+            EdgeKind::Sharp => points
                 .iter()
                 .enumerate()
                 .max_by(|left, right| left.1 .0.total_cmp(&right.1 .0))
-            {
+                .map(|(index, _)| vec![point_offset + index as i32])
+                .unwrap_or_default(),
+            // A blunt edge is closed by the segment from the last point back to
+            // the first, so its corners are exactly those two endpoints.
+            EdgeKind::Blunt => (points.len() >= 2)
+                .then(|| vec![point_offset, point_offset + points.len() as i32 - 1])
+                .unwrap_or_default(),
+        };
+        if !fan_points.is_empty() {
+            if topology.trailing_edge == EdgeKind::Sharp {
                 out.push_str("Mesh.BoundaryLayerFanElements = 7;\n");
-                out.push_str(&format!(
-                    "Field[1].FanPointsList = {{{}}};\n",
-                    point_offset + te_index as i32
-                ));
             }
+            out.push_str(&format!(
+                "Field[1].FanPointsList = {{{}}};\n",
+                fan_points
+                    .iter()
+                    .map(i32::to_string)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
         }
         out.push_str("BoundaryLayer Field = 1;\n\n");
     }

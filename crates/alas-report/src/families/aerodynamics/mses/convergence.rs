@@ -16,6 +16,20 @@ use crate::theme::get_palette;
 /// partial run is evidence of the points that converged, not a complete polar.
 pub fn figure_mses_convergence(result: &MsesPolarResult, theme: Option<&str>) -> Scene {
     let pal = get_palette(theme);
+    // A required Orr-Sommerfeld map that is missing or incompatible invalidates
+    // the whole sweep, not just its usable-data verdict: the requested-point
+    // panel would otherwise mark points green on coefficients MSES produced
+    // with its transition amplification zeroed. Gate before the diagnostics
+    // fallback so the actionable map diagnostic is the reason that is shown.
+    if !result.transition_model_is_valid() {
+        return super::unavailable(
+            theme,
+            &super::cp::osmap_unavailable_reason(
+                result.osmap_status,
+                result.osmap_diagnostic.as_deref(),
+            ),
+        );
+    }
     if !result.has_usable_data() && result.point_diagnostics.is_empty() {
         return super::unavailable(theme, "MSES sweep diagnostics unavailable.");
     }

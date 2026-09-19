@@ -80,6 +80,8 @@ pub fn atr72_600() -> AircraftPreset {
             sources: vec![
                 "ATR ATR 72-600 Airport Planning Manual, Issue 8, 2021, aircraft characteristics and limitations",
                 "EASA Type Certificate Data Sheet EASA.A.084, ATR 42/72, ATR 72-212A model and engine eligibility",
+                "ATR 42 / ATR 72 Aircraft Recovery Manual, 1-10-01 p.19 Figure 1-2 (ATR 72-212A main dimensions: 1.728 m nose to nose wheel, 10.772 m wheelbase, 27.166 m length, 4.10 m track), 1-10-04 p.27 fuselage frame stations (drawing 9SMJ 062110 ZON 00110-004, frame 0 at STA 2362 mm), 4-00-02 Figure 4-1 tail-tipping CG limit H-arm 14.848 m = 54 percent MAC",
+                "ATR Weight and Balance Manual, LIMITATIONS LIM.1 p.03, 15 JAN 2021, weight variant F2/75 (MAC 2.303 m; station 0 is 2.362 m forward of the fuselage nose; station 0 to reference chord leading edge 13.604 m)",
                 "ATR ATR 72-600 Facts and Figures, product specification (accessed 2026-08-30)",
             ],
             ..AircraftReferenceData::default()
@@ -92,6 +94,64 @@ pub fn atr72_600() -> AircraftPreset {
             wheels_per_mlg_strut: 2,
             // Approximate 4.1 m main-wheel track divided by 2.77 m fuselage width.
             track_diameter_factor: 4.1 / 2.77,
+            // Longitudinal gear stations, measured, in the nose-tip frame.
+            //
+            // Source A, the stations. ATR 42 / ATR 72 *Aircraft Recovery
+            // Manual* (ATR, 1 Allee Pierre Nadot, Blagnac; "Printed in
+            // France"), 1-10-01 "Aircraft Dimensions", p.19 Figure 1-2
+            // "ATR 72-212A Main Dimensions". The side elevation carries one
+            // dimension chain along the ground line: 1,728 m (68,03 in) from
+            // the fuselage nose to the nose-wheel contact, then 10,772 m
+            // (424,09 in) from there to the main-wheel contact, drawn above an
+            // overall length of 27,166 m (1069,53 in) taken from the same nose
+            // tip. p.18 Figure 1-1 "ATR 42-500 Main Dimensions" prints the
+            // identical leading 1,728 m (68,03 in) ahead of an 8,781 m
+            // (345,70 in) wheelbase on a 22,67 m (892,52 in) aeroplane, which
+            // is what a shared forward fuselage requires and is why the
+            // 1,728 m reads as the nose-to-nose-gear leg of the chain.
+            //
+            // Source B, the frame. ATR *Weight and Balance Manual*,
+            // LIMITATIONS LIM.1 "Certified Center of Gravity Envelope" p.03
+            // (data module _9d8f0447, 15 JAN 2021, weight variant F2/75,
+            // MTOW 22 800 kg): "The MAC is 2.303 m long. Station 0 is 2.362 m
+            // forward of the fuselage nose. The distance from station 0 to
+            // reference chord leading edge is 13.604 m." The recovery manual's
+            // own frame table (1-10-04, drawing 9SMJ 062110 ZON 00110-004)
+            // places frame 0 at STA 2362 mm, so STA[mm] = 1000 x x_nose[m] +
+            // 2362 exactly and the two manuals share one frame.
+            //
+            // Independent check, nothing here was fitted to it. The recovery
+            // manual's Figure 4-1 tail-tipping CG limit is H-arm 14.848 m
+            // (54 % MAC) for the ATR 72 and 12.865 m (63 % MAC) for the ATR 42.
+            // Converted with the same 2.362 m datum offset those are 12.486 m
+            // and 10.503 m aft of the nose, against the 1.728 + 10.772 =
+            // 12.500 m and 1.728 + 8.781 = 10.509 m main-wheel stations the
+            // two dimension chains give: 14 mm and 6 mm forward of the main
+            // wheels, the small margin a tip-back limit must carry.
+            //
+            // Stored as fractions of the drawing fuselage length so a shrink
+            // or clean-sheet run re-applies them to the active fuselage rather
+            // than freezing absolute metres
+            // (`LandingGearConfig::resolved_station_positions`). These are
+            // ground-contact stations, which is what the nose-gear load
+            // balance needs; the ATR main gear is a trailing-arm unit, so its
+            // axle and its contact station are not the same point and only the
+            // contact station is dimensioned. Declaring the three fields is
+            // what retires the `StationError::MainGearStationNotMeasured`
+            // refusal this block previously carried: the refusal was correct
+            // while no ATR station in a stated frame was held, and the
+            // wing-mounted fallback (`x_mlg = mac_le + mlg_x_fraction_mac x
+            // mac`) remains outside its domain for this sponson gear - it is
+            // now simply not reached.
+            reference_wheelbase_m: Some(10.772),
+            reference_track_m: Some(4.10),
+            reference_station_frame: Some("nose_tip_drawing_reference".to_owned()),
+            reference_station_fuselage_length_m: Some(27.166),
+            reference_nlg_x_fraction: Some(1.728 / 27.166),
+            reference_mlg_x_fractions: Some(vec![
+                (1.728 + 10.772) / 27.166,
+                (1.728 + 10.772) / 27.166,
+            ]),
             ..LandingGearConfig::default()
         },
         design_vector: DesignVector {
@@ -217,6 +277,110 @@ mod tests {
         assert_eq!(atr.reference.mlw_kg, Some(22_350.0));
         assert_eq!(atr.reference.mzfw_kg, Some(21_000.0));
         assert_eq!(atr.requirements.mtow_kg, 23_000.0);
+    }
+
+    #[test]
+    fn atr_pins_the_measured_longitudinal_gear_station_anchor() {
+        // ATR 42 / ATR 72 Aircraft Recovery Manual, 1-10-01 p.19 Figure 1-2
+        // "ATR 72-212A Main Dimensions": one ground-line dimension chain reads
+        // 1,728 m (68,03 in) nose to nose wheel, then 10,772 m (424,09 in) to
+        // the main wheel, under a 27,166 m (1069,53 in) overall length taken
+        // from the same nose tip. The three anchor fields are declared together
+        // or not at all; a partial triple is rejected by
+        // `LandingGearConfig::validate`, and an estimate in any one of them
+        // would be indistinguishable downstream from this measurement.
+        let atr = atr72_600();
+        let gear = &atr.landing_gear;
+        assert_eq!(
+            gear.reference_station_frame.as_deref(),
+            Some("nose_tip_drawing_reference"),
+        );
+
+        let length_m = gear
+            .reference_station_fuselage_length_m
+            .expect("ATR drawing fuselage length");
+        assert!(
+            (length_m - 27.166).abs() < 1e-9,
+            "drawing fuselage length {length_m} m",
+        );
+
+        let nlg_fraction = gear.reference_nlg_x_fraction.expect("ATR NLG fraction");
+        let nlg_x_m = length_m * nlg_fraction;
+        assert!(
+            (nlg_x_m - 1.728).abs() < 1e-9,
+            "x_nlg {nlg_x_m} m from nose"
+        );
+
+        let mlg_fractions = gear
+            .reference_mlg_x_fractions
+            .as_deref()
+            .expect("ATR MLG fractions");
+        assert_eq!(mlg_fractions.len(), 2, "two sponson main-gear legs");
+        for fraction in mlg_fractions {
+            let mlg_x_m = length_m * fraction;
+            assert!(
+                (mlg_x_m - 12.500).abs() < 1e-9,
+                "x_mlg {mlg_x_m} m from nose"
+            );
+        }
+
+        // The wheelbase the two anchors imply is the 10.772 m the same figure
+        // prints, and the 10.77 m two independent ATR three-views carry.
+        let wheelbase_m = length_m * (mlg_fractions[0] - nlg_fraction);
+        assert!(
+            (wheelbase_m - 10.772).abs() < 1e-9,
+            "implied wheelbase {wheelbase_m} m",
+        );
+        assert_eq!(gear.reference_wheelbase_m, Some(10.772));
+        assert_eq!(gear.reference_track_m, Some(4.10));
+    }
+
+    /// The ATR Weight and Balance Manual datum, kept as an executable
+    /// conversion rather than prose: LIMITATIONS LIM.1 p.03 (15 JAN 2021)
+    /// states "Station 0 is 2.362 m forward of the fuselage nose" and puts the
+    /// reference chord leading edge 13.604 m aft of station 0, and the recovery
+    /// manual's frame table (1-10-04 p.27, drawing 9SMJ 062110 ZON 00110-004)
+    /// puts frame 0 at STA 2362 mm. So the nose-tip frame used by the anchors
+    /// above and the ATR station frame differ by exactly 2.362 m, and the
+    /// manual's own tail-tipping limit lands just forward of the main wheels.
+    #[test]
+    fn atr_nose_tip_anchor_frame_matches_the_published_atr_station_frame() {
+        const STATION_ZERO_AHEAD_OF_NOSE_M: f64 = 2.362;
+        const TAIL_TIPPING_H_ARM_M: f64 = 14.848;
+
+        let atr = atr72_600();
+        let gear = &atr.landing_gear;
+        let length_m = gear
+            .reference_station_fuselage_length_m
+            .expect("ATR drawing fuselage length");
+        let mlg_x_m = length_m
+            * gear
+                .reference_mlg_x_fractions
+                .as_deref()
+                .expect("ATR MLG fractions")[0];
+
+        let mlg_station_m = mlg_x_m + STATION_ZERO_AHEAD_OF_NOSE_M;
+        let margin_m = mlg_station_m - TAIL_TIPPING_H_ARM_M;
+        assert!(
+            (0.0..0.05).contains(&margin_m),
+            "tail-tipping limit must sit just forward of the main wheels, got {margin_m} m",
+        );
+    }
+
+    #[test]
+    fn atr_wing_root_sits_above_the_fuselage_crown() {
+        // The geometric fact that keeps the wing-mounted fallback out of its
+        // domain here, pinned at its source: the wing root chord plane is
+        // above the fuselage outer surface, so no wing-root gear bay
+        // exists. z is measured up in the geometry frame, m.
+        let atr = atr72_600();
+        let crown_z_m =
+            atr.geometry.fuselage.cabin_z_m + atr.geometry.fuselage.effective_height_m() / 2.0;
+        assert!(
+            atr.geometry.wing.root_z_m > crown_z_m,
+            "ATR wing root at {} m is not above the fuselage crown at {crown_z_m} m",
+            atr.geometry.wing.root_z_m
+        );
     }
 
     #[test]

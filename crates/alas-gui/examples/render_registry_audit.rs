@@ -263,6 +263,11 @@ fn main() -> Result<(), Box<dyn Error>> {
         strategy: "best1bin".to_owned(),
         termination: "example".to_owned(),
         pareto_front: Vec::new(),
+        // This audit renders figures from a hand-built result, so it carries
+        // no staged-search telemetry; `None` is the honest value rather than
+        // a fabricated diagnostic the figures would then display.
+        search_diagnostics: None,
+        delivered_acceptance: None,
     });
     state.pipeline_result = Some(result);
 

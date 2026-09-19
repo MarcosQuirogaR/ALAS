@@ -18,7 +18,6 @@ Covers:
   - PTY feedback: Bounded idle redraw (no busy repaint loop, 3s refresh or input/resize only)
 """
 
-import datetime
 import json
 import os
 import pathlib
@@ -26,7 +25,7 @@ import sys
 import tempfile
 import threading
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 # Ensure tools directory is on path
 tools_dir = pathlib.Path(__file__).parent.resolve()

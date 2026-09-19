@@ -39,7 +39,7 @@ pub fn show_control_bar(state: &mut AppState, ui: &mut Ui) {
         let run_response = ui
             .add_enabled(!running && !blocked, run_button)
             .on_hover_text(if blocked {
-                tr("Fix error-severity validation issues first")
+                crate::views::notices::run_blocked_hover_text(state)
             } else if baseline_mode {
                 tr("Analyze the current design and run the mission without optimization")
             } else {
@@ -47,6 +47,11 @@ pub fn show_control_bar(state: &mut AppState, ui: &mut Ui) {
             });
         if run_response.clicked() {
             state.start_pipeline(false);
+        }
+        // A disabled button explains nothing on its own: say beside it that
+        // something blocks the run, and carry the reasons in its hover text.
+        if blocked {
+            crate::views::notices::show_run_blocked_marker(state, ui);
         }
         if running {
             let cancel = ui

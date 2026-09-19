@@ -90,8 +90,10 @@ pub enum YPlusConsistency {
 pub struct InflationSpec {
     /// Whether a boundary-layer field is emitted.
     pub enabled: bool,
-    /// Number of layers.
+    /// Number of layers actually emitted.
     pub n_layers: u32,
+    /// Layer count requested by the configuration, before the coverage floor.
+    pub configured_n_layers: u32,
     /// Geometric expansion ratio.
     pub expansion_ratio: f64,
     /// Configured first cell-centre wall distance, metres.
@@ -102,6 +104,12 @@ pub struct InflationSpec {
     pub total_thickness_m: f64,
     /// Total inflation thickness as a chord fraction.
     pub total_thickness_chords: f64,
+    /// Flat-plate turbulent boundary-layer thickness estimate at the trailing
+    /// edge, metres.
+    pub estimated_boundary_layer_thickness_m: f64,
+    /// `total_thickness_m` divided by the boundary-layer estimate.  Below one
+    /// the graded stack ends inside the boundary layer.
+    pub boundary_layer_coverage_ratio: f64,
     /// Target y+.
     pub target_y_plus: f64,
     /// Estimated y+ at the configured wall distance (flat-plate estimate).
@@ -240,6 +248,23 @@ pub fn mesh_resolution(
             "total inflation thickness {total_thickness_chords:.4} c exceeds {MAX_RECOMMENDED_INFLATION_CHORDS} c; reduce the layer count or the first-layer height"
         ));
     }
+    if sizing.enabled && sizing.boundary_layer_coverage_ratio < 1.0 {
+        warnings.push(format!(
+            "the {} emitted layers span {:.3e} m, only {:.2} of the estimated boundary-layer thickness {:.3e} m; the outer layer falls to isotropic background cells and integrated forces stay provisional",
+            sizing.n_layers,
+            sizing.total_thickness_m,
+            sizing.boundary_layer_coverage_ratio,
+            sizing.estimated_boundary_layer_thickness_m,
+        ));
+    }
+    if sizing.enabled && sizing.n_layers > sizing.configured_n_layers {
+        warnings.push(format!(
+            "layer count raised from the configured {} to {} so the graded stack spans {:.2} of the estimated boundary-layer thickness",
+            sizing.configured_n_layers,
+            sizing.n_layers,
+            sizing.boundary_layer_coverage_ratio,
+        ));
+    }
     if sizing.enabled && sizing.first_layer_thickness_m > surface_size_m {
         warnings.push(format!(
             "first-layer thickness {:.3e} m exceeds the surface size {:.3e} m; the inflation field is coarser than the surface spacing",
@@ -252,11 +277,14 @@ pub fn mesh_resolution(
         inflation: InflationSpec {
             enabled: sizing.enabled,
             n_layers: sizing.n_layers,
+            configured_n_layers: sizing.configured_n_layers,
             expansion_ratio: sizing.expansion_ratio,
             wall_distance_m: sizing.selected_wall_distance_m,
             first_layer_thickness_m: sizing.first_layer_thickness_m,
             total_thickness_m: sizing.total_thickness_m,
             total_thickness_chords,
+            estimated_boundary_layer_thickness_m: sizing.estimated_boundary_layer_thickness_m,
+            boundary_layer_coverage_ratio: sizing.boundary_layer_coverage_ratio,
             target_y_plus: sizing.target_y_plus,
             estimated_y_plus: sizing.estimated_y_plus,
             wall_distance_for_target_m: sizing.derived_wall_distance_m,

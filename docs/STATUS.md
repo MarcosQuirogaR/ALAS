@@ -25,7 +25,7 @@ continuously enforced by `cargo xtask gate`.
 
 ## What runs today
 
-- `cargo run --bin alas` launches the desktop GUI (`alas-gui`); `alas --gui`
+- `cargo run --bin ALAS` launches the desktop GUI (`alas-gui`); `ALAS --gui`
   is equivalent, and headless flags (`--config`, `--save-config`) drive the
   same pipeline without it. **`docs/RUNNING.md`'s "not yet possible" is
   stale — fix pending, see below.**

@@ -197,8 +197,19 @@ pub enum OptionSource {
     StructuralMassMethod,
     /// Versioned propulsion-group mass method.
     PropulsionMassMethod,
+    /// Which method prices the engine pylons FLOPS itself omits.
+    PylonMassMethod,
+    /// Which method prices the cabin equipment and operating items.
+    CabinEquipmentMethod,
+    /// Which LTH operating-item relation an aircraft takes.
+    OperatingHaulClass,
     /// Which FLOPS wing bending-material factor is evaluated.
     FlopsWingBendingMethod,
+    /// Blade material and pitch-change hardware of a turboprop propeller.
+    PropellerConstruction,
+    /// Whether the cargo compartments are loose-loaded or take unit load
+    /// devices.
+    CargoHoldLoading,
     /// The operating rule a design mission's reserves are sized under.
     FuelScheme,
     /// The scalar the mission-sized design search minimises.
@@ -261,6 +272,15 @@ impl OptionSource {
                 Some(&["reference_compatible", "flops_transport_v1"])
             }
             Self::FlopsWingBendingMethod => Some(&["simplified", "detailed"]),
+            Self::PylonMassMethod => Some(&["none", "lth_box_beam_v1"]),
+            Self::CabinEquipmentMethod => Some(&["flops_transport_v1", "lth_civil_transport_v1"]),
+            Self::OperatingHaulClass => Some(&["short_medium_haul", "long_haul"]),
+            Self::PropellerConstruction => Some(&[
+                "aluminium_double_acting",
+                "aluminium_single_acting",
+                "composite",
+            ]),
+            Self::CargoHoldLoading => Some(&["bulk", "containerized", "mixed"]),
             Self::FuelScheme => Some(&[
                 "easa_basic",
                 "faa_domestic",

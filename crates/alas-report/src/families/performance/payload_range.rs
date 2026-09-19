@@ -362,6 +362,12 @@ pub fn payload_range_data(
 
 // Retained as an explicit compatibility/reference correlation for standalone
 // comparison tests; product capacity comes from typed feasibility evidence.
+// It has no product caller and it has DRIFTED from the two live implementations:
+// this one uses `unfolded_area`/`unfolded_span` while
+// `families::mass_balance_layout::fuel_volume::wing_fuel_volume_m3` and
+// `alas_opt::objective_model` use `reference_area`/`reference_span`. It is a
+// second, different answer to the same question and must not be quoted as
+// agreeing with either. Delete-or-reconcile is recorded as a report-owner item.
 #[allow(dead_code)]
 fn wing_fuel_volume_m3(wing: &Wing, usable_fraction: f64) -> f64 {
     if wing.xsecs.len() < 2 {

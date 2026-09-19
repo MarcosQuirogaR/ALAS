@@ -225,10 +225,11 @@ pub fn figure_structures_modes(
                 modes.mode_shape_y_m.as_ref(),
                 modes.mode_shapes.get(*msc_index),
             ) {
+                let aligned_shape = aligned_display_shape(shape, nastran_shape);
                 let points: Vec<(f64, f64)> = stations
                     .iter()
                     .copied()
-                    .zip(nastran_shape.iter().copied())
+                    .zip(aligned_shape)
                     .filter(|(y, value)| y.is_finite() && value.is_finite())
                     .collect();
                 nastran_axes.add_line_series(
@@ -246,10 +247,11 @@ pub fn figure_structures_modes(
                 modes.mode_shape_y_m.as_ref(),
                 modes.mode_shapes.get(*n95_index),
             ) {
+                let aligned_shape = aligned_display_shape(shape, n95_shape);
                 let points: Vec<(f64, f64)> = stations
                     .iter()
                     .copied()
-                    .zip(n95_shape.iter().copied())
+                    .zip(aligned_shape)
                     .filter(|(y, value)| y.is_finite() && value.is_finite())
                     .collect();
                 nastran_axes.add_line_series(
@@ -393,6 +395,50 @@ fn span_range(values: &[f64]) -> (f64, f64) {
         (lo, hi)
     } else {
         (0.0, 1.0)
+    }
+}
+
+const MODE_SIGN_EPS: f64 = 1.0e-12;
+
+/// Align a solver's displayed Y-component mode shape with its matched
+/// Rayleigh mode. Normal-mode eigenvectors have an arbitrary global sign, so
+/// this changes neither frequency, shape magnitude, nor normalization.
+///
+/// The last common station is the endpoint convention used for the report. If
+/// that endpoint is zero/non-finite, the finite-vector correlation supplies a
+/// deterministic fallback instead of forcing a sign from numerical noise.
+fn aligned_display_shape(reference: &[f64], candidate: &[f64]) -> Vec<f64> {
+    let sign = mode_sign(reference, candidate);
+    candidate.iter().map(|value| value * sign).collect()
+}
+
+fn mode_sign(reference: &[f64], candidate: &[f64]) -> f64 {
+    if let Some((&reference_endpoint, &candidate_endpoint)) =
+        reference.iter().zip(candidate).next_back()
+    {
+        if reference_endpoint.is_finite()
+            && candidate_endpoint.is_finite()
+            && reference_endpoint.abs() > MODE_SIGN_EPS
+            && candidate_endpoint.abs() > MODE_SIGN_EPS
+        {
+            return if reference_endpoint.signum() == candidate_endpoint.signum() {
+                1.0
+            } else {
+                -1.0
+            };
+        }
+    }
+
+    let correlation = reference
+        .iter()
+        .zip(candidate)
+        .filter(|(reference, candidate)| reference.is_finite() && candidate.is_finite())
+        .map(|(&reference, &candidate)| reference * candidate)
+        .sum::<f64>();
+    if correlation.is_finite() && correlation < -MODE_SIGN_EPS {
+        -1.0
+    } else {
+        1.0
     }
 }
 
@@ -549,5 +595,25 @@ mod tests {
                 if stroke.color == Color::from_hex(TAB10[0])
                     && stroke.dash_array == Some(vec![2.0, 2.0]))
         }));
+    }
+
+    #[test]
+    fn matched_solver_shapes_flip_as_a_whole_to_match_the_rayleigh_endpoint() {
+        let reference = [0.0, 0.4, 1.0];
+        let candidate = [0.0, -0.4, -1.0];
+        assert_eq!(
+            aligned_display_shape(&reference, &candidate),
+            reference.to_vec()
+        );
+    }
+
+    #[test]
+    fn zero_endpoint_uses_finite_vector_correlation_for_sign_alignment() {
+        let reference = [0.5, 0.0, 0.0];
+        let candidate = [-0.5, 0.0, 0.0];
+        assert_eq!(
+            aligned_display_shape(&reference, &candidate),
+            reference.to_vec()
+        );
     }
 }

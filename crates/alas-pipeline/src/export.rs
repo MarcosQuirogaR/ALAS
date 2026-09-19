@@ -191,10 +191,37 @@ fn flops_mass_buildup_to_json(
         },
         "airframe_ownership": {
             "nacelle_kg": airframe.structure.as_ref().map(|group| group.nacelle_kg),
-            "propulsion_without_nacelles_kg": airframe.propulsion.as_ref().map(|group| group.total_kg),
+            // A turboprop carries its propulsion in `turboprop_propulsion`
+            // and leaves the thrust-based `propulsion` group empty, so
+            // reading only the latter exported `null` for the whole ATR
+            // propulsion group while the same mass was inside the exported
+            // `Propulsion` component slot. The accessor covers both groups
+            // and is the same one the ledger closure test uses.
+            "propulsion_without_nacelles_kg": buildup.propulsion_without_nacelles_kg(),
             "nacelles_owned_by": "propulsion",
             "nacelles_counted_once": true,
         },
+        // Present only for a shaft-power aircraft. The item ledger is what
+        // lets a reader see that the ATR's propulsion mass is engines,
+        // propellers and installation rather than a thrust-scaled group, and
+        // that its gearboxes are charged inside the certificated engine mass
+        // rather than a second time.
+        "turboprop_propulsion_kg": airframe.turboprop_propulsion.as_ref().map(|group| {
+            serde_json::json!({
+                "engine_mass_source": group.engine_mass_source,
+                "engine_each": group.engine_each_kg,
+                "engines": group.engines_kg,
+                "gearboxes": group.gearboxes_kg,
+                "propeller_each": group.propeller_each_kg,
+                "propellers": group.propellers_kg,
+                "nacelles": group.nacelles_kg,
+                "pylons": group.pylons_kg,
+                "engine_installation": group.engine_installation_kg,
+                "fuel_system": group.fuel_system_kg,
+                "unusable_fuel": group.unusable_fuel_kg,
+                "total_without_nacelles": group.total_without_nacelles_kg,
+            })
+        }),
         "component_masses_kg": {
             "Wing": buildup.masses.wing,
             "H-Stab": buildup.masses.h_stab,

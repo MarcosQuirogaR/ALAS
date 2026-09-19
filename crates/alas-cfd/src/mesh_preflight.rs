@@ -71,10 +71,51 @@ pub struct PreflightIssue {
     pub remedy: String,
 }
 
-/// Thresholds the converted mesh must satisfy before a solve.
+/// Declared mesh-quality numbers, recorded as provenance.
+///
+/// **These are not the executable acceptance gate, and the field names below
+/// read as if they were.** What actually rejects a converted mesh is
+/// [`MeshQuality::passed`] — `checkMesh` reporting `Mesh OK` with no failed
+/// checks — plus the boundary/patch contract. The numeric fields here are the
+/// `checkMesh` defaults this template targets; no code compares a parsed value
+/// against them.
+///
+/// That gap is pre-existing, not introduced with these fields, and it matters:
+/// `max_non_orthogonality_deg` is `70.0` while the fine preset measures
+/// `71.37 deg` on one face out of 436 389 cells and `checkMesh` still reports
+/// `Non-orthogonality check OK` and `Mesh OK`. Under the `checkMesh` verdict
+/// the mesh passes; under a literal reading of the number below it does not.
+///
+/// **Which of those is the ALAS contract is an integration decision and is not
+/// made here**, because either choice changes behaviour a caller depends on:
+/// enforcing the numbers would newly reject meshes that ship today, and
+/// renaming the fields is a public API break. The honest interim state is this
+/// doc comment, plus [`MeshQuality::severely_non_orthogonal_faces`] so the
+/// count behind a maximum is visible in the record rather than inferred.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MeshQualityThresholds {
-    /// Maximum face non-orthogonality, degrees.
+    /// Face non-orthogonality above which `checkMesh` calls a face *severely*
+    /// non-orthogonal, degrees.  Recorded, **not enforced** — see the type
+    /// documentation.
+    ///
+    /// Observed on OpenFOAM v2606 (native Windows, this template's generated
+    /// `checkMesh` invocation), verbatim from `G3-fine-p404/logs/checkMesh.log`:
+    ///
+    /// ```text
+    /// Mesh non-orthogonality Max: 71.3691249255 average: 5.34651937631
+    ///    *Number of severely non-orthogonal (> 70 degrees) faces: 1.
+    ///     Non-orthogonality check OK.
+    /// Mesh OK.
+    /// ```
+    ///
+    /// So on **that** invocation `70 deg` is a single-`*` warning that does not
+    /// fail the check.  No claim is made here about the angle at which this or
+    /// any other OpenFOAM build *does* fail: that number is not in the log, it
+    /// varies with the release and with the generation dictionary in use, and
+    /// asserting one would be inventing a contract.  What the record carries is
+    /// the measured maximum and, in
+    /// [`MeshQuality::severely_non_orthogonal_faces`], how many faces are past
+    /// this line — one, on the case above.
     pub max_non_orthogonality_deg: f64,
     /// Maximum internal face skewness.
     pub max_internal_skewness: f64,
@@ -107,7 +148,7 @@ impl MeshQualityThresholds {
             require_check_mesh_ok: true,
             required_patches: required_boundary_types(),
             reject_nonzero_unknown_patches: true,
-            basis: "OpenFOAM checkMesh default thresholds; the runner gate currently consumes the checkMesh verdict and the boundary contract, and records these numbers for the adapter's numeric gate".to_owned(),
+            basis: "OpenFOAM checkMesh default thresholds, RECORDED AS PROVENANCE AND NOT ENFORCED: the runner gate is the checkMesh verdict (Mesh OK, no failed checks) plus the boundary contract, and no code compares a parsed value against the numbers in this record. See the MeshQualityThresholds documentation for why the difference is live on the fine preset.".to_owned(),
         }
     }
 }

@@ -3,12 +3,14 @@
 
 //! Actual wall-surface Cp/Cf plotting and branch-order diagnostics.
 
-use super::{show_line_plot, tr, tr_fields};
+use super::super::widgets::card_title;
+use super::{show_line_plot_with, tr, tr_fields};
 use egui::{RichText, Ui};
 pub(super) fn show_surface_distribution(result: &alas_cfd::CfdResults, ui: &mut Ui) {
     let Some(surface) = result.surface.as_ref() else {
         crate::theme::card_frame(ui).show(ui, |ui| {
-            ui.label(RichText::new(tr("Cp and Cf distributions")).strong().size(16.0));
+            ui.set_min_width(ui.available_width());
+            card_title(ui, "Cp and Cf distributions", "");
             ui.colored_label(
                 ui.visuals().warn_fg_color,
                 tr("Cp/Cf distributions unavailable: the solver did not emit parseable wall samples."),
@@ -23,39 +25,45 @@ pub(super) fn show_surface_distribution(result: &alas_cfd::CfdResults, ui: &mut 
     let (upper_cp, lower_cp, upper_cf, lower_cf) = surface_branch_points(surface, chord_m);
     let count = surface.samples.len();
     crate::theme::card_frame(ui).show(ui, |ui| {
-        ui.label(RichText::new(tr("Cp and Cf distributions")).strong().size(16.0));
-        ui.label(tr_fields(
-            "{count} actual wall-face samples; upper/lower branches retain parser order ({order}).",
-            &[
-                ("count", count.to_string()),
-                ("order", format!("{:?}", surface.order)),
-            ],
-        ));
-        ui.label(
-            RichText::new(tr(
+        ui.set_min_width(ui.available_width());
+        ui.horizontal_wrapped(|ui| {
+            card_title(
+                ui,
+                "Cp and Cf distributions",
                 "Cp is based on dimensional pressure and signed Cf follows the local tangent toward increasing x/c.",
-            ))
-            .weak()
-            .small(),
-        );
+            );
+            ui.label(
+                RichText::new(tr_fields(
+                    "{count} actual wall-face samples; upper/lower branches retain parser order ({order}).",
+                    &[
+                        ("count", count.to_string()),
+                        ("order", format!("{:?}", surface.order)),
+                    ],
+                ))
+                .weak()
+                .small(),
+            );
+        });
     });
     ui.add_space(6.0);
     show_surface_plot_pair(
         ui,
-        "Cp distribution: upper surface",
-        "Cp distribution: lower surface",
-        "Cp",
+        "Cp upper surface",
+        "Cp lower surface",
+        "Cp [-] (axis inverted, suction up)",
         &upper_cp,
         &lower_cp,
+        true,
     );
     ui.add_space(6.0);
     show_surface_plot_pair(
         ui,
-        "Cf distribution: upper surface",
-        "Cf distribution: lower surface",
-        "Cf",
+        "Cf upper surface",
+        "Cf lower surface",
+        "Cf [-] (signed toward +x/c)",
         &upper_cf,
         &lower_cf,
+        false,
     );
 }
 
@@ -140,27 +148,44 @@ fn show_surface_plot_pair(
     y_label: &str,
     upper: &[(f64, f64)],
     lower: &[(f64, f64)],
+    invert_y: bool,
 ) {
-    if ui.available_width() >= 760.0 {
+    if ui.available_width() >= super::WIDE_ROW_WIDTH {
         ui.columns(2, |columns| {
-            show_line_plot(
+            show_line_plot_with(
                 &mut columns[0],
                 upper_title,
                 "x/c (parser order)",
                 y_label,
                 upper,
+                invert_y,
             );
-            show_line_plot(
+            show_line_plot_with(
                 &mut columns[1],
                 lower_title,
                 "x/c (parser order)",
                 y_label,
                 lower,
+                invert_y,
             );
         });
     } else {
-        show_line_plot(ui, upper_title, "x/c (parser order)", y_label, upper);
+        show_line_plot_with(
+            ui,
+            upper_title,
+            "x/c (parser order)",
+            y_label,
+            upper,
+            invert_y,
+        );
         ui.add_space(6.0);
-        show_line_plot(ui, lower_title, "x/c (parser order)", y_label, lower);
+        show_line_plot_with(
+            ui,
+            lower_title,
+            "x/c (parser order)",
+            y_label,
+            lower,
+            invert_y,
+        );
     }
 }

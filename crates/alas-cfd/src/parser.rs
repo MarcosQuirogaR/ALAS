@@ -14,7 +14,7 @@ pub fn parse_residuals(log: &str) -> Vec<ResidualSample> {
                 outer_iteration = Some(time.round() as u64);
             }
         }
-        let Some((field_text, rest)) = line.split_once("Solving for ") else {
+        let Some((_, rest)) = line.split_once("Solving for ") else {
             continue;
         };
         let field = rest
@@ -31,7 +31,6 @@ pub fn parse_residuals(log: &str) -> Vec<ResidualSample> {
         let Some(final_residual) = number_after(rest, "Final residual =") else {
             continue;
         };
-        let _ = field_text;
         samples.push(ResidualSample {
             iteration: outer_iteration.unwrap_or(fallback_iteration),
             field: field.to_owned(),

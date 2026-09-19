@@ -8,6 +8,7 @@ use crate::views::{tr, tr_fields};
 use alas_pipeline::{RunEvent, RunEventKind};
 use egui::{RichText, ScrollArea, TextEdit, Ui};
 mod console;
+mod search_diagnostics;
 use console::{export_log, rendered_all_lines, rendered_visible_lines, RenderedLine};
 
 /// Render the run log and its diagnostic toolbar.
@@ -60,6 +61,15 @@ pub fn show_run_log(state: &mut AppState, ui: &mut Ui) {
                 state.run_log_export_status = Some(export_log(state));
             }
         }
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if crate::theme::close_icon_button(ui, tr("Close")).clicked() {
+                if state.sandbox.active() {
+                    state.sandbox.layout.log_window_open = false;
+                } else {
+                    state.run_log_open = false;
+                }
+            }
+        });
     });
     if let Some(status) = &state.run_log_export_status {
         ui.label(RichText::new(status).weak().small());
@@ -75,7 +85,7 @@ pub fn show_run_log(state: &mut AppState, ui: &mut Ui) {
                 columns[0].label(RichText::new(tr("Console")).strong().small());
                 show_console(&visible, &mut columns[0]);
                 columns[1].label(RichText::new(tr("Timings")).strong().small());
-                show_timings(&state.run_events, elapsed_ms, &mut columns[1]);
+                show_timings(state, elapsed_ms, &mut columns[1]);
             });
         })
     } else {
@@ -84,7 +94,7 @@ pub fn show_run_log(state: &mut AppState, ui: &mut Ui) {
             ui.set_min_height(ui.available_height());
             match state.run_log_tab {
                 RunLogTab::Console => show_console(&visible, ui),
-                RunLogTab::Timings => show_timings(&state.run_events, elapsed_ms, ui),
+                RunLogTab::Timings => show_timings(state, elapsed_ms, ui),
             }
         })
     };
@@ -151,12 +161,16 @@ fn show_console(lines: &[RenderedLine], ui: &mut Ui) {
         });
 }
 
-fn show_timings(events: &[RunEvent], elapsed_ms: u64, ui: &mut Ui) {
+/// The Timings tab: what the search spent, then what each stage cost.
+fn show_timings(state: &AppState, elapsed_ms: u64, ui: &mut Ui) {
     ScrollArea::vertical()
         .id_salt("run_log_timings_scroll")
         .auto_shrink([false, false])
         .max_height(ui.available_height())
-        .show(ui, |ui| show_stage_progress(events, elapsed_ms, ui));
+        .show(ui, |ui| {
+            search_diagnostics::show(state, ui);
+            show_stage_progress(&state.run_events, elapsed_ms, ui);
+        });
 }
 
 fn show_stage_progress(events: &[RunEvent], elapsed_ms: u64, ui: &mut Ui) {

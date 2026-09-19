@@ -69,6 +69,7 @@ impl AppState {
         self.apply_preset_dispatch_policy(&mut config, &mut initial_design, &mut bounds);
 
         self.is_running = true;
+        self.run_log_open = true;
         self.run_started = Some(Instant::now());
         self.run_identity = self.run_identity.wrapping_add(1);
         self.status_message = "Running...".to_owned();

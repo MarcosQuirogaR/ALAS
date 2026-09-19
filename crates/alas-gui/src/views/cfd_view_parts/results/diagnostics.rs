@@ -3,10 +3,13 @@
 
 //! Mesh-quality and solver-diagnostic plots for the Airfoil CFD results tab.
 
-use super::super::drawing::paint_multi_line_plot;
-use super::{show_line_plot, tr, tr_fields};
+use super::super::drawing::{
+    paint_multi_line_plot, plot_height, plot_legend, series_color, PlotSeries,
+};
+use super::super::widgets::card_title;
+use super::{plot_footer, show_line_plot, tr};
 use alas_cfd::CfdResults;
-use egui::{RichText, Sense, Ui};
+use egui::{Sense, Ui};
 
 pub(super) fn show_residual_plot(result: &CfdResults, ui: &mut Ui) {
     // Keep one record per (equation, outer iteration).  OpenFOAM's SIMPLE
@@ -29,64 +32,58 @@ pub(super) fn show_residual_plot(result: &CfdResults, ui: &mut Ui) {
             }
         }
     }
-    let mut series = std::collections::BTreeMap::<String, Vec<(f64, f64)>>::new();
+    // Group by equation so the initial and the final residual of one field
+    // share a colour and are told apart by the stroke pattern.  Ten same-width
+    // curves in ten colours were what made the previous legend unreadable.
+    let mut by_field =
+        std::collections::BTreeMap::<String, (Vec<(f64, f64)>, Vec<(f64, f64)>)>::new();
     for ((field, iteration), (initial, final_residual)) in by_field_and_iteration {
-        series
-            .entry(format!("{field} initial"))
-            .or_default()
-            .push((iteration as f64, initial.log10()));
-        series
-            .entry(format!("{field} final"))
-            .or_default()
-            .push((iteration as f64, final_residual.log10()));
+        let entry = by_field.entry(field).or_default();
+        entry.0.push((iteration as f64, initial.log10()));
+        entry.1.push((iteration as f64, final_residual.log10()));
     }
-    let series = series
-        .into_iter()
-        .map(|(field, mut points)| {
-            points.sort_by(|left, right| left.0.total_cmp(&right.0));
-            (field, points)
-        })
-        .collect::<Vec<_>>();
-    show_multi_line_plot(
-        ui,
-        "Residual histories by outer SIMPLE iteration (log10 initial and final)",
-        "outer iteration",
-        "log10(residual); initial is the status criterion",
-        &series,
-    );
+    let mut series = Vec::with_capacity(2 * by_field.len());
+    for (index, (field, (mut initial, mut final_residual))) in by_field.into_iter().enumerate() {
+        initial.sort_by(|left, right| left.0.total_cmp(&right.0));
+        final_residual.sort_by(|left, right| left.0.total_cmp(&right.0));
+        let color = series_color(ui, index);
+        series.push(PlotSeries {
+            name: format!("{field} initial"),
+            points: initial,
+            color,
+            dashed: false,
+        });
+        series.push(PlotSeries {
+            name: format!("{field} final"),
+            points: final_residual,
+            color,
+            dashed: true,
+        });
+    }
+    show_residual_card(ui, &series);
 }
 
-fn show_multi_line_plot(
-    ui: &mut Ui,
-    title: &str,
-    x_label: &str,
-    y_label: &str,
-    series: &[(String, Vec<(f64, f64)>)],
-) {
+/// The residual card: title, plot, wrapped legend below the plot rectangle,
+/// then the axis captions and the honest equation-sample count.
+fn show_residual_card(ui: &mut Ui, series: &[PlotSeries]) {
     crate::theme::card_frame(ui).show(ui, |ui| {
-        ui.label(RichText::new(tr(title)).strong());
-        let width = ui.available_width().max(260.0);
-        let (rect, _) = ui.allocate_exact_size(egui::vec2(width, 220.0), Sense::hover());
+        ui.set_min_width(ui.available_width());
+        card_title(
+            ui,
+            "Residual histories (log10)",
+            "One record per equation and outer SIMPLE iteration. Solid strokes are the initial residual, which is the status criterion; dashed strokes are the final residual of the same equation.",
+        );
+        let width = ui.available_width().max(200.0);
+        let (rect, _) = ui.allocate_exact_size(egui::vec2(width, plot_height(width)), Sense::hover());
         paint_multi_line_plot(ui, rect, series);
-        ui.horizontal_wrapped(|ui| {
-            ui.label(RichText::new(tr(x_label)).weak().small());
-            ui.separator();
-            ui.label(RichText::new(tr(y_label)).weak().small());
-            ui.separator();
-            let samples = series.iter().map(|(_, points)| points.len()).sum::<usize>();
-            ui.label(
-                RichText::new(if samples == 0 {
-                    tr("Unavailable: no parsed samples")
-                } else {
-                    tr_fields(
-                        "{count} actual equation samples; initial/final retain separate series",
-                        &[("count", samples.to_string())],
-                    )
-                })
-                .weak()
-                .small(),
-            );
-        });
+        plot_legend(ui, series);
+        let samples = series.iter().map(|entry| entry.points.len()).sum::<usize>();
+        plot_footer(
+            ui,
+            "outer iteration",
+            "log10(residual); initial is the status criterion",
+            samples,
+        );
     });
 }
 
@@ -95,7 +92,8 @@ pub(super) fn show_mesh_quality_plots(result: &CfdResults, ui: &mut Ui) {
     let wall_distribution = result.mesh_quality.near_wall_distribution.as_ref();
     if distributions.is_empty() && wall_distribution.is_none() {
         crate::theme::card_frame(ui).show(ui, |ui| {
-            ui.label(RichText::new(tr("Mesh quality distributions")).strong().size(16.0));
+            ui.set_min_width(ui.available_width());
+            card_title(ui, "Mesh quality distributions", "");
             ui.colored_label(
                 ui.visuals().warn_fg_color,
                 tr("Native cell-quality fields were not found. Scalar checkMesh metrics remain available; no distribution is inferred from them."),
@@ -104,30 +102,45 @@ pub(super) fn show_mesh_quality_plots(result: &CfdResults, ui: &mut Ui) {
         return;
     }
     crate::theme::card_frame(ui).show(ui, |ui| {
-        ui.label(RichText::new(tr("Mesh quality distributions")).strong().size(16.0));
-        ui.label(
-            RichText::new(tr("Percentile curves are computed from finite native OpenFOAM cell fields. The wall y+ curve is a solved wall-face diagnostic and is shown separately.")).weak().small(),
+        ui.set_min_width(ui.available_width());
+        card_title(
+            ui,
+            "Mesh quality distributions",
+            "Percentile curves are computed from finite native OpenFOAM cell fields. The wall y+ curve is a solved wall-face diagnostic and is shown separately.",
         );
     });
-    for distribution in distributions {
-        let points = distribution_points(distribution);
-        let y_label = format!("{} [{}]", distribution.label, distribution.unit);
-        let title = format!(
-            "{} distribution (native {})",
-            distribution.label, distribution.field
-        );
-        show_line_plot(ui, &title, "percentile [%]", &y_label, &points);
-        ui.add_space(8.0);
-    }
+    // Two percentile curves share a row on a wide window so five distributions
+    // do not push the rest of the tab several screens down.
+    let mut plots = distributions
+        .iter()
+        .map(|distribution| {
+            (
+                format!("{} ({})", distribution.label, distribution.field),
+                format!("{} [{}]", distribution.label, distribution.unit),
+                distribution_points(distribution),
+            )
+        })
+        .collect::<Vec<_>>();
     if let Some(distribution) = wall_distribution {
-        let points = distribution_points(distribution);
-        show_line_plot(
-            ui,
-            "Wall y+ distribution (solved wall-face diagnostic)",
-            "percentile [%]",
-            "y+ [-]",
-            &points,
-        );
+        plots.push((
+            tr("Wall y+ (solved wall-face diagnostic)"),
+            "y+ [-]".to_owned(),
+            distribution_points(distribution),
+        ));
+    }
+    let wide = ui.available_width() >= super::WIDE_ROW_WIDTH;
+    for pair in plots.chunks(if wide { 2 } else { 1 }) {
+        ui.add_space(6.0);
+        if pair.len() == 2 {
+            ui.columns(2, |columns| {
+                for (column, (title, y_label, points)) in columns.iter_mut().zip(pair.iter()) {
+                    show_line_plot(column, title, "percentile [%]", y_label, points);
+                }
+            });
+        } else {
+            let (title, y_label, points) = &pair[0];
+            show_line_plot(ui, title, "percentile [%]", y_label, points);
+        }
     }
 }
 

@@ -10,7 +10,7 @@ use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime};
 
-use alas_config::AlasConfig;
+use alas_config::{AlasConfig, MainGearFallbackRefusal};
 use alas_exec::process::{kill_process_tree, NewProcessGroup, NoConsoleWindow};
 use alas_geom::aircraft::airplane::Airplane;
 use alas_geom::aircraft::fuselage::Fuselage;
@@ -18,6 +18,7 @@ use alas_geom::aircraft::wing::Wing;
 use alas_perf::landing_gear::{size_landing_gear_with_group_stations, LandingGearLayout};
 
 use crate::full_analysis::AnalysisReport;
+use crate::gear_stations::resolved_gear_stations;
 
 #[path = "../openvsp/validation.rs"]
 mod validation;
@@ -132,7 +133,17 @@ pub fn export_openvsp_script(
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or("optimized_aircraft.preview.png");
-    let gear = landing_gear_for_report(report, config);
+    // A missing main-gear station fails the export rather than writing an
+    // aeroplane without gear or with gear at an unmeasured station: this
+    // artifact is read downstream as the aircraft, so both would misreport
+    // it. The typed refusal names the missing datum and the two heights that
+    // decided it.
+    let gear = landing_gear_for_report(report, config).map_err(|refusal| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("landing-gear export refused: {refusal}"),
+        )
+    })?;
     let script = render_script(
         &report.airplane,
         Some(&gear),
@@ -550,7 +561,22 @@ fn text_tail(text: &str) -> String {
         .join(" | ")
 }
 
-fn landing_gear_for_report(report: &AnalysisReport, config: &AlasConfig) -> LandingGearLayout {
+/// Size the gear this export draws, or report that this aircraft has no
+/// main-gear station to draw it at.
+///
+/// The stations come from [`crate::gear_stations::resolved_gear_stations`]
+/// rather than from a fallback rebuilt here, so an aircraft whose layout is
+/// outside the wing-mounted rule's domain cannot be exported with legs at a
+/// station the mass model refuses to supply. Every aircraft that has a
+/// station keeps exactly the one it had.
+///
+/// # Errors
+///
+/// [`MainGearFallbackRefusal`] when no main-gear station is available.
+fn landing_gear_for_report(
+    report: &AnalysisReport,
+    config: &AlasConfig,
+) -> Result<LandingGearLayout, MainGearFallbackRefusal> {
     let main_wing = &report.airplane.wings[0];
     let mac = report.airplane.c_ref.max(0.001);
     let x_mac_le = main_wing.aerodynamic_center(0.25)[0] - 0.25 * mac;
@@ -568,16 +594,18 @@ fn landing_gear_for_report(report: &AnalysisReport, config: &AlasConfig) -> Land
         .map_or(fus_start, |section| section.xyz_c[0]);
     let fallback_x_nlg = fus_start + (fus_end - fus_start) * config.mass_model.nlg_x_fraction;
     let fallback_x_mlg = x_mac_le + config.mass_model.mlg_x_fraction_mac * mac;
-    let stations = config.landing_gear.resolved_station_positions(
+    let stations = resolved_gear_stations(
+        config,
+        &report.airplane,
         fallback_x_nlg,
         fallback_x_mlg,
         fus_start,
         fus_end - fus_start,
-    );
+    )?;
     let mass_kg = report.component_masses.values().copied().sum();
     let diameter_m = config.geometry.fuselage.diameter_m;
 
-    size_landing_gear_with_group_stations(
+    Ok(size_landing_gear_with_group_stations(
         mass_kg,
         stations.x_nlg_m,
         stations.x_mlg_m,
@@ -587,7 +615,7 @@ fn landing_gear_for_report(report: &AnalysisReport, config: &AlasConfig) -> Land
         diameter_m * 1.1,
         &stations.main_gear_x_m,
         &config.landing_gear,
-    )
+    ))
 }
 
 fn render_script(

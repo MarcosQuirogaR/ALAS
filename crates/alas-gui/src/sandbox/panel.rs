@@ -27,7 +27,7 @@ use super::editors::show_field;
 use super::fields::{grouped, Discipline, SandboxField};
 use super::overlays::{metric_chips, CONVENTIONS};
 use super::viewport::{
-    floating_button, register_overlay_rect, was_lit, OVERLAY_INSET, REST_OPACITY,
+    floating_control, register_overlay_rect, was_lit, OVERLAY_INSET, REST_OPACITY,
 };
 
 /// Width of the floating column of category buttons, in points.
@@ -121,24 +121,40 @@ pub fn show_parameter_access(
         ui.spacing_mut().item_spacing.y = CATEGORY_SPACING;
         show_search_box(state, ui, width);
         results_top = results_top.min(ui.cursor().top());
+        // The selected component is `SandboxSession::focus` and nothing else.
+        // The category stack, the camera row's context label and the isolated
+        // scene all render from this one read, so they cannot disagree.
+        let focus = state.sandbox.focus();
         for discipline in Discipline::ALL {
             let button = egui::Button::new(tr(discipline.title())).min_size(vec2(width, 0.0));
-            if floating_button(ui, category_tag(discipline), button)
-                .on_hover_text(tr("Open this discipline in its own window."))
-                .clicked()
+            if floating_control(
+                ui,
+                category_tag(discipline),
+                true,
+                focus == Some(discipline),
+                button,
+            )
+            .on_hover_text(tr("Open this discipline in its own window."))
+            .clicked()
             {
                 open_discipline_window(state, discipline);
             }
         }
+        // The Summary card is a whole-aircraft readout, not a sixth
+        // component. Separating it from the stack and giving it its own
+        // persistent on/off state stops its button from reading as a
+        // component selection while a component is focused.
+        ui.add_space(6.0);
         summary_top = ui.cursor().top();
+        let summary_open = state.sandbox.layout.summary_open;
         let summary = egui::Button::new(tr("Summary")).min_size(vec2(width, 0.0));
-        if floating_button(ui, "summary", summary)
+        if floating_control(ui, "summary", true, summary_open, summary)
             .on_hover_text(tr(
-                "Show or hide the derived geometry metrics of the drawn aircraft.",
+                "Show or hide the derived geometry metrics of the whole aircraft; the selected component is unchanged.",
             ))
             .clicked()
         {
-            state.sandbox.layout.summary_open = !state.sandbox.layout.summary_open;
+            state.sandbox.layout.summary_open = !summary_open;
         }
     });
     let used = stack.response.rect;
@@ -181,7 +197,10 @@ fn show_summary_card(
     let response = ui.allocate_new_ui(egui::UiBuilder::new().max_rect(card), |ui| {
         egui::Frame::popup(ui.style()).show(ui, |ui| {
             ui.set_width(width - 2.0 * ui.spacing().window_margin.left);
-            ui.label(RichText::new(tr("Summary")).strong());
+            ui.label(RichText::new(tr("Whole-aircraft summary")).strong())
+                .on_hover_text(tr(
+                    "These metrics describe the whole drawn aircraft, not the selected component.",
+                ));
             for text in &chips {
                 let row = ui.label(RichText::new(text).monospace());
                 register_overlay_rect(ui.ctx(), "metric", row.rect);
@@ -333,6 +352,78 @@ mod tests {
         // The camera row pushes it down on a short viewport.
         let short = Rect::from_min_max(pos2(0.0, 100.0), pos2(1000.0, 360.0));
         assert!((stack_top(short, 150.0, 300.0, 200.0) - 150.0).abs() < 1e-6);
+    }
+
+    /// A sandbox state whose registered-preset protections are still the
+    /// ones `enter_sandbox` installs.
+    fn sandbox_state() -> AppState {
+        let mut state = AppState::default();
+        assert!(state.enter_sandbox(true));
+        state
+    }
+
+    #[test]
+    fn one_value_drives_the_category_stack_the_context_label_and_the_scene() {
+        let mut state = sandbox_state();
+        assert_eq!(state.sandbox.focus(), None, "a new sandbox has no focus");
+
+        for discipline in Discipline::ALL {
+            open_discipline_window(&mut state, discipline);
+            // The selection the stack highlights, the title the camera row
+            // prints and the component the scene isolates are all this read.
+            assert_eq!(state.sandbox.focus(), Some(discipline));
+            assert_eq!(
+                Discipline::ALL
+                    .into_iter()
+                    .filter(|d| state.sandbox.focus() == Some(*d))
+                    .count(),
+                1,
+                "exactly one category is selected at a time"
+            );
+        }
+
+        state.set_sandbox_focus(None);
+        assert_eq!(state.sandbox.focus(), None, "Overview clears the selection");
+    }
+
+    #[test]
+    fn the_summary_toggle_never_changes_the_selected_component() {
+        let mut state = sandbox_state();
+        open_discipline_window(&mut state, Discipline::Wing);
+        assert_eq!(state.sandbox.focus(), Some(Discipline::Wing));
+
+        state.sandbox.layout.summary_open = !state.sandbox.layout.summary_open;
+        assert!(state.sandbox.layout.summary_open);
+        assert_eq!(
+            state.sandbox.focus(),
+            Some(Discipline::Wing),
+            "the whole-aircraft summary is not a component selection"
+        );
+
+        // And the reverse: selecting a component leaves the summary alone.
+        open_discipline_window(&mut state, Discipline::Propulsion);
+        assert_eq!(state.sandbox.focus(), Some(Discipline::Propulsion));
+        assert!(state.sandbox.layout.summary_open);
+    }
+
+    #[test]
+    fn a_focused_component_keeps_its_window_open_and_stays_selected() {
+        let mut state = sandbox_state();
+        open_discipline_window(&mut state, Discipline::Propulsion);
+        assert!(state
+            .sandbox
+            .layout
+            .open_disciplines
+            .contains(&Discipline::Propulsion.id().to_owned()));
+        // A second selection does not lose the first window, and the
+        // selection follows the last chosen component.
+        open_discipline_window(&mut state, Discipline::Fuselage);
+        assert!(state
+            .sandbox
+            .layout
+            .open_disciplines
+            .contains(&Discipline::Propulsion.id().to_owned()));
+        assert_eq!(state.sandbox.focus(), Some(Discipline::Fuselage));
     }
 
     #[test]

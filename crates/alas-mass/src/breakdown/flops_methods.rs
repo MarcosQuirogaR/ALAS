@@ -25,13 +25,14 @@
 //! nacelle group can be dropped or added twice, which is what the previous
 //! per-group selection allowed.
 
-use alas_config::{ControlSurfacesConfig, DesignRequirements, GeometryConfig, MassModelConfig};
+use alas_config::{
+    CabinConfig, ControlSurfacesConfig, DesignRequirements, GeometryConfig, MassModelConfig,
+};
 use alas_geom::aircraft::airplane::Airplane;
 
 use crate::flops_transport::{
     evaluate_airframe_product, evaluate_product_at_design_gross_mass, FlopsAirframeBreakdown,
-    FlopsAirframeEvaluation,
-    FlopsAirframeRequest, FlopsAirframeSelection, FlopsTransportBreakdown,
+    FlopsAirframeEvaluation, FlopsAirframeRequest, FlopsAirframeSelection, FlopsTransportBreakdown,
     FlopsTransportEvaluation, FlopsTransportInputs, PartialFlopsTransportBreakdown,
 };
 
@@ -68,10 +69,20 @@ impl FlopsMassBuildup {
 
     /// The installed engines, reversers, controls, starters and fuel system,
     /// *without* the nacelles.
+    ///
+    /// For a turboprop this is the shaft-power group instead: engines,
+    /// propellers, gearboxes charged separately, pylons, the declared
+    /// installation mass and the fuel system, also without the nacelles.
     pub fn propulsion_without_nacelles_kg(&self) -> f64 {
         self.airframe
             .propulsion
-            .map_or(0.0, |propulsion| propulsion.total_kg)
+            .map(|propulsion| propulsion.total_kg)
+            .or_else(|| {
+                self.airframe
+                    .turboprop_propulsion
+                    .map(|group| group.total_without_nacelles_kg)
+            })
+            .unwrap_or(0.0)
     }
 }
 
@@ -87,6 +98,7 @@ pub(super) fn build_pure_flops(
     requirements: &DesignRequirements,
     geometry: &GeometryConfig,
     controls: &ControlSurfacesConfig,
+    cabin: &CabinConfig,
     mass_model: &MassModelConfig,
 ) -> Result<FlopsMassBuildup, ComponentMassError> {
     // The systems group reads the same design gross mass as the airframe:
@@ -97,7 +109,9 @@ pub(super) fn build_pure_flops(
         requirements,
         geometry,
         controls,
+        cabin,
         &mass_model.flops_transport,
+        &mass_model.flops_turboprop,
         mass_model.flops_structure.design_gross_mass_kg,
     ) {
         FlopsTransportEvaluation::Verified {
@@ -139,9 +153,21 @@ pub(super) fn build_pure_flops(
 
     // Asking for both groups and being handed one would mean the evaluator
     // reported success for a selection it did not honour. Refuse rather than
-    // publish a breakdown with a silently empty slot.
-    let (Some(structure), Some(propulsion)) = (airframe.structure, airframe.propulsion) else {
+    // publish a breakdown with a silently empty slot. Exactly one propulsion
+    // group is populated: the thrust-based FLOPS one for a turbofan, the
+    // shaft-power one for a turboprop, never both and never neither.
+    let Some(structure) = airframe.structure else {
         return Err(ComponentMassError::FlopsIncompleteAirframe);
+    };
+    let propulsion_without_nacelles_kg = match (
+        airframe.propulsion.as_ref(),
+        airframe.turboprop_propulsion.as_ref(),
+    ) {
+        (Some(group), None) => group.total_kg,
+        (None, Some(group)) => group.total_without_nacelles_kg,
+        (Some(_), Some(_)) | (None, None) => {
+            return Err(ComponentMassError::FlopsIncompleteAirframe)
+        }
     };
 
     let mut masses = MassBreakdown {
@@ -151,7 +177,7 @@ pub(super) fn build_pure_flops(
         fuselage: structure.fuselage_kg + structure.paint_kg,
         gear: structure.main_gear_kg + structure.nose_gear_kg,
         // Nacelles ride with the engines, here and nowhere else.
-        propulsion: propulsion.total_kg + structure.nacelle_kg,
+        propulsion: propulsion_without_nacelles_kg + structure.nacelle_kg,
         // Equation 138 counts furnishings inside the systems-and-equipment
         // group; the ALAS breakdown carries them in their own slot, so the
         // systems slot is the group total less furnishings and `WFURN` is
@@ -251,6 +277,10 @@ mod tests {
                 fuel_tank_count: Some(6),
                 maximum_fuel_capacity_kg: Some(220_000.0),
                 containerized_cargo_kg: Some(0.0),
+                cargo_loading: Some(alas_config::CargoHoldLoading::Containerized),
+                containerized_baggage_fraction: None,
+                cabin_equipment_method: alas_config::CabinEquipmentMethod::FlopsTransportV1,
+                haul_class: None,
                 provenance: FlopsTransportProvenance {
                     mission: provenance(),
                     cabin: provenance(),
@@ -273,6 +303,7 @@ mod tests {
             requirements,
             geometry,
             &ControlSurfacesConfig::default(),
+            &CabinConfig::default(),
             mass_model,
         )
         .unwrap_or_else(|error| panic!("the declared fixture must evaluate: {error}"))
@@ -442,6 +473,7 @@ mod tests {
             &requirements,
             &geometry,
             &ControlSurfacesConfig::default(),
+            &CabinConfig::default(),
             &mass_model,
         )
         .expect_err("a missing maximum Mach must block the buildup");

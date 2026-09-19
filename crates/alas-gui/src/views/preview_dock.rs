@@ -50,6 +50,7 @@ pub fn show_preview_dock(state: &mut AppState, ui: &mut Ui) {
 
     let active_camera_id = AIRCRAFT_CAMERA_ID.to_owned();
     let view_key = AIRCRAFT_VIEW_KEY.to_owned();
+    refit_on_subject_change(state, ui.ctx(), &view_key);
     let mut camera_changed = false;
 
     match &state.preview_scene {
@@ -105,6 +106,34 @@ pub fn show_preview_dock(state: &mut AppState, ui: &mut Ui) {
         None => {
             ui.centered_and_justified(|ui| ui.label(tr("Loading configuration...")));
         }
+    }
+}
+
+/// What the dock is currently drawing: the visibility mode and the figure.
+fn preview_subject(state: &AppState) -> String {
+    match state.preview_tab {
+        PreviewTab::Cabin => "cabin".to_owned(),
+        PreviewTab::Exterior => format!("exterior::{}", state.selected_preview_id),
+    }
+}
+
+/// Fit the dock to its model again when the subject it draws changes.
+///
+/// One viewport state serves every figure the dock can show, so a pan or zoom
+/// made on one subject was still in force when another took its place and the
+/// new model was left off-centre and at the wrong scale, even though switching
+/// subject is exactly when a fit is wanted. A camera orbit of the same subject
+/// is untouched.
+fn refit_on_subject_change(state: &mut AppState, ctx: &egui::Context, view_key: &str) {
+    let subject = preview_subject(state);
+    let id = Id::new(("preview_dock_subject", view_key));
+    let previous = ctx.data(|data| data.get_temp::<String>(id));
+    if previous.as_deref() == Some(subject.as_str()) {
+        return;
+    }
+    ctx.data_mut(|data| data.insert_temp(id, subject));
+    if previous.is_some() {
+        state.view_state_mut(view_key.to_owned()).reset();
     }
 }
 

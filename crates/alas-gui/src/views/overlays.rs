@@ -6,6 +6,10 @@
 
 use egui::{pos2, vec2, Color32, Context, Frame, Rect, RichText, ScrollArea, Stroke, Vec2, Window};
 
+use alas_exec::storage::{
+    clear_storage, reset_tool_preferences, storage_inventory, StorageLocations,
+};
+
 use crate::state::AppState;
 use crate::views::guide_data::CHAPTERS;
 use crate::views::tour_data::TOUR_STEPS;
@@ -386,58 +390,147 @@ pub fn show_advanced_guide(state: &mut AppState, ctx: &Context) {
 
 /// Render the storage-management dialog, if it is open.
 ///
-/// The reference's dialog is backed by an HTTP maintenance endpoint tracking
-/// extracted-runtime caches this port has no counterpart for (it is one
-/// binary, nothing to extract); the one real reclaimable location here is the
-/// pipeline's own output directory, which this offers to clear directly.
+/// The inventory is built from the same resolved data roots as the pipeline,
+/// so the dialog never clears a path merely because it happens to have a
+/// familiar name. CFD cases remain a separate category when they live below
+/// the run output directory, and the saved tool-path reset removes only the
+/// preferences file and its in-memory path values.
 pub fn show_storage_dialog(state: &mut AppState, ctx: &Context) {
     if !state.show_storage {
         return;
     }
+    let config = state.typed_config().unwrap_or_default();
+    let output_dir = state
+        .pipeline_options
+        .output_dir
+        .clone()
+        .unwrap_or_else(|| std::path::PathBuf::from("outputs"));
+    let cfd_case_root = std::path::PathBuf::from("outputs/airfoil-cfd");
+    let navdata_dir = std::path::PathBuf::from(config.mission.navdata_dir);
+    let texture_path = std::path::PathBuf::from(config.mission.texture_path);
+    let locations = StorageLocations {
+        output_dir: &output_dir,
+        cfd_case_root: &cfd_case_root,
+        navdata_dir: &navdata_dir,
+        texture_path: &texture_path,
+    };
+    let locator = state.tool_locator.clone();
+    let mut entries = storage_inventory(&locator, &locations);
     let mut open = true;
     Window::new(tr("Manage storage"))
         .open(&mut open)
-        .resizable(false)
+        .resizable(true)
         .collapsible(false)
         .show(ctx, |ui| {
-            let out_dir = state
-                .pipeline_options
-                .output_dir
-                .clone()
-                .unwrap_or_else(|| std::path::PathBuf::from("outputs"));
-            let (exists, size) = directory_size(&out_dir);
-            ui.label(tr_fields(
-                "Output directory: {path}",
-                &[("path", out_dir.display().to_string())],
+            ui.label(tr(
+                "Only ALAS-owned generated data is listed here. Tool installations and saved aircraft documents are not removed.",
             ));
-            ui.label(if exists {
-                tr_fields("{size} on disk", &[("size", format_bytes(size))])
-            } else {
-                tr("Not created yet.")
-            });
-            ui.add_space(8.0);
-            ui.add_enabled_ui(exists, |ui| {
-                if ui.button(tr("Clear exported outputs")).clicked() {
-                    match std::fs::remove_dir_all(&out_dir) {
-                        Ok(()) => state.log(
-                            tr_fields(
-                                "Cleared {path}.",
-                                &[("path", out_dir.display().to_string())],
-                            ),
-                            crate::state::LogKind::Info,
-                        ),
-                        Err(e) => state.log(
-                            tr_fields(
-                                "Could not clear outputs: {error}",
-                                &[("error", e.to_string())],
-                            ),
-                            crate::state::LogKind::Error,
-                        ),
-                    }
+            if state.is_running {
+                ui.colored_label(
+                    Color32::YELLOW,
+                    tr("Storage clearing is disabled while an analysis is running."),
+                );
+            }
+            ScrollArea::vertical().max_height(420.0).show(ui, |ui| {
+                for index in 0..entries.len() {
+                    let entry = entries[index].clone();
+                    ui.group(|ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new(tr(entry.label)).strong());
+                            ui.label(if entry.exists {
+                                tr_fields(
+                                    "{size} · {files} files",
+                                    &[
+                                        ("size", format_bytes(entry.bytes)),
+                                        ("files", entry.files.to_string()),
+                                    ],
+                                )
+                            } else {
+                                tr("Not created yet.")
+                            });
+                        });
+                        ui.small(entry.root.display().to_string());
+                        ui.add(egui::Label::new(tr(entry.description)).wrap());
+                        ui.add_enabled_ui(entry.exists && !state.is_running, |ui| {
+                            if ui.button(tr("Clear")).clicked() {
+                                let outcome = clear_storage(&entry);
+                                if outcome.failed.is_empty() {
+                                    state.log(
+                                        tr_fields(
+                                            "Cleared {category}.",
+                                            &[("category", tr(entry.label))],
+                                        ),
+                                        crate::state::LogKind::Info,
+                                    );
+                                } else {
+                                    state.log(
+                                        tr_fields(
+                                            "Cleared {removed} paths; {failed} could not be removed.",
+                                            &[
+                                                ("removed", outcome.removed.len().to_string()),
+                                                ("failed", outcome.failed.len().to_string()),
+                                            ],
+                                        ),
+                                        crate::state::LogKind::Warn,
+                                    );
+                                }
+                                entries = storage_inventory(&locator, &locations);
+                            }
+                        });
+                    });
+                    ui.add_space(4.0);
                 }
             });
+            ui.separator();
+            ui.label(RichText::new(tr("Saved tool paths")).strong());
+            ui.add(egui::Label::new(tr(
+                "Resetting saved paths leaves installed tools untouched; ALAS will discover them again on the next run or launch.",
+            ))
+            .wrap());
+            if ui.button(tr("Reset saved tool paths")).clicked() {
+                match reset_tool_preferences(&locator) {
+                    Ok(_) => {
+                        reset_session_tool_paths(state);
+                        state.log(
+                            tr("Saved tool paths reset; installed tools were not removed."),
+                            crate::state::LogKind::Info,
+                        );
+                    }
+                    Err(error) => state.log(
+                        tr_fields(
+                            "Could not reset saved tool paths: {error}",
+                            &[("error", error)],
+                        ),
+                        crate::state::LogKind::Error,
+                    ),
+                }
+            }
         });
     state.show_storage = open;
+}
+
+/// Clear the path fields that are persisted as tool preferences in the live
+/// session as well as on disk. Aircraft, mission and solver behaviour remain
+/// otherwise unchanged; defaults are the discovery starting points.
+fn reset_session_tool_paths(state: &mut AppState) {
+    let Some(mut config) = state.typed_config() else {
+        state.tool_preferences = alas_exec::ToolPreferences::default();
+        return;
+    };
+    let defaults = alas_config::AlasConfig::default();
+    config.mses.mses_dir = defaults.mses.mses_dir;
+    config.structures.nastran_exe_path = defaults.structures.nastran_exe_path;
+    config.structures.nastran_solver_path = defaults.structures.nastran_solver_path;
+    config.structures.nastran95_dir_path = defaults.structures.nastran95_dir_path;
+    config.structures.nastran95_runtime_path = defaults.structures.nastran95_runtime_path;
+    config.structures.nastran95_rf_stage_path = defaults.structures.nastran95_rf_stage_path;
+    config.structures.nastran95_open_core_words = defaults.structures.nastran95_open_core_words;
+    config.structures.patran_exe_path = defaults.structures.patran_exe_path;
+    config.mission.navdata_dir = defaults.mission.navdata_dir;
+    config.mission.routes_dir = defaults.mission.routes_dir;
+    state.config_values = crate::config_edit::full_config_values(&config);
+    state.tool_preferences = alas_exec::ToolPreferences::default();
+    state.on_config_modified();
 }
 
 /// Render the About window, if it is open.
@@ -463,28 +556,6 @@ pub fn show_about(state: &mut AppState, ctx: &Context) {
             ui.label("Copyright (C) 2026 Marcos Quiroga Rodriguez");
         });
     state.show_about = open;
-}
-
-fn directory_size(dir: &std::path::Path) -> (bool, u64) {
-    if !dir.exists() {
-        return (false, 0);
-    }
-    let mut total = 0u64;
-    let mut stack = vec![dir.to_path_buf()];
-    while let Some(d) = stack.pop() {
-        let Ok(entries) = std::fs::read_dir(&d) else {
-            continue;
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                stack.push(path);
-            } else if let Ok(meta) = entry.metadata() {
-                total += meta.len();
-            }
-        }
-    }
-    (true, total)
 }
 
 fn format_bytes(n: u64) -> String {
@@ -548,6 +619,26 @@ mod tests {
             "<- Back",
             "Advanced Walkthrough",
             "Manage storage",
+            "Only ALAS-owned generated data is listed here. Tool installations and saved aircraft documents are not removed.",
+            "Storage clearing is disabled while an analysis is running.",
+            "Generated outputs",
+            "Airfoil CFD cases",
+            "Solver scratch files",
+            "Downloaded navigation data",
+            "Downloaded globe texture",
+            "Results, exports and solver files written by runs; the next run recreates what it needs.",
+            "Airfoil CFD studies with their meshes, solver logs and results; clearing removes every saved study.",
+            "Work directories external solvers left in the system temporary folder after an interrupted run.",
+            "Navigation data for airway routing; downloaded again on demand.",
+            "Earth image for the route globe; downloaded again on demand.",
+            "{size} · {files} files",
+            "Cleared {category}.",
+            "Cleared {removed} paths; {failed} could not be removed.",
+            "Saved tool paths",
+            "Resetting saved paths leaves installed tools untouched; ALAS will discover them again on the next run or launch.",
+            "Reset saved tool paths",
+            "Saved tool paths reset; installed tools were not removed.",
+            "Could not reset saved tool paths: {error}",
             "Output directory: {path}",
             "{size} on disk",
             "Not created yet.",

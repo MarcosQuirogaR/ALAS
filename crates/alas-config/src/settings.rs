@@ -300,6 +300,26 @@ impl AlasConfig {
                     if let Some(flops) = crate::preset_flops::inputs_for(name) {
                         instance.mass_model.flops_transport = flops.transport;
                         instance.mass_model.flops_structure = flops.structure;
+                        instance.mass_model.flops_turboprop = flops.turboprop;
+                    }
+                    // FLOPS `WLDG` is the aircraft's *design landing weight*,
+                    // and equation 63 makes the main gear go as `WLDG^0.95`.
+                    // The 0.92 default in `MassModelConfig` is a generic
+                    // study fraction, not a property of any registered
+                    // aircraft: the certified MLW/MTOW ratio is 0.689 on the
+                    // A380-800 and 0.972 on the ATR 72-600, so leaving the
+                    // default in place sized the A380's gear on 515 t instead
+                    // of its certified 386 t and charged it about 7.6 t of
+                    // gear it does not have. Both masses are already declared
+                    // per aircraft in the registry, with the same TCDS/airport
+                    // planning provenance as the rest of the reference block,
+                    // so the ratio is taken from them here. It stays a ratio
+                    // rather than a pinned mass so a resized clean-sheet
+                    // derivative still scales its gear with its own takeoff
+                    // mass; `landing_mass_limit_kg` continues to return the
+                    // declared MLW itself in the reference/sandbox modes.
+                    if let Some(ratio) = declared_landing_mass_ratio(preset) {
+                        instance.mass_model.mlw_fraction_mtow = ratio;
                     }
                     if let Some(performance) = &preset.performance {
                         instance.performance = performance.clone();
@@ -323,6 +343,34 @@ impl AlasConfig {
                     instance.departure_airport = operational.departure_airport.to_owned();
                     instance.arrival_airport = operational.arrival_airport.to_owned();
                     instance.mission.profile = operational.profile;
+                    // Naming a registered aircraft means adapting *that*
+                    // aircraft, so the design space defaults to its own
+                    // reference envelope rather than to a clean sheet.
+                    //
+                    // The two are genuinely different studies and the
+                    // distinction is kept, not blurred: `CleanSheet` re-derives
+                    // the fuselage from the cabin load case and searches the
+                    // global box, `ReferenceAdaptation` holds the preset's
+                    // declared geometry and searches the D09 +/-10 % window
+                    // around it. What was wrong was which of them a bare
+                    // `{"preset": "..."}` document selected. It selected the
+                    // clean sheet, so loading an ATR 72-600 and pressing run
+                    // produced a cabin-derived body of fineness 23.5 against
+                    // the aircraft's own 9.8, and the plausibility window then
+                    // correctly rejected it - measured on the shipped path as
+                    // `fuselage_fineness_max` on 509 of 623 ATR 72-600
+                    // candidates and 646 of 668 A220-300 candidates, with the
+                    // mission and mass residuals cascading behind it. The
+                    // product answered a question nobody asked and then
+                    // reported that it had no answer.
+                    //
+                    // This widens nothing. The D09 envelope, the frozen
+                    // reference variables and every hard residual are
+                    // untouched; a document that explicitly asks for
+                    // `clean_sheet` still gets it, because the file overlay
+                    // below is applied after this and remains authoritative.
+                    instance.optimizer.design_space.mode =
+                        crate::optimizer::DesignMode::ReferenceAdaptation;
                 }
                 Err(error) => {
                     tracing::debug!(%error, "configuration names an unregistered preset");
@@ -489,6 +537,23 @@ fn is_valid_declared_mass_kg(mass_kg: f64) -> bool {
     mass_kg.is_finite() && mass_kg > 0.0
 }
 
+/// A registered aircraft's own certified landing-to-takeoff mass ratio.
+///
+/// `None` when either mass is absent or the pair is not physical (a landing
+/// mass above the takeoff mass is a registry error, not a design choice), in
+/// which case the generic [`MassModelConfig`] fraction stays in force. A
+/// notional preset such as AVE has no certified pair and keeps it by
+/// construction.
+fn declared_landing_mass_ratio(preset: &crate::AircraftPreset) -> Option<f64> {
+    let mlw_kg = preset.reference.mlw_kg?;
+    let mtow_kg = preset.reference.mtow_kg?;
+    if !is_valid_declared_mass_kg(mlw_kg) || !is_valid_declared_mass_kg(mtow_kg) {
+        return None;
+    }
+    let ratio = mlw_kg / mtow_kg;
+    (ratio > 0.0 && ratio <= 1.0).then_some(ratio)
+}
+
 #[path = "settings_load_notes.rs"]
 mod load_notes;
 pub use load_notes::{legacy_mission_disabled, ConfigLoadNotes};
@@ -623,6 +688,63 @@ mod tests {
     }
 
     #[test]
+    fn a_registered_aircraft_sizes_its_gear_on_its_own_certified_landing_mass() {
+        // FLOPS equation 63 reads `WLDG`, the design landing weight, and the
+        // main gear goes as `WLDG^0.95`. Every registered aircraft declares
+        // both certified masses, so the loaded configuration must carry that
+        // aircraft's own ratio rather than the generic 0.92 study fraction:
+        // on the A380-800 the difference is 515 t against 386 t, which is
+        // about 7.6 t of landing gear.
+        for name in [
+            "A320-200",
+            "A220-300",
+            "A340-300",
+            "A380-800",
+            "B787-9",
+            "DC-10",
+            "ATR72-600",
+        ] {
+            let preset = crate::presets::get(name).unwrap();
+            let (Some(mlw_kg), Some(mtow_kg)) = (preset.reference.mlw_kg, preset.reference.mtow_kg)
+            else {
+                panic!("{name} must declare both certified masses");
+            };
+            let config = AlasConfig::from_value(&json!({ "preset": name })).unwrap();
+            assert!(
+                (config.mass_model.mlw_fraction_mtow - mlw_kg / mtow_kg).abs() < 1e-12,
+                "{name}: {} vs {}",
+                config.mass_model.mlw_fraction_mtow,
+                mlw_kg / mtow_kg
+            );
+            // The ratio must reproduce the certified landing mass at the
+            // aircraft's own takeoff mass, in the clean-sheet mode too, where
+            // `landing_mass_limit_kg` has no reference airframe to read.
+            let mut clean_sheet = config.clone();
+            clean_sheet.optimizer.design_space.mode = crate::optimizer::DesignMode::CleanSheet;
+            assert!(
+                (clean_sheet.landing_mass_limit_kg(mtow_kg) - mlw_kg).abs() < 1e-6,
+                "{name}"
+            );
+        }
+        // A notional aircraft has no certified pair and keeps the generic
+        // fraction; nothing is invented for it.
+        let ave = AlasConfig::from_value(&json!({"preset": "AVE"})).unwrap();
+        assert_eq!(crate::presets::get("AVE").unwrap().reference.mlw_kg, None);
+        assert_eq!(
+            ave.mass_model.mlw_fraction_mtow,
+            MassModelConfig::default().mlw_fraction_mtow
+        );
+        // A saved file still overrides it, like every other preset-applied
+        // value.
+        let overridden = AlasConfig::from_value(&json!({
+            "preset": "A380-800",
+            "mass_model": {"mlw_fraction_mtow": 0.8},
+        }))
+        .unwrap();
+        assert_eq!(overridden.mass_model.mlw_fraction_mtow, 0.8);
+    }
+
+    #[test]
     fn analysis_mass_model_in_clean_sheet_keeps_the_original_fraction() {
         let mut config = AlasConfig::from_value(&json!({"preset": "ATR72-600"})).unwrap();
         config.optimizer.design_space.mode = crate::optimizer::DesignMode::CleanSheet;
@@ -747,6 +869,59 @@ mod tests {
             crate::MissionProfileConfig::default().cruise_1_air_speed_m_s
         );
         assert_eq!(config.requirements, preset.requirements);
+    }
+
+    /// Naming a registered aircraft means adapting that aircraft. The two
+    /// design modes stay distinct - this pins *which one a bare preset
+    /// document selects*, not what either mode does.
+    #[test]
+    fn a_bare_preset_document_adapts_that_aircraft_rather_than_starting_a_clean_sheet() {
+        for name in crate::presets::available() {
+            let config = AlasConfig::from_value(&json!({ "preset": name })).unwrap();
+            assert_eq!(
+                config.optimizer.design_space.mode,
+                crate::optimizer::DesignMode::ReferenceAdaptation,
+                "{name} should load as an adaptation of itself"
+            );
+        }
+    }
+
+    /// The distinction is not hidden: a document that asks for a clean sheet
+    /// gets one, on a registered aircraft as much as on anything else,
+    /// because the file overlay is applied after the preset.
+    #[test]
+    fn an_explicit_clean_sheet_request_survives_the_preset_default() {
+        let config = AlasConfig::from_value(&json!({
+            "preset": "ATR72-600",
+            "optimizer": {"design_space": {"mode": "clean_sheet"}},
+        }))
+        .unwrap();
+        assert_eq!(
+            config.optimizer.design_space.mode,
+            crate::optimizer::DesignMode::CleanSheet
+        );
+    }
+
+    /// A configuration that names no registered aircraft has nothing to
+    /// adapt, so it keeps the clean sheet it always had.
+    #[test]
+    fn a_document_without_a_registered_preset_still_starts_a_clean_sheet() {
+        assert_eq!(
+            AlasConfig::from_value(&json!({}))
+                .unwrap()
+                .optimizer
+                .design_space
+                .mode,
+            crate::optimizer::DesignMode::CleanSheet
+        );
+        assert_eq!(
+            AlasConfig::from_value(&json!({"preset": "not-a-registered-aircraft"}))
+                .unwrap()
+                .optimizer
+                .design_space
+                .mode,
+            crate::optimizer::DesignMode::CleanSheet
+        );
     }
 
     #[test]

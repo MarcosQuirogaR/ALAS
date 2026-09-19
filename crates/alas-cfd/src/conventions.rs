@@ -30,9 +30,27 @@ pub const PITCH_AXIS: [f64; 3] = [0.0, 0.0, -1.0];
 /// Chord fraction of the pitching-moment reference point.
 pub const MOMENT_REFERENCE_X_OVER_C: f64 = 0.25;
 
-/// Freestream Mach number above which the incompressible template is
-/// rejected before launch.
+/// Freestream Mach number above which the constant-density model is no longer
+/// used.  At and above this value the case writer selects `rhoSimpleFoam` and
+/// writes a perfect-gas thermodynamic state.
 pub const INCOMPRESSIBLE_LIMIT_MACH: f64 = 0.3;
+
+/// Alias used by the automatic solver policy.  Keeping the legacy constant
+/// above public preserves compatibility with callers that used it as a
+/// validity marker, while this name states the new behaviour explicitly.
+pub const COMPRESSIBLE_SOLVER_THRESHOLD_MACH: f64 = INCOMPRESSIBLE_LIMIT_MACH;
+
+/// Lower edge of the transonic band used for automatic scheme selection.
+pub const TRANSONIC_LOWER_MACH: f64 = 0.8;
+
+/// Upper edge of the transonic band.  Above it the same compressible solver is
+/// retained, but the effective configuration labels the case supersonic.
+pub const TRANSONIC_UPPER_MACH: f64 = 1.2;
+
+/// Upper freestream Mach supported by the steady airfoil case contract.  The
+/// transonic request is fully inside this domain; higher Mach numbers require
+/// a different validation envelope and are refused explicitly.
+pub const MAX_SUPPORTED_MACH: f64 = 2.0;
 
 /// Freestream Mach number from which compressibility is flagged as a caution.
 pub const COMPRESSIBILITY_CAUTION_MACH: f64 = 0.2;
@@ -172,10 +190,10 @@ pub fn boundary_table(boundaries: &BoundarySettings) -> Vec<PatchCondition> {
             patch(
                 "farField",
                 "far field",
-                "fixedValue",
+                boundaries.far_field_velocity.as_str(),
                 "zeroGradient",
-                "fixedValue",
-                "fixedValue",
+                boundaries.far_field_turbulence.as_str(),
+                boundaries.far_field_turbulence.as_str(),
                 "calculated",
             ),
         ),
@@ -221,6 +239,52 @@ pub fn boundary_table(boundaries: &BoundarySettings) -> Vec<PatchCondition> {
             "kqRWallFunction",
             "omegaWallFunction",
             "nutUSpaldingWallFunction",
+        ),
+        patch(
+            "frontAndBack",
+            "2-D constraint",
+            "empty",
+            "empty",
+            "empty",
+            "empty",
+            "empty",
+        ),
+    ]
+}
+
+/// Boundary-condition table for the automatic perfect-gas path.
+///
+/// `rhoSimpleFoam` needs thermodynamic pressure and temperature at every
+/// possible outer-flow direction.  The OpenCFD v2606 aerofoil tutorial uses
+/// the same `freestreamVelocity`/`freestreamPressure` contract, with
+/// `inletOutlet` temperature and turbulence fields; applying it to the
+/// generated inlet, outlet and far-field patches lets shocks leave the domain
+/// without imposing an incompressible zero-gradient pressure on a supersonic
+/// characteristic.
+pub fn compressible_boundary_table(boundaries: &BoundarySettings) -> Vec<PatchCondition> {
+    let outer = |patch_name: &str, role: &str| {
+        patch(
+            patch_name,
+            role,
+            "freestreamVelocity",
+            "freestreamPressure",
+            "inletOutlet",
+            "inletOutlet",
+            "calculated",
+        )
+    };
+    vec![
+        outer(&boundaries.inlet_patch, "inlet"),
+        outer(&boundaries.outlet_patch, "outlet"),
+        outer("farField", "far field"),
+        patch(
+            &boundaries.airfoil_patch,
+            "wall",
+            "noSlip",
+            "zeroGradient",
+            "kqRWallFunction",
+            "omegaWallFunction",
+            "nutkWallFunction",
         ),
         patch(
             "frontAndBack",
@@ -299,25 +363,33 @@ pub fn assess_regime(config: &CfdStudyConfig) -> RegimeAssessment {
             "model",
             RegimeSeverity::Blocking,
             format!(
-                "Turbulence model {} is not part of the validated incompressible steady k-omega SST template.",
+                "Turbulence model {} is not part of the validated steady k-omega SST template.",
                 config.turbulence_model
             ),
         );
     }
-    if !mach.is_finite() || mach > INCOMPRESSIBLE_LIMIT_MACH {
+    if !mach.is_finite() || mach > MAX_SUPPORTED_MACH {
         regime.push(
             "mach",
             RegimeSeverity::Blocking,
             format!(
-                "Mach {mach:.3} exceeds the incompressible limit of {INCOMPRESSIBLE_LIMIT_MACH:.1}; a validated compressible study is required."
+                "Mach {mach:.3} exceeds the supported airfoil CFD limit of {MAX_SUPPORTED_MACH:.1}."
             ),
         );
-    } else if mach >= COMPRESSIBILITY_CAUTION_MACH {
+    } else if mach >= TRANSONIC_LOWER_MACH {
         regime.push(
             "mach",
             RegimeSeverity::Caution,
             format!(
-                "Mach {mach:.3} is between {COMPRESSIBILITY_CAUTION_MACH:.1} and {INCOMPRESSIBLE_LIMIT_MACH:.1}; compressibility effects on pressure coefficients are not modelled."
+                "Mach {mach:.3} is in or above the transonic band; rhoSimpleFoam, perfect-gas thermodynamics and bounded shock-safe schemes are selected automatically. Physical validation against experiment remains separate."
+            ),
+        );
+    } else if mach >= COMPRESSIBLE_SOLVER_THRESHOLD_MACH {
+        regime.push(
+            "mach",
+            RegimeSeverity::Caution,
+            format!(
+                "Mach {mach:.3} uses the automatic compressible rhoSimpleFoam path; density and energy variation are included."
             ),
         );
     }
@@ -393,19 +465,29 @@ pub struct EffectiveConfiguration {
     pub reynolds: f64,
     /// Freestream Mach number from the declared static temperature.
     pub mach: f64,
+    /// Automatic regime selected from `mach`.
+    pub flow_regime: FlowRegime,
+    /// OpenFOAM solver selected from the effective regime.
+    pub solver: CfdSolverKind,
+    /// Whether density and energy equations are present in the case.
+    pub compressible: bool,
     /// Dry-air speed of sound in m/s.
     pub speed_of_sound_m_s: f64,
     /// Static temperature in K.
     pub temperature_k: f64,
+    /// Positive static pressure used by the compressible thermodynamic state.
+    pub static_pressure_pa: f64,
     /// Density in kg/m^3.
     pub density_kg_m3: f64,
     /// Dynamic viscosity in Pa s.
     pub dynamic_viscosity_pa_s: f64,
     /// Kinematic viscosity `nu` written to `transportProperties`, in m^2/s.
     pub kinematic_viscosity_m2_s: f64,
-    /// Physical pressure reference in Pa.
+    /// Physical pressure reference in Pa after the compressible fallback is
+    /// resolved; this is the absolute value used by the generated case.
     pub pressure_reference_pa: f64,
-    /// Kinematic pressure reference `p_ref / rho` written to `0/p`, in m^2/s^2.
+    /// Kinematic form of the effective pressure reference, in m^2/s^2.  The
+    /// compressible fields themselves remain dimensional Pa.
     pub pressure_reference_kinematic_m2_s2: f64,
     /// Turbulence model name.
     pub turbulence_model: String,
@@ -419,8 +501,22 @@ pub struct EffectiveConfiguration {
     pub mesh_preset: MeshPreset,
     /// Maximum SIMPLE iterations.
     pub max_iterations: u32,
+    /// Bounded-upwind startup iterations actually used.
+    pub startup_iterations: u32,
     /// Final convection scheme.
     pub convection_scheme: ConvectionScheme,
+    /// Turbulence convection scheme actually used.
+    pub turbulence_convection_scheme: TurbulenceConvectionScheme,
+    /// Gradient limiter actually used.
+    pub gradient_limiter: f64,
+    /// Pressure relaxation actually used.
+    pub pressure_relaxation: f64,
+    /// Momentum relaxation actually used.
+    pub equation_relaxation: f64,
+    /// Turbulence relaxation actually used.
+    pub turbulence_relaxation: f64,
+    /// Inner pressure relative tolerance actually used.
+    pub pressure_relative_tolerance: f64,
     /// Regime flags.
     pub regime: RegimeAssessment,
 }
@@ -428,6 +524,12 @@ pub struct EffectiveConfiguration {
 impl CfdStudyConfig {
     /// Resolve the effective configuration without validation side effects.
     pub fn effective_configuration(&self) -> EffectiveConfiguration {
+        let simulation = self.effective_simulation();
+        let static_pressure_pa = if simulation.compressible {
+            self.effective_static_pressure_pa()
+        } else {
+            self.boundaries.pressure_reference_pa
+        };
         EffectiveConfiguration {
             template_version: TEMPLATE_VERSION.to_owned(),
             airfoil_name: self.airfoil_name.clone(),
@@ -435,25 +537,39 @@ impl CfdStudyConfig {
             frame: FrameConvention::default(),
             reynolds: self.effective_reynolds(),
             mach: self.mach_number(),
+            flow_regime: simulation.regime,
+            solver: simulation.solver,
+            compressible: simulation.compressible,
             speed_of_sound_m_s: self.speed_of_sound_m_s(),
             temperature_k: self.freestream_temperature_k,
+            static_pressure_pa,
             density_kg_m3: self.density_kg_m3,
             dynamic_viscosity_pa_s: self.dynamic_viscosity_pa_s,
             kinematic_viscosity_m2_s: self.dynamic_viscosity_pa_s / self.density_kg_m3,
-            pressure_reference_pa: self.boundaries.pressure_reference_pa,
-            pressure_reference_kinematic_m2_s2: self.boundaries.pressure_reference_pa
-                / self.density_kg_m3,
+            pressure_reference_pa: static_pressure_pa,
+            pressure_reference_kinematic_m2_s2: static_pressure_pa / self.density_kg_m3,
             turbulence_model: self.turbulence_model.clone(),
             turbulence: self.effective_turbulence(),
-            boundaries: boundary_table(&self.boundaries),
+            boundaries: if simulation.compressible {
+                compressible_boundary_table(&self.boundaries)
+            } else {
+                boundary_table(&self.boundaries)
+            },
             domain_extents_chords: [
                 self.mesh.upstream_chords,
                 self.mesh.downstream_chords,
                 self.mesh.half_height_chords,
             ],
             mesh_preset: self.mesh.preset,
-            max_iterations: self.solver.max_iterations,
-            convection_scheme: self.solver.convection_scheme,
+            max_iterations: simulation.max_iterations,
+            startup_iterations: simulation.startup_iterations,
+            convection_scheme: simulation.convection_scheme,
+            turbulence_convection_scheme: simulation.turbulence_convection_scheme,
+            gradient_limiter: simulation.gradient_limiter,
+            pressure_relaxation: simulation.pressure_relaxation,
+            equation_relaxation: simulation.equation_relaxation,
+            turbulence_relaxation: simulation.turbulence_relaxation,
+            pressure_relative_tolerance: simulation.pressure_relative_tolerance,
             regime: assess_regime(self),
         }
     }
@@ -585,6 +701,273 @@ mod tests {
     }
 
     #[test]
+    fn fv_solution_emits_the_configured_relaxation_and_residual_control() {
+        let path = test_case_dir("fv-solution");
+        let config = CfdStudyConfig::default();
+        generate_case(&config, &path).expect("case generation should succeed");
+        let solution = fs::read_to_string(path.join("system/fvSolution")).expect("fvSolution");
+        assert!(solution.contains("consistent yes;"), "{solution}");
+        assert!(solution.contains("fields { p 0.3; }"), "{solution}");
+        assert!(
+            solution.contains("equations { U 0.7; k 0.7; omega 0.7; }"),
+            "{solution}"
+        );
+        // residualControl is what lets the solver stop at convergence instead
+        // of always running to endTime.  It is written BELOW the acceptance
+        // gate so that a run the solver ends by itself has real headroom
+        // against that gate rather than satisfying it by construction.
+        assert!(
+            solution.contains(&format!(
+                "p {:.3e};",
+                config.solver.residual_tolerance * 0.5
+            )),
+            "{solution}"
+        );
+        assert!(
+            solution.contains("nNonOrthogonalCorrectors 5;"),
+            "{solution}"
+        );
+        let _ = fs::remove_dir_all(path);
+
+        // The relaxation pair is a control, not a constant: a case that asks
+        // for the undamped SIMPLEC pair must receive it verbatim so a probe
+        // result is attributable to the value it requested.
+        let faster = test_case_dir("fv-solution-fast");
+        let mut config = CfdStudyConfig::default();
+        config.solver.pressure_relaxation = 1.0;
+        config.solver.equation_relaxation = 0.9;
+        generate_case(&config, &faster).expect("case generation should succeed");
+        let solution = fs::read_to_string(faster.join("system/fvSolution")).expect("fvSolution");
+        assert!(solution.contains("fields { p 1; }"), "{solution}");
+        assert!(
+            solution.contains("equations { U 0.9; k 0.9; omega 0.9; }"),
+            "{solution}"
+        );
+        let _ = fs::remove_dir_all(faster);
+
+        let mut invalid = CfdStudyConfig::default();
+        invalid.solver.pressure_relaxation = 0.0;
+        assert!(invalid.validate().is_err());
+        invalid.solver.pressure_relaxation = 1.5;
+        assert!(invalid.validate().is_err());
+
+        // The turbulence pair may be relaxed separately, but only when a case
+        // asks for it: unset, it must follow the momentum factor exactly, so
+        // no existing configuration changes meaning.
+        let split = test_case_dir("fv-solution-split-relaxation");
+        let mut config = CfdStudyConfig::default();
+        config.solver.equation_relaxation = 0.7;
+        config.solver.turbulence_relaxation = Some(0.5);
+        generate_case(&config, &split).expect("case generation should succeed");
+        let solution = fs::read_to_string(split.join("system/fvSolution")).expect("fvSolution");
+        assert!(
+            solution.contains("equations { U 0.7; k 0.5; omega 0.5; }"),
+            "{solution}"
+        );
+        let _ = fs::remove_dir_all(split);
+
+        let mut invalid = CfdStudyConfig::default();
+        invalid.solver.turbulence_relaxation = Some(0.0);
+        assert!(invalid.validate().is_err());
+    }
+
+    #[test]
+    fn discretization_and_wall_solve_controls_reach_the_generated_dictionaries() {
+        // Defaults first: the shipped template must be byte-recognisable, so a
+        // reader can tell at a glance which controls a case actually used.
+        let path = test_case_dir("schemes-default");
+        let config = CfdStudyConfig::default();
+        generate_case(&config, &path).expect("case generation should succeed");
+        let schemes = fs::read_to_string(path.join("system/fvSchemes")).expect("fvSchemes");
+        let solution = fs::read_to_string(path.join("system/fvSolution")).expect("fvSolution");
+        let nut = fs::read_to_string(path.join("0/nut")).expect("nut");
+        // The shipped default is now the UNLIMITED gradient: the cell limiter
+        // was measured to be the dominant destabiliser of this template.
+        assert!(
+            schemes.contains("gradSchemes { default Gauss linear; grad(U) Gauss linear; }"),
+            "{schemes}"
+        );
+        assert!(!schemes.contains("cellLimited"), "{schemes}");
+        assert!(
+            schemes.contains("Gauss linear limited 0.500000"),
+            "{schemes}"
+        );
+        assert!(
+            solution.contains("nNonOrthogonalCorrectors 1;"),
+            "{solution}"
+        );
+        assert!(
+            solution.contains("relTol 0.05; smoother GaussSeidel"),
+            "{solution}"
+        );
+        assert!(
+            solution.contains("solver smoothSolver; smoother symGaussSeidel;"),
+            "{solution}"
+        );
+        assert!(
+            nut.contains("nutUSpaldingWallFunction; tolerance 1.000e-2; maxIter 10;"),
+            "{nut}"
+        );
+        let _ = fs::remove_dir_all(path);
+
+        // Every control is emitted verbatim, so a measured result is
+        // attributable to the value that produced it.
+        let tuned = test_case_dir("schemes-tuned");
+        let mut config = CfdStudyConfig::default();
+        config.solver.gradient_limiter = 0.0;
+        config.solver.non_orthogonal_limiter = 1.0;
+        config.solver.non_orthogonal_correctors = 2;
+        config.solver.pressure_relative_tolerance = Some(0.01);
+        config.solver.momentum_linear_solver = MomentumLinearSolver::PBiCgStab;
+        config.solver.turbulence_convection_scheme = TurbulenceConvectionScheme::LinearUpwind;
+        config.solver.wall_function_tolerance = 1.0e-8;
+        config.solver.wall_function_max_iterations = 100;
+        generate_case(&config, &tuned).expect("case generation should succeed");
+        // The startup stage is bounded upwind on every transported variable by
+        // design; the selected turbulence scheme belongs to the final stage.
+        let startup = fs::read_to_string(tuned.join("system/fvSchemes")).expect("fvSchemes");
+        assert!(
+            startup.contains("div(phi,k) bounded Gauss upwind;"),
+            "{startup}"
+        );
+        fs::write(tuned.join("system/fvSchemes"), fv_schemes(&config, false))
+            .expect("final schemes");
+        let schemes = fs::read_to_string(tuned.join("system/fvSchemes")).expect("fvSchemes");
+        let solution = fs::read_to_string(tuned.join("system/fvSolution")).expect("fvSolution");
+        let nut = fs::read_to_string(tuned.join("0/nut")).expect("nut");
+        // A zero limiter coefficient is the unlimited scheme, not
+        // `cellLimited ... 0`, which OpenFOAM does not accept as such.
+        assert!(
+            schemes.contains("gradSchemes { default Gauss linear; grad(U) Gauss linear; }"),
+            "{schemes}"
+        );
+        assert!(!schemes.contains("cellLimited"), "{schemes}");
+        assert!(
+            schemes.contains("Gauss linear limited 1.000000"),
+            "{schemes}"
+        );
+        assert!(
+            schemes.contains("snGradSchemes { default limited 1.000000; }"),
+            "{schemes}"
+        );
+        // `linearUpwind` names the gradient it reconstructs, so each scalar
+        // gets its own entry rather than a shared one.
+        assert!(
+            schemes.contains("div(phi,k) bounded Gauss linearUpwind grad(k);"),
+            "{schemes}"
+        );
+        assert!(
+            schemes.contains("div(phi,omega) bounded Gauss linearUpwind grad(omega);"),
+            "{schemes}"
+        );
+        assert!(
+            solution.contains("nNonOrthogonalCorrectors 2;"),
+            "{solution}"
+        );
+        assert!(
+            solution.contains("relTol 0.01; smoother GaussSeidel"),
+            "{solution}"
+        );
+        assert!(
+            solution.contains("solver PBiCGStab; preconditioner DILU;"),
+            "{solution}"
+        );
+        assert!(!solution.contains("smoothSolver"), "{solution}");
+        assert!(
+            nut.contains("nutUSpaldingWallFunction; tolerance 1.000e-8; maxIter 100;"),
+            "{nut}"
+        );
+        let _ = fs::remove_dir_all(tuned);
+
+        // Out-of-range controls are rejected rather than silently clamped.
+        for mutate in [
+            (|solver: &mut SolverSettings| solver.gradient_limiter = 1.5)
+                as fn(&mut SolverSettings),
+            |solver: &mut SolverSettings| solver.non_orthogonal_limiter = -0.1,
+            |solver: &mut SolverSettings| solver.non_orthogonal_correctors = 11,
+            |solver: &mut SolverSettings| solver.pressure_relative_tolerance = Some(0.9),
+            |solver: &mut SolverSettings| solver.wall_function_tolerance = 1.0,
+            |solver: &mut SolverSettings| solver.wall_function_max_iterations = 0,
+        ] {
+            let mut invalid = CfdStudyConfig::default();
+            mutate(&mut invalid.solver);
+            assert!(invalid.validate().is_err());
+        }
+    }
+
+    #[test]
+    fn the_far_field_turbulence_condition_is_inflow_identical_and_outflow_free() {
+        // `inletOutlet` must impose exactly the same free-stream state on
+        // inflow as `fixedValue` does; the whole point is that it differs only
+        // on faces the flow is leaving, where `fixedValue` over-specifies.
+        let mut config = CfdStudyConfig::default();
+        let turbulence = config.effective_turbulence();
+        let free_stream_k = format!("{:.16e}", turbulence.k_m2_s2);
+        let free_stream_omega = format!("{:.16e}", turbulence.omega_s_inv);
+
+        config.boundaries.far_field_turbulence = FarFieldTurbulenceCondition::FixedValue;
+        let clamped = test_case_dir("far-field-turbulence-fixed");
+        generate_case(&config, &clamped).expect("case generation should succeed");
+        let k = fs::read_to_string(clamped.join("0/k")).expect("k");
+        let omega = fs::read_to_string(clamped.join("0/omega")).expect("omega");
+        assert!(
+            k.contains(&format!(
+                "farField {{ type fixedValue; value uniform {free_stream_k}; }}"
+            )),
+            "{k}"
+        );
+        assert!(
+            omega.contains(&format!(
+                "farField {{ type fixedValue; value uniform {free_stream_omega}; }}"
+            )),
+            "{omega}"
+        );
+        let _ = fs::remove_dir_all(clamped);
+
+        config.boundaries.far_field_turbulence = FarFieldTurbulenceCondition::InletOutlet;
+        let open = test_case_dir("far-field-turbulence-inletoutlet");
+        generate_case(&config, &open).expect("case generation should succeed");
+        let k = fs::read_to_string(open.join("0/k")).expect("k");
+        let omega = fs::read_to_string(open.join("0/omega")).expect("omega");
+        assert!(
+            k.contains(&format!(
+                "farField {{ type inletOutlet; inletValue uniform {free_stream_k}; value uniform {free_stream_k}; }}"
+            )),
+            "{k}"
+        );
+        assert!(
+            omega.contains(&format!(
+                "farField {{ type inletOutlet; inletValue uniform {free_stream_omega}; value uniform {free_stream_omega}; }}"
+            )),
+            "{omega}"
+        );
+        // The true inflow patch and the wall treatment are untouched: this
+        // control is about the outer patch only.
+        assert!(
+            k.contains(&format!(
+                "inlet {{ type fixedValue; value uniform {free_stream_k}; }}"
+            )),
+            "{k}"
+        );
+        assert!(k.contains("airfoil { type kqRWallFunction;"), "{k}");
+        assert!(
+            omega.contains("airfoil { type omegaWallFunction; blended true;"),
+            "{omega}"
+        );
+        // The reported boundary table must track the emitted dictionaries, so
+        // the GUI can never show a condition the case does not carry.
+        let table = boundary_table(&config.boundaries);
+        let far = table
+            .iter()
+            .find(|entry| entry.patch == "farField")
+            .expect("far field row");
+        assert_eq!(far.k, "inletOutlet");
+        assert_eq!(far.omega, "inletOutlet");
+        assert_eq!(far.velocity, "fixedValue");
+        let _ = fs::remove_dir_all(open);
+    }
+
+    #[test]
     fn generated_boundary_files_match_the_effective_boundary_table() {
         for far_field in [FarFieldCondition::FixedValue, FarFieldCondition::Freestream] {
             let path = test_case_dir("boundaries");
@@ -631,12 +1014,22 @@ mod tests {
         let mut compressible = CfdStudyConfig::default();
         compressible.speed_m_s = 120.0;
         let regime = assess_regime(&compressible);
+        assert!(!regime.is_blocked());
+        assert!(regime
+            .flags
+            .iter()
+            .any(|flag| flag.code == "mach" && flag.severity == RegimeSeverity::Caution));
+        assert!(compressible.validate().is_ok());
+
+        let mut unsupported = CfdStudyConfig::default();
+        unsupported.speed_m_s = 700.0;
+        let regime = assess_regime(&unsupported);
         assert!(regime.is_blocked());
         assert!(regime
             .flags
             .iter()
             .any(|flag| flag.code == "mach" && flag.severity == RegimeSeverity::Blocking));
-        assert!(compressible.validate().is_err());
+        assert!(unsupported.validate().is_err());
 
         let mut low_reynolds = CfdStudyConfig::default();
         low_reynolds.speed_m_s = 5.0;

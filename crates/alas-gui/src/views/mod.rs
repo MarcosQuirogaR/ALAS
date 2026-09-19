@@ -3,6 +3,7 @@
 
 //! View components for every navigable page and shell panel.
 
+pub mod airport_window;
 pub mod analyses_view;
 pub mod cfd_view;
 pub mod control_bar;
@@ -10,7 +11,10 @@ pub mod design_space_view;
 pub mod form;
 pub mod form_page;
 pub mod guide_data;
+pub(crate) mod inputs_custom;
+pub(crate) mod inputs_relaxation;
 pub mod inputs_view;
+pub mod notices;
 pub mod overlays;
 pub mod preview_dock;
 mod result_3d;
@@ -21,6 +25,7 @@ pub(crate) mod screening_window;
 pub mod tools_view;
 pub mod tour_data;
 pub mod uav_view;
+pub mod wing_analysis_view;
 
 pub use analyses_view::show_analyses_view;
 pub use control_bar::show_control_bar;

@@ -91,7 +91,7 @@ pub(crate) fn openfoam_card(state: &mut AppState, ui: &mut Ui) {
         show_capabilities(state, ui);
         ui.label(
             RichText::new(tr(
-                "The initial study uses an incompressible steady k-omega SST template. Missing utilities or unsupported regimes stop before a solver result is presented.",
+                "The study selects simpleFoam below Mach 0.3 and rhoSimpleFoam with perfect-gas thermodynamics and bounded shock-safe schemes at higher Mach. Missing utilities or unsupported regimes stop before a solver result is presented.",
             ))
             .weak()
             .small(),

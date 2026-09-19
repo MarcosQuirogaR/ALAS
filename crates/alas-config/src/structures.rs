@@ -395,10 +395,9 @@ impl Default for StructuresConfig {
             run_nastran: true,
             run_sol_static: true,
             run_sol_modes: true,
-            // Keep the product default deliberately bounded for interactive
-            // runs; the NASTRAN adapter honors any explicit user/reference
-            // value rather than silently clipping it.
-            run_sol_vibration_sine: false,
+            // SOL 111 is part of the default structural response set; the
+            // NASTRAN adapter still honors explicit user/reference limits.
+            run_sol_vibration_sine: true,
             // A unit force PSD makes SOL 111 immediately observable; a user
             // can replace it with the aircraft-specific excitation level.
             run_sol_vibration_random: true,

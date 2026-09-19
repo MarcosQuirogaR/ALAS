@@ -14,6 +14,7 @@ use serde_json::Value;
 
 use crate::sandbox::StartingDesign;
 use crate::state::AppState;
+use crate::views::airport_window;
 use crate::views::form::dynamic_form;
 use crate::views::tour_data::TourTarget;
 use crate::views::{tr, tr_fields};
@@ -30,6 +31,8 @@ pub fn show_inputs_view(state: &mut AppState, ui: &mut Ui) {
             show_requirements_card(state, ui);
             ui.add_space(8.0);
             show_route_card(state, ui);
+            ui.add_space(8.0);
+            crate::views::inputs_custom::show_custom_geometry_card(state, ui);
             ui.add_space(8.0);
             show_run_options_card(state, ui);
         });
@@ -51,48 +54,70 @@ fn card(ui: &mut Ui, title: &str, body: impl FnOnce(&mut Ui)) -> egui::Response 
         .response
 }
 
-/// The starting-design choice: a clean sheet opens the sandbox, a preset
-/// aircraft keeps its geometry protected. Whether a run optimizes is a
-/// separate toggle below.
+/// Height of the two starting-design actions, in points. Tall enough to read
+/// as the page's primary choice rather than as an ordinary toolbar button.
+const STARTING_DESIGN_BUTTON_HEIGHT: f32 = 44.0;
+
+/// The starting-design choice: the Design Wizard adapts a registered aircraft
+/// whose geometry stays protected, Sandbox Mode opens the free-form editor.
+/// Whether a run optimizes is a separate toggle below.
+///
+/// The two actions are the only controls in this card, so they are laid out
+/// like the Route card's airport selectors: equal columns that together span
+/// the full card width, each holding one full-width prominent button. Below
+/// the Route card's two-column threshold they stack, still full width.
 fn show_starting_design_card(state: &mut AppState, ui: &mut Ui) {
     let _ = card(ui, "Starting design", |ui| {
         let choice = state.starting_design();
-        ui.horizontal_wrapped(|ui| {
-            if ui
-                .add(crate::theme::selectable_button(
-                    tr("Clean sheet design"),
-                    choice == StartingDesign::CleanSheet,
-                ))
-                .on_hover_text(tr(
-                    "Open the sandbox: the first time from the AVE reference, afterwards resuming the last sandbox or custom design.",
-                ))
-                .clicked()
-            {
-                state.enter_sandbox(false);
+        let state_targets_sandbox = state.walkthrough_targets(TourTarget::SandboxEntry);
+        let mut open_wizard = false;
+        let mut open_sandbox = false;
+        let mut sandbox_rect = None;
+        let mut wizard = |ui: &mut Ui| {
+            open_wizard |= starting_design_button(
+                ui,
+                "Design Wizard",
+                "Analyse or adapt a registered aircraft; its defining geometry stays protected from manual edits.",
+                choice == StartingDesign::PresetAircraft,
+            )
+            .clicked();
+        };
+        let mut sandbox = |ui: &mut Ui| {
+            let response = starting_design_button(
+                ui,
+                "Sandbox Mode",
+                "Open the sandbox: the first time from the AVE reference, afterwards resuming the last sandbox or custom design.",
+                choice == StartingDesign::CleanSheet,
+            );
+            if state_targets_sandbox {
+                response.scroll_to_me(Some(egui::Align::Center));
             }
-            if ui
-                .add(crate::theme::selectable_button(
-                    tr("Preset aircraft"),
-                    choice == StartingDesign::PresetAircraft,
-                ))
-                .on_hover_text(tr(
-                    "Analyse or adapt a registered aircraft; its defining geometry stays protected from manual edits.",
-                ))
-                .clicked()
-                && choice != StartingDesign::PresetAircraft
-            {
-                if let Some((first, _)) = state.preset_names.first().cloned() {
-                    state.load_preset(&first);
-                }
+            sandbox_rect = Some(response.rect);
+            open_sandbox |= response.clicked();
+        };
+        if route_column_count(ui.available_width()) == 1 {
+            wizard(ui);
+            ui.add_space(6.0);
+            sandbox(ui);
+        } else {
+            ui.columns(2, |columns| {
+                wizard(&mut columns[0]);
+                sandbox(&mut columns[1]);
+            });
+        }
+        if let Some(rect) = sandbox_rect {
+            if ui.clip_rect().intersects(rect) {
+                state.record_walkthrough_target(TourTarget::SandboxEntry, rect);
             }
-            if ui
-                .add(egui::Button::new(tr("New from AVE")).small())
-                .on_hover_text(tr("Open a new sandbox from the AVE reference instead of resuming."))
-                .clicked()
-            {
-                state.enter_sandbox(true);
+        }
+        if open_wizard && choice != StartingDesign::PresetAircraft {
+            if let Some((first, _)) = state.preset_names.first().cloned() {
+                state.load_preset(&first);
             }
-        });
+        }
+        if open_sandbox {
+            state.enter_sandbox(false);
+        }
         if choice == StartingDesign::CleanSheet && state.has_custom_design() {
             ui.label(
                 RichText::new(tr("A custom baseline promoted from the sandbox is active."))
@@ -103,8 +128,20 @@ fn show_starting_design_card(state: &mut AppState, ui: &mut Ui) {
     });
 }
 
+/// One full-width starting-design action, sized so both buttons share the
+/// card's whole width between them.
+fn starting_design_button(ui: &mut Ui, label: &str, hover: &str, selected: bool) -> egui::Response {
+    let size = egui::vec2(ui.available_width(), STARTING_DESIGN_BUTTON_HEIGHT);
+    ui.add_sized(
+        size,
+        crate::theme::selectable_button(RichText::new(tr(label)).strong().size(16.0), selected),
+    )
+    .on_hover_text(tr(hover))
+}
+
 fn show_aircraft_card(state: &mut AppState, ui: &mut Ui) {
     let response = card(ui, "Aircraft Configuration", |ui| {
+        let stacked = ui.available_width() < crate::layout::SELECTOR_PAIR_MIN_WIDTH;
         ui.horizontal_wrapped(|ui| {
             ui.label(tr("Preset:"));
             let names = state.preset_names.clone();
@@ -133,7 +170,12 @@ fn show_aircraft_card(state: &mut AppState, ui: &mut Ui) {
                 state.load_preset(&name);
             }
 
-            ui.add_space(16.0);
+            // Consuming the rest of the line forces a new one.
+            if stacked {
+                ui.allocate_space(egui::vec2(ui.available_width(), 0.0));
+            } else {
+                ui.add_space(16.0);
+            }
             ui.label(tr("Engine:"));
             let current_engine = state
                 .config_values
@@ -168,6 +210,8 @@ fn show_aircraft_card(state: &mut AppState, ui: &mut Ui) {
 
 fn show_requirements_card(state: &mut AppState, ui: &mut Ui) {
     let _ = card(ui, "TLAR / service requirements", |ui| {
+        // Why a run is blocked belongs on the card the value was typed into.
+        crate::views::notices::show_group_issues(state, ui, "requirements");
         let fields = state
             .schema
             .field("requirements")
@@ -203,6 +247,7 @@ fn show_requirements_card(state: &mut AppState, ui: &mut Ui) {
             }
         }
         show_custom_cabin_passenger_target(state, ui);
+        show_cargo_capacity_objective(state, ui);
     });
 }
 
@@ -263,6 +308,60 @@ fn show_custom_cabin_passenger_target(state: &mut AppState, ui: &mut Ui) {
     }
 }
 
+/// Render the cargo payload mass the user asks the design to match, for a
+/// freighter only.
+///
+/// The cargo analogue of the passenger requirement above, and meaningless on
+/// a passenger aircraft, so it is shown by type rather than in the generic
+/// requirements form. The field is advanced in the schema (this is the only
+/// place the guided view shows it) and it is rendered through the same
+/// `dynamic_form` as every other requirement, so its label, unit, help and
+/// translation come from the schema rather than from a second copy here.
+///
+/// What is entered stays a target: it is scored by the objective
+/// (`DesignRequirements::cargo_target_kg`) and never becomes the hold's
+/// capacity or the payload a candidate carries.
+fn show_cargo_capacity_objective(state: &mut AppState, ui: &mut Ui) {
+    let eligible = state
+        .typed_config()
+        .is_some_and(|config| config.requirements.aircraft_type == "cargo");
+    if !eligible {
+        return;
+    }
+    let Some(field) = state
+        .schema
+        .field("requirements")
+        .and_then(|group| match &group.entry {
+            alas_config::Entry::Node(node) => node
+                .fields
+                .iter()
+                .find(|field| field.name == "cargo_objective_kg")
+                .cloned(),
+            alas_config::Entry::Leaf(_) => None,
+        })
+    else {
+        return;
+    };
+
+    let lang = Some(state.language.code());
+    let show_help = state.help_verbose;
+    // No validation rule rejects a cargo objective: any positive mass is a
+    // legitimate request, and a request the aeroplane cannot meet is a
+    // ranking outcome, not an invalid input.
+    let no_errors = std::collections::HashSet::<String>::new();
+    ui.separator();
+    let mut edits = Vec::new();
+    if let Some(values) = state.group_mut("requirements") {
+        edits = dynamic_form(ui, &[field], values, &no_errors, lang, show_help);
+    }
+    if !edits.is_empty() {
+        state.on_config_modified();
+        for edit in edits {
+            state.note_parameter_modified(edit.label, edit.value);
+        }
+    }
+}
+
 fn show_route_card(state: &mut AppState, ui: &mut Ui) {
     let _ = card(ui, "Route", |ui| {
         let route_fields = [
@@ -296,10 +395,23 @@ fn show_route_field(state: &mut AppState, ui: &mut Ui, label: &str, key: &str) {
         .unwrap_or("")
         .to_owned();
     let mut chosen = None;
+    let mut open_custom_editor = false;
     let combo_response = ComboBox::from_id_salt(format!("inputs_{key}_combo"))
         .width(ui.available_width())
         .selected_text(&current)
         .show_ui(ui, |ui| {
+            // A command rather than a route value: it opens the detached
+            // custom-airport editor for this selector and is never stored.
+            if ui
+                .selectable_label(false, tr(airport_window::CUSTOM_AIRPORT_OPTION))
+                .on_hover_text(tr(
+                    "Enter, import, or reuse an airport that is not in the curated database.",
+                ))
+                .clicked()
+            {
+                open_custom_editor = true;
+            }
+            ui.separator();
             for name in &airports {
                 if ui.selectable_label(*name == current, name).clicked() {
                     chosen = Some(name.clone());
@@ -309,6 +421,9 @@ fn show_route_field(state: &mut AppState, ui: &mut Ui, label: &str, key: &str) {
     combo_response
         .response
         .on_hover_text(airport_resolution_tooltip(&current));
+    if open_custom_editor {
+        airport_window::open_for(state, key, label);
+    }
     if let Some(name) = chosen {
         let feedback_value = name.clone();
         if let Some(obj) = state.config_values.as_object_mut() {
@@ -465,6 +580,7 @@ fn route_column_count(available_width: f32) -> usize {
 fn show_run_options_card(state: &mut AppState, ui: &mut Ui) {
     let _ = card(ui, "Run options", |ui| {
         show_run_content_options(state, ui);
+        crate::views::inputs_relaxation::show_constraint_policy(state, ui);
     });
 }
 
@@ -600,15 +716,158 @@ pub(crate) fn show_run_evaluation_options(state: &mut AppState, ui: &mut Ui) {
 mod tests {
     use super::{
         airport_resolution, airport_resolution_tooltip, custom_cabin_passenger_target_eligible,
-        route_column_count, AirportResolution,
+        route_column_count, show_starting_design_card, AirportResolution,
+        STARTING_DESIGN_BUTTON_HEIGHT,
     };
     use crate::state::AppState;
+    use crate::views::tr;
     use alas_config::{DesignMode, FieldSource, RunwayDataKind};
 
     #[test]
     fn input_cards_add_columns_only_when_the_window_has_room() {
         assert_eq!(route_column_count(679.0), 1);
         assert_eq!(route_column_count(680.0), 2);
+    }
+
+    /// Paint the starting-design card on a `width`-point screen and return the
+    /// rectangle of every text label egui actually laid out.
+    fn starting_design_labels(width: f32) -> Vec<(String, egui::Rect)> {
+        let context = egui::Context::default();
+        let mut state = AppState::default();
+        let output = context.run(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(width, 600.0),
+                )),
+                ..egui::RawInput::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    show_starting_design_card(&mut state, ui);
+                });
+            },
+        );
+        output
+            .shapes
+            .iter()
+            .filter_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) => Some((
+                    text.galley.job.text.clone(),
+                    egui::Rect::from_min_size(text.pos, text.galley.size()),
+                )),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn the_starting_design_card_offers_only_the_wizard_and_sandbox_actions() {
+        let labels = starting_design_labels(900.0);
+        let texts: Vec<_> = labels.iter().map(|(text, _)| text.as_str()).collect();
+        assert!(texts.contains(&tr("Design Wizard").as_str()), "{texts:?}");
+        assert!(texts.contains(&tr("Sandbox Mode").as_str()), "{texts:?}");
+        for retired in ["New from AVE", "Clean sheet design", "Preset aircraft"] {
+            assert!(
+                !texts.contains(&tr(retired).as_str()),
+                "the Inputs card still offers {retired}: {texts:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_wizard_precedes_the_sandbox_and_the_pair_spans_the_whole_card() {
+        let width = 900.0;
+        let labels = starting_design_labels(width);
+        let find = |wanted: &str| {
+            let wanted = tr(wanted);
+            labels
+                .iter()
+                .find(|(text, _)| *text == wanted)
+                .map(|(_, rect)| *rect)
+                .unwrap_or_else(|| panic!("{wanted} is painted"))
+        };
+        let wizard = find("Design Wizard");
+        let sandbox = find("Sandbox Mode");
+        assert!(
+            wizard.center().x < sandbox.center().x,
+            "Design Wizard comes first: {wizard:?} then {sandbox:?}"
+        );
+        assert!(
+            (wizard.center().y - sandbox.center().y).abs() < 1.0,
+            "both actions share one row: {wizard:?} {sandbox:?}"
+        );
+        // Each label sits in the middle of its own half of the card, so the two
+        // buttons together cover the full available width.
+        assert!(
+            (wizard.center().x - width * 0.25).abs() < width * 0.08,
+            "the first button fills the left half: {wizard:?}"
+        );
+        assert!(
+            (sandbox.center().x - width * 0.75).abs() < width * 0.08,
+            "the second button fills the right half: {sandbox:?}"
+        );
+        assert!(STARTING_DESIGN_BUTTON_HEIGHT >= 40.0);
+    }
+
+    #[test]
+    fn the_starting_design_actions_stack_full_width_in_a_narrow_window() {
+        let labels = starting_design_labels(520.0);
+        let find = |wanted: &str| {
+            let wanted = tr(wanted);
+            labels
+                .iter()
+                .find(|(text, _)| *text == wanted)
+                .map(|(_, rect)| *rect)
+                .unwrap_or_else(|| panic!("{wanted} is painted"))
+        };
+        let wizard = find("Design Wizard");
+        let sandbox = find("Sandbox Mode");
+        assert!(
+            wizard.center().y + 1.0 < sandbox.center().y,
+            "the two actions stack with the wizard on top: {wizard:?} {sandbox:?}"
+        );
+    }
+
+    #[test]
+    fn the_sandbox_walkthrough_step_spotlights_the_sandbox_button() {
+        use crate::views::tour_data::{TourTarget, TOUR_STEPS};
+
+        let step = &TOUR_STEPS[3];
+        assert_eq!(step.title, "Sandbox mode");
+        assert_eq!(step.page, Some("inputs"));
+        assert_eq!(step.target, Some(TourTarget::SandboxEntry));
+
+        let context = egui::Context::default();
+        let mut state = AppState::default();
+        state.begin_walkthrough();
+        state.walkthrough_step = 3;
+        state.prepare_walkthrough_step();
+        let _ = context.run(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(900.0, 600.0),
+                )),
+                ..egui::RawInput::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    show_starting_design_card(&mut state, ui);
+                });
+            },
+        );
+        let spotlight = state
+            .current_walkthrough_target()
+            .expect("step 4 measures the Sandbox Mode button");
+        assert!(
+            spotlight.height() <= 2.0 * STARTING_DESIGN_BUTTON_HEIGHT,
+            "the spotlight is the button, not the whole card: {spotlight:?}"
+        );
+        assert!(
+            spotlight.center().x > 450.0,
+            "the spotlight sits on the right-hand Sandbox Mode button: {spotlight:?}"
+        );
     }
 
     #[test]

@@ -3,6 +3,7 @@
 
 //! Actual aerodynamic curves assembled from isolated CFD sweep cases.
 
+use super::super::widgets::{card_title, coefficient_value, WIDE_ROW_WIDTH};
 use super::{show_line_plot, tr, tr_fields};
 use crate::cfd::{CfdSweepPointResult, CfdSweepPointStatus};
 use crate::state::{AppState, LogKind};
@@ -69,14 +70,25 @@ pub(super) fn show_sweep_results(state: &mut AppState, ui: &mut Ui) {
     });
     let mut open_case = None;
     crate::theme::card_frame(ui).show(ui, |ui| {
-        ui.label(RichText::new(tr("Sweep results")).strong().size(16.0));
-        ui.label(tr_fields(
-            "{completed}/{total} points returned; every row retains its own case provenance.",
-            &[
-                ("completed", completed.to_string()),
-                ("total", total.to_string()),
-            ],
-        ));
+        ui.set_min_width(ui.available_width());
+        ui.horizontal_wrapped(|ui| {
+            card_title(
+                ui,
+                "Sweep results",
+                "Each row is one isolated OpenFOAM case with its own inputs, numerical status and case folder.",
+            );
+            ui.label(
+                RichText::new(tr_fields(
+                    "{completed}/{total} points returned; every row retains its own case provenance.",
+                    &[
+                        ("completed", completed.to_string()),
+                        ("total", total.to_string()),
+                    ],
+                ))
+                .weak()
+                .small(),
+            );
+        });
         ScrollArea::horizontal()
             .id_salt("airfoil_cfd_sweep_table_scroll")
             .show(ui, |ui| {
@@ -101,18 +113,18 @@ pub(super) fn show_sweep_results(state: &mut AppState, ui: &mut Ui) {
                         ui.end_row();
                         for point in &state.cfd.sweep_results {
                             ui.label((point.index + 1).to_string());
-                            ui.label(format!("{:.6} {}", point.value, variable.unit()));
+                            ui.monospace(format!("{:.4} {}", point.value, variable.unit()));
                             ui.label(tr(point.status.label()));
-                            ui.label(format!("{:.5}", point.config.effective_speed_m_s()));
-                            ui.label(format!("{:.5e}", point.config.effective_reynolds()));
+                            ui.monospace(format!("{:.4}", point.config.effective_speed_m_s()));
+                            ui.monospace(format!("{:.4e}", point.config.effective_reynolds()));
                             if let Some(force) = point
                                 .result
                                 .as_ref()
                                 .and_then(|result| result.forces.last())
                             {
-                                ui.label(format!("{:.6}", force.cl));
-                                ui.label(format!("{:.6}", force.cd));
-                                ui.label(format!("{:.6}", force.cm));
+                                ui.monospace(coefficient_value(force.cl));
+                                ui.monospace(coefficient_value(force.cd));
+                                ui.monospace(coefficient_value(force.cm));
                             } else {
                                 for _ in 0..3 {
                                     ui.label(tr("Unavailable"));
@@ -139,18 +151,18 @@ pub(super) fn show_sweep_results(state: &mut AppState, ui: &mut Ui) {
     });
     if !cl_points.is_empty() || !cd_points.is_empty() {
         ui.add_space(8.0);
-        if ui.available_width() >= 760.0 {
+        if ui.available_width() >= WIDE_ROW_WIDTH {
             ui.columns(2, |columns| {
                 show_line_plot(
                     &mut columns[0],
-                    "Sweep CL distribution (actual points)",
+                    "Sweep CL (actual points)",
                     variable.label(),
                     "CL",
                     &cl_points,
                 );
                 show_line_plot(
                     &mut columns[1],
-                    "Sweep CD distribution (actual points)",
+                    "Sweep CD (actual points)",
                     variable.label(),
                     "CD",
                     &cd_points,
@@ -159,7 +171,7 @@ pub(super) fn show_sweep_results(state: &mut AppState, ui: &mut Ui) {
         } else {
             show_line_plot(
                 ui,
-                "Sweep CL distribution (actual points)",
+                "Sweep CL (actual points)",
                 variable.label(),
                 "CL",
                 &cl_points,
@@ -167,7 +179,7 @@ pub(super) fn show_sweep_results(state: &mut AppState, ui: &mut Ui) {
             ui.add_space(8.0);
             show_line_plot(
                 ui,
-                "Sweep CD distribution (actual points)",
+                "Sweep CD (actual points)",
                 variable.label(),
                 "CD",
                 &cd_points,
@@ -176,38 +188,32 @@ pub(super) fn show_sweep_results(state: &mut AppState, ui: &mut Ui) {
     }
     if !cl_vs_cd.is_empty() {
         ui.add_space(8.0);
-        if ui.available_width() >= 760.0 && !efficiency_points.is_empty() {
+        if ui.available_width() >= WIDE_ROW_WIDTH && !efficiency_points.is_empty() {
             ui.columns(2, |columns| {
                 show_line_plot(
                     &mut columns[0],
-                    "CL versus CD (actual finite points)",
+                    "CL versus CD (actual points)",
                     "CD",
                     "CL",
                     &cl_vs_cd,
                 );
                 show_line_plot(
                     &mut columns[1],
-                    "Section efficiency CL/CD versus angle of attack (actual finite points)",
+                    "CL/CD versus angle of attack",
                     "angle of attack [deg]",
                     "CL/CD [-]",
                     &efficiency_points,
                 );
             });
         } else {
-            show_line_plot(
-                ui,
-                "CL versus CD (actual finite points)",
-                "CD",
-                "CL",
-                &cl_vs_cd,
-            );
+            show_line_plot(ui, "CL versus CD (actual points)", "CD", "CL", &cl_vs_cd);
         }
     }
     if !efficiency_points.is_empty() && ui.available_width() < 760.0 {
         ui.add_space(8.0);
         show_line_plot(
             ui,
-            "Section efficiency CL/CD versus angle of attack (actual finite points)",
+            "CL/CD versus angle of attack",
             "angle of attack [deg]",
             "CL/CD [-]",
             &efficiency_points,

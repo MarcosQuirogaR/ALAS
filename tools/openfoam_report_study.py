@@ -28,7 +28,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Iterable, Sequence
+from typing import Sequence
 
 
 REPO = Path(__file__).resolve().parents[1]
@@ -58,7 +58,6 @@ NU_INF_M2_S = 2.65e-5
 MU_INF_PA_S = RHO_INF_KG_M3 * NU_INF_M2_S
 CHORD_M = 6.0
 SPAN_M = 0.01 * CHORD_M
-MACH_POINTS = (0.0, 0.6, 0.85)
 ALPHA_POINTS_DEG = (-4.0, -2.0, 0.0, 2.0, 4.0, 6.0, 8.0, 10.0, 12.0)
 
 # The report supplies no turbulence/transition model inputs.  These are

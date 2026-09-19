@@ -21,6 +21,9 @@ use crate::state::{AppState, LogKind};
 use crate::views::design_space_view::design_mode_display_name;
 use crate::views::{tr, tr_fields};
 
+#[path = "config_edit_custom.rs"]
+mod config_edit_custom;
+
 /// Serialize a configuration for the generic form editor, which edits this
 /// JSON directly and needs every schema field present to find it back.
 ///
@@ -383,31 +386,6 @@ impl AppState {
         out
     }
 
-    /// Save the current configuration to [`AppState::config_path`] as JSON.
-    pub fn save_config(&mut self) {
-        let text = match serde_json::to_string_pretty(&self.workspace_document()) {
-            Ok(t) => t,
-            Err(e) => {
-                self.log(
-                    tr_fields("Save failed: {error}", &[("error", e.to_string())]),
-                    LogKind::Error,
-                );
-                return;
-            }
-        };
-        let path = self.config_path.clone();
-        match std::fs::write(&path, text) {
-            Ok(()) => self.log(
-                tr_fields("Saved configuration to {path}.", &[("path", path)]),
-                LogKind::Info,
-            ),
-            Err(e) => self.log(
-                tr_fields("Save failed: {error}", &[("error", e.to_string())]),
-                LogKind::Error,
-            ),
-        }
-    }
-
     /// Load a configuration from [`AppState::config_path`] (JSON or YAML).
     pub fn load_config(&mut self) {
         let path = self.config_path.clone();
@@ -427,19 +405,40 @@ impl AppState {
             serde_json::from_str(&text).map_err(|e| e.to_string())
         };
         match parsed {
-            Ok(value) => match self.apply_workspace_document(&value) {
-                Ok(()) => {
-                    self.save_tool_preferences();
+            Ok(value) => {
+                let old_airports = alas_config::airport_io::registered_custom_airports();
+                let old_airfoils = alas_geom::airfoil_io::records();
+                if let Err(error) = self.restore_custom_data_from_workspace(&value) {
                     self.log(
-                        tr_fields("Loaded configuration from {path}.", &[("path", path)]),
-                        LogKind::Info,
+                        tr_fields("Load failed: {error}", &[("error", error)]),
+                        LogKind::Error,
                     );
+                    return;
                 }
-                Err(error) => self.log(
-                    tr_fields("Load failed: {error}", &[("error", error)]),
-                    LogKind::Error,
-                ),
-            },
+                match self.apply_workspace_document(&value) {
+                    Ok(()) => {
+                        self.save_tool_preferences();
+                        self.log(
+                            tr_fields("Loaded configuration from {path}.", &[("path", path)]),
+                            LogKind::Info,
+                        );
+                    }
+                    Err(error) => {
+                        // The workspace envelope is applied before the typed
+                        // configuration. If the latter is rejected, put the
+                        // registries back too, so a failed load is atomic from
+                        // the user's point of view.
+                        let _ = alas_config::airport_io::replace_custom_airports(old_airports);
+                        let _ = alas_geom::airfoil_io::replace_records(old_airfoils);
+                        self.refresh_airport_names();
+                        self.screening.preview.invalidate_filter();
+                        self.log(
+                            tr_fields("Load failed: {error}", &[("error", error)]),
+                            LogKind::Error,
+                        );
+                    }
+                }
+            }
             Err(e) => self.log(
                 tr_fields("Load failed: {error}", &[("error", e.to_string())]),
                 LogKind::Error,

@@ -141,9 +141,27 @@ fn render_element(out: &mut String, elem: &SceneElement) {
         } => {
             render_image(out, source, *x, *y, *width, *height, *source_rect);
         }
-        SceneElement::SphericalImage { center, radius, .. } => {
+        SceneElement::SphericalImage {
+            center,
+            radius,
+            clip,
+            ..
+        } => {
+            // The silhouette carries the same viewport bound as the texture
+            // layer, so a zoomed globe does not paint over the surrounding
+            // title and colorbar in a headless SVG either.
+            let (open, close) = match clip {
+                Some([x, y, width, height]) => {
+                    let id = format!("globe-clip-{x:.0}-{y:.0}-{width:.0}-{height:.0}");
+                    out.push_str(&format!(
+                        r##"  <clipPath id="{id}"><rect x="{x:.2}" y="{y:.2}" width="{width:.2}" height="{height:.2}"/></clipPath>"##
+                    ));
+                    (format!(r##"<g clip-path="url(#{id})">"##), "</g>")
+                }
+                None => (String::new(), ""),
+            };
             out.push_str(&format!(
-                r##"  <circle cx="{:.2}" cy="{:.2}" r="{:.2}" fill="#08213d"/>"##,
+                r##"  {open}<circle cx="{:.2}" cy="{:.2}" r="{:.2}" fill="#08213d"/>{close}"##,
                 center[0], center[1], radius
             ));
         }

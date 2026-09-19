@@ -287,6 +287,7 @@ fn embedded_blue_marble_stays_on_the_scene_display_path() {
         radius: 200.0,
         camera: alas_report::scene::Camera3D::front(),
         mirror_longitude: false,
+        clip: None,
     });
     assert!(!scene_has_external_images(&scene));
 }
@@ -464,4 +465,48 @@ mod maximized_overlay {
         });
         assert!(sense.click, "egui::Image senses hover only unless asked");
     }
+}
+
+#[test]
+fn a_result_figure_card_shows_its_explanation_only_as_hover_text() {
+    let descriptor = alas_report::RESULT_FIGURES
+        .iter()
+        .find(|descriptor| !descriptor.description.is_empty())
+        .expect("a registered result figure with an explanation");
+    let context = Context::default();
+    let mut state = AppState::default();
+    state.help_verbose = true;
+    let config = state
+        .typed_config()
+        .expect("the default state has a typed configuration");
+    let output = context.run(
+        RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(900.0, 700.0),
+            )),
+            ..RawInput::default()
+        },
+        |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                super::figure_tile(&mut state, ui, &config, descriptor, 420.0, 260.0);
+            });
+        },
+    );
+    let painted: Vec<_> = output
+        .shapes
+        .iter()
+        .filter_map(|shape| match &shape.shape {
+            egui::Shape::Text(text) => Some(text.galley.job.text.clone()),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        painted.iter().any(|text| text == descriptor.title),
+        "the card paints the figure title: {painted:?}"
+    );
+    assert!(
+        !painted.iter().any(|text| text == descriptor.description),
+        "Learn-more help must not repeat the hover explanation as a subtitle: {painted:?}"
+    );
 }

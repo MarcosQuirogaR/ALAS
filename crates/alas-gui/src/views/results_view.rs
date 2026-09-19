@@ -274,11 +274,12 @@ fn figure_tile(
         ui.set_min_width(content_width);
         ui.set_max_width(content_width);
         ui.vertical(|ui| {
+            // The figure explanation belongs to the title's hover text only.
+            // Learn-more help used to repeat it as a subtitle under the
+            // heading, which was redundant with the hover and crowded the
+            // result cards, so no inline subtitle is drawn here.
             ui.label(RichText::new(tr(title)).strong())
                 .on_hover_text(tr(description));
-            if state.help_verbose {
-                ui.label(RichText::new(tr(description)).weak().small());
-            }
             match scene.as_ref() {
                 Some(scene) => {
                     let canvas_width = ui.available_width().max(1.0);

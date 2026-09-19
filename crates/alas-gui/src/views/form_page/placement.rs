@@ -304,38 +304,6 @@ pub(crate) fn toggle_bool(values: &mut Value, name: &str, enabled: bool) {
     }
 }
 
-/// The drag formulas as implemented by `alas_aero::analysis` (parasite
-/// build-up and Korn wave drag); induced drag comes from the VLM. Shown on
-/// Modeling > Aerodynamics as the one deliberate exception to hover-only help.
-pub(super) fn render_drag_formulas(ui: &mut Ui) {
-    crate::theme::card_frame(ui).show(ui, |ui| {
-        ui.set_min_width(ui.available_width());
-        ui.label(RichText::new(tr("Drag formulas (as implemented)")).strong());
-        ui.add_space(4.0);
-        ui.label(RichText::new(tr("Total drag coefficient")).strong().small());
-        ui.monospace("CD = CD0 + CDi + CDw");
-        ui.label(RichText::new(tr("CDi: induced drag from the vortex-lattice solver. All coefficients are dimensionless on the reference wing area S_ref [m^2].")).small());
-        ui.add_space(4.0);
-        ui.label(RichText::new(tr("Parasite drag (skin friction and form)")).strong().small());
-        ui.monospace("CD0 = k_v * sum_i [ Cf_i * FF_i * Q_i * S_wet,i / S_ref ]");
-        ui.monospace("Cf = 0.455 / [ (log10 Re)^2.58 * (1 + 0.144 M^2)^0.65 ]");
-        ui.monospace("Re = rho * V * L / mu      L = MAC (wings), body length (fuselage, nacelles)");
-        ui.monospace("FF_wing = [1 + 0.6/(x/c)_m * (t/c) + 100 (t/c)^4] * [1.34 M^0.18 (cos L)^0.28]");
-        ui.monospace("FF_fuselage = FF_nacelle = 1");
-        ui.monospace("S_wet,wing = (S_unfolded - S_buried) * k_wet,wing");
-        ui.monospace("S_wet,fuselage = pi * D * L_f * k_wet,fuselage      S_wet,nacelle = pi * 2 r_n * L_n");
-        ui.label(RichText::new(tr("k_v: viscous drag margin. Q_i: interference factors (wing, fuselage, nacelle/pylon). (x/c)_m: max-thickness chordwise location. t/c: section thickness ratio. L: wing sweep angle used by the analysis. M: Mach number. Re: Reynolds number of each component. k_wet: wetted-area factors from Geometry. S_buried is the main-wing area inside the fuselage when excluded.")).small());
-        ui.add_space(4.0);
-        ui.label(RichText::new(tr("Wave drag (Korn equation)")).strong().small());
-        ui.monospace("M_dd = kappa / cos L - (t/c) / cos^2 L - CL / (10 cos^3 L)");
-        ui.monospace("CDw = c_w * (M - M_dd)^4   if M >= M_onset and M > M_dd, else 0");
-        ui.label(RichText::new(tr("kappa: Korn technology factor. c_w: wave-drag rise coefficient. M_onset: wave-drag onset Mach. CL: lift coefficient at the operating point.")).small());
-        ui.add_space(4.0);
-        ui.label(RichText::new(tr("Validity: subsonic and transonic flight (M < 1), fully turbulent flat-plate skin friction, conceptual-design form factors; not a separated-flow or supersonic model.")).small());
-    });
-    ui.add_space(6.0);
-}
-
 /// The propulsion editor split by surface: Modeling shows the engine
 /// selector and the cycle assumptions; Advanced Settings shows the rating
 /// and cycle anchors, installation and nacelle placement.

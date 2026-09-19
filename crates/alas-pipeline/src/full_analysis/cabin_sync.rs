@@ -25,7 +25,7 @@ use alas_payload::layout::{LayoutSummary, PayloadLayout};
 /// seats, so the first evaluation cannot reject a declared 140-seat cabin
 /// against a registered 130-seat seed. A percent-share cabin is left to the
 /// layout, whose seated result [`cabin_synchronized`] applies afterwards.
-pub(super) fn declared_cabin(
+pub fn declared_cabin(
     requirements: &DesignRequirements,
     mass_model: &MassModelConfig,
     cabin: &PassengerCabinConfig,
@@ -71,7 +71,7 @@ pub(super) fn sized_design_gross_mass_kg(config: &AlasConfig, takeoff_mass_kg: f
 /// class counts and the passenger total taken from the seats the layout
 /// placed. Cargo layouts, and passenger layouts that seated nobody, return
 /// the inputs unchanged.
-pub(super) fn cabin_synchronized(
+pub fn cabin_synchronized(
     requirements: &DesignRequirements,
     mass_model: &MassModelConfig,
     layout: &PayloadLayout,

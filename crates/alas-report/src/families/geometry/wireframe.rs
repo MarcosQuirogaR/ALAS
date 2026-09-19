@@ -459,7 +459,9 @@ pub fn figure_exterior_3d(
         let color = if wing.name.to_lowercase().contains("wing") {
             Color::from_hex("#2563eb")
         } else {
-            Color::from_hex("#a0a0a0")
+            // Theme-derived: a fixed light grey left the empennage at 2.35:1
+            // on the Light canvas, effectively invisible at a 1 px stroke.
+            Color::from_hex(crate::theme::secondary_surface_line(pal))
         };
         draw_wing_wireframe(&mut scene, &cam, center, span, viewport, wing, color);
     }

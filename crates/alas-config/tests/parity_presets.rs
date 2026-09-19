@@ -77,6 +77,23 @@ fn every_solver_preset_matches_the_reference() {
                 // Solver presets preserve the selected method while changing
                 // only the historical effort/budget settings.
                 settings.remove("method");
+                // Only the balanced preset's worker count diverges, and it
+                // diverges the way the configuration default does: the frozen
+                // literal `1` became `0`, meaning "resolve against this
+                // machine", which the staged MADS search uses to evaluate a
+                // poll block in parallel without changing which points it
+                // evaluates or which one it returns. The other three presets
+                // ask for four workers explicitly and are unchanged. The
+                // product value is asserted here so it is pinned on both
+                // sides, and the frozen literal is then compared as it stands.
+                if preset.name == "balanced" {
+                    assert_eq!(
+                        settings.get("workers").and_then(Value::as_i64),
+                        Some(0),
+                        "the balanced preset resolves its worker count against the machine"
+                    );
+                    settings.insert("workers".to_owned(), serde_json::json!(1));
+                }
                 (
                     preset.name,
                     preset.display_name,

@@ -29,7 +29,7 @@ struct Resources {
 impl Resources {
     fn load() -> Self {
         let path =
-            env::var_os("ALAS_RESOURCE_EXE").unwrap_or_else(|| env!("CARGO_BIN_EXE_alas").into());
+            env::var_os("ALAS_RESOURCE_EXE").unwrap_or_else(|| env!("CARGO_BIN_EXE_ALAS").into());
         let exe = fs::read(&path).expect("built application is readable");
         assert_eq!(&exe[..2], b"MZ");
         let pe = u32_at(&exe, 0x3c) as usize;
@@ -148,7 +148,7 @@ fn version_resource_identifies_the_product_and_repository_metadata() {
     for (key, value) in [
         ("ProductName", "ALAS"),
         ("FileDescription", "ALAS"),
-        ("OriginalFilename", "alas.exe"),
+        ("OriginalFilename", "ALAS.exe"),
         ("CompanyName", env!("CARGO_PKG_AUTHORS")),
         ("LegalCopyright", env!("CARGO_PKG_AUTHORS")),
         ("Comments", env!("CARGO_PKG_LICENSE")),

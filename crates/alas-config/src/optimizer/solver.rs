@@ -102,9 +102,16 @@ pub struct SolverSettings {
     pub seed: Option<i64>,
 
     /// How many native-objective workers evaluate a candidate batch at once.
+    ///
+    /// `0` means "decide from the machine". The worker count changes only how
+    /// a batch is distributed, never which designs are evaluated or what they
+    /// score, so this is a wall-clock setting and not a modelling one; the
+    /// batch is a fixed set of points and each point is scored independently.
+    /// A positive value is used exactly as given, so a configuration that
+    /// states `1` keeps one worker.
     #[config(
         label = "Parallel worker processes",
-        help = "Number of native worker threads for differential-evolution candidate batches (>1 enables parallel evaluation; non-positive values are treated as 1). External evaluator adapters remain serial because they own mutable process/session state."
+        help = "Number of native worker threads for candidate batches. 0 (the default) picks a count from the machine's available parallelism; a positive value is used exactly as written; negative values are treated as 1. For the staged MADS search this changes only how long a poll block takes, not which points are evaluated or the winner. Differential evolution is different: asking for more than one worker builds a whole generation before evaluating it, so an accepted trial no longer influences later trial vectors in the same generation, which is a different algorithm and a different result. External evaluator adapters remain serial because they own mutable process/session state."
     )]
     pub workers: i64,
 
@@ -141,7 +148,7 @@ impl Default for SolverSettings {
             population_size: 6,
             tolerance: 0.01,
             seed: None,
-            workers: 1,
+            workers: 0,
             display_progress: true,
             seed_near_initial_design: true,
             seed_perturbation_fraction: 0.05,
@@ -149,7 +156,38 @@ impl Default for SolverSettings {
     }
 }
 
+/// The largest automatic worker count.
+///
+/// The measured evidence for worker scaling on this product covers one and
+/// eight workers (2.24x on B787-9 and 2.76x on AVE, with the evaluation count
+/// and the winning design identical at both). Eight is therefore the largest
+/// count the automatic setting will choose on its own: a bigger number is an
+/// extrapolation past what has been measured, and on a batch of a few hundred
+/// coupled analyses it also starts competing with the desktop session for
+/// cores. A configuration that states more than eight is still honoured.
+pub const MAXIMUM_AUTOMATIC_WORKERS: usize = 8;
+
 impl SolverSettings {
+    /// The worker count to actually evaluate a batch with.
+    ///
+    /// Resolves the `0` automatic setting against the machine, so the three
+    /// search drivers cannot disagree about what "automatic" means. A machine
+    /// that does not report its parallelism falls back to one worker rather
+    /// than guessing, which is the same conservative answer the setting had
+    /// before it could be automatic.
+    #[must_use]
+    pub fn resolved_workers(&self) -> usize {
+        if self.workers > 0 {
+            // `as` on a checked-positive i64 is the count the user asked for.
+            return usize::try_from(self.workers).unwrap_or(usize::MAX);
+        }
+        if self.workers < 0 {
+            return 1;
+        }
+        std::thread::available_parallelism()
+            .map_or(1, |count| count.get().min(MAXIMUM_AUTOMATIC_WORKERS))
+    }
+
     /// Whether `method` names an optimizer implemented by the product.
     ///
     /// Keep this list next to the serialized setting so configuration

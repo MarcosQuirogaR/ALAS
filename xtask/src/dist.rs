@@ -165,6 +165,15 @@ struct SourceRecord {
 struct SourceSnapshot {
     records: Vec<SourceRecord>,
     excluded_count: usize,
+    /// Tracked, allowlisted paths git reports as deleted in the worktree.
+    ///
+    /// Named rather than only counted: a release snapshot that silently
+    /// dropped a file the index still lists would be indistinguishable from
+    /// one that lost it. `docs/ALAS-report-clarified.md` is the current such
+    /// path — the report's canonical copy lives outside the repository and the
+    /// in-tree duplicate was removed on purpose, so packaging it would ship a
+    /// stale second copy.
+    deleted_paths: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -193,7 +202,7 @@ pub fn create_distribution(root: &Path) -> Result<(), String> {
     println!("Compiling release binary...");
     let status = Command::new(env!("CARGO"))
         .current_dir(root)
-        .args(["build", "--release", "--locked", "--bin", "alas"])
+        .args(["build", "--release", "--locked", "--bin", "ALAS"])
         .status()
         .map_err(|e| format!("failed to compile release binary: {e}"))?;
 
@@ -201,7 +210,7 @@ pub fn create_distribution(root: &Path) -> Result<(), String> {
         return Err("release build failed".to_owned());
     }
 
-    let exe_name = if cfg!(windows) { "alas.exe" } else { "alas" };
+    let exe_name = if cfg!(windows) { "ALAS.exe" } else { "ALAS" };
     let src_exe = cargo_target_dir(root).join("release").join(exe_name);
     if !src_exe.exists() {
         return Err(format!("release binary not found at {}", src_exe.display()));
@@ -428,13 +437,31 @@ fn bundle_source_snapshot(root: &Path, package_dir: &Path) -> Result<SourceSnaps
     }
     tracked.sort_unstable();
 
+    // `--cached` lists what the index holds, which still includes a tracked
+    // file the worktree has deliberately deleted. Packaging one would mean
+    // resolving a path that is not there, so the snapshot used to fail the
+    // whole release on it. Ask git which deletions are intentional and skip
+    // exactly those.
+    //
+    // This stays fail-closed. Only a path git itself reports as deleted is
+    // skipped; a file that disappeared for any other reason still fails the
+    // `is_file` check below with its own message, and every skipped path is
+    // counted and named in the source manifest rather than vanishing quietly.
+    let deleted = deleted_tracked_paths(root)?;
+
     let source_root = package_dir.join("source").join("alas");
     let canonical_root = fs::canonicalize(root)
         .map_err(|e| format!("failed to resolve repository root for source safety: {e}"))?;
     let mut records = Vec::new();
     let mut excluded_count = 0;
+    let mut deleted_paths = Vec::new();
     for relative in tracked {
         if !source_path_allowed(&relative) {
+            excluded_count += 1;
+            continue;
+        }
+        if deleted.contains(&relative) {
+            deleted_paths.push(normalize_relative_path(&relative));
             excluded_count += 1;
             continue;
         }
@@ -491,11 +518,20 @@ fn bundle_source_snapshot(root: &Path, package_dir: &Path) -> Result<SourceSnaps
         return Err("allowlisted source snapshot is empty after the release allowlist".to_owned());
     }
 
+    deleted_paths.sort_unstable();
     let snapshot = SourceSnapshot {
         records,
         excluded_count,
+        deleted_paths,
     };
     write_source_manifest(&source_root, &snapshot)?;
+    if !snapshot.deleted_paths.is_empty() {
+        println!(
+            "Skipped {} tracked source file(s) deleted in the worktree: {}",
+            snapshot.deleted_paths.len(),
+            snapshot.deleted_paths.join(", ")
+        );
+    }
     println!(
         "Included {} allowlisted source files ({} excluded by release allowlist)",
         snapshot.records.len(),
@@ -659,6 +695,11 @@ fn write_source_manifest(source_root: &Path, snapshot: &SourceSnapshot) -> Resul
     json.push_str(&format!(
         "  \"allowed_tool_extensions\": {},\n",
         json_string_array(&SOURCE_TOOL_EXTENSIONS)
+    ));
+    let deleted: Vec<&str> = snapshot.deleted_paths.iter().map(String::as_str).collect();
+    json.push_str(&format!(
+        "  \"tracked_paths_deleted_in_worktree\": {},\n",
+        json_string_array(&deleted)
     ));
     json.push_str(&format!(
         "  \"excluded_file_count\": {},\n  \"files\": [\n",
@@ -843,6 +884,35 @@ fn collect_files_recursive(
         }
     }
     Ok(())
+}
+
+/// Tracked paths git reports as deleted from the worktree.
+///
+/// Deliberately a hard error rather than an empty set on failure: silently
+/// treating "git could not tell us" as "nothing was deleted" would put the
+/// snapshot back in the state this exists to fix, and would do it invisibly.
+fn deleted_tracked_paths(root: &Path) -> Result<BTreeSet<String>, String> {
+    let output = Command::new("git")
+        .current_dir(root)
+        .args(["ls-files", "--deleted", "-z"])
+        .output()
+        .map_err(|e| format!("failed to enumerate deleted tracked source paths: {e}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "git ls-files --deleted failed while preparing the source snapshot (status {})",
+            output.status
+        ));
+    }
+    let mut deleted = BTreeSet::new();
+    for item in output.stdout.split(|byte| *byte == 0) {
+        if item.is_empty() {
+            continue;
+        }
+        let path = String::from_utf8(item.to_vec())
+            .map_err(|_| "deleted tracked path is not UTF-8".to_owned())?;
+        deleted.insert(path);
+    }
+    Ok(deleted)
 }
 
 fn git_output(root: &Path, args: &[&str]) -> Option<String> {
@@ -1593,10 +1663,53 @@ mod tests {
     use std::path::PathBuf;
 
     use super::{
-        assess_nastran95, bundle_branding, bundle_status_json, package_name,
+        assess_nastran95, bundle_branding, bundle_status_json, deleted_tracked_paths, package_name,
         parse_artifact_records, sha256_hex, source_path_allowed, target_label, BundleStatus,
         USER_SUPPLIED_EXTERNAL_TOOLS,
     };
+
+    /// A tracked file deleted on purpose must not fail the release, and must
+    /// not disappear from the manifest either.
+    ///
+    /// `git ls-files --cached` still lists a deleted tracked path, so the
+    /// snapshot used to try to resolve it and fail the whole `dist` run. The
+    /// current such path is `docs/ALAS-report-clarified.md`: the report's
+    /// canonical copy lives outside the repository and the in-tree duplicate
+    /// was removed deliberately, so packaging it would ship a stale second
+    /// copy of a report that is maintained elsewhere.
+    ///
+    /// This asserts the mechanism against the real repository rather than a
+    /// fixture, because the behaviour under test is what git reports about
+    /// *this* worktree. It is deliberately tolerant about which paths are
+    /// deleted — that set changes — and strict about the two invariants: a
+    /// deleted path is allowlisted-but-skipped, and the enumeration itself
+    /// either succeeds or is a hard error.
+    #[test]
+    fn a_deliberately_deleted_tracked_file_is_skipped_rather_than_failing_the_release() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("xtask has a workspace parent")
+            .to_path_buf();
+        let deleted = deleted_tracked_paths(&root).unwrap_or_else(|error| {
+            panic!("git must answer which tracked files are deleted: {error}")
+        });
+        for path in &deleted {
+            assert!(
+                !root.join(path).exists(),
+                "a path reported deleted must not be on disk: {path}"
+            );
+        }
+        // The report duplicate is the case this exists for; assert it only
+        // when the worktree is actually in that state, so the test does not
+        // demand a particular deletion be present forever.
+        if deleted.contains("docs/ALAS-report-clarified.md") {
+            assert!(
+                source_path_allowed("docs/ALAS-report-clarified.md"),
+                "the path must be allowlisted, or it would be skipped for the wrong reason \
+                 and the deletion handling would never be exercised"
+            );
+        }
+    }
 
     #[test]
     fn distribution_copies_native_branding_artifacts_verbatim() {
@@ -1761,7 +1874,7 @@ mod tests {
         let text = r#"{
   "artifacts": [
     {
-      "path": "alas.exe",
+      "path": "ALAS.exe",
       "bytes": 17,
       "sha256": "0123456789abcdef"
     }
@@ -1769,7 +1882,7 @@ mod tests {
 }"#;
         let records = parse_artifact_records(text).expect("well-formed artifact entry");
         assert_eq!(records.len(), 1);
-        assert_eq!(records[0].path, "alas.exe");
+        assert_eq!(records[0].path, "ALAS.exe");
         assert_eq!(records[0].bytes, 17);
         assert_eq!(records[0].sha256, "0123456789abcdef");
 

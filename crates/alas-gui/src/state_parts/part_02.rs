@@ -193,7 +193,23 @@ impl AppState {
 
     /// Update the live-preview scene from the current geometry and dock tab.
     pub fn update_preview_scene(&mut self) {
-        self.preview_scene = crate::scene::build_preview_scene(self);
+        // A text editor can temporarily hold an unreadable or physically
+        // invalid configuration. Keep the last accepted scene visible until
+        // the edit is valid again; replacing it with a blank scene makes an
+        // ordinary mid-edit keystroke look like data loss.
+        let invalid = self.typed_config().is_none_or(|config| {
+            alas_config::validate(&config)
+                .iter()
+                .any(|issue| issue.severity == alas_config::Severity::Error)
+        });
+        if invalid {
+            return;
+        }
+        let next_scene = crate::scene::build_preview_scene(self);
+        if next_scene.is_none() && self.preview_scene.is_some() {
+            return;
+        }
+        self.preview_scene = next_scene;
         self.preview_scene_revision = self.preview_scene_revision.wrapping_add(1);
     }
 
@@ -299,14 +315,17 @@ mod walkthrough_tests {
         assert!(state.nav_pinned);
         assert!(!state.nav_hover_open);
 
-        state.walkthrough_step = 3;
+        // Step 4 (index 3) spotlights the Inputs Sandbox Mode button; the
+        // 3D Live Preview step that reopens the dock follows it.
+        state.walkthrough_step = 4;
         state.prepare_walkthrough_step();
         assert_eq!(state.active_page, "inputs");
         assert!(state.preview_open);
 
         // The randomizer walkthrough step was removed with the DOE/Random
-        // controls, so Results is now the following step.
-        state.walkthrough_step = 11;
+        // controls and the Sandbox mode step was inserted after it, so
+        // Results is displayed step 13 (index 12).
+        state.walkthrough_step = 12;
         state.prepare_walkthrough_step();
         assert_eq!(state.active_page, "results");
 
@@ -327,5 +346,34 @@ mod walkthrough_tests {
         state.record_walkthrough_target(TourTarget::Navigation, measured);
 
         assert_eq!(state.current_walkthrough_target(), Some(measured));
+    }
+}
+
+#[cfg(test)]
+mod preview_scene_tests {
+    use super::AppState;
+    use alas_report::scene::Scene;
+    use serde_json::json;
+
+    #[test]
+    fn an_invalid_custom_geometry_edit_keeps_the_last_valid_scene() {
+        let mut state = AppState::default();
+        let mut previous = Scene::new(320.0, 200.0, None);
+        previous.title = Some("last valid".to_owned());
+        state.preview_scene = Some(previous.clone());
+        state.preview_scene_revision = 17;
+        state.config_values["geometry"]["wing"]["custom_sections"] = json!([{
+            "span_fraction": 1.0,
+            "leading_edge_x_m": 0.0,
+            "chord_m": 1.0,
+            "z_m": 0.0,
+            "twist_deg": 0.0,
+            "airfoil": "naca2410"
+        }]);
+
+        state.update_preview_scene();
+
+        assert_eq!(state.preview_scene, Some(previous));
+        assert_eq!(state.preview_scene_revision, 17);
     }
 }

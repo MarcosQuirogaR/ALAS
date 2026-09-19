@@ -22,11 +22,17 @@
 
 pub mod design_space;
 mod objective;
+pub mod plausibility;
+pub mod policy_review;
+pub mod relaxation;
 mod solver;
 mod weights;
 
 pub use design_space::{DesignMode, DesignSpaceConfig, VariableEnvelope};
 pub use objective::{ConstraintPolicy, MtowSizing, ObjectiveConfig, ObjectiveKind};
+pub use plausibility::PlausibilityLimits;
+pub use policy_review::{review_for, RelaxationReview, ReviewedLimit, REVIEWED_LIMITS};
+pub use relaxation::{ConstraintRelaxation, RelaxableLimit, NON_RELAXABLE_RESIDUAL_IDS};
 pub use solver::SolverSettings;
 pub use weights::ObjectiveWeights;
 
@@ -67,6 +73,31 @@ pub struct OptimizerConfig {
         help = "Design boundary for clean-sheet studies, reference-aircraft adaptation, and the fixed baseline sandbox. The resolved mutable/fixed envelope is recorded with each run and is enforced by the evaluator as well as the search bounds."
     )]
     pub design_space: DesignSpaceConfig,
+
+    /// The validity domain an optimized design must stay inside.
+    ///
+    /// See [`plausibility::PlausibilityLimits`] for what each window means
+    /// and why it is a statement about the model rather than a requirement.
+    #[serde(default, skip_serializing_if = "PlausibilityLimits::is_default")]
+    #[config(
+        nested,
+        label = "Model validity domain",
+        help = "The window of shapes this program's own mass, drag and stability correlations were fitted for. These are not performance requirements: a design outside one of them is a result the correlations cannot be trusted to have computed, which is why every window is set wider than every registered aircraft. They reach the search as named Geometry residuals and follow that family's policy."
+    )]
+    pub plausibility: PlausibilityLimits,
+
+    /// Whether, and how far, an overconstrained problem may miss a limit.
+    ///
+    /// Strict as shipped; see [`relaxation::ConstraintRelaxation`] for the
+    /// D01-D03 rules and [`policy_review`] for the review that decides which
+    /// limits may ever be listed.
+    #[serde(default, skip_serializing_if = "ConstraintRelaxation::is_default")]
+    #[config(
+        nested,
+        label = "Controlled constraint relaxation",
+        help = "Off by default, so every Mass, Balance, Performance and Geometry limit is hard. The engineering review behind it currently admits no limit at all, so switching it on changes nothing until a reviewed tolerance with a primary source exists."
+    )]
+    pub relaxation: ConstraintRelaxation,
 }
 
 // A test asserts on values it constructed here directly, so a failed unwrap
@@ -82,12 +113,21 @@ mod tests {
         // A run that changed a weight and a run that changed a generation
         // count are not comparable, and the form is where that distinction
         // has to be visible. The mission-sized objective is a third question:
-        // what is being minimised at all, and gets its own group.
+        // what is being minimised at all, and gets its own group. The
+        // validity domain and the relaxation policy are two more: where the
+        // model stops being trustworthy, and whether a limit may be missed.
         let schema = OptimizerConfig::default().schema();
         let names: Vec<&str> = schema.fields.iter().map(|field| field.name).collect();
         assert_eq!(
             names,
-            vec!["weights", "solver", "objective", "design_space"]
+            vec![
+                "weights",
+                "solver",
+                "objective",
+                "design_space",
+                "plausibility",
+                "relaxation"
+            ]
         );
         for field in &schema.fields {
             assert!(matches!(field.entry, Entry::Node(_)), "{}", field.name);
@@ -100,5 +140,14 @@ mod tests {
         assert_eq!(config.weights, ObjectiveWeights::default());
         assert_eq!(config.solver, SolverSettings::default());
         assert_eq!(config.design_space, DesignSpaceConfig::default());
+        assert_eq!(config.relaxation, ConstraintRelaxation::default());
+    }
+
+    #[test]
+    fn the_shipped_optimizer_relaxes_nothing() {
+        // A user who never opens the relaxation form must get exactly the
+        // strict behaviour every measurement in this product was taken with.
+        let config = OptimizerConfig::default();
+        assert!(!config.relaxation.is_active());
     }
 }

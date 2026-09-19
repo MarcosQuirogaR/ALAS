@@ -127,35 +127,40 @@ pub(super) fn was_lit(ctx: &Context, id: Id) -> bool {
 /// Add a floating control: its own box only, [`REST_OPACITY`] at rest and
 /// fully visible while hovered, pressed or keyboard-focused. The keyboard
 /// focus cue is the same as anywhere else; only the resting opacity is
-/// lowered. A disabled control stays at rest and draws egui's disabled
-/// look.
+/// lowered. A disabled control stays at rest and draws egui's disabled look.
+///
+/// `selected` is a persistent on/off state, not a hover cue: it keeps its
+/// accent fill and full opacity once the pointer moves away, which is what
+/// lets the category stack, the camera row's context label and the isolated
+/// component agree, all three rendering from one value.
 pub(super) fn floating_control(
     ui: &mut Ui,
     tag: &'static str,
     enabled: bool,
+    selected: bool,
     button: egui::Button<'_>,
 ) -> Response {
     let id = ui.next_auto_id();
     let previous = ui.opacity();
-    ui.set_opacity(if enabled && was_lit(ui.ctx(), id) {
+    ui.set_opacity(if enabled && (selected || was_lit(ui.ctx(), id)) {
         1.0
     } else {
         REST_OPACITY
     });
-    let response = ui.add_enabled(enabled, button);
+    let response = ui.add_enabled(enabled, button.selected(selected));
     ui.set_opacity(previous);
     debug_assert_eq!(response.id, id, "floating control id is predictable");
     register_overlay_rect(ui.ctx(), tag, response.rect);
     response
 }
 
-/// An enabled [`floating_control`].
+/// An enabled, momentary [`floating_control`].
 pub(super) fn floating_button(
     ui: &mut Ui,
     tag: &'static str,
     button: egui::Button<'_>,
 ) -> Response {
-    floating_control(ui, tag, true, button)
+    floating_control(ui, tag, true, false, button)
 }
 
 /// The size a centred row measured last frame, or `default_height` tall
@@ -437,12 +442,21 @@ fn show_viewport_controls(
 ) -> Rect {
     let top = viewport.top() + OVERLAY_INSET;
     let row = centered_row(ui, "camera", viewport, top, CAMERA_ROW_HEIGHT, |ui| {
+        // Overview is the no-component state of the same selection the
+        // category stack renders, so it shows as selected exactly when no
+        // component is focused.
         let overview = state.sandbox.focus().is_none();
-        if floating_button(ui, "camera", egui::Button::new(tr("Overview")).small())
-            .on_hover_text(tr(
-                "Show the whole aircraft again without changing any data.",
-            ))
-            .clicked()
+        if floating_control(
+            ui,
+            "camera",
+            true,
+            overview,
+            egui::Button::new(tr("Overview")).small(),
+        )
+        .on_hover_text(tr(
+            "Show the whole aircraft again without changing any data.",
+        ))
+        .clicked()
             && !overview
         {
             state.set_sandbox_focus(None);

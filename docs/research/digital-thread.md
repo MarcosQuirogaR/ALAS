@@ -249,7 +249,7 @@ The following is a concrete shape, with illustrative values:
       "tool_id": "alas",
       "name": "ALAS",
       "version": "git:commit",
-      "executable": "target/release/alas.exe",
+      "executable": "target/release/ALAS.exe",
       "sha256": "sha256-of-executable-or-package",
       "source_commit": "git-commit",
       "license": "repository-license"

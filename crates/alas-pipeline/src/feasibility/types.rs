@@ -92,6 +92,56 @@ pub enum FindingCode {
     MassModelDisagreement,
 }
 
+impl FindingCode {
+    /// Machine-stable spelling, for manifests, exports and the acceptance
+    /// record that has to name which check rejected a delivered design.
+    ///
+    /// These strings are an interface: a reader matching on one is entitled
+    /// to expect it not to change under them, so a rename of a variant must
+    /// keep its spelling here or be treated as a breaking change.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::InvalidEnvelopeSpeedOrder => "invalid_envelope_speed_order",
+            Self::InvalidCruiseAerodynamics => "invalid_cruise_aerodynamics",
+            Self::NonPositiveFuel => "non_positive_fuel",
+            Self::TankLimitedTakeoffMass => "tank_limited_takeoff_mass",
+            Self::FuelCapacityUnavailable => "fuel_capacity_unavailable",
+            Self::CgEnvelopeViolation => "cg_envelope_violation",
+            Self::ModelCgAssessmentUnavailable => "model_cg_assessment_unavailable",
+            Self::ModelCgForwardRangeViolation => "model_cg_forward_range_violation",
+            Self::NoseGearStrengthViolation => "nose_gear_strength_violation",
+            Self::MainGearStrengthViolation => "main_gear_strength_violation",
+            Self::MinimumNoseGearLoadViolation => "minimum_nose_gear_load_violation",
+            Self::PublicPlanningCgEnvelopeViolation => "public_planning_cg_envelope_violation",
+            Self::TrimUnavailable => "trim_unavailable",
+            Self::InsufficientStaticMargin => "insufficient_static_margin",
+            Self::WingAreaLimit => "wing_area_limit",
+            Self::ReportedCruiseAttitudeOutsideWindow => "reported_cruise_attitude_outside_window",
+            Self::MissionUnavailable => "mission_unavailable",
+            Self::MissionNotConverged => "mission_not_converged",
+            Self::InvalidMissionFuelBurn => "invalid_mission_fuel_burn",
+            Self::MissionFuelShortfall => "mission_fuel_shortfall",
+            Self::InvalidCruiseForceBalance => "invalid_cruise_force_balance",
+            Self::FieldPerformanceUnavailable => "field_performance_unavailable",
+            Self::FieldTakeoffDistanceViolation => "field_takeoff_distance_violation",
+            Self::FieldLandingDistanceViolation => "field_landing_distance_violation",
+            Self::LandingMassLimitViolation => "landing_mass_limit_violation",
+            Self::ThrustMarginViolation => "thrust_margin_violation",
+            Self::MissionThrottleLimitViolation => "mission_throttle_limit_violation",
+            Self::PassengerCapacityShortfall => "passenger_capacity_shortfall",
+            Self::CargoCapacityShortfall => "cargo_capacity_shortfall",
+            Self::MaximumZeroFuelWeightViolation => "maximum_zero_fuel_weight_violation",
+            Self::StructuralPayloadLimitViolation => "structural_payload_limit_violation",
+            Self::ReserveFuelShortfall => "reserve_fuel_shortfall",
+            Self::DispatchNotConverged => "dispatch_not_converged",
+            Self::FuelPolicyUnavailable => "fuel_policy_unavailable",
+            Self::MassLedgerUnavailable => "mass_ledger_unavailable",
+            Self::FuelTankLayoutUnavailable => "fuel_tank_layout_unavailable",
+            Self::MassModelDisagreement => "mass_model_disagreement",
+        }
+    }
+}
+
 /// Severity of a physical finding.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FindingSeverity {

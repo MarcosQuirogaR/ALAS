@@ -969,6 +969,100 @@ mod tests {
             first_segment.conditions.drag_coefficient
         );
 
+        // A command above the rating must still move the force. While the
+        // solver's throttle was clamped inside the residual closure every
+        // command above one produced the identical force, so the residual was
+        // flat there, its Jacobian column was zero, and `hybrd` stalled with
+        // `NoProgressSinceIterations` instead of reporting a thrust shortfall
+        // - measured on the delivered AVE finalist as a request of 128.246 on
+        // `descent_4` while the recorded throttle read exactly 1.000. This is
+        // the property that was missing.
+        // Force, the deck's reported flight-idle floor, and fuel flow at one
+        // commanded throttle, taken through the real takeoff segment.
+        let probe_at = |command: f64| -> (f64, f64, f64) {
+            let mut probe = alas_mission::segments::Segment::new(
+                build_schedule(&request)
+                    .unwrap_or_else(|error| panic!("probe schedule: {error}"))
+                    .into_iter()
+                    .next()
+                    .unwrap_or_else(|| panic!("probe takeoff spec")),
+                None,
+            )
+            .unwrap_or_else(|error| panic!("probe segment: {error}"));
+            for throttle in &mut probe.throttle {
+                *throttle = command;
+            }
+            probe.iterate(&analyses);
+            (
+                probe.conditions.thrust_force_vector_n[0][0],
+                probe.conditions.available_throttle_floor[0],
+                probe.conditions.vehicle_mass_rate_kg_s[0],
+            )
+        };
+        let thrust_at = |command: f64| probe_at(command).0;
+        let rated = thrust_at(1.0);
+        let over = thrust_at(1.5);
+        assert!(
+            rated.is_finite() && over.is_finite() && rated > 0.0,
+            "the probe must produce a usable rated force: rated={rated}, over={over}"
+        );
+        assert!(
+            over > rated * 1.4,
+            "a command above the rating must continue the force, not repeat it: \
+             1.0 -> {rated} N, 1.5 -> {over} N"
+        );
+        // And nothing inside the envelope moves: this is the guarantee that
+        // the continuation cannot change a segment that already converged.
+        let half = thrust_at(0.5);
+        assert!(
+            half.is_finite() && half < rated,
+            "inside the envelope the deck is unchanged: 0.5 -> {half} N, 1.0 -> {rated} N"
+        );
+
+        // The same property at the *lower* bound, which is the one that
+        // actually stopped the A320-200. A deck's lowest deliverable force is
+        // flight idle, a positive fraction of the rating, so the whole band
+        // below it produced the identical force: the residual was flat there,
+        // the throttle block of the Jacobian was zero, and a root find that
+        // wandered into the band could never leave it. Measured on the
+        // product deck over an A320-200 `descent_1`, the solve stalled
+        // `NoProgressSinceIterations` after 215 residual evaluations at a
+        // request of -6.761 while a root existed at 0.737-0.934, entirely
+        // inside the envelope.
+        let (at_zero, floor, idle_fuel_flow) = probe_at(0.0);
+        assert!(
+            floor.is_finite() && floor > 0.0 && floor < 1.0,
+            "the deck must report a positive flight-idle floor below the rating: {floor}"
+        );
+        let below = thrust_at(0.5 * floor);
+        let (negative, _, fuel_below) = probe_at(-0.5);
+        assert!(
+            at_zero.is_finite() && below.is_finite() && negative.is_finite(),
+            "the continuation must stay finite below the floor: \
+             -0.5 -> {negative} N, 0.0 -> {at_zero} N, {floor} -> {below} N"
+        );
+        assert!(
+            negative < at_zero && at_zero < below && below < half,
+            "below the flight-idle floor the force must keep a gradient, not repeat: \
+             -0.5 -> {negative} N, 0.0 -> {at_zero} N, half-floor -> {below} N, \
+             0.5 -> {half} N"
+        );
+        // Fuel flow is never continued through the floor: the point is
+        // refused either way, and a burn below idle would feed the mass ODE a
+        // mass the aeroplane never lost.
+        assert!(
+            (fuel_below - idle_fuel_flow).abs() <= 1.0e-12 * idle_fuel_flow.abs().max(1.0),
+            "fuel flow must stay at the idle value below the floor: \
+             {fuel_below} kg/s against {idle_fuel_flow} kg/s"
+        );
+        // Nothing at or above the floor is touched: the deck answers directly
+        // and reports no floor at all.
+        let (_, no_floor, _) = probe_at(0.5);
+        assert!(
+            no_floor == 0.0,
+            "a command the deck answers directly must report no floor: {no_floor}"
+        );
+
         let mut hot_origin = origin.clone();
         hot_origin.isa_deviation_c = 15.0;
         let hot_request = build_mission_request(&config, &hot_origin, destination, 5_000_000.0);

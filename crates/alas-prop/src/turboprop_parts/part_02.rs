@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-
 impl Pw127m568fModel {
     fn rated_shaft_power_w(self, rating: Pw127mRating) -> f64 {
         match rating {
@@ -12,6 +11,31 @@ impl Pw127m568fModel {
             Pw127mRating::MaximumCruise => self.maximum_cruise_power_w,
             Pw127mRating::FlightIdleSurrogate => 0.08 * self.maximum_continuous_power_w,
         }
+    }
+
+    /// The share of shaft power that reaches ideal induced power at this
+    /// advance ratio.
+    ///
+    /// A smoothstep from [`Pw127m568fModel::static_figure_of_merit`] at
+    /// `J = 0` to [`Pw127m568fModel::blade_efficiency_cruise`] at and above
+    /// [`Pw127m568fModel::blade_efficiency_knee_advance_ratio`], with zero
+    /// slope at both ends so no operating point sits on a kink. The shape
+    /// between the two is a surrogate: the sources characterise the ends, not
+    /// the transition.
+    pub(crate) fn blade_efficiency(self, advance_ratio: f64) -> f64 {
+        let static_value = self.static_figure_of_merit;
+        let forward_value = self.blade_efficiency_cruise;
+        // A NaN advance ratio is not positive, and must not be blended into a
+        // NaN efficiency; the static value is the defined end of the blend.
+        if !advance_ratio.is_finite()
+            || advance_ratio <= 0.0
+            || self.blade_efficiency_knee_advance_ratio <= 0.0
+        {
+            return static_value;
+        }
+        let fraction = (advance_ratio / self.blade_efficiency_knee_advance_ratio).min(1.0);
+        let weight = fraction * fraction * (3.0 - 2.0 * fraction);
+        static_value + weight * (forward_value - static_value)
     }
 
     fn power_lapse_fraction(self, density_kg_m3: f64) -> f64 {
@@ -45,6 +69,9 @@ impl Pw127m568fModel {
                 residual_jet_thrust_n: 0.0,
                 total_thrust_n: 0.0,
                 fuel_flow_kg_s: 0.0,
+                // A shut-down engine burns nothing, and the specific
+                // consumption of nothing is undefined rather than zero.
+                psfc_kg_kwh: f64::NAN,
                 blade_angle_deg: self.surrogate.minimum_blade_angle_deg,
                 advance_ratio: 0.0,
                 propulsive_efficiency: 0.0,
@@ -132,7 +159,7 @@ impl Pw127m568fModel {
                     0.0
                 } else {
                     actuator_disk_thrust_bound_n(
-                        self.static_figure_of_merit * propeller_power_w,
+                        self.blade_efficiency(advance_ratio) * propeller_power_w,
                         condition.density_kg_m3,
                         disk_area_m2,
                         condition.true_airspeed_m_s,
@@ -146,19 +173,37 @@ impl Pw127m568fModel {
             + transition_weight * (governed_angle_deg - self.surrogate.minimum_blade_angle_deg);
         let blended_thrust_n =
             static_thrust_n + transition_weight * (governed_thrust_n - static_thrust_n);
-        // The generic CT/CP surface is not an energy-consistent propeller map.
-        // Bound positive thrust by ideal one-dimensional actuator-disk momentum
-        // theory at the actual shaft power. This preserves the surrogate below
-        // the bound and prevents it from creating propulsive power. The static
-        // fallback remains lower than this ideal bound through its measured-class
-        // figure-of-merit correction above.
+        // The generic CT/CP surface is not an energy-consistent propeller map,
+        // so positive thrust is bounded by one-dimensional actuator-disk
+        // momentum theory. The power that reaches the disc is not the whole
+        // shaft power: a real blade spends part of it on profile drag, tip
+        // loss and non-uniform inflow, and bounding with the *whole* shaft
+        // power is a propeller with none of those. That bound is what the
+        // cruise points used to sit on, at eta_p = 0.98, which no propeller of
+        // this class reaches.
+        //
+        // The same treatment the static branch already applies — a figure of
+        // merit as an effective-power loss factor — is therefore applied at
+        // every airspeed, with the blade efficiency blended from the static
+        // figure of merit to the declared forward-flight value. At `V = 0` the
+        // two coincide exactly, so the static thrust is unchanged.
+        let blade_efficiency = self.blade_efficiency(advance_ratio);
         let ideal_thrust_bound_n = actuator_disk_thrust_bound_n(
-            propeller_power_w,
+            blade_efficiency * propeller_power_w,
             condition.density_kg_m3,
             disk_area_m2,
             condition.true_airspeed_m_s,
         );
-        let energy_bounded_thrust_n = blended_thrust_n.min(ideal_thrust_bound_n);
+        // A guard, not a working part of the model: no retrieved source puts a
+        // single-rotation propeller of this class above it.
+        let efficiency_capped_thrust_n = if condition.true_airspeed_m_s > 0.0 {
+            self.maximum_propulsive_efficiency * propeller_power_w / condition.true_airspeed_m_s
+        } else {
+            f64::INFINITY
+        };
+        let energy_bounded_thrust_n = blended_thrust_n
+            .min(ideal_thrust_bound_n)
+            .min(efficiency_capped_thrust_n);
         let propeller_thrust_n = if command.mode == TurbopropMode::FlightIdle {
             // The generic powered CT polynomial is not a windmilling map and
             // predicts several kilonewtons of drag at some descent points. With
@@ -185,8 +230,13 @@ impl Pw127m568fModel {
         // typed rating is sea-level power. Correct the rating-basis coefficient
         // by the lapse at the declared fuel-reference density so the anchor is
         // reproduced after applying actual shaft-power lapse.
-        let fuel_reference_lapse = self.power_lapse_fraction(self.fuel_reference_density_kg_m3);
-        let calibrated_psfc_kg_kwh = self.reference_psfc_kg_kwh / fuel_reference_lapse;
+        // `reference_psfc_kg_kwh` is fuel flow per unit *sea-level-rated*
+        // shaft power, not a PSFC; dividing by the lapse at the declared
+        // anchor density turns it into the PSFC the engine is actually run at.
+        // That PSFC is a single constant — it is reported on the output so a
+        // consumer can see both what the engine burns and that it does not
+        // vary with the operating point.
+        let calibrated_psfc_kg_kwh = self.implied_psfc_kg_kwh();
         let fuel_flow_kg_s = engine_power_w * calibrated_psfc_kg_kwh / JOULES_PER_KWH;
         let output = TurbopropOutput {
             engine_shaft_power_w: engine_power_w,
@@ -198,6 +248,7 @@ impl Pw127m568fModel {
             residual_jet_thrust_n: self.residual_jet_thrust_n,
             total_thrust_n: propeller_thrust_n + self.residual_jet_thrust_n,
             fuel_flow_kg_s,
+            psfc_kg_kwh: calibrated_psfc_kg_kwh,
             blade_angle_deg,
             advance_ratio,
             propulsive_efficiency: efficiency,
@@ -284,6 +335,15 @@ impl Pw127m568fModel {
                 self.fuel_reference_density_kg_m3,
             ),
             ("static_figure_of_merit", self.static_figure_of_merit),
+            ("blade_efficiency_cruise", self.blade_efficiency_cruise),
+            (
+                "blade_efficiency_knee_advance_ratio",
+                self.blade_efficiency_knee_advance_ratio,
+            ),
+            (
+                "maximum_propulsive_efficiency",
+                self.maximum_propulsive_efficiency,
+            ),
             (
                 "power_lapse_reference_density_kg_m3",
                 self.power_lapse_reference_density_kg_m3,
@@ -325,6 +385,24 @@ impl Pw127m568fModel {
             (
                 "static_figure_of_merit",
                 self.static_figure_of_merit,
+                f64::MIN_POSITIVE,
+                1.0,
+            ),
+            (
+                "blade_efficiency_cruise",
+                self.blade_efficiency_cruise,
+                f64::MIN_POSITIVE,
+                1.0,
+            ),
+            (
+                "blade_efficiency_knee_advance_ratio",
+                self.blade_efficiency_knee_advance_ratio,
+                f64::MIN_POSITIVE,
+                10.0,
+            ),
+            (
+                "maximum_propulsive_efficiency",
+                self.maximum_propulsive_efficiency,
                 f64::MIN_POSITIVE,
                 1.0,
             ),
@@ -411,7 +489,7 @@ fn actuator_disk_thrust_bound_n(
     0.5 * (lower_thrust_n + upper_thrust_n)
 }
 
-const PROVENANCE: &str = "PW127M takeoff/continuous ratings: certification evidence; ATR 72-600 climb/cruise ratings, 568F-1 diameter, 762 kg/h maximum-cruise fuel flow and 17.5 min climb to FL170: ATR manufacturer factsheet; rated shaft power lapses as max(0.15, min(1, rho/1.225)^0.75), an aircraft-level minimum-hypothesis calibration rather than an OEM engine deck; the 762 kg/h fuel anchor is calibrated after power lapse at rho=0.70 kg/m3 (FL170-like optimum-altitude cruise), so sea-level use remains extrapolated; propeller coefficients: generic six-blade surrogate (not OEM 568F data), bounded by ideal one-dimensional actuator-disk momentum theory; outside the generic governor surface, actuator-disk thrust uses static figure of merit as an effective-power loss factor; flight-idle propeller force is the neutral zero-force hypothesis because no OEM idle/windmilling map is available; fuel model has one aircraft-level calibration anchor, not a PW127M deck";
+const PROVENANCE: &str = "PW127M takeoff/continuous ratings: certification evidence; ATR 72-600 climb/cruise ratings, 568F-1 diameter, 762 kg/h maximum-cruise fuel flow and 17.5 min climb to FL170: ATR manufacturer factsheet; rated shaft power lapses as max(0.15, min(1, rho/1.225)^0.75), an aircraft-level minimum-hypothesis calibration rather than an OEM engine deck; the 762 kg/h fuel anchor is calibrated after power lapse at rho=0.70 kg/m3 (FL170-like optimum-altitude cruise), so sea-level use remains extrapolated; propeller coefficients: generic six-blade surrogate (not OEM 568F data), bounded by one-dimensional actuator-disk momentum theory evaluated on the blade-efficiency share of shaft power rather than on the whole of it, so no operating point sits on the loss-free ideal bound; blade efficiency blends the 0.72 static figure of merit into a declared forward-flight 0.86, the conservative end of the 0.86-0.91 band that NASA TM-83458 p.8 interpolation, Nita 2008 Table 3.4 (Scholz chart read for the ATR 72) and the published 762 kg/h and 1,355 ft/min aircraft-level closures agree on; the blend shape between the two ends is a surrogate and the resulting cruise efficiency carries about -0/+6 percent; propulsive efficiency is additionally capped at 0.88 as a guard; flight-idle propeller force is the neutral zero-force hypothesis because no OEM idle/windmilling map is available; fuel model has one aircraft-level calibration anchor, not a PW127M deck";
 
 /// Technology-neutral adapter for the two-engine ATR 72 PW127M/568F installation.
 ///

@@ -192,7 +192,7 @@ pub(super) fn run<E: ConstrainedSearch + ?Sized>(
         step_tolerance: 1.0e-4,
     };
     let initial = initial_design.copied().unwrap_or_default().to_array();
-    let workers = solver.workers.max(1) as usize;
+    let workers = solver.resolved_workers();
     let outcome = {
         let mut adapter = BatchAdapter { objective, workers };
         run_sqp(bounds, &initial, &settings, &mut adapter, progress_callback)
@@ -209,5 +209,7 @@ pub(super) fn run<E: ConstrainedSearch + ?Sized>(
         strategy: outcome.termination.to_owned(),
         termination: outcome.termination.to_owned(),
         pareto_front: Vec::new(),
+        search_diagnostics: None,
+        delivered_acceptance: None,
     }
 }

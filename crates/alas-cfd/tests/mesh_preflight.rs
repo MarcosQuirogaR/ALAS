@@ -422,9 +422,18 @@ fn leading_edge_refinement_adds_a_threshold_field_only_when_requested() {
         geo_assignment(&source, "Field[7].SizeMin"),
         resolution.refinement.leading_edge_size_m
     );
+    // The leading-edge field must relax to the FAR-FIELD size, not the surface
+    // size.  `Field[5]` is `Min{3, 4, 7}` and a `Threshold` returns `SizeMax`
+    // everywhere beyond `DistMax`, so relaxing only to the surface size clamps
+    // the entire domain to it and the mesh explodes: measured at 2.6 GB of Gmsh
+    // memory with no mesh after eight minutes, against ten seconds at level 0.
     assert_eq!(
         geo_assignment(&source, "Field[7].SizeMax"),
-        resolution.refinement.surface_size_m
+        resolution.refinement.far_field_size_m
+    );
+    assert!(
+        resolution.refinement.far_field_size_m > resolution.refinement.surface_size_m,
+        "the far-field size is the coarse one, so this assertion has teeth"
     );
     assert!(source.contains("Field[6] = Distance;"));
     assert!(source.contains("Field[5].FieldsList = {3, 4, 7};"));
@@ -451,6 +460,59 @@ fn leading_edge_refinement_adds_a_threshold_field_only_when_requested() {
         plain.manifest.gmsh_source_hash,
         bundle.manifest.gmsh_source_hash
     );
+}
+
+/// Every documented refinement level must emit a GEO Gmsh can actually mesh.
+///
+/// Levels 0..=6 were run through Gmsh 4.15.2 on this host after the `SizeMax`
+/// fix: level 0 gives 193 302 nodes, level 2 194 360, level 4 198 370 in 10.6 s
+/// with no errors, and levels 5 and 6 saturate at the chord clamp and give
+/// 199 578 nodes in 12.3 s.  This test pins the two properties that make that
+/// true — the far-field relaxation and the size floor — so the range stays
+/// meshable; level 7 is rejected in preflight instead (see
+/// `preflight_rejects_impossible_configurations`).
+#[test]
+fn every_documented_leading_edge_level_stays_meshable() {
+    let name = "naca0024";
+    let mut previous = f64::INFINITY;
+    for level in 0..=6_u32 {
+        let mut config = config_for(name);
+        config.mesh.leading_edge_refinement = level;
+        config
+            .validate()
+            .unwrap_or_else(|errors| panic!("level {level}: {errors:?}"));
+        let bundle =
+            run_mesh_preflight(&config, &snapshot(name)).unwrap_or_else(|error| panic!("{error}"));
+        let resolution = bundle
+            .manifest
+            .resolution
+            .unwrap_or_else(|| panic!("no resolution"));
+        let le = resolution.refinement.leading_edge_size_m;
+        // The floor is what keeps levels 5 and 6 from asking for a cell Gmsh
+        // cannot fill: at 5e-4 chords they are the same mesh, not a finer one.
+        assert!(
+            le >= 5.0e-4 * config.chord_m * (1.0 - 1.0e-12),
+            "level {level}: leading-edge size {le:.6e} m is below the chord floor"
+        );
+        assert!(le <= previous, "level {level}: size must not grow");
+        previous = le;
+        let Some(geo) = bundle.geo else {
+            continue;
+        };
+        if level == 0 {
+            assert!(!geo.source.contains("Field[7]"));
+            continue;
+        }
+        assert_eq!(geo_assignment(&geo.source, "Field[7].SizeMin"), le);
+        // Without this the `Min` field clamps the whole 30 m x 20 m domain to
+        // the surface size and Gmsh never returns.
+        assert_eq!(
+            geo_assignment(&geo.source, "Field[7].SizeMax"),
+            resolution.refinement.far_field_size_m
+        );
+    }
+    // Levels 5 and 6 both sit on the floor, so the clamp is exercised above.
+    assert!(previous > 0.0);
 }
 
 fn blocked_codes(name: &str, coordinates: Vec<(f64, f64)>) -> (MeshPreflight, Vec<String>) {
@@ -701,13 +763,35 @@ fn preset_and_domain_controls_are_validated_with_units() {
 
     let config = CfdStudyConfig::default();
     let resolution = mesh_resolution(&config, Some(2.05)).unwrap_or_else(|error| panic!("{error}"));
+    // The default derives the wall distance from the y+ target, so the
+    // reported distance is the derived one and the emitted first-layer
+    // thickness is twice it under the cell-centre interpretation.
+    assert!(config.mesh.derive_first_layer_from_target_y_plus);
     assert_eq!(
         resolution.inflation.first_layer_thickness_m,
-        2.0 * config.mesh.first_layer_height_m
+        2.0 * resolution.inflation.wall_distance_m
     );
     assert_eq!(
         resolution.inflation.wall_distance_m,
+        resolution.inflation.wall_distance_for_target_m
+    );
+    assert_ne!(
+        resolution.inflation.wall_distance_m,
         config.mesh.first_layer_height_m
+    );
+
+    // With the override the literal configured length is used verbatim.
+    let mut literal = CfdStudyConfig::default();
+    literal.mesh.derive_first_layer_from_target_y_plus = false;
+    let literal_resolution =
+        mesh_resolution(&literal, Some(2.05)).unwrap_or_else(|error| panic!("{error}"));
+    assert_eq!(
+        literal_resolution.inflation.wall_distance_m,
+        literal.mesh.first_layer_height_m
+    );
+    assert_eq!(
+        literal_resolution.inflation.first_layer_thickness_m,
+        2.0 * literal.mesh.first_layer_height_m
     );
     assert!(
         (resolution.inflation.y_plus_ratio
@@ -728,7 +812,10 @@ fn preset_and_domain_controls_are_validated_with_units() {
         Some((2.05 * config.chord_m / resolution.refinement.surface_size_m).round() as u64)
     );
 
+    // A too-coarse first cell is only reachable through the explicit override
+    // now; the derived path cannot disagree with its own target.
     let mut coarse_wall = CfdStudyConfig::default();
+    coarse_wall.mesh.derive_first_layer_from_target_y_plus = false;
     coarse_wall.mesh.first_layer_height_m = 2.0e-3;
     let resolution = mesh_resolution(&coarse_wall, None).unwrap_or_else(|error| panic!("{error}"));
     assert_eq!(

@@ -6,7 +6,7 @@ use alas_config::AlasConfig;
 
 use super::{
     candidate_is_at_least_as_good, candidate_is_better, converged, latin_hypercube_population,
-    scored_point, select_samples, DesignObjective, DesignOptimizer, OptimizationError,
+    scored_point_at, select_samples, DesignObjective, DesignOptimizer, OptimizationError,
     SearchObjective,
 };
 use crate::evaluator::ObjectiveEvaluation;
@@ -38,8 +38,8 @@ fn a_solver_failure_is_worse_than_a_recoverable_constraint_violation() {
         "body_alpha_window",
     );
 
-    let failed_point = scored_point(&values, 1.0, &failed);
-    let recoverable_point = scored_point(&values, 2.0, &recoverable);
+    let failed_point = scored_point_at(&values, 1.0, &failed, 0);
+    let recoverable_point = scored_point_at(&values, 2.0, &recoverable, 0);
 
     assert!(failed_point.constraint_violation > recoverable_point.constraint_violation);
 }

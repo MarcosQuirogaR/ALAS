@@ -82,14 +82,76 @@ struct Replay {
 
 /// Replay one design vector through both assessors, exactly as `pipeline.rs`
 /// does: the search-time gate first, then the finalist report bound to the
-/// closed takeoff mass that gate produced.
+/// closed takeoff mass *and the design vector* that gate evaluated.
+///
+/// The second half of that sentence is load-bearing. A clean-sheet design
+/// space derives `fuselage_length_m` from the cabin load case, so the
+/// evaluator replaces the caller's coordinate before it builds anything, and
+/// the vector it evaluated is the one it reports as
+/// `resolved.design`. Handing the report the caller's vector instead compares
+/// two *different aeroplanes*, which is what
+/// `the_report_is_built_on_the_aircraft_the_gate_evaluated` measures below.
 fn replay(config: &AlasConfig, design: &DesignVector) -> Replay {
     let assessment = alas_opt::assess_product_candidate(config, design)
         .expect("finalist re-evaluates under the same mission-sized objective");
     let report = FullAnalysis::new(config.clone())
-        .run_at_sized_takeoff_mass(design, true, assessment.sized.takeoff_mass_kg)
+        .run_at_sized_takeoff_mass(
+            &assessment.resolved.design,
+            true,
+            assessment.sized.takeoff_mass_kg,
+        )
         .expect("finalist report binds to the same closed takeoff mass");
     Replay { assessment, report }
+}
+
+/// The gate and the report must build one aeroplane, whatever vector the
+/// caller supplied.
+///
+/// `alas_opt::mdo::build::size_fuselage_from_cabin` re-derives the body
+/// length from the cabin load case over its own specification interval, so
+/// the caller's literal is discarded. The derivation has fixed points -- an
+/// optimizer finalist is one, which is why the ordinary search path never saw
+/// this -- but the r5 fixture below was recorded against an earlier cabin and
+/// is not one any more. Measured at `AlasConfig::default()`:
+/// the evaluated body is 72.000000 m against the fixture's 76.250000 m, worth
+/// 4.250 m of H-stab station, 2 406.354 kg of fuselage and 1.237 m of payload
+/// station. Every one of those collapses to zero on the evaluated body.
+///
+/// This test pins the seam itself rather than the numbers: whatever the design
+/// space derives, `resolved.design` must be what a bound report is built on.
+#[test]
+fn the_report_is_built_on_the_aircraft_the_gate_evaluated() {
+    let config = AlasConfig::default();
+    let supplied = r5_finalist_design();
+    let assessment =
+        alas_opt::assess_product_candidate(&config, &supplied).expect("the fixture is assessable");
+    let evaluated = assessment.resolved.design;
+
+    // Everything the caller pinned that the design space does not derive must
+    // survive verbatim: the evaluator is allowed to replace the cabin-derived
+    // coordinate and nothing else.
+    let mut supplied_with_evaluated_body = supplied;
+    supplied_with_evaluated_body.fuselage_length_m = evaluated.fuselage_length_m;
+    assert_eq!(
+        evaluated, supplied_with_evaluated_body,
+        "the evaluator changed a design coordinate other than the cabin-derived body length"
+    );
+
+    // And the derivation is idempotent on its own output, which is why an
+    // optimizer finalist replays unchanged.
+    let second = alas_opt::assess_product_candidate(&config, &evaluated)
+        .expect("the evaluated vector is assessable");
+    assert_eq!(
+        second.resolved.design, evaluated,
+        "re-assessing the evaluated vector derived a third body: {} m then {} m",
+        evaluated.fuselage_length_m, second.resolved.design.fuselage_length_m,
+    );
+    assert!(
+        (second.sized.takeoff_mass_kg - assessment.sized.takeoff_mass_kg).abs() < 1.0e-6,
+        "the evaluated vector closed at a different takeoff mass on replay: {} kg then {} kg",
+        assessment.sized.takeoff_mass_kg,
+        second.sized.takeoff_mass_kg,
+    );
 }
 
 #[test]

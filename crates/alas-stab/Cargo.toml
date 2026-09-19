@@ -33,7 +33,6 @@ alas-testkit = { path = "../alas-testkit" }
 # Only the parity test's fixture structs derive `Deserialize`; the library
 # types carry no serde dependency, the same split `alas-aero` makes.
 serde = { workspace = true }
-serde_json = { workspace = true }
 
 [lints]
 workspace = true

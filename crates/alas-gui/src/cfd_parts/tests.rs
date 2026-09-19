@@ -363,6 +363,9 @@ fn test_result_fixture() -> CfdResults {
         surface: None,
         surface_error: None,
         command_logs: std::collections::BTreeMap::new(),
+        field_updates: Default::default(),
+        mesh_qualification: Default::default(),
+        numerical_convergence: CfdOutcome::Unconverged,
         status_detail: String::new(),
     }
 }

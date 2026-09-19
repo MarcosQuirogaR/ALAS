@@ -21,6 +21,7 @@ use alas_geom::builder::AircraftBuilder;
 use alas_payload::{build_payload_layout, ItemMeta};
 use alas_perf::landing_gear::size_landing_gear_with_group_stations;
 use alas_pipeline::full_analysis::FullAnalysis;
+use alas_pipeline::gear_stations::resolved_gear_stations;
 use alas_pipeline::{DesignPipeline, PipelineOptions, RunEnvironment};
 use serde_json::{json, Value};
 
@@ -190,12 +191,18 @@ fn dump(name: &str) -> Result<Value, String> {
     let fallback_x_nlg =
         fuselage_start_x + (fuselage_end_x - fuselage_start_x) * config.mass_model.nlg_x_fraction;
     let fallback_x_mlg = x_mac_le + config.mass_model.mlg_x_fraction_mac * c_ref;
-    let gear_stations = config.landing_gear.resolved_station_positions(
+    // Resolved through the shared gate, not rebuilt here: a diagnostic export
+    // that invented a main-gear station the mass model refuses would be the
+    // one artifact a reviewer trusts to show what the model actually holds.
+    let gear_stations = resolved_gear_stations(
+        &config,
+        &report.airplane,
         fallback_x_nlg,
         fallback_x_mlg,
         fuselage_start_x,
         fuselage_end_x - fuselage_start_x,
-    );
+    )
+    .map_err(|refusal| format!("main_gear_station_not_measured: {refusal}"))?;
     let gear_mass_kg: f64 = report.component_masses.values().copied().sum();
     let gear_layout = size_landing_gear_with_group_stations(
         gear_mass_kg,

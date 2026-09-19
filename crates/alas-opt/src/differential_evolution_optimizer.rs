@@ -110,6 +110,29 @@ impl DesignOptimizer {
         let nominal = self.nominal_design(initial_design)?;
         let design_space = &self.config.optimizer.design_space;
         let declared = design_space.envelope(&nominal);
+        // A caller that supplies no bounds is asking for the design space it
+        // configured, and that space is already a complete, anchored envelope:
+        // the global box widened to contain the start for a clean sheet, the
+        // D09 window around the registered reference for an adaptation, the
+        // reference itself for a baseline sandbox.  Intersecting it with the
+        // global box as well would be intersecting it with AVE's family, and
+        // the registered types do not live there.  Every other type in the
+        // catalogue has a span, a chord or a body length outside at least one
+        // of those global limits, an A320 by more than twenty metres of
+        // fuselage, so the intersection is empty and the search is rejected
+        // before it evaluates anything.  The envelope is validated on its own
+        // terms below and the evaluator enforces the same one, so nothing is
+        // widened by this: what changes is that a registered aircraft can be
+        // optimized inside its own declared window without the caller having
+        // to restate it.
+        if bounds.is_none() {
+            let envelope: Vec<(f64, f64)> = declared
+                .iter()
+                .map(|variable| (variable.lower, variable.upper))
+                .collect();
+            validate_bounds(&envelope)?;
+            return Ok(envelope);
+        }
         let mut effective = Vec::with_capacity(requested.len());
         for (index, (&(requested_lower, requested_upper), variable)) in
             requested.iter().zip(&declared).enumerate()
@@ -314,9 +337,23 @@ impl DesignOptimizer {
         // path while leaving the normal sixteen-variable population unchanged.
         let pop_size = (pop_mult * n_dof).max(6);
         // Native objective evaluation is thread-safe after cloning its
-        // configuration. A non-positive setting keeps the historical serial
-        // behaviour rather than creating an invalid worker count.
-        let workers = solver.workers.max(1) as usize;
+        // configuration. The setting is resolved in one place so the DE
+        // driver, the staged search and SQP cannot disagree about what the
+        // automatic count is.
+        //
+        // Differential evolution is the one driver whose *result* depends on
+        // this, because a batched generation defers the population update and
+        // a serial one lets an accepted trial influence later trial vectors
+        // in the same generation. Those are different algorithms, so the
+        // choice between them must come from the configuration, never from
+        // how many cores the machine reports: resolving `0` (automatic) to
+        // the machine's parallelism here silently moved the frozen replay off
+        // the reference interleaving and made its winner core-count
+        // dependent. The generation loop therefore batches only when a
+        // configuration explicitly asks for more than one worker, and the
+        // resolved count then says only how that batch is spread.
+        let workers = solver.resolved_workers();
+        let deferred_generations = solver.workers > 1;
         let seed_val = solver.seed.map(|seed| seed as u64).unwrap_or_else(|| {
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)
@@ -390,7 +427,7 @@ impl DesignOptimizer {
             // SciPy's default mutation is a per-generation dither in
             // [0.5, 1.0), not a fixed F=0.8.
             let f_weight = rng.uniform(0.5, 1.0);
-            if workers <= 1 {
+            if !deferred_generations {
                 // Preserve the reference interleaving in the serial mode:
                 // accepted trials immediately influence later trial vectors.
                 for i in 0..pop_size {
@@ -486,6 +523,8 @@ impl DesignOptimizer {
             strategy: solver.strategy.clone(),
             termination: termination.to_owned(),
             pareto_front: Vec::new(),
+            search_diagnostics: None,
+            delivered_acceptance: None,
         }
     }
 
@@ -508,39 +547,248 @@ impl DesignOptimizer {
         }
         let default_bounds = DesignVector::bounds();
         let bounds = bounds.unwrap_or(&default_bounds);
-        let population_size = (solver.population_size.max(1) as usize * bounds.len()).max(2);
         let generations = solver.max_iterations.max(0) as usize;
         let seed = solver.seed.map_or_else(runtime_seed, |value| value as u64);
-        let initial_values = initial_design.map(DesignVector::to_array);
+        let mut initial_values = initial_design.map(DesignVector::to_array);
+        // The analysis-start instant for this stage.  Every elapsed time
+        // reported below, including the staged scan, is measured from here so
+        // a runtime claim covers the whole search rather than its last phase.
         let started = Instant::now();
-        let mut evaluate = |values: &[f64]| {
-            let cost = objective.evaluate(values);
-            scored_point(values, cost, objective.history())
+        let staged = crate::search::staged::Settings::from_solver(solver, bounds.len());
+        let mut progress_callback = progress_callback;
+        let mut report = |line: &str| {
+            if let Some(callback) = progress_callback.as_mut() {
+                (**callback)(line);
+            }
         };
-        // Legacy method names remain loadable for saved configurations, but
-        // every product run uses this single MADS driver. The compatibility
-        // constructor above is the only path that still replays DE.
+
+        // Stage A: a broad low-resolution scan over the whole envelope, then
+        // a full-fidelity re-evaluation of its finalists, which supplies the
+        // MADS starting point.  The scan ranks candidates on a reduced
+        // aerodynamic mesh and a loosened sizing closure, so it may only
+        // *nominate* a start; every candidate that can be accepted below is
+        // ranked by the full objective.
+        let scan = self.broad_scan(bounds, initial_values.as_deref(), &staged);
+        let (verified_start, scan_verification) = verify_scan_finalists(
+            objective,
+            &scan.candidates,
+            initial_values.as_deref(),
+            staged.workers,
+        );
+        if verified_start.is_some() {
+            initial_values = verified_start;
+        }
+        report(&format!(
+            "staged scan | screened {} | screening_feasible {} | verified {} | elapsed_s {:.3}",
+            scan.screened, scan.feasible_screened, scan_verification, scan.elapsed_s
+        ));
+
+        // Stage B: MADS over the full coupled objective, from the verified
+        // start.  Legacy method names remain loadable for saved
+        // configurations, but every product run uses this single driver; the
+        // compatibility constructor above is the only path that still replays
+        // differential evolution.
+        let mut evaluator = BatchEvaluator {
+            objective,
+            workers: staged.workers,
+        };
         let search_result = crate::search::mads::run(
             bounds,
             initial_values.as_deref(),
             crate::search::mads::Settings {
-                max_iterations: generations,
-                max_evaluations: (population_size.saturating_mul(generations.max(1) + 1)).max(1),
+                max_iterations: generations.max(staged.minimum_poll_iterations),
+                max_evaluations: staged.max_evaluations,
                 seed,
+                convergence_mesh_size: staged.convergence_mesh_size,
+                minimum_relative_improvement: staged.minimum_relative_improvement,
+                poll_block_size: staged.poll_block_size,
+                watchdog: staged.watchdog,
+                // The sixteen-variable product space pays the adjacent
+                // diagonals on every failed poll, which are exactly the polls
+                // that contract the mesh; see `search::directions`.
+                pair_diagonal_directions: bounds.len() <= 4,
+                minimal_positive_basis: staged.minimal_positive_basis,
                 ..Default::default()
             },
-            &mut evaluate,
+            &mut evaluator,
             progress_callback,
         );
 
         let termination = search_result.termination.as_str();
-        result_from_method(
+        let mut result = result_from_method(
             search_result.outcome,
             "mads",
             "progressive_barrier",
             termination,
             objective.history(),
             started.elapsed().as_secs_f64(),
-        )
+        );
+        result.search_diagnostics = Some(SearchDiagnostics {
+            converged: search_result.termination.is_converged(),
+            analysis_evaluations: search_result.evaluations,
+            cache_hits: search_result.cache_hits,
+            poll_iterations: search_result.iterations,
+            screening_evaluations: scan.screened,
+            screening_feasible: scan.feasible_screened,
+            verification_evaluations: scan_verification,
+            scan_wall_time_s: scan.elapsed_s,
+            search_wall_time_s: search_result.elapsed_s,
+            workers: staged.workers,
+            poll_block_size: staged.poll_block_size,
+            first_feasible_cost: search_result.first_feasible_cost,
+            relative_improvement: search_result.relative_improvement,
+        });
+        result
+    }
+}
+
+/// What the broad scan found.
+struct ScanOutcome {
+    /// Finalist design vectors, best first in the scan's own ranking.
+    candidates: Vec<Vec<f64>>,
+    /// Low-resolution analyses executed.
+    screened: usize,
+    /// How many of them were feasible under the reduced model.
+    feasible_screened: usize,
+    /// Wall-clock seconds spent in the scan.
+    elapsed_s: f64,
+}
+
+impl DesignOptimizer {
+    /// Rank a broad deterministic sample of the envelope on the reduced model
+    /// and return its best few design vectors.
+    ///
+    /// The reduced model is defined by `search::staged::screening_config`.
+    /// Its evaluations are deliberately *not* merged into the run's history:
+    /// they were scored on a coarser mesh and a looser closure, and a history
+    /// that mixed the two would let a reader compare objective values that
+    /// are not comparable. Their count is reported separately instead.
+    fn broad_scan(
+        &self,
+        bounds: &[(f64, f64)],
+        initial: Option<&[f64]>,
+        settings: &crate::search::staged::Settings,
+    ) -> ScanOutcome {
+        let started = Instant::now();
+        let empty = ScanOutcome {
+            candidates: Vec::new(),
+            screened: 0,
+            feasible_screened: 0,
+            elapsed_s: 0.0,
+        };
+        if settings.scan_points == 0 || settings.scan_finalists == 0 || bounds.is_empty() {
+            return empty;
+        }
+        let sample =
+            crate::search::staged::scan_sample(bounds, settings.scan_points, settings.seed);
+        if sample.is_empty() {
+            return empty;
+        }
+        let screening = crate::search::staged::screening_config(&self.config);
+        let mut objective = match initial.and_then(|values| DesignVector::from_array(values).ok()) {
+            Some(nominal) => DesignObjective::new_with_nominal(screening, nominal),
+            None => DesignObjective::new(screening),
+        };
+        let scores = objective.evaluate_batch(&sample, settings.workers);
+        let history = objective.history().clone();
+        let mut ranked: Vec<(usize, ScoredPoint)> = sample
+            .iter()
+            .zip(scores)
+            .enumerate()
+            .map(|(index, (values, (cost, _)))| {
+                (index, scored_point_at(values, cost, &history, index))
+            })
+            .collect();
+        let feasible_screened = ranked.iter().filter(|(_, point)| point.valid).count();
+        // Feasibility first, then aggregate violation, then objective: the
+        // same order the search ranks candidates by, with the sample index as
+        // the deterministic tie-break.
+        ranked.sort_by(|left, right| {
+            left.1
+                .feasibility_key()
+                .cmp(&right.1.feasibility_key())
+                .then(left.0.cmp(&right.0))
+        });
+        let candidates = ranked
+            .into_iter()
+            .take(settings.scan_finalists)
+            .map(|(index, _)| sample[index].clone())
+            .collect();
+        ScanOutcome {
+            candidates,
+            screened: sample.len(),
+            feasible_screened,
+            elapsed_s: started.elapsed().as_secs_f64(),
+        }
+    }
+}
+
+/// Re-evaluate the scan finalists, and the caller's nominal design, with the
+/// run's own full objective, and return the best start plus how many coupled
+/// analyses that cost.
+///
+/// This is the boundary the reduced model may not cross: a scan finalist only
+/// becomes the search's starting point after a full coupled evaluation ranks
+/// it ahead of the nominal, and those evaluations enter the run's history like
+/// any other. Including the nominal in the same block is what makes the
+/// comparison a like-for-like one.
+fn verify_scan_finalists<E: SearchObjective + ?Sized>(
+    objective: &mut E,
+    candidates: &[Vec<f64>],
+    nominal: Option<&[f64]>,
+    workers: usize,
+) -> (Option<Vec<f64>>, usize) {
+    if candidates.is_empty() {
+        return (None, 0);
+    }
+    let mut points: Vec<Vec<f64>> = Vec::with_capacity(candidates.len() + 1);
+    if let Some(values) = nominal {
+        points.push(values.to_vec());
+    }
+    for candidate in candidates {
+        if !points.iter().any(|existing| existing == candidate) {
+            points.push(candidate.clone());
+        }
+    }
+    let before = objective.history().n_evaluations();
+    let scores = objective.evaluate_batch(&points, workers);
+    let history = objective.history();
+    let mut best: Option<(usize, ScoredPoint)> = None;
+    for (offset, (values, (cost, _))) in points.iter().zip(scores).enumerate() {
+        let scored = scored_point_at(values, cost, history, before + offset);
+        let better = best
+            .as_ref()
+            .is_none_or(|(_, incumbent)| scored.feasibility_key() < incumbent.feasibility_key());
+        if better {
+            best = Some((offset, scored));
+        }
+    }
+    (best.map(|(offset, _)| points[offset].clone()), points.len())
+}
+
+/// Adapter that evaluates one independent MADS block through the objective's
+/// own worker pool.
+///
+/// The block boundary is chosen by the search (see `search::mads`), so the
+/// worker count changes only how the block is distributed, never which points
+/// are evaluated or the order they are considered in.
+struct BatchEvaluator<'a, E: SearchObjective + ?Sized> {
+    objective: &'a mut E,
+    workers: usize,
+}
+
+impl<E: SearchObjective + ?Sized> crate::search::mads::Evaluate for BatchEvaluator<'_, E> {
+    fn evaluate_block(&mut self, points: &[Vec<f64>]) -> Vec<ScoredPoint> {
+        let before = self.objective.history().n_evaluations();
+        let scores = self.objective.evaluate_batch(points, self.workers);
+        let history = self.objective.history();
+        points
+            .iter()
+            .zip(scores)
+            .enumerate()
+            .map(|(offset, (values, (cost, _)))| {
+                scored_point_at(values, cost, history, before + offset)
+            })
+            .collect()
     }
 }

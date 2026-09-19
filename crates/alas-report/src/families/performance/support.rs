@@ -119,7 +119,7 @@ pub(super) fn draw_arrow(scene: &mut Scene, p0: Point2D, p1: Point2D, color: Col
 
 /// Vertices of a diamond centered at `center` with "radius" `r` -- the V-n
 /// diagram's cruise-point marker (matplotlib's `marker="D"`).
-#[allow(dead_code)] // The enhanced envelope renderer owns the only current call site.
+// The enhanced envelope renderer owns the only current call site (envelope.rs:333).
 pub(super) fn diamond_points(center: Point2D, r: f64) -> Vec<Point2D> {
     vec![
         [center[0], center[1] - r],

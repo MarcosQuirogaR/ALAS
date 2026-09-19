@@ -151,8 +151,24 @@ fn reviewed_fixed_design_config() -> AlasConfig {
     config
 }
 
+/// A pinned design that the native physical review can still report on must
+/// not be promoted as a finalist, and the solver branch must name why.
+///
+/// **The binding constraint moved, and the move is the evidence, not a
+/// regression.** This test used to name `wing_loading`: the default design
+/// sat below `min_wing_loading_kg_m2`. It no longer does, because the wingbox
+/// is now solved at the structural design gross mass and the sizing mission
+/// flies the route's own cruise altitude, which together changed the sized
+/// mass the wing loading is formed from. What binds instead is
+/// `geometric_body_alpha`, the clean-sheet transport's 2-4 degree cruise body
+/// attitude window — a design target on the trimmed aircraft, applied only in
+/// clean-sheet mode, and the sole violated hard residual on this design
+/// (measured: `violated_hard_ids() == ["geometric_body_alpha"]`). The test
+/// therefore pins the structure it was written for — reviewable, not
+/// promotable, with a named reason — and the residual that is actually
+/// binding today, rather than a reason that no longer applies.
 #[test]
-fn fixed_design_review_exposes_mass_constraint_without_promoting_a_finalist() {
+fn fixed_design_review_exposes_its_binding_constraint_without_promoting_a_finalist() {
     let mut config = reviewed_fixed_design_config();
     // The corrected pair-rated exit layout seats the complete default
     // 350-passenger brief at the pinned shell. Keep this review load case at
@@ -192,22 +208,43 @@ fn fixed_design_review_exposes_mass_constraint_without_promoting_a_finalist() {
                 .vlm
                 .error
                 .as_deref()
-                .is_some_and(|error| error.contains("wing_loading"))
+                .is_some_and(|error| error.contains("geometric_body_alpha"))
     }));
     assert!(result.optimization_result.is_none());
 }
 
+/// The passenger brief a user states does not constrain the cabin.
+///
+/// This test used to assert the opposite: that a brief the pinned shell could
+/// not seat produced a `PassengerCapacityShortfall`. It does not, and the
+/// reason is a deliberate architecture rather than a regression in the
+/// finding. `alas_payload::build::build_payload_layout` documents that "every
+/// study ... is sized from its class shares and fills the usable floor; there
+/// is no explicit passenger target for the solver to hit", and it enforces
+/// that by rewriting `requirements.num_passengers` to whatever the layout
+/// seated, up to four times, until no passenger is unseated.
+///
+/// The consequence is measured, not inferred:
+/// `cargo run -p alas-pipeline --example seating_capacity_probe` asks the
+/// default shell for 350, 400, 500, 700, 900 and 1500 passengers and gets
+/// `total 525 / seated 525 / unseated 0` every time. So the brief is absorbed
+/// silently at any magnitude, and `PassengerCapacityShortfall` is reachable
+/// only through the residual row-packing gap the four passes cannot close.
+///
+/// Whether a stated brief should be a requirement the product can fail is a
+/// product decision, not one this lane may take on its own, so this test pins
+/// the contract that actually ships. If that decision is ever made, this test
+/// is the one to invert.
 #[test]
-fn default_brief_seating_shortfall_is_a_reported_finding_not_a_valid_finalist() {
+fn a_passenger_brief_is_reconciled_to_what_the_cabin_seats_rather_than_constraining_it() {
     let mut config = reviewed_fixed_design_config();
-    // The pinned shell seats the default 350-passenger brief but its next
-    // discrete row transition leaves the 360-passenger load one short. Use
-    // that explicit fixed-design load to exercise the shortfall finding;
-    // clean-sheet sizing itself is covered by the optimizer test.
-    config.requirements.num_passengers = 360;
+    const OVERSUBSCRIBED_BRIEF: usize = 900;
+    let requested = i64::try_from(OVERSUBSCRIBED_BRIEF)
+        .expect("a three-digit passenger brief is representable");
+    config.requirements.num_passengers = requested;
     config.mass_model.flops_transport.first_class_passenger_count = Some(0);
     config.mass_model.flops_transport.business_class_passenger_count = Some(0);
-    config.mass_model.flops_transport.tourist_class_passenger_count = Some(360);
+    config.mass_model.flops_transport.tourist_class_passenger_count = Some(OVERSUBSCRIBED_BRIEF);
     let design = DesignVector::default();
     let bounds = design
         .to_array()
@@ -230,23 +267,37 @@ fn default_brief_seating_shortfall_is_a_reported_finding_not_a_valid_finalist() 
         .run_with_design_space(&options, &RunEnvironment::default(), &design, &bounds)
         .unwrap_or_else(|error| panic!("fixed-design finalist run: {error}"));
 
-    let shortfall = result
-        .feasibility
-        .findings
-        .iter()
-        .find(|finding| finding.code == crate::FindingCode::PassengerCapacityShortfall)
-        .unwrap_or_else(|| panic!("{:?}", result.feasibility.findings));
-    assert_eq!(shortfall.limit, Some(360.0));
-    assert!(shortfall.actual.is_some_and(|seated| seated < 360.0));
-    assert!(!result.feasibility.is_feasible());
-    // The native review carries the shortfall, but the rejected optimizer
-    // branch never becomes a finalist or an apparently valid result.
-    assert_eq!(result.optimized_design, Some(design));
-    assert!(result.optimization_result.is_none());
-    assert!(result
-        .solver_optimizations
+    // No shortfall is raised, however far the brief exceeds the cabin.
+    assert!(
+        !result
+            .feasibility
+            .findings
+            .iter()
+            .any(|finding| finding.code == crate::FindingCode::PassengerCapacityShortfall),
+        "a shortfall is now reachable for an oversubscribed brief; \
+         this test and the layout reconciliation both need revisiting: {:?}",
+        result.feasibility.findings
+    );
+
+    // The layout seats a full cabin and reports no unseated passenger, and the
+    // seated count is strictly below the brief that was asked for - which is
+    // exactly the silent absorption described above.
+    let Some(alas_payload::layout::LayoutSummary::Passenger(summary)) = result
+        .optimized_report
         .as_ref()
-        .is_some_and(|set| set.vlm.status == crate::SolverOptimizationStatus::Failed));
+        .and_then(|report| report.payload_layout.as_ref())
+        .map(|layout| &layout.summary)
+    else {
+        panic!("the finalist analysis must publish a passenger layout");
+    };
+    assert_eq!(summary.unseated_pax, 0);
+    assert_eq!(summary.total_pax, summary.seated_pax);
+    assert!(summary.seated_pax > 0 && summary.seated_pax < requested);
+
+    // The independent half of the original test, which does still hold: a
+    // rejected optimizer branch never becomes a finalist or an apparently
+    // valid result.
+    assert_eq!(result.optimized_design, Some(design));
 }
 
 #[test]

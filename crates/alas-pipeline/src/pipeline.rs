@@ -39,6 +39,7 @@ use alas_route::route::{Route, RouteSource};
 use alas_route::{fetch_route_with_status, SimbriefFetchStatus};
 use serde::{Deserialize, Serialize};
 
+use crate::acceptance::AcceptanceRoute;
 use crate::avl::{run_avl_takeoff_comparison, AvlAnalysisResult};
 use crate::baseline::{analyze_baseline, BaselineReport};
 use crate::cabin_scene::export_cabin_scene;
@@ -595,7 +596,7 @@ type MissionStageOutputs = (
     Option<SelectedLoadCase>,
 );
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct PlannedRoute {
     route: Route,
     status: RoutePlanningStatus,
@@ -876,6 +877,22 @@ impl DesignPipeline {
         let nominal_design = initial_design.unwrap_or_else(|| self.configured_nominal_design());
         let fixed_design_review = bounds.is_some_and(bounds_are_fixed);
 
+        // The route depends on the configuration, not on the design, so plan
+        // it once here rather than inside the mission stage. Two callers now
+        // need it: the mission stage as before, and the optimizer's
+        // reporting-fidelity acceptance check, which has to fly the same
+        // route the published mission will. Planning it twice would also mean
+        // two SimBrief fetches per run.
+        let planned_route = if self.config.mission.enabled {
+            let planned = self.plan_active_route(dispatched_route);
+            if planned.is_some() {
+                emit_diagnostic(events, run_clock, "setup", "Route planned for this run");
+            }
+            planned
+        } else {
+            None
+        };
+
         // Stage 0: Baseline W&B + stability estimation.
         report("Stage 1/7: baseline weight, balance, and stability");
         let mut stage_clock = begin_stage(
@@ -909,6 +926,28 @@ impl DesignPipeline {
                 "Optimization skipped"
             },
         );
+        // Resolve the two airports once, with the same fallback
+        // `evaluate_active_mission` applies: a planned route carries its
+        // endpoint records only when the planner had them, and a great-circle
+        // plan for a configured city pair does not. Doing it here keeps the
+        // acceptance check and the published mission on one route.
+        let acceptance_route = planned_route.as_ref().and_then(|planned| {
+            let origin = planned
+                .route
+                .origin_airport
+                .clone()
+                .or_else(|| get_airport(&self.config.departure_airport).ok().cloned())?;
+            let destination = planned
+                .route
+                .dest_airport
+                .clone()
+                .or_else(|| get_airport(&self.config.arrival_airport).ok().cloned())?;
+            Some(AcceptanceRoute {
+                origin,
+                destination,
+                distance_m: planned.route.total_distance_m(),
+            })
+        });
         let solver_optimizations = if options.optimize {
             Some(run_solver_optimizations(
                 &self.config,
@@ -919,6 +958,7 @@ impl DesignPipeline {
                 &nominal_design,
                 bounds,
                 Some(analysis_dir.as_path()),
+                acceptance_route.as_ref(),
             ))
         } else {
             None
@@ -957,6 +997,50 @@ impl DesignPipeline {
         } else {
             (nominal_design, None, None)
         };
+        // Say what the reporting-fidelity re-evaluation did, in the run log,
+        // before any downstream stage speaks. A user who sees a converged
+        // search and an infeasible aircraft is entitled to read which of the
+        // two the run is actually claiming.
+        if let Some(acceptance) = optimization_result
+            .as_ref()
+            .and_then(|optimization| optimization.delivered_acceptance.as_ref())
+        {
+            let (severity, message) = if acceptance.verified
+                && acceptance.delivered_is_search_finalist
+            {
+                (
+                    RunEventSeverity::Info,
+                    format!(
+                        "Finalist accepted at reporting fidelity ({} candidate(s) re-evaluated, {:.2} s)",
+                        acceptance.candidates_evaluated, acceptance.wall_time_s
+                    ),
+                )
+            } else if acceptance.verified {
+                (
+                    RunEventSeverity::Warning,
+                    format!(
+                        "Search finalist rejected at reporting fidelity by {} ({}); delivered a verified fallback candidate instead ({} candidate(s) re-evaluated, {:.2} s). This run is NOT reported as converged.",
+                        acceptance.finalist_rejected_by.join(", "),
+                        acceptance.rejection_messages.join("; "),
+                        acceptance.candidates_evaluated,
+                        acceptance.wall_time_s
+                    ),
+                )
+            } else {
+                (
+                    RunEventSeverity::Error,
+                    format!(
+                        "No candidate survived the reporting-fidelity re-evaluation; the delivered design is rejected by {} ({}) ({} candidate(s) re-evaluated, {:.2} s). This run is NOT reported as converged.",
+                        acceptance.delivered_rejected_by.join(", "),
+                        acceptance.rejection_messages.join("; "),
+                        acceptance.candidates_evaluated,
+                        acceptance.wall_time_s
+                    ),
+                )
+            };
+            report(&message);
+            emit_diagnostic_with_severity(events, run_clock, "optimization", &message, severity);
+        }
         finish_stage(events, run_clock, stage_clock, 2, "optimization");
         check_cancelled(cancel)?;
 
@@ -1014,8 +1098,28 @@ impl DesignPipeline {
                     }
                 ));
             }
+            // Bind the report to the vector the assessment was *evaluated*
+            // on, not the one it was handed. A clean-sheet design space
+            // derives the fuselage coordinate from the cabin load case, so
+            // the two are the same vector for an optimizer finalist and can
+            // differ for any other supplied design (see
+            // `alas_opt::ResolvedProductState::design`). Reporting the
+            // caller's vector there would publish a different aeroplane from
+            // the one this gate just passed.
+            let assessed_design = assessment.resolved.design;
+            if assessed_design != optimized_design {
+                emit_diagnostic(
+                    events,
+                    run_clock,
+                    "full_analysis",
+                    &format!(
+                        "Finalist geometry re-derived by the design space: fuselage length {:.6} m evaluated against {:.6} m supplied; the report is bound to the evaluated aircraft",
+                        assessed_design.fuselage_length_m, optimized_design.fuselage_length_m,
+                    ),
+                );
+            }
             optimized_report = full.run_at_sized_takeoff_mass(
-                &optimized_design,
+                &assessed_design,
                 true,
                 assessment.sized.takeoff_mass_kg,
             )?;
@@ -1215,7 +1319,7 @@ impl DesignPipeline {
                 "downstream/mission",
                 "Mission and route analysis",
             );
-            let result = self.evaluate_active_mission(&optimized_report, dispatched_route);
+            let result = self.evaluate_active_mission(&optimized_report, planned_route.as_ref());
             finish_component(
                 events,
                 run_clock,
@@ -1868,13 +1972,18 @@ impl DesignPipeline {
     fn evaluate_active_mission(
         &self,
         report: &AnalysisReport,
-        dispatched_route: Option<Route>,
+        planned_route: Option<&PlannedRoute>,
     ) -> Result<MissionStageOutputs, String> {
         if !self.config.mission.enabled {
             return Ok((None, None, None, None));
         }
-        let planned = self
-            .plan_active_route(dispatched_route)
+        // The route is planned once per run, before the search starts,
+        // because it depends on the configuration and not on the design. That
+        // is what lets the optimizer's reporting-fidelity acceptance check fly
+        // the same route this stage does, instead of a second route fetched
+        // from a network service that may answer differently.
+        let planned = planned_route
+            .cloned()
             .ok_or_else(|| "mission is enabled but route planning produced no route".to_owned())?;
         let selected_origin = get_airport(&self.config.departure_airport)
             .map_err(|error| format!("mission departure airport could not be resolved: {error}"))?;

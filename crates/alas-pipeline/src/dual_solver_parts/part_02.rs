@@ -271,6 +271,7 @@ mod tests {
             &DesignVector::default(),
             None,
             None,
+            None,
         );
 
         assert_eq!(result.vlm.status, SolverOptimizationStatus::Failed);
@@ -281,5 +282,42 @@ mod tests {
             .error
             .as_deref()
             .is_some_and(|error| error.contains("no feasible design")));
+    }
+
+    #[test]
+    fn a_serial_request_reaches_the_candidate_batch_and_not_only_the_branches() {
+        // `--no-parallel` used to decide only whether the VLM and AVL
+        // branches ran side by side. A user who asks for a serial run gets
+        // one candidate evaluated at a time as well, whatever the automatic
+        // worker count would have resolved to on this machine.
+        let mut config = AlasConfig::default();
+        config.optimizer.solver.workers = 0;
+        assert!(
+            alas_config::SolverSettings::default().resolved_workers() >= 1,
+            "the automatic default resolves against the machine"
+        );
+
+        let serial = serial_solver_config(&config, false);
+        assert_eq!(serial.optimizer.solver.workers, 1);
+        assert_eq!(serial.optimizer.solver.resolved_workers(), 1);
+
+        let parallel = serial_solver_config(&config, true);
+        assert_eq!(
+            parallel.optimizer.solver.workers, 0,
+            "a parallel run keeps the configured automatic setting"
+        );
+    }
+
+    #[test]
+    fn a_serial_request_does_not_overwrite_an_explicit_worker_count_upwards() {
+        let mut config = AlasConfig::default();
+        config.optimizer.solver.workers = 4;
+        assert_eq!(
+            serial_solver_config(&config, false)
+                .optimizer
+                .solver
+                .workers,
+            1
+        );
     }
 }

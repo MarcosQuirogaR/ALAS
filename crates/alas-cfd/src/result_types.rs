@@ -213,6 +213,14 @@ pub struct MassBalanceSample {
     pub cumulative: Option<f64>,
 }
 
+/// Default solver-only verdict for a record archived before the field
+/// existed: `Failed`, because an older record carries no evidence that the
+/// solver reached any criterion, and absence of evidence must not read as a
+/// pass.
+fn default_numerical_convergence() -> CfdOutcome {
+    CfdOutcome::Failed
+}
+
 /// Mesh quality evidence from `checkMesh`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MeshQuality {
@@ -226,6 +234,47 @@ pub struct MeshQuality {
     pub max_skewness: Option<f64>,
     /// Minimum cell volume, if parsed.
     pub min_volume_m3: Option<f64>,
+    /// Faces `checkMesh` called *severely* non-orthogonal (`> 70 deg`), if the
+    /// line was present.
+    ///
+    /// On the runs measured here `checkMesh` prints this as a single-`*`
+    /// warning and still reports `Non-orthogonality check OK` and `Mesh OK`.
+    /// No angle is claimed at which it would instead *fail*: that number is not
+    /// in the log and depends on the release and the generation dictionary.
+    ///
+    /// The maximum angle alone cannot be read without this count — on the fine
+    /// preset one face out of 436 389 cells reaches `71.37 deg` against an
+    /// average of `5.35 deg`, which is a different mesh from one where
+    /// thousands do.  What the count does **not** establish is that the outlier
+    /// is aerodynamically irrelevant; its location and its effect on the
+    /// integrated loads were not measured.
+    ///
+    /// `None` means the warning line was absent, which is the normal case.
+    #[serde(default)]
+    pub severely_non_orthogonal_faces: Option<u64>,
+    /// Largest BOUNDARY-face skewness and the patch it occurs on.
+    ///
+    /// Dimensionless.  `checkMesh`'s headline `Max skewness` is the internal
+    /// maximum; this is read from the `boundaryField` of the written
+    /// `skewness` field and is the only exact boundary value available.
+    /// `None` means the field was not written, so the boundary limit is not
+    /// demonstrated by a measured maximum.
+    #[serde(default)]
+    pub max_boundary_skewness: Option<f64>,
+    /// Patch carrying [`Self::max_boundary_skewness`].
+    #[serde(default)]
+    pub max_boundary_skewness_patch: Option<String>,
+    /// Faces violating `maxInternalSkewness` or `maxBoundarySkewness`, from
+    /// `checkMesh -meshQuality`.
+    ///
+    /// `Some(0)` demonstrates both declared skewness limits; `Some(n > 0)` is a
+    /// violation of at least one, which the text does not attribute.  `None`
+    /// means the run did not use `-meshQuality`, so neither limit is proven.
+    #[serde(default)]
+    pub skewness_faces_in_error: Option<u64>,
+    /// Faces violating `maxNonOrtho`, from `checkMesh -meshQuality`.
+    #[serde(default)]
+    pub non_orthogonality_faces_in_error: Option<u64>,
     /// Raw quality output retained for audit/export.
     pub raw_output: String,
     /// Percentile summaries computed from native OpenFOAM cell-quality fields.
@@ -254,6 +303,11 @@ impl Default for MeshQuality {
             max_non_orthogonality_deg: None,
             max_skewness: None,
             min_volume_m3: None,
+            severely_non_orthogonal_faces: None,
+            max_boundary_skewness: None,
+            max_boundary_skewness_patch: None,
+            skewness_faces_in_error: None,
+            non_orthogonality_faces_in_error: None,
             raw_output: String::new(),
             distributions: Vec::new(),
             near_wall: None,
@@ -351,6 +405,28 @@ pub struct CfdResults {
     pub mass_balance: Vec<MassBalanceSample>,
     /// Mesh quality evidence.
     pub mesh_quality: MeshQuality,
+    /// Whether the converted mesh meets the DECLARED numeric limits, check by
+    /// check, with unmeasured checks marked as such.
+    ///
+    /// Separate from `checkMesh`'s own verdict, which is one of the checks
+    /// inside it.  A case can converge numerically on a mesh that violates a
+    /// declared limit; both verdicts are kept so neither hides the other.
+    #[serde(default)]
+    pub mesh_qualification: MeshQualification,
+    /// Solver-only verdict, before the mesh contract is applied.
+    ///
+    /// `outcome` is the worse of this and the mesh qualification.  This field
+    /// keeps the numerical result visible when a mesh failure overrides it.
+    #[serde(default = "default_numerical_convergence")]
+    pub numerical_convergence: CfdOutcome,
+    /// Whether each solved field was still being updated between the last two
+    /// written times.
+    ///
+    /// This is what separates a converged equation from an abandoned one; the
+    /// residual history cannot.  Absent on results archived before the check
+    /// existed, which reads as "not observed", never as "not updated".
+    #[serde(default)]
+    pub field_updates: FieldUpdateEvidence,
     /// Actual native/sampled field outputs found after post-processing.
     pub fields: Vec<FieldArtifact>,
     /// Face-resolved pressure and wall-shear distribution from the latest

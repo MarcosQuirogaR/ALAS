@@ -31,6 +31,7 @@ fn constrained_solution_restores_feasibility_and_reduces_objective() {
             seed: 11,
             initial_mesh_size: 0.25,
             minimum_mesh_size: 1.0e-5,
+            ..Settings::default()
         },
         &mut evaluate,
         None,
@@ -71,7 +72,7 @@ fn progressive_barrier_improves_quantitative_miss_without_false_feasibility() {
 
 #[test]
 fn poll_basis_contains_signed_oblique_directions_and_is_full_rank() {
-    let directions = poll_directions(4, 7, 23);
+    let directions = poll_directions(4, 7, 23, true);
     assert!(directions.len() >= 8);
     assert!(directions
         .iter()
@@ -256,8 +257,219 @@ fn seeded_runs_are_reproducible() {
     };
     let (first, first_trace) = execute();
     let (second, second_trace) = execute();
-    assert_eq!(first, second);
+    // Everything the seed determines, compared field by field: `elapsed_s` is
+    // a wall-clock measurement and is the one part of the outcome that is
+    // meant to differ between two runs of the same search.
+    assert_eq!(first.outcome, second.outcome);
+    assert_eq!(first.termination, second.termination);
+    assert_eq!(first.evaluations, second.evaluations);
+    assert_eq!(first.cache_hits, second.cache_hits);
+    assert_eq!(first.iterations, second.iterations);
+    assert_eq!(first.first_feasible_cost, second.first_feasible_cost);
+    assert_eq!(first.relative_improvement, second.relative_improvement);
     assert_eq!(first_trace, second_trace);
+}
+
+#[test]
+fn a_block_evaluated_in_parallel_reaches_the_same_result_as_a_serial_one() {
+    // The poll block boundary is a search setting, so a caller that spreads a
+    // block over threads must evaluate exactly the same points, in the same
+    // order, and reach the same winner.  This double records the blocks it is
+    // handed and scores them the way a threaded caller would: all at once.
+    struct Blocks {
+        seen: Vec<Vec<Vec<f64>>>,
+    }
+    impl Evaluate for Blocks {
+        fn evaluate_block(&mut self, points: &[Vec<f64>]) -> Vec<ScoredPoint> {
+            self.seen.push(points.to_vec());
+            points
+                .iter()
+                .map(|values| {
+                    let cost = values
+                        .iter()
+                        .map(|value| (value - 0.3).powi(2))
+                        .sum::<f64>();
+                    point(values, cost, true, 0.0)
+                })
+                .collect()
+        }
+    }
+
+    let settings = Settings {
+        max_iterations: 12,
+        max_evaluations: 400,
+        seed: 31,
+        ..Settings::default()
+    };
+    let mut batched = Blocks { seen: Vec::new() };
+    let batched_outcome = run(
+        &[(0.0, 1.0), (0.0, 1.0), (-1.0, 1.0)],
+        Some(&[0.9, 0.1, -0.5]),
+        settings,
+        &mut batched,
+        None,
+    );
+
+    let mut serial_trace = Vec::new();
+    let mut serial = |values: &[f64]| {
+        serial_trace.push(values.to_vec());
+        let cost = values
+            .iter()
+            .map(|value| (value - 0.3).powi(2))
+            .sum::<f64>();
+        point(values, cost, true, 0.0)
+    };
+    let serial_outcome = run(
+        &[(0.0, 1.0), (0.0, 1.0), (-1.0, 1.0)],
+        Some(&[0.9, 0.1, -0.5]),
+        settings,
+        &mut serial,
+        None,
+    );
+
+    assert_eq!(batched_outcome.outcome, serial_outcome.outcome);
+    assert_eq!(batched_outcome.termination, serial_outcome.termination);
+    assert_eq!(batched_outcome.evaluations, serial_outcome.evaluations);
+    let batched_trace: Vec<Vec<f64>> = batched.seen.into_iter().flatten().collect();
+    assert_eq!(batched_trace, serial_trace);
+    // The blocks really were blocks, not one point at a time.
+    assert!(batched_trace.len() > 1);
+}
+
+#[test]
+fn a_repeated_mesh_node_is_served_from_the_cache_rather_than_re_analysed() {
+    let analyses = std::cell::Cell::new(0usize);
+    let mut evaluate = |values: &[f64]| {
+        analyses.set(analyses.get() + 1);
+        point(values, values[0].powi(2), true, 0.0)
+    };
+    let outcome = run(
+        &[(-1.0, 1.0), (-1.0, 1.0)],
+        Some(&[0.5, 0.5]),
+        Settings {
+            max_iterations: 25,
+            max_evaluations: 5_000,
+            seed: 13,
+            ..Settings::default()
+        },
+        &mut evaluate,
+        None,
+    );
+    assert_eq!(outcome.evaluations, analyses.get());
+    // The retried successful direction and the two poll centres put the
+    // search back on nodes it has already paid for; the cache is what stops
+    // those from being analysed twice.
+    assert!(outcome.cache_hits > 0);
+}
+
+#[test]
+fn convergence_needs_feasibility_a_small_mesh_and_a_real_improvement() {
+    // (1) A run that starts at the optimum has nothing to improve on, so it
+    // reaches the mesh floor and reports that, not convergence.
+    let mut at_optimum = |values: &[f64]| point(values, values[0].powi(2), true, 0.0);
+    let no_improvement = run(
+        &[(-1.0, 1.0)],
+        Some(&[0.0]),
+        Settings {
+            max_iterations: 40,
+            max_evaluations: 2_000,
+            seed: 2,
+            minimum_mesh_size: 1.0e-6,
+            ..Settings::default()
+        },
+        &mut at_optimum,
+        None,
+    );
+    assert!(!no_improvement.termination.is_converged());
+    assert_eq!(no_improvement.termination, TerminationReason::MeshLimit);
+
+    // (2) A run with no feasible point anywhere cannot converge either, no
+    // matter how far the mesh contracts.
+    let mut never_feasible =
+        |values: &[f64]| point(values, -values[0], false, 1.0 + values[0].abs());
+    let infeasible = run(
+        &[(0.0, 1.0)],
+        Some(&[0.5]),
+        Settings {
+            max_iterations: 40,
+            max_evaluations: 2_000,
+            seed: 2,
+            ..Settings::default()
+        },
+        &mut never_feasible,
+        None,
+    );
+    assert!(!infeasible.termination.is_converged());
+    assert!(infeasible.relative_improvement.is_none());
+
+    // (3) A feasible start with room to improve does converge, and reports
+    // the improvement it converged on.
+    let mut improvable = |values: &[f64]| point(values, (values[0] - 0.25).powi(2), true, 0.0);
+    let converged = run(
+        &[(-1.0, 1.0)],
+        Some(&[0.9]),
+        Settings {
+            max_iterations: 40,
+            max_evaluations: 2_000,
+            seed: 2,
+            ..Settings::default()
+        },
+        &mut improvable,
+        None,
+    );
+    assert_eq!(converged.termination, TerminationReason::Converged);
+    assert!(converged.termination.is_converged());
+    assert!(converged.outcome.winner.valid);
+    assert!(converged.relative_improvement.unwrap_or(0.0) > 0.0);
+}
+
+#[test]
+fn a_watchdog_stop_is_reported_as_not_converged() {
+    // The watchdog is a safety limit, so a run that hits it must not be able
+    // to claim the convergence the remaining polls would have had to earn.
+    let mut slow = |values: &[f64]| {
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        point(values, (values[0] - 0.25).powi(2), true, 0.0)
+    };
+    let outcome = run(
+        &[(-1.0, 1.0), (-1.0, 1.0)],
+        Some(&[0.9, 0.9]),
+        Settings {
+            max_iterations: 200,
+            max_evaluations: 100_000,
+            seed: 2,
+            watchdog: Some(std::time::Duration::from_millis(30)),
+            ..Settings::default()
+        },
+        &mut slow,
+        None,
+    );
+    assert_eq!(outcome.termination, TerminationReason::Watchdog);
+    assert_eq!(outcome.termination.as_str(), "watchdog");
+    assert!(!outcome.termination.is_converged());
+}
+
+#[test]
+fn dropping_the_pair_diagonals_leaves_a_positive_spanning_poll() {
+    // The sixteen-variable product space polls without the adjacent
+    // diagonals.  What must survive is the property the theory needs: the
+    // remaining directions still positively span the space, which for a
+    // signed set means every coordinate is reachable both ways.
+    let directions = poll_directions(16, 3, 19, false);
+    let enriched = poll_directions(16, 3, 19, true);
+    assert!(directions.len() < enriched.len());
+    for direction in &directions {
+        let opposite: Vec<i64> = direction.iter().map(|value| -value).collect();
+        assert!(directions.contains(&opposite));
+    }
+    for index in 0..16 {
+        let mut unit = vec![0_i64; 16];
+        unit[index] = 1;
+        let negative: Vec<i64> = unit.iter().map(|value| -value).collect();
+        assert!(directions.contains(&unit), "coordinate {index}");
+        assert!(directions.contains(&negative), "coordinate {index}");
+    }
+    assert!(full_rank(&direction_matrix(16, 3, 3, 19)));
 }
 
 #[test]

@@ -86,8 +86,22 @@ pub(crate) fn show_native_viewport(
             builder.inner_size = Some(size);
         }
     }
-    if let Some(position) = geometry.and_then(|geometry| geometry.native_position) {
-        builder.position = Some(position);
+    // A viewport builder is reconstructed on every parent pass. Only send
+    // the initial position until egui reports the child outer rect; after
+    // that, re-sending it would snap a moved window back and look like a
+    // flicker while an analysis window is running.
+    let child_has_position = ctx.input(|input| {
+        input
+            .raw
+            .viewports
+            .get(&viewport_id)
+            .and_then(|viewport| viewport.outer_rect)
+            .is_some_and(valid_rect)
+    });
+    if !child_has_position {
+        if let Some(position) = geometry.and_then(|geometry| geometry.native_position) {
+            builder.position = Some(position);
+        }
     }
     let fallback_size = builder.inner_size;
     let fallback_min_size = builder.min_inner_size;
@@ -191,11 +205,15 @@ fn initial_viewport_geometry(
         .filter(|&size| valid_size(size))
         .or_else(|| fallback_size.filter(|&size| valid_size(size)))?;
 
-    // `monitor_size` is in the same logical-point coordinate system as the
-    // root outer rect.  Its origin is the monitor's top-left in viewport
-    // coordinates, so no physical-pixel conversion or DPI guess is needed.
-    let native_position =
-        root_monitor_size.map(|monitor_size| centered_position_in_size(monitor_size, size));
+    // `outer_rect` is already in the desktop's logical-point coordinate
+    // system, so centering from it places a detached child over the main ALAS
+    // window. A monitor-size center is only a first-frame fallback when the
+    // integration has not reported the root window's absolute origin yet.
+    let native_position = root_outer_rect
+        .map(|rect| centered_position_in_rect(rect, size))
+        .or_else(|| {
+            root_monitor_size.map(|monitor_size| centered_position_in_size(monitor_size, size))
+        });
 
     // Embedded viewports are egui Windows inside the root content area.  Their
     // position therefore uses the root screen rectangle, rather than the
@@ -305,7 +323,7 @@ mod tests {
     }
 
     #[test]
-    fn initial_geometry_scales_root_window_and_centers_on_monitor() {
+    fn initial_geometry_scales_root_window_and_centers_on_parent_window() {
         let context = Context::default();
         let mut geometry = None;
         let _ = context.run(
@@ -324,12 +342,12 @@ mod tests {
 
         let geometry = geometry.expect("valid root metrics should produce initial geometry");
         assert_vec2_close(geometry.size, egui::vec2(768.0, 480.0));
-        assert_pos2_close(geometry.native_position, Pos2::new(896.0, 480.0));
+        assert_pos2_close(geometry.native_position, Pos2::new(376.0, 240.0));
         assert_pos2_close(geometry.embedded_position, Pos2::new(256.0, 160.0));
     }
 
     #[test]
-    fn remembered_size_wins_but_is_centered_using_current_monitor_points() {
+    fn remembered_size_wins_but_is_centered_using_current_parent_points() {
         let context = Context::default();
         let mut geometry = None;
         let _ = context.run(
@@ -349,7 +367,7 @@ mod tests {
 
         let geometry = geometry.expect("remembered size should produce initial geometry");
         assert_eq!(geometry.size, egui::vec2(500.0, 300.0));
-        assert_pos2_close(geometry.native_position, Pos2::new(1030.0, 570.0));
+        assert_pos2_close(geometry.native_position, Pos2::new(390.0, 250.0));
     }
 
     #[test]

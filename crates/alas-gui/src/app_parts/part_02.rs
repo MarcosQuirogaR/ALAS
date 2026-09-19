@@ -5,13 +5,26 @@ impl AlasApp {
     /// Top-bar entry point for standalone analyses that do not require a
     /// whole-aircraft pipeline run.
     fn render_analysis_menu(&mut self, ui: &mut Ui) {
+        // An immediate egui viewport lives only while its parent keeps
+        // showing it, so the detached window is dispatched beside its entry.
+        crate::views::wing_analysis_view::show_wing_analysis_window(&mut self.state, ui.ctx());
         ui.menu_button(tr("Analysis"), |ui| {
+            if ui.button(tr("Open Wing Analysis")).clicked() {
+                crate::views::wing_analysis_view::open_wing_analysis(ui.ctx());
+                ui.close_menu();
+            }
             if ui.button(tr("Open Airfoil CFD")).clicked() {
                 self.state.cfd.window_open = true;
                 self.state.cfd.tab = crate::cfd::CfdTab::Study;
                 ui.close_menu();
             }
             if ui.button(tr("Open Airfoil Screening")).clicked() {
+                // Opening an already-open workspace means "show it to me": the
+                // window may be behind the main one, where setting the flag
+                // again would look like the action did nothing.
+                if self.state.screening.window_open {
+                    crate::views::screening_window::focus_window(ui.ctx());
+                }
                 self.state.screening.window_open = true;
                 ui.close_menu();
             }
@@ -90,6 +103,16 @@ impl AlasApp {
             };
             if ui.button(tr(label)).clicked() {
                 self.state.show_view_panel = !self.state.show_view_panel;
+                ui.close_menu();
+            }
+            ui.separator();
+            let run_log_label = if self.state.run_log_open {
+                "Hide Run Log"
+            } else {
+                "Show Run Log"
+            };
+            if ui.button(tr(run_log_label)).clicked() {
+                self.state.run_log_open = !self.state.run_log_open;
                 ui.close_menu();
             }
             ui.separator();
@@ -240,6 +263,9 @@ mod tests {
             "Light",
             "Grey",
             "3D Live Preview",
+            "Show Run Log",
+            "Hide Run Log",
+            "Close",
             "Automatic zoom",
             "English",
             "Spanish",

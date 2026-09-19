@@ -5,20 +5,20 @@
 
 use super::ScoredPoint;
 
-pub(super) fn midpoint(bounds: &[(f64, f64)]) -> Vec<f64> {
+pub(crate) fn midpoint(bounds: &[(f64, f64)]) -> Vec<f64> {
     bounds
         .iter()
         .map(|&(lower, upper)| lower + (upper - lower) * 0.5)
         .collect()
 }
 
-pub(super) fn clamp_to_bounds(values: &mut [f64], bounds: &[(f64, f64)]) {
+pub(crate) fn clamp_to_bounds(values: &mut [f64], bounds: &[(f64, f64)]) {
     for (value, &(lower, upper)) in values.iter_mut().zip(bounds) {
         *value = value.clamp(lower, upper);
     }
 }
 
-pub(super) fn to_normalized(values: &[f64], bounds: &[(f64, f64)]) -> Vec<f64> {
+pub(crate) fn to_normalized(values: &[f64], bounds: &[(f64, f64)]) -> Vec<f64> {
     values
         .iter()
         .zip(bounds)
@@ -33,7 +33,7 @@ pub(super) fn to_normalized(values: &[f64], bounds: &[(f64, f64)]) -> Vec<f64> {
         .collect()
 }
 
-pub(super) fn from_normalized(values: &[f64], bounds: &[(f64, f64)]) -> Vec<f64> {
+pub(crate) fn from_normalized(values: &[f64], bounds: &[(f64, f64)]) -> Vec<f64> {
     values
         .iter()
         .zip(bounds)
@@ -47,7 +47,7 @@ pub(super) fn from_normalized(values: &[f64], bounds: &[(f64, f64)]) -> Vec<f64>
         .collect()
 }
 
-pub(super) fn same_point(left: &[f64], right: &[f64], bounds: &[(f64, f64)]) -> bool {
+pub(crate) fn same_point(left: &[f64], right: &[f64], bounds: &[(f64, f64)]) -> bool {
     left.len() == right.len()
         && left
             .iter()
@@ -59,7 +59,7 @@ pub(super) fn same_point(left: &[f64], right: &[f64], bounds: &[(f64, f64)]) -> 
             })
 }
 
-pub(super) fn poll_centers(
+pub(crate) fn poll_centers(
     current: &[f64],
     infeasible: Option<&ScoredPoint>,
     bounds: &[(f64, f64)],
@@ -73,7 +73,7 @@ pub(super) fn poll_centers(
     centers
 }
 
-pub(super) fn poll_point(
+pub(crate) fn poll_point(
     center: &[f64],
     direction: &[i64],
     frame_size: f64,
@@ -88,7 +88,7 @@ pub(super) fn poll_point(
     from_normalized(&candidate, bounds)
 }
 
-pub(super) fn initial_search_points(
+pub(crate) fn initial_search_points(
     bounds: &[(f64, f64)],
     origin: &[f64],
     mesh_size: f64,
@@ -113,7 +113,7 @@ pub(super) fn initial_search_points(
         .collect()
 }
 
-pub(super) fn permutation(length: usize, mut state: u64) -> Vec<usize> {
+pub(crate) fn permutation(length: usize, mut state: u64) -> Vec<usize> {
     let mut values = (0..length).collect::<Vec<_>>();
     for index in (1..length).rev() {
         let swap = (next_u64(&mut state) % (index as u64 + 1)) as usize;
@@ -124,10 +124,23 @@ pub(super) fn permutation(length: usize, mut state: u64) -> Vec<usize> {
 
 /// Construct a MADS positive poll basis.  Integer offsets keep every point
 /// on the translated mesh; `+/-` columns of a full-rank matrix are a maximal
-/// positive spanning set.  The extra coordinate and pair-diagonal directions
-/// preserve local resolution and make oblique valleys visible at coarse mesh
-/// sizes while the Halton-generated matrix supplies changing rational slopes.
-pub(super) fn poll_directions(dimension: usize, iteration: usize, seed: u64) -> Vec<Vec<i64>> {
+/// positive spanning set.  The extra coordinate directions preserve local
+/// resolution, and the Halton-generated matrix supplies changing rational
+/// slopes so oblique valleys stay visible at coarse mesh sizes.
+///
+/// `pair_diagonals` adds the `2 (n - 1)` adjacent-coordinate sum/difference
+/// pairs and their negatives.  They are enrichment, not part of the positive
+/// spanning property, and they nearly triple the poll: in sixteen dimensions
+/// the poll grows from 48 directions to 124.  That cost is paid in full by
+/// exactly the polls that fail, which are the ones that contract the mesh and
+/// therefore drive termination, so the caller enables them only for the small
+/// design spaces where the extra slopes are cheap.
+pub(crate) fn poll_directions(
+    dimension: usize,
+    iteration: usize,
+    seed: u64,
+    pair_diagonals: bool,
+) -> Vec<Vec<i64>> {
     if dimension == 0 {
         return Vec::new();
     }
@@ -147,7 +160,7 @@ pub(super) fn poll_directions(dimension: usize, iteration: usize, seed: u64) -> 
         let mut vector = vec![0_i64; dimension];
         vector[index] = 1;
         add_signed_direction(&mut directions, vector);
-        if index + 1 < dimension {
+        if pair_diagonals && index + 1 < dimension {
             let mut plus = vec![0_i64; dimension];
             plus[index] = 1;
             plus[index + 1] = 1;
@@ -161,7 +174,44 @@ pub(super) fn poll_directions(dimension: usize, iteration: usize, seed: u64) -> 
     directions
 }
 
-pub(super) fn add_signed_direction(directions: &mut Vec<Vec<i64>>, direction: Vec<i64>) {
+/// A minimal positive basis: the `n` columns of a full-rank integer matrix
+/// plus the negative of their sum.
+///
+/// `n + 1` directions positively span the space, which is the property MADS
+/// needs of a poll before an unsuccessful iteration may contract the mesh. It
+/// is the smallest set with that property, and in sixteen dimensions it is
+/// seventeen coupled analyses per failed poll instead of the maximal set's
+/// forty-eight. What it gives up is local resolution: a maximal set probes
+/// every coordinate both ways every poll, a minimal one probes each direction
+/// once and relies on the changing Halton basis for coverage across polls.
+/// That trade is worth taking when one evaluation is a full aircraft sizing.
+pub(crate) fn minimal_positive_basis(
+    dimension: usize,
+    iteration: usize,
+    seed: u64,
+) -> Vec<Vec<i64>> {
+    if dimension == 0 {
+        return Vec::new();
+    }
+    let q = ((iteration as f64 + 1.0).sqrt() + 1.0).ceil() as i64;
+    let matrix = direction_matrix(dimension, q, iteration, seed);
+    let columns: Vec<Vec<i64>> = (0..dimension)
+        .map(|column| matrix.iter().map(|row| row[column]).collect())
+        .collect();
+    let mut closing = vec![0_i64; dimension];
+    for column in &columns {
+        for (slot, value) in closing.iter_mut().zip(column) {
+            *slot -= value;
+        }
+    }
+    let mut directions = columns;
+    if closing.iter().any(|&value| value != 0) {
+        directions.push(closing);
+    }
+    directions
+}
+
+pub(crate) fn add_signed_direction(directions: &mut Vec<Vec<i64>>, direction: Vec<i64>) {
     if direction.iter().all(|&value| value == 0) {
         return;
     }
@@ -177,7 +227,7 @@ pub(super) fn add_signed_direction(directions: &mut Vec<Vec<i64>>, direction: Ve
     }
 }
 
-pub(super) fn direction_matrix(
+pub(crate) fn direction_matrix(
     dimension: usize,
     q: i64,
     iteration: usize,
@@ -222,7 +272,7 @@ pub(super) fn direction_matrix(
     identity
 }
 
-pub(super) fn has_oblique_column(matrix: &[Vec<i64>]) -> bool {
+pub(crate) fn has_oblique_column(matrix: &[Vec<i64>]) -> bool {
     (0..matrix.len()).any(|column| {
         matrix
             .iter()
@@ -233,7 +283,7 @@ pub(super) fn has_oblique_column(matrix: &[Vec<i64>]) -> bool {
     })
 }
 
-pub(super) fn full_rank(matrix: &[Vec<i64>]) -> bool {
+pub(crate) fn full_rank(matrix: &[Vec<i64>]) -> bool {
     let dimension = matrix.len();
     if dimension == 0 || matrix.iter().any(|row| row.len() != dimension) {
         return false;
@@ -269,7 +319,7 @@ pub(super) fn full_rank(matrix: &[Vec<i64>]) -> bool {
     true
 }
 
-pub(super) fn nth_prime(index: usize) -> u64 {
+pub(crate) fn nth_prime(index: usize) -> u64 {
     let mut found = 0usize;
     let mut candidate = 2_u64;
     loop {
@@ -283,7 +333,7 @@ pub(super) fn nth_prime(index: usize) -> u64 {
     }
 }
 
-pub(super) fn is_prime(value: u64) -> bool {
+pub(crate) fn is_prime(value: u64) -> bool {
     if value < 2 {
         return false;
     }
@@ -297,7 +347,7 @@ pub(super) fn is_prime(value: u64) -> bool {
     true
 }
 
-pub(super) fn halton(mut index: u64, base: u64) -> f64 {
+pub(crate) fn halton(mut index: u64, base: u64) -> f64 {
     let mut factor = 1.0 / base as f64;
     let mut value = 0.0;
     while index > 0 {
@@ -308,12 +358,12 @@ pub(super) fn halton(mut index: u64, base: u64) -> f64 {
     value
 }
 
-pub(super) fn mix_seed(seed: u64, stream: u64) -> u64 {
+pub(crate) fn mix_seed(seed: u64, stream: u64) -> u64 {
     let mut state = seed.wrapping_add(stream.wrapping_mul(0x9e37_79b9_7f4a_7c15));
     next_u64(&mut state)
 }
 
-pub(super) fn next_u64(state: &mut u64) -> u64 {
+pub(crate) fn next_u64(state: &mut u64) -> u64 {
     *state = state.wrapping_add(0x9e37_79b9_7f4a_7c15);
     let mut value = *state;
     value = (value ^ (value >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);

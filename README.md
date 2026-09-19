@@ -17,7 +17,7 @@ have is written down.
 
 ## State
 
-Running, not finished. `cargo run --bin alas` launches the desktop interface,
+Running, not finished. `cargo run --bin ALAS` launches the desktop interface,
 and the full pipeline — geometry, mass/CG, mission, drag build-up, wingbox
 sizing, figures — runs end to end for hand-built and CPACS-imported aircraft,
 against eight reference presets and the external solvers that are installed.

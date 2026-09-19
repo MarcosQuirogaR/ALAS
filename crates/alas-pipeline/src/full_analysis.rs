@@ -185,8 +185,20 @@ pub struct FullAnalysis {
 
 mod station_coordinates;
 pub(crate) use station_coordinates::station_coordinates_for;
+pub use station_coordinates::StationPlacementFailure;
 
-mod cabin_sync;
+/// The one-cabin-per-case rule, shared rather than mirrored.
+///
+/// `alas-report`'s quick preview runs the same two mass passes this module
+/// does and has to apply the same rule, or its operating empty mass prices a
+/// different cabin from the payload it draws beside it (measured on the
+/// A320-200 as a 30-seat difference). Duplicating the rule in `alas-report`
+/// is what produced that class of divergence in the first place, so the
+/// module is public and there is one implementation. It cannot live in
+/// `alas-mass` instead: `cabin_synchronized` reads an
+/// `alas_payload::layout::PayloadLayout` and `alas-payload` already depends
+/// on `alas-mass`, so that direction is a cycle.
+pub mod cabin_sync;
 
 include!("full_analysis_parts/part_01.rs");
 include!("full_analysis_parts/part_02.rs");

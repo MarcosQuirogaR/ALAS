@@ -382,7 +382,7 @@ pub fn figure_vspaero_wake_convergence(
     let iteration_stroke = Stroke::new(Color::from_hex("#56b4e9"), 1.6);
     axes[0].add_line_series(&mut scene, &residual_points, residual_stroke.clone());
     axes[1].add_line_series(&mut scene, &iteration_points, iteration_stroke.clone());
-    for (&(alpha_deg, change), point) in residual_points.iter().zip(&cases) {
+    for &(alpha_deg, change) in &residual_points {
         let color = if change <= WAKE_TOLERANCE {
             Color::from_hex(ACCEPTED_COLOR)
         } else {
@@ -394,7 +394,6 @@ pub fn figure_vspaero_wake_convergence(
             fill: Some(Fill::new(color)),
             stroke: None,
         });
-        let _ = point;
     }
     scene.add(SceneElement::Line {
         p1: axes[0].map_point(alpha.0, WAKE_TOLERANCE),

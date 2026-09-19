@@ -1,44 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-use alas_config::{DesignVector, GeometryConfig, TransportPlanform, TransportPlanformError};
-use alas_math::CubicSplineError;
+use alas_config::{DesignVector, GeometryConfig, TransportPlanform};
 
 use crate::aircraft::airfoil::Airfoil;
 use crate::aircraft::airplane::Airplane;
-use crate::aircraft::fuselage::{Fuselage, FuselageXSec, FuselageXSecError, DEFAULT_SHAPE};
-use crate::aircraft::wing::{SubdivideSectionsError, Wing, WingXSec};
+use crate::aircraft::fuselage::{Fuselage, FuselageXSec, DEFAULT_SHAPE};
+use crate::aircraft::wing::{Wing, WingXSec};
 use crate::airfoil_library::{build_section, AirfoilLibrary};
-
-/// Why [`AircraftBuilder::build`] could not assemble an [`Airplane`].
-#[derive(Debug, Clone, PartialEq, thiserror::Error)]
-pub enum BuildError {
-    /// [`AirfoilLibrary::get`] did not resolve a name the geometry
-    /// configuration names. Every airfoil `alas-config::geometry` can name is
-    /// checked (`docs/PORTING.md`, Geometry) to resolve through one of that
-    /// method's three branches, so this is not reached by this program's own
-    /// configuration; it exists because the lookup is fallible, not
-    /// because a real input takes it.
-    #[error("airfoil {0:?} did not resolve")]
-    UnresolvedAirfoil(String),
-    /// Shaping a wing section (`build_section`'s `repanel` step) failed.
-    #[error(transparent)]
-    Section(#[from] CubicSplineError),
-    /// Subdividing a wing's cross-sections failed: an `n_subdivisions` below
-    /// 2, or a blend between two distinct airfoils that failed to repanel.
-    #[error(transparent)]
-    Subdivide(#[from] SubdivideSectionsError),
-    /// A fuselage cross-section's radius/width/height combination was
-    /// invalid. [`AircraftBuilder`] always supplies exactly one of the two
-    /// forms, so this is not reachable from this module's own calls; see
-    /// [`crate::aircraft::fuselage::FuselageXSecError`].
-    #[error(transparent)]
-    FuselageXSec(#[from] FuselageXSecError),
-    /// The configured transport planform has invalid stations, chords, or
-    /// sweep angles.
-    #[error(transparent)]
-    Planform(#[from] TransportPlanformError),
-}
 
 /// Geometry behavior selected by an [`AircraftBuilder`] construction path.
 ///
@@ -228,6 +197,7 @@ impl AircraftBuilder {
             dv.tip_twist_deg,
             tip_airfoil.clone(),
         ));
+        self.append_custom_wing_sections(planform, &mut xsecs)?;
 
         let wing = Wing::new("Main Wing", xsecs, true);
         let wing = mesh::for_contract(
@@ -371,6 +341,7 @@ impl AircraftBuilder {
                 r_val,
             )?);
         }
+        self.append_custom_fuselage_sections(fus_len, &mut stations)?;
 
         Ok(Fuselage::new("Fuselage", stations))
     }

@@ -175,6 +175,70 @@ fn selection_foreground(accent: Color32) -> Color32 {
     }
 }
 
+/// How far a hovered control's tint sits from the selected fill, toward the
+/// panel it floats on. Selected, hovered, pressed/focused and open were all
+/// drawn with one saturated accent, so an open menu, a hovered tab and the
+/// actually selected tab were indistinguishable.
+const HOVER_TINT_TOWARD_PANEL: f32 = 0.62;
+
+/// The same blend for a pressed, keyboard-focused or open control: stronger
+/// than hover, still clearly weaker than a selected fill, and additionally
+/// carrying the wider `active` ring.
+const PRESSED_TINT_TOWARD_PANEL: f32 = 0.40;
+
+/// The fill behind a *selected* control.
+///
+/// `apply_theme` sets `override_text_color` to the palette title colour, and
+/// egui resolves a plain or strong widget label through that override before
+/// any per-widget fallback (`RichText::get_text_color`,
+/// `Visuals::strong_text_color`). The foreground on a selected control is
+/// therefore the theme's own text colour - white in Dark and Grey, black in
+/// Light - and the fill has to clear WCAG 2.1 AA 4.5:1 against *that*, not
+/// against white everywhere. The palette accents did not: `#4f8cff` with white
+/// is 3.22:1 and `#6aa2ff` with white is 2.55:1.
+fn accent_fill(theme: AppTheme) -> Color32 {
+    match theme {
+        // White label text: 5.17:1.
+        AppTheme::Dark | AppTheme::Grey => Color32::from_rgb(0x25, 0x63, 0xEB),
+        // Black label text: 6.50:1, and 3.23:1 against the white page, so the
+        // filled control keeps a 1.4.11 boundary even without its stroke.
+        AppTheme::Light => Color32::from_rgb(0x5B, 0x8D, 0xEF),
+    }
+}
+
+/// The accent used for *text* and thin marks: section headings, the navigation
+/// rail, sparkline strokes and editor guide lines.
+///
+/// egui's default `hyperlink_color` is `#009bff`, which is 2.94:1 on white, so
+/// every accent section heading on the Light page failed AA. Each value below
+/// clears 4.5:1 against both the page background and the card surface of its
+/// own theme.
+fn accent_text(theme: AppTheme) -> Color32 {
+    match theme {
+        // 6.85:1 on #1e1e1e, 5.92:1 on #262a31.
+        AppTheme::Dark => Color32::from_rgb(0x5A, 0xAA, 0xFF),
+        // 5.67:1 on #3a3a3a, 4.80:1 on #41454c.
+        AppTheme::Grey => Color32::from_rgb(0x8F, 0xB8, 0xFF),
+        // 5.17:1 on #ffffff, 4.74:1 on #f4f5f7.
+        AppTheme::Light => Color32::from_rgb(0x25, 0x63, 0xEB),
+    }
+}
+
+/// Blend `accent` `amount` of the way into `surface`, then keep stepping
+/// toward the surface until `foreground` clears the AA body-text threshold on
+/// the result. Hover and pressed states are tints of the selected fill rather
+/// than copies of it, which is what makes the interaction states separable;
+/// the loop guarantees the label on them stays readable.
+fn accent_tint(accent: Color32, surface: Color32, foreground: Color32, amount: f32) -> Color32 {
+    let mut step = amount.clamp(0.0, 1.0);
+    let mut tint = blend_color(accent, surface, step);
+    while contrast_ratio(foreground, tint) < 4.5 && step < 1.0 {
+        step = (step + 0.02).min(1.0);
+        tint = blend_color(accent, surface, step);
+    }
+    tint
+}
+
 fn widget_border(theme: AppTheme, pal: &Palette) -> Color32 {
     match theme {
         // The print palette's pale rule is intentionally subtle. Interactive
@@ -246,7 +310,6 @@ pub fn apply_theme(theme: AppTheme, ctx: &Context) {
     let bg_color = hex_to_color32(pal.bg);
     let panel_bg = hex_to_color32(pal.panel);
     let text_color = hex_to_color32(pal.title);
-    let accent = hex_to_color32(pal.accent);
     let border = widget_border(theme, pal);
     let field_fill = input_fill(theme);
     let field_border = input_border(theme);
@@ -254,18 +317,22 @@ pub fn apply_theme(theme: AppTheme, ctx: &Context) {
     // Keep that foreground readable on ordinary surfaces and adapt the
     // highlight fill to it, rather than making all emphasized labels black.
     let hover_foreground = text_color;
-    let mut highlight_fill = accent;
-    let highlight_target = if is_dark {
-        Color32::BLACK
-    } else {
-        Color32::WHITE
-    };
-    for step in 0..=100 {
-        highlight_fill = blend_color(accent, highlight_target, step as f32 / 100.0);
-        if contrast_ratio(hover_foreground, highlight_fill) >= 4.5 {
-            break;
-        }
-    }
+    // One accent fill for the selected state, and two tints of it for hover
+    // and for pressed / keyboard-focused / open, so the four states no longer
+    // share a single saturated fill.
+    let selected_fill = accent_fill(theme);
+    let hover_fill = accent_tint(
+        selected_fill,
+        panel_bg,
+        hover_foreground,
+        HOVER_TINT_TOWARD_PANEL,
+    );
+    let pressed_fill = accent_tint(
+        selected_fill,
+        panel_bg,
+        hover_foreground,
+        PRESSED_TINT_TOWARD_PANEL,
+    );
 
     visuals.panel_fill = panel_bg;
     visuals.window_fill = bg_color;
@@ -279,17 +346,26 @@ pub fn apply_theme(theme: AppTheme, ctx: &Context) {
     visuals.widgets.inactive.bg_stroke = Stroke::new(1.0_f32, field_border);
     visuals.widgets.inactive.fg_stroke = Stroke::new(1.0_f32, disabled_text_color(theme));
     visuals.widgets.open.bg_stroke = Stroke::new(1.0_f32, border);
+    // An open menu-bar button is drawn from `widgets.open.weak_bg_fill`
+    // (egui `menu::stationary_menu_impl`). That was left at the framework
+    // default, which sits within ~1.1:1 of these panels, so an open menu had
+    // no persistent indicator and the only visible fill tracked the pointer.
+    visuals.widgets.open.weak_bg_fill = pressed_fill;
+    visuals.widgets.open.bg_fill = pressed_fill;
+    visuals.widgets.open.fg_stroke = Stroke::new(1.0_f32, hover_foreground);
     // Menu bars intentionally remove egui's default hover stroke, so the
-    // optional button fill is the visible hover affordance there. Use the
-    // contrast-adjusted palette accent; the old
-    // neutral grey fill was too close to the Grey panel background to read as
-    // a highlighted top-bar item.
-    visuals.widgets.hovered.weak_bg_fill = highlight_fill;
-    visuals.widgets.hovered.bg_fill = highlight_fill;
+    // optional button fill is the visible hover affordance there. A tint of
+    // the selected fill keeps that affordance while leaving the saturated
+    // accent to mean "selected" and nothing else.
+    visuals.widgets.hovered.weak_bg_fill = hover_fill;
+    visuals.widgets.hovered.bg_fill = hover_fill;
     visuals.widgets.hovered.fg_stroke = Stroke::new(1.5_f32, hover_foreground);
     visuals.widgets.hovered.bg_stroke = Stroke::new(1.0_f32, hover_foreground);
-    visuals.widgets.active.weak_bg_fill = highlight_fill;
-    visuals.widgets.active.bg_fill = highlight_fill;
+    // Pressed and keyboard-focused controls resolve to `widgets.active`
+    // (`Widgets::style`), so this is also the focus treatment: a stronger tint
+    // plus the wider ring below.
+    visuals.widgets.active.weak_bg_fill = pressed_fill;
+    visuals.widgets.active.bg_fill = pressed_fill;
     visuals.widgets.active.fg_stroke = Stroke::new(2.0_f32, hover_foreground);
     visuals.widgets.active.bg_stroke = Stroke::new(2.0_f32, hover_foreground);
     visuals.window_rounding = Rounding::same(10.0);
@@ -303,8 +379,10 @@ pub fn apply_theme(theme: AppTheme, ctx: &Context) {
     ] {
         widget.rounding = Rounding::same(6.0);
     }
-    visuals.selection.bg_fill = accent;
-    visuals.selection.stroke = Stroke::new(1.0_f32, selection_foreground(accent));
+    visuals.selection.bg_fill = selected_fill;
+    visuals.selection.stroke = Stroke::new(1.0_f32, selection_foreground(selected_fill));
+    // Section headings, the navigation rail and every accent mark read this.
+    visuals.hyperlink_color = accent_text(theme);
     // Nested configuration nodes are already enclosed by cards and headings.
     // The default left rule makes those sections look like unfinished boxes.
     visuals.indent_has_left_vline = false;
@@ -379,36 +457,38 @@ mod tests {
                 });
             });
         });
-        fn collect(shape: &egui::Shape, colors: &mut Vec<(String, Color32)>) {
-            match shape {
-                egui::Shape::Text(text) => {
-                    for section in &text.galley.job.sections {
-                        let color = text.override_text_color.unwrap_or_else(|| {
-                            if section.format.color == Color32::PLACEHOLDER {
-                                text.fallback_color
-                            } else {
-                                section.format.color
-                            }
-                        });
-                        colors.push((
-                            text.galley.job.text[section.byte_range.clone()].to_owned(),
-                            color,
-                        ));
-                    }
-                }
-                egui::Shape::Vec(shapes) => {
-                    for shape in shapes {
-                        collect(shape, colors);
-                    }
-                }
-                _ => {}
-            }
-        }
         let mut colors = Vec::new();
         for shape in &output.shapes {
-            collect(&shape.shape, &mut colors);
+            collect_text_colors(&shape.shape, &mut colors);
         }
         colors
+    }
+
+    /// Walk a paint shape and record every emitted (text, colour) pair.
+    fn collect_text_colors(shape: &egui::Shape, colors: &mut Vec<(String, Color32)>) {
+        match shape {
+            egui::Shape::Text(text) => {
+                for section in &text.galley.job.sections {
+                    let color = text.override_text_color.unwrap_or_else(|| {
+                        if section.format.color == Color32::PLACEHOLDER {
+                            text.fallback_color
+                        } else {
+                            section.format.color
+                        }
+                    });
+                    colors.push((
+                        text.galley.job.text[section.byte_range.clone()].to_owned(),
+                        color,
+                    ));
+                }
+            }
+            egui::Shape::Vec(shapes) => {
+                for shape in shapes {
+                    collect_text_colors(shape, colors);
+                }
+            }
+            _ => {}
+        }
     }
 
     #[test]
@@ -486,6 +566,99 @@ mod tests {
             contrast_ratio(heading, panel) >= 4.5,
             "ordinary heading takes override_text_color"
         );
+    }
+
+    /// Emit the labels of controls drawn in their *selected* state.
+    ///
+    /// The measurement has to come from the rendered galley: egui resolves a
+    /// plain or strong label through `Visuals::override_text_color` before the
+    /// selected widget's own `fg_stroke`, so reading `selection.stroke` alone
+    /// would measure a colour the user never sees.
+    fn emitted_selected_label_colors(context: &Context) -> Vec<(String, Color32)> {
+        let output = context.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                ui.add(selectable_button("Selected page", true));
+                ui.add(selectable_button(
+                    egui::RichText::new("Selected strong").strong(),
+                    true,
+                ));
+                let _ = ui.selectable_label(true, "Selected row");
+            });
+        });
+        let mut colors = Vec::new();
+        for shape in &output.shapes {
+            collect_text_colors(&shape.shape, &mut colors);
+        }
+        colors
+    }
+
+    #[test]
+    fn a_selected_control_keeps_its_label_readable_on_the_accent_fill() {
+        for theme in [AppTheme::Dark, AppTheme::Light, AppTheme::Grey] {
+            let context = Context::default();
+            apply_theme(theme, &context);
+            let fill = context.style().visuals.selection.bg_fill;
+            let colors = emitted_selected_label_colors(&context);
+            for label in ["Selected page", "Selected strong", "Selected row"] {
+                let color = colors
+                    .iter()
+                    .find(|(text, _)| text == label)
+                    .unwrap_or_else(|| panic!("{theme:?}: missing rendered {label}"))
+                    .1;
+                let ratio = contrast_ratio(color, fill);
+                assert!(
+                    ratio >= 4.5,
+                    "{theme:?}: selected {label} {color:?} on {fill:?} is {ratio:.2}:1"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn accent_heading_text_meets_aa_on_every_theme_surface() {
+        // Regression: egui's default `#009bff` hyperlink colour measured
+        // 2.94:1 on the Light page, so every accent section heading failed.
+        for theme in [AppTheme::Dark, AppTheme::Light, AppTheme::Grey] {
+            let context = Context::default();
+            apply_theme(theme, &context);
+            let visuals = context.style().visuals.clone();
+            for background in [visuals.panel_fill, visuals.window_fill] {
+                let ratio = contrast_ratio(visuals.hyperlink_color, background);
+                assert!(
+                    ratio >= 4.5,
+                    "{theme:?}: accent text {:?} on {background:?} is {ratio:.2}:1",
+                    visuals.hyperlink_color
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn selected_hovered_and_open_controls_are_three_distinct_fills() {
+        for theme in [AppTheme::Dark, AppTheme::Light, AppTheme::Grey] {
+            let context = Context::default();
+            apply_theme(theme, &context);
+            let visuals = context.style().visuals.clone();
+            let panel = visuals.panel_fill;
+            let selected = visuals.selection.bg_fill;
+            let hovered = visuals.widgets.hovered.weak_bg_fill;
+            let open = visuals.widgets.open.weak_bg_fill;
+            assert!(
+                contrast_ratio(selected, hovered) >= 1.4,
+                "{theme:?}: selected {selected:?} and hovered {hovered:?} are the same fill"
+            );
+            assert!(
+                contrast_ratio(open, hovered) >= 1.1,
+                "{theme:?}: an open menu must not look hovered"
+            );
+            assert!(contrast_ratio(hovered, panel) >= 1.15, "{theme:?}: hover tint invisible");
+            assert!(contrast_ratio(open, panel) >= 1.3, "{theme:?}: open tint invisible");
+            assert!(contrast_ratio(selected, panel) >= 1.7, "{theme:?}: selected fill invisible");
+            // The selected fill leans on its stroke for the 1.4.11 boundary.
+            assert!(contrast_ratio(visuals.selection.stroke.color, panel) >= 3.0);
+            // Focus stays separable from hover by its wider ring.
+            assert!(visuals.widgets.active.bg_stroke.width > visuals.widgets.hovered.bg_stroke.width);
+        }
     }
 
     #[test]

@@ -97,21 +97,16 @@ dependencies = [
 name = "alas-app"
 version = "1.1.0"
 dependencies = [
- "alas-aero",
  "alas-config",
  "alas-exec",
  "alas-gui",
- "alas-mission",
  "alas-pipeline",
  "alas-report",
  "alas-route",
- "alas-struct",
  "alas-testkit",
- "alas-types",
  "serde",
  "serde_json",
  "serde_yaml",
- "thiserror 2.0.19",
  "tracing",
  "winresource",
 ]
@@ -123,7 +118,6 @@ dependencies = [
  "alas-math",
  "alas-testkit",
  "serde",
- "serde_json",
  "tracing",
 ]
 
@@ -177,15 +171,14 @@ dependencies = [
  "alas-math",
  "alas-testkit",
  "serde",
- "serde_json",
  "thiserror 2.0.19",
- "tracing",
 ]
 
 [[package]]
 name = "alas-gui"
 version = "1.1.0"
 dependencies = [
+ "alas-aero",
  "alas-cfd",
  "alas-config",
  "alas-exec",
@@ -243,7 +236,6 @@ dependencies = [
  "alas-testkit",
  "faer",
  "serde",
- "serde_json",
  "thiserror 2.0.19",
 ]
 
@@ -273,6 +265,7 @@ dependencies = [
  "alas-geom",
  "alas-mass",
  "alas-math",
+ "alas-mission",
  "alas-payload",
  "alas-perf",
  "alas-prop",
@@ -332,7 +325,6 @@ dependencies = [
  "alas-stab",
  "alas-struct",
  "alas-testkit",
- "alas-types",
  "alas-units",
  "roxmltree",
  "serde",
@@ -373,14 +365,11 @@ dependencies = [
  "alas-stab",
  "alas-struct",
  "alas-testkit",
- "alas-types",
- "alas-units",
  "plotters",
  "plotters-backend",
  "serde",
  "serde_json",
  "thiserror 2.0.19",
- "tracing",
 ]
 
 [[package]]
@@ -407,11 +396,7 @@ dependencies = [
  "alas-opt",
  "alas-stab",
  "alas-testkit",
- "alas-types",
  "serde",
- "serde_json",
- "thiserror 2.0.19",
- "tracing",
 ]
 
 [[package]]
@@ -425,7 +410,6 @@ dependencies = [
  "alas-math",
  "alas-testkit",
  "serde",
- "serde_json",
 ]
 
 [[package]]
@@ -482,14 +466,12 @@ name = "alas-viz"
 version = "1.1.0"
 dependencies = [
  "alas-report",
- "alas-testkit",
  "egui",
  "plotters",
  "plotters-backend",
  "rayon",
  "resvg",
  "tiny-skia",
- "tracing",
 ]
 
 [[package]]

@@ -25,6 +25,16 @@ use super::types::{
 
 /// A failure with the `mass_coordinates` reason, for the engine-binding
 /// lookups beside the mass analysis.
+///
+/// This is deliberately **not** the seam for a station-placement failure. A
+/// candidate whose main-gear station cannot be placed never reaches here: the
+/// mass analysis it passes through first
+/// (`build::mass_analysis_with_structural_feedback`) already classifies that
+/// cause as `main_gear_station_not_measured` and propagates it with `?`, so
+/// a search log can separate a missing gear datum from a degenerate geometry.
+/// `a_missing_main_gear_datum_survives_the_mdo_sizing_entry_point` pins that.
+/// What is bucketed under `mass_coordinates` here is the engine binding
+/// beside the mass analysis, for the reason stated at each call site.
 fn mass_coordinates_failure() -> CandidateFailure {
     CandidateFailure {
         reason: "mass_coordinates",
@@ -202,10 +212,30 @@ pub(crate) fn run_candidate_with_polar_and_fuselage_policy(
         .unwrap_or(0.0);
     let holding_altitude_m =
         arrival_elevation_m + candidate_config.fuel_policy.holding_altitude_ft * alas_units::FOOT;
+    // The altitude the configured route is actually flown at, resolved by the
+    // same rule the published mission uses
+    // (`alas_mission::route_cruise_altitude_m`). `req.cruise_altitude_m` is
+    // the *sizing* cruise altitude - the design point the wing, the engine
+    // deck and the drag polar are built at - and it stays that everywhere
+    // else in this function, including the propulsion deck's reference point
+    // above. It is not the flight level a dispatcher files for a short
+    // declared sector, and using it as one is what made the A320-200 and the
+    // A220-300 reject every candidate on `mission_profile_range`: the
+    // climb-cruise-descent ladder to 11 278 m needs 743 km of still air and
+    // the declared LEMD-LEPA sector is 546 km. The published mission was
+    // corrected to fly the preset's own declared operational altitude; this
+    // is the same correction on the optimizer's side, so the two models size
+    // and fly one mission instead of two.
+    let flown_cruise_altitude_m = match (departure, arrival) {
+        (Some(origin), Some(destination)) => {
+            alas_mission::route_cruise_altitude_m(&candidate_config, origin, destination)
+        }
+        _ => req.cruise_altitude_m,
+    };
     let model = SegmentMissionModel::new(
         candidate_config.mission.profile.clone(),
         req.cruise_mach,
-        req.cruise_altitude_m,
+        flown_cruise_altitude_m,
         departure_elevation_m,
         arrival_elevation_m,
         plane.s_ref,
@@ -234,7 +264,11 @@ pub(crate) fn run_candidate_with_polar_and_fuselage_policy(
     model.validate().map_err(|_| CandidateFailure {
         reason: "trim_solve",
     })?;
-    let minimum_profile_range_m = model.minimum_profile_range_m();
+    // The route has to clear the ladder the aircraft can actually fly, which
+    // is the one at the lowest cruise level the geometry admits; the planner
+    // lowers the level until it fits. See
+    // `SegmentMissionModel::minimum_flyable_profile_range_m`.
+    let minimum_profile_range_m = model.minimum_flyable_profile_range_m();
 
     let tank_capacity = tank_capacity_kg(&candidate_config, &plane, &dv);
 
@@ -287,10 +321,45 @@ pub(crate) fn run_candidate_with_polar_and_fuselage_policy(
             design_gross_mass_kg,
             design_landing_mass_kg,
         } => (design_gross_mass_kg, design_landing_mass_kg),
-        alas_config::MassSizingBasis::Coupled => (
-            analysis_takeoff_mass_kg,
-            candidate_config.landing_mass_limit_kg(analysis_takeoff_mass_kg),
-        ),
+        alas_config::MassSizingBasis::Coupled => {
+            // The component ledger is closed on this candidate's own
+            // dispatched mass, which is what "coupled" means and is left
+            // alone. The *landing* limit is a different quantity and must
+            // not follow it.
+            //
+            // A maximum landing mass is a structural design weight: a
+            // fraction of the design gross weight the airframe and gear are
+            // built for. Referring it to the mass this particular sector
+            // happens to close at makes the `landing_mass` residual say
+            // "burn at least (1 - mlw_fraction) of your own take-off mass on
+            // this flight", which is a statement about the mission with no
+            // aircraft property in it, and it is unsatisfiable by
+            // construction on a short sector: measured on the shipped
+            // clean-sheet path it rejected 434 of 462 A320-200 candidates,
+            // 438 of 460 A220-300 and 603 of 605 A340-300.
+            //
+            // Under `MtowSizing::SizedByMission` - the product default - the
+            // closure is explicitly bounded above by the declared MTOW, so
+            // that declared mass *is* the design gross weight the structure
+            // must support and the closure is only this mission's dispatch.
+            // The limit is therefore taken against the ceiling there.
+            // `Unconstrained` declares no ceiling at all (see the
+            // `mtow_ceiling` residual above), so it keeps the closed mass,
+            // which is the only design weight that mode has.
+            let limit_basis_kg = if candidate_config.optimizer.objective.mtow_sizing
+                == MtowSizing::SizedByMission
+                && mtow_ceiling.is_finite()
+                && mtow_ceiling > 0.0
+            {
+                mtow_ceiling
+            } else {
+                analysis_takeoff_mass_kg
+            };
+            (
+                analysis_takeoff_mass_kg,
+                candidate_config.landing_mass_limit_kg(limit_basis_kg),
+            )
+        }
     };
     let sized = SizedCandidate {
         takeoff_mass_kg: analysis_takeoff_mass_kg,
@@ -389,5 +458,35 @@ mod tests {
             outcome.sized.retrim_count > 0,
             "mission-sized closure must refresh the polar after mass/CG updates"
         );
+    }
+
+    #[test]
+    fn a_missing_main_gear_datum_survives_the_mdo_sizing_entry_point() {
+        // The MDA-sizing entry point must not relabel a refused main-gear
+        // station as a generic coordinate failure on its way out: the two
+        // lead to opposite actions, and only this reason tells a reviewer to
+        // register the aircraft's published gear stations.
+        let mut config = AlasConfig::from_value(&serde_json::json!({ "preset": "ATR72-600" }))
+            .unwrap_or_else(|error| panic!("ATR configuration: {error}"));
+        // This test owns an explicitly unmeasured fixture; the registered
+        // ATR preset itself now has its published gear anchors.
+        config.landing_gear.reference_station_fuselage_length_m = None;
+        config.landing_gear.reference_nlg_x_fraction = None;
+        config.landing_gear.reference_mlg_x_fractions = None;
+        let preset = alas_config::presets::get("ATR72-600")
+            .unwrap_or_else(|error| panic!("registered ATR preset: {error}"));
+        let failure = run_candidate(&config, &preset.design_vector.to_array())
+            .err()
+            .unwrap_or_else(|| panic!("an ATR-like candidate has no main-gear station to size"));
+        assert_eq!(failure.reason, "main_gear_station_not_measured");
+    }
+
+    #[test]
+    fn a_resolvable_candidate_is_not_labelled_a_missing_gear_datum() {
+        // The clean-sheet default keeps the wing-mounted fallback and must
+        // still size, so the gate cannot be what stops an in-domain layout.
+        let config = AlasConfig::default();
+        let x = DesignVector::default().to_array();
+        assert!(run_candidate(&config, &x).is_ok());
     }
 }

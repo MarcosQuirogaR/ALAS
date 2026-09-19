@@ -174,8 +174,18 @@ pub(super) fn select_load_case(
         let Some(summary) = flown.completed_summary() else {
             analyses.takeoff_mass_kg = fuel_loading.analyzed_takeoff_mass_kg;
             analyses.minimum_mass_kg = Some(zero_fuel_mass_kg);
+            // Name the condition the mission refused on. Without it this
+            // finding says only that the route could not be flown, which
+            // leaves a reader unable to tell a fuel exhaustion from a
+            // throttle stop from a non-converged segment - three findings
+            // with three different owners. Measured on the all-eight matrix:
+            // this is the single most common rejection among presets that do
+            // produce an aircraft, and it carried no attributable cause.
+            let refusal = flown
+                .completion_refusal()
+                .unwrap_or_else(|| "no completed mission summary".to_owned());
             return Ok(maximum(Some(format!(
-                "the route could not be flown at {takeoff_mass_kg:.1} kg during the fuel-policy closure"
+                "the route could not be flown at {takeoff_mass_kg:.1} kg during the fuel-policy closure: {refusal}"
             ))));
         };
         let leg = LegEstimate {

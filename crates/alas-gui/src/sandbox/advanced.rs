@@ -10,7 +10,7 @@
 //! edit. A registered preset's geometry stays read-only here as everywhere
 //! else in the guided workspace.
 
-use egui::{vec2, Context, RichText, ScrollArea, ViewportBuilder};
+use egui::{vec2, Context, ScrollArea, ViewportBuilder};
 
 use crate::native_viewport::show_native_viewport;
 use crate::nav::{self, PageKind};
@@ -95,18 +95,10 @@ pub fn show_advanced_settings_window(state: &mut AppState, ctx: &Context) {
                     }
                     let locked = state.manual_geometry_locked()
                         && matches!(page.group, Some("geometry") | Some("control_surfaces"));
-                    if locked {
-                        ui.label(
-                            RichText::new(tr(
-                                "Preset geometry is protected from manual edits here as well; open the sandbox for geometry experiments.",
-                            ))
-                            .color(ui.visuals().warn_fg_color)
-                            .small(),
-                        );
-                    }
-                    ui.add_enabled_ui(!locked, |ui| {
-                        form_page::show_form_page(state, ui, page);
-                    });
+                    // The page draws its own lock notice under its title and
+                    // disables only its editors, so a protected page keeps its
+                    // heading, description and field labels readable.
+                    form_page::show_form_page_locked(state, ui, page, locked);
                 });
         },
     );

@@ -30,6 +30,48 @@ fn ground_reaction_constraint(constraint: ModelCgConstraint) -> bool {
     )
 }
 
+/// The typed refusal when this aircraft has no main-gear longitudinal station
+/// the mass model can supply, `None` when it has one.
+///
+/// Both envelope paths rebuild the mass model's own gear fallbacks
+/// (`nlg_x_fraction` of fuselage length, `mlg_x_fraction_mac` aft of the MAC
+/// leading edge) so they can feed `resolved_station_positions` the same
+/// numbers `alas_mass::stations` would. The main-gear half of that pair is a
+/// wing-mounted gear rule with a stated domain, and the one place that domain
+/// is stated is `alas_mass::stations::main_gear_station`. This asks that owner
+/// whether a station exists rather than restating the test here, so the two
+/// crates cannot drift apart into accepting different aircraft.
+///
+/// A source-scaled resolution is a published station scaled onto the active
+/// fuselage and is admissible on any layout, so the question is only asked
+/// when the fallback is what would otherwise stand in — which is also what
+/// keeps this off the search's hot path for every registered aircraft that
+/// carries an anchor.
+///
+/// Only [`StationError::MainGearStationNotMeasured`] is reported. The other
+/// station failures are degenerate-geometry conditions that both callers
+/// already detect through their own missing-surface and finiteness checks.
+fn unmeasured_main_gear_station(
+    plane: &Airplane,
+    config: &AlasConfig,
+    gear_stations: &alas_config::LandingGearStationPositions,
+) -> Option<StationError> {
+    if gear_stations.source_scaled {
+        return None;
+    }
+    match alas_mass::stations::component_stations_with_gear(
+        plane,
+        &config.geometry,
+        &config.requirements,
+        &config.mass_model,
+        &config.structures,
+        &config.landing_gear,
+    ) {
+        Err(error @ StationError::MainGearStationNotMeasured { .. }) => Some(error),
+        _ => None,
+    }
+}
+
 /// Assess hard model constraints across OEW, analyzed ZFW/TOW, and explicit
 /// mid-mission/reserve fuel cases.
 ///
@@ -134,6 +176,15 @@ pub fn assess_model_cg_envelope(
         fus_start_x,
         fuselage_length_m,
     );
+    // `fallback_x_main_gear` above is the wing-mounted rule, admissible only
+    // on the layouts `alas_mass::stations` states it for. Refuse the whole
+    // assessment when this aircraft is outside that domain and registers no
+    // station anchor: the wheelbase, both gear-strength capacities and
+    // `min_nose_gear_load` below are all moments about that station, so a
+    // refused station cannot be allowed to produce reported reactions.
+    if let Some(error) = unmeasured_main_gear_station(plane, config, &gear_stations) {
+        return Err(ModelCgEnvelopeError::MainGearStationNotMeasured(error));
+    }
     let x_nose_gear = gear_stations.x_nlg_m;
     let x_main_gear = gear_stations.x_mlg_m;
     let wheelbase_m = x_main_gear - x_nose_gear;
@@ -280,6 +331,20 @@ pub fn check_cg_envelope(
         fus_start_x,
         fus_len,
     );
+    // The same refusal as [`assess_model_cg_envelope`]. This path reports a
+    // Boolean and an exceedance rather than a typed error, so it fails closed:
+    // an aircraft with no measured main-gear station has no compliant state
+    // to report. No exceedance magnitude is claimed, because none was
+    // measured — a missing datum is not a distance past a limit — and the
+    // violation Boolean is what marks the candidate rejected. The frozen
+    // reference fixture is a low-wing aircraft whose fallback stands, so its
+    // replayed values are unchanged.
+    if unmeasured_main_gear_station(plane, config, &gear_stations).is_some() {
+        return CgEnvelopeResult {
+            violation: true,
+            worst_exceedance: 0.0,
+        };
+    }
     let x_nlg = gear_stations.x_nlg_m;
     let x_mlg = gear_stations.x_mlg_m;
     let wheelbase = x_mlg - x_nlg;
@@ -344,13 +409,15 @@ pub fn check_cg_envelope(
 #[cfg(test)]
 mod tests {
     use super::{
-        assess_loading_constraints, assess_model_cg_envelope, ground_reaction_constraint,
-        is_flight_eligible_state, loading_states, LoadingConstraintInputs, ModelCgConstraint,
-        ModelCgLoadingState,
+        assess_loading_constraints, assess_model_cg_envelope, check_cg_envelope,
+        ground_reaction_constraint, is_flight_eligible_state, loading_states,
+        LoadingConstraintInputs, ModelCgConstraint, ModelCgEnvelopeError, ModelCgLoadingState,
+        StationError,
     };
     use alas_config::{AlasConfig, DesignVector};
+    use alas_geom::aircraft::airplane::Airplane;
     use alas_geom::builder::AircraftBuilder;
-    use alas_mass::breakdown::run_mass_analysis;
+    use alas_mass::breakdown::{run_mass_analysis, MassBreakdown, MassCoordinates};
 
     fn passing_inputs() -> LoadingConstraintInputs {
         LoadingConstraintInputs {
@@ -381,6 +448,71 @@ mod tests {
             .map(|constraint| constraint.constraint)
             .collect::<Vec<_>>();
         assert_eq!(violations, vec![expected]);
+    }
+
+    /// A loaded state resting on both legs keeps all five constraints and is
+    /// declared admissible; nothing about the ordinary case moved.
+    #[test]
+    fn a_state_resting_on_both_gear_groups_keeps_every_constraint() {
+        let assessment = assess_loading_constraints(passing_inputs());
+        assert!(assessment.ground_reactions_admissible);
+        assert_eq!(assessment.constraints.len(), 5);
+        assert!(assessment
+            .constraints
+            .iter()
+            .any(|constraint| constraint.constraint == ModelCgConstraint::NoseGearStrength));
+        assert!(assessment
+            .constraints
+            .iter()
+            .any(|constraint| constraint.constraint == ModelCgConstraint::MainGearStrength));
+        assert!(!assessment.constraints.iter().any(|c| c.violated));
+    }
+
+    /// The tail-sitting state the ATR 72-600 and the A380-800 both produced:
+    /// the centre of gravity aft of the effective main-gear station, so the
+    /// nose reaction is negative and the main reaction exceeds the whole
+    /// weight. Neither is a load the gear sees, so neither rated-capacity
+    /// comparison is reported; `MinimumNoseGearLoad` still rejects the state.
+    ///
+    /// Before this, `-5 618 kg < 68 000 kg` printed as a *passing* nose-gear
+    /// strength margin on the A380-800 and `435 877 kg` printed as a passing
+    /// main-gear load on a 430 259 kg aeroplane.
+    #[test]
+    fn a_tail_sitting_state_reports_no_gear_strength_margin() {
+        let mut inputs = passing_inputs();
+        inputs.nose_gear_load_kg = -1_310.0;
+        inputs.main_gear_load_kg = inputs.mass_kg - inputs.nose_gear_load_kg;
+        let assessment = assess_loading_constraints(inputs);
+
+        assert!(!assessment.ground_reactions_admissible);
+        assert!((assessment.nose_gear_load_fraction - -0.0131).abs() < 1.0e-12);
+        let present: Vec<ModelCgConstraint> = assessment
+            .constraints
+            .iter()
+            .map(|constraint| constraint.constraint)
+            .collect();
+        assert!(!present.contains(&ModelCgConstraint::NoseGearStrength));
+        assert!(!present.contains(&ModelCgConstraint::MainGearStrength));
+        assert!(present.contains(&ModelCgConstraint::MinimumNoseGearLoad));
+        assert_only_constraint_violates(inputs, ModelCgConstraint::MinimumNoseGearLoad);
+    }
+
+    /// Zero nose load is the tipping point itself, not past it: the split is
+    /// still a statement the model can make, so nothing is dropped. This pins
+    /// that the domain test carries no margin in either direction.
+    #[test]
+    fn the_admissibility_boundary_is_exact_and_carries_no_margin() {
+        let mut inputs = passing_inputs();
+        inputs.nose_gear_load_kg = 0.0;
+        inputs.main_gear_load_kg = inputs.mass_kg;
+        let at_boundary = assess_loading_constraints(inputs);
+        assert!(at_boundary.ground_reactions_admissible);
+        assert_eq!(at_boundary.constraints.len(), 5);
+
+        inputs.nose_gear_load_kg = -f64::MIN_POSITIVE;
+        let past_boundary = assess_loading_constraints(inputs);
+        assert!(!past_boundary.ground_reactions_admissible);
+        assert_eq!(past_boundary.constraints.len(), 3);
     }
 
     #[test]
@@ -639,5 +771,206 @@ mod tests {
             "the ground-reaction check must not be waived for a ground-only state"
         );
         assert!(!assessment.hard_constraints_pass());
+    }
+
+    /// A registered aircraft and the lumped mass state both envelope paths
+    /// are evaluated at. The lumped analysis places its own gear point and
+    /// never consults `alas_mass::stations`, so this builds the same inputs
+    /// for an aircraft whose main-gear station the station model refuses.
+    #[allow(clippy::expect_used)]
+    fn preset_case(preset: &str) -> (AlasConfig, Airplane, MassBreakdown, MassCoordinates, f64) {
+        let mut config = AlasConfig::from_value(&serde_json::json!({ "preset": preset }))
+            .unwrap_or_else(|error| panic!("{error}"));
+        if preset == "ATR72-600" {
+            // The refusal-path figure tests deliberately clear the source
+            // anchors; the registered ATR now carries measured stations.
+            config.landing_gear.reference_station_fuselage_length_m = None;
+            config.landing_gear.reference_nlg_x_fraction = None;
+            config.landing_gear.reference_mlg_x_fractions = None;
+        }
+        let registered =
+            alas_config::presets::get(preset).unwrap_or_else(|error| panic!("{error}"));
+        let plane = AircraftBuilder::new(Some(config.geometry.clone()))
+            .build(Some(&registered.design_vector), true)
+            .expect("a registered aircraft builds");
+        let (masses, coordinates, cg) = run_mass_analysis(
+            &plane,
+            &config.requirements,
+            &config.geometry,
+            Some(&config.mass_model),
+            None,
+        );
+        (config, plane, masses, coordinates, cg[0])
+    }
+
+    /// The ATR 72-600 is the registered high-wing, fuselage-sponson aircraft
+    /// that registers no gear-station anchor, so
+    /// `alas_mass::stations::main_gear_station` refuses to place its main
+    /// gear. This module rebuilds that same wing-mounted fallback itself, and
+    /// before this gate it computed the wheelbase, both gear-strength
+    /// capacities and `min_nose_gear_load` from the refused station: the
+    /// aircraft was reported with ground reactions about a point the mass
+    /// model declined to supply. The assessment must now refuse as a whole
+    /// and carry the two heights that decided it.
+    #[test]
+    fn an_aircraft_with_no_measured_main_gear_station_gets_no_model_cg_assessment() {
+        let (config, plane, masses, coordinates, cg_x) = preset_case("ATR72-600");
+        let x_np = cg_x + 0.10 * plane.c_ref;
+
+        match assess_model_cg_envelope(
+            &plane,
+            &masses,
+            &coordinates,
+            cg_x,
+            x_np,
+            plane.c_ref,
+            &config,
+        ) {
+            Err(ModelCgEnvelopeError::MainGearStationNotMeasured(
+                StationError::MainGearStationNotMeasured {
+                    wing_root_z_m,
+                    fuselage_crown_z_m,
+                },
+            )) => {
+                assert!(
+                    wing_root_z_m > fuselage_crown_z_m,
+                    "the refusal must carry the heights that decided it: root {wing_root_z_m} m \
+                     against crown {fuselage_crown_z_m} m"
+                );
+            }
+            other => panic!(
+                "an aircraft with no measured main-gear station must refuse the whole model CG \
+                 assessment, got {other:?}"
+            ),
+        }
+    }
+
+    /// The frozen reference-compatibility path returns a Boolean rather than
+    /// a typed error, so it fails closed on the same refusal: no compliant
+    /// state is reported for an aircraft whose main-gear station was refused.
+    /// No exceedance magnitude is claimed, because none was measured.
+    #[test]
+    fn the_frozen_reference_path_fails_closed_without_a_measured_main_gear_station() {
+        let (config, plane, masses, coordinates, cg_x) = preset_case("ATR72-600");
+        let x_np = cg_x + 0.10 * plane.c_ref;
+
+        let result = check_cg_envelope(
+            &plane,
+            &masses,
+            &coordinates,
+            cg_x,
+            x_np,
+            plane.c_ref,
+            &config,
+        );
+
+        assert!(
+            result.violation,
+            "the compatibility path must not report a missing main-gear datum as compliant"
+        );
+        assert_eq!(result.worst_exceedance, 0.0);
+    }
+
+    /// The refusal is scoped to the layout the wing-mounted fallback rule
+    /// excludes, not to the absence of a registered anchor. The B787-9 and
+    /// the DC-10 register no anchor either and must still be assessed through
+    /// that fallback, at the same station, with every gear constraint —
+    /// `min_nose_gear_load` included — still evaluated.
+    #[test]
+    fn low_wing_fallback_aircraft_keep_their_assessment_and_their_gear_constraints() {
+        for preset in ["B787-9", "DC-10"] {
+            let (config, plane, masses, coordinates, cg_x) = preset_case(preset);
+            let x_np = cg_x + 0.10 * plane.c_ref;
+            let assessment = assess_model_cg_envelope(
+                &plane,
+                &masses,
+                &coordinates,
+                cg_x,
+                x_np,
+                plane.c_ref,
+                &config,
+            )
+            .unwrap_or_else(|error| panic!("{preset} must still be assessed: {error}"));
+
+            // The station the assessment used is still the wing-mounted
+            // fallback, unchanged: MAC leading edge plus the configured
+            // fraction of the MAC.
+            let mac = plane.c_ref;
+            let x_mac_le = plane.wings[0].aerodynamic_center(0.25)[0] - 0.25 * mac;
+            let expected_x_mlg = x_mac_le + config.mass_model.mlg_x_fraction_mac * mac;
+            let fus = &plane.fuselages[0];
+            let fus_start_x = fus.xsecs[0].xyz_c[0];
+            let fus_len = fus.xsecs[fus.xsecs.len() - 1].xyz_c[0] - fus_start_x;
+            let stations = config.landing_gear.resolved_station_positions(
+                fus_start_x + fus_len * config.mass_model.nlg_x_fraction,
+                expected_x_mlg,
+                fus_start_x,
+                fus_len,
+            );
+            assert!(
+                !stations.source_scaled,
+                "{preset} is expected to reach the fallback, not a source anchor"
+            );
+            assert!((stations.x_mlg_m - expected_x_mlg).abs() < 1.0e-12);
+
+            for state in &assessment.loading_states {
+                assert!(
+                    state
+                        .constraints
+                        .iter()
+                        .any(|constraint| constraint.constraint
+                            == ModelCgConstraint::MinimumNoseGearLoad),
+                    "{preset}/{:?} must keep its minimum nose-gear load gate",
+                    state.state
+                );
+            }
+            let flight_state = assessment
+                .loading_states
+                .iter()
+                .find(|state| state.state == ModelCgLoadingState::AnalyzedTakeoff)
+                .unwrap_or_else(|| panic!("{preset} analyzed-TOW state"));
+            assert_eq!(
+                flight_state.constraints.len(),
+                5,
+                "{preset} must keep every hard constraint, static margin included"
+            );
+            assert!(flight_state
+                .constraints
+                .iter()
+                .all(|constraint| constraint.limit.is_finite()));
+        }
+    }
+
+    /// The same aircraft with a complete source anchor is assessed normally,
+    /// so the refusal reads as the missing datum it is and not as a rule that
+    /// high-wing aircraft cannot be assessed.
+    #[test]
+    fn a_registered_station_anchor_restores_the_assessment_on_the_same_aircraft() {
+        let (config, plane, masses, coordinates, cg_x) = preset_case("ATR72-600");
+        let x_np = cg_x + 0.10 * plane.c_ref;
+        // Illustrative fractions of the active fuselage length, not ATR data:
+        // this asserts the plumbing and asserts nothing about where the ATR's
+        // gear actually is.
+        let anchored = AlasConfig {
+            landing_gear: alas_config::LandingGearConfig {
+                reference_station_fuselage_length_m: Some(27.166),
+                reference_nlg_x_fraction: Some(0.1),
+                reference_mlg_x_fractions: Some(vec![0.45, 0.45]),
+                ..config.landing_gear.clone()
+            },
+            ..config
+        };
+
+        let assessment = assess_model_cg_envelope(
+            &plane,
+            &masses,
+            &coordinates,
+            cg_x,
+            x_np,
+            plane.c_ref,
+            &anchored,
+        )
+        .unwrap_or_else(|error| panic!("a registered anchor must restore the assessment: {error}"));
+        assert!(!assessment.loading_states.is_empty());
     }
 }

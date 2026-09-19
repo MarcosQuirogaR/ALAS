@@ -207,6 +207,21 @@ pub fn a380_800() -> AircraftPreset {
             mtow_kg: Some(560_000.0),
             mlw_kg: Some(386_000.0),
             mzfw_kg: Some(361_000.0),
+            // EASA TCDS EASA.A.110 Issue 17, 2026-08-05, section 3.3 "Fluid
+            // Capacities", p.14 of 20: 324,339 L usable and 1,086 L unusable
+            // at the sheet's 0.800 kg/L (324,339 x 0.800 = 259,471 kg). The
+            // aeroplane total stands here rather than the 323,546 L tank
+            // total, because the 793 L difference is the same table's
+            // "Systems" row - usable fuel in lines and engines, not in a tank
+            // - and this block is the certified aircraft record that
+            // docs/aircraft-parity.md compares the model against and that
+            // supplies the FLOPS maximum fuel capacity, which the A380
+            // declares nowhere else (`preset_flops::inputs_for`). The tanks
+            // themselves now carry the same table's certified per-tank
+            // volumes and sum to exactly 323,546 L, so the residual is that
+            // system inventory and nothing else; the derivation and the
+            // certified 0.00335 unusable fraction are in
+            // `preset_fuel_tanks::layout_for`.
             usable_fuel_volume_l: Some(324_339.0),
             usable_fuel_mass_kg: Some(259_471.0),
             fuel_density_kg_l: Some(0.8),
@@ -323,7 +338,29 @@ pub fn a380_800() -> AircraftPreset {
                 hstab_tip_chord_m: 2.5,
                 hstab_root_twist_deg: -2.0,
                 hstab_tip_twist_deg: -2.0,
-                hstab_tip_le_m: (8.5, 12.5, 1.2),
+                // Tailplane span 30.37 m (99.64 ft), so a 15.185 m tip
+                // station: Airbus A380 Aircraft Characteristics - Airport and
+                // Maintenance Planning, Revision 20 Dec 01/25, Subject 2-2-0
+                // General Aircraft Dimensions, FIGURE-2-2-0-991-001-A01 Sheet
+                // 1 of 2, page 2-2-0 Page 2. In that front elevation the
+                // dimension's extension lines terminate on the tailplane tips,
+                // between the 79.75 m wing span above it and the 7.14 m
+                // fuselage width below it; the figure is drawn to scale and
+                // this preset already matches both of those. The previous
+                // 12.5 m tip gave a 25.0 m tailplane, 17.7 % narrower than the
+                // published surface.
+                //
+                // Only the span is published. The chords, the leading-edge
+                // sweep and the root station are not, so the tip's x offset is
+                // left at its unsourced 8.5 m rather than scaled with the
+                // span: that keeps the tip trailing edge on the fuselage tail
+                // tip, where the original planform put it, and changes exactly
+                // the one quantity the source states. The resolved trapezoidal
+                // area moves from 143.75 m^2 to (9.0 + 2.5) x 15.185 =
+                // 174.63 m^2; aggregator pages carry about 205 m^2, which the
+                // unverified chords would have to account for and which no
+                // Airbus document retrieved here states.
+                hstab_tip_le_m: (8.5, 15.185, 1.2),
                 vstab_offset_from_tail_m: 13.0,
                 vstab_z_m: 2.5,
                 vstab_root_chord_m: 11.0,

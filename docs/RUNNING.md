@@ -131,24 +131,24 @@ The workspace also builds `alas-bench` and `external_preset_audit`
 (`alas-acceptance`), so `cargo run` alone is ambiguous — name the binary.
 
 ```powershell
-cargo run --release --bin alas
+cargo run --release --bin ALAS
 ```
 
-starts the desktop application (equivalent to `... --bin alas -- --gui`).
+starts the desktop application (equivalent to `... --bin ALAS -- --gui`).
 `--release` builds the optimized version, which is slower to compile and much
 faster to run — always use it for anything you are timing or actually using.
 
 ```powershell
-cargo run --release --bin alas -- --config path\to\your.yaml --output outputs
+cargo run --release --bin ALAS -- --config path\to\your.yaml --output outputs
 ```
 
 runs an analysis with no interface: `--config` overlays a YAML/JSON
 configuration, `--output` selects the directory the reports and figures are
-written into (default `outputs`). Run `cargo run --bin alas -- --help` for
+written into (default `outputs`). Run `cargo run --bin ALAS -- --help` for
 the full flag list — it includes `--no-optimize`, `--no-mission`,
 `--aero-solver`, `--cpacs-input` and others.
 
-The built executable lands at `target\release\alas.exe` and is standalone —
+The built executable lands at `target\release\ALAS.exe` and is standalone —
 copy it anywhere, no installation, no Python.
 
 On Windows, every solver ALAS launches (AVL, VSPAERO, MSES, OpenVSP, NASTRAN,

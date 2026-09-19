@@ -58,6 +58,17 @@ use alas_prop::system::{
 
 use crate::operating::ThrustRating;
 
+/// The name every propulsion technology gives the active limit it raises when
+/// a normalized-force command would deliver less than flight-idle thrust.
+///
+/// This is the decks' own shared string, not a name invented here: the
+/// empirical turbofan raises it from `requested_thrust_n < idle_thrust` and
+/// the PW127M turboprop surrogate raises it from its flight-idle fallback,
+/// both spelled `flight-idle-thrust`. It is matched rather than typed because
+/// [`alas_prop::system::ActiveLimit`] carries a name, and a typed variant
+/// would be a propulsion-crate contract change this boundary does not own.
+pub const FLIGHT_IDLE_LIMIT: &str = "flight-idle-thrust";
+
 /// What one call to the aerodynamics analysis produces.
 pub struct AeroSolution {
     /// The aircraft lift coefficient, after the fuselage correction.
@@ -267,6 +278,38 @@ impl MissionAnalyses {
         gravity_m_s2: f64,
         throttle: f64,
     ) -> ThrustOutput {
+        self.thrust_with_domain(
+            atmosphere,
+            altitude_m,
+            velocity_m_s,
+            mach,
+            gravity_m_s2,
+            throttle,
+        )
+        .0
+    }
+
+    /// [`Self::thrust`], plus whether the deck answered from its own
+    /// flight-idle floor rather than from the command it was given.
+    ///
+    /// Both shipped technologies refuse to deliver less than flight-idle
+    /// thrust and report that refusal the same way: an
+    /// [`alas_prop::system::ActiveLimit`] named [`FLIGHT_IDLE_LIMIT`] with
+    /// full utilization. That is the technology-neutral contract this reads,
+    /// not a turbofan-specific detail — the ATR surrogate emits the identical
+    /// name from its own idle fallback. The caller needs it because a floored
+    /// answer means *the command it asked about is outside the deck's
+    /// domain*, so every command below that point produces the same force and
+    /// the force balance has no gradient there.
+    pub fn thrust_with_domain(
+        &self,
+        atmosphere: &Us1976Values,
+        altitude_m: f64,
+        velocity_m_s: f64,
+        mach: f64,
+        gravity_m_s2: f64,
+        throttle: f64,
+    ) -> (ThrustOutput, bool) {
         let freestream =
             freestream_from_atmosphere(atmosphere, altitude_m, velocity_m_s, mach, gravity_m_s2);
         let request = PropulsionRequest {
@@ -290,27 +333,22 @@ impl MissionAnalyses {
                 let Some(legacy) = self.legacy_turbofan.as_ref() else {
                     unreachable!("guarded by the compatibility-state check");
                 };
-                return evaluate_thrust(
-                    &freestream,
-                    &legacy.inputs,
-                    &legacy.params,
-                    legacy.compressor_nondimensional_massflow,
-                    throttle,
+                return (
+                    evaluate_thrust(
+                        &freestream,
+                        &legacy.inputs,
+                        &legacy.params,
+                        legacy.compressor_nondimensional_massflow,
+                        throttle,
+                    ),
+                    false,
                 );
             }
             Err(PropulsionError::InvalidInput { .. } | PropulsionError::NonFiniteOutput(_)) => {
                 // Nonlinear root solvers may probe outside a typed model's
                 // validity domain. Return a rejected numerical point, never
                 // a result from another propulsion technology.
-                return ThrustOutput {
-                    thrust_n: f64::NAN,
-                    thrust_specific_fuel_consumption: f64::NAN,
-                    non_dimensional_thrust: f64::NAN,
-                    core_mass_flow_rate_kg_s: f64::NAN,
-                    fuel_flow_rate_kg_s: f64::NAN,
-                    power_w: f64::NAN,
-                    specific_impulse_s: f64::NAN,
-                };
+                return (rejected_thrust_output(), false);
             }
             Err(error) => {
                 // A typed model-domain rejection can occur at a nonlinear
@@ -322,23 +360,21 @@ impl MissionAnalyses {
                     error = %error,
                     "mission propulsion rejected a trial operating point"
                 );
-                return ThrustOutput {
-                    thrust_n: f64::NAN,
-                    thrust_specific_fuel_consumption: f64::NAN,
-                    non_dimensional_thrust: f64::NAN,
-                    core_mass_flow_rate_kg_s: f64::NAN,
-                    fuel_flow_rate_kg_s: f64::NAN,
-                    power_w: f64::NAN,
-                    specific_impulse_s: f64::NAN,
-                };
+                return (rejected_thrust_output(), false);
             }
         };
 
-        self.project_propulsion_result(result, velocity_m_s, gravity_m_s2)
+        let idle_floor_limited = result
+            .active_limits
+            .iter()
+            .any(|limit| limit.name == FLIGHT_IDLE_LIMIT);
+        let output = self
+            .project_propulsion_result(result, velocity_m_s, gravity_m_s2)
             .unwrap_or_else(|error| {
                 tracing::warn!(error = %error, "mission propulsion projection rejected a trial point");
                 rejected_thrust_output()
-            })
+            });
+        (output, idle_floor_limited)
     }
 
     /// Evaluate a phase rating through the technology-neutral model.

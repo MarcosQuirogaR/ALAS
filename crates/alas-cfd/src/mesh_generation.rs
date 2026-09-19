@@ -3,8 +3,9 @@
 
 use super::{
     AirfoilSnapshot, AirfoilTopology, BoundaryLayerSizing, CfdStudyConfig, EdgeKind, GmshGeo,
-    MeshError, MeshGeometryReport, BOUNDARY_LAYER_EXPANSION_RATIO, CLOSURE_TOLERANCE,
-    EDGE_X_TOLERANCE, GMSH_TEMPLATE_VERSION, MAX_EDGE_POINTS,
+    MeshError, MeshGeometryReport, BOUNDARY_LAYER_COVERAGE_FACTOR, BOUNDARY_LAYER_EXPANSION_RATIO,
+    CLOSURE_TOLERANCE, EDGE_X_TOLERANCE, GMSH_TEMPLATE_VERSION, MAX_DERIVED_BOUNDARY_LAYERS,
+    MAX_EDGE_POINTS,
 };
 #[path = "mesh_render.rs"]
 mod render;
@@ -132,13 +133,45 @@ pub fn boundary_layer_sizing(config: &CfdStudyConfig) -> Result<BoundaryLayerSiz
         target_y_plus * kinematic_viscosity_m2_s / friction_velocity_m_s,
         "derived first-layer wall distance",
     )?;
-    let selected_wall_distance_m = requested_wall_distance_m;
+    // The first cell governs the wall treatment, so it has to be a function of
+    // the flow state.  The configured length stays available as an explicit
+    // override and both values stay in the report.
+    let selected_wall_distance_m = if config.mesh.derive_first_layer_from_target_y_plus {
+        derived_wall_distance_m
+    } else {
+        requested_wall_distance_m
+    };
     let first_layer_thickness_m =
         positive_finite(2.0 * selected_wall_distance_m, "first-layer thickness")?;
-    let n_layers = if config.mesh.boundary_layers {
+    // Flat-plate turbulent estimate of the layer the stack has to span.  The
+    // stack is the only graded region of the mesh; anything the stack does not
+    // cover falls to isotropic background cells that are typically an order of
+    // magnitude larger than the outermost prism.
+    let estimated_boundary_layer_thickness_m = positive_finite(
+        0.37 * config.chord_m / reynolds.powf(0.2),
+        "estimated boundary-layer thickness",
+    )?;
+    let target_total_thickness_m = positive_finite(
+        BOUNDARY_LAYER_COVERAGE_FACTOR * estimated_boundary_layer_thickness_m,
+        "target boundary-layer stack thickness",
+    )?;
+    let configured_n_layers = if config.mesh.boundary_layers {
         config.mesh.n_layers
     } else {
         0
+    };
+    let n_layers = if configured_n_layers == 0 {
+        0
+    } else {
+        // The configured count is a floor, never a ceiling: a user asking for
+        // more layers than the estimate needs still gets them.
+        layers_spanning_thickness(
+            first_layer_thickness_m,
+            BOUNDARY_LAYER_EXPANSION_RATIO,
+            target_total_thickness_m,
+        )
+        .max(configured_n_layers)
+        .min(MAX_DERIVED_BOUNDARY_LAYERS.max(configured_n_layers))
     };
     let total_thickness_m = if n_layers == 0 {
         0.0
@@ -152,6 +185,7 @@ pub fn boundary_layer_sizing(config: &CfdStudyConfig) -> Result<BoundaryLayerSiz
             "boundary-layer total thickness",
         )?
     };
+    let boundary_layer_coverage_ratio = total_thickness_m / estimated_boundary_layer_thickness_m;
     let estimated_y_plus = positive_finite(
         selected_wall_distance_m * friction_velocity_m_s / kinematic_viscosity_m2_s,
         "estimated y+",
@@ -159,12 +193,16 @@ pub fn boundary_layer_sizing(config: &CfdStudyConfig) -> Result<BoundaryLayerSiz
     Ok(BoundaryLayerSizing {
         enabled: config.mesh.boundary_layers,
         n_layers,
+        configured_n_layers,
         expansion_ratio: BOUNDARY_LAYER_EXPANSION_RATIO,
         requested_wall_distance_m,
         derived_wall_distance_m,
         selected_wall_distance_m,
         first_layer_thickness_m,
         total_thickness_m,
+        estimated_boundary_layer_thickness_m,
+        target_total_thickness_m,
+        boundary_layer_coverage_ratio,
         friction_velocity_m_s,
         estimated_y_plus,
         target_y_plus,
@@ -349,6 +387,30 @@ pub(super) fn geometric_layer_sum(first: f64, ratio: f64, n_layers: u32) -> f64 
         return 0.0;
     }
     first * (ratio.powi(n_layers as i32) - 1.0) / (ratio - 1.0)
+}
+
+/// Smallest layer count whose geometric sum reaches `target`.
+///
+/// Inverting the geometric sum analytically keeps this exact for the sizes in
+/// use; the result is still confirmed by [`geometric_layer_sum`] so a rounding
+/// step down cannot leave the stack short of `target`.  Non-finite or
+/// non-growing inputs fall back to one layer rather than an unbounded count.
+pub(super) fn layers_spanning_thickness(first: f64, ratio: f64, target: f64) -> u32 {
+    if !first.is_finite() || first <= 0.0 || !target.is_finite() || target <= 0.0 {
+        return 1;
+    }
+    if !ratio.is_finite() || ratio <= 1.0 {
+        return ((target / first).ceil() as u32).clamp(1, MAX_DERIVED_BOUNDARY_LAYERS);
+    }
+    let exact = (1.0 + target * (ratio - 1.0) / first).ln() / ratio.ln();
+    if !exact.is_finite() {
+        return MAX_DERIVED_BOUNDARY_LAYERS;
+    }
+    let mut count = (exact.ceil() as i64).clamp(1, i64::from(MAX_DERIVED_BOUNDARY_LAYERS)) as u32;
+    while count < MAX_DERIVED_BOUNDARY_LAYERS && geometric_layer_sum(first, ratio, count) < target {
+        count += 1;
+    }
+    count
 }
 
 pub(super) fn positive_finite(value: f64, name: &str) -> Result<f64, MeshError> {

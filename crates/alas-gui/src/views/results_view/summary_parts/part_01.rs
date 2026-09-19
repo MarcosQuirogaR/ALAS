@@ -159,9 +159,8 @@ pub(super) fn show_summary(state: &AppState, ui: &mut Ui, result: &alas_pipeline
         show_stat_tiles(ui, &payload_summary_metrics(layout));
     }
 
-    egui::CollapsingHeader::new(RichText::new(tr("Propulsion cycle details")).strong())
-        .default_open(false)
-        .show(ui, |ui| show_propulsion_cycle_summary(ui, &result.config));
+    section_title(ui, "Propulsion cycle details");
+    show_propulsion_cycle_summary(ui, &result.config);
     ui.add_space(8.0);
 }
 
@@ -398,29 +397,91 @@ fn trim_metrics(result: &alas_pipeline::PipelineResult) -> Vec<(&'static str, St
 
 fn show_propulsion_cycle_summary(ui: &mut Ui, config: &alas_config::AlasConfig) {
     let lines = alas_report::families::propulsion::propulsion_cycle_summary(config);
-    crate::theme::card_frame(ui).show(ui, |ui| {
-        ui.label(RichText::new(tr("Propulsion cycle summary")).strong());
-        ui.add_space(4.0);
-        let entries: Vec<(String, String)> = lines
-            .into_iter()
-            .filter(|line| !line.is_empty())
-            .map(|line| propulsion_summary_entry(&line))
-            .collect();
-        let columns = usize::from(ui.available_width() >= 620.0).max(1);
-        for row in entries.chunks(columns) {
-            ui.columns(columns, |columns| {
-                for (index, (label, value)) in row.iter().enumerate() {
-                    columns[index].horizontal_wrapped(|ui| {
-                        if !label.is_empty() {
-                            ui.label(RichText::new(label).small());
-                        }
-                        ui.label(RichText::new(value).strong());
-                    });
-                }
-            });
-            ui.add_space(4.0);
+    ui.label(RichText::new(tr("Propulsion cycle summary")).strong());
+    ui.add_space(4.0);
+    let entries = propulsion_summary_entries(&lines);
+    if entries.is_empty() {
+        return;
+    }
+    let columns = summary_column_count(ui.available_width()).min(entries.len());
+    for row in entries.chunks(columns) {
+        ui.columns(columns, |columns| {
+            for (index, (label, value)) in row.iter().enumerate() {
+                propulsion_metric_card(&mut columns[index], label, value);
+            }
+        });
+        ui.add_space(8.0);
+    }
+}
+
+/// Split the shared propulsion summary into independently readable cards.
+///
+/// The cycle producer keeps its report-oriented lines (including the compact
+/// BPR/OPR/FPR/TIT row) as the source of truth. This adapter only changes the
+/// presentation shape; it does not recalculate or round any physical value.
+fn propulsion_summary_entries(lines: &[String]) -> Vec<(String, String)> {
+    let mut entries = Vec::new();
+    for line in lines
+        .iter()
+        .map(String::as_str)
+        .filter(|line| !line.trim().is_empty())
+    {
+        if line.trim_start().starts_with("BPR =") {
+            entries.extend(
+                line.split("    ")
+                    .filter(|metric| !metric.trim().is_empty())
+                    .map(propulsion_summary_entry),
+            );
+        } else {
+            entries.push(propulsion_summary_entry(line));
         }
+    }
+    entries
+}
+
+fn propulsion_metric_card(ui: &mut Ui, label: &str, value: &str) {
+    crate::theme::card_frame(ui).show(ui, |ui| {
+        ui.set_min_width(ui.available_width());
+        if !label.is_empty() {
+            ui.add(
+                egui::Label::new(math_rich_text(&localized_propulsion_label(label)).small()).wrap(),
+            );
+        }
+        ui.add(egui::Label::new(math_rich_text(value).strong().size(14.0)).wrap());
     });
+}
+
+/// Use a monospace face for cycle symbols (η, subscripts and compact metric
+/// names) so they remain legible in all three desktop themes and at narrow
+/// widths. The values themselves remain the producer's unit-bearing strings.
+fn math_rich_text(text: &str) -> RichText {
+    RichText::new(text.to_owned()).font(egui::FontId::monospace(13.0))
+}
+
+fn localized_propulsion_label(label: &str) -> String {
+    let compact = label.split_whitespace().collect::<Vec<_>>().join(" ");
+    match compact.as_str() {
+        "Engine" => tr("Engine:").trim().to_owned(),
+        "Design point" => tr("Design point: ").trim().to_owned(),
+        "Specific thrust SFn" => format!("{}  SFn", tr("Specific thrust")),
+        "Fuel-air ratio f" => format!("{}  f", tr("Fuel-air ratio")),
+        "TSFC (computed)" => tr("TSFC (computed)"),
+        "TSFC (reference)" => tr("TSFC (reference)"),
+        "Thermal efficiency (eta_t)" => format!("{} (ηₜ)", tr("Thermal efficiency")),
+        "Propulsive efficiency (eta_p)" => format!("{} (ηₚ)", tr("Propulsive efficiency")),
+        "Overall efficiency (eta_o)" => format!("{} (ηₒ)", tr("Overall efficiency")),
+        "Per-engine thrust, static (rated)" => tr("Per-engine thrust, static (rated)"),
+        "Per-engine thrust, this cruise pt" => tr("Per-engine thrust, this cruise pt"),
+        "Cycle infeasible at this design point" => tr("Cycle infeasible at this design point:")
+            .trim_end_matches(':')
+            .to_owned(),
+        _ if compact.starts_with("Total installed thrust") => format!(
+            "{} {}",
+            tr("Total installed thrust"),
+            compact.trim_start_matches("Total installed thrust").trim()
+        ),
+        _ => label.trim().to_owned(),
+    }
 }
 
 fn propulsion_summary_entry(line: &str) -> (String, String) {

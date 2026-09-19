@@ -121,14 +121,22 @@ fn show_menu_bar(state: &mut AppState, ctx: &Context, ui: &mut Ui) {
             ui.separator();
             render_view_options(state, ctx, ui, true);
         });
+        // One menu-bar order across modes: the guided workspace is
+        // File - View - Analysis - Advanced Settings - Help, and a command
+        // that moves position between modes costs the user every time. The
+        // standalone analyses are disabled here rather than removed, so their
+        // absence is legible and carries its reason.
+        ui.add_enabled(false, egui::Button::new(tr("Analysis")))
+            .on_disabled_hover_text(tr(
+                "Standalone analyses open from the guided workspace; leave the sandbox to use them.",
+            ));
+        show_menu_action(state, ui);
         ui.menu_button(tr("Help"), |ui| {
             if ui.button(tr("About ALAS")).clicked() {
                 state.show_about = true;
                 ui.close_menu();
             }
         });
-        ui.separator();
-        show_menu_action(state, ui);
     });
 }
 

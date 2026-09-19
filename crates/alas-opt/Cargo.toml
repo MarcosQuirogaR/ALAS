@@ -21,6 +21,11 @@ alas-prop = { path = "../alas-prop" }
 alas-stab = { path = "../alas-stab" }
 alas-math = { path = "../alas-math" }
 alas-units = { path = "../alas-units" }
+# One function: `route_cruise_altitude_m`, the rule that decides what altitude
+# a configured route is actually flown at. The optimizer's sizing mission and
+# the published mission have to agree about it, and a policy duplicated in two
+# crates is exactly how they stopped agreeing.
+alas-mission = { path = "../alas-mission" }
 tracing = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }

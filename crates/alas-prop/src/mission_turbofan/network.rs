@@ -85,9 +85,9 @@ pub(super) fn build_freestream(altitude_m: f64, mach: f64, gravity_m_s2: f64) ->
 /// including the thrust process (which the caller runs with the scale factor
 /// appropriate to the pass).
 ///
-/// Returns the ten component outputs in flow order, and the two low-pressure
+/// Returns the ten component outputs in flow order. The low-pressure
 /// compressor reference stagnation quantities the thrust process normalizes
-/// against.
+/// against are read off the returned `lpc`; they are not returned separately.
 #[allow(clippy::type_complexity)] // one pass legitimately yields every station
 pub(super) fn walk_network(
     freestream: &Freestream,

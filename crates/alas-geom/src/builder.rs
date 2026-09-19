@@ -14,7 +14,7 @@
 //!
 //! [`AircraftBuilder::build`] is where every other module in this crate
 //! meets: [`crate::airfoil_library::AirfoilLibrary::get`] resolves the three
-//! configured airfoil names (through all three of its branches on the
+//! configured airfoil names (through all four of its branches on the
 //! default aircraft, see `docs/PORTING.md`'s Geometry section),
 //! [`crate::airfoil_library::build_section`] shapes the root section from the
 //! design vector, and [`crate::aircraft::wing::Wing`] /
@@ -43,7 +43,13 @@
 //! widening the aircraft model's visibility for one helper (see either module's own
 //! `linspace` for the precedent).
 
+#[path = "builder_parts/error.rs"]
+mod errors;
 mod mesh;
+
+pub use errors::BuildError;
 
 include!("builder_parts/part_01.rs");
 include!("builder_parts/part_02.rs");
+#[path = "builder_parts/part_03.rs"]
+mod custom_sections;

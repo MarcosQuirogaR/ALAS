@@ -14,7 +14,7 @@ use egui::{RichText, Ui};
 use serde_json::Value;
 
 use crate::nav::Surface;
-use crate::views::form::{dynamic_form, FormEdit};
+use crate::views::form::{dynamic_form_with_open_root_nodes, FormEdit};
 use crate::views::tr;
 
 /// A visual subsection of a previously flat configuration page.
@@ -102,6 +102,20 @@ pub(super) fn page_sections(group: &str, surface: Surface) -> Option<&'static [P
             names: &["solver"],
             default_open: true,
         },
+        // Two questions the objective does not answer: where this program's
+        // own correlations stop being trustworthy, and whether an
+        // overconstrained problem may miss a limit at all. Both are closed
+        // by default because neither belongs in a routine run.
+        PageSection {
+            title: "Model validity domain",
+            names: &["plausibility"],
+            default_open: false,
+        },
+        PageSection {
+            title: "Controlled constraint relaxation",
+            names: &["relaxation"],
+            default_open: false,
+        },
     ];
     const LANDING_GEAR: &[PageSection] = &[
         PageSection {
@@ -153,7 +167,7 @@ pub(super) fn page_sections(group: &str, surface: Surface) -> Option<&'static [P
                 "spoiler_span_start_frac",
                 "spoiler_span_end_frac",
             ],
-            default_open: false,
+            default_open: true,
         },
         PageSection {
             title: "Tail surfaces",
@@ -165,7 +179,7 @@ pub(super) fn page_sections(group: &str, surface: Surface) -> Option<&'static [P
                 "rudder_span_start_frac",
                 "rudder_span_end_frac",
             ],
-            default_open: false,
+            default_open: true,
         },
     ];
     const STRUCTURES: &[PageSection] = &[
@@ -200,7 +214,7 @@ pub(super) fn page_sections(group: &str, surface: Surface) -> Option<&'static [P
                 "cap_taper_eta_lock",
                 "cap_taper_tip_fraction",
             ],
-            default_open: false,
+            default_open: true,
         },
     ];
     const STRUCTURES_ADVANCED: &[PageSection] = &[
@@ -250,7 +264,7 @@ pub(super) fn page_sections(group: &str, surface: Surface) -> Option<&'static [P
         PageSection {
             title: "Fine VLM mesh",
             names: &["fine_spanwise_resolution", "fine_chordwise_resolution"],
-            default_open: false,
+            default_open: true,
         },
         PageSection {
             title: "Trim and stability",
@@ -264,7 +278,7 @@ pub(super) fn page_sections(group: &str, surface: Surface) -> Option<&'static [P
                 "tail_efficiency",
                 "include_fuselage_stability",
             ],
-            default_open: false,
+            default_open: true,
         },
         PageSection {
             title: "Polar fit",
@@ -274,7 +288,7 @@ pub(super) fn page_sections(group: &str, surface: Surface) -> Option<&'static [P
                 "polar_fit_cl_min_fallback",
                 "polar_fit_cl_max_fallback",
             ],
-            default_open: false,
+            default_open: true,
         },
     ];
     const PERFORMANCE: &[PageSection] = &[
@@ -305,7 +319,7 @@ pub(super) fn page_sections(group: &str, surface: Surface) -> Option<&'static [P
                 "bfl_factor",
                 "matching_chart_resolution",
             ],
-            default_open: false,
+            default_open: true,
         },
         PageSection {
             title: "Take-off speed schedule",
@@ -316,12 +330,12 @@ pub(super) fn page_sections(group: &str, surface: Surface) -> Option<&'static [P
                 "v2_vstall_factor",
                 "v1_vr_factor",
             ],
-            default_open: false,
+            default_open: true,
         },
         PageSection {
             title: "Approach speed schedule",
             names: &["vapp_vstall_land_factor", "vtd_vstall_land_factor"],
-            default_open: false,
+            default_open: true,
         },
     ];
     const MSES: &[PageSection] = &[
@@ -344,7 +358,7 @@ pub(super) fn page_sections(group: &str, surface: Surface) -> Option<&'static [P
         PageSection {
             title: "Mesh resolution",
             names: &["mset_n", "mset_e"],
-            default_open: false,
+            default_open: true,
         },
     ];
 
@@ -398,13 +412,14 @@ pub(super) fn render_sectioned_form(
                 .id_salt(format!("{group}::{}", section.title))
                 .default_open(section.default_open)
                 .show(ui, |ui| {
-                    edits.extend(dynamic_form(
+                    edits.extend(dynamic_form_with_open_root_nodes(
                         ui,
                         &section_fields,
                         values,
                         error_fields,
                         lang,
                         show_help,
+                        true,
                     ));
                 });
         });
@@ -424,15 +439,16 @@ pub(super) fn render_sectioned_form(
         crate::theme::card_frame(ui).show(ui, |ui| {
             egui::CollapsingHeader::new(RichText::new(tr("Additional settings")).strong())
                 .id_salt(format!("{group}::additional"))
-                .default_open(false)
+                .default_open(true)
                 .show(ui, |ui| {
-                    edits.extend(dynamic_form(
+                    edits.extend(dynamic_form_with_open_root_nodes(
                         ui,
                         &remaining,
                         values,
                         error_fields,
                         lang,
                         show_help,
+                        true,
                     ));
                 });
         });

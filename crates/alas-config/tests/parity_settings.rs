@@ -353,9 +353,7 @@ fn compare_values(
 /// fields appear here once per registered aircraft. Both sides stay pinned,
 /// exactly as they are for a directly constructed configuration.
 fn vibration_performance_default_correction(path: &str) -> Option<(Value, Value)> {
-    if path.ends_with(".structures.run_sol_vibration_sine") {
-        Some((Value::Bool(true), Value::Bool(false)))
-    } else if path.ends_with(".structures.freq_sweep_max_hz") {
+    if path.ends_with(".structures.freq_sweep_max_hz") {
         Some((serde_json::json!(500.0), serde_json::json!(60.0)))
     } else if path.ends_with(".structures.n_modes") {
         Some((serde_json::json!(30), serde_json::json!(16)))
@@ -575,7 +573,44 @@ fn preset_source_corrections() -> BTreeMap<String, SourceCorrection> {
             "A220-300", "A320-200", "A340-300", "A380-800", "AVE", "B787-9", "DC-10",
         ],
     );
+    add_native_worker_corrections(
+        &mut corrections,
+        &[
+            "A220-300", "A320-200", "A340-300", "A380-800", "AVE", "B787-9", "DC-10",
+        ],
+    );
+    add_certified_landing_mass_ratio_corrections(&mut corrections);
     corrections
+}
+
+/// A registered aircraft now carries its own certified landing-to-takeoff
+/// mass ratio instead of the frozen study fraction.
+///
+/// FLOPS equation 63 sizes the main gear on `WLDG^0.95`, so the generic 0.92
+/// put 515 t of landing weight into the A380-800's gear equation against its
+/// certified 386 t. Both masses are already in the registry with their
+/// airport-planning and type-certificate provenance, so the ratio is read
+/// from them. AVE declares no certified pair and keeps 0.92, which is why it
+/// is absent here.
+fn add_certified_landing_mass_ratio_corrections(
+    corrections: &mut BTreeMap<String, SourceCorrection>,
+) {
+    for (preset, mlw_kg, mtow_kg) in [
+        ("A220-300", 58_740.0, 67_585.0),
+        ("A320-200", 66_000.0, 78_000.0),
+        ("A340-300", 188_000.0, 260_000.0),
+        ("A380-800", 386_000.0, 560_000.0),
+        ("B787-9", 192_776.0, 254_692.0),
+        ("DC-10", 190_962.0, 259_454.0),
+    ] {
+        corrections.insert(
+            format!("{preset}.mass_model.mlw_fraction_mtow"),
+            SourceCorrection {
+                upstream: Value::from(0.92),
+                corrected: Value::from(mlw_kg / mtow_kg),
+            },
+        );
+    }
 }
 
 fn saved_file_source_corrections() -> BTreeMap<String, SourceCorrection> {
@@ -617,6 +652,19 @@ fn saved_file_source_corrections() -> BTreeMap<String, SourceCorrection> {
             "preset_then_field.requirements.cabin_preset",
             "Ryanair",
             "Custom",
+        ),
+        // The two saved-file cases load the A220-300 and the B787-9, which
+        // now carry their own certified MLW/MTOW ratio; see
+        // `add_certified_landing_mass_ratio_corrections`.
+        correction(
+            "preset_only.mass_model.mlw_fraction_mtow",
+            0.92,
+            58_740.0 / 67_585.0,
+        ),
+        correction(
+            "preset_then_field.mass_model.mlw_fraction_mtow",
+            0.92,
+            192_776.0 / 254_692.0,
         ),
         correction("preset_only.landing_gear.n_mlg_struts", 0, 2),
         correction("preset_only.landing_gear.n_nlg_wheels", 0, 2),
@@ -716,6 +764,18 @@ fn saved_file_source_corrections() -> BTreeMap<String, SourceCorrection> {
             "deep_partial",
         ],
     );
+    add_native_worker_corrections(
+        &mut corrections,
+        &[
+            "empty",
+            "preset_only",
+            "preset_then_field",
+            "tuple_field_from_a_list",
+            "airports",
+            "unknown_preset",
+            "deep_partial",
+        ],
+    );
     corrections
 }
 
@@ -740,6 +800,31 @@ fn add_planning_cabin_corrections(
             SourceCorrection {
                 upstream: Value::from(85.0),
                 corrected: Value::from(100.0),
+            },
+        );
+    }
+}
+
+/// The native worker count.
+///
+/// `workers` moved from the frozen literal `1` to `0`, meaning "resolve
+/// against this machine": the staged MADS search evaluates a poll block in
+/// parallel at that count without changing which points it evaluates or which
+/// one it returns. Differential evolution is deliberately excluded from the
+/// automatic setting — its generation loop batches only on an explicit
+/// request, because a batched generation defers the population update and is a
+/// different algorithm — so the frozen replay keeps the reference
+/// interleaving.
+fn add_native_worker_corrections(
+    corrections: &mut BTreeMap<String, SourceCorrection>,
+    cases: &[&str],
+) {
+    for case in cases {
+        corrections.insert(
+            format!("{case}.optimizer.solver.workers"),
+            SourceCorrection {
+                upstream: Value::from(1.0),
+                corrected: Value::from(0.0),
             },
         );
     }

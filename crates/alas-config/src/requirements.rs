@@ -117,6 +117,25 @@ pub struct DesignRequirements {
     )]
     pub cargo_payload_kg: f64,
 
+    /// The freight mass the design is asked to match, kg.
+    ///
+    /// The user's requested cargo objective: deliberately a different
+    /// quantity from `cargo_payload_kg` (the capacity a cabin preset
+    /// determines and the load case requests) and from the payload a
+    /// candidate actually carries. A cabin preset writes the capacity and
+    /// never this field, because a request that preset application
+    /// overwrote would not be a requirement at all. Read it through
+    /// [`Self::cargo_target_kg`], the mass the objective scores a
+    /// candidate's deviation from.
+    #[serde(default)]
+    #[config(
+        advanced,
+        label = "Cargo capacity objective",
+        unit = "kg",
+        help = "Cargo capacity objective: the cargo payload mass requested of a freighter (aircraft_type 'cargo'), which the search is rewarded for getting closer to. It stays separate from the cargo payload capacity above and from the payload a candidate actually carries, so it redefines neither, and it is not a floor a candidate must clear: mass, volume, structural-loading and mission feasibility are judged exactly as before. 0 = disabled (the default), and the objective then follows the configured cargo payload capacity."
+    )]
+    pub cargo_objective_kg: f64,
+
     /// The most the airframe may carry, whatever the hold could hold.
     #[config(
         advanced,
@@ -242,6 +261,7 @@ impl Default for DesignRequirements {
             optimize_passenger_capacity: true,
             num_passengers: 350,
             cargo_payload_kg: 102_100.0,
+            cargo_objective_kg: 0.0,
             max_structural_payload_kg: 0.0,
             min_passenger_capacity: 0,
             ultimate_load_factor: 3.75,
@@ -317,6 +337,26 @@ impl DesignRequirements {
         self.num_passengers as f64 * self.passenger_mass_kg
     }
 
+    /// The cargo payload mass the objective scores a candidate against, kg.
+    ///
+    /// The requested [`Self::cargo_objective_kg`] when the user entered one,
+    /// otherwise the configured [`Self::cargo_payload_kg`] capacity, which is
+    /// the mass the objective used before a request could be entered: a study
+    /// that enters none is scored exactly as it was. A non-finite or
+    /// non-positive request is no request, since a payload mass is positive
+    /// by definition and zero or below is outside the target's valid domain
+    /// rather than a request to carry nothing.
+    ///
+    /// This resolves the target only; it writes neither field, so the request
+    /// can redefine neither the capacity a cabin preset determined nor the
+    /// payload the load case actually carries.
+    pub fn cargo_target_kg(&self) -> f64 {
+        if self.cargo_objective_kg.is_finite() && self.cargo_objective_kg > 0.0 {
+            return self.cargo_objective_kg;
+        }
+        self.cargo_payload_kg
+    }
+
     /// The lift coefficient needed to hold level flight: `CL = W / (q * S)`.
     pub fn required_cruise_cl(&self, dynamic_pressure_pa: f64, wing_area_m2: f64) -> f64 {
         let weight_n = self.mtow_kg * self.gravity_m_s2;
@@ -385,6 +425,90 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(freighter.payload_kg(), freighter.cargo_payload_kg);
+    }
+
+    #[test]
+    fn the_cargo_objective_is_disabled_by_default_and_the_capacity_is_the_target() {
+        // Nothing entered: the objective is scored against the configured
+        // capacity, which is the mass it was scored against before a request
+        // could be entered at all.
+        let defaults = DesignRequirements::default();
+        assert_eq!(defaults.cargo_objective_kg, 0.0);
+        assert_eq!(defaults.cargo_target_kg(), defaults.cargo_payload_kg);
+    }
+
+    #[test]
+    fn an_entered_cargo_objective_is_the_target_and_leaves_the_capacity_alone() {
+        let requirements = DesignRequirements {
+            aircraft_type: "cargo".to_owned(),
+            cargo_payload_kg: 45_000.0,
+            cargo_objective_kg: 60_000.0,
+            ..Default::default()
+        };
+        assert_eq!(requirements.cargo_target_kg(), 60_000.0);
+        // The request is the target and nothing else: the capacity, and so
+        // the payload the load case asks the hold for, are untouched.
+        assert_eq!(requirements.cargo_payload_kg, 45_000.0);
+        assert_eq!(requirements.payload_kg(), 45_000.0);
+    }
+
+    #[test]
+    fn a_cargo_objective_outside_its_valid_domain_is_no_request() {
+        // A payload mass is positive and finite. Anything else is not a
+        // smaller target, it is no target, and the capacity keeps the role.
+        for request in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+            let requirements = DesignRequirements {
+                cargo_objective_kg: request,
+                ..Default::default()
+            };
+            assert_eq!(
+                requirements.cargo_target_kg(),
+                requirements.cargo_payload_kg,
+                "request {request}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_cargo_objective_survives_a_save_and_load_round_trip() {
+        let requirements = DesignRequirements {
+            aircraft_type: "cargo".to_owned(),
+            cabin_preset: "Max payload".to_owned(),
+            cargo_objective_kg: 62_500.0,
+            ..Default::default()
+        };
+        let saved = serde_json::to_value(requirements.clone()).unwrap();
+        assert_eq!(saved["cargo_objective_kg"], 62_500.0);
+        let loaded: DesignRequirements = serde_json::from_value(saved).unwrap();
+        assert_eq!(loaded, requirements);
+        assert_eq!(loaded.cargo_target_kg(), 62_500.0);
+    }
+
+    #[test]
+    fn a_file_written_before_the_cargo_objective_existed_loads_with_it_disabled() {
+        let mut saved = serde_json::to_value(DesignRequirements::default()).unwrap();
+        saved.as_object_mut().unwrap().remove("cargo_objective_kg");
+        let loaded: DesignRequirements = serde_json::from_value(saved).unwrap();
+        assert_eq!(loaded.cargo_objective_kg, 0.0);
+        assert_eq!(loaded, DesignRequirements::default());
+    }
+
+    #[test]
+    fn the_cargo_objective_is_an_advanced_field_in_kilograms() {
+        // Advanced, so the guided requirements card keeps exactly the fields
+        // it had: the objective is rendered there by the Inputs view itself,
+        // and only for a freighter. It is a free input at all times, unlike
+        // the capacity a cabin preset owns.
+        let schema = DesignRequirements::default().schema();
+        let field = schema
+            .field("cargo_objective_kg")
+            .expect("the cargo objective is in the schema");
+        assert_eq!(field.unit, "kg");
+        assert!(field.advanced);
+        match &field.entry {
+            crate::Entry::Leaf(leaf) => assert!(leaf.readonly_unless.is_none()),
+            crate::Entry::Node(_) => panic!("a payload mass is not a group"),
+        }
     }
 
     #[test]

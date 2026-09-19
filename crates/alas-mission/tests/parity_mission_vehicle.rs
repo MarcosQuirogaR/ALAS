@@ -253,6 +253,17 @@ fn vehicle_request_matches_the_reference() {
 
 fn request_corrections() -> BTreeMap<&'static str, RequestCorrection> {
     [
+        // The wing spanwise panel count, which changed meaning rather than
+        // fidelity: the frozen value is a per-section multiplier, the product
+        // one an absolute panel count across the semispan, and 24 is what the
+        // frozen three-section planform already meshed to. The same decision
+        // is declared for the configuration default in `alas-config`'s
+        // `parity_config::product_default_correction`; it reaches the vehicle
+        // request through these two presets, so it is recorded here too rather
+        // than left as an undeclared disagreement. See
+        // `alas_geom::aircraft::spanwise`.
+        correction("A320-200.geometry_config.wing.n_subdivisions", 8.0, 24.0),
+        correction("A340-300.geometry_config.wing.n_subdivisions", 8.0, 24.0),
         // Airbus/EASA-sourced A320-214 and A340-312 dimension corrections,
         // pinned two-sidedly by the alas-config preset ledger.
         correction(

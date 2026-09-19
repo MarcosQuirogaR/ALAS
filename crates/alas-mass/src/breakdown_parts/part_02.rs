@@ -273,7 +273,7 @@ pub fn calculate_flops_mass_buildup(
     control_surfaces: &ControlSurfacesConfig,
     mass_model: Option<&MassModelConfig>,
     landing_gear: &LandingGearConfig,
-    _cabin_config: &CabinConfig,
+    cabin_config: &CabinConfig,
 ) -> Result<ProductMassBuildup, ComponentMassError> {
     let default_mass_model = MassModelConfig::default();
     let mm = mass_model.unwrap_or(&default_mass_model);
@@ -297,6 +297,7 @@ pub fn calculate_flops_mass_buildup(
             requirements,
             geometry_config,
             control_surfaces,
+            cabin_config,
             mm,
         )
         .map(|built| ProductMassBuildup::PureFlops(Box::new(built)));

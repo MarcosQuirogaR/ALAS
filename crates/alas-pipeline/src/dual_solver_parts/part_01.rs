@@ -3,6 +3,7 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 use alas_aero::avl::{AvlPolar, AvlPolarPoint};
 use alas_config::design_variables::DesignVector;
@@ -10,10 +11,13 @@ use alas_config::AlasConfig;
 use alas_exec::RunEnvironment;
 use alas_opt::objective::DesignObjective;
 use alas_opt::{
-    assess_candidate_with_polar, assess_product_candidate, DesignOptimizer, ExternalPolar,
+    assess_candidate_with_polar, DeliveredAcceptance, DesignOptimizer, ExternalPolar,
     ObjectiveEvaluation, ObjectiveEvaluator, OptimizationResult,
 };
 
+use crate::acceptance::{
+    verify_finalist, AcceptanceRoute, FinalistVerification, MAX_VERIFIED_CANDIDATES,
+};
 use crate::avl::{run_avl_analysis, AvlAnalysisResult, AvlAnalysisStatus};
 use crate::full_analysis::{AnalysisReport, FullAnalysis};
 use crate::solver_mode::{OptimizationSolverMode, SolverKind};
@@ -149,6 +153,7 @@ pub fn run_solver_optimizations(
     nominal_design: &DesignVector,
     bounds: Option<&[(f64, f64)]>,
     output_dir: Option<&Path>,
+    acceptance_route: Option<&AcceptanceRoute>,
 ) -> SolverOptimizationSet {
     let want_vlm = matches!(
         mode,
@@ -160,8 +165,8 @@ pub fn run_solver_optimizations(
     );
     let bounds = bounds.map(<[(f64, f64)]>::to_vec);
     let nominal = *nominal_design;
-    let vlm_config = config.clone();
-    let avl_config = config.clone();
+    let vlm_config = serial_solver_config(config, parallel);
+    let avl_config = serial_solver_config(config, parallel);
     let vlm_environment = environment.clone();
     let avl_environment = environment.clone();
     let vlm_output = output_dir.map(|path| path.join("solvers/vlm"));
@@ -176,6 +181,7 @@ pub fn run_solver_optimizations(
                 nominal,
                 bounds.as_deref(),
                 vlm_output,
+                acceptance_route,
             )
         } else {
             SolverOptimizationResult::not_requested(SolverKind::Vlm)
@@ -225,6 +231,30 @@ pub fn run_solver_optimizations(
     }
 }
 
+/// Run the native search, then make the design it delivers survive the
+/// application's own reporting-fidelity re-evaluation before the branch is
+/// reported as completed.
+///
+/// The search ranks candidates on the in-loop panel mesh and its analytic
+/// dispatch closure; the published analysis re-solves the winner on the finer
+/// reported mesh and flies the native mission at the fuel policy's load case.
+/// Those are two models, and they can disagree by about the coarse mesh's own
+/// error - enough to move a trimmed body attitude out of a two-degree design
+/// window, or to leave a route the analytic closure sized for unflyable at
+/// the mass it closed at. The optimizer used to report `converged` in exactly
+/// those runs and the feasibility stage used to report the same aircraft
+/// INFEASIBLE.
+///
+/// So the finalist is re-evaluated here, inside the optimization stage's own
+/// clock. If it is accepted, nothing changes but the record. If it is
+/// rejected, the loop offers the search's next-best *hard-feasible* candidate
+/// - never a design the search itself rejected - and the first one the
+/// application accepts is delivered, with the run reported as a
+/// reporting-fidelity fallback rather than as convergence. If none is
+/// accepted the search's own finalist is still returned, with its full
+/// report and every finding intact, and the run is reported as
+/// `reporting_fidelity_rejected`. No limit, residual or tolerance is
+/// weakened anywhere in that ladder.
 fn run_vlm_optimizer(
     config: AlasConfig,
     seed: Option<u64>,
@@ -232,6 +262,7 @@ fn run_vlm_optimizer(
     nominal: DesignVector,
     bounds: Option<&[(f64, f64)]>,
     output_dir: Option<PathBuf>,
+    acceptance_route: Option<&AcceptanceRoute>,
 ) -> SolverOptimizationResult {
     let output_dir = create_branch_directory(output_dir);
     let effective_config = match seeded_config(&config, seed) {
@@ -239,7 +270,7 @@ fn run_vlm_optimizer(
         Err(error) => return SolverOptimizationResult::failed(SolverKind::Vlm, output_dir, error),
     };
     let mut optimizer = DesignOptimizer::new(effective_config.clone());
-    let optimization = match optimizer.run(bounds, Some(&nominal), None) {
+    let mut optimization = match optimizer.run(bounds, Some(&nominal), None) {
         Ok(result) => result,
         Err(error) => {
             return SolverOptimizationResult::failed(
@@ -249,47 +280,87 @@ fn run_vlm_optimizer(
             )
         }
     };
-    let design = optimization.best_design;
-    let assessment = match assess_product_candidate(&config, &design) {
-        Ok(assessment) if assessment.hard_feasible => assessment,
-        Ok(assessment) => {
-            return SolverOptimizationResult::failed(
-                SolverKind::Vlm,
-                output_dir,
-                format!(
-                    "VLM finalist failed its replayed hard constraints: {}",
-                    assessment.violated_hard_ids().join(", ")
-                ),
-            )
+
+    let started = Instant::now();
+    let candidates = optimization.ranked_hard_feasible_candidates(MAX_VERIFIED_CANDIDATES);
+    let mut evaluated = 0usize;
+    let mut finalist: Option<FinalistVerification> = None;
+    let mut finalist_rejected_by = Vec::new();
+    let mut rejection_messages: Vec<String> = Vec::new();
+    let mut accepted: Option<(usize, FinalistVerification)> = None;
+    for (rank, candidate) in candidates.iter().enumerate() {
+        let verification = match verify_finalist(&config, candidate, acceptance_route) {
+            Ok(verification) => verification,
+            Err(error) if rank == 0 => {
+                // The search returned a design its own replay rejects. That
+                // is an integration error in the search, not a reporting
+                // disagreement, and it stays a branch failure.
+                return SolverOptimizationResult::failed(
+                    SolverKind::Vlm,
+                    output_dir,
+                    format!("VLM finalist replay failed: {error}"),
+                );
+            }
+            Err(error) => {
+                tracing::warn!(%error, rank, "fallback candidate could not be re-evaluated");
+                continue;
+            }
+        };
+        evaluated += 1;
+        if rank == 0 {
+            finalist_rejected_by = verification.rejected_by();
+            rejection_messages = verification.rejection_messages();
         }
-        Err(error) => {
+        if verification.accepted() {
+            accepted = Some((rank, verification));
+            break;
+        }
+        if rank == 0 {
+            finalist = Some(verification);
+        }
+    }
+
+    let (delivered, delivered_is_search_finalist) = match (accepted, finalist) {
+        (Some((rank, verification)), _) => (verification, rank == 0),
+        (None, Some(verification)) => (verification, true),
+        (None, None) => {
             return SolverOptimizationResult::failed(
                 SolverKind::Vlm,
                 output_dir,
-                format!("VLM finalist replay failed: {error}"),
+                "VLM finalist could not be re-evaluated at reporting fidelity",
             )
         }
     };
-    let report = match FullAnalysis::new(config).run_at_sized_takeoff_mass(
-        &design,
-        true,
-        assessment.sized.takeoff_mass_kg,
-    ) {
-        Ok(report) => report,
-        Err(error) => {
-            return SolverOptimizationResult::failed(
-                SolverKind::Vlm,
-                output_dir,
-                format!("VLM best-design analysis failed: {error}"),
-            )
-        }
-    };
+    let verified = delivered.accepted();
+    let delivered_rejected_by = delivered.rejected_by();
+    if !verified {
+        // Nothing was accepted, so the messages a reader needs are the
+        // delivered design's own rather than the finalist's.
+        rejection_messages = delivered.rejection_messages();
+    }
+    if !verified {
+        tracing::warn!(
+            rejected_by = %delivered_rejected_by.join(", "),
+            candidates_evaluated = evaluated,
+            "no candidate survived the reporting-fidelity re-evaluation"
+        );
+    }
+    optimization.record_delivered_acceptance(DeliveredAcceptance {
+        verified,
+        finalist_rejected_by,
+        delivered_rejected_by,
+        rejection_messages,
+        candidates_evaluated: evaluated,
+        delivered_is_search_finalist,
+        wall_time_s: started.elapsed().as_secs_f64(),
+    });
+
     SolverOptimizationResult {
         solver: SolverKind::Vlm,
         status: SolverOptimizationStatus::Completed,
-        design: Some(design),
+        design: Some(delivered.design),
         optimization: Some(optimization),
-        report: Some(report),
+        report: Some(delivered.report),
         avl_result: None,
         output_dir,
         error: None,
@@ -376,6 +447,34 @@ fn run_avl_optimizer(
         output_dir,
         error: None,
     }
+}
+
+/// The solver configuration a run with `parallel` uses.
+///
+/// `parallel` is the run-level "use this machine" switch (`--no-parallel`
+/// clears it), and it used to reach only the choice to run the VLM and AVL
+/// branches side by side: candidate evaluation inside each branch read
+/// `optimizer.solver.workers` and never saw the flag, so a serial request
+/// still started a batch on every worker the setting allowed. Clamping the
+/// count here is what makes the serial request actually serial.
+///
+/// It is a scheduling change only - the batch, its designs and their scores
+/// are identical at any worker count - so a serial run returns the same
+/// aircraft, more slowly.
+///
+/// What this does *not* claim is a single-threaded process. One coupled
+/// evaluation still fills its vortex-lattice influence matrix and factorises
+/// it across the shared rayon pool (`alas_aero::vlm::system`,
+/// `alas_math::linalg`). That is data parallelism inside one arithmetic
+/// operation, with a result documented and tested as bit-identical to the
+/// serial loop, not concurrent evaluation of independent work; no candidate,
+/// branch or pipeline stage overlaps another under `--no-parallel`.
+fn serial_solver_config(config: &AlasConfig, parallel: bool) -> AlasConfig {
+    let mut config = config.clone();
+    if !parallel {
+        config.optimizer.solver.workers = 1;
+    }
+    config
 }
 
 fn create_branch_directory(output_dir: Option<PathBuf>) -> Option<PathBuf> {

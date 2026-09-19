@@ -15,6 +15,8 @@ pub enum TourTarget {
     Navigation,
     /// The Inputs content containing aircraft configuration.
     AircraftConfig,
+    /// The Inputs starting-design card's Sandbox Mode button.
+    SandboxEntry,
     /// The live-preview dock.
     PreviewDock,
     /// The active central content panel.
@@ -63,7 +65,7 @@ pub const TOUR_STEPS: &[TourStep] = &[
         title: "Sandbox mode",
         body: "Sandbox mode lets you shape the aircraft in Discipline Windows. Use Quick Analysis for initial estimates or Full Analysis for detailed results. When you leave, choose whether to discard the sandbox changes or use them as the active design.",
         page: Some("inputs"),
-        target: Some(TourTarget::AircraftConfig),
+        target: Some(TourTarget::SandboxEntry),
     },
     TourStep {
         title: "3D Live Preview",

@@ -24,6 +24,16 @@ pub(crate) enum Field {
     Scalar(ScalarField),
     Vector(VectorField),
 }
+
+/// Units carried by an OpenFOAM pressure field.  The incompressible solver
+/// writes kinematic pressure (`m^2/s^2`), while rhoSimpleFoam writes absolute
+/// thermodynamic pressure (`Pa`).  Surface integration normalises both to the
+/// kinematic representation used by the public sample type.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PressureUnits {
+    Kinematic,
+    Absolute,
+}
 #[derive(Clone)]
 pub(crate) enum Scalar {
     Uniform(f64),
@@ -262,7 +272,11 @@ fn vector_at(ts: &[String], i: &mut usize, source: &str) -> Result<Vector, Surfa
         _ => Err(error(source, "field value must be uniform or nonuniform")),
     }
 }
-pub(crate) fn validate_header(ts: &[String], source: &str) -> Result<(), SurfaceError> {
+pub(crate) fn validate_header(
+    ts: &[String],
+    source: &str,
+    allow_absolute_pressure: bool,
+) -> Result<PressureUnits, SurfaceError> {
     let format = ts
         .iter()
         .position(|v| v == "format")
@@ -288,17 +302,32 @@ pub(crate) fn validate_header(ts: &[String], source: &str) -> Result<(), Surface
             .and_then(|v| v.parse().ok())
             .ok_or_else(|| error(source, "field dimensions contain a non-integer component"))?;
     }
-    if ts.get(i + 9).map(String::as_str) != Some("]") || values != [0, 2, -2, 0, 0, 0, 0] {
+    if ts.get(i + 9).map(String::as_str) != Some("]") {
         return Err(error(
             source,
             "field dimensions must be kinematic pressure/stress [0 2 -2 0 0 0 0]",
         ));
     }
-    Ok(())
+    if values == [0, 2, -2, 0, 0, 0, 0] {
+        Ok(PressureUnits::Kinematic)
+    } else if allow_absolute_pressure && values == [1, -1, -2, 0, 0, 0, 0] {
+        Ok(PressureUnits::Absolute)
+    } else {
+        Err(error(
+            source,
+            "field dimensions must be kinematic pressure/stress [0 2 -2 0 0 0 0] or absolute pressure [1 -1 -2 0 0 0 0]",
+        ))
+    }
 }
-pub(crate) fn field(text: &str, want_vector: bool, source: &str) -> Result<Field, SurfaceError> {
+
+fn field_with_pressure_units(
+    text: &str,
+    want_vector: bool,
+    source: &str,
+    allow_absolute_pressure: bool,
+) -> Result<(Field, PressureUnits), SurfaceError> {
     let ts = tokens(text);
-    validate_header(&ts, source)?;
+    let units = validate_header(&ts, source, allow_absolute_pressure)?;
     let internal = ts
         .iter()
         .position(|v| v == "internalField")
@@ -317,7 +346,7 @@ pub(crate) fn field(text: &str, want_vector: bool, source: &str) -> Result<Field
         })
     };
     let Some(mut b) = ts.iter().position(|v| v == "boundaryField") else {
-        return Ok(f);
+        return Ok((f, units));
     };
     b += 1;
     if ts.get(b).map(String::as_str) != Some("{") {
@@ -339,22 +368,28 @@ pub(crate) fn field(text: &str, want_vector: bool, source: &str) -> Result<Field
                     let mut value = j;
                     if want_vector {
                         let v = vector_at(&ts, &mut value, source)?;
-                        return Ok(match f {
-                            Field::Vector(mut x) => {
-                                x.patch = Some(v);
-                                Field::Vector(x)
-                            }
-                            _ => f,
-                        });
+                        return Ok((
+                            match f {
+                                Field::Vector(mut x) => {
+                                    x.patch = Some(v);
+                                    Field::Vector(x)
+                                }
+                                _ => f,
+                            },
+                            units,
+                        ));
                     }
                     let v = scalar_at(&ts, &mut value, source)?;
-                    return Ok(match f {
-                        Field::Scalar(mut x) => {
-                            x.patch = Some(v);
-                            Field::Scalar(x)
-                        }
-                        _ => f,
-                    });
+                    return Ok((
+                        match f {
+                            Field::Scalar(mut x) => {
+                                x.patch = Some(v);
+                                Field::Scalar(x)
+                            }
+                            _ => f,
+                        },
+                        units,
+                    ));
                 }
                 j += 1;
             }
@@ -365,7 +400,28 @@ pub(crate) fn field(text: &str, want_vector: bool, source: &str) -> Result<Field
         }
         b += 1;
     }
-    Ok(f)
+    Ok((f, units))
+}
+
+#[allow(dead_code)]
+pub(crate) fn field(text: &str, want_vector: bool, source: &str) -> Result<Field, SurfaceError> {
+    field_with_pressure_units(text, want_vector, source, false).map(|(field, _)| field)
+}
+
+pub(crate) fn pressure_field(
+    text: &str,
+    source: &str,
+) -> Result<(Field, PressureUnits), SurfaceError> {
+    field_with_pressure_units(text, false, source, true)
+}
+
+pub(crate) fn wall_shear_field(
+    text: &str,
+    source: &str,
+) -> Result<(Field, PressureUnits), SurfaceError> {
+    // Incompressible wallShearStress is kinematic (`m^2/s^2`), while the
+    // compressible function object writes physical stress (`Pa`).
+    field_with_pressure_units(text, true, source, true)
 }
 
 pub(crate) fn scalar_patch(

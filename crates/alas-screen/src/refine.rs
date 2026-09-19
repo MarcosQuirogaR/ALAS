@@ -81,27 +81,6 @@ pub fn refine_candidate_3d_reference_compatibility(
     );
 }
 
-/// Refine a candidate using the product structural mass-coordinate model.
-pub fn refine_candidate_3d_product(
-    candidate: &mut AirfoilCandidateResult,
-    config: &AlasConfig,
-    dv: &DesignVector,
-    mach: f64,
-    altitude: f64,
-    cl_target: f64,
-    min_static_margin: Option<f64>,
-) {
-    refine_candidate_3d(
-        candidate,
-        config,
-        dv,
-        mach,
-        altitude,
-        cl_target,
-        min_static_margin,
-    );
-}
-
 // The translated solver inputs stay explicit at the parity/product mode seam.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn refine_candidate_3d_with_mass_model(

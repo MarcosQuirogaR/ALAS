@@ -6,6 +6,7 @@
 //! Provides the primary interactive user environment for conceptual aircraft
 //! design, multi-stage engineering analysis, optimization, and visualization.
 
+pub mod airport_editor;
 pub mod app;
 mod branding;
 pub mod cfd;

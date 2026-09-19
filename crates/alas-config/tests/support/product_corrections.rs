@@ -13,6 +13,9 @@ use serde_json::{json, Value};
 pub fn dimensions(path: &str) -> Option<(Value, Value)> {
     let (old, new) = match path {
         "A340-300.geometry.empennage.hstab_tip_le_m[1]" => (9.0, 9.7),
+        // Airbus A380 AC Rev 20 Dec 01/25, Subject 2-2-0,
+        // FIGURE-2-2-0-991-001-A01 Sheet 1 of 2: 30.37 m tailplane span.
+        "A380-800.geometry.empennage.hstab_tip_le_m[1]" => (12.5, 15.185),
         "A380-800.design_vector.sweep_deg" => (33.5, 36.429_099_956_878_43),
         "DC-10.design_vector.sweep_deg" => (35.0, 38.371_897_798_492_91),
         "A320-200.design_vector.break_chord_m" => (3.8, 3.432),
@@ -87,7 +90,7 @@ pub fn native_field(path: &str, key: &str) -> bool {
                     | "reference_track_m"
                     | "mlg_strut_bogie_wheels"
             ))
-        || (path.ends_with(".optimizer") && key == "objective")
+        || (path.ends_with(".optimizer") && matches!(key, "objective" | "design_space"))
         || (path.ends_with(".mass_model")
             && matches!(
                 key,
@@ -106,9 +109,21 @@ pub fn native_field(path: &str, key: &str) -> bool {
                 key,
                 "use_airway_endpoint_coordinates" | "max_airway_stretch"
             ))
+        // Whether a preset's climb and descent rungs are stated in calibrated
+        // or true airspeed. The frozen configuration has one ladder in literal
+        // true airspeed and no way to say otherwise, so this is a native
+        // addition rather than a disagreement about a value.
+        || (path.ends_with(".mission.profile") && key == "climb_descent_speed_reference")
         || (path.ends_with(".optimizer.solver")
             && matches!(key, "finite_difference_step" | "constraint_tolerance"))
         || (path.ends_with(".drag_model") && key == "exclude_buried_main_wing_area")
+        // The cargo capacity objective (clarified ledger App Features 2,
+        // decision D10) is a requested target the frozen configuration has no
+        // field for: a native addition rather than a disagreement about a
+        // value. Every registered preset leaves it at its disabled default,
+        // so no preset's resolved cargo target moves; `alas-opt`'s
+        // `cargo_target_objective` tests pin that.
+        || (path.ends_with(".requirements") && key == "cargo_objective_kg")
 }
 
 /// Named operational defaults are product additions, with their inputs and
@@ -122,13 +137,35 @@ pub fn operational(path: &str) -> Option<Value> {
     };
     let preset = alas_config::presets::get(name).ok()?;
     let defaults = preset.operational_mission_defaults();
+    // Every flown speed, rate and rung boundary a preset declares for its own
+    // route, not only the three cruise speeds. The frozen configuration has no
+    // per-aircraft operational profile at all: it carries one ladder, stated
+    // in *literal true airspeeds* and written for the AVE reference
+    // aircraft's FL390/M0.84 design point. A true airspeed is not a flight
+    // condition, so that ladder means something different at every other
+    // preset's cruise level — on the A320-200 at FL280 its 250 m/s upper
+    // climb rung is about 178 m/s equivalent, and the mission deck refuses it
+    // with 57 046 N of drag against 56 106 N of maximum-climb rating. The
+    // presets that declare their own calibrated ladder (the ATR 72-600, and
+    // now the A320-200) are therefore compared against *their own* declared
+    // operational default, which is the authority here, rather than against a
+    // frozen number that was never about them.
+    if let Some(key) = field.strip_prefix("mission.profile.") {
+        let profile = serde_json::to_value(&defaults.profile).ok()?;
+        return profile.get(key).cloned();
+    }
     Some(match field {
         "departure_airport" => json!(defaults.departure_airport),
         "arrival_airport" => json!(defaults.arrival_airport),
-        "mission.profile.cruise_1_air_speed_m_s" => json!(defaults.profile.cruise_1_air_speed_m_s),
-        "mission.profile.cruise_2_air_speed_m_s" => json!(defaults.profile.cruise_2_air_speed_m_s),
-        "mission.profile.cruise_3_air_speed_m_s" => json!(defaults.profile.cruise_3_air_speed_m_s),
-        "cabin.cargo.lower_deck_uld" if name == "A220-300" => json!("BLK"),
+        // The hold architecture is declared once, in
+        // `preset_flops::declared_cargo_loading`, and read by both
+        // `planning_cabin_config` and the FLOPS container tare. This used to
+        // name the A220-300 alone because that was the only preset carrying
+        // the bulk declaration; the declaration now also covers the ATR 72-600
+        // (no lower hold at all) and the A320-200, so the correction reads the
+        // product's own value instead of repeating one preset's name. The
+        // value itself is pinned by that declaration's own tests, not here.
+        "cabin.cargo.lower_deck_uld" => json!(preset.planning_cabin_config().cargo.lower_deck_uld),
         _ => return None,
     })
 }

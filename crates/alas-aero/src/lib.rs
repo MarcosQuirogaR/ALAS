@@ -96,3 +96,4 @@ pub mod singularities;
 mod vector3;
 pub mod vorlax;
 pub mod vspaero;
+pub mod wing_analysis;

@@ -4,13 +4,19 @@
 //! Result cards, actual solver histories, and field-artifact dispatch.
 
 use super::super::*;
-use super::drawing::paint_line_plot;
+use super::drawing::{paint_line_plot_with, plot_height};
+use super::widgets::{
+    card, coefficient_value, count_value, details, optional_value, physical_value, value_table,
+    value_table_with, WIDE_ROW_WIDTH,
+};
 use crate::state::{AppState, LogKind};
 use crate::views::{tr, tr_fields};
 use alas_cfd::CfdOutcome;
 use egui::{ComboBox, Grid, RichText, ScrollArea, Sense, Ui};
 
+mod contours;
 mod diagnostics;
+mod qualification;
 mod surface;
 mod sweep;
 
@@ -19,8 +25,6 @@ pub(crate) fn show_results_tab(state: &mut AppState, ui: &mut Ui) {
         .id_salt("airfoil_cfd_results_scroll")
         .auto_shrink([false, false])
         .show(ui, |ui| {
-            show_result_import(state, ui);
-            ui.add_space(8.0);
             let mut pending_open_case = None;
             let mut pending_folder_error = None;
             if let Some(result) = state.cfd.result.as_ref() {
@@ -28,7 +32,7 @@ pub(crate) fn show_results_tab(state: &mut AppState, ui: &mut Ui) {
                 ui.add_space(8.0);
                 show_coefficients(result, ui);
                 ui.add_space(8.0);
-                if ui.available_width() >= 760.0 {
+                if ui.available_width() >= WIDE_ROW_WIDTH {
                     ui.columns(2, |columns| {
                         show_force_plot(result, &mut columns[0]);
                         diagnostics::show_residual_plot(result, &mut columns[1]);
@@ -43,7 +47,7 @@ pub(crate) fn show_results_tab(state: &mut AppState, ui: &mut Ui) {
                 ui.add_space(8.0);
                 diagnostics::show_mesh_quality_plots(result, ui);
                 ui.add_space(8.0);
-                show_contour_images(&mut state.cfd.contour_textures, result, ui);
+                contours::show_contour_images(&mut state.cfd.contour_textures, result, ui);
                 ui.add_space(8.0);
                 surface::show_surface_distribution(result, ui);
                 ui.add_space(8.0);
@@ -53,6 +57,7 @@ pub(crate) fn show_results_tab(state: &mut AppState, ui: &mut Ui) {
                     &mut state.cfd.selected_field,
                     state.cfd.paraview_executable.is_some(),
                 );
+                ui.add_space(8.0);
             }
             if let Some(error) = pending_folder_error {
                 state.cfd.error = Some(error.clone());
@@ -65,29 +70,26 @@ pub(crate) fn show_results_tab(state: &mut AppState, ui: &mut Ui) {
                 }
             }
             if !state.cfd.sweep_results.is_empty() {
-                if state.cfd.result.is_some() {
-                    ui.add_space(8.0);
-                }
                 sweep::show_sweep_results(state, ui);
+                ui.add_space(8.0);
             } else if state.cfd.result.is_none() {
                 ui.label(RichText::new(tr("No current CFD result. Run a study after the inputs and connection test are ready.")).weak());
+                ui.add_space(8.0);
             }
+            show_result_import(state, ui);
         });
 }
 
 fn show_result_import(state: &mut AppState, ui: &mut Ui) {
     crate::theme::card_frame(ui).show(ui, |ui| {
-        ui.label(RichText::new(tr("Load persisted OpenFOAM result")).strong());
-        ui.label(
-            RichText::new(tr("Load an existing results.json without rerunning the solver. The recorded convergence status, exact geometry snapshot and field paths remain unchanged."))
-                .weak()
-                .small(),
-        );
+        ui.set_min_width(ui.available_width());
         ui.horizontal_wrapped(|ui| {
+            ui.label(RichText::new(tr("Load persisted OpenFOAM result")).strong())
+                .on_hover_text(tr("Load an existing results.json without rerunning the solver. The recorded convergence status, exact geometry snapshot and field paths remain unchanged."));
             ui.add(
                 egui::TextEdit::singleline(&mut state.cfd.result_json_path)
                     .hint_text(tr("Path to results.json"))
-                    .desired_width(ui.available_width().min(560.0)),
+                    .desired_width((ui.available_width() - 120.0).clamp(160.0, 560.0)),
             );
             if ui.small_button(tr("Load result")).clicked() {
                 let path = std::path::PathBuf::from(state.cfd.result_json_path.trim());
@@ -103,6 +105,9 @@ fn show_result_import(state: &mut AppState, ui: &mut Ui) {
     });
 }
 
+/// The numerical outcome, its detail and its provenance on one compact band.
+/// An unconverged or failed run keeps its colour and its caution line here;
+/// nothing about the status is folded away.
 fn show_result_status(result: &alas_cfd::CfdResults, ui: &mut Ui) {
     let (color, label) = match result.outcome {
         CfdOutcome::NumericallyConverged => (
@@ -114,79 +119,79 @@ fn show_result_status(result: &alas_cfd::CfdResults, ui: &mut Ui) {
         CfdOutcome::Failed => (ui.visuals().error_fg_color, "Failed"),
     };
     crate::theme::card_frame(ui).show(ui, |ui| {
+        ui.set_min_width(ui.available_width());
         ui.horizontal_wrapped(|ui| {
-            ui.label(RichText::new(tr("CFD result")).strong().size(16.0));
-            ui.colored_label(color, tr(label));
+            ui.label(RichText::new(tr("CFD result")).strong().size(15.0));
+            ui.colored_label(color, RichText::new(tr(label)).strong());
+            ui.separator();
+            ui.label(RichText::new(result.status_detail.as_str()).weak());
         });
-        ui.label(RichText::new(result.status_detail.as_str()).weak());
         if result.outcome == CfdOutcome::Unconverged {
             ui.colored_label(
                 ui.visuals().warn_fg_color,
                 tr("Finite native force, field, residual, and mesh diagnostics remain available for inspection; numerical qualification is still unconverged."),
             );
         }
-        ui.label(tr_fields(
-            "Airfoil {airfoil} \u{00b7} template {template} \u{00b7} case {case}",
-            &[
-                ("airfoil", result.provenance.airfoil.name.clone()),
-                ("template", result.provenance.template_version.clone()),
-                ("case", result.case_dir.display().to_string()),
-            ],
-        ));
+        ui.label(
+            RichText::new(tr_fields(
+                "Airfoil {airfoil} \u{00b7} template {template} \u{00b7} case {case}",
+                &[
+                    ("airfoil", result.provenance.airfoil.name.clone()),
+                    ("template", result.provenance.template_version.clone()),
+                    ("case", result.case_dir.display().to_string()),
+                ],
+            ))
+            .weak()
+            .small(),
+        );
     });
 }
 
+/// One grouped table instead of a narrow card: every coefficient is shown for
+/// the force-history and the surface-integrated route side by side, so the two
+/// independent evaluations can be compared row by row.
 fn show_coefficients(result: &alas_cfd::CfdResults, ui: &mut Ui) {
-    crate::theme::card_frame(ui).show(ui, |ui| {
-        ui.label(
-            RichText::new(tr("Aerodynamic coefficients"))
-                .strong()
-                .size(16.0),
-        );
-        if let Some(last) = result.forces.last() {
+    card(
+        ui,
+        "Aerodynamic coefficients",
+        "Left column: the solver's own force function object. Right column: coefficients re-integrated from the parsed wall samples. They are independent evaluations of the same solved field.",
+        |ui| {
+            let Some(last) = result.forces.last() else {
+                ui.colored_label(
+                    ui.visuals().warn_fg_color,
+                    tr("No force coefficients were parsed from the OpenFOAM output."),
+                );
+                return;
+            };
+            let surface = result.surface.as_ref().map(|surface| &surface.forces);
+            let rows: [(&str, Option<f64>, Option<f64>); 7] = [
+                ("CL", Some(last.cl), surface.map(|forces| forces.cl)),
+                ("CD", Some(last.cd), surface.map(|forces| forces.cd)),
+                ("CM (quarter chord)", Some(last.cm), surface.map(|forces| forces.cm)),
+                ("CL pressure", last.cl_pressure, surface.map(|forces| forces.cl_pressure)),
+                ("CL viscous", last.cl_viscous, surface.map(|forces| forces.cl_viscous)),
+                ("CD pressure", last.cd_pressure, surface.map(|forces| forces.cd_pressure)),
+                ("CD viscous", last.cd_viscous, surface.map(|forces| forces.cd_viscous)),
+            ];
             Grid::new("airfoil_cfd_coefficients")
-                .num_columns(2)
-                .spacing([18.0, 4.0])
+                .num_columns(3)
+                .striped(true)
+                .min_col_width((ui.available_width() / 3.0 - 12.0).clamp(90.0, 460.0))
+                .spacing([12.0, 4.0])
                 .show(ui, |ui| {
-                    coefficient_row(ui, "CL", last.cl);
-                    coefficient_row(ui, "CD", last.cd);
-                    coefficient_row(ui, "CM (quarter chord)", last.cm);
-                    coefficient_optional_row(ui, "CD pressure", last.cd_pressure);
-                    coefficient_optional_row(ui, "CD viscous", last.cd_viscous);
-                    coefficient_optional_row(ui, "CL pressure", last.cl_pressure);
-                    coefficient_optional_row(ui, "CL viscous", last.cl_viscous);
-                    if let Some(surface) = result.surface.as_ref() {
-                        ui.separator();
-                        ui.label(RichText::new(tr("Surface-integrated coefficients")).strong());
+                    ui.label(RichText::new(tr("Coefficient")).strong());
+                    ui.label(RichText::new(tr("Force history")).strong());
+                    ui.label(RichText::new(tr("Surface-integrated")).strong());
+                    ui.end_row();
+                    for (label, history, integrated) in rows {
+                        ui.label(tr(label));
+                        ui.monospace(optional_value(history, coefficient_value));
+                        ui.monospace(optional_value(integrated, coefficient_value));
                         ui.end_row();
-                        coefficient_row(ui, "CL (surface)", surface.forces.cl);
-                        coefficient_row(ui, "CD (surface)", surface.forces.cd);
-                        coefficient_row(ui, "CM (surface)", surface.forces.cm);
-                        coefficient_row(ui, "CL pressure (surface)", surface.forces.cl_pressure);
-                        coefficient_row(ui, "CL viscous (surface)", surface.forces.cl_viscous);
-                        coefficient_row(ui, "CD pressure (surface)", surface.forces.cd_pressure);
-                        coefficient_row(ui, "CD viscous (surface)", surface.forces.cd_viscous);
                     }
                 });
-        } else {
-            ui.colored_label(
-                ui.visuals().warn_fg_color,
-                tr("No force coefficients were parsed from the OpenFOAM output."),
-            );
-        }
-    });
-}
-
-fn coefficient_row(ui: &mut Ui, label: &str, value: f64) {
-    ui.label(RichText::new(tr(label)).strong());
-    ui.label(format!("{value:.6}"));
-    ui.end_row();
-}
-
-fn coefficient_optional_row(ui: &mut Ui, label: &str, value: Option<f64>) {
-    ui.label(tr(label));
-    ui.label(value.map_or_else(|| tr("Unavailable"), |value| format!("{value:.6}")));
-    ui.end_row();
+        },
+    );
 }
 
 fn show_force_plot(result: &alas_cfd::CfdResults, ui: &mut Ui) {
@@ -197,194 +202,142 @@ fn show_force_plot(result: &alas_cfd::CfdResults, ui: &mut Ui) {
         .collect::<Vec<_>>();
     show_line_plot(
         ui,
-        "Lift coefficient history (actual samples)",
+        "Lift coefficient history",
         "iteration/time",
         "CL",
         &points,
     );
 }
 
+/// A titled plot that grows with its column and keeps its axis captions and
+/// its honest sample count on one compact footer row.
 fn show_line_plot(ui: &mut Ui, title: &str, x_label: &str, y_label: &str, points: &[(f64, f64)]) {
-    crate::theme::card_frame(ui).show(ui, |ui| {
-        ui.label(RichText::new(tr(title)).strong());
-        let width = ui.available_width().max(260.0);
-        let (rect, _) = ui.allocate_exact_size(vec2(width, 220.0), Sense::hover());
-        paint_line_plot(ui, rect, points);
-        ui.horizontal_wrapped(|ui| {
-            ui.label(RichText::new(tr(x_label)).weak().small());
-            ui.separator();
-            ui.label(RichText::new(tr(y_label)).weak().small());
-            ui.separator();
-            ui.label(
-                RichText::new(if points.is_empty() {
-                    tr("Unavailable: no parsed samples")
-                } else {
-                    tr_fields(
-                        "{count} actual samples",
-                        &[("count", points.len().to_string())],
-                    )
-                })
-                .weak()
-                .small(),
-            );
-        });
-    });
+    show_line_plot_with(ui, title, x_label, y_label, points, false);
 }
 
-fn show_quality_and_balance(result: &alas_cfd::CfdResults, ui: &mut Ui) {
-    crate::theme::card_frame(ui).show(ui, |ui| {
-        ui.label(RichText::new(tr("Quality and conservation evidence")).strong().size(16.0));
-        Grid::new("airfoil_cfd_quality_grid")
-            .num_columns(2)
-            .spacing([18.0, 4.0])
-            .show(ui, |ui| {
-                ui.label(RichText::new(tr("Mesh quality check")).strong());
-                ui.label(if result.mesh_quality.passed { tr("Passed") } else { tr("Failed or unavailable") });
-                ui.end_row();
-                quality_optional_row(ui, "Cells", result.mesh_quality.cells.map(|value| value as f64));
-                quality_optional_row(ui, "Max non-orthogonality [deg]", result.mesh_quality.max_non_orthogonality_deg);
-                quality_optional_row(ui, "Max skewness", result.mesh_quality.max_skewness);
-                quality_optional_row(ui, "Minimum cell volume [m\u{00b3}]", result.mesh_quality.min_volume_m3);
-                ui.label(RichText::new(tr("Native quality distributions")).strong());
-                ui.label(result.mesh_quality.distributions.len().to_string());
-                ui.end_row();
-                ui.label(RichText::new(tr("Continuity samples")).strong());
-                ui.label(result.mass_balance.len().to_string());
-                ui.end_row();
-            });
-        if let Some(near_wall) = result.mesh_quality.near_wall.as_ref() {
-            ui.label(tr_fields(
-                "Solved wall y+ diagnostic: patch {patch}, time {time}, min {min}, average {average}, max {max}; target {target}",
-                &[
-                    ("patch", near_wall.patch_name.clone()),
-                    ("time", format!("{:.4}", near_wall.time)),
-                    ("min", format!("{:.4}", near_wall.min_y_plus)),
-                    ("average", format!("{:.4}", near_wall.average_y_plus)),
-                    ("max", format!("{:.4}", near_wall.max_y_plus)),
-                    ("target", format!("{:.4}", near_wall.target_y_plus)),
-                ],
-            ));
-        }
-        if result.mass_balance.is_empty() {
-            ui.colored_label(ui.visuals().warn_fg_color, tr("Mass-balance evidence is unavailable; numerical convergence remains unconfirmed."));
-        }
-    });
-}
-
-fn quality_optional_row(ui: &mut Ui, label: &str, value: Option<f64>) {
-    ui.label(tr(label));
-    ui.label(value.map_or_else(|| tr("Unavailable"), |value| format!("{value:.6}")));
-    ui.end_row();
-}
-
-/// Display contour artifacts rendered from the native OpenFOAM fields.  The
-/// renderer writes these files outside the result parser (usually through the
-/// bundled ParaView batch script), so a missing image stays visibly
-/// unavailable rather than becoming a synthetic scalar plot.
-fn show_contour_images(
-    textures: &mut std::collections::BTreeMap<String, egui::TextureHandle>,
-    result: &alas_cfd::CfdResults,
+/// Same card, with the vertical axis optionally inverted for display.
+///
+/// Inversion changes only which way the axis grows; the plotted values and the
+/// tick labels are the recorded ones. It is not a sign change.
+pub(super) fn show_line_plot_with(
     ui: &mut Ui,
+    title: &str,
+    x_label: &str,
+    y_label: &str,
+    points: &[(f64, f64)],
+    invert_y: bool,
 ) {
-    let figure_root = result
-        .case_dir
-        .join("postProcessing")
-        .join("alas-field-figures");
-    let figures = [
-        ("Mach contour", "mach-contour.png", "Mach [-]"),
-        (
-            "Pressure contour",
-            "pressure-contour.png",
-            "Gauge pressure [Pa]",
-        ),
-    ]
-    .into_iter()
-    .filter_map(|(title, filename, unit)| {
-        let path = figure_root.join(filename);
-        path.is_file().then_some((title, path, unit))
-    })
-    .collect::<Vec<_>>();
-    if figures.is_empty() {
-        crate::theme::card_frame(ui).show(ui, |ui| {
-            ui.label(
-                RichText::new(tr("Mach and pressure contours"))
-                    .strong()
-                    .size(16.0),
-            );
-            ui.label(
-                RichText::new(tr("Unavailable: no native ParaView contour artifacts were rendered for this case. The OpenFOAM p and U fields remain available in the field list and ParaView handoff."))
-                    .weak()
-                    .small(),
-            );
-        });
-        return;
-    }
     crate::theme::card_frame(ui).show(ui, |ui| {
+        ui.set_min_width(ui.available_width());
+        ui.label(RichText::new(tr(title)).strong());
+        let width = ui.available_width().max(200.0);
+        let (rect, _) = ui.allocate_exact_size(vec2(width, plot_height(width)), Sense::hover());
+        paint_line_plot_with(ui, rect, points, invert_y);
+        plot_footer(ui, x_label, y_label, points.len());
+    });
+}
+
+/// Axis captions plus the parsed-sample count, never the plot title again.
+pub(super) fn plot_footer(ui: &mut Ui, x_label: &str, y_label: &str, samples: usize) {
+    ui.horizontal_wrapped(|ui| {
+        ui.label(RichText::new(tr(x_label)).weak().small());
+        ui.separator();
+        ui.label(RichText::new(tr(y_label)).weak().small());
+        ui.separator();
         ui.label(
-            RichText::new(tr("Native OpenFOAM contours"))
-                .strong()
-                .size(16.0),
-        );
-        ui.label(
-            RichText::new(tr("Mach is the low-Mach diagnostic |U|/a at the recorded static temperature. Pressure is gauge rho*p for the incompressible kinematic p field. Both images retain the exact case folder and solved write time."))
-                .weak()
-                .small(),
+            RichText::new(if samples == 0 {
+                tr("Unavailable: no parsed samples")
+            } else {
+                tr_fields("{count} actual samples", &[("count", samples.to_string())])
+            })
+            .weak()
+            .small(),
         );
     });
-    let mut show_figure = |ui: &mut Ui, title: &str, path: &std::path::Path, unit: &str| {
-        crate::theme::card_frame(ui).show(ui, |ui| {
-            ui.label(RichText::new(tr(title)).strong());
-            let key = path.to_string_lossy().to_string();
-            let texture = if let Some(texture) = textures.get(&key) {
-                Some(texture.clone())
-            } else {
-                let bytes = std::fs::read(path).ok();
-                let decoded = bytes
-                    .as_deref()
-                    .and_then(|bytes| eframe::icon_data::from_png_bytes(bytes).ok());
-                decoded.map(|icon| {
-                    let image = egui::ColorImage::from_rgba_unmultiplied(
-                        [icon.width as usize, icon.height as usize],
-                        &icon.rgba,
-                    );
-                    let texture = ui.ctx().load_texture(
-                        format!("airfoil-cfd-contour:{key}"),
-                        image,
-                        egui::TextureOptions::LINEAR,
-                    );
-                    textures.insert(key.clone(), texture.clone());
-                    texture
-                })
-            };
-            if let Some(texture) = texture {
-                let width = ui.available_width().max(260.0);
-                let height = width * texture.size_vec2().y / texture.size_vec2().x;
-                ui.add(
-                    egui::Image::from_texture(&texture)
-                        .fit_to_exact_size(egui::vec2(width, height.min(420.0))),
-                );
-                ui.label(RichText::new(tr(unit)).weak().small());
-            } else {
+}
+
+/// Mesh and conservation evidence packed across the card width, with counts
+/// shown as integers and physical volumes in scientific notation so a tiny but
+/// nonzero cell volume is never displayed as an exact zero.
+fn show_quality_and_balance(result: &alas_cfd::CfdResults, ui: &mut Ui) {
+    card(
+        ui,
+        "Quality and conservation evidence",
+        "checkMesh scalars, the count of native quality distributions, and the number of parsed continuity samples for this case.",
+        |ui| {
+            let quality = &result.mesh_quality;
+            let rows = [
+                (
+                    "checkMesh verdict".to_owned(),
+                    if quality.passed { tr("Mesh OK") } else { tr("Failed or unavailable") },
+                ),
+                (
+                    "Cells".to_owned(),
+                    quality.cells.map_or_else(|| tr("Unavailable"), count_value),
+                ),
+                (
+                    "Max non-orthogonality [deg]".to_owned(),
+                    optional_value(quality.max_non_orthogonality_deg, physical_value),
+                ),
+                (
+                    "Severely non-orthogonal faces".to_owned(),
+                    // Prefer the qualification record: an archived result predates
+                    // the MeshQuality field, and reading None there would
+                    // contradict the warning below, which uses the record.
+                    result
+                        .mesh_qualification
+                        .severely_non_orthogonal_faces
+                        .or(quality.severely_non_orthogonal_faces)
+                        .map_or_else(|| tr("None reported"), count_value),
+                ),
+                (
+                    "Max skewness".to_owned(),
+                    optional_value(quality.max_skewness, physical_value),
+                ),
+                (
+                    "Minimum cell volume [m\u{00b3}]".to_owned(),
+                    optional_value(quality.min_volume_m3, physical_value),
+                ),
+                (
+                    "Native quality distributions".to_owned(),
+                    count_value(quality.distributions.len() as u64),
+                ),
+                (
+                    "Continuity samples".to_owned(),
+                    count_value(result.mass_balance.len() as u64),
+                ),
+            ];
+            value_table_with(ui, "airfoil_cfd_quality_grid", &rows, |ui, value| {
+                ui.monospace(value);
+            });
+            qualification::show_qualification_notes(result, ui);
+            qualification::show_field_updates(&result.field_updates, ui);
+            qualification::show_plausibility(result, ui);
+            if let Some(near_wall) = quality.near_wall.as_ref() {
+                ui.add_space(4.0);
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(RichText::new(tr("Solved wall y+")).strong().small());
+                    for (label, value) in [
+                        ("Patch", near_wall.patch_name.clone()),
+                        ("Time", format!("{:.4}", near_wall.time)),
+                        ("Minimum", physical_value(near_wall.min_y_plus)),
+                        ("Average", physical_value(near_wall.average_y_plus)),
+                        ("Maximum", physical_value(near_wall.max_y_plus)),
+                        ("Target", physical_value(near_wall.target_y_plus)),
+                    ] {
+                        ui.label(RichText::new(tr(label)).weak().small());
+                        ui.label(RichText::new(value).monospace().small());
+                    }
+                });
+            }
+            if result.mass_balance.is_empty() {
                 ui.colored_label(
                     ui.visuals().warn_fg_color,
-                    tr("Contour image could not be decoded from the recorded case artifact."),
+                    tr("Mass-balance evidence is unavailable; numerical convergence remains unconfirmed."),
                 );
             }
-            ui.label(RichText::new(path.display().to_string()).weak().small());
-        });
-    };
-    if figures.len() == 2 && ui.available_width() >= 760.0 {
-        ui.columns(2, |columns| {
-            for (column, (title, path, unit)) in columns.iter_mut().zip(figures.iter()) {
-                show_figure(column, title, path, unit);
-            }
-        });
-    } else {
-        for (title, path, unit) in figures {
-            show_figure(ui, title, &path, unit);
-            ui.add_space(8.0);
-        }
-    }
+        },
+    );
 }
 
 /// Show the face-resolved pressure and signed skin-friction samples produced
@@ -399,85 +352,112 @@ fn show_field_inspection(
 ) -> (Option<std::path::PathBuf>, Option<String>) {
     let mut open_case = None;
     let mut folder_error = None;
-    crate::theme::card_frame(ui).show(ui, |ui| {
-        ui.label(RichText::new(tr("Flow-field inspection and exports")).strong().size(16.0));
-        ui.label(RichText::new(tr("Inspect pressure and velocity fields, wall diagnostics and raw solver outputs.")).weak().small());
-        if result.fields.is_empty() {
-            ui.colored_label(ui.visuals().warn_fg_color, tr("No native or sampled field artifacts were found in this case."));
-        } else {
-            let mut selected = selected_field_state.clone();
-            let selected_text = selected
-                .as_deref()
-                .map_or_else(|| tr("Select field artifact"), str::to_owned);
-            ComboBox::from_id_salt("airfoil_cfd_field_selector")
-                .width(ui.available_width().min(420.0))
-                .selected_text(selected_text)
-                .show_ui(ui, |ui| {
-                    for field in &result.fields {
-                        let label = format!("{} \u{00b7} {}", field.name, field.relative_path);
-                        if ui.selectable_label(selected.as_deref() == Some(label.as_str()), label.clone()).clicked() {
-                            selected = Some(label);
-                        }
-                    }
-                });
-            *selected_field_state = selected;
-            if let Some(field) = selected_field_state.as_ref() {
-                ui.label(RichText::new(field).weak());
-            }
-            ui.add_space(4.0);
-            ui.label(tr("Available artifacts"));
-            for artifact in &result.fields {
-                ui.horizontal_wrapped(|ui| {
-                    ui.label(RichText::new(&artifact.name).strong());
-                    ui.label(artifact.relative_path.as_str());
-                    if let Some(time) = artifact.time {
-                        ui.label(format!("t={time:.4}"));
-                    }
-                    ui.label(RichText::new(&artifact.kind).weak());
-                });
-            }
-        }
-        ui.separator();
-        if result.surface.is_some() {
-            ui.label(tr(
-                "Parsed Cp/Cf distributions are available above from dimensional pressure and wall shear.",
-            ));
-        } else if let Some(error) = result.surface_error.as_deref() {
-            ui.label(tr("Parsed Cp/Cf distributions are unavailable for this case."));
-            ui.label(RichText::new(error).weak().small());
-        } else {
-            ui.label(tr("Parsed Cp/Cf distributions are unavailable for this case."));
-        }
-        ui.horizontal_wrapped(|ui| {
-            ui.label(RichText::new(tr("Reproducible case folder")).strong());
-            ui.label(result.case_dir.display().to_string());
-            if ui.small_button(tr("Copy path")).clicked() {
-                ui.ctx().copy_text(result.case_dir.display().to_string());
-            }
-            if ui
-                .small_button(tr("Open folder"))
-                .on_hover_text(tr("Show this exact location in the system file explorer."))
-                .clicked()
-            {
-                if let Err(error) = crate::views::tools_view::open_in_file_explorer(
-                    &result.case_dir.to_string_lossy(),
-                    true,
-                ) {
-                    folder_error = Some(error);
+    card(
+        ui,
+        "Flow-field inspection and exports",
+        "Inspect pressure and velocity fields, wall diagnostics and raw solver outputs.",
+        |ui| {
+            ui.horizontal_wrapped(|ui| {
+                ui.label(RichText::new(tr("Reproducible case folder")).weak());
+                ui.label(RichText::new(result.case_dir.display().to_string()).monospace().small());
+                if ui.small_button(tr("Copy path")).clicked() {
+                    ui.ctx().copy_text(result.case_dir.display().to_string());
                 }
-            }
-            if has_paraview {
                 if ui
-                    .button(tr("Open case in ParaView"))
-                    .on_hover_text(tr("Open the actual OpenFOAM case for pressure, velocity and streamline inspection."))
+                    .small_button(tr("Open folder"))
+                    .on_hover_text(tr("Show this exact location in the system file explorer."))
                     .clicked()
                 {
-                    open_case = Some(result.case_dir.clone());
+                    if let Err(error) = crate::views::tools_view::open_in_file_explorer(
+                        &result.case_dir.to_string_lossy(),
+                        true,
+                    ) {
+                        folder_error = Some(error);
+                    }
                 }
-            } else {
-                ui.label(RichText::new(tr("Configure ParaView under External Tools for field and streamline inspection.")).weak().small());
+                if has_paraview {
+                    if ui
+                        .small_button(tr("Open case in ParaView"))
+                        .on_hover_text(tr("Open the actual OpenFOAM case for pressure, velocity and streamline inspection."))
+                        .clicked()
+                    {
+                        open_case = Some(result.case_dir.clone());
+                    }
+                } else {
+                    ui.label(RichText::new(tr("Configure ParaView under External Tools for field and streamline inspection.")).weak().small());
+                }
+            });
+            if result.surface.is_none() {
+                ui.label(
+                    RichText::new(tr(
+                        "Parsed Cp/Cf distributions are unavailable for this case.",
+                    ))
+                    .weak()
+                    .small(),
+                );
+                if let Some(error) = result.surface_error.as_deref() {
+                    ui.label(RichText::new(error).weak().small());
+                }
             }
-        });
-    });
+            if result.fields.is_empty() {
+                ui.colored_label(
+                    ui.visuals().warn_fg_color,
+                    tr("No native or sampled field artifacts were found in this case."),
+                );
+                return;
+            }
+            ui.horizontal_wrapped(|ui| {
+                ui.label(RichText::new(tr("Field artifact")).weak());
+                let mut selected = selected_field_state.clone();
+                let selected_text = selected
+                    .as_deref()
+                    .map_or_else(|| tr("Select field artifact"), str::to_owned);
+                ComboBox::from_id_salt("airfoil_cfd_field_selector")
+                    .width(ui.available_width().min(420.0))
+                    .selected_text(selected_text)
+                    .show_ui(ui, |ui| {
+                        for artifact in &result.fields {
+                            let label =
+                                format!("{} \u{00b7} {}", artifact.name, artifact.relative_path);
+                            if ui
+                                .selectable_label(
+                                    selected.as_deref() == Some(label.as_str()),
+                                    label.clone(),
+                                )
+                                .clicked()
+                            {
+                                selected = Some(label);
+                            }
+                        }
+                    });
+                *selected_field_state = selected;
+            });
+            details(
+                ui,
+                "airfoil_cfd_artifact_list",
+                "Available artifacts",
+                |ui| {
+                    let rows = result
+                        .fields
+                        .iter()
+                        .map(|artifact| {
+                            let time = artifact
+                                .time
+                                .map(|time| format!(" t={time:.4}"))
+                                .unwrap_or_default();
+                            (
+                                artifact.name.clone(),
+                                format!(
+                                    "{} \u{00b7} {}{time}",
+                                    artifact.relative_path, artifact.kind
+                                ),
+                            )
+                        })
+                        .collect::<Vec<_>>();
+                    value_table(ui, "airfoil_cfd_artifact_table", &rows);
+                },
+            );
+        },
+    );
     (open_case, folder_error)
 }

@@ -245,7 +245,7 @@ pub fn build_page_preview_with_camera(
                 Ok(report) => report,
                 Err(error) => {
                     return Some(localize_scene_for_display(figure_status_message(
-                        "Mass and balance preview unavailable",
+                        &preview_unavailable_title(id),
                         &format!("Invalid structural mass-coordinate model: {error}"),
                         false,
                         Some(&theme),
@@ -261,6 +261,25 @@ pub fn build_page_preview_with_camera(
         _ => return None,
     };
     Some(localize_scene_for_display(scene))
+}
+
+/// The title a status figure carries when it stands in for preview `id`.
+///
+/// One `Err` arm serves the CG envelope, the landing-gear planform and the
+/// control-surface layout, and it used to hard-code
+/// "Mass and balance preview unavailable" for all three, so the Landing Gear
+/// page displayed an error titled for a different artefact. The panel title is
+/// already declared once, in [`crate::nav`], so the status figure takes it
+/// from there instead of restating it.
+pub(crate) fn preview_unavailable_title(id: &str) -> String {
+    let figure = crate::nav::all_pages()
+        .find(|page| page.preview == Some(id))
+        .and_then(|page| page.preview_title)
+        .unwrap_or("Preview");
+    crate::views::tr_fields(
+        "{figure} unavailable",
+        &[("figure", crate::views::tr(figure))],
+    )
 }
 
 /// The results-gallery scene for the current result selection.

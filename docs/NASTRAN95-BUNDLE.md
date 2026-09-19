@@ -2,7 +2,7 @@
 
 NASTRAN-95 remains a separate NOSA 1.3 program launched by ALAS. It is not
 linked into, translated into, or relicensed as part of the AGPL application.
-The Windows package may aggregate a reviewed build beside `alas.exe` at
+The Windows package may aggregate a reviewed build beside `ALAS.exe` at
 `external tools/NASTRAN-95`.
 
 This is an engineering and release-control policy, not legal advice. Before a

@@ -33,6 +33,7 @@ mod overlay;
 mod schema;
 
 pub mod airport_dataset;
+pub mod airport_io;
 pub mod airports;
 pub mod analysis;
 pub mod cabin;
@@ -68,6 +69,7 @@ pub use sizing_basis::MassSizingBasis;
 pub mod solver_presets;
 pub mod structures;
 pub mod systems_mass;
+pub mod turboprop_mass;
 pub mod validation;
 
 pub use alas_config_derive::ConfigNode;
@@ -93,7 +95,8 @@ pub use engines::{
 };
 pub use fidelity_presets::{FidelityPreset, UnknownFidelityPreset};
 pub use flops_structure::{
-    FlopsStructureConfig, FlopsWingBendingMethod, PropulsionMassMethod, StructuralMassMethod,
+    FlopsStructureConfig, FlopsWingBendingMethod, PropulsionMassMethod, PylonMassMethod,
+    StructuralMassMethod,
 };
 pub use fuel_policy::{FuelPolicyConfig, FuelScheme};
 pub use fuel_tanks::{
@@ -101,12 +104,14 @@ pub use fuel_tanks::{
 };
 pub use geometry::{
     ActiveEngineModel, EmpennageConfig, EngineBindingError, EngineConfig, FuselageConfig,
-    GeometryConfig, InboardAerodynamicStation, MainWingPanel, MainWingStation, MainWingStationKind,
-    TransportPlanform, TransportPlanformError, WingConfig,
+    FuselageSection, FuselageSectionError, GeometryConfig, InboardAerodynamicStation,
+    MainWingPanel, MainWingStation, MainWingStationKind, TransportPlanform, TransportPlanformError,
+    WingConfig, WingSection, WingSectionError,
 };
 pub use landing_gear::{
     effective_main_gear_station, EffectiveGearStationExt, EffectiveMainGearStation,
-    GearStationRejection, LandingGearConfig, LandingGearStationPositions, ValidGearStation,
+    GearStationRejection, LandingGearConfig, LandingGearStationPositions, MainGearFallbackRefusal,
+    ValidGearStation, WingMountedGearDomain,
 };
 pub use mass::MassModelConfig;
 pub(crate) use mass_architecture::legacy_mass_model_schema_version;
@@ -140,9 +145,10 @@ pub use settings::{legacy_mission_disabled, AlasConfig, ConfigLoadNotes, WORKSPA
 pub use solver_presets::{SolverPreset, UnknownSolverPreset};
 pub use structures::StructuresConfig;
 pub use systems_mass::{
-    FlopsInputEvidence, FlopsInputProvenance, FlopsTransportConfig, FlopsTransportProvenance,
-    SystemsMassMethod,
+    CabinEquipmentMethod, CargoHoldLoading, FlopsInputEvidence, FlopsInputProvenance,
+    FlopsTransportConfig, FlopsTransportProvenance, OperatingHaulClass, SystemsMassMethod,
 };
+pub use turboprop_mass::{FlopsTurbopropConfig, PropellerConstruction};
 pub use validation::{validate, Severity, ValidationIssue};
 
 /// A configuration struct that can describe its own fields.

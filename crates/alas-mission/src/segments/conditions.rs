@@ -79,6 +79,21 @@ pub struct Conditions {
     pub transform_body_to_inertial: Vec<Matrix3>,
     /// Thrust in the body frame, N, along `x`.
     pub thrust_force_vector_n: Vec<Vector3>,
+    /// The normalized-force command at which the propulsion deck's own
+    /// flight-idle floor binds at this control point, or `0.0` where the deck
+    /// answered inside its domain and therefore never reported a floor.
+    ///
+    /// A deck's normalized-force command is *not* bounded below by zero. Both
+    /// shipped technologies floor a command that would deliver less than
+    /// flight-idle thrust and say so with a shared `flight-idle-thrust`
+    /// active limit, so every command below that fraction produces the
+    /// identical force. Measured on the product turbofan deck the fraction is
+    /// 0.04-0.09 depending on altitude and speed, which means the mission's
+    /// historical `[0, 1]` envelope declared a whole band of *unavailable*
+    /// commands to be inside it. This records the boundary the deck itself
+    /// reported so [`crate::solve::converge_root`] can refuse a request below
+    /// it instead of publishing a command the engine cannot hold.
+    pub available_throttle_floor: Vec<f64>,
 
     // frames.wind
     /// Lift in the wind frame, N, along `-z`.
@@ -177,6 +192,7 @@ impl Conditions {
             body_inertial_rotations_rad: vec![[0.0; 3]; points],
             transform_body_to_inertial: vec![[[0.0; 3]; 3]; points],
             thrust_force_vector_n: vec![[0.0; 3]; points],
+            available_throttle_floor: vec![0.0; points],
             wind_lift_force_vector_n: vec![[0.0; 3]; points],
             wind_drag_force_vector_n: vec![[0.0; 3]; points],
             transform_wind_to_inertial: vec![[[0.0; 3]; 3]; points],

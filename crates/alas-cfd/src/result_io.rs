@@ -146,6 +146,57 @@ pub(crate) fn read_mesh_quality_distributions(case_dir: &Path) -> Vec<ScalarDist
         .collect()
 }
 
+/// Largest boundary-face skewness written by `checkMesh -writeAllFields`, with
+/// the patch it occurs on.
+///
+/// `checkMesh`'s headline `Max skewness` is the **internal**-face maximum; the
+/// boundary faces live in the `boundaryField` of the written `skewness` field
+/// and are the only place the boundary maximum can be read exactly.  Without
+/// this, `max_boundary_skewness` can be demonstrated only as a count of faces
+/// in error, never as the value the declared limit is written against.
+///
+/// Skewness is dimensionless.  An `empty` patch carries no faces and is skipped
+/// rather than counted as a zero maximum.  Returns `None` when the field was
+/// not written or contains no usable boundary list, so an absent measurement
+/// stays absent.
+pub fn read_boundary_skewness_max(case_dir: &Path) -> Option<(f64, String)> {
+    let path = numeric_time_dirs(case_dir)
+        .into_iter()
+        .map(|(_, directory)| directory.join("skewness"))
+        .find(|candidate| candidate.is_file())?;
+    let text = fs::read_to_string(path).ok()?;
+    let body = &text[text.find("boundaryField")?..];
+    let mut best: Option<(f64, String)> = None;
+    let mut cursor = 0_usize;
+    while let Some(offset) = body[cursor..].find("nonuniform") {
+        let at = cursor + offset;
+        // The patch name is the last identifier before this entry's dictionary.
+        let name = body[..at]
+            .rsplit('{')
+            .nth(1)
+            .and_then(|segment| segment.split_whitespace().last())
+            .unwrap_or("unknown")
+            .to_owned();
+        cursor = at + "nonuniform".len();
+        let Some(values) = parse_scalar_list(&body[at..], "nonuniform") else {
+            continue;
+        };
+        let Some(max) = values
+            .into_iter()
+            .filter(|value| value.is_finite())
+            .fold(None, |acc: Option<f64>, value| {
+                Some(acc.map_or(value, |current: f64| current.max(value)))
+            })
+        else {
+            continue;
+        };
+        if best.as_ref().is_none_or(|(current, _)| max > *current) {
+            best = Some((max, name));
+        }
+    }
+    best
+}
+
 /// Read the solved wall-face y+ field for a named patch.
 ///
 /// The y+ field is kept separate from cell-quality distributions because it is
@@ -234,7 +285,7 @@ fn quantile(sorted: &[f64], fraction: f64) -> f64 {
 /// Both `internalField` and a patch `value` entry use the same list grammar.
 /// The declared count is checked when present, preventing a truncated file
 /// from becoming a plausible-looking distribution.
-fn parse_scalar_list(text: &str, marker: &str) -> Option<Vec<f64>> {
+pub(crate) fn parse_scalar_list(text: &str, marker: &str) -> Option<Vec<f64>> {
     let start = text.find(marker)?;
     let tail = &text[start..];
     let nonuniform_offset = tail.find("nonuniform")?;
@@ -343,7 +394,7 @@ fn read_native_y_plus_count(case_dir: &Path, time: &str, patch_name: &str) -> Op
     None
 }
 
-fn numeric_time_dirs(root: &Path) -> Vec<(f64, PathBuf)> {
+pub(crate) fn numeric_time_dirs(root: &Path) -> Vec<(f64, PathBuf)> {
     let mut directories = fs::read_dir(root)
         .ok()
         .into_iter()

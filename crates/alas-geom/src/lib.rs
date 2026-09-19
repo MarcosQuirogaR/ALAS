@@ -39,6 +39,7 @@
 
 pub mod aircraft;
 pub mod airfoil_data;
+pub mod airfoil_io;
 pub mod airfoil_library;
 /// Compatibility alias for older solver and unpublished parity callers.
 #[doc(hidden)]

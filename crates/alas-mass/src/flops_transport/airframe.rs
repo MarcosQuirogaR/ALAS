@@ -32,6 +32,10 @@ use super::structure::{
     estimate_flops_structure, main_gear_oleo_length_m, nacelle_kg, nose_gear_oleo_length_m,
     FlopsStructureBreakdown, FlopsStructureInputs, FlopsWingInputs, WingBendingFactor,
 };
+use super::turboprop::{
+    estimate_turboprop_propulsion, TurbopropMassUnverifiedReason, TurbopropPropulsionBreakdown,
+    TurbopropPropulsionInputs,
+};
 use super::wing_bending::{detailed_bending_factor, DetailedBendingFactor};
 use super::{FlopsSystemsBreakdown, FlopsTransportUnverifiedReason as Reason};
 
@@ -66,8 +70,17 @@ pub struct FlopsAirframeSources {
 pub struct FlopsAirframeBreakdown {
     /// Structural group, when selected.
     pub structure: Option<FlopsStructureBreakdown>,
-    /// Propulsion group, when selected.
+    /// Thrust-based FLOPS propulsion group, when selected and the
+    /// installation is a turbofan.
     pub propulsion: Option<FlopsPropulsionBreakdown>,
+    /// Shaft-power propulsion group, when selected and the installation is a
+    /// turboprop.
+    ///
+    /// Exactly one of this and [`Self::propulsion`] is ever populated: the
+    /// FLOPS propulsion equations read a rated thrust that a propeller
+    /// installation does not have, so the two are alternatives rather than
+    /// contributions that could be summed.
+    pub turboprop_propulsion: Option<TurbopropPropulsionBreakdown>,
     /// Structural inputs as evaluated.
     pub structure_inputs: FlopsStructureInputs,
     /// Propulsion inputs as evaluated.
@@ -165,10 +178,14 @@ pub fn evaluate_airframe_product(request: &FlopsAirframeRequest<'_>) -> FlopsAir
         return sort_reasons(reasons);
     };
 
+    // A turboprop is evaluated by the shaft-power group of
+    // [`super::turboprop`], not by the thrust-based FLOPS propulsion
+    // equations. Its rated thrust stays zero and is never read.
+    let mut turboprop_spec = None;
     let rated_thrust_per_engine_n = match geometry.engine.active_model() {
         Ok(ActiveEngineModel::Turbofan(spec)) => spec.rated_thrust_kn * 1_000.0,
-        Ok(ActiveEngineModel::Turboprop(_)) => {
-            reasons.push(Reason::UnsupportedPropulsionTechnology);
+        Ok(ActiveEngineModel::Turboprop(spec)) => {
+            turboprop_spec = Some(spec.clone());
             0.0
         }
         Err(_) => {
@@ -243,8 +260,65 @@ pub fn evaluate_airframe_product(request: &FlopsAirframeRequest<'_>) -> FlopsAir
         nacelle_diameter_m,
         maximum_fuel_capacity_kg,
         misc_propulsion_mass_kg: technology.misc_propulsion_mass_kg,
+        pylon_mass_method: technology.pylon_mass_method,
     };
     let propulsion = estimate_flops_propulsion(&propulsion_inputs);
+    // The shaft-power group, when the installation is a propeller one. The
+    // nacelle comes with it, because FLOPS equation 69 reads a rated thrust
+    // that a turboprop does not have.
+    let turboprop = match turboprop_spec.as_ref() {
+        None => None,
+        Some(spec) => {
+            if matches!(
+                technology.wing_bending_method,
+                FlopsWingBendingMethod::Detailed
+            ) {
+                // Equations 39-41 relieve the wing with an engine-pod mass
+                // built from the thrust-based propulsion terms; there is no
+                // published shaft-power form of that pod.
+                reasons.push(Reason::UnsupportedPropulsionTechnology);
+            }
+            let turboprop_inputs = TurbopropPropulsionInputs {
+                engine_count,
+                takeoff_shaft_power_per_engine_w: spec.takeoff_shaft_power_kw * 1_000.0,
+                propeller_speed_rpm: spec.governed_propeller_speed_rpm,
+                propeller_diameter_m: spec.propeller_diameter_m,
+                reduction_ratio: spec.reduction_ratio,
+                design_mach: maximum_mach,
+                nacelle_wetted_area_m2: std::f64::consts::PI
+                    * nacelle_diameter_m
+                    * nacelle_length_m,
+                maximum_fuel_capacity_kg,
+            };
+            match estimate_turboprop_propulsion(
+                &turboprop_inputs,
+                &mass_model.flops_turboprop,
+                maximum_mach,
+            ) {
+                Ok(group) => Some(group),
+                Err(blockers) => {
+                    reasons.extend(blockers.into_iter().map(|blocker| match blocker {
+                        TurbopropMassUnverifiedReason::InvalidConfiguration => {
+                            Reason::TurbopropMassConfiguration
+                        }
+                        TurbopropMassUnverifiedReason::ShaftPowerRating => {
+                            Reason::TurbopropShaftPowerRating
+                        }
+                        TurbopropMassUnverifiedReason::PropellerGeometry => {
+                            Reason::TurbopropPropellerGeometry
+                        }
+                        TurbopropMassUnverifiedReason::NacelleArchitecture => {
+                            Reason::TurbopropNacelleArchitecture
+                        }
+                    }));
+                    None
+                }
+            }
+        }
+    };
+    if !reasons.is_empty() {
+        return sort_reasons(reasons);
+    }
     let scaling = distributed_scaling(
         engine_count,
         wing_engines,
@@ -404,13 +478,21 @@ pub fn evaluate_airframe_product(request: &FlopsAirframeRequest<'_>) -> FlopsAir
         rated_thrust_per_engine_n,
         paint_area_density_kg_m2: technology.paint_area_density_kg_m2,
         painted_wetted_area_m2,
+        // FLOPS equation 69 reads a rated thrust, so a propeller installation
+        // takes the NASA GASP area-density nacelle instead. Either way the
+        // nacelle reaches the structural total once, from one method.
+        nacelle_mass_override_kg: turboprop.map(|group| group.nacelles_kg),
     };
     let structure = selection
         .structure
         .then(|| estimate_flops_structure(&structure_inputs));
     let breakdown = FlopsAirframeBreakdown {
         structure,
-        propulsion: selection.propulsion.then_some(propulsion),
+        propulsion: selection
+            .propulsion
+            .then_some(propulsion)
+            .filter(|_| turboprop.is_none()),
+        turboprop_propulsion: selection.propulsion.then_some(turboprop).flatten(),
         structure_inputs,
         propulsion_inputs,
         detailed_bending,
@@ -476,6 +558,10 @@ mod tests {
                 fuel_tank_count: Some(6),
                 maximum_fuel_capacity_kg: Some(220_000.0),
                 containerized_cargo_kg: Some(0.0),
+                cargo_loading: Some(alas_config::CargoHoldLoading::Containerized),
+                containerized_baggage_fraction: None,
+                cabin_equipment_method: alas_config::CabinEquipmentMethod::FlopsTransportV1,
+                haul_class: None,
                 provenance: FlopsTransportProvenance {
                     mission: provenance("mission"),
                     cabin: provenance("cabin"),

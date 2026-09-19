@@ -22,7 +22,7 @@ use alas_mass::ledger::{MassItem, MassProperties};
 use alas_mass::statement::{
     LedgerMethods, LoadState, MassStatement, MassStatementInputs, PayloadItemSummary,
 };
-use alas_mass::stations::component_stations_with_gear;
+use alas_mass::stations::{component_stations_with_gear, StationError};
 use alas_mass::tanks::FuelTankLayout;
 
 use crate::full_analysis::AnalysisReport;
@@ -51,6 +51,12 @@ const FUEL_CG_CURVE_STEPS: usize = 24;
 /// Returns `None`, with a warning finding, when the geometry cannot place
 /// its components or the tank arrangement cannot be resolved on it; the
 /// lumped model then remains the only mass evidence, and the report says so.
+///
+/// The one station failure that is *not* a warning is
+/// [`StationError::MainGearStationNotMeasured`]: the lumped model cannot
+/// stand in for it, because the lumped gear point is the same refused
+/// station. That case pushes an error finding, so the run is infeasible
+/// rather than reported without a mass statement.
 pub(super) fn assess_mass_balance(
     config: &AlasConfig,
     design: &DesignVector,
@@ -77,6 +83,33 @@ pub(super) fn assess_mass_balance(
         &config.landing_gear,
     ) {
         Ok(stations) => stations,
+        Err(
+            error @ StationError::MainGearStationNotMeasured {
+                wing_root_z_m,
+                fuselage_crown_z_m,
+            },
+        ) => {
+            // A missing main-gear datum is not a ledger that degraded to the
+            // lumped model: it is a component this aircraft has no measured
+            // station for. Reported as a warning the run stays feasible under
+            // it, so the design would be published with its ground reactions
+            // silently taken from a station the mass model refused. It is an
+            // error finding, which `FeasibilityReport::is_feasible` fails on.
+            //
+            // The two heights are kept as the finding's own measured pair
+            // (geometry frame, z up, m): the wing root leading edge, and the
+            // fuselage crown at that station that the wing-mounted fallback
+            // rule requires it to lie at or below.
+            findings.push(PhysicalFinding {
+                code: FindingCode::MassLedgerUnavailable,
+                severity: FindingSeverity::Error,
+                message: format!("component stations could not be placed: {error}"),
+                actual: Some(wing_root_z_m),
+                limit: Some(fuselage_crown_z_m),
+                unit: "m",
+            });
+            return None;
+        }
         Err(error) => {
             warn(
                 findings,
@@ -520,6 +553,101 @@ mod tests {
             "ledger {} vs lumped {} percent MAC",
             takeoff.cg_pct_mac,
             assessment.lumped_takeoff_cg_pct_mac
+        );
+    }
+
+    /// A refused main-gear station is an error finding, not a warning, and
+    /// the low-wing fallback case beside it is untouched.
+    ///
+    /// Before this phase both halves returned `None` with a
+    /// `FindingSeverity::Warning`, so an aircraft the mass model refused to
+    /// place a main gear on was reported as a run that merely lacked an item
+    /// ledger — and `FeasibilityReport::is_feasible`, which fails only on
+    /// error findings, could still call it feasible. The lumped model is not
+    /// a fallback here: its gear point is the same refused station.
+    ///
+    /// The two halves share one analysis run. The ATR half substitutes the
+    /// registered ATR 72-600's configuration and built geometry, which is all
+    /// `assess_mass_balance` reads before it resolves stations and returns.
+    #[test]
+    fn a_refused_main_gear_station_is_an_error_and_a_low_wing_fallback_is_not() {
+        use alas_geom::builder::AircraftBuilder;
+
+        let config = AlasConfig::default();
+        let design = DesignVector::default();
+        let report = FullAnalysis::new(config.clone())
+            .run(&design, true)
+            .expect("default analysis");
+        let fuel_loading = plan_fuel_loading(&config, &design, &report);
+
+        // The default aircraft is low-wing: its wing-mounted gear fallback
+        // stands, the statement is built, and nothing is escalated.
+        let mut findings = Vec::new();
+        assert!(
+            assess_mass_balance(&config, &design, &report, &fuel_loading, &mut findings).is_some(),
+            "the low-wing fallback case must still produce a mass statement"
+        );
+        assert!(
+            findings
+                .iter()
+                .all(|finding| finding.severity != FindingSeverity::Error),
+            "{findings:?}"
+        );
+
+        // The ATR 72-600 registers no gear-station anchor and is high-wing,
+        // so the station model refuses its main gear.
+        let mut atr = AlasConfig::from_value(&serde_json::json!({ "preset": "ATR72-600" }))
+            .unwrap_or_else(|error| panic!("{error}"));
+        // Exercise the explicit refusal fixture; the registered ATR now has
+        // source gear stations and is evaluated through the normal path.
+        atr.landing_gear.reference_station_fuselage_length_m = None;
+        atr.landing_gear.reference_nlg_x_fraction = None;
+        atr.landing_gear.reference_mlg_x_fractions = None;
+        let registered =
+            alas_config::presets::get("ATR72-600").unwrap_or_else(|error| panic!("{error}"));
+        let mut atr_report = report;
+        atr_report.airplane = AircraftBuilder::new(Some(atr.geometry.clone()))
+            .build(Some(&registered.design_vector), true)
+            .expect("the ATR builds");
+
+        let mut findings = Vec::new();
+        assert!(
+            assess_mass_balance(
+                &atr,
+                &registered.design_vector,
+                &atr_report,
+                &fuel_loading,
+                &mut findings
+            )
+            .is_none(),
+            "no mass statement can be built without a main-gear station"
+        );
+        let finding = match findings.as_slice() {
+            [finding] => finding,
+            other => panic!("expected exactly one finding, got {other:?}"),
+        };
+        assert_eq!(finding.code, FindingCode::MassLedgerUnavailable);
+        assert_eq!(
+            finding.severity,
+            FindingSeverity::Error,
+            "a missing main-gear datum must not be downgradable to a warning"
+        );
+        assert!(
+            finding.message.contains("main-gear"),
+            "the finding must name the missing datum: {}",
+            finding.message
+        );
+        // The evidence the station model measured is kept, in SI metres:
+        // the wing root leading edge above the fuselage crown it would have
+        // had to sit at or below for the wing-mounted rule to apply.
+        assert_eq!(finding.unit, "m");
+        let (root_z_m, crown_z_m) = (
+            finding.actual.expect("wing root height"),
+            finding.limit.expect("fuselage crown height"),
+        );
+        assert!(
+            root_z_m > crown_z_m,
+            "root {root_z_m} m, crown {crown_z_m} m"
         );
     }
 }

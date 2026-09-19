@@ -6,7 +6,7 @@ use egui::{vec2, RichText, Ui};
 
 use crate::nav::{Page, Surface};
 use crate::state::AppState;
-use crate::views::form::{dynamic_form, FormEdit};
+use crate::views::form::{dynamic_form, dynamic_form_with_open_root_nodes, FormEdit};
 use crate::views::tr;
 
 #[path = "../form_page/aux_preset.rs"]
@@ -24,14 +24,39 @@ use aux_preset::show_aux_preset_picker;
 use mission_form::render_mission_form;
 use sections::{page_sections, render_sectioned_form};
 
+/// The notice a page carries while a registered preset protects its geometry.
+pub const PRESET_LOCK_NOTICE: &str =
+    "Preset geometry is protected from manual edits here as well; open the sandbox for geometry experiments.";
+
 /// Render one Advanced Settings form page.
 pub fn show_form_page(state: &mut AppState, ui: &mut Ui, page: &Page) {
+    show_form_page_locked(state, ui, page, false);
+}
+
+/// Render one Advanced Settings form page, with its editors optionally locked.
+///
+/// A locked page used to be wrapped whole in `add_enabled_ui(false)`. egui's
+/// disabled scope fades every painted colour toward the background, so the page
+/// title, its description, every field *label* and the page actions all dropped
+/// to the disabled token together (measured 4.28-4.68:1 against 12-15:1 on an
+/// active page) and the page read as failed to load rather than as protected.
+/// Only the editors are disabled here, and the lock notice sits under the page
+/// title instead of above it, inside the page's own heading hierarchy.
+pub fn show_form_page_locked(state: &mut AppState, ui: &mut Ui, page: &Page, locked: bool) {
     let Some(group) = page.group else { return };
     placement::sync_preview_tab(state, ui.ctx(), page);
 
     let heading = ui.heading(alas_i18n::t(Some(page.title), None));
     if let Some(desc) = page.description {
         heading.on_hover_text(alas_i18n::t(Some(desc), None));
+    }
+    if locked {
+        ui.add_space(2.0);
+        ui.label(
+            RichText::new(tr(PRESET_LOCK_NOTICE))
+                .color(ui.visuals().warn_fg_color)
+                .small(),
+        );
     }
     if state.help_verbose {
         if let Some(desc) = page.description {
@@ -81,8 +106,10 @@ pub fn show_form_page(state: &mut AppState, ui: &mut Ui, page: &Page) {
 
     ui.horizontal(|ui| {
         ui.label(RichText::new(tr("Parameter values")).strong());
+        // A framed button, not frameless text: "Reset page" changes every
+        // value on the page and must look like the action it is.
         if ui
-            .add(egui::Button::new(tr("Reset page")).small().frame(false))
+            .add_enabled(!locked, egui::Button::new(tr("Reset page")).small())
             .on_hover_text(tr(
                 "Restore this page's default values; other pages are unchanged.",
             ))
@@ -94,19 +121,18 @@ pub fn show_form_page(state: &mut AppState, ui: &mut Ui, page: &Page) {
     ui.add_space(4.0);
 
     let visible_fields = placement::visible_fields(page, group, &fields);
-    render_editor(
-        state,
-        ui,
-        group,
-        page.surface,
-        &visible_fields,
-        &error_fields,
-        lang,
-    );
-    if page.id == "aerodynamics" {
-        placement::render_drag_formulas(ui);
-    }
-    placement::render_extra_sections(state, ui, page, &error_fields, lang);
+    ui.add_enabled_ui(!locked, |ui| {
+        render_editor(
+            state,
+            ui,
+            group,
+            page.surface,
+            &visible_fields,
+            &error_fields,
+            lang,
+        );
+        placement::render_extra_sections(state, ui, page, &error_fields, lang);
+    });
     render_preview(state, ui, page.preview, page.preview_title);
 }
 
@@ -135,6 +161,23 @@ fn render_editor(
                 lang,
                 show_help,
             )
+        } else if group == "cabin" {
+            // Passenger and cargo are the two primary cabin controls. Keep
+            // both root nodes open and render them in sequence so the page
+            // reads as two stacked, immediately editable rows.
+            if let Some(values) = state.group_mut(group) {
+                dynamic_form_with_open_root_nodes(
+                    ui,
+                    fields,
+                    values,
+                    error_fields,
+                    lang,
+                    show_help,
+                    true,
+                )
+            } else {
+                Vec::new()
+            }
         } else if let Some(values) = state.group_mut(group) {
             if let Some(sections) = page_sections(group, surface) {
                 render_sectioned_form(

@@ -65,6 +65,46 @@ variables), `tolerance`, `seed`, `workers`, `seed_near_initial_design` and
 (fraction of each bound range) and `constraint_tolerance` (normalised). The
 `strategy` field is the differential-evolution mutation scheme.
 
+### `optimizer.plausibility`: the model's validity domain
+
+Fourteen fields: six two-sided windows, one ordering requirement and an
+`enabled` switch. The windows are dimensionless except the two twist bounds
+in degrees, and bound wing aspect ratio, fuselage fineness (length over
+equivalent diameter), horizontal-tail arm as a fraction of fuselage length,
+tip-to-root chord ratio, root thickness-to-chord ratio, and built geometric
+washout (tip section incidence less root section incidence, negative for
+washout). The ordering requirement keeps the trailing-edge break chord
+between the tip and root chords.
+
+These are statements about where this program's own mass, drag and
+stability correlations were fitted, not performance requirements, and each
+window is deliberately wider than every registered aircraft. They reach the
+search as named Geometry residuals (`aspect_ratio_min/max` and the rest) and
+follow the geometry family's configured policy. The group is edited in
+Advanced Settings > Optimizer > Model validity domain, and is written to a
+saved document only when it differs from the shipped defaults, so an older
+file loads with those defaults rather than with zeros.
+
+### `optimizer.relaxation`: controlled constraint relaxation (D01-D03)
+
+`enabled` and `allowed_violated_groups` are on the Inputs page under Run
+options and in Advanced Settings; `eligible`, the per-limit list, is
+document-only. Violated discipline *groups* are counted rather than limits
+(D01), a limit must be on the eligibility list and missed inside its own
+declared tolerance (D02), and a relaxed design never ranks ahead of, or is
+labelled as, a fully feasible one (D03).
+
+**No limit is currently eligible.** `alas_config::optimizer::policy_review`
+records the D02 review as one determination per residual identifier, with
+the reason: a limit is `NeverRelaxable` (a failed or incomplete evaluation,
+or a boolean availability flag), or `Ineligible` because no traceable
+primary engineering or regulatory source states a fraction of it that may be
+exceeded and this program has no measured error band for the quantity
+either, or `Eligible` with a sourced tolerance ceiling. The third state has
+no entries. A configuration that lists an ineligible or unknown identifier
+is a blocking validation error quoting the recorded reason, so the shipped
+run is strict and stays strict.
+
 ### `optimizer.weights`: replay table
 
 Only `failure_cost` (the cost of a candidate that cannot be built, trimmed

@@ -92,8 +92,64 @@ pub fn validate(config: &AlasConfig) -> Vec<ValidationIssue> {
     issues.extend(empennage_tapers_toward_its_tips(config));
     issues.extend(mses_timeouts_are_positive_and_finite(config));
     issues.extend(optimizer_tokens_are_supported(config));
+    issues.extend(crate::optimizer::policy_review::policy_group_issues(config));
+    issues.extend(custom_geometry_is_physical(config));
     issues.extend(vlm_mesh_is_solvable(config));
     issues
+}
+
+/// Keep user-defined geometry outside the undefined portions of the loft
+/// model. The builder repeats its planform-dependent checks for the active
+/// design vector; this boundary check catches malformed saved values before a
+/// preview or run can consume them.
+fn custom_geometry_is_physical(config: &AlasConfig) -> Vec<ValidationIssue> {
+    let mut issues = Vec::new();
+    if let Err(error) = config.geometry.wing.validate_custom_sections() {
+        issues.push(ValidationIssue {
+            field_path: wing_section_path(&error),
+            message: error.to_string(),
+            severity: Severity::Error,
+        });
+    }
+    if let Err(error) = config.geometry.fuselage.validate_custom_sections() {
+        issues.push(ValidationIssue {
+            field_path: fuselage_section_path(&error),
+            message: error.to_string(),
+            severity: Severity::Error,
+        });
+    }
+    issues
+}
+
+fn wing_section_path(error: &crate::WingSectionError) -> String {
+    let index = match error {
+        crate::WingSectionError::NonFinite { index, .. }
+        | crate::WingSectionError::NonPositiveChord { index, .. }
+        | crate::WingSectionError::SpanOutOfRange { index, .. }
+        | crate::WingSectionError::InvalidOrder { index, .. }
+        | crate::WingSectionError::EmptyAirfoil(index) => Some(*index),
+        crate::WingSectionError::DuplicatePlanformStation { .. }
+        | crate::WingSectionError::NonMonotoneChord { .. } => None,
+    };
+    index.map_or_else(
+        || "geometry.wing.custom_sections".to_owned(),
+        |index| format!("geometry.wing.custom_sections[{index}]"),
+    )
+}
+
+fn fuselage_section_path(error: &crate::FuselageSectionError) -> String {
+    let index = match error {
+        crate::FuselageSectionError::NonFinite { index, .. }
+        | crate::FuselageSectionError::NonPositive { index, .. }
+        | crate::FuselageSectionError::XOutOfRange { index, .. }
+        | crate::FuselageSectionError::InvalidOrder { index, .. }
+        | crate::FuselageSectionError::InvalidShape { index, .. } => Some(*index),
+        crate::FuselageSectionError::DuplicateGeneratedStation { .. } => None,
+    };
+    index.map_or_else(
+        || "geometry.fuselage.custom_sections".to_owned(),
+        |index| format!("geometry.fuselage.custom_sections[{index}]"),
+    )
 }
 
 /// Keep source-backed landing-gear dimensions and heterogeneous bogie lists

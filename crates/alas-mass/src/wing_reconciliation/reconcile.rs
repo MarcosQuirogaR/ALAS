@@ -95,7 +95,35 @@ pub fn sized_primary_wing(
         .map_err(|_| WingReconciliationError::StructuralSizing)?;
     let rib = alas_config::materials::get(&config.structures.rib_material)
         .map_err(|_| WingReconciliationError::StructuralSizing)?;
-    let sizing = size_wingbox(
+    // The wing-carried masses `size_wingbox`'s own signature cannot see, and
+    // this caller can: the aircraft's declared integral wing-tank capacity in
+    // place of the geometric estimate, and its wing-mounted powerplant. Both
+    // relieve wing-root bending at their own stations. Neither is a correction
+    // in a favourable direction: supplying them makes five of the eight
+    // registered boxes heavier and two lighter.
+    let stations = alas_struct::sizing::sizing_stations(&geometry, &config.structures);
+    let (front, rear) = alas_struct::sizing::box_chord_band(&geometry);
+    // The declared capacity is bounded to the fuel the loading envelope
+    // guarantees is in the wings at the design gross mass the manoeuvre is
+    // applied at: a published tank volume says what the wing can hold, and an
+    // aircraft that can reach its design mass at the maximum structural payload
+    // holds only `DG - MZFW` of it. `requirements` is already the design-gross
+    // mass form, so the bound and the load case read one mass.
+    let declared_fuel = fuel_relief::declared_integral_wing_fuel_kg_m(
+        config,
+        dv,
+        requirements,
+        &geometry,
+        &stations,
+        front,
+        rear,
+    );
+    let wing_mounted = alas_struct::loads::engine_point_loads_n(
+        &config.geometry.engine,
+        &config.mass_model,
+        requirements,
+    );
+    let sizing = alas_struct::sizing::size_wingbox_with_wing_carried_mass(
         &geometry,
         &config.structures,
         requirements,
@@ -103,19 +131,27 @@ pub fn sized_primary_wing(
         web,
         cap,
         rib,
+        declared_fuel.as_deref(),
+        &wing_mounted,
     );
-    // A sized station can land one ulp below zero after the closed-form
-    // section-property arithmetic (the default design observed
-    // -1.11e-16).  Keep a small, explicit numerical tolerance at this
-    // production seam while still rejecting NaN and any material strength
-    // deficit.  The structural crate retains its exact predicate for its
-    // own reporting/tests; this caller is deciding whether round-off alone
-    // invalidates an otherwise finite candidate.
+    // A station sized to a margin of exactly zero can report one or two units
+    // in the last place below it, because the reported margin recomputes the
+    // equality the sizing solved and that round trip is not exact in binary
+    // floating point. That is arithmetic, not a strength deficit, and
+    // `alas_struct::sizing::MARGIN_NUMERICAL_ZERO` states the band and derives
+    // it from the four inexact operations involved.
+    //
+    // This seam used to carry its own `-1.0e-10`, six orders of magnitude
+    // wider than the arithmetic needs and with no stated basis. Reading the
+    // shared constant **tightens** the gate rather than widening it, and puts
+    // this caller and `alas-pipeline`'s own structural gate on one predicate,
+    // so a wingbox cannot be feasible for mass and infeasible for the
+    // structural solve on the same numbers.
     let strength_margins_ok = sizing
         .spars
         .iter()
         .flat_map(|spar| spar.margin_of_safety.iter())
-        .all(|margin| !margin.is_nan() && *margin >= -1.0e-10);
+        .all(|margin| alas_struct::sizing::margin_is_structurally_non_negative(*margin));
     if !sizing.total_mass_kg.is_finite()
         || sizing.total_mass_kg <= 0.0
         || !strength_margins_ok

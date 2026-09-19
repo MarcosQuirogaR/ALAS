@@ -26,8 +26,56 @@
 //! implementation does not claim a global optimum, aircraft convergence, or
 //! theorem-level stationarity when hidden analyses, closure noise, or finite
 //! budgets violate the assumptions of the MADS convergence results.
+//!
+//! # What counts as convergence here
+//!
+//! [`TerminationReason::Converged`] is the only reason that reports the run as
+//! converged, and it requires all three of:
+//!
+//! 1. a feasible incumbent, which for the product objective means every hard
+//!    residual is satisfied *and* the coupled sizing loop closed (the
+//!    `sizing_not_closed` and `dispatch_not_converged` residuals are hard), so
+//!    this is a coupled-analysis criterion and not merely a bound check;
+//! 2. the translated mesh has contracted to `convergence_mesh_size`, which
+//!    can only happen through consecutive *failed* polls of a positive
+//!    spanning set at successively halved frames: mesh-local optimality
+//!    against the directions actually polled, not a budget stop.
+//!
+//!    How strong that statement is depends on which poll the run used, and
+//!    the product design space uses the weaker one. With
+//!    `minimal_positive_basis` (enabled above four variables, so on every
+//!    sixteen-variable product run) a failed poll certifies that `n + 1`
+//!    directions did not improve the incumbent at that frame; with the
+//!    maximal set it certifies `2n` directions plus their coordinate
+//!    enrichment. Both are positive spanning sets, so both make the
+//!    contraction meaningful rather than arbitrary, and the basis is redrawn
+//!    from the Halton sequence every iteration so the directions polled over
+//!    a run are not the same `n + 1` each time. Neither is a proof of local
+//!    optimality: this is a finite run of a model with hidden analyses and
+//!    closure noise, and the caveat below applies in full;
+//! 3. a relative objective improvement of at least
+//!    `minimum_relative_improvement` over the first feasible point the run
+//!    found, so a run that merely re-confirmed its starting design is not
+//!    reported as a converged optimization.
+//!
+//! Every other reason, including [`TerminationReason::Watchdog`], is reported
+//! as *not* converged.  The watchdog is a wall-clock safety and diagnostic
+//! limit only; it never stands in for a convergence criterion.
+//!
+//! # Evaluation blocks, parallelism and determinism
+//!
+//! The poll is opportunistic: it is cut into blocks of `poll_block_size`
+//! points, and polling stops after the first block that improves the
+//! incumbent.  The block size is deliberately a search setting and *not* the
+//! worker-thread count, so the set of evaluated points and the order they are
+//! considered in are identical whether the caller evaluates a block serially
+//! or across sixteen threads.  Repeated points are served from a bit-exact
+//! cache, which removes the re-evaluation MADS performs whenever two poll
+//! centres, a retried successful direction, or two successive frames land on
+//! the same mesh node.
 
-use std::time::Instant;
+use std::collections::HashMap;
+use std::time::{Duration, Instant};
 
 use super::{MethodOutcome, ScoredPoint};
 
@@ -45,7 +93,8 @@ const VIOLATION_RELATIVE_TOLERANCE: f64 = 1.0e-12;
 pub(crate) struct Settings {
     /// Maximum poll/search iterations.
     pub max_iterations: usize,
-    /// Evaluation budget, including the initial point.
+    /// Evaluation budget, including the initial point.  Cache hits are not
+    /// charged against it: a repeated mesh node costs no analysis.
     pub max_evaluations: usize,
     /// Reproducible seed for search points and poll directions.
     pub seed: u64,
@@ -53,6 +102,43 @@ pub(crate) struct Settings {
     pub initial_mesh_size: f64,
     /// Smallest normalized mesh spacing at which the run stops.
     pub minimum_mesh_size: f64,
+    /// Normalized mesh spacing at or below which a feasible, improved
+    /// incumbent is reported as converged.  Normalized means a fraction of
+    /// each variable's bound width, so `1e-2` is 0.2 m on a 60-80 m span
+    /// bound and 0.2 deg on a 25-45 deg sweep bound: a conceptual-design
+    /// resolution rather than a floating-point one.
+    pub convergence_mesh_size: f64,
+    /// Relative improvement in the feasible objective, against the first
+    /// feasible point of the run, required before convergence may be
+    /// reported.  Dimensionless.
+    pub minimum_relative_improvement: f64,
+    /// How many poll points are evaluated before the opportunistic success
+    /// check.  Independent of the caller's thread count on purpose: see the
+    /// determinism note in the module documentation.
+    pub poll_block_size: usize,
+    /// Hard wall-clock safety limit.  Exceeding it stops the run with
+    /// [`TerminationReason::Watchdog`], which is *not* convergence.
+    ///
+    /// It is checked between evaluation blocks, not inside one, because a
+    /// block is handed to the caller as a unit and may be spread over
+    /// threads.  A run therefore stops at the limit plus at most the time of
+    /// the block in flight: on the ATR-72, whose coupled analysis costs about
+    /// thirteen seconds, a 900 s limit was observed to stop at 1296 s.  That
+    /// is a safety bound, not a deadline.
+    pub watchdog: Option<Duration>,
+    /// Whether the poll is enriched with adjacent-coordinate diagonals.
+    /// See `search::directions::poll_directions` for why this is off for the
+    /// sixteen-variable product design space.
+    pub pair_diagonal_directions: bool,
+    /// Whether an unsuccessful poll only has to exhaust a *minimal* positive
+    /// basis of `n + 1` directions before the mesh may contract, instead of
+    /// the maximal `2n` spanning set with its coordinate enrichment.
+    ///
+    /// Both satisfy the positive-spanning condition MADS requires; the
+    /// minimal one costs a third of the analyses per failed poll, which is
+    /// what decides the wall-clock cost of reaching the convergence mesh when
+    /// one evaluation is a full aircraft sizing.
+    pub minimal_positive_basis: bool,
 }
 
 /// Why a bounded MADS run stopped.
@@ -65,14 +151,23 @@ pub(crate) struct Settings {
 /// convergence.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TerminationReason {
+    /// A feasible incumbent reached mesh-local optimality with a real
+    /// objective improvement.  This is the only converged reason; see the
+    /// module documentation for the exact three conditions.
+    Converged,
     /// The callback budget, including the initial evaluation, was exhausted.
     EvaluationBudget,
-    /// The translated mesh reached the configured minimum spacing.
+    /// The translated mesh reached the configured minimum spacing without
+    /// satisfying every convergence condition (typically: no feasible
+    /// incumbent, or no improvement over the starting design).
     MeshLimit,
     /// The configured poll iteration count was exhausted.
     IterationLimit,
     /// All candidate poll moves were blocked by fixed bounds.
     FixedBounds,
+    /// The wall-clock safety limit was reached.  A diagnostic stop, never
+    /// convergence.
+    Watchdog,
     /// Bounds, initial values, or mesh settings failed validation.
     InvalidInput,
 }
@@ -81,12 +176,19 @@ impl TerminationReason {
     /// Stable progress/log label retained for the existing callback channel.
     pub(crate) const fn as_str(self) -> &'static str {
         match self {
+            Self::Converged => "converged",
             Self::EvaluationBudget => "evaluation_budget",
             Self::MeshLimit => "mesh_limit",
             Self::IterationLimit => "iteration_limit",
             Self::FixedBounds => "fixed_bounds",
+            Self::Watchdog => "watchdog",
             Self::InvalidInput => "invalid_input",
         }
+    }
+
+    /// Whether this reason reports a converged search.
+    pub(crate) const fn is_converged(self) -> bool {
+        matches!(self, Self::Converged)
     }
 }
 
@@ -100,6 +202,20 @@ impl TerminationReason {
 pub(crate) struct MadsOutcome {
     pub(crate) outcome: MethodOutcome,
     pub(crate) termination: TerminationReason,
+    /// Analyses actually executed, excluding cache hits.
+    pub(crate) evaluations: usize,
+    /// Repeated mesh nodes served from the run's own cache.
+    pub(crate) cache_hits: usize,
+    /// Poll/search iterations completed.
+    pub(crate) iterations: usize,
+    /// Wall-clock seconds from the first instruction of [`run`].
+    pub(crate) elapsed_s: f64,
+    /// Feasible objective at the first feasible point, and at the winner.
+    /// `None` when the run never reached a feasible candidate.
+    pub(crate) first_feasible_cost: Option<f64>,
+    /// Relative improvement of the feasible incumbent over the first
+    /// feasible point, dimensionless; `None` without a feasible candidate.
+    pub(crate) relative_improvement: Option<f64>,
 }
 
 impl Default for Settings {
@@ -110,23 +226,104 @@ impl Default for Settings {
             seed: 0,
             initial_mesh_size: 0.25,
             minimum_mesh_size: 1.0e-4,
+            convergence_mesh_size: 1.0e-2,
+            minimum_relative_improvement: 1.0e-4,
+            poll_block_size: 16,
+            watchdog: None,
+            pair_diagonal_directions: true,
+            minimal_positive_basis: false,
         }
+    }
+}
+
+/// How the kernel asks for candidate scores.
+///
+/// A block is a set of independent candidates: the caller is free to spread
+/// it over worker threads, and must return one score per point in input
+/// order.  Any `FnMut(&[f64]) -> ScoredPoint` is accepted through the blanket
+/// implementation below, which evaluates the block serially.
+pub(crate) trait Evaluate {
+    /// Score `points`, returning one entry per point, in order.
+    fn evaluate_block(&mut self, points: &[Vec<f64>]) -> Vec<ScoredPoint>;
+}
+
+impl<F: FnMut(&[f64]) -> ScoredPoint> Evaluate for F {
+    fn evaluate_block(&mut self, points: &[Vec<f64>]) -> Vec<ScoredPoint> {
+        points.iter().map(|point| self(point)).collect()
+    }
+}
+
+/// Bit-exact memo of the points this run already scored.
+///
+/// MADS revisits mesh nodes routinely: the retried successful direction, the
+/// second poll centre and two successive frames all land on points the run
+/// has already paid for.  Keying on the raw bit patterns makes a hit exactly
+/// a repeat of the same design vector, so the memo cannot merge two designs
+/// that differ below a tolerance.
+#[derive(Default)]
+struct EvaluationCache {
+    entries: HashMap<Vec<u64>, ScoredPoint>,
+    hits: usize,
+    misses: usize,
+}
+
+fn cache_key(values: &[f64]) -> Vec<u64> {
+    values.iter().map(|value| value.to_bits()).collect()
+}
+
+impl EvaluationCache {
+    /// Score `points`, calling `evaluate` only for the ones not already known.
+    fn evaluate_block(
+        &mut self,
+        points: &[Vec<f64>],
+        evaluate: &mut dyn Evaluate,
+    ) -> Vec<ScoredPoint> {
+        let keys: Vec<Vec<u64>> = points.iter().map(|point| cache_key(point)).collect();
+        let mut pending = Vec::new();
+        let mut pending_keys: Vec<Vec<u64>> = Vec::new();
+        for (point, key) in points.iter().zip(&keys) {
+            if self.entries.contains_key(key) {
+                self.hits += 1;
+            } else if !pending_keys.contains(key) {
+                pending_keys.push(key.clone());
+                pending.push(point.clone());
+            }
+        }
+        if !pending.is_empty() {
+            let scores = evaluate.evaluate_block(&pending);
+            self.misses += pending.len();
+            for (key, score) in pending_keys.into_iter().zip(scores) {
+                self.entries.insert(key, score);
+            }
+        }
+        keys.iter()
+            .zip(points)
+            .map(|(key, point)| match self.entries.get(key) {
+                Some(score) => score.clone(),
+                // A caller that returns fewer scores than requested is a
+                // broken evaluator, not a design decision; treat the missing
+                // entry as an unevaluated extreme barrier rather than
+                // silently scoring it well.
+                None => invalid_point(point.clone()),
+            })
+            .collect()
     }
 }
 
 /// Run the bounded MADS progressive-barrier search.
 ///
-/// The callback is invoked at most `settings.max_evaluations` times.  Bounds
-/// are finite SI/physical input units supplied by the caller; all poll and
-/// mesh arithmetic is performed in the unitless normalized box.  A malformed
+/// At most `settings.max_evaluations` analyses are executed; repeated mesh
+/// nodes are served from the run's cache and are not charged.  Bounds are
+/// finite SI/physical input units supplied by the caller; all poll and mesh
+/// arithmetic is performed in the unitless normalized box.  A malformed
 /// bound/initial vector or invalid mesh setting returns an invalid fallback
-/// without invoking the callback, because this legacy result interface has no
+/// without invoking the evaluator, because this legacy result interface has no
 /// `Result` channel for input errors.
 pub(crate) fn run(
     bounds: &[(f64, f64)],
     initial: Option<&[f64]>,
     settings: Settings,
-    evaluate: &mut dyn FnMut(&[f64]) -> ScoredPoint,
+    evaluate: &mut dyn Evaluate,
     mut progress: Option<&mut dyn FnMut(&str)>,
 ) -> MadsOutcome {
     let started = Instant::now();
@@ -134,6 +331,12 @@ pub(crate) fn run(
         return MadsOutcome {
             outcome: invalid_outcome(bounds, initial),
             termination: TerminationReason::InvalidInput,
+            evaluations: 0,
+            cache_hits: 0,
+            iterations: 0,
+            elapsed_s: started.elapsed().as_secs_f64(),
+            first_feasible_cost: None,
+            relative_improvement: None,
         };
     }
 
@@ -148,7 +351,7 @@ pub(crate) fn run(
     let mut frame_size = mesh_size;
     let max_evaluations = settings.max_evaluations;
 
-    // A zero budget is a valid bounded request, but no callback may be made.
+    // A zero budget is a valid bounded request, but no analysis may be run.
     // Return the projected initial vector as an unevaluated extreme barrier.
     if max_evaluations == 0 {
         return MadsOutcome {
@@ -157,17 +360,36 @@ pub(crate) fn run(
                 pareto_front: Vec::new(),
             },
             termination: TerminationReason::EvaluationBudget,
+            evaluations: 0,
+            cache_hits: 0,
+            iterations: 0,
+            elapsed_s: started.elapsed().as_secs_f64(),
+            first_feasible_cost: None,
+            relative_improvement: None,
         };
     }
 
-    let mut evaluations = 0usize;
-    let first = evaluate_candidate(&current_values, evaluate);
-    evaluations += 1;
+    let mut cache = EvaluationCache::default();
+    let block_size = settings.poll_block_size.max(1);
+    let watchdog_expired = |started: &Instant| {
+        settings
+            .watchdog
+            .is_some_and(|limit| started.elapsed() >= limit)
+    };
+
+    let first = evaluate_candidates(&[current_values.clone()], &mut cache, evaluate)
+        .into_iter()
+        .next()
+        .unwrap_or_else(|| extreme_evaluated(current_values.clone()));
     let mut best_feasible = None;
     let mut best_infeasible = None;
     let mut barrier = f64::INFINITY;
+    // The objective of the first feasible point the run reaches, which the
+    // convergence criterion measures improvement against.
+    let mut first_feasible_cost: Option<f64> = None;
     if !first.extreme {
         if first.h == 0.0 {
+            first_feasible_cost = Some(first.point.cost);
             best_feasible = Some(first.point.clone());
             barrier = 0.0;
         } else {
@@ -176,37 +398,50 @@ pub(crate) fn run(
         }
     }
     let initial_fallback = first.point.clone();
+    let mut watchdog_hit = false;
 
     // MADS permits a bounded search phase before polling.  This deterministic
     // Latin-hypercube phase is snapped to the translated initial mesh so it
     // remains part of the same mesh sequence and is reproducible for a seed.
-    if settings.max_iterations > 0 && evaluations < max_evaluations && dimension > 0 {
-        let search_points = initial_search_points(bounds, &origin, mesh_size, settings.seed);
-        for point in search_points {
-            if evaluations >= max_evaluations {
+    // It is evaluated in blocks for the same reason the poll is: the points
+    // are independent of one another.
+    if settings.max_iterations > 0 && cache.misses < max_evaluations && dimension > 0 {
+        let search_points: Vec<Vec<f64>> =
+            initial_search_points(bounds, &origin, mesh_size, settings.seed)
+                .into_iter()
+                .filter(|point| !same_point(point, &current_values, bounds))
+                .collect();
+        'search: for block in search_points.chunks(block_size) {
+            if cache.misses >= max_evaluations || watchdog_expired(&started) {
+                watchdog_hit |= watchdog_expired(&started);
                 break;
             }
-            if same_point(&point, &current_values, bounds) {
-                continue;
-            }
-            let candidate = evaluate_candidate(&point, evaluate);
-            evaluations += 1;
-            let change = consider_candidate(
-                candidate,
-                barrier,
-                &mut best_feasible,
-                &mut best_infeasible,
-                &mut current_values,
-            );
-            if change.infeasible_improved {
-                barrier = best_infeasible
-                    .as_ref()
-                    .map(|point| point.constraint_violation)
-                    .unwrap_or(barrier)
-                    .min(barrier);
-            }
-            if best_feasible.is_some() {
-                barrier = 0.0;
+            let block = truncate_to_budget(block, &cache, max_evaluations);
+            for candidate in evaluate_candidates(&block, &mut cache, evaluate) {
+                let feasible_before = best_feasible.is_some();
+                let change = consider_candidate(
+                    candidate,
+                    barrier,
+                    &mut best_feasible,
+                    &mut best_infeasible,
+                    &mut current_values,
+                );
+                if change.infeasible_improved {
+                    barrier = best_infeasible
+                        .as_ref()
+                        .map(|point| point.constraint_violation)
+                        .unwrap_or(barrier)
+                        .min(barrier);
+                }
+                if let Some(point) = best_feasible.as_ref() {
+                    if !feasible_before {
+                        first_feasible_cost = Some(point.cost);
+                    }
+                    barrier = 0.0;
+                }
+                if cache.misses >= max_evaluations {
+                    break 'search;
+                }
             }
         }
     }
@@ -225,12 +460,36 @@ pub(crate) fn run(
         TerminationReason::IterationLimit
     };
     while iteration < settings.max_iterations
-        && evaluations < max_evaluations
+        && cache.misses < max_evaluations
         && mesh_size > minimum_mesh_size
     {
+        if watchdog_expired(&started) {
+            watchdog_hit = true;
+            break;
+        }
         let feasible_before = best_feasible.as_ref().map(|point| point.cost);
-        let directions = poll_directions(dimension, iteration, settings.seed);
-        let centers = poll_centers(&current_values, best_infeasible.as_ref(), bounds);
+        let directions = if settings.minimal_positive_basis {
+            minimal_positive_basis(dimension, iteration, settings.seed)
+        } else {
+            poll_directions(
+                dimension,
+                iteration,
+                settings.seed,
+                settings.pair_diagonal_directions,
+            )
+        };
+        // The second poll centre belongs to the progressive barrier's
+        // restoration phase.  Once a feasible incumbent exists the barrier is
+        // closed at h = 0, so nothing polled around the infeasible incumbent
+        // can be accepted unless it is itself feasible, while the centre
+        // doubles the cost of every poll, including the failed polls that
+        // contract the mesh.  Keep it only while the run is still looking for
+        // its first feasible aircraft.
+        let restoration_center = best_feasible
+            .is_none()
+            .then_some(best_infeasible.as_ref())
+            .flatten();
+        let centers = poll_centers(&current_values, restoration_center, bounds);
         let mut poll: Vec<(Vec<f64>, Vec<i64>)> = Vec::new();
         if let Some(direction) = last_success_direction.as_ref() {
             let point = poll_point(&current_values, direction, frame_size, bounds);
@@ -256,23 +515,47 @@ pub(crate) fn run(
             break;
         }
 
+        // Opportunistic polling in fixed-size blocks: the poll stops at the
+        // first block that improves the incumbent, so a successful iteration
+        // costs a block rather than the whole positive spanning set.  The
+        // block boundary is a search setting, not the caller's thread count,
+        // so the evaluated set and the order it is considered in do not
+        // change when the caller evaluates a block in parallel.
         let mut infeasible_improved = false;
-        for (point, direction) in poll {
-            if evaluations >= max_evaluations {
+        for block in poll.chunks(block_size) {
+            if cache.misses >= max_evaluations {
                 break;
             }
-            let candidate = evaluate_candidate(&point, evaluate);
-            evaluations += 1;
-            let change = consider_candidate(
-                candidate,
-                barrier,
-                &mut best_feasible,
-                &mut best_infeasible,
-                &mut current_values,
-            );
-            infeasible_improved |= change.infeasible_improved;
-            if change.accepted {
-                last_success_direction = Some(direction);
+            if watchdog_expired(&started) {
+                watchdog_hit = true;
+                break;
+            }
+            let points: Vec<Vec<f64>> = block.iter().map(|(point, _)| point.clone()).collect();
+            let points = truncate_to_budget(&points, &cache, max_evaluations);
+            let scored = evaluate_candidates(&points, &mut cache, evaluate);
+            let mut block_success = false;
+            for (candidate, (_, direction)) in scored.into_iter().zip(block) {
+                let was_feasible = best_feasible.is_some();
+                let change = consider_candidate(
+                    candidate,
+                    barrier,
+                    &mut best_feasible,
+                    &mut best_infeasible,
+                    &mut current_values,
+                );
+                infeasible_improved |= change.infeasible_improved;
+                if change.accepted {
+                    last_success_direction = Some(direction.clone());
+                    block_success = true;
+                }
+                if let Some(point) = best_feasible.as_ref() {
+                    if !was_feasible {
+                        first_feasible_cost = Some(point.cost);
+                    }
+                }
+            }
+            if block_success {
+                break;
             }
         }
 
@@ -315,37 +598,70 @@ pub(crate) fn run(
                 .or(best_infeasible.as_ref())
                 .unwrap_or(&first.point);
             (**callback)(&format!(
-                "mads iteration {iteration} | evaluations {evaluations} | mesh {:.3e} | frame {:.3e} | barrier {:.3e} | feasible {} | violation {:.3e} | objective {:.6}",
+                "mads iteration {iteration} | evaluations {} | cache_hits {} | mesh {:.3e} | frame {:.3e} | barrier {:.3e} | feasible {} | violation {:.3e} | objective {:.6} | elapsed_s {:.3}",
+                cache.misses,
+                cache.hits,
                 mesh_size,
                 frame_size,
                 barrier,
                 point.valid,
                 point.constraint_violation,
-                point.cost
+                point.cost,
+                started.elapsed().as_secs_f64()
             ));
+        }
+
+        // The converged stop is checked here, at the end of an iteration,
+        // because all three of its conditions are iteration state: the mesh
+        // has just contracted through a failed poll of a maximal positive
+        // spanning set, the incumbent is feasible, and its objective has
+        // improved on the first feasible point by a stated margin.
+        if mesh_size <= settings.convergence_mesh_size {
+            if let (Some(point), Some(start)) = (best_feasible.as_ref(), first_feasible_cost) {
+                if relative_improvement(start, point.cost)
+                    >= settings.minimum_relative_improvement.max(0.0)
+                {
+                    termination = TerminationReason::Converged;
+                    break;
+                }
+            }
         }
     }
 
-    if evaluations >= max_evaluations {
-        termination = TerminationReason::EvaluationBudget;
-    } else if mesh_size <= minimum_mesh_size {
-        termination = TerminationReason::MeshLimit;
-    } else if iteration >= settings.max_iterations {
-        termination = TerminationReason::IterationLimit;
+    // Convergence is decided inside the loop; every reason below reports a
+    // run that stopped for a budget, safety or structural reason instead.
+    if !termination.is_converged() {
+        if watchdog_hit {
+            termination = TerminationReason::Watchdog;
+        } else if cache.misses >= max_evaluations {
+            termination = TerminationReason::EvaluationBudget;
+        } else if mesh_size <= minimum_mesh_size {
+            termination = TerminationReason::MeshLimit;
+        } else if iteration >= settings.max_iterations {
+            termination = TerminationReason::IterationLimit;
+        }
     }
+    let improvement = best_feasible
+        .as_ref()
+        .zip(first_feasible_cost)
+        .map(|(point, start)| relative_improvement(start, point.cost));
     if let Some(callback) = progress.as_mut() {
         let point = best_feasible
             .as_ref()
             .or(best_infeasible.as_ref())
             .unwrap_or(&initial_fallback);
         (**callback)(&format!(
-            "mads termination {} | evaluations {evaluations} | mesh {:.3e} | feasible {} | violation {:.3e} | objective {:.6} | feasible_found {} | elapsed_s {:.3e}",
+            "mads termination {} | converged {} | evaluations {} | cache_hits {} | iterations {iteration} | mesh {:.3e} | feasible {} | violation {:.3e} | objective {:.6} | feasible_found {} | relative_improvement {} | elapsed_s {:.3}",
             termination.as_str(),
+            termination.is_converged(),
+            cache.misses,
+            cache.hits,
             mesh_size,
             point.valid,
             point.constraint_violation,
             point.cost,
             best_feasible.is_some(),
+            improvement.map(|value| format!("{value:.6}")).unwrap_or_else(|| "none".to_owned()),
             started.elapsed().as_secs_f64()
         ));
     }
@@ -359,6 +675,82 @@ pub(crate) fn run(
             pareto_front: Vec::new(),
         },
         termination,
+        evaluations: cache.misses,
+        cache_hits: cache.hits,
+        iterations: iteration,
+        elapsed_s: started.elapsed().as_secs_f64(),
+        first_feasible_cost,
+        relative_improvement: improvement,
+    }
+}
+
+/// Relative improvement of `current` over `start`, dimensionless.
+///
+/// The objective the product search minimises can be negative (a normalised
+/// block-fuel or mass objective shifted by its reference), so the change is
+/// divided by the magnitude of the starting value rather than by the signed
+/// value itself, and a zero start falls back to the absolute change.  A
+/// worsened incumbent gives a negative result, which never satisfies a
+/// nonnegative improvement requirement.
+fn relative_improvement(start: f64, current: f64) -> f64 {
+    if !start.is_finite() || !current.is_finite() {
+        return 0.0;
+    }
+    let scale = start.abs();
+    if scale <= f64::MIN_POSITIVE {
+        start - current
+    } else {
+        (start - current) / scale
+    }
+}
+
+/// Trim `points` so the block cannot exceed the remaining analysis budget.
+///
+/// Cached points are free, so only the ones that would be evaluated count
+/// against the budget; a block made entirely of repeats is never truncated.
+fn truncate_to_budget(
+    points: &[Vec<f64>],
+    cache: &EvaluationCache,
+    max_evaluations: usize,
+) -> Vec<Vec<f64>> {
+    let mut remaining = max_evaluations.saturating_sub(cache.misses);
+    let mut taken = Vec::with_capacity(points.len());
+    let mut new_keys: Vec<Vec<u64>> = Vec::new();
+    for point in points {
+        let key = cache_key(point);
+        let known = cache.entries.contains_key(&key) || new_keys.contains(&key);
+        if !known {
+            if remaining == 0 {
+                break;
+            }
+            remaining -= 1;
+            new_keys.push(key);
+        }
+        taken.push(point.clone());
+    }
+    taken
+}
+
+/// Score a block through the cache and apply the extreme-barrier mapping.
+fn evaluate_candidates(
+    points: &[Vec<f64>],
+    cache: &mut EvaluationCache,
+    evaluate: &mut dyn Evaluate,
+) -> Vec<EvaluatedPoint> {
+    cache
+        .evaluate_block(points, evaluate)
+        .into_iter()
+        .zip(points)
+        .map(|(score, values)| classify_candidate(score, values))
+        .collect()
+}
+
+/// An unevaluated point held behind the extreme barrier.
+fn extreme_evaluated(values: Vec<f64>) -> EvaluatedPoint {
+    EvaluatedPoint {
+        point: invalid_point(values),
+        h: f64::INFINITY,
+        extreme: true,
     }
 }
 
@@ -423,11 +815,7 @@ fn invalid_point(values: Vec<f64>) -> ScoredPoint {
     }
 }
 
-fn evaluate_candidate(
-    values: &[f64],
-    evaluate: &mut dyn FnMut(&[f64]) -> ScoredPoint,
-) -> EvaluatedPoint {
-    let mut point = evaluate(values);
+fn classify_candidate(mut point: ScoredPoint, values: &[f64]) -> EvaluatedPoint {
     // The design vector being scored is authoritative; this also prevents an
     // evaluator bug from pairing one score with another candidate's values.
     point.values = values.to_vec();
@@ -529,15 +917,13 @@ fn strictly_less_violation(left: f64, right: f64) -> bool {
 
 // Geometry and direction generation stay in a separate module so the search
 // driver remains small enough to audit independently.
-#[path = "directions.rs"]
-mod directions;
-use directions::{
-    clamp_to_bounds, initial_search_points, midpoint, poll_centers, poll_directions, poll_point,
-    same_point, to_normalized,
+use super::directions::{
+    clamp_to_bounds, initial_search_points, midpoint, minimal_positive_basis, poll_centers,
+    poll_directions, poll_point, same_point, to_normalized,
 };
 
 #[cfg(test)]
-use directions::{direction_matrix, full_rank};
+use super::directions::{direction_matrix, full_rank};
 
 #[cfg(test)]
 #[path = "mads_tests.rs"]

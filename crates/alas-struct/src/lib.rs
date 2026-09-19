@@ -9,7 +9,10 @@
 //! three design load cases that scale it, and the per-engine point loads that
 //! relieve it. Strength sizing and the analytical deflection solve land
 //! alongside it, in their own modules, as they are ported, all three sharing
-//! this one load model so they can never disagree about it.
+//! this one load model so they can never disagree about it. [`tanks`] supplies
+//! the one load-relieving mass that is not the structure's own: the fuel the
+//! sized box encloses, derived from that box's geometry rather than declared
+//! beside it.
 //!
 //! [`mesh`] and [`nastran`] are the finite-element half: the first builds the
 //! NASTRAN deck for the sized wingbox, the second writes the solution decks
@@ -33,4 +36,6 @@ pub mod mesh;
 pub mod nastran;
 pub mod nastran95;
 pub mod op2;
+pub mod scope;
 pub mod sizing;
+pub mod tanks;

@@ -5,8 +5,8 @@
 mod tests {
     use super::findings::finding_margin;
     use super::{
-        fuel_margin_rows, mass_triplet_kg, payload_summary_metrics, static_margin_rows,
-        takeoff_mass_margin,
+        fuel_margin_rows, localized_propulsion_label, mass_triplet_kg, payload_summary_metrics,
+        propulsion_summary_entries, static_margin_rows, takeoff_mass_margin,
     };
     use alas_payload::layout::{LayoutSummary, PassengerSummary, PayloadLayout};
     use alas_pipeline::feasibility::MissionFuelStatus;
@@ -138,6 +138,63 @@ mod tests {
             mass_triplet_kg(&masses, 29_000.0, 32_000.0),
             Some((20_000.0, 29_000.0, 32_000.0))
         );
+    }
+
+    #[test]
+    fn propulsion_summary_splits_compact_cycle_metrics_into_independent_cards() {
+        let lines = vec![
+            "Engine: Demo (high-bypass turbofan)".to_owned(),
+            "BPR = 8.0    OPR = 32.0    FPR = 1.6    TIT = 1450 K".to_owned(),
+            "Thermal efficiency (eta_t) = 0.42".to_owned(),
+        ];
+        let entries = propulsion_summary_entries(&lines);
+        assert_eq!(entries.len(), 6);
+        assert!(entries
+            .iter()
+            .any(|(label, value)| { label == "BPR" && value == "8.0" }));
+        assert!(entries
+            .iter()
+            .any(|(label, value)| { label == "TIT" && value == "1450 K" }));
+        assert!(entries
+            .iter()
+            .any(|(label, value)| { label == "Thermal efficiency (eta_t)" && value == "0.42" }));
+    }
+
+    #[test]
+    fn propulsion_summary_localizes_all_catalogued_engine_labels_without_gluing_suffixes() {
+        assert_eq!(
+            localized_propulsion_label("TSFC (computed)"),
+            "TSFC (computed)"
+        );
+        assert_eq!(
+            localized_propulsion_label("Per-engine thrust, this cruise pt"),
+            "Per-engine thrust, this cruise pt"
+        );
+        assert_eq!(
+            localized_propulsion_label("Total installed thrust (x4)"),
+            "Total installed thrust (x4)"
+        );
+    }
+
+    #[test]
+    fn propulsion_summary_uses_existing_spanish_cycle_labels() {
+        alas_i18n::es::install();
+        alas_i18n::set_language(Some("es"));
+
+        assert_eq!(
+            localized_propulsion_label("TSFC (computed)"),
+            "TSFC (calculado)"
+        );
+        assert_eq!(
+            localized_propulsion_label("Per-engine thrust, this cruise pt"),
+            "Empuje por motor, en este punto de crucero"
+        );
+        assert_eq!(
+            localized_propulsion_label("Total installed thrust (x4)"),
+            "Empuje total instalado (x4)"
+        );
+
+        alas_i18n::set_language(Some("en"));
     }
 
     #[test]

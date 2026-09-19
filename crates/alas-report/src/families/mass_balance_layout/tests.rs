@@ -430,3 +430,71 @@ fn w35_reference_contract_covers_every_mass_balance_figure_in_both_themes() {
         }
     }
 }
+
+/// The registered ATR 72-600 geometry and configuration: a real high-wing
+/// layout that registers no source gear-station anchor, which is exactly the
+/// case the wing-mounted fallback rule does not cover.
+fn atr_case() -> (AlasConfig, Airplane) {
+    let preset = alas_config::presets::get("ATR72-600").expect("registered ATR preset");
+    let mut config = AlasConfig::from_value(&serde_json::json!({ "preset": "ATR72-600" }))
+        .expect("ATR configuration");
+    // Keep this refusal fixture explicit: the production ATR configuration
+    // now carries its measured gear stations.
+    config.landing_gear.reference_station_fuselage_length_m = None;
+    config.landing_gear.reference_nlg_x_fraction = None;
+    config.landing_gear.reference_mlg_x_fractions = None;
+    let airplane = alas_geom::builder::AircraftBuilder::new(Some(config.geometry.clone()))
+        .build(Some(&preset.design_vector), true)
+        .expect("ATR geometry");
+    (config, airplane)
+}
+
+#[test]
+fn a_planform_without_a_measured_main_gear_station_draws_no_wheels() {
+    // Every wheel in this figure is drawn at its station. With no main-gear
+    // station measured there is nothing to draw, and a planform showing legs
+    // under the wing root would be the most convincing possible statement of
+    // a datum nobody measured.
+    let (config, airplane) = atr_case();
+    let mut report = test_report(full_masses());
+    report.airplane = airplane;
+
+    let scene = figure_landing_gear_planform(&report, &config, None);
+    let texts: Vec<&String> = scene
+        .elements
+        .iter()
+        .filter_map(|element| match element {
+            SceneElement::Text { text, .. } => Some(text),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        texts
+            .iter()
+            .any(|text| text.contains("No main-gear station measured")),
+        "the figure must name the missing datum: {texts:?}"
+    );
+    assert!(!texts.iter().any(|text| text.as_str() == "MLG-L"));
+    assert!(!texts.iter().any(|text| text.as_str() == "NLG"));
+    assert_eq!(
+        scene
+            .elements
+            .iter()
+            .filter(|element| matches!(element, SceneElement::Polygon { .. }))
+            .count(),
+        0,
+        "no wheel, wing or fuselage outline may be drawn around a refused station"
+    );
+}
+
+#[test]
+fn a_planform_with_a_measured_main_gear_station_is_unchanged() {
+    // The default clean-sheet layout keeps the wing-mounted fallback, so the
+    // gate must be inert here.
+    let scene =
+        figure_landing_gear_planform(&test_report(full_masses()), &AlasConfig::default(), None);
+    assert!(!scene.elements.iter().any(|element| matches!(
+        element,
+        SceneElement::Text { text, .. } if text.contains("No main-gear station measured")
+    )));
+}

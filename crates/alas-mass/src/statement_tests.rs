@@ -155,7 +155,8 @@ fn the_flops_split_preserves_systems_and_furnishings_totals() {
         engine_oil_kg: 60.0,
         passenger_service_kg: 240.0,
         cargo_containers_kg: 90.0,
-        total_kg: 380.0 + 190.0 + 120.0 + 60.0 + 240.0 + 90.0,
+        total_kg: 380.0 + 190.0 + 120.0 + 60.0 + 240.0,
+        total_with_cargo_containers_kg: 380.0 + 190.0 + 120.0 + 60.0 + 240.0 + 90.0,
     };
     let flops = FlopsTransportBreakdown {
         systems,
@@ -268,7 +269,8 @@ fn sample_flops() -> FlopsTransportBreakdown {
         engine_oil_kg: 60.0,
         passenger_service_kg: 240.0,
         cargo_containers_kg: 90.0,
-        total_kg: 380.0 + 190.0 + 120.0 + 60.0 + 240.0 + 90.0,
+        total_kg: 380.0 + 190.0 + 120.0 + 60.0 + 240.0,
+        total_with_cargo_containers_kg: 380.0 + 190.0 + 120.0 + 60.0 + 240.0 + 90.0,
     };
     FlopsTransportBreakdown {
         systems,

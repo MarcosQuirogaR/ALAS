@@ -3,7 +3,7 @@
 
 use super::*;
 
-pub(crate) fn execute_solver_stage<F>(
+pub(crate) fn execute_solver_stage_with_tool<F>(
     adapter: &OpenFoamAdapter,
     case_dir: &Path,
     timeout_seconds: u64,
@@ -14,11 +14,12 @@ pub(crate) fn execute_solver_stage<F>(
     mesh_output: &mut String,
     stage: CfdStage,
     label: &str,
+    solver: &str,
 ) -> Result<OpenFoamProcessStatus, String>
 where
     F: FnMut(CfdRunEvent),
 {
-    let command = adapter.command("simpleFoam", Some(case_dir), &[])?;
+    let command = adapter.command(solver, Some(case_dir), &[])?;
     execute_resolved_stage(
         adapter,
         case_dir,
@@ -34,7 +35,7 @@ where
     )
 }
 
-pub(crate) fn execute_solver_postprocess_stage<F>(
+pub(crate) fn execute_solver_postprocess_stage_with_tool<F>(
     adapter: &OpenFoamAdapter,
     case_dir: &Path,
     timeout_seconds: u64,
@@ -43,6 +44,7 @@ pub(crate) fn execute_solver_postprocess_stage<F>(
     started: std::time::Instant,
     command_logs: &mut BTreeMap<String, String>,
     mesh_output: &mut String,
+    solver: &str,
 ) -> Result<OpenFoamProcessStatus, String>
 where
     F: FnMut(CfdRunEvent),
@@ -51,7 +53,7 @@ where
         .into_iter()
         .map(std::ffi::OsString::from)
         .collect();
-    let command = adapter.command("simpleFoam", Some(case_dir), &args)?;
+    let command = adapter.command(solver, Some(case_dir), &args)?;
     execute_resolved_stage(
         adapter,
         case_dir,
@@ -62,7 +64,7 @@ where
         command_logs,
         mesh_output,
         CfdStage::PostProcessing,
-        "simpleFoam-postProcess",
+        &format!("{solver}-postProcess"),
         command,
     )
 }

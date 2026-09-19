@@ -213,7 +213,17 @@ pub struct DesignObjective {
     /// `passenger_shortfall` residual/penalty so a candidate whose resolved
     /// capacity falls short of the floor is scored accordingly.
     pub target_num_passengers: i64,
-    /// Original cargo payload target in kg.
+    /// The cargo payload mass a candidate's achieved payload is scored
+    /// against, kg, captured before any candidate load case runs.
+    ///
+    /// [`alas_config::DesignRequirements::cargo_target_kg`]: the user's
+    /// entered cargo objective when there is one, otherwise the configured
+    /// cargo payload capacity. It is a target to match (clarified ledger App
+    /// Features 2, decision D10), not a floor: `mdo::residuals_geometry`
+    /// turns the two-sided deviation from it into the soft
+    /// `cargo_target_shortfall`/`cargo_target_excess` pair, and what rejects
+    /// an overloaded aircraft stays in the mass, balance and volume
+    /// residuals. Zero on a passenger aircraft, which has no such pair.
     pub target_cargo_payload_kg: f64,
     /// Nominal vector around which reference and baseline design envelopes
     /// are enforced. Clean-sheet runs use the configured preset when one is
@@ -306,7 +316,7 @@ impl DesignObjective {
             config.geometry.engine.apply_engine_spec();
         }
         let target_num_passengers = config.requirements.min_passenger_capacity;
-        let target_cargo_payload_kg = config.requirements.cargo_payload_kg;
+        let target_cargo_payload_kg = config.requirements.cargo_target_kg();
         let nominal = nominal.unwrap_or_else(|| {
             if config.preset.is_empty() {
                 DesignVector::default()

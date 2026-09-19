@@ -20,7 +20,7 @@ import sys
 import tempfile
 import textwrap
 import time
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple
 
 # -----------------------------------------------------------------------------
 # Constants & Configuration
@@ -34,7 +34,6 @@ REGISTRY_LOCK_STALE_SECONDS = 60.0
 
 REGISTRY_REL_PATH = pathlib.Path(".agent/control/jobs.json")
 REPORTS_DIR_REL = pathlib.Path(".agent/reports")
-PROMPTS_DIR_REL = pathlib.Path(".agent/control/prompts")
 
 FORBIDDEN_PROMPT_PATTERNS = [
     r"auth",

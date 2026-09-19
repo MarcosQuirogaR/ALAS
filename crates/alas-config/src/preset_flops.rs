@@ -43,8 +43,8 @@
 //!   source establishes otherwise, which none does.
 
 use crate::{
-    FlopsInputEvidence, FlopsInputProvenance, FlopsStructureConfig, FlopsTransportConfig,
-    FlopsTransportProvenance, FuelTankLayoutConfig,
+    CargoHoldLoading, FlopsInputEvidence, FlopsInputProvenance, FlopsStructureConfig,
+    FlopsTransportConfig, FlopsTransportProvenance, FlopsTurbopropConfig, FuelTankLayoutConfig,
 };
 
 /// The FLOPS architecture registered for one aircraft.
@@ -54,6 +54,10 @@ pub struct PresetFlopsInputs {
     pub transport: FlopsTransportConfig,
     /// Technology factors and declared airframe/propulsion overrides.
     pub structure: FlopsStructureConfig,
+    /// Declared shaft-power propulsion-group inputs, for a turboprop.
+    ///
+    /// Left at its undeclared default for every jet, which never reads it.
+    pub turboprop: FlopsTurbopropConfig,
 }
 
 /// A cabin class split, in installed seats.
@@ -104,6 +108,16 @@ struct DeclaredArchitecture {
     maximum_fuel_capacity_kg: Option<f64>,
     /// FLOPS `WCARGO`, kilograms of containerised cargo.
     containerized_cargo_kg: f64,
+    /// How this aircraft's holds are loaded, which decides whether its
+    /// checked baggage carries a unit-load-device tare.
+    cargo_loading: CargoHoldLoading,
+    /// Containerised share of the checked baggage, for a mixed arrangement.
+    containerized_baggage_fraction: Option<f64>,
+    /// Which method prices this aircraft's cabin equipment and
+    /// occupant-driven operating items.
+    cabin_equipment_method: crate::CabinEquipmentMethod,
+    /// Which LTH operating-item relation this aircraft would take.
+    haul_class: crate::OperatingHaulClass,
     /// Evidence for the mission family.
     mission: Evidence,
     /// Evidence for the cabin family.
@@ -193,6 +207,10 @@ pub fn inputs_for(preset_name: &str) -> Option<PresetFlopsInputs> {
             .maximum_fuel_capacity_kg
             .or(preset.reference.usable_fuel_mass_kg),
         containerized_cargo_kg: Some(declared.containerized_cargo_kg),
+        cargo_loading: Some(declared.cargo_loading),
+        containerized_baggage_fraction: declared.containerized_baggage_fraction,
+        cabin_equipment_method: declared.cabin_equipment_method,
+        haul_class: Some(declared.haul_class),
         provenance: FlopsTransportProvenance {
             mission: declared.mission.into_provenance(),
             cabin: declared.cabin.into_provenance(),
@@ -203,6 +221,7 @@ pub fn inputs_for(preset_name: &str) -> Option<PresetFlopsInputs> {
     Some(PresetFlopsInputs {
         transport,
         structure: declared_structure(preset_name),
+        turboprop: declared_turboprop(preset_name),
     })
 }
 
@@ -211,7 +230,8 @@ mod architecture;
 #[path = "preset_flops/structure.rs"]
 mod structure;
 use architecture::declared_architecture;
-use structure::declared_structure;
+pub(crate) use architecture::declared_cargo_loading;
+use structure::{declared_structure, declared_turboprop};
 
 #[cfg(test)]
 #[path = "preset_flops/tests.rs"]

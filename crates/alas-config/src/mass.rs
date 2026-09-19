@@ -16,8 +16,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     legacy_mass_model_schema_version, ConfigNode, FlopsStructureConfig, FlopsTransportConfig,
-    MassArchitecture, MassArchitectureMigration, PropulsionMassMethod, StructuralMassMethod,
-    SystemsMassMethod, MASS_MODEL_SCHEMA_VERSION,
+    FlopsTurbopropConfig, MassArchitecture, MassArchitectureMigration, PropulsionMassMethod,
+    StructuralMassMethod, SystemsMassMethod, MASS_MODEL_SCHEMA_VERSION,
 };
 
 /// Tunable mass fractions and structural parameters.
@@ -85,6 +85,20 @@ pub struct MassModelConfig {
         help = "FLOPS technology factors (composites, aeroelastic tailoring, strut bracing, variable sweep), landing-gear and landing-mass overrides, baseline engine scaling, and the empty-mass margin used by the FLOPS structural and propulsion methods."
     )]
     pub flops_structure: FlopsStructureConfig,
+
+    /// Declared inputs of the shaft-power propulsion group.
+    ///
+    /// Read only when the installed engine is a turboprop; the FLOPS source
+    /// has no propeller, gearbox or shaft-power mass equation, so a turboprop
+    /// propulsion group is evaluated from this node instead of from equations
+    /// 69 and 75-92.
+    #[serde(default, skip_serializing_if = "FlopsTurbopropConfig::is_default")]
+    #[config(
+        nested,
+        advanced,
+        help = "Declared engine dry mass, propeller geometry and construction, nacelle area density, pylon coefficient and engine-installation mass used by the shaft-power propulsion group. NASA FLOPS parameterises every propulsion mass on rated thrust and has no turboprop branch, so these inputs replace that group for a propeller-driven aircraft."
+    )]
+    pub flops_turboprop: FlopsTurbopropConfig,
 
     /// Whether the product analysis places each mass group at its
     /// geometry-derived station.
@@ -250,6 +264,7 @@ struct MassModelConfigWire {
     structural_mass_method: StructuralMassMethod,
     propulsion_mass_method: PropulsionMassMethod,
     flops_structure: FlopsStructureConfig,
+    flops_turboprop: FlopsTurbopropConfig,
     geometric_component_stations: bool,
     suspended_mass_fraction: f64,
     max_airspeed_for_flaps_ms: f64,
@@ -284,6 +299,7 @@ impl Default for MassModelConfigWire {
             structural_mass_method: defaults.structural_mass_method,
             propulsion_mass_method: defaults.propulsion_mass_method,
             flops_structure: defaults.flops_structure,
+            flops_turboprop: defaults.flops_turboprop,
             geometric_component_stations: default_true(),
             suspended_mass_fraction: defaults.suspended_mass_fraction,
             max_airspeed_for_flaps_ms: defaults.max_airspeed_for_flaps_ms,
@@ -319,6 +335,7 @@ impl From<MassModelConfigWire> for MassModelConfig {
             structural_mass_method: wire.structural_mass_method,
             propulsion_mass_method: wire.propulsion_mass_method,
             flops_structure: wire.flops_structure,
+            flops_turboprop: wire.flops_turboprop,
             geometric_component_stations: wire.geometric_component_stations,
             suspended_mass_fraction: wire.suspended_mass_fraction,
             max_airspeed_for_flaps_ms: wire.max_airspeed_for_flaps_ms,
@@ -448,6 +465,7 @@ impl Default for MassModelConfig {
             structural_mass_method: mass_architecture.structural_method(),
             propulsion_mass_method: mass_architecture.propulsion_method(),
             flops_structure: FlopsStructureConfig::default(),
+            flops_turboprop: FlopsTurbopropConfig::default(),
             geometric_component_stations: true,
             suspended_mass_fraction: 0.75,
             max_airspeed_for_flaps_ms: 90.0,

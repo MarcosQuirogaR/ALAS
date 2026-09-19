@@ -2,8 +2,36 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 use crate::scene::{Axes2D, Color, Fill, Scene, SceneElement, Stroke, TextAlign, TextBaseline};
+use crate::theme::Palette;
 
 pub(super) const BAR_HEIGHT: f64 = 0.5;
+
+/// A titled canvas carrying centered placeholder text instead of a diagram,
+/// for a figure whose governing datum is missing.
+///
+/// The same convention `mass_balance`'s `no_data_scene` uses: the figure
+/// states what it does not have rather than drawing a substitute for it.
+pub(super) fn missing_datum_scene(
+    width: f64,
+    height: f64,
+    title: &str,
+    pal: &Palette,
+    message: &str,
+) -> Scene {
+    let mut scene = Scene::new(width, height, Some(Color::from_hex(pal.bg)));
+    scene.title = Some(title.to_owned());
+    scene.add(SceneElement::Text {
+        text: message.to_owned(),
+        pos: [width * 0.5, height * 0.5],
+        font_size: 12.0,
+        color: Color::from_hex(pal.title),
+        align: TextAlign::Center,
+        baseline: TextBaseline::Middle,
+        angle_deg: 0.0,
+        bold: false,
+    });
+    scene
+}
 /// Greedily assign a row index to each (already x-sorted) label so any two
 /// labels sharing a row are at least `min_sep` apart: `_assign_label_rows`.
 pub(super) fn assign_label_rows(xs: &[f64], min_sep: f64) -> Vec<usize> {

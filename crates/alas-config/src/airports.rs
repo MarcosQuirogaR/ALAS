@@ -89,6 +89,30 @@ pub fn database() -> &'static [Airport] {
     DATABASE.get_or_init(|| parse().airports)
 }
 
+/// Return the curated table plus any user-registered airport records.
+///
+/// The returned vector is a snapshot so callers may safely use it to populate
+/// a selector while another workspace import replaces the registry.
+pub fn database_with_custom() -> Vec<Airport> {
+    let mut airports = database().to_vec();
+    airports.extend(
+        crate::airport_io::registered_custom_airports()
+            .into_iter()
+            .map(|airport| Airport {
+                name: airport.name,
+                icao: airport.icao,
+                elevation_m: airport.altitude_m,
+                toda_m: airport.declared_toda_m.unwrap_or(0.0),
+                lda_m: airport.declared_lda_m.unwrap_or(0.0),
+                isa_deviation_c: airport.isa_delta_c,
+                notes: "Custom entry; physical runway lengths remain provenance-only".to_owned(),
+                latitude_deg: airport.latitude_deg,
+                longitude_deg: airport.longitude_deg,
+            }),
+    );
+    airports
+}
+
 /// Look one aerodrome up by display name or by ICAO code.
 ///
 /// Both are accepted because the configuration stores the display name while
@@ -100,9 +124,13 @@ pub fn database() -> &'static [Airport] {
 /// [`UnknownAirport`] when neither matches. Upstream raises for the same
 /// input.
 pub fn get(name_or_icao: &str) -> Result<&'static Airport, UnknownAirport> {
-    database()
+    if let Some(airport) = database()
         .iter()
         .find(|airport| airport.name == name_or_icao || airport.icao == name_or_icao)
+    {
+        return Ok(airport);
+    }
+    crate::airport_io::legacy_by_name_or_icao(name_or_icao)
         .ok_or_else(|| UnknownAirport(name_or_icao.to_owned()))
 }
 

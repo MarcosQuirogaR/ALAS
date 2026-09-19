@@ -7,6 +7,41 @@ fn structural_failure() -> CandidateFailure {
     }
 }
 
+/// Name the typed cause of a failed product station placement.
+///
+/// [`product_mass_coordinates`] reports a message, so the cause a search log
+/// needs — a *missing* main-gear datum against a *degenerate* geometry — is
+/// already flattened by the time it arrives here. Re-resolving the same
+/// stations recovers the typed [`alas_mass::stations::StationError`] without
+/// restating the applicability rule that decides it, which belongs to
+/// `alas_mass::stations`. This runs only on the failure path, so an accepted
+/// candidate pays nothing for it.
+///
+/// A missing main-gear station rejects the candidate exactly as before; what
+/// changes is that `OptimizationHistory::reject_reason_counts` can now
+/// separate it from every other coordinate failure, which is what tells a
+/// reviewer to register the aircraft's published gear stations rather than to
+/// look for a geometry bug.
+fn mass_coordinate_failure(config: &AlasConfig, plane: &Airplane) -> CandidateFailure {
+    match alas_mass::stations::component_stations_with_gear(
+        plane,
+        &config.geometry,
+        &config.requirements,
+        &config.mass_model,
+        &config.structures,
+        &config.landing_gear,
+    ) {
+        Err(alas_mass::stations::StationError::MainGearStationNotMeasured { .. }) => {
+            CandidateFailure {
+                reason: "main_gear_station_not_measured",
+            }
+        }
+        _ => CandidateFailure {
+            reason: "mass_coordinates",
+        },
+    }
+}
+
 /// Run the checked pure-FLOPS product mass buildup and independently evaluate
 /// the structural wing-sizing diagnostic.  The structural result is retained
 /// for feasibility and reporting, but it never replaces the FLOPS wing mass:
@@ -61,12 +96,8 @@ pub(crate) fn mass_analysis_with_structural_feedback(
     // The FLOPS buildup already closed payload and fuel against its own
     // component groups.  Keep those values untouched so the search and final
     // report share one authoritative ledger.
-    let (coords, cg) =
-        product_mass_coordinates(config, dv, plane, &masses, coords).map_err(|_| {
-            CandidateFailure {
-                reason: "mass_coordinates",
-            }
-        })?;
+    let (coords, cg) = product_mass_coordinates(config, dv, plane, &masses, coords)
+        .map_err(|_| mass_coordinate_failure(config, plane))?;
     Ok((masses, coords, cg, feedback, reference, inventory))
 }
 
@@ -87,6 +118,49 @@ mod structural_tests {
         assert_eq!(config.optimizer.design_space.mode, DesignMode::CleanSheet);
         build_geometry(&config, &DesignVector::default().to_array())
             .unwrap_or_else(|failure| panic!("{}", failure.reason))
+    }
+
+    /// An ATR-like candidate — high wing, fuselage sponsons, no registered
+    /// gear-station anchor — is rejected, and the search log says *why*.
+    ///
+    /// The candidate was already rejected before this phase, but under the
+    /// generic `mass_coordinates` label, which a reject-reason tally cannot
+    /// tell apart from a degenerate geometry. The distinction matters because
+    /// the two have opposite remedies: this one is closed by registering the
+    /// aircraft's published gear stations, not by fixing a builder.
+    #[test]
+    fn a_missing_main_gear_datum_is_named_in_the_candidate_rejection() {
+        let mut config = AlasConfig::from_value(&serde_json::json!({ "preset": "ATR72-600" }))
+            .unwrap_or_else(|error| panic!("{error}"));
+        // Keep this rejection fixture independent of the registered ATR
+        // datum: the production preset now carries measured stations.
+        config.landing_gear.reference_station_fuselage_length_m = None;
+        config.landing_gear.reference_nlg_x_fraction = None;
+        config.landing_gear.reference_mlg_x_fractions = None;
+        let registered =
+            alas_config::presets::get("ATR72-600").unwrap_or_else(|error| panic!("{error}"));
+        let dv = registered.design_vector;
+        let plane = AircraftBuilder::new(Some(config.geometry.clone()))
+            .build(Some(&dv), true)
+            .expect("the ATR builds");
+
+        let failure = mass_analysis_with_structural_feedback(&config, &dv, &plane, None, None)
+            .expect_err("an aircraft with no measured main-gear station is not evaluable");
+        assert_eq!(failure.reason, "main_gear_station_not_measured");
+    }
+
+    /// The label is specific to the missing datum: a candidate whose stations
+    /// resolve is not relabelled, and the clean-sheet default still evaluates.
+    #[test]
+    fn a_resolvable_candidate_is_not_labelled_a_missing_gear_datum() {
+        let (config, dv, plane) = clean_sheet_candidate();
+        mass_analysis_with_structural_feedback(&config, &dv, &plane, None, None)
+            .unwrap_or_else(|failure| panic!("{}", failure.reason));
+        assert_eq!(
+            mass_coordinate_failure(&config, &plane).reason,
+            "mass_coordinates",
+            "a candidate whose stations resolve keeps the generic coordinate label"
+        );
     }
 
     #[test]

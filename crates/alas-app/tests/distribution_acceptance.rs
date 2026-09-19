@@ -87,8 +87,8 @@ impl IsolatedPackage {
         fs::create_dir_all(&user_data).expect("isolated package directory is created");
         fs::create_dir_all(root.join("outputs")).expect("package output directory is created");
 
-        let source = PathBuf::from(env!("CARGO_BIN_EXE_alas"));
-        let executable = root.join(if cfg!(windows) { "alas.exe" } else { "alas" });
+        let source = PathBuf::from(env!("CARGO_BIN_EXE_ALAS"));
+        let executable = root.join(if cfg!(windows) { "ALAS.exe" } else { "ALAS" });
         fs::copy(&source, &executable).expect("test binary is copied into the package");
 
         Self {
@@ -148,7 +148,7 @@ fn output_text(output: &Output) -> String {
 #[cfg(windows)]
 #[test]
 fn packaged_executable_uses_the_windows_gui_subsystem() {
-    let executable = PathBuf::from(env!("CARGO_BIN_EXE_alas"));
+    let executable = PathBuf::from(env!("CARGO_BIN_EXE_ALAS"));
     let bytes = fs::read(&executable).expect("packaged executable is readable");
     assert!(
         bytes.len() >= 0x40,

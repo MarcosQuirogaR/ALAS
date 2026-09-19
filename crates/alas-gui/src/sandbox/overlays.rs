@@ -91,7 +91,7 @@ pub fn metric_chips(state: &AppState) -> Vec<String> {
     };
     let m = geometry_metrics(plane, &design);
     vec![
-        format!("S_ref {:.1} m2", m.reference_area_m2),
+        format!("S_ref {:.1} m\u{b2}", m.reference_area_m2),
         format!("b {:.2} m", m.span_m),
         format!("MAC {:.2} m", m.mean_aerodynamic_chord_m),
         format!("AR {:.2}", m.aspect_ratio),
@@ -141,7 +141,13 @@ fn show_launch_actions(state: &mut AppState, ui: &mut Ui) {
         let running = state.is_running;
         let blocked = state.blocked();
         let quick = egui::Button::new(RichText::new(tr("Quick Analysis")).strong());
-        if floating_control(ui, "action", !blocked && !state.sandbox.estimates.running(), quick)
+        if floating_control(
+            ui,
+            "action",
+            !blocked && !state.sandbox.estimates.running(),
+            false,
+            quick,
+        )
             .on_hover_text(tr("Reduced in-process estimates for the drawn aircraft; first results within seconds, labelled as initial estimates."))
             .clicked()
         {
@@ -151,6 +157,7 @@ fn show_launch_actions(state: &mut AppState, ui: &mut Ui) {
             ui,
             "action",
             !running && !blocked,
+            false,
             egui::Button::new(tr("Full Analysis")),
         )
         .on_hover_text(tr("Run the complete pipeline on the drawn aircraft as a fixed design; results open in their own window."))
@@ -163,6 +170,7 @@ fn show_launch_actions(state: &mut AppState, ui: &mut Ui) {
                 ui,
                 "action",
                 !state.cancellation_requested,
+                false,
                 egui::Button::new(tr("Cancel")),
             )
             .clicked()
@@ -183,6 +191,7 @@ fn show_edit_actions(state: &mut AppState, ui: &mut Ui) {
             ui,
             "action",
             state.sandbox.undo.can_undo(),
+            false,
             egui::Button::new(tr("Undo")).small(),
         )
         .clicked()
@@ -193,6 +202,7 @@ fn show_edit_actions(state: &mut AppState, ui: &mut Ui) {
             ui,
             "action",
             state.sandbox.undo.can_redo(),
+            false,
             egui::Button::new(tr("Redo")).small(),
         )
         .clicked()
@@ -236,7 +246,7 @@ mod tests {
         assert!(state.enter_sandbox(true));
         let chips = metric_chips(&state);
         assert_eq!(chips.len(), 8);
-        assert!(chips[0].starts_with("S_ref ") && chips[0].ends_with(" m2"));
+        assert!(chips[0].starts_with("S_ref ") && chips[0].ends_with(" m\u{b2}"));
         assert!(chips[1].starts_with("b ") && chips[1].ends_with(" m"));
         assert!(chips[4].starts_with("LE sweep ") && chips[4].ends_with(" deg"));
         assert!(chips[7].starts_with("L_fus "));

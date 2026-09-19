@@ -4,6 +4,7 @@
 use alas_config::AlasConfig;
 use alas_geom::aircraft::airplane::Airplane;
 use alas_mass::breakdown::{MassBreakdown, MassCoordinates};
+use alas_mass::stations::StationError;
 use alas_payload::oew::oew_and_cg;
 use alas_perf::landing_gear::size_landing_gear_with_group_stations;
 
@@ -116,6 +117,22 @@ pub struct ModelCgLoadingAssessment {
     pub static_margin: f64,
     /// Nose-gear reaction divided by this loading state's total weight.
     pub nose_gear_load_fraction: f64,
+    /// Whether this state's ground reactions are inside the validity domain
+    /// of the two-group static split that produced them.
+    ///
+    /// `N_nose = m (x_mlg - x_cg) / (x_mlg - x_nlg)` and
+    /// `N_main = m - N_nose` describe an aeroplane resting on both gear
+    /// groups **in compression**. With the centre of gravity aft of the
+    /// effective main-gear station the nose reaction comes out negative and
+    /// the main reaction exceeds the whole weight: the aeroplane sits on its
+    /// tail, the nose leg carries nothing, and neither number is a load the
+    /// gear actually sees. When this is `false` the two strength assessments
+    /// are omitted from [`Self::constraints`] rather than reported, because a
+    /// negative reaction trivially satisfies a rated-capacity upper bound and
+    /// would otherwise print as a passing strength margin.
+    /// [`ModelCgConstraint::MinimumNoseGearLoad`] is the constraint that
+    /// describes this state and is always retained.
+    pub ground_reactions_admissible: bool,
     /// Independently evaluated hard constraints.
     pub constraints: Vec<ModelCgConstraintAssessment>,
 }
@@ -177,7 +194,12 @@ impl ModelCgEnvelopeAssessment {
 }
 
 /// Why the model-derived assessment could not be formed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+///
+/// `Eq` is deliberately not derived: [`Self::MainGearStationNotMeasured`]
+/// carries a [`StationError`] whose evidence is floating point, and an
+/// exact-equality trait on it would invite comparisons that are not
+/// meaningful. Every variant remains `PartialEq`.
+#[derive(Debug, Clone, Copy, PartialEq, thiserror::Error)]
 pub enum ModelCgEnvelopeError {
     /// The aircraft has no main aerodynamic surface.
     #[error("model CG assessment requires a main wing")]
@@ -188,6 +210,20 @@ pub enum ModelCgEnvelopeError {
     /// An input required by the static-equilibrium calculation is invalid.
     #[error("model CG assessment received a non-finite or non-positive input")]
     InvalidInput,
+    /// No main-gear longitudinal station is available for this aircraft, so
+    /// no ground reaction in this assessment has a point to act about.
+    ///
+    /// Every quantity this assessment reports about the ground — both gear
+    /// strength limits, the minimum nose-gear load, and the wheelbase that
+    /// normalizes them — is a moment about the main-gear station. When
+    /// [`alas_mass::stations`] refuses to supply one, the wing-mounted
+    /// fallback this module rebuilds is outside its stated domain, and the
+    /// reactions computed from it would be reported as if they were measured.
+    /// The assessment is therefore refused whole rather than returned with
+    /// the gear constraints evaluated at an invented station; the carried
+    /// [`StationError`] keeps the two heights that decided it.
+    #[error("model CG assessment has no measured main-gear station: {0}")]
+    MainGearStationNotMeasured(#[source] StationError),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -240,6 +276,14 @@ fn upper_bound_constraint(
 
 fn assess_loading_constraints(inputs: LoadingConstraintInputs) -> ModelCgLoadingAssessment {
     let nose_gear_load_fraction = inputs.nose_gear_load_kg / inputs.mass_kg;
+    // Both groups in compression is the stated domain of the split that
+    // produced these two reactions; see
+    // `ModelCgLoadingAssessment::ground_reactions_admissible`. The test is on
+    // the reactions themselves, with no margin and no tolerance: zero nose
+    // load is the tipping point itself and is still a reaction the model can
+    // state.
+    let ground_reactions_admissible =
+        inputs.nose_gear_load_kg >= 0.0 && inputs.main_gear_load_kg >= 0.0;
     let constraints = vec![
         lower_bound_constraint(
             ModelCgConstraint::StaticStabilityFloor,
@@ -272,6 +316,20 @@ fn assess_loading_constraints(inputs: LoadingConstraintInputs) -> ModelCgLoading
             1.0,
         ),
     ];
+    let mut constraints = constraints;
+    if !ground_reactions_admissible {
+        // Drop only the two rated-capacity comparisons. This cannot admit a
+        // candidate that would otherwise be rejected: both are upper bounds
+        // that a negative reaction already satisfies, so what is removed is a
+        // passing verdict on a number the model did not measure, and
+        // `MinimumNoseGearLoad` keeps rejecting the state.
+        constraints.retain(|constraint| {
+            !matches!(
+                constraint.constraint,
+                ModelCgConstraint::NoseGearStrength | ModelCgConstraint::MainGearStrength
+            )
+        });
+    }
     ModelCgLoadingAssessment {
         state: inputs.state,
         mass_kg: inputs.mass_kg,
@@ -279,6 +337,7 @@ fn assess_loading_constraints(inputs: LoadingConstraintInputs) -> ModelCgLoading
         cg_pct_mac: inputs.cg_pct_mac,
         static_margin: inputs.static_margin,
         nose_gear_load_fraction,
+        ground_reactions_admissible,
         constraints,
     }
 }

@@ -36,7 +36,8 @@ mod search_methods;
 pub mod transport_planform;
 
 pub use differential_evolution::{
-    DesignOptimizer, NoFeasibleDesign, OptimizationError, OptimizationResult, ParetoCandidate,
+    DeliveredAcceptance, DesignOptimizer, NoFeasibleDesign, OptimizationError, OptimizationResult,
+    ParetoCandidate, SearchDiagnostics, REPORTING_FIDELITY_FALLBACK, REPORTING_FIDELITY_REJECTED,
 };
 pub use envelope::{
     assess_model_cg_envelope, check_cg_envelope, CgEnvelopeResult, ModelCgConstraint,

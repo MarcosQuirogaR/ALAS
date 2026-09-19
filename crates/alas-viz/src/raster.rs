@@ -143,6 +143,7 @@ fn draw_spherical_textures(scene: &Scene, destination: &mut tiny_skia::Pixmap, s
             radius,
             camera,
             mirror_longitude,
+            clip,
         } = element
         else {
             continue;
@@ -153,8 +154,11 @@ fn draw_spherical_textures(scene: &Scene, destination: &mut tiny_skia::Pixmap, s
         draw_equirectangular_sphere(
             destination,
             texture.as_ref(),
-            *center,
-            *radius,
+            SpherePlacement {
+                center: *center,
+                radius: *radius,
+                clip: *clip,
+            },
             *camera,
             *mirror_longitude,
             scale,
@@ -162,26 +166,59 @@ fn draw_spherical_textures(scene: &Scene, destination: &mut tiny_skia::Pixmap, s
     }
 }
 
+/// Where a projected sphere sits in scene coordinates, and the figure area it
+/// may paint.
+struct SpherePlacement {
+    center: [f64; 2],
+    radius: f64,
+    clip: Option<[f64; 4]>,
+}
+
 fn draw_equirectangular_sphere(
     destination: &mut tiny_skia::Pixmap,
     texture: tiny_skia::PixmapRef<'_>,
-    center: [f64; 2],
-    radius: f64,
+    placement: SpherePlacement,
     camera: Camera3D,
     mirror_longitude: bool,
     scale: f64,
 ) {
+    let SpherePlacement {
+        center,
+        radius,
+        clip,
+    } = placement;
     let center_x = center[0] * scale;
     let center_y = center[1] * scale;
     let radius_px = radius * scale;
-    let left = (center_x - radius_px).floor().max(0.0) as u32;
+    // A zoomed globe is larger than the figure area that frames it. The clip
+    // keeps the sphere inside that area instead of over the figure's title,
+    // footnote and colorbar.
+    let (clip_left, clip_top, clip_right, clip_bottom) = match clip {
+        Some([x, y, width, height]) if [x, y, width, height].iter().all(|v| v.is_finite()) => (
+            x * scale,
+            y * scale,
+            (x + width) * scale,
+            (y + height) * scale,
+        ),
+        _ => (
+            0.0,
+            0.0,
+            f64::from(destination.width()),
+            f64::from(destination.height()),
+        ),
+    };
+    let left = (center_x - radius_px).floor().max(clip_left).max(0.0) as u32;
     let right = (center_x + radius_px)
         .ceil()
-        .min(f64::from(destination.width())) as u32;
-    let top = (center_y - radius_px).floor().max(0.0) as u32;
+        .min(clip_right)
+        .min(f64::from(destination.width()))
+        .max(0.0) as u32;
+    let top = (center_y - radius_px).floor().max(clip_top).max(0.0) as u32;
     let bottom = (center_y + radius_px)
         .ceil()
-        .min(f64::from(destination.height())) as u32;
+        .min(clip_bottom)
+        .min(f64::from(destination.height()))
+        .max(0.0) as u32;
     if bottom <= top || right <= left {
         return;
     }
@@ -329,8 +366,8 @@ fn blue_marble_texture() -> Option<&'static tiny_skia::Pixmap> {
 #[cfg(test)]
 mod tests {
     use super::{
-        render_scene_png, render_scene_rgba, render_scene_rgba_scaled, source_longitude,
-        sphere_sample_direction,
+        render_scene_png, render_scene_rgba, render_scene_rgba_scaled,
+        render_scene_textures_rgba_scaled, source_longitude, sphere_sample_direction,
     };
     use alas_report::scene::{Camera3D, Color, Scene, SceneElement, TextAlign, TextBaseline};
 
@@ -391,6 +428,34 @@ mod tests {
     }
 
     #[test]
+    fn a_clipped_sphere_paints_inside_its_figure_area_only() {
+        let mut scene = Scene::new(80.0, 80.0, None);
+        scene.add(SceneElement::SphericalImage {
+            source: "embedded://nasa-blue-marble".to_owned(),
+            center: [40.0, 40.0],
+            // A globe zoomed past its own figure area, as the maximized route
+            // view allows.
+            radius: 70.0,
+            camera: Camera3D::front(),
+            mirror_longitude: false,
+            clip: Some([20.0, 25.0, 40.0, 30.0]),
+        });
+
+        let (width, _, pixels) = render_scene_textures_rgba_scaled(&scene, 1.0)
+            .expect("textured scene")
+            .expect("texture raster");
+        for (index, pixel) in pixels.chunks_exact(4).enumerate() {
+            let x = (index as u32 % width) as f64;
+            let y = (index as u32 / width) as f64;
+            let inside = (20.0..60.0).contains(&x) && (25.0..55.0).contains(&y);
+            if !inside {
+                assert_eq!(pixel[3], 0, "sphere painted outside its clip at {x},{y}");
+            }
+        }
+        assert!(pixels.chunks_exact(4).any(|pixel| pixel[3] > 0));
+    }
+
+    #[test]
     fn the_texture_layer_alone_matches_the_full_raster_of_a_texture_only_scene() {
         let mut scene = Scene::new(65.0, 65.0, None);
         scene.add(SceneElement::SphericalImage {
@@ -399,6 +464,7 @@ mod tests {
             radius: 30.0,
             camera: Camera3D::front(),
             mirror_longitude: false,
+            clip: None,
         });
         let full = super::render_scene_rgba_scaled(&scene, 1.5).expect("full raster");
         let textures = super::render_scene_textures_rgba_scaled(&scene, 1.5)
@@ -475,6 +541,7 @@ mod tests {
             radius: 30.0,
             camera: Camera3D::front(),
             mirror_longitude: false,
+            clip: None,
         });
 
         let (_, _, pixels) = render_scene_rgba(&scene).expect("Earth sphere rasterization");
