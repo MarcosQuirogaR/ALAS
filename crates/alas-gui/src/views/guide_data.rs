@@ -38,7 +38,7 @@ pub const CHAPTERS: &[Chapter] = &[
                 heading: "The five stages",
                 body: &[
                     "A full run walks a fixed pipeline. Stage 0 analyses the design you started from (weight, balance and static margin) so a preset or a promoted sandbox design can be checked before any optimisation. Stage 1 searches the design space when Optimize design space is on. Stage 2 re-analyses the winner at high fidelity. Stage 3 exports. Stage 4 draws the figures. Stage 5 flies the mission natively in every full run.",
-                    "Everything after Stage 2 is additive: mission analysis, MSES and the structural solve are downstream consumers of the design. They never feed back into it, so the optional analyses chosen on Analyses change what you see, never what the optimizer chose.",
+                    "Everything after Stage 2 is additive: native mission, MSES, structural sizing, baseline comparison and the optional OpenVSP, VSPAERO, AVL, FLOWUnsteady, NASTRAN and Patran stages are downstream consumers of the design. They never feed back into it, so the analyses chosen on Analyses change what you see, never what the optimizer chose.",
                 ],
             },
             Section {

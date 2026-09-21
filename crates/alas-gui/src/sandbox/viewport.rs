@@ -348,10 +348,10 @@ pub fn show_viewport(state: &mut AppState, ui: &mut Ui) {
             .sandbox
             .drag
             .as_ref()
-            .is_some_and(|d| d.handle.kind == handle.kind);
+            .is_some_and(|d| same_handle_identity(&d.handle, handle));
         let hovered = hovered_handle
             .as_ref()
-            .is_some_and(|h| h.kind == handle.kind);
+            .is_some_and(|h| same_handle_identity(h, handle));
         let (fill, radius) = if active || hovered {
             (accent, HANDLE_RADIUS + 2.0)
         } else {
@@ -426,6 +426,19 @@ pub fn show_viewport(state: &mut AppState, ui: &mut Ui) {
     }
 }
 
+/// Compare handles by the model target they edit, rather than by their
+/// current screen geometry.  A dragged handle's point and axis are rebuilt
+/// after every model refresh, so those values cannot identify the same
+/// gesture across frames.  Dynamic section handles share a `HandleKind`; the
+/// section index and component are what distinguish their individual cells.
+fn same_handle_identity(left: &Handle, right: &Handle) -> bool {
+    left.kind == right.kind
+        && left.discipline == right.discipline
+        && left.field_id == right.field_id
+        && left.component == right.component
+        && left.section_index == right.section_index
+}
+
 fn hover_text(handle: &Handle) -> String {
     format!("{} ({})", tr(handle.label), tr("drag to edit"))
 }
@@ -492,4 +505,42 @@ fn show_viewport_controls(
         pos2(viewport.left(), top),
         pos2(viewport.right(), row.bottom().max(top + CAMERA_ROW_HEIGHT)),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::drag::{Handle, HandleKind};
+    use super::super::fields::Discipline;
+    use super::same_handle_identity;
+
+    fn custom_wing_handle(section_index: usize, component: usize) -> Handle {
+        Handle {
+            kind: HandleKind::CustomWingSectionChord,
+            discipline: Discipline::Wing,
+            field_id: "geometry.custom_sections",
+            label: "Custom wing section chord",
+            point: [section_index as f64, component as f64, 0.0],
+            axis: [1.0, 0.0, 0.0],
+            per_metre: 1.0,
+            component: Some(component),
+            section_index: Some(section_index),
+        }
+    }
+
+    #[test]
+    fn handle_identity_survives_reprojection_and_distinguishes_sections() {
+        let original = custom_wing_handle(0, 2);
+        let reprojected = Handle {
+            point: [11.0, 12.0, 13.0],
+            axis: [0.0, 1.0, 0.0],
+            per_metre: 0.25,
+            ..original.clone()
+        };
+        let other_section = custom_wing_handle(1, 2);
+        let other_component = custom_wing_handle(0, 3);
+
+        assert!(same_handle_identity(&original, &reprojected));
+        assert!(!same_handle_identity(&original, &other_section));
+        assert!(!same_handle_identity(&original, &other_component));
+    }
 }

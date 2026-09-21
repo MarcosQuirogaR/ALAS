@@ -12,6 +12,92 @@ use alas_report::scene::{Color, Scene, SceneElement, TextAlign, TextBaseline};
 use egui::{Context, RawInput};
 
 #[test]
+fn openvsp_center_overlay_takes_the_click_instead_of_the_geometry_canvas() {
+    let directory = std::env::temp_dir().join(format!("alas-openvsp-hit-{}", std::process::id()));
+    std::fs::create_dir_all(&directory).unwrap();
+    let executable = directory.join(if cfg!(windows) { "vsp.exe" } else { "vsp" });
+    // Deliberately invalid executable: verify dispatch and error feedback
+    // without starting a real GUI or changing the user's desktop.
+    std::fs::write(&executable, b"not an executable").unwrap();
+    let model = directory.join("full.cad_preview.vsp3");
+    std::fs::write(&model, b"test model").unwrap();
+    let mut config = alas_config::AlasConfig::default();
+    config.mission.enabled = false;
+    config.mses.enabled = false;
+    config.structures.enabled = false;
+    let mut result = alas_pipeline::DesignPipeline::new(config)
+        .run(
+            &alas_pipeline::PipelineOptions {
+                optimize: false,
+                compare_baseline: false,
+                quiet: true,
+                output_dir: Some(directory.join("outputs")),
+                ..Default::default()
+            },
+            &alas_exec::RunEnvironment::default(),
+        )
+        .unwrap();
+    let export = result.openvsp_export.as_mut().unwrap();
+    export.status = alas_pipeline::OpenVspExportStatus::Vsp3Materialized;
+    export.runtime_executable = Some(directory.join("vspscript.exe"));
+    export.cad_preview_vsp3_path = model;
+    let mut state = AppState::default();
+    state.pipeline_result = Some(result);
+    let ctx = Context::default();
+    let mut center = egui::Pos2::ZERO;
+    let mut canvas_clicked = false;
+    for frame in 0..4 {
+        let events = match frame {
+            2 | 3 => vec![
+                egui::Event::PointerMoved(center),
+                egui::Event::PointerButton {
+                    pos: center,
+                    button: egui::PointerButton::Primary,
+                    pressed: frame == 2,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+            _ => Vec::new(),
+        };
+        let _ = ctx.run(
+            RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(800.0, 600.0),
+                )),
+                events,
+                time: Some(frame as f64 * 0.1),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    let (canvas, response) =
+                        ui.allocate_exact_size(egui::vec2(640.0, 400.0), egui::Sense::click());
+                    center = canvas.center();
+                    canvas_clicked |= response.clicked();
+                    super::openvsp::show_launch_button(&mut state, ui, canvas);
+                });
+            },
+        );
+    }
+    assert!(
+        !canvas_clicked,
+        "the centered overlay must consume the canvas click"
+    );
+    assert!(
+        state.status_message.contains("Could not open OpenVSP"),
+        "{}",
+        state.status_message
+    );
+    assert_eq!(
+        alas_report::find_figure("openvsp_cad_preview")
+            .unwrap()
+            .category,
+        "Geometry"
+    );
+}
+
+#[test]
 fn baseline_cg_fraction_is_displayed_once_as_percent_mac() {
     assert_eq!(format_cg_pct_mac(25.359), "25.4% MAC");
 }

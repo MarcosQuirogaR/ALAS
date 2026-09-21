@@ -173,11 +173,6 @@ pub(crate) fn paint_line_plot_with(
     ));
 }
 
-/// Paint one series with the conventional upward vertical axis.
-pub(crate) fn paint_line_plot(ui: &Ui, rect: egui::Rect, points: &[(f64, f64)]) {
-    paint_line_plot_with(ui, rect, points, false);
-}
-
 /// One actual data series with the style the legend repeats outside the plot.
 pub(crate) struct PlotSeries {
     /// Legend label, already grouped by physical quantity.

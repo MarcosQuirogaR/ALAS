@@ -24,7 +24,7 @@ use alas_geom::builder::AircraftBuilder;
 use alas_report::families::geometry::{
     SandboxSceneModel, SandboxSceneOptions, SceneComponent, SceneFraming,
 };
-use alas_report::scene::Scene;
+use alas_report::scene::{Camera3D, Scene};
 
 use crate::state::AppState;
 
@@ -80,6 +80,40 @@ pub fn build_sandbox_model(plane: &Airplane) -> SandboxSceneModel {
 pub fn build_sandbox_scene(state: &AppState) -> Option<(Scene, SceneFraming)> {
     let (plane, _) = build_sandbox_airplane(state)?;
     Some(project_sandbox_model(state, &build_sandbox_model(&plane)))
+}
+
+/// Build the same high-detail lofted scene used by the sandbox for the
+/// guided live-preview dock. The dock keeps its own camera and viewport
+/// state, but shares the exact `SandboxSceneModel` renderer and its 40-point
+/// section sampling so the two previews do not disagree about geometry.
+pub fn build_live_preview_scene(state: &AppState, camera: Camera3D) -> Option<Scene> {
+    let (plane, _) = build_sandbox_airplane(state)?;
+    let model = build_sandbox_model(&plane);
+    Some(
+        model
+            .render(
+                Some(camera),
+                Some(state.theme.figure_theme_name()),
+                &live_preview_options(),
+            )
+            .0,
+    )
+}
+
+/// Drawing options for the live-preview dock.
+///
+/// The dock shares the sandbox's committed aircraft and renderer, but it is
+/// its own view.  In particular, a discipline focus or a fitted framing in
+/// Sandbox must never make a supposedly full-aircraft live preview disappear
+/// or change its camera framing.  Its camera is supplied by the dock and its
+/// viewport uses a stable bootstrap canvas until the dock reports its size.
+fn live_preview_options() -> SandboxSceneOptions {
+    SandboxSceneOptions {
+        isolate: None,
+        max_section_points: SECTION_POINTS,
+        canvas: DEFAULT_CANVAS,
+        reference: None,
+    }
 }
 
 /// The drawing options the current state asks for: the isolated component,
@@ -183,5 +217,21 @@ mod tests {
         state.sandbox.set_focus(None);
         let again = build_sandbox_scene(&state).expect("scene");
         assert_eq!(again.0.elements.len(), whole.0.elements.len());
+    }
+
+    #[test]
+    fn live_preview_ignores_sandbox_focus_and_framing() {
+        let mut state = AppState::default();
+        let camera = Camera3D::default();
+        let whole = build_live_preview_scene(&state, camera).expect("live scene");
+
+        state.sandbox.set_focus(Some(Discipline::Wing));
+        state.sandbox.framing = Some(alas_report::families::geometry::FramingReference {
+            center: [0.0, 0.0, 0.0],
+            extent: 1.0,
+        });
+        let focused = build_live_preview_scene(&state, camera).expect("live scene");
+
+        assert_eq!(focused, whole);
     }
 }

@@ -23,10 +23,6 @@ pub struct CustomAirportDraft {
     pub altitude_m: String,
     /// Comma- or space-separated physical runway lengths in metres.
     pub runway_lengths_m: String,
-    /// Optional declared TODA in metres.
-    pub declared_toda_m: String,
-    /// Optional declared LDA in metres.
-    pub declared_lda_m: String,
 }
 
 impl CustomAirportDraft {
@@ -45,8 +41,11 @@ impl CustomAirportDraft {
                 .filter(|value| !value.is_empty())
                 .map(|value| parse_number("runway length", value))
                 .collect::<Result<Vec<_>, _>>()?,
-            declared_toda_m: parse_optional("declared TODA", &self.declared_toda_m)?,
-            declared_lda_m: parse_optional("declared LDA", &self.declared_lda_m)?,
+            // Operational TODA/LDA values are derived by the application from
+            // the physical runway lengths; the editor never accepts declared
+            // values that would look like user-supplied regulatory data.
+            declared_toda_m: None,
+            declared_lda_m: None,
             provenance: AirportProvenance {
                 kind: AirportProvenanceKind::UserEntered,
                 source: Some("ALAS custom-airport editor".to_owned()),
@@ -65,12 +64,4 @@ fn parse_number(label: &str, value: &str) -> Result<f64, String> {
         .trim()
         .parse::<f64>()
         .map_err(|_| format!("{label} must be a finite number"))
-}
-
-fn parse_optional(label: &str, value: &str) -> Result<Option<f64>, String> {
-    if value.trim().is_empty() {
-        Ok(None)
-    } else {
-        parse_number(label, value).map(Some)
-    }
 }

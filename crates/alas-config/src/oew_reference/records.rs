@@ -9,8 +9,8 @@
 
 use super::sources::{
     unknown, A220_ACP, A220_ARP, A320_ACAP_REV46, A320_F_HDRF_SHEET, A340_ACAP_REV33,
-    A380_ACAP_REV20, A380_AGGREGATOR, ATR_FACTSHEET, B777X_ACAP_REV_G, B787_ACAP_REV_L, DC10_ACAP,
-    DC10_ACAP_30CF, ELSEVIER_DATA_A, RETRIEVED,
+    A380_ACAP_REV20, A380_AGGREGATOR, ATR_FACTSHEET, B777X_ACAP_REV_G, B777X_SECONDARY_PROJECTION,
+    B787_ACAP_REV_L, DC10_ACAP, DC10_ACAP_30CF, ELSEVIER_DATA_A, RETRIEVED,
 };
 use super::{
     InclusionStatus, OewApplicability, OewCaseAnchor, OewInclusionList, OewReference,
@@ -25,26 +25,35 @@ pub(super) static RECORDS: &[OewReference] = &[
         definition_label: "none: notional design",
         reference_configuration: OewReferenceConfiguration {
             model: "AVE-v1",
-            weight_variant: "notional design requirement",
+            weight_variant: "notional design requirement; user-selected Boeing 777-9 planning benchmark (351,534 kg MTOW)",
             mtow_kg: Some(358_670.0),
-            engine: "GE9X family conceptual installation",
-            modification_state: "AVE-v1 design baseline",
-            cabin: "auto-sized product cabin",
+            engine: "GE9X family conceptual installation; benchmark GE9X-105B1A",
+            modification_state: "AVE-v1 design baseline; benchmark D6-86073 Rev G 777-9 planning configuration",
+            cabin: "auto-sized product cabin; benchmark 777-9 planning layouts 426 two-class / 357 three-class",
         },
         differences_from_preset: &[],
         inclusion: unknown(),
         source: None,
         uncertainty_kg: None,
         case_anchor: None,
-        other_published_values: &[PublishedOewValue {
-            label: "Boeing 777-9 planning benchmark: no numeric OEW published",
-            value_kg: 0.0,
-            is_operating_empty: false,
-            source: B777X_ACAP_REV_G,
-            note: "the 777-9 is a benchmark for AVE's geometry class, not a measurement of AVE",
-        }],
+        other_published_values: &[
+            PublishedOewValue {
+                label: "Boeing 777-9 current planning benchmark: no numeric OEW published",
+                value_kg: 0.0,
+                is_operating_empty: false,
+                source: B777X_ACAP_REV_G,
+                note: "the current Rev G planning document defines OEW but leaves its numeric value TBD; the 777-9 is a reference configuration for AVE, not a measurement of AVE",
+            },
+            PublishedOewValue {
+                label: "Boeing 777-9X early secondary OEW projection",
+                value_kg: 188_241.0,
+                is_operating_empty: true,
+                source: B777X_SECONDARY_PROJECTION,
+                note: "secondary 2014 projection for a 4-class 300-seat 777-9X, repeated in an independent aviation report and attributed to Aspire Aviation/Boeing sources; the cabin, design revision, and inclusion list do not match the current Rev G planning case, so this row is context only and is excluded from every validation or AVE metric",
+            },
+        ],
         structural_payload_basis_oew_kg: None,
-        notes: "AVE is notional; no aircraft OEW exists and none may be inferred from the 777-9.",
+        notes: "AVE is notional and uses the Boeing 777-9 as its user-selected reference configuration. The current Rev G primary document has no numeric OEW; the old 188,241 kg projection is retained only as a secondary, pre-certification context row and cannot be transferred to AVE or used for calibration/validation.",
     },
     OewReference {
         preset: "A340-300",

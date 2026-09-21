@@ -13,8 +13,6 @@ use crate::views::tr;
 mod aux_preset;
 #[path = "../mission_form.rs"]
 mod mission_form;
-#[path = "../mission_profile_preview.rs"]
-mod mission_profile_preview;
 #[path = "../form_page/placement.rs"]
 pub(crate) mod placement;
 #[path = "../form_page_sections.rs"]
@@ -133,6 +131,9 @@ pub fn show_form_page_locked(state: &mut AppState, ui: &mut Ui, page: &Page, loc
         );
         placement::render_extra_sections(state, ui, page, &error_fields, lang);
     });
+    if group == "mission" && page.surface == Surface::Advanced {
+        crate::views::mission_profile_inputs::show_mission_profile_advanced(state, ui);
+    }
     render_preview(state, ui, page.preview, page.preview_title);
 }
 
@@ -149,7 +150,7 @@ fn render_editor(
     // preview so the preview cannot disappear behind the resizable run log.
     ui.vertical(|ui| {
         let show_help = state.help_verbose;
-        let edits = if group == "mission" {
+        let edits = if group == "mission" && surface != Surface::Advanced {
             render_mission_form(state, ui, fields, error_fields, lang, show_help)
         } else if group == "propulsion_cycle" {
             placement::render_propulsion_editor(
@@ -163,18 +164,25 @@ fn render_editor(
             )
         } else if group == "cabin" {
             // Passenger and cargo are the two primary cabin controls. Keep
-            // both root nodes open and render them in sequence so the page
-            // reads as two stacked, immediately editable rows.
+            // both root nodes open and render one root node per form pass so
+            // the page reads as two stacked, immediately editable cards even
+            // in a wide window. The generic form intentionally uses adaptive
+            // columns for dense scalar settings; cabin's two large cards need
+            // the available width for their nested fields instead.
             if let Some(values) = state.group_mut(group) {
-                dynamic_form_with_open_root_nodes(
-                    ui,
-                    fields,
-                    values,
-                    error_fields,
-                    lang,
-                    show_help,
-                    true,
-                )
+                let mut edits = Vec::new();
+                for field in fields {
+                    edits.extend(dynamic_form_with_open_root_nodes(
+                        ui,
+                        std::slice::from_ref(field),
+                        values,
+                        error_fields,
+                        lang,
+                        show_help,
+                        true,
+                    ));
+                }
+                edits
             } else {
                 Vec::new()
             }

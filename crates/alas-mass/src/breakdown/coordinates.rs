@@ -161,8 +161,8 @@ pub fn define_mass_coordinates(
 
 /// Determine component coordinates using an explicit coordinate model.
 ///
-/// The reference-compatible path is infallible and numerically identical to
-/// [`define_mass_coordinates`]. The structural path reports invalid wingbox
+/// The reference-compatible path preserves the frozen forward-loaded payload
+/// convention. The product path uses the installed-cabin centroid and reports invalid wingbox
 /// geometry or material configuration as a typed error; it never silently
 /// falls back to the legacy point, because that would make an apparently
 /// physical CG depend on an unreported compatibility behavior.
@@ -174,6 +174,18 @@ pub fn define_mass_coordinates_with_model(
     coordinate_model: MassCoordinateModel<'_>,
 ) -> Result<MassCoordinates, WingCentroidError> {
     let mut coordinates = define_mass_coordinates(plane, geometry_config, requirements, mass_model);
+    if matches!(
+        coordinate_model,
+        MassCoordinateModel::ReferenceCompatibility
+    ) {
+        restore_reference_payload_coordinate(
+            &mut coordinates,
+            plane,
+            geometry_config,
+            requirements,
+            mass_model,
+        );
+    }
     if let MassCoordinateModel::StructuralWingbox(structures) = coordinate_model {
         let default_requirements = DesignRequirements::default();
         let requirements = requirements.unwrap_or(&default_requirements);
@@ -187,6 +199,29 @@ pub fn define_mass_coordinates_with_model(
             crate::wing_centroid::wing_structural_centroid(wing, requirements, structures)?.xyz_m;
     }
     Ok(coordinates)
+}
+
+/// Frozen Python replay only. Product planning payloads remain centered in
+/// the installed cabin; detailed layouts replace this coordinate afterwards.
+fn restore_reference_payload_coordinate(
+    coordinates: &mut MassCoordinates,
+    plane: &Airplane,
+    geometry: &GeometryConfig,
+    requirements: Option<&DesignRequirements>,
+    mass_model: Option<&MassModelConfig>,
+) {
+    let default_requirements = DesignRequirements::default();
+    let default_model = MassModelConfig::default();
+    let requirements = requirements.unwrap_or(&default_requirements);
+    let model = mass_model.unwrap_or(&default_model);
+    let fuselage = &plane.fuselages[0];
+    let length = fuselage.xsecs.last().map_or(0.0, |x| x.xyz_c[0])
+        - fuselage.xsecs.first().map_or(0.0, |x| x.xyz_c[0]);
+    let start = geometry.fuselage.cabin_start_x_m;
+    let cabin_length = (length - start - geometry.fuselage.tailcone_length_m).max(1.0);
+    let occupied_length =
+        cabin_length.min(requirements.payload_kg() / model.cabin_payload_density_kg_m.max(1.0e-6));
+    coordinates.payload[0] = start + 0.5 * occupied_length;
 }
 
 /// Calculate the global center of gravity location `[X, Y, Z]` in meters:
@@ -230,8 +265,15 @@ pub fn run_mass_analysis(
     payload_layout: Option<&PayloadLayoutSummary>,
 ) -> (MassBreakdown, MassCoordinates, [f64; 3]) {
     let masses = calculate_component_masses(plane, requirements, geometry_config, mass_model);
-    let coordinates =
+    let mut coordinates =
         define_mass_coordinates(plane, geometry_config, Some(requirements), mass_model);
+    restore_reference_payload_coordinate(
+        &mut coordinates,
+        plane,
+        geometry_config,
+        Some(requirements),
+        mass_model,
+    );
     complete_mass_analysis(masses, coordinates, requirements, payload_layout)
 }
 
@@ -270,7 +312,7 @@ pub fn run_mass_analysis_checked(
 /// frozen Python fixture and [`MassCoordinateModel::StructuralWingbox`] for a
 /// physical product analysis. For one fixed aircraft input, both coordinate
 /// paths share that run's component masses and detailed-payload replacement;
-/// only the main-wing coordinate differs. This does not mean different
+/// the main-wing and fallback payload coordinates differ. This does not mean different
 /// presets have identical masses: systems/furnishings scale with their
 /// selected mass model and MTOW (or with declared FLOPS architecture).
 pub fn run_mass_analysis_with_model(

@@ -201,7 +201,7 @@ fn write_sandbox_component_context_evidence_images() {
     alas_gui::apply_theme(alas_gui::AppTheme::Dark, &ctx);
     let background = ctx.style().visuals.window_fill();
 
-    let mut shot = |state: &mut AppState, name: &str| {
+    let shot = |state: &mut AppState, name: &str| {
         let mut output = None;
         for _ in 0..3 {
             let input = RawInput {

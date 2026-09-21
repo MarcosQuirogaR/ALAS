@@ -246,7 +246,13 @@ pub fn evaluate_product_at_design_gross_mass(
             0
         }
     };
-    let engine_count = wing_engines + fuselage_engines;
+    let engine_count = match wing_engines.checked_add(fuselage_engines) {
+        Some(value) => value,
+        None => {
+            reasons.push(FlopsTransportUnverifiedReason::EngineMounting);
+            0
+        }
+    };
     let nacelle_diameter = if nacelles.is_empty() {
         geometry.engine.radius_scale_m * 2.0
     } else {
@@ -324,10 +330,14 @@ pub fn evaluate_product_at_design_gross_mass(
         Ok(value) => value,
         Err(_) => usize::MAX,
     };
-    if requirements.aircraft_type == "passenger"
-        && first + business + tourist != requested_passengers
-    {
-        reasons.push(FlopsTransportUnverifiedReason::PassengerClassCounts);
+    let passenger_count = first
+        .checked_add(business)
+        .and_then(|value| value.checked_add(tourist));
+    if requirements.aircraft_type == "passenger" {
+        match passenger_count {
+            Some(value) if value == requested_passengers => {}
+            Some(_) | None => reasons.push(FlopsTransportUnverifiedReason::PassengerClassCounts),
+        }
     }
     if !flops.provenance.cabin.is_declared() {
         reasons.push(FlopsTransportUnverifiedReason::CabinProvenance);
@@ -438,6 +448,7 @@ pub fn evaluate_product_at_design_gross_mass(
         fuel_tank_count,
         containerized_cargo_kg,
         containerized_baggage_kg,
+        apu_installed: flops.apu_installed,
         cargo_loading,
         cabin_equipment_method: flops.cabin_equipment_method,
         haul_class: flops.haul_class.unwrap_or_default(),
@@ -501,6 +512,31 @@ mod tests {
     }
 
     #[test]
+    fn product_boundary_rejects_passenger_count_overflow_without_panicking() {
+        let geometry = GeometryConfig::default();
+        let plane = AircraftBuilder::new(Some(geometry.clone()))
+            .build(None, true)
+            .expect("default geometry is a valid product fixture");
+        let mut flops = complete_test_config();
+        flops.first_class_passenger_count = Some(usize::MAX);
+        flops.business_class_passenger_count = Some(1);
+        flops.tourist_class_passenger_count = Some(0);
+        let result = evaluate_product(
+            &plane,
+            &DesignRequirements::default(),
+            &geometry,
+            &ControlSurfacesConfig::default(),
+            &alas_config::CabinConfig::default(),
+            &flops,
+            &alas_config::FlopsTurbopropConfig::default(),
+        );
+        let FlopsTransportEvaluation::Unverified { reasons, .. } = result else {
+            panic!("overflowed passenger counts must remain unverified");
+        };
+        assert!(reasons.contains(&FlopsTransportUnverifiedReason::PassengerClassCounts));
+    }
+
+    #[test]
     fn a_complete_declared_architecture_reaches_the_published_equations() {
         let geometry = GeometryConfig::default();
         let plane = AircraftBuilder::new(Some(geometry.clone()))
@@ -522,6 +558,7 @@ mod tests {
             fuselage_mounted_engine_count: Some(0),
             fuel_tank_count: Some(4),
             maximum_fuel_capacity_kg: Some(100_000.0),
+            apu_installed: true,
             containerized_cargo_kg: Some(0.0),
             cargo_loading: Some(alas_config::CargoHoldLoading::Containerized),
             containerized_baggage_fraction: None,
@@ -851,6 +888,7 @@ mod tests {
             fuselage_mounted_engine_count: Some(0),
             fuel_tank_count: Some(4),
             maximum_fuel_capacity_kg: Some(100_000.0),
+            apu_installed: true,
             containerized_cargo_kg: Some(0.0),
             cargo_loading: Some(alas_config::CargoHoldLoading::Containerized),
             containerized_baggage_fraction: None,

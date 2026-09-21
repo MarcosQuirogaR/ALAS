@@ -11,11 +11,12 @@
 //! last size.
 
 use egui::{
-    CentralPanel, Context, Id, Pos2, Rect, Ui, Vec2, ViewportBuilder, ViewportClass, ViewportId,
-    Window,
+    CentralPanel, Context, Id, Pos2, Rect, Ui, Vec2, ViewportBuilder, ViewportClass,
+    ViewportCommand, ViewportId, Window,
 };
 
 const INITIAL_SIZE_FRACTION: f32 = 0.6;
+const POSITION_EPSILON: f32 = 1.0;
 
 /// The interaction information a detached viewport needs to report to its
 /// owner after rendering.
@@ -37,6 +38,8 @@ struct InitialViewportGeometry {
     size: Vec2,
     native_position: Option<Pos2>,
     embedded_position: Option<Pos2>,
+    root_outer_rect: Option<Rect>,
+    root_native_pixels_per_point: Option<f32>,
 }
 
 /// Build the stable ID used for a detached viewport.
@@ -55,12 +58,39 @@ pub(crate) fn show_native_viewport(
     ctx: &Context,
     key: impl std::hash::Hash,
     title: impl Into<String>,
+    builder: ViewportBuilder,
+    content: impl FnMut(&Context, &mut Ui, ViewportClass),
+) -> NativeViewportResponse {
+    show_native_viewport_with_size_policy(ctx, key, title, builder, false, content)
+}
+
+/// Show a compact detached surface at the size requested by its builder.
+///
+/// Most ALAS workspaces intentionally occupy a fraction of the main window.
+/// Small editors instead need a content-sized initial window; scaling those
+/// to the parent leaves a large unused panel below their controls.
+pub(crate) fn show_compact_native_viewport(
+    ctx: &Context,
+    key: impl std::hash::Hash,
+    title: impl Into<String>,
+    builder: ViewportBuilder,
+    content: impl FnMut(&Context, &mut Ui, ViewportClass),
+) -> NativeViewportResponse {
+    show_native_viewport_with_size_policy(ctx, key, title, builder, true, content)
+}
+
+fn show_native_viewport_with_size_policy(
+    ctx: &Context,
+    key: impl std::hash::Hash,
+    title: impl Into<String>,
     mut builder: ViewportBuilder,
+    prefer_requested_size: bool,
     mut content: impl FnMut(&Context, &mut Ui, ViewportClass),
 ) -> NativeViewportResponse {
     let title = title.into();
     let viewport_id = viewport_id(&key);
     let memory_id = Id::new(("alas_native_viewport_size", &key));
+    let placement_memory_id = Id::new(("alas_native_viewport_initial_position", &key));
     let embedded_id = Id::new(("alas_native_viewport_embedded", &key));
 
     // `ViewportBuilder::inner_size` is an initial request.  Applying the
@@ -80,37 +110,44 @@ pub(crate) fn show_native_viewport(
     // immediate child, the active input viewport is no longer the ALAS window.
     // Missing first-frame metrics leave the caller's request intact; a later
     // frame can still supply the initial geometry.
-    let geometry = initial_viewport_geometry(ctx, remembered_size, builder.inner_size);
+    let geometry = initial_viewport_geometry(
+        ctx,
+        remembered_size,
+        builder.inner_size,
+        prefer_requested_size,
+    );
     if remembered_size.is_none() {
         if let Some(size) = geometry.map(|geometry| geometry.size) {
             builder.inner_size = Some(size);
         }
     }
     // A viewport builder is reconstructed on every parent pass. Only send
-    // the initial position until egui reports the child outer rect; after
-    // that, re-sending it would snap a moved window back and look like a
-    // flicker while an analysis window is running.
-    let child_has_position = ctx.input(|input| {
-        input
-            .raw
-            .viewports
-            .get(&viewport_id)
-            .and_then(|viewport| viewport.outer_rect)
-            .is_some_and(valid_rect)
-    });
-    if !child_has_position {
+    // creation-time geometry while the child is absent. Waiting for
+    // `outer_rect` is insufficient: native backends can briefly report no
+    // rectangle while a window is being dragged or moved between monitors,
+    // and re-sending the position during that interval snaps the window back
+    // and produces the characteristic analysis-time flicker.
+    let child_exists = ctx.input(|input| input.raw.viewports.contains_key(&viewport_id));
+    if !child_exists {
+        // A stable viewport ID can be reused after the native child closes.
+        // Treat that as a new placement cycle so a reopened tool is centred
+        // on the current root window again.
+        ctx.data_mut(|data| data.remove::<bool>(placement_memory_id));
         if let Some(position) = geometry.and_then(|geometry| geometry.native_position) {
             builder.position = Some(position);
         }
     }
+    let initial_placement_pending =
+        !ctx.data(|data| data.get_temp::<bool>(placement_memory_id).unwrap_or(false));
     let fallback_size = builder.inner_size;
     let fallback_min_size = builder.min_inner_size;
     let fallback_max_size = builder.max_inner_size;
     let fallback_resizable = builder.resizable.unwrap_or(true);
-    // A newly opened tool should receive keyboard focus.  The builder is
-    // rebuilt on every parent pass, while egui patches an existing viewport,
-    // so this does not steal focus again after the first creation.
-    if builder.active.is_none() {
+    // A newly opened tool should receive keyboard focus. Applying `active` to
+    // an existing viewport asks the native backend to activate it on every
+    // parent repaint, which steals focus while the user is dragging another
+    // detached window. Restrict it to creation as well.
+    if !child_exists && builder.active.is_none() {
         builder.active = Some(true);
     }
 
@@ -122,6 +159,26 @@ pub(crate) fn show_native_viewport(
         response.pointer_pressed |= pointer_pressed;
 
         if matches!(class, ViewportClass::Immediate) {
+            if initial_placement_pending {
+                if let Some(position) =
+                    geometry.and_then(|geometry| corrected_native_position(geometry, child_ctx))
+                {
+                    let current_position =
+                        child_ctx.input(|input| input.viewport().outer_rect.map(|rect| rect.min));
+                    if current_position
+                        .is_none_or(|current| !positions_are_close(current, position))
+                    {
+                        // `ViewportBuilder::position` is converted with the
+                        // primary monitor's scale while the window is being
+                        // created. Once the child reports its actual monitor,
+                        // issue one logical-point command using that child's
+                        // scale so a differently scaled secondary monitor
+                        // still receives the intended desktop position.
+                        child_ctx.send_viewport_cmd(ViewportCommand::OuterPosition(position));
+                    }
+                    ctx.data_mut(|data| data.insert_temp(placement_memory_id, true));
+                }
+            }
             if let Some(size) =
                 child_ctx.input(|input| input.viewport().inner_rect.map(|r| r.size()))
             {
@@ -185,6 +242,7 @@ fn initial_viewport_geometry(
     ctx: &Context,
     remembered_size: Option<Vec2>,
     fallback_size: Option<Vec2>,
+    prefer_requested_size: bool,
 ) -> Option<InitialViewportGeometry> {
     let (root_viewport, root_screen_rect) = ctx.input(|input| {
         (
@@ -199,11 +257,19 @@ fn initial_viewport_geometry(
     let root_monitor_size = root_viewport
         .as_ref()
         .and_then(|viewport| viewport.monitor_size.filter(|&size| valid_size(size)));
+    let root_native_pixels_per_point = root_viewport
+        .as_ref()
+        .and_then(|viewport| viewport.native_pixels_per_point)
+        .filter(|scale| scale.is_finite() && *scale > 0.0);
+    let requested_size = fallback_size.filter(|&size| valid_size(size));
+    let parent_fraction = root_outer_rect
+        .map(|rect| rect.size() * INITIAL_SIZE_FRACTION)
+        .filter(|&size| valid_size(size));
     let size = remembered_size
         .filter(|&size| valid_size(size))
-        .or_else(|| root_outer_rect.map(|rect| rect.size() * INITIAL_SIZE_FRACTION))
-        .filter(|&size| valid_size(size))
-        .or_else(|| fallback_size.filter(|&size| valid_size(size)))?;
+        .or_else(|| prefer_requested_size.then_some(requested_size).flatten())
+        .or(parent_fraction)
+        .or(requested_size)?;
 
     // `outer_rect` is already in the desktop's logical-point coordinate
     // system, so centering from it places a detached child over the main ALAS
@@ -232,7 +298,45 @@ fn initial_viewport_geometry(
         size,
         native_position,
         embedded_position,
+        root_outer_rect,
+        root_native_pixels_per_point,
     })
+}
+
+fn corrected_native_position(
+    geometry: InitialViewportGeometry,
+    child_ctx: &Context,
+) -> Option<Pos2> {
+    let root_outer_rect = geometry.root_outer_rect?;
+    let root_scale = geometry.root_native_pixels_per_point?;
+    let child_scale = child_ctx
+        .input(|input| input.viewport().native_pixels_per_point)
+        .filter(|scale| scale.is_finite() && *scale > 0.0)?;
+
+    Some(centered_position_for_scales(
+        root_outer_rect,
+        geometry.size,
+        root_scale,
+        child_scale,
+    ))
+}
+
+fn centered_position_for_scales(
+    root_outer_rect: Rect,
+    child_size: Vec2,
+    root_native_pixels_per_point: f32,
+    child_native_pixels_per_point: f32,
+) -> Pos2 {
+    let root_center_in_physical_pixels =
+        root_outer_rect.center().to_vec2() * root_native_pixels_per_point;
+    Pos2::new(
+        root_center_in_physical_pixels.x / child_native_pixels_per_point - child_size.x * 0.5,
+        root_center_in_physical_pixels.y / child_native_pixels_per_point - child_size.y * 0.5,
+    )
+}
+
+fn positions_are_close(first: Pos2, second: Pos2) -> bool {
+    (first - second).length() <= POSITION_EPSILON
 }
 
 fn centered_position_in_size(container: Vec2, size: Vec2) -> Pos2 {
@@ -336,7 +440,8 @@ mod tests {
                 Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(1280.0, 800.0))),
             ),
             |ctx| {
-                geometry = initial_viewport_geometry(ctx, None, Some(egui::vec2(320.0, 240.0)));
+                geometry =
+                    initial_viewport_geometry(ctx, None, Some(egui::vec2(320.0, 240.0)), false);
             },
         );
 
@@ -361,6 +466,7 @@ mod tests {
                     ctx,
                     Some(egui::vec2(500.0, 300.0)),
                     Some(egui::vec2(320.0, 240.0)),
+                    false,
                 );
             },
         );
@@ -375,13 +481,60 @@ mod tests {
         let context = Context::default();
         let mut geometry = None;
         let _ = context.run(egui::RawInput::default(), |ctx| {
-            geometry = initial_viewport_geometry(ctx, None, Some(egui::vec2(320.0, 240.0)));
+            geometry = initial_viewport_geometry(ctx, None, Some(egui::vec2(320.0, 240.0)), false);
         });
 
         let geometry = geometry.expect("the caller's valid fallback size remains usable");
         assert_eq!(geometry.size, egui::vec2(320.0, 240.0));
         assert_eq!(geometry.native_position, None);
         assert_eq!(geometry.embedded_position, None);
+    }
+
+    #[test]
+    fn compact_viewport_keeps_its_requested_size_inside_a_large_parent() {
+        let context = Context::default();
+        let mut geometry = None;
+        let _ = context.run(
+            root_input(
+                Some(Rect::from_min_size(
+                    Pos2::new(120.0, 80.0),
+                    egui::vec2(1280.0, 800.0),
+                )),
+                Some(egui::vec2(2560.0, 1440.0)),
+                Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(1280.0, 800.0))),
+            ),
+            |ctx| {
+                geometry =
+                    initial_viewport_geometry(ctx, None, Some(egui::vec2(780.0, 520.0)), true);
+            },
+        );
+
+        let geometry = geometry.expect("compact viewport geometry");
+        assert_eq!(geometry.size, egui::vec2(780.0, 520.0));
+        assert_pos2_close(geometry.native_position, Pos2::new(370.0, 220.0));
+        assert_pos2_close(geometry.embedded_position, Pos2::new(250.0, 140.0));
+    }
+
+    #[test]
+    fn cross_monitor_position_uses_the_child_monitor_scale() {
+        let root = Rect::from_min_size(Pos2::new(1000.0, 100.0), egui::vec2(1000.0, 800.0));
+        let child_size = egui::vec2(500.0, 400.0);
+
+        // Equal-DPI monitors preserve the existing centre calculation.
+        assert_pos2_close(
+            Some(centered_position_for_scales(root, child_size, 1.5, 1.5)),
+            Pos2::new(1250.0, 300.0),
+        );
+
+        // If the root is on a 150% monitor and the child is created on a
+        // 100% monitor, the logical position must be reprojected after the
+        // child reports its actual monitor. The desktop centre is at
+        // (2250, 750) physical pixels, so the child begins at (2000, 550)
+        // logical points on its 100% monitor.
+        assert_pos2_close(
+            Some(centered_position_for_scales(root, child_size, 1.5, 1.0)),
+            Pos2::new(2000.0, 550.0),
+        );
     }
 
     #[test]

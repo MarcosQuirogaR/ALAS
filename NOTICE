@@ -109,7 +109,10 @@ they are the ones a reader is most likely to question:
     child programs, each with its own licence and corresponding source. The
     release task refuses to package NASTRAN-95 unless its exact source,
     revision and modification record are present. MSES and MSC Nastran remain
-    user-supplied. ALAS invokes every solver through a process boundary.
+    user-supplied. ALAS invokes every solver through a process boundary. The
+    release may include the separately licensed GPL XFOIL Orr–Sommerfeld map
+    used as transition data by an installed MSES process; this map does not
+    include or license the MSES executables.
 
 Every translated module names its origin, the upstream licence and the source
 revision in a provenance header. THIRD-PARTY-NOTICES.md lists the components

@@ -21,7 +21,7 @@ use crate::stations::ComponentStations;
 
 use super::build::{closure_tolerance, propulsion_positions, push_furnishings_item};
 
-/// A point-mass ledger item tagged `MassMethod::Correlation("FLOPS")`.
+/// A point-mass ledger item retaining the equation source that produced it.
 ///
 /// None of the individual FLOPS systems/operating-item components has a
 /// declared shape of its own, so each is a point mass at its station; only
@@ -34,6 +34,7 @@ fn push_flops_item(
     role: MassRole,
     mass_kg: f64,
     position_m: [f64; 3],
+    method: MassMethod,
 ) {
     ledger.push(MassItem {
         id: id.to_owned(),
@@ -42,7 +43,7 @@ fn push_flops_item(
         mass_kg,
         position_m,
         local_inertia: InertiaTensor::ZERO,
-        method: MassMethod::Correlation("FLOPS"),
+        method,
     });
 }
 
@@ -115,6 +116,7 @@ fn push_flops_systems(
             MassRole::Fixed,
             mass_kg,
             position_m,
+            MassMethod::Correlation("FLOPS"),
         );
         placed_kg += mass_kg;
     }
@@ -136,6 +138,7 @@ fn push_flops_operating_items(
     ledger: &mut MassLedger,
     stations: &ComponentStations,
     operating_items: &FlopsOperatingItemsBreakdown,
+    flops: &FlopsTransportBreakdown,
 ) -> f64 {
     let fuselage_length_m = stations.fuselage.extent_m[0];
     let z = stations.fuselage.position_m[2];
@@ -166,6 +169,13 @@ fn push_flops_operating_items(
             MassRole::OperatingItem,
             mass_kg,
             position_m,
+            if flops.cabin_equipment_method
+                == alas_config::CabinEquipmentMethod::LthCivilTransportV1
+            {
+                MassMethod::Correlation("LTH civil transport cabin")
+            } else {
+                MassMethod::Correlation("FLOPS")
+            },
         );
     }
 
@@ -184,6 +194,12 @@ fn push_flops_operating_items(
             MassRole::OperatingItem,
             oil_share,
             *position_m,
+            match flops.propulsion_sizing {
+                crate::flops_transport::PropulsionSizing::RatedThrust => {
+                    MassMethod::Correlation("FLOPS")
+                }
+                crate::flops_transport::PropulsionSizing::ShaftPower { .. } => MassMethod::Declared,
+            },
         );
     }
 
@@ -240,11 +256,12 @@ pub(super) fn push_flops_systems_and_operating_items(
             MassRole::Fixed,
             systems_residual_kg,
             stations.systems.position_m,
+            MassMethod::Correlation("FLOPS empty mass margin"),
         );
     }
 
     let placed_operating_items_kg =
-        push_flops_operating_items(ledger, stations, &flops.operating_items);
+        push_flops_operating_items(ledger, stations, &flops.operating_items, flops);
     let allocated_unusable_kg = flops.operating_items.unusable_fuel_kg;
     let supplied_unusable_kg: f64 = unusable_fuel_items.iter().map(|item| item.mass_kg).sum();
     let relieved_unusable_kg = if unusable_fuel_items.is_empty() {
@@ -267,7 +284,15 @@ pub(super) fn push_flops_systems_and_operating_items(
         ledger,
         reduced_furnishings_kg,
         stations,
-        MassMethod::Correlation("FLOPS"),
+        if flops.cabin_equipment_method == alas_config::CabinEquipmentMethod::LthCivilTransportV1 {
+            if relieved_unusable_kg == 0.0 && allocated_unusable_kg > 0.0 {
+                MassMethod::Correlation("LTH furnishings + FLOPS unusable fuel")
+            } else {
+                MassMethod::Correlation("LTH civil transport cabin")
+            }
+        } else {
+            MassMethod::Correlation("FLOPS")
+        },
     );
     Ok(())
 }

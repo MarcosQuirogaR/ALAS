@@ -47,6 +47,16 @@ pub fn figure_control_surfaces(
     scene.title = Some("Control Surfaces & Tail Sizing".to_owned());
     draw_title(&mut scene, "Control Surfaces & Tail Sizing", pal);
     scene.suppress_derived_title();
+    scene.add(SceneElement::Text {
+        text: crate::families::mass_balance::mass_method_note(config).to_owned(),
+        pos: [width * 0.5, 38.0],
+        font_size: 7.6,
+        color: Color::from_hex(pal.tick),
+        align: TextAlign::Center,
+        baseline: TextBaseline::Middle,
+        angle_deg: 0.0,
+        bold: false,
+    });
 
     let (y_min, y_max, x_min, x_max) = planform_bounds(plane);
     let top_w = if vstab.is_some() { 560.0 } else { 700.0 };

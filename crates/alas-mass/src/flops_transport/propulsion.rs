@@ -21,7 +21,7 @@
 //! user-declared masses FLOPS adds without an equation and are not
 //! represented here.
 
-use alas_config::PylonMassMethod;
+use alas_config::{FlopsNozzleScope, FlopsStarterScope, PylonMassMethod};
 use alas_units::{FOOT, POUND_FORCE, POUND_MASS};
 
 fn lb(kilograms: f64) -> f64 {
@@ -247,6 +247,8 @@ pub struct FlopsPropulsionInputs {
     pub baseline_engine_mass_kg: Option<f64>,
     /// Engine mass scaling exponent `EEXP`.
     pub scaling_exponent: f64,
+    /// Source scope of the starter relative to FLOPS equation 89.
+    pub starter_scope: FlopsStarterScope,
     /// Separately declared baseline inlet mass `WINLB`, kg. `None` selects
     /// equation 80: the inlet is inside `WENGB`.
     pub baseline_inlet_mass_kg: Option<f64>,
@@ -257,6 +259,8 @@ pub struct FlopsPropulsionInputs {
     pub baseline_nozzle_mass_kg: Option<f64>,
     /// Nozzle mass scaling exponent `ENOZ`; the FLOPS default is 1.
     pub nozzle_scaling_exponent: f64,
+    /// Source scope of the nozzle relative to FLOPS equations 77-80.
+    pub nozzle_scope: FlopsNozzleScope,
     /// Whether thrust reversers are installed.
     pub thrust_reversers_installed: bool,
     /// Maximum Mach number `VMAX`.
@@ -308,6 +312,10 @@ pub struct FlopsPropulsionBreakdown {
     pub engine_controls_kg: f64,
     /// Engine starters `WSTART`, kg.
     pub starters_kg: f64,
+    /// Resolved source scope for the starter term.
+    pub starter_scope: FlopsStarterScope,
+    /// Resolved source scope for the nozzle term.
+    pub nozzle_scope: FlopsNozzleScope,
     /// Miscellaneous propulsion systems `WPMSC` (controls, starters and the
     /// declared miscellaneous mass), kg.
     pub misc_kg: f64,
@@ -346,12 +354,16 @@ pub fn estimate_flops_propulsion(inputs: &FlopsPropulsionInputs) -> FlopsPropuls
         inputs.baseline_thrust_n,
         inputs.inlet_scaling_exponent,
     );
-    let nozzle_each_kg = scaled_inlet_or_nozzle_kg(
-        inputs.baseline_nozzle_mass_kg,
-        inputs.rated_thrust_per_engine_n,
-        inputs.baseline_thrust_n,
-        inputs.nozzle_scaling_exponent,
-    );
+    let nozzle_each_kg = if matches!(inputs.nozzle_scope, FlopsNozzleScope::SeparateEquation78) {
+        scaled_inlet_or_nozzle_kg(
+            inputs.baseline_nozzle_mass_kg,
+            inputs.rated_thrust_per_engine_n,
+            inputs.baseline_thrust_n,
+            inputs.nozzle_scaling_exponent,
+        )
+    } else {
+        0.0
+    };
     // Equation 79 when either is declared separately, equation 80 otherwise
     // (both zero terms leave `WENG = WENGP`).
     let engine_each_kg = engine_core_each_kg + inlet_each_kg + nozzle_each_kg;
@@ -366,11 +378,15 @@ pub fn estimate_flops_propulsion(inputs: &FlopsPropulsionInputs) -> FlopsPropuls
         0.0
     };
     let engine_controls = engine_controls_kg(scaling.engines, scaling.thrust_per_engine_n);
-    let starters = engine_starters_kg(
-        scaling.engines,
-        inputs.maximum_mach,
-        scaling.nacelle_diameter_m,
-    );
+    let starters = if inputs.starter_scope.includes_equation_89() {
+        engine_starters_kg(
+            scaling.engines,
+            inputs.maximum_mach,
+            scaling.nacelle_diameter_m,
+        )
+    } else {
+        0.0
+    };
     let misc = engine_controls + starters + inputs.misc_propulsion_mass_kg;
     let fuel_system = fuel_system_kg(
         inputs.maximum_fuel_capacity_kg,
@@ -397,6 +413,8 @@ pub fn estimate_flops_propulsion(inputs: &FlopsPropulsionInputs) -> FlopsPropuls
         thrust_reversers_kg: thrust_reversers,
         engine_controls_kg: engine_controls,
         starters_kg: starters,
+        starter_scope: inputs.starter_scope,
+        nozzle_scope: inputs.nozzle_scope,
         misc_kg: misc,
         fuel_system_kg: fuel_system,
         pylons_kg: pylons,
@@ -447,10 +465,12 @@ mod tests {
             baseline_thrust_n: 120_000.0,
             baseline_engine_mass_kg: None,
             scaling_exponent: 1.15,
+            starter_scope: FlopsStarterScope::SeparateEquation89,
             baseline_inlet_mass_kg: None,
             inlet_scaling_exponent: 1.0,
             baseline_nozzle_mass_kg: None,
             nozzle_scaling_exponent: 1.0,
+            nozzle_scope: FlopsNozzleScope::IncludedInBaseline,
             thrust_reversers_installed: true,
             maximum_mach: 0.82,
             nacelle_diameter_m: 2.0,
@@ -542,6 +562,35 @@ mod tests {
     }
 
     #[test]
+    fn starter_scope_is_explicit_and_unknown_is_conservative() {
+        let separate = estimate_flops_propulsion(&twin_inputs());
+        assert!(separate.starters_kg > 0.0);
+        assert_eq!(
+            separate.starter_scope,
+            FlopsStarterScope::SeparateEquation89
+        );
+
+        let mut included_inputs = twin_inputs();
+        included_inputs.starter_scope = FlopsStarterScope::IncludedInBaseline;
+        let included = estimate_flops_propulsion(&included_inputs);
+        assert_eq!(included.starters_kg, 0.0);
+        assert_eq!(
+            included.starter_scope,
+            FlopsStarterScope::IncludedInBaseline
+        );
+        assert!((separate.misc_kg - included.misc_kg - separate.starters_kg).abs() < 1e-9);
+
+        let mut unknown_inputs = twin_inputs();
+        unknown_inputs.starter_scope = FlopsStarterScope::UnknownConservativeSeparate;
+        let unknown = estimate_flops_propulsion(&unknown_inputs);
+        assert!((unknown.starters_kg - separate.starters_kg).abs() < 1e-12);
+        assert_eq!(
+            unknown.starter_scope,
+            FlopsStarterScope::UnknownConservativeSeparate
+        );
+    }
+
+    #[test]
     fn a_separately_declared_inlet_and_nozzle_follow_equations_77_to_79() {
         // WENGB is the bare core when WINLB and WNOZB are declared, so
         // WENG = WENGP + WINL + WNOZ with each term scaled by its own
@@ -555,6 +604,7 @@ mod tests {
         inputs.inlet_scaling_exponent = 1.0;
         inputs.baseline_nozzle_mass_kg = Some(120.0);
         inputs.nozzle_scaling_exponent = 0.8;
+        inputs.nozzle_scope = FlopsNozzleScope::SeparateEquation78;
         let breakdown = estimate_flops_propulsion(&inputs);
 
         let ratio = 120_000.0 / 96_000.0_f64;

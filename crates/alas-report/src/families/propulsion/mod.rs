@@ -22,6 +22,8 @@ mod cycle;
 mod support;
 mod sweeps;
 mod technology;
+mod ts_preview;
+mod turboprop_cycle;
 
 pub use altitude::figure_propulsion_altitude_sweep;
 pub use cycle::{

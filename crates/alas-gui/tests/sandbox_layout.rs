@@ -135,10 +135,8 @@ fn wing_tip_screen_y(state: &AppState) -> f64 {
 }
 
 fn settled(theme: AppTheme, size: (f32, f32)) -> (Context, AppState) {
-    let mut state = AppState {
-        theme,
-        ..Default::default()
-    };
+    let mut state = AppState::default();
+    state.theme = theme;
     assert!(state.enter_sandbox(true));
     let ctx = Context::default();
     alas_gui::apply_theme(theme, &ctx);

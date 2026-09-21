@@ -381,10 +381,8 @@ fn write_workspace_layout_evidence_images() {
         ("light", AppTheme::Light, ""),
         ("dark-search", AppTheme::Dark, "sweep"),
     ] {
-        let mut state = AppState {
-            theme,
-            ..Default::default()
-        };
+        let mut state = AppState::default();
+        state.theme = theme;
         assert!(state.enter_sandbox(true));
         state.sandbox.search = search.to_owned();
         let ctx = Context::default();

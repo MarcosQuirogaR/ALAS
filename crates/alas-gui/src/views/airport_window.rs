@@ -9,15 +9,14 @@
 //! separate window is what the Inputs page asked for — a route selector is a
 //! one-line choice, while entering an aerodrome is a form.
 //!
-//! Nothing here invents operational data. Physical runway lengths are stored
-//! as physical lengths; declared take-off and landing distances stay absent
-//! unless the user supplies them, and the window says so rather than letting
-//! a field-performance consumer read a fabricated declaration.
+//! The editor accepts physical runway lengths only.  Field-performance code
+//! uses the longest entered physical runway as its conservative available
+//! distance when no externally declared operational distances are present.
 
 use alas_config::airport_io::AirportProvenanceKind;
 use egui::{vec2, Context, RichText, Ui, ViewportBuilder};
 
-use crate::native_viewport::show_native_viewport;
+use crate::native_viewport::show_compact_native_viewport;
 use crate::state::{AppState, LogKind};
 use crate::views::{tr, tr_fields};
 
@@ -51,14 +50,14 @@ pub(crate) fn show_custom_airport_window(state: &mut AppState, ctx: &Context) {
         return;
     }
 
-    let response = show_native_viewport(
+    let response = show_compact_native_viewport(
         ctx,
         "custom_airport",
         tr("Custom airport"),
         ViewportBuilder::default()
             .with_title(tr("Custom airport"))
-            .with_inner_size(vec2(860.0, 620.0))
-            .with_min_inner_size(vec2(560.0, 420.0))
+            .with_inner_size(vec2(780.0, 520.0))
+            .with_min_inner_size(vec2(520.0, 420.0))
             .with_resizable(true),
         |_child_ctx, ui, _class| {
             egui::ScrollArea::vertical()
@@ -77,81 +76,76 @@ pub(crate) fn show_custom_airport_window(state: &mut AppState, ctx: &Context) {
 /// registry with its provenance and missing-declaration status.
 fn show_custom_airport_editor(state: &mut AppState, ui: &mut Ui) {
     ui.heading(tr("Custom airport"));
-    if let Some((_, label)) = state.custom_airport_window.target.clone() {
-        ui.label(
-            RichText::new(tr_fields(
-                "Opened from {field}. Saving with the route action registers the airport and selects it there.",
-                &[("field", label)],
-            ))
-            .weak(),
-        );
-    }
     ui.add_space(6.0);
-    ui.label(
-        RichText::new(tr(
-            "Enter an airport with an ICAO code, coordinates, ISA delta, elevation, and physical runway lengths. Physical lengths remain provenance-only unless declared TODA and LDA are supplied explicitly.",
-        ))
-        .weak()
-        .small(),
-    );
+    crate::theme::card_frame(ui).show(ui, |ui| {
+        ui.set_min_width(ui.available_width());
+        if ui.available_width() >= 600.0 {
+            ui.columns(2, |columns| {
+                airport_draft_text(
+                    &mut columns[0],
+                    "ICAO",
+                    &mut state.custom_airport_draft.icao,
+                );
+                airport_draft_text(
+                    &mut columns[0],
+                    "Latitude deg",
+                    &mut state.custom_airport_draft.latitude_deg,
+                );
+                airport_draft_text(
+                    &mut columns[0],
+                    "ISA delta C",
+                    &mut state.custom_airport_draft.isa_delta_c,
+                );
+                airport_draft_text(
+                    &mut columns[0],
+                    "Runway lengths m",
+                    &mut state.custom_airport_draft.runway_lengths_m,
+                );
 
-    ui.add_space(6.0);
-    ui.horizontal_wrapped(|ui| {
-        ui.label(tr("ICAO"));
-        ui.text_edit_singleline(&mut state.custom_airport_draft.icao);
-        ui.label(tr("Name"));
-        ui.text_edit_singleline(&mut state.custom_airport_draft.name);
-    });
-    ui.horizontal_wrapped(|ui| {
-        airport_draft_text(
-            ui,
-            "Latitude deg",
-            &mut state.custom_airport_draft.latitude_deg,
-        );
-        airport_draft_text(
-            ui,
-            "Longitude deg",
-            &mut state.custom_airport_draft.longitude_deg,
-        );
-        airport_draft_text(
-            ui,
-            "ISA delta C",
-            &mut state.custom_airport_draft.isa_delta_c,
-        );
-        airport_draft_text(ui, "Altitude m", &mut state.custom_airport_draft.altitude_m);
-    });
-    ui.horizontal_wrapped(|ui| {
-        airport_draft_text(
-            ui,
-            "Runway lengths m",
-            &mut state.custom_airport_draft.runway_lengths_m,
-        );
-        airport_draft_text(
-            ui,
-            "Declared TODA m",
-            &mut state.custom_airport_draft.declared_toda_m,
-        );
-        airport_draft_text(
-            ui,
-            "Declared LDA m",
-            &mut state.custom_airport_draft.declared_lda_m,
-        );
+                airport_draft_text(
+                    &mut columns[1],
+                    "Name",
+                    &mut state.custom_airport_draft.name,
+                );
+                airport_draft_text(
+                    &mut columns[1],
+                    "Longitude deg",
+                    &mut state.custom_airport_draft.longitude_deg,
+                );
+                airport_draft_text(
+                    &mut columns[1],
+                    "Altitude m",
+                    &mut state.custom_airport_draft.altitude_m,
+                );
+            });
+        } else {
+            airport_draft_text(ui, "ICAO", &mut state.custom_airport_draft.icao);
+            airport_draft_text(ui, "Name", &mut state.custom_airport_draft.name);
+            airport_draft_text(
+                ui,
+                "Latitude deg",
+                &mut state.custom_airport_draft.latitude_deg,
+            );
+            airport_draft_text(
+                ui,
+                "Longitude deg",
+                &mut state.custom_airport_draft.longitude_deg,
+            );
+            airport_draft_text(
+                ui,
+                "ISA delta C",
+                &mut state.custom_airport_draft.isa_delta_c,
+            );
+            airport_draft_text(ui, "Altitude m", &mut state.custom_airport_draft.altitude_m);
+            airport_draft_text(
+                ui,
+                "Runway lengths m",
+                &mut state.custom_airport_draft.runway_lengths_m,
+            );
+        }
     });
 
-    // The consequence of leaving the declarations empty is shown while the
-    // draft is still editable, rather than after a route has silently lost
-    // its field-performance basis.
-    if declarations_incomplete(state) {
-        ui.label(
-            RichText::new(tr(
-                "Declared TODA and LDA are empty. The airport is stored with physical runway lengths only, and declared field-performance checks will report missing data for it.",
-            ))
-            .color(ui.visuals().warn_fg_color)
-            .small(),
-        );
-    }
-
-    ui.add_space(6.0);
+    ui.add_space(8.0);
     ui.horizontal_wrapped(|ui| {
         if let Some((key, label)) = state.custom_airport_window.target.clone() {
             if ui
@@ -172,15 +166,22 @@ fn show_custom_airport_editor(state: &mut AppState, ui: &mut Ui) {
             state.save_custom_airport();
         }
     });
-    ui.horizontal_wrapped(|ui| {
-        ui.label(tr("Import / export path"));
-        ui.text_edit_singleline(&mut state.custom_airport_file_path);
-        if ui.button(tr("Import airports")).clicked() {
-            state.import_custom_airports();
-        }
-        if ui.button(tr("Export airports")).clicked() {
-            state.export_custom_airports();
-        }
+    ui.add_space(8.0);
+    crate::theme::card_frame(ui).show(ui, |ui| {
+        ui.set_min_width(ui.available_width());
+        ui.label(RichText::new(tr("Import / export path")).strong());
+        ui.add_sized(
+            [ui.available_width(), ui.spacing().interact_size.y],
+            egui::TextEdit::singleline(&mut state.custom_airport_file_path),
+        );
+        ui.horizontal_wrapped(|ui| {
+            if ui.button(tr("Import airports")).clicked() {
+                state.import_custom_airports();
+            }
+            if ui.button(tr("Export airports")).clicked() {
+                state.export_custom_airports();
+            }
+        });
     });
     if let Some(status) = &state.custom_airport_status {
         ui.label(RichText::new(status).weak().small());
@@ -191,28 +192,20 @@ fn show_custom_airport_editor(state: &mut AppState, ui: &mut Ui) {
         ui.separator();
         ui.label(RichText::new(tr("Registered custom airports")).strong());
         for airport in custom {
-            let declared = airport.declared_toda_m.zip(airport.declared_lda_m);
-            let runway_status = declared.map_or_else(
-                || tr("physical runway lengths only; declared TODA/LDA missing"),
-                |(toda, lda)| format!("declared TODA/LDA: {toda:.0}/{lda:.0} m"),
-            );
+            let runway_length = airport
+                .runway_lengths_m
+                .iter()
+                .copied()
+                .filter(|length| length.is_finite() && *length > 0.0)
+                .fold(0.0, f64::max);
             ui.label(format!(
-                "{} - {} ({}) [{}]",
+                "{} - {} ({runway_length:.0} m) [{}]",
                 airport.icao,
                 airport.name,
-                runway_status,
                 tr(airport_provenance_label(airport.provenance.kind))
             ));
         }
     }
-}
-
-/// Whether the draft would register an airport with no declared operational
-/// distances. Blank is the honest state for unknown data; this only decides
-/// whether to say so.
-fn declarations_incomplete(state: &AppState) -> bool {
-    state.custom_airport_draft.declared_toda_m.trim().is_empty()
-        || state.custom_airport_draft.declared_lda_m.trim().is_empty()
 }
 
 /// Register the drafted airport and, only if the registry accepted it, select
@@ -251,12 +244,88 @@ fn airport_provenance_label(kind: AirportProvenanceKind) -> &'static str {
 
 fn airport_draft_text(ui: &mut Ui, label: &str, value: &mut String) {
     ui.label(tr(label));
-    ui.add_sized([110.0, 20.0], egui::TextEdit::singleline(value));
+    ui.add_sized(
+        [ui.available_width(), ui.spacing().interact_size.y],
+        egui::TextEdit::singleline(value),
+    );
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn render_editor(size: egui::Vec2) -> egui::FullOutput {
+        let context = Context::default();
+        crate::theme::apply_theme(crate::theme::AppTheme::Dark, &context);
+        let mut state = AppState::default();
+        open_for(&mut state, "departure_airport", "Departure airport");
+        drafted(&mut state, "LEMD", "Madrid Custom");
+        let mut output = None;
+        for _ in 0..2 {
+            output = Some(context.run(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+                    ..egui::RawInput::default()
+                },
+                |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        show_custom_airport_editor(&mut state, ui);
+                    });
+                },
+            ));
+        }
+        output.expect("two settled editor frames")
+    }
+
+    fn horizontally_clipped_text(output: &egui::FullOutput) -> Vec<String> {
+        fn walk(shape: &egui::Shape, clip: egui::Rect, found: &mut Vec<String>) {
+            match shape {
+                egui::Shape::Vec(shapes) => {
+                    for shape in shapes {
+                        walk(shape, clip, found);
+                    }
+                }
+                egui::Shape::Text(text) => {
+                    let rect = text.galley.rect.translate(text.pos.to_vec2());
+                    if rect.left() < clip.left() - 0.5 || rect.right() > clip.right() + 0.5 {
+                        let text = text.galley.text().trim();
+                        if !text.is_empty() {
+                            found.push(text.to_owned());
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        let mut found = Vec::new();
+        for clipped in &output.shapes {
+            walk(&clipped.shape, clipped.clip_rect, &mut found);
+        }
+        found
+    }
+
+    fn widest_painted_edge(output: &egui::FullOutput) -> f32 {
+        fn walk(shape: &egui::Shape, widest: &mut f32) {
+            match shape {
+                egui::Shape::Vec(shapes) => {
+                    for shape in shapes {
+                        walk(shape, widest);
+                    }
+                }
+                egui::Shape::Rect(rect) if rect.rect.width() > 10.0 => {
+                    *widest = widest.max(rect.rect.right());
+                }
+                _ => {}
+            }
+        }
+
+        let mut widest = 0.0_f32;
+        for clipped in &output.shapes {
+            walk(&clipped.shape, &mut widest);
+        }
+        widest
+    }
 
     fn drafted(state: &mut AppState, icao: &str, name: &str) {
         state.custom_airport_draft = crate::airport_editor::CustomAirportDraft {
@@ -267,8 +336,6 @@ mod tests {
             isa_delta_c: "0.0".to_owned(),
             altitude_m: "610.0".to_owned(),
             runway_lengths_m: "3500, 4100".to_owned(),
-            declared_toda_m: String::new(),
-            declared_lda_m: String::new(),
         };
     }
 
@@ -312,10 +379,9 @@ mod tests {
     }
 
     #[test]
-    fn missing_declarations_are_reported_rather_than_filled_in() {
+    fn custom_airport_draft_keeps_physical_lengths_without_regulatory_fields() {
         let mut state = AppState::default();
         drafted(&mut state, "LEMD", "Madrid Custom");
-        assert!(declarations_incomplete(&state));
 
         let airport = state
             .custom_airport_draft
@@ -324,9 +390,21 @@ mod tests {
         assert_eq!(airport.declared_toda_m, None);
         assert_eq!(airport.declared_lda_m, None);
         assert_eq!(airport.runway_lengths_m, vec![3500.0, 4100.0]);
+    }
 
-        state.custom_airport_draft.declared_toda_m = "3400".to_owned();
-        state.custom_airport_draft.declared_lda_m = "3000".to_owned();
-        assert!(!declarations_incomplete(&state));
+    #[test]
+    fn editor_reflows_without_horizontal_overflow() {
+        for size in [vec2(520.0, 900.0), vec2(754.0, 594.0), vec2(780.0, 520.0)] {
+            let output = render_editor(size);
+            let clipped = horizontally_clipped_text(&output);
+            assert!(
+                clipped.is_empty(),
+                "custom-airport text is clipped at {size:?}: {clipped:?}"
+            );
+            assert!(
+                widest_painted_edge(&output) <= size.x + 0.5,
+                "custom-airport controls overflow a {size:?} viewport"
+            );
+        }
     }
 }

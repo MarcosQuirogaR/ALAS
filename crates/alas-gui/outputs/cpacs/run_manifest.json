@@ -1,0 +1,22 @@
+{
+  "cpacs_input": "outputs\\cpacs/optimized_aircraft.cpacs.xml",
+  "cpacs_version": "3.5",
+  "aircraft_model_uid": "alas-aircraft-model",
+  "engine_uid": "alas-engine",
+  "stages": {
+    "avl": "not_configured",
+    "cpacs_adapter_manifest": "completed",
+    "cpacs_export": "completed",
+    "flowunsteady": "not_configured",
+    "vspaero": "not_configured"
+  },
+  "artifacts": {
+    "avl_geometry": "avl/optimized_aircraft.avl",
+    "cabin_scene_v2": "cabin_scene_v2.json",
+    "cpacs_adapter_manifest": "cpacs/adapter_manifest.json",
+    "cpacs_input": "cpacs/optimized_aircraft.cpacs.xml",
+    "flowunsteady_request": "flowunsteady/optimized_aircraft.request.txt",
+    "openvsp_script": "openvsp/optimized_aircraft.vspscript",
+    "payload_layout": "payload_layout.json"
+  }
+}

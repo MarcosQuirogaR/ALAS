@@ -112,6 +112,20 @@ fn apply_cabin_preset_with_semantics(
     design_vector: Option<&DesignVector>,
     semantics: CabinPresetSemantics,
 ) -> Result<(), CabinPresetError> {
+    if semantics == CabinPresetSemantics::RequirementsFirst
+        && config.requirements.aircraft_type == "passenger"
+        && config.cabin.passenger.class_mix_mode == "count"
+    {
+        // Count mode is an installed-cabin declaration. Preserve it across
+        // direct preset calls as well as the geometry-boundary call below;
+        // otherwise a named preset can replace user counts before payload or
+        // the optimizer gets a chance to resolve the canonical FLOPS split.
+        config.cabin.passenger = config.cabin.passenger.canonicalized_for_product();
+        if config.cabin.passenger.total_seats() > 0 {
+            config.requirements.num_passengers = config.cabin.passenger.total_seats();
+            return Ok(());
+        }
+    }
     let preset = config.requirements.cabin_preset.clone();
     if preset == "Custom" {
         return apply_custom(config, design_vector, semantics);
@@ -390,6 +404,13 @@ pub(super) fn apply_cabin_preset_to_geometry(
     if config.requirements.aircraft_type == "cargo" {
         return;
     }
+    if config.cabin.passenger.class_mix_mode == "count" {
+        config.cabin.passenger = config.cabin.passenger.canonicalized_for_product();
+        if config.cabin.passenger.total_seats() > 0 {
+            config.requirements.num_passengers = config.cabin.passenger.total_seats();
+            return;
+        }
+    }
     let preset = config.requirements.cabin_preset.clone();
     if preset == "Custom"
         && config.cabin.passenger.class_mix_mode == "count"
@@ -470,6 +491,28 @@ mod tests {
         assert!((config.cabin.passenger.business.share_pct - 100.0 * 31.0 / 348.0).abs() < 1e-9);
         assert_eq!(config.cabin.passenger.premium.share_pct, 0.0);
         assert!((config.cabin.passenger.economy.share_pct - 100.0 * 317.0 / 348.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn product_named_preset_preserves_a_nonempty_count_cabin() {
+        let mut config = AlasConfig::default();
+        config.requirements.cabin_preset = "Emirates".to_owned();
+        config.cabin.passenger.class_mix_mode = "count".to_owned();
+        config.cabin.passenger.first.count = 12;
+        config.cabin.passenger.business.count = 24;
+        config.cabin.passenger.premium.count = 6;
+        config.cabin.passenger.economy.count = 138;
+
+        apply_cabin_preset(&mut config, Some(&DesignVector::default()))
+            .unwrap_or_else(|error| panic!("count cabin preset applies: {error}"));
+
+        // Premium is folded at the product boundary, and no named-preset
+        // capacity may replace the installed total.
+        assert_eq!(config.cabin.passenger.first.count, 12);
+        assert_eq!(config.cabin.passenger.business.count, 24);
+        assert_eq!(config.cabin.passenger.premium.count, 0);
+        assert_eq!(config.cabin.passenger.economy.count, 144);
+        assert_eq!(config.requirements.num_passengers, 180);
     }
 
     #[test]

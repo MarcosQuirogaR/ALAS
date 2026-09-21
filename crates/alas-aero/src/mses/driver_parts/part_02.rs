@@ -181,6 +181,19 @@ mod tests {
     }
 
     #[test]
+    fn relative_osmap_diagnostics_are_resolved_from_the_host_working_directory() {
+        let relative = PathBuf::from("alas-definitely-missing-osmap.dat");
+        let expected = std::env::current_dir()
+            .expect("the test has a working directory")
+            .join(&relative);
+        let error = osmap_candidate(relative, "test").expect_err("the fixture is absent");
+        assert!(
+            error.contains(&expected.display().to_string()),
+            "relative resource paths must be normalized before child launch: {error}"
+        );
+    }
+
+    #[test]
     fn free_transition_requires_a_compatible_map_but_forced_transition_does_not() {
         let workdir =
             WorkDir::new("alas_osmap_resolution_test_").expect("temporary OSMAP directory");
@@ -197,6 +210,32 @@ mod tests {
         let forced = resolve_osmap(&config, workdir.path());
         assert!(!forced.required);
         assert_eq!(forced.status, MsesOsmapStatus::NotRequired);
+    }
+
+    #[test]
+    fn release_asset_is_used_without_mses_directory_or_working_directory_dependence() {
+        let package = WorkDir::new("alas_osmap_package_test_").expect("temporary package root");
+        let mses_dir = package.path().join("external tools").join("MSES");
+        std::fs::create_dir_all(&mses_dir).expect("temporary MSES directory");
+        let asset = package
+            .path()
+            .join("assets")
+            .join("mses")
+            .join("osmapDP.dat");
+        std::fs::create_dir_all(asset.parent().expect("asset parent")).expect("asset directory");
+        write_osmap_header(&asset, 224);
+
+        let config = MsesConfig {
+            mses_dir: mses_dir.display().to_string(),
+            ..MsesConfig::default()
+        };
+        let selection = resolve_osmap(&config, &mses_dir);
+        assert_eq!(selection.status, MsesOsmapStatus::Available);
+        assert_eq!(selection.path.as_deref(), Some(asset.as_path()));
+        assert!(selection
+            .diagnostic
+            .as_deref()
+            .is_some_and(|text| text.contains("bundled ALAS")));
     }
 
     #[test]

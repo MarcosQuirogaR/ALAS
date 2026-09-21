@@ -89,6 +89,9 @@ pub struct FlopsTransportInputs {
     pub variable_sweep_penalty: f64,
     /// Maximum usable aircraft fuel capacity, kilograms, FLOPS `FMXTOT`.
     pub maximum_fuel_capacity_kg: f64,
+    /// Whether the aircraft has an auxiliary power unit for equation 101.
+    /// Engine hotel-mode power can explicitly set this false.
+    pub apu_installed: bool,
     /// Number of fuel tanks, FLOPS `NTANK`.
     pub fuel_tank_count: usize,
     /// Revenue cargo loaded into containers, kilograms, part of FLOPS
@@ -160,6 +163,14 @@ impl FlopsTransportInputs {
         self.first_class_passenger_count
             + self.business_class_passenger_count
             + self.tourist_class_passenger_count
+    }
+
+    /// Checked passenger-count sum for public evaluators that must reject
+    /// hostile or malformed `usize` inputs before a mass power law runs.
+    pub fn checked_passenger_count(&self) -> Option<usize> {
+        self.first_class_passenger_count
+            .checked_add(self.business_class_passenger_count)?
+            .checked_add(self.tourist_class_passenger_count)
     }
 }
 
@@ -247,6 +258,22 @@ pub struct FlopsTransportBreakdown {
     pub systems: FlopsSystemsBreakdown,
     /// Operating items from section 5.5.
     pub operating_items: FlopsOperatingItemsBreakdown,
+    /// Cabin-equipment and occupant-driven operating-item relation that was
+    /// resolved for this evaluation.
+    ///
+    /// This is copied from [`FlopsTransportInputs`] instead of being inferred
+    /// from component zeros later.  The latter is ambiguous because a real
+    /// zero-valued input and the LTH relation both leave some FLOPS lines at
+    /// zero.
+    pub cabin_equipment_method: alas_config::CabinEquipmentMethod,
+    /// Propulsion rating used for the two propulsion-dependent operating
+    /// items.  A shaft-power installation uses the explicit alternate rather
+    /// than an invented rated thrust.
+    pub propulsion_sizing: PropulsionSizing,
+    /// Whether equation 101's APU term was physically installed for this
+    /// evaluation.  This remains on the breakdown so exports do not have to
+    /// infer an architectural absence from a zero mass.
+    pub apu_installed: bool,
 }
 
 /// A component-level projection when the complete method is not verifiable.
@@ -338,6 +365,9 @@ pub enum FlopsTransportUnverifiedReason {
     /// A declared shaft-power propulsion mass input is nonfinite or out of
     /// range.
     TurbopropMassConfiguration,
+    /// A shaft-power operating point is nonfinite or outside the positive
+    /// domain required by its fractional-power relations.
+    TurbopropOperatingPoint,
     /// No engine is installed, or the take-off shaft-power rating is absent.
     TurbopropShaftPowerRating,
     /// Propeller diameter, blade count, activity factor, speed or weight
@@ -385,6 +415,7 @@ impl FlopsTransportUnverifiedReason {
             Self::TailGeometry => "tail_geometry",
             Self::NacelleGeometry => "nacelle_geometry",
             Self::TurbopropMassConfiguration => "turboprop_mass_configuration",
+            Self::TurbopropOperatingPoint => "turboprop_operating_point",
             Self::TurbopropShaftPowerRating => "turboprop_shaft_power_rating",
             Self::TurbopropPropellerGeometry => "turboprop_propeller_geometry",
             Self::TurbopropNacelleArchitecture => "turboprop_nacelle_architecture",
@@ -432,6 +463,9 @@ impl FlopsTransportUnverifiedReason {
             Self::NacelleGeometry => "no nacelle body or profile has positive diameter and length",
             Self::TurbopropMassConfiguration => {
                 "a declared shaft-power propulsion mass input is nonfinite or outside its range"
+            }
+            Self::TurbopropOperatingPoint => {
+                "a shaft-power operating point is nonfinite or outside the positive domain of the mass relations"
             }
             Self::TurbopropShaftPowerRating => {
                 "no engine is installed, or the take-off shaft-power rating is missing"

@@ -1,0 +1,3498 @@
+{
+  "schema_version": "alas.payload-layout-render/v1",
+  "provenance": {
+    "producer": "ALAS optimized pipeline",
+    "source": "optimized_report.payload_layout",
+    "aircraft_preset": null,
+    "cabin_preset": "Ryanair"
+  },
+  "optimized_design": {
+    "span_m": 71.75,
+    "root_chord_m": 16.5,
+    "break_chord_m": 7.8,
+    "tip_chord_m": 1.6,
+    "sweep_deg": 34.0,
+    "tip_twist_deg": 0.0,
+    "wing_x_shift_m": 0.0,
+    "tail_scale": 1.0,
+    "fuselage_length_m": 76.72,
+    "tail_x_shift_m": 0.0,
+    "airfoil_thickness_scale": 1.0,
+    "airfoil_camber_scale": 1.0,
+    "bump_upper_front": 0.0,
+    "bump_upper_rear": 0.0,
+    "bump_lower_mid": 0.0,
+    "bump_lower_rear": 0.0
+  },
+  "effective_config": {
+    "preset": "",
+    "requirements": {
+      "cruise_mach": 0.84,
+      "cruise_altitude_m": 11887.2,
+      "mtow_kg": 358670.0,
+      "aircraft_type": "passenger",
+      "cabin_preset": "Ryanair",
+      "num_passengers": 350,
+      "cargo_payload_kg": 102100.0,
+      "cargo_objective_kg": 0.0,
+      "max_structural_payload_kg": 0.0,
+      "min_passenger_capacity": 0,
+      "ultimate_load_factor": 3.75,
+      "dive_speed_m_s": 220.0,
+      "limit_load_factor_neg": -1.0,
+      "max_wing_area_m2": 535.0,
+      "min_wing_loading_kg_m2": 485.0,
+      "max_cruise_cl": 0.95,
+      "target_static_margin": 0.1,
+      "cg_range_pct_mac": 30.0,
+      "min_physical_static_margin": 0.05,
+      "passenger_mass_kg": 100.0,
+      "gravity_m_s2": 9.81
+    },
+    "geometry": {
+      "wing": {
+        "root_datum_x_m": 26.24,
+        "root_z_m": -2.1,
+        "break_z_m": -0.3,
+        "tip_z_m": 2.5,
+        "root_twist_deg": 4.0,
+        "break_twist_deg": 2.0,
+        "break_span_fraction": 0.35,
+        "side_of_body_span_fraction": 0.1,
+        "kink_span_fraction": 0.37,
+        "outboard_sweep_decrement_deg": 2.0,
+        "root_airfoil": "SC2-0714",
+        "tip_airfoil": "naca2410",
+        "n_subdivisions": 24
+      },
+      "empennage": {
+        "tail_airfoil": "naca0012",
+        "n_subdivisions": 6,
+        "hstab_offset_from_tail_m": 10.7,
+        "hstab_z_m": 1.2,
+        "hstab_root_chord_m": 8.0,
+        "hstab_tip_chord_m": 2.2,
+        "hstab_root_twist_deg": -2.0,
+        "hstab_tip_twist_deg": -2.0,
+        "hstab_tip_le_m": [
+          7.5,
+          11.0,
+          1.0
+        ],
+        "vstab_offset_from_tail_m": 12.2,
+        "vstab_z_m": 2.0,
+        "vstab_root_chord_m": 9.5,
+        "vstab_tip_chord_m": 3.2,
+        "vstab_tip_le_m": [
+          9.0,
+          0.0,
+          9.8
+        ]
+      },
+      "fuselage": {
+        "diameter_m": 6.2,
+        "height_m": null,
+        "nose_z_m": -0.5,
+        "cabin_start_x_m": 6.0,
+        "cabin_z_m": 0.2,
+        "tailcone_length_m": 14.0,
+        "tail_z_m": 1.8,
+        "n_subdivisions": 12
+      },
+      "engine": {
+        "engine_name": "GE9X",
+        "turbofan": {
+          "rated_thrust_kn": 467.0,
+          "bypass_ratio": 10.0,
+          "takeoff_bypass_ratio": 10.0,
+          "overall_pressure_ratio": 60.0,
+          "fan_pressure_ratio": 1.45,
+          "turbine_inlet_temp_k": 1670.0,
+          "cruise_tsfc_kg_kgf_hr": 0.5,
+          "part_power_fuel_flow_ratios": [
+            0.0825787,
+            0.25328704,
+            0.815,
+            1.0
+          ],
+          "takeoff_fuel_flow_kg_s": 2.704,
+          "part_power_source": "ICAO EEDB 03/2026 family proxy: 07P27GE235 GEnx-1B74/75/P2",
+          "off_design": {
+            "cruise_reference_thrust_n": 140000.0,
+            "cruise_reference_altitude_m": 10668.0,
+            "cruise_reference_mach": 0.84,
+            "evidence": "aircraft-requirement-calibration",
+            "source": "Conditional AVE-v1 aircraft-level excess-power calibration: closes the analyzed-load EGLL-OMDB FL390 requirement with 7.3% of route distance below FL300 and a retained final FL390 leg; synthetic requirement verification only, not an OEM GE9X thrust deck or a 777-9 validation"
+          }
+        },
+        "nacelle_profile": [
+          [
+            0.0,
+            0.4
+          ],
+          [
+            0.6,
+            0.92
+          ],
+          [
+            1.2,
+            1.0
+          ],
+          [
+            4.3,
+            1.0
+          ],
+          [
+            5.9,
+            0.82
+          ],
+          [
+            7.8,
+            0.45
+          ]
+        ],
+        "radius_scale_m": 2.1,
+        "spanwise_positions_m": [
+          9.8,
+          -9.8
+        ],
+        "z_m": -2.9,
+        "inlet_x_offset_m": 4.2,
+        "thrust_kn": 467.0,
+        "bypass_ratio": 10.0,
+        "overall_pressure_ratio": 60.0,
+        "fan_pressure_ratio": 1.45,
+        "turbine_inlet_temp_k": 1670.0,
+        "cruise_tsfc_kg_kgf_hr": 0.5,
+        "fan_diameter_m": 3.4,
+        "part_power_fuel_flow_ratios": [
+          0.0825787,
+          0.25328704,
+          0.815,
+          1.0
+        ],
+        "part_power_source": "ICAO EEDB 03/2026 family proxy: 07P27GE235 GEnx-1B74/75/P2"
+      },
+      "wing_wetted_area_factor": 2.05,
+      "fuselage_wetted_factor": 0.9
+    },
+    "optimizer": {
+      "weights": {
+        "ld_weight": 1.0,
+        "alpha_penalty_scale": 5.0,
+        "alpha_min_penalty_deg": 0.0,
+        "alpha_max_penalty_deg": 10.0,
+        "transport_planform_constraints_enabled": true,
+        "transport_shape_priors_enabled": false,
+        "geometric_body_alpha_min_deg": 2.0,
+        "geometric_body_alpha_max_deg": 4.0,
+        "geometric_body_alpha_penalty_scale": 200.0,
+        "min_root_wingbox_depth_m": 1.2,
+        "min_break_wingbox_depth_m": 0.65,
+        "min_break_wingbox_width_m": 2.5,
+        "wingbox_packaging_penalty_scale": 250.0,
+        "min_flap_area_fraction": 0.11,
+        "flap_area_penalty_scale": 250.0,
+        "max_root_bending_box_slenderness": 700.0,
+        "bending_slenderness_penalty_scale": 150.0,
+        "tankable_span_start_fraction": 0.1,
+        "tankable_span_end_fraction": 0.75,
+        "span_penalty_per_m": 0.02,
+        "cd0_penalty_scale": 50.0,
+        "area_penalty_scale": 0.5,
+        "wing_loading_penalty_scale": 0.005,
+        "cg_penalty_scale": 200.0,
+        "cg_envelope_penalty_scale": 400000.0,
+        "cg_envelope_reward": 5.0,
+        "fuel_penalty_scale": 50.0,
+        "fuel_volume_penalty_scale": 300.0,
+        "static_margin_penalty_scale": 20.0,
+        "thickness_floor": 0.9,
+        "thickness_penalty_scale": 20.0,
+        "fuselage_floor_m": 60.0,
+        "fuselage_penalty_scale": 5.0,
+        "min_hstab_area_fraction": 0.15,
+        "min_vstab_area_fraction": 0.07,
+        "tail_area_penalty_scale": 150.0,
+        "min_hstab_volume_coef": 0.75,
+        "max_hstab_volume_coef": 1.25,
+        "min_vstab_volume_coef": 0.06,
+        "max_vstab_volume_coef": 0.13,
+        "tail_volume_penalty_scale": 200.0,
+        "max_break_root_chord_ratio": 0.65,
+        "min_break_root_chord_ratio": 0.4,
+        "min_tip_root_chord_ratio": 0.16,
+        "taper_realism_penalty_scale": 250.0,
+        "te_root_angle_penalty_scale": 100.0,
+        "min_inboard_te_sweep_deg": 0.0,
+        "max_inboard_te_sweep_deg": 22.0,
+        "min_wing_position_fraction": 0.27,
+        "wing_position_penalty_scale": 300.0,
+        "payload_shortfall_penalty_scale": 1000.0,
+        "fineness_ratio_max": 15.0,
+        "fineness_ratio_penalty_scale": 500.0,
+        "failure_cost": 1000.0,
+        "instability_failure_cost": 1000.0
+      },
+      "solver": {
+        "method": "differential_evolution",
+        "strategy": "best1bin",
+        "max_iterations": 15,
+        "population_size": 6,
+        "tolerance": 0.01,
+        "seed": null,
+        "workers": 0,
+        "display_progress": true,
+        "seed_near_initial_design": true,
+        "seed_perturbation_fraction": 0.05
+      }
+    },
+    "analysis": {
+      "sweep_alpha_min_deg": -4.0,
+      "sweep_alpha_max_deg": 10.0,
+      "sweep_n_points": 15,
+      "spanwise_resolution": 1,
+      "chordwise_resolution": 8,
+      "fine_spanwise_resolution": 1,
+      "fine_chordwise_resolution": 16,
+      "probe_alpha_low_deg": 2.0,
+      "probe_alpha_high_deg": 3.0,
+      "trim_incidence_probe_delta_deg": 1.0,
+      "autobalance_velocity_m_s": 250.0,
+      "autobalance_alpha_low_deg": 0.0,
+      "autobalance_alpha_high_deg": 2.0,
+      "tail_efficiency": 0.9,
+      "include_fuselage_stability": true,
+      "polar_fit_cl_min": 0.3,
+      "polar_fit_cl_max": 0.6,
+      "polar_fit_cl_min_fallback": 0.1,
+      "polar_fit_cl_max_fallback": 0.8
+    },
+    "drag_model": {
+      "exclude_buried_main_wing_area": true,
+      "max_thickness_chordwise_loc": 0.35,
+      "interference_factor_wing": 1.0,
+      "interference_factor_fuselage": 1.25,
+      "viscous_margin": 1.1,
+      "interference_factor_nacelle": 1.3,
+      "korn_technology_factor": 0.95,
+      "wave_drag_onset_mach": 0.6,
+      "wave_drag_coefficient": 20.0
+    },
+    "performance": {
+      "cl_max_to": 1.8,
+      "cl_max_land": 2.6,
+      "cl_max_clean": 1.5,
+      "cl_min_clean": -1.0,
+      "thrust_lapse": 0.235,
+      "oei_gradient": 0.024,
+      "k_land": 0.6,
+      "oei_climb_cl": 1.2,
+      "oei_climb_delta_cd": 0.025,
+      "ws_min_pa": 2000.0,
+      "ws_max_pa": 10000.0,
+      "bfl_factor": 1.15,
+      "vmc_vstall_factor": 1.13,
+      "vr_vmc_factor": 1.05,
+      "vr_vstall_factor": 1.1,
+      "v2_vstall_factor": 1.2,
+      "v1_vr_factor": 0.95,
+      "vapp_vstall_land_factor": 1.3,
+      "vtd_vstall_land_factor": 1.15,
+      "matching_chart_resolution": 150
+    },
+    "mass_model": {
+      "schema_version": 2,
+      "mass_architecture": "pure_flops_transport_v1",
+      "flops_transport": {
+        "maximum_mach": 0.9,
+        "design_range_nmi": 7600.0,
+        "flight_crew_count": 2,
+        "flight_attendant_count": 7,
+        "galley_crew_count": 0,
+        "first_class_passenger_count": 0,
+        "business_class_passenger_count": 0,
+        "tourist_class_passenger_count": 350,
+        "hydraulic_pressure_pa": 20684271.879504,
+        "variable_sweep_penalty": 0.0,
+        "wing_mounted_engine_count": 2,
+        "fuselage_mounted_engine_count": 0,
+        "fuel_tank_count": 3,
+        "maximum_fuel_capacity_kg": 200000.0,
+        "containerized_cargo_kg": 0.0,
+        "cargo_loading": "containerized",
+        "containerized_baggage_fraction": null,
+        "cabin_equipment_method": "lth_civil_transport_v1",
+        "haul_class": "long_haul",
+        "provenance": {
+          "mission": {
+            "document": "ALAS pure FLOPS conventional transport default",
+            "revision": "ALAS 2026-09-11",
+            "location": "FlopsTransportConfig::working_default",
+            "applicability": "generic notional transport; configured run must replace with aircraft evidence when available",
+            "evidence": "user_declared",
+            "uncertainty": "mission speed and range are a notional conventional-transport scenario"
+          },
+          "cabin": {
+            "document": "ALAS pure FLOPS conventional transport default",
+            "revision": "ALAS 2026-09-11",
+            "location": "FlopsTransportConfig::working_default",
+            "applicability": "generic notional transport; configured run must replace with aircraft evidence when available",
+            "evidence": "user_declared",
+            "uncertainty": "the cabin is an all-economy 350-seat study scenario"
+          },
+          "architecture": {
+            "document": "ALAS pure FLOPS conventional transport default",
+            "revision": "ALAS 2026-09-11",
+            "location": "FlopsTransportConfig::working_default",
+            "applicability": "generic notional transport; configured run must replace with aircraft evidence when available",
+            "evidence": "user_declared",
+            "uncertainty": "twin wing-mounted engines, fixed wing, three tanks and 3,000 psi are study inputs"
+          }
+        }
+      },
+      "suspended_mass_fraction": 0.75,
+      "max_airspeed_for_flaps_ms": 90.0,
+      "flap_deflection_angle_deg": 40.0,
+      "landing_gear_mass_fraction": 0.04,
+      "propulsion_twr_factor": 6.0,
+      "propulsion_installation_factor": 1.3,
+      "propulsion_mass_fallback_fraction": 0.07,
+      "systems_mass_fraction": 0.11,
+      "furnishings_mass_fraction": 0.1,
+      "cabin_payload_density_kg_m": 800.0,
+      "nlg_x_fraction": 0.1,
+      "mlg_x_fraction_mac": 0.5,
+      "pct_load_nlg_max": 0.1,
+      "pct_load_mlg_max": 0.93,
+      "pct_load_nlg_min": 0.02,
+      "mlw_fraction_mtow": 0.92,
+      "fuel_density_kg_m3": 804.0,
+      "fuel_tank_usable_fraction": 0.85
+    },
+    "landing_gear": {
+      "tire_safety_factor": 1.07,
+      "n_nlg_wheels": 0,
+      "nlg_dual_wheel_mtow_kg": 15000.0,
+      "n_mlg_struts": 0,
+      "mlg_body_gear_mtow_kg": 300000.0,
+      "wheels_per_mlg_strut": 0,
+      "track_diameter_factor": 1.85,
+      "reference_wheelbase_m": null,
+      "reference_station_frame": null,
+      "reference_station_fuselage_length_m": null,
+      "reference_nlg_x_fraction": null,
+      "reference_mlg_x_fractions": null,
+      "reference_body_wheelbase_m": null,
+      "reference_track_m": null,
+      "mlg_strut_bogie_wheels": null,
+      "tire_class": "auto",
+      "strut_material": "auto",
+      "turnover_angle_limit_deg": 63.0
+    },
+    "cabin": {
+      "passenger": {
+        "class_mix_mode": "percent",
+        "first": {
+          "share_pct": 0.0,
+          "count": 0,
+          "abreast": 0,
+          "pitch_m": 1.93,
+          "width_m": 0.95,
+          "mass_per_pax_kg": 96.0
+        },
+        "business": {
+          "share_pct": 15.0,
+          "count": 0,
+          "abreast": 0,
+          "pitch_m": 1.55,
+          "width_m": 0.7,
+          "mass_per_pax_kg": 90.0
+        },
+        "premium": {
+          "share_pct": 0.0,
+          "count": 0,
+          "abreast": 0,
+          "pitch_m": 0.97,
+          "width_m": 0.52,
+          "mass_per_pax_kg": 86.0
+        },
+        "economy": {
+          "share_pct": 85.0,
+          "count": 0,
+          "abreast": 0,
+          "pitch_m": 0.79,
+          "width_m": 0.46,
+          "mass_per_pax_kg": 84.0
+        },
+        "aisle_width_m": 0.0,
+        "galley_count": 0,
+        "lavatory_count": 0,
+        "checked_bag_mass_kg": 16.0,
+        "belly_cargo_kg": 0.0,
+        "wall_thickness_m": 0.15,
+        "min_exit_pair_spacing_m": 11.0,
+        "exit_capacity_realism_factor": 0.478
+      },
+      "cargo": {
+        "use_main_deck": true,
+        "main_deck_uld": "PMC",
+        "lower_deck_uld": "LD3",
+        "loading_strategy": "target_cg",
+        "target_cg_pct_mac": 25.0,
+        "main_door_x_m": 0.0,
+        "fwd_door_x_m": 0.0,
+        "aft_door_x_m": 0.0,
+        "cg_trim_step_kg": 50.0,
+        "cg_trim_max_iterations": 2000
+      }
+    },
+    "mission": {
+      "enabled": false,
+      "timeout_s": 900.0,
+      "navdata_dir": "alas/data/navdata",
+      "texture_path": "alas/data/textures/earth_blue_marble.jpg",
+      "routes_dir": "alas/data/routes",
+      "great_circle_points": 50,
+      "max_airway_stretch": 1.2,
+      "use_airway_endpoint_coordinates": true,
+      "simbrief_username": "",
+      "simbrief_timeout_s": 15.0,
+      "simbrief_overrides_airports": true,
+      "profile": {
+        "takeoff_altitude_gain_m": 3048.0,
+        "takeoff_air_speed_m_s": 128.6,
+        "takeoff_climb_rate_m_s": 10.0,
+        "initial_climb_air_speed_m_s": 170.0,
+        "initial_climb_rate_m_s": 12.0,
+        "initial_climb_altitude_fraction": 0.795,
+        "step_climb_1_air_speed_m_s": 250.0,
+        "step_climb_1_rate_m_s": 3.0,
+        "step_climb_1_altitude_fraction": 0.897,
+        "step_climb_2_air_speed_m_s": 248.0,
+        "step_climb_2_rate_m_s": 2.5,
+        "cruise_1_air_speed_m_s": 253.5,
+        "cruise_1_distance_fraction": 0.28169,
+        "cruise_2_air_speed_m_s": 249.4,
+        "cruise_2_distance_fraction": 0.33803,
+        "cruise_3_air_speed_m_s": 247.8,
+        "cruise_3_distance_fraction": 0.38028,
+        "descent_1_altitude_ft": 30000.0,
+        "descent_1_air_speed_m_s": 220.0,
+        "descent_1_rate_m_s": 4.5,
+        "descent_2_altitude_ft": 17000.0,
+        "descent_2_air_speed_m_s": 195.0,
+        "descent_2_rate_m_s": 5.0,
+        "descent_3_altitude_ft": 10000.0,
+        "descent_3_air_speed_m_s": 170.0,
+        "descent_3_rate_m_s": 5.0,
+        "descent_4_altitude_ft": 6500.0,
+        "descent_4_air_speed_m_s": 150.0,
+        "descent_4_rate_m_s": 5.0,
+        "landing_air_speed_m_s": 83.6,
+        "landing_descent_rate_m_s": 3.0
+      }
+    },
+    "mses": {
+      "enabled": false,
+      "mses_dir": "external tools/MSES",
+      "timeout_mset_s": 30.0,
+      "timeout_mses_s": 60.0,
+      "max_iterations": 100,
+      "n_crit": 9.0,
+      "xtr_upper": 1.0,
+      "xtr_lower": 1.0,
+      "alpha_sweep_halfwidth_deg": 3.0,
+      "alpha_sweep_n_points": 7,
+      "mset_n": 141,
+      "mset_e": 0.4
+    },
+    "control_surfaces": {
+      "slat_chord_fraction": 0.15,
+      "slat_span_start_frac": 0.08,
+      "slat_span_end_frac": 0.95,
+      "flap_chord_fraction": 0.25,
+      "flap_span_start_frac": 0.1,
+      "flap_span_end_frac": 0.62,
+      "aileron_chord_fraction": 0.2,
+      "aileron_span_start_frac": 0.66,
+      "aileron_span_end_frac": 0.95,
+      "spoiler_chord_fraction": 0.1,
+      "spoiler_span_start_frac": 0.1,
+      "spoiler_span_end_frac": 0.64,
+      "elevator_chord_fraction": 0.35,
+      "elevator_span_start_frac": 0.05,
+      "elevator_span_end_frac": 0.95,
+      "rudder_chord_fraction": 0.35,
+      "rudder_span_start_frac": 0.1,
+      "rudder_span_end_frac": 0.9
+    },
+    "propulsion_cycle": {
+      "turboprop_overall_pressure_ratio": 15.0,
+      "turboprop_turbine_inlet_temperature_k": 1400.0,
+      "inlet_pressure_recovery": 0.98,
+      "lpc_pressure_ratio_split": 1.2,
+      "lpc_polytropic_efficiency": 0.91,
+      "hpc_polytropic_efficiency": 0.93,
+      "fan_polytropic_efficiency": 0.93,
+      "combustor_pressure_ratio": 0.95,
+      "combustor_efficiency": 0.99,
+      "hpt_polytropic_efficiency": 0.95,
+      "lpt_polytropic_efficiency": 0.95,
+      "turbine_mechanical_efficiency": 0.99,
+      "core_nozzle_pressure_ratio": 0.99,
+      "fan_nozzle_pressure_ratio": 0.99,
+      "core_nozzle_efficiency": 0.95,
+      "fan_nozzle_efficiency": 0.95,
+      "fuel_heating_value_kj_kg": 42800.0,
+      "cp_cold_j_kgk": 1004.5,
+      "gamma_cold": 1.4,
+      "cp_hot_j_kgk": 1156.9,
+      "gamma_hot": 1.33,
+      "fan_face_mach": 0.55
+    },
+    "structures": {
+      "enabled": false,
+      "spar_chord_fractions": [
+        0.25,
+        0.7
+      ],
+      "te_rib_mode": "all",
+      "center_spar_enabled": false,
+      "center_spar_chord_fraction": 0.5,
+      "skin_material": "Al 7075-T6",
+      "spar_web_material": "Al 7075-T6",
+      "spar_cap_material": "CFRP UD",
+      "rib_material": "Al 7075-T6",
+      "additional_safety_factor": 1.0,
+      "t_skin_min_m": 0.006,
+      "t_web_min_m": 0.002,
+      "t_rib_m": 0.004,
+      "t_te_strip_m": 0.002,
+      "cap_taper_eta_lock": 0.4,
+      "cap_taper_tip_fraction": 0.2,
+      "rib_buckling_coeff": 1.5,
+      "rib_radius_of_gyration_m": 0.03,
+      "num_ribs_override": null,
+      "spanwise_stations": 200,
+      "mesh_chordwise_points": 50,
+      "nastran_exe_path": "",
+      "run_nastran": true,
+      "run_sol_static": true,
+      "run_sol_modes": true,
+      "run_sol_vibration_sine": true,
+      "run_sol_vibration_random": true,
+      "timeout_s": 3600.0,
+      "n_modes": 16,
+      "freq_sweep_max_hz": 60.0,
+      "freq_step_hz": 1.0,
+      "modal_damping_ratio": 0.02,
+      "random_force_psd_n2_per_hz": 1.0,
+      "psd_base_g2_per_hz": 0.01,
+      "patran_exe_path": "",
+      "run_patran_export": true
+    },
+    "departure_airport": "London Heathrow (EGLL)",
+    "arrival_airport": "Dubai (OMDB)"
+  },
+  "layout": {
+    "mode": "passenger",
+    "items": [
+      {
+        "kind": "seat_row",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 7.9596226415094335,
+          "center_y": 0.0,
+          "center_z": 0.825,
+          "length": 1.0192452830188676,
+          "width": 5.723,
+          "height": 1.25
+        },
+        "mass_kg": 840.0,
+        "label": "Economy",
+        "meta": {
+          "abreast": 10,
+          "aisle_width_m": 0.51,
+          "aisles": 2,
+          "blocks": [
+            3,
+            4,
+            3
+          ],
+          "class": "Economy",
+          "deck": "main",
+          "filled": 10,
+          "seat_width_m": 0.46
+        }
+      },
+      {
+        "kind": "seat_row",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 8.978867924528302,
+          "center_y": 0.0,
+          "center_z": 0.825,
+          "length": 1.0192452830188676,
+          "width": 5.723,
+          "height": 1.25
+        },
+        "mass_kg": 840.0,
+        "label": "Economy",
+        "meta": {
+          "abreast": 10,
+          "aisle_width_m": 0.51,
+          "aisles": 2,
+          "blocks": [
+            3,
+            4,
+            3
+          ],
+          "class": "Economy",
+          "deck": "main",
+          "filled": 10,
+          "seat_width_m": 0.46
+        }
+      },
+      {
+        "kind": "seat_row",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 9.99811320754717,
+          "center_y": 0.0,
+          "center_z": 0.825,
+          "length": 1.0192452830188676,
+          "width": 5.723,
+          "height": 1.25
+        },
+        "mass_kg": 840.0,
+        "label": "Economy",
+        "meta": {
+          "abreast": 10,
+          "aisle_width_m": 0.51,
+          "aisles": 2,
+          "blocks": [
+            3,
+            4,
+            3
+          ],
+          "class": "Economy",
+          "deck": "main",
+          "filled": 10,
+          "seat_width_m": 0.46
+        }
+      },
+      {
+        "kind": "seat_row",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 11.017358490566039,
+          "center_y": 0.0,
+          "center_z": 0.825,
+          "length": 1.0192452830188676,
+          "width": 5.723,
+          "height": 1.25
+        },
+        "mass_kg": 840.0,
+        "label": "Economy",
+        "meta": {
+          "abreast": 10,
+          "aisle_width_m": 0.51,
+          "aisles": 2,
+          "blocks": [
+            3,
+            4,
+            3
+          ],
+          "class": "Economy",
+          "deck": "main",
+          "filled": 10,
+          "seat_width_m": 0.46
+        }
+      },
+      {
+        "kind": "seat_row",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 12.036603773584908,
+          "center_y": 0.0,
+          "center_z": 0.825,
+          "length": 1.0192452830188676,
+          "width": 5.723,
+          "height": 1.25
+        },
+        "mass_kg": 840.0,
+        "label": "Economy",
+        "meta": {
+          "abreast": 10,
+          "aisle_width_m": 0.51,
+          "aisles": 2,
+          "blocks": [
+            3,
+            4,
+            3
+          ],
+          "class": "Economy",
+          "deck": "main",
+          "filled": 10,
+          "seat_width_m": 0.46
+        }
+      },
+      {
+        "kind": "seat_row",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 13.055849056603776,
+          "center_y": 0.0,
+          "center_z": 0.825,
+          "length": 1.0192452830188676,
+          "width": 5.723,
+          "height": 1.25
+        },
+        "mass_kg": 840.0,
+        "label": "Economy",
+        "meta": {
+          "abreast": 10,
+          "aisle_width_m": 0.51,
+          "aisles": 2,
+          "blocks": [
+            3,
+            4,
+            3
+          ],
+          "class": "Economy",
+          "deck": "main",
+          "filled": 10,
+          "seat_width_m": 0.46
+        }
+      },
+      {
+        "kind": "seat_row",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 14.075094339622645,
+          "center_y": 0.0,
+          "center_z": 0.825,
+          "length": 1.0192452830188676,
+          "width": 5.723,
+          "height": 1.25
+        },
+        "mass_kg": 840.0,
+        "label": "Economy",
+        "meta": {
+          "abreast": 10,
+          "aisle_width_m": 0.51,
+          "aisles": 2,
+          "blocks": [
+            3,
+            4,
+            3
+          ],
+          "class": "Economy",
+          "deck": "main",
+          "filled": 10,
+          "seat_width_m": 0.46
+        }
+      },
+      {
+        "kind": "seat_row",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 15.094339622641513,
+          "center_y": 0.0,
+          "center_z": 0.825,
+          "length": 1.0192452830188676,
+          "width": 5.723,
+          "height": 1.25
+        },
+        "mass_kg": 840.0,
+        "label": "Economy",
+        "meta": {
+          "abreast": 10,
+          "aisle_width_m": 0.51,
+          "aisles": 2,
+          "blocks": [
+            3,
+            4,
+            3
+          ],
+          "class": "Economy",
+          "deck": "main",
+          "filled": 10,
+          "seat_width_m": 0.46
+        }
+      },
+      {
+        "kind": "seat_row",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 16.11358490566038,
+          "center_y": 0.0,
+          "center_z": 0.825,
+          "length": 1.0192452830188676,
+          "width": 5.723,
+          "height": 1.25
+        },
+        "mass_kg": 840.0,
+        "label": "Economy",
+        "meta": {
+          "abreast": 10,
+          "aisle_width_m": 0.51,
+          "aisles": 2,
+          "blocks": [
+            3,
+            4,
+            3
+          ],
+          "class": "Economy",
+          "deck": "main",
+          "filled": 10,
+          "seat_width_m": 0.46
+        }
+      },
+      {
+        "kind": "seat_row",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 17.13283018867925,
+          "center_y": 0.0,
+          "center_z": 0.825,
+          "length": 1.0192452830188676,
+          "width": 5.723,
+          "height": 1.25
+        },
+        "mass_kg": 840.0,
+        "label": "Economy",
+        "meta": {
+          "abreast": 10,
+          "aisle_width_m": 0.51,
+          "aisles": 2,
+          "blocks": [
+            3,
+            4,
+            3
+          ],
+          "class": "Economy",
+          "deck": "main",
+          "filled": 10,
+          "seat_width_m": 0.46
+        }
+      },
+      {
+        "kind": "seat_row",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 18.15207547169812,
+          "center_y": 0.0,
+          "center_z": 0.825,
+          "length": 1.0192452830188676,
+          "width": 5.723,
+          "height": 1.25
+        },
+        "mass_kg": 840.0,
+        "label": "Economy",
+        "meta": {
+          "abreast": 10,
+          "aisle_width_m": 0.51,
+          "aisles": 2,
+          "blocks": [
+            3,
+            4,
+            3
+          ],
+          "class": "Economy",
+          "deck": "main",
+          "filled": 10,
+          "seat_width_m": 0.46
+        }
+      },
+      {
+        "kind": "seat_row",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 19.171320754716987,
+          "center_y": 0.0,
+          "center_z": 0.825,
+          "length": 1.0192452830188676,
+          "width": 5.723,
+          "height": 1.25
+        },
+        "mass_kg": 840.0,
+        "label": "Economy",
+        "meta": {
+          "abreast": 10,
+          "aisle_width_m": 0.51,
+          "aisles": 2,
+          "blocks": [
+            3,
+            4,
+            3
+          ],
+          "class": "Economy",
+          "deck": "main",
+          "filled": 10,
+          "seat_width_m": 0.46
+        }
+      },
+      {
+        "kind": "seat_row",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 21.140566037735855,
+          "center_y": 0.0,
+          "center_z": 0.825,
+          "length": 1.0192452830188676,
+          "width": 5.723,
+          "height": 1.25
+        },
+        "mass_kg": 840.0,
+        "label": "Economy",
+        "meta": {
+          "abreast": 10,
+          "aisle_width_m": 0.51,
+          "aisles": 2,
+          "blocks": [
+            3,
+            4,
+            3
+          ],
+          "class": "Economy",
+          "deck": "main",
+          "filled": 10,
+          "seat_width_m": 0.46
+        }
+      },
+      {
+        "kind": "seat_row",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 22.159811320754724,
+          "center_y": 0.0,
+          "center_z": 0.825,
+          "length": 1.0192452830188676,
+          "width": 5.723,
+          "height": 1.25
+        },
+        "mass_kg": 840.0,
+        "label": "Economy",
+        "meta": {
+          "abreast": 10,
+          "aisle_width_m": 0.51,
+          "aisles": 2,
+          "blocks": [
+            3,
+            4,
+            3
+          ],
+          "class": "Economy",
+          "deck": "main",
+          "filled": 10,
+          "seat_width_m": 0.46
+        }
+      },
+      {
+        "kind": "seat_row",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 23.179056603773592,
+          "center_y": 0.0,
+          "center_z": 0.825,
+          "length": 1.0192452830188676,
+          "width": 5.723,
+          "height": 1.25
+        },
+        "mass_kg": 840.0,
+        "label": "Economy",
+        "meta": {
+          "abreast": 10,
+          "aisle_width_m": 0.51,
+          "aisles": 2,
+          "blocks": [
+            3,
+            4,
+            3
+          ],
+          "class": "Economy",
+          "deck": "main",
+          "filled": 10,
+          "seat_width_m": 0.46
+        }
+      },
+      {
+        "kind": "seat_row",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 24.19830188679246,
+          "center_y": 0.0,
+          "center_z": 0.825,
+          "length": 1.0192452830188676,
+          "width": 5.723,
+          "height": 1.25
+        },
+        "mass_kg": 840.0,
+        "label": "Economy",
+        "meta": {
+          "abreast": 10,
+          "aisle_width_m": 0.51,
+          "aisles": 2,
+          "blocks": [
+            3,
+            4,
+            3
+          ],
+          "class": "Economy",
+          "deck": "main",
+          "filled": 10,
+          "seat_width_m": 0.46
+        }
+      },
+      {
+        "kind": "seat_row",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 25.21754716981133,
+          "center_y": 0.0,
+          "center_z": 0.825,
+          "length": 1.0192452830188676,
+          "width": 5.723,
+          "height": 1.25
+        },
+        "mass_kg": 840.0,
+        "label": "Economy",
+        "meta": {
+          "abreast": 10,
+          "aisle_width_m": 0.51,
+          "aisles": 2,
+          "blocks": [
+            3,
+            4,
+            3
+          ],
+          "class": "Economy",
+          "deck": "main",
+          "filled": 10,
+          "seat_width_m": 0.46
+        }
+      },
+      {
+        "kind": "seat_row",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 26.236792452830198,
+          "center_y": 0.0,
+          "center_z": 0.825,
+          "length": 1.0192452830188676,
+          "width": 5.723,
+          "height": 1.25
+        },
+        "mass_kg": 840.0,
+        "label": "Economy",
+        "meta": {
+          "abreast": 10,
+          "aisle_width_m": 0.51,
+          "aisles": 2,
+          "blocks": [
+            3,
+            4,
+            3
+          ],
+          "class": "Economy",
+          "deck": "main",
+          "filled": 10,
+          "seat_width_m": 0.46
+        }
+      },
+      {
+        "kind": "seat_row",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 27.256037735849066,
+          "center_y": 0.0,
+          "center_z": 0.825,
+          "length": 1.0192452830188676,
+          "width": 5.723,
+          "height": 1.25
+        },
+        "mass_kg": 840.0,
+        "label": "Economy",
+        "meta": {
+          "abreast": 10,
+          "aisle_width_m": 0.51,
+          "aisles": 2,
+          "blocks": [
+            3,
+            4,
+            3
+          ],
+          "class": "Economy",
+          "deck": "main",
+          "filled": 10,
+          "seat_width_m": 0.46
+        }
+      },
+      {
+        "kind": "seat_row",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 28.275283018867935,
+          "center_y": 0.0,
+          "center_z": 0.825,
+          "length": 1.0192452830188676,
+          "width": 5.723,
+          "height": 1.25
+        },
+        "mass_kg": 840.0,
+        "label": "Economy",
+        "meta": {
+          "abreast": 10,
+          "aisle_width_m": 0.51,
+          "aisles": 2,
+          "blocks": [
+            3,
+            4,
+            3
+          ],
+          "class": "Economy",
+          "deck": "main",
+          "filled": 10,
+          "seat_width_m": 0.46
+        }
+      },
+      {
+        "kind": "seat_row",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 29.294528301886803,
+          "center_y": 0.0,
+          "center_z": 0.825,
+          "length": 1.0192452830188676,
+          "width": 5.723,
+          "height": 1.25
+        },
+        "mass_kg": 840.0,
+        "label": "Economy",
+        "meta": {
+          "abreast": 10,
+          "aisle_width_m": 0.51,
+          "aisles": 2,
+          "blocks": [
+            3,
+            4,
+            3
+          ],
+          "class": "Economy",
+          "deck": "main",
+          "filled": 10,
+          "seat_width_m": 0.46
+        }
+      },
+      {
+        "kind": "seat_row",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 30.31377358490567,
+          "center_y": 0.0,
+          "center_z": 0.825,
+          "length": 1.0192452830188676,
+          "width": 5.723,
+          "height": 1.25
+        },
+        "mass_kg": 840.0,
+        "label": "Economy",
+        "meta": {
+          "abreast": 10,
+          "aisle_width_m": 0.51,
+          "aisles": 2,
+          "blocks": [
+            3,
+            4,
+            3
+          ],
+          "class": "Economy",
+          "deck": "main",
+          "filled": 10,
+          "seat_width_m": 0.46
+        }
+      },
+      {
+        "kind": "seat_row",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 32.28301886792454,
+          "center_y": 0.0,
+          "center_z": 0.825,
+          "length": 1.0192452830188676,
+          "width": 5.723,
+          "height": 1.25
+        },
+        "mass_kg": 840.0,
+        "label": "Economy",
+        "meta": {
+          "abreast": 10,
+          "aisle_width_m": 0.51,
+          "aisles": 2,
+          "blocks": [
+            3,
+            4,
+            3
+          ],
+          "class": "Economy",
+          "deck": "main",
+          "filled": 10,
+          "seat_width_m": 0.46
+        }
+      },
+      {
+        "kind": "seat_row",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 33.3022641509434,
+          "center_y": 0.0,
+          "center_z": 0.825,
+          "length": 1.0192452830188676,
+          "width": 5.723,
+          "height": 1.25
+        },
+        "mass_kg": 840.0,
+        "label": "Economy",
+        "meta": {
+          "abreast": 10,
+          "aisle_width_m": 0.51,
+          "aisles": 2,
+          "blocks": [
+            3,
+            4,
+            3
+          ],
+          "class": "Economy",
+          "deck": "main",
+          "filled": 10,
+          "seat_width_m": 0.46
+        }
+      },
+      {
+        "kind": "seat_row",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 34.32150943396227,
+          "center_y": 0.0,
+          "center_z": 0.825,
+          "length": 1.0192452830188676,
+          "width": 5.723,
+          "height": 1.25
+        },
+        "mass_kg": 840.0,
+        "label": "Economy",
+        "meta": {
+          "abreast": 10,
+          "aisle_width_m": 0.51,
+          "aisles": 2,
+          "blocks": [
+            3,
+            4,
+            3
+          ],
+          "class": "Economy",
+          "deck": "main",
+          "filled": 10,
+          "seat_width_m": 0.46
+        }
+      },
+      {
+        "kind": "seat_row",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 35.34075471698114,
+          "center_y": 0.0,
+          "center_z": 0.825,
+          "length": 1.0192452830188676,
+          "width": 5.723,
+          "height": 1.25
+        },
+        "mass_kg": 840.0,
+        "label": "Economy",
+        "meta": {
+          "abreast": 10,
+          "aisle_width_m": 0.51,
+          "aisles": 2,
+          "blocks": [
+            3,
+            4,
+            3
+          ],
+          "class": "Economy",
+          "deck": "main",
+          "filled": 10,
+          "seat_width_m": 0.46
+        }
+      },
+      {
+        "kind": "seat_row",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 36.36000000000001,
+          "center_y": 0.0,
+          "center_z": 0.825,
+          "length": 1.0192452830188676,
+          "width": 5.723,
+          "height": 1.25
+        },
+        "mass_kg": 840.0,
+        "label": "Economy",
+        "meta": {
+          "abreast": 10,
+          "aisle_width_m": 0.51,
+          "aisles": 2,
+          "blocks": [
+            3,
+            4,
+            3
+          ],
+          "class": "Economy",
+          "deck": "main",
+          "filled": 10,
+          "seat_width_m": 0.46
+        }
+      },
+      {
+        "kind": "seat_row",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 37.379245283018875,
+          "center_y": 0.0,
+          "center_z": 0.825,
+          "length": 1.0192452830188676,
+          "width": 5.723,
+          "height": 1.25
+        },
+        "mass_kg": 840.0,
+        "label": "Economy",
+        "meta": {
+          "abreast": 10,
+          "aisle_width_m": 0.51,
+          "aisles": 2,
+          "blocks": [
+            3,
+            4,
+            3
+          ],
+          "class": "Economy",
+          "deck": "main",
+          "filled": 10,
+          "seat_width_m": 0.46
+        }
+      },
+      {
+        "kind": "seat_row",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 38.398490566037744,
+          "center_y": 0.0,
+          "center_z": 0.825,
+          "length": 1.0192452830188676,
+          "width": 5.723,
+          "height": 1.25
+        },
+        "mass_kg": 840.0,
+        "label": "Economy",
+        "meta": {
+          "abreast": 10,
+          "aisle_width_m": 0.51,
+          "aisles": 2,
+          "blocks": [
+            3,
+            4,
+            3
+          ],
+          "class": "Economy",
+          "deck": "main",
+          "filled": 10,
+          "seat_width_m": 0.46
+        }
+      },
+      {
+        "kind": "seat_row",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 39.41773584905661,
+          "center_y": 0.0,
+          "center_z": 0.825,
+          "length": 1.0192452830188676,
+          "width": 5.723,
+          "height": 1.25
+        },
+        "mass_kg": 840.0,
+        "label": "Economy",
+        "meta": {
+          "abreast": 10,
+          "aisle_width_m": 0.51,
+          "aisles": 2,
+          "blocks": [
+            3,
+            4,
+            3
+          ],
+          "class": "Economy",
+          "deck": "main",
+          "filled": 10,
+          "seat_width_m": 0.46
+        }
+      },
+      {
+        "kind": "seat_row",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 40.43698113207548,
+          "center_y": 0.0,
+          "center_z": 0.825,
+          "length": 1.0192452830188676,
+          "width": 5.723,
+          "height": 1.25
+        },
+        "mass_kg": 840.0,
+        "label": "Economy",
+        "meta": {
+          "abreast": 10,
+          "aisle_width_m": 0.51,
+          "aisles": 2,
+          "blocks": [
+            3,
+            4,
+            3
+          ],
+          "class": "Economy",
+          "deck": "main",
+          "filled": 10,
+          "seat_width_m": 0.46
+        }
+      },
+      {
+        "kind": "seat_row",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 41.45622641509435,
+          "center_y": 0.0,
+          "center_z": 0.825,
+          "length": 1.0192452830188676,
+          "width": 5.723,
+          "height": 1.25
+        },
+        "mass_kg": 840.0,
+        "label": "Economy",
+        "meta": {
+          "abreast": 10,
+          "aisle_width_m": 0.51,
+          "aisles": 2,
+          "blocks": [
+            3,
+            4,
+            3
+          ],
+          "class": "Economy",
+          "deck": "main",
+          "filled": 10,
+          "seat_width_m": 0.46
+        }
+      },
+      {
+        "kind": "seat_row",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 42.47547169811322,
+          "center_y": 0.0,
+          "center_z": 0.825,
+          "length": 1.0192452830188676,
+          "width": 5.723,
+          "height": 1.25
+        },
+        "mass_kg": 840.0,
+        "label": "Economy",
+        "meta": {
+          "abreast": 10,
+          "aisle_width_m": 0.51,
+          "aisles": 2,
+          "blocks": [
+            3,
+            4,
+            3
+          ],
+          "class": "Economy",
+          "deck": "main",
+          "filled": 10,
+          "seat_width_m": 0.46
+        }
+      },
+      {
+        "kind": "seat_row",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 44.44471698113209,
+          "center_y": 0.0,
+          "center_z": 0.825,
+          "length": 1.0192452830188676,
+          "width": 5.723,
+          "height": 1.25
+        },
+        "mass_kg": 840.0,
+        "label": "Economy",
+        "meta": {
+          "abreast": 10,
+          "aisle_width_m": 0.51,
+          "aisles": 2,
+          "blocks": [
+            3,
+            4,
+            3
+          ],
+          "class": "Economy",
+          "deck": "main",
+          "filled": 10,
+          "seat_width_m": 0.46
+        }
+      },
+      {
+        "kind": "seat_row",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 45.46396226415096,
+          "center_y": 0.0,
+          "center_z": 0.825,
+          "length": 1.0192452830188676,
+          "width": 5.723,
+          "height": 1.25
+        },
+        "mass_kg": 840.0,
+        "label": "Economy",
+        "meta": {
+          "abreast": 10,
+          "aisle_width_m": 0.51,
+          "aisles": 2,
+          "blocks": [
+            3,
+            4,
+            3
+          ],
+          "class": "Economy",
+          "deck": "main",
+          "filled": 10,
+          "seat_width_m": 0.46
+        }
+      },
+      {
+        "kind": "seat_row",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 46.483207547169826,
+          "center_y": 0.0,
+          "center_z": 0.825,
+          "length": 1.0192452830188676,
+          "width": 5.723,
+          "height": 1.25
+        },
+        "mass_kg": 840.0,
+        "label": "Economy",
+        "meta": {
+          "abreast": 10,
+          "aisle_width_m": 0.51,
+          "aisles": 2,
+          "blocks": [
+            3,
+            4,
+            3
+          ],
+          "class": "Economy",
+          "deck": "main",
+          "filled": 10,
+          "seat_width_m": 0.46
+        }
+      },
+      {
+        "kind": "seat_row",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 47.502452830188695,
+          "center_y": 0.0,
+          "center_z": 0.825,
+          "length": 1.0192452830188676,
+          "width": 5.723,
+          "height": 1.25
+        },
+        "mass_kg": 840.0,
+        "label": "Economy",
+        "meta": {
+          "abreast": 10,
+          "aisle_width_m": 0.51,
+          "aisles": 2,
+          "blocks": [
+            3,
+            4,
+            3
+          ],
+          "class": "Economy",
+          "deck": "main",
+          "filled": 10,
+          "seat_width_m": 0.46
+        }
+      },
+      {
+        "kind": "seat_row",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 48.52169811320756,
+          "center_y": 0.0,
+          "center_z": 0.825,
+          "length": 1.0192452830188676,
+          "width": 5.723,
+          "height": 1.25
+        },
+        "mass_kg": 840.0,
+        "label": "Economy",
+        "meta": {
+          "abreast": 10,
+          "aisle_width_m": 0.51,
+          "aisles": 2,
+          "blocks": [
+            3,
+            4,
+            3
+          ],
+          "class": "Economy",
+          "deck": "main",
+          "filled": 10,
+          "seat_width_m": 0.46
+        }
+      },
+      {
+        "kind": "seat_row",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 49.54094339622643,
+          "center_y": 0.0,
+          "center_z": 0.825,
+          "length": 1.0192452830188676,
+          "width": 5.723,
+          "height": 1.25
+        },
+        "mass_kg": 840.0,
+        "label": "Economy",
+        "meta": {
+          "abreast": 10,
+          "aisle_width_m": 0.51,
+          "aisles": 2,
+          "blocks": [
+            3,
+            4,
+            3
+          ],
+          "class": "Economy",
+          "deck": "main",
+          "filled": 10,
+          "seat_width_m": 0.46
+        }
+      },
+      {
+        "kind": "seat_row",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 50.5601886792453,
+          "center_y": 0.0,
+          "center_z": 0.825,
+          "length": 1.0192452830188676,
+          "width": 5.723,
+          "height": 1.25
+        },
+        "mass_kg": 840.0,
+        "label": "Economy",
+        "meta": {
+          "abreast": 10,
+          "aisle_width_m": 0.51,
+          "aisles": 2,
+          "blocks": [
+            3,
+            4,
+            3
+          ],
+          "class": "Economy",
+          "deck": "main",
+          "filled": 10,
+          "seat_width_m": 0.46
+        }
+      },
+      {
+        "kind": "seat_row",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 51.57943396226417,
+          "center_y": 0.0,
+          "center_z": 0.825,
+          "length": 1.0192452830188676,
+          "width": 5.723,
+          "height": 1.25
+        },
+        "mass_kg": 840.0,
+        "label": "Economy",
+        "meta": {
+          "abreast": 10,
+          "aisle_width_m": 0.51,
+          "aisles": 2,
+          "blocks": [
+            3,
+            4,
+            3
+          ],
+          "class": "Economy",
+          "deck": "main",
+          "filled": 10,
+          "seat_width_m": 0.46
+        }
+      },
+      {
+        "kind": "seat_row",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 52.59867924528304,
+          "center_y": 0.0,
+          "center_z": 0.825,
+          "length": 1.0192452830188676,
+          "width": 5.723,
+          "height": 1.25
+        },
+        "mass_kg": 840.0,
+        "label": "Economy",
+        "meta": {
+          "abreast": 10,
+          "aisle_width_m": 0.51,
+          "aisles": 2,
+          "blocks": [
+            3,
+            4,
+            3
+          ],
+          "class": "Economy",
+          "deck": "main",
+          "filled": 10,
+          "seat_width_m": 0.46
+        }
+      },
+      {
+        "kind": "seat_row",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 53.617924528301906,
+          "center_y": 0.0,
+          "center_z": 0.825,
+          "length": 1.0192452830188676,
+          "width": 5.723,
+          "height": 1.25
+        },
+        "mass_kg": 840.0,
+        "label": "Economy",
+        "meta": {
+          "abreast": 10,
+          "aisle_width_m": 0.51,
+          "aisles": 2,
+          "blocks": [
+            3,
+            4,
+            3
+          ],
+          "class": "Economy",
+          "deck": "main",
+          "filled": 10,
+          "seat_width_m": 0.46
+        }
+      },
+      {
+        "kind": "seat_row",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 55.58716981132078,
+          "center_y": 0.0,
+          "center_z": 0.825,
+          "length": 1.0192452830188676,
+          "width": 5.723,
+          "height": 1.25
+        },
+        "mass_kg": 840.0,
+        "label": "Economy",
+        "meta": {
+          "abreast": 10,
+          "aisle_width_m": 0.51,
+          "aisles": 2,
+          "blocks": [
+            3,
+            4,
+            3
+          ],
+          "class": "Economy",
+          "deck": "main",
+          "filled": 10,
+          "seat_width_m": 0.46
+        }
+      },
+      {
+        "kind": "seat_row",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 56.606415094339646,
+          "center_y": 0.0,
+          "center_z": 0.825,
+          "length": 1.0192452830188676,
+          "width": 5.723,
+          "height": 1.25
+        },
+        "mass_kg": 840.0,
+        "label": "Economy",
+        "meta": {
+          "abreast": 10,
+          "aisle_width_m": 0.51,
+          "aisles": 2,
+          "blocks": [
+            3,
+            4,
+            3
+          ],
+          "class": "Economy",
+          "deck": "main",
+          "filled": 10,
+          "seat_width_m": 0.46
+        }
+      },
+      {
+        "kind": "seat_row",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 57.625660377358514,
+          "center_y": 0.0,
+          "center_z": 0.825,
+          "length": 1.0192452830188676,
+          "width": 5.723,
+          "height": 1.25
+        },
+        "mass_kg": 840.0,
+        "label": "Economy",
+        "meta": {
+          "abreast": 10,
+          "aisle_width_m": 0.51,
+          "aisles": 2,
+          "blocks": [
+            3,
+            4,
+            3
+          ],
+          "class": "Economy",
+          "deck": "main",
+          "filled": 10,
+          "seat_width_m": 0.46
+        }
+      },
+      {
+        "kind": "seat_row",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 58.64490566037738,
+          "center_y": 0.0,
+          "center_z": 0.825,
+          "length": 1.0192452830188676,
+          "width": 5.723,
+          "height": 1.25
+        },
+        "mass_kg": 840.0,
+        "label": "Economy",
+        "meta": {
+          "abreast": 10,
+          "aisle_width_m": 0.51,
+          "aisles": 2,
+          "blocks": [
+            3,
+            4,
+            3
+          ],
+          "class": "Economy",
+          "deck": "main",
+          "filled": 10,
+          "seat_width_m": 0.46
+        }
+      },
+      {
+        "kind": "seat_row",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 59.66415094339625,
+          "center_y": 0.0,
+          "center_z": 0.825,
+          "length": 1.0192452830188676,
+          "width": 5.723,
+          "height": 1.25
+        },
+        "mass_kg": 840.0,
+        "label": "Economy",
+        "meta": {
+          "abreast": 10,
+          "aisle_width_m": 0.51,
+          "aisles": 2,
+          "blocks": [
+            3,
+            4,
+            3
+          ],
+          "class": "Economy",
+          "deck": "main",
+          "filled": 10,
+          "seat_width_m": 0.46
+        }
+      },
+      {
+        "kind": "seat_row",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 60.68339622641512,
+          "center_y": 0.0,
+          "center_z": 0.825,
+          "length": 1.0192452830188676,
+          "width": 5.723,
+          "height": 1.25
+        },
+        "mass_kg": 840.0,
+        "label": "Economy",
+        "meta": {
+          "abreast": 10,
+          "aisle_width_m": 0.51,
+          "aisles": 2,
+          "blocks": [
+            3,
+            4,
+            3
+          ],
+          "class": "Economy",
+          "deck": "main",
+          "filled": 10,
+          "seat_width_m": 0.46
+        }
+      },
+      {
+        "kind": "seat_row",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 61.70264150943399,
+          "center_y": 0.0,
+          "center_z": 0.825,
+          "length": 1.0192452830188676,
+          "width": 5.723,
+          "height": 1.25
+        },
+        "mass_kg": 840.0,
+        "label": "Economy",
+        "meta": {
+          "abreast": 10,
+          "aisle_width_m": 0.51,
+          "aisles": 2,
+          "blocks": [
+            3,
+            4,
+            3
+          ],
+          "class": "Economy",
+          "deck": "main",
+          "filled": 10,
+          "seat_width_m": 0.46
+        }
+      },
+      {
+        "kind": "seat_row",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 62.72188679245286,
+          "center_y": 0.0,
+          "center_z": 0.825,
+          "length": 1.0192452830188676,
+          "width": 5.723,
+          "height": 1.25
+        },
+        "mass_kg": 840.0,
+        "label": "Economy",
+        "meta": {
+          "abreast": 10,
+          "aisle_width_m": 0.51,
+          "aisles": 2,
+          "blocks": [
+            3,
+            4,
+            3
+          ],
+          "class": "Economy",
+          "deck": "main",
+          "filled": 10,
+          "seat_width_m": 0.46
+        }
+      },
+      {
+        "kind": "seat_row",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 63.741132075471725,
+          "center_y": 0.0,
+          "center_z": 0.8444860736747541,
+          "length": 1.0192452830188676,
+          "width": 5.649756720575018,
+          "height": 1.25
+        },
+        "mass_kg": 840.0,
+        "label": "Economy",
+        "meta": {
+          "abreast": 10,
+          "aisle_width_m": 0.51,
+          "aisles": 2,
+          "blocks": [
+            3,
+            4,
+            3
+          ],
+          "class": "Economy",
+          "deck": "main",
+          "filled": 10,
+          "seat_width_m": 0.46
+        }
+      },
+      {
+        "kind": "seat_row",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 64.7603773584906,
+          "center_y": 0.0,
+          "center_z": 0.8833144654088063,
+          "length": 1.0192452830188676,
+          "width": 5.50381050314465,
+          "height": 1.25
+        },
+        "mass_kg": 420.0,
+        "label": "Economy",
+        "meta": {
+          "abreast": 9,
+          "aisle_width_m": 0.51,
+          "aisles": 2,
+          "blocks": [
+            3,
+            3,
+            3
+          ],
+          "class": "Economy",
+          "deck": "main",
+          "filled": 5,
+          "seat_width_m": 0.46
+        }
+      },
+      {
+        "kind": "overhead_bin",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 10.507735849056605,
+          "center_y": -2.124868417407584,
+          "center_z": 1.95,
+          "length": 6.115471698113211,
+          "width": 0.5,
+          "height": 0.4
+        },
+        "mass_kg": 0.0,
+        "label": "Sidewall pivot bin",
+        "meta": {
+          "bin_type": "sidewall"
+        }
+      },
+      {
+        "kind": "overhead_bin",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 10.507735849056605,
+          "center_y": 2.124868417407584,
+          "center_z": 1.95,
+          "length": 6.115471698113211,
+          "width": 0.5,
+          "height": 0.4
+        },
+        "mass_kg": 0.0,
+        "label": "Sidewall pivot bin",
+        "meta": {
+          "bin_type": "sidewall"
+        }
+      },
+      {
+        "kind": "overhead_bin",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 10.507735849056605,
+          "center_y": 0.0,
+          "center_z": 2.09,
+          "length": 6.115471698113211,
+          "width": 1.3248,
+          "height": 0.34
+        },
+        "mass_kg": 0.0,
+        "label": "Center hinge bin",
+        "meta": {
+          "bin_type": "center"
+        }
+      },
+      {
+        "kind": "overhead_bin",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 16.623207547169816,
+          "center_y": -2.124868417407584,
+          "center_z": 1.95,
+          "length": 6.115471698113211,
+          "width": 0.5,
+          "height": 0.4
+        },
+        "mass_kg": 0.0,
+        "label": "Sidewall pivot bin",
+        "meta": {
+          "bin_type": "sidewall"
+        }
+      },
+      {
+        "kind": "overhead_bin",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 16.623207547169816,
+          "center_y": 2.124868417407584,
+          "center_z": 1.95,
+          "length": 6.115471698113211,
+          "width": 0.5,
+          "height": 0.4
+        },
+        "mass_kg": 0.0,
+        "label": "Sidewall pivot bin",
+        "meta": {
+          "bin_type": "sidewall"
+        }
+      },
+      {
+        "kind": "overhead_bin",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 16.623207547169816,
+          "center_y": 0.0,
+          "center_z": 2.09,
+          "length": 6.115471698113211,
+          "width": 1.3248,
+          "height": 0.34
+        },
+        "mass_kg": 0.0,
+        "label": "Center hinge bin",
+        "meta": {
+          "bin_type": "center"
+        }
+      },
+      {
+        "kind": "overhead_bin",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 23.688679245283026,
+          "center_y": -2.124868417407584,
+          "center_z": 1.95,
+          "length": 6.115471698113211,
+          "width": 0.5,
+          "height": 0.4
+        },
+        "mass_kg": 0.0,
+        "label": "Sidewall pivot bin",
+        "meta": {
+          "bin_type": "sidewall"
+        }
+      },
+      {
+        "kind": "overhead_bin",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 23.688679245283026,
+          "center_y": 2.124868417407584,
+          "center_z": 1.95,
+          "length": 6.115471698113211,
+          "width": 0.5,
+          "height": 0.4
+        },
+        "mass_kg": 0.0,
+        "label": "Sidewall pivot bin",
+        "meta": {
+          "bin_type": "sidewall"
+        }
+      },
+      {
+        "kind": "overhead_bin",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 23.688679245283026,
+          "center_y": 0.0,
+          "center_z": 2.09,
+          "length": 6.115471698113211,
+          "width": 1.3248,
+          "height": 0.34
+        },
+        "mass_kg": 0.0,
+        "label": "Center hinge bin",
+        "meta": {
+          "bin_type": "center"
+        }
+      },
+      {
+        "kind": "overhead_bin",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 30.279150943396232,
+          "center_y": -2.124868417407584,
+          "center_z": 1.95,
+          "length": 7.0654716981132,
+          "width": 0.5,
+          "height": 0.4
+        },
+        "mass_kg": 0.0,
+        "label": "Sidewall pivot bin",
+        "meta": {
+          "bin_type": "sidewall"
+        }
+      },
+      {
+        "kind": "overhead_bin",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 30.279150943396232,
+          "center_y": 2.124868417407584,
+          "center_z": 1.95,
+          "length": 7.0654716981132,
+          "width": 0.5,
+          "height": 0.4
+        },
+        "mass_kg": 0.0,
+        "label": "Sidewall pivot bin",
+        "meta": {
+          "bin_type": "sidewall"
+        }
+      },
+      {
+        "kind": "overhead_bin",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 30.279150943396232,
+          "center_y": 0.0,
+          "center_z": 2.09,
+          "length": 7.0654716981132,
+          "width": 1.3248,
+          "height": 0.34
+        },
+        "mass_kg": 0.0,
+        "label": "Center hinge bin",
+        "meta": {
+          "bin_type": "center"
+        }
+      },
+      {
+        "kind": "overhead_bin",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 36.86962264150944,
+          "center_y": -2.124868417407584,
+          "center_z": 1.95,
+          "length": 6.115471698113204,
+          "width": 0.5,
+          "height": 0.4
+        },
+        "mass_kg": 0.0,
+        "label": "Sidewall pivot bin",
+        "meta": {
+          "bin_type": "sidewall"
+        }
+      },
+      {
+        "kind": "overhead_bin",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 36.86962264150944,
+          "center_y": 2.124868417407584,
+          "center_z": 1.95,
+          "length": 6.115471698113204,
+          "width": 0.5,
+          "height": 0.4
+        },
+        "mass_kg": 0.0,
+        "label": "Sidewall pivot bin",
+        "meta": {
+          "bin_type": "sidewall"
+        }
+      },
+      {
+        "kind": "overhead_bin",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 36.86962264150944,
+          "center_y": 0.0,
+          "center_z": 2.09,
+          "length": 6.115471698113204,
+          "width": 1.3248,
+          "height": 0.34
+        },
+        "mass_kg": 0.0,
+        "label": "Center hinge bin",
+        "meta": {
+          "bin_type": "center"
+        }
+      },
+      {
+        "kind": "overhead_bin",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 43.46009433962266,
+          "center_y": -2.124868417407584,
+          "center_z": 1.95,
+          "length": 7.065471698113207,
+          "width": 0.5,
+          "height": 0.4
+        },
+        "mass_kg": 0.0,
+        "label": "Sidewall pivot bin",
+        "meta": {
+          "bin_type": "sidewall"
+        }
+      },
+      {
+        "kind": "overhead_bin",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 43.46009433962266,
+          "center_y": 2.124868417407584,
+          "center_z": 1.95,
+          "length": 7.065471698113207,
+          "width": 0.5,
+          "height": 0.4
+        },
+        "mass_kg": 0.0,
+        "label": "Sidewall pivot bin",
+        "meta": {
+          "bin_type": "sidewall"
+        }
+      },
+      {
+        "kind": "overhead_bin",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 43.46009433962266,
+          "center_y": 0.0,
+          "center_z": 2.09,
+          "length": 7.065471698113207,
+          "width": 1.3248,
+          "height": 0.34
+        },
+        "mass_kg": 0.0,
+        "label": "Center hinge bin",
+        "meta": {
+          "bin_type": "center"
+        }
+      },
+      {
+        "kind": "overhead_bin",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 50.05056603773586,
+          "center_y": -2.124868417407584,
+          "center_z": 1.95,
+          "length": 6.115471698113204,
+          "width": 0.5,
+          "height": 0.4
+        },
+        "mass_kg": 0.0,
+        "label": "Sidewall pivot bin",
+        "meta": {
+          "bin_type": "sidewall"
+        }
+      },
+      {
+        "kind": "overhead_bin",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 50.05056603773586,
+          "center_y": 2.124868417407584,
+          "center_z": 1.95,
+          "length": 6.115471698113204,
+          "width": 0.5,
+          "height": 0.4
+        },
+        "mass_kg": 0.0,
+        "label": "Sidewall pivot bin",
+        "meta": {
+          "bin_type": "sidewall"
+        }
+      },
+      {
+        "kind": "overhead_bin",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 50.05056603773586,
+          "center_y": 0.0,
+          "center_z": 2.09,
+          "length": 6.115471698113204,
+          "width": 1.3248,
+          "height": 0.34
+        },
+        "mass_kg": 0.0,
+        "label": "Center hinge bin",
+        "meta": {
+          "bin_type": "center"
+        }
+      },
+      {
+        "kind": "overhead_bin",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 56.64103773584908,
+          "center_y": -2.124868417407584,
+          "center_z": 1.95,
+          "length": 7.065471698113207,
+          "width": 0.5,
+          "height": 0.4
+        },
+        "mass_kg": 0.0,
+        "label": "Sidewall pivot bin",
+        "meta": {
+          "bin_type": "sidewall"
+        }
+      },
+      {
+        "kind": "overhead_bin",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 56.64103773584908,
+          "center_y": 2.124868417407584,
+          "center_z": 1.95,
+          "length": 7.065471698113207,
+          "width": 0.5,
+          "height": 0.4
+        },
+        "mass_kg": 0.0,
+        "label": "Sidewall pivot bin",
+        "meta": {
+          "bin_type": "sidewall"
+        }
+      },
+      {
+        "kind": "overhead_bin",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 56.64103773584908,
+          "center_y": 0.0,
+          "center_z": 2.09,
+          "length": 7.065471698113207,
+          "width": 1.3248,
+          "height": 0.34
+        },
+        "mass_kg": 0.0,
+        "label": "Center hinge bin",
+        "meta": {
+          "bin_type": "center"
+        }
+      },
+      {
+        "kind": "overhead_bin",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 62.721886792452864,
+          "center_y": -2.1246954259872277,
+          "center_z": 1.9500718778077282,
+          "length": 5.09622641509435,
+          "width": 0.5,
+          "height": 0.4
+        },
+        "mass_kg": 0.0,
+        "label": "Sidewall pivot bin",
+        "meta": {
+          "bin_type": "sidewall"
+        }
+      },
+      {
+        "kind": "overhead_bin",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 62.721886792452864,
+          "center_y": 2.1246954259872277,
+          "center_z": 1.9500718778077282,
+          "length": 5.09622641509435,
+          "width": 0.5,
+          "height": 0.4
+        },
+        "mass_kg": 0.0,
+        "label": "Sidewall pivot bin",
+        "meta": {
+          "bin_type": "sidewall"
+        }
+      },
+      {
+        "kind": "overhead_bin",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 62.721886792452864,
+          "center_y": 0.0,
+          "center_z": 2.0900718778077283,
+          "length": 5.09622641509435,
+          "width": 1.3248,
+          "height": 0.34
+        },
+        "mass_kg": 0.0,
+        "label": "Center hinge bin",
+        "meta": {
+          "bin_type": "center"
+        }
+      },
+      {
+        "kind": "galley",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 6.975,
+          "center_y": 2.4365,
+          "center_z": 0.825,
+          "length": 0.95,
+          "width": 0.85,
+          "height": 1.25
+        },
+        "mass_kg": 0.0,
+        "label": "Galley",
+        "meta": {}
+      },
+      {
+        "kind": "galley",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 65.745,
+          "center_y": 2.1949502136010577,
+          "center_z": 0.9866124813746812,
+          "length": 0.95,
+          "width": 0.85,
+          "height": 1.25
+        },
+        "mass_kg": 0.0,
+        "label": "Galley",
+        "meta": {}
+      },
+      {
+        "kind": "galley",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 20.155943396226423,
+          "center_y": 2.4365,
+          "center_z": 0.825,
+          "length": 0.95,
+          "width": 0.85,
+          "height": 1.25
+        },
+        "mass_kg": 0.0,
+        "label": "Galley",
+        "meta": {}
+      },
+      {
+        "kind": "galley",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 54.602547169811345,
+          "center_y": 2.4365,
+          "center_z": 0.825,
+          "length": 0.95,
+          "width": 0.85,
+          "height": 1.25
+        },
+        "mass_kg": 0.0,
+        "label": "Galley",
+        "meta": {}
+      },
+      {
+        "kind": "galley",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 31.298396226415107,
+          "center_y": 2.4365,
+          "center_z": 0.825,
+          "length": 0.95,
+          "width": 0.85,
+          "height": 1.25
+        },
+        "mass_kg": 0.0,
+        "label": "Galley",
+        "meta": {}
+      },
+      {
+        "kind": "galley",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 43.46009433962266,
+          "center_y": 2.4365,
+          "center_z": 0.825,
+          "length": 0.95,
+          "width": 0.85,
+          "height": 1.25
+        },
+        "mass_kg": 0.0,
+        "label": "Galley",
+        "meta": {}
+      },
+      {
+        "kind": "galley",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 6.975,
+          "center_y": 1.5864999999999998,
+          "center_z": 0.825,
+          "length": 0.95,
+          "width": 0.85,
+          "height": 1.25
+        },
+        "mass_kg": 0.0,
+        "label": "Galley",
+        "meta": {}
+      },
+      {
+        "kind": "accessible_lav",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 6.975,
+          "center_y": -2.4114999999999998,
+          "center_z": 0.825,
+          "length": 0.95,
+          "width": 1.45,
+          "height": 1.25
+        },
+        "mass_kg": 0.0,
+        "label": "Accessible lav",
+        "meta": {}
+      },
+      {
+        "kind": "lav",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 65.745,
+          "center_y": -2.1699502136010573,
+          "center_z": 0.9866124813746812,
+          "length": 0.95,
+          "width": 0.9,
+          "height": 1.25
+        },
+        "mass_kg": 0.0,
+        "label": "Lav",
+        "meta": {}
+      },
+      {
+        "kind": "lav",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 20.155943396226423,
+          "center_y": -2.4114999999999998,
+          "center_z": 0.825,
+          "length": 0.95,
+          "width": 0.9,
+          "height": 1.25
+        },
+        "mass_kg": 0.0,
+        "label": "Lav",
+        "meta": {}
+      },
+      {
+        "kind": "lav",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 54.602547169811345,
+          "center_y": -2.4114999999999998,
+          "center_z": 0.825,
+          "length": 0.95,
+          "width": 0.9,
+          "height": 1.25
+        },
+        "mass_kg": 0.0,
+        "label": "Lav",
+        "meta": {}
+      },
+      {
+        "kind": "lav",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 31.298396226415107,
+          "center_y": -2.4114999999999998,
+          "center_z": 0.825,
+          "length": 0.95,
+          "width": 0.9,
+          "height": 1.25
+        },
+        "mass_kg": 0.0,
+        "label": "Lav",
+        "meta": {}
+      },
+      {
+        "kind": "lav",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 43.46009433962266,
+          "center_y": -2.4114999999999998,
+          "center_z": 0.825,
+          "length": 0.95,
+          "width": 0.9,
+          "height": 1.25
+        },
+        "mass_kg": 0.0,
+        "label": "Lav",
+        "meta": {}
+      },
+      {
+        "kind": "lav",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 6.975,
+          "center_y": -1.5115,
+          "center_z": 0.825,
+          "length": 0.95,
+          "width": 0.9,
+          "height": 1.25
+        },
+        "mass_kg": 0.0,
+        "label": "Lav",
+        "meta": {}
+      },
+      {
+        "kind": "lav",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 65.745,
+          "center_y": -1.2699502136010576,
+          "center_z": 0.9866124813746812,
+          "length": 0.95,
+          "width": 0.9,
+          "height": 1.25
+        },
+        "mass_kg": 0.0,
+        "label": "Lav",
+        "meta": {}
+      },
+      {
+        "kind": "lav",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 20.155943396226423,
+          "center_y": -1.5115,
+          "center_z": 0.825,
+          "length": 0.95,
+          "width": 0.9,
+          "height": 1.25
+        },
+        "mass_kg": 0.0,
+        "label": "Lav",
+        "meta": {}
+      },
+      {
+        "kind": "lav",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 54.602547169811345,
+          "center_y": -1.5115,
+          "center_z": 0.825,
+          "length": 0.95,
+          "width": 0.9,
+          "height": 1.25
+        },
+        "mass_kg": 0.0,
+        "label": "Lav",
+        "meta": {}
+      },
+      {
+        "kind": "lav",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 31.298396226415107,
+          "center_y": -1.5115,
+          "center_z": 0.825,
+          "length": 0.95,
+          "width": 0.9,
+          "height": 1.25
+        },
+        "mass_kg": 0.0,
+        "label": "Lav",
+        "meta": {}
+      },
+      {
+        "kind": "lav",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 43.46009433962266,
+          "center_y": -1.5115,
+          "center_z": 0.825,
+          "length": 0.95,
+          "width": 0.9,
+          "height": 1.25
+        },
+        "mass_kg": 0.0,
+        "label": "Lav",
+        "meta": {}
+      },
+      {
+        "kind": "wheelchair_stowage",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 54.602547169811345,
+          "center_y": 1.7365,
+          "center_z": 0.7250000000000001,
+          "length": 0.95,
+          "width": 0.55,
+          "height": 1.05
+        },
+        "mass_kg": 0.0,
+        "label": "Wheelchair stowage",
+        "meta": {}
+      },
+      {
+        "kind": "exit",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 6.975,
+          "center_y": -3.0115,
+          "center_z": 1.115,
+          "length": 1.07,
+          "width": 0.25,
+          "height": 1.83
+        },
+        "mass_kg": 0.0,
+        "label": "Type A",
+        "meta": {
+          "door_height_m": 1.83,
+          "door_width_m": 1.07,
+          "exit_type": "A"
+        }
+      },
+      {
+        "kind": "exit",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 6.975,
+          "center_y": 3.0115,
+          "center_z": 1.115,
+          "length": 1.07,
+          "width": 0.25,
+          "height": 1.83
+        },
+        "mass_kg": 0.0,
+        "label": "Type A",
+        "meta": {
+          "door_height_m": 1.83,
+          "door_width_m": 1.07,
+          "exit_type": "A"
+        }
+      },
+      {
+        "kind": "exit",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 20.155943396226423,
+          "center_y": -3.0115,
+          "center_z": 1.115,
+          "length": 1.07,
+          "width": 0.25,
+          "height": 1.83
+        },
+        "mass_kg": 0.0,
+        "label": "Type A",
+        "meta": {
+          "door_height_m": 1.83,
+          "door_width_m": 1.07,
+          "exit_type": "A"
+        }
+      },
+      {
+        "kind": "exit",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 20.155943396226423,
+          "center_y": 3.0115,
+          "center_z": 1.115,
+          "length": 1.07,
+          "width": 0.25,
+          "height": 1.83
+        },
+        "mass_kg": 0.0,
+        "label": "Type A",
+        "meta": {
+          "door_height_m": 1.83,
+          "door_width_m": 1.07,
+          "exit_type": "A"
+        }
+      },
+      {
+        "kind": "exit",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 31.298396226415107,
+          "center_y": -3.0115,
+          "center_z": 1.115,
+          "length": 1.07,
+          "width": 0.25,
+          "height": 1.83
+        },
+        "mass_kg": 0.0,
+        "label": "Type A",
+        "meta": {
+          "door_height_m": 1.83,
+          "door_width_m": 1.07,
+          "exit_type": "A"
+        }
+      },
+      {
+        "kind": "exit",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 31.298396226415107,
+          "center_y": 3.0115,
+          "center_z": 1.115,
+          "length": 1.07,
+          "width": 0.25,
+          "height": 1.83
+        },
+        "mass_kg": 0.0,
+        "label": "Type A",
+        "meta": {
+          "door_height_m": 1.83,
+          "door_width_m": 1.07,
+          "exit_type": "A"
+        }
+      },
+      {
+        "kind": "exit",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 54.602547169811345,
+          "center_y": -3.0115,
+          "center_z": 1.115,
+          "length": 1.07,
+          "width": 0.25,
+          "height": 1.83
+        },
+        "mass_kg": 0.0,
+        "label": "Type A",
+        "meta": {
+          "door_height_m": 1.83,
+          "door_width_m": 1.07,
+          "exit_type": "A"
+        }
+      },
+      {
+        "kind": "exit",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 54.602547169811345,
+          "center_y": 3.0115,
+          "center_z": 1.115,
+          "length": 1.07,
+          "width": 0.25,
+          "height": 1.83
+        },
+        "mass_kg": 0.0,
+        "label": "Type A",
+        "meta": {
+          "door_height_m": 1.83,
+          "door_width_m": 1.07,
+          "exit_type": "A"
+        }
+      },
+      {
+        "kind": "exit",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 65.745,
+          "center_y": -2.7077695428164588,
+          "center_z": 1.276612481374681,
+          "length": 1.07,
+          "width": 0.25,
+          "height": 1.83
+        },
+        "mass_kg": 0.0,
+        "label": "Type A",
+        "meta": {
+          "door_height_m": 1.83,
+          "door_width_m": 1.07,
+          "exit_type": "A"
+        }
+      },
+      {
+        "kind": "exit",
+        "deck": "main",
+        "geometry_m": {
+          "center_x": 65.745,
+          "center_y": 2.7077695428164588,
+          "center_z": 1.276612481374681,
+          "length": 1.07,
+          "width": 0.25,
+          "height": 1.83
+        },
+        "mass_kg": 0.0,
+        "label": "Type A",
+        "meta": {
+          "door_height_m": 1.83,
+          "door_width_m": 1.07,
+          "exit_type": "A"
+        }
+      },
+      {
+        "kind": "bag",
+        "deck": "lower",
+        "geometry_m": {
+          "center_x": 22.340000000000003,
+          "center_y": -0.79,
+          "center_z": -1.0795000000000001,
+          "length": 1.56,
+          "width": 1.53,
+          "height": 1.63
+        },
+        "mass_kg": 532.0,
+        "label": "AKE 532 kg",
+        "meta": {
+          "color": "#e74c3c",
+          "contour_fidelity": "visualization_only",
+          "contour_mirrorable": true,
+          "contour_source": "IATA public LD3 illustration (AKE/AVE/AKN/RKN), E contour; normalized visualization approximation, not aircraft-specific WBM/CAD",
+          "fill_fraction": 0.29880478087649404,
+          "net_load_kg": null,
+          "normalized_contour_yz": [
+            [
+              -1.0,
+              0.0
+            ],
+            [
+              0.56,
+              0.0
+            ],
+            [
+              1.0,
+              0.44
+            ],
+            [
+              1.0,
+              0.78
+            ],
+            [
+              1.0,
+              1.0
+            ],
+            [
+              0.0,
+              1.0
+            ],
+            [
+              -1.0,
+              1.0
+            ],
+            [
+              -1.0,
+              0.5
+            ]
+          ],
+          "uld_code": "AKE"
+        }
+      },
+      {
+        "kind": "bag",
+        "deck": "lower",
+        "geometry_m": {
+          "center_x": 23.980000000000004,
+          "center_y": -0.79,
+          "center_z": -1.0795000000000001,
+          "length": 1.56,
+          "width": 1.53,
+          "height": 1.63
+        },
+        "mass_kg": 1588.0,
+        "label": "AKE 1588 kg",
+        "meta": {
+          "color": "#e74c3c",
+          "contour_fidelity": "visualization_only",
+          "contour_mirrorable": true,
+          "contour_source": "IATA public LD3 illustration (AKE/AVE/AKN/RKN), E contour; normalized visualization approximation, not aircraft-specific WBM/CAD",
+          "fill_fraction": 1.0,
+          "net_load_kg": null,
+          "normalized_contour_yz": [
+            [
+              -1.0,
+              0.0
+            ],
+            [
+              0.56,
+              0.0
+            ],
+            [
+              1.0,
+              0.44
+            ],
+            [
+              1.0,
+              0.78
+            ],
+            [
+              1.0,
+              1.0
+            ],
+            [
+              0.0,
+              1.0
+            ],
+            [
+              -1.0,
+              1.0
+            ],
+            [
+              -1.0,
+              0.5
+            ]
+          ],
+          "uld_code": "AKE"
+        }
+      },
+      {
+        "kind": "bag",
+        "deck": "lower",
+        "geometry_m": {
+          "center_x": 23.980000000000004,
+          "center_y": 0.79,
+          "center_z": -1.0795000000000001,
+          "length": 1.56,
+          "width": 1.53,
+          "height": 1.63
+        },
+        "mass_kg": 1588.0,
+        "label": "AKE 1588 kg",
+        "meta": {
+          "color": "#e74c3c",
+          "contour_fidelity": "visualization_only",
+          "contour_mirrorable": true,
+          "contour_source": "IATA public LD3 illustration (AKE/AVE/AKN/RKN), E contour; normalized visualization approximation, not aircraft-specific WBM/CAD",
+          "fill_fraction": 1.0,
+          "net_load_kg": null,
+          "normalized_contour_yz": [
+            [
+              -1.0,
+              0.0
+            ],
+            [
+              0.56,
+              0.0
+            ],
+            [
+              1.0,
+              0.44
+            ],
+            [
+              1.0,
+              0.78
+            ],
+            [
+              1.0,
+              1.0
+            ],
+            [
+              0.0,
+              1.0
+            ],
+            [
+              -1.0,
+              1.0
+            ],
+            [
+              -1.0,
+              0.5
+            ]
+          ],
+          "uld_code": "AKE"
+        }
+      },
+      {
+        "kind": "bag",
+        "deck": "lower",
+        "geometry_m": {
+          "center_x": 43.72,
+          "center_y": -0.79,
+          "center_z": -1.0795000000000001,
+          "length": 1.56,
+          "width": 1.53,
+          "height": 1.63
+        },
+        "mass_kg": 1588.0,
+        "label": "AKE 1588 kg",
+        "meta": {
+          "color": "#e74c3c",
+          "contour_fidelity": "visualization_only",
+          "contour_mirrorable": true,
+          "contour_source": "IATA public LD3 illustration (AKE/AVE/AKN/RKN), E contour; normalized visualization approximation, not aircraft-specific WBM/CAD",
+          "fill_fraction": 1.0,
+          "net_load_kg": null,
+          "normalized_contour_yz": [
+            [
+              -1.0,
+              0.0
+            ],
+            [
+              0.56,
+              0.0
+            ],
+            [
+              1.0,
+              0.44
+            ],
+            [
+              1.0,
+              0.78
+            ],
+            [
+              1.0,
+              1.0
+            ],
+            [
+              0.0,
+              1.0
+            ],
+            [
+              -1.0,
+              1.0
+            ],
+            [
+              -1.0,
+              0.5
+            ]
+          ],
+          "uld_code": "AKE"
+        }
+      },
+      {
+        "kind": "bag",
+        "deck": "lower",
+        "geometry_m": {
+          "center_x": 43.72,
+          "center_y": 0.79,
+          "center_z": -1.0795000000000001,
+          "length": 1.56,
+          "width": 1.53,
+          "height": 1.63
+        },
+        "mass_kg": 1588.0,
+        "label": "AKE 1588 kg",
+        "meta": {
+          "color": "#e74c3c",
+          "contour_fidelity": "visualization_only",
+          "contour_mirrorable": true,
+          "contour_source": "IATA public LD3 illustration (AKE/AVE/AKN/RKN), E contour; normalized visualization approximation, not aircraft-specific WBM/CAD",
+          "fill_fraction": 1.0,
+          "net_load_kg": null,
+          "normalized_contour_yz": [
+            [
+              -1.0,
+              0.0
+            ],
+            [
+              0.56,
+              0.0
+            ],
+            [
+              1.0,
+              0.44
+            ],
+            [
+              1.0,
+              0.78
+            ],
+            [
+              1.0,
+              1.0
+            ],
+            [
+              0.0,
+              1.0
+            ],
+            [
+              -1.0,
+              1.0
+            ],
+            [
+              -1.0,
+              0.5
+            ]
+          ],
+          "uld_code": "AKE"
+        }
+      },
+      {
+        "kind": "bag",
+        "deck": "lower",
+        "geometry_m": {
+          "center_x": 45.36,
+          "center_y": -0.79,
+          "center_z": -1.0795000000000001,
+          "length": 1.56,
+          "width": 1.53,
+          "height": 1.63
+        },
+        "mass_kg": 502.0,
+        "label": "AKE 502 kg",
+        "meta": {
+          "color": "#e74c3c",
+          "contour_fidelity": "visualization_only",
+          "contour_mirrorable": true,
+          "contour_source": "IATA public LD3 illustration (AKE/AVE/AKN/RKN), E contour; normalized visualization approximation, not aircraft-specific WBM/CAD",
+          "fill_fraction": 0.2788844621513944,
+          "net_load_kg": null,
+          "normalized_contour_yz": [
+            [
+              -1.0,
+              0.0
+            ],
+            [
+              0.56,
+              0.0
+            ],
+            [
+              1.0,
+              0.44
+            ],
+            [
+              1.0,
+              0.78
+            ],
+            [
+              1.0,
+              1.0
+            ],
+            [
+              0.0,
+              1.0
+            ],
+            [
+              -1.0,
+              1.0
+            ],
+            [
+              -1.0,
+              0.5
+            ]
+          ],
+          "uld_code": "AKE"
+        }
+      },
+      {
+        "kind": "bag",
+        "deck": "lower",
+        "geometry_m": {
+          "center_x": 45.36,
+          "center_y": 0.79,
+          "center_z": -1.0795000000000001,
+          "length": 1.56,
+          "width": 1.53,
+          "height": 1.63
+        },
+        "mass_kg": 1588.0,
+        "label": "AKE 1588 kg",
+        "meta": {
+          "color": "#e74c3c",
+          "contour_fidelity": "visualization_only",
+          "contour_mirrorable": true,
+          "contour_source": "IATA public LD3 illustration (AKE/AVE/AKN/RKN), E contour; normalized visualization approximation, not aircraft-specific WBM/CAD",
+          "fill_fraction": 1.0,
+          "net_load_kg": null,
+          "normalized_contour_yz": [
+            [
+              -1.0,
+              0.0
+            ],
+            [
+              0.56,
+              0.0
+            ],
+            [
+              1.0,
+              0.44
+            ],
+            [
+              1.0,
+              0.78
+            ],
+            [
+              1.0,
+              1.0
+            ],
+            [
+              0.0,
+              1.0
+            ],
+            [
+              -1.0,
+              1.0
+            ],
+            [
+              -1.0,
+              0.5
+            ]
+          ],
+          "uld_code": "AKE"
+        }
+      }
+    ],
+    "total_mass_kg": 53074.0,
+    "cg_x_m": 35.98858803763489,
+    "cg_y_m": 0.00824622225571843,
+    "summary": {
+      "accessible_lavatories": 1,
+      "aisle_width_m": 0.51,
+      "bag_mass_t": 8.4,
+      "belly_cargo_t": 0.0,
+      "capacity_binding": "geometry_exit_limit",
+      "cg_pct_mac": 14.924941073818507,
+      "classes": [
+        [
+          "Economy",
+          525
+        ]
+      ],
+      "deck_utilization": [
+        [
+          "main",
+          100.0
+        ]
+      ],
+      "double_deck": false,
+      "exit_capacity": 525,
+      "exit_pairs": 5,
+      "exit_type": "A",
+      "galleys": 7,
+      "geometric_capacity": 525,
+      "hold_capacity_t": 69.276,
+      "hold_ulds": 7,
+      "hold_used_t": 8.974,
+      "lavatories": 12,
+      "max_abreast": 10,
+      "max_certifiable_capacity": 525,
+      "n_aisles": 2,
+      "payload_t": 53.074,
+      "seat_mass_t": 44.1,
+      "seated_pax": 525,
+      "source_capacity_cap": null,
+      "source_exit_layout": null,
+      "total_pax": 525,
+      "type": "passenger",
+      "unseated_pax": 0,
+      "wheelchair_stowages": 1
+    }
+  },
+  "fidelity": {
+    "authoritative": [
+      "effective configuration and optimized design vector",
+      "item centres, envelopes, masses, labels, deck and placement order",
+      "ULD code, fill fraction, net load when modeled, and payload mass/CG"
+    ],
+    "derived_or_nominal": [
+      "fuselage and deck geometry from the configured aircraft model",
+      "seat, monument and overhead-bin envelopes from layout rules",
+      "ULD contours resolved by code from the ALAS IATA-type database"
+    ],
+    "missing_for_manufacturer_fidelity": [
+      "station-indexed structural inner mould line and cabin-liner contour",
+      "window station, reveal depth, glazing curvature and frame profile",
+      "supplier-specific overhead-bin shell, rail and attachment geometry",
+      "ULD serial/orientation/restraint details and measured load bulge"
+    ]
+  }
+}

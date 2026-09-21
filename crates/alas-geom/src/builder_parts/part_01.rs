@@ -296,26 +296,36 @@ impl AircraftBuilder {
     /// circular radius.
     fn build_fuselage(&self, dv: &DesignVector) -> Result<Fuselage, BuildError> {
         let g = &self.geometry.fuselage;
+        g.validate_generated_sections()?;
         let radius = g.diameter_m / 2.0;
         let fus_len = dv.fuselage_length_m;
         let cabin_end = fus_len - g.tailcone_length_m;
 
-        let make_xsec = |x_val: f64, z_val: f64, r_val: f64| -> Result<FuselageXSec, BuildError> {
-            let xsec = match g.height_m {
-                Some(height_m) if height_m != g.diameter_m => {
-                    let local_width = r_val * 2.0;
-                    let local_height = r_val * 2.0 * (height_m / g.diameter_m);
-                    FuselageXSec::new(
-                        [x_val, 0.0, z_val],
-                        None,
-                        Some(local_width),
-                        Some(local_height),
-                        DEFAULT_SHAPE,
+        let local_height_scale = g.height_m.map_or(1.0, |height_m| height_m / g.diameter_m);
+        let mut generated_index = 0usize;
+        let mut make_xsec = |x_val: f64,
+                             z_val: f64,
+                             width_m: f64,
+                             height_m: f64|
+         -> Result<FuselageXSec, BuildError> {
+            let override_section = g.generated_sections.get(generated_index);
+            let (z_m, width_m, height_m, shape) =
+                override_section.map_or((z_val, width_m, height_m, DEFAULT_SHAPE), |section| {
+                    (
+                        section.z_m,
+                        section.width_m,
+                        section.height_m,
+                        section.shape,
                     )
-                }
-                _ => FuselageXSec::new([x_val, 0.0, z_val], Some(r_val), None, None, DEFAULT_SHAPE),
-            }?;
-            Ok(xsec)
+                });
+            generated_index += 1;
+            Ok(FuselageXSec::new(
+                [x_val, 0.0, z_m],
+                None,
+                Some(width_m),
+                Some(height_m),
+                shape,
+            )?)
         };
 
         let mut stations = Vec::new();
@@ -324,11 +334,26 @@ impl AircraftBuilder {
         for &xi in &x_nose[..x_nose.len() - 1] {
             let z_val = g.cabin_z_m + (g.nose_z_m - g.cabin_z_m) * (1.0 - xi).powi(2);
             let r_val = radius * (1.0 - (1.0 - xi).powi(2)).sqrt();
-            stations.push(make_xsec(xi * g.cabin_start_x_m, z_val, r_val)?);
+            stations.push(make_xsec(
+                xi * g.cabin_start_x_m,
+                z_val,
+                r_val * 2.0,
+                r_val * 2.0 * local_height_scale,
+            )?);
         }
 
-        stations.push(make_xsec(g.cabin_start_x_m, g.cabin_z_m, radius)?);
-        stations.push(make_xsec(cabin_end, g.cabin_z_m, radius)?);
+        stations.push(make_xsec(
+            g.cabin_start_x_m,
+            g.cabin_z_m,
+            radius * 2.0,
+            radius * 2.0 * local_height_scale,
+        )?);
+        stations.push(make_xsec(
+            cabin_end,
+            g.cabin_z_m,
+            radius * 2.0,
+            radius * 2.0 * local_height_scale,
+        )?);
 
         // Exclude the first point: it is the cabin end, added above.
         let x_tail = linspace(0.0, 1.0, 10);
@@ -338,7 +363,8 @@ impl AircraftBuilder {
             stations.push(make_xsec(
                 cabin_end + xi * g.tailcone_length_m,
                 z_val,
-                r_val,
+                r_val * 2.0,
+                r_val * 2.0 * local_height_scale,
             )?);
         }
         self.append_custom_fuselage_sections(fus_len, &mut stations)?;

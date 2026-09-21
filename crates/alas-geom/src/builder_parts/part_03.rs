@@ -154,6 +154,36 @@ mod custom_section_tests {
     }
 
     #[test]
+    fn a_generated_fuselage_override_replaces_its_indexed_station() {
+        let mut geometry = GeometryConfig::default();
+        geometry.fuselage.generated_sections = (0..20)
+            .map(|index| alas_config::FuselageSection {
+                x_fraction: index as f64 / 19.0,
+                width_m: 6.2,
+                height_m: 6.2,
+                z_m: 0.2,
+                shape: 2.0,
+            })
+            .collect();
+        let design = DesignVector::default();
+        let cabin_end = design.fuselage_length_m - geometry.fuselage.tailcone_length_m;
+        geometry.fuselage.generated_sections[10].width_m = 8.4;
+        geometry.fuselage.generated_sections[10].height_m = 7.6;
+        geometry.fuselage.generated_sections[10].z_m = 1.1;
+        let airplane = AircraftBuilder::new(Some(geometry))
+            .build(Some(&design), false)
+            .expect("valid generated override builds");
+        let section = airplane.fuselages[0]
+            .xsecs
+            .iter()
+            .find(|section| (section.xyz_c[0] - cabin_end).abs() < 1.0e-12)
+            .expect("generated cabin-end station remains in the loft");
+        assert_eq!(section.width, 8.4);
+        assert_eq!(section.height, 7.6);
+        assert_eq!(section.xyz_c[2], 1.1);
+    }
+
+    #[test]
     fn an_invalid_custom_fuselage_shape_is_a_typed_build_error() {
         let mut geometry = GeometryConfig::default();
         geometry

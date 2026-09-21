@@ -40,7 +40,23 @@ fn status_frame(ui: &Ui, severity: FindingSeverity) -> Frame {
     )
 }
 
-fn show_status_banner(ui: &mut Ui, result: &alas_pipeline::PipelineResult) {
+fn status_banner_title(completed: bool, errors: usize, warnings: usize) -> &'static str {
+    if !completed {
+        "Assessment incomplete"
+    } else if errors > 0 {
+        "Infeasible under implemented checks"
+    } else if warnings > 0 {
+        "Feasible with engineering warnings"
+    } else {
+        "Feasible under implemented checks"
+    }
+}
+
+fn show_status_banner(
+    ui: &mut Ui,
+    result: &alas_pipeline::PipelineResult,
+    completed: bool,
+) {
     let errors = result
         .feasibility
         .findings
@@ -55,22 +71,28 @@ fn show_status_banner(ui: &mut Ui, result: &alas_pipeline::PipelineResult) {
             ("warnings", warnings.to_string()),
         ],
     );
-    let (color, title, detail) = if errors > 0 {
+    let (color, title, detail) = if !completed {
+        (
+            ui.visuals().warn_fg_color,
+            tr(status_banner_title(false, errors, warnings)),
+            tr("The figures below come from finished analysis stages, but the overall feasibility assessment is incomplete. Finalized report exports are unavailable until the pipeline completes."),
+        )
+    } else if errors > 0 {
         (
             ui.visuals().error_fg_color,
-            tr("Infeasible under implemented checks"),
+            tr(status_banner_title(true, errors, warnings)),
             format!("{counts} {}", mission_status_label(result)),
         )
     } else if warnings > 0 {
         (
             ui.visuals().warn_fg_color,
-            tr("Feasible with engineering warnings"),
+            tr(status_banner_title(true, errors, warnings)),
             format!("{counts} {}", mission_status_label(result)),
         )
     } else {
         (
             crate::theme::success_color(ui.visuals()),
-            tr("Feasible under implemented checks"),
+            tr(status_banner_title(true, errors, warnings)),
             mission_status_label(result),
         )
     };
@@ -135,9 +157,11 @@ fn section_title(ui: &mut Ui, title: &str) {
 }
 
 pub(super) fn show_summary(state: &AppState, ui: &mut Ui, result: &alas_pipeline::PipelineResult) {
-    show_status_banner(ui, result);
+    show_status_banner(ui, result, state.pipeline_result_complete);
     ui.add_space(10.0);
-    findings_card::show_findings_card(ui, &result.feasibility.findings);
+    if state.pipeline_result_complete {
+        findings_card::show_findings_card(ui, &result.feasibility.findings);
+    }
 
     section_title(ui, "External analyses");
     show_tool_status_cards(ui, result);
@@ -444,18 +468,11 @@ fn propulsion_metric_card(ui: &mut Ui, label: &str, value: &str) {
         ui.set_min_width(ui.available_width());
         if !label.is_empty() {
             ui.add(
-                egui::Label::new(math_rich_text(&localized_propulsion_label(label)).small()).wrap(),
+                egui::Label::new(RichText::new(localized_propulsion_label(label)).small()).wrap(),
             );
         }
-        ui.add(egui::Label::new(math_rich_text(value).strong().size(14.0)).wrap());
+        ui.add(egui::Label::new(RichText::new(value).strong().size(14.0)).wrap());
     });
-}
-
-/// Use a monospace face for cycle symbols (η, subscripts and compact metric
-/// names) so they remain legible in all three desktop themes and at narrow
-/// widths. The values themselves remain the producer's unit-bearing strings.
-fn math_rich_text(text: &str) -> RichText {
-    RichText::new(text.to_owned()).font(egui::FontId::monospace(13.0))
 }
 
 fn localized_propulsion_label(label: &str) -> String {

@@ -155,6 +155,17 @@ fn build_structures_preview(
 
 /// The live-preview scene for the unified aircraft viewer's current mode.
 pub fn build_preview_scene(state: &AppState) -> Option<Scene> {
+    // Exterior live preview and Sandbox must share one renderer and one
+    // section sampling policy. This keeps arbitrary sandbox stations, wing
+    // twists and fuselage lofts visible at the same fidelity in both places.
+    if state.preview_tab == PreviewTab::Exterior {
+        if let Some(scene) = crate::sandbox::scene::build_live_preview_scene(
+            state,
+            state.active_preview_camera().into(),
+        ) {
+            return Some(scene);
+        }
+    }
     let id = match state.preview_tab {
         PreviewTab::Cabin => "cabin_3d",
         PreviewTab::Exterior => state.selected_preview_id.as_str(),

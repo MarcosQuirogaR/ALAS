@@ -208,11 +208,9 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     alas_i18n::es::install();
     alas_i18n::set_language(Some("es"));
-    let mut state = AppState {
-        theme: AppTheme::Dark,
-        language: Language::Es,
-        ..AppState::default()
-    };
+    let mut state = AppState::default();
+    state.theme = AppTheme::Dark;
+    state.language = Language::Es;
     let config = state
         .typed_config()
         .ok_or_else(|| std::io::Error::other("default GUI configuration is invalid"))?;

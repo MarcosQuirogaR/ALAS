@@ -7,6 +7,7 @@ authors.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+alas-fonts = { path = "../alas-fonts" }
 alas-report = { path = "../alas-report" }
 egui = { workspace = true }
 plotters = { workspace = true }

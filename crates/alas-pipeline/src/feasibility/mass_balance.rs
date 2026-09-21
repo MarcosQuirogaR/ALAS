@@ -224,15 +224,23 @@ pub(super) fn assess_mass_balance(
             unusable_fuel_items: tanks.unusable_items(),
             flops: flops_groups,
         },
-        LedgerMethods::from_mass_model(&config.mass_model),
+        report.flops_mass_buildup.as_deref().map_or_else(
+            || LedgerMethods::from_mass_model(&config.mass_model),
+            LedgerMethods::from_buildup,
+        ),
     ) {
         Ok(statement) => statement,
         Err(error) => {
-            warn(
-                findings,
-                FindingCode::MassLedgerUnavailable,
-                format!("the mass ledger is not physical: {error}"),
-            );
+            // An inconsistent mass statement is an invalid analysis, not an
+            // optional report that can be omitted while retaining feasibility.
+            findings.push(PhysicalFinding {
+                code: FindingCode::MassLedgerUnavailable,
+                severity: FindingSeverity::Error,
+                message: format!("the mass ledger is not physical: {error}"),
+                actual: None,
+                limit: None,
+                unit: "kg",
+            });
             return None;
         }
     };
@@ -329,6 +337,7 @@ pub(super) fn assess_mass_balance(
             .map(|item| LedgerItemSummary {
                 id: item.id.clone(),
                 group: item.group.label(),
+                method: item.method.label(),
                 mass_kg: item.mass_kg,
                 position_m: item.position_m,
             })
@@ -397,7 +406,10 @@ pub fn takeoff_mass_properties(
             unusable_fuel_items: tanks.unusable_items(),
             flops: flops_groups,
         },
-        LedgerMethods::from_mass_model(&config.mass_model),
+        report.flops_mass_buildup.as_deref().map_or_else(
+            || LedgerMethods::from_mass_model(&config.mass_model),
+            LedgerMethods::from_buildup,
+        ),
     )
     .ok()?;
     Some(statement.state(LoadState::Takeoff))

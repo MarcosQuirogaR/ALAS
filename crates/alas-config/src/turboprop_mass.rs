@@ -22,7 +22,7 @@
 //! | Group | Owner | Source |
 //! |---|---|---|
 //! | Engine (turbomachine + reduction gearbox) | declared certificated dry mass, else GASP specific weight | NASA CR-152303 Vol. V eq. V.1.3-V.1.4 |
-//! | Propeller | Hamilton Standard regression | NASA CR-152303 Vol. V eq. V.1.28-V.1.29; NASA TM-83458 p. 5 |
+//! | Propeller | source-declared propeller mass, else Hamilton Standard regression | NASA CR-152303 Vol. V eq. V.1.28-V.1.29; NASA TM-83458 p. 5; aircraft source when declared |
 //! | Reduction gearbox | inside the declared engine mass | EASA TCDS IM.E.041 §III.2 |
 //! | Nacelle | area density times nacelle wetted area | NASA CR-152303 Vol. V eq. V.1.6 |
 //! | Pylon | `F_PYL (W_ENG + W_NAC)^0.736` | NASA CR-152303 Vol. V eq. V.1.7 |
@@ -171,14 +171,52 @@ pub struct FlopsTurbopropConfig {
     )]
     pub propeller_accessory_mass_kg: f64,
 
+    /// Declared mass of one source-specified propeller item, when an
+    /// aircraft-specific source is available. The source inclusion scope is
+    /// controlled separately because a certificate table may not define it.
+    #[config(
+        advanced,
+        label = "Propeller assembly mass",
+        unit = "kg",
+        help = "Optional source-backed mass of one propeller item. When present it replaces the generic Hamilton Standard regression for that installation; the regression inputs remain the documented fallback for configurations without a source statement. Declare the accessory-scope control separately when the source defines it; an unknown scope forbids a separate accessory allowance. Update or clear this fixed declaration when changing the propeller design."
+    )]
+    pub propeller_assembly_mass_kg: Option<f64>,
+
+    /// Whether a source-backed assembly mass explicitly includes the
+    /// separately declared accessory scope.
+    #[config(
+        advanced,
+        label = "Assembly includes accessories",
+        help = "Scope control for a declared propeller assembly mass. Blank means the source scope is unknown and forbids a separate accessory allowance; false means the source explicitly excludes accessories; true means it includes them and the separate accessory mass must remain zero."
+    )]
+    pub propeller_assembly_accessories_included: Option<bool>,
+
     /// Nacelle mass per unit nacelle wetted area, GASP `UW_NAC`.
     #[config(
         advanced,
         label = "Nacelle area density",
         unit = "kg/m^2",
-        help = "NASA GASP UW_NAC of CR-152303 Vol. V equation V.1.6: nacelle mass per unit nacelle wetted area. There is no published shaft-power-based turboprop nacelle relation, so this is a declared physical input. Zero blocks the nacelle mass instead of assuming a value."
+        help = "NASA GASP UW_NAC of CR-152303 Vol. V equation V.1.6: an empirical nacelle component area coefficient, not a material density. There is no published shaft-power-based turboprop nacelle relation, so this remains a declared model input. A reference component mass and area, when supplied, override this scalar. Zero blocks the nacelle mass instead of assuming a value."
     )]
     pub nacelle_area_density_kg_m2: f64,
+
+    /// Component mass used to anchor a calibrated nacelle area density.
+    #[config(
+        advanced,
+        label = "Nacelle reference component mass",
+        unit = "kg",
+        help = "Optional source-backed mass of one nacelle component used with the reference area below. When both reference fields are present, the evaluator resolves the area density as reference mass divided by reference area and applies it to the built nacelle area."
+    )]
+    pub nacelle_reference_mass_kg: Option<f64>,
+
+    /// Wetted area corresponding to the reference nacelle component mass.
+    #[config(
+        advanced,
+        label = "Nacelle reference area",
+        unit = "m^2",
+        help = "Optional reference wetted area of one nacelle corresponding to the reference component mass. This keeps a calibrated component anchor explicit when the runtime uses the built nacelle wetted area; it is not an independently measured material density."
+    )]
+    pub nacelle_reference_area_m2: Option<f64>,
 
     /// Pylon coefficient, GASP `F_PYL`.
     #[config(
@@ -219,7 +257,11 @@ impl Default for FlopsTurbopropConfig {
             propeller_construction: PropellerConstruction::default(),
             propeller_weight_coefficient: None,
             propeller_accessory_mass_kg: 0.0,
+            propeller_assembly_mass_kg: None,
+            propeller_assembly_accessories_included: None,
             nacelle_area_density_kg_m2: 0.0,
+            nacelle_reference_mass_kg: None,
+            nacelle_reference_area_m2: None,
             pylon_coefficient: 0.0,
             engine_installation_mass_kg: 0.0,
             engine_oil_mass_kg: 0.0,
@@ -245,6 +287,27 @@ impl FlopsTurbopropConfig {
             Some(value) if value.is_finite() && value > 0.0 => Some(value),
             Some(_) => None,
             None => self.propeller_construction.published_weight_coefficient(),
+        }
+    }
+
+    /// Resolve the nacelle area density from an explicit component anchor
+    /// when one is declared, retaining the legacy scalar as the fallback for
+    /// older or generic configurations.
+    pub fn resolved_nacelle_area_density_kg_m2(&self) -> Option<f64> {
+        match (
+            self.nacelle_reference_mass_kg,
+            self.nacelle_reference_area_m2,
+        ) {
+            (Some(mass), Some(area))
+                if mass.is_finite() && mass > 0.0 && area.is_finite() && area > 0.0 =>
+            {
+                let density = mass / area;
+                density.is_finite().then_some(density)
+            }
+            (None, None) if self.nacelle_area_density_kg_m2.is_finite() => {
+                Some(self.nacelle_area_density_kg_m2)
+            }
+            _ => None,
         }
     }
 
@@ -279,6 +342,39 @@ impl FlopsTurbopropConfig {
             if !value.is_finite() || value < 0.0 {
                 return Err(field);
             }
+        }
+        if let Some(mass_kg) = self.propeller_assembly_mass_kg {
+            if !mass_kg.is_finite() || mass_kg <= 0.0 {
+                return Err("propeller_assembly_mass_kg");
+            }
+        }
+        if self.propeller_assembly_mass_kg.is_some() && self.propeller_accessory_mass_kg > 0.0 {
+            match self.propeller_assembly_accessories_included {
+                Some(false) => {}
+                Some(true) => return Err("propeller_accessory_mass_kg"),
+                None => return Err("propeller_assembly_accessories_included"),
+            }
+        }
+        if self.propeller_assembly_mass_kg.is_none()
+            && self.propeller_assembly_accessories_included.is_some()
+        {
+            return Err("propeller_assembly_mass_kg");
+        }
+        match (
+            self.nacelle_reference_mass_kg,
+            self.nacelle_reference_area_m2,
+        ) {
+            (Some(mass_kg), Some(area_m2)) => {
+                if !mass_kg.is_finite() || mass_kg <= 0.0 {
+                    return Err("nacelle_reference_mass_kg");
+                }
+                if !area_m2.is_finite() || area_m2 <= 0.0 {
+                    return Err("nacelle_reference_area_m2");
+                }
+            }
+            (None, None) => {}
+            (Some(_), None) => return Err("nacelle_reference_area_m2"),
+            (None, Some(_)) => return Err("nacelle_reference_mass_kg"),
         }
         if let Some(mass_kg) = self.engine_dry_mass_kg {
             if !mass_kg.is_finite() || mass_kg <= 0.0 {
@@ -318,6 +414,21 @@ mod tests {
         // Aluminium double-acting is the published default construction, so
         // its coefficient resolves without a declaration.
         assert_eq!(config.resolved_weight_coefficient(), Some(355.0));
+        assert_eq!(config.resolved_nacelle_area_density_kg_m2(), Some(0.0));
+    }
+
+    #[test]
+    fn a_nacelle_reference_pair_resolves_an_explicit_component_density() {
+        let mut config = FlopsTurbopropConfig::default();
+        config.nacelle_reference_mass_kg = Some(207.75);
+        config.nacelle_reference_area_m2 = Some(12.25);
+        assert_eq!(config.validate(), Ok(()));
+        assert!(
+            (config.resolved_nacelle_area_density_kg_m2().unwrap() - 16.959_183_673_469_4).abs()
+                < 1e-12
+        );
+        config.nacelle_reference_area_m2 = None;
+        assert_eq!(config.validate(), Err("nacelle_reference_area_m2"));
     }
 
     #[test]

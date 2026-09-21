@@ -50,6 +50,9 @@ pub enum ExportError {
     NoPipelineRun,
     /// Baseline-only data cannot form the existing design summary report.
     NoOptimizedReport,
+    /// A live snapshot contains figures, but the pipeline has not reached its
+    /// final feasibility and export stages.
+    IncompletePipelineRun,
     /// The registry supplied no scenes that this run could export.
     NoFigures,
     /// A scene was rejected by the vector PDF backend.
@@ -77,6 +80,9 @@ impl fmt::Display for ExportError {
             Self::NoOptimizedReport => {
                 formatter.write_str("this run has no optimized report to export")
             }
+            Self::IncompletePipelineRun => formatter.write_str(
+                "the pipeline result is incomplete; wait for the run to finish before exporting",
+            ),
             Self::NoFigures => {
                 formatter.write_str("this run produced no exportable result figures")
             }
@@ -146,6 +152,7 @@ pub fn export_pdf_report(
 }
 
 fn collect_export_figures(state: &AppState) -> Result<Vec<ExportedFigure>, ExportError> {
+    export_readiness(state.pipeline_result.is_some(), state.pipeline_result_complete)?;
     let result = state
         .pipeline_result
         .as_ref()
@@ -181,6 +188,16 @@ fn collect_export_figures(state: &AppState) -> Result<Vec<ExportedFigure>, Expor
         return Err(ExportError::NoFigures);
     }
     Ok(figures)
+}
+
+fn export_readiness(has_result: bool, complete: bool) -> Result<(), ExportError> {
+    if !has_result {
+        Err(ExportError::NoPipelineRun)
+    } else if !complete {
+        Err(ExportError::IncompletePipelineRun)
+    } else {
+        Ok(())
+    }
 }
 
 fn figure_file_name(registry_position: usize, id: &str) -> String {

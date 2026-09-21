@@ -311,14 +311,21 @@ fn validate(inputs: &FlopsTransportInputs) -> Result<(), FlopsTransportInputErro
             field: "fuselage_count",
         });
     }
+    if inputs.checked_passenger_count().is_none() {
+        return Err(FlopsTransportInputError {
+            field: "passenger_class_counts",
+        });
+    }
     if inputs.flight_crew_count == 0 {
         return Err(FlopsTransportInputError {
             field: "flight_crew_count",
         });
     }
     if inputs.engine_count == 0
-        || inputs.wing_mounted_engine_count + inputs.fuselage_mounted_engine_count
-            != inputs.engine_count
+        || inputs
+            .wing_mounted_engine_count
+            .checked_add(inputs.fuselage_mounted_engine_count)
+            != Some(inputs.engine_count)
     {
         return Err(FlopsTransportInputError {
             field: "engine_mounting",
@@ -391,7 +398,11 @@ pub fn estimate_flops_transport(
         inputs.movable_surface_area_m2,
         inputs.design_gross_mass_kg,
     );
-    let apu = apu_kg(fuselage_planform_area_m2, passengers);
+    let apu = if inputs.apu_installed {
+        apu_kg(fuselage_planform_area_m2, passengers)
+    } else {
+        0.0
+    };
     let instruments = instruments_kg(
         fuselage_planform_area_m2,
         inputs.maximum_mach,
@@ -570,6 +581,9 @@ pub fn estimate_flops_transport(
     Ok(FlopsTransportBreakdown {
         systems,
         operating_items,
+        cabin_equipment_method: inputs.cabin_equipment_method,
+        propulsion_sizing: inputs.propulsion_sizing,
+        apu_installed: inputs.apu_installed,
     })
 }
 
@@ -605,6 +619,7 @@ mod tests {
             hydraulic_pressure_pa: 20_684_271.879_504,
             variable_sweep_penalty: 0.0,
             maximum_fuel_capacity_kg: 100_000.0,
+            apu_installed: true,
             fuel_tank_count: 4,
             containerized_cargo_kg: 0.0,
             containerized_baggage_kg: 0.0,
@@ -613,6 +628,50 @@ mod tests {
             haul_class: alas_config::OperatingHaulClass::ShortMediumHaul,
             propulsion_sizing: PropulsionSizing::RatedThrust,
         }
+    }
+
+    #[test]
+    fn an_aircraft_without_an_apu_omits_only_equation_101() {
+        let with_apu = estimate_flops_transport(&representative_inputs())
+            .expect("the representative transport evaluates");
+        let mut without_input = representative_inputs();
+        without_input.apu_installed = false;
+        let without_apu = estimate_flops_transport(&without_input)
+            .expect("the explicit hotel-mode architecture evaluates");
+        assert!(with_apu.systems.apu_kg > 0.0);
+        assert_eq!(without_apu.systems.apu_kg, 0.0);
+        assert!(with_apu.apu_installed);
+        assert!(!without_apu.apu_installed);
+        assert!(
+            (with_apu.systems.total_kg - without_apu.systems.total_kg - with_apu.systems.apu_kg)
+                .abs()
+                < 1.0e-9
+        );
+        assert_eq!(with_apu.operating_items, without_apu.operating_items);
+    }
+
+    #[test]
+    fn public_transport_evaluation_rejects_count_overflow_before_arithmetic() {
+        let mut passengers = representative_inputs();
+        passengers.first_class_passenger_count = usize::MAX;
+        passengers.business_class_passenger_count = 1;
+        assert_eq!(
+            estimate_flops_transport(&passengers)
+                .expect_err("passenger-count overflow must be a typed input error")
+                .field,
+            "passenger_class_counts"
+        );
+
+        let mut engines = representative_inputs();
+        engines.wing_mounted_engine_count = usize::MAX;
+        engines.fuselage_mounted_engine_count = 1;
+        engines.engine_count = usize::MAX;
+        assert_eq!(
+            estimate_flops_transport(&engines)
+                .expect_err("engine-count overflow must be a typed input error")
+                .field,
+            "engine_mounting"
+        );
     }
 
     /// A propeller installation substitutes for equations 121 and 122 and for

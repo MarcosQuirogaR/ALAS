@@ -46,7 +46,7 @@ impl AlasApp {
                 ui.close_menu();
             }
             ui.separator();
-            let exports_enabled = self.state.pipeline_result.is_some();
+            let exports_enabled = self.state.pipeline_result_complete;
             if ui
                 .add_enabled(
                     exports_enabled,
@@ -96,16 +96,6 @@ impl AlasApp {
     fn render_view_menu(&mut self, ctx: &Context, ui: &mut Ui) {
         ui.menu_button(tr("View"), |ui| {
             ui.set_min_width(layout::MENU_MIN_WIDTH);
-            let label = if self.state.show_view_panel {
-                "Hide View panel"
-            } else {
-                "Detach View options"
-            };
-            if ui.button(tr(label)).clicked() {
-                self.state.show_view_panel = !self.state.show_view_panel;
-                ui.close_menu();
-            }
-            ui.separator();
             let run_log_label = if self.state.run_log_open {
                 "Hide Run Log"
             } else {
@@ -266,6 +256,7 @@ mod tests {
             "Show Run Log",
             "Hide Run Log",
             "Close",
+            "Reduced Animations",
             "Automatic zoom",
             "English",
             "Spanish",

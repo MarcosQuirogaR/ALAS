@@ -158,14 +158,6 @@ pub struct NavGroup {
 const SETUP_PAGES: &[Page] = &[
     Page::screen("inputs", "Inputs", PageKind::Inputs),
     Page::screen("design_space", "Design Space", PageKind::DesignSpace),
-    Page {
-        description: Some("Native mission settings and the full climb/cruise/descent speed profile, plus route/asset paths. Runs as pipeline Stage 5 in every full run."),
-        detail: &[
-            "Mission analysis runs natively as pipeline Stage 5 over your departure->arrival airport pair, returning fuel burn, block time, and full climb/cruise/descent telemetry.",
-            "The profile fields set every climb/cruise/descent speed, rate, and altitude fraction. Routing tries, in order: the SimBrief API (if a username is set), a manual SimBrief KML drop-in, the open-navdata airway graph (one-time download), and finally a great-circle, each falling through to the next so a route always renders.",
-        ],
-        ..Page::form("mission", "Mission Analysis", "mission")
-    },
     Page::screen("setup_analyses", "Analyses", PageKind::Analyses),
     Page {
         description: Some("Select source-provenanced hardware, set mission and airframe assumptions, and verify generated UAV geometry with the shared production physics core."),
@@ -236,7 +228,7 @@ const MODELING_PAGES: &[Page] = &[
         description: Some("On-design turbofan cycle assumptions (component efficiencies and pressure ratios) of the selected engine. Rating anchors, installation and nacelle placement are in Advanced Settings > Propulsion."),
         surface: Surface::Modeling,
         preview: Some("engine"),
-        preview_title: Some("Nacelle profile preview"),
+        preview_title: Some("Thermodynamic cycle preview"),
         ..Page::form("engine_designer", "Propulsion", "propulsion_cycle")
     },
 ];
@@ -288,6 +280,15 @@ pub const ADVANCED_SETTINGS_PAGES: &[Page] = &[
         ..Page::form("analysis", "Analysis fidelity", "analysis")
     },
     Page {
+        description: Some("Native mission settings and the full climb/cruise/descent speed profile, plus route/asset paths. Runs as pipeline Stage 5 in every full run."),
+        detail: &[
+            "Mission analysis runs natively as pipeline Stage 5 over your departure->arrival airport pair, returning fuel burn, block time, and full climb/cruise/descent telemetry.",
+            "The profile fields set every climb/cruise/descent speed, rate, and altitude fraction. Routing tries, in order: the SimBrief API (if a username is set), a manual SimBrief KML drop-in, the open-navdata airway graph (one-time download), and finally a great-circle, each falling through to the next so a route always renders.",
+        ],
+        surface: Surface::Advanced,
+        ..Page::form("mission_advanced", "Mission Analysis", "mission")
+    },
+    Page {
         description: Some("The mission-sized objective, explicit requirement policies, and the MADS search settings. Whether a run optimizes at all is chosen on Inputs; the selected catalogue engine remains fixed."),
         detail: &[
             "Every candidate is built, mass-balanced and trimmed, then closed by the design mission: mass, centre of gravity, trim, mission fuel and takeoff mass are iterated until the design weights converge. The objective is what that converged mission costs (block fuel, takeoff mass, empty mass or fuel per seat-kilometre); the frozen lift-to-drag formulation of the Python reference is replayed only by the parity fixtures.",
@@ -297,7 +298,7 @@ pub const ADVANCED_SETTINGS_PAGES: &[Page] = &[
         ..Page::form("optimizer", "Optimizer", "optimizer")
     },
     Page {
-        description: Some("Optional high-fidelity MSES airfoil analysis. The executables ship bundled; enable it on Analyses and configure the sweep here."),
+        description: Some("Optional high-fidelity MSES airfoil analysis. MSES remains a user-supplied installation because its per-seat licence does not authorize redistribution; enable it on Analyses and configure the sweep here."),
         detail: &[
             "MSES is a coupled viscous/inviscid Euler + boundary-layer solver: the highest-fidelity 2-D airfoil analysis in the app, and the only one that captures shocks and true wave drag. It runs on the optimized design's root section for the Model Comparison tab, and optionally on Airfoil Screening's finalists.",
             "The section sees the swept effective Mach (M*cos L), not freestream. The alpha-sweep half-width brackets the trim CL; widen it if MSES reports the target CL outside its converged range. A non-convergent geometry is an expected solver outcome, not a crash: the run degrades gracefully.",

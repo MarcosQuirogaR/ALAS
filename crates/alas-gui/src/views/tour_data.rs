@@ -93,7 +93,7 @@ pub const TOUR_STEPS: &[TourStep] = &[
     },
     TourStep {
         title: "Choose your analyses",
-        body: "Setup > Analyses lists what a full run performs. Core aerodynamics, weight & balance, propulsion, field performance and the mission analysis always run; MSES 2-D airfoil analysis, the wingbox structures solve and its solver cases are configurable here. External-tool paths live under Advanced Settings > External Tools.",
+        body: "Setup > Analyses lists what a full run performs. Core aerodynamics, weight & balance, propulsion and field performance always run; native mission, MSES 2-D airfoil analysis, wingbox structures and its solver cases, baseline comparison, OpenVSP, VSPAERO, AVL, FLOWUnsteady, NASTRAN and Patran are configurable here. External-tool paths live under Advanced Settings > External Tools.",
         page: Some("setup_analyses"),
         target: Some(TourTarget::Content),
     },

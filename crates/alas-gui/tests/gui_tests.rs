@@ -359,10 +359,9 @@ fn w33_public_mission_result_reaches_every_mission_dispatch() {
     assert!(result.route.is_some());
     assert!(result.mission_result.is_some());
 
-    let mut state = AppState {
-        pipeline_result: Some(result),
-        ..AppState::default()
-    };
+    let mut state = AppState::default();
+    state.pipeline_result = Some(result);
+    state.pipeline_result_complete = true;
     for id in [
         "mission_profile",
         "mission_velocities",
@@ -500,6 +499,7 @@ fn desktop_shell_defaults_to_hover_navigation_and_a_readable_run_log() {
     let state = AppState::default();
 
     assert!(!state.nav_pinned);
+    assert!(!state.reduced_animations);
     assert_eq!(state.run_log_height, 220.0);
     assert!(!state.logs.is_empty());
 }

@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-use crate::{FlopsStructureConfig, FlopsTurbopropConfig, PropellerConstruction, PylonMassMethod};
+use crate::{
+    FlopsNozzleScope, FlopsStarterScope, FlopsStructureConfig, FlopsTurbopropConfig,
+    PropellerConstruction, PylonMassMethod,
+};
 
 /// Structure and propulsion overrides for registered aircraft.
 ///
@@ -18,18 +21,46 @@ use crate::{FlopsStructureConfig, FlopsTurbopropConfig, PropellerConstruction, P
 /// correlation and records the reason. No legacy fraction is inserted here.
 pub(super) fn declared_structure(name: &str) -> FlopsStructureConfig {
     let mut config = FlopsStructureConfig::default();
-    // No registered aircraft has a source-backed FLOPS FCOMP coefficient. A
-    // literal composite percentage would be a different quantity, so retain
-    // the published metallic baseline until a calibrated FLOPS coefficient is
-    // obtained. This branch keeps the aircraft distinction visible for future
-    // evidence without silently pretending it is known today.
-    if matches!(name, "A220-300" | "B787-9") {
-        config.composite_utilization = 0.0;
-    }
+    config.composite_utilization = declared_composite_utilization(name);
     config.baseline_engine_mass_kg = certified_dry_engine_mass_kg(name);
+    config.starter_scope = match name {
+        // EASA E.003 explicitly places the CFM56-5B starter hardware in
+        // engine type design, but FLOPS equation 89 prices the broader
+        // "starter system". Retain the equation until the system split is
+        // published, while recording the known hardware overlap explicitly.
+        "A320-200" => FlopsStarterScope::HardwareIncludedSystemUnresolved,
+        // The PW1521G and Trent 970 data sheets retained here do not state
+        // starter inclusion. Keep equation 89 conservatively, but expose
+        // that the overlap is unresolved rather than calling it verified.
+        "A220-300" | "A380-800" => FlopsStarterScope::UnknownConservativeSeparate,
+        _ => FlopsStarterScope::SeparateEquation89,
+    };
+    config.nozzle_scope = match name {
+        // These certified values are bare/basic engine values whose retained
+        // type-certificate scope places the aircraft-side exhaust/installation
+        // hardware outside the engine type design. FLOPS has no term for that
+        // known omission unless a separable Eq. 78 nozzle mass is supplied.
+        // Keep the omission explicit and add no guessed kilograms.
+        "A320-200" | "A220-300" | "A380-800" => FlopsNozzleScope::OutsideUnmodelled,
+        _ if config.baseline_engine_mass_kg.is_some() => FlopsNozzleScope::Unknown,
+        _ => FlopsNozzleScope::IncludedInBaseline,
+    };
     config.paint_area_density_kg_m2 = declared_paint_area_density_kg_m2(name);
     config.pylon_mass_method = declared_pylon_mass_method(name);
     config
+}
+
+/// Select the FLOPS `FCOMP` endpoint for a registered aircraft.
+///
+/// NASA/TM-2017-219627 Appendix D defines `FCOMP` as a technology coefficient
+/// in the wing mass fits, not as the aircraft's percentage of composite
+/// material. The retained primary evidence provides no aircraft-specific map
+/// from composite architecture or material percentage to that coefficient, so
+/// every preset keeps the published metallic-equation endpoint. This is an
+/// explicit evidence-limited baseline and does not claim that any aircraft is
+/// all-metal; a source-backed coefficient can replace it when one exists.
+fn declared_composite_utilization(_name: &str) -> f64 {
+    0.0
 }
 
 /// Exterior paint, FLOPS `WPAINT`, kg per square metre of wetted area.
@@ -117,13 +148,16 @@ fn declared_pylon_mass_method(name: &str) -> PylonMassMethod {
 /// * DC-10, CF6-50C: no certified dry weight was retained.
 /// * AVE (notional) and ATR72-600 (unsupported propulsion technology).
 ///
-/// Known scope residuals of the declared values, recorded rather than
-/// adjusted: the engine starter is inside the data-sheet mass and FLOPS
-/// equation 89 prices a starting system separately (order 20 kg per engine
-/// of overlap); the exhaust nozzle and plug are outside the data-sheet mass
-/// and are not a separate FLOPS term on this branch (order 50 kg per engine
-/// of omission). Both are far below the correlation's departure from the
-/// certified value.
+/// The starter/nozzle controls in [`declared_structure`] keep these boundary
+/// questions explicit. The A320 starter is known to be inside the certified
+/// engine type design; the A220 and A380 starter scopes remain unresolved and
+/// therefore retain equation 89 conservatively. None of the retained data
+/// sheets supplies a separable Eq. 78 nozzle mass. The certified A320, A220,
+/// and A380 records therefore expose their known aircraft-side exhaust/EBU
+/// omission as `OutsideUnmodelled`; the exact nozzle-versus-reverser split is
+/// still unresolved and no invented correction is applied. Other certified
+/// values remain `Unknown` when the retained sheet does not resolve that
+/// boundary.
 fn certified_dry_engine_mass_kg(name: &str) -> Option<f64> {
     match name {
         "A320-200" => Some(2_454.8),
@@ -155,23 +189,32 @@ fn certified_dry_engine_mass_kg(name: &str) -> Option<f64> {
 ///   ranging between 160 to 180 may be assumed for advanced technology
 ///   fiberglass or composite propellers". 170 is the midpoint of that
 ///   published band, not a value fitted to any total.
-/// * **Activity factor 130.** *Declared, not sourced.* No public document
-///   retrieved states the 568F-1 blade activity factor; the FAA propeller
-///   type-certificate data sheet was not reachable. 130 sits mid-band for a
-///   modern high-power turboprop blade. The propeller mass scales as
-///   `A.F.^0.75`, so the whole 120-160 plausible band moves it by about
-///   -7 to +9 percent.
-/// * **Nacelle area density 16.96 kg/m^2.** *Calibrated, not sourced.* There
-///   is no published shaft-power turboprop nacelle relation at all
-///   (GASP equation V.1.6 takes `UW_NAC` as a user input). The value carries
-///   the "Engine Section" line of the NASA ATR 42-600 group weight statement
-///   (NTRS 20230006542 Table 2: 916 lbf = 415.5 kg for two nacelles) onto
-///   this aircraft's resolved nacelle wetted area, 2 x pi x 1.3 m x 3.0 m =
-///   24.50 m^2, which is legitimate only because the ATR 42-600 and the
-///   ATR 72-600 share the same PW127-series nacelle installation. That NASA
-///   statement is a GASP model output calibrated to published top-level data,
-///   **not** a measured manufacturer weight statement, and the calibration is
-///   to a component line rather than to any total.
+/// * **Activity factor 130 and `K_w = 170`.** *Declared fallback values, not
+///   aircraft-specific measurements.* No public document retrieved here
+///   states the 568F-1 blade activity factor. The generic regression remains
+///   available for configurations without a source-backed propeller assembly
+///   mass. The registered ATR uses the JCAB type-certificate sheet's
+///   approximate 568F-1 propeller weight instead, so these fallback values do
+///   not silently override the aircraft-specific statement.
+/// * **Propeller mass 360.9 lb (163.70 kg) each.** *Source-backed
+///   approximate value.* JCAB ATR 42/72 TCDS Revision 3, PDF pp. 7-8, names
+///   the Hamilton Standard 568F-1 and lists its approximate weight. The input
+///   is carried as a source-declared propeller mass override; the separate
+///   spinner/de-icing/governor accessory field remains zero because the
+///   retained sheet provides neither a separable accessory mass nor an
+///   inclusion list. No second allowance is invented.
+/// * **Nacelle area coefficient.** *Calibrated, not sourced as a material
+///   density.* There is no published shaft-power turboprop nacelle relation
+///   (GASP equation V.1.6 takes `UW_NAC` as a user input). The source anchor
+///   is explicit: the NASA ATR 42-600 group statement (NTRS 20230006542
+///   Table 2, "Engine Section", 916 lbf = 415.5 kg for two nacelles). The
+///   runtime reference area is the built ATR nacelle profile's per-nacelle
+///   wetted area, 10.543172340348409 m^2, and the reference component mass is
+///   207.75 kg. This preserves the source component anchor while applying the
+///   coefficient to the same built profile used by the evaluator; it does
+///   not claim a measured manufacturer nacelle density or total-aircraft
+///   calibration. The original 24.50 m^2 cylinder is source context, not the
+///   runtime geometry area.
 /// * **Pylon coefficient zero.** The ATR's nacelles are faired into the wing
 ///   rather than pylon-mounted, so the GASP pylon relation does not apply.
 ///   This is an architecture statement, not an omission.
@@ -180,10 +223,13 @@ fn certified_dry_engine_mass_kg(name: &str) -> Option<f64> {
 ///   the "Engine Installation" line of the same NASA ATR 42-600 statement
 ///   (679 lbf). FLOPS equations 87 and 89 cover the same scope from rated
 ///   thrust and have no shaft-power form.
-/// * **Engine oil 26 kg, propeller accessories 0 kg.** Declared study values;
-///   no retrieved source gives the PW127M oil charge or the 568F-1 spinner,
-///   de-icing and governor masses. The accessory mass stays at zero so the
-///   gap is visible in the ledger rather than filled with a guess.
+/// * **Engine oil 46.220 kg for both engines.** *Source-backed installed
+///   capacity.* JCAB ATR 42/72 TCDS Revision 3 p. 10 lists 23.110 kg per
+///   PW127M engine (23.703 L each), and the p. 12 full-oil note corroborates
+///   the aircraft-level convention, so the two-engine input is 46.220 kg.
+///   **Propeller accessories remain 0 kg:** the retained source gives no
+///   separable spinner, de-icing or governor mass, and the assembly override
+///   is not augmented with an invented allowance.
 pub(super) fn declared_turboprop(name: &str) -> FlopsTurbopropConfig {
     match name {
         "ATR72-600" => FlopsTurbopropConfig {
@@ -200,10 +246,16 @@ pub(super) fn declared_turboprop(name: &str) -> FlopsTurbopropConfig {
             propeller_construction: PropellerConstruction::Composite,
             propeller_weight_coefficient: Some(170.0),
             propeller_accessory_mass_kg: 0.0,
-            nacelle_area_density_kg_m2: 16.956,
+            propeller_assembly_mass_kg: Some(360.9 * 0.453_592_37),
+            propeller_assembly_accessories_included: None,
+            nacelle_area_density_kg_m2: 415.5 / (2.0 * 10.543_172_340_348_409),
+            nacelle_reference_mass_kg: Some(415.5 / 2.0),
+            // Per-nacelle area from the configured ATR profile through the
+            // same Fuselage::area_wetted integration used by the evaluator.
+            nacelle_reference_area_m2: Some(10.543_172_340_348_409),
             pylon_coefficient: 0.0,
             engine_installation_mass_kg: 308.0,
-            engine_oil_mass_kg: 26.0,
+            engine_oil_mass_kg: 46.220,
         },
         _ => FlopsTurbopropConfig::default(),
     }
@@ -264,5 +316,29 @@ mod tests {
         // A declared engine mass without a separate inlet or nozzle is the
         // equation 80 branch and validates as such.
         assert!(declared_structure("A320-200").validate().is_ok());
+    }
+
+    #[test]
+    fn registered_composite_selection_keeps_the_explicit_unknown_baseline() {
+        for name in [
+            "AVE",
+            "A220-300",
+            "A320-200",
+            "A340-300",
+            "A380-800",
+            "ATR72-600",
+            "B787-9",
+            "DC-10",
+        ] {
+            let structure = declared_structure(name);
+            assert_eq!(
+                structure.composite_utilization, 0.0,
+                "{name} must retain the source-limited FLOPS baseline"
+            );
+            assert_eq!(
+                structure.composite_utilization_interpretation(),
+                "declared FLOPS metallic-equation baseline; not an aircraft material percentage"
+            );
+        }
     }
 }

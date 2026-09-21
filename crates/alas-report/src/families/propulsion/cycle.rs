@@ -6,9 +6,10 @@
 // _propulsion_cycle_summary_lines)
 // Reference: alas @ rust-port-baseline.
 
-//! On-design cruise cycle station temperatures and the engine designer's
-//! nacelle-profile preview. Detailed cycle numbers are presented on the
-//! Results Summary tab so the figure can keep its station chart uncluttered.
+//! On-design cruise cycle station temperatures and the Engine Designer's
+//! thermodynamic preview. The editor preview uses the same cycle walk as the
+//! numerical summary, including entropy relative to the freestream static
+//! state and separate core/bypass paths.
 
 use super::design_point;
 use crate::chart_kit::draw_title;
@@ -149,47 +150,31 @@ pub fn propulsion_cycle_summary(config: &AlasConfig) -> Vec<String> {
     propulsion_cycle_summary_lines(config, &out, true)
 }
 
-/// Focused nacelle-profile preview for the Engine Designer tab. Detailed
-/// cycle quantities belong in the Results Summary, where they can be read at
-/// useful scale instead of competing with the editable geometry preview.
+/// Thermodynamic preview for the Engine Designer tab.
+///
+/// Turbofans use calculated station temperatures and constant-property
+/// entropy coordinates, with separate core/bypass paths. Turboprops use a
+/// free-turbine design cycle reconstructed from OPR/TIT and cruise power/fuel
+/// anchors. Both distinguish reference
+/// cycle closure from the physical open engine path.
 pub fn figure_engine_designer_preview(config: &AlasConfig, theme: Option<&str>) -> Scene {
-    if let Some(scene) = super::technology::binding_error_scene(config, theme, (550.0, 390.0)) {
+    if let Some(scene) = super::technology::binding_error_scene(config, theme, (900.0, 560.0)) {
         return scene;
     }
-    let pal = get_palette(theme);
-    let mut scene = Scene::new(550.0, 390.0, Some(Color::from_hex(pal.bg)));
-    scene.title = Some("Engine Designer Preview".to_owned());
-    let eng = &config.geometry.engine;
-
-    panel_title(&mut scene, pal, "Nacelle profile silhouette", 30.0);
-    if eng.nacelle_profile.is_empty() {
-        scene.add(SceneElement::Text {
-            text: "No nacelle profile defined".to_owned(),
-            pos: [275.0, 210.0],
-            font_size: 10.0,
-            color: Color::from_hex(pal.title),
-            align: TextAlign::Center,
-            baseline: TextBaseline::Middle,
-            angle_deg: 0.0,
-            bold: false,
-        });
-    } else {
-        draw_nacelle_silhouette(&mut scene, pal, eng);
+    if super::is_turboprop(config) {
+        return super::turboprop_cycle::figure_turboprop_cycle_preview(config, theme);
     }
-    scene
+    super::ts_preview::preview(config, theme)
 }
 
-/// Text lines for the on-design cycle summary panel: shared by
-/// [`figure_propulsion_cycle_summary`] (wide, `verbose = true`) and
-/// [`figure_engine_designer_preview`] (compact, `verbose = false`), matching
-/// `_propulsion_cycle_summary_lines`'s reason for existing: the two can never
-/// silently drift into showing different numbers for the same design.
+/// Text lines for the on-design cycle summary panel. `verbose` retains the
+/// report-summary option for the fuel-air-ratio line; the compact editor now
+/// shows the thermodynamic path instead of duplicating this text panel.
 ///
 /// Upstream's docstring says `verbose = False` also drops "the
 /// per-efficiency-term breakout lines", but the function body only ever
 /// guards the fuel-air-ratio line with `if verbose:`; the three efficiency
-/// lines are unconditional in both callers. Reproduced as written, not as
-/// documented.
+/// lines remain unconditional. Reproduced as written, not as documented.
 fn propulsion_cycle_summary_lines(
     config: &AlasConfig,
     out: &TurbofanCycleResult,
@@ -275,6 +260,7 @@ fn propulsion_cycle_summary_lines(
 /// annotated: ported from `figure_engine_designer_preview`'s `ax_nacelle`
 /// block. No `set_aspect("equal")` primitive exists here, so the axes rect is
 /// sized to match the data's own aspect ratio instead, which reads the same.
+#[allow(dead_code)]
 fn draw_nacelle_silhouette(scene: &mut Scene, pal: &Palette, eng: &EngineConfig) {
     let xs: Vec<f64> = eng.nacelle_profile.iter().map(|&(x, _)| x).collect();
     let rs: Vec<f64> = eng
@@ -384,6 +370,7 @@ fn draw_nacelle_silhouette(scene: &mut Scene, pal: &Palette, eng: &EngineConfig)
 /// convention `figure_threeview` already uses for per-axes titles (this
 /// scene primitive set has no per-`Axes2D` title, only the whole-figure
 /// `Scene::title`).
+#[allow(dead_code)]
 fn panel_title(scene: &mut Scene, pal: &Palette, text: &str, x: f64) {
     scene.add(SceneElement::Text {
         text: text.to_owned(),
@@ -524,22 +511,33 @@ mod tests {
     }
 
     #[test]
-    fn the_engine_designer_preview_draws_one_marker_per_nacelle_control_point() {
+    fn the_engine_designer_preview_draws_core_and_bypass_entropy_paths() {
         let config = AlasConfig::default();
         let scene = figure_engine_designer_preview(&config, Some("dark"));
-        let n_points = config.geometry.engine.nacelle_profile.len();
-        let circles = scene
+        let polylines = scene
             .elements
             .iter()
-            .filter(|e| matches!(e, SceneElement::Circle { .. }))
+            .filter(|e| matches!(e, SceneElement::Polyline { .. }))
             .count();
-        // One circle per point on the top edge and one on the (identical
-        // radius) bottom edge.
-        assert_eq!(circles, 2 * n_points);
+        assert!(
+            polylines > 10,
+            "component curves, closure guides and inlet detail"
+        );
+        let texts: Vec<&str> = scene
+            .elements
+            .iter()
+            .filter_map(|element| match element {
+                SceneElement::Text { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert!(texts.contains(&"Core flow"));
+        assert!(texts.contains(&"Bypass flow"));
+        assert!(texts.contains(&"s - s₀ [kJ/(kg·K)]"));
     }
 
     #[test]
-    fn engine_designer_preview_keeps_cycle_summary_text_out_of_the_editor_canvas() {
+    fn engine_designer_preview_labels_the_thermodynamic_reference() {
         let scene = figure_engine_designer_preview(&AlasConfig::default(), Some("dark"));
         let texts: Vec<&str> = scene
             .elements
@@ -549,23 +547,29 @@ mod tests {
                 _ => None,
             })
             .collect();
-        assert!(!texts
+        assert!(texts.iter().any(|text| text.contains("s - s₀ [kJ/(kg·K)]")));
+        assert!(texts
             .iter()
-            .any(|text| text.contains("Cruise Design-Point")));
-        assert!(!texts.iter().any(|text| text.starts_with("TSFC")));
+            .any(|text| text.contains("T [K]") || text.contains("Temperature T")));
     }
 
     #[test]
-    fn an_empty_nacelle_profile_renders_a_placeholder_and_no_markers() {
+    fn an_infeasible_engine_designer_cycle_renders_the_reason() {
         let mut config = AlasConfig::default();
-        config.geometry.engine.nacelle_profile.clear();
+        config
+            .geometry
+            .engine
+            .turbofan
+            .as_mut()
+            .unwrap()
+            .turbine_inlet_temp_k = 100.0;
         let scene = figure_engine_designer_preview(&config, None);
+        let svg = render_svg(&scene);
+        assert!(svg.contains("Cycle infeasible at this design point"));
         assert!(!scene
             .elements
             .iter()
-            .any(|e| matches!(e, SceneElement::Circle { .. })));
-        let svg = render_svg(&scene);
-        assert!(svg.contains("No nacelle profile defined"));
+            .any(|e| matches!(e, SceneElement::Polyline { .. })));
     }
 
     #[test]

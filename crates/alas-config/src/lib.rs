@@ -39,6 +39,7 @@ pub mod analysis;
 pub mod cabin;
 pub mod control_surfaces;
 pub mod design_variables;
+pub mod downstream;
 pub mod engines;
 pub mod fidelity_presets;
 pub mod flops_structure;
@@ -90,13 +91,14 @@ pub use control_surfaces::ControlSurfacesConfig;
 pub use design_variables::{
     DesignVariableSpec, DesignVector, DesignVectorError, SPECS as DESIGN_VARIABLE_SPECS,
 };
+pub use downstream::DownstreamConfig;
 pub use engines::{
     PropulsionTechnology, TurbofanEngineSpec, TurbofanOffDesignSpec, TurbopropEngineSpec,
 };
 pub use fidelity_presets::{FidelityPreset, UnknownFidelityPreset};
 pub use flops_structure::{
-    FlopsStructureConfig, FlopsWingBendingMethod, PropulsionMassMethod, PylonMassMethod,
-    StructuralMassMethod,
+    FlopsNozzleScope, FlopsStarterScope, FlopsStructureConfig, FlopsWingBendingMethod,
+    PropulsionMassMethod, PylonMassMethod, StructuralMassMethod,
 };
 pub use fuel_policy::{FuelPolicyConfig, FuelScheme};
 pub use fuel_tanks::{

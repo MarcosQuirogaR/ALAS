@@ -19,6 +19,13 @@ and its results, before and after the corrections of 2026-09-12, are under
 
 ## One production architecture
 
+The architecture's serialized name is retained for compatibility. Its current
+equation set includes declared LTH cabin/pylon relations and, for shaft-power
+aircraft, GASP/TM-83458 installation relations. The completed buildup and item
+ledger identify those sources; the name alone does not establish NASA-only
+equations or physical validation. The current robustness contracts and OEW
+comparison limits are in [`flops-robustness.md`](flops-robustness.md).
+
 `MassModelConfig::mass_architecture = pure_flops_transport_v1` owns every
 production mass group end to end: screening, optimization, MDA closure, the
 final analysis, the payload layout, the item ledger, CG and inertia, the
@@ -123,10 +130,12 @@ declared-count cases, not as the preset's production result.
 
 ## Passenger and baggage mass
 
-`requirements.passenger_mass_kg` (100 kg, the FAA AC 120-27E standard;
-EASA standard masses are likewise class-independent) is the single product
-load-case authority: every seated passenger, of any class, costs the
-zero-fuel mass that combined figure. `cabin.passenger.checked_bag_mass_kg`
+`requirements.passenger_mass_kg` (100 kg, the shipped project load-case
+default) is the single product load-case authority: every seated passenger,
+of any class, costs the zero-fuel mass that combined figure. FAA AC 120-27F
+is operator weight-and-balance guidance and does not establish a universal
+passenger mass; an operational value must carry its operator, population,
+baggage method and date. `cabin.passenger.checked_bag_mass_kg`
 (16 kg) is the baggage share the layout charges per seated passenger, and the
 per-class occupant slot is the derived remainder (84 kg). The one seam that
 applies it is `PassengerCabinConfig::apply_passenger_mass_authority`, called
@@ -197,7 +206,7 @@ terms, never part of OEW.
 | Paint | eq. 68 | structure | `fuselage` | wetted area, `WPAINT` (0 by default) |
 | Nose and main gear | eqs. 63-67 | structure | `gear` (`nose_gear`, `main_gear` rows at 15/85) | `WLDG`, oleo lengths |
 | Nacelles | eq. 69 | structure group, charged once to propulsion | `propulsion` | thrust, nacelle geometry |
-| Engine term `WENGP`/`WENG` | eqs. 75-80 | propulsion | `propulsion` | declared `WENGB` (the certified dry engine mass of the type-certificate data sheet, where its stated scope is the basic engine with accessories and the reverser is outside it: A320 CFM56-5B4/3 2,454.8 kg, A220 PW1521G-3 2,177 kg, A380 Trent 970-84 6,246 kg) or the `THRSO/5.5` correlation where no such scope is stated (A340: the CFM56-5C dry weight contains the reverser; B787: the GEnx data sheet lists the fan reversers under the engine type design without a split; DC-10: no retained CF6-50C value); includes inlet and nozzle only when they are not declared. Known residuals of the declared values: the starter is inside the data-sheet mass and eq. 89 prices a starting system too (order 20 kg per engine); the nozzle and plug are outside it and have no separate term (order 50 kg per engine). See `preset_flops/structure.rs` |
+| Engine term `WENGP`/`WENG` | eqs. 75-80 | propulsion | `propulsion` | declared `WENGB` (the certified dry engine mass of the type-certificate data sheet, where its stated scope is the basic engine with accessories: A320 CFM56-5B4/3 2,454.8 kg, A220 PW1521G-3 2,177 kg, A380 Trent 970-84 6,246 kg) or the `THRSO/5.5` correlation where no such scope is stated (A340: the CFM56-5C dry weight contains its adapter/reverser; B787: the GEnx data sheet lists the fan reversers under the engine type design without a split; DC-10: no retained CF6-50C value). Certified A320/A220/A380 aircraft-side exhaust/EBU scope is recorded as `OutsideUnmodelled`; no Eq. 78 mass is invented without a separable source. Starter overlap is explicit per preset and remains conservative when unresolved. See `preset_flops/structure.rs` |
 | Inlet, nozzle | eqs. 77-78 | propulsion | `propulsion` | declared baselines only; otherwise inside `WENG` |
 | Thrust reversers, engine controls, starters, misc. | eqs. 86, 87, 89 | propulsion | `propulsion` | thrust, `VMAX`, nacelle diameter |
 | Fuel system | eq. 92 | propulsion | `propulsion` | `FMXTOT`, engines, `VMAX` |
@@ -220,10 +229,12 @@ terms, never part of OEW.
 | Usable tank capacity | | preset reference / tank layout | `usable_capacity_kg` | published capacity at the source density |
 | MTOW fuel headroom | | ledger closure | `fuel` = `mtow_kg` - OEW - payload | a budget, not a burn |
 
-`WENGB` is an engine-term boundary: on the default branch it includes the
-inlet and nozzle because they are not declared, and nothing else. Pylons,
-mounts, installation hardware and fluids are outside every FLOPS term and
-are recorded as unresolved scope, not as an all-in pod.
+`WENGB` is an engine-term boundary: on the generic default branch it includes
+the inlet and nozzle because they are not declared. Certified preset scope
+controls can instead mark known aircraft-side exhaust/EBU hardware as
+`OutsideUnmodelled`; the corresponding Eq. 78 split is still absent and no
+mass is guessed. Pylons, mounts, installation hardware and fluids are outside
+every FLOPS term and are recorded as unresolved scope, not as an all-in pod.
 
 ### Sources of the design quantities
 
@@ -231,8 +242,8 @@ are recorded as unresolved scope, not as an all-in pod.
 |---|---|---|
 | `DG` | `MassSizingBasis` (above) | declared MTOW for a fixed aircraft, closure mass for a clean sheet, or a declared override |
 | `WLDG` | preset `reference.mlw_kg` in fixed modes; `mlw_fraction_mtow` (0.92) x `DG` otherwise; declared override wins | on the baseline tree the report path used 0.92 x MTOW for every preset because presets load in `CleanSheet`; the A320 gear was 272 kg heavier than at its certified 66,000 kg |
-| Ultimate load factor | `requirements.ultimate_load_factor` = 3.75 | 1.5 x 2.5 g rule lower bound; no aircraft-specific design load case is retained |
-| Dive speed | `requirements.dive_speed_m_s` | Torenbeek/strength diagnostic only; not a FLOPS input |
+| Ultimate load factor | `requirements.ultimate_load_factor` = 3.75 | Screening value (`1.5 x 2.5`); verify certification basis, amendment, category and load case; no aircraft-specific design load case is retained |
+| Dive speed | `requirements.dive_speed_m_s` | Screening/Torenbeek strength input and V-n value; speed type, altitude/Mach envelope and certification basis must be recorded |
 | Fuel density | preset `reference.fuel_density_kg_l` (source table) | A320: 0.800 kg/L (EASA table); the Airbus common convention 0.785 kg/L is a different bookkeeping |
 | Usable fuel | preset `reference.usable_fuel_mass_kg` | `FMXTOT`; the A320 tank layout sums to the 24,209 L common table while the selected MOD table is 24,167 L (42 L recorded mismatch) |
 | Unusable fuel | eq. 121 correlation | physical inventory (EASA 65.7 kg on the A320) is not what the equation returns |

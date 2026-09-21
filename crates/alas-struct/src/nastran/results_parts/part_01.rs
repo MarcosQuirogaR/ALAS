@@ -279,13 +279,21 @@ pub fn read_modes(
     result.mode_shape_y_m = Some(ordered.iter().map(|&(y, _)| y).collect());
 
     for &mode in &kept {
-        let Some(shape) = eigenvectors.data.get(mode) else {
-            continue;
-        };
-        let out_of_plane: Vec<f64> = ordered
-            .iter()
-            .map(|&(_, row)| shape.get(row).map_or(f64::NAN, |values| values[2]))
-            .collect();
+        // Keep one shape slot for every retained frequency, even when an OP2
+        // omits that mode's vector table.  `frequencies_hz` and
+        // `mode_shapes` are parallel by contract; silently skipping a vector
+        // would shift every later shape onto the wrong frequency and could
+        // make the report compare unrelated modes.
+        let out_of_plane: Vec<f64> = eigenvectors
+            .data
+            .get(mode)
+            .map(|shape| {
+                ordered
+                    .iter()
+                    .map(|&(_, row)| shape.get(row).map_or(f64::NAN, |values| values[2]))
+                    .collect()
+            })
+            .unwrap_or_else(|| vec![f64::NAN; ordered.len()]);
         // Upstream's `float(np.max(np.abs(t3))) or 1.0`: a mode that is
         // identically zero on this line normalizes by one rather than by zero.
         let peak = out_of_plane

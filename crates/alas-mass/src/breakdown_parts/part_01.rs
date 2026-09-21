@@ -167,8 +167,9 @@ const AERODYNAMIC_CENTER_CHORD_FRACTION: f64 = 0.25;
 /// [`Self::ReferenceCompatibility`] is the translated Python coordinate and
 /// remains available so the frozen parity fixture keeps testing the reference
 /// implementation rather than an improvement. [`Self::StructuralWingbox`]
-/// replaces only the main-wing point with a first moment integrated from the
-/// configured spars, skins, ribs, materials, and ultimate maneuver load.
+/// places the main-wing point from the configured structural first moment and
+/// uses a cabin-centered planning payload rather than the frozen forward-load
+/// convention. A resolved payload layout supersedes either fallback.
 #[derive(Debug, Clone, Copy)]
 pub enum MassCoordinateModel<'a> {
     /// Exact `alas/physics/mass.py` coordinate behavior.

@@ -111,6 +111,14 @@ impl AppState {
 
         self.config_values = full_config_values(&config);
         self.active_preset = preset.name.to_owned();
+        // Preset operational profiles are automatic suggestions tied to the
+        // preset route. Start a fresh regeneration policy so a later route
+        // edit regenerates until the user changes a phase deliberately.
+        self.mission_profile_manual_edit = false;
+        self.mission_profile_route_signature =
+            crate::views::mission_profile_inputs::route_signature(&self.config_values);
+        self.mission_profile_regeneration_prompt = false;
+        self.mission_profile_retained_validation = None;
 
         // Recenter the design space on the preset's own design vector, using
         // the selected design-mode envelope rather than the retired fixed

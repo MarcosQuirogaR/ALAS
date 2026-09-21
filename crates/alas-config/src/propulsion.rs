@@ -31,6 +31,24 @@ use crate::ConfigNode;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ConfigNode)]
 #[serde(deny_unknown_fields)]
 pub struct PropulsionCycleConfig {
+    /// Conceptual turboprop compressor design ratio, not an OEM cycle anchor.
+    #[serde(default = "default_turboprop_pressure_ratio")]
+    #[config(
+        label = "Turboprop design pressure ratio",
+        unit = "-",
+        help = "Overall core compression ratio for the free-turbine design cycle. The default is a conceptual design assumption, not certified engine data."
+    )]
+    pub turboprop_overall_pressure_ratio: f64,
+
+    /// Conceptual turboprop combustor-exit total temperature.
+    #[serde(default = "default_turboprop_temperature")]
+    #[config(
+        label = "Turboprop design turbine inlet temperature",
+        unit = "K",
+        help = "Combustor-exit total temperature for the free-turbine design cycle. Airflow is inferred from this temperature, compression and the selected engine's cruise fuel-flow anchor; the free turbine supplies its cruise shaft rating."
+    )]
+    pub turboprop_turbine_inlet_temperature_k: f64,
+
     /// Total-pressure recovery through the inlet.
     #[config(
         label = "Inlet pressure recovery",
@@ -195,6 +213,8 @@ pub struct PropulsionCycleConfig {
 impl Default for PropulsionCycleConfig {
     fn default() -> Self {
         Self {
+            turboprop_overall_pressure_ratio: default_turboprop_pressure_ratio(),
+            turboprop_turbine_inlet_temperature_k: default_turboprop_temperature(),
             inlet_pressure_recovery: 0.98,
             lpc_pressure_ratio_split: 1.20,
             lpc_polytropic_efficiency: 0.91,
@@ -219,12 +239,37 @@ impl Default for PropulsionCycleConfig {
     }
 }
 
+fn default_turboprop_pressure_ratio() -> f64 {
+    15.0
+}
+fn default_turboprop_temperature() -> f64 {
+    1400.0
+}
+
 // A test asserts on values it constructed here directly, so a failed unwrap
 // or expect is the assertion failing, not a library invariant being broken.
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn older_cycle_configs_receive_explicit_turboprop_design_defaults() {
+        let mut value = serde_json::to_value(PropulsionCycleConfig::default()).unwrap();
+        let map = value.as_object_mut().unwrap();
+        map.remove("turboprop_overall_pressure_ratio");
+        map.remove("turboprop_turbine_inlet_temperature_k");
+        let decoded: PropulsionCycleConfig = serde_json::from_value(value).unwrap();
+        assert_eq!(decoded, PropulsionCycleConfig::default());
+        let schema = decoded.schema();
+        assert_eq!(
+            schema
+                .field("turboprop_turbine_inlet_temperature_k")
+                .unwrap()
+                .unit,
+            "K"
+        );
+    }
 
     #[test]
     fn no_component_is_better_than_lossless() {

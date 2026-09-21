@@ -125,6 +125,9 @@ impl Default for RunOptions {
 pub enum WorkerMessage {
     /// A typed pipeline lifecycle event.
     Event(RunEvent),
+    /// A report snapshot whose figures are already safe to display while the
+    /// downstream stages continue in the worker.
+    Snapshot(Box<PipelineResult>),
     /// The finished result, or the error that ended the run.
     Finished(Box<Result<PipelineResult, String>>),
 }
@@ -178,6 +181,8 @@ pub struct AppState {
     pub nav_pinned: bool,
     /// Whether the unpinned navigation overlay is currently open from hover.
     pub nav_hover_open: bool,
+    /// Whether navigation motion is replaced by immediate state changes.
+    pub reduced_animations: bool,
     /// The whole-interface zoom multiplier (View > Zoom).
     pub zoom: f32,
     /// Whether zoom follows the current window size until the user chooses a
@@ -206,8 +211,26 @@ pub struct AppState {
     pub stage: String,
     /// When the current run started, for the elapsed stopwatch.
     pub run_started: Option<Instant>,
-    /// The most recent finished pipeline result.
+    /// The most recent pipeline snapshot or finished pipeline result.
     pub pipeline_result: Option<PipelineResult>,
+    /// Whether `pipeline_result` is the final result of a successfully
+    /// completed pipeline run. Snapshots published before downstream stages
+    /// finish deliberately keep this false, even though their figures are
+    /// safe to display.
+    pub pipeline_result_complete: bool,
+    /// Whether the user has manually changed a mission-profile phase.
+    /// Route changes use this bit to switch from automatic regeneration to
+    /// the explicit retain/regenerate prompt.
+    pub mission_profile_manual_edit: bool,
+    /// Route signature for which the displayed profile was last reconciled.
+    pub mission_profile_route_signature: String,
+    /// Whether a route change is waiting for the user's profile decision.
+    pub mission_profile_regeneration_prompt: bool,
+    /// Validation warning for phases retained after a route change.
+    pub mission_profile_retained_validation: Option<String>,
+    /// Native editor opened by clicking a phase in the mission profile
+    /// preview.
+    pub(crate) mission_profile_window: crate::views::mission_profile_inputs::MissionProfileWindow,
     /// Monotonic identity for the current result-producing run.
     pub run_identity: u64,
     /// The channel a running pipeline reports over.
@@ -382,6 +405,7 @@ impl Default for AppState {
             preview_open: true,
             nav_pinned: false,
             nav_hover_open: false,
+            reduced_animations: false,
             zoom: 1.0,
             zoom_auto: true,
             preview_tab: PreviewTab::Exterior,
@@ -396,6 +420,13 @@ impl Default for AppState {
             stage: String::new(),
             run_started: None,
             pipeline_result: None,
+            pipeline_result_complete: false,
+            mission_profile_manual_edit: false,
+            mission_profile_route_signature: String::new(),
+            mission_profile_regeneration_prompt: false,
+            mission_profile_retained_validation: None,
+            mission_profile_window:
+                crate::views::mission_profile_inputs::MissionProfileWindow::default(),
             run_identity: 0,
             worker_rx: None,
             navdata_download_rx: None,

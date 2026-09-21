@@ -12,7 +12,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use alas_aero::mses::{run_mses_polar, MsesStatus};
+use alas_aero::mses::{run_mses_polar, Mses, MsesStatus};
 use alas_config::MsesConfig;
 use alas_geom::asb::airfoil::Airfoil;
 
@@ -30,6 +30,61 @@ fn temporary_directory(label: &str) -> PathBuf {
 
 fn config() -> MsesConfig {
     MsesConfig::default()
+}
+
+fn write_osmap_header(path: &Path) {
+    let mut header = Vec::new();
+    for value in [12_i32, 28, 41, 18, 12, 224] {
+        header.extend_from_slice(&value.to_le_bytes());
+    }
+    fs::write(path, header).expect("the OSMAP header fixture can be written");
+}
+
+#[test]
+fn missing_free_transition_database_stops_before_launching_any_solver() {
+    let root = temporary_directory("missing-osmap");
+    // Invalid executables prove preflight happens before any process launch.
+    for name in ["mset.exe", "mses.exe", "mplot.exe"] {
+        fs::write(root.join(name), b"not executable").unwrap();
+    }
+    let mut settings = config();
+    settings.osmap_path = Some(root.join("missing.dat").display().to_string());
+    let result = run_mses_polar(&airfoil(), 0.3, 5.0e6, 2.0, &settings, &root);
+    assert_eq!(result.status, MsesStatus::Incomplete);
+    assert!(result.solver_attempts.is_empty());
+    assert!(result.error.as_deref().unwrap().contains("No solver retries were run"));
+    assert_eq!(result.converged_alpha_count, 0);
+    let pressure = alas_aero::mses::run_mses_pressure_distribution(
+        &airfoil(), 0.3, 5.0e6, 2.0, &settings, &root, None,
+    );
+    assert_eq!(pressure.status, MsesStatus::Incomplete);
+    assert!(pressure.solver_attempts.is_empty());
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn packaged_osmap_is_selected_from_the_install_root_for_a_changed_working_directory() {
+    let package = temporary_directory("packaged-osmap");
+    let mses_dir = package.join("external tools").join("MSES");
+    let asset = package.join("assets").join("mses").join("osmapDP.dat");
+    fs::create_dir_all(&mses_dir).expect("packaged MSES directory can be created");
+    fs::create_dir_all(asset.parent().expect("packaged OSMAP parent exists"))
+        .expect("packaged OSMAP directory can be created");
+    write_osmap_header(&asset);
+
+    let mut settings = config();
+    settings.enabled = false;
+    let driver = Mses::new(airfoil(), &settings, &mses_dir);
+    let result = driver.polar(&[], 5.0e6, 0.3);
+    let asset_text = asset.to_string_lossy().into_owned();
+    assert_eq!(result.osmap_status.as_str(), "available");
+    assert_eq!(result.osmap_path.as_deref(), Some(asset_text.as_str()));
+    assert!(result
+        .osmap_diagnostic
+        .as_deref()
+        .is_some_and(|text| text.contains("bundled ALAS")));
+    assert_eq!(result.status, MsesStatus::Disabled);
+    fs::remove_dir_all(package).expect("packaged OSMAP fixture can be removed");
 }
 
 #[test]
@@ -100,7 +155,11 @@ fn present_but_unlaunchable_mses_reports_launch_failure() {
         }
     }
 
-    let result = run_mses_polar(&airfoil(), 0.3, 5.0e6, 2.0, &config(), &root);
+    // Exercise executable launch independently of the OSMAP prerequisite.
+    let mut forced = config();
+    forced.xtr_upper = 0.5;
+    forced.xtr_lower = 0.5;
+    let result = run_mses_polar(&airfoil(), 0.3, 5.0e6, 2.0, &forced, &root);
     assert_eq!(result.status, MsesStatus::LaunchFailure);
     #[cfg(windows)]
     drop(launch_guards);

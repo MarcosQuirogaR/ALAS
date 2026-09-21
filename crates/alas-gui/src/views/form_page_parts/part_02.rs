@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-/// Group the otherwise flat turbofan-cycle inputs by their physical subsystem.
+/// Group the otherwise flat cycle inputs by their physical subsystem.
 /// The model schema remains the single source of field metadata; this only
 /// supplies visual hierarchy for a form with no nested configuration nodes.
 fn render_engine_designer_form(
@@ -12,7 +12,15 @@ fn render_engine_designer_form(
     lang: Option<&str>,
     show_help: bool,
 ) -> Vec<FormEdit> {
-    const GROUPS: [(&str, &[&str], bool); 4] = [
+    const GROUPS: [(&str, &[&str], bool); 5] = [
+        (
+            "Cycle design inputs",
+            &[
+                "turboprop_overall_pressure_ratio",
+                "turboprop_turbine_inlet_temperature_k",
+            ],
+            true,
+        ),
         (
             "Intake & compressors",
             &[
@@ -184,6 +192,8 @@ fn render_preview(
 mod tests {
     use super::placement::{optimizer_ui_fields, relocated_paths};
     use super::{engine_editor_model, EngineEditorModel};
+    use crate::nav;
+    use crate::state::AppState;
     use alas_config::ConfigNode;
 
     #[test]
@@ -252,6 +262,29 @@ mod tests {
             engine_editor_model(&alas_config::EngineConfig::default()),
             Ok(EngineEditorModel::Turbofan { .. })
         ));
+    }
+
+    #[test]
+    fn propulsion_page_routes_to_the_rendered_thermodynamic_preview() {
+        let page = nav::page("engine_designer").expect("propulsion page");
+        assert_eq!(page.preview, Some("engine"));
+        assert_eq!(page.preview_title, Some("Thermodynamic cycle preview"));
+
+        let state = AppState::default();
+        let scene = crate::scene::build_page_preview(&state, page.preview.unwrap())
+            .expect("default turbofan cycle preview");
+        assert_eq!(scene.title.as_deref(), Some("Thermodynamic Cycle (T-s)"));
+        assert!(
+            scene
+                .elements
+                .iter()
+                .filter(|element| matches!(
+                    element,
+                    alas_report::scene::SceneElement::Polyline { .. }
+                ))
+                .count()
+                >= 2
+        );
     }
 
     #[test]

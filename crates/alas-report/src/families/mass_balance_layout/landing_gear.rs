@@ -225,6 +225,16 @@ pub fn figure_landing_gear_planform(
         angle_deg: 0.0,
         bold: false,
     });
+    scene.add(SceneElement::Text {
+        text: crate::families::mass_balance::mass_method_note(config).to_owned(),
+        pos: [canvas_w / 2.0, 60.0],
+        font_size: 7.6,
+        color: Color::from_hex(pal.tick),
+        align: TextAlign::Center,
+        baseline: TextBaseline::Middle,
+        angle_deg: 0.0,
+        bold: false,
+    });
 
     // --- Wing planform outline(s).
     let wing_fill = Fill::new(Color::rgba(31, 119, 180, 64));

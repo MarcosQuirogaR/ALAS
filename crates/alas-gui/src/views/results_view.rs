@@ -19,6 +19,7 @@ mod external;
 #[path = "fullscreen_result.rs"]
 mod fullscreen_result;
 mod images;
+mod openvsp;
 mod solver;
 use fullscreen_result::show_fullscreen_result;
 #[cfg(test)]
@@ -283,6 +284,10 @@ fn figure_tile(
             match scene.as_ref() {
                 Some(scene) => {
                     let canvas_width = ui.available_width().max(1.0);
+                    let canvas_rect = egui::Rect::from_min_size(
+                        ui.cursor().min,
+                        vec2(canvas_width, canvas_height),
+                    );
                     if images::scene_has_external_images(scene) {
                         if images::show_external_images(
                             state,
@@ -344,6 +349,9 @@ fn figure_tile(
                                 orbitable,
                             );
                         }
+                    }
+                    if id == "openvsp_cad_preview" {
+                        openvsp::show_launch_button(state, ui, canvas_rect);
                     }
                 }
                 None => {

@@ -3,10 +3,14 @@
 
 //! Theme palette adapter mapping ALAS design system palettes to `egui::Visuals`.
 
+use alas_fonts::{
+    MATH_FONT_BYTES, MATH_FONT_KEY, MONOSPACE_FONT_BYTES, MONOSPACE_FONT_KEY,
+    PROPORTIONAL_FONT_BYTES, PROPORTIONAL_FONT_KEY,
+};
 use alas_report::theme::{get_palette, Palette};
 use egui::{
-    vec2, Align2, Color32, Context, FontId, Frame, Margin, Response, Rounding, Sense, Stroke,
-    TextStyle, Ui, Visuals,
+    vec2, Align2, Color32, Context, FontData, FontDefinitions, FontFamily, FontId, Frame, Margin,
+    Response, Rounding, Sense, Stroke, TextStyle, Ui, Visuals,
 };
 
 /// Available UI themes for the desktop application.
@@ -298,6 +302,7 @@ fn contrast_ratio(a: Color32, b: Color32) -> f32 {
 
 /// Apply the selected theme palette to an `egui::Context`.
 pub fn apply_theme(theme: AppTheme, ctx: &Context) {
+    install_engineering_fonts(ctx);
     let pal = theme.palette();
     let is_dark = theme != AppTheme::Light;
 
@@ -423,9 +428,84 @@ pub fn apply_theme(theme: AppTheme, ctx: &Context) {
     ctx.set_style(style);
 }
 
+/// Configure every native text family with the bundled engineering typefaces.
+///
+/// `egui` resolves the family list per glyph in order. The Noto text faces are
+/// therefore the ordinary application typography, while Noto Sans Math covers
+/// Greek extensions, SI notation, operators and letter subscripts absent from
+/// the framework defaults. Emoji remains last so existing icon-like labels
+/// retain egui's color glyph fallback.
+fn install_engineering_fonts(ctx: &Context) {
+    let mut fonts = FontDefinitions::default();
+    fonts.font_data.insert(
+        PROPORTIONAL_FONT_KEY.to_owned(),
+        FontData::from_static(PROPORTIONAL_FONT_BYTES),
+    );
+    fonts.font_data.insert(
+        MONOSPACE_FONT_KEY.to_owned(),
+        FontData::from_static(MONOSPACE_FONT_BYTES),
+    );
+    fonts.font_data.insert(
+        MATH_FONT_KEY.to_owned(),
+        FontData::from_static(MATH_FONT_BYTES),
+    );
+
+    fonts.families.insert(
+        FontFamily::Proportional,
+        vec![
+            PROPORTIONAL_FONT_KEY.to_owned(),
+            MATH_FONT_KEY.to_owned(),
+            "NotoEmoji-Regular".to_owned(),
+            "emoji-icon-font".to_owned(),
+        ],
+    );
+    fonts.families.insert(
+        FontFamily::Monospace,
+        vec![
+            MONOSPACE_FONT_KEY.to_owned(),
+            MATH_FONT_KEY.to_owned(),
+            PROPORTIONAL_FONT_KEY.to_owned(),
+            "NotoEmoji-Regular".to_owned(),
+            "emoji-icon-font".to_owned(),
+        ],
+    );
+    ctx.set_fonts(fonts);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const ENGINEERING_GLYPH_CORPUS: &str = concat!(
+        // Greek alphabet, commonly used alternate forms, and accented Greek.
+        "\u{0391}\u{0392}\u{0393}\u{0394}\u{0395}\u{0396}\u{0397}\u{0398}\u{0399}\u{039A}\u{039B}\u{039C}\u{039D}\u{039E}\u{039F}\u{03A0}\u{03A1}\u{03A3}\u{03A4}\u{03A5}\u{03A6}\u{03A7}\u{03A8}\u{03A9}",
+        "\u{03B1}\u{03B2}\u{03B3}\u{03B4}\u{03B5}\u{03B6}\u{03B7}\u{03B8}\u{03B9}\u{03BA}\u{03BB}\u{03BC}\u{03BD}\u{03BE}\u{03BF}\u{03C0}\u{03C1}\u{03C2}\u{03C3}\u{03C4}\u{03C5}\u{03C6}\u{03C7}\u{03C8}\u{03C9}",
+        "\u{03D1}\u{03D5}\u{03D6}\u{03F0}\u{03F1}\u{03F5}\u{03AC}\u{03AD}\u{03AE}\u{03AF}\u{03CC}\u{03CD}\u{03CE}",
+        // Actual ALAS engineering labels, including the Latin dotted m.
+        "\u{1E41}\u{2070}\u{00B9}\u{00B2}\u{00B3}\u{2074}\u{2075}\u{2076}\u{2077}\u{2078}\u{2079}\u{207A}\u{207B}\u{207C}\u{207D}\u{207E}\u{207F}",
+        "\u{2080}\u{2081}\u{2082}\u{2083}\u{2084}\u{2085}\u{2086}\u{2087}\u{2088}\u{2089}\u{2090}\u{2091}\u{2092}\u{2093}\u{2094}\u{2095}\u{2096}\u{2097}\u{2098}\u{2099}\u{209A}\u{209B}\u{209C}",
+        // SI typography, calculus, relations, arrows, delimiters, and common
+        // mathematical-alphabet letters that should never resolve to a box.
+        "\u{00B0}\u{00B1}\u{00B7}\u{00D7}\u{00F7}\u{2013}\u{2014}\u{2032}\u{2033}\u{2190}\u{2191}\u{2192}\u{2193}\u{2194}\u{21A6}\u{21D0}\u{21D2}\u{21D4}",
+        "\u{2200}\u{2202}\u{2203}\u{2205}\u{2206}\u{2207}\u{2208}\u{2209}\u{220F}\u{2211}\u{2212}\u{2213}\u{2217}\u{2218}\u{221A}\u{221D}\u{221E}\u{2220}\u{2227}\u{2228}\u{2229}\u{222B}\u{2248}\u{2260}\u{2261}\u{2264}\u{2265}\u{2282}\u{2286}\u{2295}\u{2297}\u{22C5}\u{2308}\u{2309}\u{230A}\u{230B}\u{27E8}\u{27E9}",
+        "\u{1D6A8}\u{1D6C2}\u{1D6E2}\u{1D6FC}\u{1D70E}\u{1D722}\u{1D734}\u{1D74E}\u{1D760}\u{1D7CA}\u{1D400}\u{1D41A}\u{1D434}\u{1D44E}\u{1D468}\u{1D482}\u{1D7D8}\u{1D7E2}"
+    );
+
+    #[test]
+    fn bundled_font_stacks_cover_greek_and_engineering_notation() {
+        for theme in [AppTheme::Dark, AppTheme::Light, AppTheme::Grey] {
+            let context = Context::default();
+            apply_theme(theme, &context);
+            let _ = context.run(egui::RawInput::default(), |_| {});
+            for style in [TextStyle::Body, TextStyle::Monospace] {
+                let font = style.resolve(&context.style());
+                assert!(
+                    context.fonts(|fonts| fonts.has_glyphs(&font, ENGINEERING_GLYPH_CORPUS)),
+                    "{theme:?}: {style:?} stack misses an engineering glyph"
+                );
+            }
+        }
+    }
 
     fn emitted_label_colors(context: &Context) -> Vec<(String, Color32)> {
         let output = context.run(egui::RawInput::default(), |ctx| {

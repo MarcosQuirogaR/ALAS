@@ -77,7 +77,7 @@ pub fn engine_copy(path: &str) -> Option<Value> {
 
 /// Additive propulsion fields are validated by the active-binding unit tests.
 pub fn native_field(path: &str, key: &str) -> bool {
-    (matches!(key, "fuel_policy" | "fuel_tanks") && !path.contains('.'))
+    (matches!(key, "fuel_policy" | "fuel_tanks" | "downstream") && !path.contains('.'))
         || (path.ends_with(".landing_gear")
             && matches!(
                 key,

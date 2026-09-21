@@ -307,6 +307,8 @@ mod tests {
         }
         let freestream = states.freestream_static.as_ref().unwrap();
         assert_eq!(freestream.entropy_j_kgk, 0.0);
+        assert!(states.core[0].entropy_j_kgk.abs() < 1e-9);
+        assert!(states.core[1].entropy_j_kgk > states.core[0].entropy_j_kgk);
         assert_eq!(freestream.temperature_k, states.reference.temperature_k);
         // Every stagnation state and every static exit state has a
         // positive temperature and pressure, and the path is

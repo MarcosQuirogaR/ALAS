@@ -13,6 +13,7 @@ use std::f64::consts::PI;
 
 use alas_aero::analysis::AeroAnalysis;
 use alas_atmo::Atmosphere;
+use alas_config::cabin::annotate_flops_cabin_resolution;
 use alas_config::design_variables::DesignVector;
 use alas_config::optimizer::DesignMode;
 use alas_config::AlasConfig;
@@ -146,28 +147,44 @@ pub(crate) fn apply_candidate_payload_load_case(
     }
     let target_cargo_kg = config.requirements.cargo_payload_kg;
     let passenger_mass_kg = config.requirements.passenger_mass_kg;
-    apply_cabin_preset(config, Some(design_vector))?;
     if config.requirements.aircraft_type == "passenger" {
-        // The FLOPS transport mass model declares its own per-class
-        // passenger counts independently of the cabin/requirements model.
-        // Keep them derived from the same geometry-resolved counts
-        // `apply_cabin_preset` just wrote, so the FLOPS buildup's own
-        // completeness check (`first + business + tourist ==
-        // requested_passengers`, in `alas_mass::flops_transport::product`)
-        // can never fail from a stale copy, whatever the resolved total is.
-        let to_count = |count: i64| usize::try_from(count.max(0)).unwrap_or(0);
+        // Resolve the legacy Premium slot before deciding whether this is a
+        // nonempty installed cabin; otherwise a Premium-only declaration
+        // could be mistaken for an empty count cabin and rematerialized.
+        config.cabin.passenger = config.cabin.passenger.canonicalized_for_product();
+    }
+    let explicit_count_cabin = config.requirements.aircraft_type == "passenger"
+        && config.cabin.passenger.class_mix_mode == "count"
+        && config.cabin.passenger.total_seats() > 0;
+    if !explicit_count_cabin {
+        apply_cabin_preset(config, Some(design_vector))?;
+    }
+    if config.requirements.aircraft_type == "passenger" {
+        // Resolve one canonical three-class cabin for both payload and FLOPS.
+        // A legacy Premium slot is folded into Economy before the row packer
+        // sees it; percent-mode stale count seeds are ignored unless they
+        // already agree with the requirements total.
+        let counts = config
+            .cabin
+            .passenger
+            .resolved_flops_counts(config.requirements.num_passengers);
+        if config.cabin.passenger.class_mix_mode == "count" && counts.is_nonempty() {
+            config.requirements.num_passengers = counts.total();
+        }
+        let to_count = |count: i64| usize::try_from(count.max(0)).unwrap_or(usize::MAX);
+        annotate_flops_cabin_resolution(&mut config.mass_model, counts);
         config
             .mass_model
             .flops_transport
-            .first_class_passenger_count = Some(to_count(config.cabin.passenger.first.count));
+            .first_class_passenger_count = Some(to_count(counts.first));
         config
             .mass_model
             .flops_transport
-            .business_class_passenger_count = Some(to_count(config.cabin.passenger.business.count));
+            .business_class_passenger_count = Some(to_count(counts.business));
         config
             .mass_model
             .flops_transport
-            .tourist_class_passenger_count = Some(to_count(config.cabin.passenger.economy.count));
+            .tourist_class_passenger_count = Some(to_count(counts.tourist));
     }
     config.requirements.cargo_payload_kg = target_cargo_kg;
     config

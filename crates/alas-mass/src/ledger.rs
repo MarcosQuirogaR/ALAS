@@ -319,6 +319,22 @@ pub enum MassMethod {
     ClosureRemainder,
 }
 
+impl MassMethod {
+    /// Source label retained by reports and exports, without inferring it from
+    /// the architecture that owns the item.
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Correlation(source) => source,
+            Self::TakeoffMassFraction => "takeoff mass fraction",
+            Self::Geometric => "geometry and density",
+            Self::Declared => "declared mass",
+            Self::LayoutPlacement => "payload layout",
+            Self::TankFill => "tank volume and density",
+            Self::ClosureRemainder => "mass closure remainder",
+        }
+    }
+}
+
 /// One row of the ledger.
 #[derive(Debug, Clone, PartialEq)]
 pub struct MassItem {

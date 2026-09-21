@@ -117,13 +117,20 @@ fn same_key(airport: &CustomAirport, key: &str) -> bool {
 }
 
 fn to_legacy(airport: &CustomAirport) -> Airport {
-    let toda = airport.declared_toda_m.unwrap_or(0.0);
-    let lda = airport.declared_lda_m.unwrap_or(0.0);
-    let runway_kind = if airport.declared_toda_m.is_some() && airport.declared_lda_m.is_some() {
-        "declared TODA/LDA supplied"
-    } else {
-        "physical runway lengths only; declared TODA/LDA unavailable"
-    };
+    let physical_length = airport
+        .runway_lengths_m
+        .iter()
+        .copied()
+        .filter(|length| length.is_finite() && *length > 0.0)
+        .fold(0.0, f64::max);
+    let (toda, lda, runway_kind) = airport.declared_toda_m.zip(airport.declared_lda_m).map_or(
+        (
+            physical_length,
+            physical_length,
+            "longest physical runway used conservatively",
+        ),
+        |(toda, lda)| (toda, lda, "declared distances supplied"),
+    );
     let provenance = airport
         .provenance
         .source

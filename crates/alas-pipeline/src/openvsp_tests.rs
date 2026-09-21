@@ -85,12 +85,15 @@ fn the_cad_preview_export_adds_the_fuselage_without_touching_the_solver_geometry
 
     // The two VSPAEROComputeGeometry calls are independent named analyses
     // writing to independent WriteVSPFile targets.
-    let solver_geom_set = "SetIntAnalysisInput( alas_vspaero_geometry_analysis, \"GeomSet\", { SET_NONE }, 0 );";
+    let solver_geom_set =
+        "SetIntAnalysisInput( alas_vspaero_geometry_analysis, \"GeomSet\", { SET_NONE }, 0 );";
     let preview_geom_set =
         "SetIntAnalysisInput( alas_cad_preview_geometry_analysis, \"GeomSet\", { 4 }, 0 );";
     assert!(script.contains(solver_geom_set));
     assert!(script.contains(preview_geom_set));
-    let solver_write = script.find("WriteVSPFile(\"aircraft.vsp3\", SET_ALL);").unwrap();
+    let solver_write = script
+        .find("WriteVSPFile(\"aircraft.vsp3\", SET_ALL);")
+        .unwrap();
     let solver_analysis = script.find(solver_geom_set).unwrap();
     let preview_write = script
         .find("WriteVSPFile(\"aircraft.cad_preview.vsp3\", SET_ALL);")
@@ -104,6 +107,57 @@ fn the_cad_preview_export_adds_the_fuselage_without_touching_the_solver_geometry
     assert!(solver_analysis < preview_analysis);
     assert!(preview_write < preview_analysis);
 
+    Ok(())
+}
+
+#[test]
+fn the_fuselage_export_pins_the_documented_linear_loft_and_point_caps(
+) -> Result<(), alas_geom::builder::BuildError> {
+    let config = AlasConfig::default();
+    let airplane = AircraftBuilder::new(Some(config.geometry.clone()))
+        .build(Some(&DesignVector::default()), true)?;
+    let script = render_script(
+        &airplane,
+        None,
+        "aircraft.vsp3",
+        "aircraft.cad_preview.vsp3",
+        "aircraft.preview.png",
+    );
+
+    for (fuselage_index, fuselage) in airplane.fuselages.iter().enumerate() {
+        for section_index in 0..fuselage.xsecs.len() {
+            let xsec_id = format!("body_xsec_{fuselage_index}_{section_index}");
+            assert!(script.contains(&format!(
+                "SetXSecContinuity( {xsec_id}, 0 );"
+            )));
+            assert!(script.contains(&format!(
+                "SetXSecTanAngles( {xsec_id}, XSEC_BOTH_SIDES, 0 );"
+            )));
+            assert!(script.contains(&format!(
+                "SetXSecTanStrengths( {xsec_id}, XSEC_BOTH_SIDES, 0 );"
+            )));
+        }
+
+        let first = &fuselage.xsecs[0];
+        let last_index = fuselage.xsecs.len() - 1;
+        let last = &fuselage.xsecs[last_index];
+        let first_cap = format!("body_xsec_{fuselage_index}_0");
+        let last_cap = format!("body_xsec_{fuselage_index}_{last_index}");
+        let first_angle = format!(
+            "SetXSecTanAngles( {first_cap}, XSEC_BOTH_SIDES, 90 );"
+        );
+        let last_angle = format!(
+            "SetXSecTanAngles( {last_cap}, XSEC_BOTH_SIDES, -90 );"
+        );
+        assert_eq!(
+            script.contains(&first_angle),
+            first.width <= 1.0e-9 || first.height <= 1.0e-9
+        );
+        assert_eq!(
+            script.contains(&last_angle),
+            last.width <= 1.0e-9 || last.height <= 1.0e-9
+        );
+    }
     Ok(())
 }
 
@@ -159,6 +213,190 @@ fn default_report() -> (AlasConfig, AnalysisReport) {
         .run(&DesignVector::default(), false)
         .unwrap_or_else(|error| panic!("clean-sheet analysis: {error}"));
     (config, report)
+}
+
+/// Numerical round-trip against OpenVSP, rather than a text-only check of
+/// requested driver values: stale derived totals used to shrink the root
+/// chord and increase span when the native project was reopened.
+#[test]
+#[ignore = "requires ALAS_OPENVSP_EXE pointing to installed vspscript"]
+fn native_wing_roundtrip_preserves_section_chords_and_tip_position() {
+    let executable = std::env::var_os("ALAS_OPENVSP_EXE")
+        .expect("set ALAS_OPENVSP_EXE to the installed script runner");
+    let airplane = AircraftBuilder::new(Some(AlasConfig::default().geometry))
+        .build(Some(&DesignVector::default()), true)
+        .unwrap();
+    let wing = &airplane.wings[0];
+    let tip = wing.xsecs.last().unwrap();
+    let directory =
+        std::env::temp_dir().join(format!("alas-wing-roundtrip-{}", std::process::id()));
+    fs::create_dir_all(&directory).unwrap();
+    let mut script = String::from("void main() {\n    ClearVSPModel();\n");
+    emit_wing(&mut script, 0, wing);
+    script.push_str("    Update();\n    WriteVSPFile(\"wing.vsp3\", SET_ALL);\n    bool valid = true;\n    for ( int phase = 0; phase < 2; phase++ ) {\n        if ( phase == 1 ) { ClearVSPModel(); ReadVSPFile(\"wing.vsp3\"); }\n");
+    let _ = writeln!(
+        script,
+        "        string geom = FindGeom(\"{}\", 0);",
+        script_string(&wing.name)
+    );
+    script.push_str("        string surf = GetXSecSurf(geom, 0);\n");
+    for (index, section) in wing.xsecs.iter().enumerate() {
+        let _ = writeln!(script, "        double chord_{index} = GetParmVal(GetXSecParm(GetXSec(surf, {index}), \"Chord\"));");
+        let _ = writeln!(script, "        if (chord_{index} < {:.12} || chord_{index} > {:.12}) {{ valid = false; Print(\"CHORD_MISMATCH_{index}\"); }}", section.chord - 1.0e-7, section.chord + 1.0e-7);
+    }
+    script.push_str("        vec3d tip = CompPnt01(geom, 0, 1.0, 0.5);\n");
+    for (axis, expected) in ["x", "y", "z"].into_iter().zip(tip.xyz_le) {
+        let _ = writeln!(script, "        if (tip.{axis}() < {:.12} || tip.{axis}() > {:.12}) {{ valid = false; Print(\"TIP_MISMATCH_{axis}\"); }}", expected - 1.0e-7, expected + 1.0e-7);
+    }
+    script.push_str("    }\n    if (valid) { Print(\"ALAS_WING_ROUNDTRIP_OK\"); }\n}\n");
+    fs::write(directory.join("roundtrip.vspscript"), script).unwrap();
+    let output = Command::new(executable)
+        .arg("-script")
+        .arg("roundtrip.vspscript")
+        .current_dir(&directory)
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        output.status.success() && stdout.contains("ALAS_WING_ROUNDTRIP_OK"),
+        "OpenVSP round-trip failed; retained evidence at {}\n{}\n{}",
+        directory.display(),
+        stdout,
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+/// Native surface samples verify the exporter preserves ALAS's documented
+/// piecewise-linear loft, rather than merely hiding the spline ripple through
+/// display tessellation. The sampled side radius is compared with the linear
+/// interpolation of adjacent station envelopes in metres, and nose/tail
+/// samples are required to remain monotone.
+#[test]
+#[ignore = "requires ALAS_OPENVSP_EXE pointing to installed vspscript"]
+fn native_fuselage_surface_samples_match_the_linear_station_loft() {
+    let executable = std::env::var_os("ALAS_OPENVSP_EXE")
+        .expect("set ALAS_OPENVSP_EXE to the installed script runner");
+    let airplane = AircraftBuilder::new(Some(AlasConfig::default().geometry))
+        .build(Some(&DesignVector::default()), true)
+        .unwrap();
+    let fuselage = &airplane.fuselages[0];
+    let section_count = fuselage.xsecs.len();
+    assert!(section_count >= 3, "fixture needs nose, cabin and tail stations");
+    let max_width = fuselage
+        .xsecs
+        .iter()
+        .map(|section| section.width)
+        .fold(0.0, f64::max);
+    let nose_end = fuselage
+        .xsecs
+        .iter()
+        .position(|section| (section.width - max_width).abs() <= 1.0e-12)
+        .unwrap();
+    let tail_start = fuselage
+        .xsecs
+        .iter()
+        .rposition(|section| (section.width - max_width).abs() <= 1.0e-12)
+        .unwrap();
+    let denominator = (section_count - 1) as f64;
+    let nose_break = nose_end as f64 / denominator;
+    let tail_break = tail_start as f64 / denominator;
+    let directory = std::env::var_os("ALAS_OPENVSP_FUSELAGE_TEST_OUTPUT")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| {
+            std::env::temp_dir().join(format!(
+                "alas-fuselage-loft-{}-{:?}",
+                std::process::id(),
+                std::thread::current().id()
+            ))
+        });
+    fs::create_dir_all(&directory).unwrap();
+
+    let mut script = String::from("void main() {\n    ClearVSPModel();\n");
+    emit_fuselage(&mut script, 0, fuselage);
+    script.push_str(
+        r#"    Update();
+    WriteVSPFile( "fuselage.vsp3", SET_ALL );
+    ClearVSPModel();
+    ReadVSPFile( "fuselage.vsp3" );
+    string body = FindGeom( "Fuselage", 0 );
+    bool valid = true;
+    double previous_x = -1.0e30;
+    double previous_nose_y = -1.0e30;
+    double previous_tail_y = 1.0e30;
+    bool have_nose = false;
+    bool have_tail = false;
+    for ( int sample = 0; sample <= 400; sample++ ) {
+        double u = sample / 400.0;
+        vec3d p = CompPnt01( body, 0, u, 0.0 );
+        if ( sample > 0 && p.x() + 1.0e-8 < previous_x ) {
+            valid = false;
+            Print( string( "ALAS_FUSELAGE_X_NONMONOTONE\n" ) );
+        }
+        previous_x = p.x();
+        double expected_radius = 0.0;
+"#,
+    );
+    for (index, pair) in fuselage.xsecs.windows(2).enumerate() {
+        let left = pair[0];
+        let right = pair[1];
+        let slope = (right.width - left.width) / (right.xyz_c[0] - left.xyz_c[0]) / 2.0;
+        let condition = if index == 0 { "if" } else { "else if" };
+        let _ = writeln!(
+            script,
+            "        {condition} ( p.x() <= {:.12} ) {{ expected_radius = {:.12} + ( p.x() - {:.12} ) * {:.12}; }}",
+            right.xyz_c[0],
+            left.width / 2.0,
+            left.xyz_c[0],
+            slope
+        );
+    }
+    script.push_str(
+        r#"        if ( abs( p.y() - expected_radius ) > 1.0e-6 ) {
+            valid = false;
+            Print( string( "ALAS_FUSELAGE_LINEAR_MISMATCH\n" ) );
+        }
+"#,
+    );
+    let _ = writeln!(
+        script,
+        r#"        if ( u <= {:.12} ) {{
+            if ( have_nose && p.y() + 1.0e-8 < previous_nose_y ) {{
+                valid = false;
+                Print( string( "ALAS_FUSELAGE_NOSE_RIPPLE\n" ) );
+            }}
+            previous_nose_y = p.y();
+            have_nose = true;
+        }}
+        if ( u >= {:.12} ) {{
+            if ( have_tail && p.y() > previous_tail_y + 1.0e-8 ) {{
+                valid = false;
+                Print( string( "ALAS_FUSELAGE_TAIL_RIPPLE\n" ) );
+            }}
+            previous_tail_y = p.y();
+            have_tail = true;
+        }}
+    }}
+    if ( valid ) {{ Print( string( "ALAS_FUSELAGE_LINEAR_OK\n" ) ); }}
+}}
+"#,
+        nose_break,
+        tail_break
+    );
+    fs::write(directory.join("fuselage.vspscript"), script).unwrap();
+    let output = Command::new(executable)
+        .arg("-script")
+        .arg("fuselage.vspscript")
+        .current_dir(&directory)
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        output.status.success() && stdout.contains("ALAS_FUSELAGE_LINEAR_OK"),
+        "OpenVSP fuselage loft failed; retained evidence at {}\n{}\n{}",
+        directory.display(),
+        stdout,
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 #[test]

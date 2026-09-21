@@ -294,12 +294,12 @@ mod tests {
     }
 
     #[test]
-    fn physical_lengths_do_not_become_declared_distances() {
+    fn physical_lengths_supply_conservative_legacy_distances() {
         let airport = sample("ZZ03");
         replace_custom_airports(vec![airport]).expect("registry accepts sample");
         let legacy = legacy_by_name_or_icao("ZZ03").expect("legacy lookup");
-        assert_eq!(legacy.toda_m, 0.0);
-        assert_eq!(legacy.lda_m, 0.0);
+        assert_eq!(legacy.toda_m, 2400.0);
+        assert_eq!(legacy.lda_m, 2400.0);
         replace_custom_airports(Vec::new()).expect("registry clears");
     }
 

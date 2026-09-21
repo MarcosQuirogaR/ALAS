@@ -634,8 +634,8 @@ fn compare_transport_planform_schema(
 }
 
 fn is_native_config_field(path: &str, key: &str) -> bool {
-    (matches!(key, "fuel_policy" | "fuel_tanks")
-        && (path.ends_with("AlasConfig") || path.is_empty()))
+    (matches!(key, "fuel_policy" | "fuel_tanks" | "downstream")
+        && (path.ends_with("AlasConfig") || path.ends_with("ALASConfig") || path.is_empty()))
         // Source-backed landing-gear references and heterogeneous bogie
         // counts are native additions; the frozen Python schema predates
         // them. Their values are checked by landing-gear unit/config tests.

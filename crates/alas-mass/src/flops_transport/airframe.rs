@@ -17,6 +17,7 @@ use alas_config::{
     GeometryConfig, MassModelConfig,
 };
 use alas_geom::aircraft::airplane::Airplane;
+use alas_geom::aircraft::fuselage::{Fuselage, FuselageXSec, DEFAULT_SHAPE};
 
 use super::airframe_geometry::{
     average_thickness, detailed_stations, dihedral_deg, find_surface, nacelle_dimensions,
@@ -127,6 +128,86 @@ fn sort_reasons(mut reasons: Vec<Reason>) -> FlopsAirframeEvaluation {
     FlopsAirframeEvaluation::Unverified { reasons }
 }
 
+/// Resolve the wetted area of one nacelle from the built aircraft whenever
+/// nacelle bodies are present. The turboprop evaluator multiplies this
+/// per-body area by the installed engine count, so the built areas are
+/// averaged only to retain that existing per-engine interface. If a caller
+/// intentionally omits engine bodies, rebuild the same configured profile in
+/// memory; this keeps `include_engines` from changing a mass input. A
+/// cylindrical proxy remains only for a legacy configuration with no profile.
+fn turboprop_nacelle_wetted_area_m2(
+    plane: &Airplane,
+    geometry: &GeometryConfig,
+    fallback_diameter_m: f64,
+    fallback_length_m: f64,
+) -> (f64, &'static str) {
+    let bodies: Vec<_> = plane
+        .fuselages
+        .iter()
+        .filter(|body| body.name.contains("Nacelle"))
+        .collect();
+    if !bodies.is_empty() {
+        let areas_m2: Vec<f64> = bodies.iter().map(|body| body.area_wetted()).collect();
+        if areas_m2
+            .iter()
+            .any(|area_m2| !area_m2.is_finite() || *area_m2 <= 0.0)
+        {
+            // A present but malformed body is a geometry error. Falling
+            // through to a proxy here would silently hide a bad build and
+            // make the mass depend on whether the body happened to be
+            // present.
+            return (f64::NAN, "invalid_built_nacelle_fuselage_wetted_area");
+        }
+        let total_area_m2: f64 = areas_m2.iter().sum();
+        let average_area_m2 = total_area_m2 / bodies.len() as f64;
+        if average_area_m2.is_finite() && average_area_m2 > 0.0 {
+            return (average_area_m2, "built_nacelle_fuselage_wetted_area");
+        }
+        return (f64::NAN, "invalid_built_nacelle_fuselage_wetted_area");
+    }
+
+    let profile = &geometry.engine.nacelle_profile;
+    if !profile.is_empty() {
+        if profile.len() < 2 {
+            return (f64::NAN, "invalid_configured_nacelle_profile");
+        }
+        if !geometry.engine.radius_scale_m.is_finite() || geometry.engine.radius_scale_m <= 0.0 {
+            return (f64::NAN, "invalid_configured_nacelle_profile");
+        }
+        let xsecs: Result<Vec<_>, _> = profile
+            .iter()
+            .map(|&(x, radius_fraction)| {
+                if !x.is_finite() || !radius_fraction.is_finite() || radius_fraction < 0.0 {
+                    return Err(());
+                }
+                FuselageXSec::new(
+                    [x, 0.0, 0.0],
+                    Some(geometry.engine.radius_scale_m * radius_fraction),
+                    None,
+                    None,
+                    DEFAULT_SHAPE,
+                )
+                .map_err(|_| ())
+            })
+            .collect();
+        let Ok(xsecs) = xsecs else {
+            return (f64::NAN, "invalid_configured_nacelle_profile");
+        };
+        let area_m2 = Fuselage::new("Configured Nacelle", xsecs).area_wetted();
+        if area_m2.is_finite() && area_m2 > 0.0 {
+            return (area_m2, "configured_nacelle_profile_wetted_area");
+        }
+        return (f64::NAN, "invalid_configured_nacelle_profile");
+    }
+
+    // This is intentionally a last-resort compatibility path for older
+    // configurations that carry dimensions but no silhouette profile.
+    (
+        std::f64::consts::PI * fallback_diameter_m * fallback_length_m,
+        "configured_cylindrical_nacelle_proxy_fallback",
+    )
+}
+
 /// Resolve and evaluate the selected FLOPS airframe groups.
 pub fn evaluate_airframe_product(request: &FlopsAirframeRequest<'_>) -> FlopsAirframeEvaluation {
     let FlopsAirframeRequest {
@@ -229,7 +310,12 @@ pub fn evaluate_airframe_product(request: &FlopsAirframeRequest<'_>) -> FlopsAir
         }
     };
     let (nacelle_diameter_m, nacelle_length_m) = nacelle_dimensions(plane, geometry);
+    let (nacelle_wetted_area_m2, nacelle_area_basis) =
+        turboprop_nacelle_wetted_area_m2(plane, geometry, nacelle_diameter_m, nacelle_length_m);
     if !(nacelle_diameter_m > 0.0 && nacelle_length_m > 0.0) {
+        reasons.push(Reason::NacelleGeometry);
+    }
+    if !nacelle_wetted_area_m2.is_finite() || nacelle_wetted_area_m2 <= 0.0 {
         reasons.push(Reason::NacelleGeometry);
     }
     if !reasons.is_empty() {
@@ -247,6 +333,7 @@ pub fn evaluate_airframe_product(request: &FlopsAirframeRequest<'_>) -> FlopsAir
         baseline_thrust_n,
         baseline_engine_mass_kg: technology.baseline_engine_mass_kg,
         scaling_exponent: technology.engine_mass_scaling_exponent,
+        starter_scope: technology.starter_scope,
         // Equations 77-79 only when the configuration declares the inlet or
         // nozzle separately; `FlopsStructureConfig::validate` has already
         // refused a separate item without an explicit baseline core mass, so
@@ -255,6 +342,7 @@ pub fn evaluate_airframe_product(request: &FlopsAirframeRequest<'_>) -> FlopsAir
         inlet_scaling_exponent: technology.inlet_mass_scaling_exponent,
         baseline_nozzle_mass_kg: technology.baseline_nozzle_mass_kg,
         nozzle_scaling_exponent: technology.nozzle_mass_scaling_exponent,
+        nozzle_scope: technology.nozzle_scope,
         thrust_reversers_installed: technology.thrust_reversers_installed,
         maximum_mach,
         nacelle_diameter_m,
@@ -284,10 +372,8 @@ pub fn evaluate_airframe_product(request: &FlopsAirframeRequest<'_>) -> FlopsAir
                 propeller_speed_rpm: spec.governed_propeller_speed_rpm,
                 propeller_diameter_m: spec.propeller_diameter_m,
                 reduction_ratio: spec.reduction_ratio,
-                design_mach: maximum_mach,
-                nacelle_wetted_area_m2: std::f64::consts::PI
-                    * nacelle_diameter_m
-                    * nacelle_length_m,
+                design_mach: requirements.cruise_mach,
+                nacelle_wetted_area_m2,
                 maximum_fuel_capacity_kg,
             };
             match estimate_turboprop_propulsion(
@@ -295,11 +381,18 @@ pub fn evaluate_airframe_product(request: &FlopsAirframeRequest<'_>) -> FlopsAir
                 &mass_model.flops_turboprop,
                 maximum_mach,
             ) {
-                Ok(group) => Some(group),
+                Ok(mut group) => {
+                    group.design_mach_basis = "requirements_cruise_mach";
+                    group.nacelle_area_basis = nacelle_area_basis;
+                    Some(group)
+                }
                 Err(blockers) => {
                     reasons.extend(blockers.into_iter().map(|blocker| match blocker {
                         TurbopropMassUnverifiedReason::InvalidConfiguration => {
                             Reason::TurbopropMassConfiguration
+                        }
+                        TurbopropMassUnverifiedReason::InvalidOperatingPoint => {
+                            Reason::TurbopropOperatingPoint
                         }
                         TurbopropMassUnverifiedReason::ShaftPowerRating => {
                             Reason::TurbopropShaftPowerRating
@@ -527,6 +620,7 @@ mod tests {
         FlopsInputEvidence, FlopsInputProvenance, FlopsStructureConfig, FlopsTransportConfig,
         FlopsTransportProvenance,
     };
+    use alas_geom::aircraft::fuselage::{Fuselage, FuselageXSec, DEFAULT_SHAPE};
     use alas_geom::builder::AircraftBuilder;
 
     fn provenance(document: &str) -> FlopsInputProvenance {
@@ -557,6 +651,7 @@ mod tests {
                 fuselage_mounted_engine_count: Some(0),
                 fuel_tank_count: Some(6),
                 maximum_fuel_capacity_kg: Some(220_000.0),
+                apu_installed: true,
                 containerized_cargo_kg: Some(0.0),
                 cargo_loading: Some(alas_config::CargoHoldLoading::Containerized),
                 containerized_baggage_fraction: None,
@@ -689,6 +784,81 @@ mod tests {
             "{}",
             breakdown.structure_inputs.design_landing_mass_kg
         );
+    }
+
+    #[test]
+    fn turboprop_nacelle_area_uses_the_built_profile_with_or_without_bodies() {
+        let config =
+            alas_config::AlasConfig::from_value(&serde_json::json!({"preset": "ATR72-600"}))
+                .expect("registered ATR preset");
+        let geometry = config.geometry.clone();
+        let built = AircraftBuilder::new(Some(geometry.clone()))
+            .build(None, true)
+            .expect("ATR geometry with nacelles");
+        let omitted = AircraftBuilder::new(Some(geometry.clone()))
+            .build(None, false)
+            .expect("ATR geometry without nacelles");
+        let (diameter_m, length_m) = nacelle_dimensions(&built, &geometry);
+        let (built_area_m2, built_basis) =
+            turboprop_nacelle_wetted_area_m2(&built, &geometry, diameter_m, length_m);
+        let (omitted_area_m2, omitted_basis) =
+            turboprop_nacelle_wetted_area_m2(&omitted, &geometry, diameter_m, length_m);
+        let cylindrical_proxy_m2 = std::f64::consts::PI * diameter_m * length_m;
+        println!(
+            concat!(
+                "ATR nacelle area: built={:.15} m2, omitted={:.15} m2, ",
+                "cylindrical_proxy={:.15} m2, ratio={:.9}"
+            ),
+            built_area_m2,
+            omitted_area_m2,
+            cylindrical_proxy_m2,
+            built_area_m2 / cylindrical_proxy_m2
+        );
+        assert_eq!(built_basis, "built_nacelle_fuselage_wetted_area");
+        assert_eq!(omitted_basis, "configured_nacelle_profile_wetted_area");
+        assert!(built_area_m2 > 0.0);
+        assert!((built_area_m2 - omitted_area_m2).abs() < 1.0e-12);
+    }
+
+    #[test]
+    fn malformed_nacelle_geometry_is_not_replaced_by_a_cylindrical_proxy() {
+        let geometry = GeometryConfig::default();
+        let malformed_body = Fuselage::new(
+            "Nacelle malformed",
+            vec![
+                FuselageXSec::new([0.0, 0.0, 0.0], Some(1.0), None, None, DEFAULT_SHAPE)
+                    .expect("valid section"),
+            ],
+        );
+        let body_plane = Airplane {
+            name: "malformed".to_owned(),
+            xyz_ref: [0.0; 3],
+            wings: Vec::new(),
+            fuselages: vec![malformed_body],
+            s_ref: 0.0,
+            c_ref: 0.0,
+            b_ref: 0.0,
+        };
+        let (body_area_m2, body_basis) =
+            turboprop_nacelle_wetted_area_m2(&body_plane, &geometry, 1.0, 3.0);
+        assert!(body_area_m2.is_nan());
+        assert_eq!(body_basis, "invalid_built_nacelle_fuselage_wetted_area");
+
+        let mut malformed_profile = geometry;
+        malformed_profile.engine.nacelle_profile = vec![(0.0, 0.5)];
+        let empty_plane = Airplane {
+            name: "empty".to_owned(),
+            xyz_ref: [0.0; 3],
+            wings: Vec::new(),
+            fuselages: Vec::new(),
+            s_ref: 0.0,
+            c_ref: 0.0,
+            b_ref: 0.0,
+        };
+        let (profile_area_m2, profile_basis) =
+            turboprop_nacelle_wetted_area_m2(&empty_plane, &malformed_profile, 1.0, 3.0);
+        assert!(profile_area_m2.is_nan());
+        assert_eq!(profile_basis, "invalid_configured_nacelle_profile");
     }
 
     #[test]

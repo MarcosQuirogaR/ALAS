@@ -21,6 +21,7 @@ pub mod nav;
 mod nav_overlay;
 pub mod path_picker;
 pub mod run;
+mod result_refresh;
 pub mod sandbox;
 pub mod scene;
 pub mod screening;

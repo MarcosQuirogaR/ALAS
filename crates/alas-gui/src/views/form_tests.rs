@@ -195,6 +195,9 @@ fn every_declared_option_source_resolves_to_a_nonempty_form_list() {
         "strategy",
         "aircraft_type",
         "cabin_preset",
+        "main_deck_uld",
+        "lower_deck_uld",
+        "loading_strategy",
     ] {
         assert!(
             names.iter().any(|name| name == expected),
@@ -242,6 +245,48 @@ fn tire_and_cabin_preset_lists_include_the_declared_values() {
 }
 
 #[test]
+fn cargo_choice_lists_cover_the_loader_inputs() {
+    let config = AlasConfig::default();
+    let values = serde_json::to_value(&config).expect("default config serializes");
+    let schema = config.schema();
+    let cabin = schema.field("cabin").expect("cabin group");
+    let Entry::Node(cabin) = &cabin.entry else {
+        panic!("cabin is a group");
+    };
+    let cargo = cabin.field("cargo").expect("cargo group");
+    let Entry::Node(cargo) = &cargo.entry else {
+        panic!("cargo is a group");
+    };
+    let cargo_values = values
+        .get("cabin")
+        .and_then(|cabin| cabin.get("cargo"))
+        .expect("cargo values");
+
+    let main = cargo.field("main_deck_uld").expect("main-deck ULD field");
+    let lower = cargo
+        .field("lower_deck_uld")
+        .expect("lower-deck ULD field");
+    let strategy = cargo
+        .field("loading_strategy")
+        .expect("loading strategy field");
+
+    let main_options = resolved_options(main, cargo_values).expect("main-deck ULD options");
+    assert_eq!(main_options.len(), alas_payload::cargo::ULD_DATABASE.len());
+    assert!(main_options.contains(&"PMC".to_owned()));
+    assert!(main_options.contains(&"M1".to_owned()));
+
+    let lower_options = resolved_options(lower, cargo_values).expect("lower-deck ULD options");
+    assert_eq!(lower_options.first(), Some(&"AUTO".to_owned()));
+    assert!(lower_options.contains(&"LD3".to_owned()));
+    assert!(lower_options.contains(&"BLK".to_owned()));
+
+    assert_eq!(
+        resolved_options(strategy, cargo_values).expect("loading strategy options"),
+        vec!["target_cg", "min_pallets", "door_proximity", "uniform"]
+    );
+}
+
+#[test]
 fn nested_readonly_conditions_can_use_a_dotted_path_from_an_ancestor() {
     let class = alas_config::SeatClassConfig::default().schema();
     let Entry::Leaf(share) = &class.field("share_pct").expect("class share").entry else {
@@ -276,6 +321,7 @@ fn form_columns_and_label_text_stay_within_readability_bounds() {
 fn fixed_option_values_are_capitalized_without_changing_their_data_value() {
     assert_eq!(display_option("passenger"), "Passenger");
     assert_eq!(display_option("auto"), "Auto");
+    assert_eq!(display_option("target_cg"), "Target_cg");
 }
 
 #[test]

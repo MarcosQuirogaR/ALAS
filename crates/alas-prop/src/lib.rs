@@ -26,3 +26,4 @@ pub mod product_turbofan;
 pub mod system;
 pub mod turbofan_physics;
 pub mod turboprop;
+pub mod turboprop_cycle;

@@ -69,12 +69,14 @@ use crate::vspaero::{run_vspaero_analysis, VspaeroAnalysisResult};
 mod curl_transport;
 use curl_transport::SystemCurlTransport;
 mod helpers;
+mod snapshots;
 #[cfg(test)]
 use helpers::optimizer_config;
 use helpers::{
     add_manifest_artifact, add_manifest_artifact_if_exists, check_preset_policy,
     persist_mses_polar_diagnostics, persist_mses_raw_exports, validate_bounds,
 };
+use snapshots::SnapshotPublisher;
 
 /// The 2-D section condition sent to MSES for a 3-D swept-wing cruise case.
 ///
@@ -681,7 +683,17 @@ impl DesignPipeline {
         options: &PipelineOptions,
         environment: &RunEnvironment,
     ) -> Result<PipelineResult, String> {
-        self.run_inner(options, environment, None, None, None, None, None, None)
+        self.run_inner(
+            options,
+            environment,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
     }
 
     /// Execute a run using the one resolved external-tool environment shared
@@ -717,6 +729,7 @@ impl DesignPipeline {
             None,
             Some(events),
             None,
+            None,
         )
     }
 
@@ -735,6 +748,7 @@ impl DesignPipeline {
             options,
             environment,
             dispatched_route,
+            None,
             None,
             None,
             None,
@@ -766,6 +780,7 @@ impl DesignPipeline {
             None,
             None,
             None,
+            None,
         )
     }
 
@@ -790,6 +805,7 @@ impl DesignPipeline {
             Some(*initial_design),
             Some(bounds),
             Some(progress),
+            None,
             None,
             None,
         )
@@ -817,6 +833,41 @@ impl DesignPipeline {
             None,
             Some(events),
             Some(cancel),
+            None,
+        )
+    }
+
+    /// Execute a desktop design-space run while publishing typed, immutable
+    /// result snapshots as report data becomes available. The snapshots use
+    /// the same [`PipelineResult`] shape as the final run, with downstream
+    /// fields left `None` until their stages finish, so the GUI can render its
+    /// ordinary Results gallery without inventing progress-only figures.
+    /// Snapshots are cumulative and published in completion order, including
+    /// during parallel downstream work. Their feasibility record is not yet
+    /// assessed: only the successful return value is a completed run suitable
+    /// for a feasibility verdict or final report export. The callback must
+    /// enqueue promptly rather than render or block the analysis worker.
+    pub fn run_with_design_space_events_and_snapshots(
+        &self,
+        options: &PipelineOptions,
+        environment: &RunEnvironment,
+        initial_design: &DesignVector,
+        bounds: &[(f64, f64)],
+        events: &(dyn Fn(RunEvent) + Sync),
+        snapshots: &(dyn Fn(PipelineResult) + Sync),
+        cancel: &AtomicBool,
+    ) -> Result<PipelineResult, String> {
+        validate_bounds(bounds)?;
+        self.run_inner(
+            options,
+            environment,
+            None,
+            Some(*initial_design),
+            Some(bounds),
+            None,
+            Some(events),
+            Some(cancel),
+            Some(snapshots),
         )
     }
 
@@ -832,6 +883,7 @@ impl DesignPipeline {
         progress: Option<&(dyn Fn(&str) + Sync)>,
         events: Option<&(dyn Fn(RunEvent) + Sync)>,
         cancel: Option<&AtomicBool>,
+        snapshots: Option<&(dyn Fn(PipelineResult) + Sync)>,
     ) -> Result<PipelineResult, String> {
         let run_clock = Instant::now();
         let report = |message: &str| {
@@ -1146,6 +1198,44 @@ impl DesignPipeline {
                 optimized_report.design_point.l_over_d,
             ),
         );
+        // The optimized report is the first complete figure-producing data
+        // boundary. Publish it before CPACS/export/downstream work starts so
+        // the desktop can render the same report gallery it will keep after
+        // the run, while the remaining stages continue in the worker.
+        let live_results = SnapshotPublisher::new(snapshots, || PipelineResult {
+            config: self.config.clone(),
+            optimized_design: Some(optimized_design),
+            optimized_report: Some(optimized_report.clone()),
+            optimization_result: optimization_result.clone(),
+            solver_optimizations: solver_optimizations.clone(),
+            baseline_report: baseline_report.clone(),
+            baseline_analysis: None,
+            baseline_analysis_error: None,
+            route: planned_route.as_ref().map(|planned| planned.route.clone()),
+            route_status: planned_route.as_ref().map(|planned| planned.status.clone()),
+            mission_result: None,
+            mission_load_case: None,
+            feasibility: FeasibilityReport::default(),
+            mses_result: None,
+            mses_pressure: None,
+            structural_result: None,
+            design_database: None,
+            openvsp_export: None,
+            cpacs_export: None,
+            cpacs_manifest: None,
+            vspaero_result: None,
+            avl_result: None,
+            flowunsteady_result: None,
+            execution: PipelineExecutionStatus {
+                parallel_requested: options.parallel,
+                parallel_effective: false,
+                aerodynamic_solver: options.aerodynamic_solver,
+                optimization_solver: options.optimization_solver,
+                seed_requested: options.seed,
+                seed_applied: options.optimize && options.seed.is_some(),
+                quiet_requested: options.quiet,
+            },
+        });
         finish_stage(events, run_clock, stage_clock, 3, "full_analysis");
         check_cancelled(cancel)?;
 
@@ -1172,10 +1262,14 @@ impl DesignPipeline {
                 .to_airplane()
                 .map_err(|error| format!("CPACS canonicalization failed: {error}"))?;
         }
+        live_results.update(|snapshot| {
+            snapshot.optimized_report = Some(optimized_report.clone());
+            snapshot.cpacs_export = cpacs_export.clone();
+        });
         finish_stage(events, run_clock, stage_clock, 4, "geometry_export");
         check_cancelled(cancel)?;
 
-        let openvsp_export = {
+        let openvsp_export = if self.config.downstream.openvsp {
             let af_path = analysis_dir.join("airfoils/optimized_root.dat");
             let openvsp_path = analysis_dir.join("openvsp/optimized_aircraft.vspscript");
             let _ = export_airfoil_dat(&optimized_report, &self.config, &af_path, "ALAS_Optimized");
@@ -1189,14 +1283,28 @@ impl DesignPipeline {
                     None
                 }
             }
+        } else {
+            None
         };
-        let avl_requested = matches!(
-            options.aerodynamic_solver,
-            AerodynamicSolverMode::Avl | AerodynamicSolverMode::Both
-        );
+        live_results.update(|snapshot| snapshot.openvsp_export = openvsp_export.clone());
+        let avl_requested = self.config.downstream.avl
+            && matches!(
+                options.aerodynamic_solver,
+                AerodynamicSolverMode::Avl | AerodynamicSolverMode::Both
+            );
         let run_vspaero = || {
             let stage_clock =
                 begin_component(events, run_clock, "downstream/vspaero", "VSPAERO analysis");
+            if !self.config.downstream.vspaero {
+                finish_component(
+                    events,
+                    run_clock,
+                    stage_clock,
+                    "downstream/vspaero",
+                    "Skipped",
+                );
+                return None;
+            }
             let result = openvsp_export.as_ref().map(|openvsp| {
                 run_vspaero_analysis(
                     &optimized_report,
@@ -1209,6 +1317,7 @@ impl DesignPipeline {
                     900.0,
                 )
             });
+            live_results.update(|snapshot| snapshot.vspaero_result = result.clone());
             finish_component(
                 events,
                 run_clock,
@@ -1240,6 +1349,7 @@ impl DesignPipeline {
                 environment.avl_exe.as_deref(),
                 300.0,
             ));
+            live_results.update(|snapshot| snapshot.avl_result = result.clone());
             finish_component(
                 events,
                 run_clock,
@@ -1256,6 +1366,16 @@ impl DesignPipeline {
                 "downstream/flowunsteady",
                 "FLOWUnsteady analysis",
             );
+            if !self.config.downstream.flowunsteady {
+                finish_component(
+                    events,
+                    run_clock,
+                    stage_clock,
+                    "downstream/flowunsteady",
+                    "Skipped",
+                );
+                return None;
+            }
             let result = Some(run_flowunsteady_analysis(
                 &optimized_report,
                 &self.config,
@@ -1263,6 +1383,7 @@ impl DesignPipeline {
                 environment.flowunsteady_exe.as_deref(),
                 900.0,
             ));
+            live_results.update(|snapshot| snapshot.flowunsteady_result = result.clone());
             finish_component(
                 events,
                 run_clock,
@@ -1289,6 +1410,9 @@ impl DesignPipeline {
                 );
                 (None, None)
             } else if !options.optimize && self.aircraft_override.is_none() {
+                live_results.update(|snapshot| {
+                    snapshot.baseline_analysis = Some(optimized_report.clone());
+                });
                 finish_component(
                     events,
                     run_clock,
@@ -1302,6 +1426,10 @@ impl DesignPipeline {
                     Ok(report) => (Some(report), None),
                     Err(error) => (None, Some(error)),
                 };
+                live_results.update(|snapshot| {
+                    snapshot.baseline_analysis = result.0.clone();
+                    snapshot.baseline_analysis_error = result.1.clone();
+                });
                 finish_component(
                     events,
                     run_clock,
@@ -1320,6 +1448,14 @@ impl DesignPipeline {
                 "Mission and route analysis",
             );
             let result = self.evaluate_active_mission(&optimized_report, planned_route.as_ref());
+            if let Ok((route, status, mission, load_case)) = &result {
+                live_results.update(|snapshot| {
+                    snapshot.route = route.clone();
+                    snapshot.route_status = status.clone();
+                    snapshot.mission_result = mission.clone();
+                    snapshot.mission_load_case = load_case.clone();
+                });
+            }
             finish_component(
                 events,
                 run_clock,
@@ -1338,6 +1474,10 @@ impl DesignPipeline {
                 begin_component(events, run_clock, "downstream/mses", "MSES analysis");
             let result =
                 self.run_mses_stage(&optimized_report, environment.mses_dir.as_deref(), cancel);
+            live_results.update(|snapshot| {
+                snapshot.mses_result = result.0.clone();
+                snapshot.mses_pressure = result.1.clone();
+            });
             let (polar, pressure) = &result;
             let polar_summary = polar.as_ref().map_or_else(
                 || "unavailable".to_owned(),
@@ -1431,6 +1571,7 @@ impl DesignPipeline {
                         run_clock,
                     ),
                 );
+                live_results.update(|snapshot| snapshot.structural_result = result.clone());
                 finish_component(
                     events,
                     run_clock,
@@ -1466,6 +1607,9 @@ impl DesignPipeline {
                 "Downstream analyses (sequential)"
             },
         );
+        live_results.update(|snapshot| {
+            snapshot.execution.parallel_effective = options.parallel;
+        });
         let (
             vspaero_result,
             avl_result,

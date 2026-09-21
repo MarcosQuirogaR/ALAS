@@ -441,7 +441,7 @@ impl Leaf for OperatingHaulClass {
 /// Every field is optional because an old configuration has none of them.
 /// The evaluator reports each absent datum as unverified; these options are
 /// not invitations to substitute a default correlation or preset constant.
-#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, ConfigNode)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ConfigNode)]
 #[serde(default, deny_unknown_fields)]
 pub struct FlopsTransportConfig {
     /// Maximum operating or design Mach number used by the FLOPS fits.
@@ -484,21 +484,21 @@ pub struct FlopsTransportConfig {
     #[config(
         advanced,
         label = "First-class passenger count",
-        help = "Installed first-class seats for FLOPS furnishings and passenger-service mass."
+        help = "Seed/mirror for direct FLOPS calls. Passenger product cases derive the installed first-class count from Cabin class configuration; edit the Cabin class layout to change seats."
     )]
     pub first_class_passenger_count: Option<usize>,
     /// Number of business-class passengers in the installed cabin.
     #[config(
         advanced,
         label = "Business-class passenger count",
-        help = "Installed business-class seats for FLOPS furnishings and passenger-service mass."
+        help = "Seed/mirror for direct FLOPS calls. Passenger product cases derive the installed business-class count from Cabin class configuration; edit the Cabin class layout to change seats."
     )]
     pub business_class_passenger_count: Option<usize>,
     /// Number of tourist/economy passengers in the installed cabin.
     #[config(
         advanced,
         label = "Tourist-class passenger count",
-        help = "Installed economy/tourist seats for FLOPS furnishings and passenger-service mass."
+        help = "Seed/mirror for direct FLOPS calls. Passenger product cases derive the installed economy/tourist count from Cabin class configuration; edit the Cabin class layout to change seats."
     )]
     pub tourist_class_passenger_count: Option<usize>,
     /// Hydraulic system working pressure, in pascals.
@@ -546,6 +546,16 @@ pub struct FlopsTransportConfig {
         help = "FLOPS FMXTOT: source-backed maximum usable fuel capacity across wing, fuselage, and auxiliary tanks."
     )]
     pub maximum_fuel_capacity_kg: Option<f64>,
+    /// Whether an auxiliary power unit is installed and should be priced by
+    /// NASA FLOPS equation 101.  The FLOPS default is present; installations
+    /// such as the ATR 72 that use an engine in hotel mode declare `false`.
+    #[serde(default = "default_apu_installed")]
+    #[config(
+        advanced,
+        label = "Auxiliary power unit installed",
+        help = "Whether the aircraft carries an APU. NASA FLOPS equation 101 is evaluated when true; an architecture that supplies hotel power from an installed engine declares false rather than carrying an invented APU mass."
+    )]
+    pub apu_installed: bool,
     /// Cargo mass carried in standardized containers, in kilograms.
     #[config(
         advanced,
@@ -598,6 +608,38 @@ pub struct FlopsTransportConfig {
     pub provenance: FlopsTransportProvenance,
 }
 
+const fn default_apu_installed() -> bool {
+    true
+}
+
+impl Default for FlopsTransportConfig {
+    fn default() -> Self {
+        Self {
+            maximum_mach: None,
+            design_range_nmi: None,
+            flight_crew_count: None,
+            flight_attendant_count: None,
+            galley_crew_count: None,
+            first_class_passenger_count: None,
+            business_class_passenger_count: None,
+            tourist_class_passenger_count: None,
+            hydraulic_pressure_pa: None,
+            variable_sweep_penalty: None,
+            wing_mounted_engine_count: None,
+            fuselage_mounted_engine_count: None,
+            fuel_tank_count: None,
+            maximum_fuel_capacity_kg: None,
+            apu_installed: default_apu_installed(),
+            containerized_cargo_kg: None,
+            cargo_loading: None,
+            containerized_baggage_fraction: None,
+            cabin_equipment_method: CabinEquipmentMethod::default(),
+            haul_class: None,
+            provenance: FlopsTransportProvenance::default(),
+        }
+    }
+}
+
 impl FlopsTransportConfig {
     /// A complete conventional transport scenario for an unconfigured run.
     ///
@@ -625,6 +667,7 @@ impl FlopsTransportConfig {
             fuselage_mounted_engine_count: Some(0),
             fuel_tank_count: Some(3),
             maximum_fuel_capacity_kg: Some(200_000.0),
+            apu_installed: true,
             containerized_cargo_kg: Some(0.0),
             // A 350-seat notional widebody is a containerised aircraft; the
             // study scenario says so explicitly rather than inheriting it.
@@ -696,7 +739,12 @@ mod tests {
 
     #[test]
     fn an_empty_flops_contract_is_explicitly_detectable() {
-        assert!(FlopsTransportConfig::default().is_unspecified());
+        let default = FlopsTransportConfig::default();
+        assert!(default.is_unspecified());
+        assert!(default.apu_installed);
+        let legacy: FlopsTransportConfig = serde_json::from_value(serde_json::json!({}))
+            .expect("legacy empty FLOPS configuration loads");
+        assert!(legacy.apu_installed);
         let configured = FlopsTransportConfig {
             hydraulic_pressure_pa: Some(20_684_271.879_504),
             ..Default::default()

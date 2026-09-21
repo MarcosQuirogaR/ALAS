@@ -28,6 +28,49 @@ mod tests {
         assert_eq!(inputs.transport.maximum_mach, Some(0.55));
     }
 
+    #[test]
+    fn atr_hotel_mode_declares_the_apu_absence_without_changing_jet_defaults() {
+        let atr = inputs_for("ATR72-600").expect("ATR FLOPS contract");
+        assert!(!atr.transport.apu_installed);
+        assert!(atr
+            .transport
+            .provenance
+            .architecture
+            .uncertainty
+            .contains("APU absent by ATR hotel-mode architecture"));
+
+        let a320 = inputs_for("A320-200").expect("A320 FLOPS contract");
+        assert!(a320.transport.apu_installed);
+    }
+
+    #[test]
+    fn certified_engine_scope_does_not_suppress_an_unresolved_starter_system() {
+        use crate::{FlopsNozzleScope, FlopsStarterScope};
+        let a320 = inputs_for("A320-200").expect("A320 FLOPS contract");
+        assert_eq!(
+            a320.structure.starter_scope,
+            FlopsStarterScope::HardwareIncludedSystemUnresolved
+        );
+        let a220 = inputs_for("A220-300").expect("A220 FLOPS contract");
+        assert_eq!(
+            a220.structure.starter_scope,
+            FlopsStarterScope::UnknownConservativeSeparate
+        );
+        let a380 = inputs_for("A380-800").expect("A380 FLOPS contract");
+        assert_eq!(
+            a320.structure.nozzle_scope,
+            FlopsNozzleScope::OutsideUnmodelled
+        );
+        assert_eq!(
+            a220.structure.nozzle_scope,
+            FlopsNozzleScope::OutsideUnmodelled
+        );
+        assert_eq!(
+            a380.structure.nozzle_scope,
+            FlopsNozzleScope::OutsideUnmodelled
+        );
+    }
+
     /// The unit-load-device tare of FLOPS equations 125-126 is hardware, so
     /// it belongs only to the aircraft whose holds take a container. The three
     /// bulk-loaded types must declare that, and none may be given a mixed

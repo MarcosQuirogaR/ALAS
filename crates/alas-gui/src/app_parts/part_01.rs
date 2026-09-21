@@ -140,8 +140,10 @@ impl App for AlasApp {
             // Sandbox (and reappears when they leave it).
             crate::views::cfd_view::show_cfd_window(&mut self.state, ctx);
             crate::views::screening_window::show_screening_window(&mut self.state, ctx);
+            crate::views::screening_window::show_custom_airfoil_import_window(&mut self.state, ctx);
             crate::views::wing_analysis_view::show_wing_analysis_window(&mut self.state, ctx);
             crate::views::airport_window::show_custom_airport_window(&mut self.state, ctx);
+            crate::views::mission_profile_inputs::show_mission_profile_window(&mut self.state, ctx);
             return self.show_detached_view_panel(ctx);
         }
         self.state.prepare_walkthrough_step();
@@ -319,7 +321,9 @@ impl App for AlasApp {
         crate::sandbox::advanced::show_advanced_settings_window(&mut self.state, ctx);
         crate::views::cfd_view::show_cfd_window(&mut self.state, ctx);
         crate::views::screening_window::show_screening_window(&mut self.state, ctx);
+        crate::views::screening_window::show_custom_airfoil_import_window(&mut self.state, ctx);
         crate::views::airport_window::show_custom_airport_window(&mut self.state, ctx);
+        crate::views::mission_profile_inputs::show_mission_profile_window(&mut self.state, ctx);
         self.show_detached_view_panel(ctx);
         #[cfg(debug_assertions)]
         self.layout_debug.finish_frame(ctx);
@@ -338,6 +342,14 @@ fn render_nav(state: &mut AppState, ui: &mut Ui) {
     render_nav_contents(state, ui, true);
 }
 
+// These are deliberately shorter than a page transition. The rail is an
+// affordance users may cross on the way to the canvas, so it must confirm
+// entry without making a cursor detour feel sticky. Egui mirrors `cubic_out`
+// for the closing direction: that makes withdrawal start promptly, while its
+// final pixels still settle continuously instead of popping away.
+const NAV_OVERLAY_OPEN_DURATION_S: f32 = 0.14;
+const NAV_OVERLAY_CLOSE_DURATION_S: f32 = 0.10;
+
 fn render_nav_rail(state: &mut AppState, ctx: &Context, body_rect: egui::Rect) {
     let pointer = ctx.pointer_hover_pos();
     let width = layout::expanded_navigation_width(
@@ -352,28 +364,45 @@ fn render_nav_rail(state: &mut AppState, ctx: &Context, body_rect: egui::Rect) {
         width,
     );
     state.nav_hover_open = hovered;
-    // Hovering a navigation rail is a navigational affordance, not a content
-    // transition. Opening it immediately removes the distracting resize
-    // animation while retaining the compact rail when it is not needed.
-    let expansion = if hovered { 1.0 } else { 0.0 };
-    let panel_width = layout::NAV_RAIL_WIDTH + (width - layout::NAV_RAIL_WIDTH) * expansion;
+    let expansion = if state.reduced_animations {
+        // This is an accessibility preference, not a slower motion setting:
+        // every rail state change completes in the current frame.
+        if hovered { 1.0 } else { 0.0 }
+    } else {
+        ctx.animate_bool_with_time_and_easing(
+            egui::Id::new("nav_rail_expansion"),
+            hovered,
+            if hovered {
+                NAV_OVERLAY_OPEN_DURATION_S
+            } else {
+                NAV_OVERLAY_CLOSE_DURATION_S
+            },
+            egui::emath::easing::cubic_out,
+        )
+    };
     let panel_height = (body_rect.height() - 2.0 * layout::NAV_OVERLAY_MARGIN).max(1.0);
+    // Slide a stable, full-width surface out of the rail rather than resizing
+    // it. Resizing would repeatedly reflow the navigation labels and controls
+    // while the cursor is already trying to select them. At rest only the
+    // rightmost eight-point rail remains visible.
     let panel_pos = pos2(
-        body_rect.left(),
+        body_rect.left() - (width - layout::NAV_RAIL_WIDTH) * (1.0 - expansion),
         body_rect.top() + layout::NAV_OVERLAY_MARGIN,
     );
 
     let rail = Area::new(egui::Id::new("nav_rail"))
         .order(Order::Foreground)
+        .constrain(false)
+        .fade_in(false)
         .fixed_pos(panel_pos)
         .show(ctx, |ui| {
             ui.allocate_ui_with_layout(
-                vec2(panel_width, panel_height),
+                vec2(width, panel_height),
                 Layout::top_down(Align::Min),
                 |ui| {
                     let frame = navigation_overlay_frame(ui, expansion);
                     frame.show(ui, |ui| {
-                        if expansion > 0.08 {
+                        if expansion > 0.01 {
                             render_nav_contents(state, ui, false);
                         } else {
                             let response = ui

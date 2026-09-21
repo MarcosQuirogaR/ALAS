@@ -67,6 +67,24 @@ pub fn show_discipline_windows(state: &mut AppState, ctx: &Context) {
                             });
                             ui.add_space(4.0);
                         }
+                        if discipline == Discipline::Wing {
+                            crate::theme::card_frame(ui).show(ui, |ui| {
+                                ui.set_min_width(ui.available_width());
+                                ui.label(RichText::new(tr("Create wing sections")).strong());
+                                crate::views::inputs_custom::show_custom_wing_sections(state, ui);
+                            });
+                            ui.add_space(4.0);
+                        }
+                        if discipline == Discipline::Fuselage {
+                            crate::theme::card_frame(ui).show(ui, |ui| {
+                                ui.set_min_width(ui.available_width());
+                                ui.label(RichText::new(tr("Create fuselage sections")).strong());
+                                crate::views::inputs_custom::show_custom_fuselage_sections(
+                                    state, ui,
+                                );
+                            });
+                            ui.add_space(4.0);
+                        }
                         for (title, members) in &groups {
                             let members: Vec<_> = members.iter().map(|f| (*f).clone()).collect();
                             show_group(

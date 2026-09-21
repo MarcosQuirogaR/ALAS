@@ -52,6 +52,13 @@ pub(crate) fn render_view_options(
         state.preview_open = !state.preview_open;
     }
     ui.separator();
+    if ui
+        .selectable_label(state.reduced_animations, tr("Reduced Animations"))
+        .clicked()
+    {
+        state.reduced_animations = !state.reduced_animations;
+    }
+    ui.separator();
     for (lang, label) in [(Language::En, "English"), (Language::Es, "Spanish")] {
         if ui
             .selectable_label(state.language == lang, tr(label))

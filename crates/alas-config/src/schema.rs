@@ -205,6 +205,10 @@ pub enum OptionSource {
     OperatingHaulClass,
     /// Which FLOPS wing bending-material factor is evaluated.
     FlopsWingBendingMethod,
+    /// Whether the FLOPS engine starter is inside the declared baseline mass.
+    FlopsStarterScope,
+    /// Whether the FLOPS engine nozzle is inside the declared baseline mass.
+    FlopsNozzleScope,
     /// Blade material and pitch-change hardware of a turboprop propeller.
     PropellerConstruction,
     /// Whether the cargo compartments are loose-loaded or take unit load
@@ -212,6 +216,12 @@ pub enum OptionSource {
     CargoHoldLoading,
     /// The operating rule a design mission's reserves are sized under.
     FuelScheme,
+    /// The container or pallet loaded on the main cargo deck.
+    MainDeckUld,
+    /// The lower-hold container format, including the physical auto-selector.
+    LowerDeckUld,
+    /// How the cargo loader distributes payload between available positions.
+    CargoLoadingStrategy,
     /// The scalar the mission-sized design search minimises.
     ObjectiveKind,
     /// Whether the takeoff mass is a fixed input, closed by the mission up
@@ -273,6 +283,18 @@ impl OptionSource {
             }
             Self::FlopsWingBendingMethod => Some(&["simplified", "detailed"]),
             Self::PylonMassMethod => Some(&["none", "lth_box_beam_v1"]),
+            Self::FlopsStarterScope => Some(&[
+                "separate_equation_89",
+                "included_in_baseline",
+                "hardware_included_system_unresolved",
+                "unknown_conservative_separate",
+            ]),
+            Self::FlopsNozzleScope => Some(&[
+                "included_in_baseline",
+                "separate_equation_78",
+                "outside_unmodelled",
+                "unknown",
+            ]),
             Self::CabinEquipmentMethod => Some(&["flops_transport_v1", "lth_civil_transport_v1"]),
             Self::OperatingHaulClass => Some(&["short_medium_haul", "long_haul"]),
             Self::PropellerConstruction => Some(&[
@@ -287,6 +309,12 @@ impl OptionSource {
                 "faa_flag_supplemental",
                 "study_convention",
                 "trip_fuel_only",
+            ]),
+            Self::CargoLoadingStrategy => Some(&[
+                "target_cg",
+                "min_pallets",
+                "door_proximity",
+                "uniform",
             ]),
             Self::ObjectiveKind => Some(&[
                 "block_fuel",

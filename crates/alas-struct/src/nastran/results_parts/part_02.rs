@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-
 /// Integrate a one-sided force PSD through the solved unit-force response.
 ///
 /// A SOL 111 sine sweep with the product deck applies one newton at the engine
@@ -108,6 +107,8 @@ fn trapezoid(y: &[f64], x: &[f64]) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mesh::{Deck, MeshNodeIndex};
+    use crate::op2::EigenvectorTable;
 
     #[test]
     fn labelled_values_keep_the_order_they_were_recorded_in() {
@@ -201,5 +202,44 @@ mod tests {
         let y = vec![2.0; 5];
         assert_eq!(trapezoid(&y, &x), 8.0);
     }
-}
 
+    #[test]
+    fn modal_shape_slots_stay_parallel_when_an_op2_vector_is_missing() {
+        let mut deck = Deck::new();
+        deck.add_grid(1, [0.0, 0.0, 0.0]);
+        deck.add_grid(2, [0.0, 1.0, 0.0]);
+        let node_index = MeshNodeIndex {
+            root_nid: 1,
+            tip_nid: 2,
+            kink_nid: 1,
+            spar_upper_nids: vec![vec![1, 2]],
+            spar_lower_nids: Vec::new(),
+            engine_nids: Vec::new(),
+        };
+        let mut op2 = Op2::default();
+        op2.eigenvectors.insert(
+            1,
+            EigenvectorTable {
+                modes: vec![1, 2],
+                eigenvalues: vec![1.0, 4.0],
+                mode_cycles: vec![1.0, 2.0],
+                node_ids: vec![1, 2],
+                // The frequency table has two retained modes, while the
+                // vector table contains only the first.  The reader must keep
+                // an all-NaN slot for the absent second shape so a later
+                // frequency can never inherit the preceding mode's vector.
+                data: vec![vec![
+                    [0.0, 0.0, 0.5, 0.0, 0.0, 0.0],
+                    [0.0, 0.0, 1.0, 0.0, 0.0, 0.0],
+                ]],
+            },
+        );
+
+        let result = read_modes(&op2, &deck, &node_index);
+
+        assert_eq!(result.frequencies_hz, vec![1.0, 2.0]);
+        assert_eq!(result.mode_shapes.len(), result.frequencies_hz.len());
+        assert!(result.mode_shapes[0].iter().all(|value| value.is_finite()));
+        assert!(result.mode_shapes[1].iter().all(|value| value.is_nan()));
+    }
+}

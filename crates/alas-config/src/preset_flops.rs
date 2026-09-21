@@ -186,6 +186,22 @@ pub fn inputs_for(preset_name: &str) -> Option<PresetFlopsInputs> {
             .map(tank_count_from_layout)
     })?;
 
+    // ATR's published hotel-mode architecture supplies onboard power from a
+    // running engine instead of carrying an APU. Keep the generic FLOPS
+    // default present for every other preset and retain the source statement
+    // in the architecture provenance rather than applying a turboprop-wide
+    // assumption.
+    let apu_installed = preset_name != "ATR72-600";
+    let mut architecture_provenance = declared.architecture.into_provenance();
+    if !apu_installed {
+        architecture_provenance.applicability.push_str(
+            "; ATR hotel mode supplies aircraft power from the engine instead of an APU (ATR, https://www.atr-aircraft.com/innovation/a-history-of-innovation/)",
+        );
+        architecture_provenance
+            .uncertainty
+            .push_str("; APU absent by ATR hotel-mode architecture");
+    }
+
     let transport = FlopsTransportConfig {
         maximum_mach: Some(declared.maximum_mach),
         design_range_nmi: Some(declared.design_range_nmi),
@@ -206,6 +222,7 @@ pub fn inputs_for(preset_name: &str) -> Option<PresetFlopsInputs> {
         maximum_fuel_capacity_kg: declared
             .maximum_fuel_capacity_kg
             .or(preset.reference.usable_fuel_mass_kg),
+        apu_installed,
         containerized_cargo_kg: Some(declared.containerized_cargo_kg),
         cargo_loading: Some(declared.cargo_loading),
         containerized_baggage_fraction: declared.containerized_baggage_fraction,
@@ -214,7 +231,7 @@ pub fn inputs_for(preset_name: &str) -> Option<PresetFlopsInputs> {
         provenance: FlopsTransportProvenance {
             mission: declared.mission.into_provenance(),
             cabin: declared.cabin.into_provenance(),
-            architecture: declared.architecture.into_provenance(),
+            architecture: architecture_provenance,
         },
     };
 

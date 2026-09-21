@@ -6,11 +6,61 @@ mod tests {
     use super::findings::finding_margin;
     use super::{
         fuel_margin_rows, localized_propulsion_label, mass_triplet_kg, payload_summary_metrics,
-        propulsion_summary_entries, static_margin_rows, takeoff_mass_margin,
+        propulsion_metric_card, propulsion_summary_entries, static_margin_rows,
+        status_banner_title, takeoff_mass_margin,
     };
+    use crate::theme::{apply_theme, AppTheme};
     use alas_payload::layout::{LayoutSummary, PassengerSummary, PayloadLayout};
     use alas_pipeline::feasibility::MissionFuelStatus;
     use alas_pipeline::FindingCode;
+    use egui::{Context, FontFamily, RawInput, Shape};
+
+    fn collect_text_families(shape: &Shape, families: &mut Vec<(String, FontFamily)>) {
+        match shape {
+            Shape::Text(text) => {
+                for section in &text.galley.job.sections {
+                    families.push((
+                        text.galley.job.text[section.byte_range.clone()].to_owned(),
+                        section.format.font_id.family.clone(),
+                    ));
+                }
+            }
+            Shape::Vec(shapes) => {
+                for shape in shapes {
+                    collect_text_families(shape, families);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    #[test]
+    fn propulsion_cards_follow_the_proportional_ui_font_family() {
+        let context = Context::default();
+        apply_theme(AppTheme::Dark, &context);
+        let output = context.run(RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                propulsion_metric_card(ui, "Thermal efficiency (eta_t)", "\u{03b7}\u{209c} = 0.42");
+            });
+        });
+        let mut families = Vec::new();
+        for shape in &output.shapes {
+            collect_text_families(&shape.shape, &mut families);
+        }
+
+        for label in [
+            "Thermal efficiency (\u{03b7}\u{209c})",
+            "\u{03b7}\u{209c} = 0.42",
+        ] {
+            let family = families
+                .iter()
+                .find(|(text, _)| text == label)
+                .unwrap_or_else(|| panic!("missing rendered summary text: {label}"))
+                .1
+                .clone();
+            assert_eq!(family, FontFamily::Proportional, "{label}");
+        }
+    }
 
     fn passenger_layout() -> PayloadLayout {
         PayloadLayout {
@@ -206,6 +256,22 @@ mod tests {
         assert!(
             (finding_margin(FindingCode::InsufficientStaticMargin, 0.03, 0.05) + 0.02).abs()
                 < 1.0e-12
+        );
+    }
+
+    #[test]
+    fn incomplete_snapshots_never_receive_a_feasibility_verdict() {
+        assert_eq!(
+            status_banner_title(false, 0, 0),
+            "Assessment incomplete"
+        );
+        assert_ne!(
+            status_banner_title(false, 0, 0),
+            "Feasible under implemented checks"
+        );
+        assert_eq!(
+            status_banner_title(true, 0, 0),
+            "Feasible under implemented checks"
         );
     }
 }

@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! The pure FLOPS product mass buildup.
+//! The FLOPS-based product mass buildup.
 //!
-//! Every one of the eight operating-empty slots is a FLOPS equation. Nothing
-//! here starts from the frozen Torenbeek/fraction buildup and replaces part of
-//! it: that arrangement produced a mass belonging to no published method, and
-//! the group boundaries did not line up. FLOPS assigns items on its own
-//! conventions and the mapping into the ALAS slots is fixed here, once:
+//! The eight operating-empty slots use FLOPS grouping, with explicitly
+//! selected LTH cabin/pylon relations and a shaft-power installation branch.
+//! The resolved buildup retains those equation sources. It is independent of
+//! the frozen Torenbeek/fraction compatibility buildup. The mapping into the
+//! ALAS slots is fixed here:
 //!
 //! | FLOPS | ALAS slot |
 //! |---|---|
@@ -276,6 +276,7 @@ mod tests {
                 fuselage_mounted_engine_count: Some(0),
                 fuel_tank_count: Some(6),
                 maximum_fuel_capacity_kg: Some(220_000.0),
+                apu_installed: true,
                 containerized_cargo_kg: Some(0.0),
                 cargo_loading: Some(alas_config::CargoHoldLoading::Containerized),
                 containerized_baggage_fraction: None,

@@ -43,6 +43,18 @@ pub struct FuselageSection {
 /// Why a user-defined fuselage section cannot be lofted safely.
 #[derive(Debug, Clone, Copy, PartialEq, thiserror::Error)]
 pub enum FuselageSectionError {
+    /// The generated-station override list must retain one row for every
+    /// generated nose/cabin/tail station so the builder can address rows by
+    /// stable station index.
+    #[error(
+        "generated fuselage section overrides must contain exactly {expected} stations, got {actual}"
+    )]
+    GeneratedSectionCount {
+        /// Number of generated stations emitted by the parametric body.
+        expected: usize,
+        /// Number of rows supplied by the configuration.
+        actual: usize,
+    },
     /// A geometric field is not finite.
     #[error("custom fuselage section {index} field {field} must be finite, got {value}")]
     NonFinite {
@@ -168,6 +180,19 @@ pub struct FuselageConfig {
     )]
     pub custom_sections: Vec<FuselageSection>,
 
+    /// Optional per-station overrides for the generated nose/cabin/tail
+    /// stations.  The vector is empty until a sandbox user edits a generated
+    /// row; once present it contains the complete generated station list in
+    /// builder order.  Station X positions remain owned by the body
+    /// parameters, while width, height, Z, and shape are independently
+    /// editable here.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[config(
+        hidden,
+        help = "Per-station overrides for the generated fuselage loft, written by the sandbox section editor."
+    )]
+    pub generated_sections: Vec<FuselageSection>,
+
     /// How many stations the body is lofted through.
     #[config(
         label = "Fuselage cross-section count",
@@ -189,6 +214,7 @@ impl Default for FuselageConfig {
             tailcone_length_m: 14.0,
             tail_z_m: 1.8,
             custom_sections: Vec::new(),
+            generated_sections: Vec::new(),
             n_subdivisions: 12,
         }
     }
@@ -264,6 +290,59 @@ impl FuselageConfig {
         sections.sort_by(|left, right| left.x_fraction.total_cmp(&right.x_fraction));
         Ok(sections)
     }
+
+    /// Validate the optional generated-station override vector.
+    pub fn validate_generated_sections(&self) -> Result<(), FuselageSectionError> {
+        const GENERATED_STATION_COUNT: usize = 20;
+        if self.generated_sections.is_empty() {
+            return Ok(());
+        }
+        if self.generated_sections.len() != GENERATED_STATION_COUNT {
+            return Err(FuselageSectionError::GeneratedSectionCount {
+                expected: GENERATED_STATION_COUNT,
+                actual: self.generated_sections.len(),
+            });
+        }
+        for (index, section) in self.generated_sections.iter().enumerate() {
+            for (field, value) in [
+                ("x_fraction", section.x_fraction),
+                ("width_m", section.width_m),
+                ("height_m", section.height_m),
+                ("z_m", section.z_m),
+                ("shape", section.shape),
+            ] {
+                if !value.is_finite() {
+                    return Err(FuselageSectionError::NonFinite {
+                        index,
+                        field,
+                        value,
+                    });
+                }
+            }
+            if !(0.0..=1.0).contains(&section.x_fraction) {
+                return Err(FuselageSectionError::XOutOfRange {
+                    index,
+                    value: section.x_fraction,
+                });
+            }
+            for (field, value) in [("width", section.width_m), ("height", section.height_m)] {
+                if value <= 0.0 {
+                    return Err(FuselageSectionError::NonPositive {
+                        index,
+                        field,
+                        value,
+                    });
+                }
+            }
+            if !(1.0..=50.0).contains(&section.shape) {
+                return Err(FuselageSectionError::InvalidShape {
+                    index,
+                    value: section.shape,
+                });
+            }
+        }
+        Ok(())
+    }
 }
 
 // A test asserts on values it constructed here directly, so a failed unwrap
@@ -322,5 +401,24 @@ mod tests {
             tapers < floor,
             "{tapers} m of taper in a {floor} m fuselage"
         );
+    }
+
+    #[test]
+    fn generated_overrides_require_the_complete_indexed_station_vector() {
+        let mut fuselage = FuselageConfig::default();
+        fuselage.generated_sections.push(FuselageSection {
+            x_fraction: 0.0,
+            width_m: 1.0,
+            height_m: 1.0,
+            z_m: 0.0,
+            shape: 2.0,
+        });
+        assert!(matches!(
+            fuselage.validate_generated_sections(),
+            Err(FuselageSectionError::GeneratedSectionCount {
+                expected: 20,
+                actual: 1
+            })
+        ));
     }
 }

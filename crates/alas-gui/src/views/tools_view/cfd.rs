@@ -48,7 +48,11 @@ pub(crate) fn save_cfd_environment_preferences(state: &mut AppState) {
     }
 }
 
-pub(super) fn status_rows(state: &AppState, ui: &mut Ui) {
+pub(super) fn status_rows(
+    state: &AppState,
+    ui: &mut Ui,
+    parafoam: Option<&std::path::Path>,
+) {
     status_row(
         ui,
         "OpenFOAM CFD",
@@ -67,11 +71,10 @@ pub(super) fn status_rows(state: &AppState, ui: &mut Ui) {
         "ParaView",
         describe_optional_executable(state.cfd.paraview_executable.as_deref()),
     );
-    let parafoam = detect_parafoam(state);
     status_row(
         ui,
         "paraFoam",
-        parafoam.as_deref().map_or_else(
+        parafoam.map_or_else(
             || tr("not found in the configured OpenFOAM project"),
             |path| path.display().to_string(),
         ),
@@ -82,7 +85,7 @@ pub(super) fn status_rows(state: &AppState, ui: &mut Ui) {
 /// project.  It is a shell script, so the GUI reports it separately from the
 /// native solver executables and leaves execution to the documented MSYS2
 /// wrapper when exporting contours.
-fn detect_parafoam(state: &AppState) -> Option<std::path::PathBuf> {
+pub(super) fn detect_parafoam(state: &AppState) -> Option<std::path::PathBuf> {
     if let Some(project) = state.cfd.openfoam_preferences.native_project_dir.as_deref() {
         let root = std::path::Path::new(project);
         for name in ["paraFoam", "paraFoam.exe"] {

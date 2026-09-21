@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-
 #[test]
 fn enabled_native_mission_is_present_in_a_normal_pipeline_result() {
     let config = AlasConfig::default();
@@ -130,15 +129,44 @@ fn parallel_downstream_stages_preserve_the_serial_analysis_result() {
     let serial = DesignPipeline::new(config.clone())
         .run(&options, &RunEnvironment::default())
         .unwrap_or_else(|error| panic!("serial pipeline run: {error}"));
+    let snapshots = std::sync::Mutex::new(Vec::new());
     let parallel = DesignPipeline::new(config)
-        .run(
+        .run_inner(
             &PipelineOptions {
                 parallel: true,
                 ..options
             },
             &RunEnvironment::default(),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some(&|snapshot| snapshots.lock().unwrap().push(snapshot)),
         )
         .unwrap_or_else(|error| panic!("parallel pipeline run: {error}"));
+
+    let snapshots = snapshots.into_inner().unwrap();
+    assert!(
+        snapshots.len() > 2,
+        "publish component completions, not only joins"
+    );
+    let first = snapshots.first().unwrap();
+    assert!(first.optimized_report.is_some());
+    assert!(first.baseline_analysis.is_none());
+    assert!(first.flowunsteady_result.is_none());
+    let last = snapshots.last().unwrap();
+    assert_eq!(last.baseline_analysis, parallel.baseline_analysis);
+    assert_eq!(last.vspaero_result, parallel.vspaero_result);
+    assert_eq!(last.avl_result, parallel.avl_result);
+    assert_eq!(last.flowunsteady_result, parallel.flowunsteady_result);
+    assert_eq!(last.mses_result, parallel.mses_result);
+    assert_eq!(last.structural_result, parallel.structural_result);
+    for pair in snapshots.windows(2) {
+        assert!(pair[0].baseline_analysis.is_none() || pair[1].baseline_analysis.is_some());
+        assert!(pair[0].flowunsteady_result.is_none() || pair[1].flowunsteady_result.is_some());
+    }
 
     assert_eq!(parallel.optimized_design, serial.optimized_design);
     assert_eq!(parallel.optimized_report, serial.optimized_report);
@@ -239,4 +267,3 @@ fn the_section_incidence_proxy_removes_finite_wing_downwash() {
     assert!(angle < 2.0, "angle={angle}");
     assert_eq!(mean_induced_angle_deg(0.5, 0.0, 0.85), 0.0);
 }
-

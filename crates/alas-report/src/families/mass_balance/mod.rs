@@ -31,6 +31,20 @@ use alas_payload::oew::oew_and_cg;
 use alas_pipeline::full_analysis::{AnalysisReport, DesignPoint, PolarFit, PolarFitStatus};
 
 pub use super::mass_balance_layout::{figure_landing_gear_planform, figure_mass_breakdown};
+
+/// Explain which mass architecture owns the live preview's values. The
+/// preview invokes the same mass-analysis product path as a full run, but it
+/// deliberately does not fabricate a completed aerodynamic or mission report.
+pub(crate) fn mass_method_note(config: &AlasConfig) -> &'static str {
+    match config.mass_model.mass_architecture {
+        alas_config::MassArchitecture::PureFlopsTransportV1 => {
+            "Mass method: FLOPS-based transport with declared cabin and installation methods"
+        }
+        alas_config::MassArchitecture::LegacyReferenceCompatibleComparison => {
+            "Mass method: reference-compatible comparison (live preview uses the selected equations)"
+        }
+    }
+}
 pub use cg_envelope::figure_cg_envelope;
 pub use mass_distribution::figure_mass_distribution;
 
@@ -90,11 +104,15 @@ pub fn quick_preview_report(
     // payload beside it prices the layout - on the A320-200 a 30-seat
     // difference in the furnishings, passenger-service, cabin-crew and
     // air-conditioning terms.
+    let product_cabin = config.cabin.passenger.canonicalized_for_product();
+    let mut product_config = config.clone();
+    product_config.cabin.passenger = product_cabin.clone();
+    let analysis_mass_model = config.analysis_mass_model(config.requirements.mtow_kg);
     let (declared_requirements, analysis_mass_model) =
         alas_pipeline::full_analysis::cabin_sync::declared_cabin(
             &config.requirements,
-            &config.analysis_mass_model(config.requirements.mtow_kg),
-            &config.cabin.passenger,
+            &analysis_mass_model,
+            &product_cabin,
         );
     let run = |requirements: &alas_config::DesignRequirements,
                mass_model: &alas_config::MassModelConfig,
@@ -103,12 +121,12 @@ pub fn quick_preview_report(
             &airplane,
             requirements,
             &geometry,
-            &config.cabin,
-            &config.control_surfaces,
+            &product_config.cabin,
+            &product_config.control_surfaces,
             Some(mass_model),
             layout,
-            MassCoordinateModel::StructuralWingbox(&config.structures),
-            &config.landing_gear,
+            MassCoordinateModel::StructuralWingbox(&product_config.structures),
+            &product_config.landing_gear,
         )
         .map_err(|error| error.to_string())
     };
@@ -125,7 +143,7 @@ pub fn quick_preview_report(
     // stands, and `payload_layout` stays `None` so a reader can tell which of
     // the two this report is.
     let (payload_layout, masses, coordinates, physical_cg) =
-        match build_payload_layout(&airplane, config, oew, x_oew) {
+        match build_payload_layout(&airplane, &product_config, oew, x_oew) {
             Ok(layout) => {
                 let summary = alas_mass::breakdown::PayloadLayoutSummary {
                     total_mass: layout.total_mass,
@@ -133,9 +151,10 @@ pub fn quick_preview_report(
                     cg_y: layout.cg_y,
                 };
                 let (cabin_requirements, cabin_mass_model) =
-                    alas_pipeline::full_analysis::cabin_sync::cabin_synchronized(
+                    alas_pipeline::full_analysis::cabin_sync::cabin_synchronized_for_cabin(
                         &declared_requirements,
                         &analysis_mass_model,
+                        &product_cabin,
                         &layout,
                     );
                 match run(&cabin_requirements, &cabin_mass_model, Some(&summary)) {
@@ -230,4 +249,33 @@ fn no_data_scene(mut scene: Scene, pal: &Palette, message: &str) -> Scene {
         bold: false,
     });
     scene
+}
+
+#[cfg(test)]
+mod preview_tests {
+    use super::*;
+
+    #[test]
+    fn default_preview_mass_evaluation_is_verified() {
+        let config = AlasConfig::default();
+        let design = DesignVector::default();
+        let airplane = alas_geom::builder::AircraftBuilder::new(Some(config.geometry.clone()))
+            .build(Some(&design), true)
+            .expect("default preview aircraft builds");
+        let report = quick_preview_report(airplane, &config, design)
+            .unwrap_or_else(|error| panic!("default preview FLOPS mass is unverified: {error}"));
+        assert!(!report.component_masses.is_empty());
+    }
+
+    #[test]
+    fn named_cabin_preview_mass_evaluation_is_verified_after_materialization() {
+        let mut config = AlasConfig::default();
+        let design = DesignVector::default();
+        alas_payload::apply_cabin_preset(&mut config, Some(&design)).expect("cabin preset");
+        let airplane = alas_geom::builder::AircraftBuilder::new(Some(config.geometry.clone()))
+            .build(Some(&design), true)
+            .expect("default preview aircraft builds");
+        let result = quick_preview_report(airplane, &config, design);
+        assert!(result.is_ok(), "materialized cabin FLOPS mass: {result:?}");
+    }
 }

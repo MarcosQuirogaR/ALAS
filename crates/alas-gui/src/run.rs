@@ -20,7 +20,7 @@ use alas_exec::supervise::{launches_after, LaunchRecord};
 
 #[path = "run/preset_barrier.rs"]
 mod preset_barrier;
-use alas_pipeline::{RunEvent, RunEventKind, RunEventSeverity};
+use alas_pipeline::{PipelineResult, RunEvent, RunEventKind, RunEventSeverity};
 
 impl AppState {
     /// Launch a full or baseline-only pipeline run in the background.
@@ -75,6 +75,9 @@ impl AppState {
         self.status_message = "Running...".to_owned();
         self.stage.clear();
         self.pipeline_result = None;
+        self.pipeline_result_complete = false;
+        self.result_figure_cache.clear();
+        self.patran_textures.clear();
         self.selected_solver_view = crate::views::results_view::SolverResultView::Vlm;
         self.cancel_flag.store(false, Ordering::Relaxed);
         self.cancellation_requested = false;
@@ -175,12 +178,17 @@ impl AppState {
                 }
                 let _ = event_tx.send(WorkerMessage::Event(event));
             };
-            let result = pipeline.run_with_design_space_events(
+            let snapshot_tx = tx.clone();
+            let publish_snapshot = move |snapshot: PipelineResult| {
+                let _ = snapshot_tx.send(WorkerMessage::Snapshot(Box::new(snapshot)));
+            };
+            let result = pipeline.run_with_design_space_events_and_snapshots(
                 &options,
                 &environment,
                 &initial_design,
                 &bounds,
                 &report,
+                &publish_snapshot,
                 &cancel,
             );
             let _ = tx.send(WorkerMessage::Finished(Box::new(result)));
@@ -191,13 +199,26 @@ impl AppState {
     pub fn poll_worker(&mut self) {
         let mut completed = None;
         let mut events = Vec::new();
+        let mut snapshots = Vec::new();
         if let Some(rx) = &self.worker_rx {
             while let Ok(msg) = rx.try_recv() {
                 match msg {
                     WorkerMessage::Event(event) => events.push(event),
+                    WorkerMessage::Snapshot(snapshot) => {
+                        self.pipeline_result_complete = false;
+                        snapshots.push(*snapshot);
+                    }
                     WorkerMessage::Finished(res) => completed = Some(*res),
                 }
             }
+        }
+
+        // Snapshots are immutable report boundaries. Keep the latest one so
+        // the Results page can use its normal gallery while the worker still
+        // runs downstream exports and optional analyses.
+        if let Some(snapshot) = snapshots.into_iter().last() {
+            self.pipeline_result = Some(snapshot);
+            self.update_result_scene();
         }
 
         for event in events {
@@ -251,7 +272,9 @@ impl AppState {
                         );
                     }
                     self.pipeline_result = Some(result);
+                    self.pipeline_result_complete = true;
                     self.update_result_scene();
+                    self.verify_final_result_figures();
                     if self.sandbox.active() {
                         self.sandbox.results_window_open = true;
                     } else {
@@ -259,6 +282,9 @@ impl AppState {
                     }
                 }
                 Err(e) => {
+                    // A snapshot may remain visible after cancellation or a
+                    // downstream failure, but it is never a finalized report.
+                    self.pipeline_result_complete = false;
                     if e.starts_with("Cancelled safely") {
                         self.status_message = "Cancelled.".to_owned();
                         self.log("Run cancelled safely.", LogKind::Warn);

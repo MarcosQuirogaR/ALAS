@@ -213,7 +213,7 @@ fn fixed_design_review_exposes_its_binding_constraint_without_promoting_a_finali
     assert!(result.optimization_result.is_none());
 }
 
-/// The passenger brief a user states does not constrain the cabin.
+/// A percentage-mode passenger brief does not constrain the cabin capacity.
 ///
 /// This test used to assert the opposite: that a brief the pinned shell could
 /// not seat produced a `PassengerCapacityShortfall`. It does not, and the
@@ -231,7 +231,11 @@ fn fixed_design_review_exposes_its_binding_constraint_without_promoting_a_finali
 /// silently at any magnitude, and `PassengerCapacityShortfall` is reachable
 /// only through the residual row-packing gap the four passes cannot close.
 ///
-/// Whether a stated brief should be a requirement the product can fail is a
+/// An explicit count-mode cabin is a different input: its installed seats
+/// bound occupancy, and a shortfall remains visible. This test covers the
+/// percentage-mode capacity policy, not that installed-cabin contract.
+///
+/// Whether a percentage-mode brief should be a requirement the product can fail is a
 /// product decision, not one this lane may take on its own, so this test pins
 /// the contract that actually ships. If that decision is ever made, this test
 /// is the one to invert.

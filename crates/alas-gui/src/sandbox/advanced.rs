@@ -10,15 +10,15 @@
 //! edit. A registered preset's geometry stays read-only here as everywhere
 //! else in the guided workspace.
 
-use egui::{vec2, Context, ScrollArea, ViewportBuilder};
+use egui::{vec2, Context, ScrollArea, ViewportBuilder, ViewportCommand};
 
-use crate::native_viewport::show_native_viewport;
+use crate::native_viewport::{show_native_viewport, viewport_id};
 use crate::nav::{self, PageKind};
 use crate::state::AppState;
 use crate::views::{form_page, tr};
 
 /// The pages the window offers, in tab order: every Advanced Settings tab
-/// (discipline forms, Airfoil Screening and External Tools) plus Run options.
+/// (discipline forms, Airfoil Screening, and External Tools) plus Run options.
 pub fn pages() -> Vec<&'static nav::Page> {
     nav::ADVANCED_SETTINGS_PAGES.iter().collect()
 }
@@ -87,7 +87,7 @@ pub fn show_advanced_settings_window(state: &mut AppState, ctx: &Context) {
                             if state.screening.window_open {
                                 ui.label(tr("Airfoil Screening is open in its own window."));
                             } else {
-                                crate::views::show_screening_view(state, ui);
+                                crate::views::show_screening_view_advanced(state, ui);
                             }
                             return;
                         }
@@ -110,6 +110,14 @@ pub fn show_advanced_settings_window(state: &mut AppState, ctx: &Context) {
 /// The top-bar action that opens the window.
 pub fn show_menu_action(state: &mut AppState, ui: &mut egui::Ui) {
     if ui.button(tr("Advanced Settings")).clicked() {
+        if state.sandbox.layout.advanced_settings_open {
+            // The action is also a raise/focus command when the native window
+            // already exists behind the main ALAS window.
+            ui.ctx().send_viewport_cmd_to(
+                viewport_id("advanced_settings"),
+                ViewportCommand::Focus,
+            );
+        }
         state.sandbox.layout.advanced_settings_open = true;
     }
 }

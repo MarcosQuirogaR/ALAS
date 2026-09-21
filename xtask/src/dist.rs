@@ -18,6 +18,14 @@ const PACKAGE_VERSION: &str = env!("CARGO_PKG_VERSION");
 const NASTRAN_STRICT_ENV: &str = "ALAS_STRICT_BUNDLED_NASTRAN95";
 const SOURCE_MANIFEST_NAME: &str = "SOURCE-MANIFEST.json";
 const RELEASE_MANIFEST_NAME: &str = "RELEASE-MANIFEST.json";
+const MSES_OSMAP_RELATIVE_PATH: &str = "assets/mses/osmapDP.dat";
+const MSES_OSMAP_ARCHIVE_RELATIVE_PATH: &str = "assets/mses/xfoil6.99.tgz";
+const MSES_OSMAP_LICENSE_RELATIVE_PATH: &str = "assets/mses/COPYING-XFOIL.txt";
+const MSES_OSMAP_README_RELATIVE_PATH: &str = "assets/mses/README.md";
+const MSES_OSMAP_ACQUISITION_RELATIVE_PATH: &str = "assets/mses/acquire_osmap.ps1";
+const MSES_OSMAP_SHA256: &str = "2f6b3c63461d71da9b6cb9ca1340d77cff0cfbe767679d15b5b8556b45d948c4";
+const MSES_OSMAP_ARCHIVE_SHA256: &str =
+    "5c0250643f52ce0e75d7338ae2504ce7907f2d49a30f921826717b8ac12ebe40";
 const SOURCE_DIRECTORY_ROOTS: [&str; 5] = ["crates", "xtask", "tools", "docs", ".cargo"];
 const SOURCE_ROOT_FILES: [&str; 12] = [
     "Cargo.toml",
@@ -134,7 +142,7 @@ impl BundleStatus {
 const USER_SUPPLIED_EXTERNAL_TOOLS: [(&str, &str); 5] = [
     (
         "mses",
-        "Proprietary MSES (mset/mses/mplot), per-seat licence from MIT; never bundled. See THIRD-PARTY-NOTICES.md.",
+        "Proprietary MSES (mset/mses/mplot), per-seat licence from MIT; executables remain user-supplied. The compatible GPL OSMAP data resource is bundled separately under assets/mses/. See THIRD-PARTY-NOTICES.md.",
     ),
     (
         "vspaero",
@@ -236,6 +244,7 @@ pub fn create_distribution(root: &Path) -> Result<(), String> {
 
     let avl_status = bundle_avl(root, &pkg_dir)?;
     let nastran_status = bundle_nastran95(root, &pkg_dir, strict_nastran)?;
+    bundle_mses_osmap(root, &pkg_dir)?;
     bundle_branding(root, &pkg_dir)?;
 
     // Copy documentation and notices.
@@ -811,6 +820,34 @@ fn write_release_manifest(
         });
     }
     json.push_str("  },\n");
+    json.push_str("  \"bundled_resources\": {\n");
+    json.push_str("    \"mses_osmap\": {\n");
+    json.push_str("      \"status\": \"bundled\",\n");
+    json.push_str(&format!(
+        "      \"path\": {},\n",
+        json_string(MSES_OSMAP_RELATIVE_PATH)
+    ));
+    json.push_str(&format!(
+        "      \"sha256\": {},\n",
+        json_string(MSES_OSMAP_SHA256)
+    ));
+    json.push_str(&format!(
+        "      \"source_archive\": {},\n",
+        json_string(MSES_OSMAP_ARCHIVE_RELATIVE_PATH)
+    ));
+    json.push_str(&format!(
+        "      \"license\": {},\n",
+        json_string(MSES_OSMAP_LICENSE_RELATIVE_PATH)
+    ));
+    json.push_str(&format!(
+        "      \"provenance\": {},\n",
+        json_string(MSES_OSMAP_README_RELATIVE_PATH)
+    ));
+    json.push_str(&format!(
+        "      \"acquisition_script\": {}\n",
+        json_string(MSES_OSMAP_ACQUISITION_RELATIVE_PATH)
+    ));
+    json.push_str("    }\n  },\n");
     json.push_str("  \"artifacts\": [\n");
     for (index, artifact) in artifacts.iter().enumerate() {
         json.push_str("    {\n");
@@ -945,6 +982,137 @@ fn json_string(value: &str) -> String {
     }
     escaped.push('"');
     escaped
+}
+
+/// Bundle the GPL OSMAP data required by MSES free-transition calculations.
+///
+/// The MSES executables remain user-supplied because their per-seat licence is
+/// not covered by ALAS. The transition map is an independent, unmodified XFOIL
+/// distribution asset, so it can travel with the release together with its
+/// source archive and licence text. Copying the complete provenance set here
+/// makes a package self-auditing and avoids a network fetch at run time.
+fn bundle_mses_osmap(root: &Path, package_dir: &Path) -> Result<(), String> {
+    let source_dir = root.join("assets").join("mses");
+    let destination_dir = package_dir.join("assets").join("mses");
+    fs::create_dir_all(&destination_dir).map_err(|error| {
+        format!(
+            "failed to create bundled MSES resource directory {}: {error}",
+            destination_dir.display()
+        )
+    })?;
+
+    for name in [
+        "osmapDP.dat",
+        "xfoil6.99.tgz",
+        "COPYING-XFOIL.txt",
+        "README.md",
+        "acquire_osmap.ps1",
+    ] {
+        let source = source_dir.join(name);
+        if !source.is_file() {
+            return Err(format!(
+                "bundled MSES OSMAP artifact is missing: {}; release packaging requires the map, exact source archive, licence text, and provenance README",
+                source.display()
+            ));
+        }
+        let destination = destination_dir.join(name);
+        fs::copy(&source, &destination).map_err(|error| {
+            format!(
+                "failed to copy bundled MSES OSMAP artifact to {}: {error}",
+                destination.display()
+            )
+        })?;
+    }
+
+    validate_bundled_mses_osmap(package_dir)?;
+    println!(
+        "Bundled the GPL double-precision MSES OSMAP resource, exact XFOIL source archive, licence, and provenance in {}",
+        destination_dir.display()
+    );
+    Ok(())
+}
+
+/// Validate the packaged OSMAP bytes and its redistribution evidence.
+///
+/// The lightweight record check mirrors the runtime check in `alas-aero`: the
+/// first Fortran record is 12 bytes and the double-precision table record is
+/// 224 bytes. The fixed hashes additionally prevent a single-precision map or
+/// a locally regenerated file from silently entering a release.
+fn validate_bundled_mses_osmap(package_dir: &Path) -> Result<(), String> {
+    let map = package_dir.join(MSES_OSMAP_RELATIVE_PATH);
+    let map_bytes = fs::read(&map).map_err(|error| {
+        format!(
+            "bundled MSES OSMAP cannot be read at {}: {error}",
+            map.display()
+        )
+    })?;
+    if sha256_hex(&map_bytes) != MSES_OSMAP_SHA256 {
+        return Err(format!(
+            "bundled MSES OSMAP hash mismatch at {}; expected {}",
+            map.display(),
+            MSES_OSMAP_SHA256
+        ));
+    }
+    if map_bytes.len() < 24 {
+        return Err(format!(
+            "bundled MSES OSMAP is too short at {} ({} bytes)",
+            map.display(),
+            map_bytes.len()
+        ));
+    }
+    let read_i32 = |offset: usize| {
+        i32::from_le_bytes([
+            map_bytes[offset],
+            map_bytes[offset + 1],
+            map_bytes[offset + 2],
+            map_bytes[offset + 3],
+        ])
+    };
+    let first = read_i32(0);
+    let trailing = read_i32(16);
+    let table_record = read_i32(20);
+    if first != 12 || trailing != 12 || table_record != 224 {
+        return Err(format!(
+            "bundled MSES OSMAP has incompatible Fortran header at {} (first={first}, trailing={trailing}, table_record={table_record}; expected 12, 12, 224)",
+            map.display()
+        ));
+    }
+
+    let archive = package_dir.join(MSES_OSMAP_ARCHIVE_RELATIVE_PATH);
+    let archive_bytes = fs::read(&archive).map_err(|error| {
+        format!(
+            "bundled MSES OSMAP source archive cannot be read at {}: {error}",
+            archive.display()
+        )
+    })?;
+    if sha256_hex(&archive_bytes) != MSES_OSMAP_ARCHIVE_SHA256 {
+        return Err(format!(
+            "bundled MSES OSMAP source archive hash mismatch at {}; expected {}",
+            archive.display(),
+            MSES_OSMAP_ARCHIVE_SHA256
+        ));
+    }
+
+    for relative in [
+        MSES_OSMAP_LICENSE_RELATIVE_PATH,
+        MSES_OSMAP_README_RELATIVE_PATH,
+        MSES_OSMAP_ACQUISITION_RELATIVE_PATH,
+    ] {
+        let path = package_dir.join(relative);
+        let metadata = fs::metadata(&path).map_err(|error| {
+            format!(
+                "bundled MSES OSMAP provenance file is missing at {}: {error}",
+                path.display()
+            )
+        })?;
+        if metadata.len() == 0 {
+            return Err(format!(
+                "bundled MSES OSMAP provenance file is empty: {}",
+                path.display()
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// Copy the unchanged GPL AVL program and its corresponding source into the
@@ -1222,6 +1390,7 @@ fn validate_distribution(
     // 2. Verify the manifest and the generated package configuration before
     // invoking the more expensive headless/AVL smoke run.
     validate_release_manifest(release_manifest, package_root)?;
+    validate_bundled_mses_osmap(package_root)?;
     let packaged_config_metadata = fs::metadata(packaged_config).map_err(|e| {
         format!(
             "packaged configuration template is missing at {}: {e}",
@@ -1340,6 +1509,8 @@ fn validate_release_manifest(path: &Path, package_root: &Path) -> Result<(), Str
         "\"package_name\":",
         "\"source_snapshot\":",
         "\"external_tools\":",
+        "\"bundled_resources\":",
+        "\"mses_osmap\":",
         "\"artifacts\":",
     ] {
         if !text.contains(required) {
@@ -1663,9 +1834,10 @@ mod tests {
     use std::path::PathBuf;
 
     use super::{
-        assess_nastran95, bundle_branding, bundle_status_json, deleted_tracked_paths, package_name,
-        parse_artifact_records, sha256_hex, source_path_allowed, target_label, BundleStatus,
-        USER_SUPPLIED_EXTERNAL_TOOLS,
+        assess_nastran95, bundle_branding, bundle_mses_osmap, bundle_status_json,
+        deleted_tracked_paths, package_name, parse_artifact_records, sha256_hex,
+        source_path_allowed, target_label, validate_bundled_mses_osmap, BundleStatus,
+        MSES_OSMAP_RELATIVE_PATH, USER_SUPPLIED_EXTERNAL_TOOLS,
     };
 
     /// A tracked file deleted on purpose must not fail the release, and must
@@ -1735,6 +1907,29 @@ mod tests {
                 "packaged branding differs from {name}"
             );
         }
+
+        fs::remove_dir_all(package).expect("temporary package cleanup");
+    }
+
+    #[test]
+    fn distribution_bundles_and_validates_the_mses_osmap_resource() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .map(PathBuf::from)
+            .expect("workspace root beside xtask crate");
+        let package =
+            std::env::temp_dir().join(format!("alas-mses-osmap-package-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&package);
+        fs::create_dir_all(&package).expect("temporary package directory");
+
+        bundle_mses_osmap(&root, &package).expect("MSES OSMAP resource package");
+        validate_bundled_mses_osmap(&package).expect("packaged MSES OSMAP validates");
+        assert_eq!(
+            fs::metadata(package.join(MSES_OSMAP_RELATIVE_PATH))
+                .expect("packaged OSMAP")
+                .len(),
+            1_576_588
+        );
 
         fs::remove_dir_all(package).expect("temporary package cleanup");
     }

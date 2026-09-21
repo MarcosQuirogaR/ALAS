@@ -5,6 +5,14 @@ The NASA FLOPS conventional-transport weight equations, implemented in
 what is implemented, what is deliberately not, and which conventions were
 chosen where the source is ambiguous.
 
+The serialized architecture name `pure_flops_transport_v1` is retained for
+saved-file compatibility. The current production model is **FLOPS-based**, not
+a claim that every contribution is a NASA FLOPS equation: registered aircraft
+can use LTH cabin equipment and pylons, and turboprops use a declared
+shaft-power installation model. These resolved methods are retained in the
+mass ledger and JSON export. An evaluated input contract is not physical OEW
+validation. See [mass robustness and OEW verification](flops-robustness.md).
+
 ## Sources
 
 | Role | Source |
@@ -47,7 +55,9 @@ independent production controls.
 
 `legacy_reference_compatible_comparison` is an explicit comparison and
 regression control. It is never selected as a missing-input fallback, and no
-FLOPS group may be paired with its Torenbeek/fraction groups. A pre-version-2
+FLOPS-based group may be paired with its Torenbeek/fraction groups. Declared
+LTH cabin/pylon methods and the shaft-power branch are explicit, separately
+attributed components within the production architecture. A pre-version-2
 file that selected the old all-legacy default or a hybrid is migrated to pure
 FLOPS with a visible migration record; a user who needs the old numbers must
 choose the comparison architecture by name.
@@ -88,8 +98,29 @@ three closures rather than assuming them:
    fuel is placed once, at its tank stations. A disagreement returns
    `LedgerError::UnusableFuelAllocationMismatch`.
 3. Ledger `MassMethod` labels come from `LedgerMethods::from_mass_model`,
-so labels follow the selected whole architecture rather than whichever group
-happened to be present in an intermediate buildup.
+or, for a completed production evaluation, `LedgerMethods::from_buildup`.
+Labels retain the actual LTH, FLOPS or shaft-power source. Exports preserve
+each row's method and the resolved cabin/propulsion selectors.
+4. A nonempty itemized payload list must sum to the component payload mass
+within `1e-6` relative tolerance. A mismatch returns
+`LedgerError::PayloadAllocationMismatch`; it cannot silently change zero-fuel
+mass or CG. A failed physical ledger is an error feasibility finding.
+
+## Installed equipment and cabin resolution
+
+The first mass pass resolves passenger counts from the canonical cabin before
+evaluating FLOPS. Count mode declares installed seats; percent mode resolves
+a complete seed allocation and then follows the seated layout. Legacy Premium
+seats are handled consistently by the canonical three-class representation.
+Missing or inconsistent inputs at the raw equation adapter still produce a
+named blocker. Public preflight checks the mass-specific configuration and
+the design gross/landing mass relationship.
+
+`apu_installed` is explicit. The default and jet presets retain equation 101;
+the ATR hotel-mode preset has no separate APU. Engine starter and nozzle scope
+are explicit metadata and configuration choices, so a certified dry-engine
+mass is not silently assumed to include a complete installation. Unresolved
+equipment scope remains an uncertainty, not a manufactured mass correction.
 
 ## Conventions chosen where the source is ambiguous
 
@@ -157,10 +188,10 @@ eq. 137's group total and eq. 41's pod relief.
 
 | Item | Status |
 |---|---|
-| **Turboprop / propeller / gearbox** | **Unsupported, permanently.** The memorandum contains no propeller, gearbox or shaft-power mass equation; Appendix D is a declared-complete variable list with no power entry, and §5.3 scales engine mass from rated thrust only. Aviary's FLOPS path has no propeller component, and its GASP path treats propeller mass as a user input defaulting to zero. The ATR baseline therefore returns `unsupported_propulsion_technology`. **Shaft power is never converted into an equivalent thrust.** Closing this needs a different published method, declared as such. |
+| **Turboprop / propeller / gearbox** | No NASA FLOPS thrust-based propulsion branch is used. The production model explicitly uses certificated dry-engine mass or GASP specific weight, source-declared propeller mass (with explicit accessory scope) or the Hamilton Standard regression, TM-83458 separate gearbox mass where needed, declared installation items and FLOPS fuel-system mass. Shaft power is never converted to equivalent thrust. A gearbox included in engine mass is not added again. The input reduction ratio is engine/propeller speed and is converted to TM-83458's reciprocal convention. The ATR preset uses the approximate JCAB 568F-1 mass and full-oil quantity described in [the robustness record](flops-robustness.md). Nacelle area follows the built or reconstructed configured profile, with an explicit component mass/area calibration anchor. Detailed FLOPS wing pod relief remains unsupported for shaft-power aircraft. |
 | Fighter/attack, general-aviation, hybrid-wing-body branches | Not translated. Transport branch only. |
 | `WARM` (armament), `AEWT`, `POWWT`, `WTBAT` | Zero for a transport; not represented. |
-| Alternate mass equations (TM §7.1) | Not implemented. The primary set only. |
+| Alternate mass equations (TM §7.1) | The shaft-power branch uses the thrust-free unusable-fuel equation 161. This is not a complete implementation of the alternate equation set. |
 | Per-component mass scalers | Aviary has them; ALAS carries none, so validation cases divide the FLOPS output by the case's scaler. |
 | Unusable-fuel density ratio | Aviary multiplies eq. 121 by `fuel_density / 6.7 lbm/galUS`. **This factor is not in the memorandum** and is inert for Jet A; not implemented. |
 | `sqrt(Engine.SCALE_FACTOR)` nacelle rescale | An Aviary deviation with no TM basis. ALAS reads the *installed* nacelle from the built geometry, so applying it would double-count. |
@@ -186,9 +217,8 @@ uv run --with matplotlib python tools/report_flops_comparison.py \
 ```
 
 The comparison example evaluates the registered presets with their
-revision-locked FLOPS inputs. Supported jet transports produce a pure-FLOPS
-row; ATR72-600 remains an explicit unsupported-domain row because the pinned
-transport equations have no propeller/shaft-power branch. The secondary legacy
+declared inputs and resolved methods. Jet transports and the ATR shaft-power
+scenario produce separately attributed FLOPS-based rows. The secondary legacy
 column is selected by name inside the example and never supplies a missing
 FLOPS input. User-declared values in the default conventional scenario remain
 labelled as assumptions, **not** preset or manufacturer facts.

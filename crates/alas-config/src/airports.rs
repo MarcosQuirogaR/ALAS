@@ -98,16 +98,33 @@ pub fn database_with_custom() -> Vec<Airport> {
     airports.extend(
         crate::airport_io::registered_custom_airports()
             .into_iter()
-            .map(|airport| Airport {
-                name: airport.name,
-                icao: airport.icao,
-                elevation_m: airport.altitude_m,
-                toda_m: airport.declared_toda_m.unwrap_or(0.0),
-                lda_m: airport.declared_lda_m.unwrap_or(0.0),
-                isa_deviation_c: airport.isa_delta_c,
-                notes: "Custom entry; physical runway lengths remain provenance-only".to_owned(),
-                latitude_deg: airport.latitude_deg,
-                longitude_deg: airport.longitude_deg,
+            .map(|airport| {
+                let physical_length = airport
+                    .runway_lengths_m
+                    .iter()
+                    .copied()
+                    .filter(|length| length.is_finite() && *length > 0.0)
+                    .fold(0.0, f64::max);
+                let (toda_m, lda_m, notes) =
+                    airport.declared_toda_m.zip(airport.declared_lda_m).map_or(
+                        (
+                            physical_length,
+                            physical_length,
+                            "Custom entry; longest physical runway used conservatively",
+                        ),
+                        |(toda, lda)| (toda, lda, "Custom entry; declared distances supplied"),
+                    );
+                Airport {
+                    name: airport.name,
+                    icao: airport.icao,
+                    elevation_m: airport.altitude_m,
+                    toda_m,
+                    lda_m,
+                    isa_deviation_c: airport.isa_delta_c,
+                    notes: notes.to_owned(),
+                    latitude_deg: airport.latitude_deg,
+                    longitude_deg: airport.longitude_deg,
+                }
             }),
     );
     airports

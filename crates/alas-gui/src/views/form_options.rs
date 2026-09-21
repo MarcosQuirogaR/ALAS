@@ -46,6 +46,17 @@ pub(super) fn resolved_options(field: &Field, values: &Value) -> Option<Vec<Stri
                     .map(|tire| tire.code.to_owned()),
             )
             .collect(),
+        Some(OptionSource::MainDeckUld) => alas_payload::cargo::ULD_DATABASE
+            .iter()
+            .map(|uld| uld.key.to_owned())
+            .collect(),
+        Some(OptionSource::LowerDeckUld) => std::iter::once("AUTO".to_owned())
+            .chain(
+                alas_payload::cargo::ULD_DATABASE
+                    .iter()
+                    .map(|uld| uld.key.to_owned()),
+            )
+            .collect(),
         Some(OptionSource::CabinPreset) => Vec::new(),
         Some(source) => source
             .options()

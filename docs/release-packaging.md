@@ -6,6 +6,20 @@ Every package contains `RELEASE-MANIFEST.json`. It records the version, target, 
 
 AVL 3.52 remains an adjacent GPL child executable. Packaging requires its executable, source archive, and GPL notice because the distribution validation run uses it. NASTRAN-95 is optional in the default mode. When the local staging tree is missing or its provenance is incomplete, the task omits it and records `external_tools.nastran95.status = "not_bundled"` with the specific reason; no placeholder directory or executable is created. This is the expected result on a checkout without NASTRAN-95 staging.
 
+The MSES release resource is recorded separately as `bundled_resources.mses_osmap`.
+The compatible GPL double-precision map, exact XFOIL source archive, GPL text,
+provenance README and acquisition script are copied under `assets/mses/`;
+the MSES executables remain user-supplied.
+
+The release guard hashes the bundled `osmapDP.dat` and exact XFOIL 6.99
+archive, checks the GPL provenance files, and verifies the double-precision
+Fortran record header before it writes the archive. At runtime, ALAS resolves
+the map from the explicit configuration, `MSES_OSMAP`, the selected MSES
+directory, or the package's own `assets/mses/` path. The selected absolute
+path is passed to the MSES child process through `MSES_OSMAP`, so launching
+the packaged application from another working directory does not make a valid
+free-transition run appear to have a missing database.
+
 An intentional bundled NASTRAN-95 package must opt into the fail-closed check:
 
 ```powershell

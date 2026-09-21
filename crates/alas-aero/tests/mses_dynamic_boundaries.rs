@@ -290,6 +290,9 @@ fn temporary_directory(label: &str) -> PathBuf {
 }
 
 fn fake_mses_installation(root: &Path, mode: &str) {
+    // Transcript tests require a complete free-transition installation at
+    // preflight. This header is only for the fake solver, never real physics.
+    write_osmap_fixture(root);
     let source = root.join("fake_mses.rs");
     let helper = root.join("fake_mses_helper.exe");
     let source_text = FAKE_MSES_SOURCE.replace("__ALAS_FAKE_MSES_MODE__", mode);
@@ -381,6 +384,7 @@ fn public_mses_polar_reports_invalid_timeout_without_launching_a_tool() {
     for field in ["mset", "mses"] {
         for seconds in [0.0, -1.0, f64::NAN, f64::INFINITY] {
             let root = temporary_directory(&format!("invalid-timeout-{field}"));
+            write_osmap_fixture(&root);
             let mut config = MsesConfig::default();
             if field == "mset" {
                 for name in ["mset.exe", "mses.exe", "mplot.exe"] {

@@ -45,3 +45,7 @@
 /external tools/Mses3.12c-win32/*.ps
 /external tools/Mses3.12c-win32/*.csv
 /external tools/Mses3.12c-win32/mdat.*
+
+# Optional native OpenVSP screenshot runtime, provisioned with pinned downloads.
+/external tools/**/preview-runtime/
+/external tools/**/preview-runtime.backup-*/

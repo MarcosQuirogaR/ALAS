@@ -215,6 +215,11 @@ impl AppState {
 
     /// Update the results-gallery scene from the current result and selection.
     pub fn update_result_scene(&mut self) {
+        // A run identity is stable while new stages arrive. Both successful
+        // scenes and cached `None`/unavailable scenes must be invalidated at
+        // each data boundary, including the final result.
+        self.result_figure_cache.clear();
+        self.patran_textures.clear();
         self.result_scene = crate::scene::build_result_scene(self);
     }
 
@@ -304,7 +309,7 @@ mod walkthrough_tests {
     fn walkthrough_opens_hidden_targets_and_restores_the_shell_afterward() {
         let mut state = AppState::default();
         state.finish_walkthrough();
-        state.active_page = "mission".to_owned();
+        state.active_page = "inputs".to_owned();
         state.nav_pinned = false;
         state.nav_hover_open = true;
         state.preview_open = false;
@@ -330,7 +335,7 @@ mod walkthrough_tests {
         assert_eq!(state.active_page, "results");
 
         state.finish_walkthrough();
-        assert_eq!(state.active_page, "mission");
+        assert_eq!(state.active_page, "inputs");
         assert!(!state.nav_pinned);
         assert!(state.nav_hover_open);
         assert!(!state.preview_open);
@@ -346,6 +351,14 @@ mod walkthrough_tests {
         state.record_walkthrough_target(TourTarget::Navigation, measured);
 
         assert_eq!(state.current_walkthrough_target(), Some(measured));
+    }
+
+    #[test]
+    fn a_fresh_state_has_no_completed_pipeline_result() {
+        let state = AppState::default();
+
+        assert!(state.pipeline_result.is_none());
+        assert!(!state.pipeline_result_complete);
     }
 }
 

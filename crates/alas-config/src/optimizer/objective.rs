@@ -215,7 +215,7 @@ pub struct ObjectiveConfig {
     #[config(
         label = "Maximum wingspan",
         unit = "m",
-        help = "Largest wingspan the intended aerodrome reference code admits: 36 m for code C, 52 m for D, 65 m for E and 80 m for F (ICAO Annex 14). Zero disables the limit."
+        help = "Largest wingspan allowed by the selected aerodrome reference-code case. The 36/52/65/80 m values are study inputs representing codes C/D/E/F; this configuration does not infer a code from an ICAO identifier or runway length. Zero disables the limit."
     )]
     pub max_span_m: f64,
 
@@ -223,7 +223,7 @@ pub struct ObjectiveConfig {
     #[config(
         label = "Maximum approach speed",
         unit = "kt",
-        help = "Upper bound on the reference landing speed at the maximum landing mass. Approach category C ends at 140 kt and D at 165 kt (ICAO PANS-OPS). Zero disables the limit."
+        help = "Upper bound on reference approach speed at maximum landing mass for the selected operating/aerodrome category. The category and source must be selected explicitly; the configuration does not infer them from an ICAO identifier. Zero disables the limit."
     )]
     pub max_approach_speed_kt: f64,
 

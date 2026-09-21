@@ -12,10 +12,56 @@ use egui::{vec2, RichText, Ui, ViewportBuilder, ViewportCommand};
 
 use crate::native_viewport::{show_native_viewport, viewport_id};
 use crate::state::{AppState, LogKind};
-use crate::views::{show_screening_view, tr};
+use crate::views::{show_screening_view, show_screening_view_advanced, tr};
 
 /// The key both the viewport and its focus command are built from.
 const SCREENING_VIEWPORT_KEY: &str = "airfoil_screening";
+const CUSTOM_AIRFOIL_IMPORT_VIEWPORT_KEY: &str = "custom_airfoil_import";
+
+/// Render the custom-airfoil importer requested from the screening selector.
+///
+/// The file action deliberately lives in its own native viewport.  Inputs has
+/// no importer card, so a custom section can only be added from the
+/// Advanced Settings > Airfoil Screening airfoil selector.
+pub fn show_custom_airfoil_import_window(state: &mut AppState, ctx: &egui::Context) {
+    if !state.screening.custom_airfoil_import_open {
+        return;
+    }
+
+    let response = show_native_viewport(
+        ctx,
+        CUSTOM_AIRFOIL_IMPORT_VIEWPORT_KEY,
+        tr("Import custom airfoil"),
+        ViewportBuilder::default()
+            .with_title(tr("Import custom airfoil"))
+            .with_inner_size(vec2(640.0, 220.0))
+            .with_min_inner_size(vec2(480.0, 180.0))
+            .with_resizable(true),
+        |_child_ctx, ui, _class| {
+            ui.heading(tr("Import custom airfoil"));
+            egui::Grid::new("custom_airfoil_import_fields")
+                .num_columns(2)
+                .spacing([12.0, 8.0])
+                .show(ui, |ui| {
+                    ui.label(tr("Selig .dat path"));
+                    ui.text_edit_singleline(&mut state.custom_airfoil_file_path);
+                    ui.end_row();
+                    ui.label("");
+                    if ui.button(tr("Import airfoil .dat")).clicked() {
+                        state.import_custom_airfoil();
+                    }
+                    ui.end_row();
+                });
+            if let Some(status) = &state.custom_airfoil_status {
+                ui.label(RichText::new(status).weak().small());
+            }
+        },
+    );
+
+    if response.close_requested {
+        state.screening.custom_airfoil_import_open = false;
+    }
+}
 
 /// Render the detached Airfoil Screening workspace when it is open.
 pub fn show_screening_window(state: &mut AppState, ctx: &egui::Context) {
@@ -73,7 +119,7 @@ fn close_window(state: &mut AppState) {
 /// the blank panel an early return would leave.
 pub fn show_screening_page(state: &mut AppState, ui: &mut Ui) {
     if !state.screening.window_open {
-        show_screening_view(state, ui);
+        show_screening_view_advanced(state, ui);
         return;
     }
 

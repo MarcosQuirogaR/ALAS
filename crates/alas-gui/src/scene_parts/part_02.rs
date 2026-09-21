@@ -366,18 +366,45 @@ pub fn build_screening_figure(state: &AppState, id: &str, theme: &str) -> Option
 mod tests {
     use super::{cap_interactive_preview_mesh, localize_scene_text};
     use alas_config::AlasConfig;
+    use alas_report::scene::SceneElement;
 
     #[test]
     fn interactive_preview_caps_mesh_without_changing_solver_configuration() {
         let original = AlasConfig::default();
+        let original_wing_subdivisions = original.geometry.wing.n_subdivisions;
+        let original_empennage_subdivisions = original.geometry.empennage.n_subdivisions;
         let mut preview = original.clone();
 
         cap_interactive_preview_mesh(&mut preview);
 
         assert_eq!(preview.geometry.wing.n_subdivisions, 2);
         assert_eq!(preview.geometry.empennage.n_subdivisions, 2);
-        assert_eq!(original.geometry.wing.n_subdivisions, 8);
-        assert_eq!(original.geometry.empennage.n_subdivisions, 6);
+        assert_eq!(original.geometry.wing.n_subdivisions, original_wing_subdivisions);
+        assert_eq!(
+            original.geometry.empennage.n_subdivisions,
+            original_empennage_subdivisions
+        );
+    }
+
+    #[test]
+    fn mass_live_previews_use_the_materialized_cabin_flops_without_unverified_warning() {
+        let state = crate::state::AppState::default();
+        for id in ["landing_gear", "control_surfaces"] {
+            let scene = super::build_page_preview(&state, id).expect("mass preview scene");
+            let text = scene
+                .elements
+                .iter()
+                .filter_map(|element| match element {
+                    SceneElement::Text { text, .. } | SceneElement::TextBlock { text, .. } => {
+                        Some(text.as_str())
+                    }
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join(" ")
+                .to_ascii_lowercase();
+            assert!(!text.contains("unverified"), "{id} warning: {text}");
+        }
     }
 
     #[test]

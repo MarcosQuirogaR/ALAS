@@ -44,6 +44,13 @@ pub enum LedgerError {
         /// The mass method's own allocation, kg.
         allocated_kg: f64,
     },
+    /// Itemized payload disagrees with the component mass closure.
+    PayloadAllocationMismatch {
+        /// Sum of payload items supplied by the layout, kg.
+        supplied_kg: f64,
+        /// Payload carried by the component buildup, kg.
+        allocated_kg: f64,
+    },
 }
 
 impl fmt::Display for LedgerError {
@@ -70,6 +77,10 @@ impl fmt::Display for LedgerError {
                  {allocated_kg} kg allocation; placing both would count that fuel twice"
             ),
             Self::DuplicateId { id } => write!(formatter, "ledger item {id} is listed twice"),
+            Self::PayloadAllocationMismatch { supplied_kg, allocated_kg } => write!(
+                formatter,
+                "payload items total {supplied_kg} kg but the component buildup carries {allocated_kg} kg"
+            ),
         }
     }
 }

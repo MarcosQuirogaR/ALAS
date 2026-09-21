@@ -43,9 +43,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     overlay, AnalysisConfig, CabinConfig, ConfigNode, ControlSurfacesConfig, DesignRequirements,
-    DragModelConfig, FuelPolicyConfig, FuelTankLayoutConfig, GeometryConfig, LandingGearConfig,
-    MassModelConfig, MissionConfig, MsesConfig, OptimizerConfig, OverlayError, PerformanceConfig,
-    PropulsionCycleConfig, StructuresConfig,
+    DownstreamConfig, DragModelConfig, FuelPolicyConfig, FuelTankLayoutConfig, GeometryConfig,
+    LandingGearConfig, MassModelConfig, MissionConfig, MsesConfig, OptimizerConfig, OverlayError,
+    PerformanceConfig, PropulsionCycleConfig, StructuresConfig,
 };
 
 /// Top-level key under which the desktop application stores its workspace
@@ -162,6 +162,14 @@ pub struct AlasConfig {
     )]
     pub structures: StructuresConfig,
 
+    /// Independent external analyses and geometry export.
+    #[serde(default)]
+    #[config(
+        nested,
+        help = "Optional OpenVSP, VSPAERO, AVL and FLOWUnsteady stages. They consume the completed aircraft downstream and never alter the optimizer's selected design."
+    )]
+    pub downstream: DownstreamConfig,
+
     /// The operating rule the mission fuel is planned under.
     #[serde(default, skip_serializing_if = "FuelPolicyConfig::is_default")]
     #[config(
@@ -212,6 +220,7 @@ impl Default for AlasConfig {
             control_surfaces: ControlSurfacesConfig::default(),
             propulsion_cycle: PropulsionCycleConfig::default(),
             structures: StructuresConfig::default(),
+            downstream: DownstreamConfig::default(),
             fuel_policy: FuelPolicyConfig::default(),
             fuel_tanks: FuelTankLayoutConfig::default(),
             // A long-haul pair, so an unconfigured run has a real route rather
@@ -1006,7 +1015,7 @@ mod tests {
             .collect();
         assert_eq!(names.first(), Some(&"preset"));
         assert_eq!(names.last(), Some(&"arrival_airport"));
-        assert_eq!(names.len(), 19);
+        assert_eq!(names.len(), 20);
         assert!(names.contains(&"fuel_policy"));
         assert!(names.contains(&"fuel_tanks"));
     }

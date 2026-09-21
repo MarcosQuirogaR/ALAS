@@ -183,9 +183,27 @@ pub(super) const B777X_ACAP_REV_G: OewSource = OewSource {
     revision: "Revision G",
     date: "2025-09",
     locator: "section 2 (weights) and 3 (payload/range)",
-    url: "",
+    url: "https://www.boeing.com/content/dam/boeing/v2/airports/acaps/777X_Rev_G.pdf",
     local_path: ".agent/data/flops-refinement-evidence/sources/boeing-777x-acap-rev-g.pdf",
     retrieved: "2026-09-11",
     quote: "no numeric operating empty weight; payload/range data will be provided at a later date",
     tier: OewSourceTier::ManufacturerPlanningDocument,
+};
+
+/// Early 777-9X projection repeated in an independent aviation report.
+///
+/// The current Boeing Rev. G planning document still gives no numeric OEW.
+/// This value is retained only as a clearly secondary, pre-certification
+/// context row; it is not the AVE reference and cannot enter validation.
+pub(super) const B777X_SECONDARY_PROJECTION: OewSource = OewSource {
+    document: "Airbus, Boeing in game of thrones for widebody dominance",
+    publisher: "Aspire Aviation (reported by an independent aviation forum)",
+    revision: "2014-07-11 report; secondary copy/quote",
+    date: "2014-07-11",
+    locator: "forum quotation of the Aspire Aviation 4-class, 300-seat 777-9X estimate",
+    url: "https://www.aviazionecivile.it/threads/thread-airbus-330-neo.132876/",
+    local_path: "",
+    retrieved: RETRIEVED,
+    quote: "a 4-class 300-seat 777-9X has an OEW of 188,241 kg (415,000 lbs), attributed to Aspire Aviation's multiple Boeing sources",
+    tier: OewSourceTier::Aggregator,
 };

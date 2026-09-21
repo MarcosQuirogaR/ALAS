@@ -43,6 +43,16 @@ pub(super) fn advanced_paths(group: &str) -> &'static [&'static str] {
             "modal_damping_ratio",
             "random_force_psd_n2_per_hz",
         ],
+        "mission" => &[
+            "enabled",
+            "timeout_s",
+            "great_circle_points",
+            "max_airway_stretch",
+            "use_airway_endpoint_coordinates",
+            "simbrief_username",
+            "simbrief_timeout_s",
+            "simbrief_overrides_airports",
+        ],
         _ => &[],
     }
 }
@@ -316,13 +326,13 @@ pub(super) fn render_propulsion_editor(
     lang: Option<&str>,
     show_help: bool,
 ) -> Vec<FormEdit> {
+    if surface != Surface::Advanced {
+        render_engine_selector(state, ui);
+    }
     let model = state
         .typed_config()
         .ok_or_else(|| "configuration cannot be decoded".to_owned())
         .and_then(|config| super::engine_editor_model(&config.geometry.engine));
-    if surface != Surface::Advanced {
-        render_engine_selector(state, ui);
-    }
     let model = match model {
         Ok(model) => model,
         Err(error) => {
@@ -338,26 +348,55 @@ pub(super) fn render_propulsion_editor(
         return edits;
     }
     ui.add_space(6.0);
-    if matches!(model, super::EngineEditorModel::Turbofan { .. }) {
-        if let Some(values) = state.group_mut("propulsion_cycle") {
-            edits.extend(super::render_engine_designer_form(
-                ui,
-                cycle_fields,
-                values,
-                error_fields,
-                lang,
-                show_help,
-            ));
-        }
-    } else {
-        ui.label(
-            RichText::new(tr(
-                "Turbofan BPR, OPR, FPR, T4, TSFC and ICAO LTO controls do not apply to this shaft-power propulsion model.",
-            ))
-            .small(),
-        );
+    let turboprop = matches!(model, super::EngineEditorModel::Turboprop { .. });
+    let cycle_fields = propulsion_cycle_fields(cycle_fields, turboprop);
+    if let Some(values) = state.group_mut("propulsion_cycle") {
+        edits.extend(super::render_engine_designer_form(
+            ui,
+            &cycle_fields,
+            values,
+            error_fields,
+            lang,
+            show_help,
+        ));
     }
     edits
+}
+
+fn propulsion_cycle_fields(fields: &[Field], turboprop: bool) -> Vec<Field> {
+    const FAN_ONLY: &[&str] = &[
+        "fan_polytropic_efficiency",
+        "fan_nozzle_pressure_ratio",
+        "fan_nozzle_efficiency",
+        "fan_face_mach",
+    ];
+    fields
+        .iter()
+        .filter(|field| {
+            if turboprop {
+                !FAN_ONLY.contains(&field.name)
+            } else {
+                !field.name.starts_with("turboprop_")
+            }
+        })
+        .cloned()
+        .map(|mut field| {
+            if turboprop {
+                match field.name {
+                    "hpt_polytropic_efficiency" => {
+                        field.label = "Gas-generator turbine polytropic efficiency";
+                        field.help = "Aggregate turbine efficiency for work supplied to the core compressors.";
+                    }
+                    "lpt_polytropic_efficiency" => {
+                        field.label = "Power turbine polytropic efficiency";
+                        field.help = "Free-turbine efficiency for the selected engine's cruise shaft-power output.";
+                    }
+                    _ => {}
+                }
+            }
+            field
+        })
+        .collect()
 }
 
 fn render_engine_selector(state: &mut AppState, ui: &mut Ui) {
@@ -438,6 +477,41 @@ mod tests {
     };
     use crate::nav::{all_pages, page, ADVANCED_SETTINGS_PAGES, NAV};
     use alas_config::{AlasConfig, ConfigNode, Entry, Field};
+
+    #[test]
+    fn cycle_controls_follow_the_active_engine_technology() {
+        let fields = alas_config::PropulsionCycleConfig::default()
+            .schema()
+            .fields;
+        let turboprop = super::propulsion_cycle_fields(&fields, true);
+        let turbofan = super::propulsion_cycle_fields(&fields, false);
+        for name in [
+            "turboprop_overall_pressure_ratio",
+            "turboprop_turbine_inlet_temperature_k",
+        ] {
+            assert!(turboprop.iter().any(|field| field.name == name));
+            assert!(!turbofan.iter().any(|field| field.name == name));
+        }
+        for name in [
+            "fan_polytropic_efficiency",
+            "fan_nozzle_pressure_ratio",
+            "fan_nozzle_efficiency",
+            "fan_face_mach",
+        ] {
+            assert!(turbofan.iter().any(|field| field.name == name));
+            assert!(!turboprop.iter().any(|field| field.name == name));
+        }
+        for name in [
+            "lpc_pressure_ratio_split",
+            "hpc_polytropic_efficiency",
+            "lpt_polytropic_efficiency",
+            "core_nozzle_efficiency",
+            "cp_hot_j_kgk",
+        ] {
+            assert!(turboprop.iter().any(|field| field.name == name));
+            assert!(turbofan.iter().any(|field| field.name == name));
+        }
+    }
 
     fn leaf_paths(fields: &[Field], prefix: &str, out: &mut Vec<String>) {
         for field in fields {
@@ -560,7 +634,7 @@ mod tests {
     }
 
     #[test]
-    fn the_advanced_window_offers_external_tools_and_airfoil_screening_tabs() {
+    fn the_advanced_window_offers_airfoil_screening_and_external_tools_tabs() {
         let ids: Vec<&str> = ADVANCED_SETTINGS_PAGES.iter().map(|page| page.id).collect();
         assert!(ids.contains(&"setup_tools"));
         assert!(ids.contains(&"airfoil_screening"));

@@ -94,6 +94,7 @@ pub(super) fn show_fullscreen_result(
                     // frame, including on the smallest supported window.
                     let available = ui.available_size();
                     let available = vec2(available.x.max(320.0), (available.y - 28.0).max(180.0));
+                    let canvas_rect = egui::Rect::from_min_size(ui.cursor().min, available);
                     // A double-click maximized the card; the same gesture on
                     // the maximized figure restores it.  The click that
                     // opened the overlay cannot re-trigger here because egui
@@ -139,6 +140,9 @@ pub(super) fn show_fullscreen_result(
                             .desired_size(available),
                         );
                         restore |= response.double_clicked();
+                    }
+                    if view_key.split(';').any(|part| part == "figure=openvsp_cad_preview") {
+                        super::openvsp::show_launch_button(state, ui, canvas_rect);
                     }
                 });
         });

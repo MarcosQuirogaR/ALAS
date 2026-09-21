@@ -4,12 +4,16 @@
 //! The window-level overlays: the boot splash, the first-run walkthrough, the
 //! advanced walkthrough guide, the storage dialog, and the About window.
 
-use egui::{pos2, vec2, Color32, Context, Frame, Rect, RichText, ScrollArea, Stroke, Vec2, Window};
+use egui::{
+    pos2, vec2, Color32, Context, Frame, Id, Rect, RichText, ScrollArea, Stroke, Vec2,
+    ViewportBuilder, Window,
+};
 
 use alas_exec::storage::{
     clear_storage, reset_tool_preferences, storage_inventory, StorageLocations,
 };
 
+use crate::native_viewport::show_native_viewport;
 use crate::state::AppState;
 use crate::views::guide_data::CHAPTERS;
 use crate::views::tour_data::TOUR_STEPS;
@@ -415,98 +419,132 @@ pub fn show_storage_dialog(state: &mut AppState, ctx: &Context) {
         texture_path: &texture_path,
     };
     let locator = state.tool_locator.clone();
-    let mut entries = storage_inventory(&locator, &locations);
-    let mut open = true;
-    Window::new(tr("Manage storage"))
-        .open(&mut open)
-        .resizable(true)
-        .collapsible(false)
-        .show(ctx, |ui| {
-            ui.label(tr(
-                "Only ALAS-owned generated data is listed here. Tool installations and saved aircraft documents are not removed.",
-            ));
-            if state.is_running {
-                ui.colored_label(
-                    Color32::YELLOW,
-                    tr("Storage clearing is disabled while an analysis is running."),
-                );
-            }
-            ScrollArea::vertical().max_height(420.0).show(ui, |ui| {
-                for index in 0..entries.len() {
-                    let entry = entries[index].clone();
-                    ui.group(|ui| {
-                        ui.horizontal(|ui| {
-                            ui.label(RichText::new(tr(entry.label)).strong());
-                            ui.label(if entry.exists {
-                                tr_fields(
-                                    "{size} · {files} files",
-                                    &[
-                                        ("size", format_bytes(entry.bytes)),
-                                        ("files", entry.files.to_string()),
-                                    ],
-                                )
-                            } else {
-                                tr("Not created yet.")
-                            });
-                        });
-                        ui.small(entry.root.display().to_string());
-                        ui.add(egui::Label::new(tr(entry.description)).wrap());
-                        ui.add_enabled_ui(entry.exists && !state.is_running, |ui| {
-                            if ui.button(tr("Clear")).clicked() {
-                                let outcome = clear_storage(&entry);
-                                if outcome.failed.is_empty() {
-                                    state.log(
-                                        tr_fields(
-                                            "Cleared {category}.",
-                                            &[("category", tr(entry.label))],
-                                        ),
-                                        crate::state::LogKind::Info,
-                                    );
-                                } else {
-                                    state.log(
-                                        tr_fields(
-                                            "Cleared {removed} paths; {failed} could not be removed.",
-                                            &[
-                                                ("removed", outcome.removed.len().to_string()),
-                                                ("failed", outcome.failed.len().to_string()),
-                                            ],
-                                        ),
-                                        crate::state::LogKind::Warn,
-                                    );
-                                }
-                                entries = storage_inventory(&locator, &locations);
-                            }
-                        });
-                    });
-                    ui.add_space(4.0);
-                }
-            });
-            ui.separator();
-            ui.label(RichText::new(tr("Saved tool paths")).strong());
-            ui.add(egui::Label::new(tr(
-                "Resetting saved paths leaves installed tools untouched; ALAS will discover them again on the next run or launch.",
-            ))
-            .wrap());
-            if ui.button(tr("Reset saved tool paths")).clicked() {
-                match reset_tool_preferences(&locator) {
-                    Ok(_) => {
-                        reset_session_tool_paths(state);
-                        state.log(
-                            tr("Saved tool paths reset; installed tools were not removed."),
-                            crate::state::LogKind::Info,
+    let cache_id = Id::new((
+        "alas_storage_inventory",
+        &output_dir,
+        &cfd_case_root,
+        &navdata_dir,
+        &texture_path,
+    ));
+    let mut entries = ctx
+        .data(|data| data.get_temp::<Vec<alas_exec::storage::StorageEntry>>(cache_id))
+        .unwrap_or_else(|| {
+            let entries = storage_inventory(&locator, &locations);
+            ctx.data_mut(|data| data.insert_temp(cache_id, entries.clone()));
+            entries
+        });
+    let response = show_native_viewport(
+        ctx,
+        "manage_storage",
+        tr("Manage storage"),
+        ViewportBuilder::default()
+            .with_title(tr("Manage storage"))
+            .with_inner_size(vec2(760.0, 620.0))
+            .with_min_inner_size(vec2(560.0, 420.0))
+            .with_resizable(true),
+        |_child_ctx, ui, _class| {
+            // Keep the complete body in one scroll area.  The previous fixed
+            // 420-point child area left the saved-path controls below the
+            // viewport on short windows, where the outer viewport itself did
+            // not expose a second scroll bar.
+            ScrollArea::vertical()
+                .id_salt("manage_storage_scroll")
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    ui.label(tr(
+                        "Only ALAS-owned generated data is listed here. Tool installations and saved aircraft documents are not removed.",
+                    ));
+                    if state.is_running {
+                        ui.colored_label(
+                            Color32::YELLOW,
+                            tr("Storage clearing is disabled while an analysis is running."),
                         );
                     }
-                    Err(error) => state.log(
-                        tr_fields(
-                            "Could not reset saved tool paths: {error}",
-                            &[("error", error)],
-                        ),
-                        crate::state::LogKind::Error,
-                    ),
-                }
-            }
-        });
-    state.show_storage = open;
+                    for index in 0..entries.len() {
+                        let entry = entries[index].clone();
+                        ui.group(|ui| {
+                            ui.horizontal(|ui| {
+                                ui.label(RichText::new(tr(entry.label)).strong());
+                                ui.label(if entry.exists {
+                                    tr_fields(
+                                        "{size} · {files} files",
+                                        &[
+                                            ("size", format_bytes(entry.bytes)),
+                                            ("files", entry.files.to_string()),
+                                        ],
+                                    )
+                                } else {
+                                    tr("Not created yet.")
+                                });
+                            });
+                            ui.small(entry.root.display().to_string());
+                            ui.add(egui::Label::new(tr(entry.description)).wrap());
+                            ui.add_enabled_ui(entry.exists && !state.is_running, |ui| {
+                                if ui.button(tr("Clear")).clicked() {
+                                    let outcome = clear_storage(&entry);
+                                    if outcome.failed.is_empty() {
+                                        state.log(
+                                            tr_fields(
+                                                "Cleared {category}.",
+                                                &[("category", tr(entry.label))],
+                                            ),
+                                            crate::state::LogKind::Info,
+                                        );
+                                    } else {
+                                        state.log(
+                                            tr_fields(
+                                                "Cleared {removed} paths; {failed} could not be removed.",
+                                                &[
+                                                    ("removed", outcome.removed.len().to_string()),
+                                                    ("failed", outcome.failed.len().to_string()),
+                                                ],
+                                            ),
+                                            crate::state::LogKind::Warn,
+                                        );
+                                    }
+                                    entries = storage_inventory(&locator, &locations);
+                                    ctx.data_mut(|data| {
+                                        data.insert_temp(cache_id, entries.clone())
+                                    });
+                                }
+                            });
+                        });
+                        ui.add_space(4.0);
+                    }
+                    if ui.button(tr("Refresh inventory")).clicked() {
+                        entries = storage_inventory(&locator, &locations);
+                        ctx.data_mut(|data| data.insert_temp(cache_id, entries.clone()));
+                    }
+                    ui.separator();
+                    ui.label(RichText::new(tr("Saved tool paths")).strong());
+                    ui.add(egui::Label::new(tr(
+                        "Resetting saved paths leaves installed tools untouched; ALAS will discover them again on the next run or launch.",
+                    ))
+                    .wrap());
+                    if ui.button(tr("Reset saved tool paths")).clicked() {
+                        match reset_tool_preferences(&locator) {
+                            Ok(_) => {
+                                reset_session_tool_paths(state);
+                                state.log(
+                                    tr("Saved tool paths reset; installed tools were not removed."),
+                                    crate::state::LogKind::Info,
+                                );
+                            }
+                            Err(error) => state.log(
+                                tr_fields(
+                                    "Could not reset saved tool paths: {error}",
+                                    &[("error", error)],
+                                ),
+                                crate::state::LogKind::Error,
+                            ),
+                        }
+                    }
+                });
+        },
+    );
+    if response.close_requested {
+        state.show_storage = false;
+    }
 }
 
 /// Clear the path fields that are persisted as tool preferences in the live

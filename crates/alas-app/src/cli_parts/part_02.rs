@@ -87,10 +87,12 @@ fn save_result_plots(result: &PipelineResult, output_dir: Option<&Path>) -> Resu
     fs::create_dir_all(&dir)
         .map_err(|e| format!("failed to create plot directory {}: {e}", dir.display()))?;
 
-    let state = alas_gui::AppState {
-        pipeline_result: Some(result.clone()),
-        ..alas_gui::AppState::default()
-    };
+    // Construct through the public default state so the CLI does not need to
+    // name the GUI's private window bookkeeping.  Use the shared completion
+    // transition so GUI figure/export helpers do not treat this valid CLI
+    // result as an in-flight snapshot.
+    let mut state = alas_gui::AppState::default();
+    state.set_completed_pipeline_result(result.clone());
 
     let mut written = 0;
     let mut manifest = Vec::with_capacity(alas_report::RESULT_FIGURES.len());

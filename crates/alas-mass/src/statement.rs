@@ -21,7 +21,7 @@ mod flops_items;
 
 use alas_config::MassModelConfig;
 
-use crate::breakdown::MassBreakdown;
+use crate::breakdown::{FlopsMassBuildup, MassBreakdown};
 use crate::flops_transport::FlopsTransportBreakdown;
 use crate::inertia::RadiiOfGyration;
 use crate::ledger::{LedgerError, MassGroup, MassItem, MassLedger, MassMethod, MassProperties};
@@ -99,11 +99,36 @@ impl LedgerMethods {
                 reference.landing_gear
             },
             propulsion: if flops_propulsion {
-                MassMethod::Correlation("FLOPS")
+                match model.flops_structure.pylon_mass_method {
+                    alas_config::PylonMassMethod::None => MassMethod::Correlation("FLOPS"),
+                    alas_config::PylonMassMethod::LthBoxBeamV1 => {
+                        MassMethod::Correlation("FLOPS + LTH pylons")
+                    }
+                }
             } else {
                 reference.propulsion
             },
         }
+    }
+
+    /// Methods from the completed evaluation rather than a potentially stale
+    /// configuration. A shaft-power installation is not a FLOPS jet engine.
+    pub fn from_buildup(buildup: &FlopsMassBuildup) -> Self {
+        let mut methods = Self::pure_flops();
+        methods.propulsion = if let Some(group) = &buildup.airframe.turboprop_propulsion {
+            if group.engine_mass_source == "declared_certificated_dry_mass" {
+                MassMethod::Correlation("declared engine + GASP/TM-83458 + FLOPS fuel system")
+            } else {
+                MassMethod::Correlation("GASP/TM-83458 + FLOPS fuel system")
+            }
+        } else if buildup.airframe.propulsion_inputs.pylon_mass_method
+            == alas_config::PylonMassMethod::LthBoxBeamV1
+        {
+            MassMethod::Correlation("FLOPS + LTH pylons")
+        } else {
+            MassMethod::Correlation("FLOPS")
+        };
+        methods
     }
 }
 
@@ -186,10 +211,20 @@ impl MassStatement {
     /// [`LedgerError`] if any item (including a caller-supplied payload or
     /// fuel item) has an invalid mass, position, inertia tensor, or a
     /// duplicate id, or if supplied unusable-fuel rows disagree with the
-    /// selected method's own unusable-fuel allocation.
+    /// selected method's own unusable-fuel allocation, or if itemized payload
+    /// disagrees with the component payload mass.
     pub fn build(inputs: MassStatementInputs<'_>) -> Result<Self, LedgerError> {
-        let methods = if inputs.flops.is_some() {
-            LedgerMethods::pure_flops()
+        let methods = if let Some(flops) = inputs.flops {
+            let mut methods = LedgerMethods::pure_flops();
+            if matches!(
+                flops.propulsion_sizing,
+                crate::flops_transport::PropulsionSizing::ShaftPower { .. }
+            ) {
+                methods.propulsion = MassMethod::Correlation(
+                    "shaft-power installation (resolved sources in buildup)",
+                );
+            }
+            methods
         } else {
             LedgerMethods::default()
         };

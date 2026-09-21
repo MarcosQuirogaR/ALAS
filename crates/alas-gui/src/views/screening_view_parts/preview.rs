@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-fn show_screening_preview(screening: &mut crate::screening::ScreeningState, ui: &mut Ui) {
+fn show_screening_preview_scoped(
+    screening: &mut crate::screening::ScreeningState,
+    ui: &mut Ui,
+    allow_custom_import: bool,
+) {
     screening
         .preview
         .update_filter(&screening.options.name_filter);
@@ -16,18 +20,44 @@ fn show_screening_preview(screening: &mut crate::screening::ScreeningState, ui: 
             .width(ui.available_width().min(320.0))
             .selected_text(screening.preview.selected().unwrap_or("-"))
             .show_ui(ui, |ui| {
-                let row_height = ui.text_style_height(&egui::TextStyle::Button)
+                let row_height = ui
+                    .text_style_height(&egui::TextStyle::Button)
                     .max(ui.spacing().interact_size.y);
                 let mut selected = None;
-                ScrollArea::vertical().max_height(240.0).show_rows(
-                    ui, row_height, screening.preview.filtered_names().len(), |ui, range| {
-                    for index in range {
-                        let name = &screening.preview.filtered_names()[index];
-                        if ui.selectable_label(screening.preview.selected() == Some(name.as_str()), name).clicked() {
-                            selected = Some(name.clone());
+                let library_rows = screening.preview.filtered_names().len();
+                // Keep the importer and the virtualized library in one
+                // scroll model.  The previous layout put the importer after
+                // a nested library scroll area, which made the popup expose
+                // two independent vertical tracks and hid the action at the
+                // bottom of a long library.
+                let import_rows = usize::from(allow_custom_import);
+                ScrollArea::vertical()
+                    .id_salt("screening_preview_airfoil_scroll")
+                    .max_height(240.0)
+                    .show_rows(ui, row_height, library_rows + import_rows, |ui, range| {
+                        for row in range {
+                            if allow_custom_import && row == 0 {
+                                if ui
+                                    .selectable_label(false, tr("Import custom airfoil .dat..."))
+                                    .clicked()
+                                {
+                                    screening.custom_airfoil_import_open = true;
+                                }
+                                continue;
+                            }
+                            let index = row - import_rows;
+                            let name = &screening.preview.filtered_names()[index];
+                            if ui
+                                .selectable_label(
+                                    screening.preview.selected() == Some(name.as_str()),
+                                    name,
+                                )
+                                .clicked()
+                            {
+                                selected = Some(name.clone());
+                            }
                         }
-                    }
-                });
+                    });
                 if let Some(name) = selected {
                     screening.preview.select(&name);
                 }
@@ -36,13 +66,22 @@ fn show_screening_preview(screening: &mut crate::screening::ScreeningState, ui: 
             ui.label(tr("No library sections match the name filter."));
         }
         let Some(points) = screening.preview.coordinates() else {
-            ui.colored_label(ui.visuals().error_fg_color, tr("Airfoil coordinates unavailable."));
+            ui.colored_label(
+                ui.visuals().error_fg_color,
+                tr("Airfoil coordinates unavailable."),
+            );
             return;
         };
         let width = ui.available_width().max(1.0);
-        let (rect, _) = ui.allocate_exact_size(vec2(width, (width * 0.28).clamp(100.0, 220.0)), egui::Sense::hover());
+        let (rect, _) = ui.allocate_exact_size(
+            vec2(width, (width * 0.28).clamp(100.0, 220.0)),
+            egui::Sense::hover(),
+        );
         let points = screening_outline_points(points, rect.shrink(12.0));
-        ui.painter().add(egui::Shape::line(points, egui::Stroke::new(2.0_f32, ui.visuals().text_color())));
+        ui.painter().add(egui::Shape::line(
+            points,
+            egui::Stroke::new(2.0_f32, ui.visuals().text_color()),
+        ));
     });
 }
 
@@ -118,8 +157,9 @@ mod preview_tests {
                     ..Default::default()
                 },
                 |ctx| {
-                    egui::CentralPanel::default()
-                        .show(ctx, |ui| show_screening_preview(&mut state, ui));
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        show_screening_preview_scoped(&mut state, ui, true)
+                    });
                 },
             )
         };
@@ -195,8 +235,9 @@ mod preview_tests {
                     ..Default::default()
                 },
                 |ctx| {
-                    egui::CentralPanel::default()
-                        .show(ctx, |ui| show_screening_preview(&mut state, ui));
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        show_screening_preview_scoped(&mut state, ui, true)
+                    });
                 },
             )
         };
@@ -281,8 +322,9 @@ mod preview_tests {
                         ..Default::default()
                     },
                     |ctx| {
-                        egui::CentralPanel::default()
-                            .show(ctx, |ui| show_screening_preview(&mut screening, ui));
+                        egui::CentralPanel::default().show(ctx, |ui| {
+                            show_screening_preview_scoped(&mut screening, ui, true)
+                        });
                     },
                 );
                 assert!(screening.preview.coordinates().is_some());
@@ -315,8 +357,9 @@ mod preview_tests {
                 ..Default::default()
             },
             |ctx| {
-                egui::CentralPanel::default()
-                    .show(ctx, |ui| show_screening_content(&mut state, ui));
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    show_screening_content_scoped(&mut state, ui, true)
+                });
             },
         );
 

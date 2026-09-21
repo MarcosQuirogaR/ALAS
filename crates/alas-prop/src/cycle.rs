@@ -212,9 +212,8 @@ pub(crate) fn walk_cycle(
     let v0 = m0 * a0;
 
     let tt0 = t0 * (1.0 + 0.5 * (gc - 1.0) * m0.powi(2));
-    let pt0_ideal = p0 * (1.0 + 0.5 * (gc - 1.0) * m0.powi(2)).powf(gc / (gc - 1.0));
-    let pt0 = pt0_ideal * cfg.inlet_pressure_recovery;
-    let (tt2, pt2) = (tt0, pt0);
+    let pt0 = p0 * (1.0 + 0.5 * (gc - 1.0) * m0.powi(2)).powf(gc / (gc - 1.0));
+    let (tt2, pt2) = (tt0, pt0 * cfg.inlet_pressure_recovery);
 
     // Fan branch (parallel to the core compressors, same inlet state)
     let pi_f = inputs.fan_pressure_ratio.max(1.0);

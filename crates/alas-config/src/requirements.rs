@@ -4,13 +4,14 @@
 // Ported from alas/config/requirements.py
 // Reference: alas @ rust-port-baseline.
 
-//! What the user is asking for: the mission targets the design must meet.
+//! The stable wire group for mission targets and aircraft-level limits.
 //!
-//! This is the input, as distinct from every other module here, which is an
-//! assumption. The optimizer searches the design space for the geometry that
-//! best satisfies what is stated here, so a value in this module is a
-//! requirement the search is trying to meet rather than a modelling choice
-//! it is working under.
+//! The original configuration grouped mission requirements, discipline inputs
+//! and a few study bounds here. The optimizer still reads this group as the
+//! compatibility authority, but new code should classify each field explicitly
+//! as a requirement, model input, preference or numerical setting. The audit
+//! and migration ledger lives in `docs/design-constraints.md`; moving fields
+//! requires a saved-file migration rather than silently changing their meaning.
 //!
 //! The defaults reproduce the long-range transport the reference
 //! implementation was tuned against, so the program produces a real aircraft
@@ -157,7 +158,7 @@ pub struct DesignRequirements {
     #[config(
         advanced,
         label = "Ultimate load factor (n_ult)",
-        help = "Limit load factor times the 1.5 safety margin, fed into the Torenbeek structural mass formulas."
+        help = "Structural screening input fed into the Torenbeek mass formulas. The shipped 3.75 is 1.5 × 2.5; verify the selected certification basis, amendment, aircraft category and load case before treating it as an airworthiness value."
     )]
     pub ultimate_load_factor: f64,
 
@@ -166,7 +167,7 @@ pub struct DesignRequirements {
         advanced,
         label = "Design dive speed (V_dive)",
         unit = "m/s",
-        help = "Structural design dive speed, fed into the Torenbeek structural mass formulas. Also VD on the V-n diagram; design cruise speed VC is derived as VD/1.25 (CS-25.335(b) minimum margin) rather than a separate field."
+        help = "Structural screening dive speed, fed into the Torenbeek mass formulas and the V-n diagram. The project may derive VC as VD/1.25 for this study; verify speed type, altitude/Mach envelope, certification basis and amendment before treating that relation as an airworthiness result."
     )]
     pub dive_speed_m_s: f64,
 
@@ -174,7 +175,7 @@ pub struct DesignRequirements {
     #[config(
         advanced,
         label = "Limit load factor, negative (n_lim,neg)",
-        help = "CS-25.337(c) negative limit load factor for the V-n diagram. The positive limit load factor is derived as ultimate_load_factor / 1.5 (CS-25.303) rather than a separate field."
+        help = "Negative V-n screening input. The shipped -1.0 follows the large-aeroplane CS-25 reference case up to VC; verify the selected certification basis, amendment, speed range and category before using it for qualification. The positive limit value is derived as ultimate_load_factor / 1.5."
     )]
     pub limit_load_factor_neg: f64,
 
@@ -236,7 +237,7 @@ pub struct DesignRequirements {
         advanced,
         label = "Mass per passenger",
         unit = "kg",
-        help = "Combined average mass per occupant (body + baggage). FAA AC 120-27E standard is 100 kg; airlines may use 90-105 kg. This is the single load-case authority for every product path (report, GUI preview, pipeline, export and the optimizer): every seated passenger, of any class, is priced at this combined mass, with cabin.passenger.checked_bag_mass_kg as the baggage share and the occupant slot the remainder. Per-class seat masses (e.g. a named cabin preset's business/economy figures) are cosmetic/geometry seeds only and are overwritten by this value."
+        help = "Combined average mass per occupant (body + baggage). The shipped 100 kg is a transparent project load-case default; FAA AC 120-27F is operator weight-and-balance guidance and does not establish a universal passenger mass. Record the operator, population, baggage method and date before using another value operationally. This remains the single load-case authority for report, GUI preview, pipeline, export and optimizer paths: cabin.passenger.checked_bag_mass_kg supplies the baggage share and the occupant slot the remainder."
     )]
     pub passenger_mass_kg: f64,
 

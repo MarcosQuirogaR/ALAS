@@ -32,7 +32,7 @@ pub fn show_inputs_view(state: &mut AppState, ui: &mut Ui) {
             ui.add_space(8.0);
             show_route_card(state, ui);
             ui.add_space(8.0);
-            crate::views::inputs_custom::show_custom_geometry_card(state, ui);
+            crate::views::mission_profile_inputs::show_mission_profile_inputs(state, ui);
             ui.add_space(8.0);
             show_run_options_card(state, ui);
         });

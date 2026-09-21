@@ -31,7 +31,7 @@
 //! |---|---|---|
 //! | Engine (turbomachine and reduction gearbox) | declared certificated dry mass scaled on shaft power, else the GASP turboshaft specific weight `0.5 lb/hp` | NASA CR-152303 Vol. V eq. V.1.3-V.1.4, p. V-1.4 |
 //! | Reduction gearbox | inside the declared engine mass for a PW100-class engine; otherwise the torque relation | EASA TCDS IM.E.041 §III.2; NASA TM-83458 p. 14 eq. 3B |
-//! | Propeller | Hamilton Standard regression | NASA CR-152303 Vol. V eq. V.1.28-V.1.29, pp. V-1.10 to V-1.12; NASA TM-83458 p. 5 |
+//! | Propeller | source-declared propeller mass, else Hamilton Standard regression | NASA CR-152303 Vol. V eq. V.1.28-V.1.29, pp. V-1.10 to V-1.12; NASA TM-83458 p. 5; aircraft source when declared |
 //! | Spinner, blade de-icing, governor | declared, because the regression excludes them verbatim | NASA CR-152303 Vol. V p. V-1.11 |
 //! | Nacelle | area density times nacelle wetted area | NASA CR-152303 Vol. V eq. V.1.6, p. V-1.5 |
 //! | Pylon | `F_PYL (W_ENG + W_NAC)^0.736` | NASA CR-152303 Vol. V eq. V.1.7, p. V-1.5 |
@@ -114,20 +114,30 @@ pub fn shaft_torque_n_m(shaft_power_w: f64, propeller_speed_rpm: f64) -> f64 {
 }
 
 /// NASA TM-83458 p. 14 equation 3B with the p. 16 defaults: reduction-gearbox
-/// mass, kg, from output torque and gear ratio.
+/// mass, kg, from output torque and the declared engine-to-propeller speed
+/// ratio.
 ///
 /// The stated validity domain (p. 6) is *in-line* gearboxes in the 1,000 to
 /// 2,500 horsepower range, and the document itself calls the result a rough
 /// estimate. It is evaluated only when the declared engine mass does not
 /// already contain the gearbox; a PW100-class certificated dry weight does
 /// (EASA TCDS IM.E.041 §III.2), and evaluating both would count it twice.
-pub fn gearbox_mass_kg(torque_n_m: f64, gear_ratio: f64) -> f64 {
-    if gear_ratio <= 0.0 {
+pub fn gearbox_mass_kg(torque_n_m: f64, engine_to_propeller_ratio: f64) -> f64 {
+    if !is_positive(torque_n_m) || !is_positive(engine_to_propeller_ratio) {
         return 0.0;
     }
     // 1 N*m = 0.737 562 149 277 ft*lbf; the relation is printed in imperial.
     let torque_ft_lbf = torque_n_m * 0.737_562_149_277_265;
-    kg((0.0174 * torque_ft_lbf + 45.0) * (0.118 / gear_ratio).sqrt())
+    // TM-83458 defines GR as propeller speed / engine speed. The public
+    // aircraft input is the reciprocal convention (engine speed / propeller
+    // speed), so convert once at this boundary before applying equation 3B.
+    let source_gear_ratio = 1.0 / engine_to_propeller_ratio;
+    let mass_lb = (0.0174 * torque_ft_lbf + 45.0) * (0.118 / source_gear_ratio).sqrt();
+    if mass_lb.is_finite() && mass_lb >= 0.0 {
+        kg(mass_lb)
+    } else {
+        0.0
+    }
 }
 
 /// The Hamilton Standard regression constants selected by a construction.
@@ -150,7 +160,7 @@ fn propeller_exponents(construction: PropellerConstruction) -> (f64, f64, f64) {
     }
 }
 
-/// Equations V.1.28 and V.1.29: the wet mass of one propeller, kg.
+/// Equations V.1.28 and V.1.29: the fallback mass of one propeller, kg.
 ///
 /// The regression excludes the spinner, the blade de-icing and the governor
 /// (NASA CR-152303 Vol. V p. V-1.11, verbatim); those are added by the caller
@@ -231,21 +241,22 @@ pub struct TurbopropPropulsionInputs {
     pub engine_count: usize,
     /// Take-off shaft power of one installed engine, W.
     pub takeoff_shaft_power_per_engine_w: f64,
-    /// Governed propeller speed, rev/min.
+    /// Governed propeller speed, rev/min. It remains a required installation
+    /// datum even with a source-declared propeller mass; it is also required
+    /// when the reduction gearbox is charged separately.
     pub propeller_speed_rpm: f64,
     /// Propeller diameter, m.
     pub propeller_diameter_m: f64,
     /// Engine-to-propeller reduction ratio, engine speed over propeller
     /// speed, used only when the gearbox is charged separately.
     pub reduction_ratio: f64,
-    /// Maximum-power cruise Mach number the regression's `(M + 1)^0.5` reads.
+    /// Mach number at the maximum-power cruise design condition, used by the
+    /// regression's `(M + 1)^0.5` term.
     ///
-    /// NASA CR-152303 Vol. V p. V-1.11 defines this as the Mach number at
-    /// the maximum-power cruise design condition. The product adapter passes
-    /// the declared maximum Mach `VMAX`, which is an upper bound on it: for
-    /// the ATR 72-600 that is 0.55 against a 275 KTAS cruise near Mach 0.45,
-    /// and the term moves the propeller mass by under four percent across
-    /// that range.
+    /// NASA CR-152303 Vol. V p. V-1.11 defines this as a design-condition
+    /// Mach number rather than a limiting maximum speed. The product adapter
+    /// uses the declared requirements cruise Mach as the closest available
+    /// design input and records that basis in the evaluated breakdown.
     pub design_mach: f64,
     /// Wetted area of one nacelle, m^2.
     pub nacelle_wetted_area_m2: f64,
@@ -264,8 +275,9 @@ pub struct TurbopropPropulsionBreakdown {
     /// Reduction gearboxes charged separately, kg. Zero when the declared
     /// engine mass already contains them.
     pub gearboxes_kg: f64,
-    /// One propeller from the Hamilton Standard regression, kg, excluding the
-    /// spinner, de-icing and governor.
+    /// One source-declared propeller mass or Hamilton Standard fallback, kg.
+    /// The certificate/source scope is recorded by `propeller_mass_basis`;
+    /// the regression term excludes the spinner, de-icing and governor.
     pub propeller_each_kg: f64,
     /// Every propeller including the declared accessory mass, kg.
     pub propellers_kg: f64,
@@ -286,6 +298,22 @@ pub struct TurbopropPropulsionBreakdown {
     pub total_without_nacelles_kg: f64,
     /// Which engine-mass source was used.
     pub engine_mass_source: &'static str,
+    /// Resolved Mach number supplied to the propeller regression.
+    pub design_mach: f64,
+    /// Evidence/basis label for `design_mach`.
+    pub design_mach_basis: &'static str,
+    /// Resolved wetted area of one nacelle, m^2.
+    pub nacelle_wetted_area_m2: f64,
+    /// Evidence/basis label for `nacelle_wetted_area_m2`.
+    pub nacelle_area_basis: &'static str,
+    /// Resolved nacelle component density, kg/m^2.
+    pub nacelle_area_density_kg_m2: f64,
+    /// Evidence/basis label for `nacelle_area_density_kg_m2`.
+    pub nacelle_area_density_basis: &'static str,
+    /// Whether propeller mass came from the generic regression or a declared
+    /// aircraft-specific source statement. The source statement's inclusion
+    /// scope is not inferred when it is unspecified.
+    pub propeller_mass_basis: &'static str,
 }
 
 /// Why a shaft-power propulsion group could not be evaluated.
@@ -293,6 +321,9 @@ pub struct TurbopropPropulsionBreakdown {
 pub enum TurbopropMassUnverifiedReason {
     /// A declared turboprop mass input is nonfinite or out of range.
     InvalidConfiguration,
+    /// A finite but nonphysical operating-point input would make a power law
+    /// undefined or would apply the method outside its positive domain.
+    InvalidOperatingPoint,
     /// No engine is installed, or the shaft-power rating is absent.
     ShaftPowerRating,
     /// Propeller diameter, blade count, activity factor, speed or weight
@@ -308,6 +339,7 @@ impl TurbopropMassUnverifiedReason {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::InvalidConfiguration => "turboprop_mass_configuration",
+            Self::InvalidOperatingPoint => "turboprop_operating_point",
             Self::ShaftPowerRating => "turboprop_shaft_power_rating",
             Self::PropellerGeometry => "turboprop_propeller_geometry",
             Self::NacelleArchitecture => "turboprop_nacelle_architecture",
@@ -337,32 +369,47 @@ pub fn estimate_turboprop_propulsion(
         reasons.push(TurbopropMassUnverifiedReason::ShaftPowerRating);
     }
     let weight_coefficient = config.resolved_weight_coefficient();
-    if weight_coefficient.is_none()
-        || config.propeller_blade_count == 0
-        || !is_positive(config.propeller_activity_factor)
+    let propeller_geometry_missing = config.propeller_assembly_mass_kg.is_none()
+        && (weight_coefficient.is_none()
+            || config.propeller_blade_count == 0
+            || !is_positive(config.propeller_activity_factor));
+    if propeller_geometry_missing
         || !is_positive(inputs.propeller_diameter_m)
         || !is_positive(inputs.propeller_speed_rpm)
     {
         reasons.push(TurbopropMassUnverifiedReason::PropellerGeometry);
     }
-    if !is_positive(config.nacelle_area_density_kg_m2)
+    let nacelle_area_density_kg_m2 = config.resolved_nacelle_area_density_kg_m2();
+    if !nacelle_area_density_kg_m2.is_some_and(is_positive)
         || !is_positive(inputs.nacelle_wetted_area_m2)
     {
         reasons.push(TurbopropMassUnverifiedReason::NacelleArchitecture);
+    }
+    // These values enter fractional power laws. Keep the public evaluator
+    // closed over finite positive inputs even when callers bypass the product
+    // adapter and construct the SI record directly.
+    if !is_positive(inputs.reduction_ratio)
+        || !is_positive(inputs.design_mach)
+        || !is_positive(inputs.maximum_fuel_capacity_kg)
+        || !is_positive(maximum_mach)
+    {
+        reasons.push(TurbopropMassUnverifiedReason::InvalidOperatingPoint);
     }
     if !reasons.is_empty() {
         reasons.sort_unstable();
         reasons.dedup();
         return Err(reasons);
     }
-    let Some(weight_coefficient) = weight_coefficient else {
-        return Err(vec![TurbopropMassUnverifiedReason::PropellerGeometry]);
-    };
+    let nacelle_area_density_kg_m2 =
+        nacelle_area_density_kg_m2.expect("positive nacelle density checked above");
 
     let count = inputs.engine_count as f64;
     let baseline_shaft_power_w = config
         .baseline_shaft_power_kw
         .map_or(inputs.takeoff_shaft_power_per_engine_w, |kw| kw * 1_000.0);
+    if !is_positive(baseline_shaft_power_w) {
+        return Err(vec![TurbopropMassUnverifiedReason::InvalidConfiguration]);
+    }
     let engine_each_kg = engine_mass_each_kg(
         inputs.takeoff_shaft_power_per_engine_w,
         baseline_shaft_power_w,
@@ -376,36 +423,61 @@ pub fn estimate_turboprop_propulsion(
     let gearboxes_kg = if config.gearbox_inside_engine_mass {
         0.0
     } else {
-        count
-            * gearbox_mass_kg(
-                shaft_torque_n_m(
-                    inputs.takeoff_shaft_power_per_engine_w,
-                    inputs.propeller_speed_rpm,
-                ),
-                inputs.reduction_ratio,
-            )
+        let gearbox_each_kg = gearbox_mass_kg(
+            shaft_torque_n_m(
+                inputs.takeoff_shaft_power_per_engine_w,
+                inputs.propeller_speed_rpm,
+            ),
+            inputs.reduction_ratio,
+        );
+        // `gearbox_mass_kg` keeps its historical scalar API and maps invalid
+        // helper inputs to zero. A separately selected gearbox cannot silently
+        // disappear at this public evaluator boundary: reject the result
+        // before it can be folded into the propulsion total.
+        if !gearbox_each_kg.is_finite() || gearbox_each_kg <= 0.0 {
+            return Err(vec![TurbopropMassUnverifiedReason::InvalidConfiguration]);
+        }
+        let total = count * gearbox_each_kg;
+        if !total.is_finite() || total <= 0.0 {
+            return Err(vec![TurbopropMassUnverifiedReason::InvalidConfiguration]);
+        }
+        total
     };
-    let propeller_each_kg = propeller_mass_each_kg(
-        weight_coefficient,
-        inputs.propeller_diameter_m,
-        config.propeller_blade_count,
-        config.propeller_activity_factor,
-        inputs.propeller_speed_rpm,
-        inputs.takeoff_shaft_power_per_engine_w,
-        inputs.design_mach,
-        config.propeller_construction,
-    );
+    let (propeller_each_kg, propeller_mass_basis) =
+        if let Some(assembly_mass_kg) = config.propeller_assembly_mass_kg {
+            let basis = match config.propeller_assembly_accessories_included {
+                Some(true) => "declared_propeller_assembly_mass_including_accessories",
+                Some(false) => "declared_propeller_assembly_mass_excluding_accessories",
+                None => "declared_propeller_assembly_mass_scope_unspecified",
+            };
+            (assembly_mass_kg, basis)
+        } else {
+            let Some(weight_coefficient) = weight_coefficient else {
+                return Err(vec![TurbopropMassUnverifiedReason::PropellerGeometry]);
+            };
+            (
+                propeller_mass_each_kg(
+                    weight_coefficient,
+                    inputs.propeller_diameter_m,
+                    config.propeller_blade_count,
+                    config.propeller_activity_factor,
+                    inputs.propeller_speed_rpm,
+                    inputs.takeoff_shaft_power_per_engine_w,
+                    inputs.design_mach,
+                    config.propeller_construction,
+                ),
+                "hamilton_standard_regression",
+            )
+        };
     let propellers_kg = count * (propeller_each_kg + config.propeller_accessory_mass_kg);
-    let nacelle_each_kg = nacelle_mass_each_kg(
-        config.nacelle_area_density_kg_m2,
-        inputs.nacelle_wetted_area_m2,
-    );
+    let nacelle_each_kg =
+        nacelle_mass_each_kg(nacelle_area_density_kg_m2, inputs.nacelle_wetted_area_m2);
     let nacelles_kg = count * nacelle_each_kg;
     let pylons_kg =
         count * pylon_mass_each_kg(config.pylon_coefficient, engine_each_kg, nacelle_each_kg);
     let fuel_system = fuel_system_kg(inputs.maximum_fuel_capacity_kg, count, maximum_mach);
     let engines_kg = count * engine_each_kg;
-    Ok(TurbopropPropulsionBreakdown {
+    let result = TurbopropPropulsionBreakdown {
         engine_each_kg,
         engines_kg,
         gearboxes_kg,
@@ -423,7 +495,41 @@ pub fn estimate_turboprop_propulsion(
             + config.engine_installation_mass_kg
             + fuel_system,
         engine_mass_source,
-    })
+        design_mach: inputs.design_mach,
+        design_mach_basis: "caller_supplied_maximum_power_design_mach",
+        nacelle_wetted_area_m2: inputs.nacelle_wetted_area_m2,
+        nacelle_area_basis: "caller_supplied_nacelle_wetted_area",
+        nacelle_area_density_kg_m2,
+        nacelle_area_density_basis: if config.nacelle_reference_mass_kg.is_some() {
+            "declared_reference_component_mass_over_reference_area"
+        } else {
+            "declared_gasp_area_density"
+        },
+        propeller_mass_basis,
+    };
+    let finite = [
+        result.engine_each_kg,
+        result.engines_kg,
+        result.gearboxes_kg,
+        result.propeller_each_kg,
+        result.propellers_kg,
+        result.nacelles_kg,
+        result.pylons_kg,
+        result.engine_installation_kg,
+        result.fuel_system_kg,
+        result.unusable_fuel_kg,
+        result.total_without_nacelles_kg,
+        result.design_mach,
+        result.nacelle_wetted_area_m2,
+        result.nacelle_area_density_kg_m2,
+    ]
+    .into_iter()
+    .all(|value| value.is_finite() && value >= 0.0);
+    if finite {
+        Ok(result)
+    } else {
+        Err(vec![TurbopropMassUnverifiedReason::InvalidConfiguration])
+    }
 }
 
 #[cfg(test)]
@@ -457,7 +563,11 @@ mod tests {
             propeller_construction: PropellerConstruction::Composite,
             propeller_weight_coefficient: Some(170.0),
             propeller_accessory_mass_kg: 0.0,
+            propeller_assembly_mass_kg: None,
+            propeller_assembly_accessories_included: None,
             nacelle_area_density_kg_m2: 12.0,
+            nacelle_reference_mass_kg: None,
+            nacelle_reference_area_m2: None,
             pylon_coefficient: 0.0,
             engine_installation_mass_kg: 0.0,
             engine_oil_mass_kg: 0.0,
@@ -577,15 +687,66 @@ mod tests {
     }
 
     #[test]
+    fn the_public_evaluator_rejects_nonphysical_fractional_power_domains() {
+        let cases: [(
+            &str,
+            fn(TurbopropPropulsionInputs) -> TurbopropPropulsionInputs,
+        ); 3] = [
+            ("reduction_ratio", |mut input: TurbopropPropulsionInputs| {
+                input.reduction_ratio = 0.0;
+                input
+            }),
+            ("design_mach", |mut input: TurbopropPropulsionInputs| {
+                input.design_mach = f64::NAN;
+                input
+            }),
+            (
+                "maximum_fuel_capacity_kg",
+                |mut input: TurbopropPropulsionInputs| {
+                    input.maximum_fuel_capacity_kg = -1.0;
+                    input
+                },
+            ),
+        ];
+        for (field, mutate) in cases {
+            let reasons = estimate_turboprop_propulsion(&mutate(atr_inputs()), &atr_config(), 0.55)
+                .expect_err("invalid operating input must be rejected");
+            assert!(
+                reasons.contains(&TurbopropMassUnverifiedReason::InvalidOperatingPoint),
+                "missing operating-point blocker for {field}: {reasons:?}"
+            );
+        }
+        let reasons = estimate_turboprop_propulsion(&atr_inputs(), &atr_config(), f64::INFINITY)
+            .expect_err("nonfinite maximum Mach must be rejected");
+        assert!(reasons.contains(&TurbopropMassUnverifiedReason::InvalidOperatingPoint));
+    }
+
+    #[test]
     fn a_separately_charged_gearbox_follows_the_torque_relation() {
         let mut config = atr_config();
         config.gearbox_inside_engine_mass = false;
         let breakdown = estimate_turboprop_propulsion(&atr_inputs(), &config, 0.55)
             .expect("a separately charged gearbox evaluates");
         let torque = shaft_torque_n_m(2_475.0 * WATTS_PER_SHP, 1_200.0);
-        let expected = 2.0 * gearbox_mass_kg(torque, 16.7);
+        // Independent numerical check from NASA TM-83458 p. 14 Eq. 3B:
+        // GR = propeller speed / engine speed = 1 / 16.7.  The published
+        // constants and SI conversions give 148.670346964617 kg per gearbox.
+        let expected = 2.0 * 148.670_346_964_617;
+        assert!((gearbox_mass_kg(torque, 16.7) - 148.670_346_964_617).abs() < 1.0e-9);
         assert!((breakdown.gearboxes_kg - expected).abs() < 1e-9);
         assert!(breakdown.gearboxes_kg > 0.0);
+    }
+
+    #[test]
+    fn a_separately_charged_gearbox_rejects_nonfinite_torque_results() {
+        let mut config = atr_config();
+        config.gearbox_inside_engine_mass = false;
+        let mut inputs = atr_inputs();
+        inputs.takeoff_shaft_power_per_engine_w = f64::MAX;
+        inputs.reduction_ratio = f64::MAX;
+        let reasons = estimate_turboprop_propulsion(&inputs, &config, 0.55)
+            .expect_err("an overflowing separate gearbox must not disappear as zero");
+        assert!(reasons.contains(&TurbopropMassUnverifiedReason::InvalidConfiguration));
     }
 
     #[test]

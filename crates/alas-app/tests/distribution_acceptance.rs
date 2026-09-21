@@ -240,6 +240,31 @@ fn preset_tool_config(
     .to_string()
 }
 
+/// Build a packaged-tool fixture that reaches executable launch.
+///
+/// The real default is free transition and therefore requires a compatible
+/// installation-owned `osmapDP.dat`.  These tests use deliberately invalid
+/// stand-in executables, so force both transition stations to isolate the
+/// packaged path lookup and process-launch boundary.  The dedicated MSES
+/// status test continues to cover missing-map preflight for free transition.
+fn preset_forced_transition_tool_config(
+    preset: &str,
+    mission_enabled: bool,
+    mses_dir: &str,
+) -> String {
+    serde_json::json!({
+        "preset": preset,
+        "mission": {"enabled": mission_enabled},
+        "mses": {
+            "enabled": true,
+            "mses_dir": mses_dir,
+            "xtr_upper": 0.5,
+            "xtr_lower": 0.5
+        }
+    })
+    .to_string()
+}
+
 #[test]
 fn packaged_help_runs_without_the_checkout() {
     let package = IsolatedPackage::new();
@@ -513,7 +538,7 @@ fn packaged_adjacent_and_configured_tool_paths_are_resolved_from_the_install() {
 
     let adjacent_config = package.write_config(
         "adjacent-tool.json",
-        &preset_tool_config("AVE", false, true, ""),
+        &preset_forced_transition_tool_config("AVE", false, ""),
     );
     let adjacent_output = run(
         &package,
@@ -553,7 +578,7 @@ fn packaged_adjacent_and_configured_tool_paths_are_resolved_from_the_install() {
     let configured_path = configured.to_string_lossy().replace('\\', "/");
     let configured_config = package.write_config(
         "configured-tool.json",
-        &preset_tool_config("AVE", false, true, &configured_path),
+        &preset_forced_transition_tool_config("AVE", false, &configured_path),
     );
     let configured_output = run(
         &package,

@@ -94,15 +94,21 @@ carried verbatim; no coordinate value is modified, reordered or resampled.
 MIT, with NeuralFoil above. Embedded as `f32` arrays converted from the
 upstream `.npz` files without retraining or modification.
 
-### Fonts supplied by GUI and SVG dependencies
+### Bundled Noto typefaces
 
-The repository does not contain a separately embedded DejaVu Sans file and does
-not promise Matplotlib-identical font metrics. The `egui`/`eframe` and SVG
-rendering dependency graph carries default font data and declares OFL-1.1 and
-Ubuntu Font License entries in `deny.toml`; those dependency notices apply to
-the corresponding dependency binaries. Font discovery for SVG export also
-loads fonts available on the host. See `docs/dependency-policy.md` for the
-current dependency-level audit.
+The desktop application embeds Noto Sans, Noto Sans Mono, and Noto Sans Math
+from the Google Fonts repository revision
+`e44c4b011a820c2cbe2fd2cfa8052037d7edb571`. They are used by both the egui
+text atlas and the SVG figure rasterizer, so Greek and engineering notation do
+not depend on host-font discovery. The exact source paths, SHA-256 values, and
+complete SIL Open Font License 1.1 texts are retained under
+`crates/alas-fonts/assets/`.
+
+The `egui`/`eframe` and SVG rendering dependency graph still carries its own
+default font data and declares OFL-1.1 and Ubuntu Font License entries in
+`deny.toml`; those dependency notices apply to the corresponding dependency
+binaries. See `docs/dependency-policy.md` for the current dependency-level
+audit.
 
 ### Airport and engine reference data
 
@@ -115,6 +121,22 @@ Public domain NASA raster. `assets/textures/earth_blue_marble.png` is checked
 into this repository, embedded at compile time by the route/report/pipeline
 renderers, and included in release source archives. It is not downloaded on
 demand and is not user-configurable at runtime.
+
+### XFOIL 6.99 Orr–Sommerfeld map — GPL-2.0-or-later
+
+The release includes `assets/mses/osmapDP.dat`, an unmodified
+double-precision Orr–Sommerfeld lookup database extracted from Mark Drela's
+official XFOIL 6.99 source archive:
+<https://web.mit.edu/drela/Public/web/xfoil/xfoil6.99.tgz>.
+
+The exact archive is retained beside the map as
+`assets/mses/xfoil6.99.tgz`, together with the complete GPL text in
+`assets/mses/COPYING-XFOIL.txt`, the provenance and compatibility record in
+`assets/mses/README.md`, and the reproducible acquisition script in
+`assets/mses/acquire_osmap.ps1`. The map is consumed by an MSES process for
+free boundary-layer transition; it does not contain or redistribute the MSES
+executables. The map SHA-256 is
+`2F6B3C63461D71DA9B6CB9CA1340D77CFF0CFBE767679D15B5B8556B45D948C4`.
 
 ---
 
@@ -140,12 +162,34 @@ remain user-supplied.
 | Program | Licence | Used for |
 |---|---|---|
 | MSES (`mset`, `mses`, `mplot`) | Proprietary, per-seat from MIT | Two-dimensional viscous airfoil analysis |
-| OpenVSP / VSPAERO | NASA Open Source Agreement, as supplied by the selected OpenVSP release | Geometry export and independent three-dimensional aerodynamic checks |
+| OpenVSP / VSPAERO | NASA Open Source Agreement, as supplied by the selected OpenVSP release | Geometry export, native CAD screenshots, and independent three-dimensional aerodynamic checks |
+| CPython 3.13.7 and NumPy 2.3.3 (optional app-local preview runtime) | Python Software Foundation license; NumPy BSD license and bundled dependency notices | Runs OpenVSP's graphics API in a separate process; downloaded by `tools/setup_openvsp_preview.ps1`, with upstream licenses retained |
 | MSC Nastran | Proprietary | Wingbox statics, normal modes, vibration |
 | MSC Patran | Proprietary | Structural preprocessing and post-processing launcher |
 | NASTRAN-95 | NOSA 1.3 | Wingbox statics and normal modes, where MSC Nastran is unavailable |
 | AVL | GPL-2.0 | Independent vortex-lattice and dynamic-mode cross-check |
 | FLOWUnsteady adapter / Julia environment | User-supplied; licence follows the selected external release | Optional lifting-surface unsteady analysis through a process boundary |
+
+The release review uses these primary licence or provenance references. The
+reference identifies the governing terms; it does not turn a user-selected
+installation into a reviewed bundle:
+
+- MSES: [MIT Technology Licensing Office commercial-use EULA](https://web.mit.edu/tlo/documents/MSES_EULA_commercial_2021_05.pdf).
+  The exact MSES installation and any seat or field-of-use terms must be
+  reviewed before redistribution, so ALAS keeps it user-supplied.
+- OpenVSP/VSPAERO: [official OpenVSP NASA Open Source Agreement page](https://openvsp.org/license.shtml).
+  A particular binary still needs its matching source, notices, and
+  modification record before it can enter a package.
+- AVL: [the upstream MIT AVL distribution](https://web.mit.edu/drela/Public/web/avl/),
+  with the GPL text carried as `external tools/AVL-GPL-2.0.txt` when AVL is
+  bundled.
+- NASTRAN-95: the repository's [fail-closed bundle policy](docs/NASTRAN95-BUNDLE.md)
+  records the exact source, build, NOSA notice, and runtime evidence required
+  for a reviewed aggregation.
+- FLOWUnsteady: [the upstream project and its MIT licence](https://github.com/byuflowlab/FLOWUnsteady).
+  ALAS does not assume that one Julia environment's dependency closure or
+  selected release is covered by that upstream notice, so the adapter remains
+  user-supplied.
 
 NOSA 1.3 is not compatible with the GPL family. NASTRAN-95 is therefore invoked
 as a separate executable and nothing of it is linked or translated into this

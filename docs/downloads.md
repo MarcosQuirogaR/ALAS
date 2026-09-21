@@ -23,6 +23,9 @@ Every accepted package includes:
 - `SOURCE-MANIFEST.json` and the matching `source/` AGPL snapshot;
 - `configs/ave.yaml`, a generated configuration template;
 - `README.md`, `LICENSE`, `NOTICE`, and `THIRD-PARTY-NOTICES.md`.
+- `assets/mses/osmapDP.dat` plus its exact XFOIL source archive, GPL text,
+  provenance README, and acquisition script. This is transition data for an
+  installed MSES process; it is not the MSES executable bundle.
 
 The archive also has a sibling `.zip.sha256` file. Verify that checksum before
 extracting a download. The release task validates `--help`, configuration
@@ -50,8 +53,11 @@ user-supplied or unavailable one.
   policy](NASTRAN95-BUNDLE.md).
 - MSES (`mset`, `mses`, and `mplot`) is not redistributed when the governing
   MIT per-seat licence does not authorize that use. It remains a user-supplied
-  installation, and Screening reports the missing/unconfigured Stage 3 state
-  rather than fabricating a result.
+  installation. The compatible GPL double-precision `osmapDP.dat` transition
+  map is bundled separately under `assets/mses/` and is passed to the
+  installed solver by absolute path, so free-transition runs do not depend on
+  the user's working directory. Screening still reports the missing/
+  unconfigured executable installation rather than fabricating a result.
 - OpenVSP/VSPAERO, MSC Nastran, MSC Patran, and FLOWUnsteady/Julia remain
   user-supplied unless a specific release has been reviewed for redistribution
   and its notices are carried with the exact archive. Do not copy local

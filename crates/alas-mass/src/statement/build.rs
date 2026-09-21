@@ -60,15 +60,26 @@ pub(super) fn build_ledger(
         )?,
         None => push_lumped_systems_and_furnishings(&mut ledger, masses, stations),
     }
-    for item in unusable_fuel_items {
+    for mut item in unusable_fuel_items {
+        if let Some(flops) = flops {
+            // The tank provides the station; the mass comes from the resolved
+            // operating-item allocation, not a geometric unusable fraction.
+            item.method = match flops.propulsion_sizing {
+                crate::flops_transport::PropulsionSizing::RatedThrust => {
+                    MassMethod::Correlation("FLOPS equation 121")
+                }
+                crate::flops_transport::PropulsionSizing::ShaftPower { .. } => {
+                    MassMethod::Correlation("FLOPS alternate equation 161")
+                }
+            };
+        }
         ledger.push(item);
     }
-    push_payload(&mut ledger, masses, stations, payload_items);
+    push_payload(&mut ledger, masses, stations, payload_items)?;
     Ok(ledger)
 }
 
-/// Relative tolerance for the two group-closure checks below: the
-/// systems-group residual and the unusable-fuel allocation. Both compare
+/// Relative tolerance for systems, unusable-fuel and payload closure. These compare
 /// sums of `f64` masses that travelled through several correlations, so an
 /// exact equality test would fail on rounding alone; anything larger than
 /// this is a real disagreement and is surfaced, not absorbed.
@@ -287,7 +298,7 @@ fn push_payload(
     masses: &MassBreakdown,
     stations: &ComponentStations,
     payload_items: &[PayloadItemSummary],
-) {
+) -> Result<(), LedgerError> {
     if payload_items.is_empty() {
         ledger.push(MassItem {
             id: "payload".to_owned(),
@@ -303,7 +314,17 @@ fn push_payload(
             ),
             method: MassMethod::LayoutPlacement,
         });
-        return;
+        return Ok(());
+    }
+    let supplied_kg: f64 = payload_items.iter().map(|item| item.mass_kg).sum();
+    if !supplied_kg.is_finite()
+        || !masses.payload.is_finite()
+        || (supplied_kg - masses.payload).abs() > closure_tolerance(masses.payload)
+    {
+        return Err(LedgerError::PayloadAllocationMismatch {
+            supplied_kg,
+            allocated_kg: masses.payload,
+        });
     }
     for (index, item) in payload_items.iter().enumerate() {
         ledger.push(MassItem {
@@ -321,4 +342,5 @@ fn push_payload(
             method: MassMethod::LayoutPlacement,
         });
     }
+    Ok(())
 }

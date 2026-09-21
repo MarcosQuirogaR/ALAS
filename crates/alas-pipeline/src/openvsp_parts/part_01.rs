@@ -24,6 +24,9 @@ use crate::gear_stations::resolved_gear_stations;
 mod validation;
 use validation::validate_script;
 
+#[path = "../openvsp/native_preview.rs"]
+mod native_preview;
+
 /// Evidence state of an OpenVSP export artifact.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OpenVspExportStatus {
@@ -431,6 +434,15 @@ pub fn materialize_openvsp_project(
             export.cad_preview_geometry_path.display()
         ));
     }
+    if !export.preview_available {
+        match native_preview::capture(&export, executable) {
+            Ok(()) => {
+                export.preview_available = true;
+                export.preview_error = None;
+            }
+            Err(error) => export.preview_error = Some(error),
+        }
+    }
     export
 }
 
@@ -795,6 +807,46 @@ fn emit_fuselage(script: &mut String, index: usize, fuselage: &Fuselage) {
         set_xsec_parm(script, &xsec_id, "XLocPercent", x_fraction);
         set_xsec_parm(script, &xsec_id, "YLocPercent", y_fraction);
         set_xsec_parm(script, &xsec_id, "ZLocPercent", z_fraction);
+
+        // OpenVSP's default FUSELAGE skin leaves tangent strengths at their
+        // nonzero spline defaults. That skin overshoots the ALAS station
+        // envelope between sections, producing visible nose/tail ripples.
+        // Zero tangent strength selects OpenVSP's piecewise-linear skin
+        // interpolation, matching Fuselage's documented linear loft exactly.
+        // Explicit C0 continuity and zero tangents make that choice stable
+        // across OpenVSP defaults. Every ALAS station coordinate and envelope
+        // remains the requested value.
+        let _ = writeln!(
+            script,
+            "    SetXSecContinuity( {xsec_id}, 0 );"
+        );
+        let _ = writeln!(
+            script,
+            "    SetXSecTanAngles( {xsec_id}, XSEC_BOTH_SIDES, 0 );"
+        );
+        let _ = writeln!(
+            script,
+            "    SetXSecTanStrengths( {xsec_id}, XSEC_BOTH_SIDES, 0 );"
+        );
+    }
+
+    // Retain OpenVSP's endpoint angle convention only for point caps. Do not
+    // apply these angles to ordinary nonzero end sections (for example,
+    // nacelle inlet/exit stations), where they would change the intended
+    // end-section shape. Zero tangent strength keeps the linear envelope.
+    if first.width <= 1.0e-9 || first.height <= 1.0e-9 {
+        let first_xsec_id = format!("body_xsec_{index}_0");
+        let _ = writeln!(
+            script,
+            "    SetXSecTanAngles( {first_xsec_id}, XSEC_BOTH_SIDES, 90 );"
+        );
+    }
+    if last.width <= 1.0e-9 || last.height <= 1.0e-9 {
+        let last_xsec_id = format!("body_xsec_{index}_{}", fuselage.xsecs.len() - 1);
+        let _ = writeln!(
+            script,
+            "    SetXSecTanAngles( {last_xsec_id}, XSEC_BOTH_SIDES, -90 );"
+        );
     }
     script.push('\n');
 }

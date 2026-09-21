@@ -39,6 +39,9 @@ pub struct ScreeningState {
     /// compatibility; the top-bar action uses this flag to show the same
     /// renderer in a separate viewport.
     pub window_open: bool,
+    /// Whether the detached custom-airfoil importer was requested from the
+    /// Advanced Settings > Airfoil Screening selector.
+    pub custom_airfoil_import_open: bool,
     pub(crate) mses_readiness: MsesReadiness,
     /// Inspection state only: never applied to the aircraft configuration.
     pub preview: ScreeningPreview,
@@ -73,6 +76,7 @@ impl Default for ScreeningState {
     fn default() -> Self {
         Self {
             window_open: false,
+            custom_airfoil_import_open: false,
             mses_readiness: MsesReadiness::default(),
             preview: ScreeningPreview::default(),
             options: AirfoilScreeningOptions::default(),

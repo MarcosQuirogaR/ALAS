@@ -11,6 +11,12 @@ use crate::scene::{
     TextAlign, TextBaseline, CSS_PIXELS_PER_POINT, TEXT_LINE_HEIGHT_EM,
 };
 
+/// Explicit family stack shared by SVG exports and the GUI rasterizer.
+///
+/// ALAS bundles the first two faces for in-app rendering. A generic final
+/// fallback keeps exported SVG text readable when it is opened elsewhere.
+const SVG_FONT_FAMILY: &str = "'Noto Sans', 'Noto Sans Math', sans-serif";
+
 /// Render a complete [`Scene`] to a standalone XML SVG string.
 pub fn render_svg(scene: &Scene) -> String {
     let mut out = String::with_capacity(4096);
@@ -194,7 +200,8 @@ fn render_element(out: &mut String, elem: &SceneElement) {
             let line_height = font_size * CSS_PIXELS_PER_POINT * TEXT_LINE_HEIGHT_EM;
             let centers = text_line_center_offsets(lines.len(), line_height, *baseline);
             out.push_str(&format!(
-                r#"  <text font-family="sans-serif" font-size="{:.1}pt" fill="{}" fill-opacity="{:.3}" text-anchor="{}" dominant-baseline="central"{}{}>"#,
+                r#"  <text font-family="{}" font-size="{:.1}pt" fill="{}" fill-opacity="{:.3}" text-anchor="{}" dominant-baseline="central"{}{}>"#,
+                SVG_FONT_FAMILY,
                 font_size,
                 color.to_hex_rgb(),
                 color.alpha_f64(),
@@ -228,7 +235,8 @@ fn render_element(out: &mut String, elem: &SceneElement) {
             let line_height = font_size * CSS_PIXELS_PER_POINT * TEXT_LINE_HEIGHT_EM;
             let centers = text_line_center_offsets(lines.len(), line_height, TextBaseline::Top);
             out.push_str(&format!(
-                r#"  <text font-family="sans-serif" font-size="{:.1}pt" fill="{}" fill-opacity="{:.3}" text-anchor="start" dominant-baseline="central"{}>"#,
+                r#"  <text font-family="{}" font-size="{:.1}pt" fill="{}" fill-opacity="{:.3}" text-anchor="start" dominant-baseline="central"{}>"#,
+                SVG_FONT_FAMILY,
                 font_size,
                 color.to_hex_rgb(),
                 color.alpha_f64(),
@@ -460,5 +468,28 @@ mod tests {
         assert_eq!(svg.matches("<tspan").count(), 2);
         assert!(svg.contains("x=\"100.00\" y=\"40.40\">Required</tspan>"));
         assert!(svg.contains("x=\"100.00\" y=\"59.60\">Available</tspan>"));
+    }
+
+    #[test]
+    fn text_uses_the_bundled_engineering_font_stack() {
+        let mut scene = Scene::new(200.0, 100.0, None);
+        scene.add(SceneElement::Text {
+            text: "\u{03B7}\u{209C}\u{2095} = \u{03B7}\u{209A} \u{22C5} \u{03B7}\u{2092}"
+                .to_owned(),
+            pos: [100.0, 50.0],
+            font_size: 12.0,
+            color: Color::rgb(0, 0, 0),
+            align: TextAlign::Center,
+            baseline: TextBaseline::Middle,
+            angle_deg: 0.0,
+            bold: false,
+        });
+
+        let svg = render_svg(&scene);
+
+        assert!(svg.contains("font-family=\"'Noto Sans', 'Noto Sans Math', sans-serif\""));
+        assert!(
+            svg.contains("\u{03B7}\u{209C}\u{2095} = \u{03B7}\u{209A} \u{22C5} \u{03B7}\u{2092}")
+        );
     }
 }

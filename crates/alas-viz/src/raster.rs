@@ -8,6 +8,9 @@
 //! to the exported figure while moving geometry and text work out of every
 //! egui paint pass.
 
+use alas_fonts::{
+    MATH_FONT_BYTES, MONOSPACE_FONT_BYTES, PROPORTIONAL_FAMILY, PROPORTIONAL_FONT_BYTES,
+};
 use alas_report::scene::{Camera3D, SceneElement};
 use alas_report::{render_svg, Scene};
 use rayon::prelude::*;
@@ -68,11 +71,11 @@ pub fn render_scene_rgba_scaled(scene: &Scene, scale: f64) -> Result<(u32, u32, 
     // otherwise hide the texture layer drawn onto `pixmap` below.
     vector_scene.hide_background_paint();
     let svg = render_svg(&vector_scene);
-    // usvg intentionally starts with an empty font database. Loading system
-    // fonts on every globe orbit frame dominates raster time, so all figure
-    // renders share one immutable desktop font database.
+    // usvg intentionally starts with an empty font database. All figure
+    // renders share the same immutable bundled database, so glyph coverage
+    // and metrics cannot depend on a user's installed fonts.
     let options = resvg::usvg::Options {
-        fontdb: system_font_database(),
+        fontdb: figure_font_database(),
         ..resvg::usvg::Options::default()
     };
     let tree = resvg::usvg::Tree::from_str(&svg, &options)
@@ -340,15 +343,25 @@ fn draw_embedded_textures(scene: &Scene, destination: &mut tiny_skia::Pixmap, sc
     }
 }
 
-fn system_font_database() -> Arc<resvg::usvg::fontdb::Database> {
+fn figure_font_database() -> Arc<resvg::usvg::fontdb::Database> {
     static FONT_DATABASE: OnceLock<Arc<resvg::usvg::fontdb::Database>> = OnceLock::new();
     FONT_DATABASE
-        .get_or_init(|| {
-            let mut database = resvg::usvg::fontdb::Database::new();
-            database.load_system_fonts();
-            Arc::new(database)
-        })
+        .get_or_init(|| Arc::new(bundled_font_database()))
         .clone()
+}
+
+/// Build the deterministic portion of the figure font database.
+///
+/// The load order is intentional: usvg walks its database when a primary face
+/// lacks a glyph, so the mathematical face precedes the monospaced face.
+fn bundled_font_database() -> resvg::usvg::fontdb::Database {
+    let mut database = resvg::usvg::fontdb::Database::new();
+    database.load_font_data(PROPORTIONAL_FONT_BYTES.to_vec());
+    database.load_font_data(MATH_FONT_BYTES.to_vec());
+    database.load_font_data(MONOSPACE_FONT_BYTES.to_vec());
+    database.set_sans_serif_family(PROPORTIONAL_FAMILY);
+    database.set_serif_family(PROPORTIONAL_FAMILY);
+    database
 }
 
 fn blue_marble_texture() -> Option<&'static tiny_skia::Pixmap> {
@@ -366,10 +379,49 @@ fn blue_marble_texture() -> Option<&'static tiny_skia::Pixmap> {
 #[cfg(test)]
 mod tests {
     use super::{
-        render_scene_png, render_scene_rgba, render_scene_rgba_scaled,
+        bundled_font_database, render_scene_png, render_scene_rgba, render_scene_rgba_scaled,
         render_scene_textures_rgba_scaled, source_longitude, sphere_sample_direction,
     };
+    use alas_fonts::{MATH_FAMILY, MONOSPACE_FAMILY, PROPORTIONAL_FAMILY};
     use alas_report::scene::{Camera3D, Color, Scene, SceneElement, TextAlign, TextBaseline};
+
+    const ENGINEERING_GLYPH_CORPUS: &str = concat!(
+        "\u{03B1}\u{03B7}\u{03C1}\u{03C3}\u{03C9}\u{1E41}",
+        "\u{2070}\u{00B2}\u{00B3}\u{2080}\u{2092}\u{2095}\u{209A}\u{209C}",
+        "\u{00B0}\u{00B1}\u{00B7}\u{00D7}\u{2212}\u{221A}\u{2264}\u{2265}\u{2260}\u{2192}\u{2202}\u{2207}\u{2211}\u{222B}\u{1D6FC}"
+    );
+
+    #[test]
+    fn bundled_figure_fonts_render_engineering_text_without_host_fonts() {
+        let database = bundled_font_database();
+        assert_eq!(database.len(), 3, "no host fonts belong in a GUI figure");
+        for family in [PROPORTIONAL_FAMILY, MATH_FAMILY, MONOSPACE_FAMILY] {
+            assert!(
+                database
+                    .faces()
+                    .any(|face| face.families.iter().any(|entry| entry.0 == family)),
+                "bundled figure database is missing {family}"
+            );
+        }
+
+        let mut scene = Scene::new(800.0, 160.0, Some(Color::rgb(255, 255, 255)));
+        scene.add(SceneElement::Text {
+            text: ENGINEERING_GLYPH_CORPUS.to_owned(),
+            pos: [20.0, 50.0],
+            font_size: 15.0,
+            color: Color::rgb(0, 0, 0),
+            align: TextAlign::Left,
+            baseline: TextBaseline::Top,
+            angle_deg: 0.0,
+            bold: false,
+        });
+        let (_width, _height, rgba) = render_scene_rgba(&scene).expect("figure rasterizes");
+        assert!(
+            rgba.chunks_exact(4)
+                .any(|pixel| pixel != [255, 255, 255, 255]),
+            "engineering text must paint into the bundled-font raster"
+        );
+    }
 
     /// Regression for the actual GUI figure-card bug: this function used to
     /// clear `scene.background` before calling `render_svg` so the vector

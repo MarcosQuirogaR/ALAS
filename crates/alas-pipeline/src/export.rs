@@ -99,7 +99,7 @@ pub fn report_to_database(report: &AnalysisReport, config: &AlasConfig) -> Desig
         "mass_architecture": config.mass_model.mass_architecture.as_str(),
         "systems_mass_method": config.mass_model.systems_mass_method,
         "systems_mass_status": if config.mass_model.mass_architecture.is_pure_flops() {
-            "verified_architecture"
+            if report.flops_mass_buildup.is_some() { "evaluated_declared_inputs" } else { "not_evaluated" }
         } else {
             "compatibility_only"
         },
@@ -107,6 +107,7 @@ pub fn report_to_database(report: &AnalysisReport, config: &AlasConfig) -> Desig
             .flops_mass_buildup
             .as_deref()
             .map(flops_mass_buildup_to_json),
+        "physical_validation": "not_established_by_equation_evaluation",
         "physical_cg_m": report.physical_cg,
         "component_masses_kg": report.component_masses,
         "mass_coordinates_m": report.mass_coordinates,
@@ -136,9 +137,39 @@ fn flops_mass_buildup_to_json(
     let systems = &buildup.systems_and_operating_items.systems;
     let operating = &buildup.systems_and_operating_items.operating_items;
     let airframe = &buildup.airframe;
+    // Technology scenarios are diagnostics at the resolved geometry and DG.
+    // They are not a confidence interval or a change to the authoritative OEW.
+    let composite_scenarios: Vec<_> = [0.0, 0.5, 1.0]
+        .into_iter()
+        .map(|coefficient| {
+            let mut wing = airframe.structure_inputs.wing;
+            wing.composite_utilization = coefficient;
+            serde_json::json!({
+                "fcomp": coefficient,
+                "wing_mass_kg": alas_mass::flops_transport::structure::wing_mass(&wing).total_kg,
+            })
+        })
+        .collect();
     serde_json::json!({
         "provenance": &*buildup.provenance,
+        "wing_composite_assumption": {
+            "fcomp": airframe.structure_inputs.wing.composite_utilization,
+            "meaning": "FLOPS wing technology coefficient, not aircraft composite mass fraction",
+            "zero_meaning": "published no-composite-credit baseline; not evidence that the real aircraft is metallic",
+            "scenarios": composite_scenarios,
+            "scenario_scope": "fixed geometry, loads and other inputs; not applied to OEW, not an uncertainty interval or aircraft calibration",
+        },
+        "equation_methods": {
+            "cabin_equipment": buildup.inputs.cabin_equipment_method.as_str(),
+            "pylons": airframe.propulsion_inputs.pylon_mass_method.as_str(),
+            "installed_propulsion": alas_mass::statement::LedgerMethods::from_buildup(buildup).propulsion.label(),
+            "starter_scope": airframe.propulsion.as_ref().map(|group| group.starter_scope.as_str()),
+            "nozzle_scope": airframe.propulsion.as_ref().map(|group| group.nozzle_scope.as_str()),
+        },
         "inputs": {
+            "cabin_equipment_method": buildup.inputs.cabin_equipment_method.as_str(),
+            "haul_class": buildup.inputs.haul_class,
+            "apu_installed": buildup.inputs.apu_installed,
             "maximum_mach": buildup.inputs.maximum_mach,
             "design_range_nmi": buildup.inputs.design_range_nmi,
             "design_gross_mass_kg": buildup.inputs.design_gross_mass_kg,
@@ -209,6 +240,16 @@ fn flops_mass_buildup_to_json(
         "turboprop_propulsion_kg": airframe.turboprop_propulsion.as_ref().map(|group| {
             serde_json::json!({
                 "engine_mass_source": group.engine_mass_source,
+                "propeller_mass_basis": group.propeller_mass_basis,
+                "resolved_inputs": {
+                    "design_mach": group.design_mach,
+                    "design_mach_basis": group.design_mach_basis,
+                    "nacelle_wetted_area_each_m2": group.nacelle_wetted_area_m2,
+                    "nacelle_area_basis": group.nacelle_area_basis,
+                    "nacelle_area_density_kg_m2": group.nacelle_area_density_kg_m2,
+                    "nacelle_area_density_basis": group.nacelle_area_density_basis,
+                    "propeller_accessory_scope": "declared assembly inclusion scope must be checked against its source; zero extra allowance does not establish accessory absence",
+                },
                 "engine_each": group.engine_each_kg,
                 "engines": group.engines_kg,
                 "gearboxes": group.gearboxes_kg,
@@ -389,6 +430,7 @@ fn mass_balance_to_json(
             serde_json::json!({
                 "id": item.id,
                 "group": item.group,
+                "method": item.method,
                 "mass_kg": item.mass_kg,
                 "position_m": item.position_m,
             })
@@ -554,7 +596,7 @@ pub fn format_summary(report: &AnalysisReport, config: Option<&AlasConfig>) -> S
     let system_status = config
         .map(|cfg| {
             if cfg.mass_model.mass_architecture.is_pure_flops() {
-                "FLOPS architecture"
+                "FLOPS-based architecture; cabin and installation sources exported separately"
             } else {
                 "compatibility-only fractions"
             }
@@ -630,6 +672,7 @@ pub fn format_summary(report: &AnalysisReport, config: Option<&AlasConfig>) -> S
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used)]
 mod tests {
     use super::report_to_database;
     use crate::full_analysis::{AnalysisReport, DesignPoint, PolarFit, PolarFitStatus};
@@ -638,6 +681,75 @@ mod tests {
     use alas_config::AlasConfig;
     use alas_geom::aircraft::airplane::Airplane;
     use std::collections::HashMap;
+
+    #[test]
+    fn resolved_cabin_and_propulsion_sources_survive_export() {
+        use alas_geom::builder::AircraftBuilder;
+        use alas_mass::breakdown::{calculate_flops_mass_buildup, ProductMassBuildup};
+        for name in ["A320-200", "ATR72-600"] {
+            let config = AlasConfig::from_value(&serde_json::json!({"preset": name}))
+                .expect("registered configuration");
+            let preset = alas_config::presets::get(name).expect("preset");
+            let plane = AircraftBuilder::new(Some(config.geometry.clone()))
+                .build(Some(&preset.design_vector), true)
+                .expect("geometry");
+            let ProductMassBuildup::PureFlops(buildup) = calculate_flops_mass_buildup(
+                &plane,
+                &config.requirements,
+                &config.geometry,
+                &config.control_surfaces,
+                Some(&config.mass_model),
+                &config.landing_gear,
+                &config.cabin,
+            )
+            .expect("complete mass buildup") else {
+                panic!("production mass")
+            };
+            let exported = super::flops_mass_buildup_to_json(&buildup);
+            let scenarios = exported["wing_composite_assumption"]["scenarios"]
+                .as_array()
+                .expect("three technology scenarios");
+            assert_eq!(scenarios.len(), 3);
+            let baseline_wing = scenarios[0]["wing_mass_kg"].as_f64().expect("wing kg");
+            let maximum_credit_wing = scenarios[2]["wing_mass_kg"].as_f64().expect("wing kg");
+            assert!((baseline_wing - buildup.masses.wing).abs() < 1.0e-8);
+            assert!(maximum_credit_wing > 0.0 && maximum_credit_wing < baseline_wing);
+            assert_eq!(
+                exported["equation_methods"]["cabin_equipment"],
+                "lth_civil_transport_v1"
+            );
+            let propulsion = exported["equation_methods"]["installed_propulsion"]
+                .as_str()
+                .expect("source label");
+            assert_ne!(
+                propulsion, "FLOPS",
+                "substitutions must be visible for {name}"
+            );
+            if name == "ATR72-600" {
+                assert!(propulsion.contains("GASP/TM-83458"));
+                let turboprop = &exported["turboprop_propulsion_kg"];
+                assert!(turboprop["propeller_mass_basis"].is_string());
+                assert!(
+                    (turboprop["propeller_each"].as_f64().expect("propeller kg")
+                        - 360.9 * 0.453_592_37)
+                        .abs()
+                        < 1.0e-6
+                );
+                let inputs = &turboprop["resolved_inputs"];
+                assert_eq!(inputs["design_mach"], config.requirements.cruise_mach);
+                assert!(
+                    inputs["nacelle_wetted_area_each_m2"]
+                        .as_f64()
+                        .expect("area")
+                        > 0.0
+                );
+                assert!(inputs["nacelle_area_basis"].is_string());
+            } else {
+                assert!(propulsion.contains("LTH pylons"));
+                assert!(exported["equation_methods"]["starter_scope"].is_string());
+            }
+        }
+    }
 
     #[test]
     fn polar_fit_fallback_status_survives_json_export() {
