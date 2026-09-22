@@ -233,7 +233,11 @@ fn build_cargo_layout_with_mass_semantics(
         } else {
             0.0
         },
-        volume_m3: manager.slots.iter().map(|slot| slot.uld.volume_m3).sum(),
+        volume_m3: manager
+            .slots
+            .iter()
+            .map(|slot| slot.usable_volume_m3())
+            .sum(),
         lower_uld: manager.lower_uld.code,
         target_cg_pct_mac: target_pct,
         achieved_cg_pct_mac: if total_mass > 0.0 {

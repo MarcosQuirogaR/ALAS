@@ -92,28 +92,37 @@ fn public_planning_cg_uses_the_source_frame_without_becoming_a_certification_cla
     let result = evaluate_preset("A220-300").expect("A220 evaluation");
 
     assert!(result.execution_passed);
-    // Current product state of the A220-300 preset, with its PW1521G-3
-    // binding at the ICAO rating and the bulk-only lower hold from its
-    // weight-and-balance manual, flown at the EASA basic-scheme takeoff mass
-    // with geometry-derived component stations: the larger source-layout
-    // cabin load moves the analyzed CG aft of the published planning limit.
-    // Bare OEW is a ground-only reference condition under this model's
-    // applicability contract (see `envelope_parts/part_02.rs`), so its
-    // forward-of-range position no longer gates the model hard constraints;
-    // its ground static-reaction/gear checks still pass. The public
-    // planning-frame finding remains open. This is a physical finding; the
-    // assertion records it as reported rather than passed.
+    // Re-derived 2026-09-22. This was previously the aft-limit-violation
+    // case: with `lower_deck_uld == "BLK"` (the A220's bulk-only lower hold,
+    // per its weight-and-balance manual) and the generic `BULK` block's
+    // nominal 1.5 m height not fitting this narrowbody's shallower
+    // clearance, `alas-payload`'s cargo loader had zero real hold positions
+    // to place anything in, so `place_baggage`'s trim loop
+    // (`hold_target_cg`, meant to spread checked baggage to balance the
+    // aircraft at its empty-aircraft CG) had nothing to spread across and
+    // every bag fell back to one fixed loose block at the aft bulkhead,
+    // dragging the analyzed CG aft of the published planning limit
+    // regardless of what the trim loop was actually asking for. Restoring
+    // real bulk-hold positions (`alas-payload/src/cargo/headroom.rs`) lets
+    // that existing trim loop do its job, and the A220 now closes within
+    // its published planning limit and passes the model's hard constraints
+    // outright. This test's own scenario (a case that must be reported, not
+    // silently accepted, while genuinely violating) no longer has an
+    // A220 witness; the reporting path it names is not otherwise covered by
+    // this file, so treat that as an open coverage gap, not evidence the
+    // path was removed.
     assert!(result.model_cg_envelope_ok);
     assert_eq!(
         result.public_planning_cg_status,
-        PlanningCgStatus::AftLimitViolation
+        PlanningCgStatus::WithinPublishedLimits
     );
-    assert!(!result.physical_passed);
+    assert!(result.physical_passed);
     assert!(
-        result.physical_findings.iter().any(|finding| finding.code
-            == FindingCode::PublicPlanningCgEnvelopeViolation
-            && finding.severity == alas_pipeline::FindingSeverity::Error),
-        "PublicPlanningCgEnvelopeViolation is not reported: {:?}",
+        !result
+            .physical_findings
+            .iter()
+            .any(|finding| finding.code == FindingCode::PublicPlanningCgEnvelopeViolation),
+        "the corrected bulk-hold trim no longer violates the public planning envelope: {:?}",
         result.physical_findings
     );
     assert!(
@@ -132,21 +141,13 @@ fn public_planning_cg_uses_the_source_frame_without_becoming_a_certification_cla
 
     // Regression pins of the same analyzed takeoff state in the two frames.
     // They are product-state values, not validated aircraft data.
-    // Re-pinned 2026-09-22 (41.021 -> 44.779 model, 37.626 -> 41.352 public):
-    // this acceptance suite had never been executed end-to-end before this
-    // pin was written, so the prior numbers are not a verified baseline this
-    // is a regression from. A targeted revert-and-rebuild check against the
-    // cabin seating repair (`place_seats`,
-    // `crates/alas-payload/src/cabin/seating.rs`), the only functional
-    // change touching payload/cabin code in the reviewed integration range,
-    // reproduced the identical CG bit for bit with that repair disabled, so
-    // it is not the cause. No other functional diff in that range touches
-    // mass-station or MAC/LEMAC computation. The values below are this
-    // pipeline's actual, directly measured output for the registered
-    // preset; the planning-frame status and findings asserted above are
-    // unaffected by the pin.
+    // Re-pinned 2026-09-23 after scaling each shallow bulk slot's load
+    // limit to its realized height, preserving the nominal mass density.
+    // Reduced per-slot limits change the mass assigned along the hold and
+    // move the same takeoff CG from 22.862719 to 22.872246% model MAC and
+    // from 19.617749 to 19.627197% in the published planning frame.
     assert!(
-        (result.model_cg_pct_mac - 44.778_594_701_195_76).abs() < 1.0e-6,
+        (result.model_cg_pct_mac - 22.872_246_301_225_57).abs() < 1.0e-6,
         "model-frame CG was {}% MAC",
         result.model_cg_pct_mac
     );
@@ -154,7 +155,7 @@ fn public_planning_cg_uses_the_source_frame_without_becoming_a_certification_cla
         .public_planning_cg_pct_mac
         .expect("A220 has a source planning frame");
     assert!(
-        (public_pct_mac - 41.352_241_357_110_02).abs() < 1.0e-6,
+        (public_pct_mac - 19.627_197_343_330_582).abs() < 1.0e-6,
         "public-frame CG was {public_pct_mac}% MAC"
     );
 
@@ -204,7 +205,12 @@ fn public_planning_cg_uses_the_source_frame_without_becoming_a_certification_cla
     };
     let text = format_matrix_report(&report);
     assert!(text.contains("Execution Verdict: ALL PRESETS EXECUTED"));
-    assert!(text.contains("Physical Verdict: 1 preset finding(s) require investigation"));
+    // Re-derived 2026-09-22 (was "1 preset finding(s)", "AFT FAIL"): the
+    // belly-cargo bulk-hold fix (see the re-pin note above) clears every
+    // error-level finding for this preset, so the table reports the
+    // planning frame "WITHIN" its published limit and the physical column
+    // "PASS" instead.
+    assert!(text.contains("Physical Verdict: 0 preset finding(s) require investigation"));
     assert!(text.contains("Design mission evidence:"));
     assert!(text.contains("A220-300: UNVERIFIED - no source-backed mission registered"));
     assert!(text.contains("Interactive route diagnostics (not preset design-mission validation):"));
@@ -213,7 +219,7 @@ fn public_planning_cg_uses_the_source_frame_without_becoming_a_certification_cla
     // The planning frame is reported as public planning evidence, separate
     // from the model assessment, whether or not a limit is violated.
     assert!(text.contains("separate from public planning evidence"));
-    assert!(text.contains("AFT FAIL"));
+    assert!(text.contains("WITHIN"));
     assert!(!text.to_ascii_lowercase().contains("certif"));
 
     let json = format_matrix_json(&report).expect("acceptance JSON artifact");
@@ -354,19 +360,26 @@ fn acceptance_narrowbody_and_widebody_mass_calibrations() {
         expected_mtow_shortfall_kg
     );
     // At the policy takeoff mass the route completes within the loaded fuel
-    // and lands below the WV017 maximum landing mass. The open physical
-    // finding was previously the operating-empty centre of gravity sitting
-    // forward of the model's configured forward range
-    // (`ModelCgForwardRangeViolation`); see the re-pin note on the A220
-    // planning-CG test above for why the analyzed CG moved (an unattributed,
-    // pre-existing pin, not a regression traced to the reviewed range) and
-    // aft, clearing that finding. The same aft shift now trips a different,
-    // previously-unbinding hard constraint at the model's aft loading state:
-    // the nose gear's minimum load fraction goes slightly negative (below
-    // the required weight-on-wheels floor), i.e. the analyzed CG has moved
-    // close enough to the main gear that the model's static ground-stability
-    // margin is now the tighter constraint. The aircraft remains reported,
-    // not passed, under the hard model constraints either way.
+    // and lands below the WV017 maximum landing mass. This used to also be
+    // where the operating-empty centre of gravity sat forward of the
+    // model's configured forward range (`ModelCgForwardRangeViolation`),
+    // and, briefly during this investigation, where it sat close enough to
+    // the main gear to trip a minimum nose-gear load finding instead. Both
+    // were symptoms of the same bug: with `lower_deck_uld == "BLK"` and no
+    // rigid ULD envelope to place, `place_baggage`'s trim loop
+    // (`hold_target_cg`, which is meant to spread the hold load to balance
+    // the aircraft at its empty-aircraft CG) had zero real positions to
+    // spread checked baggage across (see the belly-cargo fix in
+    // `alas-payload/src/cargo/headroom.rs`), so every declared-bulk
+    // aircraft's bags landed in one fixed loose block at the aft bulkhead
+    // regardless of trim, dragging the analyzed CG aft of where the loop
+    // was already trying to put it. Restoring real bulk-hold positions lets
+    // the existing trim loop do its job, and the A320 now closes cleanly:
+    // re-pinned 2026-09-23 after shallow bulk slots inherited their scaled
+    // usable volume and load limits, moving 17.576899 to 17.759868% MAC.
+    // This remains forward of
+    // both the broken aft-violating state and the historical pin, which
+    // predates cabin/mass-station work this investigation did not audit).
     assert!(a320.mission_fuel_within_available);
     assert!(!a320
         .physical_findings
@@ -381,14 +394,23 @@ fn acceptance_narrowbody_and_widebody_mass_calibrations() {
             .physical_findings
             .iter()
             .any(|finding| finding.code == FindingCode::ModelCgForwardRangeViolation),
-        "the corrected cabin length no longer places the analyzed CG forward of range: {:?}",
+        "the corrected bulk-hold trim no longer places the analyzed CG forward of range: {:?}",
         a320.physical_findings
     );
-    assert!(a320.physical_findings.iter().any(|finding| {
-        finding.code == FindingCode::MinimumNoseGearLoadViolation
-            && finding.severity == alas_pipeline::FindingSeverity::Error
-    }));
-    assert!(!a320.physical_passed);
+    assert!(
+        !a320.physical_findings.iter().any(|finding| {
+            finding.code == FindingCode::MinimumNoseGearLoadViolation
+                && finding.severity == alas_pipeline::FindingSeverity::Error
+        }),
+        "the corrected bulk-hold trim no longer strains the nose gear: {:?}",
+        a320.physical_findings
+    );
+    assert!(
+        (a320.model_cg_pct_mac - 17.759_867_972_899_137).abs() < 0.01,
+        "model-frame CG was {}% MAC",
+        a320.model_cg_pct_mac
+    );
+    assert!(a320.physical_passed);
     assert!(!a320
         .physical_findings
         .iter()
@@ -431,13 +453,13 @@ fn acceptance_narrowbody_and_widebody_mass_calibrations() {
     // the wing, wing mass in the spar box) are distinct from the frozen
     // compatibility coordinates used to establish the historical 14.749%
     // reference; the finding is reported at the analyzed zero-fuel state.
-    // Re-pinned 2026-09-22 (12.418 -> 16.923), same unattributed pre-existing
-    // pin as the A220 test above: this acceptance suite had never run
-    // end-to-end before, and the aft shift is not traced to the reviewed
-    // integration range (see that test's re-pin note). The direction and
-    // roughly 4-5 point magnitude match the A220 and A320 pins, consistent
-    // with all three sharing the same registered-preset mass-coordinate
-    // machinery, but the specific cause is not identified here.
+    // Re-pinned 2026-09-22 (12.418 -> 16.923). AVE declares a containerized
+    // hold (`preset_flops::declared_cargo_loading`), not `"BLK"`, so it is
+    // unaffected by the belly-cargo bulk-hold fix the A320/A220 pins above
+    // are traced to (confirmed: this value is bit for bit unchanged by that
+    // fix). This acceptance suite had never run end-to-end before this pin
+    // was written, so the prior number is not a verified baseline to trace
+    // a cause from; the value below is this pipeline's actual output.
     assert!(
         (ave_forward_finding.actual.expect("AVE CG actual") - 16.923_225_276_357_176).abs() < 0.01
     );
@@ -582,6 +604,44 @@ fn a320_source_max_payload_case_separates_net_tare_gross_and_usable_fuel() {
     assert!(gross_fuel_kg > usable_closure_fuel_kg);
     assert!(unusable_fuel_kg.is_finite() && unusable_fuel_kg > 0.0);
     assert!((usable_closure_fuel_kg - (gross_fuel_kg - unusable_fuel_kg)).abs() < 1.0e-9);
+}
+
+#[test]
+fn a320_delivered_bulk_hold_carries_the_requested_belly_cargo() {
+    // The delivered WV017 A320-200 (the registered preset's own default, no
+    // override) has no installed cargo-loading system
+    // (`lower_deck_uld == "BLK"`, `preset_flops::declared_cargo_loading`),
+    // unlike the option/STC-equipped source case above. Loose bulk freight
+    // has no rigid envelope of its own, so it is carried at the local hold
+    // clearance rather than requiring the generic `BULK` type's oversized
+    // 1.5 m nominal block to fit whole (`alas_payload::cargo::headroom`);
+    // this proves the same 2,682 kg net revenue request the source case
+    // above names is carried in this delivered, bulk-only arrangement too.
+    let preset = presets::get("A320-200").expect("A320 preset");
+    let requested_belly_cargo_kg = 2_682.0;
+    let mut config = AlasConfig::from_value(&serde_json::json!({
+        "preset": preset.name
+    }))
+    .expect("A320 preset configuration");
+    config.cabin.passenger.belly_cargo_kg = requested_belly_cargo_kg;
+    assert_eq!(config.cabin.cargo.lower_deck_uld, "BLK");
+
+    let airplane = AircraftBuilder::new(Some(config.geometry.clone()))
+        .build(Some(&preset.design_vector), true)
+        .expect("A320 delivered-arrangement geometry");
+    let layout = build_payload_layout(&airplane, &config, 0.0, 0.0)
+        .expect("A320 delivered-arrangement layout");
+    let summary = match &layout.summary {
+        LayoutSummary::Passenger(summary) => summary,
+        LayoutSummary::Cargo(_) => panic!("A320 delivered arrangement must use passenger layout"),
+    };
+    assert!(
+        (summary.belly_cargo_t * 1_000.0 - requested_belly_cargo_kg).abs() < 1.0e-6,
+        "A320 delivered bulk hold carried {} kg of the requested {requested_belly_cargo_kg} kg",
+        summary.belly_cargo_t * 1_000.0
+    );
+    // Loose bulk, not containers: no ULD count and no container tare.
+    assert_eq!(summary.hold_ulds, 0);
 }
 
 #[test]
