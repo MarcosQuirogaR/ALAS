@@ -15,11 +15,6 @@ name: Release package (manual/tag, non-publishing)
 # genuine Linux lane beside rather than replaces.
 on:
   workflow_dispatch:
-    inputs:
-      strict_nastran95:
-        description: "Require a fully reviewed NASTRAN-95 bundle instead of accepting an omitted optional tool"
-        type: boolean
-        default: false
   push:
     tags:
       - "v*"
@@ -120,8 +115,8 @@ jobs:
 
       - name: Build and assemble the standalone package from the locked dependency graph
         shell: bash
-        env:
-          ALAS_STRICT_BUNDLED_NASTRAN95: ${{ inputs.strict_nastran95 == true && '1' || '' }}
+        # CI starts from a clean checkout without a reviewed NASTRAN-95 staging
+        # tree. Strict bundling remains a local, explicitly staged release path.
         run: cargo xtask dist
 
       # `cargo xtask dist` already ran its own headless validation (--help,
