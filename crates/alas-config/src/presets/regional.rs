@@ -33,7 +33,11 @@ pub fn atr72_600() -> AircraftPreset {
         (3.0, 0.35),
     ];
     engine.radius_scale_m = 0.65;
-    engine.spanwise_positions_m = vec![4.25, -4.25];
+    // ATR 72-600 factsheet 2020 p.22 states an 8.10 m propeller-axis
+    // separation; half of that is the single-engine spanwise station.
+    // Physics review v1.2, section 4.3: the previous 4.25 m was 0.20 m
+    // off-source.
+    engine.spanwise_positions_m = vec![4.05, -4.05];
     engine.z_m = -0.70;
     engine.inlet_x_offset_m = 1.2;
 
@@ -45,11 +49,26 @@ pub fn atr72_600() -> AircraftPreset {
             model: "ATR 72-212A",
             weight_variant: "23,000 kg MTOW",
             engine_model: "PW127M",
-            modification_state: "ATR 72-600 commercial standard; Mod 5948",
+            // EASA TCDS A.084 Note VII.1: Mod 5948 is the New Avionic Suite
+            // ("Glass Cockpit") change that defines the "ATR 72-600"
+            // commercial designation for the ATR 72-212A; it is not a
+            // weight variant. The 23,000 kg MTOW / 22,350 kg MLW /
+            // 21,000 kg MZFW variant this preset declares is Mod 6219 (TCDS
+            // A.084 section III.13.b, "ATR 72-212A models" table), a
+            // separate, independently applicable modification. Physics
+            // review v1.2, section 4.3: the prior text named only Mod 5948
+            // and could be read as the weight-variant citation.
+            modification_state: "ATR 72-600 commercial standard (Mod 5948, NAS/glass cockpit); 23,000 kg MTOW weight variant (Mod 6219)",
             tank_configuration: "standard integral wing tanks",
         },
         reference: AircraftReferenceData {
-            mrw_kg: Some(23_150.0),
+            // EASA TCDS A.084, Issue 14 (23 Feb 2026), section III.13.b
+            // "ATR 72-212A models", Mod 6219 column: MRW 23,170 kg, MTOW
+            // 23,000 kg, MLW 22,350 kg, MZFW 21,000 kg. The MTOW/MLW/MZFW
+            // already matched this preset exactly; only MRW needed
+            // correcting from an uncited 23,150 kg (physics review v1.2,
+            // section 4.3, decoded from the downloaded TCDS PDF with pypdf).
+            mrw_kg: Some(23_170.0),
             mtow_kg: Some(23_000.0),
             mlw_kg: Some(22_350.0),
             mzfw_kg: Some(21_000.0),
@@ -79,7 +98,7 @@ pub fn atr72_600() -> AircraftPreset {
             cg_evidence: CgEnvelopeEvidence::AfmRequired,
             sources: vec![
                 "ATR ATR 72-600 Airport Planning Manual, Issue 8, 2021, aircraft characteristics and limitations",
-                "EASA Type Certificate Data Sheet EASA.A.084, ATR 42/72, ATR 72-212A model and engine eligibility",
+                "EASA Type Certificate Data Sheet EASA.A.084, ATR 42/72, Issue 14, 23 February 2026, section III.13.b \"ATR 72-212A models\" (Mod 6219 column: MRW 23,170 kg, MTOW 23,000 kg, MLW 22,350 kg, MZFW 21,000 kg) and Note VII.1 (Mod 5948 = New Avionic Suite / \"Glass Cockpit\", the commercial \"ATR 72-600\" designation, a separate modification from the weight variant)",
                 "ATR 42 / ATR 72 Aircraft Recovery Manual, 1-10-01 p.19 Figure 1-2 (ATR 72-212A main dimensions: 1.728 m nose to nose wheel, 10.772 m wheelbase, 27.166 m length, 4.10 m track), 1-10-04 p.27 fuselage frame stations (drawing 9SMJ 062110 ZON 00110-004, frame 0 at STA 2362 mm), 4-00-02 Figure 4-1 tail-tipping CG limit H-arm 14.848 m = 54 percent MAC",
                 "ATR Weight and Balance Manual, LIMITATIONS LIM.1 p.03, 15 JAN 2021, weight variant F2/75 (MAC 2.303 m; station 0 is 2.362 m forward of the fuselage nose; station 0 to reference chord leading edge 13.604 m)",
                 "ATR ATR 72-600 Facts and Figures, product specification (accessed 2026-08-30)",
@@ -175,7 +194,25 @@ pub fn atr72_600() -> AircraftPreset {
         },
         geometry: GeometryConfig {
             wing: WingConfig {
-                root_datum_x_m: 10.2,
+                // ATR Weight and Balance Manual, LIMITATIONS LIM.1 p.03 (15
+                // JAN 2021): reference-chord leading edge 11.242 m aft of the
+                // nose (station 0 is 2.362 m forward of the nose; station 0
+                // to reference-chord LE is 13.604 m; 13.604 - 2.362 =
+                // 11.242). The built wing's own area-weighted MAC leading
+                // edge (`Wing::aerodynamic_center(0.0)`) sat at 10.488 m at
+                // the previous 10.2 m datum -- 0.754 m forward of the WBM
+                // reference chord -- which is what drove the model's
+                // static margin to roughly -46% and the ZFW nose-gear
+                // reaction negative (physics review v1.2, section 4.3).
+                // Moving the datum aft by that same 0.754 m places the
+                // built LEMAC on the WBM station; it does not change the
+                // built wing's own MAC length (2.498 m against the WBM's
+                // 2.303 m reference chord, an 8% difference the review
+                // separately notes and this fix does not close, since doing
+                // so would need a planform-shape change, not a translation).
+                // 10.2 + (11.242 - 10.488069716279679) = 10.953930283720321,
+                // rounded to the WBM source's own three-decimal precision.
+                root_datum_x_m: 10.954,
                 root_z_m: 1.85,
                 break_z_m: 1.85,
                 tip_z_m: 1.85,
@@ -392,6 +429,6 @@ mod tests {
         let atr = atr72_600();
         assert_eq!(atr.engine_name, "PW127M");
         assert_eq!(atr.geometry.engine.engine_name, "PW127M");
-        assert_eq!(atr.engine_spanwise_positions(), &[4.25, -4.25]);
+        assert_eq!(atr.engine_spanwise_positions(), &[4.05, -4.05]);
     }
 }

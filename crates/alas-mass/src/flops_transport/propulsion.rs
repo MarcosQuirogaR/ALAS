@@ -503,8 +503,13 @@ mod tests {
         let twin = distributed_scaling(2, 2, 0, 120_000.0, 2.0);
         assert_eq!(twin.thrust_per_engine_n, 120_000.0);
         assert_eq!(twin.nacelle_diameter_m, 2.0);
-        // The branch is continuous in neither variable at four engines, which
-        // is the published behaviour: four keeps D, five jumps to 0.5 D sqrt 5.
+        // The branch *is* continuous at four engines in both the scaled
+        // engine count (`FNENG(4) = 4 + 2 atan(0) = 4`) and the nacelle
+        // diameter (`FNAC(4) = 0.5 D sqrt(4) = D`, matching the <=4 branch's
+        // constant D exactly): treated as a function of a continuous engine
+        // count, the two pieces meet with no jump at the boundary. No
+        // registered preset exceeds four engines, so this is unreached in
+        // practice either way. Physics review v1.2, finding M2.
         assert_eq!(scaled_nacelle_diameter_m(3.0, 4), 3.0);
         assert!((scaled_nacelle_diameter_m(3.0, 5) - 1.5 * 5.0_f64.sqrt()).abs() < 1e-12);
     }

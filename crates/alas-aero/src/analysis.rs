@@ -46,6 +46,7 @@
 //! the phase order to name the type.
 
 mod performance;
+mod wave;
 mod wetted;
 
 use std::f64::consts::PI;
@@ -57,7 +58,7 @@ use alas_config::physics::DragModelConfig;
 use alas_geom::aircraft::airplane::Airplane;
 use alas_geom::aircraft::fuselage::Fuselage;
 use alas_geom::aircraft::spacing::linspace;
-use alas_geom::aircraft::wing::Wing;
+use alas_geom::aircraft::wing::{Wing, WingXSec};
 
 pub use performance::{PolarSweep, QuickPerformance, TrimPoint, TrimmedPerformance};
 
@@ -158,6 +159,9 @@ pub struct AeroAnalysis<'a> {
     /// Reference fixtures used one main-wing thickness and design sweep for
     /// every surface. Product analyses use each surface's own geometry.
     reference_compatibility: bool,
+    /// Replay the frozen Python quartic starting at M_dd, for objective
+    /// parity fixtures generated before the Lock/Korn correction.
+    frozen_wave_drag: bool,
 }
 
 impl<'a> AeroAnalysis<'a> {
@@ -177,6 +181,7 @@ impl<'a> AeroAnalysis<'a> {
             drag: drag_model.unwrap_or_default(),
             analysis: analysis.unwrap_or_default(),
             reference_compatibility: false,
+            frozen_wave_drag: false,
         }
     }
 
@@ -194,6 +199,21 @@ impl<'a> AeroAnalysis<'a> {
     ) -> Self {
         let mut result = Self::new(plane, sweep_deg, geometry, drag_model, analysis);
         result.reference_compatibility = true;
+        result
+    }
+
+    /// Replay both the frozen surface buildup and its superseded wave law.
+    /// Used only for objective parity against the uncorrected Python fixture.
+    pub fn new_frozen_wave_drag_compatibility(
+        plane: &'a Airplane,
+        sweep_deg: f64,
+        geometry: Option<GeometryConfig>,
+        drag_model: Option<DragModelConfig>,
+        analysis: Option<AnalysisConfig>,
+    ) -> Self {
+        let mut result =
+            Self::new_reference_compatibility(plane, sweep_deg, geometry, drag_model, analysis);
+        result.frozen_wave_drag = true;
         result
     }
 
@@ -224,6 +244,46 @@ impl<'a> AeroAnalysis<'a> {
                 xsec.airfoil
                     .max_thickness(&linspace(0.0, 1.0, MAX_THICKNESS_SAMPLES))
             })
+    }
+
+    /// The exposed-area-weighted thickness-to-chord across every panel of
+    /// `wing`, Raymer eq. 12.30's own convention for the form-factor `t/c`.
+    ///
+    /// The root section's maximum thickness (what [`Self::wing_section_thickness`]
+    /// returns) is the thickest station on a tapered wing, so using it for
+    /// the whole surface's form factor biases the factor high: physics
+    /// review v1.2, section 3.1 (root t/c 0.15 against an area-weighted
+    /// ~0.12 costs about +8% wing profile drag on the reviewed case). Each
+    /// panel between consecutive cross-sections contributes the mean of its
+    /// two end thicknesses, weighted by that panel's own trapezoidal
+    /// planform area (span in the YZ plane, so dihedral is respected, times
+    /// the mean chord) -- the same panel decomposition
+    /// [`Wing::mean_aerodynamic_chord`] and [`Wing::aerodynamic_center`] use
+    /// internally, reproduced here from public cross-section fields since
+    /// that panel area is not itself exposed across the crate boundary.
+    /// Falls back to [`Self::wing_section_thickness`] for a wing with fewer
+    /// than two cross-sections, where no panel exists to weight.
+    fn area_weighted_thickness(wing: &Wing) -> f64 {
+        let thickness_at = |xsec: &WingXSec| -> f64 {
+            xsec.airfoil
+                .max_thickness(&linspace(0.0, 1.0, MAX_THICKNESS_SAMPLES))
+        };
+        let mut area_sum = 0.0;
+        let mut weighted_sum = 0.0;
+        for pair in wing.xsecs.windows(2) {
+            let dy = pair[1].xyz_le[1] - pair[0].xyz_le[1];
+            let dz = pair[1].xyz_le[2] - pair[0].xyz_le[2];
+            let span_m = (dy * dy + dz * dz).sqrt();
+            let panel_area = span_m * (pair[0].chord + pair[1].chord) / 2.0;
+            let panel_thickness = (thickness_at(&pair[0]) + thickness_at(&pair[1])) / 2.0;
+            area_sum += panel_area;
+            weighted_sum += panel_area * panel_thickness;
+        }
+        if area_sum > 0.0 {
+            weighted_sum / area_sum
+        } else {
+            Self::wing_section_thickness(wing)
+        }
     }
 
     /// Sweep used by the surface parasite form factor.
@@ -284,8 +344,10 @@ impl<'a> AeroAnalysis<'a> {
             let mac = wing.mean_aerodynamic_chord();
             let reynolds = density * velocity * mac / viscosity;
             let cf = Self::turbulent_cf(reynolds, mach);
-            let thickness = if self.reference_compatibility || index == 0 {
+            let thickness = if self.reference_compatibility {
                 main_thickness
+            } else if index == 0 {
+                Self::area_weighted_thickness(wing)
             } else {
                 Self::wing_section_thickness(wing)
             };
@@ -317,9 +379,25 @@ impl<'a> AeroAnalysis<'a> {
         }
 
         // The primary body: length from its end stations, diameter from the
-        // configuration rather than from the built cross-sections. No form
-        // factor is applied to it, nor to the nacelles below: upstream
-        // carries the slenderness effect inside its wetted-area factors.
+        // configuration rather than from the built cross-sections. No
+        // fineness-dependent pressure/form-drag term (Raymer eq. 12.31,
+        // `1 + 60/f^3 + f/400`) is applied to it, nor to the nacelles below.
+        // `fuselage_wetted_factor` (0.9) is a wetted-*area* correction for a
+        // tapered nose/tail against a plain cylinder, geometric, not a drag
+        // coefficient; `interference_factor_fuselage` (1.25) is a real,
+        // separate junction-interference Q factor; `viscous_margin` (1.10)
+        // is a lumped total-parasite-drag margin applied once at the end of
+        // `parasite_drag`. None of the three represents the fuselage's own
+        // 3D pressure drag, so this buildup is missing that term outright
+        // (physics review v1.2, finding A1), not merely mislabeling it: at
+        // the reviewed transports' fineness ratios (~9.8-10) Raymer's form
+        // factor evaluates to about 1.08-1.09. Adding it here would raise
+        // every preset's fuselage parasite drag (and, compounded with the
+        // A3 wave-drag correction already applied this pass, total cruise
+        // drag) by a similar fraction without a validated recalibration
+        // pass to confirm nothing else in this buildup silently offsets it;
+        // left undone this pass rather than risk an unvalidated
+        // double-count, and recorded here as the A1 finding's disposition.
         if let Some(fuselage) = self.plane.fuselages.first() {
             let length = Self::body_length(fuselage);
             let diameter = self.geometry.fuselage.diameter_m;
@@ -352,28 +430,6 @@ impl<'a> AeroAnalysis<'a> {
             // body with no stations has no length, and nothing this program
             // builds produces one.
             _ => 0.0,
-        }
-    }
-
-    /// The Korn-equation transonic wave-drag estimate.
-    ///
-    /// Zero below the configured onset Mach, and zero again above it while
-    /// the drag-divergence Mach the section, sweep and lift coefficient set
-    /// has not been passed, which is where the nominal cruise point of this
-    /// program's own default aircraft actually sits.
-    pub fn wave_drag(&self, mach: f64, cl: f64, section_thickness: Option<f64>) -> f64 {
-        if mach < self.drag.wave_drag_onset_mach {
-            return 0.0;
-        }
-        let thickness = section_thickness.unwrap_or_else(|| self.section_thickness());
-        let cos_sweep = self.sweep_deg.to_radians().cos();
-        let kappa = self.drag.korn_technology_factor;
-        let mach_dd =
-            kappa / cos_sweep - thickness / cos_sweep.powf(2.0) - cl / (10.0 * cos_sweep.powf(3.0));
-        if mach > mach_dd {
-            self.drag.wave_drag_coefficient * (mach - mach_dd).powf(4.0)
-        } else {
-            0.0
         }
     }
 
@@ -593,6 +649,29 @@ mod tests {
         let light = analysis.wave_drag(0.86, 0.4, None);
         let heavy = analysis.wave_drag(0.86, 0.9, None);
         assert!(heavy > light);
+    }
+
+    #[test]
+    fn configured_wave_rise_preserves_drag_divergence_slope() {
+        let plane = probe();
+        let mut analysis = AeroAnalysis::new(&plane, 32.0, None, None, None);
+        let cl = 0.5;
+        let thickness = analysis.section_thickness();
+        let cos_sweep = analysis.sweep_deg.to_radians().cos();
+        let mach_dd = analysis.drag.korn_technology_factor / cos_sweep
+            - thickness / cos_sweep.powi(2)
+            - cl / (10.0 * cos_sweep.powi(3));
+        for coefficient in [10.0, 20.0, 40.0] {
+            analysis.drag.wave_drag_coefficient = coefficient;
+            let h = 1e-5;
+            let slope = (analysis.wave_drag(mach_dd + h, cl, Some(thickness))
+                - analysis.wave_drag(mach_dd - h, cl, Some(thickness)))
+                / (2.0 * h);
+            assert!(
+                (slope - 0.1).abs() < 1e-8,
+                "coefficient {coefficient}: {slope}"
+            );
+        }
     }
 
     #[test]
