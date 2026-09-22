@@ -27,6 +27,26 @@ aircraft misses. Admitting a miss accepts a result computed outside that domain,
 opposite of what a tolerance expresses. The windows are already set wider than every registered \
 aircraft, so the margin a tolerance would add has been taken once already.";
 
+/// A `mdo::residuals_layout` conventional-practice band: incidence,
+/// dihedral or the wing's longitudinal apex station on the fuselage, sourced
+/// to a conceptual-design reference's qualitative rationale and anchored to
+/// this program's own registered fleet with margin.
+pub(super) const WING_LAYOUT_VALIDITY_DOMAIN: &str =
+    "A wing-to-fuselage layout window, in the same sense \
+as `PlausibilityLimits`: it states the span of conventional transport practice this program's \
+own registered aircraft sit inside, not a requirement measured against an external standard. \
+Every band already carries an explicit margin over the registered fleet, so the margin a \
+tolerance would add has been taken once already.";
+
+/// A `mdo::residuals_layout` physical containment relation: a structural or
+/// geometric component that must fit inside, or connect to, the body that
+/// carries it.
+pub(super) const WING_FUSELAGE_CONTAINMENT: &str = "A physical containment relation, not a fitted \
+correlation boundary: the wing root cannot begin or end outside the fuselage it is mounted on, \
+and the primary structure box it carries cannot be deeper than that fuselage. There is no \
+fraction of 'the wing is disconnected from its own body' that remains an aeroplane, so no \
+primary source states one.";
+
 /// A declared maximum weight.
 const ESTABLISHED_WEIGHT: &str = "A declared maximum weight is established under 14 CFR/CS 25.25 \
 rather than estimated, and no primary source states a fraction of an established maximum weight \
@@ -43,12 +63,17 @@ const THE_BRIEF: &str = "The value is the mission brief the user asked for. An a
 carries less or flies less far is a different requirement, not the same requirement within a \
 tolerance.";
 
-/// Every residual identifier the optimizer can emit, with its D02
-/// determination.
+/// Every residual identifier the optimizer can emit that is not part of
+/// `mdo::residuals_layout`'s wing-to-fuselage family
+/// ([`super::limits_layout::LAYOUT_LIMITS`]), with its D02 determination.
 ///
-/// Ordered by family, then by identifier, so a reader can find a limit and a
-/// diff shows a review change rather than a reordering.
-pub const REVIEWED_LIMITS: &[ReviewedLimit] = &[
+/// Split from that family into its own file so this table's own growth does
+/// not compete with the layout family's for the same budgeted file
+/// (`docs/source-size-budgets.tsv`'s ratchet); [`super::reviewed_limits`]
+/// is the one list a caller reads. Ordered by family, then by identifier, so
+/// a reader can find a limit and a diff shows a review change rather than a
+/// reordering.
+pub(super) const CORE_LIMITS: &[ReviewedLimit] = &[
     // --- Evaluation: no aircraft, or no measured quantity, behind the id ---
     ReviewedLimit {
         id: "design_space",
