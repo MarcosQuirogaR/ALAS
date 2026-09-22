@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-
 // Each argument is an independent schema or presentation input used by the
 // leaf editor; a bundle would make the dynamic-form boundary less explicit.
 #[allow(clippy::too_many_arguments)]
@@ -12,7 +11,6 @@ fn edit_leaf(
     slot: &mut Value,
     id_prefix: &str,
     options: Option<&[String]>,
-    modified: bool,
     label: &str,
 ) -> bool {
     match kind {
@@ -26,14 +24,23 @@ fn edit_leaf(
         }
         Kind::Int => {
             let mut v = slot.as_f64().unwrap_or(0.0);
+            // A whole-number field renders as a whole number. egui would
+            // otherwise derive one decimal place from the drag speed and the
+            // display scale, so wheel and iteration counts read "0.0"/"30.0".
+            // A declared sentinel reads as its word instead of as a count.
             let mut drag = DragValue::new(&mut v)
                 .speed(1.0)
-                .suffix(unit_suffix(field, modified));
+                .max_decimals(0)
+                .custom_formatter(move |value, _| match sentinel_text(field, value) {
+                    Some(word) => word,
+                    None => format_number(value, 0),
+                })
+                .custom_parser(move |text| parse_number_or_sentinel(text, field))
+                .suffix(unit_suffix(field));
             if let (Some(lo), Some(hi)) = bounds(field) {
                 drag = drag.range(lo..=hi);
             }
             let response = ui.add_sized([ui.available_width(), ui.spacing().interact_size.y], drag);
-            paint_modified_indicator(ui, &response, modified || response.changed());
             if response.changed() {
                 *slot = Value::from(v.round() as i64);
                 return true;
@@ -46,12 +53,16 @@ fn edit_leaf(
             let mut drag = DragValue::new(&mut v)
                 .speed(step)
                 .max_decimals(decimals)
-                .suffix(unit_suffix(field, modified));
+                .custom_formatter(move |value, _| match sentinel_text(field, value) {
+                    Some(word) => word,
+                    None => format_number(value, decimals),
+                })
+                .custom_parser(move |text| parse_number_or_sentinel(text, field))
+                .suffix(unit_suffix(field));
             if let (Some(lo), Some(hi)) = bounds(field) {
                 drag = drag.range(lo..=hi);
             }
             let response = ui.add_sized([ui.available_width(), ui.spacing().interact_size.y], drag);
-            paint_modified_indicator(ui, &response, modified || response.changed());
             if response.changed() {
                 *slot = Value::from(v);
                 return true;
@@ -65,34 +76,58 @@ fn edit_leaf(
                 .clamp(WEIGHT_MIN, WEIGHT_MAX);
             let slider = Slider::new(&mut v, WEIGHT_MIN..=WEIGHT_MAX)
                 .logarithmic(true)
-                .suffix(unit_suffix(field, modified));
+                .suffix(unit_suffix(field));
             let response =
                 ui.add_sized([ui.available_width(), ui.spacing().interact_size.y], slider);
-            paint_modified_indicator(ui, &response, modified || response.changed());
             if response.changed() {
                 *slot = Value::from(v);
                 return true;
             }
             false
         }
-        Kind::Str => edit_str(ui, field, slot, id_prefix, options, modified),
+        Kind::Str => edit_str(ui, field, slot, id_prefix, options),
         Kind::Optional => {
+            // An empty optional used to render as a blank box with no
+            // placeholder and no unit, so "derived", "random" and "never set"
+            // all looked alike, and three optional lengths stated their metre
+            // unit nowhere in the interface.
             let mut text = value_as_str(slot).unwrap_or_default();
-            let response = ui.add(
-                TextEdit::singleline(&mut text)
-                    .hint_text(unit_suffix_text("", modified))
-                    .desired_width(ui.available_width()),
-            );
-            paint_modified_indicator(ui, &response, modified || response.changed());
-            if response.changed() {
-                *slot = if text.is_empty() {
-                    Value::Null
+            let unit = display_unit(field.unit);
+            let hint = crate::views::tr(optional_hint(field));
+            let mut changed = false;
+            ui.horizontal(|ui| {
+                let unit_width = if unit.is_empty() {
+                    0.0
                 } else {
-                    Value::String(text)
+                    ui.fonts(|fonts| {
+                        fonts
+                            .layout_no_wrap(
+                                unit.clone(),
+                                egui::TextStyle::Body.resolve(ui.style()),
+                                ui.visuals().text_color(),
+                            )
+                            .size()
+                            .x
+                    }) + ui.spacing().item_spacing.x
                 };
-                return true;
-            }
-            false
+                let response = ui.add(
+                    TextEdit::singleline(&mut text)
+                        .hint_text(&hint)
+                        .desired_width((ui.available_width() - unit_width).max(40.0)),
+                );
+                if !unit.is_empty() {
+                    ui.label(RichText::new(unit).weak());
+                }
+                if response.changed() {
+                    *slot = if text.is_empty() {
+                        Value::Null
+                    } else {
+                        Value::String(text)
+                    };
+                    changed = true;
+                }
+            });
+            changed
         }
         Kind::NumberList => edit_number_list(ui, slot),
         Kind::TupleList => edit_tuple_list(ui, field, slot),
@@ -106,16 +141,19 @@ fn edit_leaf(
     }
 }
 
-fn unit_suffix(field: &Field, modified: bool) -> String {
-    unit_suffix_text(field.unit, modified)
-}
-
-fn unit_suffix_text(unit: &str, modified: bool) -> String {
-    match (unit.is_empty(), modified) {
-        (true, false) => String::new(),
-        (false, false) => format!(" {unit}"),
-        (true, true) => format!("  {}", tr("Modified")),
-        (false, true) => format!(" {unit}  {}", tr("Modified")),
+/// The editor's value suffix: the field's displayed unit and nothing else.
+///
+/// A numeric editor renders its suffix inside its own value area, so nothing
+/// but the unit belongs here: the modification marker is drawn once, in the
+/// label row (`form_feedback::modified_marker`). The unit itself goes through
+/// [`display_unit`], which is where the one dimensionless convention and the
+/// unit typography live.
+fn unit_suffix(field: &Field) -> String {
+    let unit = display_unit(field.unit);
+    if unit.is_empty() {
+        String::new()
+    } else {
+        format!(" {unit}")
     }
 }
 
@@ -125,7 +163,6 @@ fn edit_str(
     slot: &mut Value,
     id_prefix: &str,
     options: Option<&[String]>,
-    modified: bool,
 ) -> bool {
     let current = value_as_str(slot).unwrap_or_default();
 
@@ -137,11 +174,7 @@ fn edit_str(
                 .selected_text(if current.is_empty() {
                     "-".to_owned()
                 } else {
-                    format!(
-                        "{}{}",
-                        display_option(&current),
-                        unit_suffix_text("", modified)
-                    )
+                    display_option(&current)
                 })
                 .show_ui(ui, |ui| {
                     // Keep a value from an older save selectable even when it
@@ -193,12 +226,8 @@ fn edit_str(
         }
         None => {
             let mut text = current;
-            let response = ui.add(
-                TextEdit::singleline(&mut text)
-                    .desired_width(ui.available_width())
-                    .hint_text(unit_suffix_text("", modified)),
-            );
-            paint_modified_indicator(ui, &response, modified || response.changed());
+            let response =
+                ui.add(TextEdit::singleline(&mut text).desired_width(ui.available_width()));
             if response.changed() {
                 *slot = Value::String(text);
                 return true;
@@ -273,4 +302,3 @@ fn edit_tuple_list(ui: &mut Ui, field: &Field, slot: &mut Value) -> bool {
 #[cfg(test)]
 #[path = "../form_tests.rs"]
 mod tests;
-

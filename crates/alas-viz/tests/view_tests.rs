@@ -351,3 +351,61 @@ fn well_conditioned_polygons_keep_the_feathered_convex_path() {
     );
     assert!(!shapes.iter().any(|s| matches!(s, egui::Shape::Mesh(_))));
 }
+
+#[test]
+fn concave_faces_are_triangulated_without_changing_the_boundary_area() {
+    let boundary = vec![
+        [20.0, 20.0],
+        [220.0, 20.0],
+        [220.0, 100.0],
+        [130.0, 100.0],
+        [130.0, 220.0],
+        [20.0, 220.0],
+    ];
+    let mut scene = Scene::new(300.0, 300.0, None);
+    scene.render_title = false;
+    scene.add(SceneElement::Polygon {
+        points: boundary.clone(),
+        fill: Some(Fill::new(Color::rgb(1, 2, 3))),
+        stroke: Some(Stroke::new(Color::rgb(200, 200, 200), 0.35)),
+    });
+    let rect = egui::Rect::from_min_max(pos2(0.0, 0.0), pos2(300.0, 300.0));
+    let transform = ViewportTransform::fit(scene.width, scene.height, rect);
+    let shapes = render_scene_to_shapes(&scene, &transform);
+    let mesh = shapes
+        .iter()
+        .find_map(|shape| match shape {
+            egui::Shape::Mesh(mesh) => Some(mesh),
+            _ => None,
+        })
+        .expect("concave fill should use a mesh");
+    assert_eq!(mesh.indices.len(), (boundary.len() - 2) * 3);
+
+    let polygon_area = |points: &[[f32; 2]]| {
+        points
+            .iter()
+            .zip(points.iter().cycle().skip(1))
+            .take(points.len())
+            .map(|(left, right)| left[0] * right[1] - right[0] * left[1])
+            .sum::<f32>()
+            .abs()
+            * 0.5
+    };
+    let expected_area = polygon_area(
+        &boundary
+            .iter()
+            .map(|point| [point[0] as f32, point[1] as f32])
+            .collect::<Vec<_>>(),
+    );
+    let rendered_area = mesh
+        .indices
+        .chunks_exact(3)
+        .map(|triangle| {
+            let a = mesh.vertices[triangle[0] as usize].pos;
+            let b = mesh.vertices[triangle[1] as usize].pos;
+            let c = mesh.vertices[triangle[2] as usize].pos;
+            polygon_area(&[[a.x, a.y], [b.x, b.y], [c.x, c.y]])
+        })
+        .sum::<f32>();
+    assert!((rendered_area - expected_area).abs() < 1.0e-3);
+}

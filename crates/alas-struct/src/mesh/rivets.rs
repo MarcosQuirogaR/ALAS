@@ -3,8 +3,8 @@
 
 //! Tying a truncated rib to the skin around it.
 //!
-//! A transition rib is a rib the root plane cut short, so the skin panels --
-//! which start at the first full-length rib -- do not reach it. Left alone it
+//! A transition rib is a rib the root plane cut short, so the skin panels,
+//! which start at the first full-length rib, do not reach it. Left alone it
 //! is a stiff plate floating inside a wingbox, connected to the spar and
 //! nothing else. Each of its grids is therefore made the dependent grid of a
 //! weighted-average rigid element whose independents are the three nearest
@@ -29,7 +29,7 @@ const RIVET_INDEPENDENTS: usize = 3;
 /// looked for in.
 const SEARCH_BAND_RIB_SPACINGS: f64 = 3.0;
 
-/// Write one rivet per transition-rib grid, returning how many were written --
+/// Write one rivet per transition-rib grid, returning how many were written:
 /// `_add_transition_rbe3`.
 #[allow(clippy::too_many_arguments)] // Mirrors the reference's own signature.
 pub(super) fn add_transition_rbe3(

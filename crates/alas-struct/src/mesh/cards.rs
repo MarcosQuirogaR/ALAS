@@ -207,7 +207,7 @@ impl Deck {
             .map(|grid| grid.xyz)
     }
 
-    /// The `y` coordinate of grid `nid` -- the one component every consumer of
+    /// The `y` coordinate of grid `nid`: the one component every consumer of
     /// a finished mesh asks for, since the deck is a semi-wing and `y` is span.
     ///
     /// Returns `NaN` for a grid the deck does not have, which no caller can

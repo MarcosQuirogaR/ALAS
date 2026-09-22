@@ -26,7 +26,7 @@
 //! declared height clears 1.15 diameters is treated as an A380-style ovoid and
 //! gets two passenger decks. A circular fuselage leaves `height_m` unset and
 //! can never reach it, which is why the test reads the raw `Option` rather
-//! than [`alas_config::FuselageConfig::effective_height_m`] -- the latter
+//! than [`alas_config::FuselageConfig::effective_height_m`]: the latter
 //! falls back to the diameter, and `d >= 1.15 d` would be a different
 //! question that happens to have the same answer today.
 //!

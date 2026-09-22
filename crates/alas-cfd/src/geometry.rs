@@ -85,7 +85,7 @@ pub fn validate_coordinates(coordinates: &[(f64, f64)]) -> Result<(), String> {
     Ok(())
 }
 
-fn canonical_topology_points(coordinates: &[(f64, f64)]) -> Vec<(f64, f64)> {
+pub(crate) fn canonical_topology_points(coordinates: &[(f64, f64)]) -> Vec<(f64, f64)> {
     let mut points = coordinates.to_vec();
     while points.len() > 1 && distance_sq(points[0], *points.last().unwrap_or(&points[0])) < 1.0e-20
     {
@@ -94,7 +94,7 @@ fn canonical_topology_points(coordinates: &[(f64, f64)]) -> Vec<(f64, f64)> {
     points
 }
 
-fn distance_sq(a: (f64, f64), b: (f64, f64)) -> f64 {
+pub(crate) fn distance_sq(a: (f64, f64), b: (f64, f64)) -> f64 {
     (a.0 - b.0).mul_add(a.0 - b.0, (a.1 - b.1) * (a.1 - b.1))
 }
 
@@ -102,7 +102,7 @@ fn orientation(a: (f64, f64), b: (f64, f64), c: (f64, f64)) -> f64 {
     (b.0 - a.0) * (c.1 - a.1) - (b.1 - a.1) * (c.0 - a.0)
 }
 
-fn segments_cross(a: (f64, f64), b: (f64, f64), c: (f64, f64), d: (f64, f64)) -> bool {
+pub(crate) fn segments_cross(a: (f64, f64), b: (f64, f64), c: (f64, f64), d: (f64, f64)) -> bool {
     let ab_c = orientation(a, b, c);
     let ab_d = orientation(a, b, d);
     let cd_a = orientation(c, d, a);
@@ -119,7 +119,7 @@ fn ranges_overlap(a: f64, b: f64, c: f64, d: f64) -> bool {
     a.min(b) <= c.max(d) + 1.0e-10 && c.min(d) <= a.max(b) + 1.0e-10
 }
 
-fn coordinate_hash(name: &str, coordinates: &[(f64, f64)]) -> String {
+pub(crate) fn coordinate_hash(name: &str, coordinates: &[(f64, f64)]) -> String {
     // FNV-1a is deterministic across platforms and requires no crypto crate;
     // it is an identity/provenance checksum, not a security boundary.
     let mut hash = 0xcbf29ce484222325_u64;

@@ -19,8 +19,8 @@ mod external;
 #[path = "fullscreen_result.rs"]
 mod fullscreen_result;
 mod images;
+mod openvsp;
 mod solver;
-use external::show_external_tools_result;
 use fullscreen_result::show_fullscreen_result;
 #[cfg(test)]
 use images::scene_has_external_images;
@@ -81,11 +81,6 @@ const TABS: &[Tab] = &[
         id: "model",
         title: "Model Comparison",
         category: "Model Comparison",
-    },
-    Tab {
-        id: "external",
-        title: "External Tools",
-        category: "External Tools",
     },
 ];
 
@@ -196,14 +191,6 @@ pub fn show_results_view(state: &mut AppState, ui: &mut Ui) {
             });
         return;
     }
-    if state.results_tab == "external" {
-        ScrollArea::vertical()
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
-                show_external_tools_result(ui, result);
-            });
-        return;
-    }
     let Some(tab) = TABS.iter().find(|t| t.id == state.results_tab) else {
         return;
     };
@@ -288,14 +275,19 @@ fn figure_tile(
         ui.set_min_width(content_width);
         ui.set_max_width(content_width);
         ui.vertical(|ui| {
+            // The figure explanation belongs to the title's hover text only.
+            // Learn-more help used to repeat it as a subtitle under the
+            // heading, which was redundant with the hover and crowded the
+            // result cards, so no inline subtitle is drawn here.
             ui.label(RichText::new(tr(title)).strong())
                 .on_hover_text(tr(description));
-            if state.help_verbose {
-                ui.label(RichText::new(tr(description)).weak().small());
-            }
             match scene.as_ref() {
                 Some(scene) => {
                     let canvas_width = ui.available_width().max(1.0);
+                    let canvas_rect = egui::Rect::from_min_size(
+                        ui.cursor().min,
+                        vec2(canvas_width, canvas_height),
+                    );
                     if images::scene_has_external_images(scene) {
                         if images::show_external_images(
                             state,
@@ -357,6 +349,9 @@ fn figure_tile(
                                 orbitable,
                             );
                         }
+                    }
+                    if id == "openvsp_cad_preview" {
+                        openvsp::show_launch_button(state, ui, canvas_rect);
                     }
                 }
                 None => {

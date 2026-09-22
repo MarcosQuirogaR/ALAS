@@ -15,8 +15,8 @@
 //! defaults throughout, matching the generator.
 //!
 //! Every quantity here is closed-form `f64` arithmetic over the (already
-//! `green`) built geometry -- component mass fractions, empirical Torenbeek
-//! weights, mass-weighted centroids -- so the whole row is checked at
+//! `green`) built geometry: component mass fractions, empirical Torenbeek
+//! weights, mass-weighted centroids, so the whole row is checked at
 //! `Tier::Closed`, matching `docs/PORTING.md`.
 
 // This file is itself a test binary, so an unwrap or expect that fails is

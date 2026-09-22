@@ -10,7 +10,7 @@
 //!
 //! This is the model `Atmosphere(altitude=...)` uses when no `method` is
 //! named, which is how every module in the reference implementation but one
-//! constructs it -- the turbofan cycle, the performance envelope, the
+//! constructs it: the turbofan cycle, the performance envelope, the
 //! aerodynamic analysis, stability, the full analysis. It exists so that a
 //! gradient-based optimizer sees a smooth function rather than the ISA's
 //! piecewise-linear temperature, and it is not a small correction to the
@@ -31,7 +31,7 @@
 //! # The altitude grid
 //!
 //! Sixteen hand-picked altitudes bracketing the ISA's layer boundaries, plus
-//! two geometric fans reaching far outside any atmosphere -- up to 2,087 km
+//! two geometric fans reaching far outside any atmosphere, up to 2,087 km
 //! and down to -5,000 km. The fans are not physical; they exist so an
 //! optimizer that steps an altitude variable somewhere absurd still gets a
 //! finite number and a finite gradient back instead of leaving the model's
@@ -41,7 +41,7 @@
 //!
 //! The grid is computed here from the same construction upstream writes
 //! rather than transcribed as a table of thirty-eight literals, so that what
-//! it *is* -- two geometric fans and a hand-picked list -- stays legible. The
+//! it *is* (two geometric fans and a hand-picked list) stays legible. The
 //! parity fixture records the resulting altitudes and compares them, which is
 //! what makes computing them safe: a mistake in the construction is a
 //! different grid and a different atmosphere, and the comparison sees it.
@@ -88,8 +88,8 @@ fn geomspace(start: f64, stop: f64, count: usize) -> Vec<f64> {
 /// The thirty-eight altitudes the fit interpolates, in metres, ascending.
 ///
 /// `np.sort(np.unique(...))` upstream. The three sources produce no
-/// duplicates -- one fan is entirely negative, the other entirely above 87 km
-/// -- so the deduplication has nothing to remove here; it is reproduced
+/// duplicates (one fan is entirely negative, the other entirely above 87 km)
+/// so the deduplication has nothing to remove here; it is reproduced
 /// because leaving it out would make the grid silently depend on that
 /// remaining true.
 static ALTITUDE_KNOTS_M: LazyLock<Vec<f64>> = LazyLock::new(|| {

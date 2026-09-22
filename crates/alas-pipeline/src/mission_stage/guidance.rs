@@ -131,12 +131,40 @@ pub(super) fn adapt_failed_climb(
     })
 }
 
-/// Increase a descent rate when the minimum available thrust leaves too much
-/// excess energy for the requested descent. The rate is kept below the true
-/// airspeed so the horizontal component remains real.
+/// Revise a descent rate the aircraft could not fly, in the direction the
+/// solver's own refusal indicates. The rate is kept below the true airspeed so
+/// the horizontal component remains real, and above
+/// [`MIN_VERTICAL_RATE_M_S`] so the segment remains a descent.
+///
+/// # Why the direction has to be chosen rather than fixed
+///
+/// A descent can fail at either end of the propulsion envelope and the two
+/// need opposite revisions:
+///
+/// - **Not enough thrust.** At the commanded rate and speed the aircraft
+///   cannot hold its energy; the descent must become *steeper*, trading
+///   altitude for the energy the engine will not supply.
+/// - **Too much thrust at flight idle** (`required_below_idle`). The engine's
+///   own floor already delivers more force than the commanded profile can
+///   absorb, so the solver asks for a command below it. Steepening makes that
+///   strictly worse: the forward weight component grows and the aircraft needs
+///   even less thrust. The descent must become *shallower*, so that the
+///   thrust the profile requires rises back to something the engine can hold.
+///
+/// This function increased the rate unconditionally until the solver could
+/// distinguish the two. It could not before: below the deck's flight-idle
+/// floor every command produced the identical force, so a sub-idle descent
+/// surfaced only as a stalled root find, and every revision moved it further
+/// from a schedule it could fly until the increase saturated against
+/// `maximum_rate` and the loop gave up.
+///
+/// Both branches reuse the existing bounded factors. No new rate, speed or
+/// schedule is introduced here, and the convergence gate is untouched: a
+/// revised profile still has to be flown and still has to converge.
 pub(super) fn adapt_failed_descent(
     schedule: &mut [SegmentSpec],
     index: usize,
+    required_below_idle: bool,
 ) -> Option<GuidanceChange> {
     let spec = schedule.get_mut(index)?;
     let SegmentKind::Descent {
@@ -155,8 +183,12 @@ pub(super) fn adapt_failed_descent(
         return None;
     }
     let maximum_rate = (spec.air_speed_m_s * 0.8).max(MIN_VERTICAL_RATE_M_S);
-    let new_rate = (descent_rate_m_s * RATE_INCREASE_FACTOR).min(maximum_rate);
-    if new_rate <= descent_rate_m_s + f64::EPSILON {
+    let new_rate = if required_below_idle {
+        (descent_rate_m_s * RATE_REDUCTION_FACTOR).max(MIN_VERTICAL_RATE_M_S)
+    } else {
+        (descent_rate_m_s * RATE_INCREASE_FACTOR).min(maximum_rate)
+    };
+    if (new_rate - descent_rate_m_s).abs() <= f64::EPSILON {
         return None;
     }
     spec.kind = SegmentKind::Descent {

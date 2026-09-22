@@ -273,7 +273,7 @@ fn tank_limited_model_cg_uses_the_analyzed_fuel_and_names_the_load_case_honestly
     assert_eq!(takeoff.state.label(), "analyzed TOW");
     // `model_cg_assessment` builds its `MassBreakdown` from exactly the ten
     // named OEW/payload/fuel fields (`crates/alas-mass/src/breakdown_parts/part_01.rs`'s
-    // `OEW_KEYS` plus payload and fuel) -- there is no eleventh "unusable
+    // `OEW_KEYS` plus payload and fuel); there is no eleventh "unusable
     // fuel" slot, so `takeoff.mass_kg` here is OEW(narrow) + payload +
     // analyzed usable fuel, the same quantity `fuel_loading.analyzed_takeoff_mass_kg`
     // held before the MTOW/unusable-fuel closure. That closure made

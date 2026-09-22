@@ -26,10 +26,10 @@ const CRUISE_BLUE: &str = "tab:blue";
 
 /// Generate the CS-25-style flight maneuver and gust envelope (V-n diagram).
 ///
-/// Every boundary comes straight off `vn` -- the output of
+/// Every boundary comes straight off `vn`: the output of
 /// [`alas_perf::performance::build_vn_diagram`], which is itself derived from
 /// `DesignRequirements`/`PerformanceConfig` and the analyzed wing's own
-/// reference area -- rather than being recomputed here; this function only
+/// reference area, rather than being recomputed here; this function only
 /// draws it. Reproduces upstream's layered bands in the same paint order
 /// (never-exceed red, structural-margin orange, caution yellow / normal
 /// green, the hatched stall-limited region, then the boundary lines and
@@ -215,7 +215,7 @@ fn fill_band(
 }
 
 /// A `fill_between` restricted to `[start, end)`, for the caution/normal
-/// split -- upstream's `where=` masked calls.
+/// split: upstream's `where=` masked calls.
 #[allow(clippy::too_many_arguments)]
 fn fill_band_slice(
     scene: &mut Scene,
@@ -256,7 +256,7 @@ fn line_series(scene: &mut Scene, axes: &Axes2D, x: &[f64], y: &[f64], stroke: S
 }
 
 /// Diagonal hatch lines across the stall-limited region (`0..v_s_kt`, full
-/// axis height) -- the closest approximation [`crate::scene`]'s primitives
+/// axis height): the closest approximation [`crate::scene`]'s primitives
 /// offer to matplotlib's `hatch="///"`, since there is no dedicated hatch fill.
 fn draw_hatch(scene: &mut Scene, axes: &Axes2D, v_s_kt: f64) {
     let top_left = axes.map_point(0.0, axes.y_max);
@@ -431,7 +431,7 @@ mod tests {
 
     #[test]
     fn the_never_exceed_band_reaches_past_vd_to_the_axis_edge() {
-        // A case where the last knot sits well beyond VD -- the axvspan
+        // A case where the last knot sits well beyond VD: the axvspan
         // rectangle must still cover that whole tail.
         let vn = sample_vn();
         let scene = figure_vn_diagram(&vn, None);

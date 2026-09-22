@@ -20,7 +20,7 @@
 //!
 //! The second is worse, because it moves inside a single search. Whether a
 //! station exists can depend on the design vector, so two adjacent candidates
-//! could differ by a whole section -- and therefore by eight strips and,
+//! could differ by a whole section, and therefore by eight strips and,
 //! measured, by about fifteen percent in induced drag. A search cannot
 //! distinguish that discretisation step from a real aerodynamic gradient; it
 //! will happily climb it.
@@ -30,7 +30,7 @@
 //! A cross-section is not a mesh node. It is where the loft *changes*: the
 //! side-of-body station, the Yehudi kink, the tip. Chord slope, twist and
 //! airfoil are all discontinuous in derivative there, and a panel spanning
-//! such a station averages across the discontinuity and erases it -- the same
+//! such a station averages across the discontinuity and erases it: the same
 //! failure mode as meshing a cambered section with one chordwise panel, where
 //! the Hicks-Henne bump variables become literally invisible.
 //!
@@ -51,7 +51,7 @@
 //! is also markedly worse at any affordable count: the A320-200 reports a
 //! near-field induced-drag factor of 0.0376 on a uniform 24-panel semispan
 //! against a converged 0.0411, and needs about 96 panels to recover it.
-//! Cosine spacing within each section behaves the same way -- 0.0380 at 24,
+//! Cosine spacing within each section behaves the same way: 0.0380 at 24,
 //! 0.0411 at 96. An even split reaches 0.0411 at 24 panels and holds it
 //! through a four-fold refinement.
 //!
@@ -67,7 +67,7 @@
 //! and a feature with no panel is a feature that is not in the mesh. Ties in
 //! the remainder go to the longer section, and then to the inboard one, so
 //! the result is a deterministic function of the geometry and the requested
-//! count -- the same wing and count give the same mesh on every run.
+//! count: the same wing and count give the same mesh on every run.
 
 use super::wing::{SpacingFunction, SubdivideSectionsError, Wing, WingXSec};
 
@@ -113,7 +113,7 @@ impl Wing {
     /// `panels` is an absolute count for the whole surface, not a multiplier:
     /// the same number gives the same mesh density whether the planform has
     /// two lofted sections or four. A count below the number of sections
-    /// cannot honour both the count and the stations, and the stations win --
+    /// cannot honour both the count and the stations, and the stations win:
     /// the result then has one panel per section. A surface with fewer than
     /// two cross-sections is returned unchanged.
     ///
@@ -159,7 +159,7 @@ impl Wing {
 /// One cross-section a fraction `s` of the way from `a` to `b`.
 ///
 /// Identical in result to what [`Wing::subdivide_sections`] produces at the
-/// same fraction -- the linear loft of leading edge, chord and twist, and the
+/// same fraction: the linear loft of leading edge, chord and twist, and the
 /// reference's own airfoil rule: carry the inboard section unless the two are
 /// structurally distinct, and blend only then.
 fn interpolate(a: &WingXSec, b: &WingXSec, s: f64) -> Result<WingXSec, SubdivideSectionsError> {

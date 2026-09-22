@@ -10,22 +10,17 @@
 //! edit. A registered preset's geometry stays read-only here as everywhere
 //! else in the guided workspace.
 
-use egui::{vec2, Context, RichText, ScrollArea, ViewportBuilder};
+use egui::{vec2, Context, ScrollArea, ViewportBuilder, ViewportCommand};
 
-use crate::native_viewport::show_native_viewport;
+use crate::native_viewport::{show_native_viewport, viewport_id};
 use crate::nav::{self, PageKind};
 use crate::state::AppState;
 use crate::views::{form_page, tr};
 
-/// The pages the window offers, in tab order.
-fn pages() -> Vec<&'static nav::Page> {
-    nav::NAV
-        .iter()
-        .filter(|group| group.title == "Advanced Settings")
-        .flat_map(|group| group.subgroups.iter())
-        .flat_map(|subgroup| subgroup.pages.iter())
-        .filter(|page| page.kind == PageKind::Form)
-        .collect()
+/// The pages the window offers, in tab order: every Advanced Settings tab
+/// (discipline forms, Airfoil Screening, and External Tools) plus Run options.
+pub fn pages() -> Vec<&'static nav::Page> {
+    nav::ADVANCED_SETTINGS_PAGES.iter().collect()
 }
 
 /// Render the window when it is open.
@@ -83,20 +78,27 @@ pub fn show_advanced_settings_window(state: &mut AppState, ctx: &Context) {
                     let Some(page) = pages.iter().find(|p| p.id == active).cloned() else {
                         return;
                     };
+                    match page.kind {
+                        PageKind::Setup => {
+                            crate::views::show_tools_view(state, ui);
+                            return;
+                        }
+                        PageKind::AirfoilScreening => {
+                            if state.screening.window_open {
+                                ui.label(tr("Airfoil Screening is open in its own window."));
+                            } else {
+                                crate::views::show_screening_view_advanced(state, ui);
+                            }
+                            return;
+                        }
+                        _ => {}
+                    }
                     let locked = state.manual_geometry_locked()
                         && matches!(page.group, Some("geometry") | Some("control_surfaces"));
-                    if locked {
-                        ui.label(
-                            RichText::new(tr(
-                                "Preset geometry is protected from manual edits here as well; open the sandbox for geometry experiments.",
-                            ))
-                            .color(ui.visuals().warn_fg_color)
-                            .small(),
-                        );
-                    }
-                    ui.add_enabled_ui(!locked, |ui| {
-                        form_page::show_form_page(state, ui, page);
-                    });
+                    // The page draws its own lock notice under its title and
+                    // disables only its editors, so a protected page keeps its
+                    // heading, description and field labels readable.
+                    form_page::show_form_page_locked(state, ui, page, locked);
                 });
         },
     );
@@ -108,6 +110,12 @@ pub fn show_advanced_settings_window(state: &mut AppState, ctx: &Context) {
 /// The top-bar action that opens the window.
 pub fn show_menu_action(state: &mut AppState, ui: &mut egui::Ui) {
     if ui.button(tr("Advanced Settings")).clicked() {
+        if state.sandbox.layout.advanced_settings_open {
+            // The action is also a raise/focus command when the native window
+            // already exists behind the main ALAS window.
+            ui.ctx()
+                .send_viewport_cmd_to(viewport_id("advanced_settings"), ViewportCommand::Focus);
+        }
         state.sandbox.layout.advanced_settings_open = true;
     }
 }

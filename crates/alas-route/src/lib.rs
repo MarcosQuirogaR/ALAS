@@ -33,7 +33,7 @@
 //! It performs no network access. Upstream's routing package fetches a
 //! dispatch plan over HTTPS and downloads the navigation data, and both of
 //! those would put an HTTP client and a TLS stack into a crate whose job is
-//! spherical geometry -- and therefore into everything that depends on it.
+//! spherical geometry, and therefore into everything that depends on it.
 //! The addresses, the request this needs and the size floors a completed
 //! transfer must clear are all stated here; `alas-app` performs the transfers.
 //! This is the same boundary `alas-config::settings` draws for file codecs, and

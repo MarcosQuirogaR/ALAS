@@ -220,7 +220,7 @@ fn candidate_mses_status(candidate: &alas_screen::types::AirfoilCandidateResult)
         return tr("MSES-verified");
     }
     match candidate.mses_status.as_deref() {
-        Some("not_configured") => tr("MSES executables not configured (Setup > External Tools)"),
+        Some("not_configured") => tr("MSES executables not configured (Advanced Settings > External Tools)"),
         Some(status) => status.to_owned(),
         None => "-".to_owned(),
     }
@@ -331,7 +331,7 @@ fn screening_mses_unavailable_reason(
     }
     if !statuses.is_empty() && statuses.iter().all(|status| *status == "not_configured") {
         return tr(
-            "Not available: MSES verification was selected, but no MSES installation was resolved (Setup > External Tools).",
+            "Not available: MSES verification was selected, but no MSES installation was resolved (Advanced Settings > External Tools).",
         );
     }
     if !statuses.is_empty() && statuses.iter().all(|status| *status == "disabled") {
@@ -354,7 +354,7 @@ fn translate_screening_status(status: &str) -> String {
         .collect::<Vec<_>>();
     if status.starts_with("Stage 1 (2-D):") && numbers.len() == 6 {
         return tr_fields(
-            "Stage 1 (2-D): {done}/{total} evaluated -- {ok} ok, {errors} errors",
+            "Stage 1 (2-D): {done}/{total} evaluated ({ok} ok, {errors} errors)",
             &[
                 ("done", numbers[2].to_owned()),
                 ("total", numbers[3].to_owned()),
@@ -365,7 +365,7 @@ fn translate_screening_status(status: &str) -> String {
     }
     if status.starts_with("Stage 2 (3-D wing):") && numbers.len() == 5 {
         return tr_fields(
-            "Stage 2 (3-D wing): {done}/{total} re-simulated -- {ok} ok",
+            "Stage 2 (3-D wing): {done}/{total} re-simulated ({ok} ok)",
             &[
                 ("done", numbers[2].to_owned()),
                 ("total", numbers[3].to_owned()),
@@ -375,7 +375,7 @@ fn translate_screening_status(status: &str) -> String {
     }
     if status.starts_with("Stage 3 (MSES):") && numbers.len() == 4 {
         return tr_fields(
-            "Stage 3 (MSES): {done}/{total} verified -- {ok} ok",
+            "Stage 3 (MSES): {done}/{total} verified ({ok} ok)",
             &[
                 ("done", numbers[1].to_owned()),
                 ("total", numbers[2].to_owned()),

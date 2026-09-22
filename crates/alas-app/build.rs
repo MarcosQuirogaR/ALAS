@@ -20,7 +20,7 @@ fn main() -> std::io::Result<()> {
         .set("ProductName", "ALAS")
         .set("FileDescription", "ALAS")
         .set("InternalName", "ALAS")
-        .set("OriginalFilename", "alas.exe")
+        .set("OriginalFilename", "ALAS.exe")
         .set("FileVersion", env!("CARGO_PKG_VERSION"))
         .set("ProductVersion", env!("CARGO_PKG_VERSION"))
         .set("CompanyName", env!("CARGO_PKG_AUTHORS"))

@@ -27,14 +27,22 @@
 //!   Climb and descent are not credited separately.
 //! * Fuel burn: the closure's block fuel for the declared route.
 //! * Cruise speed and ceiling: thrust available from the catalogue deck at
-//!   the maximum-climb rating against the parabolic polar fitted from the
-//!   reduced full analysis, at the takeoff-mass estimate. The service
+//!   the maximum-climb rating against the wave-free base polar fitted to
+//!   the reduced sweep's parasite-plus-induced drag, plus one Korn wave term
+//!   at the flight Mach, at the takeoff-mass estimate. The service
 //!   ceiling is the altitude where the excess-power rate of climb falls to
 //!   0.508 m/s (100 ft/min) at the best-climb Mach, bounded by the deck
 //!   domain (13 716 m, Mach 0.9). The achievable Mach is the highest
 //!   thrust-equals-drag Mach at the requested altitude, capped at 0.895.
+//! * Payload capacity: the estimated achievable payload of the fixed
+//!   aircraft, the declared structural cap bounded by the preset MZFW-derived
+//!   limit and by `MTOW - OEW`; the declared cap is the requested value.
 //! * Payload-range: the same corner convention as the report figure (max
-//!   payload with fuel to MTOW, max fuel with payload traded, ferry).
+//!   payload with fuel to MTOW, max fuel with payload traded, ferry), with
+//!   the maximum payload bounded as above so no corner exceeds MTOW; an
+//!   empty mass at or above MTOW fails the diagram instead of drawing it.
+//!   Turboprop ranges scale the two-engine catalogue fuel-flow anchor by the
+//!   installed engine count.
 //! * Feasibility: the physical feasibility assessment of the reduced full
 //!   analysis without a flown mission, plus the closure's dispatch flags.
 //!
@@ -52,13 +60,16 @@ use alas_mass::dispatch::DispatchStatus;
 use alas_opt::assess_product_candidate;
 
 use crate::feasibility::{assess_physical_feasibility, FindingSeverity};
-use crate::full_analysis::FullAnalysis;
+use crate::full_analysis::{effective_structural_payload_limit_kg, FullAnalysis};
 
 mod breguet;
 mod cruise;
 mod types;
 
-pub use breguet::{payload_range_corners, QuickPayloadRange};
+pub use breguet::{
+    payload_capacity_estimate, payload_range_corners, PayloadCapacityEstimate,
+    PayloadRangeUnavailable, QuickPayloadRange,
+};
 pub use cruise::{CruiseSolve, SERVICE_CEILING_CLIMB_RATE_M_S};
 pub use types::{
     QuickAnalysisRequest, QuickAnalysisSummary, QuickEvent, QuickFeasibility, QuickFlag,
@@ -206,11 +217,25 @@ pub fn run_quick_analysis(
                 None,
                 "FLOPS transport build-up at the fixed design weights",
             );
+            let payload_capacity = payload_capacity_estimate(
+                requirements.max_structural_payload_kg,
+                effective_structural_payload_limit_kg(
+                    &reduced,
+                    &request.design,
+                    sized.operating_empty_mass_kg,
+                ),
+                sized.payload_kg,
+                requirements.mtow_kg,
+                sized.operating_empty_mass_kg,
+            );
             publisher.value(
                 QuickMetric::PayloadCapacity,
-                requirements.max_structural_payload_kg,
-                None,
-                "declared structural payload cap; not derived from the cabin",
+                payload_capacity.capacity_kg,
+                Some(requirements.max_structural_payload_kg).filter(|cap| *cap > 0.0),
+                &format!(
+                    "estimated achievable payload of the fixed aircraft, bounded by the {}; not derived from the cabin volume",
+                    payload_capacity.basis
+                ),
             );
             publisher.value(
                 QuickMetric::CarriedPayload,
@@ -377,14 +402,16 @@ pub fn run_quick_analysis(
     }
 
     match payload_range_corners(&reduced, &report) {
-        Some(corners) => publisher.publish(
+        Ok(corners) => publisher.publish(
             QuickMetric::PayloadRange,
             QuickOutcome::PayloadRange(corners),
         ),
-        None => publisher.publish(
-            QuickMetric::PayloadRange,
-            QuickOutcome::Unsupported("fuel capacity or propulsion anchor unavailable".to_owned()),
-        ),
+        Err(PayloadRangeUnavailable::Unsupported(reason)) => {
+            publisher.publish(QuickMetric::PayloadRange, QuickOutcome::Unsupported(reason))
+        }
+        Err(PayloadRangeUnavailable::Infeasible(reason)) => {
+            publisher.publish(QuickMetric::PayloadRange, QuickOutcome::Failed(reason))
+        }
     }
 
     let feasibility = assess_physical_feasibility(&reduced, &request.design, &report, None);

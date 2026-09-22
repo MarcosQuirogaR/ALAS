@@ -9,6 +9,10 @@ use std::collections::HashSet;
 
 const EPS: f64 = 1.0e-12;
 
+/// Per-face centroid and component values parsed from a raw OpenFOAM
+/// sampled-surface text dump.
+pub(super) type FaceRows = Vec<([f64; 3], Vec<f64>)>;
+
 fn p2(a: [f64; 3], b: [f64; 3]) -> f64 {
     (a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2)
 }
@@ -31,7 +35,7 @@ fn sub(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
 pub(crate) fn raw_rows(
     text: &str,
     components: usize,
-) -> Result<(Vec<([f64; 3], Vec<f64>)>, Option<usize>), SurfaceError> {
+) -> Result<(FaceRows, Option<usize>), SurfaceError> {
     let mut rows = Vec::new();
     let mut declared = None;
     for line in text.lines() {
@@ -41,7 +45,7 @@ pub(crate) fn raw_rows(
         }
         if trimmed.starts_with('#') || trimmed.starts_with("//") {
             let words = trimmed
-                .trim_start_matches(|c| c == '#' || c == '/')
+                .trim_start_matches(['#', '/'])
                 .split_whitespace()
                 .collect::<Vec<_>>();
             if let Some(i) = words.iter().position(|w| *w == "FACE_DATA") {
@@ -50,11 +54,7 @@ pub(crate) fn raw_rows(
             continue;
         }
         let mut values = Vec::new();
-        for token in trimmed
-            .replace('(', " ")
-            .replace(')', " ")
-            .split_whitespace()
-        {
+        for token in trimmed.replace(['(', ')'], " ").split_whitespace() {
             values.push(
                 token
                     .parse::<f64>()

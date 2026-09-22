@@ -40,23 +40,19 @@ fn main() -> io::Result<()> {
 
     let bounds = local_bounds(&preset.design_vector);
     let mut optimizer_runs = Vec::new();
+    // Differential evolution (L-SHADE, epsilon-constrained) is the one
+    // search kernel this build runs; the legacy method names this sweep used
+    // to compare (`feasibility_first_de`, `nsga2`, `turbo_1`, `cma_es`) are
+    // retired and no longer distinct algorithms to sample.
     for incidence_offset_deg in [0.0, 1.5] {
-        for method in [
+        optimizer_runs.push(run_optimizer(
+            &config,
+            &preset.design_vector,
+            &bounds,
             "differential_evolution",
-            "feasibility_first_de",
-            "nsga2",
-            "turbo_1",
-            "cma_es",
-        ] {
-            optimizer_runs.push(run_optimizer(
-                &config,
-                &preset.design_vector,
-                &bounds,
-                method,
-                false,
-                incidence_offset_deg,
-            ));
-        }
+            false,
+            incidence_offset_deg,
+        ));
     }
     optimizer_runs.push(run_optimizer(
         &config,

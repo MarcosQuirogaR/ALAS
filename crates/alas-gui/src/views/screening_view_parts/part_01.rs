@@ -12,16 +12,30 @@ use crate::views::{tr, tr_fields};
 
 /// Render the airfoil screening page.
 pub fn show_screening_view(state: &mut AppState, ui: &mut Ui) {
+    show_screening_view_scoped(state, ui, false);
+}
+
+/// Render the screening page from Advanced Settings, where custom-airfoil
+/// import is intentionally available.
+pub(crate) fn show_screening_view_advanced(state: &mut AppState, ui: &mut Ui) {
+    show_screening_view_scoped(state, ui, true);
+}
+
+fn show_screening_view_scoped(state: &mut AppState, ui: &mut Ui, allow_custom_import: bool) {
     // The run log is a resizable bottom panel. Keeping the complete screening
     // page in one scroll area makes the lower figures reachable at its maximum
     // height instead of letting the central panel clip them.
     ScrollArea::vertical()
         .id_salt("screening_page_scroll")
         .auto_shrink([false, false])
-        .show(ui, |ui| show_screening_content(state, ui));
+        .show(ui, |ui| show_screening_content_scoped(state, ui, allow_custom_import));
 }
 
-fn show_screening_content(state: &mut AppState, ui: &mut Ui) {
+fn show_screening_content_scoped(
+    state: &mut AppState,
+    ui: &mut Ui,
+    allow_custom_import: bool,
+) {
     ui.heading(tr("Airfoil Screening"));
     if state.help_verbose {
         ui.label(
@@ -34,7 +48,7 @@ fn show_screening_content(state: &mut AppState, ui: &mut Ui) {
     }
     ui.add_space(6.0);
 
-    show_screening_preview(&mut state.screening, ui);
+    show_screening_preview_scoped(&mut state.screening, ui, allow_custom_import);
     ui.add_space(12.0);
     show_options(state, ui);
     ui.add_space(8.0);
@@ -85,7 +99,7 @@ fn show_mses_readiness(state: &mut AppState, ui: &mut Ui) {
     } else if readiness.pending() {
         tr("Checking...")
     } else {
-        tr("MSES executables not configured (Setup > External Tools)")
+        tr("MSES executables not configured (Advanced Settings > External Tools)")
     };
     let color = if resolved.is_some() {
         crate::theme::success_color(ui.visuals())

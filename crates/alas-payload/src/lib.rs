@@ -19,7 +19,7 @@
 //! other part of the interior reads, so that the seating and the hold cannot
 //! disagree about where the floor is or how wide it is. [`layout`] is the item
 //! and summary vocabulary both layout engines produce. [`cabin`] is the
-//! passenger engine -- seats, monuments, CS-25 exits and checked baggage --
+//! passenger engine (seats, monuments, CS-25 exits and checked baggage)
 //! and [`cargo`] is the freighter one, containers and the trim solver that
 //! distributes a load across them. [`build`] is the dispatcher every consumer
 //! actually calls, together with the fast auto-sizer that turns a class mix

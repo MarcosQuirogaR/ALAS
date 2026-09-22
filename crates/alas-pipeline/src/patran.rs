@@ -18,6 +18,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use alas_exec::process::{kill_process_tree, NewProcessGroup, NoConsoleWindow};
+use alas_exec::SupervisedSpawn;
 
 use crate::structural::PatranExportResult;
 
@@ -63,7 +64,7 @@ pub fn run_patran_export(
     let op2_path = work_dir.join("sol101").join("wing_sol101.op2");
     if !bdf_path.is_file() || !op2_path.is_file() {
         return failed(format!(
-            "Missing {} or {} -- run NASTRAN SOL 101 first",
+            "Missing {} or {}: run NASTRAN SOL 101 first",
             bdf_path.display(),
             op2_path.display()
         ));
@@ -178,7 +179,7 @@ fn run_one(
         .stderr(Stdio::piped())
         .no_window()
         .new_process_group();
-    let mut child = command.spawn().map_err(|error| {
+    let mut child = command.spawn_supervised("Patran render").map_err(|error| {
         let classification = if error.kind() == std::io::ErrorKind::PermissionDenied {
             "OS denied execution (check sandbox or executable permissions)"
         } else if error.kind() == std::io::ErrorKind::NotFound {

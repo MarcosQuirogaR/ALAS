@@ -72,14 +72,35 @@ fn public_pipeline_reports_complete_or_explicitly_partial_preset_missions() {
         );
         let result = match run {
             Ok(result) => result,
+            // The ATR's documented public-path failure is now the station
+            // refusal, which is raised while the lumped groups are being
+            // placed and therefore *before* the propulsion buildup that used
+            // to stop it. Both are missing data on the same aircraft; this
+            // pins the one the pipeline actually reports, classified and with
+            // the evidence that decided it, so the failure cannot silently
+            // become a green run or a different blocker.
             Err(error) if name == "ATR72-600" => {
                 assert!(
-                    error.contains("unsupported_propulsion_technology"),
-                    "pure FLOPS ATR failure must identify the unsupported propulsion technology: {error}"
+                    error.contains(
+                        alas_pipeline::full_analysis::StationPlacementFailure::MainGearStationNotMeasured
+                            .as_str()
+                    ),
+                    "the ATR public failure must carry its stable classification: {error}"
                 );
                 assert!(
-                    error.contains("propeller/shaft-power"),
-                    "pure FLOPS ATR failure must explain the missing propeller/shaft-power equations: {error}"
+                    error.contains("no main-gear longitudinal station is available"),
+                    "the ATR public failure must name the missing main-gear station: {error}"
+                );
+                assert!(
+                    error.contains("above the fuselage crown"),
+                    "the ATR public failure must keep the evidence that refused the wing-mounted fallback: {error}"
+                );
+                assert!(
+                    !error.contains(
+                        alas_pipeline::full_analysis::StationPlacementFailure::MassCoordinates
+                            .as_str()
+                    ),
+                    "a missing gear datum must not be reported as a generic coordinate failure: {error}"
                 );
                 continue;
             }

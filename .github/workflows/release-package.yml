@@ -1,0 +1,193 @@
+name: Release package (manual/tag, non-publishing)
+
+# Builds and validates a real per-platform package (Windows .zip, Linux
+# .tar.gz) from a clean checkout and the committed Cargo.lock, on both
+# windows-latest and ubuntu-22.04 (the older-glibc baseline: ubuntu-22.04
+# ships glibc 2.35, so a binary built there runs on any distribution with an
+# equal or newer glibc; ubuntu-latest would silently raise that floor as
+# GitHub rolls the label forward). It uploads each package as a workflow-run
+# artifact for review. It does not create a GitHub Release, does not push a
+# tag, and does not publish anything outside its own workflow-run artifacts;
+# publishing a reviewed release remains a separate, human-gated action. See
+# docs/release-packaging.md for the three-tier distinction between a local
+# package, a CI artifact, and an externally published release, and for the
+# pre-existing Windows-only `release-preflight.yml` this workflow adds a
+# genuine Linux lane beside rather than replaces.
+on:
+  workflow_dispatch:
+    inputs:
+      strict_nastran95:
+        description: "Require a fully reviewed NASTRAN-95 bundle instead of accepting an omitted optional tool"
+        type: boolean
+        default: false
+  push:
+    tags:
+      - "v*"
+  # A change to the packaging code or this workflow is proven on both
+  # platforms before it merges, not first discovered at a release tag.
+  pull_request:
+    paths:
+      - "xtask/**"
+      - "Cargo.lock"
+      - ".github/workflows/release-package.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-package-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  package:
+    name: Build and validate the ${{ matrix.os }} package (locked, non-publishing)
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-22.04]
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install the repository Rust toolchain
+        uses: dtolnay/rust-toolchain@1.97.1
+
+      # eframe/egui-winit link against the platform windowing and font
+      # stacks at build time even though the packaging smoke run below never
+      # opens a window. This exact list was derived by reading Cargo.lock's
+      # winit 0.30 / wgpu 22 / wayland-client / smithay-client-toolkit /
+      # font-kit dependency chain and cross-checked by actually running
+      # `cargo check --target x86_64-unknown-linux-gnu -p alas-app` on a
+      # Windows host, which reached as far as a real Linux sysroot allows
+      # from there (it fails only on font-kit's fontconfig pkg-config probe,
+      # which needs a genuine Linux target to resolve; libfontconfig1-dev
+      # below is exactly what that probe needs). Whether this list is
+      # complete for a full native build can only be confirmed by this job
+      # actually running; a missing package here fails fast at `cargo xtask
+      # dist`'s build step with a normal linker/pkg-config error, not
+      # silently.
+      - name: Install Linux system dependencies (winit/wgpu windowing, wayland, fontconfig)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config \
+            libwayland-dev \
+            libxkbcommon-dev \
+            libxkbcommon-x11-dev \
+            libx11-dev \
+            libxcursor-dev \
+            libxrandr-dev \
+            libxi-dev \
+            libxext-dev \
+            libgl1-mesa-dev \
+            libegl1-mesa-dev \
+            mesa-vulkan-drivers \
+            libfontconfig1-dev \
+            xvfb
+
+      - name: Record exact toolchain and target
+        shell: bash
+        run: |
+          mkdir -p package-metadata
+          record="package-metadata/toolchain.txt"
+          {
+            echo "workspace version:"
+            grep '^version = ' Cargo.toml | head -1
+            echo
+            echo "rustc -vV:"
+            rustc -vV
+            echo
+            echo "cargo -vV:"
+            cargo -vV
+            echo
+            echo "runner:"
+            echo "${{ runner.os }} ${{ runner.arch }} (github.com runner image ${{ runner.name }})"
+          } > "$record"
+          cat "$record"
+
+      # The subset named in this task: repository checks, formatting, the
+      # deny-warnings clippy lint set, and the workspace test suite, in that
+      # order, matching what `cargo xtask gate` already runs for the
+      # Windows-only preflight workflow. Running the identical command on
+      # both platforms is deliberate: it is the only way this task can show
+      # the workspace's own test suite, not just `cargo check`, passing on
+      # Linux before a Linux package is ever assembled from it.
+      - name: Run the repository gate (repository checks, fmt, clippy -D warnings, workspace tests)
+        run: cargo xtask gate
+
+      - name: Build and assemble the standalone package from the locked dependency graph
+        shell: bash
+        env:
+          ALAS_STRICT_BUNDLED_NASTRAN95: ${{ inputs.strict_nastran95 == true && '1' || '' }}
+        run: cargo xtask dist
+
+      # `cargo xtask dist` already ran its own headless validation (--help,
+      # manifest/config checks, a config round-trip smoke run under a
+      # path containing spaces, and — only where AVL is actually bundled,
+      # which today is Windows alone — an AVL cross-check) before it wrote
+      # the archive. This step names exactly the package directory that
+      # validation ran against, for the acceptance and smoke steps below.
+      - name: Locate the assembled package directory
+        id: package_dir
+        shell: bash
+        run: |
+          set -euo pipefail
+          found="$(find dist -mindepth 1 -maxdepth 1 -type d -name 'alas-v*' | head -1)"
+          if [ -z "$found" ]; then
+            echo "no assembled package directory found under dist/" >&2
+            exit 1
+          fi
+          echo "path=$found" >> "$GITHUB_OUTPUT"
+          echo "assembled package: $found"
+
+      # Opt-in per crates/alas-acceptance/tests/distribution_license_boundary.rs:
+      # it inspects the produced package directory named by
+      # ALAS_W55_PACKAGE_DIR rather than the checkout, and otherwise skips.
+      # This is the check that would fail a package shipping a proprietary
+      # or Windows-only-and-mislabelled tool.
+      - name: Run the license-boundary acceptance suite against the assembled package
+        shell: bash
+        env:
+          ALAS_W55_PACKAGE_DIR: ${{ steps.package_dir.outputs.path }}
+        run: cargo test -p alas-acceptance --test distribution_license_boundary --locked -- --nocapture
+
+      # A second, CI-level headless confirmation beside `cargo xtask dist`'s
+      # own: run the archived binary's only supported no-window flag
+      # (`-h`/`--help` — this CLI has no `--version`) directly from the
+      # unpacked package. `xvfb-run` wraps the Linux invocation defensively;
+      # `--help` does not construct an eframe/winit window today, but this
+      # keeps the step correct even if that ever changes, at the cost of one
+      # extra, harmless dependency already installed above.
+      - name: Headless smoke test of the packaged binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            "${{ steps.package_dir.outputs.path }}/ALAS.exe" --help
+          else
+            xvfb-run --auto-servernum "${{ steps.package_dir.outputs.path }}/ALAS" --help
+          fi
+
+      - name: Collect package and provenance artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p package-artifact
+          cp package-metadata/toolchain.txt package-artifact/
+          cp dist/*.zip package-artifact/ 2>/dev/null || true
+          cp dist/*.zip.sha256 package-artifact/ 2>/dev/null || true
+          cp dist/*.tar.gz package-artifact/ 2>/dev/null || true
+          cp dist/*.tar.gz.sha256 package-artifact/ 2>/dev/null || true
+          cp "${{ steps.package_dir.outputs.path }}/RELEASE-MANIFEST.json" package-artifact/
+          cp "${{ steps.package_dir.outputs.path }}/SOURCE-MANIFEST.json" package-artifact/
+          ls -la package-artifact
+
+      - name: Upload package artifact (workflow-run only, not a published release)
+        uses: actions/upload-artifact@v4
+        with:
+          name: alas-${{ matrix.os }}-release-package
+          path: package-artifact/
+          if-no-files-found: error

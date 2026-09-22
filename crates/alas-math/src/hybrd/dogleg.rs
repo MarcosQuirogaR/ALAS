@@ -17,7 +17,7 @@
 //! descent direction truncated to the boundary; otherwise take the point
 //! where the segment joining the two crosses the boundary.
 //!
-//! That last case is the one that makes this a "dogleg" -- the path bends --
+//! That last case is the one that makes this a "dogleg" (the path bends)
 //! and it is the one whose closed form below looks arbitrary. It is the
 //! positive root of a quadratic in the blending parameter, arranged by the
 //! Fortran so that every intermediate is a ratio of comparable magnitudes,
@@ -27,8 +27,8 @@
 //! `r` is the packed upper triangle described in [`super::qr`], and `diag` is
 //! `hybrd`'s scaling vector: the trust region is a ball in the scaled
 //! variables `diag * x`, not in `x`, so that unknowns of different physical
-//! magnitude -- a throttle near one and a body angle in radians near a
-//! hundredth -- are stepped comparably.
+//! magnitude: a throttle near one and a body angle in radians near a
+//! hundredth, are stepped comparably.
 
 use super::enorm::enorm;
 

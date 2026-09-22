@@ -10,7 +10,7 @@
 //! weighs empty and where that weight sits, it can solve backwards for the
 //! payload centre of gravity that puts the *loaded* aircraft on its target
 //! trim point. Without it the loader can only centre the payload on itself,
-//! which is a different and less useful question -- a hold trimmed to its own
+//! which is a different and less useful question: a hold trimmed to its own
 //! centre still flies out of the envelope if the empty aircraft is nose-heavy.
 //!
 //! It lives here rather than in `alas-mass` because it is the payload
@@ -21,8 +21,8 @@
 //! # A signature narrowed on purpose
 //!
 //! Upstream takes two `Dict`s and skips any component that has a mass and no
-//! coordinate. Every one of its three call sites -- `pipeline.py`,
-//! `analysis/full_analysis.py` and `optimization/objective.py` -- passes the
+//! coordinate. Every one of its three call sites: `pipeline.py`,
+//! `analysis/full_analysis.py` and `optimization/objective.py`: passes the
 //! output of `calculate_component_masses` and `define_mass_coordinates`
 //! together, and those two always populate the same ten names, so the missing
 //! -coordinate branch is unreachable from this program's inputs. Taking the
@@ -38,7 +38,7 @@ use alas_mass::breakdown::{MassBreakdown, MassCoordinates, OEW_KEYS};
 ///
 /// A component whose estimated mass came out negative contributes nothing
 /// rather than subtracting moment, and an aircraft with no mass at all
-/// balances at the origin rather than dividing by zero -- the optimizer's
+/// balances at the origin rather than dividing by zero: the optimizer's
 /// first evaluations reach both.
 pub fn oew_and_cg(masses: &MassBreakdown, coords: &MassCoordinates) -> (f64, f64) {
     let positions = coords.as_pairs();

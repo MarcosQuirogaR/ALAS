@@ -27,6 +27,7 @@ pub mod propulsion;
 mod range;
 mod residuals;
 mod residuals_geometry;
+mod residuals_layout;
 mod residuals_performance;
 mod sizing;
 mod tanks;

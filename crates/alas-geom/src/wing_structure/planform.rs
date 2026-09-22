@@ -3,14 +3,14 @@
 
 //! Planform, dihedral and airfoil-surface sampling: everything a caller
 //! reads about a spanwise station before any spar or rib-length logic
-//! enters -- `local_chord`/`x_le`/`z_le`/`rib_vector`/`le_direction`/
+//! enters: `local_chord`/`x_le`/`z_le`/`rib_vector`/`le_direction`/
 //! `airfoil_zu_zl`/`spar_height`.
 
 use super::support::clamped_interp;
 use super::WingStructureGeometry;
 
 impl WingStructureGeometry {
-    // -- planform / dihedral (piecewise-linear root -> break -> tip) -------
+    // planform / dihedral (piecewise-linear root -> break -> tip)
 
     /// Local chord at `eta`, by linear interpolation root -> break -> tip.
     pub fn local_chord(&self, eta: f64) -> f64 {
@@ -61,7 +61,7 @@ impl WingStructureGeometry {
     }
 
     /// Unit leading-edge tangent direction in the XY plane, independent of
-    /// [`WingStructureGeometry::rib_vector`] -- a self-consistency check (a
+    /// [`WingStructureGeometry::rib_vector`]: a self-consistency check (a
     /// realized rib cut should come out perpendicular to this everywhere
     /// except the root rib, which is deliberately streamwise instead).
     pub fn le_direction(&self, eta: f64) -> (f64, f64) {
@@ -76,13 +76,13 @@ impl WingStructureGeometry {
         (dx / norm, dy / norm)
     }
 
-    // -- airfoil surface at an arbitrary (eta, x/c) -------------------------
+    // airfoil surface at an arbitrary (eta, x/c)
 
     /// Upper/lower surface height (fraction of local chord) at `xc_frac`.
     ///
     /// `eta <= break_eta` returns the root section verbatim, matching
     /// `AircraftBuilder` reusing the same morphed root section for both the
-    /// root and break wing cross-sections -- no interpolation needed
+    /// root and break wing cross-sections, no interpolation needed
     /// inboard. `eta > break_eta` linearly blends toward the tip section,
     /// matching native aerodynamic model's own linear interpolation between the break and
     /// tip cross-sections.

@@ -9,7 +9,7 @@
 //! (`alas_config::FuelTankLayoutConfig`) into integral wing tanks bounded by
 //! the spar box and two semispan stations, a wing carry-through centre tank,
 //! a horizontal-stabiliser trim tank and a declared-volume fuselage
-//! auxiliary tank -- each with its own capacity, centroid, extent and burn
+//! auxiliary tank, each with its own capacity, centroid, extent and burn
 //! order on the aircraft actually built, not on a number typed in.
 //! [`FuelTankLayout::distribute`] turns one fuel load into a per-tank fill
 //! following that burn order, and [`FuelState`] is that fill: the ledger

@@ -9,7 +9,7 @@
 //! Householder QR here and LAPACK's `gelsd` there, and two least-squares
 //! routines that both minimize the same residual do not have to agree beyond
 //! the conditioning of the problem. These matrices sit at about 1.1e3, so the
-//! observed agreement is nearer 3e-12 -- but the tier states the construction,
+//! observed agreement is nearer 3e-12, but the tier states the construction,
 //! not today's numbers, and a routine whose error scales with `cond(A)` is
 //! exactly the case the tier table names.
 //!
@@ -173,7 +173,7 @@ fn the_surface_samplers_match_aerosandbox_at_every_station() {
 #[test]
 fn max_thickness_matches_aerosandbox_on_every_section() {
     // `KulfanAirfoil` inherits `Airfoil.max_thickness`'s name and replaces
-    // what is underneath it -- this samples the two class-times-shape
+    // what is underneath it; this samples the two class-times-shape
     // surfaces analytically where `alas-geom::asb::airfoil`'s interpolates a
     // vertex list. `alas-aero::neuralfoil` reads this one, and only this one,
     // for the `t/c` that sets the supersonic end of its wave-drag schedule.

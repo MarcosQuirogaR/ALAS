@@ -2,7 +2,7 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 //! What `parity_analysis.rs` reads: the shape of `golden/aero/analysis.json`,
-//! and the two constructions that have to match the generator's -- the
+//! and the two constructions that have to match the generator's: the
 //! nominal aircraft and the `AeroAnalysis` wrapped around it.
 //!
 //! This lives beside the test rather than inside it because
@@ -197,7 +197,7 @@ pub struct Fixture {
     pub sweep: HashMap<String, SweepCase>,
 }
 
-/// A `null` incidence is a NaN one -- see [`TrimmedInputs::trim_ih_deg`].
+/// A `null` incidence is a NaN one, see [`TrimmedInputs::trim_ih_deg`].
 pub fn or_nan(value: Option<f64>) -> f64 {
     value.unwrap_or(f64::NAN)
 }
@@ -244,7 +244,7 @@ pub fn reference_mesh() -> AnalysisConfig {
 }
 
 /// An analysis of `plane` at the fixture's sweep, every configuration group
-/// at its default -- the generator's `_aero`.
+/// at its default: the generator's `_aero`.
 pub fn aero<'a>(
     plane: &'a Airplane,
     fixture: &Fixture,

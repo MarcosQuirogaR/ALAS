@@ -10,6 +10,8 @@
 
 pub mod raster;
 pub mod render;
+#[cfg(test)]
+mod text_block_tests;
 pub mod view;
 
 pub use render::{

@@ -322,19 +322,7 @@ fn draw_global_route(scene: &mut Scene, axes: &Axes2D, route: &Route) {
 }
 
 fn status_scene(pal: &crate::theme::Palette, title: &str, message: &str) -> Scene {
-    let mut scene = Scene::new(800.0, 180.0, Some(Color::from_hex(pal.bg)));
-    scene.title = Some(title.to_owned());
-    scene.add(SceneElement::Text {
-        text: message.to_owned(),
-        pos: [400.0, 90.0],
-        font_size: 13.0,
-        color: Color::from_hex("#c0392b"),
-        align: TextAlign::Center,
-        baseline: TextBaseline::Middle,
-        angle_deg: 0.0,
-        bold: true,
-    });
-    scene
+    crate::status_figure::status_scene(title, message, false, pal)
 }
 
 #[cfg(test)]

@@ -7,7 +7,7 @@
 //! reference scripts this mesh generalizes, and two of them are fatal: a
 //! triangle with no area means the zipper bridging produced nonsense, and a
 //! grid inboard of the root plane means the rib truncation did. The other
-//! three come back as warnings, which is the reference's own severity split --
+//! three come back as warnings, which is the reference's own severity split,
 //! only the two fatal ones ever stopped a run there.
 
 use alas_geom::wing_structure::{RibStation, WingStructureGeometry};
@@ -23,7 +23,7 @@ const SPAR_STRAIGHTNESS_LIMIT_M: f64 = 1e-3;
 /// declared corrupt, metres. A grid exactly on the plane rounds either way.
 const ROOT_PLANE_TOLERANCE_M: f64 = 0.001;
 
-/// Run every health check over a finished deck -- `_check_mesh_health`.
+/// Run every health check over a finished deck: `_check_mesh_health`.
 ///
 /// # Errors
 ///

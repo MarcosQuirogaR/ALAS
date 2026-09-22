@@ -17,7 +17,7 @@
 //!
 //! A position exists only where the container's rigid envelope fits the local
 //! hold cross-section, in width *and* in height. A station too shallow gets no
-//! position rather than a container clamped through the structure -- which is
+//! position rather than a container clamped through the structure, which is
 //! why a narrowbody, whose hold cannot take a full-height LD3, degrades through
 //! [`LOWER_HOLD_FALLBACKS`] to the reduced-height container and then to loose
 //! bulk instead of reporting a hold it does not have.
@@ -481,7 +481,7 @@ pub fn uld_by_code(code: &str) -> Option<&'static UldType> {
     ULD_DATABASE.iter().find(|entry| entry.code == code)
 }
 
-/// The container a key names, falling back to `fallback` -- upstream's
+/// The container a key names, falling back to `fallback`: upstream's
 /// `_uld(code, fallback)`, which is how an unrecognised code in a saved
 /// configuration loads as the sensible default rather than as nothing.
 pub fn uld_or(key: &str, fallback: &'static UldType) -> &'static UldType {
@@ -523,7 +523,7 @@ impl CargoSlot {
         self.uld.max_net()
     }
 
-    /// What it weighs as loaded, container included -- and nothing at all
+    /// What it weighs as loaded, container included, and nothing at all
     /// while it is empty, since an empty position is not carried.
     pub fn total_weight(&self) -> f64 {
         if self.payload > MIN_LOADED_KG {

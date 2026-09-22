@@ -32,8 +32,8 @@ tracing = { workspace = true }
 # The mission request is a JSON document upstream (it crossed a subprocess
 # boundary as one), so the type that stands in for it serializes.
 serde = { workspace = true }
-# The vehicle request carries three P10 report outputs -- the design vector, the
-# geometry summary and the component masses -- that have no native type yet, so
+# The vehicle request carries three P10 report outputs (the design vector, the
+# geometry summary and the component masses) that have no native type yet, so
 # they pass through as `serde_json::Value` until P10 gives them one.
 serde_json = { workspace = true }
 

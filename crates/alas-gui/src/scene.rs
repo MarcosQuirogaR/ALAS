@@ -6,7 +6,7 @@
 //!
 //! Kept out of [`crate::state`] so that module stays the data hub: these
 //! functions read a whole [`AppState`] and return the [`Scene`] a viewport then
-//! draws. Everything here degrades to `None` rather than panicking -- a figure
+//! draws. Everything here degrades to `None` rather than panicking: a figure
 //! that needs a completed run, or a geometry that will not build mid-edit, is a
 //! blank slot, not a crash.
 

@@ -15,7 +15,7 @@
 //! # Loading is where a file becomes a run
 //!
 //! [`AlasConfig::from_value`] is the whole loading path, and it does two
-//! things in an order that matters. It first applies the named preset --
+//! things in an order that matters. It first applies the named preset,
 //! copying that aircraft's geometry and requirements in, and, where the preset
 //! carries them, its mass-model and field-performance calibrations. Then it
 //! lays the file's own keys over the result, so a file may start from a real
@@ -33,8 +33,8 @@
 //! # Where the file formats went
 //!
 //! Upstream this module also opens and writes YAML and JSON files. Both are
-//! thin codecs over the single dictionary representation below -- its own
-//! comment says so -- and that representation is what lives here, as
+//! thin codecs over the single dictionary representation below: its own
+//! comment says so, and that representation is what lives here, as
 //! `serde_json::Value`. Reading and writing a path is the concern of the crate
 //! that owns paths, and putting a serialization-format dependency in the
 //! configuration model would put it in every crate that reads a setting.
@@ -43,9 +43,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     overlay, AnalysisConfig, CabinConfig, ConfigNode, ControlSurfacesConfig, DesignRequirements,
-    DragModelConfig, FuelPolicyConfig, FuelTankLayoutConfig, GeometryConfig, LandingGearConfig,
-    MassModelConfig, MissionConfig, MsesConfig, OptimizerConfig, OverlayError, PerformanceConfig,
-    PropulsionCycleConfig, StructuresConfig,
+    DownstreamConfig, DragModelConfig, FuelPolicyConfig, FuelTankLayoutConfig, GeometryConfig,
+    LandingGearConfig, MassModelConfig, MissionConfig, MsesConfig, OptimizerConfig, OverlayError,
+    PerformanceConfig, PropulsionCycleConfig, StructuresConfig,
 };
 
 /// Top-level key under which the desktop application stores its workspace
@@ -67,7 +67,7 @@ pub struct AlasConfig {
     /// What the aircraft has to do.
     #[config(
         nested,
-        help = "The mission targets the design must meet -- the inputs, as distinct from the modelling assumptions in every other group."
+        help = "The mission targets the design must meet: the inputs, as distinct from the modelling assumptions in every other group."
     )]
     pub requirements: DesignRequirements,
 
@@ -81,7 +81,7 @@ pub struct AlasConfig {
     /// What the search is looking for, and how hard it looks.
     #[config(
         nested,
-        help = "What the design search optimizes for and how it is run -- the objective weights and the differential-evolution solver settings."
+        help = "What the design search optimizes for and how it is run: the objective weights and the differential-evolution solver settings."
     )]
     pub optimizer: OptimizerConfig,
 
@@ -95,7 +95,7 @@ pub struct AlasConfig {
     /// The parasite and induced drag build-up.
     #[config(
         nested,
-        help = "Drag model assumptions -- form factors, interference factors and the margins applied to the parasite-drag buildup."
+        help = "Drag model assumptions: form factors, interference factors and the margins applied to the parasite-drag buildup."
     )]
     pub drag_model: DragModelConfig,
 
@@ -162,6 +162,14 @@ pub struct AlasConfig {
     )]
     pub structures: StructuresConfig,
 
+    /// Independent external analyses and geometry export.
+    #[serde(default)]
+    #[config(
+        nested,
+        help = "Optional OpenVSP, VSPAERO, AVL and FLOWUnsteady stages. They consume the completed aircraft downstream and never alter the optimizer's selected design."
+    )]
+    pub downstream: DownstreamConfig,
+
     /// The operating rule the mission fuel is planned under.
     #[serde(default, skip_serializing_if = "FuelPolicyConfig::is_default")]
     #[config(
@@ -212,6 +220,7 @@ impl Default for AlasConfig {
             control_surfaces: ControlSurfacesConfig::default(),
             propulsion_cycle: PropulsionCycleConfig::default(),
             structures: StructuresConfig::default(),
+            downstream: DownstreamConfig::default(),
             fuel_policy: FuelPolicyConfig::default(),
             fuel_tanks: FuelTankLayoutConfig::default(),
             // A long-haul pair, so an unconfigured run has a real route rather
@@ -244,20 +253,15 @@ impl AlasConfig {
         Self::from_value_with_migration(data).map(|(config, _)| config)
     }
 
-    /// [`Self::from_value`], also reporting what loading did to the mass
-    /// method.
-    ///
-    /// The mass architecture is the one configuration decision whose
-    /// migration changes a published number -- operating empty mass -- so it
-    /// is returned rather than logged. A front end shows it, an export
-    /// records it, and a headless run can assert on it.
+    /// [`Self::from_value`], also reporting what loading changed about the
+    /// document (see [`ConfigLoadNotes`]).
     ///
     /// # Errors
     ///
     /// As [`Self::from_value`].
-    pub fn from_value_with_migration(
+    pub fn from_value_with_notes(
         data: &serde_json::Value,
-    ) -> Result<(Self, crate::MassArchitectureMigration), OverlayError> {
+    ) -> Result<(Self, ConfigLoadNotes), OverlayError> {
         // A workspace file carries the desktop session envelope next to the
         // aircraft configuration. The envelope is not aircraft data, so it is
         // removed before the strict overlay sees the document; a file with no
@@ -305,6 +309,26 @@ impl AlasConfig {
                     if let Some(flops) = crate::preset_flops::inputs_for(name) {
                         instance.mass_model.flops_transport = flops.transport;
                         instance.mass_model.flops_structure = flops.structure;
+                        instance.mass_model.flops_turboprop = flops.turboprop;
+                    }
+                    // FLOPS `WLDG` is the aircraft's *design landing weight*,
+                    // and equation 63 makes the main gear go as `WLDG^0.95`.
+                    // The 0.92 default in `MassModelConfig` is a generic
+                    // study fraction, not a property of any registered
+                    // aircraft: the certified MLW/MTOW ratio is 0.689 on the
+                    // A380-800 and 0.972 on the ATR 72-600, so leaving the
+                    // default in place sized the A380's gear on 515 t instead
+                    // of its certified 386 t and charged it about 7.6 t of
+                    // gear it does not have. Both masses are already declared
+                    // per aircraft in the registry, with the same TCDS/airport
+                    // planning provenance as the rest of the reference block,
+                    // so the ratio is taken from them here. It stays a ratio
+                    // rather than a pinned mass so a resized clean-sheet
+                    // derivative still scales its gear with its own takeoff
+                    // mass; `landing_mass_limit_kg` continues to return the
+                    // declared MLW itself in the reference/sandbox modes.
+                    if let Some(ratio) = declared_landing_mass_ratio(preset) {
+                        instance.mass_model.mlw_fraction_mtow = ratio;
                     }
                     if let Some(performance) = &preset.performance {
                         instance.performance = performance.clone();
@@ -319,8 +343,8 @@ impl AlasConfig {
                     // A registered aircraft's wing-box material family is aircraft data, not a
                     // global study default: the default's CFRP spar cap lands on metallic wings
                     // that no source describes that way. Only the material family travels here;
-                    // gauges and spar stations stay with the study, because no source in
-                    // .agent/evidence/ establishes them and the spars bound the fuel tank box.
+                    // gauges and spar stations stay with the study, because no source on
+                    // file establishes them and the spars bound the fuel tank box.
                     // The overlay below still lets a file change any of it.
                     if let Some(structures) = crate::preset_structures::config_for(name) {
                         instance.structures = structures;
@@ -328,6 +352,34 @@ impl AlasConfig {
                     instance.departure_airport = operational.departure_airport.to_owned();
                     instance.arrival_airport = operational.arrival_airport.to_owned();
                     instance.mission.profile = operational.profile;
+                    // Naming a registered aircraft means adapting *that*
+                    // aircraft, so the design space defaults to its own
+                    // reference envelope rather than to a clean sheet.
+                    //
+                    // The two are genuinely different studies and the
+                    // distinction is kept, not blurred: `CleanSheet` re-derives
+                    // the fuselage from the cabin load case and searches the
+                    // global box, `ReferenceAdaptation` holds the preset's
+                    // declared geometry and searches the D09 +/-10 % window
+                    // around it. What was wrong was which of them a bare
+                    // `{"preset": "..."}` document selected. It selected the
+                    // clean sheet, so loading an ATR 72-600 and pressing run
+                    // produced a cabin-derived body of fineness 23.5 against
+                    // the aircraft's own 9.8, and the plausibility window then
+                    // correctly rejected it - measured on the shipped path as
+                    // `fuselage_fineness_max` on 509 of 623 ATR 72-600
+                    // candidates and 646 of 668 A220-300 candidates, with the
+                    // mission and mass residuals cascading behind it. The
+                    // product answered a question nobody asked and then
+                    // reported that it had no answer.
+                    //
+                    // This widens nothing. The D09 envelope, the frozen
+                    // reference variables and every hard residual are
+                    // untouched; a document that explicitly asks for
+                    // `clean_sheet` still gets it, because the file overlay
+                    // below is applied after this and remains authoritative.
+                    instance.optimizer.design_space.mode =
+                        crate::optimizer::DesignMode::ReferenceAdaptation;
                 }
                 Err(error) => {
                     tracing::debug!(%error, "configuration names an unregistered preset");
@@ -409,13 +461,13 @@ impl AlasConfig {
         // explicit version-2 selection (as the settings form does), so it
         // must remain selectable rather than being mistaken for an old file.
         let migration = loaded.mass_model.normalize_architecture();
-        Ok((loaded, migration))
+        Ok(load_notes::finish(loaded, migration, data))
     }
 
     /// The maximum landing mass to enforce for `candidate_mtow_kg`.
     ///
     /// In [`crate::optimizer::DesignMode::BaselineSandbox`], a valid declared
-    /// reference MLW -- the registered preset's own certified limit -- governs
+    /// reference MLW (the registered preset's own certified limit) governs
     /// as a fixed aircraft limit and does not scale with `candidate_mtow_kg`:
     /// BaselineSandbox replays that certified airframe unchanged, so its
     /// certified MLW does not move because a candidate MTOW does.
@@ -466,7 +518,7 @@ impl AlasConfig {
     /// it; they have no `DesignMode`/preset identity to resolve a reference
     /// MLW themselves. `mlw_fraction_mtow` is this method's only way to carry
     /// [`Self::landing_mass_limit_kg`]'s mode-aware result through that
-    /// existing slot -- it is not a new scalable design fraction. In
+    /// existing slot; it is not a new scalable design fraction. In
     /// BaselineSandbox/ReferenceAdaptation it is a fixed reference MLW
     /// divided by whatever `candidate_mtow_kg` is, so it changes if
     /// `candidate_mtow_kg` does and must be recomputed per call rather than
@@ -493,6 +545,27 @@ impl AlasConfig {
 fn is_valid_declared_mass_kg(mass_kg: f64) -> bool {
     mass_kg.is_finite() && mass_kg > 0.0
 }
+
+/// A registered aircraft's own certified landing-to-takeoff mass ratio.
+///
+/// `None` when either mass is absent or the pair is not physical (a landing
+/// mass above the takeoff mass is a registry error, not a design choice), in
+/// which case the generic [`MassModelConfig`] fraction stays in force. A
+/// notional preset such as AVE has no certified pair and keeps it by
+/// construction.
+fn declared_landing_mass_ratio(preset: &crate::AircraftPreset) -> Option<f64> {
+    let mlw_kg = preset.reference.mlw_kg?;
+    let mtow_kg = preset.reference.mtow_kg?;
+    if !is_valid_declared_mass_kg(mlw_kg) || !is_valid_declared_mass_kg(mtow_kg) {
+        return None;
+    }
+    let ratio = mlw_kg / mtow_kg;
+    (ratio > 0.0 && ratio <= 1.0).then_some(ratio)
+}
+
+#[path = "settings_load_notes.rs"]
+mod load_notes;
+pub use load_notes::{legacy_mission_disabled, legacy_solver_method, ConfigLoadNotes};
 
 // A test asserts on values it constructed here directly, so a failed unwrap
 // or expect is the assertion failing, not a library invariant being broken.
@@ -606,7 +679,7 @@ mod tests {
             config.optimizer.design_space.mode = mode;
             // Two different adapted MTOWs must still imply the same 22_350 kg
             // reference landing mass once the derived fraction is applied
-            // back to the candidate it was built from -- the ratio itself is
+            // back to the candidate it was built from: the ratio itself is
             // only the transport format, not a new scalable constraint.
             for candidate_mtow_kg in [20_000.0, 23_000.0, 30_000.0] {
                 let model = config.analysis_mass_model(candidate_mtow_kg);
@@ -621,6 +694,63 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn a_registered_aircraft_sizes_its_gear_on_its_own_certified_landing_mass() {
+        // FLOPS equation 63 reads `WLDG`, the design landing weight, and the
+        // main gear goes as `WLDG^0.95`. Every registered aircraft declares
+        // both certified masses, so the loaded configuration must carry that
+        // aircraft's own ratio rather than the generic 0.92 study fraction:
+        // on the A380-800 the difference is 515 t against 386 t, which is
+        // about 7.6 t of landing gear.
+        for name in [
+            "A320-200",
+            "A220-300",
+            "A340-300",
+            "A380-800",
+            "B787-9",
+            "DC-10",
+            "ATR72-600",
+        ] {
+            let preset = crate::presets::get(name).unwrap();
+            let (Some(mlw_kg), Some(mtow_kg)) = (preset.reference.mlw_kg, preset.reference.mtow_kg)
+            else {
+                panic!("{name} must declare both certified masses");
+            };
+            let config = AlasConfig::from_value(&json!({ "preset": name })).unwrap();
+            assert!(
+                (config.mass_model.mlw_fraction_mtow - mlw_kg / mtow_kg).abs() < 1e-12,
+                "{name}: {} vs {}",
+                config.mass_model.mlw_fraction_mtow,
+                mlw_kg / mtow_kg
+            );
+            // The ratio must reproduce the certified landing mass at the
+            // aircraft's own takeoff mass, in the clean-sheet mode too, where
+            // `landing_mass_limit_kg` has no reference airframe to read.
+            let mut clean_sheet = config.clone();
+            clean_sheet.optimizer.design_space.mode = crate::optimizer::DesignMode::CleanSheet;
+            assert!(
+                (clean_sheet.landing_mass_limit_kg(mtow_kg) - mlw_kg).abs() < 1e-6,
+                "{name}"
+            );
+        }
+        // A notional aircraft has no certified pair and keeps the generic
+        // fraction; nothing is invented for it.
+        let ave = AlasConfig::from_value(&json!({"preset": "AVE"})).unwrap();
+        assert_eq!(crate::presets::get("AVE").unwrap().reference.mlw_kg, None);
+        assert_eq!(
+            ave.mass_model.mlw_fraction_mtow,
+            MassModelConfig::default().mlw_fraction_mtow
+        );
+        // A saved file still overrides it, like every other preset-applied
+        // value.
+        let overridden = AlasConfig::from_value(&json!({
+            "preset": "A380-800",
+            "mass_model": {"mlw_fraction_mtow": 0.8},
+        }))
+        .unwrap();
+        assert_eq!(overridden.mass_model.mlw_fraction_mtow, 0.8);
     }
 
     #[test]
@@ -750,6 +880,59 @@ mod tests {
         assert_eq!(config.requirements, preset.requirements);
     }
 
+    /// Naming a registered aircraft means adapting that aircraft. The two
+    /// design modes stay distinct - this pins *which one a bare preset
+    /// document selects*, not what either mode does.
+    #[test]
+    fn a_bare_preset_document_adapts_that_aircraft_rather_than_starting_a_clean_sheet() {
+        for name in crate::presets::available() {
+            let config = AlasConfig::from_value(&json!({ "preset": name })).unwrap();
+            assert_eq!(
+                config.optimizer.design_space.mode,
+                crate::optimizer::DesignMode::ReferenceAdaptation,
+                "{name} should load as an adaptation of itself"
+            );
+        }
+    }
+
+    /// The distinction is not hidden: a document that asks for a clean sheet
+    /// gets one, on a registered aircraft as much as on anything else,
+    /// because the file overlay is applied after the preset.
+    #[test]
+    fn an_explicit_clean_sheet_request_survives_the_preset_default() {
+        let config = AlasConfig::from_value(&json!({
+            "preset": "ATR72-600",
+            "optimizer": {"design_space": {"mode": "clean_sheet"}},
+        }))
+        .unwrap();
+        assert_eq!(
+            config.optimizer.design_space.mode,
+            crate::optimizer::DesignMode::CleanSheet
+        );
+    }
+
+    /// A configuration that names no registered aircraft has nothing to
+    /// adapt, so it keeps the clean sheet it always had.
+    #[test]
+    fn a_document_without_a_registered_preset_still_starts_a_clean_sheet() {
+        assert_eq!(
+            AlasConfig::from_value(&json!({}))
+                .unwrap()
+                .optimizer
+                .design_space
+                .mode,
+            crate::optimizer::DesignMode::CleanSheet
+        );
+        assert_eq!(
+            AlasConfig::from_value(&json!({"preset": "not-a-registered-aircraft"}))
+                .unwrap()
+                .optimizer
+                .design_space
+                .mode,
+            crate::optimizer::DesignMode::CleanSheet
+        );
+    }
+
     #[test]
     fn saved_route_and_profile_values_override_the_preset_defaults() {
         let config = AlasConfig::from_value(&json!({
@@ -832,7 +1015,7 @@ mod tests {
             .collect();
         assert_eq!(names.first(), Some(&"preset"));
         assert_eq!(names.last(), Some(&"arrival_airport"));
-        assert_eq!(names.len(), 19);
+        assert_eq!(names.len(), 20);
         assert!(names.contains(&"fuel_policy"));
         assert!(names.contains(&"fuel_tanks"));
     }

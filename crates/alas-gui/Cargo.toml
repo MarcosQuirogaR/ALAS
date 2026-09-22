@@ -7,9 +7,13 @@ authors.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+# The standalone Wing Analysis window drives `alas-aero::wing_analysis`, the
+# wing-only entry over the in-process vortex lattice.
+alas-aero = { path = "../alas-aero" }
 alas-cfd = { path = "../alas-cfd" }
 alas-config = { path = "../alas-config" }
 alas-exec = { path = "../alas-exec" }
+alas-fonts = { path = "../alas-fonts" }
 alas-geom = { path = "../alas-geom" }
 alas-i18n = { path = "../alas-i18n" }
 alas-mission = { path = "../alas-mission" }

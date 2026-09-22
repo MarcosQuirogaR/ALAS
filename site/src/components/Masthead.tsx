@@ -1,0 +1,102 @@
+import { useEffect, useState } from 'react'
+import { withBase } from '../lib/base'
+
+export default function Masthead() {
+  const [isOpen, setIsOpen] = useState(false)
+
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape' && isOpen) {
+        setIsOpen(false)
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [isOpen])
+
+  const links = [
+    { href: withBase('#overview'), label: 'Overview' },
+    { href: withBase('docs/'), label: 'Documentation' },
+    { href: withBase('#download'), label: 'Downloads' },
+    { href: withBase('#releases'), label: 'Release notes' },
+  ]
+
+  return (
+    <header className="sticky top-0 z-50 border-b border-rule bg-base">
+      <div className="mx-auto flex max-w-[68rem] items-center justify-between gap-6 px-6 py-3.5">
+        {/* wordmark.png already carries the three-stripe mark and the divider;
+            pairing it with mark.png would render the mark twice. */}
+        <a href={withBase('')} className="flex items-center gap-2.5" aria-label="ALAS home">
+          <img
+            src={withBase('brand/wordmark.png')}
+            alt="ALAS"
+            className="h-7 w-auto object-contain"
+          />
+        </a>
+
+        {/* Desktop navigation */}
+        <nav aria-label="Main navigation" className="hidden items-center gap-7 text-[0.86rem] text-fg-dim md:flex">
+          {links.map((l) => (
+            <a key={l.href} href={l.href} className="transition-colors hover:text-fg-strong">
+              {l.label}
+            </a>
+          ))}
+        </nav>
+
+        <div className="flex items-center gap-3">
+          <a
+            href={withBase('#download')}
+            className="hidden sm:inline-block bg-accent px-4 py-2 text-[0.82rem] font-semibold text-base transition-colors hover:bg-accent-bright"
+          >
+            Downloads
+          </a>
+
+          {/* Mobile menu toggle */}
+          <button
+            type="button"
+            onClick={() => setIsOpen(!isOpen)}
+            aria-expanded={isOpen}
+            aria-controls="mobile-nav"
+            aria-label={isOpen ? 'Close navigation menu' : 'Open navigation menu'}
+            className="flex h-9 w-9 items-center justify-center border border-rule text-fg-dim transition-colors hover:border-rule-strong hover:text-fg-strong md:hidden"
+          >
+            {isOpen ? (
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="square" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            ) : (
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="square" strokeWidth="2" d="M4 6h16M4 12h16M4 18h16" />
+              </svg>
+            )}
+          </button>
+        </div>
+      </div>
+
+      {/* Mobile dropdown panel */}
+      {isOpen && (
+        <div id="mobile-nav" className="border-t border-rule bg-base px-6 py-4 md:hidden">
+          <nav aria-label="Mobile navigation" className="flex flex-col gap-3 text-[0.92rem]">
+            {links.map((l) => (
+              <a
+                key={l.href}
+                href={l.href}
+                onClick={() => setIsOpen(false)}
+                className="py-1 text-fg-dim transition-colors hover:text-fg-strong"
+              >
+                {l.label}
+              </a>
+            ))}
+            <a
+              href={withBase('#download')}
+              onClick={() => setIsOpen(false)}
+              className="mt-2 inline-block bg-accent px-4 py-2.5 text-center text-[0.86rem] font-semibold text-base transition-colors hover:bg-accent-bright"
+            >
+              Downloads
+            </a>
+          </nav>
+        </div>
+      )}
+    </header>
+  )
+}

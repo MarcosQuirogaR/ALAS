@@ -74,7 +74,7 @@ where
 /// Recursively lay `patch` over `base`.
 ///
 /// Two mappings merge key by key; anything else replaces outright. A list is
-/// replaced rather than merged because a list's meaning is positional -- an
+/// replaced rather than merged because a list's meaning is positional: an
 /// element-wise merge of a shorter list would leave a tail from the defaults
 /// that the file's author never wrote.
 fn merge(base: &mut serde_json::Value, patch: &serde_json::Value) {

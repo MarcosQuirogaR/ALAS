@@ -20,7 +20,7 @@ use super::WingReconciliationError;
 ///
 /// Reference adaptation and the baseline sandbox freeze a measured empirical
 /// wing, so their non-box inventory is complete by construction and carries no
-/// item list -- unless the strength-sized box alone outweighs that wing, which
+/// item list; unless the strength-sized box alone outweighs that wing, which
 /// is reported rather than reconciled. Clean-sheet runs build the enumerated
 /// [`crate::wing_inventory`] list and are complete only when that list is.
 #[derive(Debug, Clone)]
@@ -55,7 +55,7 @@ impl StructuralInventory {
 /// declared FLOPS `DG` override when the configuration carries one (a
 /// weight-variant declaration, or the fixed-aircraft basis
 /// `AlasConfig::at_closure_mass` writes), otherwise the takeoff-mass
-/// requirement of the case being evaluated -- the same rule the FLOPS
+/// requirement of the case being evaluated: the same rule the FLOPS
 /// airframe adapter applies, so the sized box and the FLOPS wing never
 /// answer to two different design weights.
 pub fn design_gross_mass_kg(config: &AlasConfig) -> f64 {
@@ -95,8 +95,8 @@ type ReconciledReference = (
 ///
 /// When the strength-sized box alone outweighs the empirical wing there is no
 /// non-box remainder to freeze. That is a finding about the structural model
-/// on this aircraft -- its loads, materials and gauges against the FLOPS
-/// correlation -- and not a reason to abandon the mass evaluation: the
+/// on this aircraft (its loads, materials and gauges against the FLOPS
+/// correlation) and not a reason to abandon the mass evaluation: the
 /// empirical wing is published unchanged, the box is reported beside it, and
 /// [`StructuralInventory::ReferenceExceededBySizedBox`] marks the inventory
 /// incomplete so the feasibility residual carries the finding. Every other

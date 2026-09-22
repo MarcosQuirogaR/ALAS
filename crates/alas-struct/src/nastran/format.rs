@@ -12,8 +12,8 @@
 //!
 //! That second path has a quirk worth naming, since it is reproduced rather
 //! than fixed: a magnitude below about 1e-7 renders as `0.0`, the value having
-//! fallen off the end of six decimal places. Nothing in these decks reaches it
-//! -- the smallest number any of them carries is a damping ratio -- so it is
+//! fallen off the end of six decimal places. Nothing in these decks reaches it:
+//! the smallest number any of them carries is a damping ratio, so it is
 //! recorded here rather than as a `deviation-candidate` in the ledger, which is
 //! for behaviour that is reached.
 
@@ -23,7 +23,7 @@ const GENERAL_PRECISION: usize = 8;
 /// Decimal places its fallback `%.6f` asks for.
 const FALLBACK_DECIMALS: usize = 6;
 
-/// One free-field real, guaranteed to carry a decimal point -- `_f`.
+/// One free-field real, guaranteed to carry a decimal point: `_f`.
 ///
 /// Public because it is part of this module's contract rather than an
 /// implementation detail: every card these decks write is rendered by it, a
@@ -54,8 +54,8 @@ pub fn free_field(value: f64) -> String {
 /// `value` under C's `%.8g`: fixed notation with trailing zeros trimmed, or
 /// exponent notation when the exponent falls outside `[-4, 8)`.
 ///
-/// Only the fixed result is ever used as text -- [`free_field`] re-renders the
-/// other case -- so the exponent branch returns the scientific string purely as
+/// Only the fixed result is ever used as text ([`free_field`] re-renders the
+/// other case) so the exponent branch returns the scientific string purely as
 /// the marker that it was taken.
 fn general(value: f64) -> String {
     let scientific = format!("{value:.*e}", GENERAL_PRECISION - 1);

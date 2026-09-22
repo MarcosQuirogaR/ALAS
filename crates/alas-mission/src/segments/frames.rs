@@ -20,9 +20,9 @@
 //! adds the weight.
 //!
 //! The rotation machinery is translated rather than simplified. Every
-//! rotation this mission actually performs is about the pitch axis alone --
+//! rotation this mission actually performs is about the pitch axis alone:
 //! roll and yaw are identically zero, so `T0` and `T2` are the identity and
-//! the products collapse -- but writing the collapsed form would make the
+//! the products collapse, but writing the collapsed form would make the
 //! sequence a comment instead of code, and the sequence (`T0 * T1 * T2`, from
 //! `angles_to_dcms(rotations, (2, 1, 0))` walking its sequence backwards) is
 //! exactly the sort of thing a port gets subtly wrong.
@@ -96,7 +96,7 @@ fn transpose(matrix: &Matrix3) -> Matrix3 {
 /// `angles_to_dcms(rotations, (2, 1, 0))`.
 ///
 /// The sequence is walked in reverse and each factor multiplied on the right
-/// of the running product, which starts at the identity -- so the result is
+/// of the running product, which starts at the identity, so the result is
 /// `T0(r0) * T1(r1) * T2(r2)`.
 fn angles_to_dcm(rotations: &Vector3) -> Matrix3 {
     let identity = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
@@ -127,7 +127,7 @@ pub fn initialize_time(conditions: &mut Conditions, initials: Option<&Initials>)
 /// ended.
 ///
 /// Upstream first tries to overwrite the *previous* segment's last altitude
-/// with this segment's own, which is a real mutation of a shared object -- but
+/// with this segment's own, which is a real mutation of a shared object, but
 /// it is guarded on `segment.altitude` or `segment.altitude_start` being set,
 /// and every segment in this mission that has a predecessor leaves both at
 /// `None`. Its `else` branch is `assert('Altitude not set')`, which asserts a
@@ -164,8 +164,8 @@ pub fn initialize_inertial_position(conditions: &mut Conditions, initials: Optio
 ///
 /// Not a shift: upstream assigns the scalar across the whole column, which is
 /// what makes [`update_planet_position`]'s reading of row zero well defined.
-/// With no previous segment and no `latitude` on the segment -- which is every
-/// case `mission_setup` builds -- the initial position is the equator on the
+/// With no previous segment and no `latitude` on the segment, which is every
+/// case `mission_setup` builds, the initial position is the equator on the
 /// prime meridian.
 pub fn initialize_planet_position(conditions: &mut Conditions, initials: Option<&Initials>) {
     let (latitude, longitude) = match initials {
@@ -179,7 +179,7 @@ pub fn initialize_planet_position(conditions: &mut Conditions, initials: Option<
 /// Differentiate the inertial velocity to get the inertial acceleration.
 ///
 /// Runs in a climb or descent segment and *not* in a cruise segment, whose
-/// iterate chain omits it -- so a cruise acceleration stays at the zero
+/// iterate chain omits it, so a cruise acceleration stays at the zero
 /// `expand_rows` left it at, and its residual is formed without one.
 pub fn update_acceleration(conditions: &mut Conditions, differentiate: &[Vec<f64>]) {
     let velocity = conditions.velocity_vector_m_s.clone();
@@ -225,8 +225,8 @@ pub fn update_orientations(conditions: &mut Conditions) {
         conditions.transform_body_to_inertial[point] = body_to_inertial;
 
         // Upstream builds `T_wind2body`, transposes it into `T_body2wind`,
-        // and then forms the wind-to-inertial transform from `T_wind2body`
-        // -- so the transpose is computed and never read, the same dead
+        // and then forms the wind-to-inertial transform from `T_wind2body`,
+        // so the transpose is computed and never read, the same dead
         // arithmetic `alas-struct::mesh` and `alas-aero::vorlax` each dropped
         // in their own rows. It is dropped here too, and the product is the
         // one upstream actually takes.
@@ -274,8 +274,8 @@ pub fn update_forces(conditions: &mut Conditions) {
 /// reports. The integrated latitude is divided by the degree factor and then
 /// *its cosine is taken*, so a degree-valued number is fed to a trigonometric
 /// function expecting radians; and the result is added to a latitude that was
-/// initialized in radians. Nothing downstream reads either column -- no force,
-/// no residual and no exported quantity depends on them -- which is why the
+/// initialized in radians. Nothing downstream reads either column (no force,
+/// no residual and no exported quantity depends on them) which is why the
 /// mismatch has survived.
 pub fn update_planet_position(
     conditions: &mut Conditions,

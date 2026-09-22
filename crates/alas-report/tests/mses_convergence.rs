@@ -4,13 +4,27 @@
 //! Focused presentation contracts for the MSES sweep-convergence figure.
 
 use alas_aero::mses::{
-    MsesPolarPointDiagnostic, MsesPolarPointStatus, MsesPolarResult, MsesStatus,
+    MsesOsmapStatus, MsesPolarPointDiagnostic, MsesPolarPointStatus, MsesPolarResult, MsesStatus,
 };
 use alas_report::families::aerodynamics::figure_mses_convergence;
-use alas_report::scene::{SceneElement, TextAlign};
+use alas_report::scene::{Color, Scene, SceneElement, TextAlign};
 use alas_report::svg::render_svg;
 
+/// The reference partially converged sweep: a free-transition run whose
+/// Orr-Sommerfeld map resolved and passed the driver's local format check.
 fn fixture_result() -> MsesPolarResult {
+    fixture_with_osmap(
+        MsesOsmapStatus::Available,
+        Some("adjacent double-precision osmapDP.dat passed the local header check"),
+    )
+}
+
+/// The same sweep with only its Orr-Sommerfeld map evidence varied, so the
+/// figure's map gate is tested against identical coefficient data.
+fn fixture_with_osmap(
+    osmap_status: MsesOsmapStatus,
+    osmap_diagnostic: Option<&str>,
+) -> MsesPolarResult {
     MsesPolarResult {
         status: MsesStatus::PartialConvergence,
         error: Some("MSES converged at 2 of 3 requested alpha points".to_owned()),
@@ -34,9 +48,8 @@ fn fixture_result() -> MsesPolarResult {
             },
         ],
         osmap_required: true,
-        osmap_diagnostic: Some(
-            "adjacent OSMAP file does not exist: C:\\solver\\osmapDP.dat".to_owned(),
-        ),
+        osmap_status,
+        osmap_diagnostic: osmap_diagnostic.map(str::to_owned),
         alpha_deg: vec![0.0, 8.0],
         cl: vec![0.2, 0.9],
         cd: vec![0.02, 0.08],
@@ -65,7 +78,7 @@ fn convergence_figure_removes_status_prose_and_verdict_legend() {
     assert!(svg.contains("MSES Sweep Convergence".to_ascii_lowercase().as_str()));
     assert!(!svg.contains("converged request"));
     assert!(!svg.contains("not converged"));
-    assert!(!svg.contains("adjacent osmap file does not exist"));
+    assert!(!svg.contains("passed the local header check"));
     assert!(!svg.contains("mses converged at"));
 
     // The requested-point markers and the three coefficient traces remain in
@@ -87,12 +100,105 @@ fn convergence_figure_removes_status_prose_and_verdict_legend() {
     );
     assert_eq!(
         result.osmap_diagnostic.as_deref(),
-        Some("adjacent OSMAP file does not exist: C:\\solver\\osmapDP.dat")
+        Some("adjacent double-precision osmapDP.dat passed the local header check")
     );
     assert_eq!(
         result.point_diagnostics[1].solver_output,
         "native solver transcript: residual history"
     );
+}
+
+fn status_body_text(scene: &Scene) -> String {
+    scene
+        .elements
+        .iter()
+        .filter_map(|element| match element {
+            SceneElement::TextBlock { text, .. } => Some(text.clone()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn coefficient_traces(scene: &Scene) -> usize {
+    scene
+        .elements
+        .iter()
+        .filter(|element| matches!(element, SceneElement::Polyline { .. }))
+        .count()
+}
+
+#[test]
+fn missing_required_osmap_cannot_render_as_a_converged_sweep() {
+    let result = fixture_with_osmap(
+        MsesOsmapStatus::Missing,
+        Some("adjacent OSMAP file does not exist: C:\\solver\\osmapDP.dat"),
+    );
+    let scene = figure_mses_convergence(&result, Some("grey"));
+
+    // The same coefficient arrays render three traces when the map is
+    // available; with the map missing none of them may be drawn, and no
+    // requested point may be marked green.
+    assert_eq!(scene.title.as_deref(), Some("MSES figure unavailable"));
+    assert_eq!(coefficient_traces(&scene), 0);
+    assert!(!scene.elements.iter().any(|element| matches!(
+        element,
+        SceneElement::Circle { fill: Some(fill), .. }
+            if fill.color == Color::from_hex("#27ae60")
+    )));
+    assert_eq!(
+        status_body_text(&scene),
+        "adjacent OSMAP file does not exist: C:\\solver\\osmapDP.dat"
+    );
+
+    // The structured evidence the run manifest serializes is untouched.
+    assert_eq!(result.osmap_status.as_str(), "missing");
+    assert_eq!(
+        result.osmap_diagnostic.as_deref(),
+        Some("adjacent OSMAP file does not exist: C:\\solver\\osmapDP.dat")
+    );
+    assert_eq!(result.converged_alpha_count, 2);
+}
+
+#[test]
+fn incompatible_required_osmap_cannot_render_as_a_converged_sweep() {
+    let diagnostic = "configured OSMAP file C:\\solver\\osmap.dat is incompatible: \
+         single-precision osmap.dat detected; MSES requires osmapDP.dat";
+    let result = fixture_with_osmap(MsesOsmapStatus::Incompatible, Some(diagnostic));
+    let scene = figure_mses_convergence(&result, Some("dark"));
+
+    assert_eq!(scene.title.as_deref(), Some("MSES figure unavailable"));
+    assert_eq!(coefficient_traces(&scene), 0);
+    assert_eq!(status_body_text(&scene), diagnostic);
+    assert_eq!(result.osmap_status.as_str(), "incompatible");
+}
+
+#[test]
+fn unusable_required_osmap_without_a_diagnostic_names_the_retained_status() {
+    let scene = figure_mses_convergence(
+        &fixture_with_osmap(MsesOsmapStatus::Incompatible, None),
+        Some("light"),
+    );
+
+    assert_eq!(scene.title.as_deref(), Some("MSES figure unavailable"));
+    assert_eq!(coefficient_traces(&scene), 0);
+    assert_eq!(
+        status_body_text(&scene),
+        "MSES free transition was requested but no usable Orr-Sommerfeld map was recorded \
+         (osmap status: incompatible)"
+    );
+    // The solver's own status prose stays out of the figure.
+    assert!(!status_body_text(&scene).contains("MSES converged at"));
+}
+
+#[test]
+fn a_forced_transition_sweep_renders_without_any_osmap() {
+    let mut result = fixture_with_osmap(MsesOsmapStatus::NotRequired, None);
+    result.osmap_required = false;
+    let scene = figure_mses_convergence(&result, Some("grey"));
+
+    assert_eq!(scene.title.as_deref(), Some("MSES Sweep Convergence"));
+    assert_eq!(coefficient_traces(&scene), 3);
 }
 
 #[test]

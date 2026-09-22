@@ -11,9 +11,13 @@
 //! Gauss-Seidel fixed point on the takeoff mass, accelerated here with
 //! Aitken's delta-squared extrapolation because the map contracts by a
 //! roughly constant factor per pass. The expensive discipline, the
-//! vortex-lattice trim, is re-run only when the centre of gravity has moved
-//! by more than the configured fraction of the mean chord since the last
-//! trim; a zero tolerance keeps the single trim at the takeoff-mass ceiling.
+//! vortex-lattice trim, is re-run only when the polar's own inputs have
+//! moved: the centre of gravity by more than `retrim_cg_tolerance_pct_mac`
+//! percent of the mean aerodynamic chord, or the takeoff mass (and with it
+//! the required cruise lift coefficient, which is proportional to it at fixed
+//! altitude, Mach and reference area) by more than the same percentage. A
+//! zero tolerance re-trims on any change at all. The shift that was accepted
+//! without a re-trim is reported as `MdaClosure::cg_shift_pct_mac`.
 //!
 //! `MtowSizing::FixedRequirement` takes one pass: the takeoff mass is the
 //! requirement and the mission must fit under it. `MtowSizing::SizedByMission`
@@ -23,7 +27,7 @@
 //! `SizedByMission` keeps it as the dispatch ceiling and as the Aitken
 //! extrapolation's admissibility bound on every pass, while `Unconstrained`
 //! drops both after the seed, so the requirement never reappears as a limit
-//! anywhere in the closure -- only the freely converging dispatch mass does.
+//! anywhere in the closure, only the freely converging dispatch mass does.
 
 use alas_config::design_variables::DesignVector;
 use alas_config::{AlasConfig, MassSizingBasis, MtowSizing};
@@ -88,6 +92,16 @@ pub(crate) struct MdaClosure {
     pub structural_feedback: alas_mass::wingbox_feedback::WingboxFeedback,
 }
 
+/// A failure with the `mass_coordinates` reason, for the one arm of
+/// [`converge`] that keeps it panic-free.
+///
+/// This is deliberately **not** the seam for a station-placement failure.
+/// Every mass and coordinate result this loop consumes comes from
+/// `build::mass_analysis_with_structural_feedback`, which already classifies
+/// a missing main-gear station as `main_gear_station_not_measured` and
+/// propagates it with `?`; the candidate is rejected there, before the loop
+/// body runs. The arm below is reached only if `max_passes` were zero, which
+/// the caller's own `max(1)` prevents, so it names no physical cause at all.
 fn mass_coordinates_failure() -> CandidateFailure {
     CandidateFailure {
         reason: "mass_coordinates",
@@ -139,6 +153,7 @@ fn evaluate_state_at_tow(
     model: &mut SegmentMissionModel,
     structural_feedback: &mut alas_mass::wingbox_feedback::WingboxFeedback,
     cg_at_trim: &mut f64,
+    mass_at_trim: &mut f64,
     retrim_count: &mut usize,
 ) -> Result<(), CandidateFailure> {
     let config = context.config;
@@ -179,19 +194,49 @@ fn evaluate_state_at_tow(
     state.masses = masses;
     state.coords = coords;
     state.cg = cg;
-    // The mission model is coupled to the trimmed polar. Re-trim on every
-    // refreshed mass state so a CG change cannot leave fuel sizing on a stale
-    // induced-drag model.
+    // The mission model is coupled to the trimmed polar, and the trim is the
+    // expensive discipline in this loop: a vortex-lattice solve per call. The
+    // polar is a function of the two things a pass can change, the centre of
+    // gravity and the lift coefficient the mass demands, so the loop re-trims
+    // when either has moved by more than the configured tolerance and reuses
+    // the standing polar when neither has.
+    //
+    // `retrim_cg_tolerance_pct_mac` is that tolerance, read as a percentage
+    // of the mean aerodynamic chord for the centre of gravity and as the same
+    // percentage of the lift coefficient for the mass. At fixed altitude,
+    // Mach and reference area the required cruise lift coefficient is
+    // proportional to mass, so one number bounds both couplings. A tolerance
+    // of zero re-trims on any change at all, which is the behaviour before
+    // this criterion existed.
+    //
+    // The residual shift that was accepted is reported through
+    // `MdaClosure::cg_shift_pct_mac`, so a candidate never claims a polar it
+    // did not solve at.
     if context.retrim_allowed {
-        state.polar = trim_and_polar(config, plane, cg[0], context.dv, tow_k)?;
-        *cg_at_trim = cg[0];
-        *retrim_count += 1;
-        model.cd0 = state.polar.cd0;
-        model.induced_factor_k = state.polar.induced_factor_k;
-        model.wave_drag_cd = state.polar.wave_drag_cd;
-        model.validate().map_err(|_| CandidateFailure {
-            reason: "trim_solve",
-        })?;
+        let tolerance_pct = config
+            .optimizer
+            .objective
+            .retrim_cg_tolerance_pct_mac
+            .max(0.0);
+        let mac = plane.c_ref.max(1e-9);
+        let cg_shift_pct_mac = (cg[0] - *cg_at_trim).abs() / mac * 100.0;
+        let mass_shift_pct = if *mass_at_trim > 0.0 {
+            (tow_k - *mass_at_trim).abs() / *mass_at_trim * 100.0
+        } else {
+            f64::INFINITY
+        };
+        if cg_shift_pct_mac > tolerance_pct || mass_shift_pct > tolerance_pct {
+            state.polar = trim_and_polar(config, plane, cg[0], context.dv, tow_k)?;
+            *cg_at_trim = cg[0];
+            *mass_at_trim = tow_k;
+            *retrim_count += 1;
+            model.cd0 = state.polar.cd0;
+            model.induced_factor_k = state.polar.induced_factor_k;
+            model.wave_drag_cd = state.polar.wave_drag_cd;
+            model.validate().map_err(|_| CandidateFailure {
+                reason: "trim_solve",
+            })?;
+        }
     }
     Ok(())
 }
@@ -222,8 +267,8 @@ pub(crate) fn converge(
     // aircraft (`BaselineSandbox`, `ReferenceAdaptation`, or any mode with a
     // declared `flops_structure.design_gross_mass_kg` override) is designed
     // to one landing weight regardless of what the dispatch mass converges
-    // to, so every pass -- under `FixedRequirement`, `SizedByMission` and
-    // `Unconstrained` alike -- uses the sizing basis's own
+    // to, so every pass (under `FixedRequirement`, `SizedByMission` and
+    // `Unconstrained` alike) uses the sizing basis's own
     // `design_landing_mass_kg`. Only a coupled clean-sheet closure recomputes
     // the limit from the current takeoff-mass iterate, because there the
     // landing mass is defined as a fraction of whatever the design converges
@@ -257,6 +302,9 @@ pub(crate) fn converge(
 
     let mut state = initial;
     let mut cg_at_trim = state.cg[0];
+    // The initial state was trimmed at the ceiling mass, so that is the mass
+    // the standing polar belongs to.
+    let mut mass_at_trim = ceiling;
     let mut tow_k = ceiling;
     let mut iterates: Vec<f64> = vec![tow_k];
     let mut model = context.model.clone();
@@ -276,6 +324,7 @@ pub(crate) fn converge(
                 &mut model,
                 &mut structural_feedback,
                 &mut cg_at_trim,
+                &mut mass_at_trim,
                 &mut retrim_count,
             )?;
         }
@@ -324,6 +373,7 @@ pub(crate) fn converge(
                 &mut model,
                 &mut structural_feedback,
                 &mut cg_at_trim,
+                &mut mass_at_trim,
                 &mut retrim_count,
             )?;
         }

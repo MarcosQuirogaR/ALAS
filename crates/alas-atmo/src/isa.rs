@@ -13,7 +13,7 @@
 //! default is the fitted [`crate::differentiable`] model, and the two
 //! disagree by about a per cent in temperature, so where a module in this
 //! port evaluates the ISA it is because its Python counterpart passed
-//! `method="isa"` -- not because the closed form is the natural reading of
+//! `method="isa"`, not because the closed form is the natural reading of
 //! "the standard atmosphere".
 //!
 //! [`BAROMETRIC_GRAVITY`] (9.81 m/s^2) is the constant this module's upstream
@@ -67,7 +67,7 @@ const SEA_LEVEL_PRESSURE_PA: f64 = 101_325.0;
 /// than the -2 K/km lapse from layer 6 would predict there. `temperature_isa`
 /// always evaluates the layer below a boundary (see [`layer_index`]), so
 /// querying exactly 84852 m returns the extrapolated value, not this row's
-/// own number -- a published-table rounding artifact reproduced as-is, not a
+/// own number: a published-table rounding artifact reproduced as-is, not a
 /// discontinuity this crate introduces.
 const RAW_TABLE: [(f64, f64, f64); 8] = [
     (0.0, -6.5, 15.0),
@@ -226,7 +226,7 @@ mod tests {
         // strictly picks the layer below (its condition is `altitude >
         // base`, not `>=`), so this checks that evaluating the lower layer's
         // formula at its own top reproduces the upper layer's stored base
-        // pressure exactly -- which is what makes the table's precomputed
+        // pressure exactly, which is what makes the table's precomputed
         // chain trustworthy in the first place. Guaranteed by construction:
         // each `base_pressure_pa` *is* the lower layer's formula evaluated at
         // that altitude.
@@ -241,7 +241,7 @@ mod tests {
     fn temperature_agrees_with_the_layer_below_at_every_boundary_but_the_last() {
         // Unlike pressure, each row's base temperature is an independent
         // value out of the CSV rather than something computed from the row
-        // below, so this equality is not guaranteed the way pressure's is --
+        // below, so this equality is not guaranteed the way pressure's is;
         // it happens to hold because the published lapse rates and base
         // temperatures are mutually consistent, except at the very last
         // boundary. There, linearly extrapolating layer 6 (-2 K/km from
@@ -250,7 +250,7 @@ mod tests {
         // rounded to two decimal places and does not round-trip exactly.
         // `temperature_isa` always evaluates the layer *below* a boundary, so
         // it returns the extrapolated 186.946 K here, not the table's stored
-        // value -- reproduced faithfully, not treated as a bug to fix.
+        // value: reproduced faithfully, not treated as a bug to fix.
         for i in 1..LAYERS.len() - 1 {
             let boundary_m = LAYERS[i].base_altitude_m;
             assert_eq!(temperature_isa(boundary_m), LAYERS[i].base_temperature_k);

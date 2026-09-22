@@ -295,7 +295,7 @@ fn installed_msc_sol101_sol103_and_harmonic_sol111_are_consumed() {
     std::fs::write(
         output.join("sol111_sine/force_psd_rms.txt"),
         format!(
-            "one-sided force PSD: {:.12e} N^2/Hz\nfrequency band: {:.6}--{:.6} Hz\n{rms_text}\n",
+            "one-sided force PSD: {:.12e} N^2/Hz\nfrequency band: {:.6} to {:.6} Hz\n{rms_text}\n",
             config.random_force_psd_n2_per_hz, config.freq_step_hz, config.freq_sweep_max_hz,
         ),
     )

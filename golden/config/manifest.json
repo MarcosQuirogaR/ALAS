@@ -1,7 +1,7 @@
 {
   "fixtures": {
     "aircraft_presets": {
-      "description": "alas.config.presets: every registered aircraft preset in registration order, as a complete design -- design vector, geometry scaffold, requirements, engine, and any per-aircraft mass-model and performance calibration",
+      "description": "alas.config.presets: every registered aircraft preset in registration order, as a complete design: design vector, geometry scaffold, requirements, engine, and any per-aircraft mass-model and performance calibration",
       "generator": "gen_config_aircraft.py",
       "runtime": "alas",
       "alas_commit": "7d1555c1f4db5110cf6cd187c156718e1a033b50",

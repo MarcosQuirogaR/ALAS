@@ -5,7 +5,7 @@
 // Reference: alas @ rust-port-baseline.
 
 //! Every main-wing cross-section's airfoil outline, coloured by spanwise
-//! position with a colorbar -- `figure_airfoil_evolution`.
+//! position with a colorbar: `figure_airfoil_evolution`.
 
 use alas_geom::aircraft::airplane::Airplane;
 

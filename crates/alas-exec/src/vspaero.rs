@@ -16,6 +16,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use crate::process::{kill_process_tree, NewProcessGroup, NoConsoleWindow};
+use crate::supervise::SupervisedSpawn;
 
 /// Wake model declared by the native `.vspaero` setup.
 ///
@@ -308,7 +309,7 @@ pub fn run_vspaero(
         .stderr(Stdio::from(stderr))
         .no_window()
         .new_process_group();
-    let mut child = match command.spawn() {
+    let mut child = match command.spawn_supervised("VSPAERO analysis") {
         Ok(child) => child,
         Err(error) => {
             result.status = VspaeroProcessStatus::LaunchFailed;

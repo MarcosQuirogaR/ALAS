@@ -91,14 +91,8 @@ pub(super) fn show_external_images(
     let panel_width = (panel_height * native_width as f32 / native_height as f32).min(panel_width);
     match load_external_texture(state, ui.ctx(), source) {
         Some(texture) => {
-            if let Some(label) = labels.get(selected) {
-                ui.label(RichText::new(*label).strong());
-            }
             if ui
-                .add(
-                    egui::Image::from_texture(&texture)
-                        .fit_to_exact_size(vec2(panel_width, panel_height)),
-                )
+                .add(external_image(&texture, vec2(panel_width, panel_height)))
                 .double_clicked()
             {
                 double_clicked = true;
@@ -119,6 +113,18 @@ pub(super) fn show_external_images(
         }
     }
     double_clicked
+}
+
+/// The maximizable render widget.  `egui::Image` senses hover only, so the
+/// double-click that maximizes every other result figure never fired on a
+/// Patran render until the widget asked for click input.
+pub(super) fn external_image(
+    texture: &egui::TextureHandle,
+    size: egui::Vec2,
+) -> egui::Image<'static> {
+    egui::Image::from_texture(texture)
+        .fit_to_exact_size(size)
+        .sense(egui::Sense::click())
 }
 
 fn load_external_texture(

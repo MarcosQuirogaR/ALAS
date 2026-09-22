@@ -12,7 +12,7 @@ rust-version.workspace = true
 # `alas-route::simbrief` also synthesizes one from a dispatch plan's own data.
 alas-config = { path = "../alas-config" }
 # `simbrief` parses a dispatch plan that arrives as JSON. It does not fetch
-# one -- see the module doc for where the transport lives.
+# one, see the module doc for where the transport lives.
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }

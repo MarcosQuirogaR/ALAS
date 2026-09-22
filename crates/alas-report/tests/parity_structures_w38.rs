@@ -30,7 +30,9 @@ fn text_nodes(scene: &alas_report::scene::Scene) -> Vec<&str> {
         .elements
         .iter()
         .filter_map(|element| match element {
-            SceneElement::Text { text, .. } => Some(text.as_str()),
+            SceneElement::Text { text, .. } | SceneElement::TextBlock { text, .. } => {
+                Some(text.as_str())
+            }
             _ => None,
         })
         .collect()

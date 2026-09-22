@@ -47,12 +47,15 @@ impl OpenFoamAdapter {
                 commands.insert((*tool).to_owned(), false);
             }
             commands.insert(GMSH_COMMAND.to_owned(), false);
+            let parsed_version = configured_directory_version(&self.preferences);
             return OpenFoamCapabilities {
                 backend: self.backend,
-                version,
+                version: parsed_version.as_ref().map(OpenFoamVersion::qualified_name),
                 commands,
                 available: false,
                 detail: "wsl.exe is not available on this host".to_owned(),
+                version_support: OpenFoamVersionAssessment::from_version(parsed_version.as_ref()),
+                parsed_version,
             };
         }
 
@@ -121,12 +124,22 @@ impl OpenFoamAdapter {
             };
         }
 
+        // A banner is authoritative; the configured directory name is only a
+        // fallback so a Foundation 11 `OpenFOAM-11` install is still reported
+        // as unsupported when no utility answered the probe.
+        let parsed_version = version.or_else(|| configured_directory_version(&self.preferences));
+        let version_support = OpenFoamVersionAssessment::from_version(parsed_version.as_ref());
+        if version_support.level == OpenFoamSupportLevel::Unsupported {
+            detail = format!("{detail} {}", version_support.reason);
+        }
         OpenFoamCapabilities {
             backend: self.backend,
-            version,
+            version: parsed_version.as_ref().map(OpenFoamVersion::qualified_name),
             commands,
             available,
             detail,
+            parsed_version,
+            version_support,
         }
     }
 
@@ -182,37 +195,7 @@ impl OpenFoamAdapter {
                 if !wsl_candidate(&self.preferences) {
                     return Err("wsl.exe is not available on this host".to_owned());
                 }
-                let mut args = Vec::with_capacity(extra_args.len() + 8);
-                if let Some(distribution) = self
-                    .preferences
-                    .wsl_distribution
-                    .as_deref()
-                    .filter(|value| !value.trim().is_empty())
-                {
-                    args.push(OsString::from("--distribution"));
-                    args.push(OsString::from(distribution));
-                }
-                if let Some(case_dir) = case_dir {
-                    args.push(OsString::from("--cd"));
-                    args.push(OsString::from(wsl_path(case_dir)));
-                }
-                args.push(OsString::from("--exec"));
-                let wsl_tool = if let Some(bin) = self
-                    .preferences
-                    .wsl_bin_dir
-                    .as_deref()
-                    .filter(|value| !value.trim().is_empty())
-                {
-                    format!("{}/{tool}", wsl_path(Path::new(bin)))
-                } else {
-                    tool.to_owned()
-                };
-                args.push(OsString::from(wsl_tool));
-                if case_dir.is_some() {
-                    args.push(OsString::from("-case"));
-                    args.push(OsString::from("."));
-                }
-                args.extend(extra_args.iter().cloned());
+                let args = wsl_tool_args(&self.preferences, tool, case_dir, extra_args);
                 Ok(OpenFoamCommand {
                     program: PathBuf::from("wsl.exe"),
                     args,

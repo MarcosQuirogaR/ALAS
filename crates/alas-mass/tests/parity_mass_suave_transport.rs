@@ -5,9 +5,9 @@
 //! `Weights_Transport` implementation. This unpublished parity test retains
 //! the historical fixture and test filename for reproducibility.
 //!
-//! Every quantity here is closed-form `f64` arithmetic -- imperial unit
+//! Every quantity here is closed-form `f64` arithmetic: imperial unit
 //! conversions and empirical correlations, no factorization, spline fit or
-//! iteration -- so the whole row is checked at `Tier::Closed`, the tier
+//! iteration, so the whole row is checked at `Tier::Closed`, the tier
 //! `docs/PORTING.md` assigns it.
 
 // This file is itself a test binary, so an unwrap or expect that fails is the
@@ -145,7 +145,7 @@ struct Fixture {
 }
 
 /// Resolve SUAVE's `vehicle.systems.control` string the same way
-/// `systems.systems` does -- a test-only mapping, since the crate's public
+/// `systems.systems` does: a test-only mapping, since the crate's public
 /// API rightly takes the enum and the production string resolution belongs to
 /// `alas-mission::vehicle` (a later crate). `"long range"` (space) and the
 /// other unhyphenated forms this program actually produces all resolve to the

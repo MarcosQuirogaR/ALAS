@@ -7,9 +7,15 @@
 //! without requiring any external drawing or graphical library dependencies.
 
 use crate::scene::{
-    text_line_center_offsets, visual_title, Fill, Scene, SceneElement, Stroke, TextAlign,
-    CSS_PIXELS_PER_POINT, TEXT_LINE_HEIGHT_EM,
+    text_line_center_offsets, visual_title, wrap_text_to_width, Fill, Scene, SceneElement, Stroke,
+    TextAlign, TextBaseline, CSS_PIXELS_PER_POINT, TEXT_LINE_HEIGHT_EM,
 };
+
+/// Explicit family stack shared by SVG exports and the GUI rasterizer.
+///
+/// ALAS bundles the first two faces for in-app rendering. A generic final
+/// fallback keeps exported SVG text readable when it is opened elsewhere.
+const SVG_FONT_FAMILY: &str = "'Noto Sans', 'Noto Sans Math', sans-serif";
 
 /// Render a complete [`Scene`] to a standalone XML SVG string.
 pub fn render_svg(scene: &Scene) -> String {
@@ -141,9 +147,27 @@ fn render_element(out: &mut String, elem: &SceneElement) {
         } => {
             render_image(out, source, *x, *y, *width, *height, *source_rect);
         }
-        SceneElement::SphericalImage { center, radius, .. } => {
+        SceneElement::SphericalImage {
+            center,
+            radius,
+            clip,
+            ..
+        } => {
+            // The silhouette carries the same viewport bound as the texture
+            // layer, so a zoomed globe does not paint over the surrounding
+            // title and colorbar in a headless SVG either.
+            let (open, close) = match clip {
+                Some([x, y, width, height]) => {
+                    let id = format!("globe-clip-{x:.0}-{y:.0}-{width:.0}-{height:.0}");
+                    out.push_str(&format!(
+                        r##"  <clipPath id="{id}"><rect x="{x:.2}" y="{y:.2}" width="{width:.2}" height="{height:.2}"/></clipPath>"##
+                    ));
+                    (format!(r##"<g clip-path="url(#{id})">"##), "</g>")
+                }
+                None => (String::new(), ""),
+            };
             out.push_str(&format!(
-                r##"  <circle cx="{:.2}" cy="{:.2}" r="{:.2}" fill="#08213d"/>"##,
+                r##"  {open}<circle cx="{:.2}" cy="{:.2}" r="{:.2}" fill="#08213d"/>{close}"##,
                 center[0], center[1], radius
             ));
         }
@@ -176,13 +200,47 @@ fn render_element(out: &mut String, elem: &SceneElement) {
             let line_height = font_size * CSS_PIXELS_PER_POINT * TEXT_LINE_HEIGHT_EM;
             let centers = text_line_center_offsets(lines.len(), line_height, *baseline);
             out.push_str(&format!(
-                r#"  <text font-family="sans-serif" font-size="{:.1}pt" fill="{}" fill-opacity="{:.3}" text-anchor="{}" dominant-baseline="central"{}{}>"#,
+                r#"  <text font-family="{}" font-size="{:.1}pt" fill="{}" fill-opacity="{:.3}" text-anchor="{}" dominant-baseline="central"{}{}>"#,
+                SVG_FONT_FAMILY,
                 font_size,
                 color.to_hex_rgb(),
                 color.alpha_f64(),
                 anchor,
                 weight,
                 rot,
+            ));
+            for (line, center) in lines.iter().zip(centers) {
+                out.push_str(&format!(
+                    r#"<tspan x="{:.2}" y="{:.2}">{}</tspan>"#,
+                    pos[0],
+                    pos[1] + center,
+                    escape_xml(line),
+                ));
+            }
+            out.push_str("</text>");
+        }
+        SceneElement::TextBlock {
+            text,
+            pos,
+            width,
+            font_size,
+            color,
+            bold,
+        } => {
+            // SVG has no metric-aware wrapping the viewer applies itself, so
+            // reflow with the conservative budget and emit one row per line.
+            let weight = if *bold { r#" font-weight="bold""# } else { "" };
+            let wrapped = wrap_text_to_width(text, *font_size, *width);
+            let lines = wrapped.lines().collect::<Vec<_>>();
+            let line_height = font_size * CSS_PIXELS_PER_POINT * TEXT_LINE_HEIGHT_EM;
+            let centers = text_line_center_offsets(lines.len(), line_height, TextBaseline::Top);
+            out.push_str(&format!(
+                r#"  <text font-family="{}" font-size="{:.1}pt" fill="{}" fill-opacity="{:.3}" text-anchor="start" dominant-baseline="central"{}>"#,
+                SVG_FONT_FAMILY,
+                font_size,
+                color.to_hex_rgb(),
+                color.alpha_f64(),
+                weight,
             ));
             for (line, center) in lines.iter().zip(centers) {
                 out.push_str(&format!(
@@ -410,5 +468,28 @@ mod tests {
         assert_eq!(svg.matches("<tspan").count(), 2);
         assert!(svg.contains("x=\"100.00\" y=\"40.40\">Required</tspan>"));
         assert!(svg.contains("x=\"100.00\" y=\"59.60\">Available</tspan>"));
+    }
+
+    #[test]
+    fn text_uses_the_bundled_engineering_font_stack() {
+        let mut scene = Scene::new(200.0, 100.0, None);
+        scene.add(SceneElement::Text {
+            text: "\u{03B7}\u{209C}\u{2095} = \u{03B7}\u{209A} \u{22C5} \u{03B7}\u{2092}"
+                .to_owned(),
+            pos: [100.0, 50.0],
+            font_size: 12.0,
+            color: Color::rgb(0, 0, 0),
+            align: TextAlign::Center,
+            baseline: TextBaseline::Middle,
+            angle_deg: 0.0,
+            bold: false,
+        });
+
+        let svg = render_svg(&scene);
+
+        assert!(svg.contains("font-family=\"'Noto Sans', 'Noto Sans Math', sans-serif\""));
+        assert!(
+            svg.contains("\u{03B7}\u{209C}\u{2095} = \u{03B7}\u{209A} \u{22C5} \u{03B7}\u{2092}")
+        );
     }
 }

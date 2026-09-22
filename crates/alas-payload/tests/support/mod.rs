@@ -22,7 +22,7 @@ use alas_geom::builder::AircraftBuilder;
 use serde_json::Value;
 
 /// A case's configuration, the aircraft it builds, and the design vector it
-/// was built from -- the generator's `_config_and_plane`.
+/// was built from: the generator's `_config_and_plane`.
 pub fn config_and_plane(input: &Value) -> (AlasConfig, Airplane, Option<DesignVector>) {
     let defaults: Value = alas_testkit::load("config", "defaults");
     let presets: Value = alas_testkit::load("config", "aircraft_presets");

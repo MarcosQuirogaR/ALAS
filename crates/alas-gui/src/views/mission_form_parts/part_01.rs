@@ -12,7 +12,7 @@ use crate::theme::card_frame;
 use crate::views::form::{dynamic_form, FormEdit};
 use crate::views::{tr, tr_fields};
 
-use super::mission_profile_preview::show_mission_profile_preview;
+use crate::views::mission_profile_preview::show_mission_profile_preview;
 
 const ACTIVE_FRACTION: f64 = 1.0e-6;
 const MIN_CARD_COLUMN_WIDTH: f32 = 430.0;

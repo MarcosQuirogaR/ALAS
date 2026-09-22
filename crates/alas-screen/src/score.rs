@@ -352,7 +352,7 @@ pub(crate) fn score_candidate_with_geometry(
             name: name.to_string(),
             status: "error".to_string(),
             error: Some(format!(
-                "implausible t/c={:.1}% (outside 0.5-30% realistic range) -- likely a multi-element/degenerate database entry, not a usable wing section",
+                "implausible t/c={:.1}% (outside 0.5-30% realistic range), likely a multi-element/degenerate database entry, not a usable wing section",
                 max_t * 100.0
             )),
             ..Default::default()
@@ -378,7 +378,7 @@ pub(crate) fn score_candidate_with_geometry(
             name: name.to_string(),
             status: "error".to_string(),
             error: Some(format!(
-                "implausible 2-D result at target CL (CD={:.4}, L/D={:.1}) -- likely a NeuralFoil CST-fit breakdown for this coordinate set, not a real polar",
+                "implausible 2-D result at target CL (CD={:.4}, L/D={:.1}), likely a NeuralFoil CST-fit breakdown for this coordinate set, not a real polar",
                 cd_at_target, l_over_d
             )),
             ..Default::default()

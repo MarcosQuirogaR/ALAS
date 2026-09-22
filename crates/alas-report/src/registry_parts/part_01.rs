@@ -211,8 +211,8 @@ pub static PREVIEW_FIGURES: &[FigureDescriptor] = &[
     ),
     preview_descriptor(
         "engine",
-        "Engine Designer Preview",
+        "Thermodynamic Cycle Preview",
         "Propulsion",
-        "Editable nacelle profile preview.",
+        "Thermodynamic cycle temperature-entropy preview with separate core and bypass paths.",
     ),
 ];

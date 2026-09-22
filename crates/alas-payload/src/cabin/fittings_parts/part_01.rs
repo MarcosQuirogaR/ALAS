@@ -299,7 +299,7 @@ pub(super) struct Exits {
 ///
 /// A double-decker's upper deck needs its own evacuation route, so this runs
 /// per deck rather than once for the aircraft, and each deck is sized from the
-/// passengers actually seated on it after the capacity cap -- never from the
+/// passengers actually seated on it after the capacity cap, never from the
 /// raw requested total, which is what a deck that could not seat them all would
 /// otherwise be given doors for.
 pub(super) fn place_exits(

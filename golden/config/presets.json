@@ -1,7 +1,7 @@
 {
   "fidelity": [
     {
-      "description": "Coarse polar sweep and panel resolution -- fastest feedback while iterating on requirements/geometry.",
+      "description": "Coarse polar sweep and panel resolution: fastest feedback while iterating on requirements/geometry.",
       "display_name": "Draft (fast)",
       "name": "draft",
       "settings": {
@@ -27,7 +27,7 @@
       }
     },
     {
-      "description": "The default resolution -- a good balance of speed and accuracy for most runs.",
+      "description": "The default resolution: a good balance of speed and accuracy for most runs.",
       "display_name": "Standard (Recommended)",
       "name": "standard",
       "settings": {
@@ -108,7 +108,7 @@
       }
     },
     {
-      "description": "Typical modern narrow-body twin -- the PerformanceConfig defaults.",
+      "description": "Typical modern narrow-body twin: the PerformanceConfig defaults.",
       "display_name": "Standard Narrow-body (Recommended)",
       "name": "standard_narrowbody",
       "settings": {
@@ -135,7 +135,7 @@
       }
     },
     {
-      "description": "Modern single-aisle twin with leading-edge slats and single/double-slotted Fowler flaps (e.g. A320/A220 family) -- higher CLmax than the generic 'standard narrow-body' bucket, which undersells this common, well-documented high-lift system and overestimates V-speeds by ~15-20 kt.",
+      "description": "Modern single-aisle twin with leading-edge slats and single/double-slotted Fowler flaps (e.g. A320/A220 family): higher CLmax than the generic 'standard narrow-body' bucket, which undersells this common, well-documented high-lift system and overestimates V-speeds by ~15-20 kt.",
       "display_name": "Modern Narrow-body (slats + Fowler flaps)",
       "name": "modern_narrowbody",
       "settings": {
@@ -191,7 +191,7 @@
   ],
   "solver": [
     {
-      "description": "Fast, rough pass -- small population and few generations. Good for iterating on requirements/geometry before committing to a full run.",
+      "description": "Fast, rough pass: small population and few generations. Good for iterating on requirements/geometry before committing to a full run.",
       "display_name": "Quick Draft",
       "name": "quick_draft",
       "settings": {
@@ -207,7 +207,7 @@
       }
     },
     {
-      "description": "The default tradeoff -- good convergence in a reasonable wall-clock time.",
+      "description": "The default tradeoff: good convergence in a reasonable wall-clock time.",
       "display_name": "Balanced (Recommended)",
       "name": "balanced",
       "settings": {
@@ -239,7 +239,7 @@
       }
     },
     {
-      "description": "Widest search -- large population, many generations, tight tolerance. Slowest option; use for a final high-confidence optimization.",
+      "description": "Widest search: large population, many generations, tight tolerance. Slowest option; use for a final high-confidence optimization.",
       "display_name": "Exhaustive",
       "name": "exhaustive",
       "settings": {

@@ -19,7 +19,7 @@ use alas_config::MsesConfig;
 use alas_geom::aircraft::airfoil::Airfoil;
 use alas_geom::aircraft::spacing::linspace;
 
-/// The repanel density both entry points fix at their MSES call sites --
+/// The repanel density both entry points fix at their MSES call sites:
 /// `airfoil.repanel(n_points_per_side=80)`.
 const N_POINTS_PER_SIDE: usize = 80;
 
@@ -101,7 +101,7 @@ impl MsesPolarPointStatus {
     }
 }
 
-/// Availability and format validation of the Orr--Sommerfeld database used by
+/// Availability and format validation of the Orr-Sommerfeld database used by
 /// MSES's free-transition model.
 ///
 /// MSES can still emit a finite pressure table when this resource is missing,
@@ -210,7 +210,7 @@ pub struct MsesPolarResult {
     /// continues to describe only requested operating points.
     pub solver_attempts: Vec<MsesSolverAttempt>,
     /// Whether this run asked MSES to predict natural transition on either
-    /// surface. Forced-transition cases do not need an Orr--Sommerfeld map.
+    /// surface. Forced-transition cases do not need an Orr-Sommerfeld map.
     pub osmap_required: bool,
     /// Format/resource status for the map used by the live solver process.
     pub osmap_status: MsesOsmapStatus,
@@ -248,16 +248,16 @@ pub struct MsesPolarResult {
     pub checkpoints: Vec<MsesConvergedCheckpoint>,
 }
 
-/// A self-contained snapshot of one genuinely converged MSES solve --
+/// A self-contained snapshot of one genuinely converged MSES solve:
 /// geometry, solver configuration, Mach, Reynolds, OSMAP identity, the
-/// converged angle, and the raw `mdat.case` continuation state -- that a
+/// converged angle, and the raw `mdat.case` continuation state: that a
 /// later, independent driver call can validate and reuse as a warm-start
 /// anchor instead of a cold clean mesh.
 ///
 /// There is no public constructor: the only way to obtain one is to receive
 /// it back from a driver call that genuinely converged the point it
 /// describes (see [`MsesPolarResult::checkpoints`]), which is what "reusable
-/// ... converged-only provenance" means here -- a caller cannot hand-build or
+/// ... converged-only provenance" means here: a caller cannot hand-build or
 /// forge one, and a checkpoint whose identity does not match the driver
 /// instance it is offered to (different geometry, solver settings, Mach, Re,
 /// or OSMAP) is rejected rather than trusted; see
@@ -278,7 +278,7 @@ pub struct MsesConvergedCheckpoint {
     pub(crate) osmap_path: Option<PathBuf>,
     /// The angle this checkpoint is genuinely converged at, in degrees.
     pub alpha_deg: f64,
-    /// Verbatim MSES stdout for the solve that produced this checkpoint --
+    /// Verbatim MSES stdout for the solve that produced this checkpoint:
     /// audit evidence that it is real convergence, not a claim.
     pub solver_output: String,
     pub(crate) mdat_case: Vec<u8>,
@@ -441,7 +441,7 @@ impl MsesPolarResult {
             .collect()
     }
 
-    /// The lift-to-drag ratio at each point, `0.0` where drag is negligible --
+    /// The lift-to-drag ratio at each point, `0.0` where drag is negligible:
     /// upstream's `l_over_d` property.
     pub fn l_over_d(&self) -> Vec<f64> {
         self.cl
@@ -523,7 +523,7 @@ pub struct MsesPressureResult {
     pub status: MsesStatus,
     /// A human-readable reason when `status` is not successful.
     pub error: Option<String>,
-    /// The angle that actually converged and was extracted -- the requested
+    /// The angle that actually converged and was extracted: the requested
     /// one, or a retry offset if bridging back to the exact requested angle
     /// (see [`Mses::bridge_to_target`]) did not converge either. Compare
     /// against [`Self::requested_alpha_deg`], or call
@@ -544,7 +544,7 @@ pub struct MsesPressureResult {
     /// table from being mistaken for independent convergence evidence.
     pub solver_attempts: Vec<MsesSolverAttempt>,
     /// Whether this run asked MSES to predict natural transition on either
-    /// surface. Forced-transition cases do not need an Orr--Sommerfeld map.
+    /// surface. Forced-transition cases do not need an Orr-Sommerfeld map.
     pub osmap_required: bool,
     /// Format/resource status for the map used by the live solver process.
     pub osmap_status: MsesOsmapStatus,
@@ -638,7 +638,7 @@ impl MsesPressureResult {
 
     /// Whether a converged pressure table represents the requested transition
     /// model. Forced-transition runs and offline replays do not require an
-    /// Orr--Sommerfeld map; live free-transition runs do.
+    /// Orr-Sommerfeld map; live free-transition runs do.
     pub fn transition_model_is_valid(&self) -> bool {
         !self.osmap_required || self.osmap_status == MsesOsmapStatus::Available
     }

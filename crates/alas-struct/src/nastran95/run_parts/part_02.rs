@@ -7,7 +7,7 @@
 /// grid order, paginated by form feeds that repeat the title; a new subcase
 /// restarts the grid order. So the parser collects rows while inside a
 /// displacement section and opens a fresh table whenever a grid identifier drops
-/// below the last one seen -- which separates a paginated continuation from a
+/// below the last one seen, which separates a paginated continuation from a
 /// new subcase without needing the page's subcase banner, and which the many
 /// intervening `SPCFORCE`/`STRESS` tables of a modern deck cannot confuse,
 /// because those are not displacement sections.
@@ -104,7 +104,7 @@ pub fn displacement_of(
 pub struct Mode {
     /// The eigenvalue (radians-per-second squared).
     pub eigenvalue: f64,
-    /// The cyclic frequency, Hz -- the fifth column.
+    /// The cyclic frequency, Hz: the fifth column.
     pub cyclic_hz: f64,
 }
 

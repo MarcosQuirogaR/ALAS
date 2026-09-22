@@ -13,7 +13,8 @@ use alas_config::Field;
 use egui::{RichText, Ui};
 use serde_json::Value;
 
-use crate::views::form::{dynamic_form, FormEdit};
+use crate::nav::Surface;
+use crate::views::form::{dynamic_form_with_open_root_nodes, FormEdit};
 use crate::views::tr;
 
 /// A visual subsection of a previously flat configuration page.
@@ -24,27 +25,22 @@ pub(super) struct PageSection {
 }
 
 /// Return the hierarchy for pages that do not have a bespoke editor.
-pub(super) fn page_sections(group: &str) -> Option<&'static [PageSection]> {
+pub(super) fn page_sections(group: &str, surface: Surface) -> Option<&'static [PageSection]> {
     const MASS_MODEL: &[PageSection] = &[
         PageSection {
-            title: "Mass architecture and FLOPS",
+            title: "Mass architecture",
             names: &["mass_architecture", "geometric_component_stations"],
             default_open: true,
         },
         PageSection {
-            title: "Legacy comparison controls",
+            title: "Compatibility mass fractions",
             names: &[
-                "suspended_mass_fraction",
-                "max_airspeed_for_flaps_ms",
-                "flap_deflection_angle_deg",
                 "landing_gear_mass_fraction",
-                "propulsion_twr_factor",
-                "propulsion_installation_factor",
                 "propulsion_mass_fallback_fraction",
                 "systems_mass_fraction",
                 "furnishings_mass_fraction",
             ],
-            default_open: false,
+            default_open: true,
         },
         PageSection {
             title: "Payload, fuel and stations",
@@ -55,22 +51,44 @@ pub(super) fn page_sections(group: &str) -> Option<&'static [PageSection]> {
             ],
             default_open: true,
         },
+    ];
+    const MASS_MODEL_ADVANCED: &[PageSection] = &[
         PageSection {
             title: "FLOPS transport inputs and technology",
             names: &["flops_transport", "flops_structure"],
             default_open: true,
         },
         PageSection {
-            title: "Gear load limits",
+            title: "High-lift mass loads",
             names: &[
-                "nlg_x_fraction",
-                "mlg_x_fraction_mac",
-                "pct_load_nlg_max",
-                "pct_load_mlg_max",
-                "pct_load_nlg_min",
-                "mlw_fraction_mtow",
+                "suspended_mass_fraction",
+                "max_airspeed_for_flaps_ms",
+                "flap_deflection_angle_deg",
             ],
-            default_open: false,
+            default_open: true,
+        },
+    ];
+    const DRAG_MODEL: &[PageSection] = &[
+        PageSection {
+            title: "Parasite drag build-up",
+            names: &[
+                "exclude_buried_main_wing_area",
+                "max_thickness_chordwise_loc",
+                "interference_factor_wing",
+                "interference_factor_fuselage",
+                "interference_factor_nacelle",
+                "viscous_margin",
+            ],
+            default_open: true,
+        },
+        PageSection {
+            title: "Wave drag",
+            names: &[
+                "korn_technology_factor",
+                "wave_drag_onset_mach",
+                "wave_drag_coefficient",
+            ],
+            default_open: true,
         },
     ];
     const OPTIMIZER: &[PageSection] = &[
@@ -80,9 +98,23 @@ pub(super) fn page_sections(group: &str) -> Option<&'static [PageSection]> {
             default_open: true,
         },
         PageSection {
-            title: "MADS settings",
+            title: "Differential evolution settings",
             names: &["solver"],
             default_open: true,
+        },
+        // Two questions the objective does not answer: where this program's
+        // own correlations stop being trustworthy, and whether an
+        // overconstrained problem may miss a limit at all. Both are closed
+        // by default because neither belongs in a routine run.
+        PageSection {
+            title: "Model validity domain",
+            names: &["plausibility"],
+            default_open: false,
+        },
+        PageSection {
+            title: "Controlled constraint relaxation",
+            names: &["relaxation"],
+            default_open: false,
         },
     ];
     const LANDING_GEAR: &[PageSection] = &[
@@ -135,7 +167,7 @@ pub(super) fn page_sections(group: &str) -> Option<&'static [PageSection]> {
                 "spoiler_span_start_frac",
                 "spoiler_span_end_frac",
             ],
-            default_open: false,
+            default_open: true,
         },
         PageSection {
             title: "Tail surfaces",
@@ -147,14 +179,13 @@ pub(super) fn page_sections(group: &str) -> Option<&'static [PageSection]> {
                 "rudder_span_start_frac",
                 "rudder_span_end_frac",
             ],
-            default_open: false,
+            default_open: true,
         },
     ];
     const STRUCTURES: &[PageSection] = &[
         PageSection {
             title: "Wingbox layout",
             names: &[
-                "enabled",
                 "spar_chord_fractions",
                 "te_rib_mode",
                 "center_spar_enabled",
@@ -183,8 +214,10 @@ pub(super) fn page_sections(group: &str) -> Option<&'static [PageSection]> {
                 "cap_taper_eta_lock",
                 "cap_taper_tip_fraction",
             ],
-            default_open: false,
+            default_open: true,
         },
+    ];
+    const STRUCTURES_ADVANCED: &[PageSection] = &[
         PageSection {
             title: "Ribs and mesh",
             names: &[
@@ -194,28 +227,23 @@ pub(super) fn page_sections(group: &str) -> Option<&'static [PageSection]> {
                 "spanwise_stations",
                 "mesh_chordwise_points",
             ],
-            default_open: false,
+            default_open: true,
         },
         PageSection {
-            title: "Solver cases",
+            title: "Solver limits",
             names: &[
-                "nastran_exe_path",
-                "nastran_solver_path",
-                "run_nastran",
-                "run_sol_static",
-                "run_sol_modes",
-                "run_sol_vibration_sine",
-                "run_sol_vibration_random",
                 "timeout_s",
                 "n_modes",
                 "freq_sweep_max_hz",
                 "freq_step_hz",
                 "modal_damping_ratio",
-                "psd_base_g2_per_hz",
-                "patran_exe_path",
-                "run_patran_export",
             ],
-            default_open: false,
+            default_open: true,
+        },
+        PageSection {
+            title: "Random excitation",
+            names: &["random_force_psd_n2_per_hz"],
+            default_open: true,
         },
     ];
     const ANALYSIS: &[PageSection] = &[
@@ -236,7 +264,7 @@ pub(super) fn page_sections(group: &str) -> Option<&'static [PageSection]> {
         PageSection {
             title: "Fine VLM mesh",
             names: &["fine_spanwise_resolution", "fine_chordwise_resolution"],
-            default_open: false,
+            default_open: true,
         },
         PageSection {
             title: "Trim and stability",
@@ -250,7 +278,7 @@ pub(super) fn page_sections(group: &str) -> Option<&'static [PageSection]> {
                 "tail_efficiency",
                 "include_fuselage_stability",
             ],
-            default_open: false,
+            default_open: true,
         },
         PageSection {
             title: "Polar fit",
@@ -260,7 +288,7 @@ pub(super) fn page_sections(group: &str) -> Option<&'static [PageSection]> {
                 "polar_fit_cl_min_fallback",
                 "polar_fit_cl_max_fallback",
             ],
-            default_open: false,
+            default_open: true,
         },
     ];
     const PERFORMANCE: &[PageSection] = &[
@@ -277,6 +305,9 @@ pub(super) fn page_sections(group: &str) -> Option<&'static [PageSection]> {
                 "k_land",
                 "oei_climb_cl",
                 "oei_climb_delta_cd",
+                "oei_condition_to_sls_thrust_ratio",
+                "oei_asymmetric_trim_cd",
+                "oei_windmilling_cd",
             ],
             default_open: true,
         },
@@ -288,7 +319,7 @@ pub(super) fn page_sections(group: &str) -> Option<&'static [PageSection]> {
                 "bfl_factor",
                 "matching_chart_resolution",
             ],
-            default_open: false,
+            default_open: true,
         },
         PageSection {
             title: "Take-off speed schedule",
@@ -299,12 +330,12 @@ pub(super) fn page_sections(group: &str) -> Option<&'static [PageSection]> {
                 "v2_vstall_factor",
                 "v1_vr_factor",
             ],
-            default_open: false,
+            default_open: true,
         },
         PageSection {
             title: "Approach speed schedule",
             names: &["vapp_vstall_land_factor", "vtd_vstall_land_factor"],
-            default_open: false,
+            default_open: true,
         },
     ];
     const MSES: &[PageSection] = &[
@@ -327,19 +358,22 @@ pub(super) fn page_sections(group: &str) -> Option<&'static [PageSection]> {
         PageSection {
             title: "Mesh resolution",
             names: &["mset_n", "mset_e"],
-            default_open: false,
+            default_open: true,
         },
     ];
 
-    match group {
-        "mass_model" => Some(MASS_MODEL),
-        "optimizer" => Some(OPTIMIZER),
-        "landing_gear" => Some(LANDING_GEAR),
-        "control_surfaces" => Some(CONTROL_SURFACES),
-        "structures" => Some(STRUCTURES),
-        "analysis" => Some(ANALYSIS),
-        "performance" => Some(PERFORMANCE),
-        "mses" => Some(MSES),
+    match (group, surface) {
+        ("mass_model", Surface::Advanced) => Some(MASS_MODEL_ADVANCED),
+        ("mass_model", _) => Some(MASS_MODEL),
+        ("drag_model", _) => Some(DRAG_MODEL),
+        ("optimizer", _) => Some(OPTIMIZER),
+        ("landing_gear", _) => Some(LANDING_GEAR),
+        ("control_surfaces", _) => Some(CONTROL_SURFACES),
+        ("structures", Surface::Advanced) => Some(STRUCTURES_ADVANCED),
+        ("structures", _) => Some(STRUCTURES),
+        ("analysis", _) => Some(ANALYSIS),
+        ("performance", _) => Some(PERFORMANCE),
+        ("mses", _) => Some(MSES),
         _ => None,
     }
 }
@@ -378,13 +412,14 @@ pub(super) fn render_sectioned_form(
                 .id_salt(format!("{group}::{}", section.title))
                 .default_open(section.default_open)
                 .show(ui, |ui| {
-                    edits.extend(dynamic_form(
+                    edits.extend(dynamic_form_with_open_root_nodes(
                         ui,
                         &section_fields,
                         values,
                         error_fields,
                         lang,
                         show_help,
+                        true,
                     ));
                 });
         });
@@ -404,15 +439,16 @@ pub(super) fn render_sectioned_form(
         crate::theme::card_frame(ui).show(ui, |ui| {
             egui::CollapsingHeader::new(RichText::new(tr("Additional settings")).strong())
                 .id_salt(format!("{group}::additional"))
-                .default_open(false)
+                .default_open(true)
                 .show(ui, |ui| {
-                    edits.extend(dynamic_form(
+                    edits.extend(dynamic_form_with_open_root_nodes(
                         ui,
                         &remaining,
                         values,
                         error_fields,
                         lang,
                         show_help,
+                        true,
                     ));
                 });
         });

@@ -22,7 +22,7 @@ pub fn naca(name: &str) -> Airfoil {
     Airfoil::from_name(name).expect("valid 4-digit NACA name")
 }
 
-/// A short circular fuselage spanning past the wing trailing edge -- the same
+/// A short circular fuselage spanning past the wing trailing edge: the same
 /// shape `alas-stab::trim`'s own test probe uses, proven to mesh and solve.
 fn probe_fuselage() -> Fuselage {
     let station = |x: f64, r: f64| {
@@ -87,7 +87,7 @@ pub fn probe_airplane(with_hstab: bool, with_vstab: bool) -> Airplane {
 }
 
 /// Wrap `airplane` in a hand-built [`AnalysisReport`] with a plausible (not
-/// physically consistent) polar, mass and CG -- enough for every stability
+/// physically consistent) polar, mass and CG: enough for every stability
 /// figure to have real numbers to plot.
 pub fn probe_report(airplane: Airplane) -> AnalysisReport {
     let mut component_masses = HashMap::new();

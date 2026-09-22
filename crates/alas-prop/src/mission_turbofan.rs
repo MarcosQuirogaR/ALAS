@@ -6,7 +6,7 @@
 // Reference: alas @ rust-port-baseline.
 
 //! The mission turbofan cycle at the single flight condition
-//! `turbofan_sizing` -- a second, structurally different turbofan model from
+//! `turbofan_sizing`: a second, structurally different turbofan model from
 //! [`crate::cycle`].
 //!
 //! [`crate::cycle`] is *this program's own* separate-flow on-design cycle
@@ -16,8 +16,8 @@
 //! compressors, a fan, a combustor, high- and low-pressure turbines, core and
 //! fan expansion nozzles, and a thrust process, then calls
 //! `turbofan_sizing(turbofan, cruise_mach, cruise_altitude)` once. The two
-//! models are deliberately *not* unified -- they use different station
-//! numbering, different gas-property fits and a different thrust equation --
+//! models are deliberately *not* unified; they use different station
+//! numbering, different gas-property fits and a different thrust equation,
 //! so a disagreement is unambiguous.
 //!
 //! # Scope: one sizing call, not the per-timestep mission use
@@ -25,8 +25,8 @@
 //! [`size_turbofan`] reproduces the established sizing sequence: it walks
 //! the network once at the cruise design point and runs `Thrust.size` to back
 //! the core mass flow out of the design thrust, then replays the network at
-//! sea-level-static through the network evaluator -- reusing the
-//! core-flow scale factor the cruise pass solved -- to report the
+//! sea-level-static through the network evaluator, reusing the
+//! core-flow scale factor the cruise pass solved, to report the
 //! sea-level-static thrust. That single-flight-condition call is reachable
 //! standalone and is this row's whole scope.
 //!
@@ -34,7 +34,7 @@
 //! it is what a mission segment calls once per control point: it reads the
 //! segment's own freestream rather than a design point, reuses the
 //! `compressor_nondimensional_massflow` the sizing pass solved, and multiplies
-//! the dimensional thrust by the segment's throttle -- one of the two unknowns
+//! the dimensional thrust by the segment's throttle, one of the two unknowns
 //! the segment solves for. It takes its freestream as data
 //! ([`freestream_from_atmosphere`] builds one) rather than deriving an
 //! atmosphere of its own, for the reason `alas-aero::drag_buildup`'s row
@@ -211,7 +211,7 @@ pub struct TurbofanInputs {
     pub cruise_mach: f64,
     /// The cruise design geometric altitude, m.
     pub cruise_altitude_m: f64,
-    /// `thrust.total_design`, N -- the *total* (all-engine) design thrust,
+    /// `thrust.total_design`, N: the *total* (all-engine) design thrust,
     /// which `vehicle_builder.py` sets to the cruise-required thrust, not the
     /// sea-level-static rating.
     pub design_thrust_total_n: f64,
@@ -265,7 +265,7 @@ pub fn size_turbofan(
     inputs: &TurbofanInputs,
     params: &VehicleBuilderParams,
 ) -> TurbofanSizingResult {
-    // -- cruise design-point pass --------------------------------------------
+    // cruise design-point pass
     let cruise_fs = build_freestream(
         inputs.cruise_altitude_m,
         inputs.cruise_mach,
@@ -326,7 +326,7 @@ pub fn size_turbofan(
         thrust: cruise_thrust,
     };
 
-    // -- sea-level-static replay ---------------------------------------------
+    // sea-level-static replay
     let sls_fs = build_freestream(0.0, SEA_LEVEL_STATIC_MACH, SEA_LEVEL_GRAVITY);
     let (
         sls_ram,

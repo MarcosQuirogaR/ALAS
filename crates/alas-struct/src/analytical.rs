@@ -10,12 +10,15 @@
 //! sized wingbox: the Euler-Bernoulli spanwise deflection curve via the
 //! unit-load theorem, the per-spar cap bending stress and margin of safety,
 //! and the first cantilever bending-mode frequencies via the Rayleigh
-//! quotient. These are always available -- no NASTRAN install is required.
+//! quotient. These are always available, no NASTRAN install is required.
 //!
-//! Unlike [`crate::sizing`] (which omits inertial relief for a conservative
-//! strength check), this module includes relief -- the sized structure's own
-//! distributed weight plus wing-mounted engine point masses -- since that is
-//! what makes the analytical deflection track a real NASTRAN result.
+//! The relief this module applies - the sized structure's own distributed
+//! weight plus wing-mounted engine point masses - is built from the same
+//! [`crate::loads`] primitives [`crate::sizing`] applies, so the deflection is
+//! solved under the load model the box was sized under. This module adds the
+//! engine point masses the sizing entry point is not given; it does not add
+//! the integral fuel, because a deflection is reported for the analysed
+//! aircraft state rather than for the sizing case.
 
 use alas_config::materials::MaterialSpec;
 use alas_config::{DesignRequirements, EngineConfig, MassModelConfig, StructuresConfig};
@@ -24,7 +27,7 @@ use alas_geom::wing_structure::WingStructureGeometry;
 use crate::loads;
 use crate::sizing::WingboxSizing;
 
-/// `(beta*L, sigma)` for the first four cantilever bending modes -- the
+/// `(beta*L, sigma)` for the first four cantilever bending modes: the
 /// classical clamped-free eigenvalues and their trial-shape coefficients.
 const CANTILEVER_MODES: [(f64, f64); 4] = [
     (1.8751, 0.7341),
@@ -35,7 +38,7 @@ const CANTILEVER_MODES: [(f64, f64); 4] = [
 
 /// NumPy `trapezoid(y, x)`: the trapezoidal integral of `y` over `x`.
 /// Duplicated from [`crate::sizing`]'s private helper for the reason that
-/// module keeps its own copy -- it is not part of either module's public
+/// module keeps its own copy; it is not part of either module's public
 /// surface.
 fn trapezoid(y: &[f64], x: &[f64]) -> f64 {
     let mut acc = 0.0;
@@ -52,7 +55,7 @@ pub struct SparStressResult {
     pub chord_fraction: f64,
     /// Cap bending stress at each station, Pa.
     pub stress_pa: Vec<f64>,
-    /// Margin of safety at each station -- `+inf` where the demand is below
+    /// Margin of safety at each station: `+inf` where the demand is below
     /// 1 N.m.
     pub margin_of_safety: Vec<f64>,
 }
@@ -94,7 +97,7 @@ pub struct ModalResult {
 pub struct StructuralAnalysisReport {
     /// Spanwise stations, m.
     pub y: Vec<f64>,
-    /// Static bending stiffness `EI(y)`, N.m^2 -- independent of load case.
+    /// Static bending stiffness `EI(y)`, N.m^2: independent of load case.
     pub ei_nm2: Vec<f64>,
     /// One result per load case, in the load-case order.
     pub load_cases: Vec<LoadCaseResult>,
@@ -102,7 +105,7 @@ pub struct StructuralAnalysisReport {
     pub modal: ModalResult,
 }
 
-/// Area moment of inertia of a symmetric I-section about its own centroid --
+/// Area moment of inertia of a symmetric I-section about its own centroid:
 /// `_I_section`.
 fn i_section(h: &[f64], bf: &[f64], tf: &[f64], tw: f64) -> Vec<f64> {
     (0..h.len())
@@ -118,17 +121,18 @@ fn i_section(h: &[f64], bf: &[f64], tf: &[f64], tw: f64) -> Vec<f64> {
         .collect()
 }
 
-/// Distributed mass per unit span, kg/m -- `_mass_per_length`.
+/// Distributed mass per unit span, kg/m: `_mass_per_length`.
 fn mass_per_length(
     sizing: &WingboxSizing,
     cap_rho: f64,
     web_rho: f64,
     skin_rho: f64,
     include_ribs: bool,
+    skin_cover_fraction: f64,
 ) -> Vec<f64> {
     let n = sizing.chord.len();
     let mut m_y: Vec<f64> = (0..n)
-        .map(|j| 2.0 * sizing.chord[j] * sizing.t_skin * skin_rho)
+        .map(|j| 2.0 * skin_cover_fraction * sizing.chord[j] * sizing.t_skin * skin_rho)
         .collect();
     for s in &sizing.spars {
         for (m, (&h, &a)) in m_y.iter_mut().zip(s.h.iter().zip(&s.a_cap)) {
@@ -157,7 +161,7 @@ fn mass_per_length(
     m_y
 }
 
-/// Combined bending stiffness `EI(y)`, N.m^2 -- `_EI_curve`.
+/// Combined bending stiffness `EI(y)`, N.m^2: `_EI_curve`.
 fn ei_curve(sizing: &WingboxSizing, cap_mat: &MaterialSpec, skin_mat: &MaterialSpec) -> Vec<f64> {
     let n = sizing.y_stations.len();
     let mut ei = vec![0.0; n];
@@ -190,7 +194,7 @@ fn ei_curve(sizing: &WingboxSizing, cap_mat: &MaterialSpec, skin_mat: &MaterialS
 }
 
 /// Spanwise deflection via the unit-load (virtual work) theorem at every
-/// station -- `_deflection_curve`, O(N^2).
+/// station: `_deflection_curve`, O(N^2).
 fn deflection_curve(y: &[f64], m: &[f64], ei: &[f64]) -> Vec<f64> {
     let n = y.len();
     let mut delta = vec![0.0; n];
@@ -209,7 +213,7 @@ fn deflection_curve(y: &[f64], m: &[f64], ei: &[f64]) -> Vec<f64> {
 }
 
 /// The first `n_modes` cantilever bending-mode frequencies and shapes via the
-/// Rayleigh quotient with classical trial shapes -- `_rayleigh_frequencies`.
+/// Rayleigh quotient with classical trial shapes: `_rayleigh_frequencies`.
 fn rayleigh_frequencies(
     y: &[f64],
     ei: &[f64],
@@ -253,7 +257,7 @@ fn rayleigh_frequencies(
     (freqs, shapes)
 }
 
-/// Analyze the sized wingbox: deflection, stress and modal response --
+/// Analyze the sized wingbox: deflection, stress and modal response:
 /// `analyze_structure`.
 #[allow(clippy::too_many_arguments)] // mirrors upstream's own signature
 pub fn analyze_structure(
@@ -267,8 +271,19 @@ pub fn analyze_structure(
     web_mat: &MaterialSpec,
     cap_mat: &MaterialSpec,
 ) -> StructuralAnalysisReport {
+    let (front, rear) = crate::sizing::box_chord_band(wsg);
     analyze_structure_with_rib_mass(
-        wsg, sizing, cfg, req, engine_cfg, mass_cfg, skin_mat, web_mat, cap_mat, true,
+        wsg,
+        sizing,
+        cfg,
+        req,
+        engine_cfg,
+        mass_cfg,
+        skin_mat,
+        web_mat,
+        cap_mat,
+        true,
+        (rear - front).max(0.0),
     )
 }
 
@@ -290,7 +305,7 @@ pub fn analyze_structure_reference_compatibility(
     cap_mat: &MaterialSpec,
 ) -> StructuralAnalysisReport {
     analyze_structure_with_rib_mass(
-        wsg, sizing, cfg, req, engine_cfg, mass_cfg, skin_mat, web_mat, cap_mat, false,
+        wsg, sizing, cfg, req, engine_cfg, mass_cfg, skin_mat, web_mat, cap_mat, false, 1.0,
     )
 }
 
@@ -308,6 +323,7 @@ fn analyze_structure_with_rib_mass(
     web_mat: &MaterialSpec,
     cap_mat: &MaterialSpec,
     include_ribs: bool,
+    skin_cover_fraction: f64,
 ) -> StructuralAnalysisReport {
     let y = &sizing.y_stations;
     let n = y.len();
@@ -321,6 +337,7 @@ fn analyze_structure_with_rib_mass(
         web_mat.rho_kg_m3,
         skin_mat.rho_kg_m3,
         include_ribs,
+        skin_cover_fraction,
     );
     let engine_loads = loads::engine_point_loads_n(engine_cfg, mass_cfg, req);
 
@@ -332,18 +349,13 @@ fn analyze_structure_with_rib_mass(
         let l_total = case.total_force_n.abs();
         let n_factor = case.load_factor.abs();
 
+        // Magnitudes throughout: `q_aero`, `n_factor` and `m` are all positive
+        // here and `sign` is restored below, which is the sign convention
+        // `loads::net_distributed_load` documents.
         let q_aero = loads::elliptic_distributed_load(y, semi_span, l_total);
-        let q_net: Vec<f64> = (0..n).map(|j| q_aero[j] - n_factor * g * m_y[j]).collect();
+        let q_net = loads::net_distributed_load(&q_aero, n_factor, g, &m_y);
         let (v, mut m) = loads::cantilever_shear_moment(y, &q_net);
-
-        for &(y_eng, m_eng) in &engine_loads {
-            let f_eng = n_factor * m_eng * g;
-            for j in 0..n {
-                if y[j] <= y_eng {
-                    m[j] += -f_eng * (y_eng - y[j]);
-                }
-            }
-        }
+        loads::apply_point_mass_relief(y, &mut m, n_factor, g, &engine_loads);
 
         let tip_terms: Vec<f64> = (0..n).map(|j| m[j] * m_bar_tip[j] / ei[j]).collect();
         let tip_deflection_m = trapezoid(&tip_terms, y) * sign;
@@ -438,8 +450,8 @@ mod tests {
             composite_declaration: None,
         };
 
-        let without_ribs = mass_per_length(&sizing, 1.0, 1.0, 1.0, false);
-        let with_ribs = mass_per_length(&sizing, 1.0, 1.0, 1.0, true);
+        let without_ribs = mass_per_length(&sizing, 1.0, 1.0, 1.0, false, 1.0);
+        let with_ribs = mass_per_length(&sizing, 1.0, 1.0, 1.0, true, 1.0);
         for (&with, &without) in with_ribs.iter().zip(&without_ribs) {
             assert!((with - without - 2.0).abs() < 1e-12);
         }

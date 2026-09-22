@@ -2,8 +2,8 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Native addition, not part of the upstream port documented in the parent
-// module -- see `2026-09-09-claude-mac-parity-derivation.html` under
-// `.agent/reports/` for the derivation this method is grounded in.
+// module, see the internal MAC-parity derivation study (2026-09-09) for
+// the derivation this method is grounded in.
 
 impl Wing {
     /// The manufacturer "theoretical" or reference-wing mean aerodynamic
@@ -13,7 +13,7 @@ impl Wing {
     /// fuselage carry-through).
     ///
     /// [`Self::mean_aerodynamic_chord`] integrates the wing's actual lofted
-    /// panels, including any inboard crank or side-of-body station -- the
+    /// panels, including any inboard crank or side-of-body station: the
     /// physically correct chord for lift/moment reference. Manufacturers
     /// commonly state a type-certificate MAC (and the `%MAC` balance datum
     /// derived from it) from the theoretical wing instead, because the
@@ -26,7 +26,7 @@ impl Wing {
     /// wings' EASA type-certificate data sheets in this module's tests: it
     /// reproduces the B787-9 certified MAC to 0.14% and demonstrably does
     /// *not* reproduce the A340-300 certified MAC (the A340 preset's crank
-    /// station is an area-calibrated fit rather than a source-drawn point --
+    /// station is an area-calibrated fit rather than a source-drawn point,
     /// see the report above). Do not assume this closes every cranked-wing
     /// discrepancy; it is evidence for one specific convention, not a
     /// universal correction.
@@ -92,7 +92,7 @@ mod theoretical_reference_mac_tests {
     #[test]
     fn discarding_a_steeper_inboard_crank_shrinks_the_reference_mac() {
         // A steep root-to-kink carry-through panel (chord 14 -> 9 over 8 m)
-        // followed by a shallower true taper (9 -> 3 over 22 m) to the tip --
+        // followed by a shallower true taper (9 -> 3 over 22 m) to the tip:
         // the same qualitative shape as the real cranked wings in the tests
         // below, where the fuselage-side chord decreases faster than the
         // exposed outer panel. Extending only the shallower outer panel's law

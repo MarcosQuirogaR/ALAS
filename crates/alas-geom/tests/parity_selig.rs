@@ -10,7 +10,7 @@
 //! from, one byte anywhere in 2.52 MB of raw text being enough to fail it. The
 //! coordinate comparison covers a smaller, deliberately chosen sample (see the
 //! generator's docstring) at full precision, which the digest alone would not
-//! catch a parsing bug in -- two different byte streams can hash the same only
+//! catch a parsing bug in, two different byte streams can hash the same only
 //! by chance, but a parser that mishandled `float()` at all could hash
 //! correctly (it reads the same bytes) while still returning the wrong numbers.
 //!
@@ -29,11 +29,11 @@ struct Fixture {
     samples: HashMap<String, Vec<(f64, f64)>>,
 }
 
-/// FNV-1a, 64-bit, as 16 lowercase hex digits -- matching
+/// FNV-1a, 64-bit, as 16 lowercase hex digits, matching
 /// `gen_geom_selig.py`'s `_fnv1a64` exactly. Not a cryptographic hash: this
 /// is a corruption-detection digest for one static data file, and pulling in
 /// a hashing crate for that would be a dependency change this test has no
-/// standing to make (`CLAUDE.md`). The algorithm
+/// standing to make. The algorithm
 /// (http://www.isthe.com/chongo/tech/comp/fnv/) is simple enough to implement
 /// identically on both sides of the port from its specification alone; the
 /// known-vector test below is what confirms this side got it right.

@@ -413,6 +413,55 @@ mod tests {
         }
     }
 
+    /// The Elsevier *Civil Jet Aircraft Design* companion site is an
+    /// independent published compilation, and it is registered as a secondary
+    /// anchor and as nothing else: never a record's comparable value, never a
+    /// case anchor, never at a tier above `Aggregator`, and never carrying the
+    /// A3XX-100 row, which is a pre-programme-launch projection of a 540 t /
+    /// 817 m^2 aircraft and is not the A380-800.
+    #[test]
+    fn the_elsevier_compilation_is_registered_only_as_a_secondary_anchor() {
+        const SITE: &str = "https://booksite.elsevier.com/9780340741528/appendices/default.htm";
+        let mut registered = Vec::new();
+        for record in registry() {
+            if let Some(source) = record.source {
+                assert_ne!(source.url, SITE, "{} comparable value", record.preset);
+            }
+            if let Some(anchor) = record.case_anchor {
+                assert_ne!(anchor.source.url, SITE, "{} case anchor", record.preset);
+            }
+            for published in record.other_published_values {
+                if published.source.url != SITE {
+                    continue;
+                }
+                assert_eq!(published.source.tier, OewSourceTier::Aggregator);
+                // The site's own word-of-caution wording must travel with it.
+                assert!(published.source.quote.contains("careful interpretation"));
+                assert!(published.note.contains("secondary anchor only"));
+                assert!(
+                    !published.label.contains("A3XX"),
+                    "the A3XX-100 projection is not an A380-800 reference"
+                );
+                registered.push((record.preset, published.value_kg));
+            }
+        }
+        // The three aircraft the book actually covers, in SI as the book
+        // publishes them. It is jet-only and predates the 787 and the CSeries,
+        // so the A220-300, B787-9 and ATR 72-600 have no row at all.
+        assert_eq!(
+            registered,
+            vec![
+                ("A340-300", 129_850.0),
+                ("A320-200", 41_310.0),
+                ("DC-10", 121_364.0),
+            ]
+        );
+        // And it moves nothing: a secondary anchor cannot reach a metric.
+        for record in registry() {
+            assert!(!record.counts_toward_validation(), "{}", record.preset);
+        }
+    }
+
     #[test]
     fn preset_reference_values_follow_the_applicability_rule() {
         for record in registry() {

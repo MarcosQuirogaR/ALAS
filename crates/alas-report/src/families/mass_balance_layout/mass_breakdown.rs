@@ -12,7 +12,7 @@ use alas_mass::breakdown::{
     FUEL, FURNISHINGS, FUSELAGE, GEAR, H_STAB, PAYLOAD, PROPULSION, SYSTEMS, V_STAB, WING,
 };
 use alas_pipeline::full_analysis::AnalysisReport;
-/// `Wing::aerodynamic_center`'s `chord_fraction` at native aerodynamic model's default --
+/// `Wing::aerodynamic_center`'s `chord_fraction` at native aerodynamic model's default:
 /// upstream never passes its own.
 pub(super) const AC_CHORD_FRACTION: f64 = 0.25;
 

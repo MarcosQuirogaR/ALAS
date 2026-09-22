@@ -163,20 +163,151 @@ fn polygon_corners_are_well_conditioned(points: &[Pos2]) -> bool {
     })
 }
 
-/// A polygon the feathered egui path cannot tessellate safely: the fill as a
-/// fan mesh without feathering and the outline as independent segments,
-/// neither of which uses a corner miter.
-fn sliver_polygon_shapes(points: &[Pos2], fill_color: Color32, outline: EguiStroke) -> Vec<Shape> {
+/// Whether a polygon is convex in screen space.
+///
+/// `PathShape::convex_polygon` is deliberately used only for this subset of
+/// faces. Native OpenVSP meshes can retain a concave boundary, and egui's
+/// convex path fill would cover the indentation as if it were part of the
+/// face. Collinear boundary points are allowed because tessellated CAD faces
+/// commonly contain them.
+fn polygon_is_convex(points: &[Pos2]) -> bool {
+    const EPSILON: f32 = 1.0e-5;
+    let n = points.len();
+    if n < 3 {
+        return false;
+    }
+    let mut turn_sign = 0.0_f32;
+    for i in 0..n {
+        let a = points[i];
+        let b = points[(i + 1) % n];
+        let c = points[(i + 2) % n];
+        let cross = cross_2d(b - a, c - b);
+        if cross.abs() <= EPSILON {
+            continue;
+        }
+        if turn_sign == 0.0 {
+            turn_sign = cross.signum();
+        } else if cross.signum() != turn_sign {
+            return false;
+        }
+    }
+    turn_sign != 0.0
+}
+
+#[inline]
+fn cross_2d(left: egui::Vec2, right: egui::Vec2) -> f32 {
+    left.x * right.y - left.y * right.x
+}
+
+fn signed_polygon_area(points: &[Pos2]) -> f32 {
+    points
+        .iter()
+        .zip(points.iter().cycle().skip(1))
+        .take(points.len())
+        .map(|(left, right)| left.x * right.y - right.x * left.y)
+        .sum::<f32>()
+        * 0.5
+}
+
+fn point_in_or_on_triangle(point: Pos2, a: Pos2, b: Pos2, c: Pos2, orientation: f32) -> bool {
+    const EPSILON: f32 = 1.0e-5;
+    let ab = cross_2d(b - a, point - a) * orientation;
+    let bc = cross_2d(c - b, point - b) * orientation;
+    let ca = cross_2d(a - c, point - c) * orientation;
+    ab >= -EPSILON && bc >= -EPSILON && ca >= -EPSILON
+}
+
+/// Triangulate a simple screen-space polygon without changing its boundary.
+///
+/// This is used only by the egui backend, which accepts filled convex paths
+/// but has no general concave path fill. The scene still carries the native
+/// face as one polygon; the triangles are a renderer detail. Returning
+/// `None` is safer than filling a self-intersecting or otherwise ambiguous
+/// face with a fabricated fan.
+fn triangulate_polygon(points: &[Pos2]) -> Option<Vec<[usize; 3]>> {
+    const EPSILON: f32 = 1.0e-5;
+    if points.len() < 3 {
+        return None;
+    }
+    let area = signed_polygon_area(points);
+    if !area.is_finite() || area.abs() <= EPSILON {
+        return None;
+    }
+    let orientation = area.signum();
+    let mut remaining = (0..points.len()).collect::<Vec<_>>();
+    let mut triangles = Vec::with_capacity(points.len().saturating_sub(2));
+    let mut guard = 0usize;
+    let max_iterations = points.len().saturating_mul(points.len()).max(1);
+
+    while remaining.len() > 3 {
+        let mut ear_found = false;
+        let count = remaining.len();
+        for offset in 0..count {
+            let prev = remaining[(offset + count - 1) % count];
+            let current = remaining[offset];
+            let next = remaining[(offset + 1) % count];
+            let turn = cross_2d(
+                points[next] - points[current],
+                points[prev] - points[current],
+            );
+            if turn * orientation <= EPSILON {
+                continue;
+            }
+            if remaining.iter().any(|&candidate| {
+                candidate != prev
+                    && candidate != current
+                    && candidate != next
+                    && point_in_or_on_triangle(
+                        points[candidate],
+                        points[prev],
+                        points[current],
+                        points[next],
+                        orientation,
+                    )
+            }) {
+                continue;
+            }
+            triangles.push([prev, current, next]);
+            remaining.remove(offset);
+            ear_found = true;
+            break;
+        }
+        if !ear_found {
+            return None;
+        }
+        guard += 1;
+        if guard > max_iterations {
+            return None;
+        }
+    }
+
+    if remaining.len() == 3 {
+        triangles.push([remaining[0], remaining[1], remaining[2]]);
+    }
+    Some(triangles)
+}
+
+/// A polygon the feathered egui path cannot tessellate safely, or a concave
+/// polygon for which that path's convex-only fill would be wrong: triangulate
+/// the fill and draw the original boundary as independent segments.
+fn triangulated_polygon_shapes(
+    points: &[Pos2],
+    fill_color: Color32,
+    outline: EguiStroke,
+) -> Vec<Shape> {
     let mut shapes = Vec::new();
     if fill_color != Color32::TRANSPARENT {
+        let triangles = triangulate_polygon(points).unwrap_or_default();
         let mut mesh = Mesh::default();
         for &p in points {
             mesh.colored_vertex(p, fill_color);
         }
-        for i in 2..points.len() as u32 {
-            mesh.add_triangle(0, i - 1, i);
+        for [a, b, c] in triangles {
+            mesh.add_triangle(a as u32, b as u32, c as u32);
         }
-        shapes.push(Shape::mesh(mesh));
+        if !mesh.indices.is_empty() {
+            shapes.push(Shape::mesh(mesh));
+        }
     }
     if outline != EguiStroke::NONE {
         let n = points.len();
@@ -281,15 +412,20 @@ impl<'a> EguiBackend<'a> {
                     .as_ref()
                     .map(|s| to_egui_stroke(s, self.transform.scale))
                     .unwrap_or(EguiStroke::NONE);
-                if polygon_corners_are_well_conditioned(&egui_points) {
+                if polygon_corners_are_well_conditioned(&egui_points)
+                    && polygon_is_convex(&egui_points)
+                {
                     self.shapes.push(Shape::Path(PathShape::convex_polygon(
                         egui_points,
                         fill_color,
                         outline,
                     )));
                 } else {
-                    self.shapes
-                        .extend(sliver_polygon_shapes(&egui_points, fill_color, outline));
+                    self.shapes.extend(triangulated_polygon_shapes(
+                        &egui_points,
+                        fill_color,
+                        outline,
+                    ));
                 }
             }
             SceneElement::Rect {
@@ -390,6 +526,44 @@ impl<'a> EguiBackend<'a> {
                     *bold,
                 );
             }
+            SceneElement::TextBlock {
+                text,
+                pos,
+                width,
+                font_size,
+                color,
+                bold,
+            } => self.draw_text_block(text, *pos, *width, *font_size, *color, *bold),
+        }
+    }
+
+    /// Lay out a paragraph with the context's real glyph metrics, wrapped to
+    /// the block width in screen pixels, so it never extends past its box
+    /// however the scene is scaled into the card.
+    fn draw_text_block(
+        &mut self,
+        text: &str,
+        pos: Point2D,
+        width: f64,
+        font_size: f64,
+        color: Color,
+        bold: bool,
+    ) {
+        let color = to_egui_color(&color);
+        let font_id = FontId::new(
+            self.screen_font_size(font_size) as f32,
+            FontFamily::Proportional,
+        );
+        let wrap_width = (width.max(0.0) as f32 * self.transform.scale).max(1.0);
+        let galley = self
+            .context
+            .fonts(|fonts| fonts.layout(text.to_owned(), font_id.clone(), color, wrap_width));
+        let text_shape = TextShape::new(self.transform.to_screen(pos), galley, color);
+        self.shapes.push(Shape::Text(text_shape.clone()));
+        if bold {
+            let mut weight = text_shape;
+            weight.pos += vec2(0.35, 0.0);
+            self.shapes.push(Shape::Text(weight));
         }
     }
 

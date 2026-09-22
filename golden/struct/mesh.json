@@ -91891,7 +91891,7 @@
         ],
         "triangle_ratio": 0.0074834295488561044,
         "warnings": [
-          "Rib 1 (y=0.94 m) aero-only: 11.9% nominal chord -- excluded.",
+          "Rib 1 (y=0.94 m) aero-only: 11.9% nominal chord, excluded.",
           "Spar x/c=0.25 deviates 44.17 mm from straight.",
           "Spar x/c=0.70 deviates 256.17 mm from straight."
         ],

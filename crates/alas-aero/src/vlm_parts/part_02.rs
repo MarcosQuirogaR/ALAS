@@ -105,7 +105,7 @@ mod tests {
     #[test]
     fn doubling_the_freestream_velocity_leaves_the_lift_coefficient_unchanged() {
         // CL depends on alpha, not on the airspeed itself, for an inviscid
-        // linear solve -- doubling V quadruples both L and q, so CL should be
+        // linear solve, doubling V quadruples both L and q, so CL should be
         // invariant.
         let airplane = single_wing_airplane(true);
         let slow = OperatingPoint::new(Atmosphere::new(0.0), 40.0, 4.0, 0.0, 0.0, 0.0, 0.0);

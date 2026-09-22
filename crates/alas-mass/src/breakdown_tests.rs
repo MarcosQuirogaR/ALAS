@@ -177,7 +177,7 @@ fn nacelle_fuselages_overwrite_the_propulsion_coordinate_with_their_mean_positio
     ]);
     let coords = define_mass_coordinates(&plane, &geometry, None, None);
     // Mean X of the two nacelles' (start + half length): both at
-    // x_start=10, length=8, so midpoint 14 for each -- mean is 14.
+    // x_start=10, length=8, so midpoint 14 for each: mean is 14.
     assert!((coords.propulsion[0] - 14.0).abs() < 1e-9);
     assert!((coords.propulsion[1] - 0.0).abs() < 1e-9); // symmetric L/R
     assert!((coords.propulsion[2] - (-2.0)).abs() < 1e-9);

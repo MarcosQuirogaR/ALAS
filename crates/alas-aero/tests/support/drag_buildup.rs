@@ -100,7 +100,7 @@ pub struct CaseFixture {
 }
 
 /// The flow state the correlations were evaluated at, as SUAVE's
-/// `US_Standard_1976` produced it. Read, never recomputed -- see the test's
+/// `US_Standard_1976` produced it. Read, never recomputed, see the test's
 /// module documentation for what recomputing it cost.
 #[derive(Debug, Deserialize)]
 pub struct FreestreamFixture {

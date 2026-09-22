@@ -13,9 +13,9 @@
 //!
 //! # What a preset carries, and what applying one should mean
 //!
-//! [`AnalysisConfig`] also holds physical and empirical assumptions -- tail
+//! [`AnalysisConfig`] also holds physical and empirical assumptions: tail
 //! efficiency, the lift-coefficient window the drag polar is fitted over, the
-//! probe angles the trim search starts from -- and every preset leaves those
+//! probe angles the trim search starts from, and every preset leaves those
 //! at their defaults. Upstream states that the registry is scoped to the three
 //! resolution fields precisely so it cannot clobber an assumption the user has
 //! tuned, and then hands its consumer the whole configuration, which clobbers
@@ -104,7 +104,7 @@ fn build() -> Vec<FidelityPreset> {
         FidelityPreset {
             name: "draft",
             display_name: "Draft (fast)",
-            description: "Coarse polar sweep and panel resolution -- fastest feedback while \
+            description: "Coarse polar sweep and panel resolution: fastest feedback while \
                           iterating on requirements/geometry.",
             // Four chordwise panels, not one. Draft buys speed by sweeping
             // fewer polar points and meshing more coarsely than standard, but
@@ -127,7 +127,7 @@ fn build() -> Vec<FidelityPreset> {
             name: "standard",
             display_name: "Standard (Recommended)",
             description:
-                "The default resolution -- a good balance of speed and accuracy for most runs.",
+                "The default resolution: a good balance of speed and accuracy for most runs.",
             // Whatever `AnalysisConfig` itself defaults to, so the
             // recommended preset and an unconfigured run are the same run.
             analysis: AnalysisConfig::default(),
@@ -139,7 +139,7 @@ fn build() -> Vec<FidelityPreset> {
                           analysis. Slowest option.",
             // Panels go chordwise, not spanwise. The builder has already
             // resolved the span, so raising `spanwise_resolution` only
-            // re-subdivides finished strips and degrades the induced drag --
+            // re-subdivides finished strips and degrades the induced drag:
             // the previous 3x3 setting measured *worse* than the standard
             // preset on the A320 (k = 0.0571 against 0.0559, converged
             // 0.0414) while costing nine times the panels. 1x16 costs a third

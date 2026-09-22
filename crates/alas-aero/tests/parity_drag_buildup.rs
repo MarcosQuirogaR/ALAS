@@ -6,7 +6,7 @@
 //!
 //! Two tiers, and the split is the same one `alas-aero::analysis` and the two
 //! payload rows carry. Everything discrete about the comparison is checked at
-//! `exact` -- the analysis settings, which are copied constants rather than
+//! `exact`: the analysis settings, which are copied constants rather than
 //! computed values, and the component tags, so that a fixture whose wings have
 //! stopped meaning the same wings is one line of report rather than forty.
 //! Every drag coefficient is closed-form `f64` arithmetic over a geometry, a
@@ -187,7 +187,7 @@ fn the_drag_buildup_agrees_with_suave() {
     for case in &fixture.cases {
         // The lift solution is the vortex lattice's, taken from the fixture.
         // `compressible_wings` and `inviscid_wings` are the same array
-        // upstream -- `Vortex_Lattice.evaluate` assigns one to the other --
+        // upstream (`Vortex_Lattice.evaluate` assigns one to the other)
         // so the port carries one field, and the equality is asserted here
         // rather than assumed, since a future producer could break it.
         let wings: Vec<WingParams> = geometry

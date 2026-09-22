@@ -13,8 +13,8 @@
 //!
 //! A configuration struct derives [`ConfigNode`], which gives it a
 //! [`Node`]: its fields in declaration order, each with a label, a unit, an
-//! explanation, and either its value or -- for a field that is itself a
-//! group -- the same description one level down. That description is what the
+//! explanation, and either its value or, for a field that is itself a
+//! group: the same description one level down. That description is what the
 //! settings interface renders, so a field is documented once, next to its
 //! type, rather than in a form definition somewhere else that drifts.
 //!
@@ -33,11 +33,13 @@ mod overlay;
 mod schema;
 
 pub mod airport_dataset;
+pub mod airport_io;
 pub mod airports;
 pub mod analysis;
 pub mod cabin;
 pub mod control_surfaces;
 pub mod design_variables;
+pub mod downstream;
 pub mod engines;
 pub mod fidelity_presets;
 pub mod flops_structure;
@@ -57,6 +59,7 @@ pub mod performance_presets;
 pub mod physics;
 pub mod preset_flops;
 pub mod preset_fuel_tanks;
+pub mod preset_policy;
 pub mod preset_structures;
 pub mod presets;
 pub mod propulsion;
@@ -67,6 +70,7 @@ pub use sizing_basis::MassSizingBasis;
 pub mod solver_presets;
 pub mod structures;
 pub mod systems_mass;
+pub mod turboprop_mass;
 pub mod validation;
 
 pub use alas_config_derive::ConfigNode;
@@ -87,25 +91,30 @@ pub use control_surfaces::ControlSurfacesConfig;
 pub use design_variables::{
     DesignVariableSpec, DesignVector, DesignVectorError, SPECS as DESIGN_VARIABLE_SPECS,
 };
+pub use downstream::DownstreamConfig;
 pub use engines::{
     PropulsionTechnology, TurbofanEngineSpec, TurbofanOffDesignSpec, TurbopropEngineSpec,
 };
 pub use fidelity_presets::{FidelityPreset, UnknownFidelityPreset};
 pub use flops_structure::{
-    FlopsStructureConfig, FlopsWingBendingMethod, PropulsionMassMethod, StructuralMassMethod,
+    FlopsNozzleScope, FlopsStarterScope, FlopsStructureConfig, FlopsWingBendingMethod,
+    PropulsionMassMethod, PylonMassMethod, StructuralMassMethod,
 };
 pub use fuel_policy::{FuelPolicyConfig, FuelScheme};
 pub use fuel_tanks::{
     AuxiliaryTankConfig, CenterTankConfig, FuelTankLayoutConfig, TrimTankConfig, WingTankConfig,
 };
 pub use geometry::{
-    ActiveEngineModel, EmpennageConfig, EngineBindingError, EngineConfig, FuselageConfig,
-    GeometryConfig, InboardAerodynamicStation, MainWingPanel, MainWingStation, MainWingStationKind,
-    TransportPlanform, TransportPlanformError, WingConfig,
+    ActiveEngineModel, BodyFuselageExtent, EmpennageConfig, EngineBindingError, EngineConfig,
+    FuselageConfig, FuselageSection, FuselageSectionError, GeometryConfig,
+    InboardAerodynamicStation, LongitudinalStationFrame, MacFrame, MainWingPanel, MainWingStation,
+    MainWingStationKind, TransportPlanform, TransportPlanformError, WingConfig, WingSection,
+    WingSectionError,
 };
 pub use landing_gear::{
     effective_main_gear_station, EffectiveGearStationExt, EffectiveMainGearStation,
-    GearStationRejection, LandingGearConfig, LandingGearStationPositions, ValidGearStation,
+    GearStationRejection, LandingGearConfig, LandingGearStationPositions, MainGearFallbackRefusal,
+    ValidGearStation, WingMountedGearDomain,
 };
 pub use mass::MassModelConfig;
 pub(crate) use mass_architecture::legacy_mass_model_schema_version;
@@ -120,28 +129,31 @@ pub use oew_reference::{
 };
 pub use optimizer::{
     ConstraintPolicy, DesignMode, DesignSpaceConfig, MtowSizing, ObjectiveConfig, ObjectiveKind,
-    ObjectiveWeights, OptimizerConfig, SolverSettings, VariableEnvelope,
+    ObjectiveWeights, OptimizerConfig, SolverSettings, VariableEnvelope, LEGACY_METHOD_TOKENS,
 };
 pub use performance::PerformanceConfig;
 pub use performance_presets::{PerformancePreset, UnknownPerformancePreset};
 pub use physics::DragModelConfig;
 pub use presets::{
-    AircraftPreset, AircraftReferenceData, AircraftVariantIdentity, CertifiedExitLayout,
-    CertifiedExitPair, CgEnvelopeCondition, CgEnvelopeEvidence, CgEnvelopeSource, CgEnvelopeVertex,
-    CgLimits, DesignMissionEvidence, DesignMissionReference, MissingDesignMissionDatum,
-    MissionEvidenceApplicability, PartialDesignMissionEvidence, PartialMissionEvidenceKind,
+    applicability_label, datum_label, AircraftPreset, AircraftReferenceData,
+    AircraftVariantIdentity, CertifiedExitLayout, CertifiedExitPair, CgEnvelopeCondition,
+    CgEnvelopeEvidence, CgEnvelopeSource, CgEnvelopeVertex, CgLimits, DesignMissionEvidence,
+    DesignMissionProvenanceSet, DesignMissionReference, MissingDesignMissionDatum,
+    MissionDatumProvenance, MissionEvidenceApplicability, MissionEvidenceTier,
+    MissionPromotionRefusal, PartialDesignMissionEvidence, PartialMissionEvidenceKind,
     PlanningCgEnvelope, PlanningMacReference, PublishedMissionLoadCase, PublishedRange,
     PublishedReserveContract, UnknownAircraftPreset,
 };
 pub use propulsion::PropulsionCycleConfig;
 pub use requirements::{DesignRequirements, RequirementsError};
-pub use settings::{AlasConfig, WORKSPACE_ENVELOPE_KEY};
+pub use settings::{legacy_mission_disabled, AlasConfig, ConfigLoadNotes, WORKSPACE_ENVELOPE_KEY};
 pub use solver_presets::{SolverPreset, UnknownSolverPreset};
 pub use structures::StructuresConfig;
 pub use systems_mass::{
-    FlopsInputEvidence, FlopsInputProvenance, FlopsTransportConfig, FlopsTransportProvenance,
-    SystemsMassMethod,
+    CabinEquipmentMethod, CargoHoldLoading, FlopsInputEvidence, FlopsInputProvenance,
+    FlopsTransportConfig, FlopsTransportProvenance, OperatingHaulClass, SystemsMassMethod,
 };
+pub use turboprop_mass::{FlopsTurbopropConfig, PropellerConstruction};
 pub use validation::{validate, Severity, ValidationIssue};
 
 /// A configuration struct that can describe its own fields.

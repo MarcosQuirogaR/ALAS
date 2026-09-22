@@ -4,8 +4,8 @@
 //! Compares `alas-geom::asb::fuselage` against AeroSandbox's
 //! `Fuselage`/`FuselageXSec`, via `golden/generators/gen_geom_asb_fuselage.py`.
 //!
-//! Every quantity here -- `FuselageXSec` construction from `radius` or from
-//! `width`/`height`, and `.translate()` on both classes -- is closed-form
+//! Every quantity here: `FuselageXSec` construction from `radius` or from
+//! `width`/`height`, and `.translate()` on both classes, is closed-form
 //! arithmetic, checked at `Tier::Closed`, the tier `docs/PORTING.md` names
 //! for this row.
 //!
@@ -69,7 +69,7 @@ const RADIUS: f64 = DIAMETER_M / 2.0;
 
 /// `numpy.linspace(start, stop, num, endpoint=True)`, forcing the exact
 /// endpoints the way `alas-geom::asb::spacing::linspace` (private to that
-/// module) does -- reimplemented here since this test crosses the crate
+/// module) does: reimplemented here since this test crosses the crate
 /// boundary.
 fn linspace(start: f64, stop: f64, num: usize) -> Vec<f64> {
     let step = (stop - start) / (num - 1) as f64;
@@ -93,7 +93,7 @@ fn sinspace01(num: usize) -> Vec<f64> {
 }
 
 /// The 20 (x, z, r) triples `_build_fuselage` computes, independent of the
-/// circular/ovoid choice -- see `gen_geom_asb_fuselage.py`'s `_stations`.
+/// circular/ovoid choice, see `gen_geom_asb_fuselage.py`'s `_stations`.
 fn stations() -> Vec<(f64, f64, f64)> {
     let cabin_end = FUSELAGE_LENGTH_M - TAILCONE_LENGTH_M;
     let mut stations = Vec::new();

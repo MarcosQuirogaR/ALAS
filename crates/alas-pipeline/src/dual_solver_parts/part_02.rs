@@ -1,25 +1,54 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-impl AvlObjective {
+impl AvlObjective<'_> {
     /// Score one candidate with the mission-sized objective around AVL's
     /// aerodynamics: AVL supplies the induced drag at the required cruise
     /// lift, while the parasite build-up, trim incidence and neutral point
     /// stay the native report's, and the sizing loop closes mass, fuel and
     /// takeoff mass around that fixed polar.
+    ///
+    /// Cancellation is read twice here: once before the native analysis and
+    /// once immediately before the external sweep is launched. A candidate
+    /// refused at either point is rejected with a reason that names
+    /// cancellation, so a stopped search cannot be read as a design space
+    /// where AVL failed.
     fn evaluate_uncached(&self, design: &DesignVector, key: &str) -> ObjectiveEvaluation {
+        if self.scope.requested() {
+            self.scope
+                .work_skipped("AVL candidate not started on the cancellation request");
+            return ObjectiveEvaluation::rejected(self.failure_cost(), "cancelled");
+        }
         let report = match FullAnalysis::new(self.config.clone()).run(design, true) {
             Ok(report) => report,
             Err(_) => return ObjectiveEvaluation::rejected(self.failure_cost(), "full_analysis"),
         };
+        if self.scope.requested() {
+            // The deck is not written and no process is spawned: the drain
+            // stops here instead of waiting out a sweep nobody will read.
+            self.scope
+                .external_skipped("AVL sweep not launched on the cancellation request");
+            return ObjectiveEvaluation::rejected(self.failure_cost(), "cancelled");
+        }
         let evaluation_dir = self.output_root.join(key);
+        self.scope
+            .enter(alas_opt::CancelPhase::ExternalSolverCall, 0);
+        self.scope
+            .external_started(format!("AVL sweep for candidate {key}"));
         let avl = run_avl_analysis(
             &report,
             &self.config,
             &evaluation_dir,
             Some(&self.executable),
-            300.0,
+            AVL_EVALUATION_TIMEOUT_S,
         );
+        if avl.status == AvlAnalysisStatus::TimedOut {
+            self.scope.external_terminated(format!(
+                "AVL sweep for candidate {key} exceeded {AVL_EVALUATION_TIMEOUT_S:.0} s and its \
+                 process tree was killed"
+            ));
+            return ObjectiveEvaluation::rejected(self.failure_cost(), "avl_timed_out");
+        }
         let Some(polar) = avl.comparable_polar() else {
             return ObjectiveEvaluation::rejected(self.failure_cost(), "avl_unavailable");
         };
@@ -156,6 +185,9 @@ fn finite_avl_objective_point(point: &AvlPolarPoint) -> bool {
     .all(|value| value.is_finite())
 }
 
+// Tests build their own fixtures and assert on them, so a failed expect is
+// the assertion failing rather than a library invariant breaking.
+#[allow(clippy::expect_used)]
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -271,6 +303,8 @@ mod tests {
             &DesignVector::default(),
             None,
             None,
+            None,
+            None,
         );
 
         assert_eq!(result.vlm.status, SolverOptimizationStatus::Failed);
@@ -281,5 +315,217 @@ mod tests {
             .error
             .as_deref()
             .is_some_and(|error| error.contains("no feasible design")));
+    }
+
+    #[test]
+    fn a_cancelled_flag_stops_the_de_branch_short_of_its_generation_budget() {
+        // The flag is set before the branch ever starts, so this is
+        // deterministic: cancellation is observed at the first generation
+        // boundary, well short of the 30-generation budget below, with
+        // nothing timed.
+        let mut config = AlasConfig::default();
+        config.optimizer.solver.max_iterations = 30;
+        config.optimizer.solver.population_size = 1;
+        let cancel = AtomicBool::new(true);
+
+        let result = run_solver_optimizations(
+            &config,
+            OptimizationSolverMode::Vlm,
+            false,
+            Some(3),
+            &RunEnvironment::default(),
+            &DesignVector::default(),
+            None,
+            None,
+            None,
+            Some(&cancel),
+        );
+
+        assert_eq!(result.vlm.status, SolverOptimizationStatus::Failed);
+        assert!(
+            result.vlm.design.is_none(),
+            "a cancelled branch must never deliver a design as optimized"
+        );
+        assert!(
+            result
+                .vlm
+                .error
+                .as_deref()
+                .is_some_and(|error| error.starts_with("Cancelled safely")),
+            "{:?} must carry the same prefix the GUI already checks to report a cancelled run",
+            result.vlm.error
+        );
+    }
+
+    /// A cancelled branch must leave the analyses it already paid for behind,
+    /// labelled as effort and not as a result.
+    #[test]
+    fn a_cancelled_branch_persists_a_record_that_claims_nothing() {
+        let root = std::env::temp_dir().join(format!(
+            "alas-cancelled-search-record-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        let mut config = AlasConfig::default();
+        config.optimizer.solver.max_iterations = 30;
+        config.optimizer.solver.population_size = 1;
+        let cancel = AtomicBool::new(true);
+
+        let result = run_solver_optimizations(
+            &config,
+            OptimizationSolverMode::Vlm,
+            false,
+            Some(3),
+            &RunEnvironment::default(),
+            &DesignVector::default(),
+            None,
+            Some(root.as_path()),
+            None,
+            Some(&cancel),
+        );
+
+        assert_eq!(result.vlm.status, SolverOptimizationStatus::Failed);
+        let record_path = root.join("solvers/vlm").join(CANCELLED_SEARCH_RECORD);
+        let bytes = std::fs::read(&record_path)
+            .unwrap_or_else(|error| panic!("{} must exist: {error}", record_path.display()));
+        let record: serde_json::Value =
+            serde_json::from_slice(&bytes).expect("the record is valid JSON");
+        assert_eq!(record["record_kind"], "cancelled_search");
+        assert_eq!(record["termination"], "cancelled");
+        assert_eq!(record["stop_reason"], "cancelled");
+        for verdict in ["converged", "delivered_feasible", "best_valid"] {
+            assert_eq!(
+                record[verdict],
+                serde_json::Value::Bool(false),
+                "a cancelled run may never claim {verdict}"
+            );
+        }
+        assert!(
+            record.get("best_design").is_none() && record.get("design").is_none(),
+            "the record must carry no design: {record}"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The headline claim, asserted on counts rather than on a clock so it is
+    /// deterministic: once the search is inside a Differential Evolution
+    /// generation, a cancellation request costs at most the one coupled
+    /// analysis already in flight.
+    #[test]
+    fn a_request_inside_a_de_generation_costs_at_most_one_more_analysis() {
+        let mut config = AlasConfig::default();
+        // Enough generations that the run cannot finish on its own before the
+        // request, small enough that a failure of this test wastes a bounded
+        // amount of time rather than an unbounded one.
+        config.optimizer.solver.max_iterations = 4;
+        config.optimizer.solver.population_size = 1;
+        config.optimizer.solver.workers = 1;
+
+        let watch = alas_opt::CancelWatch::new();
+        let worker_watch = std::sync::Arc::clone(&watch);
+        let worker_config = config.clone();
+        let handle = std::thread::spawn(move || {
+            run_solver_optimizations(
+                &worker_config,
+                OptimizationSolverMode::Vlm,
+                false,
+                Some(7),
+                &RunEnvironment::default(),
+                &DesignVector::default(),
+                None,
+                None,
+                None,
+                Some(worker_watch.flag()),
+            )
+        });
+
+        // Wait for the search to actually be inside a generation. The wait is
+        // on the telemetry's own phase, not on elapsed time, so what the
+        // assertion below measures is exactly the boundary it names.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(600);
+        loop {
+            let snapshot = watch.snapshot();
+            if snapshot.phase == alas_opt::CancelPhase::DeGeneration
+                && snapshot.evaluations_completed > 0
+            {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the default configuration never reached a DE generation; phase {} after {} \
+                 analyses",
+                snapshot.phase.as_str(),
+                snapshot.evaluations_completed
+            );
+            std::thread::yield_now();
+        }
+        watch.request_cancellation();
+        let result = handle.join().expect("the optimizer worker must not panic");
+        watch.mark_worker_joined();
+
+        let snapshot = watch.snapshot();
+        assert_eq!(
+            snapshot.requested_during,
+            alas_opt::CancelPhase::DeGeneration,
+            "the request must have landed inside a generation for this bound to mean anything"
+        );
+        assert!(
+            snapshot.evaluations_after_request <= 1,
+            "cancellation inside a generation must cost at most the analysis in flight, not the \
+             rest of the generation: {} analyses ran after the request",
+            snapshot.evaluations_after_request
+        );
+        assert_eq!(
+            snapshot.external_processes_started, 0,
+            "the VLM branch spawns no external solver, so nothing can survive it"
+        );
+        assert_eq!(snapshot.stop_reason, Some(alas_opt::StopReason::Cancelled));
+        assert_eq!(result.vlm.status, SolverOptimizationStatus::Failed);
+        assert!(
+            result.vlm.design.is_none(),
+            "a cancelled branch must never deliver a design as optimized"
+        );
+        assert!(result
+            .vlm
+            .error
+            .as_deref()
+            .is_some_and(|error| error.starts_with("Cancelled safely")));
+    }
+
+    #[test]
+    fn a_serial_request_reaches_the_candidate_batch_and_not_only_the_branches() {
+        // `--no-parallel` used to decide only whether the VLM and AVL
+        // branches ran side by side. A user who asks for a serial run gets
+        // one candidate evaluated at a time as well, whatever the automatic
+        // worker count would have resolved to on this machine.
+        let mut config = AlasConfig::default();
+        config.optimizer.solver.workers = 0;
+        assert!(
+            alas_config::SolverSettings::default().resolved_workers() >= 1,
+            "the automatic default resolves against the machine"
+        );
+
+        let serial = serial_solver_config(&config, false);
+        assert_eq!(serial.optimizer.solver.workers, 1);
+        assert_eq!(serial.optimizer.solver.resolved_workers(), 1);
+
+        let parallel = serial_solver_config(&config, true);
+        assert_eq!(
+            parallel.optimizer.solver.workers, 0,
+            "a parallel run keeps the configured automatic setting"
+        );
+    }
+
+    #[test]
+    fn a_serial_request_does_not_overwrite_an_explicit_worker_count_upwards() {
+        let mut config = AlasConfig::default();
+        config.optimizer.solver.workers = 4;
+        assert_eq!(
+            serial_solver_config(&config, false)
+                .optimizer
+                .solver
+                .workers,
+            1
+        );
     }
 }

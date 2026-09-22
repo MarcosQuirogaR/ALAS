@@ -23,6 +23,7 @@ reference produced, not a decimal approximation of them.
 from __future__ import annotations
 
 import json
+import os
 import platform
 import subprocess
 import sys
@@ -30,8 +31,12 @@ from pathlib import Path
 from typing import Any
 
 GOLDEN_DIR = Path(__file__).resolve().parent.parent
+
+# Location of the Python reference implementation these generators read. It is
+# not part of this repository, so it is taken from the environment and only
+# falls back to a sibling checkout.
 ALAS_ROOT = Path(
-    r"C:\Users\Marcos\OneDrive\Proyectos\Universidad\ALAS"
+    os.environ.get("ALAS_PYTHON_REFERENCE", str(GOLDEN_DIR.parent.parent / "ALAS-python"))
 )
 
 # The reference uses two virtual environments. A family manifest used to put

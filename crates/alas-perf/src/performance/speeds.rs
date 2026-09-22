@@ -11,7 +11,7 @@ use alas_config::PerformanceConfig;
 
 use super::{density_ratio, G, M_TO_FT, PA_TO_PSF, RHO_SL};
 
-/// Reference speeds [m/s] for one aircraft + aerodrome combination --
+/// Reference speeds [m/s] for one aircraft + aerodrome combination:
 /// `VSpeeds`.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct VSpeeds {
@@ -38,7 +38,7 @@ pub struct VSpeeds {
     pub v_td_ms: f64,
 }
 
-/// Compute the FAR-25 V-speed schedule at the given aerodrome conditions --
+/// Compute the FAR-25 V-speed schedule at the given aerodrome conditions:
 /// `compute_v_speeds`.
 ///
 /// The multiplicative factors come from `perf_config` rather than being fixed,
@@ -107,7 +107,7 @@ pub fn compute_v_speeds_at_masses(
     }
 }
 
-/// Estimated field-performance distances for one aircraft + aerodrome --
+/// Estimated field-performance distances for one aircraft + aerodrome:
 /// `FieldPerformance`.
 ///
 /// Holds the aerodrome so the distances-available and the margins against them
@@ -163,7 +163,7 @@ impl FieldPerformance {
     }
 }
 
-/// Estimate take-off and landing distances -- `compute_field_performance`.
+/// Estimate take-off and landing distances: `compute_field_performance`.
 ///
 /// Uses the same empirical constants as the constraint curves so the distances
 /// are consistent with the design-space boundary. `tw_sl` is the sea-level

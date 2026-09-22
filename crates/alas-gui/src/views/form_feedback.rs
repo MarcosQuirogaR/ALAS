@@ -1,95 +1,82 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! Short-lived, local acknowledgement for schema-generated form fields.
+//! The "Modified" marker of a schema-generated form field.
 //!
-//! The run log records the settled value after an edit gesture becomes idle.
-//! This badge provides immediate confirmation inside the control without
-//! turning a wheel or drag interaction into a sequence of log messages.
+//! The marker states one fact: this field no longer holds the value the
+//! schema declares as its default. That is a property of the value, so it is
+//! derived from the value on every frame rather than remembered from an edit
+//! gesture. An earlier version timed the marker out about a second after a
+//! keystroke, which made a field that was still non-default look untouched,
+//! and wrote the word into the editor's own value suffix as well, so a
+//! numeric field briefly rendered the non-numeric text "3.5  Modified".
+//!
+//! The marker is drawn once, in the field's label row beside the reset
+//! arrow, so it never overlaps a value, a combo-box arrow or a slider.
 
-use std::time::Duration;
-
-use egui::{pos2, Align2, FontId, Id, Response, Ui};
+use egui::{RichText, Ui};
+use serde_json::Value;
 
 use crate::theme::success_color;
 use crate::views::tr;
 
-/// How long an edited form field keeps its local acknowledgement visible.
-pub(super) const MODIFIED_INDICATOR_DURATION: Duration = Duration::from_millis(1_100);
-
-/// Remember that a field changed, without adding a second line below it.
-pub(super) fn record_modified(ui: &mut Ui, id: Id, changed: bool) {
-    if !changed {
-        return;
-    }
-    let now = ui.input(|input| input.time);
-    ui.memory_mut(|memory| memory.data.insert_temp(id, now));
-    ui.ctx().request_repaint();
-    ui.ctx().request_repaint_after(MODIFIED_INDICATOR_DURATION);
+/// Whether an edited slot differs from the schema default it started at.
+///
+/// This is the same comparison the reset arrow uses, so the two affordances
+/// can never disagree about whether a field was modified.
+pub(super) fn differs_from_default(slot: &Value, default: &Value) -> bool {
+    slot != default
 }
 
-/// Whether the field should render its acknowledgement inside the editor.
-pub(super) fn is_modified(ui: &mut Ui, id: Id) -> bool {
-    let now = ui.input(|input| input.time);
-    let Some(changed_at) = ui.memory(|memory| memory.data.get_temp::<f64>(id)) else {
-        return false;
-    };
-    let remaining = MODIFIED_INDICATOR_DURATION.as_secs_f64() - (now - changed_at);
-    if remaining <= 0.0 {
-        ui.memory_mut(|memory| memory.data.remove::<f64>(id));
-        return false;
-    }
-
-    ui.ctx()
-        .request_repaint_after(Duration::from_secs_f64(remaining));
-    true
-}
-
-/// Paint the acknowledgement inside a wide editor, including while a numeric
-/// editor has keyboard focus and therefore hides its normal value suffix.
-pub(super) fn paint_modified_indicator(ui: &Ui, response: &Response, show: bool) {
+/// Draw the marker for a field whose value differs from its default.
+pub(super) fn modified_marker(ui: &mut Ui, show: bool) {
     if !show {
         return;
     }
-    ui.painter().text(
-        pos2(response.rect.right() - 8.0, response.rect.center().y),
-        Align2::RIGHT_CENTER,
-        tr("Modified"),
-        FontId::proportional(11.0),
-        success_color(ui.visuals()),
-    );
+    ui.label(
+        RichText::new(tr("Modified"))
+            .size(11.0)
+            .color(success_color(ui.visuals())),
+    )
+    .on_hover_text(tr("This value differs from the preset default."));
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{is_modified, record_modified, MODIFIED_INDICATOR_DURATION};
-    use egui::{CentralPanel, Context, Id, RawInput};
+    use super::differs_from_default;
+    use serde_json::Value;
 
     #[test]
-    fn acknowledgement_lasts_long_enough_to_be_seen_without_lingering() {
-        assert!(MODIFIED_INDICATOR_DURATION >= std::time::Duration::from_secs(1));
-        assert!(MODIFIED_INDICATOR_DURATION < std::time::Duration::from_secs(2));
+    fn a_value_equal_to_its_default_is_not_modified() {
+        assert!(!differs_from_default(
+            &Value::from(0.84),
+            &Value::from(0.84)
+        ));
+        assert!(!differs_from_default(
+            &Value::String("Passenger".to_owned()),
+            &Value::String("Passenger".to_owned())
+        ));
+        assert!(!differs_from_default(&Value::Null, &Value::Null));
     }
 
     #[test]
-    fn acknowledgement_survives_into_the_following_render_frame() {
-        let context = Context::default();
-        let id = Id::new("modified-field");
-        context.begin_pass(RawInput {
-            time: Some(1.0),
-            ..Default::default()
-        });
-        CentralPanel::default().show(&context, |ui| record_modified(ui, id, true));
-        let _ = context.end_pass();
+    fn a_value_away_from_its_default_stays_modified_for_as_long_as_it_differs() {
+        let default = Value::from(0.84);
+        let edited = Value::from(3.5);
+        // The same call any number of frames later returns the same answer:
+        // the marker cannot time out while the value is still non-default.
+        for _ in 0..1_000 {
+            assert!(differs_from_default(&edited, &default));
+        }
+        assert!(!differs_from_default(&default, &default));
+    }
 
-        context.begin_pass(RawInput {
-            time: Some(1.1),
-            ..Default::default()
-        });
-        let mut visible = false;
-        CentralPanel::default().show(&context, |ui| visible = is_modified(ui, id));
-        let _ = context.end_pass();
-
-        assert!(visible);
+    #[test]
+    fn a_restored_default_clears_the_marker() {
+        let default = Value::from(11_887.0);
+        let mut slot = Value::from(12_000.0);
+        assert!(differs_from_default(&slot, &default));
+        slot = default.clone();
+        assert!(!differs_from_default(&slot, &default));
     }
 }

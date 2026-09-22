@@ -16,7 +16,7 @@ alas-atmo = { path = "../alas-atmo" }
 # `AnalysisConfig`, exactly as `alas/physics/aerodynamics.py` does. The other
 # modules here take no configuration.
 alas-config = { path = "../alas-config" }
-# The in-process VLM panels an `alas-geom::aircraft::airplane::Airplane`'s wings directly --
+# The in-process VLM panels an `alas-geom::aircraft::airplane::Airplane`'s wings directly:
 # `Wing::mesh_thin_surface`/`subdivide_sections` are the meshing this solver
 # runs on every call, not duplicated here.
 alas-geom = { path = "../alas-geom" }
@@ -25,7 +25,7 @@ alas-geom = { path = "../alas-geom" }
 # became its second caller.
 alas-math = { path = "../alas-math" }
 # `mses` spawns the external mset/mses/mplot binaries through this crate's
-# windowless-spawn helper -- the subprocess foundation the ledger sets aside for
+# windowless-spawn helper: the subprocess foundation the ledger sets aside for
 # exactly this row and `alas-struct::nastran`.
 alas-exec = { path = "../alas-exec" }
 thiserror = { workspace = true }

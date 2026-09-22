@@ -12,7 +12,7 @@ use alas_geom::aircraft::wing::Wing;
 use alas_math::{interp, linalg};
 
 /// The wing this module reads the aerodynamic centre and aspect ratio off,
-/// falling back to the first wing when none is named this -- upstream's
+/// falling back to the first wing when none is named this: upstream's
 /// `next((w for w in airplane.wings if w.name == "Main Wing"), airplane.wings[0])`.
 const MAIN_WING_NAME: &str = "Main Wing";
 
@@ -20,7 +20,7 @@ const MAIN_WING_NAME: &str = "Main Wing";
 /// [`fuselage_cm_alpha`] reads the tail station off.
 const HSTAB_NAME: &str = "Horizontal Stabilizer";
 
-/// `aerodynamic_center()`'s default `chord_fraction` -- the quarter-MAC point,
+/// `aerodynamic_center()`'s default `chord_fraction`: the quarter-MAC point,
 /// which every call site here takes unspecified.
 const AC_CHORD_FRACTION: f64 = 0.25;
 
@@ -29,7 +29,7 @@ const AC_CHORD_FRACTION: f64 = 0.25;
 const DEGENERACY_FLOOR: f64 = 1e-9;
 
 /// Cruise-condition static margin plus the closed-form longitudinal trim
-/// solve -- `StabilityTrimResult`. `trim_ih_deg` is NaN and `cl_ih`/`cm_ih`
+/// solve: `StabilityTrimResult`. `trim_ih_deg` is NaN and `cl_ih`/`cm_ih`
 /// are `0.0` when the airplane has no horizontal stabilizer (the pure-alpha
 /// trim fallback).
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -63,7 +63,7 @@ pub struct StabilityTrimResult {
 }
 
 /// The Munk `(k2 - k1)` apparent-mass factor against fuselage fineness ratio
-/// `L/d` -- `munk_apparent_mass_factor`. Clamped to the tabulated range
+/// `L/d`: `munk_apparent_mass_factor`. Clamped to the tabulated range
 /// `[4, 20]`: approaches 1 for a very slender body, lower for a stubby one.
 /// (Munk; tabulated in Roskam / USAF DATCOM.)
 pub fn munk_apparent_mass_factor(fineness: f64) -> f64 {
@@ -75,7 +75,7 @@ pub fn munk_apparent_mass_factor(fineness: f64) -> f64 {
 }
 
 /// The fuselage pitching-moment slope `dCm/dalpha` [per rad] by the
-/// slender-body (Munk/Multhopp) method -- `fuselage_cm_alpha`. Positive is
+/// slender-body (Munk/Multhopp) method: `fuselage_cm_alpha`. Positive is
 /// destabilising (moves the neutral point forward). Integrates the *actual*
 /// fuselage cross-section area distribution `A(x) = (pi/4) w(x) h(x)`, with a
 /// local-flow factor that reduces the afterbody's contribution by the wing
@@ -165,7 +165,7 @@ fn fuselage_cm_alpha_with_reference_mode(
     k_fac * 2.0 * accum / (s_ref * c_ref)
 }
 
-/// Static margin `SM = -dCm/dCL` from two low-speed VLM operating points --
+/// Static margin `SM = -dCm/dCL` from two low-speed VLM operating points:
 /// `static_margin`. NaN when the two probes carry the same lift (a degenerate
 /// `dCL`).
 ///
@@ -190,8 +190,8 @@ pub fn static_margin(airplane: &Airplane, analysis: &AnalysisConfig) -> Result<f
     Ok(-d_cm / d_cl)
 }
 
-/// Shift the CG so the aircraft's static margin equals `target_static_margin`
-/// -- `autobalance`. Mutates `airplane.xyz_ref[0]` in place and returns the
+/// Shift the CG so the aircraft's static margin equals `target_static_margin`:
+/// `autobalance`. Mutates `airplane.xyz_ref[0]` in place and returns the
 /// static margin measured *before* the correction (a free byproduct of the
 /// VLM calls [`static_margin`] already made, for penalty terms). A positive
 /// shift moves the CG aft, reducing the margin. Returns NaN and leaves the
@@ -214,7 +214,7 @@ pub fn autobalance(
     Ok(sm_current)
 }
 
-/// Physically-anchored neutral point, static margin and lift-curve slope --
+/// Physically-anchored neutral point, static margin and lift-curve slope:
 /// `neutral_point`, returning `(x_np, static_margin, cl_alpha)`. Probes at the
 /// fixed low-speed reference condition (`autobalance_velocity_m_s`), applies a
 /// tail dynamic-pressure efficiency to the tail's stabilising contribution,
@@ -284,7 +284,7 @@ fn neutral_point_with_reference_mode(
 }
 
 /// Cruise-condition three-point VLM probe: static margin plus a closed-form
-/// longitudinal trim solve -- `stability_and_trim`. Probes at the actual
+/// longitudinal trim solve: `stability_and_trim`. Probes at the actual
 /// cruise Mach/altitude, so the same solves serve both the static-margin
 /// measurement and a genuine trimmed solve: alpha and stabilizer incidence
 /// jointly satisfying `CL = cl_target` and `Cm = 0` (a closed-form 2x2). With

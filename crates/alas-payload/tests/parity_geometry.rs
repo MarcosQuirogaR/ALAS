@@ -6,7 +6,7 @@
 //!
 //! The fixture builds each case's frozen-reference aircraft through
 //! `AircraftBuilder::new_reference_compatibility(config.geometry).build` on a
-//! preset's own design vector -- so what is compared here is the cabin frame
+//! preset's own design vector, so what is compared here is the cabin frame
 //! of a real fuselage rather than of a synthetic probe. Product geometry is a
 //! separate path. Four bodies are covered: the shipped default, a narrowbody,
 //! a twin-aisle widebody, and the one preset whose declared height clears 1.15
@@ -21,7 +21,7 @@
 //! `internal_half_height` onto its 0.1 m floor and `usable_width` onto zero.
 //!
 //! `Tier::Closed`, matching `docs/PORTING.md`: every quantity is closed-form
-//! `f64` arithmetic over the already-`green` built geometry -- a linear
+//! `f64` arithmetic over the already-`green` built geometry: a linear
 //! interpolation, a fraction of a half-height, a percentage of a chord. The
 //! deck fractions and the double-deck verdict are compared at `Tier::Exact`,
 //! since those are values copied from the source rather than computed, and a
@@ -348,7 +348,7 @@ fn the_cabin_frame_matches_python_on_every_shipped_fuselage() {
 
         // The generator probes the passenger decks in order and then the
         // lower hold, so the same sequence is rebuilt here rather than
-        // matched by name -- a deck that appeared in the wrong place would
+        // matched by name: a deck that appeared in the wrong place would
         // otherwise compare against the right numbers.
         let decks: Vec<&DeckSpec> = g
             .passenger_decks

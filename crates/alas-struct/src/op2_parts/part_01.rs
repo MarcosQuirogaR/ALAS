@@ -25,11 +25,11 @@ pub struct EigenvectorTable {
     pub modes: Vec<i64>,
     /// Each mode's eigenvalue (`rad^2/s^2`).
     pub eigenvalues: Vec<f64>,
-    /// Each mode's frequency in Hz -- the reference's `mode_cycles`.
+    /// Each mode's frequency in Hz: the reference's `mode_cycles`.
     pub mode_cycles: Vec<f64>,
     /// The grid ids, device code stripped.
     pub node_ids: Vec<i64>,
-    /// `data[mode][node]` -- six components each.
+    /// `data[mode][node]`, six components each.
     pub data: Vec<Vec<[f64; 6]>>,
 }
 
@@ -42,9 +42,9 @@ pub struct ComplexVectorTable {
     pub freqs: Vec<f64>,
     /// The grid ids, device code stripped.
     pub node_ids: Vec<i64>,
-    /// `real[freq][node]` -- six real parts each.
+    /// `real[freq][node]`, six real parts each.
     pub real: Vec<Vec<[f64; 6]>>,
-    /// `imag[freq][node]` -- six imaginary parts each.
+    /// `imag[freq][node]`, six imaginary parts each.
     pub imag: Vec<Vec<[f64; 6]>>,
 }
 
@@ -122,7 +122,7 @@ pub enum Op2Error {
         /// Byte offset of the record whose two length words disagree.
         offset: usize,
     },
-    /// A record was shorter than the field being read out of it -- a table
+    /// A record was shorter than the field being read out of it: a table
     /// whose declared width overran its own data.
     #[error("OP2 record is too short for the field being read")]
     RecordTooShort,
@@ -149,7 +149,7 @@ pub fn read_op2(bytes: &[u8]) -> Result<Op2, Op2Error> {
 ///
 /// Each record is `[len][body][len]` with 32-bit little-endian length words.
 /// Reading stops cleanly at the first length word that cannot begin a record
-/// (non-positive, or overrunning the file) -- that is how the trailing
+/// (non-positive, or overrunning the file): that is how the trailing
 /// end-of-file marker and any pad are reached. A record whose two length words
 /// disagree is corruption, and is reported.
 fn split_records(bytes: &[u8]) -> Result<Vec<&[u8]>, Op2Error> {
@@ -175,7 +175,7 @@ fn split_records(bytes: &[u8]) -> Result<Vec<&[u8]>, Op2Error> {
     Ok(records)
 }
 
-/// The datablock name records this reader routes on -- eigenvectors arrive in
+/// The datablock name records this reader routes on: eigenvectors arrive in
 /// `OPHIG`, everything else in a name starting `OUG` (displacement family) or
 /// `OES` (element stress).
 fn record_is_name(record: &[u8]) -> Option<String> {
@@ -400,7 +400,7 @@ struct VectorRows {
 }
 
 /// Read a displacement/eigenvector/complex DATA record: `num_wide` words per
-/// node -- `[nid*10+device, gridtype, six real (+ six imaginary)]`.
+/// node: `[nid*10+device, gridtype, six real (+ six imaginary)]`.
 fn read_vector(table4: &[u8], num_wide: i64) -> Result<VectorRows, Op2Error> {
     let per = match num_wide {
         8 | 14 => num_wide as usize,

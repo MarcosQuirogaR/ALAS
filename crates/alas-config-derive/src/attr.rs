@@ -45,7 +45,7 @@ impl FieldConfig {
     /// # Errors
     ///
     /// On an unknown key, a malformed value, or a field that states no
-    /// metadata at all -- the last of which is the rule CONTRIBUTING.md
+    /// metadata at all: the last of which is the rule CONTRIBUTING.md
     /// describes: a configuration field with neither documentation nor an
     /// explicit `skip` would reach the settings interface as a blank mystery,
     /// so it does not compile.

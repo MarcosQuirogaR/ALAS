@@ -10,6 +10,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::airport_io::{self, CustomAirport};
 use crate::airports::{self, Airport};
 
 const OURAIRPORTS_JSON: &str = include_str!(concat!(
@@ -120,6 +121,8 @@ pub struct ProvenancedAirport {
     pub latitude_deg: AirportField<f64>,
     /// Reference longitude, positive east, deg.
     pub longitude_deg: AirportField<f64>,
+    /// ISA temperature deviation at the field, in degrees Celsius.
+    pub isa_deviation_c: AirportField<f64>,
     /// Meaning of the runway values in this record.
     pub runway_data_kind: RunwayDataKind,
 }
@@ -171,6 +174,9 @@ pub enum AirportDataError {
 /// Resolve a display name or ICAO code from the curated table, then the local
 /// OurAirports import. Resolution never invents missing fields.
 pub fn resolve(name_or_icao: &str) -> Result<ProvenancedAirport, AirportDataError> {
+    if let Some(airport) = airport_io::find_custom(name_or_icao) {
+        return Ok(from_custom(&airport));
+    }
     if let Ok(airport) = airports::get(name_or_icao) {
         return Ok(from_curated(airport));
     }
@@ -240,6 +246,7 @@ fn from_curated(airport: &Airport) -> ProvenancedAirport {
         lda_m: field(airport.lda_m, source),
         latitude_deg: field(airport.latitude_deg, source),
         longitude_deg: field(airport.longitude_deg, source),
+        isa_deviation_c: field(airport.isa_deviation_c, source),
         runway_data_kind: RunwayDataKind::DeclaredOperationalDistance,
     }
 }
@@ -254,11 +261,56 @@ fn from_import(record: &ImportedAirport) -> ProvenancedAirport {
         lda_m: optional_field(record.physical_runway_length_m, source),
         latitude_deg: optional_field(record.latitude_deg, source),
         longitude_deg: optional_field(record.longitude_deg, source),
+        isa_deviation_c: AirportField::missing(),
         runway_data_kind: if record.physical_runway_length_m.is_some() {
             RunwayDataKind::PhysicalRunwayLength
         } else {
             RunwayDataKind::Missing
         },
+    }
+}
+
+fn from_custom(airport: &CustomAirport) -> ProvenancedAirport {
+    let source = FieldSource::UserOverride;
+    let declared = airport
+        .declared_toda_m
+        .zip(airport.declared_lda_m)
+        .filter(|(toda, lda)| toda.is_finite() && *toda > 0.0 && lda.is_finite() && *lda > 0.0);
+    let physical = airport
+        .runway_lengths_m
+        .iter()
+        .copied()
+        .filter(|length| length.is_finite() && *length > 0.0)
+        .reduce(f64::max);
+    let (toda_m, lda_m, runway_data_kind) = match declared {
+        Some((toda, lda)) => (
+            field(toda, source),
+            field(lda, source),
+            RunwayDataKind::DeclaredOperationalDistance,
+        ),
+        None => match physical {
+            Some(length) => (
+                field(length, source),
+                field(length, source),
+                RunwayDataKind::PhysicalRunwayLength,
+            ),
+            None => (
+                AirportField::missing(),
+                AirportField::missing(),
+                RunwayDataKind::Missing,
+            ),
+        },
+    };
+    ProvenancedAirport {
+        icao: field(airport.icao.clone(), source),
+        name: field(airport.name.clone(), source),
+        elevation_m: field(airport.altitude_m, source),
+        toda_m,
+        lda_m,
+        latitude_deg: field(airport.latitude_deg, source),
+        longitude_deg: field(airport.longitude_deg, source),
+        isa_deviation_c: field(airport.isa_delta_c, source),
+        runway_data_kind,
     }
 }
 

@@ -52,7 +52,7 @@ function one(overrides = {}, modelValue = 10, localValue = 10) {
 }
 
 test('matched primary source within tolerance is eligible', () => {
-  // 0.05 m absolute error on a 10 m source is 0.5% relative -- inside both the 0.5 m
+  // 0.05 m absolute error on a 10 m source is 0.5% relative: inside both the 0.5 m
   // absolute and 1% relative bounds declared by the 'small' tolerance fixture.
   const row = one({}, 10.05);
   assert.equal(row.status, 'within_tolerance');
@@ -111,7 +111,7 @@ test('descriptive source evidence requires a normalized export', () => {
 
 test('a generous absolute tolerance cannot rescue a check that misses its relative tolerance', () => {
   // Reproduces the ATR-72 mass.oew_kg defect: a 2 m miss against a 10 m source is 20%
-  // relative error -- well outside a 1% relative bound -- even though it sits inside a
+  // relative error (well outside a 1% relative bound) even though it sits inside a
   // deliberately loose 5 m absolute bound. Both declared bounds must hold (AND), not either.
   const row = one({tolerance: 'loose_absolute'}, 12);
   assert.equal(row.status, 'out_of_tolerance');

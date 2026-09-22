@@ -4,9 +4,9 @@
 //! Compares `alas-struct::loads` against `alas/physics/structural_loads.py`,
 //! via `golden/generators/gen_struct_loads.py`.
 //!
-//! Every quantity here is closed-form `f64` arithmetic -- the load-case
+//! Every quantity here is closed-form `f64` arithmetic: the load-case
 //! scaling, the closed-form ellipse, and a trapezoidal integral evaluated in
-//! the same summation order as the reference's `np.cumsum` -- so the whole row
+//! the same summation order as the reference's `np.cumsum`, so the whole row
 //! is checked at `Tier::Closed`, matching `docs/PORTING.md`.
 
 // This file is itself a test binary, so an unwrap or expect that fails is the
@@ -87,7 +87,7 @@ struct Fixture {
 }
 
 /// A `DesignRequirements` carrying only the four fields `load_cases` reads,
-/// over the crate's defaults -- the fixture records exactly those four.
+/// over the crate's defaults: the fixture records exactly those four.
 fn requirements_from(fields: &ReqFields) -> DesignRequirements {
     DesignRequirements {
         gravity_m_s2: fields.gravity_m_s2,

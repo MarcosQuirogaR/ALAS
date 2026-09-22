@@ -5,7 +5,7 @@
 //! baseline: a request of zero must carry zero, no matter how much
 //! structural or hold capacity the airframe leaves free once seats and bags
 //! are aboard. These regressions pin that contract for the product entry
-//! point (`build_payload_layout`), and pin its one deliberate exception --
+//! point (`build_payload_layout`), and pin its one deliberate exception:
 //! the frozen `*_reference_compatibility` replay used by the Python parity
 //! fixtures, which auto-fills the belly to the structural cap and must keep
 //! doing so.
@@ -33,7 +33,7 @@ fn b787_config() -> (AlasConfig, alas_geom::aircraft::airplane::Airplane) {
 
 /// Loads the unregistered clean-sheet configuration and its default aircraft.
 ///
-/// No study -- clean-sheet included -- treats `requirements.num_passengers`
+/// No study (clean-sheet included) treats `requirements.num_passengers`
 /// as a fixed load-case target; capacity is always resolved from the cabin
 /// class-mix percentages and the candidate's actual geometry. Keeping this
 /// fixture separate from [`b787_config`] still matters: a clean-sheet study
@@ -122,7 +122,7 @@ fn belly_cargo_request_beyond_hold_capacity_is_clamped_and_reported_as_a_shortfa
 
 #[test]
 fn cabin_density_and_baggage_changes_move_the_actual_payload() {
-    // No study -- clean-sheet included -- carries a fixed/exact
+    // No study (clean-sheet included) carries a fixed/exact
     // passenger-count target any more: capacity is always resolved from the
     // cabin class-mix percentages and the candidate's actual geometry,
     // exactly like the registered-aircraft contract covered by the test

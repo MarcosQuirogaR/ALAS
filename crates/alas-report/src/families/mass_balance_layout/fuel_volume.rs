@@ -13,13 +13,13 @@ use alas_geom::aircraft::wing::Wing;
 use alas_mass::breakdown::FUEL;
 use alas_pipeline::feasibility::{FuelCapacityEvidence, FuelLoadingAssessment};
 use alas_pipeline::full_analysis::AnalysisReport;
-/// `color` with its alpha channel replaced -- `Color` carries no builder for
+/// `color` with its alpha channel replaced: `Color` carries no builder for
 /// this, so the two channels a translucent fill needs are set by hand.
 pub(super) fn with_alpha(color: Color, a: u8) -> Color {
     Color::rgba(color.r, color.g, color.b, a)
 }
 
-/// Torenbeek geometric wing fuel-tank volume estimate [m^3] --
+/// Torenbeek geometric wing fuel-tank volume estimate [m^3]:
 /// `physics.performance.wing_fuel_volume_m3`:
 ///
 /// `V = 0.54 * (S^2 / b) * (t/c)_root * (1 + lambda + lambda^2) / (1 + lambda)^2`
@@ -39,7 +39,7 @@ pub(super) fn wing_fuel_volume_m3(wing: &Wing, usable_fraction: f64) -> f64 {
 }
 
 /// Single-bar check: does the wing physically have room for the fuel the
-/// design requires? -- `figure_fuel_volume_check`, deliberately minimal (a
+/// design requires? `figure_fuel_volume_check`, deliberately minimal (a
 /// yes/no engineering check, not a multi-panel figure). A green bar means
 /// the Torenbeek usable tank volume, converted to mass at the configured
 /// fuel density, covers `component_masses["Fuel"]` with margin; red means

@@ -9,8 +9,8 @@
 //!
 //! `docs/PORTING.md` names `closed` for this row, and it holds: nothing here
 //! goes through a factorization. Every reported number is closed-form `f64`
-//! arithmetic -- the DATCOM slope, the tube-and-wing moment sums, the fuselage
-//! correlations -- that both implementations evaluate in the same order, so the
+//! arithmetic: the DATCOM slope, the tube-and-wing moment sums, the fuselage
+//! correlations: that both implementations evaluate in the same order, so the
 //! parity test asserts at `Tier::Closed`. The fixture geometry (recorded once
 //! from the SUAVE vehicle) is fed into the port's flat input, and each case's
 //! flight condition drives one `static_stability` call.

@@ -12,7 +12,6 @@ use std::path::Path;
 
 use alas_aero::mses::{MsesPolarResult, MsesPressureResult};
 use alas_config::design_variables::DesignVector;
-#[cfg(test)]
 use alas_config::AlasConfig;
 use serde_json::json;
 
@@ -181,4 +180,35 @@ pub(super) fn optimizer_config(
         );
     }
     Ok(effective)
+}
+
+/// The dispatch-time preset barrier of clarified App Features 1.2: a run on
+/// a registered preset must name a registered aircraft, and in preset mode
+/// its locked geometry, initial design point and search bounds must match
+/// the registry's values and the D09 envelope anchored there. The guided
+/// workspace restores these after every edit; this check is the second
+/// barrier for buffers that reached the pipeline by another route.
+pub(super) fn check_preset_policy(
+    config: &AlasConfig,
+    initial_design: Option<&DesignVector>,
+    bounds: Option<&[(f64, f64)]>,
+) -> Result<(), String> {
+    if !config.preset.is_empty() {
+        alas_config::presets::get(&config.preset).map_err(|error| {
+            format!(
+                "configuration preset identity is not registered: {error}; clear the preset field or select a registered aircraft preset"
+            )
+        })?;
+    }
+    let violations =
+        alas_config::preset_policy::dispatch_violations(config, initial_design, bounds)
+            .map_err(|error| error.to_string())?;
+    if violations.is_empty() {
+        return Ok(());
+    }
+    Err(format!(
+        "preset '{}' is protected in preset mode and the run does not match its registered definition: {}; restore the preset values or use the sandbox for geometry experiments",
+        config.preset,
+        alas_config::preset_policy::describe_violations(&violations)
+    ))
 }

@@ -25,7 +25,7 @@
 //! because that is what `dataclasses.asdict` produces there.
 
 // A test asserts on values it constructed, so a failed unwrap there is the
-// assertion failing -- which is the test doing its job, not a panic escaping
+// assertion failing, which is the test doing its job, not a panic escaping
 // into a user's run.
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 

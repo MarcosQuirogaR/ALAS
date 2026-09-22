@@ -12,7 +12,7 @@
 //!
 //! # Closed-form, given the derivatives
 //!
-//! Every formula here is `f64` arithmetic over its inputs -- Flight Vehicle
+//! Every formula here is `f64` arithmetic over its inputs: Flight Vehicle
 //! Aerodynamics Eqs. 9.55-9.68, transcribed. It runs no solve of its own. The
 //! [`StabilityAero`] set it consumes *is* produced by a vortex-lattice solve
 //! upstream (`alas-aero::vlm`'s [`run_with_stability_derivatives`], through
@@ -27,7 +27,7 @@
 //!
 //! [`StabilityAero`] carries exactly the eleven coefficients `get_modes` reads
 //! off the aero dict (`CL`, `CD`, `Cma`, `Cmq`, `Clp`, `CYb`, `Cnb`, `CYr`,
-//! `Cnr`, `Clb`, `Clr`) -- the sweep produces thirty derivatives, and this is
+//! `Cnr`, `Clb`, `Clr`): the sweep produces thirty derivatives, and this is
 //! the subset the eigenmode formulas touch. The phugoid's
 //! `eigenvalue_imag_approx`/`damping_ratio_approx` byproducts are not
 //! translated: `compute_dynamic_modes`, the only consumer, reads only the
@@ -44,7 +44,7 @@
 use alas_aero::operating_point::OperatingPoint;
 use alas_geom::aircraft::airplane::Airplane;
 
-/// Standard gravity, m/s^2 -- `get_modes`'s `g=9.81` default, which no call
+/// Standard gravity, m/s^2: `get_modes`'s `g=9.81` default, which no call
 /// site overrides.
 const GRAVITY: f64 = 9.81;
 
@@ -54,32 +54,32 @@ const GRAVITY: f64 = 9.81;
 /// native aerodynamic model's sweep reports them.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct StabilityAero {
-    /// Lift coefficient at the base point -- `CL`.
+    /// Lift coefficient at the base point: `CL`.
     pub cl: f64,
-    /// Drag coefficient at the base point -- `CD`.
+    /// Drag coefficient at the base point: `CD`.
     pub cd: f64,
-    /// Pitching-moment slope with angle of attack -- `Cma`.
+    /// Pitching-moment slope with angle of attack: `Cma`.
     pub cma: f64,
-    /// Pitching-moment slope with nondimensional pitch rate -- `Cmq`.
+    /// Pitching-moment slope with nondimensional pitch rate: `Cmq`.
     pub cmq: f64,
-    /// Rolling-moment slope with nondimensional roll rate -- `Clp`.
+    /// Rolling-moment slope with nondimensional roll rate: `Clp`.
     pub clp: f64,
-    /// Side-force slope with sideslip -- `CYb`.
+    /// Side-force slope with sideslip: `CYb`.
     pub cyb: f64,
-    /// Yawing-moment slope with sideslip -- `Cnb`.
+    /// Yawing-moment slope with sideslip: `Cnb`.
     pub cnb: f64,
-    /// Side-force slope with nondimensional yaw rate -- `CYr`.
+    /// Side-force slope with nondimensional yaw rate: `CYr`.
     pub cyr: f64,
-    /// Yawing-moment slope with nondimensional yaw rate -- `Cnr`.
+    /// Yawing-moment slope with nondimensional yaw rate: `Cnr`.
     pub cnr: f64,
-    /// Rolling-moment slope with sideslip -- `Clb`.
+    /// Rolling-moment slope with sideslip: `Clb`.
     pub clb: f64,
-    /// Rolling-moment slope with nondimensional yaw rate -- `Clr`.
+    /// Rolling-moment slope with nondimensional yaw rate: `Clr`.
     pub clr: f64,
 }
 
 /// The mass and principal moments of inertia `get_modes` reads off a
-/// `MassProperties` -- upstream's full object, narrowed to the four fields the
+/// `MassProperties`: upstream's full object, narrowed to the four fields the
 /// eigenmode formulas touch (`mass`, `Ixx`, `Iyy`, `Izz`).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MassProperties {
@@ -138,13 +138,13 @@ fn mode_info(sigma: f64, omega_squared: f64) -> (f64, f64) {
 }
 
 /// The damping ratio `-real / sqrt(real^2 + imag^2)` `get_modes`'s final loop
-/// assigns every mode -- including the roll and spiral roots, whose earlier
+/// assigns every mode, including the roll and spiral roots, whose earlier
 /// literal damping is overwritten here.
 fn damping_ratio(real: f64, imag: f64) -> f64 {
     -real / (real * real + imag * imag).sqrt()
 }
 
-/// The five small-perturbation eigenmodes at `op_point` -- `get_modes`.
+/// The five small-perturbation eigenmodes at `op_point`: `get_modes`.
 ///
 /// `aero` is the stability-derivative set (upstream's `aero` dict), `mass` the
 /// inertia estimate (upstream's `MassProperties`). Reference dimensions come
@@ -248,7 +248,7 @@ mod tests {
 
     #[test]
     fn damping_ratio_is_plus_or_minus_one_for_a_purely_real_root() {
-        // A stable aperiodic root damps to +1, an unstable one to -1 -- the
+        // A stable aperiodic root damps to +1, an unstable one to -1: the
         // value get_modes's final loop assigns, overwriting the literal 1 the
         // roll mode is first given.
         assert!((damping_ratio(-0.5, 0.0) - 1.0).abs() < 1e-12);

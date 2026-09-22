@@ -7,7 +7,7 @@
 //! What the aircraft carries, and where in the fuselage it sits.
 //!
 //! This drives the detailed payload layout, which is built afresh for every
-//! candidate the optimizer evaluates -- not only for the final design -- so
+//! candidate the optimizer evaluates (not only for the final design) so
 //! that the centre of gravity checked against the envelope is the one the
 //! real seating and loading produce rather than a lumped estimate.
 //!
@@ -17,19 +17,133 @@
 //! former premium-economy slot remains in serialized files for compatibility,
 //! but is hidden and excluded from all product allocation calculations.
 
+mod allocation;
 mod cargo;
 mod seat_class;
 
+use allocation::proportional_integer_allocation;
 pub use cargo::CargoDeckConfig;
 pub use seat_class::SeatClassConfig;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{ConfigNode, DesignRequirements};
+use crate::{ConfigNode, DesignRequirements, FlopsInputEvidence, MassModelConfig};
 
 /// The three product class slots, forward to aft. Naming them once keeps the layout
 /// order and the share mix from disagreeing about which cabin comes first.
 const CLASS_NAMES: [&str; 3] = ["First", "Business", "Economy"];
+
+/// The three class counts the FLOPS transport contract can consume.
+///
+/// `PassengerCabinConfig` still carries the former premium-economy slot for
+/// saved-file compatibility, but FLOPS has no fourth class. A positive legacy
+/// premium count is therefore folded into `tourist` by the resolver below.
+/// Keeping this value type in the configuration crate lets payload, pipeline,
+/// optimizer and validation code use the same authority without depending on
+/// the mass-equation crate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ResolvedPassengerCounts {
+    /// First-class seats.
+    pub first: i64,
+    /// Business-class seats.
+    pub business: i64,
+    /// Tourist/economy seats, including a positive legacy premium count.
+    pub tourist: i64,
+}
+
+impl ResolvedPassengerCounts {
+    /// Total installed passenger seats represented by this FLOPS split.
+    pub fn total(self) -> i64 {
+        self.first
+            .saturating_add(self.business)
+            .saturating_add(self.tourist)
+    }
+
+    /// Whether at least one seat was resolved.
+    pub fn is_nonempty(self) -> bool {
+        self.total() > 0
+    }
+}
+
+/// Mark a FLOPS transport clone when its class-count mirror has been resolved
+/// from the canonical cabin rather than copied from the serialized seed.
+///
+/// The transport node retains the source document and revision for the seed,
+/// but a changed numeric split must not continue to look source-backed in an
+/// evaluated report. There is no fourth Derived evidence enum in the saved
+/// schema, so the existing auditable UserDeclared category is used together
+/// with an explicit applicability/uncertainty note. The comparison is made
+/// before the caller writes the new counts; calling this helper twice is
+/// idempotent.
+pub fn annotate_flops_cabin_resolution(
+    mass_model: &mut MassModelConfig,
+    counts: ResolvedPassengerCounts,
+) {
+    let current = [
+        mass_model
+            .flops_transport
+            .first_class_passenger_count
+            .and_then(|value| i64::try_from(value).ok()),
+        mass_model
+            .flops_transport
+            .business_class_passenger_count
+            .and_then(|value| i64::try_from(value).ok()),
+        mass_model
+            .flops_transport
+            .tourist_class_passenger_count
+            .and_then(|value| i64::try_from(value).ok()),
+    ];
+    let resolved = [
+        Some(counts.first),
+        Some(counts.business),
+        Some(counts.tourist),
+    ];
+    if current == resolved {
+        return;
+    }
+
+    let note = format!(
+        "canonical cabin resolution for this evaluation uses FLOPS class counts First={}, Business={}, Tourist={}",
+        counts.first, counts.business, counts.tourist
+    );
+    let provenance = &mut mass_model.flops_transport.provenance.cabin;
+    provenance.applicability = replace_provenance_note(
+        &provenance.applicability,
+        "canonical cabin resolution for this evaluation uses FLOPS class counts",
+        &note,
+    );
+    if !provenance
+        .uncertainty
+        .contains("serialized FLOPS class-count seed was superseded")
+    {
+        provenance.uncertainty = append_provenance_note(
+            &provenance.uncertainty,
+            "the serialized FLOPS class-count seed was superseded by the canonical cabin for this load case",
+        );
+    }
+    provenance.evidence = FlopsInputEvidence::UserDeclared;
+}
+
+fn replace_provenance_note(existing: &str, marker: &str, note: &str) -> String {
+    let existing = existing.trim().trim_end_matches('.');
+    if let Some(index) = existing.find(marker) {
+        let prefix = existing[..index].trim().trim_end_matches(';').trim();
+        if prefix.is_empty() {
+            return note.to_owned();
+        }
+        return format!("{prefix}; {note}");
+    }
+    append_provenance_note(existing, note)
+}
+
+fn append_provenance_note(existing: &str, note: &str) -> String {
+    let existing = existing.trim().trim_end_matches('.');
+    if existing.is_empty() {
+        note.to_owned()
+    } else {
+        format!("{existing}; {note}")
+    }
+}
 
 /// Passenger cabin: the class mix, the monuments, and the baggage.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ConfigNode)]
@@ -140,6 +254,100 @@ impl PassengerCabinConfig {
         self.classes().iter().map(|(_, class)| class.count).sum()
     }
 
+    /// Resolve the cabin's canonical three-class FLOPS split.
+    ///
+    /// Count-mode values are deliberate installed-cabin declarations and take
+    /// precedence over the requirements seed. A positive serialized
+    /// premium-economy count is legacy data, so it is retained by folding it
+    /// into FLOPS tourist/economy. Percent-mode counts are only trusted when
+    /// they are already materialized and agree with the requested total;
+    /// otherwise the requested total is allocated from the class shares. This
+    /// gives every pre-layout caller a complete, coherent split without
+    /// changing the cabin geometry or silently replacing a user's count-mode
+    /// declaration with payload occupancy.
+    pub fn resolved_flops_counts(&self, requested_passengers: i64) -> ResolvedPassengerCounts {
+        let requested_passengers = requested_passengers.max(0);
+        let declared = self.declared_flops_counts();
+
+        if self.class_mix_mode == "count" && declared.is_nonempty() {
+            return declared;
+        }
+
+        if self.class_mix_mode != "count" {
+            let materialized = self.materialized_flops_counts(requested_passengers);
+            if let Some(counts) = materialized {
+                return counts;
+            }
+        }
+
+        let weights = [
+            self.first.share_pct,
+            self.business.share_pct,
+            self.economy.share_pct,
+        ];
+        let weights = if weights
+            .iter()
+            .all(|share| share.is_finite() && *share >= 0.0)
+            && weights.iter().sum::<f64>() > 0.0
+        {
+            weights
+        } else {
+            [0.0, 0.0, 1.0]
+        };
+        let allocation = proportional_integer_allocation(requested_passengers, weights);
+        ResolvedPassengerCounts {
+            first: allocation[0],
+            business: allocation[1],
+            tourist: allocation[2],
+        }
+    }
+
+    /// Return a product cabin with the hidden legacy Premium slot mapped to
+    /// the public Economy slot whenever a saved count seed carries it.
+    ///
+    /// This is intentionally a clone-producing boundary. Validation and saved
+    /// configuration inspection must preserve the user's original document,
+    /// while payload layout and mass callers need the same three-class cabin.
+    pub fn canonicalized_for_product(&self) -> Self {
+        let mut canonical = self.clone();
+        if canonical.premium.count > 0 {
+            canonical.economy.count = canonical
+                .economy
+                .count
+                .max(0)
+                .saturating_add(canonical.premium.count);
+            canonical.premium.count = 0;
+        }
+        canonical
+    }
+
+    fn declared_flops_counts(&self) -> ResolvedPassengerCounts {
+        ResolvedPassengerCounts {
+            first: self.first.count.max(0),
+            business: self.business.count.max(0),
+            tourist: self
+                .economy
+                .count
+                .max(0)
+                .saturating_add(self.premium.count.max(0)),
+        }
+    }
+
+    fn materialized_flops_counts(
+        &self,
+        requested_passengers: i64,
+    ) -> Option<ResolvedPassengerCounts> {
+        if requested_passengers <= 0 {
+            return Some(ResolvedPassengerCounts {
+                first: 0,
+                business: 0,
+                tourist: 0,
+            });
+        }
+        let counts = self.declared_flops_counts();
+        (counts.total() == requested_passengers).then_some(counts)
+    }
+
     /// Set every class slot's occupant mass from one combined passenger mass.
     ///
     /// A requirements-first passenger mass is a single load-case authority,
@@ -166,8 +374,8 @@ impl PassengerCabinConfig {
     /// mass: occupant plus checked baggage combined, and combined masses do
     /// not vary by class. A named cabin preset (or a hand-edited class) may
     /// still declare its own `mass_per_pax_kg` for display and for the seat
-    /// geometry it seeds, but every product path -- report, GUI preview,
-    /// pipeline, export, acceptance and the optimizer -- must reprice each
+    /// geometry it seeds, but every product path (report, GUI preview,
+    /// pipeline, export, acceptance and the optimizer) must reprice each
     /// seated passenger, whatever class fills the seat, as this combined
     /// mass: occupant = `passenger_mass_kg` - `checked_bag_mass_kg` (floored
     /// at zero), plus the bag. Calling this after a preset or a hand edit has
@@ -267,45 +475,6 @@ impl PassengerCabinConfig {
         self.premium.share_pct = 0.0;
         self.economy.share_pct = share_of(CLASS_NAMES[2]);
     }
-}
-
-fn proportional_integer_allocation(target: i64, weights: [f64; 3]) -> [i64; 3] {
-    if target <= 0 {
-        return [0; 3];
-    }
-    let total: f64 = weights.iter().sum();
-    if !total.is_finite() || total <= 0.0 {
-        return [0, 0, target];
-    }
-
-    let mut allocation = [0_i64; 3];
-    let mut fractional = [0.0_f64; 3];
-    let mut assigned = 0_i64;
-    for (index, weight) in weights.into_iter().enumerate() {
-        let raw = target as f64 * weight / total;
-        let whole = raw.floor() as i64;
-        allocation[index] = whole;
-        fractional[index] = raw - whole as f64;
-        assigned += whole;
-    }
-
-    // At most two seats remain after flooring three class allocations. The
-    // stable index tie-break keeps saved runs reproducible.
-    let mut remaining = (target - assigned).max(0);
-    while remaining > 0 {
-        let index = fractional
-            .iter()
-            .enumerate()
-            .max_by(|(left_index, left), (right_index, right)| {
-                left.total_cmp(right)
-                    .then_with(|| right_index.cmp(left_index))
-            })
-            .map_or(2, |(index, _)| index);
-        allocation[index] += 1;
-        fractional[index] = f64::NEG_INFINITY;
-        remaining -= 1;
-    }
-    allocation
 }
 
 /// The composed cabin and payload configuration.
@@ -439,6 +608,178 @@ mod tests {
         cabin.set_fixed_passenger_count(2);
 
         assert_eq!(cabin.all_classes().map(|(_, class)| class.count), [1, 1, 0]);
+    }
+
+    #[test]
+    fn percent_resolution_allocates_the_requested_total_from_shares() {
+        let mut cabin = PassengerCabinConfig::default();
+        cabin.first.share_pct = 10.0;
+        cabin.business.share_pct = 20.0;
+        cabin.economy.share_pct = 70.0;
+
+        assert_eq!(
+            cabin.resolved_flops_counts(101),
+            ResolvedPassengerCounts {
+                first: 10,
+                business: 20,
+                tourist: 71,
+            }
+        );
+        assert_eq!(cabin.total_seats(), 0);
+    }
+
+    #[test]
+    fn percent_resolution_keeps_a_materialized_layout_when_it_matches_the_target() {
+        let mut cabin = PassengerCabinConfig {
+            class_mix_mode: "percent".to_owned(),
+            ..Default::default()
+        };
+        cabin.first.count = 2;
+        cabin.business.count = 18;
+        cabin.economy.count = 80;
+
+        assert_eq!(
+            cabin.resolved_flops_counts(100),
+            ResolvedPassengerCounts {
+                first: 2,
+                business: 18,
+                tourist: 80,
+            }
+        );
+    }
+
+    #[test]
+    fn percent_resolution_discards_stale_counts_when_the_target_differs() {
+        let mut cabin = PassengerCabinConfig::default();
+        cabin.first.share_pct = 25.0;
+        cabin.business.share_pct = 25.0;
+        cabin.economy.share_pct = 50.0;
+        cabin.first.count = 2;
+        cabin.business.count = 18;
+        cabin.economy.count = 80;
+
+        assert_eq!(
+            cabin.resolved_flops_counts(200),
+            ResolvedPassengerCounts {
+                first: 50,
+                business: 50,
+                tourist: 100,
+            }
+        );
+    }
+
+    #[test]
+    fn count_resolution_preserves_declared_classes_and_folds_legacy_premium() {
+        let mut cabin = PassengerCabinConfig {
+            class_mix_mode: "count".to_owned(),
+            ..Default::default()
+        };
+        cabin.first.count = 4;
+        cabin.business.count = 16;
+        cabin.premium.count = 10;
+        cabin.economy.count = 70;
+
+        assert_eq!(
+            cabin.resolved_flops_counts(999),
+            ResolvedPassengerCounts {
+                first: 4,
+                business: 16,
+                tourist: 80,
+            }
+        );
+        assert_eq!(cabin.canonicalized_for_product().premium.count, 0);
+        assert_eq!(cabin.canonicalized_for_product().economy.count, 80);
+    }
+
+    #[test]
+    fn percent_mode_legacy_premium_survives_serialization_but_is_folded_for_product() {
+        let mut cabin = PassengerCabinConfig::default();
+        cabin.first.count = 4;
+        cabin.business.count = 16;
+        cabin.premium.count = 10;
+        cabin.economy.count = 70;
+
+        let encoded = serde_json::to_string(&cabin).unwrap();
+        let decoded: PassengerCabinConfig = serde_json::from_str(&encoded).unwrap();
+
+        assert_eq!(decoded, cabin);
+        assert_eq!(decoded.resolved_flops_counts(100).total(), 100);
+        let product = decoded.canonicalized_for_product();
+        assert_eq!(product.premium.count, 0);
+        assert_eq!(product.economy.count, 80);
+        assert_eq!(cabin.premium.count, 10);
+    }
+
+    #[test]
+    fn a_resolved_split_downgrades_source_backed_cabin_provenance() {
+        let mut mass_model = MassModelConfig::default();
+        mass_model.flops_transport.provenance.cabin.evidence = FlopsInputEvidence::SourceBacked;
+
+        annotate_flops_cabin_resolution(
+            &mut mass_model,
+            ResolvedPassengerCounts {
+                first: 10,
+                business: 20,
+                tourist: 70,
+            },
+        );
+
+        let provenance = &mass_model.flops_transport.provenance.cabin;
+        assert_eq!(provenance.evidence, FlopsInputEvidence::UserDeclared);
+        assert!(provenance
+            .applicability
+            .contains("canonical cabin resolution"));
+        assert!(provenance
+            .uncertainty
+            .contains("serialized FLOPS class-count seed was superseded"));
+    }
+
+    #[test]
+    fn a_second_cabin_resolution_replaces_the_first_provenance_split() {
+        let mut mass_model = MassModelConfig::default();
+        annotate_flops_cabin_resolution(
+            &mut mass_model,
+            ResolvedPassengerCounts {
+                first: 10,
+                business: 20,
+                tourist: 70,
+            },
+        );
+        mass_model.flops_transport.first_class_passenger_count = Some(10);
+        mass_model.flops_transport.business_class_passenger_count = Some(20);
+        mass_model.flops_transport.tourist_class_passenger_count = Some(70);
+        annotate_flops_cabin_resolution(
+            &mut mass_model,
+            ResolvedPassengerCounts {
+                first: 8,
+                business: 22,
+                tourist: 70,
+            },
+        );
+
+        let applicability = &mass_model.flops_transport.provenance.cabin.applicability;
+        assert!(applicability.contains("First=8"));
+        assert!(!applicability.contains("First=10"));
+    }
+
+    #[test]
+    fn empty_count_mode_uses_the_requirements_seed_until_the_layout_is_materialized() {
+        let mut cabin = PassengerCabinConfig {
+            class_mix_mode: "count".to_owned(),
+            ..Default::default()
+        };
+        cabin.first.share_pct = 0.0;
+        cabin.business.share_pct = 0.0;
+        cabin.economy.share_pct = 100.0;
+
+        assert_eq!(
+            cabin.resolved_flops_counts(73),
+            ResolvedPassengerCounts {
+                first: 0,
+                business: 0,
+                tourist: 73,
+            }
+        );
     }
 
     #[test]

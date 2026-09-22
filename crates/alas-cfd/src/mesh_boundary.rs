@@ -54,7 +54,7 @@ pub fn ensure_boundary_patch_types(boundary_path: &Path) -> Result<BoundaryPatch
     }
     let updated = !replacements.is_empty();
     let mut rewritten = contents;
-    replacements.sort_by(|left, right| right.0.cmp(&left.0));
+    replacements.sort_by_key(|(start, _, _)| std::cmp::Reverse(*start));
     for (start, end, replacement) in replacements {
         rewritten.replace_range(start..end, &replacement);
     }

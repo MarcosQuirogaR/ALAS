@@ -15,8 +15,8 @@
 //! array is shifted, and that difference is most of the diagnosis.
 //!
 //! The second is that tolerances are not chosen per test. They come from
-//! [`Tier`], and a tier is picked for what the code does -- closed-form
-//! arithmetic, a factorization, an `f32` kernel -- not for what it takes to
+//! [`Tier`], and a tier is picked for what the code does: closed-form
+//! arithmetic, a factorization, an `f32` kernel, not for what it takes to
 //! make today's numbers pass. Loosening a tier to get green is how a real
 //! disagreement gets absorbed into a rounding allowance, so the tiers are
 //! defined once, here, with the reason each exists.
@@ -328,7 +328,7 @@ mod tests {
         // invisible at every tier except the one where it matters most: an
         // `exact` comparison against a value the reference wrote is then
         // unwinnable. `float_roundtrip` in the workspace manifest buys the
-        // correctly-rounded path, and this is what says so out loud -- it fails
+        // correctly-rounded path, and this is what says so out loud; it fails
         // if that feature is ever dropped.
         //
         // The literal is Python's repr of an f32-derived double, the shape every

@@ -11,14 +11,14 @@ use alas_units::POUND_MASS;
 
 use super::PayloadBreakdown;
 
-/// The FAA per-passenger body weight allowance, 195 lb -- upstream's
+/// The FAA per-passenger body weight allowance, 195 lb: upstream's
 /// `wt_passenger` default, never overridden by [`super::empty_weight`].
 const PASSENGER_MASS_LB: f64 = 195.0;
-/// The per-passenger baggage allowance, 30 lb -- upstream's `wt_baggage`
+/// The per-passenger baggage allowance, 30 lb: upstream's `wt_baggage`
 /// default, never overridden.
 const BAGGAGE_MASS_LB: f64 = 30.0;
 
-/// The payload mass -- `payload` (FAA passenger-weight guidelines).
+/// The payload mass: `payload` (FAA passenger-weight guidelines).
 pub(crate) fn payload(passenger_count: f64, cargo_kg: f64) -> PayloadBreakdown {
     let passengers_kg = PASSENGER_MASS_LB * POUND_MASS * passenger_count;
     let baggage_kg = BAGGAGE_MASS_LB * POUND_MASS * passenger_count;

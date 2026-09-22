@@ -5,7 +5,7 @@
 //! errors through, kept apart from its methods so a reader can see the shape
 //! of the result without the arithmetic that builds it.
 
-/// One spanwise rib cross-section, ready for sizing/mesh consumption --
+/// One spanwise rib cross-section, ready for sizing/mesh consumption:
 /// `RibStation`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RibStation {
@@ -18,7 +18,7 @@ pub struct RibStation {
     /// `false` for a truncated ("transition") rib near the root.
     ///
     /// Always `true` here: classifying full vs. transition ribs is the mesh
-    /// builder's job, which knows the skin-start rib -- see
+    /// builder's job, which knows the skin-start rib, see
     /// `alas/geometry/wing_mesh_bdf.py`'s own docstring. This field exists
     /// so [`RibStation`] carries the same shape the mesh builder consumes.
     pub is_full: bool,

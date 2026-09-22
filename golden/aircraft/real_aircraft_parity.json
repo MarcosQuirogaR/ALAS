@@ -430,7 +430,7 @@
   ],
   "aircraft": {
     "A220-300": {
-      "evidence_file": ".agent/validation/A220-300.json",
+      "evidence_file": "out/validation/A220-300.json",
       "variant": "BD-500-1A11 legacy 67,585 kg preset weight; PW1500G",
       "checks": [
         {
@@ -815,7 +815,7 @@
       ]
     },
     "A320-200": {
-      "evidence_file": ".agent/validation/A320-200.json",
+      "evidence_file": "out/validation/A320-200.json",
       "variant": "A320-214 WV017 / CFM56-5B4/3 / Sharklets",
       "checks": [
         {
@@ -1227,7 +1227,7 @@
       ]
     },
     "A340-300": {
-      "evidence_file": ".agent/validation/A340-300.json",
+      "evidence_file": "out/validation/A340-300.json",
       "variant": "A340-312 WV029 / CFM56-5C3",
       "checks": [
         {
@@ -1650,7 +1650,7 @@
       ]
     },
     "A380-800": {
-      "evidence_file": ".agent/validation/A380-800.json",
+      "evidence_file": "out/validation/A380-800.json",
       "variant": "A380-800 WV000; engine-specific variant not asserted",
       "checks": [
         {
@@ -2101,7 +2101,7 @@
       ]
     },
     "ATR72-600": {
-      "evidence_file": ".agent/validation/ATR72-600.json",
+      "evidence_file": "out/validation/ATR72-600.json",
       "variant": "ATR 72-212A / PW127M / 23,000 kg option",
       "checks": [
         {
@@ -2438,7 +2438,7 @@
       ]
     },
     "B787-9": {
-      "evidence_file": ".agent/validation/B787-9.json",
+      "evidence_file": "out/validation/B787-9.json",
       "variant": "legacy 787-9 / GEnx-1B family / 254,692 kg MTOW",
       "checks": [
         {
@@ -2792,7 +2792,7 @@
       ]
     },
     "DC-10": {
-      "evidence_file": ".agent/validation/DC-10.json",
+      "evidence_file": "out/validation/DC-10.json",
       "variant": "DC-10-30 high-gross-weight option / CF6-50",
       "checks": [
         {

@@ -10,8 +10,8 @@
 //! numbers the reference computed. This one is different: both sides drive the
 //! same compiled `mset`/`mses`/`mplot` binaries, so the numbers come out of the
 //! tool, not out of either implementation. That is checkable at `Tier::Exact`
-//! because MSES is deterministic -- an identical mesh and `mses.case` deck
-//! produce byte-identical output -- so what is really being compared is the
+//! because MSES is deterministic: an identical mesh and `mses.case` deck
+//! produce byte-identical output, so what is really being compared is the
 //! orchestration and the parsing: does a Rust-built deck driving the same
 //! binary reproduce the reference's result exactly.
 //!
@@ -143,7 +143,7 @@ struct PressureResultFixture {
     airfoil_y: Vec<f64>,
 }
 
-/// FNV-1a, 64-bit, as `gen_aero_mses.py`'s `_fnv1a64` computes it -- the same
+/// FNV-1a, 64-bit, as `gen_aero_mses.py`'s `_fnv1a64` computes it: the same
 /// digest `parity_selig.rs`/`parity_neuralfoil.rs` use.
 fn fnv1a64(data: &[u8]) -> String {
     const OFFSET_BASIS: u64 = 0xCBF2_9CE4_8422_2325;
@@ -210,8 +210,8 @@ fn generated_airfoil_dat_matches_aerosandbox_byte_for_byte() {
     deck.finish();
 }
 
-// A skipped external-solver test has to say why on stderr -- "no MSES here",
-// "wrong MSES build" -- or a silent pass looks like a real one. That is what
+// A skipped external-solver test has to say why on stderr, "no MSES here",
+// "wrong MSES build", or a silent pass looks like a real one. That is what
 // eprintln is for here, so the workspace print ban is lifted for this test.
 #[allow(clippy::print_stderr)]
 #[ignore = "requires the exact installed MSES/mset/mplot build used for the golden fixture"]

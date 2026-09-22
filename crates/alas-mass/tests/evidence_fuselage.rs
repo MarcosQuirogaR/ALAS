@@ -160,6 +160,17 @@ fn reference_requirements_view(
     let mut serialized = serde_json::to_value(requirements).unwrap();
     let object = serialized.as_object_mut().unwrap();
     object.remove("optimize_passenger_capacity");
+    // The cargo capacity objective (clarified ledger App Features 2, decision
+    // D10) is a native product addition the frozen W6.3 fixture has no field
+    // for. It is a ranking target that enters no mass correlation, so it is
+    // taken out of the compared view rather than recorded as a divergence -
+    // after pinning that this replay carries no request at all, which is what
+    // keeps the frozen mass point attributable to the translated model.
+    assert_eq!(
+        object.remove("cargo_objective_kg"),
+        Some(Value::from(0.0)),
+        "the frozen W6.3 replay must carry no cargo objective"
+    );
     let optimized_capacity =
         serde_json::to_value(requirements.optimize_passenger_capacity).unwrap();
     assert_eq!(

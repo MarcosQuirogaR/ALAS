@@ -81,27 +81,6 @@ pub fn refine_candidate_3d_reference_compatibility(
     );
 }
 
-/// Refine a candidate using the product structural mass-coordinate model.
-pub fn refine_candidate_3d_product(
-    candidate: &mut AirfoilCandidateResult,
-    config: &AlasConfig,
-    dv: &DesignVector,
-    mach: f64,
-    altitude: f64,
-    cl_target: f64,
-    min_static_margin: Option<f64>,
-) {
-    refine_candidate_3d(
-        candidate,
-        config,
-        dv,
-        mach,
-        altitude,
-        cl_target,
-        min_static_margin,
-    );
-}
-
 // The translated solver inputs stay explicit at the parity/product mode seam.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn refine_candidate_3d_with_mass_model(
@@ -302,7 +281,7 @@ pub(crate) fn refine_candidate_3d_with_mass_model(
 
     if !(window_lo..=window_hi).contains(&trim.trim_alpha_deg) {
         candidate.refine_error = Some(format!(
-            "trim alpha {:.1} deg is unrealistically far from the probe window [{:.1}, {:.1}] deg -- this airfoil's lift behaviour is too different from the baseline for the closed-form trim solve to be trustworthy",
+            "trim alpha {:.1} deg is unrealistically far from the probe window [{:.1}, {:.1}] deg; this airfoil's lift behaviour is too different from the baseline for the closed-form trim solve to be trustworthy",
             trim.trim_alpha_deg, a_lo, a_hi
         ));
         return;
@@ -312,7 +291,7 @@ pub(crate) fn refine_candidate_3d_with_mass_model(
         if trim.static_margin < min_sm {
             candidate.static_margin_3d = Some(trim.static_margin);
             candidate.refine_error = Some(format!(
-                "static margin {:.1}% is below the requested floor {:.1}% -- this airfoil swap would leave the aircraft too weakly stable in pitch",
+                "static margin {:.1}% is below the requested floor {:.1}%; this airfoil swap would leave the aircraft too weakly stable in pitch",
                 trim.static_margin * 100.0, min_sm * 100.0
             ));
             return;

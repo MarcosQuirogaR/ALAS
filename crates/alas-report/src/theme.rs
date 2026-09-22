@@ -93,6 +93,24 @@ pub static PALETTE_GREY_ACCESSIBLE: Palette = Palette {
     accent: "#6aa2ff",
 };
 
+/// Line colour for the secondary lifting surfaces of an exterior wireframe.
+///
+/// The horizontal and vertical stabilisers were drawn with a fixed `#a0a0a0`
+/// that did not follow the palette. On the Light canvas that measured 2.35:1
+/// (tip lines) and 2.49:1 (fin lines) against white, so at a one-pixel stroke
+/// the empennage was effectively absent, while the same lines are 15.7:1 in
+/// Dark. Each value below clears the 3:1 non-text contrast threshold against
+/// its own palette background and stays visibly distinct from the main-wing
+/// blue, so the surfaces remain separable in every theme.
+pub fn secondary_surface_line(palette: &Palette) -> &'static str {
+    match palette.name {
+        // 8.86:1 on white.
+        "light" => "#4a4a4a",
+        // 8.41:1 on #1e1e1e, 5.73:1 on #3a3a3a.
+        _ => "#b8b8b8",
+    }
+}
+
 /// Default theme used for the desktop interface.
 pub const DEFAULT_THEME: &str = "dark";
 
@@ -156,6 +174,32 @@ mod tests {
             );
             assert!(crate::scene::Color::from_hex(palette.border).contrast_against(panel) >= 3.0);
         }
+    }
+
+    #[test]
+    fn secondary_surfaces_stay_visible_in_every_palette() {
+        for palette in [
+            &PALETTE_LIGHT,
+            &PALETTE_DARK,
+            &PALETTE_GREY,
+            &PALETTE_DARK_ACCESSIBLE,
+            &PALETTE_GREY_ACCESSIBLE,
+        ] {
+            let background = crate::scene::Color::from_hex(palette.bg);
+            let line = crate::scene::Color::from_hex(secondary_surface_line(palette));
+            let ratio = line.contrast_against(background);
+            assert!(
+                ratio >= 3.0,
+                "{}: empennage line {} measures {ratio:.2}:1 on {}",
+                palette.name,
+                secondary_surface_line(palette),
+                palette.bg
+            );
+        }
+        // The regression: one fixed grey for every theme was 2.35:1 on white.
+        let on_white = crate::scene::Color::from_hex("#a0a0a0")
+            .contrast_against(crate::scene::Color::from_hex(PALETTE_LIGHT.bg));
+        assert!(on_white < 3.0, "the previous fixed grey must be observable");
     }
 
     #[test]

@@ -78,15 +78,15 @@ pub fn assess_far25_positive_limit_load_factor(
     }
 }
 
-/// Breguet range [m], SI throughout -- `breguet_range_m`.
+/// Breguet range [m], SI throughout: `breguet_range_m`.
 ///
 /// ```text
 /// R = (V / (tsfc_si * g)) * (L/D) * ln(W_start / W_end)
 /// ```
 ///
 /// `tsfc_si` is thrust-specific fuel consumption in kg/(N*s). Any physically
-/// meaningless input -- a non-positive weight or TSFC, or a burn that gains
-/// weight -- returns `0.0` rather than a negative or NaN range.
+/// meaningless input (a non-positive weight or TSFC, or a burn that gains
+/// weight) returns `0.0` rather than a negative or NaN range.
 pub fn breguet_range_m(
     tas_m_s: f64,
     l_over_d: f64,
@@ -100,7 +100,7 @@ pub fn breguet_range_m(
     (tas_m_s / (tsfc_si * G)) * l_over_d * (w_start_kg / w_end_kg).ln()
 }
 
-/// CS-25-style V-n (flight-envelope) diagram data -- `VnDiagramData`. Speeds
+/// CS-25-style V-n (flight-envelope) diagram data: `VnDiagramData`. Speeds
 /// are equivalent airspeed [kt] at MTOW against sea-level density, the
 /// convention V-n diagrams are plotted in.
 #[derive(Debug, Clone, PartialEq)]
@@ -166,7 +166,7 @@ impl VnDiagramData {
     }
 }
 
-/// Build the CS-25-style V-n diagram -- `build_vn_diagram`.
+/// Build the CS-25-style V-n diagram: `build_vn_diagram`.
 ///
 /// Scoped to `s_ref` rather than a whole `Airplane`: upstream reads only
 /// `plane.s_ref` off its airplane argument, so this crate takes the reference

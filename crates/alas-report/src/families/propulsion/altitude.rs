@@ -5,7 +5,7 @@
 // Reference: alas @ rust-port-baseline.
 
 //! Per-engine thrust and TSFC over the full (altitude, Mach) flight
-//! envelope, as filled contours -- the closed-form, first-principles
+//! envelope, as filled contours: the closed-form, first-principles
 //! stand-in for a semi-empirical installed-thrust-lapse table.
 //!
 //! Upstream draws each panel as `contourf` (20 filled levels) plus six
@@ -354,7 +354,7 @@ fn draw_isolines(
 
 /// Draw one colored [`SceneElement::Rect`] per finite grid cell (skipping
 /// `NaN`, which is how an infeasible cell reaches this function), the
-/// same coarse-grid approximation `Axes2D::add_heatmap_grid` uses -- written
+/// same coarse-grid approximation `Axes2D::add_heatmap_grid` uses: written
 /// locally rather than reusing that helper because it has no masking, and
 /// `NaN.clamp` would otherwise fall through to the colormap's last stop
 /// rather than leaving the cell blank.

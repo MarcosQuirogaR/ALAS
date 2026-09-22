@@ -4,8 +4,8 @@
 //! Compares the Chebyshev nodes and operators against SUAVE's
 //! `chebyshev_data`.
 //!
-//! The fixture covers `N = 4`, `8` and `16` -- the last of which is what the
-//! mission segment solver actually asks for -- with `integration=True`, plus
+//! The fixture covers `N = 4`, `8` and `16`: the last of which is what the
+//! mission segment solver actually asks for, with `integration=True`, plus
 //! one `N = 8` run with `integration=False` to check that branch produces no
 //! `I` at all rather than a zero one.
 //!

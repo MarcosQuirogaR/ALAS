@@ -7,7 +7,7 @@
 
 //! Torenbeek's empirical wing and fuselage weight methods, from "Synthesis
 //! of Subsonic Airplane Design" (1976, Delft University Press), Chapter 8
-//! and Appendix C -- reached through native aerodynamic model's translation of them,
+//! and Appendix C: reached through native aerodynamic model's translation of them,
 //! since `alas-mass::breakdown` (`alas/physics/mass.py`, a separate,
 //! not-yet-ported module) calls exactly two of its functions: [`mass_wing`]
 //! and [`mass_fuselage_simple`].
@@ -22,7 +22,7 @@
 //! - `mass_wing_simple`: a cruder wing weight model (Eq. 8-12), superseded
 //!   at its only prospective call site by the Appendix C method this module
 //!   implements.
-//! - `mass_fuselage`: dead code upstream -- it raises `NotImplementedError`
+//! - `mass_fuselage`: dead code upstream; it raises `NotImplementedError`
 //!   partway through, after referencing `S_g`, `W_str` and `W_fr`, none of
 //!   which the function ever assigns. Not a `deviation-candidate`; there is
 //!   no behaviour here to reproduce, faithfully or otherwise, since the
@@ -42,14 +42,14 @@
 use alas_geom::aircraft::fuselage::Fuselage;
 use alas_geom::aircraft::wing::Wing;
 
-/// `mass_wing_basic_structure`'s `k_e` default -- Torenbeek's weight
+/// `mass_wing_basic_structure`'s `k_e` default: Torenbeek's weight
 /// knockdown for a wing with no wing-mounted engines forward of the elastic
 /// axis (see that function's doc). [`mass_wing`] never overrides it, since
-/// it does not expose `k_e` as a parameter of its own -- matching upstream,
+/// it does not expose `k_e` as a parameter of its own, matching upstream,
 /// whose `mass_wing` never passes `k_e` through either.
 pub const DEFAULT_K_E: f64 = 0.95;
 
-/// Evenly spaced points from `start` to `stop`, inclusive -- NumPy's
+/// Evenly spaced points from `start` to `stop`, inclusive: NumPy's
 /// `linspace(start, stop, num, endpoint=True)`. Duplicated from
 /// `alas_geom::aircraft::spacing::linspace`, which is private to that crate's
 /// aircraft module and not reachable from here (see that module's other
@@ -69,7 +69,7 @@ fn linspace(start: f64, stop: f64, num: usize) -> Vec<f64> {
     values
 }
 
-/// The root cross-section's thickness-to-chord ratio -- every helper below
+/// The root cross-section's thickness-to-chord ratio, every helper below
 /// reads `wing.xsecs[0].airfoil.max_thickness()` at upstream's default
 /// sample, `np.linspace(0, 1, 101)`.
 fn root_thickness_to_chord(wing: &Wing) -> f64 {
@@ -77,18 +77,18 @@ fn root_thickness_to_chord(wing: &Wing) -> f64 {
     wing.xsecs[0].airfoil.max_thickness(&sample)
 }
 
-/// The cosine of an angle given in degrees -- `native aerodynamic model.numpy.cosd`.
+/// The cosine of an angle given in degrees: `native aerodynamic model.numpy.cosd`.
 fn cosd(degrees: f64) -> f64 {
     degrees.to_radians().cos()
 }
 
-/// The sine of an angle given in degrees -- `native aerodynamic model.numpy.sind`.
+/// The sine of an angle given in degrees: `native aerodynamic model.numpy.sind`.
 fn sind(degrees: f64) -> f64 {
     degrees.to_radians().sin()
 }
 
 /// The mass of a wing's high-lift devices (flaps only; leading-edge devices
-/// are stubbed to zero upstream) -- `mass_wing_high_lift_devices`, Torenbeek
+/// are stubbed to zero upstream): `mass_wing_high_lift_devices`, Torenbeek
 /// Eq. C-10.
 ///
 /// `k_f1` and `k_f2` (upstream's flap-configuration factors) are hardcoded
@@ -148,8 +148,8 @@ fn mass_wing_high_lift_devices_with_area(
     mass_trailing_edge_flaps + mass_leading_edge_devices
 }
 
-/// The mass of the wing's basic structure -- the cantilever spar box, skin
-/// and ribs, without any movable surfaces -- `mass_wing_basic_structure`,
+/// The mass of the wing's basic structure (the cantilever spar box, skin
+/// and ribs, without any movable surfaces) `mass_wing_basic_structure`,
 /// Torenbeek Appendix C.
 ///
 /// `return_dict` is narrowed away; see the module doc. `strut_y_location` is
@@ -210,7 +210,7 @@ fn mass_wing_basic_structure(
         * cos_sweep_half_chord.powf(-1.325)
 }
 
-/// The mass of the wing's spoilers and speedbrakes --
+/// The mass of the wing's spoilers and speedbrakes:
 /// `mass_wing_spoilers_and_speedbrakes`.
 ///
 /// Upstream's signature takes a `wing` parameter that its body never reads:
@@ -369,7 +369,7 @@ pub fn wing_secondary_mass_with_structure_options(
 
 /// The mass of a wing, according to Torenbeek's "Synthesis of Subsonic
 /// Airplane Design", 1976, Appendix C: "Prediction of Wing Structural
-/// Weight" -- `mass_wing`.
+/// Weight", `mass_wing`.
 ///
 /// `return_dict` is narrowed away; see the module doc. `k_e`
 /// (`mass_wing_basic_structure`'s engine-mounting knockdown) is fixed at
@@ -456,7 +456,7 @@ fn mean(values: &[f64]) -> f64 {
 }
 
 /// native aerodynamic model's `numpy.softmax`, restricted to the `softness`-parameterized
-/// path with two or more arguments -- the only way [`mass_fuselage_simple`],
+/// path with two or more arguments: the only way [`mass_fuselage_simple`],
 /// this module's one caller, ever invokes it (`hardness` is never supplied
 /// upstream, and its `n_specified_arguments` validation and the empty/
 /// single-argument `ValueError` are accordingly not reproduced).
@@ -468,7 +468,7 @@ fn softmax(values: &[f64], softness: f64) -> f64 {
 }
 
 /// The mass of the fuselage, using Torenbeek's simple version of the
-/// calculation -- `mass_fuselage_simple`, Eq. 8-16.
+/// calculation: `mass_fuselage_simple`, Eq. 8-16.
 ///
 /// `wing_to_tail_distance` is the distance from the wing's quarter-chord to
 /// the tail's quarter-chord, `m`.
@@ -759,7 +759,7 @@ mod tests {
 
 /// Parity coverage for `mass_wing`'s three private helpers, which
 /// `tests/parity_torenbeek.rs` (an integration test, which cannot see
-/// private items) cannot check directly -- only their composition through
+/// private items) cannot check directly, only their composition through
 /// `mass_wing` reaches it. Kept in-crate rather than making the helpers
 /// `pub(crate)` and moving this to `tests/`, since nothing outside this
 /// module needs to call them.
@@ -772,7 +772,7 @@ mod parity_helpers {
     use serde::Deserialize;
 
     /// The same three wings `golden/generators/gen_mass_torenbeek.py` builds,
-    /// rebuilt from its docstring's literal values -- duplicated from
+    /// rebuilt from its docstring's literal values: duplicated from
     /// `tests/parity_torenbeek.rs` because that file is a separate
     /// compilation unit with no path back into this one.
     fn build_main_wing() -> Wing {

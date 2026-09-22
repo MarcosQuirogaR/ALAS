@@ -8,16 +8,16 @@
 
 //! The main wing and the two tail surfaces' structural mass.
 //!
-//! Every sweep angle here is already in radians -- mission reference stores
+//! Every sweep angle here is already in radians: mission reference stores
 //! `wing.sweeps.quarter_chord` in radians (the `* Units.deg` conversion
 //! happens once, at vehicle construction) and the correlations read it back
-//! unconverted -- so no angle conversion factor is needed.
+//! unconverted, so no angle conversion factor is needed.
 
 use alas_units::{FOOT, POUND_MASS};
 
 /// `wing.spans.projected`, `.sweeps.quarter_chord`, `.areas.reference`,
 /// `.thickness_to_chord`, `.taper`, `.chords.root`, `.chords.mean_aerodynamic`
-/// and `.origin[0][0]` for a `Main_Wing` -- the fields
+/// and `.origin[0][0]` for a `Main_Wing`: the fields
 /// [`super::wing::wing_main`] and [`super::wing::tail_horizontal`] (which
 /// reads the main wing's own root chord and origin) touch.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -71,7 +71,7 @@ pub struct HorizontalTail {
 /// Carries no `t_tail` field: `tail_vertical`'s T-tail bonus compares
 /// `wing.t_tail == "yes"`, a string, while every vertical tail this
 /// program's mission reference bridge builds sets `wing.t_tail` to a Python `bool`
-/// (`vehicle_builder.py`'s `wing.t_tail = False`) -- and `False == "yes"` is
+/// (`vehicle_builder.py`'s `wing.t_tail = False`), and `False == "yes"` is
 /// `False` regardless of which boolean was assigned, so the comparison can
 /// never select the T-tail branch for any vehicle this program builds. The
 /// branch is not translated as a parameter; see [`tail_vertical`].
@@ -87,7 +87,7 @@ pub struct VerticalTail {
     pub thickness_to_chord: f64,
 }
 
-/// The mass of the main wing -- `wing_main`, the "mission reference Wing Weight Index"
+/// The mass of the main wing: `wing_main`, the "mission reference Wing Weight Index"
 /// method (see http://aerodesign.stanford.edu/aircraftdesign/AircraftDesign.html,
 /// "Derivation of the Wing Weight Index").
 ///
@@ -119,7 +119,7 @@ pub(crate) fn wing_main(
 }
 
 /// The mass of the horizontal tail, including its elevator (assumed 25% of
-/// the tail's area) -- `tail_horizontal`, from Raymer's "Aircraft Design: A
+/// the tail's area): `tail_horizontal`, from Raymer's "Aircraft Design: A
 /// Conceptual Approach".
 pub(crate) fn tail_horizontal(
     wing: &HorizontalTail,
@@ -161,7 +161,7 @@ pub(crate) fn tail_horizontal(
     weight_lb * POUND_MASS
 }
 
-/// The mass of the vertical tail, fin plus rudder -- `tail_vertical`. The
+/// The mass of the vertical tail, fin plus rudder: `tail_vertical`. The
 /// rudder is assumed to be 25% of the tail's area and 60% heavier per unit
 /// area than the fin (upstream's `rudder_fraction` default, never overridden
 /// by [`super::empty_weight`]'s one call site).

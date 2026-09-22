@@ -6,7 +6,8 @@
 use std::error::Error;
 use std::path::{Path, PathBuf};
 
-use alas_report::families::mission::figure_mission_route_3d;
+use alas_report::families::mission::{figure_mission_route_3d, route_focused_camera};
+use alas_report::scene::Camera3D;
 use alas_route::route::{Route, RouteSource, Waypoint};
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -30,11 +31,20 @@ fn main() -> Result<(), Box<dyn Error>> {
         ],
         RouteSource::GreatCircle,
     );
+    // An optional second argument renders the same route at a maximized-view
+    // camera zoom, which is how the globe's viewport confinement is reviewed.
+    let camera = std::env::args()
+        .nth(2)
+        .and_then(|zoom| zoom.parse::<f64>().ok())
+        .map(|zoom| Camera3D {
+            zoom,
+            ..route_focused_camera(&route)
+        });
     let scene = figure_mission_route_3d(
         &route,
         Some(&[254_000.0, 248_000.0, 238_000.0, 224_000.0, 215_000.0]),
         Some(&[0.0, 10_000.0, 11_000.0, 8_000.0, 0.0]),
-        None,
+        camera,
         Some("dark"),
     );
     let png = alas_viz::raster::render_scene_png(&scene).map_err(std::io::Error::other)?;

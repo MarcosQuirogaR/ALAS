@@ -1,24 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! Native optimizer kernels that share the product objective contract.
-//!
-//! Frozen Python parity remains in `differential_evolution`; these methods are
-//! explicit product alternatives. Every kernel receives normalized bounds and
-//! the same scored-candidate callback, so changing the search algorithm cannot
+//! The one native optimizer kernel: [`lshade_de`], dispatched by
+//! [`product_de`]. Every kernel receives normalized bounds and the same
+//! scored-candidate contract, so changing the search algorithm cannot
 //! silently change the aircraft physics being evaluated.
 
-// The saved `optimizer.solver.method` names that once selected these
-// population methods still load, but no longer choose a distinct search
-// algorithm (see `differential_evolution_tests`); the methods and their
-// shared helpers are kept, with their own tests, until the dispatch is
-// either rebuilt or the modules are retired outright.
-#![allow(dead_code)]
-
-mod cma_es;
-mod constrained_de;
-mod nsga2;
-mod turbo;
+mod lshade_de;
+pub(crate) mod product_de;
 
 /// Objective and feasibility data attached to one evaluated design.
 #[derive(Debug, Clone, PartialEq)]
@@ -66,25 +55,15 @@ impl Ord for OrderedF64 {
     }
 }
 
-pub(crate) type EvaluatePoint<'a> = dyn FnMut(&[f64]) -> ScoredPoint + 'a;
+/// Evaluate a whole generation's candidates in one deterministic call. A
+/// batch is evaluated in the input order regardless of how many worker
+/// threads the implementation spreads it across, which is what keeps a
+/// seeded search result independent of `solver.workers` (see
+/// `lshade_de`'s module documentation).
+pub(crate) type EvaluateBatch<'a> = dyn FnMut(&[Vec<f64>]) -> Vec<ScoredPoint> + 'a;
 
 pub(crate) fn clamp_to_bounds(values: &mut [f64], bounds: &[(f64, f64)]) {
     for (value, &(lower, upper)) in values.iter_mut().zip(bounds) {
         *value = value.clamp(lower, upper);
     }
-}
-
-pub(crate) fn normalized_distance_squared(
-    left: &[f64],
-    right: &[f64],
-    bounds: &[(f64, f64)],
-) -> f64 {
-    left.iter()
-        .zip(right)
-        .zip(bounds)
-        .map(|((&a, &b), &(lower, upper))| {
-            let width = (upper - lower).max(f64::EPSILON);
-            ((a - b) / width).powi(2)
-        })
-        .sum()
 }

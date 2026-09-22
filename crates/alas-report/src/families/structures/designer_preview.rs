@@ -7,7 +7,7 @@
 //! Narrow live preview for the Structural Analysis
 //! Advanced Settings tab: the same relationship as
 //! `figure_engine_designer_preview` vs. `figure_propulsion_cycle_summary`
-//! upstream describes -- the Results tab's wide `figure_structures_sizing`
+//! upstream describes: the Results tab's wide `figure_structures_sizing`
 //! is squeezed and illegible in this tab's narrow column, so this is a
 //! distinct, cheap (sizing-only, no FEM mesh, no NASTRAN) figure built
 //! directly from [`WingStructureGeometry`]/[`WingboxSizing`].

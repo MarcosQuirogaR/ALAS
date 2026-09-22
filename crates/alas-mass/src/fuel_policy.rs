@@ -38,7 +38,7 @@
 //! up to. [`plan_fuel`] does not iterate that: it evaluates every landing
 //! mass once, in the order the rule names them (destination, then
 //! alternate/reserve), from the `takeoff_mass_kg` it is given. Closing the
-//! outer loop -- finding the takeoff mass whose plan reproduces it -- is
+//! outer loop (finding the takeoff mass whose plan reproduces it) is
 //! [`crate::dispatch::solve_dispatch`]'s job, and it calls this function
 //! once per iteration.
 

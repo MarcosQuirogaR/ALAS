@@ -120,6 +120,31 @@ pub struct TurbopropEngineSpec {
     pub geometry_source: String,
 }
 
+impl TurbopropEngineSpec {
+    /// Number of engines the catalogue's `maximum_cruise_fuel_flow_kg_h` is
+    /// published for: the PW127-class data are quoted for the two-engine
+    /// ATR installation, not per engine.
+    pub const FUEL_FLOW_REFERENCE_ENGINES: usize = 2;
+
+    /// The cruise fuel-flow anchor per installed engine, kg/h.
+    pub fn cruise_fuel_flow_per_engine_kg_h(&self) -> f64 {
+        self.maximum_cruise_fuel_flow_kg_h / Self::FUEL_FLOW_REFERENCE_ENGINES as f64
+    }
+
+    /// The constant maximum-cruise fuel flow of an installation of
+    /// `installed_engines` identical engines, kg/h.
+    ///
+    /// Scales the published two-engine anchor linearly with the count: each
+    /// engine is assumed to run at the same cruise rating and specific fuel
+    /// consumption as in the reference installation. `None` when no engine
+    /// is installed, so a caller cannot publish a range for an aircraft
+    /// without propulsion.
+    pub fn installed_cruise_fuel_flow_kg_h(&self, installed_engines: usize) -> Option<f64> {
+        (installed_engines > 0)
+            .then(|| self.cruise_fuel_flow_per_engine_kg_h() * installed_engines as f64)
+    }
+}
+
 // See `crate::materials` for why the manifest directory is spelled out.
 const ENGINES_JSON: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/data/engines.json"));
 

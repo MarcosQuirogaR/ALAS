@@ -49,7 +49,7 @@ impl FullAnalysis {
         Self::fit_polar_values(polar, ar, cfg)
     }
 
-    fn fit_polar_values(
+    pub(crate) fn fit_polar_values(
         polar: &PolarSweep,
         ar: f64,
         cfg: &alas_config::AnalysisConfig,

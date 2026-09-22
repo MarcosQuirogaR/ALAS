@@ -98,6 +98,16 @@ pub(super) fn routing_card(state: &mut AppState, ui: &mut Ui) {
             {
                 state.start_navdata_download(&navdata);
             }
+            if state.navdata_download_in_progress
+                && ui
+                    .button(tr("Cancel"))
+                    .on_hover_text(tr(
+                        "Stop after the file currently transferring; any files already installed are kept.",
+                    ))
+                    .clicked()
+            {
+                state.cancel_navdata_download();
+            }
         });
         let mut routes = str_field(&state.config_values, "mission", "routes_dir");
         if text_row(
@@ -436,5 +446,124 @@ pub(super) fn openvsp_card(state: &mut AppState, ui: &mut Ui) {
             save_direct_tool_preferences(state);
             state.note_parameter_modified(tr("Install directory"), path);
         }
+        ui.add_space(8.0);
+        openvsp_preview_runtime_row(state, ui);
     });
+}
+
+/// The optional, app-local Python runtime used only for native OpenVSP
+/// screenshots after export (see `docs/openvsp-preview.md`). Separate from
+/// the install-directory row above: this never affects `vspscript` or
+/// VSPAERO analysis, and staying user-initiated keeps a fresh install from
+/// silently starting a multi-megabyte download.
+fn openvsp_preview_runtime_row(state: &mut AppState, ui: &mut Ui) {
+    ui.label(RichText::new(tr("Optional native-preview runtime")).strong());
+    ui.label(
+        RichText::new(tr(
+            "A separate, app-local Python runtime used only for native OpenVSP screenshots after export; it never affects vspscript or VSPAERO analysis. Setup downloads hash-pinned Python, OpenVSP Python bindings, and NumPy from their official sources and verifies each archive before extracting it. See docs/openvsp-preview.md for the exact pinned versions and licenses.",
+        ))
+        .weak()
+        .small(),
+    );
+    if !crate::openvsp_runtime_setup::install_supported() {
+        ui.label(
+            RichText::new(tr(
+                "Not available: the preview runtime only supports 64-bit Windows.",
+            ))
+            .weak()
+            .small(),
+        );
+        return;
+    }
+    let destination = crate::openvsp_runtime_setup::resolve_destination(
+        state.tool_preferences.openvsp_dir.as_deref(),
+    );
+    let status = crate::openvsp_runtime_setup::runtime_status(destination.as_deref());
+    status_row(ui, "Preview runtime", status.label());
+    let running = state.openvsp_runtime_setup.running;
+    let installed = matches!(
+        status,
+        crate::openvsp_runtime_setup::PreviewRuntimeStatus::Installed { .. }
+    );
+    ui.horizontal(|ui| {
+        let button_label = if running {
+            tr("Setting up...")
+        } else if installed {
+            tr("Reinstall preview runtime")
+        } else {
+            tr("Install preview runtime")
+        };
+        if ui
+            .add_enabled(!running, egui::Button::new(button_label))
+            .on_hover_text(tr(
+                "Downloads and verifies the pinned archives, then atomically replaces the runtime. Cancel any time before it finishes; nothing already installed is touched until the very last step.",
+            ))
+            .clicked()
+        {
+            state.start_openvsp_runtime_setup();
+        }
+        if running {
+            let cancelling = state.openvsp_runtime_setup.is_cancelling();
+            if ui
+                .add_enabled(!cancelling, egui::Button::new(tr("Cancel")))
+                .clicked()
+            {
+                state.cancel_openvsp_runtime_setup();
+            }
+            ui.label(
+                RichText::new(state.openvsp_runtime_setup.stage.clone())
+                    .weak()
+                    .small(),
+            );
+        }
+    });
+    if let Some(error) = state.openvsp_runtime_setup.error.clone() {
+        ui.label(
+            RichText::new(error)
+                .color(ui.visuals().error_fg_color)
+                .small(),
+        );
+    }
+}
+
+pub(super) fn flowunsteady_card(state: &mut AppState, ui: &mut Ui) {
+    card(
+        ui,
+        "FLOWUnsteady / Julia",
+        "https://github.com/byuflowlab/FLOWUnsteady",
+        |ui| {
+            ui.label(
+                RichText::new(tr(
+                    "Optional lifting-surface unsteady analysis through a process boundary. FLOWUnsteady's licence is user-supplied and follows your selected external release; ALAS does not assume the upstream MIT notice covers one user's Julia environment or dependency closure, so the adapter remains user-supplied and ALAS never downloads it.",
+                ))
+                .weak()
+                .small(),
+            );
+            let mut path = state
+                .tool_preferences
+                .flowunsteady_exe
+                .clone()
+                .unwrap_or_default();
+            if text_row(
+                state,
+                ui,
+                "Executable path",
+                &mut path,
+                false,
+                Some(ToolPathTarget::FlowUnsteadyExecutable),
+            ) {
+                state.tool_preferences.flowunsteady_exe =
+                    (!path.trim().is_empty()).then_some(path.clone());
+                save_direct_tool_preferences(state);
+                state.note_parameter_modified(tr("Executable path"), path);
+            }
+            ui.label(
+                RichText::new(tr(
+                    "This configured path overrides the ALAS_FLOWUNSTEADY_EXE environment variable, which remains usable for headless or CI launches.",
+                ))
+                .weak()
+                .small(),
+            );
+        },
+    );
 }

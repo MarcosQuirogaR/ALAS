@@ -2,7 +2,7 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 //! Rib-length truncation at the root plane, and the per-spar reference
-//! lines a station's cut is intersected against -- the geometry
+//! lines a station's cut is intersected against: the geometry
 //! `get_rib_stations` needs before it can place a single point.
 
 use super::support::intersect_line_ray;
@@ -10,7 +10,7 @@ use super::types::SparReferenceLine;
 use super::WingStructureGeometry;
 
 impl WingStructureGeometry {
-    // -- rib length (truncation by the root plane Y=0) ----------------------
+    // rib length (truncation by the root plane Y=0)
 
     /// `(L_nominal_to_TE, L_actual_after_root-plane_truncation)`, in metres
     /// along the rib's own cut direction `(aft_x, aft_y)` starting at
@@ -74,14 +74,14 @@ impl WingStructureGeometry {
         (l_nominal, l_actual)
     }
 
-    // -- spar reference lines + intersections --------------------------------
+    // spar reference lines + intersections
 
     /// One 3-point (root/break/tip) reference line per spar, generalizing
     /// the reference's single rear-spar reference line to every spar in
     /// [`WingStructureGeometry::spar_fracs`].
     ///
     /// A spar with `spar_full_span[i] = false` (the optional partial-span
-    /// center spar) gets no tip point at all -- it physically ends at the
+    /// center spar) gets no tip point at all; it physically ends at the
     /// break/kink station, so there's no break -> tip segment to define.
     pub(super) fn compute_spar_reference_points(&self) -> Vec<SparReferenceLine> {
         let x_le_root = 0.0;
@@ -127,7 +127,7 @@ impl WingStructureGeometry {
     ///
     /// Falls back to a straight `%`-chord estimate (`frac * l_nominal`) when
     /// the spar's reference line does not intersect this rib's cut within
-    /// its own root/break or break/tip segment -- the same non-fatal
+    /// its own root/break or break/tip segment: the same non-fatal
     /// fallback the reference used. Returns `None` for a partial-span spar
     /// at a station beyond its own break-station endpoint: it doesn't exist
     /// there, not even as a fallback estimate.

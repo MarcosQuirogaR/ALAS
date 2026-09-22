@@ -3,7 +3,7 @@
 
 // Tests assert on values they construct here, so a failed expect is the
 // assertion failing, not a library invariant being broken.
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+// (allow inherited from the `#[allow(...)] mod tests` attribute in session.rs)
 
 use super::*;
 use crate::state::AppState;
@@ -210,4 +210,30 @@ fn a_run_in_flight_blocks_entering_the_sandbox() {
     state.is_running = true;
     assert!(!state.enter_sandbox(false));
     assert!(!state.sandbox.active());
+}
+
+#[test]
+fn the_estimates_strip_stays_closed_until_quick_analysis_opens_it() {
+    let mut state = state();
+    assert!(state.enter_sandbox(true));
+    assert!(
+        !state.sandbox.layout.estimates_open,
+        "closed on first entry"
+    );
+    assert!(
+        !state.sandbox.layout.summary_open,
+        "the Summary card is closed too"
+    );
+    // A strip left open (View menu or an older layout) does not survive a
+    // re-entry: only Quick Analysis opens it.
+    state.sandbox.layout.estimates_open = true;
+    state.request_leave_sandbox();
+    assert!(state.resolve_leave_sandbox(ExitChoice::Discard));
+    assert!(state.enter_sandbox(false));
+    assert!(!state.sandbox.layout.estimates_open, "closed on re-entry");
+    crate::sandbox::workspace::start_quick_analysis(&mut state);
+    assert!(
+        state.sandbox.layout.estimates_open,
+        "Quick Analysis opens it"
+    );
 }

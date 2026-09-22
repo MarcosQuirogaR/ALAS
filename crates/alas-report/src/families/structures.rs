@@ -33,8 +33,7 @@ pub use designer_preview::figure_structures_designer_preview;
 pub use loads::figure_structures_loads;
 pub use sizing::figure_structures_sizing;
 
-use crate::scene::{Axes2D, Color, Scene, SceneElement, Stroke, TextAlign, TextBaseline};
-use crate::theme::get_palette;
+use crate::scene::{Axes2D, Color, Scene, Stroke};
 use alas_geom::wing_structure::WingStructureGeometry;
 use alas_pipeline::structural::StructuralAnalysisResult;
 
@@ -271,41 +270,11 @@ pub(super) fn structures_unavailable_message(
 }
 
 /// `figure_status_message`, scoped to the `ok=False` branch this family's
-/// two `structural_result`-driven figures actually reach: a small, chart-
-/// sized note explaining why the real figure is absent, red title over a
-/// tick-colored message. There is no shared `families::*` equivalent yet
-/// (a parallel effort's `figure_status_message` has not landed), so this is
-/// a local copy rather than a dependency on one.
+/// two `structural_result`-driven figures actually reach. The shared
+/// placeholder in [`crate::status_figure`] draws it, so the reason text wraps
+/// inside the canvas instead of running past it.
 pub(super) fn status_message_scene(title: &str, message: &str, theme: Option<&str>) -> Scene {
-    let pal = get_palette(theme);
-    const MESSAGE_TOP: f64 = 66.0;
-    const LINE_HEIGHT: f64 = 16.0;
-    const BOTTOM_MARGIN: f64 = 16.0;
-    let wrapped = crate::chart_kit::wrap_text(message, 100);
-    let line_count = wrapped.lines().count().max(1) as f64;
-    let height = (170.0_f64).max(MESSAGE_TOP + line_count * LINE_HEIGHT + BOTTOM_MARGIN);
-    let mut scene = Scene::new(700.0, height, Some(Color::from_hex(pal.bg)));
-    scene.add(SceneElement::Text {
-        text: title.to_owned(),
-        pos: [8.0, 26.0],
-        font_size: 14.0,
-        color: Color::from_hex("#c0392b"),
-        align: TextAlign::Left,
-        baseline: TextBaseline::Top,
-        angle_deg: 0.0,
-        bold: true,
-    });
-    scene.add(SceneElement::Text {
-        text: wrapped,
-        pos: [8.0, MESSAGE_TOP],
-        font_size: 11.0,
-        color: Color::from_hex(pal.tick),
-        align: TextAlign::Left,
-        baseline: TextBaseline::Top,
-        angle_deg: 0.0,
-        bold: false,
-    });
-    scene
+    crate::status_figure::figure_status_message(title, message, false, theme)
 }
 
 /// NumPy `linspace(start, stop, n)` with `endpoint=True`. Duplicated from

@@ -11,7 +11,7 @@
 //!
 //! The main symbol and the smaller symbol/wordmark are exposed as separate
 //! images (rather than one fused composite) so callers such as the boot
-//! splash can position each independently -- see
+//! splash can position each independently, see
 //! `alas-gui/src/views/overlays.rs::show_splash`.
 
 use egui::IconData;

@@ -11,8 +11,8 @@
 //! [`Wing`](super::wing::Wing)'s frame computation needs.
 //!
 //! Ordinary closed-form linear algebra local to `aircraft`, not `alas-math`: that
-//! crate exists for numerics with state to get wrong -- a spline fit, a
-//! factorization -- and this is a handful of formulas with one caller.
+//! crate exists for numerics with state to get wrong: a spline fit, a
+//! factorization, and this is a handful of formulas with one caller.
 
 /// `a + b`, componentwise.
 pub(super) fn add3(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
@@ -48,7 +48,7 @@ pub(super) fn norm3(a: [f64; 3]) -> f64 {
     dot3(a, a).sqrt()
 }
 
-/// Zero the X component and normalize to unit length --
+/// Zero the X component and normalize to unit length:
 /// `project_to_YZ_plane_and_normalize`, `_compute_frame_of_WingXSec`'s
 /// local helper.
 pub(super) fn project_to_yz_and_normalize(v: [f64; 3]) -> [f64; 3] {
@@ -56,7 +56,7 @@ pub(super) fn project_to_yz_and_normalize(v: [f64; 3]) -> [f64; 3] {
     [0.0, v[1] / magnitude, v[2] / magnitude]
 }
 
-/// The weighted blend `a_weight * a + b_weight * b`, componentwise --
+/// The weighted blend `a_weight * a + b_weight * b`, componentwise:
 /// `xsec_a.xyz_le * a_weight + xsec_b.xyz_le * b_weight` in
 /// `Wing.subdivide_sections`.
 pub(super) fn blend3(a: [f64; 3], b: [f64; 3], a_weight: f64, b_weight: f64) -> [f64; 3] {
@@ -64,7 +64,7 @@ pub(super) fn blend3(a: [f64; 3], b: [f64; 3], a_weight: f64, b_weight: f64) -> 
 }
 
 /// The 3x3 rotation matrix for a right-handed rotation by `angle_rad` about
-/// `axis`, Rodrigues' formula -- `reference geometry.numpy.rotations.rotation_matrix_3D`'s
+/// `axis`, Rodrigues' formula: `reference geometry.numpy.rotations.rotation_matrix_3D`'s
 /// vector-axis branch, always with `axis_already_normalized=False` (its
 /// every call site here passes an already-unit vector, but upstream
 /// normalizes anyway, so this does too).

@@ -24,7 +24,7 @@
 //!   scratch fragments behind as well. Flat, four solutions' output would be
 //!   impossible to tell apart.
 //! * That directory is emptied first. NASTRAN versions its own output when it
-//!   finds a file of the same name -- `.f06` becomes `.f06.1`, then `.f06.2` --
+//!   finds a file of the same name (`.f06` becomes `.f06.1`, then `.f06.2`)
 //!   so a stale directory accumulates one more set per re-run instead of
 //!   holding the latest solve.
 //!
@@ -110,7 +110,7 @@ fn missing_executable_message(configured: &str) -> String {
 /// `nastran_exe` is the resolved solver, or `None` when it could not be found;
 /// `configured_path` is what the configuration asked for, which is what a
 /// "not found" message has to quote. Nothing is run when
-/// [`StructuresConfig::run_nastran`] is off -- the decks are still written, so a
+/// [`StructuresConfig::run_nastran`] is off: the decks are still written, so a
 /// user can solve them by hand.
 pub fn run_nastran_analysis(
     deck: &Deck,
@@ -279,7 +279,7 @@ fn solved(bdf_path: &Path, outcome: Option<&NastranRunOutcome>) -> Solved {
 }
 
 /// The same, for the two vibration solves, where an absent one is not an error
-/// on its own -- the other may still have produced something.
+/// on its own: the other may still have produced something.
 fn read_if_solved(
     bdf_path: Option<&PathBuf>,
     outcomes: &BTreeMap<Solution, NastranRunOutcome>,
@@ -487,7 +487,7 @@ mod tests {
 
         assert_eq!(results.static_solve.status, ResultStatus::Error);
         assert_eq!(results.modes.status, ResultStatus::Error);
-        // Vibration was never asked for, so it is not an error -- it did not run.
+        // Vibration was never asked for, so it is not an error; it did not run.
         assert_eq!(results.vibration.status, ResultStatus::NotRun);
         let error = results.static_solve.error.clone().unwrap();
         assert!(error.contains("not configured"), "{error}");

@@ -70,7 +70,7 @@ fn copy_tree(source: &Path, destination: &Path) {
 }
 
 fn packaged_executable(bundle: &Path) -> PathBuf {
-    let name = if cfg!(windows) { "alas.exe" } else { "alas" };
+    let name = if cfg!(windows) { "ALAS.exe" } else { "ALAS" };
     let executable = bundle.join(name);
     assert!(
         executable.is_file(),

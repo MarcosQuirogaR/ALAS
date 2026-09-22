@@ -12,7 +12,7 @@
 //! Upstream builds the atmosphere and true airspeed from
 //! `config.requirements.cruise_altitude_m`/`cruise_mach`, so unlike the
 //! sibling stability figures this one genuinely needs the `AlasConfig`, not
-//! just the `AnalysisReport` -- the report alone does not carry the cruise
+//! just the `AnalysisReport`: the report alone does not carry the cruise
 //! flight condition its own polar sweep was evaluated at. The stub this
 //! replaces took only `(report, theme)`; this row's provenance note in
 //! `docs/PORTING.md` and `docs/PHYSICS_SOLVER_FLOW.md` describe the *content* being
@@ -148,8 +148,8 @@ fn prepare_trimmed_dynamic_state(
     })
 }
 
-/// Generate dynamic stability eigenvalues / mode poles in the complex s-plane
-/// -- `figure_dynamic_modes`.
+/// Generate dynamic stability eigenvalues / mode poles in the complex s-plane:
+/// `figure_dynamic_modes`.
 pub fn figure_dynamic_modes(
     report: &AnalysisReport,
     config: &AlasConfig,
@@ -389,7 +389,7 @@ mod tests {
     #[test]
     fn a_real_probe_aircraft_plots_ten_pole_circles() {
         // Five modes, each mirrored about the real axis (the mirror is drawn
-        // unconditionally by the loop even for the two that turn out real --
+        // unconditionally by the loop even for the two that turn out real:
         // eigenvalue_imag.abs() > 1e-9 gates it, so a real spiral/roll mode
         // draws one circle and a complex pair draws two).
         let report = probe_report(probe_airplane(true, false));
@@ -469,7 +469,7 @@ mod tests {
         assert!(scene
             .elements
             .iter()
-            .any(|e| matches!(e, SceneElement::Text { text, .. } if text.contains("geometry"))));
+            .any(|e| matches!(e, SceneElement::Text { text, .. } | SceneElement::TextBlock { text, .. } if text.contains("geometry"))));
     }
 
     #[test]

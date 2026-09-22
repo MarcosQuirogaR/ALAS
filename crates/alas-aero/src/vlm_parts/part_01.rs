@@ -23,11 +23,11 @@ pub use system::VlmSystem;
 
 /// The Kaufmann vortex core smoothing radius `VortexLatticeMethod`'s
 /// constructor defaults to and every call site in this program's inputs
-/// leaves unset -- see the module doc.
+/// leaves unset, see the module doc.
 const VORTEX_CORE_RADIUS: f64 = 1e-8;
 
 /// The trailing-leg direction every call site in this program's inputs gets,
-/// since `align_trailing_vortices_with_wind` is never set `true` -- see the
+/// since `align_trailing_vortices_with_wind` is never set `true`, see the
 /// module doc.
 const TRAILING_VORTEX_DIRECTION: [f64; 3] = [1.0, 0.0, 0.0];
 
@@ -43,8 +43,8 @@ pub enum VlmError {
     #[error("subdividing a wing's spanwise sections failed: {0}")]
     Subdivide(#[from] SubdivideSectionsError),
     /// The AIC matrix was numerically singular at the named elimination step.
-    /// Not expected for a well-formed mesh -- a horseshoe's self-influence on
-    /// its own collocation point is always well defined -- but library code
+    /// Not expected for a well-formed mesh (a horseshoe's self-influence on
+    /// its own collocation point is always well defined) but library code
     /// reports a numerical surprise rather than panicking on it
     /// (`CONTRIBUTING.md`).
     #[error("the panel influence matrix was numerically singular at row {0}")]
@@ -53,9 +53,9 @@ pub enum VlmError {
     /// circulation it returns is not a flow field.
     ///
     /// This is a *meshing* failure wearing numerical clothes. It appears when
-    /// the spanwise panel count is pushed far past what the geometry needs --
+    /// the spanwise panel count is pushed far past what the geometry needs:
     /// `AnalysisConfig::spanwise_resolution` multiplies a surface the builder
-    /// has already subdivided, so a value of ten means slivers -- and the
+    /// has already subdivided, so a value of ten means slivers, and the
     /// horseshoe legs of neighbouring panels approach collinearity. The
     /// residual stays at machine precision throughout (the linear solve is
     /// accurate; it is the system that is meaningless), so only the pivot
@@ -65,7 +65,7 @@ pub enum VlmError {
     /// registered presets, a usable mesh sits below about 60 and the meshes
     /// that return a negative or absurd lift coefficient sit above 1e4. A
     /// mesh between those can still return a plausible lift with a badly
-    /// wrong induced drag, which no linear-algebra diagnostic can detect --
+    /// wrong induced drag, which no linear-algebra diagnostic can detect:
     /// `alas_config::validation` rejects that range at the configuration
     /// boundary instead, and this is the backstop for callers that construct
     /// a [`super::VlmSystem`] directly.
@@ -93,67 +93,67 @@ pub enum VlmError {
 }
 
 /// Every field `run`'s upstream docstring lists, plus the solved circulation
-/// vector -- `VortexLatticeMethod.run`'s returned `dict`, restated as a typed
+/// vector: `VortexLatticeMethod.run`'s returned `dict`, restated as a typed
 /// struct. `alas-aero::analysis` and, eventually, `alas-stab` (P7) each read
 /// a different subset of this, so nothing here is trimmed to only what
 /// today's callers use.
 #[derive(Debug, Clone, PartialEq)]
 pub struct VlmResult {
-    /// Net aerodynamic force in geometry axes, N -- `F_g`.
+    /// Net aerodynamic force in geometry axes, N: `F_g`.
     pub force_geometry: [f64; 3],
-    /// Net aerodynamic force in body axes, N -- `F_b`.
+    /// Net aerodynamic force in body axes, N: `F_b`.
     pub force_body: [f64; 3],
-    /// Net aerodynamic force in wind axes, N -- `F_w`.
+    /// Net aerodynamic force in wind axes, N: `F_w`.
     pub force_wind: [f64; 3],
-    /// Net aerodynamic moment about geometry axes, Nm -- `M_g`.
+    /// Net aerodynamic moment about geometry axes, Nm: `M_g`.
     pub moment_geometry: [f64; 3],
-    /// Net aerodynamic moment about body axes, Nm -- `M_b`.
+    /// Net aerodynamic moment about body axes, Nm: `M_b`.
     pub moment_body: [f64; 3],
-    /// Net aerodynamic moment about wind axes, Nm -- `M_w`.
+    /// Net aerodynamic moment about wind axes, Nm: `M_w`.
     pub moment_wind: [f64; 3],
-    /// Lift, N, wind axes by definition -- `L`.
+    /// Lift, N, wind axes by definition: `L`.
     pub lift: f64,
-    /// Drag, N, wind axes by definition -- `D`.
+    /// Drag, N, wind axes by definition: `D`.
     pub drag: f64,
-    /// Side force, N, wind axes -- `Y`.
+    /// Side force, N, wind axes, `Y`.
     pub side_force: f64,
-    /// Rolling moment about the body X axis, Nm; positive is roll-right --
+    /// Rolling moment about the body X axis, Nm; positive is roll-right:
     /// `l_b`.
     pub roll_moment: f64,
-    /// Pitching moment about the body Y axis, Nm; positive is pitch-up --
+    /// Pitching moment about the body Y axis, Nm; positive is pitch-up:
     /// `m_b`.
     pub pitch_moment: f64,
-    /// Yawing moment about the body Z axis, Nm; positive is nose-right --
+    /// Yawing moment about the body Z axis, Nm; positive is nose-right:
     /// `n_b`.
     pub yaw_moment: f64,
-    /// Lift coefficient -- `CL`.
+    /// Lift coefficient: `CL`.
     pub cl_lift: f64,
-    /// Drag coefficient -- `CD`.
+    /// Drag coefficient: `CD`.
     pub cd_drag: f64,
-    /// Side-force coefficient -- `CY`.
+    /// Side-force coefficient: `CY`.
     pub cy_side: f64,
-    /// Rolling-moment coefficient, body axes -- `Cl`.
+    /// Rolling-moment coefficient, body axes: `Cl`.
     pub cl_roll: f64,
-    /// Pitching-moment coefficient, body axes -- `Cm`.
+    /// Pitching-moment coefficient, body axes: `Cm`.
     pub cm_pitch: f64,
-    /// Yawing-moment coefficient, body axes -- `Cn`.
+    /// Yawing-moment coefficient, body axes: `Cn`.
     pub cn_yaw: f64,
     /// The solved circulation strength of every horseshoe vortex, in the
     /// panel order `run` built the mesh in. Not part of upstream's returned
-    /// `dict` -- it lives on the solved `VortexLatticeMethod` instance as
-    /// `self.vortex_strengths` instead -- but returned here since this port
+    /// `dict` (it lives on the solved `VortexLatticeMethod` instance as
+    /// `self.vortex_strengths` instead) but returned here since this port
     /// has no persistent instance to hang it on afterward, and it is the
     /// strongest available check that panel assembly and the solve are both
     /// right (a wrong AIC assembly can still integrate to a coincidentally
     /// close total force).
     pub vortex_strengths: Vec<f64>,
-    /// Every panel's raw mesh geometry, aligned with [`Self::vortex_strengths`]
-    /// -- upstream's per-panel instance arrays (`front_left_vertices`, ...,
+    /// Every panel's raw mesh geometry, aligned with [`Self::vortex_strengths`]:
+    /// upstream's per-panel instance arrays (`front_left_vertices`, ...,
     /// `is_trailing_edge`), exposed for figures that read more than the net
     /// totals above: the spanwise lift distribution and the wake streamlines.
     pub panels: Vec<PanelSample>,
     /// Each panel's own aerodynamic force in geometry axes, N, aligned with
-    /// [`Self::panels`] -- the per-panel terms [`Self::force_geometry`] sums.
+    /// [`Self::panels`]: the per-panel terms [`Self::force_geometry`] sums.
     /// Not part of upstream's returned `dict` for the same reason
     /// `vortex_strengths` is not: it lives on the solved instance instead
     /// (`self.forces_geometry`).
@@ -165,7 +165,7 @@ pub struct VlmResult {
     pub solve_diagnostics: SolveDiagnostics,
 }
 
-/// Run a vortex-lattice solve of `airplane` at `op_point` -- `VortexLatticeMethod(...).run()`,
+/// Run a vortex-lattice solve of `airplane` at `op_point`: `VortexLatticeMethod(...).run()`,
 /// with the constructor arguments folded in as documented above.
 /// `spanwise_resolution`/`chordwise_resolution` are the only two constructor
 /// arguments this program's call sites ever vary.

@@ -3,8 +3,8 @@
 
 //! The fuel-burn models the pipeline prices a fuel policy with.
 //!
-//! A fuel policy needs four physical answers -- what a trip burns, what a
-//! diversion burns, what holding costs and what taxiing costs -- and the
+//! A fuel policy needs four physical answers: what a trip burns, what a
+//! diversion burns, what holding costs and what taxiing costs, and the
 //! pipeline has two sources for them. The native segment mission is the
 //! authoritative trip, but it is a pseudospectral solve and knows nothing
 //! about a hold at 1,500 ft. The analytic Breguet model built here from the
@@ -60,10 +60,32 @@ pub fn breguet_from_report(
         .map(|airport| airport.isa_deviation_c)
         .unwrap_or(0.0);
     let holding_altitude = holding_altitude_m(config, arrival_elevation_m);
+    // The altitude this route is actually flown at, by the same rule the
+    // published mission and the optimizer's sizing mission use
+    // (`alas_mission::route_cruise_altitude_m`). `requirements.cruise_altitude_m`
+    // is the *design* cruise altitude, and pricing the fuel policy there while
+    // the mission is flown somewhere else is the third instance of one
+    // inconsistency: the policy model is then built for a flight the aircraft
+    // does not make, and when it cannot be built or cannot solve the run
+    // reports `fuel_policy_unavailable` and refuses the design. That was the
+    // dominant acceptance rejection in the measured matrix - the AVE and the
+    // B787-9 finalists both.
+    //
+    // A route whose airports do not resolve keeps the design altitude, because
+    // nothing else has been declared for it.
+    let flown_cruise_altitude_m = match (
+        alas_config::airports::get(&config.departure_airport),
+        alas_config::airports::get(&config.arrival_airport),
+    ) {
+        (Ok(origin), Ok(destination)) => {
+            alas_mission::route_cruise_altitude_m(config, origin, destination)
+        }
+        _ => requirements.cruise_altitude_m,
+    };
     SegmentMissionModel::new(
         config.mission.profile.clone(),
         requirements.cruise_mach,
-        requirements.cruise_altitude_m,
+        flown_cruise_altitude_m,
         departure_elevation_m,
         arrival_elevation_m,
         report.airplane.s_ref,

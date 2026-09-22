@@ -16,7 +16,6 @@ faer = { workspace = true }
 [dev-dependencies]
 alas-testkit = { path = "../alas-testkit" }
 serde = { workspace = true }
-serde_json = { workspace = true }
 
 [lints]
 workspace = true

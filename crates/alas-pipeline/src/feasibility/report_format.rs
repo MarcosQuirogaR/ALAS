@@ -4,7 +4,7 @@
 //! Text rendering for physical-feasibility evidence.
 
 use alas_config::CgEnvelopeEvidence;
-use alas_opt::ModelCgEnvelopeAssessment;
+use alas_opt::{AftCgLimitGovernance, ModelCgEnvelopeAssessment};
 
 use super::{
     cruise_equilibrium, CgEnvelopeAssessment, FeasibilityReport, FindingSeverity, PlanningCgStatus,
@@ -40,6 +40,9 @@ pub fn format_feasibility(report: &FeasibilityReport) -> String {
         lines.push(format!("  - {severity}: {detail}"));
     }
     lines.push(format_model_cg_assessment(report.model_cg.as_ref()));
+    if let Some(line) = format_aft_limit_governance(report.model_cg.as_ref()) {
+        lines.push(line);
+    }
     lines.push(format_cg_assessment(&report.cg_envelope));
     lines.push(cruise_equilibrium::format(
         report.cruise_equilibrium.as_ref(),
@@ -73,6 +76,36 @@ fn format_model_cg_assessment(assessment: Option<&ModelCgEnvelopeAssessment>) ->
         100.0 * assessment.minimum_physical_static_margin,
         100.0 * assessment.target_static_margin.target,
     )
+}
+
+/// Name the governing aft boundary when it is not the one the envelope
+/// reports.
+///
+/// Printed only when the two disagree, because on a layout where the
+/// aerodynamic boundary governs there is nothing to say and a line saying so
+/// would dilute the one case that matters. The wording states which boundary
+/// is which and the band between them; it moves no limit.
+fn format_aft_limit_governance(assessment: Option<&ModelCgEnvelopeAssessment>) -> Option<String> {
+    let assessment = assessment?;
+    let AftCgLimitGovernance::GroundMinimumNoseLoad { margin_pct_mac } =
+        assessment.aft_limit_governance
+    else {
+        return None;
+    };
+    let consequence = if assessment.any_ground_reaction_inadmissible() {
+        "an analyzed loading state already sits back on its tail"
+    } else {
+        "no analyzed loading state has left the two-point compression domain"
+    };
+    Some(format!(
+        "Aft CG boundary     : NOT GOVERNING; aerodynamic {:.1}% MAC against ground \
+         minimum-nose-load {:.1}% MAC ({:.1}% MAC further forward), effective main gear {:.1}% \
+         MAC; {consequence}",
+        assessment.aerodynamic_aft_limit_pct_mac,
+        assessment.ground_aft_limit_pct_mac,
+        margin_pct_mac,
+        assessment.main_gear_station_pct_mac,
+    ))
 }
 
 fn format_cg_assessment(assessment: &CgEnvelopeAssessment) -> String {

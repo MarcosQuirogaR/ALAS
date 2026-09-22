@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! The candidate's geometry, mass and trimmed aerodynamic operating point --
+//! The candidate's geometry, mass and trimmed aerodynamic operating point:
 //! the part of the legacy evaluation that does not depend on the takeoff
 //! mass, so it is built exactly once per candidate.
 //!
@@ -18,8 +18,8 @@ use alas_config::AlasConfig;
 use alas_geom::aircraft::airplane::Airplane;
 use alas_geom::builder::AircraftBuilder;
 use alas_mass::breakdown::{
-    run_mass_analysis_with_model_checked_product_with_gear, MassBreakdown, MassCoordinateModel,
-    MassCoordinates, PayloadLayoutSummary,
+    run_mass_analysis_with_model_checked_product_with_gear, ComponentMassError, MassBreakdown,
+    MassCoordinateModel, MassCoordinates, PayloadLayoutSummary,
 };
 use alas_mass::product_stations::product_mass_coordinates;
 use alas_mass::wingbox_feedback::{ReferenceWingMass, WingboxFeedback};
@@ -299,9 +299,9 @@ mod tests {
 
         match layout.summary {
             LayoutSummary::Passenger(summary) => {
-                // Capacity is always dynamic -- resolved from the cabin
+                // Capacity is always dynamic (resolved from the cabin
                 // class mix and the sized fuselage's actual geometry, never
-                // forced to an exact copied count -- so the sized cabin may
+                // forced to an exact copied count) so the sized cabin may
                 // seat more than the 340-passenger floor `size_fuselage_
                 // from_cabin` bisected against, never fewer.
                 assert!(

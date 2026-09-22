@@ -4,9 +4,9 @@
 //! Compares `alas-geom::asb::wing` against AeroSandbox's `Wing`/`WingXSec`,
 //! via `golden/generators/gen_geom_asb_wing.py`.
 //!
-//! Every quantity native to `Wing`/`WingXSec` itself -- `translate`,
+//! Every quantity native to `Wing`/`WingXSec` itself: `translate`,
 //! `subdivide_sections`' blended `xyz_le`/`chord`/`twist`, `span`, `area`,
-//! `mean_aerodynamic_chord`, `aerodynamic_center`, `taper_ratio` -- is
+//! `mean_aerodynamic_chord`, `aerodynamic_center`, `taper_ratio`, is
 //! closed-form arithmetic and is checked at `Tier::Closed`, the tier
 //! `docs/PORTING.md` names for this row. The one exception is the blended
 //! airfoil's coordinate array that `subdivide_sections` also produces: that
@@ -66,8 +66,8 @@ struct Fixture {
     translate: TranslateCase,
 }
 
-/// The three wings the fixture builds -- shaped like `aircraft_builder.py`'s
-/// main wing, hstab and vstab -- rebuilt in Rust from the same literal
+/// The three wings the fixture builds (shaped like `aircraft_builder.py`'s
+/// main wing, hstab and vstab) rebuilt in Rust from the same literal
 /// values the generator records in its own docstring.
 fn build_main_wing() -> Wing {
     let root_z_m = -2.1;
@@ -260,7 +260,7 @@ fn subdivide_sections_matches_aerosandbox() {
     comparison.finish();
 
     // The blended airfoil's coordinate array passes through `repanel`'s
-    // cubic spline, so it is compared separately at `Tier::Linalg` -- see
+    // cubic spline, so it is compared separately at `Tier::Linalg`, see
     // the module doc.
     let blended = &subdivided.xsecs[case.blended_index].airfoil;
     let mut blend_comparison = Comparison::new(

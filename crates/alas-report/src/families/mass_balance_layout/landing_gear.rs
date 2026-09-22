@@ -4,8 +4,10 @@
 // Ported from alas/reporting/visualization.py:figure_landing_gear_planform (L2836-3017)
 // Reference: alas @ rust-port-baseline.
 
+use super::common::missing_datum_scene;
 use super::mass_breakdown::AC_CHORD_FRACTION;
 use crate::chart_kit::LegendMarker;
+use crate::families::MAIN_GEAR_STATION_NOT_MEASURED;
 use crate::scene::{
     Axes2D, Color, Fill, Point2D, Scene, SceneElement, Stroke, TextAlign, TextBaseline,
 };
@@ -20,7 +22,7 @@ use std::f64::consts::PI;
 // figure_landing_gear_planform
 // ---------------------------------------------------------------------------
 
-/// The fill color for one gear group -- upstream's `group_colors.get(...,
+/// The fill color for one gear group: upstream's `group_colors.get(...,
 /// "#9b59b6")`.
 pub(super) fn gear_color(strut_label: &str) -> &'static str {
     match strut_label {
@@ -53,7 +55,7 @@ pub(super) fn ellipse_polygon(
         .collect()
 }
 
-/// Top-down planform view of the aircraft with the sized landing gear --
+/// Top-down planform view of the aircraft with the sized landing gear:
 /// `figure_landing_gear_planform`. Every wheel is drawn individually (NLG
 /// vs. MLG-L/R/Body distinguished by color) at its real position and true
 /// tire size, over the wing/fuselage outline; nose at the top, matching
@@ -84,8 +86,27 @@ pub fn figure_landing_gear_planform(
     let fus_len = fus_end_x - fus_start_x;
     let fallback_x_nlg = fus_start_x + fus_len * mm.nlg_x_fraction;
     let fallback_x_mlg = x_mac_le + mm.mlg_x_fraction_mac * mac;
-    let gear_stations =
-        gear_cfg.resolved_station_positions(fallback_x_nlg, fallback_x_mlg, fus_start_x, fus_len);
+    // Resolved through the shared gate rather than from a fallback rebuilt
+    // here. This figure draws every wheel at its station; an aircraft whose
+    // main-gear station the mass model refuses has none to draw, and a
+    // planform with legs under the wing root would be the most convincing
+    // possible statement of a datum nobody measured.
+    let Ok(gear_stations) = alas_pipeline::gear_stations::resolved_gear_stations(
+        config,
+        plane,
+        fallback_x_nlg,
+        fallback_x_mlg,
+        fus_start_x,
+        fus_len,
+    ) else {
+        return missing_datum_scene(
+            520.0,
+            640.0,
+            "Landing-Gear Planform",
+            pal,
+            MAIN_GEAR_STATION_NOT_MEASURED,
+        );
+    };
     let x_nlg = gear_stations.x_nlg_m;
     let x_mlg = gear_stations.x_mlg_m;
     let fus_diam = if config.geometry.fuselage.diameter_m > 0.0 {
@@ -96,7 +117,7 @@ pub fn figure_landing_gear_planform(
         fus.xsecs.iter().map(|s| s.width).fold(f64::MIN, f64::max)
     };
 
-    // Aerodynamic (gear-independent) CG limits -- the same worst-case loads
+    // Aerodynamic (gear-independent) CG limits: the same worst-case loads
     // the optimizer's CG check sizes the gear against.
     let sm_val = if report.static_margin.is_nan() {
         0.10
@@ -199,6 +220,16 @@ pub fn figure_landing_gear_planform(
         pos: [canvas_w / 2.0, 46.0],
         font_size: 9.0,
         color: Color::from_hex(pal.title),
+        align: TextAlign::Center,
+        baseline: TextBaseline::Middle,
+        angle_deg: 0.0,
+        bold: false,
+    });
+    scene.add(SceneElement::Text {
+        text: crate::families::mass_balance::mass_method_note(config).to_owned(),
+        pos: [canvas_w / 2.0, 60.0],
+        font_size: 7.6,
+        color: Color::from_hex(pal.tick),
         align: TextAlign::Center,
         baseline: TextBaseline::Middle,
         angle_deg: 0.0,

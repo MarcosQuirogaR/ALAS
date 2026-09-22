@@ -2786,7 +2786,7 @@
           "timeout_s": 3600.0
         }
       },
-      "why": "an unregistered preset is swallowed rather than raised -- and the overlay then writes the unknown name into the field anyway, which is reproduced rather than tidied up"
+      "why": "an unregistered preset is swallowed rather than raised, and the overlay then writes the unknown name into the field anyway, which is reproduced rather than tidied up"
     },
     {
       "input": {

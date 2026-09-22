@@ -11,9 +11,9 @@
 //! opens when a sandbox analysis starts, and can be minimized (collapsed),
 //! closed and reopened without touching the run.
 
-use egui::{vec2, Context, Id, RichText, ScrollArea, ViewportBuilder, Window};
+use egui::{vec2, Context, Id, RichText, ScrollArea, Vec2, ViewportBuilder, Window};
 
-use crate::native_viewport::show_native_viewport;
+use crate::native_viewport::{show_native_viewport, show_native_viewport_anchored};
 use crate::state::AppState;
 use crate::views::{show_results_view, show_run_log, tr};
 
@@ -21,6 +21,15 @@ use super::editors::show_group;
 use super::fields::{grouped, Discipline};
 use super::fuselage_editor::show_fuselage_editor;
 use super::session::ExitChoice;
+
+/// Where a newly opened Discipline Window defaults to, in the fraction
+/// [`crate::native_viewport::show_native_viewport_anchored`] takes: clear of
+/// the design space's own centre, where the preview the window's own editors
+/// say they "update" is drawn, and clear of the category stack on the left,
+/// the camera row at the top and the action block at the bottom (see
+/// `sandbox::viewport`'s module docs), so the editor and the component it
+/// isolates are both on screen together at the moment it opens.
+const DISCIPLINE_WINDOW_ANCHOR: Vec2 = Vec2::new(0.85, 0.08);
 
 /// Render every open Discipline Window.
 pub fn show_discipline_windows(state: &mut AppState, ctx: &Context) {
@@ -32,7 +41,7 @@ pub fn show_discipline_windows(state: &mut AppState, ctx: &Context) {
             continue;
         };
         let groups = grouped(&fields, discipline);
-        let response = show_native_viewport(
+        let response = show_native_viewport_anchored(
             ctx,
             ("sandbox_discipline", discipline.id()),
             tr(discipline.title()),
@@ -41,6 +50,7 @@ pub fn show_discipline_windows(state: &mut AppState, ctx: &Context) {
                 .with_inner_size(vec2(380.0, 460.0))
                 .with_min_inner_size(vec2(300.0, 260.0))
                 .with_resizable(true),
+            DISCIPLINE_WINDOW_ANCHOR,
             |_child_ctx, ui, _class| {
                 let focused = state.sandbox.focus() == Some(discipline);
                 ui.horizontal(|ui| {
@@ -48,10 +58,7 @@ pub fn show_discipline_windows(state: &mut AppState, ctx: &Context) {
                         .add(crate::theme::selectable_button(tr("Focus"), focused))
                         .clicked()
                     {
-                        state
-                            .sandbox
-                            .set_focus(if focused { None } else { Some(discipline) });
-                        state.reproject_sandbox_scene();
+                        state.set_sandbox_focus(if focused { None } else { Some(discipline) });
                     }
                     ui.label(
                         RichText::new(tr("Edits apply on commit and update the preview."))
@@ -70,6 +77,24 @@ pub fn show_discipline_windows(state: &mut AppState, ctx: &Context) {
                             });
                             ui.add_space(4.0);
                         }
+                        if discipline == Discipline::Wing {
+                            crate::theme::card_frame(ui).show(ui, |ui| {
+                                ui.set_min_width(ui.available_width());
+                                ui.label(RichText::new(tr("Create wing sections")).strong());
+                                crate::views::inputs_custom::show_custom_wing_sections(state, ui);
+                            });
+                            ui.add_space(4.0);
+                        }
+                        if discipline == Discipline::Fuselage {
+                            crate::theme::card_frame(ui).show(ui, |ui| {
+                                ui.set_min_width(ui.available_width());
+                                ui.label(RichText::new(tr("Create fuselage sections")).strong());
+                                crate::views::inputs_custom::show_custom_fuselage_sections(
+                                    state, ui,
+                                );
+                            });
+                            ui.add_space(4.0);
+                        }
                         for (title, members) in &groups {
                             let members: Vec<_> = members.iter().map(|f| (*f).clone()).collect();
                             show_group(
@@ -85,8 +110,7 @@ pub fn show_discipline_windows(state: &mut AppState, ctx: &Context) {
             },
         );
         if response.pointer_pressed && state.sandbox.focus() != Some(discipline) {
-            state.sandbox.set_focus(Some(discipline));
-            state.reproject_sandbox_scene();
+            state.set_sandbox_focus(Some(discipline));
         }
         if response.close_requested {
             state.sandbox.layout.open_disciplines.retain(|d| *d != id);

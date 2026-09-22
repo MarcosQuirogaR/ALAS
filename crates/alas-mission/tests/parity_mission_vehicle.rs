@@ -6,14 +6,14 @@
 //! Each case names a preset whose full-analysis report the fixture recorded.
 //! The parity test rebuilds `AlasConfig::from_value({"preset": name})` and
 //! applies the engine spec the way `AircraftBuilder::build` does before the
-//! request is assembled -- the reference's report was produced by building the
+//! request is assembled: the reference's report was produced by building the
 //! aircraft, which mutates `config.geometry.engine` to the selected engine's
-//! cycle in place -- then feeds the recorded `ReportView` and compares the
+//! cycle in place, then feeds the recorded `ReportView` and compares the
 //! request `build_vehicle_request` assembles.
 //!
 //! The comparison walks the two documents in parallel: strings at `exact`, and
-//! every number -- the derived cruise thrust, the mass, the whole geometry
-//! configuration and the engine and requirements blocks -- at `closed`. The
+//! every number: the derived cruise thrust, the mass, the whole geometry
+//! configuration and the engine and requirements blocks, at `closed`. The
 //! three report passthroughs are echoed unchanged, so they compare trivially;
 //! the check that earns the fixture is the cruise-thrust derivation and the
 //! geometry serialization.
@@ -253,6 +253,17 @@ fn vehicle_request_matches_the_reference() {
 
 fn request_corrections() -> BTreeMap<&'static str, RequestCorrection> {
     [
+        // The wing spanwise panel count, which changed meaning rather than
+        // fidelity: the frozen value is a per-section multiplier, the product
+        // one an absolute panel count across the semispan, and 24 is what the
+        // frozen three-section planform already meshed to. The same decision
+        // is declared for the configuration default in `alas-config`'s
+        // `parity_config::product_default_correction`; it reaches the vehicle
+        // request through these two presets, so it is recorded here too rather
+        // than left as an undeclared disagreement. See
+        // `alas_geom::aircraft::spanwise`.
+        correction("A320-200.geometry_config.wing.n_subdivisions", 8.0, 24.0),
+        correction("A340-300.geometry_config.wing.n_subdivisions", 8.0, 24.0),
         // Airbus/EASA-sourced A320-214 and A340-312 dimension corrections,
         // pinned two-sidedly by the alas-config preset ledger.
         correction(

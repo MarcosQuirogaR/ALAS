@@ -72,8 +72,8 @@ impl NodeMap {
 
     /// The grid at rib point `key`.
     ///
-    /// Returns zero -- never a valid identifier, since numbering starts at one
-    /// -- for a point that was not placed. Every call site indexes a point it
+    /// Returns zero (never a valid identifier, since numbering starts at one)
+    /// for a point that was not placed. Every call site indexes a point it
     /// has just counted, so the fallback exists to keep a mesh defect from
     /// becoming a panic rather than because it can be reached.
     pub(super) fn at(&self, rib: usize, point: usize, surface: Surface) -> i64 {
@@ -102,7 +102,7 @@ fn coordinate_key(xyz: [f64; 3]) -> [u64; 3] {
     ]
 }
 
-/// `value` rounded to six decimal places -- Python's `round(value, 6)`.
+/// `value` rounded to six decimal places: Python's `round(value, 6)`.
 ///
 /// Python rounds a halfway case to even and this rounds it away from zero.
 /// These are node coordinates in metres, produced by a spline evaluation, and

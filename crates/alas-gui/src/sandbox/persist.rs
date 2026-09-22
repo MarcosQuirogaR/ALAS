@@ -14,7 +14,7 @@
 
 use std::collections::BTreeMap;
 
-use alas_config::{AlasConfig, WORKSPACE_ENVELOPE_KEY};
+use alas_config::{AlasConfig, MissionProfileConfig, WORKSPACE_ENVELOPE_KEY};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -99,6 +99,16 @@ impl AppState {
         }
         let config = AlasConfig::from_value(document).map_err(|error| error.to_string())?;
         let canonical = full_config_values(&config);
+        // A loaded non-default profile may be a deliberate case-file or
+        // Advanced Settings edit. Mark it for preservation before the Inputs
+        // card first reconciles the route; the card will then ask before
+        // replacing it after a route change. A literal default profile stays
+        // eligible for automatic route-linked generation.
+        self.mission_profile_manual_edit =
+            config.mission.profile != MissionProfileConfig::default();
+        self.mission_profile_route_signature.clear();
+        self.mission_profile_regeneration_prompt = false;
+        self.mission_profile_retained_validation = None;
         let design_values = envelope
             .as_ref()
             .filter(|e| !e.design_vector.is_empty())

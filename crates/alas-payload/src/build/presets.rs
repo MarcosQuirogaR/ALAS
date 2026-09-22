@@ -112,6 +112,20 @@ fn apply_cabin_preset_with_semantics(
     design_vector: Option<&DesignVector>,
     semantics: CabinPresetSemantics,
 ) -> Result<(), CabinPresetError> {
+    if semantics == CabinPresetSemantics::RequirementsFirst
+        && config.requirements.aircraft_type == "passenger"
+        && config.cabin.passenger.class_mix_mode == "count"
+    {
+        // Count mode is an installed-cabin declaration. Preserve it across
+        // direct preset calls as well as the geometry-boundary call below;
+        // otherwise a named preset can replace user counts before payload or
+        // the optimizer gets a chance to resolve the canonical FLOPS split.
+        config.cabin.passenger = config.cabin.passenger.canonicalized_for_product();
+        if config.cabin.passenger.total_seats() > 0 {
+            config.requirements.num_passengers = config.cabin.passenger.total_seats();
+            return Ok(());
+        }
+    }
     let preset = config.requirements.cabin_preset.clone();
     if preset == "Custom" {
         return apply_custom(config, design_vector, semantics);
@@ -128,6 +142,15 @@ fn apply_cabin_preset_with_semantics(
 
         let manager = CargoLoadManager::new(&cg_geom, config.cabin.cargo.clone());
         let capacity = manager.total_capacity();
+        // A cabin preset owns the *capacity*: what this deck configuration
+        // can hold, and therefore what the load case asks the hold for. It
+        // deliberately never writes `requirements.cargo_objective_kg`, the
+        // mass the user asked the design to match (clarified ledger App
+        // Features 2, decision D10): a request a preset overwrote would not
+        // be a requirement, and the objective's deviation would collapse to
+        // zero on every candidate. The two quantities stay separate here and
+        // are only brought together in the scoring, by
+        // `DesignRequirements::cargo_target_kg`.
         match preset.as_str() {
             "Max payload" => config.requirements.cargo_payload_kg = capacity,
             "Dense payload" => {
@@ -214,8 +237,8 @@ fn apply_custom(
         registered_source_exit_layout(config, semantics.uses_reference_geometry());
     // In percent mode the shares are the input and the counts are derived, so
     // a Custom cabin has to be re-solved whenever the shares change. Returning
-    // early on "already has seats" -- which is right in count mode, where the
-    // counts *are* the input -- would freeze the layout at whatever the first
+    // early on "already has seats", which is right in count mode, where the
+    // counts *are* the input, would freeze the layout at whatever the first
     // solve produced and silently ignore every later share edit.
     // A `count` cabin with seats declared is an input, not a seed: the
     // registered or user-declared per-class counts are the cabin the case
@@ -257,7 +280,7 @@ fn apply_custom(
     // All it does is fill in a sensible non-zero starting point the first time
     // Custom is selected with nothing configured, so switching to it never
     // leaves the cabin silently empty with no way to change it. The repeated
-    // case -- every optimizer evaluation -- returns here before building
+    // case (every optimizer evaluation) returns here before building
     // anything, and has to stay that cheap.
     let already_configured = if config.requirements.aircraft_type == "cargo" {
         config.requirements.cargo_payload_kg > 0.0
@@ -381,6 +404,13 @@ pub(super) fn apply_cabin_preset_to_geometry(
     if config.requirements.aircraft_type == "cargo" {
         return;
     }
+    if config.cabin.passenger.class_mix_mode == "count" {
+        config.cabin.passenger = config.cabin.passenger.canonicalized_for_product();
+        if config.cabin.passenger.total_seats() > 0 {
+            config.requirements.num_passengers = config.cabin.passenger.total_seats();
+            return;
+        }
+    }
     let preset = config.requirements.cabin_preset.clone();
     if preset == "Custom"
         && config.cabin.passenger.class_mix_mode == "count"
@@ -461,6 +491,28 @@ mod tests {
         assert!((config.cabin.passenger.business.share_pct - 100.0 * 31.0 / 348.0).abs() < 1e-9);
         assert_eq!(config.cabin.passenger.premium.share_pct, 0.0);
         assert!((config.cabin.passenger.economy.share_pct - 100.0 * 317.0 / 348.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn product_named_preset_preserves_a_nonempty_count_cabin() {
+        let mut config = AlasConfig::default();
+        config.requirements.cabin_preset = "Emirates".to_owned();
+        config.cabin.passenger.class_mix_mode = "count".to_owned();
+        config.cabin.passenger.first.count = 12;
+        config.cabin.passenger.business.count = 24;
+        config.cabin.passenger.premium.count = 6;
+        config.cabin.passenger.economy.count = 138;
+
+        apply_cabin_preset(&mut config, Some(&DesignVector::default()))
+            .unwrap_or_else(|error| panic!("count cabin preset applies: {error}"));
+
+        // Premium is folded at the product boundary, and no named-preset
+        // capacity may replace the installed total.
+        assert_eq!(config.cabin.passenger.first.count, 12);
+        assert_eq!(config.cabin.passenger.business.count, 24);
+        assert_eq!(config.cabin.passenger.premium.count, 0);
+        assert_eq!(config.cabin.passenger.economy.count, 144);
+        assert_eq!(config.requirements.num_passengers, 180);
     }
 
     #[test]

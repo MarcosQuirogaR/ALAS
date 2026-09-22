@@ -9,7 +9,7 @@
 //! ruler ([`super::metrics`]).
 
 /// Assigns each of `xs` (already x-sorted by the caller) a row index so that
-/// any two labels sharing a row are at least `min_sep` apart in x --
+/// any two labels sharing a row are at least `min_sep` apart in x:
 /// `_assign_label_rows`.
 ///
 /// Greedy: each label goes on the first existing row whose last-placed x is

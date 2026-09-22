@@ -11,8 +11,8 @@
 //!
 //! [`crate::engines`] is an immutable table of published engines, and
 //! [`EngineConfig::engine_name`] names one. It would be shorter for every
-//! consumer -- mass estimation, the mission analysis, the matching chart, the
-//! payload-range diagram, the cycle analysis -- to hold that name and look the
+//! consumer: mass estimation, the mission analysis, the matching chart, the
+//! payload-range diagram, the cycle analysis, to hold that name and look the
 //! entry up when it needs a number. It would also mean an engine that has been
 //! edited is edited for some of them and not others, since a look-up cannot
 //! see an edit.
@@ -20,8 +20,8 @@
 //! So the name is a *selector*, not a reference: choosing one copies the
 //! table's values and tagged physics payload into the fields below once, through
 //! [`EngineConfig::apply_engine_spec`], and everything downstream reads those
-//! fields. After that the design's engine can be modified freely -- a
-//! hypothetical derivative, a re-rated variant -- and every discipline sees
+//! fields. After that the design's engine can be modified freely: a
+//! hypothetical derivative, a re-rated variant, and every discipline sees
 //! the same modification, because there is only one copy of it.
 //!
 //! That is also why this group is hidden from the generated geometry form:
@@ -84,7 +84,7 @@ pub struct EngineConfig {
     #[config(
         options = Engine,
         label = "Engine model",
-        help = "Name from the built-in engine database (see the Engine selector on the Inputs tab) -- drives thrust, mass, and the default nacelle profile."
+        help = "Name from the built-in engine database (see the Engine selector on the Inputs tab): drives thrust, mass, and the default nacelle profile."
     )]
     pub engine_name: String,
 
@@ -110,7 +110,7 @@ pub struct EngineConfig {
         advanced,
         columns = ["x-station [m]", "radius fraction [0-1]"],
         label = "Nacelle profile points",
-        help = "List of (x-station [m], radius-fraction [0-1 of radius_scale_m below]) pairs tracing the nacelle's longitudinal silhouette from inlet (x=0) to exit -- see the Engine Designer tab's live nacelle-silhouette preview for a picture of the shape these points draw. Auto-filled from the engine database when engine_name is recognised."
+        help = "List of (x-station [m], radius-fraction [0-1 of radius_scale_m below]) pairs tracing the nacelle's longitudinal silhouette from inlet (x=0) to exit, see the Engine Designer tab's live nacelle-silhouette preview for a picture of the shape these points draw. Auto-filled from the engine database when engine_name is recognised."
     )]
     pub nacelle_profile: Vec<(f64, f64)>,
 
@@ -181,7 +181,7 @@ pub struct EngineConfig {
         advanced,
         label = "Turbine inlet temperature (T4t)",
         unit = "K",
-        help = "Combustor-exit stagnation temperature -- the primary driver of specific thrust and thermal efficiency in the on-design cycle."
+        help = "Combustor-exit stagnation temperature: the primary driver of specific thrust and thermal efficiency in the on-design cycle."
     )]
     pub turbine_inlet_temp_k: f64,
 
@@ -189,7 +189,7 @@ pub struct EngineConfig {
     #[config(
         label = "Cruise TSFC (reference)",
         unit = "kg/(kgf.hr)",
-        help = "Reference cruise thrust-specific fuel consumption, used by the Breguet payload-range diagram. Not necessarily identical to the Propulsion Analysis tab's on-design-cycle-computed TSFC (a fast conceptual cycle model with generic component efficiencies vs. this field's real/published in-service figure) -- see that tab's caption."
+        help = "Reference cruise thrust-specific fuel consumption, used by the Breguet payload-range diagram. Not necessarily identical to the Propulsion Analysis tab's on-design-cycle-computed TSFC (a fast conceptual cycle model with generic component efficiencies vs. this field's real/published in-service figure), see that tab's caption."
     )]
     pub cruise_tsfc_kg_kgf_hr: f64,
 
@@ -198,7 +198,7 @@ pub struct EngineConfig {
         advanced,
         label = "Fan diameter",
         unit = "m",
-        help = "Fan face diameter -- informational/reference only (does not currently size the nacelle profile, which comes from radius_scale_m/nacelle_profile above)."
+        help = "Fan face diameter: informational/reference only (does not currently size the nacelle profile, which comes from radius_scale_m/nacelle_profile above)."
     )]
     pub fan_diameter_m: f64,
 
@@ -525,7 +525,7 @@ mod tests {
         // same engine produces: the table's stations are fractions of the
         // nacelle length (0.624 m, 1.17 m, ...) and the fallback rounds them
         // (0.6 m, 1.2 m, ...). Same overall length, same radius fractions,
-        // and no station off by as much as a decimetre -- so the two draw the
+        // and no station off by as much as a decimetre, so the two draw the
         // same nacelle, and this is a rounding rather than a transposed
         // digit. Recorded rather than corrected; see docs/PORTING.md.
         let mut applied = EngineConfig::default();

@@ -21,7 +21,7 @@ What remains is a library, a user interface drawn on top of it, and a handful
 of external solvers invoked as child processes when the user has them.
 
 ```
-        alas-app  (alas.exe)
+        alas-app  (ALAS.exe)
              |
         alas-gui  ------------- alas-viz
              |                      |

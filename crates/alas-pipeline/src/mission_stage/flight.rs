@@ -5,8 +5,8 @@
 //!
 //! A segment that does not converge, or that needs more than full throttle,
 //! is not a flown segment. Rather than propagating it, the flight replans
-//! the failed leg from the propulsion envelope -- a shallower climb, a slower
-//! cruise, a gentler descent -- closes the route distance again, and flies
+//! the failed leg from the propulsion envelope: a shallower climb, a slower
+//! cruise, a gentler descent: closes the route distance again, and flies
 //! once more, up to a bounded number of revisions. The same loop serves the
 //! dispatch closure, which flies the route at several takeoff masses, and
 //! the final flight the pipeline reports.
@@ -78,15 +78,21 @@ pub(super) fn fly_with_guidance(
                     })
                 }
                 SegmentKind::Descent { .. } => {
-                    adapt_failed_descent(&mut schedule, index).map(|change| {
-                        tracing::info!(
-                            segment = %segment_tag,
-                            revision,
-                            old_rate_m_s = change.old_rate_m_s,
-                            new_rate_m_s = change.new_rate_m_s,
-                            "replanned unconverged descent from idle-thrust excess drag"
-                        );
-                    })
+                    // The refusal's own cause chooses the direction: a rung
+                    // the engine cannot hold *down* to needs to be flown more
+                    // shallowly, and every other failure needs it steeper.
+                    adapt_failed_descent(&mut schedule, index, solution.idle_floor_limited).map(
+                        |change| {
+                            tracing::info!(
+                                segment = %segment_tag,
+                                revision,
+                                old_rate_m_s = change.old_rate_m_s,
+                                new_rate_m_s = change.new_rate_m_s,
+                                below_idle = solution.idle_floor_limited,
+                                "replanned unconverged descent from the available propulsion envelope"
+                            );
+                        },
+                    )
                 }
             }
         } else {

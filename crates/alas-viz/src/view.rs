@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! Interactive scene viewport widget with pan, zoom, fit-to-view, and coordinate readouts.
+//! Interactive scene viewport widget with pan, zoom and fit-to-view. The widget
+//! paints no coordinate readout; the cursor position in scene coordinates is
+//! returned on the response as `cursor_canvas` for a caller to display.
 
 use alas_report::scene::{Point2D, Scene};
 use std::collections::hash_map::DefaultHasher;

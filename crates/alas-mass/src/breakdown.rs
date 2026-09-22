@@ -19,8 +19,8 @@
 //!
 //! [`WING`] through [`FUEL`] are the ten names upstream's `Dict[str, float]`
 //! masses and `Dict[str, List[float]]` coordinates use as keys. Both become a
-//! struct with one named field per component -- compile-time key safety over a
-//! hashmap -- while the constants and the `as_pairs` methods give back the
+//! struct with one named field per component: compile-time key safety over a
+//! hashmap; while the constants and the `as_pairs` methods give back the
 //! name-keyed iteration the dict-shaped callers ([`calculate_physical_cg`],
 //! [`OEW_KEYS`]'s summation) need. [`OEW_KEYS`] is the canonical OEW component
 //! list upstream's module doc says every other consumer imports rather than

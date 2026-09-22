@@ -9,7 +9,7 @@ use crate::scene::{Axes2D, Color, Fill, Point2D, Scene, SceneElement, Stroke};
 use alas_geom::aircraft::airplane::Airplane;
 use alas_geom::aircraft::wing::WingXSec;
 /// Interpolated `(leading_edge_x, chord)` at `span_val` along `xsecs`' span
-/// axis (`span_idx`: 1 for a wing/h-stab's Y, 2 for a v-stab's Z) --
+/// axis (`span_idx`: 1 for a wing/h-stab's Y, 2 for a v-stab's Z):
 /// `_le_chord_at_span`.
 pub(super) fn le_chord_at_span(xsecs: &[WingXSec], span_val: f64, span_idx: usize) -> (f64, f64) {
     let vals: Vec<f64> = xsecs.iter().map(|xs| xs.xyz_le[span_idx]).collect();
@@ -37,7 +37,7 @@ pub(super) fn le_chord_at_span(xsecs: &[WingXSec], span_val: f64, span_idx: usiz
 }
 
 /// Span values to sample between `s0` and `s1`, including any xsec break
-/// station strictly in between -- `_span_stations`.
+/// station strictly in between: `_span_stations`.
 pub(super) fn span_stations(xsecs: &[WingXSec], span_idx: usize, s0: f64, s1: f64) -> Vec<f64> {
     let (lo, hi) = (s0.min(s1), s0.max(s1));
     let mut inner: Vec<f64> = xsecs
@@ -57,7 +57,7 @@ pub(super) fn span_stations(xsecs: &[WingXSec], span_idx: usize, s0: f64, s1: f6
 }
 
 /// Polygon (span, chordwise-x) points between chordwise fractions
-/// `[frac_lo, frac_hi]` (0=LE, 1=TE) and span positions `s0..s1` --
+/// `[frac_lo, frac_hi]` (0=LE, 1=TE) and span positions `s0..s1`:
 /// `_cs_surface_patch`. The caller decides plot-axis order.
 pub(super) fn cs_surface_patch(
     xsecs: &[WingXSec],
@@ -85,7 +85,7 @@ pub(super) fn cs_surface_patch(
     poly
 }
 
-/// One control surface's true planform area, in m^2 -- `_cs_surface_area`.
+/// One control surface's true planform area, in m^2: `_cs_surface_area`.
 /// See the module doc for why `figure_control_surfaces` computes but does
 /// not display it, matching upstream.
 pub(super) fn cs_surface_area(
@@ -109,7 +109,7 @@ pub(super) fn cs_surface_area(
 }
 
 /// A top-view axes with the longitudinal (X) data axis negated on the way
-/// in, so the nose reads at the top of the canvas -- see the module doc.
+/// in, so the nose reads at the top of the canvas, see the module doc.
 pub(super) struct TopAxes(pub(super) Axes2D);
 
 impl TopAxes {
@@ -135,7 +135,7 @@ impl TopAxes {
 }
 
 /// The top-view background: every wing's planform outline, filled, mirrored
-/// if symmetric -- `_draw_planform` at `fill=True`.
+/// if symmetric: `_draw_planform` at `fill=True`.
 pub(super) fn draw_planform_fill(
     scene: &mut Scene,
     axes: &TopAxes,
@@ -167,7 +167,7 @@ pub(super) fn draw_planform_fill(
 }
 
 /// Draw one control-surface patch (mirrored if `mirror`) and register its
-/// legend entry if not already present -- the body of `add_top_patch`.
+/// legend entry if not already present: the body of `add_top_patch`.
 ///
 /// Eleven parameters: the same list upstream's own `add_top_patch` closes
 /// over (span/chord bounds, styling, and the mutable scene/legend state it
@@ -206,7 +206,7 @@ pub(super) fn draw_top_patch(
 }
 
 /// `Vh`/`Vv` info line: `"<name> = <val> (target lo-hi) [OK|OUT OF RANGE]"`,
-/// or `"<name>: n/a"` -- `_fmt`.
+/// or `"<name>: n/a"`: `_fmt`.
 pub(super) fn fmt_volume_coef(name: &str, val: Option<f64>, lo: f64, hi: f64) -> String {
     match val {
         None => format!("{name}: n/a"),
@@ -223,7 +223,7 @@ pub(super) fn fmt_volume_coef(name: &str, val: Option<f64>, lo: f64, hi: f64) ->
 
 /// The `(y_min, y_max, x_min, x_max)` bounding box of every wing's planform
 /// (span Y, mirrored if symmetric; longitudinal X, leading edge to trailing
-/// edge), with a fixed margin -- the data `_draw_planform`'s loop covers,
+/// edge), with a fixed margin: the data `_draw_planform`'s loop covers,
 /// read once up front to size the top-view axes.
 pub(super) fn planform_bounds(plane: &Airplane) -> (f64, f64, f64, f64) {
     let (mut y_min, mut y_max) = (0.0f64, 0.0f64);

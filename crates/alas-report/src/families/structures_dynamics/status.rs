@@ -12,48 +12,14 @@
 
 use alas_pipeline::structural::StructuralAnalysisResult;
 
-use crate::scene::{Color, Scene, SceneElement, TextAlign, TextBaseline};
+use crate::scene::{Color, Scene};
 use crate::theme::Palette;
 
-/// `figure_status_message`'s failure-note color (its `ok=True` branch is
-/// never reached by anything in this family: every early return here is a
-/// missing or failed analysis).
-const ERROR_COLOR: &str = "#c0392b";
-
-/// A minimal, chart-sized status note -- ported from `figure_status_message`,
-/// scoped to the failure styling every caller in this module needs.
+/// A minimal, chart-sized status note ported from `figure_status_message`,
+/// drawn by the shared placeholder in [`crate::status_figure`] so the reason
+/// text wraps inside the canvas.
 pub fn status_message_scene(title: &str, message: &str, ok: bool, pal: &Palette) -> Scene {
-    const MESSAGE_TOP: f64 = 78.0;
-    const LINE_HEIGHT: f64 = 16.0;
-    const BOTTOM_MARGIN: f64 = 16.0;
-    let wrapped = crate::chart_kit::wrap_text(message, 130);
-    let line_count = wrapped.lines().count().max(1) as f64;
-    let height = (220.0_f64).max(MESSAGE_TOP + line_count * LINE_HEIGHT + BOTTOM_MARGIN);
-    let mut scene = Scene::new(900.0, height, Some(Color::from_hex(pal.bg)));
-    scene.title = Some(title.to_owned());
-    scene.suppress_derived_title();
-    let color = Color::from_hex(if ok { "#27ae60" } else { ERROR_COLOR });
-    scene.add(SceneElement::Text {
-        text: title.to_owned(),
-        pos: [12.0, 34.0],
-        font_size: 15.0,
-        color,
-        align: TextAlign::Left,
-        baseline: TextBaseline::Top,
-        angle_deg: 0.0,
-        bold: true,
-    });
-    scene.add(SceneElement::Text {
-        text: wrapped,
-        pos: [12.0, MESSAGE_TOP],
-        font_size: 11.0,
-        color: Color::from_hex(pal.tick),
-        align: TextAlign::Left,
-        baseline: TextBaseline::Top,
-        angle_deg: 0.0,
-        bold: false,
-    });
-    scene
+    crate::status_figure::status_scene(title, message, ok, pal)
 }
 
 /// Port of `_structures_unavailable_message`, folded together with the
@@ -119,6 +85,7 @@ pub fn with_alpha(hex: &str, alpha: u8) -> Color {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::scene::SceneElement;
     use crate::theme::PALETTE_LIGHT;
 
     #[test]
@@ -127,7 +94,7 @@ mod tests {
         let has_message = err
             .elements
             .iter()
-            .any(|e| matches!(e, SceneElement::Text { text, .. } if text.contains("not run")));
+            .any(|e| matches!(e, SceneElement::TextBlock { text, .. } if text.contains("not run")));
         assert!(has_message);
     }
 
@@ -139,10 +106,9 @@ mod tests {
             ..StructuralAnalysisResult::default()
         };
         let err = resolve_structural_result(Some(&result), "T", &PALETTE_LIGHT).unwrap_err();
-        let has_message = err
-            .elements
-            .iter()
-            .any(|e| matches!(e, SceneElement::Text { text, .. } if text.contains("bad material")));
+        let has_message = err.elements.iter().any(
+            |e| matches!(e, SceneElement::TextBlock { text, .. } if text.contains("bad material")),
+        );
         assert!(has_message);
     }
 

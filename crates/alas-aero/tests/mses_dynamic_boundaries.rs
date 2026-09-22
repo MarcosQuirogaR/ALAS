@@ -117,7 +117,7 @@ fn main() {
         if mode == "pressure_bridge_never_exact" {
             // The exact requested angle never converges, no matter how many
             // times it is attempted; any offset candidate converges
-            // immediately -- the bridge-back attempt must fail honestly.
+            // immediately: the bridge-back attempt must fail honestly.
             let case_text = fs::read_to_string("mses.case").unwrap_or_default();
             let alpha: f64 = case_text
                 .lines()
@@ -241,7 +241,7 @@ fn main() {
     // The fake binary cannot tell which mplot menu option was requested (the
     // choice is piped over stdin, which this fixture never reads), so it
     // always writes both the pressure entry point's option-12/11 dump files
-    // in addition to the polar summary line below -- harmless for polar-only
+    // in addition to the polar summary line below: harmless for polar-only
     // tests, and it lets pressure-path tests reach a real converged replay.
     let _ = fs::write(
         "bl_dump.txt",
@@ -290,6 +290,9 @@ fn temporary_directory(label: &str) -> PathBuf {
 }
 
 fn fake_mses_installation(root: &Path, mode: &str) {
+    // Transcript tests require a complete free-transition installation at
+    // preflight. This header is only for the fake solver, never real physics.
+    write_osmap_fixture(root);
     let source = root.join("fake_mses.rs");
     let helper = root.join("fake_mses_helper.exe");
     let source_text = FAKE_MSES_SOURCE.replace("__ALAS_FAKE_MSES_MODE__", mode);
@@ -381,6 +384,7 @@ fn public_mses_polar_reports_invalid_timeout_without_launching_a_tool() {
     for field in ["mset", "mses"] {
         for seconds in [0.0, -1.0, f64::NAN, f64::INFINITY] {
             let root = temporary_directory(&format!("invalid-timeout-{field}"));
+            write_osmap_fixture(&root);
             let mut config = MsesConfig::default();
             if field == "mset" {
                 for name in ["mset.exe", "mses.exe", "mplot.exe"] {
@@ -520,7 +524,7 @@ fn a_one_degree_request_gap_bridges_through_bounded_half_degree_hops() {
     let config = MsesConfig {
         mses_dir: root.display().to_string(),
         alpha_sweep_halfwidth_deg: 1.0,
-        alpha_sweep_n_points: 3, // points: 5.0, 6.0, 7.0 -- 1.0 deg gaps
+        alpha_sweep_n_points: 3, // points: 5.0, 6.0, 7.0: 1.0 deg gaps
         ..MsesConfig::default()
     };
 
@@ -529,11 +533,11 @@ fn a_one_degree_request_gap_bridges_through_bounded_half_degree_hops() {
     assert_eq!(result.status, MsesStatus::Ok);
     assert_eq!(result.converged_alpha_count, 3);
     // The fake mplot summary always reports a fixed "alpha = 1.0" row (it
-    // does not parse mses.case), so the converged coefficient count -- not
-    // its hardcoded alpha column -- is what is meaningful here.
+    // does not parse mses.case), so the converged coefficient count (not
+    // its hardcoded alpha column) is what is meaningful here.
     assert_eq!(result.alpha_deg.len(), 3);
 
-    // Exactly one requested-point diagnostic per requested angle -- no
+    // Exactly one requested-point diagnostic per requested angle, no
     // intermediate bridge hop ever becomes (or substitutes for) a point.
     let requested: Vec<f64> = result
         .point_diagnostics
@@ -567,7 +571,7 @@ fn a_one_degree_request_gap_bridges_through_bounded_half_degree_hops() {
 
 /// When a bridge hop cannot converge (even after its bounded smaller-step
 /// retry), the driver must restore the last known-good state and fall back
-/// to a clean target-angle remesh at the actual next requested point --
+/// to a clean target-angle remesh at the actual next requested point,
 /// never leaving a diverged intermediate state to pollute it.
 #[test]
 fn a_failed_bridge_restores_state_and_falls_back_to_a_clean_remesh() {
@@ -576,7 +580,7 @@ fn a_failed_bridge_restores_state_and_falls_back_to_a_clean_remesh() {
     let config = MsesConfig {
         mses_dir: root.display().to_string(),
         alpha_sweep_halfwidth_deg: 1.0,
-        alpha_sweep_n_points: 3, // points: 5.0, 6.0, 7.0 -- 1.0 deg gaps
+        alpha_sweep_n_points: 3, // points: 5.0, 6.0, 7.0: 1.0 deg gaps
         ..MsesConfig::default()
     };
 
@@ -599,7 +603,7 @@ fn a_failed_bridge_restores_state_and_falls_back_to_a_clean_remesh() {
         })
         .collect();
     // Two gaps, each with one full-step attempt and one bounded half-step
-    // retry, both failing -- exactly four bridge attempts, all NotConverged.
+    // retry, both failing, exactly four bridge attempts, all NotConverged.
     assert_eq!(failed_bridge_attempts.len(), 4);
     assert!(failed_bridge_attempts
         .iter()
@@ -638,7 +642,7 @@ fn cancellation_before_a_bridge_hop_preserves_the_requested_partial() {
     let config = MsesConfig {
         mses_dir: root.display().to_string(),
         alpha_sweep_halfwidth_deg: 1.0,
-        alpha_sweep_n_points: 3, // points: 5.0, 6.0, 7.0 -- 1.0 deg gaps
+        alpha_sweep_n_points: 3, // points: 5.0, 6.0, 7.0: 1.0 deg gaps
         ..MsesConfig::default()
     };
 
@@ -690,7 +694,7 @@ fn a_converged_offset_pressure_candidate_bridges_back_to_the_exact_requested_ang
         ..MsesConfig::default()
     };
 
-    // Defaults try 0.0 (fails once), then 0.5 (converges) -- the offset that
+    // Defaults try 0.0 (fails once), then 0.5 (converges): the offset that
     // must trigger the exact-target bridge-back.
     let result =
         run_mses_pressure_distribution(&airfoil(), 0.735, 6.0e7, 6.0, &config, &root, None);
@@ -734,7 +738,7 @@ fn a_converged_offset_pressure_candidate_bridges_back_to_the_exact_requested_ang
 
 /// When the exact requested angle never converges even after bridging, the
 /// driver must retain the genuinely converged off-target candidate rather
-/// than discarding real evidence -- but it must be labeled off-target, not
+/// than discarding real evidence, but it must be labeled off-target, not
 /// silently presented as the requested nominal condition.
 #[test]
 fn a_pressure_bridge_that_cannot_reach_the_exact_angle_stays_truthfully_off_target() {
@@ -758,7 +762,7 @@ fn a_pressure_bridge_that_cannot_reach_the_exact_angle_stays_truthfully_off_targ
         !result.is_exact_alpha(),
         "an off-target result must never claim to be the exact requested angle"
     );
-    // Real, converged off-target contours -- not empty, not fabricated.
+    // Real, converged off-target contours, not empty, not fabricated.
     assert!(!result.x_upper.is_empty());
 
     let recovery_attempt = result
@@ -828,8 +832,8 @@ fn cancellation_during_the_pressure_bridge_is_reported_not_fabricated() {
 
 /// A genuinely converged polar checkpoint, reused for a later pressure call
 /// on the same geometry/config/Mach/Re/OSMAP identity, must warm-start the
-/// exact requested angle directly -- skipping the cold clean-mesh
-/// retry-offset search entirely -- and still produce a real, exact-condition
+/// exact requested angle directly (skipping the cold clean-mesh
+/// retry-offset search entirely) and still produce a real, exact-condition
 /// Cp/Mach export.
 #[test]
 fn a_matching_polar_checkpoint_warm_starts_the_exact_pressure_target() {
@@ -896,7 +900,7 @@ fn a_matching_polar_checkpoint_warm_starts_the_exact_pressure_target() {
         pressure.solver_attempts.iter().map(|a| &a.purpose).collect::<Vec<_>>()
     );
 
-    // Real, exact-condition Cp/Mach export -- not empty, not fabricated.
+    // Real, exact-condition Cp/Mach export, not empty, not fabricated.
     assert!(!pressure.x_upper.is_empty());
     assert!(!pressure.cp_upper.is_empty());
     assert!(!pressure.mach_upper.is_empty());
@@ -905,7 +909,7 @@ fn a_matching_polar_checkpoint_warm_starts_the_exact_pressure_target() {
 
 /// A checkpoint whose Mach/Reynolds (or, by the same identity check,
 /// geometry/config/OSMAP) does not match the current driver instance must be
-/// rejected outright -- never trusted as a stale foreign anchor -- and the
+/// rejected outright (never trusted as a stale foreign anchor) and the
 /// call must still succeed correctly through the ordinary cold-start search.
 #[test]
 fn a_mismatched_checkpoint_is_rejected_and_the_cold_start_search_still_succeeds() {
@@ -929,7 +933,7 @@ fn a_mismatched_checkpoint_is_rejected_and_the_cold_start_search_still_succeeds(
         .first()
         .expect("setup: at least one checkpoint must be captured");
 
-    // Same airfoil/config, but a different Reynolds number -- the identity
+    // Same airfoil/config, but a different Reynolds number: the identity
     // check must reject this checkpoint even though every other field matches.
     let pressure = run_mses_pressure_distribution_with_checkpoint_and_cancel(
         &airfoil(),

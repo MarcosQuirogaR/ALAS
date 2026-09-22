@@ -5,7 +5,7 @@
 //! shared mesh include.
 //!
 //! Every one of them is written by hand, card by card, rather than assembled
-//! through a model object -- which is what the mesh does -- because case
+//! through a model object, which is what the mesh does, because case
 //! control is not bulk data and there is nothing to assemble. That makes these
 //! decks text, and text is what the parity test compares them as.
 //!
@@ -21,7 +21,7 @@ use crate::loads::{self, LoadCase};
 use crate::mesh::{Deck, MeshNodeIndex};
 use crate::sizing::gradient_unit;
 
-/// The static deck's constraint set, shared by all four solutions -- the mesh
+/// The static deck's constraint set, shared by all four solutions: the mesh
 /// writes exactly one `SPC1`, and it is set 1.
 const SPC_SET: i64 = 1;
 
@@ -34,11 +34,11 @@ const FORCE_SID_BASE: i64 = 200;
 
 /// Distribute `total_force_n` over `nid_y` with the same half-ellipse
 /// [`crate::loads::elliptic_distributed_load`] uses, discretized onto the
-/// mesh's own front-spar node line -- `_elliptic_forces_by_y`.
+/// mesh's own front-spar node line: `_elliptic_forces_by_y`.
 ///
 /// The node line is not evenly spaced, so each node's share is weighted by the
 /// span it stands for as well as by the ellipse. A distribution that summed to
-/// nothing -- every node at the tip, where the ellipse is zero -- falls back to
+/// nothing (every node at the tip, where the ellipse is zero) falls back to
 /// an equal split rather than dividing by it.
 pub fn elliptic_forces_by_y(
     nid_y: &[(i64, f64)],
@@ -81,8 +81,8 @@ pub fn elliptic_forces_by_y(
 }
 
 /// SOL 101, linear static: one subcase per design load case, each combining the
-/// structure's own inertial relief with the aerodynamic lift that balances it
-/// -- `build_sol101_bulk`.
+/// structure's own inertial relief with the aerodynamic lift that balances it:
+/// `build_sol101_bulk`.
 pub fn build_sol101_bulk(
     deck: &Deck,
     node_index: &MeshNodeIndex,
@@ -187,7 +187,7 @@ fn load_case_cards(
     out
 }
 
-/// SOL 103, normal modes -- `build_sol103_bulk`.
+/// SOL 103, normal modes: `build_sol103_bulk`.
 pub fn build_sol103_bulk(cfg: &StructuresConfig, mesh_include: &str) -> String {
     [
         "SOL 103".to_string(),
@@ -217,7 +217,7 @@ pub fn build_sol103_bulk(cfg: &StructuresConfig, mesh_include: &str) -> String {
 }
 
 /// The bulk cards both SOL 111 decks share: the modal basis, the frequency
-/// sweep, the damping table, and the unit harmonic force -- `_dynamic_bulk`.
+/// sweep, the damping table, and the unit harmonic force: `_dynamic_bulk`.
 fn dynamic_bulk(
     cfg: &StructuresConfig,
     excitation_nid: i64,
@@ -328,7 +328,7 @@ fn dynamic_bulk(
 /// changed gravity would not move this deck's spectrum upstream either.
 const GRAVITY_G: f64 = 9.81;
 
-/// SOL 111 driven by a swept unit harmonic force -- `build_sol111_sine_bulk`.
+/// SOL 111 driven by a swept unit harmonic force: `build_sol111_sine_bulk`.
 pub fn build_sol111_sine_bulk(
     cfg: &StructuresConfig,
     node_index: &MeshNodeIndex,
@@ -380,7 +380,7 @@ pub fn build_sol111_sine_bulk_msc(
     out.join("\n")
 }
 
-/// SOL 111 driven by a white-noise spectrum -- `build_sol111_random_bulk`.
+/// SOL 111 driven by a white-noise spectrum: `build_sol111_random_bulk`.
 pub fn build_sol111_random_bulk(
     cfg: &StructuresConfig,
     node_index: &MeshNodeIndex,

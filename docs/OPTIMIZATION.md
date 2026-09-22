@@ -17,11 +17,13 @@ driver"); this page is the wiring and the input list.
    `run(bounds, Some(preset design vector))`. The bounds are the sixteen
    design-variable bounds of `alas_config::design_variables::SPECS`, recentred
    on the preset when one is loaded.
-3. **Method dispatch.** `optimizer.solver.method` selects the driver:
-   `differential_evolution` (the SciPy-parity loop, feasibility first),
-   `feasibility_first_de`, `nsga2`, `turbo_1`, `cma_es`, or `sqp` (the
-   gradient-based driver). Every method scores candidates through the same
-   `DesignObjective`.
+3. **The one driver.** `optimizer.solver.method` is `differential_evolution`,
+   the only optimizer this build runs: L-SHADE differential evolution under
+   the epsilon-constrained method (`search_methods::lshade_de`; see
+   `docs/methods.md`). A saved configuration naming a retired token (`sqp`,
+   `nsga2`, `turbo_1`, `cma_es`, `feasibility_first_de`) is migrated to
+   `differential_evolution` when it loads, with a note the caller can
+   surface. Every candidate scores through the same `DesignObjective`.
 4. **One evaluation.** Geometry build from the design vector; the candidate
    payload load case; a two-pass mass analysis with the payload layout;
    cruise trim and drag polar by the vortex-lattice method; then the sizing
@@ -44,7 +46,7 @@ for the parity fixtures.
 Grouped by configuration group. "Default" is what a fresh configuration
 holds; presets override the physical inputs.
 
-### `optimizer.objective` -- what is minimised and how it is bounded
+### `optimizer.objective`: what is minimised and how it is bounded
 
 | Field | Role | Default |
 | --- | --- | --- |
@@ -57,22 +59,68 @@ holds; presets override the physical inputs.
 | `max_span_m`, `max_approach_speed_kt` | aerodrome span limit, approach-category speed limit (zero disables) | 80 m, 0 |
 | `soft_penalty_weight` | weight of the soft-residual sum against the objective | 10 |
 
-### `optimizer.solver` -- how the search is run
+### `optimizer.solver`: how the search is run
 
-`method`, `max_iterations`, `population_size` (multiplier on the sixteen
-variables), `tolerance`, `seed`, `workers`, `seed_near_initial_design` and
-`seed_perturbation_fraction`, and for the SQP driver `finite_difference_step`
-(fraction of each bound range) and `constraint_tolerance` (normalised). The
-`strategy` field is the differential-evolution mutation scheme.
+`method` (always `differential_evolution`), `max_iterations` (generation
+budget), `population_size` (multiplier on the sixteen variables, before
+L-SHADE's linear population-size reduction), `tolerance` (population
+design-space spread and best-feasible-cost relative-improvement threshold),
+`convergence_stagnation_generations` (the stagnation window that tolerance
+applies over), `seed` and `workers` (worker count changes only wall time; a
+seeded run replays bit-identically at any count). `strategy`,
+`seed_near_initial_design`, `seed_perturbation_fraction`,
+`finite_difference_step` and `constraint_tolerance` remain loadable for the
+frozen reference-compatibility replay and for saved-file compatibility with
+the retired SQP driver; the product search does not read them.
 
-### `optimizer.weights` -- replay table
+### `optimizer.plausibility`: the model's validity domain
+
+Fourteen fields: six two-sided windows, one ordering requirement and an
+`enabled` switch. The windows are dimensionless except the two twist bounds
+in degrees, and bound wing aspect ratio, fuselage fineness (length over
+equivalent diameter), horizontal-tail arm as a fraction of fuselage length,
+tip-to-root chord ratio, root thickness-to-chord ratio, and built geometric
+washout (tip section incidence less root section incidence, negative for
+washout). The ordering requirement keeps the trailing-edge break chord
+between the tip and root chords.
+
+These are statements about where this program's own mass, drag and
+stability correlations were fitted, not performance requirements, and each
+window is deliberately wider than every registered aircraft. They reach the
+search as named Geometry residuals (`aspect_ratio_min/max` and the rest) and
+follow the geometry family's configured policy. The group is edited in
+Advanced Settings > Optimizer > Model validity domain, and is written to a
+saved document only when it differs from the shipped defaults, so an older
+file loads with those defaults rather than with zeros.
+
+### `optimizer.relaxation`: controlled constraint relaxation (D01-D03)
+
+`enabled` and `allowed_violated_groups` are on the Inputs page under Run
+options and in Advanced Settings; `eligible`, the per-limit list, is
+document-only. Violated discipline *groups* are counted rather than limits
+(D01), a limit must be on the eligibility list and missed inside its own
+declared tolerance (D02), and a relaxed design never ranks ahead of, or is
+labelled as, a fully feasible one (D03).
+
+**No limit is currently eligible.** `alas_config::optimizer::policy_review`
+records the D02 review as one determination per residual identifier, with
+the reason: a limit is `NeverRelaxable` (a failed or incomplete evaluation,
+or a boolean availability flag), or `Ineligible` because no traceable
+primary engineering or regulatory source states a fraction of it that may be
+exceeded and this program has no measured error band for the quantity
+either, or `Eligible` with a sourced tolerance ceiling. The third state has
+no entries. A configuration that lists an ineligible or unknown identifier
+is a blocking validation error quoting the recorded reason, so the shipped
+run is strict and stays strict.
+
+### `optimizer.weights`: replay table
 
 Only `failure_cost` (the cost of a candidate that cannot be built, trimmed
 or sized) and the tail-volume window (`min/max_hstab_volume_coef`,
 `min/max_vstab_volume_coef`, a soft plausibility band) are read. Every
 other weight belongs to the frozen reference objective.
 
-### `requirements` -- the brief
+### `requirements`: the brief
 
 `mtow_kg` (ceiling of the sized takeoff mass and the mass the first trim is
 made at), `cruise_mach` and `cruise_altitude_m` (the cruise point of the

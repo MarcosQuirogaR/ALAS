@@ -10,7 +10,7 @@ narrowbody rerun, and writes:
 * ``outputs/mass-model-consolidation/before-after-components.csv``
 * ``outputs/mass-model-consolidation/sweep-invariance.csv``
 * ``outputs/mass-model-consolidation/decision-table.csv``
-* ``.agent/reports/mass-model-consolidation.html`` (self-contained, inline SVG)
+* ``out/reports/mass-model-consolidation.html`` (self-contained, inline SVG)
 
 Usage (from the repository root)::
 
@@ -31,7 +31,7 @@ OUT = ROOT / "outputs" / "mass-model-consolidation"
 BASELINE = OUT / "baseline"
 AFTER = OUT / "after"
 NARROW = OUT / "after-narrowbody"
-REPORT = ROOT / ".agent" / "reports" / "mass-model-consolidation.html"
+REPORT = ROOT / "out" / "reports" / "mass-model-consolidation.html"
 GROUPS = ["Wing", "H-Stab", "V-Stab", "Fuselage", "Gear", "Propulsion", "Systems", "Furnishings"]
 
 

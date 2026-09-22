@@ -8,7 +8,7 @@
 //! without a statement of where it came from and what it must agree with.
 //!
 //! The opposite direction is not checked, because a row naming a crate that
-//! does not exist yet is the normal state of a plan -- most rows are `todo`,
+//! does not exist yet is the normal state of a plan: most rows are `todo`,
 //! and they are the schedule.
 
 use std::path::Path;

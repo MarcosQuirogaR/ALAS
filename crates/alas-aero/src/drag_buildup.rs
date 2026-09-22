@@ -19,7 +19,7 @@
 //! Raymer/Korn buildup, over an native aerodynamic model geometry, reached from
 //! `alas/physics/aerodynamics.py`. This one is mission analysis model's, over a mission analysis model vehicle,
 //! and the only thing in the whole reference that reaches it is the mission
-//! runner's `mission_builder.py:85-87` -- which attaches
+//! runner's `mission_builder.py:85-87`, which attaches
 //! `mission analysis model.Analyses.Aerodynamics.Fidelity_Zero()` to an assembled vehicle and
 //! sets nothing on it. The two answer the same question with different
 //! correlations and are deliberately not unified, exactly as
@@ -32,7 +32,7 @@
 //! coefficient it did not compute. Both are deliberate.
 //!
 //! The freestream is the mission segment's, which comes from mission analysis model's
-//! `US_Standard_1976` -- `alas-atmo::us1976`'s own green row. Deriving it here
+//! `US_Standard_1976`: `alas-atmo::us1976`'s own green row. Deriving it here
 //! instead would make every number this module reports a function of an
 //! atmosphere model as well as of a drag correlation, and a disagreement in
 //! the first would surface as a disagreement in the second. That is not
@@ -43,7 +43,7 @@
 //! `oswald_efficiency_factor` are both `None` in `Fidelity_Zero`'s defaults,
 //! and with `span_efficiency` unset the inviscid induced drag *is*
 //! `drag_breakdown.induced.inviscid_wings[tag]`, which
-//! `mission analysis model.Analyses.Aerodynamics.Vortex_Lattice` writes -- there is no
+//! `mission analysis model.Analyses.Aerodynamics.Vortex_Lattice` writes; there is no
 //! closed-form fallback on the path this program takes. So the lift solution
 //! arrives as data, the same arrangement `alas-mass::transport_weight` uses for
 //! `sealevel_static_thrust`. `alas-aero::lift_surrogate` is what will supply
@@ -52,7 +52,7 @@
 //! # Scope
 //!
 //! Translated: the whole `compute.drag` chain in the order
-//! `Fidelity_Zero.__defaults__` builds it -- per-component parasite drag, the
+//! `Fidelity_Zero.__defaults__` builds it: per-component parasite drag, the
 //! pylon allowance, the parasite total (including the in-place rescale the
 //! induced buildup then reads back), induced drag, per-wing compressibility
 //! drag and its total, ESDU excrescence drag, and the
@@ -69,7 +69,7 @@
 //! One reported byproduct is not translated: `induced_drag_aircraft` also
 //! reports an Oswald efficiency factor, back-solved from the total it just
 //! computed. Nothing in mission analysis model or in the mission runner reads it, and it needs
-//! the aircraft's total lift coefficient, which nothing else here does -- so
+//! the aircraft's total lift coefficient, which nothing else here does, so
 //! it is omitted rather than carried as an input used once for an output no
 //! caller has. Same reasoning as `alas-stab::modes`' untranslated phugoid
 //! byproducts.

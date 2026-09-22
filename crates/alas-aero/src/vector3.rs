@@ -5,8 +5,8 @@
 //! geometry.
 //!
 //! Ordinary closed-form linear algebra local to this crate, not `alas-math`:
-//! that crate exists for numerics with state to get wrong -- a spline fit, a
-//! factorization -- and this is a handful of formulas with two callers both
+//! that crate exists for numerics with state to get wrong: a spline fit, a
+//! factorization, and this is a handful of formulas with two callers both
 //! inside `alas-aero`. `alas-geom::aircraft::vector3` makes the identical
 //! argument for its own copy of the same handful of formulas; the two are not
 //! shared because `alas-geom`'s is `pub(super)`, private to that crate's

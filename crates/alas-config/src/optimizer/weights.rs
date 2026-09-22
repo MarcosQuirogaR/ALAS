@@ -16,9 +16,9 @@
 //! # Why almost everything here is soft
 //!
 //! Exactly one condition short-circuits the assembly and returns a flat cost:
-//! a candidate that cannot be built or evaluated at all. Everything else --
+//! a candidate that cannot be built or evaluated at all. Everything else,
 //! including a design that is physically invalid, with a static margin below
-//! the floor or a centre of gravity outside the envelope -- still has its
+//! the floor or a centre of gravity outside the envelope, still has its
 //! lift-to-drag computed, with a large but graduated penalty added on top.
 //!
 //! That distinction is the whole design of this module. An early return
@@ -30,7 +30,7 @@
 //! Fields whose names end in a weight suffix are offered as sliders rather
 //! than as numbers, because only their ratio to each other means anything.
 //! That rule is upstream's and catches a few thresholds that are not weights
-//! at all -- a thickness floor, a fuselage length floor, the failure costs --
+//! at all (a thickness floor, a fuselage length floor, the failure costs)
 //! which is reproduced rather than corrected.
 
 include!("weights_parts/part_01.rs");

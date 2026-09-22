@@ -14,7 +14,7 @@ use super::vector3::{
 /// the only value [`Wing::subdivide_sections`] ever calls it with.
 pub(super) const SUBDIVIDE_BLEND_N_POINTS_PER_SIDE: usize = 100;
 
-/// A wing cross-section: leading-edge position, chord, twist and airfoil --
+/// A wing cross-section: leading-edge position, chord, twist and airfoil:
 /// `WingXSec`, scoped to the fields this program uses (no control surfaces,
 /// no analysis-specific options; see the module doc).
 #[derive(Debug, Clone, PartialEq)]
@@ -53,7 +53,7 @@ impl WingXSec {
 }
 
 /// A wing: a name, an ordered list of cross-sections, and whether it is
-/// mirrored about the XZ plane -- `Wing`, scoped to the fields and methods
+/// mirrored about the XZ plane, `Wing`, scoped to the fields and methods
 /// this program uses (see the module doc).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Wing {
@@ -68,17 +68,17 @@ pub struct Wing {
 }
 
 /// Which spacing function [`Wing::subdivide_sections`] uses to place the new
-/// cross-sections along each lofted interval -- upstream's pluggable
+/// cross-sections along each lofted interval: upstream's pluggable
 /// `spacing_function: Callable[[float, float, int], np.ndarray]`, narrowed to
 /// the two functions this program's inputs ever name. See the module doc for
 /// which caller reaches which variant.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SpacingFunction {
-    /// Evenly spaced -- `np.linspace`, `alas-geom::builder`'s choice (its
+    /// Evenly spaced: `np.linspace`, `alas-geom::builder`'s choice (its
     /// only caller never names an explicit one, so this is upstream's
     /// default).
     Linspace,
-    /// Bunched near both ends of each interval -- `np.cosspace`,
+    /// Bunched near both ends of each interval: `np.cosspace`,
     /// `VortexLatticeMethod.run()`'s `spanwise_spacing_function` default.
     Cosspace,
 }
@@ -93,7 +93,7 @@ impl SpacingFunction {
     }
 }
 
-/// [`Wing::subdivide_sections`] rejects a ratio less than 2 -- the same
+/// [`Wing::subdivide_sections`] rejects a ratio less than 2: the same
 /// condition upstream's `raise ValueError("`ratio` must be an integer
 /// greater than or equal to 2.")` guards, restated as a typed error since
 /// this crate does not panic (`CONTRIBUTING.md`). The "integer" half of
@@ -105,7 +105,7 @@ pub enum SubdivideSectionsError {
     #[error("`ratio` must be greater than or equal to 2, got {0}")]
     RatioTooSmall(usize),
     /// Blending two distinct airfoils at a subdivision boundary failed to
-    /// repanel -- see [`Airfoil::blend_with_another_airfoil`].
+    /// repanel, see [`Airfoil::blend_with_another_airfoil`].
     #[error(transparent)]
     Blend(#[from] alas_math::CubicSplineError),
 }

@@ -4,7 +4,7 @@
 // Ported from alas/reporting/airfoil_sweep_figures.py (`fig_ranking_bars`)
 // Reference: alas @ rust-port-baseline.
 
-//! Top-candidate ranking bar chart -- the plain "what should I pick"
+//! Top-candidate ranking bar chart: the plain "what should I pick"
 //! read-out.
 
 use crate::scene::{Axes2D, Color, Fill, Scene, SceneElement, Stroke, TextAlign, TextBaseline};
@@ -14,7 +14,7 @@ use alas_screen::AirfoilScreeningResult;
 use super::{ok_candidates, refined_candidates, REFERENCE_MARKER_COLOR};
 
 /// Top candidates ranked by final cruise L/D (3-D where available), current
-/// section highlighted -- `fig_ranking_bars`. `None` when screening found no
+/// section highlighted: `fig_ranking_bars`. `None` when screening found no
 /// usable candidate.
 pub fn fig_ranking_bars(result: &AirfoilScreeningResult, theme: Option<&str>) -> Option<Scene> {
     let refined = refined_candidates(result);
@@ -63,7 +63,7 @@ pub fn fig_ranking_bars(result: &AirfoilScreeningResult, theme: Option<&str>) ->
 
     let bar_h = (axes.height / n as f64 * 0.6).min(24.0);
     for (i, (cand, &val)) in cands.iter().zip(&vals).enumerate() {
-        // Best rank first in `cands`; drawn at the top of the panel --
+        // Best rank first in `cands`; drawn at the top of the panel,
         // `y = list(range(len(cands)))[::-1]`.
         let row = (n - 1 - i) as f64 + 0.5;
         let p_left = axes.map_point(0.0, row);

@@ -24,6 +24,7 @@
 //! VSPAERO mesh. [`vspaero`] runs and parses that independent solver, then
 //! admits only reference- and frame-compatible quantities to report overlays.
 
+pub mod acceptance;
 pub mod avl;
 pub mod baseline;
 pub mod cabin_scene;
@@ -36,6 +37,7 @@ pub mod feasibility;
 pub mod flowunsteady;
 pub mod fuel_model;
 pub mod full_analysis;
+pub mod gear_stations;
 mod mission_stage;
 pub mod openvsp;
 mod patran;
@@ -86,10 +88,11 @@ pub use export::{
 };
 pub use feasibility::{
     assess_physical_feasibility, assess_physical_feasibility_with_load_case, format_feasibility,
-    CarriedFuelBasis, CgEnvelopeAssessment, CruiseEquilibriumAssessment, DispatchAssessment,
-    DispatchOutcome, FeasibilityReport, FindingCode, FindingSeverity, FuelCapacityAssessment,
-    FuelCapacityEvidence, FuelLoadingAssessment, LedgerItemSummary, MassBalanceAssessment,
-    MassStateSummary, MissionFuelAssessment, MissionFuelStatus, PhysicalFinding, PlanningCgStatus,
+    CarriedFuelBasis, CgEnvelopeAssessment, CruiseEquilibriumAssessment, DeliveryBlocker,
+    DeliveryClassification, DeliveryVerdict, DesignProvenance, DispatchAssessment, DispatchOutcome,
+    FeasibilityReport, FindingCode, FindingSeverity, FuelCapacityAssessment, FuelCapacityEvidence,
+    FuelLoadingAssessment, LedgerItemSummary, MassBalanceAssessment, MassStateSummary,
+    MissionFuelAssessment, MissionFuelStatus, PhysicalFinding, PlanningCgStatus, RunCompletion,
     TankSummary,
 };
 pub use flowunsteady::{
@@ -98,6 +101,7 @@ pub use flowunsteady::{
 pub use full_analysis::{
     AnalysisReport, DesignPoint, FullAnalysis, PolarFit, PolarFitStatus, TrimmedDesignPoint,
 };
+pub use gear_stations::{resolved_gear_stations, wing_mounted_gear_domain};
 pub use mission_stage::dispatch::{LoadCaseSelection, PolicyClosureCase, SelectedLoadCase};
 pub use openvsp::{
     export_openvsp_script, materialize_openvsp_project, OpenVspExportResult, OpenVspExportStatus,
@@ -107,6 +111,7 @@ pub use payload_layout_export::{
 };
 pub use pipeline::{
     DesignPipeline, PipelineExecutionStatus, PipelineOptions, PipelineResult, RoutePlanningStatus,
+    RunObservers,
 };
 pub use plot::render_scene_svg;
 pub use runs::{RunEvent, RunEventKind, RunEventSeverity, RunRegistry, RunState};

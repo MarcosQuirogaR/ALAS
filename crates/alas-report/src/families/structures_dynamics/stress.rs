@@ -6,7 +6,7 @@
 // Reference: alas @ rust-port-baseline.
 
 //! Spanwise margin-of-safety per spar cap, one panel per spar, all three
-//! load cases overlaid -- `MS >= 0` required everywhere for a valid design
+//! load cases overlaid: `MS >= 0` required everywhere for a valid design
 //! (`MS = 0` exactly at the root for the sizing-governing case, by
 //! construction).
 
@@ -18,7 +18,7 @@ use crate::chart_kit::{draw_legend, LegendMarker};
 use crate::scene::{Axes2D, Color, Scene, SceneElement, Stroke, TextAlign, TextBaseline};
 use crate::theme::get_palette;
 
-const TITLE: &str = "Structural Analysis -- Stress";
+const TITLE: &str = "Structural Analysis: Stress";
 
 /// Upstream's `np.clip(ss.margin_of_safety, -1.0, 5.0)` bounds, reused for
 /// both the plotted curve and the fixed y-axis range.
@@ -244,7 +244,7 @@ mod tests {
             for p in points {
                 // Canvas-space y grows downward; a value inside [MS_MIN,
                 // MS_MAX] maps inside the panel's own top/bottom, which this
-                // sample's single panel occupies entirely -- so bounding the
+                // sample's single panel occupies entirely, so bounding the
                 // canvas y is an indirect check that the clamp took effect.
                 assert!(p[1].is_finite());
             }

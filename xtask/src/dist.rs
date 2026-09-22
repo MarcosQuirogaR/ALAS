@@ -14,10 +14,21 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use crate::dist_archive;
+use crate::dist_avl;
+
 const PACKAGE_VERSION: &str = env!("CARGO_PKG_VERSION");
 const NASTRAN_STRICT_ENV: &str = "ALAS_STRICT_BUNDLED_NASTRAN95";
 const SOURCE_MANIFEST_NAME: &str = "SOURCE-MANIFEST.json";
 const RELEASE_MANIFEST_NAME: &str = "RELEASE-MANIFEST.json";
+const MSES_OSMAP_RELATIVE_PATH: &str = "assets/mses/osmapDP.dat";
+const MSES_OSMAP_ARCHIVE_RELATIVE_PATH: &str = "assets/mses/xfoil6.99.tgz";
+const MSES_OSMAP_LICENSE_RELATIVE_PATH: &str = "assets/mses/COPYING-XFOIL.txt";
+const MSES_OSMAP_README_RELATIVE_PATH: &str = "assets/mses/README.md";
+const MSES_OSMAP_ACQUISITION_RELATIVE_PATH: &str = "assets/mses/acquire_osmap.ps1";
+const MSES_OSMAP_SHA256: &str = "2f6b3c63461d71da9b6cb9ca1340d77cff0cfbe767679d15b5b8556b45d948c4";
+const MSES_OSMAP_ARCHIVE_SHA256: &str =
+    "5c0250643f52ce0e75d7338ae2504ce7907f2d49a30f921826717b8ac12ebe40";
 const SOURCE_DIRECTORY_ROOTS: [&str; 5] = ["crates", "xtask", "tools", "docs", ".cargo"];
 const SOURCE_ROOT_FILES: [&str; 12] = [
     "Cargo.toml",
@@ -76,7 +87,7 @@ const SOURCE_GOLDEN_FIXTURE_FILES: [&str; 8] = [
 // otherwise-excluded `golden/` evidence, not a directory-prefix rule. It was
 // read in full and reviewed for this entry: every numeric anchor is a short
 // factual value (dimension, mass, count) with a `cite` key into a `sources`
-// bibliography whose entries carry only `title`/`authority`/`url` -- no
+// bibliography whose entries carry only `title`/`authority`/`url`, no
 // excerpted, quoted or reproduced manufacturer document text, no images, no
 // secrets. `tools/aircraft_parity.cjs`, itself part of this source snapshot,
 // requires this exact file to run at all. Add a sibling file here only after
@@ -91,20 +102,20 @@ const SOURCE_REJECTED_FILE_PREFIXES: [&str; 5] =
     [".env", "credentials", "secret", "private", "id_rsa"];
 
 #[derive(Debug, Clone)]
-struct BundleStatus {
-    status: &'static str,
-    reason: Option<String>,
+pub(crate) struct BundleStatus {
+    pub(crate) status: &'static str,
+    pub(crate) reason: Option<String>,
 }
 
 impl BundleStatus {
-    fn bundled() -> Self {
+    pub(crate) fn bundled() -> Self {
         Self {
             status: "bundled",
             reason: None,
         }
     }
 
-    fn not_bundled(reason: impl Into<String>) -> Self {
+    pub(crate) fn not_bundled(reason: impl Into<String>) -> Self {
         Self {
             status: "not_bundled",
             reason: Some(reason.into()),
@@ -128,13 +139,13 @@ impl BundleStatus {
 /// user-selected external release makes redistribution the user's decision,
 /// not this packaging task's. Listed in the release manifest so a reviewer
 /// sees the complete required/optional tool inventory in one place instead of
-/// only the two tools [`bundle_avl`]/[`bundle_nastran95`] can bundle. Full
+/// only the two tools `dist_avl::bundle_avl`/[`bundle_nastran95`] can bundle. Full
 /// licence and provenance detail lives in `THIRD-PARTY-NOTICES.md`, which
 /// travels with the package.
 const USER_SUPPLIED_EXTERNAL_TOOLS: [(&str, &str); 5] = [
     (
         "mses",
-        "Proprietary MSES (mset/mses/mplot), per-seat licence from MIT; never bundled. See THIRD-PARTY-NOTICES.md.",
+        "Proprietary MSES (mset/mses/mplot), per-seat licence from MIT; executables remain user-supplied. The compatible GPL OSMAP data resource is bundled separately under assets/mses/. See THIRD-PARTY-NOTICES.md.",
     ),
     (
         "vspaero",
@@ -165,6 +176,15 @@ struct SourceRecord {
 struct SourceSnapshot {
     records: Vec<SourceRecord>,
     excluded_count: usize,
+    /// Tracked, allowlisted paths git reports as deleted in the worktree.
+    ///
+    /// Named rather than only counted: a release snapshot that silently
+    /// dropped a file the index still lists would be indistinguishable from
+    /// one that lost it. `docs/ALAS-report-clarified.md` is the current such
+    /// path: the report's canonical copy lives outside the repository and the
+    /// in-tree duplicate was removed on purpose, so packaging it would ship a
+    /// stale second copy.
+    deleted_paths: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -193,7 +213,7 @@ pub fn create_distribution(root: &Path) -> Result<(), String> {
     println!("Compiling release binary...");
     let status = Command::new(env!("CARGO"))
         .current_dir(root)
-        .args(["build", "--release", "--locked", "--bin", "alas"])
+        .args(["build", "--release", "--locked", "--bin", "ALAS"])
         .status()
         .map_err(|e| format!("failed to compile release binary: {e}"))?;
 
@@ -201,7 +221,7 @@ pub fn create_distribution(root: &Path) -> Result<(), String> {
         return Err("release build failed".to_owned());
     }
 
-    let exe_name = if cfg!(windows) { "alas.exe" } else { "alas" };
+    let exe_name = if cfg!(windows) { "ALAS.exe" } else { "ALAS" };
     let src_exe = cargo_target_dir(root).join("release").join(exe_name);
     if !src_exe.exists() {
         return Err(format!("release binary not found at {}", src_exe.display()));
@@ -225,8 +245,9 @@ pub fn create_distribution(root: &Path) -> Result<(), String> {
         .map_err(|e| format!("failed to copy binary to {}: {e}", dst_exe.display()))?;
     println!("Copied standalone binary: {}", dst_exe.display());
 
-    let avl_status = bundle_avl(root, &pkg_dir)?;
+    let avl_status = dist_avl::bundle_avl(root, &pkg_dir)?;
     let nastran_status = bundle_nastran95(root, &pkg_dir, strict_nastran)?;
+    bundle_mses_osmap(root, &pkg_dir)?;
     bundle_branding(root, &pkg_dir)?;
 
     // Copy documentation and notices.
@@ -272,28 +293,38 @@ pub fn create_distribution(root: &Path) -> Result<(), String> {
 
     // 4. Validate the packaged standalone distribution.
     println!("\nValidating packaged standalone distribution...");
-    validate_distribution(&dst_exe, &sample_config, &release_manifest, &dist_root)?;
+    validate_distribution(
+        &dst_exe,
+        &sample_config,
+        &release_manifest,
+        &dist_root,
+        &avl_status,
+    )?;
 
-    // 5. Create distribution zip archive only after the package has passed its
-    // executable, config, AVL, path-space, and provenance checks.
-    let zip_name = format!("{package_name}.zip");
-    let zip_path = dist_root.join(&zip_name);
-    if zip_path.exists() {
-        let _ = fs::remove_file(&zip_path);
+    // 5. Create the distribution archive only after the package has passed its
+    // executable, config, AVL, path-space, and provenance checks. Windows gets
+    // a .zip, matching shell/Explorer expectations there; every other target
+    // gets a .tar.gz, the native archive format that preserves the executable
+    // bit `fs::copy` already carried onto `ALAS` and the AVL/NASTRAN-95 child
+    // executables when present, which a zip cannot losslessly guarantee.
+    let archive_name = dist_archive::archive_file_name(&package_name);
+    let archive_path = dist_root.join(&archive_name);
+    if archive_path.exists() {
+        let _ = fs::remove_file(&archive_path);
     }
 
-    println!("Creating package archive: {}", zip_path.display());
-    create_zip_archive(&dist_root, &package_name, &zip_name)?;
-    let archive_bytes = fs::read(&zip_path).map_err(|e| {
+    println!("Creating package archive: {}", archive_path.display());
+    dist_archive::create_archive(&dist_root, &package_name, &archive_name)?;
+    let archive_bytes = fs::read(&archive_path).map_err(|e| {
         format!(
             "failed to read created package archive {}: {e}",
-            zip_path.display()
+            archive_path.display()
         )
     })?;
-    let checksum_path = dist_root.join(format!("{zip_name}.sha256"));
+    let checksum_path = dist_root.join(format!("{archive_name}.sha256"));
     fs::write(
         &checksum_path,
-        format!("{}  {zip_name}\n", sha256_hex(&archive_bytes)),
+        format!("{}  {archive_name}\n", sha256_hex(&archive_bytes)),
     )
     .map_err(|e| {
         format!(
@@ -303,7 +334,10 @@ pub fn create_distribution(root: &Path) -> Result<(), String> {
     })?;
     println!("Wrote package archive SHA-256: {}", checksum_path.display());
 
-    println!("\nDistribution packaging complete: {}", zip_path.display());
+    println!(
+        "\nDistribution packaging complete: {}",
+        archive_path.display()
+    );
     Ok(())
 }
 
@@ -428,13 +462,31 @@ fn bundle_source_snapshot(root: &Path, package_dir: &Path) -> Result<SourceSnaps
     }
     tracked.sort_unstable();
 
+    // `--cached` lists what the index holds, which still includes a tracked
+    // file the worktree has deliberately deleted. Packaging one would mean
+    // resolving a path that is not there, so the snapshot used to fail the
+    // whole release on it. Ask git which deletions are intentional and skip
+    // exactly those.
+    //
+    // This stays fail-closed. Only a path git itself reports as deleted is
+    // skipped; a file that disappeared for any other reason still fails the
+    // `is_file` check below with its own message, and every skipped path is
+    // counted and named in the source manifest rather than vanishing quietly.
+    let deleted = deleted_tracked_paths(root)?;
+
     let source_root = package_dir.join("source").join("alas");
     let canonical_root = fs::canonicalize(root)
         .map_err(|e| format!("failed to resolve repository root for source safety: {e}"))?;
     let mut records = Vec::new();
     let mut excluded_count = 0;
+    let mut deleted_paths = Vec::new();
     for relative in tracked {
         if !source_path_allowed(&relative) {
+            excluded_count += 1;
+            continue;
+        }
+        if deleted.contains(&relative) {
+            deleted_paths.push(normalize_relative_path(&relative));
             excluded_count += 1;
             continue;
         }
@@ -491,11 +543,20 @@ fn bundle_source_snapshot(root: &Path, package_dir: &Path) -> Result<SourceSnaps
         return Err("allowlisted source snapshot is empty after the release allowlist".to_owned());
     }
 
+    deleted_paths.sort_unstable();
     let snapshot = SourceSnapshot {
         records,
         excluded_count,
+        deleted_paths,
     };
     write_source_manifest(&source_root, &snapshot)?;
+    if !snapshot.deleted_paths.is_empty() {
+        println!(
+            "Skipped {} tracked source file(s) deleted in the worktree: {}",
+            snapshot.deleted_paths.len(),
+            snapshot.deleted_paths.join(", ")
+        );
+    }
     println!(
         "Included {} allowlisted source files ({} excluded by release allowlist)",
         snapshot.records.len(),
@@ -660,6 +721,11 @@ fn write_source_manifest(source_root: &Path, snapshot: &SourceSnapshot) -> Resul
         "  \"allowed_tool_extensions\": {},\n",
         json_string_array(&SOURCE_TOOL_EXTENSIONS)
     ));
+    let deleted: Vec<&str> = snapshot.deleted_paths.iter().map(String::as_str).collect();
+    json.push_str(&format!(
+        "  \"tracked_paths_deleted_in_worktree\": {},\n",
+        json_string_array(&deleted)
+    ));
     json.push_str(&format!(
         "  \"excluded_file_count\": {},\n  \"files\": [\n",
         snapshot.excluded_count
@@ -770,6 +836,34 @@ fn write_release_manifest(
         });
     }
     json.push_str("  },\n");
+    json.push_str("  \"bundled_resources\": {\n");
+    json.push_str("    \"mses_osmap\": {\n");
+    json.push_str("      \"status\": \"bundled\",\n");
+    json.push_str(&format!(
+        "      \"path\": {},\n",
+        json_string(MSES_OSMAP_RELATIVE_PATH)
+    ));
+    json.push_str(&format!(
+        "      \"sha256\": {},\n",
+        json_string(MSES_OSMAP_SHA256)
+    ));
+    json.push_str(&format!(
+        "      \"source_archive\": {},\n",
+        json_string(MSES_OSMAP_ARCHIVE_RELATIVE_PATH)
+    ));
+    json.push_str(&format!(
+        "      \"license\": {},\n",
+        json_string(MSES_OSMAP_LICENSE_RELATIVE_PATH)
+    ));
+    json.push_str(&format!(
+        "      \"provenance\": {},\n",
+        json_string(MSES_OSMAP_README_RELATIVE_PATH)
+    ));
+    json.push_str(&format!(
+        "      \"acquisition_script\": {}\n",
+        json_string(MSES_OSMAP_ACQUISITION_RELATIVE_PATH)
+    ));
+    json.push_str("    }\n  },\n");
     json.push_str("  \"artifacts\": [\n");
     for (index, artifact) in artifacts.iter().enumerate() {
         json.push_str("    {\n");
@@ -845,6 +939,35 @@ fn collect_files_recursive(
     Ok(())
 }
 
+/// Tracked paths git reports as deleted from the worktree.
+///
+/// Deliberately a hard error rather than an empty set on failure: silently
+/// treating "git could not tell us" as "nothing was deleted" would put the
+/// snapshot back in the state this exists to fix, and would do it invisibly.
+fn deleted_tracked_paths(root: &Path) -> Result<BTreeSet<String>, String> {
+    let output = Command::new("git")
+        .current_dir(root)
+        .args(["ls-files", "--deleted", "-z"])
+        .output()
+        .map_err(|e| format!("failed to enumerate deleted tracked source paths: {e}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "git ls-files --deleted failed while preparing the source snapshot (status {})",
+            output.status
+        ));
+    }
+    let mut deleted = BTreeSet::new();
+    for item in output.stdout.split(|byte| *byte == 0) {
+        if item.is_empty() {
+            continue;
+        }
+        let path = String::from_utf8(item.to_vec())
+            .map_err(|_| "deleted tracked path is not UTF-8".to_owned())?;
+        deleted.insert(path);
+    }
+    Ok(deleted)
+}
+
 fn git_output(root: &Path, args: &[&str]) -> Option<String> {
     let output = Command::new("git")
         .current_dir(root)
@@ -877,39 +1000,135 @@ fn json_string(value: &str) -> String {
     escaped
 }
 
-/// Copy the unchanged GPL AVL program and its corresponding source into the
-/// distribution as an adjacent child executable.
+/// Bundle the GPL OSMAP data required by MSES free-transition calculations.
 ///
-/// Keeping this process boundary is what lets the AGPL application and the
-/// GPL solver remain separately licensed works. The source archive and the
-/// full GPL text travel with the exact executable used by the package.
-fn bundle_avl(root: &Path, package_dir: &Path) -> Result<BundleStatus, String> {
-    let source_dir = root.join("external tools");
-    let package_tools = package_dir.join("external tools");
-    fs::create_dir_all(&package_tools)
-        .map_err(|e| format!("failed to create {}: {e}", package_tools.display()))?;
+/// The MSES executables remain user-supplied because their per-seat licence is
+/// not covered by ALAS. The transition map is an independent, unmodified XFOIL
+/// distribution asset, so it can travel with the release together with its
+/// source archive and licence text. Copying the complete provenance set here
+/// makes a package self-auditing and avoids a network fetch at run time.
+fn bundle_mses_osmap(root: &Path, package_dir: &Path) -> Result<(), String> {
+    let source_dir = root.join("assets").join("mses");
+    let destination_dir = package_dir.join("assets").join("mses");
+    fs::create_dir_all(&destination_dir).map_err(|error| {
+        format!(
+            "failed to create bundled MSES resource directory {}: {error}",
+            destination_dir.display()
+        )
+    })?;
 
-    for name in ["avl352.exe", "avl3.52.tgz", "AVL-GPL-2.0.txt"] {
+    for name in [
+        "osmapDP.dat",
+        "xfoil6.99.tgz",
+        "COPYING-XFOIL.txt",
+        "README.md",
+        "acquire_osmap.ps1",
+    ] {
         let source = source_dir.join(name);
         if !source.is_file() {
             return Err(format!(
-                "bundled AVL artifact is missing: {}; release packaging requires the unchanged executable, source archive, and GPL text",
+                "bundled MSES OSMAP artifact is missing: {}; release packaging requires the map, exact source archive, licence text, and provenance README",
                 source.display()
             ));
         }
-        let destination = package_tools.join(name);
-        fs::copy(&source, &destination).map_err(|e| {
+        let destination = destination_dir.join(name);
+        fs::copy(&source, &destination).map_err(|error| {
             format!(
-                "failed to copy bundled AVL artifact to {}: {e}",
+                "failed to copy bundled MSES OSMAP artifact to {}: {error}",
                 destination.display()
             )
         })?;
     }
+
+    validate_bundled_mses_osmap(package_dir)?;
     println!(
-        "Bundled AVL 3.52 child executable, corresponding source, and GPL text in {}",
-        package_tools.display()
+        "Bundled the GPL double-precision MSES OSMAP resource, exact XFOIL source archive, licence, and provenance in {}",
+        destination_dir.display()
     );
-    Ok(BundleStatus::bundled())
+    Ok(())
+}
+
+/// Validate the packaged OSMAP bytes and its redistribution evidence.
+///
+/// The lightweight record check mirrors the runtime check in `alas-aero`: the
+/// first Fortran record is 12 bytes and the double-precision table record is
+/// 224 bytes. The fixed hashes additionally prevent a single-precision map or
+/// a locally regenerated file from silently entering a release.
+fn validate_bundled_mses_osmap(package_dir: &Path) -> Result<(), String> {
+    let map = package_dir.join(MSES_OSMAP_RELATIVE_PATH);
+    let map_bytes = fs::read(&map).map_err(|error| {
+        format!(
+            "bundled MSES OSMAP cannot be read at {}: {error}",
+            map.display()
+        )
+    })?;
+    if sha256_hex(&map_bytes) != MSES_OSMAP_SHA256 {
+        return Err(format!(
+            "bundled MSES OSMAP hash mismatch at {}; expected {}",
+            map.display(),
+            MSES_OSMAP_SHA256
+        ));
+    }
+    if map_bytes.len() < 24 {
+        return Err(format!(
+            "bundled MSES OSMAP is too short at {} ({} bytes)",
+            map.display(),
+            map_bytes.len()
+        ));
+    }
+    let read_i32 = |offset: usize| {
+        i32::from_le_bytes([
+            map_bytes[offset],
+            map_bytes[offset + 1],
+            map_bytes[offset + 2],
+            map_bytes[offset + 3],
+        ])
+    };
+    let first = read_i32(0);
+    let trailing = read_i32(16);
+    let table_record = read_i32(20);
+    if first != 12 || trailing != 12 || table_record != 224 {
+        return Err(format!(
+            "bundled MSES OSMAP has incompatible Fortran header at {} (first={first}, trailing={trailing}, table_record={table_record}; expected 12, 12, 224)",
+            map.display()
+        ));
+    }
+
+    let archive = package_dir.join(MSES_OSMAP_ARCHIVE_RELATIVE_PATH);
+    let archive_bytes = fs::read(&archive).map_err(|error| {
+        format!(
+            "bundled MSES OSMAP source archive cannot be read at {}: {error}",
+            archive.display()
+        )
+    })?;
+    if sha256_hex(&archive_bytes) != MSES_OSMAP_ARCHIVE_SHA256 {
+        return Err(format!(
+            "bundled MSES OSMAP source archive hash mismatch at {}; expected {}",
+            archive.display(),
+            MSES_OSMAP_ARCHIVE_SHA256
+        ));
+    }
+
+    for relative in [
+        MSES_OSMAP_LICENSE_RELATIVE_PATH,
+        MSES_OSMAP_README_RELATIVE_PATH,
+        MSES_OSMAP_ACQUISITION_RELATIVE_PATH,
+    ] {
+        let path = package_dir.join(relative);
+        let metadata = fs::metadata(&path).map_err(|error| {
+            format!(
+                "bundled MSES OSMAP provenance file is missing at {}: {error}",
+                path.display()
+            )
+        })?;
+        if metadata.len() == 0 {
+            return Err(format!(
+                "bundled MSES OSMAP provenance file is empty: {}",
+                path.display()
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// Copy NASTRAN-95 as a separately licensed adjacent program when its
@@ -1130,6 +1349,7 @@ fn validate_distribution(
     packaged_config: &Path,
     release_manifest: &Path,
     dist_root: &Path,
+    avl_status: &BundleStatus,
 ) -> Result<(), String> {
     // 1. Verify --help output.
     let package_root = exe.parent().unwrap_or(dist_root);
@@ -1152,6 +1372,7 @@ fn validate_distribution(
     // 2. Verify the manifest and the generated package configuration before
     // invoking the more expensive headless/AVL smoke run.
     validate_release_manifest(release_manifest, package_root)?;
+    validate_bundled_mses_osmap(package_root)?;
     let packaged_config_metadata = fs::metadata(packaged_config).map_err(|e| {
         format!(
             "packaged configuration template is missing at {}: {e}",
@@ -1198,26 +1419,43 @@ fn validate_distribution(
         return Err("packaged binary config round-trip smoke run failed".to_owned());
     }
 
-    let avl_dir = temp_out.join("avl");
-    let avl_force_count = fs::read_dir(&avl_dir)
-        .map_err(|e| format!("packaged AVL output directory is missing: {e}"))?
-        .filter_map(Result::ok)
-        .filter(|entry| {
-            entry
-                .path()
-                .extension()
-                .is_some_and(|extension| extension == "ft")
-        })
-        .count();
-    if avl_force_count == 0 {
-        return Err("packaged run did not produce AVL total-force files".to_owned());
-    }
-    let comparison = temp_out.join("plots/model_comparison.svg");
-    let comparison_text = fs::read_to_string(&comparison)
-        .map_err(|e| format!("packaged Model Comparison figure is missing: {e}"))?;
-    if !comparison_text.contains("Athena AVL") {
-        return Err("packaged Model Comparison figure does not name Athena AVL".to_owned());
-    }
+    // The AVL cross-check only runs when this package actually bundles an
+    // executable for it (see `bundle_avl`): today that is the Windows
+    // package alone. Every other target ran the smoke analysis above through
+    // ALAS's own analytical vortex-lattice stage with no AVL executable
+    // configured, so the total-force files and the "Athena AVL" overlay this
+    // block would otherwise demand never exist; requiring them there would
+    // fail every non-Windows package regardless of whether packaging itself
+    // is correct.
+    let avl_force_count = if avl_status.status == "bundled" {
+        let avl_dir = temp_out.join("avl");
+        let count = fs::read_dir(&avl_dir)
+            .map_err(|e| format!("packaged AVL output directory is missing: {e}"))?
+            .filter_map(Result::ok)
+            .filter(|entry| {
+                entry
+                    .path()
+                    .extension()
+                    .is_some_and(|extension| extension == "ft")
+            })
+            .count();
+        if count == 0 {
+            return Err("packaged run did not produce AVL total-force files".to_owned());
+        }
+        let comparison = temp_out.join("plots/model_comparison.svg");
+        let comparison_text = fs::read_to_string(&comparison)
+            .map_err(|e| format!("packaged Model Comparison figure is missing: {e}"))?;
+        if !comparison_text.contains("Athena AVL") {
+            return Err("packaged Model Comparison figure does not name Athena AVL".to_owned());
+        }
+        Some(count)
+    } else {
+        let comparison = temp_out.join("plots/model_comparison.svg");
+        if !comparison.is_file() {
+            return Err("packaged Model Comparison figure is missing".to_owned());
+        }
+        None
+    };
 
     // The round-trip path above checks a generated config. Run the shipped
     // template as well so a stale or malformed package file cannot hide behind
@@ -1244,9 +1482,14 @@ fn validate_distribution(
         return Err("packaged binary failed to read the shipped configuration template".to_owned());
     }
     validate_release_manifest(release_manifest, package_root)?;
-    println!(
-        "  [OK] Config round-trip, shipped config read, and writable path-with-spaces; bundled AVL completed with {avl_force_count} total-force files and Model Comparison overlay"
-    );
+    match avl_force_count {
+        Some(count) => println!(
+            "  [OK] Config round-trip, shipped config read, and writable path-with-spaces; bundled AVL completed with {count} total-force files and Model Comparison overlay"
+        ),
+        None => println!(
+            "  [OK] Config round-trip, shipped config read, and writable path-with-spaces; no bundled AVL for this target, Model Comparison used the analytical fallback"
+        ),
+    }
 
     let _ = fs::remove_dir_all(&smoke_root);
     println!("  [OK] Isolated headless execution test passed");
@@ -1270,6 +1513,8 @@ fn validate_release_manifest(path: &Path, package_root: &Path) -> Result<(), Str
         "\"package_name\":",
         "\"source_snapshot\":",
         "\"external_tools\":",
+        "\"bundled_resources\":",
+        "\"mses_osmap\":",
         "\"artifacts\":",
     ] {
         if !text.contains(required) {
@@ -1441,56 +1686,6 @@ fn cargo_target_dir(root: &Path) -> PathBuf {
     )
 }
 
-fn create_zip_archive(dist_root: &Path, folder_name: &str, zip_name: &str) -> Result<(), String> {
-    if cfg!(windows) {
-        let script = format!(
-            "Compress-Archive -LiteralPath '{}' -DestinationPath '{}' -Force",
-            powershell_quote(folder_name),
-            powershell_quote(zip_name)
-        );
-        let status = Command::new("powershell")
-            .current_dir(dist_root)
-            .args(["-NoProfile", "-Command", &script])
-            .status()
-            .map_err(|e| format!("failed to run powershell Compress-Archive: {e}"))?;
-
-        if !status.success() {
-            return Err("Compress-Archive failed".to_owned());
-        }
-    } else {
-        // GNU tar's `-a` selects a compressor from the suffix but does not
-        // create ZIP archives. Prefer the Python standard-library zipfile
-        // module, then fall back to the ubiquitous `zip` utility.
-        let python3 = Command::new("python3")
-            .current_dir(dist_root)
-            .args(["-m", "zipfile", "-c", zip_name, folder_name])
-            .status();
-        if python3.is_ok_and(|status| status.success()) {
-            return Ok(());
-        }
-        let python = Command::new("python")
-            .current_dir(dist_root)
-            .args(["-m", "zipfile", "-c", zip_name, folder_name])
-            .status();
-        if python.is_ok_and(|status| status.success()) {
-            return Ok(());
-        }
-        let zip = Command::new("zip")
-            .current_dir(dist_root)
-            .args(["-q", "-r", zip_name, folder_name])
-            .status()
-            .map_err(|e| format!("failed to run python zipfile or zip packaging: {e}"))?;
-        if !zip.success() {
-            return Err("python zipfile and zip packaging failed".to_owned());
-        }
-    }
-    Ok(())
-}
-
-fn powershell_quote(value: &str) -> String {
-    value.replace('\'', "''")
-}
-
 /// A small dependency-free SHA-256 implementation keeps xtask's manifest
 /// hashes portable without changing the workspace dependency graph.
 fn sha256_hex(data: &[u8]) -> String {
@@ -1593,10 +1788,54 @@ mod tests {
     use std::path::PathBuf;
 
     use super::{
-        assess_nastran95, bundle_branding, bundle_status_json, package_name,
-        parse_artifact_records, sha256_hex, source_path_allowed, target_label, BundleStatus,
-        USER_SUPPLIED_EXTERNAL_TOOLS,
+        assess_nastran95, bundle_branding, bundle_mses_osmap, bundle_status_json,
+        deleted_tracked_paths, package_name, parse_artifact_records, sha256_hex,
+        source_path_allowed, target_label, validate_bundled_mses_osmap, BundleStatus,
+        MSES_OSMAP_RELATIVE_PATH, USER_SUPPLIED_EXTERNAL_TOOLS,
     };
+
+    /// A tracked file deleted on purpose must not fail the release, and must
+    /// not disappear from the manifest either.
+    ///
+    /// `git ls-files --cached` still lists a deleted tracked path, so the
+    /// snapshot used to try to resolve it and fail the whole `dist` run. The
+    /// current such path is `docs/ALAS-report-clarified.md`: the report's
+    /// canonical copy lives outside the repository and the in-tree duplicate
+    /// was removed deliberately, so packaging it would ship a stale second
+    /// copy of a report that is maintained elsewhere.
+    ///
+    /// This asserts the mechanism against the real repository rather than a
+    /// fixture, because the behaviour under test is what git reports about
+    /// *this* worktree. It is deliberately tolerant about which paths are
+    /// deleted (that set changes) and strict about the two invariants: a
+    /// deleted path is allowlisted-but-skipped, and the enumeration itself
+    /// either succeeds or is a hard error.
+    #[test]
+    fn a_deliberately_deleted_tracked_file_is_skipped_rather_than_failing_the_release() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("xtask has a workspace parent")
+            .to_path_buf();
+        let deleted = deleted_tracked_paths(&root).unwrap_or_else(|error| {
+            panic!("git must answer which tracked files are deleted: {error}")
+        });
+        for path in &deleted {
+            assert!(
+                !root.join(path).exists(),
+                "a path reported deleted must not be on disk: {path}"
+            );
+        }
+        // The report duplicate is the case this exists for; assert it only
+        // when the worktree is actually in that state, so the test does not
+        // demand a particular deletion be present forever.
+        if deleted.contains("docs/ALAS-report-clarified.md") {
+            assert!(
+                source_path_allowed("docs/ALAS-report-clarified.md"),
+                "the path must be allowlisted, or it would be skipped for the wrong reason \
+                 and the deletion handling would never be exercised"
+            );
+        }
+    }
 
     #[test]
     fn distribution_copies_native_branding_artifacts_verbatim() {
@@ -1622,6 +1861,29 @@ mod tests {
                 "packaged branding differs from {name}"
             );
         }
+
+        fs::remove_dir_all(package).expect("temporary package cleanup");
+    }
+
+    #[test]
+    fn distribution_bundles_and_validates_the_mses_osmap_resource() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .map(PathBuf::from)
+            .expect("workspace root beside xtask crate");
+        let package =
+            std::env::temp_dir().join(format!("alas-mses-osmap-package-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&package);
+        fs::create_dir_all(&package).expect("temporary package directory");
+
+        bundle_mses_osmap(&root, &package).expect("MSES OSMAP resource package");
+        validate_bundled_mses_osmap(&package).expect("packaged MSES OSMAP validates");
+        assert_eq!(
+            fs::metadata(package.join(MSES_OSMAP_RELATIVE_PATH))
+                .expect("packaged OSMAP")
+                .len(),
+            1_576_588
+        );
 
         fs::remove_dir_all(package).expect("temporary package cleanup");
     }
@@ -1683,12 +1945,17 @@ mod tests {
     }
 
     #[test]
+    fn ordinary_release_documentation_stays_in_the_source_package() {
+        assert!(source_path_allowed("docs/release-packaging.md"));
+    }
+
+    #[test]
     fn runtime_parity_data_outside_the_compile_time_closure_stays_excluded() {
         // The ~85 MB historical Python-reference-derived golden/ tree (read at
         // runtime via `alas_testkit::golden_dir`/`load_json`, not
         // `include_str!`/`include_bytes!`) is a distinct, still-excluded
         // category, per file, pending an individual provenance review of each
-        // fixture -- admitting it is a deliberate reproducibility trade
+        // fixture, admitting it is a deliberate reproducibility trade
         // documented in docs/release-packaging.md, not a silent gap in this
         // task's compile-time closure.
         assert!(!source_path_allowed("golden/generators/gen_config.py"));
@@ -1705,7 +1972,7 @@ mod tests {
         // Reviewed and admitted (see SOURCE_REVIEWED_EVIDENCE_FILES's doc
         // comment): every numeric anchor is a short factual value with a
         // `cite` key into a `sources` bibliography of title/authority/url
-        // only -- no reproduced manufacturer document text. Required by
+        // only, no reproduced manufacturer document text. Required by
         // `tools/aircraft_parity.cjs`, itself part of this source snapshot.
         assert!(source_path_allowed(
             "golden/aircraft/real_aircraft_parity.json"
@@ -1761,7 +2028,7 @@ mod tests {
         let text = r#"{
   "artifacts": [
     {
-      "path": "alas.exe",
+      "path": "ALAS.exe",
       "bytes": 17,
       "sha256": "0123456789abcdef"
     }
@@ -1769,7 +2036,7 @@ mod tests {
 }"#;
         let records = parse_artifact_records(text).expect("well-formed artifact entry");
         assert_eq!(records.len(), 1);
-        assert_eq!(records[0].path, "alas.exe");
+        assert_eq!(records[0].path, "ALAS.exe");
         assert_eq!(records[0].bytes, 17);
         assert_eq!(records[0].sha256, "0123456789abcdef");
 

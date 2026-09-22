@@ -196,21 +196,25 @@ fn read_modes_print(
     let eigenvector_tables = read_eigenvector_tables(print);
     let mut mode_shapes = Vec::new();
     for &mode_index in &kept {
-        let table = eigenvector_tables
+        // Keep one shape slot for every retained frequency, even when the
+        // print file omitted that mode's eigenvector table.  The public result
+        // promises parallel frequency/shape vectors; skipping a missing table
+        // would shift every later NASTRAN-95 shape onto the wrong mode.
+        let values = eigenvector_tables
             .get(mode_index)
-            .or_else(|| displacement_tables.get(mode_index));
-        let Some(table) = table else {
-            continue;
-        };
-        let values = ordered
-            .iter()
-            .map(|&(_, nid)| {
-                table
+            .or_else(|| displacement_tables.get(mode_index))
+            .map(|table| {
+                ordered
                     .iter()
-                    .find(|&&(grid, _)| grid == nid)
-                    .map_or(f64::NAN, |&(_, row)| row[2])
+                    .map(|&(_, nid)| {
+                        table
+                            .iter()
+                            .find(|&&(grid, _)| grid == nid)
+                            .map_or(f64::NAN, |&(_, row)| row[2])
+                    })
+                    .collect::<Vec<_>>()
             })
-            .collect::<Vec<_>>();
+            .unwrap_or_else(|| vec![f64::NAN; ordered.len()]);
         let scale = values
             .iter()
             .filter(|value| value.is_finite())
@@ -356,5 +360,39 @@ mod tests {
         assert_eq!(result.frequencies_hz, vec![0.25, 1.0]);
         assert_eq!(result.mode_shape_y_m, Some(vec![0.0, 1.0]));
         assert_eq!(result.mode_shapes, vec![vec![0.5, 1.0], vec![0.25, 1.0]]);
+    }
+
+    #[test]
+    fn local_modes_keep_shape_slots_when_a_print_vector_is_missing() {
+        let mut deck = Deck::new();
+        deck.add_grid(1, [0.0, 0.0, 0.0]);
+        deck.add_grid(2, [0.0, 1.0, 0.0]);
+        let index = MeshNodeIndex {
+            root_nid: 1,
+            tip_nid: 2,
+            kink_nid: 1,
+            spar_upper_nids: vec![vec![1, 2]],
+            spar_lower_nids: vec![],
+            engine_nids: vec![],
+        };
+        let print = "\
+ R E A L   E I G E N V A L U E S
+ 1 1 0.0 0.0 0.0
+ 2 1 1.0 1.0 0.25
+ 3 1 4.0 2.0 1.0
+ R E A L   E I G E N V E C T O R   N O .          1
+ 1 G 0.0 0.0 0.5 0.0 0.0 0.0
+ 2 G 0.0 0.0 1.0 0.0 0.0 0.0
+ R E A L   E I G E N V E C T O R   N O .          3
+ 1 G 0.0 0.0 0.25 0.0 0.0 0.0
+ 2 G 0.0 0.0 1.0 0.0 0.0 0.0
+";
+
+        let result = read_modes_print(print, &deck, &index, 2);
+
+        assert_eq!(result.frequencies_hz, vec![0.25, 1.0]);
+        assert_eq!(result.mode_shapes.len(), result.frequencies_hz.len());
+        assert!(result.mode_shapes[0].iter().all(|value| value.is_nan()));
+        assert!(result.mode_shapes[1].iter().all(|value| value.is_finite()));
     }
 }

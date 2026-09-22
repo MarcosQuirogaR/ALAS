@@ -6,8 +6,8 @@
 //!
 //! The geometry is read *out of* the fixture rather than rebuilt from the
 //! vehicle request. Rebuilding it would be checking two vehicle builders
-//! against each other -- `vehicle_builder.py` and a Rust reimplementation of
-//! it that this row does not own -- and `alas-aero::drag_buildup`'s ledger
+//! against each other: `vehicle_builder.py` and a Rust reimplementation of
+//! it that this row does not own, and `alas-aero::drag_buildup`'s ledger
 //! entry records what that costs: a parity test that re-derives its inputs
 //! reports the difference between two models as a disagreement in the one
 //! being tested.
@@ -270,7 +270,7 @@ impl Fixture {
     ///
     /// The moment reference is VORLAX's own choice: it takes the centre of
     /// gravity when the aircraft has one, and the main wing's aerodynamic
-    /// centre -- offset by the wing origin -- when the `x` component is
+    /// centre (offset by the wing origin) when the `x` component is
     /// exactly zero, which is every vehicle the mission runner builds since
     /// nothing sets a centre of gravity on it.
     pub fn vlm_geometry(&self) -> VlmGeometry {

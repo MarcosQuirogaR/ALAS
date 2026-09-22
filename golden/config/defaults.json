@@ -1636,7 +1636,7 @@
             "fields": [
               {
                 "advanced": false,
-                "help": "Design cruise Mach number -- the primary speed target the optimizer sizes the aircraft around.",
+                "help": "Design cruise Mach number: the primary speed target the optimizer sizes the aircraft around.",
                 "kind": "float",
                 "label": "Cruise Mach number",
                 "name": "cruise_mach",
@@ -1654,7 +1654,7 @@
               },
               {
                 "advanced": false,
-                "help": "Target maximum take-off weight -- anchors the whole weight & balance / sizing pipeline.",
+                "help": "Target maximum take-off weight: anchors the whole weight & balance / sizing pipeline.",
                 "kind": "float",
                 "label": "Max take-off weight (MTOW)",
                 "name": "mtow_kg",
@@ -1664,7 +1664,7 @@
               {
                 "advanced": false,
                 "editable": false,
-                "help": "'passenger' or 'cargo' -- switches which cabin-preset list and payload model apply.",
+                "help": "'passenger' or 'cargo': switches which cabin-preset list and payload model apply.",
                 "kind": "str",
                 "label": "Aircraft type",
                 "name": "aircraft_type",
@@ -1706,7 +1706,7 @@
               },
               {
                 "advanced": false,
-                "help": "Target passenger count (if aircraft_type is 'passenger'). Auto-recomputed when a cabin preset is active -- only editable with cabin_preset set to 'Custom'.",
+                "help": "Target passenger count (if aircraft_type is 'passenger'). Auto-recomputed when a cabin preset is active, only editable with cabin_preset set to 'Custom'.",
                 "kind": "int",
                 "label": "Passenger count",
                 "name": "num_passengers",
@@ -1719,7 +1719,7 @@
               },
               {
                 "advanced": false,
-                "help": "Target cargo payload capacity (if aircraft_type is 'cargo'). Auto-recomputed when a cabin preset is active -- only editable with cabin_preset set to 'Custom'.",
+                "help": "Target cargo payload capacity (if aircraft_type is 'cargo'). Auto-recomputed when a cabin preset is active, only editable with cabin_preset set to 'Custom'.",
                 "kind": "float",
                 "label": "Cargo payload capacity",
                 "name": "cargo_payload_kg",
@@ -1732,7 +1732,7 @@
               },
               {
                 "advanced": true,
-                "help": "Maximum structural payload (= MZFW - OEW), i.e. the most the airframe may carry regardless of how much the belly could physically hold. In passenger mode the detailed layout fills the lower-deck belly with revenue freight (on top of passengers + checked bags) up to this structural limit, so the payload -- and therefore the residual fuel (MTOW - OEW - payload) -- matches the real aircraft's max-payload point. A widebody belly can volumetrically hold far more than this structural cap, so without it 'fill the belly' overshoots. 0 = disabled (use the explicit Cabin & Payload belly_cargo_kg instead).",
+                "help": "Maximum structural payload (= MZFW - OEW), i.e. the most the airframe may carry regardless of how much the belly could physically hold. In passenger mode the detailed layout fills the lower-deck belly with revenue freight (on top of passengers + checked bags) up to this structural limit, so the payload, and therefore the residual fuel (MTOW - OEW - payload), matches the real aircraft's max-payload point. A widebody belly can volumetrically hold far more than this structural cap, so without it 'fill the belly' overshoots. 0 = disabled (use the explicit Cabin & Payload belly_cargo_kg instead).",
                 "kind": "float",
                 "label": "Max structural payload",
                 "name": "max_structural_payload_kg",
@@ -1741,7 +1741,7 @@
               },
               {
                 "advanced": true,
-                "help": "Hard floor on the geometry-resolved passenger capacity: a candidate whose class-mix and geometry produce fewer than this many seats is scored infeasible under the configured geometry constraint policy. 0 = disabled (the default) -- capacity is otherwise always dynamic, whatever the configured cabin class-mix percentages and the candidate's actual fuselage/cabin geometry produce, with no minimum.",
+                "help": "Hard floor on the geometry-resolved passenger capacity: a candidate whose class-mix and geometry produce fewer than this many seats is scored infeasible under the configured geometry constraint policy. 0 = disabled (the default): capacity is otherwise always dynamic, whatever the configured cabin class-mix percentages and the candidate's actual fuselage/cabin geometry produce, with no minimum.",
                 "kind": "int",
                 "label": "Minimum passenger capacity",
                 "name": "min_passenger_capacity",
@@ -1786,7 +1786,7 @@
               },
               {
                 "advanced": true,
-                "help": "Lower bound on wing loading (MTOW / wing area) -- keeps the wing from being sized too large for the mass it carries.",
+                "help": "Lower bound on wing loading (MTOW / wing area): keeps the wing from being sized too large for the mass it carries.",
                 "kind": "float",
                 "label": "Minimum wing loading (MTOW/S)",
                 "name": "min_wing_loading_kg_m2",
@@ -1862,7 +1862,7 @@
                 "fields": [
                   {
                     "advanced": false,
-                    "help": "Fuselage-station X of the wing-root leading-edge datum -- how far aft of the nose the wing sits.",
+                    "help": "Fuselage-station X of the wing-root leading-edge datum: how far aft of the nose the wing sits.",
                     "kind": "float",
                     "label": "Wing root X position",
                     "name": "root_datum_x_m",
@@ -7032,7 +7032,7 @@
                   },
                   {
                     "advanced": false,
-                    "help": "Incidence of the horizontal stabiliser root -- usually slightly negative to trim the wing's nose-down pitching moment.",
+                    "help": "Incidence of the horizontal stabiliser root, usually slightly negative to trim the wing's nose-down pitching moment.",
                     "kind": "float",
                     "label": "H-stab root twist",
                     "name": "hstab_root_twist_deg",
@@ -7122,7 +7122,7 @@
                 "fields": [
                   {
                     "advanced": false,
-                    "help": "Maximum fuselage cross-sectional diameter -- the main driver of cabin width and wetted area. Best judged on the 3-view preview's front/isometric panels, not the top view.",
+                    "help": "Maximum fuselage cross-sectional diameter: the main driver of cabin width and wetted area. Best judged on the 3-view preview's front/isometric panels, not the top view.",
                     "kind": "float",
                     "label": "Fuselage diameter (width)",
                     "name": "diameter_m",
@@ -7268,7 +7268,7 @@
                   },
                   {
                     "advanced": false,
-                    "help": "Small linear penalty per metre of span -- discourages excessively large wings.",
+                    "help": "Small linear penalty per metre of span: discourages excessively large wings.",
                     "kind": "weight_slider",
                     "label": "Wingspan penalty (per metre)",
                     "name": "span_penalty_per_m",
@@ -7304,7 +7304,7 @@
                   },
                   {
                     "advanced": false,
-                    "help": "NOT read by the cost function (objective.py) -- kept only so old saved YAML configs referencing this key still load without error. Originally intended to penalize (Delta x_cg / MAC)^2, but that formula was never actually wired up; the field's real runtime effect was fully redundant with static_margin_penalty_scale, since both applied to the identical static-margin-vs-target term, so the two are consolidated into that single, correctly-named, appropriately-soft term. Physical CG-envelope compliance is enforced separately by cg_envelope_penalty_scale/cg_envelope_reward below.",
+                    "help": "NOT read by the cost function (objective.py): kept only so old saved YAML configs referencing this key still load without error. Originally intended to penalize (Delta x_cg / MAC)^2, but that formula was never actually wired up; the field's real runtime effect was fully redundant with static_margin_penalty_scale, since both applied to the identical static-margin-vs-target term, so the two are consolidated into that single, correctly-named, appropriately-soft term. Physical CG-envelope compliance is enforced separately by cg_envelope_penalty_scale/cg_envelope_reward below.",
                     "kind": "weight_slider",
                     "label": "(Legacy, unused) CG/aero-balance mismatch weight",
                     "name": "cg_penalty_scale",
@@ -7340,7 +7340,7 @@
                   },
                   {
                     "advanced": false,
-                    "help": "Penalizes the wing's physical usable fuel-tank volume (physics.performance.wing_fuel_volume_m3, Torenbeek geometric estimate) being too small to hold the fuel mass the weight & balance analysis says this design actually needs -- a wing that's too thin/small/tapered to carry its own required fuel is not a buildable aircraft, independent of whether the MTOW fuel-mass budget itself closes. Quadratic on the fractional shortfall (required_fuel - tank_capacity) / required_fuel.",
+                    "help": "Penalizes the wing's physical usable fuel-tank volume (physics.performance.wing_fuel_volume_m3, Torenbeek geometric estimate) being too small to hold the fuel mass the weight & balance analysis says this design actually needs: a wing that's too thin/small/tapered to carry its own required fuel is not a buildable aircraft, independent of whether the MTOW fuel-mass budget itself closes. Quadratic on the fractional shortfall (required_fuel - tank_capacity) / required_fuel.",
                     "kind": "weight_slider",
                     "label": "Insufficient wing fuel-volume penalty weight",
                     "name": "fuel_volume_penalty_scale",
@@ -7349,7 +7349,7 @@
                   },
                   {
                     "advanced": false,
-                    "help": "SOFT preference nudging compliant-but-suboptimal candidates toward requirements.target_static_margin -- NOT a hard requirement (the physical floor, min_physical_static_margin, and the CG-envelope itself are enforced separately and are what actually keep a design safe/legal). Kept deliberately small relative to -L/D (typically 15-25) so this doesn't crowd out genuine aerodynamic improvements: raising it much above ~20-30 risks the optimizer chasing an exact SM match instead of exploring shape space, overwhelming the L/D signal the search is meant to prioritize.",
+                    "help": "SOFT preference nudging compliant-but-suboptimal candidates toward requirements.target_static_margin, NOT a hard requirement (the physical floor, min_physical_static_margin, and the CG-envelope itself are enforced separately and are what actually keep a design safe/legal). Kept deliberately small relative to -L/D (typically 15-25) so this doesn't crowd out genuine aerodynamic improvements: raising it much above ~20-30 risks the optimizer chasing an exact SM match instead of exploring shape space, overwhelming the L/D signal the search is meant to prioritize.",
                     "kind": "weight_slider",
                     "label": "Static-margin target penalty weight",
                     "name": "static_margin_penalty_scale",
@@ -7430,7 +7430,7 @@
                   },
                   {
                     "advanced": false,
-                    "help": "Upper bound on Vh -- penalises an oversized tail / an unnecessarily stretched fuselage moment arm.",
+                    "help": "Upper bound on Vh: penalises an oversized tail / an unnecessarily stretched fuselage moment arm.",
                     "kind": "float",
                     "label": "Maximum H-stab volume coefficient (Vh)",
                     "name": "max_hstab_volume_coef",
@@ -7484,7 +7484,7 @@
                   },
                   {
                     "advanced": false,
-                    "help": "Penalizes the wing's root-to-break trailing edge (seen in planform) making an angle greater than 90 deg with the fuselage centerline -- i.e. the break station's trailing edge sitting forward of the root's. That creates a reflex (concave) corner at the wing-fuselage junction: a severe stress concentration no real transport-category wing root has, caused by a short root chord combined with a comparatively long break chord and/or too little sweep. Quadratic on the angle exceedance beyond 90 deg.",
+                    "help": "Penalizes the wing's root-to-break trailing edge (seen in planform) making an angle greater than 90 deg with the fuselage centerline: i.e. the break station's trailing edge sitting forward of the root's. That creates a reflex (concave) corner at the wing-fuselage junction: a severe stress concentration no real transport-category wing root has, caused by a short root chord combined with a comparatively long break chord and/or too little sweep. Quadratic on the angle exceedance beyond 90 deg.",
                     "kind": "weight_slider",
                     "label": "Wing-root trailing-edge angle penalty weight",
                     "name": "te_root_angle_penalty_scale",
@@ -7493,7 +7493,7 @@
                   },
                   {
                     "advanced": false,
-                    "help": "Wing-root leading edge must sit at least this fraction of fuselage length aft of the nose -- prevents the optimizer placing the wing in the cockpit. Typical transports: 25-55%.",
+                    "help": "Wing-root leading edge must sit at least this fraction of fuselage length aft of the nose: prevents the optimizer placing the wing in the cockpit. Typical transports: 25-55%.",
                     "kind": "float",
                     "label": "Minimum wing position (fraction of fuselage length)",
                     "name": "min_wing_position_fraction",
@@ -7511,7 +7511,7 @@
                   },
                   {
                     "advanced": false,
-                    "help": "Steep quadratic penalty on the fractional shortfall vs. the target passenger count / cargo payload -- guides the optimizer to grow the fuselage long enough to actually fit the requested payload.",
+                    "help": "Steep quadratic penalty on the fractional shortfall vs. the target passenger count / cargo payload: guides the optimizer to grow the fuselage long enough to actually fit the requested payload.",
                     "kind": "weight_slider",
                     "label": "Payload-shortfall penalty weight",
                     "name": "payload_shortfall_penalty_scale",
@@ -7547,7 +7547,7 @@
                   },
                   {
                     "advanced": false,
-                    "help": "Severity scale for the static-margin-floor penalty applied to a candidate that builds and analyses successfully but is rejected as physically invalid (static margin below requirements.min_physical_static_margin). NOT a flat returned cost -- this floor is graduated, not an early return (objective.py's `(deficit * severity)**3` term, where this field sets `severity` so raising/lowering it steepens/relaxes the penalty without editing code; the default reproduces the exact cubic constant used before this field was wired up). Kept distinct from failure_cost so run diagnostics can tell 'geometry/analysis crashed' apart from 'physically unstable' rejects (see OptimizationHistory.reject_reason_counts).",
+                    "help": "Severity scale for the static-margin-floor penalty applied to a candidate that builds and analyses successfully but is rejected as physically invalid (static margin below requirements.min_physical_static_margin). NOT a flat returned cost; this floor is graduated, not an early return (objective.py's `(deficit * severity)**3` term, where this field sets `severity` so raising/lowering it steepens/relaxes the penalty without editing code; the default reproduces the exact cubic constant used before this field was wired up). Kept distinct from failure_cost so run diagnostics can tell 'geometry/analysis crashed' apart from 'physically unstable' rejects (see OptimizationHistory.reject_reason_counts).",
                     "kind": "weight_slider",
                     "label": "Instability reject cost",
                     "name": "instability_failure_cost",
@@ -7567,7 +7567,7 @@
                   {
                     "advanced": false,
                     "editable": false,
-                    "help": "SciPy differential_evolution strategy name (e.g. 'best1bin', 'rand1bin', 'best2bin') -- controls how new candidate designs are generated from the population each generation.",
+                    "help": "SciPy differential_evolution strategy name (e.g. 'best1bin', 'rand1bin', 'best2bin'): controls how new candidate designs are generated from the population each generation.",
                     "kind": "str",
                     "label": "DE mutation/crossover strategy",
                     "name": "strategy",
@@ -7599,7 +7599,7 @@
                   },
                   {
                     "advanced": false,
-                    "help": "Population size as a multiplier on the number of design variables -- more candidates per generation explores more broadly but costs more evaluations.",
+                    "help": "Population size as a multiplier on the number of design variables: more candidates per generation explores more broadly but costs more evaluations.",
                     "kind": "int",
                     "label": "Population size multiplier",
                     "name": "population_size",
@@ -7626,7 +7626,7 @@
                   },
                   {
                     "advanced": false,
-                    "help": "Number of worker processes for parallel evaluation (>1 uses multiprocessing). Requires a picklable objective -- already the case for ALAS's optimizer.",
+                    "help": "Number of worker processes for parallel evaluation (>1 uses multiprocessing). Requires a picklable objective, already the case for ALAS's optimizer.",
                     "kind": "int",
                     "label": "Parallel worker processes",
                     "name": "workers",
@@ -7724,7 +7724,7 @@
               },
               {
                 "advanced": false,
-                "help": "Spanwise panel resolution used ONLY for the once-per-run final/reported analysis (drag polar, trimmed cruise point, neutral point) -- not the optimizer loop. Higher fidelity where speed doesn't matter.",
+                "help": "Spanwise panel resolution used ONLY for the once-per-run final/reported analysis (drag polar, trimmed cruise point, neutral point), not the optimizer loop. Higher fidelity where speed doesn't matter.",
                 "kind": "int",
                 "label": "Fine VLM spanwise resolution (final analysis)",
                 "name": "fine_spanwise_resolution",
@@ -7960,7 +7960,7 @@
               },
               {
                 "advanced": false,
-                "help": "Maximum lift coefficient in clean (flaps/slats up) configuration -- the true aerodynamic stall limit used for the V-n diagram's stall boundary, distinct from the flaps-down CLmax_TO/CLmax_L above.",
+                "help": "Maximum lift coefficient in clean (flaps/slats up) configuration: the true aerodynamic stall limit used for the V-n diagram's stall boundary, distinct from the flaps-down CLmax_TO/CLmax_L above.",
                 "kind": "float",
                 "label": "Max lift coefficient, clean (CLmax_clean)",
                 "name": "cl_max_clean",
@@ -7969,7 +7969,7 @@
               },
               {
                 "advanced": false,
-                "help": "Most negative (inverted-flight) lift coefficient in clean configuration -- the negative stall boundary on the V-n diagram.",
+                "help": "Most negative (inverted-flight) lift coefficient in clean configuration: the negative stall boundary on the V-n diagram.",
                 "kind": "float",
                 "label": "Min lift coefficient, clean (CLmin_clean)",
                 "name": "cl_min_clean",
@@ -8113,7 +8113,7 @@
               },
               {
                 "advanced": false,
-                "help": "Number of wing-loading points swept when drawing the matching-chart constraint curves (Results -> Matching Chart). Purely a plotting resolution knob -- higher gives smoother curves at extra compute cost. Not part of the Performance preset (it isn't a physical assumption).",
+                "help": "Number of wing-loading points swept when drawing the matching-chart constraint curves (Results -> Matching Chart). Purely a plotting resolution knob: higher gives smoother curves at extra compute cost. Not part of the Performance preset (it isn't a physical assumption).",
                 "kind": "int",
                 "label": "Matching chart plot resolution",
                 "name": "matching_chart_resolution",
@@ -8213,7 +8213,7 @@
               },
               {
                 "advanced": false,
-                "help": "How much payload mass occupies one metre of cabin length. Used only to derive the payload/systems CG position (the occupied cabin length), not the payload mass itself -- so stretching the fuselage beyond what the payload needs doesn't shift the CG aft 'for free'.",
+                "help": "How much payload mass occupies one metre of cabin length. Used only to derive the payload/systems CG position (the occupied cabin length), not the payload mass itself, so stretching the fuselage beyond what the payload needs doesn't shift the CG aft 'for free'.",
                 "kind": "float",
                 "label": "Payload linear density",
                 "name": "cabin_payload_density_kg_m",
@@ -8240,7 +8240,7 @@
               },
               {
                 "advanced": false,
-                "help": "Maximum fraction of total aircraft weight the nose gear is rated to carry -- sets the 'NLG Max Strength' CG-envelope boundary.",
+                "help": "Maximum fraction of total aircraft weight the nose gear is rated to carry: sets the 'NLG Max Strength' CG-envelope boundary.",
                 "kind": "float",
                 "label": "Max nose-gear load fraction",
                 "name": "pct_load_nlg_max",
@@ -8249,7 +8249,7 @@
               },
               {
                 "advanced": false,
-                "help": "Maximum fraction of total aircraft weight the main gear is rated to carry -- sets the 'MLG Max Strength' CG-envelope boundary.",
+                "help": "Maximum fraction of total aircraft weight the main gear is rated to carry: sets the 'MLG Max Strength' CG-envelope boundary.",
                 "kind": "float",
                 "label": "Max main-gear load fraction",
                 "name": "pct_load_mlg_max",
@@ -8258,7 +8258,7 @@
               },
               {
                 "advanced": false,
-                "help": "Minimum fraction of weight that must be on the nose gear for adequate steering authority -- sets the 'Min Nose Load' CG-envelope boundary (the aft-most safe CG at each weight).",
+                "help": "Minimum fraction of weight that must be on the nose gear for adequate steering authority: sets the 'Min Nose Load' CG-envelope boundary (the aft-most safe CG at each weight).",
                 "kind": "float",
                 "label": "Min nose-gear load fraction",
                 "name": "pct_load_nlg_min",
@@ -8304,7 +8304,7 @@
             "fields": [
               {
                 "advanced": false,
-                "help": "Margin applied to the static reaction load when selecting/verifying tire count -- real gear is sized so the rated tire load is never fully consumed by static load alone, leaving margin for dynamic (braking, turning, rough-field) loads. Raymer: ~1.07 typical for a preliminary sizing pass.",
+                "help": "Margin applied to the static reaction load when selecting/verifying tire count: real gear is sized so the rated tire load is never fully consumed by static load alone, leaving margin for dynamic (braking, turning, rough-field) loads. Raymer: ~1.07 typical for a preliminary sizing pass.",
                 "kind": "float",
                 "label": "Tire load safety factor",
                 "name": "tire_safety_factor",
@@ -8322,7 +8322,7 @@
               },
               {
                 "advanced": false,
-                "help": "Auto-sizing switches from a single to a dual (twin) nose wheel above this MTOW -- below it, transport-category aircraft still commonly fly single nose wheels.",
+                "help": "Auto-sizing switches from a single to a dual (twin) nose wheel above this MTOW: below it, transport-category aircraft still commonly fly single nose wheels.",
                 "kind": "float",
                 "label": "MTOW threshold for dual nose wheels",
                 "name": "nlg_dual_wheel_mtow_kg",
@@ -8331,7 +8331,7 @@
               },
               {
                 "advanced": false,
-                "help": "Number of main-gear legs (each with its own wheel bogie), left+right combined. 0 = auto: 2 (one per side) below mlg_body_gear_mtow_kg, 4 (adds centreline body gear, e.g. A380/747-class) above it -- real widebodies above roughly 300 t add body gear because a two-leg bogie would need an impractically large tire count/track width to carry the load within tire-pressure limits.",
+                "help": "Number of main-gear legs (each with its own wheel bogie), left+right combined. 0 = auto: 2 (one per side) below mlg_body_gear_mtow_kg, 4 (adds centreline body gear, e.g. A380/747-class) above it: real widebodies above roughly 300 t add body gear because a two-leg bogie would need an impractically large tire count/track width to carry the load within tire-pressure limits.",
                 "kind": "int",
                 "label": "Main-gear strut count (0 = auto)",
                 "name": "n_mlg_struts",
@@ -8358,7 +8358,7 @@
               },
               {
                 "advanced": false,
-                "help": "Main-gear lateral track width, as a multiple of fuselage diameter. Real transports with wing-root-mounted main gear run track/diameter ~1.75-2.0 (777-300ER 2.03, 787-9 1.90, A340-300 1.91, A380-800 2.00, A320-200 1.92, DC-10-30 1.77) -- 1.85 is the fleet-average calibration. An earlier default (1.15) understated real track width by roughly a factor of 1.6, which fed directly into the lateral-turnover check (physics.landing_gear) reading artificially safe.",
+                "help": "Main-gear lateral track width, as a multiple of fuselage diameter. Real transports with wing-root-mounted main gear run track/diameter ~1.75-2.0 (777-300ER 2.03, 787-9 1.90, A340-300 1.91, A380-800 2.00, A320-200 1.92, DC-10-30 1.77): 1.85 is the fleet-average calibration. An earlier default (1.15) understated real track width by roughly a factor of 1.6, which fed directly into the lateral-turnover check (physics.landing_gear) reading artificially safe.",
                 "kind": "float",
                 "label": "Main-gear track / fuselage-diameter factor",
                 "name": "track_diameter_factor",
@@ -8368,7 +8368,7 @@
               {
                 "advanced": false,
                 "editable": false,
-                "help": "Which reference tire (see physics.landing_gear.TIRE_DATABASE) to size with -- 'auto' picks the smallest class whose rated load, combined with a realistic wheel count (<=6/strut), covers the aircraft's static gear loads. Options: auto, light, narrowbody, widebody, heavy.",
+                "help": "Which reference tire (see physics.landing_gear.TIRE_DATABASE) to size with: 'auto' picks the smallest class whose rated load, combined with a realistic wheel count (<=6/strut), covers the aircraft's static gear loads. Options: auto, light, narrowbody, widebody, heavy.",
                 "kind": "str",
                 "label": "Tire class",
                 "name": "tire_class",
@@ -8385,7 +8385,7 @@
               {
                 "advanced": false,
                 "editable": false,
-                "help": "Landing-gear strut/piston material, shown on the planform diagram and in the design report. 'auto' selects by MTOW class (see physics.landing_gear.STRUT_MATERIALS): high-strength steel (300M-class) for larger transports, an aluminium/steel combination for light aircraft. Informational/labelling only -- this preliminary-design tool does not run a structural (FEA) stress analysis of the strut itself.",
+                "help": "Landing-gear strut/piston material, shown on the planform diagram and in the design report. 'auto' selects by MTOW class (see physics.landing_gear.STRUT_MATERIALS): high-strength steel (300M-class) for larger transports, an aluminium/steel combination for light aircraft. Informational/labelling only; this preliminary-design tool does not run a structural (FEA) stress analysis of the strut itself.",
                 "kind": "str",
                 "label": "Strut material",
                 "name": "strut_material",
@@ -8422,7 +8422,7 @@
                 "fields": [
                   {
                     "advanced": false,
-                    "help": "'percent': give each class a share of cabin length and let the layout solve the seat counts (recommended -- counts depend on pitch, abreast and fuselage shape). 'count': type exact per-class seat numbers instead.",
+                    "help": "'percent': give each class a share of cabin length and let the layout solve the seat counts (recommended: counts depend on pitch, abreast and fuselage shape). 'count': type exact per-class seat numbers instead.",
                     "kind": "str",
                     "label": "Class mix mode",
                     "name": "class_mix_mode",
@@ -8480,7 +8480,7 @@
                       },
                       {
                         "advanced": false,
-                        "help": "Lateral seat footprint (incl. shell/armrests -- wider than the raw cushion for premium classes). Floor is economy's 16 in (0.4064 m) cushion width (Matrix B).",
+                        "help": "Lateral seat footprint (incl. shell/armrests: wider than the raw cushion for premium classes). Floor is economy's 16 in (0.4064 m) cushion width (Matrix B).",
                         "kind": "float",
                         "label": "Width",
                         "max": 1.2,
@@ -8556,7 +8556,7 @@
                       },
                       {
                         "advanced": false,
-                        "help": "Lateral seat footprint (incl. shell/armrests -- wider than the raw cushion for premium classes). Floor is economy's 16 in (0.4064 m) cushion width (Matrix B).",
+                        "help": "Lateral seat footprint (incl. shell/armrests: wider than the raw cushion for premium classes). Floor is economy's 16 in (0.4064 m) cushion width (Matrix B).",
                         "kind": "float",
                         "label": "Width",
                         "max": 1.2,
@@ -8632,7 +8632,7 @@
                       },
                       {
                         "advanced": false,
-                        "help": "Lateral seat footprint (incl. shell/armrests -- wider than the raw cushion for premium classes). Floor is economy's 16 in (0.4064 m) cushion width (Matrix B).",
+                        "help": "Lateral seat footprint (incl. shell/armrests: wider than the raw cushion for premium classes). Floor is economy's 16 in (0.4064 m) cushion width (Matrix B).",
                         "kind": "float",
                         "label": "Width",
                         "max": 1.2,
@@ -8708,7 +8708,7 @@
                       },
                       {
                         "advanced": false,
-                        "help": "Lateral seat footprint (incl. shell/armrests -- wider than the raw cushion for premium classes). Floor is economy's 16 in (0.4064 m) cushion width (Matrix B).",
+                        "help": "Lateral seat footprint (incl. shell/armrests: wider than the raw cushion for premium classes). Floor is economy's 16 in (0.4064 m) cushion width (Matrix B).",
                         "kind": "float",
                         "label": "Width",
                         "max": 1.2,
@@ -9322,7 +9322,7 @@
               },
               {
                 "advanced": false,
-                "help": "Newton iteration cap per angle of attack -- MSES reports non-convergence rather than looping forever, but a hard cap keeps a single stubborn point from stalling the whole sweep.",
+                "help": "Newton iteration cap per angle of attack: MSES reports non-convergence rather than looping forever, but a hard cap keeps a single stubborn point from stalling the whole sweep.",
                 "kind": "int",
                 "label": "Max solver iterations",
                 "name": "max_iterations",
@@ -9385,7 +9385,7 @@
               },
               {
                 "advanced": false,
-                "help": "Streamwise grid stretching parameter for the MSET mesh -- larger values cluster more points near the airfoil.",
+                "help": "Streamwise grid stretching parameter for the MSET mesh: larger values cluster more points near the airfoil.",
                 "kind": "float",
                 "label": "MSET grid density exponent (e)",
                 "name": "mset_e",
@@ -9747,7 +9747,7 @@
               },
               {
                 "advanced": false,
-                "help": "Used only to sanity-check the design mass flow implied by anchoring the cycle to the engine's rated static thrust -- a conceptual-design-level assumption, not a real corrected-flow schedule.",
+                "help": "Used only to sanity-check the design mass flow implied by anchoring the cycle to the engine's rated static thrust: a conceptual-design-level assumption, not a real corrected-flow schedule.",
                 "kind": "float",
                 "label": "Assumed fan-face Mach number (static anchor)",
                 "name": "fan_face_mach",
@@ -9766,7 +9766,7 @@
             "fields": [
               {
                 "advanced": false,
-                "help": "Size a generic wingbox (skin/spars/ribs) for the optimized design's main wing, write NASTRAN .bdf files, and compute theoretical (no-NASTRAN) deformations/stresses/frequencies as part of a normal Run, populating the Structural Analysis Results tab. Does not affect the mass model, CG, or optimizer -- purely a downstream analysis, like MSES/Propulsion Analysis.",
+                "help": "Size a generic wingbox (skin/spars/ribs) for the optimized design's main wing, write NASTRAN .bdf files, and compute theoretical (no-NASTRAN) deformations/stresses/frequencies as part of a normal Run, populating the Structural Analysis Results tab. Does not affect the mass model, CG, or optimizer, purely a downstream analysis, like MSES/Propulsion Analysis.",
                 "kind": "bool",
                 "label": "Enabled",
                 "name": "enabled",
@@ -9804,7 +9804,7 @@
               },
               {
                 "advanced": false,
-                "help": "Adds an optional third spar running only from the root to the wing break/kink station, at center_spar_chord_fraction of local chord -- the partial-span reinforcement spar common on widebody wings (extra bending/shear capacity where root load is highest, without the mass of running it all the way to the tip). Off by default (classic 2-spar box). This spar carries no load and contributes no mass outboard of the kink -- it simply doesn't exist there.",
+                "help": "Adds an optional third spar running only from the root to the wing break/kink station, at center_spar_chord_fraction of local chord: the partial-span reinforcement spar common on widebody wings (extra bending/shear capacity where root load is highest, without the mass of running it all the way to the tip). Off by default (classic 2-spar box). This spar carries no load and contributes no mass outboard of the kink; it simply doesn't exist there.",
                 "kind": "bool",
                 "label": "Add center spar (root-to-kink)",
                 "name": "center_spar_enabled",
@@ -9923,7 +9923,7 @@
               },
               {
                 "advanced": false,
-                "help": "Wing skin thickness -- this is the value actually used (no shear-flow/buckling upsizing is modeled, see structural_sizing.py), so treat it as a practical starting assumption for this class of aircraft, not a bare absolute-minimum gauge. 6mm matches the reference sizing scripts' own baseline for a large long-range wing; a much thinner value (e.g. 2mm) understates real skin panel buckling resistance and inflates the auto-derived rib count substantially, since rib spacing scales with sqrt(t_skin).",
+                "help": "Wing skin thickness; this is the value actually used (no shear-flow/buckling upsizing is modeled, see structural_sizing.py), so treat it as a practical starting assumption for this class of aircraft, not a bare absolute-minimum gauge. 6mm matches the reference sizing scripts' own baseline for a large long-range wing; a much thinner value (e.g. 2mm) understates real skin panel buckling resistance and inflates the auto-derived rib count substantially, since rib spacing scales with sqrt(t_skin).",
                 "kind": "float",
                 "label": "Skin gauge",
                 "name": "t_skin_min_m",
@@ -9977,7 +9977,7 @@
               },
               {
                 "advanced": false,
-                "help": "Empirical panel-buckling coefficient (c) in the Euler skin-panel critical stress formula used to auto-derive rib spacing/count -- higher allows wider rib spacing for the same skin thickness.",
+                "help": "Empirical panel-buckling coefficient (c) in the Euler skin-panel critical stress formula used to auto-derive rib spacing/count: higher allows wider rib spacing for the same skin thickness.",
                 "kind": "float",
                 "label": "Rib spacing buckling coefficient",
                 "name": "rib_buckling_coeff",
@@ -10269,7 +10269,7 @@
           },
           {
             "advanced": false,
-            "help": "Spanwise panel resolution used ONLY for the once-per-run final/reported analysis (drag polar, trimmed cruise point, neutral point) -- not the optimizer loop. Higher fidelity where speed doesn't matter.",
+            "help": "Spanwise panel resolution used ONLY for the once-per-run final/reported analysis (drag polar, trimmed cruise point, neutral point), not the optimizer loop. Higher fidelity where speed doesn't matter.",
             "kind": "int",
             "label": "Fine VLM spanwise resolution (final analysis)",
             "name": "fine_spanwise_resolution",
@@ -10611,7 +10611,7 @@
             "fields": [
               {
                 "advanced": false,
-                "help": "'percent': give each class a share of cabin length and let the layout solve the seat counts (recommended -- counts depend on pitch, abreast and fuselage shape). 'count': type exact per-class seat numbers instead.",
+                "help": "'percent': give each class a share of cabin length and let the layout solve the seat counts (recommended: counts depend on pitch, abreast and fuselage shape). 'count': type exact per-class seat numbers instead.",
                 "kind": "str",
                 "label": "Class mix mode",
                 "name": "class_mix_mode",
@@ -10669,7 +10669,7 @@
                   },
                   {
                     "advanced": false,
-                    "help": "Lateral seat footprint (incl. shell/armrests -- wider than the raw cushion for premium classes). Floor is economy's 16 in (0.4064 m) cushion width (Matrix B).",
+                    "help": "Lateral seat footprint (incl. shell/armrests: wider than the raw cushion for premium classes). Floor is economy's 16 in (0.4064 m) cushion width (Matrix B).",
                     "kind": "float",
                     "label": "Width",
                     "max": 1.2,
@@ -10745,7 +10745,7 @@
                   },
                   {
                     "advanced": false,
-                    "help": "Lateral seat footprint (incl. shell/armrests -- wider than the raw cushion for premium classes). Floor is economy's 16 in (0.4064 m) cushion width (Matrix B).",
+                    "help": "Lateral seat footprint (incl. shell/armrests: wider than the raw cushion for premium classes). Floor is economy's 16 in (0.4064 m) cushion width (Matrix B).",
                     "kind": "float",
                     "label": "Width",
                     "max": 1.2,
@@ -10821,7 +10821,7 @@
                   },
                   {
                     "advanced": false,
-                    "help": "Lateral seat footprint (incl. shell/armrests -- wider than the raw cushion for premium classes). Floor is economy's 16 in (0.4064 m) cushion width (Matrix B).",
+                    "help": "Lateral seat footprint (incl. shell/armrests: wider than the raw cushion for premium classes). Floor is economy's 16 in (0.4064 m) cushion width (Matrix B).",
                     "kind": "float",
                     "label": "Width",
                     "max": 1.2,
@@ -10897,7 +10897,7 @@
                   },
                   {
                     "advanced": false,
-                    "help": "Lateral seat footprint (incl. shell/armrests -- wider than the raw cushion for premium classes). Floor is economy's 16 in (0.4064 m) cushion width (Matrix B).",
+                    "help": "Lateral seat footprint (incl. shell/armrests: wider than the raw cushion for premium classes). Floor is economy's 16 in (0.4064 m) cushion width (Matrix B).",
                     "kind": "float",
                     "label": "Width",
                     "max": 1.2,
@@ -11436,7 +11436,7 @@
         "fields": [
           {
             "advanced": false,
-            "help": "Design cruise Mach number -- the primary speed target the optimizer sizes the aircraft around.",
+            "help": "Design cruise Mach number: the primary speed target the optimizer sizes the aircraft around.",
             "kind": "float",
             "label": "Cruise Mach number",
             "name": "cruise_mach",
@@ -11454,7 +11454,7 @@
           },
           {
             "advanced": false,
-            "help": "Target maximum take-off weight -- anchors the whole weight & balance / sizing pipeline.",
+            "help": "Target maximum take-off weight: anchors the whole weight & balance / sizing pipeline.",
             "kind": "float",
             "label": "Max take-off weight (MTOW)",
             "name": "mtow_kg",
@@ -11464,7 +11464,7 @@
           {
             "advanced": false,
             "editable": false,
-            "help": "'passenger' or 'cargo' -- switches which cabin-preset list and payload model apply.",
+            "help": "'passenger' or 'cargo': switches which cabin-preset list and payload model apply.",
             "kind": "str",
             "label": "Aircraft type",
             "name": "aircraft_type",
@@ -11506,7 +11506,7 @@
           },
           {
             "advanced": false,
-            "help": "Target passenger count (if aircraft_type is 'passenger'). Auto-recomputed when a cabin preset is active -- only editable with cabin_preset set to 'Custom'.",
+            "help": "Target passenger count (if aircraft_type is 'passenger'). Auto-recomputed when a cabin preset is active, only editable with cabin_preset set to 'Custom'.",
             "kind": "int",
             "label": "Passenger count",
             "name": "num_passengers",
@@ -11519,7 +11519,7 @@
           },
           {
             "advanced": false,
-            "help": "Target cargo payload capacity (if aircraft_type is 'cargo'). Auto-recomputed when a cabin preset is active -- only editable with cabin_preset set to 'Custom'.",
+            "help": "Target cargo payload capacity (if aircraft_type is 'cargo'). Auto-recomputed when a cabin preset is active, only editable with cabin_preset set to 'Custom'.",
             "kind": "float",
             "label": "Cargo payload capacity",
             "name": "cargo_payload_kg",
@@ -11532,7 +11532,7 @@
           },
           {
             "advanced": true,
-            "help": "Maximum structural payload (= MZFW - OEW), i.e. the most the airframe may carry regardless of how much the belly could physically hold. In passenger mode the detailed layout fills the lower-deck belly with revenue freight (on top of passengers + checked bags) up to this structural limit, so the payload -- and therefore the residual fuel (MTOW - OEW - payload) -- matches the real aircraft's max-payload point. A widebody belly can volumetrically hold far more than this structural cap, so without it 'fill the belly' overshoots. 0 = disabled (use the explicit Cabin & Payload belly_cargo_kg instead).",
+            "help": "Maximum structural payload (= MZFW - OEW), i.e. the most the airframe may carry regardless of how much the belly could physically hold. In passenger mode the detailed layout fills the lower-deck belly with revenue freight (on top of passengers + checked bags) up to this structural limit, so the payload, and therefore the residual fuel (MTOW - OEW - payload), matches the real aircraft's max-payload point. A widebody belly can volumetrically hold far more than this structural cap, so without it 'fill the belly' overshoots. 0 = disabled (use the explicit Cabin & Payload belly_cargo_kg instead).",
             "kind": "float",
             "label": "Max structural payload",
             "name": "max_structural_payload_kg",
@@ -11541,7 +11541,7 @@
           },
           {
             "advanced": true,
-            "help": "Hard floor on the geometry-resolved passenger capacity: a candidate whose class-mix and geometry produce fewer than this many seats is scored infeasible under the configured geometry constraint policy. 0 = disabled (the default) -- capacity is otherwise always dynamic, whatever the configured cabin class-mix percentages and the candidate's actual fuselage/cabin geometry produce, with no minimum.",
+            "help": "Hard floor on the geometry-resolved passenger capacity: a candidate whose class-mix and geometry produce fewer than this many seats is scored infeasible under the configured geometry constraint policy. 0 = disabled (the default): capacity is otherwise always dynamic, whatever the configured cabin class-mix percentages and the candidate's actual fuselage/cabin geometry produce, with no minimum.",
             "kind": "int",
             "label": "Minimum passenger capacity",
             "name": "min_passenger_capacity",
@@ -11586,7 +11586,7 @@
           },
           {
             "advanced": true,
-            "help": "Lower bound on wing loading (MTOW / wing area) -- keeps the wing from being sized too large for the mass it carries.",
+            "help": "Lower bound on wing loading (MTOW / wing area): keeps the wing from being sized too large for the mass it carries.",
             "kind": "float",
             "label": "Minimum wing loading (MTOW/S)",
             "name": "min_wing_loading_kg_m2",
@@ -11856,7 +11856,7 @@
           {
             "advanced": false,
             "editable": false,
-            "help": "Name from the built-in engine database (see the Engine selector on the Inputs tab) -- drives thrust, mass, and the default nacelle profile.",
+            "help": "Name from the built-in engine database (see the Engine selector on the Inputs tab): drives thrust, mass, and the default nacelle profile.",
             "kind": "str",
             "label": "Engine model",
             "name": "engine_name",
@@ -11878,7 +11878,7 @@
               "x-station [m]",
               "radius fraction [0-1]"
             ],
-            "help": "List of (x-station [m], radius-fraction [0-1 of radius_scale_m below]) pairs tracing the nacelle's longitudinal silhouette from inlet (x=0) to exit -- see the Engine Designer tab's live nacelle-silhouette preview for a picture of the shape these points draw. Auto-filled from the engine database when engine_name is recognised.",
+            "help": "List of (x-station [m], radius-fraction [0-1 of radius_scale_m below]) pairs tracing the nacelle's longitudinal silhouette from inlet (x=0) to exit, see the Engine Designer tab's live nacelle-silhouette preview for a picture of the shape these points draw. Auto-filled from the engine database when engine_name is recognised.",
             "kind": "tuple_list",
             "label": "Nacelle profile points",
             "name": "nacelle_profile",
@@ -11988,7 +11988,7 @@
           },
           {
             "advanced": true,
-            "help": "Combustor-exit stagnation temperature -- the primary driver of specific thrust and thermal efficiency in the on-design cycle.",
+            "help": "Combustor-exit stagnation temperature: the primary driver of specific thrust and thermal efficiency in the on-design cycle.",
             "kind": "float",
             "label": "Turbine inlet temperature (T4t)",
             "name": "turbine_inlet_temp_k",
@@ -11997,7 +11997,7 @@
           },
           {
             "advanced": false,
-            "help": "Reference cruise thrust-specific fuel consumption, used by the Breguet payload-range diagram. Not necessarily identical to the Propulsion Analysis tab's on-design-cycle-computed TSFC (a fast conceptual cycle model with generic component efficiencies vs. this field's real/published in-service figure) -- see that tab's caption.",
+            "help": "Reference cruise thrust-specific fuel consumption, used by the Breguet payload-range diagram. Not necessarily identical to the Propulsion Analysis tab's on-design-cycle-computed TSFC (a fast conceptual cycle model with generic component efficiencies vs. this field's real/published in-service figure), see that tab's caption.",
             "kind": "float",
             "label": "Cruise TSFC (reference)",
             "name": "cruise_tsfc_kg_kgf_hr",
@@ -12006,7 +12006,7 @@
           },
           {
             "advanced": true,
-            "help": "Fan face diameter -- informational/reference only (does not currently size the nacelle profile, which comes from radius_scale_m/nacelle_profile above).",
+            "help": "Fan face diameter: informational/reference only (does not currently size the nacelle profile, which comes from radius_scale_m/nacelle_profile above).",
             "kind": "float",
             "label": "Fan diameter",
             "name": "fan_diameter_m",
@@ -12277,7 +12277,7 @@
             "fields": [
               {
                 "advanced": false,
-                "help": "Fuselage-station X of the wing-root leading-edge datum -- how far aft of the nose the wing sits.",
+                "help": "Fuselage-station X of the wing-root leading-edge datum: how far aft of the nose the wing sits.",
                 "kind": "float",
                 "label": "Wing root X position",
                 "name": "root_datum_x_m",
@@ -17447,7 +17447,7 @@
               },
               {
                 "advanced": false,
-                "help": "Incidence of the horizontal stabiliser root -- usually slightly negative to trim the wing's nose-down pitching moment.",
+                "help": "Incidence of the horizontal stabiliser root, usually slightly negative to trim the wing's nose-down pitching moment.",
                 "kind": "float",
                 "label": "H-stab root twist",
                 "name": "hstab_root_twist_deg",
@@ -17537,7 +17537,7 @@
             "fields": [
               {
                 "advanced": false,
-                "help": "Maximum fuselage cross-sectional diameter -- the main driver of cabin width and wetted area. Best judged on the 3-view preview's front/isometric panels, not the top view.",
+                "help": "Maximum fuselage cross-sectional diameter: the main driver of cabin width and wetted area. Best judged on the 3-view preview's front/isometric panels, not the top view.",
                 "kind": "float",
                 "label": "Fuselage diameter (width)",
                 "name": "diameter_m",
@@ -17685,7 +17685,7 @@
         "fields": [
           {
             "advanced": false,
-            "help": "Margin applied to the static reaction load when selecting/verifying tire count -- real gear is sized so the rated tire load is never fully consumed by static load alone, leaving margin for dynamic (braking, turning, rough-field) loads. Raymer: ~1.07 typical for a preliminary sizing pass.",
+            "help": "Margin applied to the static reaction load when selecting/verifying tire count: real gear is sized so the rated tire load is never fully consumed by static load alone, leaving margin for dynamic (braking, turning, rough-field) loads. Raymer: ~1.07 typical for a preliminary sizing pass.",
             "kind": "float",
             "label": "Tire load safety factor",
             "name": "tire_safety_factor",
@@ -17703,7 +17703,7 @@
           },
           {
             "advanced": false,
-            "help": "Auto-sizing switches from a single to a dual (twin) nose wheel above this MTOW -- below it, transport-category aircraft still commonly fly single nose wheels.",
+            "help": "Auto-sizing switches from a single to a dual (twin) nose wheel above this MTOW: below it, transport-category aircraft still commonly fly single nose wheels.",
             "kind": "float",
             "label": "MTOW threshold for dual nose wheels",
             "name": "nlg_dual_wheel_mtow_kg",
@@ -17712,7 +17712,7 @@
           },
           {
             "advanced": false,
-            "help": "Number of main-gear legs (each with its own wheel bogie), left+right combined. 0 = auto: 2 (one per side) below mlg_body_gear_mtow_kg, 4 (adds centreline body gear, e.g. A380/747-class) above it -- real widebodies above roughly 300 t add body gear because a two-leg bogie would need an impractically large tire count/track width to carry the load within tire-pressure limits.",
+            "help": "Number of main-gear legs (each with its own wheel bogie), left+right combined. 0 = auto: 2 (one per side) below mlg_body_gear_mtow_kg, 4 (adds centreline body gear, e.g. A380/747-class) above it: real widebodies above roughly 300 t add body gear because a two-leg bogie would need an impractically large tire count/track width to carry the load within tire-pressure limits.",
             "kind": "int",
             "label": "Main-gear strut count (0 = auto)",
             "name": "n_mlg_struts",
@@ -17739,7 +17739,7 @@
           },
           {
             "advanced": false,
-            "help": "Main-gear lateral track width, as a multiple of fuselage diameter. Real transports with wing-root-mounted main gear run track/diameter ~1.75-2.0 (777-300ER 2.03, 787-9 1.90, A340-300 1.91, A380-800 2.00, A320-200 1.92, DC-10-30 1.77) -- 1.85 is the fleet-average calibration. An earlier default (1.15) understated real track width by roughly a factor of 1.6, which fed directly into the lateral-turnover check (physics.landing_gear) reading artificially safe.",
+            "help": "Main-gear lateral track width, as a multiple of fuselage diameter. Real transports with wing-root-mounted main gear run track/diameter ~1.75-2.0 (777-300ER 2.03, 787-9 1.90, A340-300 1.91, A380-800 2.00, A320-200 1.92, DC-10-30 1.77): 1.85 is the fleet-average calibration. An earlier default (1.15) understated real track width by roughly a factor of 1.6, which fed directly into the lateral-turnover check (physics.landing_gear) reading artificially safe.",
             "kind": "float",
             "label": "Main-gear track / fuselage-diameter factor",
             "name": "track_diameter_factor",
@@ -17749,7 +17749,7 @@
           {
             "advanced": false,
             "editable": false,
-            "help": "Which reference tire (see physics.landing_gear.TIRE_DATABASE) to size with -- 'auto' picks the smallest class whose rated load, combined with a realistic wheel count (<=6/strut), covers the aircraft's static gear loads. Options: auto, light, narrowbody, widebody, heavy.",
+            "help": "Which reference tire (see physics.landing_gear.TIRE_DATABASE) to size with: 'auto' picks the smallest class whose rated load, combined with a realistic wheel count (<=6/strut), covers the aircraft's static gear loads. Options: auto, light, narrowbody, widebody, heavy.",
             "kind": "str",
             "label": "Tire class",
             "name": "tire_class",
@@ -17766,7 +17766,7 @@
           {
             "advanced": false,
             "editable": false,
-            "help": "Landing-gear strut/piston material, shown on the planform diagram and in the design report. 'auto' selects by MTOW class (see physics.landing_gear.STRUT_MATERIALS): high-strength steel (300M-class) for larger transports, an aluminium/steel combination for light aircraft. Informational/labelling only -- this preliminary-design tool does not run a structural (FEA) stress analysis of the strut itself.",
+            "help": "Landing-gear strut/piston material, shown on the planform diagram and in the design report. 'auto' selects by MTOW class (see physics.landing_gear.STRUT_MATERIALS): high-strength steel (300M-class) for larger transports, an aluminium/steel combination for light aircraft. Informational/labelling only; this preliminary-design tool does not run a structural (FEA) stress analysis of the strut itself.",
             "kind": "str",
             "label": "Strut material",
             "name": "strut_material",
@@ -17867,7 +17867,7 @@
           },
           {
             "advanced": false,
-            "help": "Newton iteration cap per angle of attack -- MSES reports non-convergence rather than looping forever, but a hard cap keeps a single stubborn point from stalling the whole sweep.",
+            "help": "Newton iteration cap per angle of attack: MSES reports non-convergence rather than looping forever, but a hard cap keeps a single stubborn point from stalling the whole sweep.",
             "kind": "int",
             "label": "Max solver iterations",
             "name": "max_iterations",
@@ -17930,7 +17930,7 @@
           },
           {
             "advanced": false,
-            "help": "Streamwise grid stretching parameter for the MSET mesh -- larger values cluster more points near the airfoil.",
+            "help": "Streamwise grid stretching parameter for the MSET mesh: larger values cluster more points near the airfoil.",
             "kind": "float",
             "label": "MSET grid density exponent (e)",
             "name": "mset_e",
@@ -18103,7 +18103,7 @@
           },
           {
             "advanced": false,
-            "help": "How much payload mass occupies one metre of cabin length. Used only to derive the payload/systems CG position (the occupied cabin length), not the payload mass itself -- so stretching the fuselage beyond what the payload needs doesn't shift the CG aft 'for free'.",
+            "help": "How much payload mass occupies one metre of cabin length. Used only to derive the payload/systems CG position (the occupied cabin length), not the payload mass itself, so stretching the fuselage beyond what the payload needs doesn't shift the CG aft 'for free'.",
             "kind": "float",
             "label": "Payload linear density",
             "name": "cabin_payload_density_kg_m",
@@ -18130,7 +18130,7 @@
           },
           {
             "advanced": false,
-            "help": "Maximum fraction of total aircraft weight the nose gear is rated to carry -- sets the 'NLG Max Strength' CG-envelope boundary.",
+            "help": "Maximum fraction of total aircraft weight the nose gear is rated to carry: sets the 'NLG Max Strength' CG-envelope boundary.",
             "kind": "float",
             "label": "Max nose-gear load fraction",
             "name": "pct_load_nlg_max",
@@ -18139,7 +18139,7 @@
           },
           {
             "advanced": false,
-            "help": "Maximum fraction of total aircraft weight the main gear is rated to carry -- sets the 'MLG Max Strength' CG-envelope boundary.",
+            "help": "Maximum fraction of total aircraft weight the main gear is rated to carry: sets the 'MLG Max Strength' CG-envelope boundary.",
             "kind": "float",
             "label": "Max main-gear load fraction",
             "name": "pct_load_mlg_max",
@@ -18148,7 +18148,7 @@
           },
           {
             "advanced": false,
-            "help": "Minimum fraction of weight that must be on the nose gear for adequate steering authority -- sets the 'Min Nose Load' CG-envelope boundary (the aft-most safe CG at each weight).",
+            "help": "Minimum fraction of weight that must be on the nose gear for adequate steering authority: sets the 'Min Nose Load' CG-envelope boundary (the aft-most safe CG at each weight).",
             "kind": "float",
             "label": "Min nose-gear load fraction",
             "name": "pct_load_nlg_min",
@@ -18978,7 +18978,7 @@
               },
               {
                 "advanced": false,
-                "help": "Small linear penalty per metre of span -- discourages excessively large wings.",
+                "help": "Small linear penalty per metre of span: discourages excessively large wings.",
                 "kind": "weight_slider",
                 "label": "Wingspan penalty (per metre)",
                 "name": "span_penalty_per_m",
@@ -19014,7 +19014,7 @@
               },
               {
                 "advanced": false,
-                "help": "NOT read by the cost function (objective.py) -- kept only so old saved YAML configs referencing this key still load without error. Originally intended to penalize (Delta x_cg / MAC)^2, but that formula was never actually wired up; the field's real runtime effect was fully redundant with static_margin_penalty_scale, since both applied to the identical static-margin-vs-target term, so the two are consolidated into that single, correctly-named, appropriately-soft term. Physical CG-envelope compliance is enforced separately by cg_envelope_penalty_scale/cg_envelope_reward below.",
+                "help": "NOT read by the cost function (objective.py): kept only so old saved YAML configs referencing this key still load without error. Originally intended to penalize (Delta x_cg / MAC)^2, but that formula was never actually wired up; the field's real runtime effect was fully redundant with static_margin_penalty_scale, since both applied to the identical static-margin-vs-target term, so the two are consolidated into that single, correctly-named, appropriately-soft term. Physical CG-envelope compliance is enforced separately by cg_envelope_penalty_scale/cg_envelope_reward below.",
                 "kind": "weight_slider",
                 "label": "(Legacy, unused) CG/aero-balance mismatch weight",
                 "name": "cg_penalty_scale",
@@ -19050,7 +19050,7 @@
               },
               {
                 "advanced": false,
-                "help": "Penalizes the wing's physical usable fuel-tank volume (physics.performance.wing_fuel_volume_m3, Torenbeek geometric estimate) being too small to hold the fuel mass the weight & balance analysis says this design actually needs -- a wing that's too thin/small/tapered to carry its own required fuel is not a buildable aircraft, independent of whether the MTOW fuel-mass budget itself closes. Quadratic on the fractional shortfall (required_fuel - tank_capacity) / required_fuel.",
+                "help": "Penalizes the wing's physical usable fuel-tank volume (physics.performance.wing_fuel_volume_m3, Torenbeek geometric estimate) being too small to hold the fuel mass the weight & balance analysis says this design actually needs: a wing that's too thin/small/tapered to carry its own required fuel is not a buildable aircraft, independent of whether the MTOW fuel-mass budget itself closes. Quadratic on the fractional shortfall (required_fuel - tank_capacity) / required_fuel.",
                 "kind": "weight_slider",
                 "label": "Insufficient wing fuel-volume penalty weight",
                 "name": "fuel_volume_penalty_scale",
@@ -19059,7 +19059,7 @@
               },
               {
                 "advanced": false,
-                "help": "SOFT preference nudging compliant-but-suboptimal candidates toward requirements.target_static_margin -- NOT a hard requirement (the physical floor, min_physical_static_margin, and the CG-envelope itself are enforced separately and are what actually keep a design safe/legal). Kept deliberately small relative to -L/D (typically 15-25) so this doesn't crowd out genuine aerodynamic improvements: raising it much above ~20-30 risks the optimizer chasing an exact SM match instead of exploring shape space, overwhelming the L/D signal the search is meant to prioritize.",
+                "help": "SOFT preference nudging compliant-but-suboptimal candidates toward requirements.target_static_margin, NOT a hard requirement (the physical floor, min_physical_static_margin, and the CG-envelope itself are enforced separately and are what actually keep a design safe/legal). Kept deliberately small relative to -L/D (typically 15-25) so this doesn't crowd out genuine aerodynamic improvements: raising it much above ~20-30 risks the optimizer chasing an exact SM match instead of exploring shape space, overwhelming the L/D signal the search is meant to prioritize.",
                 "kind": "weight_slider",
                 "label": "Static-margin target penalty weight",
                 "name": "static_margin_penalty_scale",
@@ -19140,7 +19140,7 @@
               },
               {
                 "advanced": false,
-                "help": "Upper bound on Vh -- penalises an oversized tail / an unnecessarily stretched fuselage moment arm.",
+                "help": "Upper bound on Vh: penalises an oversized tail / an unnecessarily stretched fuselage moment arm.",
                 "kind": "float",
                 "label": "Maximum H-stab volume coefficient (Vh)",
                 "name": "max_hstab_volume_coef",
@@ -19194,7 +19194,7 @@
               },
               {
                 "advanced": false,
-                "help": "Penalizes the wing's root-to-break trailing edge (seen in planform) making an angle greater than 90 deg with the fuselage centerline -- i.e. the break station's trailing edge sitting forward of the root's. That creates a reflex (concave) corner at the wing-fuselage junction: a severe stress concentration no real transport-category wing root has, caused by a short root chord combined with a comparatively long break chord and/or too little sweep. Quadratic on the angle exceedance beyond 90 deg.",
+                "help": "Penalizes the wing's root-to-break trailing edge (seen in planform) making an angle greater than 90 deg with the fuselage centerline: i.e. the break station's trailing edge sitting forward of the root's. That creates a reflex (concave) corner at the wing-fuselage junction: a severe stress concentration no real transport-category wing root has, caused by a short root chord combined with a comparatively long break chord and/or too little sweep. Quadratic on the angle exceedance beyond 90 deg.",
                 "kind": "weight_slider",
                 "label": "Wing-root trailing-edge angle penalty weight",
                 "name": "te_root_angle_penalty_scale",
@@ -19203,7 +19203,7 @@
               },
               {
                 "advanced": false,
-                "help": "Wing-root leading edge must sit at least this fraction of fuselage length aft of the nose -- prevents the optimizer placing the wing in the cockpit. Typical transports: 25-55%.",
+                "help": "Wing-root leading edge must sit at least this fraction of fuselage length aft of the nose: prevents the optimizer placing the wing in the cockpit. Typical transports: 25-55%.",
                 "kind": "float",
                 "label": "Minimum wing position (fraction of fuselage length)",
                 "name": "min_wing_position_fraction",
@@ -19221,7 +19221,7 @@
               },
               {
                 "advanced": false,
-                "help": "Steep quadratic penalty on the fractional shortfall vs. the target passenger count / cargo payload -- guides the optimizer to grow the fuselage long enough to actually fit the requested payload.",
+                "help": "Steep quadratic penalty on the fractional shortfall vs. the target passenger count / cargo payload: guides the optimizer to grow the fuselage long enough to actually fit the requested payload.",
                 "kind": "weight_slider",
                 "label": "Payload-shortfall penalty weight",
                 "name": "payload_shortfall_penalty_scale",
@@ -19257,7 +19257,7 @@
               },
               {
                 "advanced": false,
-                "help": "Severity scale for the static-margin-floor penalty applied to a candidate that builds and analyses successfully but is rejected as physically invalid (static margin below requirements.min_physical_static_margin). NOT a flat returned cost -- this floor is graduated, not an early return (objective.py's `(deficit * severity)**3` term, where this field sets `severity` so raising/lowering it steepens/relaxes the penalty without editing code; the default reproduces the exact cubic constant used before this field was wired up). Kept distinct from failure_cost so run diagnostics can tell 'geometry/analysis crashed' apart from 'physically unstable' rejects (see OptimizationHistory.reject_reason_counts).",
+                "help": "Severity scale for the static-margin-floor penalty applied to a candidate that builds and analyses successfully but is rejected as physically invalid (static margin below requirements.min_physical_static_margin). NOT a flat returned cost; this floor is graduated, not an early return (objective.py's `(deficit * severity)**3` term, where this field sets `severity` so raising/lowering it steepens/relaxes the penalty without editing code; the default reproduces the exact cubic constant used before this field was wired up). Kept distinct from failure_cost so run diagnostics can tell 'geometry/analysis crashed' apart from 'physically unstable' rejects (see OptimizationHistory.reject_reason_counts).",
                 "kind": "weight_slider",
                 "label": "Instability reject cost",
                 "name": "instability_failure_cost",
@@ -19277,7 +19277,7 @@
               {
                 "advanced": false,
                 "editable": false,
-                "help": "SciPy differential_evolution strategy name (e.g. 'best1bin', 'rand1bin', 'best2bin') -- controls how new candidate designs are generated from the population each generation.",
+                "help": "SciPy differential_evolution strategy name (e.g. 'best1bin', 'rand1bin', 'best2bin'): controls how new candidate designs are generated from the population each generation.",
                 "kind": "str",
                 "label": "DE mutation/crossover strategy",
                 "name": "strategy",
@@ -19309,7 +19309,7 @@
               },
               {
                 "advanced": false,
-                "help": "Population size as a multiplier on the number of design variables -- more candidates per generation explores more broadly but costs more evaluations.",
+                "help": "Population size as a multiplier on the number of design variables: more candidates per generation explores more broadly but costs more evaluations.",
                 "kind": "int",
                 "label": "Population size multiplier",
                 "name": "population_size",
@@ -19336,7 +19336,7 @@
               },
               {
                 "advanced": false,
-                "help": "Number of worker processes for parallel evaluation (>1 uses multiprocessing). Requires a picklable objective -- already the case for ALAS's optimizer.",
+                "help": "Number of worker processes for parallel evaluation (>1 uses multiprocessing). Requires a picklable objective, already the case for ALAS's optimizer.",
                 "kind": "int",
                 "label": "Parallel worker processes",
                 "name": "workers",
@@ -19488,7 +19488,7 @@
           },
           {
             "advanced": false,
-            "help": "Maximum lift coefficient in clean (flaps/slats up) configuration -- the true aerodynamic stall limit used for the V-n diagram's stall boundary, distinct from the flaps-down CLmax_TO/CLmax_L above.",
+            "help": "Maximum lift coefficient in clean (flaps/slats up) configuration: the true aerodynamic stall limit used for the V-n diagram's stall boundary, distinct from the flaps-down CLmax_TO/CLmax_L above.",
             "kind": "float",
             "label": "Max lift coefficient, clean (CLmax_clean)",
             "name": "cl_max_clean",
@@ -19497,7 +19497,7 @@
           },
           {
             "advanced": false,
-            "help": "Most negative (inverted-flight) lift coefficient in clean configuration -- the negative stall boundary on the V-n diagram.",
+            "help": "Most negative (inverted-flight) lift coefficient in clean configuration: the negative stall boundary on the V-n diagram.",
             "kind": "float",
             "label": "Min lift coefficient, clean (CLmin_clean)",
             "name": "cl_min_clean",
@@ -19641,7 +19641,7 @@
           },
           {
             "advanced": false,
-            "help": "Number of wing-loading points swept when drawing the matching-chart constraint curves (Results -> Matching Chart). Purely a plotting resolution knob -- higher gives smoother curves at extra compute cost. Not part of the Performance preset (it isn't a physical assumption).",
+            "help": "Number of wing-loading points swept when drawing the matching-chart constraint curves (Results -> Matching Chart). Purely a plotting resolution knob: higher gives smoother curves at extra compute cost. Not part of the Performance preset (it isn't a physical assumption).",
             "kind": "int",
             "label": "Matching chart plot resolution",
             "name": "matching_chart_resolution",
@@ -19912,7 +19912,7 @@
           },
           {
             "advanced": false,
-            "help": "Used only to sanity-check the design mass flow implied by anchoring the cycle to the engine's rated static thrust -- a conceptual-design-level assumption, not a real corrected-flow schedule.",
+            "help": "Used only to sanity-check the design mass flow implied by anchoring the cycle to the engine's rated static thrust: a conceptual-design-level assumption, not a real corrected-flow schedule.",
             "kind": "float",
             "label": "Assumed fan-face Mach number (static anchor)",
             "name": "fan_face_mach",
@@ -20075,7 +20075,7 @@
         "fields": [
           {
             "advanced": false,
-            "help": "Size a generic wingbox (skin/spars/ribs) for the optimized design's main wing, write NASTRAN .bdf files, and compute theoretical (no-NASTRAN) deformations/stresses/frequencies as part of a normal Run, populating the Structural Analysis Results tab. Does not affect the mass model, CG, or optimizer -- purely a downstream analysis, like MSES/Propulsion Analysis.",
+            "help": "Size a generic wingbox (skin/spars/ribs) for the optimized design's main wing, write NASTRAN .bdf files, and compute theoretical (no-NASTRAN) deformations/stresses/frequencies as part of a normal Run, populating the Structural Analysis Results tab. Does not affect the mass model, CG, or optimizer, purely a downstream analysis, like MSES/Propulsion Analysis.",
             "kind": "bool",
             "label": "Enabled",
             "name": "enabled",
@@ -20113,7 +20113,7 @@
           },
           {
             "advanced": false,
-            "help": "Adds an optional third spar running only from the root to the wing break/kink station, at center_spar_chord_fraction of local chord -- the partial-span reinforcement spar common on widebody wings (extra bending/shear capacity where root load is highest, without the mass of running it all the way to the tip). Off by default (classic 2-spar box). This spar carries no load and contributes no mass outboard of the kink -- it simply doesn't exist there.",
+            "help": "Adds an optional third spar running only from the root to the wing break/kink station, at center_spar_chord_fraction of local chord: the partial-span reinforcement spar common on widebody wings (extra bending/shear capacity where root load is highest, without the mass of running it all the way to the tip). Off by default (classic 2-spar box). This spar carries no load and contributes no mass outboard of the kink; it simply doesn't exist there.",
             "kind": "bool",
             "label": "Add center spar (root-to-kink)",
             "name": "center_spar_enabled",
@@ -20232,7 +20232,7 @@
           },
           {
             "advanced": false,
-            "help": "Wing skin thickness -- this is the value actually used (no shear-flow/buckling upsizing is modeled, see structural_sizing.py), so treat it as a practical starting assumption for this class of aircraft, not a bare absolute-minimum gauge. 6mm matches the reference sizing scripts' own baseline for a large long-range wing; a much thinner value (e.g. 2mm) understates real skin panel buckling resistance and inflates the auto-derived rib count substantially, since rib spacing scales with sqrt(t_skin).",
+            "help": "Wing skin thickness; this is the value actually used (no shear-flow/buckling upsizing is modeled, see structural_sizing.py), so treat it as a practical starting assumption for this class of aircraft, not a bare absolute-minimum gauge. 6mm matches the reference sizing scripts' own baseline for a large long-range wing; a much thinner value (e.g. 2mm) understates real skin panel buckling resistance and inflates the auto-derived rib count substantially, since rib spacing scales with sqrt(t_skin).",
             "kind": "float",
             "label": "Skin gauge",
             "name": "t_skin_min_m",
@@ -20286,7 +20286,7 @@
           },
           {
             "advanced": false,
-            "help": "Empirical panel-buckling coefficient (c) in the Euler skin-panel critical stress formula used to auto-derive rib spacing/count -- higher allows wider rib spacing for the same skin thickness.",
+            "help": "Empirical panel-buckling coefficient (c) in the Euler skin-panel critical stress formula used to auto-derive rib spacing/count: higher allows wider rib spacing for the same skin thickness.",
             "kind": "float",
             "label": "Rib spacing buckling coefficient",
             "name": "rib_buckling_coeff",

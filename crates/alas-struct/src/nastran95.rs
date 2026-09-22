@@ -4,14 +4,14 @@
 //! NASTRAN-95 statics and normal modes: the deck this program writes for an
 //! open-source solver that predates the modern one, and the run that solves it.
 //!
-//! This is the one row in the port with no Python original -- there is nothing
+//! This is the one row in the port with no Python original; there is nothing
 //! to translate and so nothing to agree with in the usual way. What it agrees
 //! with instead is a *second solver*. The same wingbox is solved twice: once as
 //! the modern [`crate::nastran`] deck through MSC Nastran, and once as the
 //! NASTRAN-95 deck [`deck`] writes through the built 1995 solver, and the two
 //! results are held to converge on each other as the mesh is refined. That is a
-//! stronger claim than a fixed tolerance -- it measures what the dialect
-//! differences cost rather than asserting a bound -- and it is the only claim
+//! stronger claim than a fixed tolerance; it measures what the dialect
+//! differences cost rather than asserting a bound, and it is the only claim
 //! available where neither side is a reference.
 //!
 //! Three dialect facts shape everything here, each found by a run that failed,
@@ -21,8 +21,8 @@
 //! 1. **Fixed eight-column fields.** Every field is at most eight characters,
 //!    and a real must show a decimal point. [`field`] is the formatter; the
 //!    modern deck's sixteen-column large field does not exist here.
-//! 2. **At most eight fields before a continuation.** A longer card -- the
-//!    root-rib `SPC1`, every `CRBE3` -- is quoted back and *dropped without a
+//! 2. **At most eight fields before a continuation.** A longer card: the
+//!    root-rib `SPC1`, every `CRBE3`, is quoted back and *dropped without a
 //!    message* unless it continues onto a tagged line. [`field::Card`] does that.
 //! 3. **Three cards change shape.** `PBARL` has no equivalent and becomes a
 //!    computed `PBAR` ([`section`]); `RBE3` is the same element under the name
@@ -35,15 +35,15 @@
 //! **Linear statics is cross-validated and converges.** Solved through both
 //! solvers over a refinement sequence, the two peak deflections agree to about
 //! 7% on the coarsest mesh and close to about 2% on the finest, the disagreement
-//! halving as the mesh refines -- the signature of two `CQUAD4` formulations
+//! halving as the mesh refines: the signature of two `CQUAD4` formulations
 //! (1995 without drilling stiffness, `AUTOSPC`-constrained; modern with it)
 //! approaching one answer. That convergence is the row's tier;
 //! `parity_nastran95.rs` holds it.
 //!
 //! **Normal modes are written but not cross-validated, and that is a finding.**
 //! [`build_modes_deck`] produces a valid `EIGR` deck both solvers run without a
-//! fatal, but NASTRAN-95's 1970s real-eigenvalue methods -- Givens, inverse
-//! power, FEER -- do not reliably return a modern solver's lowest modes for this
+//! fatal, but NASTRAN-95's 1970s real-eigenvalue methods: Givens, inverse
+//! power, FEER, do not reliably return a modern solver's lowest modes for this
 //! model. Its mass matrix is singular on the rotational freedoms (shells and
 //! concentrated masses give translational inertia and little rotary), which
 //! Givens cannot reduce, and inverse power finds a band-dependent, incomplete

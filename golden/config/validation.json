@@ -15,7 +15,7 @@
       "issues": [
         {
           "field_path": "requirements.dive_speed_m_s",
-          "message": "Cruise design point (126 m/s EAS at Mach 0.84 / 11,887 m) exceeds the design dive speed VD (100 m/s EAS) -- the aircraft would cruise outside its own structural flight envelope.",
+          "message": "Cruise design point (126 m/s EAS at Mach 0.84 / 11,887 m) exceeds the design dive speed VD (100 m/s EAS): the aircraft would cruise outside its own structural flight envelope.",
           "severity": "error"
         }
       ],
@@ -31,12 +31,12 @@
       "issues": [
         {
           "field_path": "requirements.dive_speed_m_s",
-          "message": "Cruise design point (126 m/s EAS) is above VC (104 m/s EAS = VD/1.25) -- the aircraft cruises in the V-n diagram's caution band, not normal operation.",
+          "message": "Cruise design point (126 m/s EAS) is above VC (104 m/s EAS = VD/1.25): the aircraft cruises in the V-n diagram's caution band, not normal operation.",
           "severity": "warning"
         }
       ],
       "name": "cruise_in_the_caution_band",
-      "why": "the cruise point is past VC but short of VD -- the diagram's yellow band, which is a warning and not a block"
+      "why": "the cruise point is past VC but short of VD: the diagram's yellow band, which is a warning and not a block"
     },
     {
       "input": {
@@ -94,7 +94,7 @@
       "issues": [
         {
           "field_path": "requirements.dive_speed_m_s",
-          "message": "Cruise design point (126 m/s EAS at Mach 0.84 / 11,887 m) exceeds the design dive speed VD (100 m/s EAS) -- the aircraft would cruise outside its own structural flight envelope.",
+          "message": "Cruise design point (126 m/s EAS at Mach 0.84 / 11,887 m) exceeds the design dive speed VD (100 m/s EAS): the aircraft would cruise outside its own structural flight envelope.",
           "severity": "error"
         },
         {

@@ -17,7 +17,7 @@ have is written down.
 
 ## State
 
-Running, not finished. `cargo run --bin alas` launches the desktop interface,
+Running, not finished. `cargo run --bin ALAS` launches the desktop interface,
 and the full pipeline — geometry, mass/CG, mission, drag build-up, wingbox
 sizing, figures — runs end to end for hand-built and CPACS-imported aircraft,
 against eight reference presets and the external solvers that are installed.
@@ -75,6 +75,17 @@ follow their code into this tree; every translated file names its origin in a
 provenance header, and `THIRD-PARTY-NOTICES.md` lists the components one by
 one.
 
-External solvers — MSES, MSC Nastran, NASTRAN-95, AVL — are separate programs
-supplied by the user. Every analysis that needs one reports itself unavailable
-when it is absent, rather than substituting an approximation without saying so.
+External solvers run as separate processes. MSES and MSC Nastran are
+proprietary and always user-supplied. AVL (GPL-2.0) is bundled with the
+Windows release; the Linux release ships the same AVL source and licence with
+a build note instead, since this project has only reviewed and tested the
+Windows executable. NASTRAN-95 (NOSA 1.3) may be bundled when its complete
+reviewed source/notice staging is present — see `THIRD-PARTY-NOTICES.md` and
+`docs/downloads.md` for the exact per-tool boundary. Every analysis that needs
+a solver reports itself unavailable when it is absent, rather than
+substituting an approximation without saying so.
+
+Both a Windows portable package (`.zip`) and a Linux portable package
+(`.tar.gz`, glibc 2.35 baseline) are produced by `cargo xtask dist`; see
+`docs/downloads.md` for what each contains and the Linux package's system
+requirements.

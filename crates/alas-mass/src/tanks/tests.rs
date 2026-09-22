@@ -527,3 +527,126 @@ fn the_default_aircraft_resolves_a_finite_layout_with_positive_capacity() {
             .all(|value| value.is_finite() && *value > 0.0));
     }
 }
+
+/// Where a *partial* A380-800 fuel load actually sits, and why it decides the
+/// aeroplane's balance.
+///
+/// This is a characterization test, not an endorsement. `FuelTankLayout::distribute`
+/// fills the tanks burned **last** first (its module doc states the rule, and
+/// `distribute_sums_exactly_and_fills_the_last_burned_tank_first` pins it).
+/// The A380-800's burn order is sourced from the Airbus A380 AC fuel table
+/// (`alas_config::preset_fuel_tanks`): inner 1, mid 2, **trim 3**, **outer 4**.
+/// A partial load therefore fills the tailplane trim tank and the outer wing
+/// first and leaves the inner feed tanks empty, so the fuel centroid moves
+/// *aft* as the load falls -- past the mean aerodynamic chord's trailing edge.
+///
+/// Measured consequence, recorded in an internal mass-closure study (2026-09-17):
+/// at the mission-closed load the A380-800's analyzed fuel centroid is
+/// 115.9 %MAC, 9.5 m aft of the effective main-gear station, and it is the
+/// whole of the preset's `min_nose_gear_load` blocker. Whether a dispatch
+/// load should instead fill the tanks burned first is a fuel-policy decision
+/// coupled to the wing bending relief in
+/// `crate::wing_reconciliation::fuel_relief`, so nothing was changed for it.
+/// **If that rule is revisited, this test is the A380 consequence to re-read.**
+///
+/// Those two figures were measured before the preset's secondary tank volumes
+/// were replaced with the certified EASA.A.110 section 3.3 set (+1.33 % of
+/// layout capacity). The ordering and the sign of the effect are unchanged;
+/// the exact %MAC and offset were not re-measured.
+#[test]
+fn a_partial_a380_load_fills_the_trim_and_outer_tanks_and_moves_the_fuel_aft() {
+    let config = AlasConfig::from_value(&serde_json::json!({ "preset": "A380-800" }))
+        .expect("the registered A380 preset loads");
+    let preset = alas_config::presets::get("A380-800").expect("the A380 preset resolves");
+    let plane = AircraftBuilder::new(Some(config.geometry.clone()))
+        .build(Some(&preset.design_vector), true)
+        .expect("the A380 geometry builds");
+    let (density_kg_m3, published_total_l) =
+        crate::product_stations::tank_reference(&config, &preset.design_vector);
+    let layout = FuelTankLayout::resolve(
+        &plane,
+        &config.geometry,
+        &config.structures,
+        &config.fuel_tanks,
+        &config.fuel_policy,
+        density_kg_m3,
+        published_total_l,
+    )
+    .expect("the A380 tank arrangement resolves on its own geometry");
+
+    let capacity_kg = layout.usable_capacity_kg();
+    assert!(capacity_kg > 0.0);
+
+    // Every A380 cell carries its own certified volume, so `calibrate` has no
+    // geometric cell to absorb anything and is the identity: the resolved
+    // layout holds the certified *tank* total of 323,546 L, not the 324,339 L
+    // aeroplane total the preset declares (EASA TCDS EASA.A.110 Issue 17,
+    // 2026-08-05, section 3.3, p.14 of 20). The 793 L difference is that
+    // table's "Systems" row - usable fuel in lines and engines, which has no
+    // tank station and is not modelled here.
+    let certified_tank_kg = 323_546.0 * 1.0e-3 * density_kg_m3;
+    assert!(
+        (capacity_kg - certified_tank_kg).abs() < 1.0e-6 * certified_tank_kg,
+        "resolved {capacity_kg} kg against certified {certified_tank_kg} kg"
+    );
+
+    let centroid_x_at = |fuel_kg: f64| -> f64 {
+        layout
+            .distribute(fuel_kg)
+            .expect("the load fits")
+            .properties(&layout)
+            .cg_m[0]
+    };
+    let fill_of = |fuel_kg: f64, id_fragment: &str| -> f64 {
+        layout
+            .distribute(fuel_kg)
+            .expect("the load fits")
+            .mass_items(&layout)
+            .iter()
+            .filter(|item| item.id.contains(id_fragment))
+            .map(|item| item.mass_kg)
+            .sum()
+    };
+
+    // The mission-closed load measured on this preset, as a fraction of its
+    // own usable capacity, so the assertion survives a fuel-density change.
+    let partial_kg = 0.3735 * capacity_kg;
+    let inner_capacity_kg: f64 = layout
+        .tanks()
+        .iter()
+        .filter(|tank| tank.kind == TankKind::WingInner)
+        .map(|tank| tank.usable_capacity_kg)
+        .sum();
+    assert!(
+        inner_capacity_kg > 0.0,
+        "the A380 registers inner wing tanks"
+    );
+    assert_eq!(
+        fill_of(partial_kg, "inner"),
+        0.0,
+        "a partial A380 load leaves the inner feed tanks empty"
+    );
+    assert!(
+        fill_of(partial_kg, "trim") > 0.0,
+        "a partial A380 load fills the tailplane trim tank"
+    );
+
+    // And the centroid moves aft as the load falls, which is the balance
+    // consequence the blocker is made of.
+    let full_x = centroid_x_at(capacity_kg);
+    let partial_x = centroid_x_at(partial_kg);
+    assert!(
+        partial_x > full_x,
+        "partial fuel centroid {partial_x} m is not aft of the full-capacity centroid {full_x} m"
+    );
+
+    // Aft of the mean aerodynamic chord's trailing edge: the fuel is no
+    // longer a wing-box load in this state.
+    let mac = plane.c_ref;
+    let mac_le = plane.wings[0].aerodynamic_center(0.25)[0] - 0.25 * mac;
+    assert!(
+        partial_x > mac_le + mac,
+        "partial fuel centroid {partial_x} m against a MAC trailing edge at {} m",
+        mac_le + mac
+    );
+}

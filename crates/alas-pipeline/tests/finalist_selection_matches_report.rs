@@ -6,10 +6,11 @@
 //! vector at one identical closed takeoff mass.
 //!
 //! `alas_opt::assess_product_candidate` (via `mdo::sizing` +
-//! `mdo::residuals::build`) is the typed assessment MADS's progressive-barrier
-//! search uses to decide whether a candidate is its `best_feasible` incumbent,
-//! and `pipeline.rs` re-runs it and hard-errors the whole run if it disagrees
-//! at that boundary ("optimized finalist is not hard-feasible on replay").
+//! `mdo::residuals::build`) is the typed assessment the L-SHADE
+//! epsilon-constrained search (`search_methods::lshade_de`) uses to decide
+//! whether a candidate is strictly feasible, and `pipeline.rs` re-runs it and
+//! hard-errors the whole run if it disagrees at that boundary ("optimized
+//! finalist is not hard-feasible on replay").
 
 // This file is a test binary: a failed expect is the assertion failing.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
@@ -22,8 +23,8 @@
 //! mass groups with the frozen reference-compatibility fractions and built its
 //! candidate without nacelle bodies; the report placed them on the geometric
 //! stations of an aircraft built with engines. For the r5 nominal run's own
-//! finalist that was worth 0.56 m of centre of gravity -- 7.2 percent of the
-//! mean aerodynamic chord -- which is how a candidate the search accepted as
+//! finalist that was worth 0.56 m of centre of gravity: 7.2 percent of the
+//! mean aerodynamic chord, which is how a candidate the search accepted as
 //! hard-feasible could print as physically INFEASIBLE in its own final report.
 //!
 //! Both paths are required to resolve their stations through
@@ -35,7 +36,7 @@ use alas_config::AlasConfig;
 use alas_pipeline::{export::report_to_database, FullAnalysis};
 
 /// Exact `design_vector` block from the r5 nominal run's own
-/// `design_database.json` (`.agent/bench/nominal-r5-claude-20260909/`), not a
+/// `design_database.json` (an internal benchmark run, 2026-09-09), not a
 /// hand-picked or simplified fixture.
 fn r5_finalist_design() -> DesignVector {
     DesignVector {
@@ -82,14 +83,76 @@ struct Replay {
 
 /// Replay one design vector through both assessors, exactly as `pipeline.rs`
 /// does: the search-time gate first, then the finalist report bound to the
-/// closed takeoff mass that gate produced.
+/// closed takeoff mass *and the design vector* that gate evaluated.
+///
+/// The second half of that sentence is load-bearing. A clean-sheet design
+/// space derives `fuselage_length_m` from the cabin load case, so the
+/// evaluator replaces the caller's coordinate before it builds anything, and
+/// the vector it evaluated is the one it reports as
+/// `resolved.design`. Handing the report the caller's vector instead compares
+/// two *different aeroplanes*, which is what
+/// `the_report_is_built_on_the_aircraft_the_gate_evaluated` measures below.
 fn replay(config: &AlasConfig, design: &DesignVector) -> Replay {
     let assessment = alas_opt::assess_product_candidate(config, design)
         .expect("finalist re-evaluates under the same mission-sized objective");
     let report = FullAnalysis::new(config.clone())
-        .run_at_sized_takeoff_mass(design, true, assessment.sized.takeoff_mass_kg)
+        .run_at_sized_takeoff_mass(
+            &assessment.resolved.design,
+            true,
+            assessment.sized.takeoff_mass_kg,
+        )
         .expect("finalist report binds to the same closed takeoff mass");
     Replay { assessment, report }
+}
+
+/// The gate and the report must build one aeroplane, whatever vector the
+/// caller supplied.
+///
+/// `alas_opt::mdo::build::size_fuselage_from_cabin` re-derives the body
+/// length from the cabin load case over its own specification interval, so
+/// the caller's literal is discarded. The derivation has fixed points -- an
+/// optimizer finalist is one, which is why the ordinary search path never saw
+/// this -- but the r5 fixture below was recorded against an earlier cabin and
+/// is not one any more. Measured at `AlasConfig::default()`:
+/// the evaluated body is 72.000000 m against the fixture's 76.250000 m, worth
+/// 4.250 m of H-stab station, 2 406.354 kg of fuselage and 1.237 m of payload
+/// station. Every one of those collapses to zero on the evaluated body.
+///
+/// This test pins the seam itself rather than the numbers: whatever the design
+/// space derives, `resolved.design` must be what a bound report is built on.
+#[test]
+fn the_report_is_built_on_the_aircraft_the_gate_evaluated() {
+    let config = AlasConfig::default();
+    let supplied = r5_finalist_design();
+    let assessment =
+        alas_opt::assess_product_candidate(&config, &supplied).expect("the fixture is assessable");
+    let evaluated = assessment.resolved.design;
+
+    // Everything the caller pinned that the design space does not derive must
+    // survive verbatim: the evaluator is allowed to replace the cabin-derived
+    // coordinate and nothing else.
+    let mut supplied_with_evaluated_body = supplied;
+    supplied_with_evaluated_body.fuselage_length_m = evaluated.fuselage_length_m;
+    assert_eq!(
+        evaluated, supplied_with_evaluated_body,
+        "the evaluator changed a design coordinate other than the cabin-derived body length"
+    );
+
+    // And the derivation is idempotent on its own output, which is why an
+    // optimizer finalist replays unchanged.
+    let second = alas_opt::assess_product_candidate(&config, &evaluated)
+        .expect("the evaluated vector is assessable");
+    assert_eq!(
+        second.resolved.design, evaluated,
+        "re-assessing the evaluated vector derived a third body: {} m then {} m",
+        evaluated.fuselage_length_m, second.resolved.design.fuselage_length_m,
+    );
+    assert!(
+        (second.sized.takeoff_mass_kg - assessment.sized.takeoff_mass_kg).abs() < 1.0e-6,
+        "the evaluated vector closed at a different takeoff mass on replay: {} kg then {} kg",
+        assessment.sized.takeoff_mass_kg,
+        second.sized.takeoff_mass_kg,
+    );
 }
 
 #[test]
@@ -132,7 +195,7 @@ fn the_search_and_the_report_place_every_geometric_mass_group_identically() {
         for axis in 0..3 {
             assert!(
                 (search_station[axis] - report_station[axis]).abs() < 1.0e-6,
-                "{name} axis {axis}: the search places it at {} m and the report at {} m -- \
+                "{name} axis {axis}: the search places it at {} m and the report at {} m, \
                  both must resolve through \
                  `alas_mass::product_stations::product_mass_coordinates` on the same built \
                  aircraft",
@@ -152,11 +215,11 @@ fn the_search_and_the_report_agree_on_where_the_finalist_balances() {
     // Every item mass, not just the total. The total agrees by construction
     // (the report is bound to the search's own closed takeoff mass), so a
     // scalar check would pass while a heavier wing and a lighter fuel load
-    // cancelled inside it -- which is exactly what happened while the two
+    // cancelled inside it, which is exactly what happened while the two
     // paths published different wing groups.
     //
-    // The bound is relative because the fuel item is a closure remainder --
-    // `takeoff_mass - operating_empty - payload` -- and the two paths reach
+    // The bound is relative because the fuel item is a closure remainder:
+    // `takeoff_mass - operating_empty - payload`, and the two paths reach
     // that subtraction by summing the same nine items in different orders, so
     // it carries f64 accumulation error proportional to the takeoff mass and
     // nothing else. 1e-7 of the takeoff mass is ~0.02 kg here. For scale, the
@@ -183,7 +246,7 @@ fn the_search_and_the_report_agree_on_where_the_finalist_balances() {
     // derive separately is the payload station, and its effect on the whole
     // aircraft's centre of gravity is bounded by
     // `payload_mass / takeoff_mass * payload station difference`. That is the
-    // bound asserted here -- computed from this run's own numbers rather than
+    // bound asserted here: computed from this run's own numbers rather than
     // a fixed percentage, so it tightens automatically when the payload
     // divergence is closed and cannot hide a new one.
     let payload_station_difference_m =

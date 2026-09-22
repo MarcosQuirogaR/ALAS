@@ -15,7 +15,7 @@
 //! the floor is economy's 28-inch pitch and
 //! 16-inch width, and the ceiling has to clear a business flat-bed suite. The
 //! range is wide, and its job is only to stop a value that could never be
-//! certified -- a 0.2 metre pitch -- from being enterable at all.
+//! certified (a 0.2 metre pitch) from being enterable at all.
 
 use serde::{Deserialize, Serialize};
 

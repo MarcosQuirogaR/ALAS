@@ -3,7 +3,7 @@
 
 //! Native MSES flow-field pressure-coefficient contour rendering.
 
-use alas_aero::mses::MsesPressureResult;
+use alas_aero::mses::{MsesOsmapStatus, MsesPressureResult};
 use alas_geom::aircraft::airfoil::Airfoil;
 
 use super::{native_grid_boundary, unavailable};
@@ -12,6 +12,46 @@ use crate::colormap::Colormap;
 use crate::families::aerodynamics::support::padded_range;
 use crate::scene::{Axes2D, Color, Fill, Scene, SceneElement, Stroke, TextAlign, TextBaseline};
 use crate::theme::get_palette;
+
+/// Explain a free-transition run whose Orr-Sommerfeld map is not usable.
+///
+/// MSES still prints a finite table when the map is missing or has the wrong
+/// record format, but it zeroes its amplification rates first, so that table is
+/// not the transition model that was requested. The figures therefore treat the
+/// map status as part of the presentation gate and report the resolver's own
+/// actionable diagnostic (which names the path it tried) whenever one was
+/// retained. The fallback names the retained status instead of inventing a
+/// cause; both leave `osmap_status`/`osmap_diagnostic` untouched in the result
+/// and in the run record written by the pipeline.
+pub(super) fn osmap_unavailable_reason(
+    status: MsesOsmapStatus,
+    diagnostic: Option<&str>,
+) -> String {
+    diagnostic.map(str::to_owned).unwrap_or_else(|| {
+        format!(
+            "MSES free transition was requested but no usable Orr-Sommerfeld map was recorded (osmap status: {})",
+            status.as_str()
+        )
+    })
+}
+
+/// Pick the diagnostic shown when a pressure table may not be drawn.
+///
+/// An unusable required map is preferred over the solver's generic error text:
+/// it is the actionable cause and would otherwise be masked by a status message
+/// that does not mention the map at all. The error string itself stays in the
+/// result for logs and machine-readable reports.
+fn unavailable_reason(result: &MsesPressureResult) -> String {
+    if !result.transition_model_is_valid() {
+        return osmap_unavailable_reason(result.osmap_status, result.osmap_diagnostic.as_deref());
+    }
+    result
+        .error
+        .as_deref()
+        .or(result.osmap_diagnostic.as_deref())
+        .unwrap_or("MSES data unavailable")
+        .to_owned()
+}
 
 /// Render the pressure coefficient exported by MPlot option 11.
 ///
@@ -31,14 +71,7 @@ pub fn figure_mses_cp_contours(
         result.alpha_deg
     ));
     if !result.is_valid_for_presentation() {
-        return unavailable(
-            theme,
-            result
-                .error
-                .as_deref()
-                .or(result.osmap_diagnostic.as_deref())
-                .unwrap_or("MSES data unavailable"),
-        );
+        return unavailable(theme, &unavailable_reason(result));
     }
     if result.field_x.is_empty() || result.field_y.is_empty() || result.field_cp.is_empty() {
         return unavailable(theme, "MSES produced no Cp field export");
@@ -204,4 +237,152 @@ pub fn figure_mses_cp_contours(
         bold: false,
     });
     scene
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::status_figure::FAILURE_COLOR;
+    use alas_aero::mses::MsesStatus;
+
+    /// A converged free-transition pressure point whose map status is the only
+    /// variable under test.
+    fn free_transition_result(
+        status: MsesOsmapStatus,
+        diagnostic: Option<&str>,
+    ) -> MsesPressureResult {
+        MsesPressureResult {
+            status: MsesStatus::Ok,
+            alpha_deg: 2.0,
+            requested_alpha_deg: 2.0,
+            osmap_required: true,
+            osmap_status: status,
+            osmap_diagnostic: diagnostic.map(str::to_owned),
+            field_x: vec![0.0, 1.0, 0.0, 1.0],
+            field_y: vec![-0.5, -0.5, 0.5, 0.5],
+            field_mach: vec![0.7, 0.8, 0.9, 1.0],
+            field_cp: vec![-0.2, -0.4, -0.6, -0.1],
+            field_row_offsets: vec![0, 2],
+            ..MsesPressureResult::default()
+        }
+    }
+
+    fn is_unavailable(scene: &Scene) -> bool {
+        scene.title.as_deref() == Some("MSES figure unavailable")
+    }
+
+    fn body_text(scene: &Scene) -> String {
+        scene
+            .elements
+            .iter()
+            .filter_map(|element| match element {
+                SceneElement::TextBlock { text, .. } => Some(text.clone()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    fn filled_cells(scene: &Scene) -> usize {
+        scene
+            .elements
+            .iter()
+            .filter(|element| matches!(element, SceneElement::Polygon { .. }))
+            .count()
+    }
+
+    #[test]
+    fn missing_required_osmap_renders_unavailable_with_the_resolver_diagnostic() {
+        let result = free_transition_result(
+            MsesOsmapStatus::Missing,
+            Some("adjacent OSMAP file does not exist: C:\\solver\\osmapDP.dat"),
+        );
+        let scene = figure_mses_cp_contours(&result, None, Some("grey"));
+
+        assert!(is_unavailable(&scene));
+        assert_eq!(filled_cells(&scene), 0, "no Cp cells may be drawn");
+        assert_eq!(
+            body_text(&scene),
+            "adjacent OSMAP file does not exist: C:\\solver\\osmapDP.dat"
+        );
+        assert!(scene.elements.iter().any(|element| matches!(
+            element,
+            SceneElement::Text { color, .. } if *color == Color::from_hex(FAILURE_COLOR)
+        )));
+        // Rendering is read-only: the structured evidence is still available.
+        assert_eq!(result.osmap_status, MsesOsmapStatus::Missing);
+        assert_eq!(
+            result.osmap_diagnostic.as_deref(),
+            Some("adjacent OSMAP file does not exist: C:\\solver\\osmapDP.dat")
+        );
+    }
+
+    #[test]
+    fn incompatible_required_osmap_renders_unavailable_with_the_format_diagnostic() {
+        let diagnostic = "configured OSMAP file C:\\solver\\osmap.dat is incompatible: \
+             single-precision osmap.dat detected; MSES requires osmapDP.dat";
+        let result = free_transition_result(MsesOsmapStatus::Incompatible, Some(diagnostic));
+        let scene = figure_mses_cp_contours(&result, None, Some("dark"));
+
+        assert!(is_unavailable(&scene));
+        assert_eq!(filled_cells(&scene), 0);
+        assert_eq!(body_text(&scene), diagnostic);
+    }
+
+    #[test]
+    fn unusable_required_osmap_without_a_diagnostic_names_the_retained_status() {
+        let scene = figure_mses_cp_contours(
+            &free_transition_result(MsesOsmapStatus::Missing, None),
+            None,
+            Some("light"),
+        );
+
+        assert!(is_unavailable(&scene));
+        assert_eq!(
+            body_text(&scene),
+            "MSES free transition was requested but no usable Orr-Sommerfeld map was recorded \
+             (osmap status: missing)"
+        );
+    }
+
+    #[test]
+    fn a_solver_error_does_not_mask_an_unusable_required_osmap() {
+        let mut result = free_transition_result(
+            MsesOsmapStatus::Incompatible,
+            Some("adjacent OSMAP file C:\\solver\\osmapDP.dat is incompatible: bad header"),
+        );
+        result.status = MsesStatus::Error;
+        result.error = Some("MSES did not converge".to_owned());
+        let scene = figure_mses_cp_contours(&result, None, Some("grey"));
+
+        assert!(is_unavailable(&scene));
+        assert!(body_text(&scene).contains("is incompatible"));
+        assert_eq!(result.error.as_deref(), Some("MSES did not converge"));
+    }
+
+    #[test]
+    fn an_available_required_osmap_still_renders_the_native_cp_field() {
+        let scene = figure_mses_cp_contours(
+            &free_transition_result(
+                MsesOsmapStatus::Available,
+                Some("adjacent double-precision osmapDP.dat passed the local header check"),
+            ),
+            None,
+            Some("dark"),
+        );
+
+        assert!(!is_unavailable(&scene));
+        assert_eq!(filled_cells(&scene), 1, "the native 2x2 cell must render");
+        assert!(body_text(&scene).is_empty(), "no status prose is drawn");
+    }
+
+    #[test]
+    fn a_forced_transition_run_does_not_need_a_map() {
+        let mut result = free_transition_result(MsesOsmapStatus::NotRequired, None);
+        result.osmap_required = false;
+        let scene = figure_mses_cp_contours(&result, None, Some("light"));
+
+        assert!(!is_unavailable(&scene));
+        assert_eq!(filled_cells(&scene), 1);
+    }
 }

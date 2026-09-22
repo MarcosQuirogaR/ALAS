@@ -25,15 +25,15 @@
 //! closed-form 360-degree model for one. It is blended in on
 //! `softmax(alpha - 20, -20 - alpha) / 3`, which is near zero through the
 //! attached range and grows past twenty degrees either way. The drag blends
-//! *logarithmically* -- the attached and separated values are two orders
+//! *logarithmically*: the attached and separated values are two orders
 //! apart, and a linear blend between them would be dominated by the larger
 //! one long before the flow was actually separated.
 //!
 //! The separated model is `airfoil_coefficients_post_stall`, and it reads its
 //! `airfoil` argument nowhere: its six coefficients are NACA 0012's, hard
 //! coded, with the shape-dependent version commented out upstream and marked
-//! TODO. Reproduced faithfully -- the function here takes only an angle,
-//! rather than carrying a parameter it would not read -- and recorded in
+//! TODO. Reproduced faithfully: the function here takes only an angle,
+//! rather than carrying a parameter it would not read, and recorded in
 //! `docs/PORTING.md`.
 //!
 //! # Past the critical Mach number
@@ -42,8 +42,8 @@
 //! flow first goes sonic somewhere, through a symbolic-regression fit
 //! upstream derived from the Laitone rule and the sonic-`Cp` relation. Drag
 //! divergence follows from the Korn equation, lift and moment take a
-//! Prandtl-Glauert amplification, and the wave drag is a four-branch schedule
-//! -- nothing below the critical Mach number, a quartic rise to drag
+//! Prandtl-Glauert amplification, and the wave drag is a four-branch schedule,
+//! nothing below the critical Mach number, a quartic rise to drag
 //! divergence, a cosine-Hermite patch carrying it to Mach 1.1, and a blend
 //! above. Past drag divergence the aerodynamic centre also walks back toward
 //! mid-chord, which the moment picks up as a further shift.
@@ -69,7 +69,7 @@ const ALPHA_STALL_POSITIVE: f64 = 20.0;
 const ALPHA_STALL_NEGATIVE: f64 = -20.0;
 
 /// A section's aerodynamics with compressibility and post-stall behaviour
-/// applied -- the whole of `KulfanAirfoil.get_aero_from_neuralfoil`'s output.
+/// applied: the whole of `KulfanAirfoil.get_aero_from_neuralfoil`'s output.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Aero {
     /// How far inside its training data the underlying network query sat.
@@ -122,8 +122,8 @@ pub(super) fn apply(
     let mut cpmin_0 = peak_suction(&network);
 
     // The 360-degree extension. `include_360_deg_effects` defaults to true
-    // and neither reached call site overrides it, so there is no branch here
-    // -- the false path is not translated.
+    // and neither reached call site overrides it, so there is no branch here:
+    // the false path is not translated.
     let (cl_separated, cd_separated, cm_separated) = post_stall(alpha_deg);
     let is_separated = soft::softmax(
         &[
@@ -204,7 +204,7 @@ pub(super) fn apply(
 ///
 /// `Cp = 1 - (ue/vinf)^2` at every reported boundary-layer station; upstream
 /// notes that the network has a `Cpmin` channel and takes this instead. The
-/// station order is upstream's -- all 32 upper stations, then all 32 lower --
+/// station order is upstream's (all 32 upper stations, then all 32 lower)
 /// because the softmin's sum runs over the list in the order it is given.
 fn peak_suction(network: &NetworkAero) -> f64 {
     let mut pressures = Vec::with_capacity(2 * BL_STATIONS);
@@ -264,7 +264,7 @@ fn wave_drag(mach: f64, mach_crit: f64, mach_dd: f64, t_over_c: f64) -> f64 {
 ///
 /// Returns `(CL, CD, CM)`. `CM` is identically zero: upstream leaves it as a
 /// TODO, and the coefficients above it are NACA 0012's regardless of the
-/// section handed in -- which is why this takes an angle and no airfoil.
+/// section handed in, which is why this takes an angle and no airfoil.
 ///
 /// Reference: Truong, "An analytical model for airfoil aerodynamic
 /// characteristics over the entire 360deg angle of attack range", J.
@@ -293,7 +293,7 @@ fn post_stall(alpha_deg: f64) -> (f64, f64, f64) {
 }
 
 /// Mean skin-friction coefficient over a smooth flat plate, turbulent
-/// throughout -- `Cf_flat_plate(Re_L, method="turbulent")`.
+/// throughout: `Cf_flat_plate(Re_L, method="turbulent")`.
 ///
 /// Cengel and Cimbala, "Fluid Mechanics: Fundamentals and Applications",
 /// Table 10-4. It is added to the separated drag so that a fully stalled

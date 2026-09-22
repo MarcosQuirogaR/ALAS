@@ -15,8 +15,8 @@
 //! # This runs in `f32`, and that is the whole reason for the row's tier
 //!
 //! `compute_wing_induced_velocity` opens by casting every coordinate it uses
-//! to `np.float32` -- explicitly, with `dtype=np.float32` on each of
-//! twenty-three arrays, including the Mach number -- and every quantity
+//! to `np.float32`: explicitly, with `dtype=np.float32` on each of
+//! twenty-three arrays, including the Mach number, and every quantity
 //! derived from them stays in single precision through to the returned
 //! `C_mn`. That is not a storage decision like the panelization's: the
 //! division by `DENOM`, the two square roots and the reciprocals of `RTV1`
@@ -31,13 +31,13 @@
 //! # Scope: subsonic only
 //!
 //! `compute_wing_induced_velocity` splits on the sign of `mach^2 - 1` and has
-//! a second, much longer kernel for the supersonic side -- Mach cones, sonic
+//! a second, much longer kernel for the supersonic side: Mach cones, sonic
 //! vortex detection, the `RFLAG` row-zeroing that averages a sonic
 //! horseshoe's strength between its neighbours, and a separate in-plane
 //! case. None of it runs here. `Vortex_Lattice.__defaults__` trains on
 //! sixteen Mach numbers of which eight are supersonic, and
 //! `Fidelity_Zero.__defaults__` then **overrides that grid** with
-//! `[0.0, 0.1, 0.2, 0.3, 0.5, 0.75, 0.85, 0.9]` -- subsonic throughout. The
+//! `[0.0, 0.1, 0.2, 0.3, 0.5, 0.75, 0.85, 0.9]`: subsonic throughout. The
 //! mission never evaluates the surrogate outside it either, because
 //! `build_surrogate` builds only the subsonic spline when the supersonic
 //! training block is empty, and that spline clamps at its edge knots.
@@ -71,7 +71,7 @@ impl InducedVelocity {
 /// Half the projected length of each panel's bound vortex, VORLAX's `s`.
 ///
 /// Upstream returns this as an `n_cp` by `n_cp` array whose rows are all
-/// identical -- it repeats a row vector to make a later broadcast work -- and
+/// identical (it repeats a row vector to make a later broadcast work) and
 /// then reads only row zero. It is one value per panel and is returned as
 /// one.
 pub struct BoundVortexGeometry {
@@ -84,8 +84,8 @@ pub struct BoundVortexGeometry {
 /// # Panics
 ///
 /// Does not panic. Every division here can produce a non-finite value on
-/// degenerate geometry, and each one upstream guards is guarded the same way
-/// -- `DENOM` against a tolerance floor, `FT1`/`FT2` against a control point
+/// degenerate geometry, and each one upstream guards is guarded the same way:
+/// `DENOM` against a tolerance floor, `FT1`/`FT2` against a control point
 /// on the vortex leg, and `U`/`V` against a control point in the horseshoe's
 /// own plane.
 pub fn compute(
@@ -96,8 +96,8 @@ pub fn compute(
     let p = &vd.panels;
     let mach = mach as f32;
 
-    // If the bound vortex runs the other way -- the mirrored side of a wing,
-    // where `y` decreases outboard -- its two ends are swapped so that the
+    // If the bound vortex runs the other way (the mirrored side of a wing,
+    // where `y` decreases outboard) its two ends are swapped so that the
     // circulation sense is the same on both sides.
     let flip: Vec<bool> = (0..n).map(|i| p.yah[i] > p.ybh[i]).collect();
     let pick = |a: &[f32], b: &[f32], i: usize| if flip[i] { b[i] } else { a[i] };

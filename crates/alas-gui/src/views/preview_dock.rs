@@ -8,7 +8,7 @@
 
 use alas_report::scene::Scene;
 use alas_viz::SceneView;
-use egui::{vec2, Color32, Frame, Id, RichText, Ui};
+use egui::{vec2, Align, Color32, FontId, Frame, Id, Layout, RichText, TextStyle, Ui};
 
 use crate::state::{AppState, PreviewCamera, PreviewTab};
 use crate::views::tr;
@@ -24,6 +24,9 @@ const PREVIEW_OVERLAY_MARGIN: f32 = 8.0;
 const PREVIEW_CONTROLS_HEIGHT: f32 = 36.0;
 const PREVIEW_LEGEND_HEIGHT: f32 = 80.0;
 const PREVIEW_LEGEND_GAP: f32 = 5.0;
+const LEGEND_INNER_MARGIN: f32 = 7.0;
+const LEGEND_ROW_GAP: f32 = 3.0;
+const CONTROLS_INNER_MARGIN: egui::Vec2 = vec2(5.0, 3.0);
 
 /// Render the preview dock's contents into the given side panel.
 pub fn show_preview_dock(state: &mut AppState, ui: &mut Ui) {
@@ -47,6 +50,7 @@ pub fn show_preview_dock(state: &mut AppState, ui: &mut Ui) {
 
     let active_camera_id = AIRCRAFT_CAMERA_ID.to_owned();
     let view_key = AIRCRAFT_VIEW_KEY.to_owned();
+    refit_on_subject_change(state, ui.ctx(), &view_key);
     let mut camera_changed = false;
 
     match &state.preview_scene {
@@ -105,7 +109,43 @@ pub fn show_preview_dock(state: &mut AppState, ui: &mut Ui) {
     }
 }
 
+/// What the dock is currently drawing: the visibility mode and the figure.
+fn preview_subject(state: &AppState) -> String {
+    match state.preview_tab {
+        PreviewTab::Cabin => "cabin".to_owned(),
+        PreviewTab::Exterior => format!("exterior::{}", state.selected_preview_id),
+    }
+}
+
+/// Fit the dock to its model again when the subject it draws changes.
+///
+/// One viewport state serves every figure the dock can show, so a pan or zoom
+/// made on one subject was still in force when another took its place and the
+/// new model was left off-centre and at the wrong scale, even though switching
+/// subject is exactly when a fit is wanted. A camera orbit of the same subject
+/// is untouched.
+fn refit_on_subject_change(state: &mut AppState, ctx: &egui::Context, view_key: &str) {
+    let subject = preview_subject(state);
+    let id = Id::new(("preview_dock_subject", view_key));
+    let previous = ctx.data(|data| data.get_temp::<String>(id));
+    if previous.as_deref() == Some(subject.as_str()) {
+        return;
+    }
+    ctx.data_mut(|data| data.insert_temp(id, subject));
+    if previous.is_some() {
+        state.view_state_mut(view_key.to_owned()).reset();
+    }
+}
+
 /// Place visibility and recovery actions over the aircraft canvas.
+///
+/// The card is sized to its row before the frame is created: an egui child
+/// ui seeds its minimum rect at its own top-left corner, so a frame that
+/// simply hugs a centred row inside the wider controls region would stretch
+/// from the region's left edge to the row's right edge and leave the buttons
+/// in its right half. The row width is remembered from the previous frame
+/// (see [`centered_row`]) so the card converges on the exact width even if
+/// the estimate and the widgets disagree.
 fn show_aircraft_viewer_controls(
     state: &mut AppState,
     ui: &mut Ui,
@@ -117,36 +157,47 @@ fn show_aircraft_viewer_controls(
     let mut requested = current;
     let mut reset = false;
     let (controls, _) = preview_overlay_rects(viewport, current);
+    let row_id = Id::new(("preview_controls_row", view_key));
     ui.allocate_new_ui(egui::UiBuilder::new().max_rect(controls), |ui| {
-        Frame::group(ui.style())
-            .fill(ui.visuals().panel_fill)
-            .inner_margin(egui::Margin::symmetric(5.0, 3.0))
-            .show(ui, |ui| {
-                ui.horizontal_centered(|ui| {
-                    ui.spacing_mut().item_spacing.x = 5.0;
-                    if ui
-                        .selectable_label(current == PreviewTab::Exterior, tr("Exterior"))
-                        .on_hover_text(tr("Show the complete aircraft exterior"))
-                        .clicked()
-                    {
-                        requested = PreviewTab::Exterior;
-                    }
-                    if ui
-                        .selectable_label(current == PreviewTab::Cabin, tr("Interior"))
-                        .on_hover_text(tr("Reveal the cabin and payload layout"))
-                        .clicked()
-                    {
-                        requested = PreviewTab::Cabin;
-                    }
-                    if ui
-                        .add(egui::Button::new(tr("Reset")).small())
-                        .on_hover_text(tr("Restore the default isometric camera and framing"))
-                        .clicked()
-                    {
-                        reset = true;
-                    }
+        ui.spacing_mut().item_spacing.x = 5.0;
+        let row_width = remembered_row_width(ui, row_id, controls_row_width(ui));
+        let row_height = ui.spacing().interact_size.y;
+        let card_width = (row_width + 2.0 * CONTROLS_INNER_MARGIN.x).min(controls.width());
+        let card =
+            egui::Rect::from_center_size(controls.center(), vec2(card_width, controls.height()));
+        ui.allocate_new_ui(egui::UiBuilder::new().max_rect(card), |ui| {
+            Frame::group(ui.style())
+                .fill(ui.visuals().panel_fill)
+                .inner_margin(egui::Margin::symmetric(
+                    CONTROLS_INNER_MARGIN.x,
+                    CONTROLS_INNER_MARGIN.y,
+                ))
+                .show(ui, |ui| {
+                    centered_row(ui, row_id, row_width, row_height, |ui| {
+                        if ui
+                            .selectable_label(current == PreviewTab::Exterior, tr("Exterior"))
+                            .on_hover_text(tr("Show the complete aircraft exterior"))
+                            .clicked()
+                        {
+                            requested = PreviewTab::Exterior;
+                        }
+                        if ui
+                            .selectable_label(current == PreviewTab::Cabin, tr("Interior"))
+                            .on_hover_text(tr("Reveal the cabin and payload layout"))
+                            .clicked()
+                        {
+                            requested = PreviewTab::Cabin;
+                        }
+                        if ui
+                            .add(egui::Button::new(tr("Reset")).small())
+                            .on_hover_text(tr("Restore the default isometric camera and framing"))
+                            .clicked()
+                        {
+                            reset = true;
+                        }
+                    });
                 });
-            });
+        });
     });
 
     if requested != current {
@@ -159,41 +210,171 @@ fn show_aircraft_viewer_controls(
 }
 
 fn legend_item(ui: &mut Ui, color: Color32, label: &str) {
-    ui.horizontal(|ui| {
-        let (rect, _) = ui.allocate_exact_size(vec2(10.0, 10.0), egui::Sense::hover());
-        ui.painter().rect_filled(rect, 2.0, color);
-        ui.label(RichText::new(tr(label)).size(11.0));
-    });
+    let (rect, _) = ui.allocate_exact_size(vec2(10.0, 10.0), egui::Sense::hover());
+    ui.painter().rect_filled(rect, 2.0, color);
+    ui.label(RichText::new(tr(label)).size(11.0));
+}
+
+/// The width a [`centered_row`] with this id occupied on the previous frame,
+/// or the caller's estimate when nothing has been measured yet.
+fn remembered_row_width(ui: &Ui, row_id: Id, estimate: f32) -> f32 {
+    ui.data(|data| data.get_temp::<f32>(row_id))
+        .unwrap_or(estimate)
+        .max(1.0)
+}
+
+/// Allocate a horizontal row of `row_width` centred in the available width so
+/// the controls and their labels stay centred even when the overlay is wider
+/// than the row.
+///
+/// After layout the width the contents actually occupied is stored under
+/// `row_id` for [`remembered_row_width`], so a font, padding or translation
+/// change can leave the row off-centre for at most one frame.
+fn centered_row<R>(
+    ui: &mut Ui,
+    row_id: Id,
+    row_width: f32,
+    row_height: f32,
+    add_contents: impl FnOnce(&mut Ui) -> R,
+) -> egui::InnerResponse<R> {
+    let row_width = row_width.max(1.0);
+    let available = ui.available_rect_before_wrap();
+    let rect = egui::Rect::from_min_size(
+        egui::pos2(available.center().x - row_width * 0.5, available.top()),
+        vec2(row_width, row_height.max(1.0)),
+    );
+    let layout = if ui.layout().prefer_right_to_left() {
+        Layout::right_to_left(Align::Center)
+    } else {
+        Layout::left_to_right(Align::Center)
+    };
+    let response = ui.allocate_new_ui(
+        egui::UiBuilder::new().max_rect(rect).layout(layout),
+        add_contents,
+    );
+    let actual_width = response.response.rect.width();
+    if actual_width.is_finite() && (actual_width - row_width).abs() > 0.25 {
+        ui.data_mut(|data| data.insert_temp(row_id, actual_width));
+        ui.ctx().request_repaint();
+    }
+    response
+}
+
+/// Size of a single line of text laid out the way the labels and buttons lay
+/// it out, including the pixel rounding of the row height.
+fn text_size(ui: &Ui, text: &str, font_id: FontId) -> egui::Vec2 {
+    let text_color = ui.visuals().text_color();
+    ui.fonts(|fonts| {
+        fonts
+            .layout_no_wrap(text.to_owned(), font_id, text_color)
+            .size()
+    })
+}
+
+fn text_width(ui: &Ui, text: &str, font_id: FontId) -> f32 {
+    text_size(ui, text, font_id).x
+}
+
+fn controls_row_width(ui: &Ui) -> f32 {
+    let button_padding = ui.spacing().button_padding.x;
+    let reset_padding = if ui.visuals().button_frame {
+        button_padding
+    } else {
+        0.0
+    };
+    let exterior = text_width(ui, &tr("Exterior"), TextStyle::Button.resolve(ui.style()))
+        + 2.0 * button_padding;
+    let interior = text_width(ui, &tr("Interior"), TextStyle::Button.resolve(ui.style()))
+        + 2.0 * button_padding;
+    let reset =
+        text_width(ui, &tr("Reset"), TextStyle::Body.resolve(ui.style())) + 2.0 * reset_padding;
+    exterior + interior + reset + 2.0 * ui.spacing().item_spacing.x
+}
+
+const LEGEND_LABELS: [&str; 6] = [
+    "First class",
+    "Business class",
+    "Economy class",
+    "Galley",
+    "Lavatory",
+    "Exit",
+];
+
+fn legend_item_width(ui: &Ui, label: &str) -> f32 {
+    10.0 + ui.spacing().item_spacing.x + text_width(ui, &tr(label), FontId::proportional(11.0))
+}
+
+fn legend_row_width(ui: &Ui, labels: &[&str]) -> f32 {
+    labels
+        .iter()
+        .map(|label| legend_item_width(ui, label))
+        .sum::<f32>()
+        + ui.spacing().item_spacing.x * labels.len().saturating_sub(1) as f32
+}
+
+/// Height of a legend row: the tallest translated label or the swatch.
+fn legend_row_height(ui: &Ui) -> f32 {
+    LEGEND_LABELS
+        .iter()
+        .map(|label| text_size(ui, &tr(label), FontId::proportional(11.0)).y)
+        .fold(10.0_f32, f32::max)
+}
+
+/// Height of the legend card: title row, two entry rows, the vertical spacing
+/// between them and the frame's inner margin.
+fn legend_frame_height(ui: &Ui) -> f32 {
+    let title_height = text_size(ui, &tr("Cabin legend"), FontId::proportional(12.0)).y;
+    2.0 * LEGEND_INNER_MARGIN + title_height + 2.0 * legend_row_height(ui) + 2.0 * LEGEND_ROW_GAP
 }
 
 /// Draw a readable screen-space key that never follows the 3-D camera.
 ///
-/// The legend is always present for the cabin view. Its six entries use two
-/// explicit rows so the final entries remain inside the dock when translated
-/// labels or a narrow dock need more room.
+/// The legend is always present for the cabin view and sits along the bottom
+/// edge of the viewport, away from the cabin geometry, which the camera can
+/// otherwise place under a top-mounted card. Its six entries use two explicit
+/// rows so the final entries remain inside the dock when translated labels or
+/// a narrow dock need more room. The card is sized from its measured content
+/// and anchored to the bottom of the legend region, so its lower edge keeps
+/// the overlay margin from the viewport edge.
 fn show_cabin_legend(ui: &mut Ui, viewport: egui::Rect) {
-    let (_, rect) = preview_overlay_rects(viewport, PreviewTab::Cabin);
+    let (_, region) = preview_overlay_rects(viewport, PreviewTab::Cabin);
+    let frame_height = legend_frame_height(ui).min(region.height());
+    let rect = egui::Rect::from_min_size(
+        egui::pos2(region.left(), region.bottom() - frame_height),
+        vec2(region.width(), frame_height),
+    );
     ui.allocate_new_ui(egui::UiBuilder::new().max_rect(rect), |ui| {
         Frame::group(ui.style())
             .fill(ui.visuals().panel_fill)
-            .inner_margin(egui::Margin::same(7.0))
+            .inner_margin(egui::Margin::same(LEGEND_INNER_MARGIN))
             .show(ui, |ui| {
                 ui.vertical_centered(|ui| {
-                    ui.label(RichText::new(tr("Cabin legend")).strong().size(12.0));
                     // Keep the longest translated row inside the minimum
                     // 300-point dock while preserving a visible gap between
                     // each swatch/label pair.
-                    ui.spacing_mut().item_spacing = vec2(4.0, 3.0);
-                    ui.horizontal_centered(|ui| {
+                    ui.spacing_mut().item_spacing = vec2(4.0, LEGEND_ROW_GAP);
+                    ui.label(RichText::new(tr("Cabin legend")).strong().size(12.0));
+                    let row_height = legend_row_height(ui);
+                    let first_row_width = legend_row_width(ui, &LEGEND_LABELS[..3]);
+                    let first_row_id = Id::new(("cabin_legend_row", 0));
+                    centered_row(ui, first_row_id, first_row_width, row_height, |ui| {
                         legend_item(ui, Color32::from_rgb(142, 68, 173), "First class");
                         legend_item(ui, Color32::from_rgb(41, 128, 185), "Business class");
                         legend_item(ui, Color32::from_rgb(39, 174, 96), "Economy class");
                     });
-                    ui.horizontal_centered(|ui| {
+                    let second_row_width = legend_row_width(ui, &LEGEND_LABELS[3..]);
+                    let second_row_id = Id::new(("cabin_legend_row", 1));
+                    centered_row(ui, second_row_id, second_row_width, row_height, |ui| {
                         legend_item(ui, Color32::from_rgb(230, 126, 34), "Galley");
                         legend_item(ui, Color32::from_rgb(93, 173, 226), "Lavatory");
                         legend_item(ui, Color32::from_rgb(231, 76, 60), "Exit");
                     });
+                    // Claim any sub-pixel remainder so the painted card ends
+                    // exactly at the region's bottom edge.
+                    let remainder = ui.available_size_before_wrap();
+                    if remainder.y > 0.0 {
+                        ui.allocate_space(vec2(0.0, remainder.y));
+                    }
                 });
             });
     });
@@ -202,8 +383,10 @@ fn show_cabin_legend(ui: &mut Ui, viewport: egui::Rect) {
 /// Compute the screen-space rectangles shared by the controls and cabin key.
 ///
 /// Both overlays are centred on the canvas rather than on the dock's content
-/// cursor. Keeping the rectangles together also makes the five-point gap
-/// explicit and prevents the legend frame from extending beyond a narrow
+/// cursor. The controls hang from the top edge and the legend region hugs
+/// the bottom edge, each keeping the overlay margin. When the viewport is too
+/// short for both, the legend region slides up to the five-point gap under
+/// the controls and shrinks rather than overlapping them or leaving the
 /// viewport.
 fn preview_overlay_rects(viewport: egui::Rect, tab: PreviewTab) -> (egui::Rect, egui::Rect) {
     let preferred_controls_width: f32 = if tab == PreviewTab::Cabin {
@@ -222,9 +405,11 @@ fn preview_overlay_rects(viewport: egui::Rect, tab: PreviewTab) -> (egui::Rect, 
     );
 
     let legend_width = usable_width.min(310.0);
-    let legend_top = controls.bottom() + PREVIEW_LEGEND_GAP;
-    let available_height = (viewport.bottom() - legend_top - PREVIEW_OVERLAY_MARGIN).max(1.0);
+    let legend_bottom = viewport.bottom() - PREVIEW_OVERLAY_MARGIN;
+    let earliest_top = controls.bottom() + PREVIEW_LEGEND_GAP;
+    let available_height = (legend_bottom - earliest_top).max(1.0);
     let legend_height = PREVIEW_LEGEND_HEIGHT.min(available_height);
+    let legend_top = (legend_bottom - legend_height).max(earliest_top);
     let legend = egui::Rect::from_min_size(
         egui::pos2(viewport.center().x - legend_width * 0.5, legend_top),
         vec2(legend_width, legend_height),
@@ -344,7 +529,8 @@ mod tests {
     use super::{
         fullscreen_camera_key, fullscreen_open, fullscreen_view_key, open_fullscreen_preview,
         preview_overlay_rects, preview_scene_for_tab, reset_camera, set_fullscreen,
-        AIRCRAFT_CAMERA_ID, AIRCRAFT_VIEW_KEY,
+        AIRCRAFT_CAMERA_ID, AIRCRAFT_VIEW_KEY, PREVIEW_LEGEND_GAP, PREVIEW_LEGEND_HEIGHT,
+        PREVIEW_OVERLAY_MARGIN,
     };
     use crate::state::{AppState, PreviewCamera};
     use alas_report::scene::Scene;
@@ -414,17 +600,31 @@ mod tests {
     }
 
     #[test]
-    fn cabin_overlay_rects_are_centered_inside_the_viewport_with_five_point_gap() {
+    fn cabin_overlay_rects_hang_from_the_top_and_bottom_edges_and_never_overlap() {
         let viewport = egui::Rect::from_min_size(pos2(40.0, 20.0), vec2(300.0, 420.0));
         let (controls, legend) = preview_overlay_rects(viewport, crate::state::PreviewTab::Cabin);
 
         assert!((controls.center().x - viewport.center().x).abs() < f32::EPSILON);
         assert!((legend.center().x - viewport.center().x).abs() < f32::EPSILON);
-        assert!((legend.top() - controls.bottom() - 5.0).abs() < f32::EPSILON);
+        assert!((controls.top() - viewport.top() - PREVIEW_OVERLAY_MARGIN).abs() < f32::EPSILON);
+        assert!(
+            (viewport.bottom() - legend.bottom() - PREVIEW_OVERLAY_MARGIN).abs() < f32::EPSILON
+        );
+        assert!((legend.height() - PREVIEW_LEGEND_HEIGHT).abs() < f32::EPSILON);
+        assert!(legend.top() >= controls.bottom() + PREVIEW_LEGEND_GAP);
         assert!(controls.left() >= viewport.left());
         assert!(controls.right() <= viewport.right());
         assert!(legend.left() >= viewport.left());
         assert!(legend.right() <= viewport.right());
+
+        // A viewport too short for both overlays keeps the five-point gap and
+        // shrinks the legend instead of overlapping the controls.
+        let short = egui::Rect::from_min_size(pos2(40.0, 20.0), vec2(300.0, 100.0));
+        let (controls, legend) = preview_overlay_rects(short, crate::state::PreviewTab::Cabin);
+        assert!((legend.top() - controls.bottom() - PREVIEW_LEGEND_GAP).abs() < f32::EPSILON);
+        assert!(legend.bottom() <= short.bottom() - PREVIEW_OVERLAY_MARGIN + f32::EPSILON);
+        assert!(legend.height() < PREVIEW_LEGEND_HEIGHT);
+        assert!(legend.height() >= 1.0);
     }
 
     #[test]
@@ -449,3 +649,7 @@ mod tests {
         assert!(scene.render_title);
     }
 }
+
+#[cfg(test)]
+#[path = "preview_dock_cabin_tests.rs"]
+mod cabin_layout_tests;

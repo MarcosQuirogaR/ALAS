@@ -2,7 +2,7 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 
-/// Read a CQUAD4-144 corner-stress DATA record: 87 words per element --
+/// Read a CQUAD4-144 corner-stress DATA record: 87 words per element:
 /// `[eid*10+device, 'CEN/', then five nodes of (gid, two fibers x eight)]`.
 fn read_cquad4_corner(table4: &[u8], table: &mut StressTable) -> Result<(), Op2Error> {
     let total = table4.len() / 4;
@@ -61,8 +61,8 @@ fn word_f32(record: &[u8], word_index: usize) -> Result<f32, Op2Error> {
     read_f32(record, word_index * 4)
 }
 
-/// A one-word record read as an `i32`, or `None` if it is not exactly one word
-/// -- the test for the marker records that punctuate the stream.
+/// A one-word record read as an `i32`, or `None` if it is not exactly one word:
+/// the test for the marker records that punctuate the stream.
 fn as_i32(record: &[u8]) -> Option<i32> {
     match record {
         &[a, b, c, d] => Some(i32::from_le_bytes([a, b, c, d])),

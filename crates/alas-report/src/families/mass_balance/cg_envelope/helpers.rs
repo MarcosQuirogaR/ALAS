@@ -6,7 +6,7 @@
 
 use super::super::with_alpha;
 use crate::scene::{Axes2D, Color, Fill, Scene, SceneElement, Stroke, TextAlign, TextBaseline};
-/// Evenly spaced samples over `[a, b]`, inclusive of both ends -- `np.linspace`.
+/// Evenly spaced samples over `[a, b]`, inclusive of both ends: `np.linspace`.
 pub(super) fn linspace(a: f64, b: f64, n: usize) -> Vec<f64> {
     if n == 0 {
         return Vec::new();
@@ -18,7 +18,7 @@ pub(super) fn linspace(a: f64, b: f64, n: usize) -> Vec<f64> {
     (0..n).map(|i| a + step * i as f64).collect()
 }
 
-/// Linear interpolation over an ascending `xs`, clamped at the ends -- `np.interp`.
+/// Linear interpolation over an ascending `xs`, clamped at the ends: `np.interp`.
 pub(super) fn interp(x: f64, xs: &[f64], ys: &[f64]) -> f64 {
     if xs.is_empty() {
         return 0.0;
@@ -46,7 +46,7 @@ pub(super) fn interp(x: f64, xs: &[f64], ys: &[f64]) -> f64 {
 
 /// Draw a dash-dot-approximated limit curve plus a label anchored at the
 /// curve's crossing of `y_target` (in kg), interpolated from the real curve
-/// data -- upstream's `ax.plot(...)` + `ax.annotate(...)` pair.
+/// data: upstream's `ax.plot(...)` + `ax.annotate(...)` pair.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn draw_curve_with_label(
     scene: &mut Scene,
@@ -136,7 +136,7 @@ pub(super) fn draw_vline(
 }
 
 /// Draw one loading-trajectory polyline with a circular marker at each
-/// sampled point -- upstream's `ax.plot(..., marker="o")`.
+/// sampled point: upstream's `ax.plot(..., marker="o")`.
 pub(super) fn draw_trajectory(
     scene: &mut Scene,
     axes: &Axes2D,
@@ -164,7 +164,7 @@ pub(super) fn draw_trajectory(
     }
 }
 
-/// Small bold annotation offset a fixed pixel amount from a data point --
+/// Small bold annotation offset a fixed pixel amount from a data point:
 /// upstream's `ax.annotate(..., textcoords="offset points")`.
 // The figure API keeps each annotation property explicit to mirror the source call site.
 #[allow(clippy::too_many_arguments)]

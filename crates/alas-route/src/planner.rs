@@ -10,7 +10,7 @@
 //! exported by hand as KML, this program's own airway routing over the open
 //! navigation data, and a great circle. Each is a strictly better description
 //! of what the aircraft would actually fly than the one below it, and each is
-//! optional -- the last is not, which is what makes this total.
+//! optional: the last is not, which is what makes this total.
 //!
 //! A tier that fails is skipped rather than raised. None of them is required
 //! for a design to be evaluated: a mission over a great circle is a slightly
@@ -24,8 +24,8 @@
 //! caller passes in whatever it fetched, for the reason `crate::simbrief`
 //! gives: an HTTP client in this crate would be an HTTP client in everything
 //! that computes a distance. `alas-app` performs the request and hands the
-//! result down. Everything else about the tiering -- the order, what counts as
-//! a failure, and what each tier falls through to -- is reproduced here.
+//! result down. Everything else about the tiering: the order, what counts as
+//! a failure, and what each tier falls through to, is reproduced here.
 
 use std::path::Path;
 
@@ -56,7 +56,7 @@ pub struct RouteSources<'a> {
 
 impl RouteSources<'_> {
     /// No optional source at all, sampling a great circle at the default
-    /// resolution -- which is what an analysis run with nothing configured
+    /// resolution, which is what an analysis run with nothing configured
     /// gets.
     pub fn none() -> Self {
         Self {

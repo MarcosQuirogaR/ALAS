@@ -48,7 +48,7 @@ dependencies = [
 
 [[package]]
 name = "alas-acceptance"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "alas-aero",
  "alas-app",
@@ -79,7 +79,7 @@ dependencies = [
 
 [[package]]
 name = "alas-aero"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "alas-atmo",
  "alas-config",
@@ -95,41 +95,35 @@ dependencies = [
 
 [[package]]
 name = "alas-app"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
- "alas-aero",
  "alas-config",
  "alas-exec",
  "alas-gui",
- "alas-mission",
  "alas-pipeline",
  "alas-report",
  "alas-route",
- "alas-struct",
  "alas-testkit",
- "alas-types",
  "serde",
  "serde_json",
  "serde_yaml",
- "thiserror 2.0.19",
  "tracing",
  "winresource",
 ]
 
 [[package]]
 name = "alas-atmo"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "alas-math",
  "alas-testkit",
  "serde",
- "serde_json",
  "tracing",
 ]
 
 [[package]]
 name = "alas-cfd"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "alas-exec",
  "alas-geom",
@@ -139,7 +133,7 @@ dependencies = [
 
 [[package]]
 name = "alas-config"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "alas-atmo",
  "alas-config-derive",
@@ -153,7 +147,7 @@ dependencies = [
 
 [[package]]
 name = "alas-config-derive"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -162,32 +156,37 @@ dependencies = [
 
 [[package]]
 name = "alas-exec"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "serde",
  "serde_json",
+ "win32job",
 ]
 
 [[package]]
+name = "alas-fonts"
+version = "1.2.0"
+
+[[package]]
 name = "alas-geom"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "alas-config",
  "alas-math",
  "alas-testkit",
  "serde",
- "serde_json",
  "thiserror 2.0.19",
- "tracing",
 ]
 
 [[package]]
 name = "alas-gui"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
+ "alas-aero",
  "alas-cfd",
  "alas-config",
  "alas-exec",
+ "alas-fonts",
  "alas-geom",
  "alas-i18n",
  "alas-mission",
@@ -213,7 +212,7 @@ dependencies = [
 
 [[package]]
 name = "alas-i18n"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "alas-testkit",
  "serde",
@@ -223,7 +222,7 @@ dependencies = [
 
 [[package]]
 name = "alas-mass"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "alas-config",
  "alas-geom",
@@ -237,18 +236,17 @@ dependencies = [
 
 [[package]]
 name = "alas-math"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "alas-testkit",
  "faer",
  "serde",
- "serde_json",
  "thiserror 2.0.19",
 ]
 
 [[package]]
 name = "alas-mission"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "alas-aero",
  "alas-atmo",
@@ -264,7 +262,7 @@ dependencies = [
 
 [[package]]
 name = "alas-opt"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "alas-aero",
  "alas-atmo",
@@ -272,6 +270,7 @@ dependencies = [
  "alas-geom",
  "alas-mass",
  "alas-math",
+ "alas-mission",
  "alas-payload",
  "alas-perf",
  "alas-prop",
@@ -288,7 +287,7 @@ dependencies = [
 
 [[package]]
 name = "alas-payload"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "alas-config",
  "alas-geom",
@@ -302,7 +301,7 @@ dependencies = [
 
 [[package]]
 name = "alas-perf"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "alas-atmo",
  "alas-config",
@@ -313,7 +312,7 @@ dependencies = [
 
 [[package]]
 name = "alas-pipeline"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "alas-aero",
  "alas-atmo",
@@ -331,7 +330,6 @@ dependencies = [
  "alas-stab",
  "alas-struct",
  "alas-testkit",
- "alas-types",
  "alas-units",
  "roxmltree",
  "serde",
@@ -342,7 +340,7 @@ dependencies = [
 
 [[package]]
 name = "alas-prop"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "alas-atmo",
  "alas-config",
@@ -353,7 +351,7 @@ dependencies = [
 
 [[package]]
 name = "alas-report"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "alas-aero",
  "alas-atmo",
@@ -372,19 +370,16 @@ dependencies = [
  "alas-stab",
  "alas-struct",
  "alas-testkit",
- "alas-types",
- "alas-units",
  "plotters",
  "plotters-backend",
  "serde",
  "serde_json",
  "thiserror 2.0.19",
- "tracing",
 ]
 
 [[package]]
 name = "alas-route"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "alas-config",
  "alas-testkit",
@@ -396,7 +391,7 @@ dependencies = [
 
 [[package]]
 name = "alas-screen"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "alas-aero",
  "alas-atmo",
@@ -406,16 +401,12 @@ dependencies = [
  "alas-opt",
  "alas-stab",
  "alas-testkit",
- "alas-types",
  "serde",
- "serde_json",
- "thiserror 2.0.19",
- "tracing",
 ]
 
 [[package]]
 name = "alas-stab"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "alas-aero",
  "alas-atmo",
@@ -424,12 +415,11 @@ dependencies = [
  "alas-math",
  "alas-testkit",
  "serde",
- "serde_json",
 ]
 
 [[package]]
 name = "alas-struct"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "alas-config",
  "alas-exec",
@@ -442,7 +432,7 @@ dependencies = [
 
 [[package]]
 name = "alas-testkit"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -450,7 +440,7 @@ dependencies = [
 
 [[package]]
 name = "alas-types"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -459,7 +449,7 @@ dependencies = [
 
 [[package]]
 name = "alas-uav"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "alas-aero",
  "alas-atmo",
@@ -470,7 +460,7 @@ dependencies = [
 
 [[package]]
 name = "alas-units"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "alas-testkit",
  "serde_json",
@@ -478,17 +468,16 @@ dependencies = [
 
 [[package]]
 name = "alas-viz"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
+ "alas-fonts",
  "alas-report",
- "alas-testkit",
  "egui",
  "plotters",
  "plotters-backend",
  "rayon",
  "resvg",
  "tiny-skia",
- "tracing",
 ]
 
 [[package]]
@@ -4497,6 +4486,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72069c3113ab32ab29e5584db3c6ec55d416895e60715417b5b883a357c3e471"
 
 [[package]]
+name = "win32job"
+version = "2.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "15165faeb072f2dc68597de0d7d2071fa8ace463ec85b4a86063c0100c33bcc1"
+dependencies = [
+ "thiserror 1.0.69",
+ "windows",
+]
+
+[[package]]
 name = "winapi"
 version = "0.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4988,7 +4987,7 @@ checksum = "ec7a2a501ed189703dba8b08142f057e887dfc4b2cc4db2d343ac6376ba3e0b9"
 
 [[package]]
 name = "xtask"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "proc-macro2",
  "syn 2.0.119",

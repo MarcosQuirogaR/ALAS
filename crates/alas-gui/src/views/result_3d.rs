@@ -5,6 +5,7 @@
 
 use alas_config::AlasConfig;
 use alas_report::scene::Scene;
+use alas_viz::ViewportTransform;
 use egui::{vec2, Response, Ui, Vec2};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
@@ -12,6 +13,16 @@ use std::hash::{Hash, Hasher};
 use crate::state::{AppState, PreviewCamera};
 
 pub(crate) const MISSION_ROUTE_3D: &str = "mission_route_3d";
+/// Closest maximized-view zoom for the route globe.
+///
+/// The globe texture and every plotted object are now confined to the
+/// figure's 720 x 450 point viewport, so the bound is set by image detail
+/// rather than by contour bleed: the bundled Blue Marble raster is
+/// 4096 x 2048, which is one texture pixel per scene point at a globe radius
+/// of 4096 / (2 pi) ~= 652 points, and the route figure's radius is
+/// 180.8 points per unit of zoom. 4.0 therefore reaches about 723 points,
+/// roughly 1.1x the texture's own resolution.
+pub(crate) const MAX_ROUTE_ZOOM: f64 = 4.0;
 
 pub(crate) struct OrbitResponse {
     pub(crate) camera_changed: bool,
@@ -20,6 +31,15 @@ pub(crate) struct OrbitResponse {
 
 pub(crate) fn is_orbitable_result(id: &str) -> bool {
     id == MISSION_ROUTE_3D
+}
+
+/// Whether a retained camera belongs to the route globe.
+///
+/// Callers pass a composed key (`result_camera::run=..;figure=..`, wrapped
+/// again for the maximized overlay), so globe-specific behavior has to be
+/// recognized by the figure it ends with rather than by the bare figure id.
+fn is_route_camera_key(camera_key: &str) -> bool {
+    camera_key == MISSION_ROUTE_3D || camera_key.ends_with(&format!("figure={MISSION_ROUTE_3D}"))
 }
 
 /// Camera identity deliberately omits theme so changing palettes does not
@@ -57,6 +77,9 @@ pub(crate) fn show_orbit_view(
     desired_size: Vec2,
     maximized: bool,
 ) -> OrbitResponse {
+    if maximized && is_route_camera_key(camera_key) {
+        clamp_maximized_route_zoom(state, camera_key);
+    }
     let remaining = ui.available_size();
     let desired_size = egui::vec2(
         desired_size.x.min(remaining.x).max(100.0),
@@ -83,7 +106,7 @@ pub(crate) fn show_orbit_view(
             .cache_revision(cache_revision)
             .show_toolbar(false),
     );
-    let orbit_changed = handle_camera_response(state, &response, camera_key);
+    let orbit_changed = handle_camera_response(state, &response, scene, camera_key);
     let scroll_y = response.ctx.input(|input| input.smooth_scroll_delta.y);
     let zoom_changed = should_apply_camera_zoom(maximized, response.hovered(), scroll_y);
     if zoom_changed {
@@ -91,6 +114,9 @@ pub(crate) fn show_orbit_view(
         state
             .result_camera_mut(camera_key)
             .apply_zoom_factor(factor);
+        if is_route_camera_key(camera_key) {
+            clamp_maximized_route_zoom(state, camera_key);
+        }
     }
     OrbitResponse {
         camera_changed: orbit_changed || zoom_changed,
@@ -110,7 +136,12 @@ pub(crate) fn rebuild_scene(
         state.rebuild_result_figure_with_camera(cache_key, MISSION_ROUTE_3D, config, theme, camera);
 }
 
-fn handle_camera_response(state: &mut AppState, response: &Response, camera_key: &str) -> bool {
+fn handle_camera_response(
+    state: &mut AppState,
+    response: &Response,
+    scene: &Scene,
+    camera_key: &str,
+) -> bool {
     // A double-click changes only the containing view.  Its pointer sequence
     // must not also be interpreted as a final orbit gesture, otherwise a
     // tiny click displacement changes the camera as fullscreen opens.
@@ -122,10 +153,48 @@ fn handle_camera_response(state: &mut AppState, response: &Response, camera_key:
         return false;
     }
     let delta = response.drag_motion();
+    if is_route_camera_key(camera_key)
+        && apply_anchored_globe_drag(state, response, scene, camera_key, delta)
+    {
+        return true;
+    }
     state
         .result_camera_mut(camera_key)
         .apply_orbit_motion(delta);
     delta.is_finite() && delta != vec2(0.0, 0.0)
+}
+
+/// Drag the globe by its surface instead of by a fixed number of degrees per
+/// pixel, so the grabbed location follows the pointer at any zoom.
+///
+/// The anchor is re-picked from the previous pointer position each frame
+/// rather than stored, which keeps the gesture exact while the pointer is on
+/// the globe and lets the clamped horizon, pole and outside-pointer cases
+/// recover on the following frame. The route view disables canvas pan and
+/// wheel zoom, so the widget's fit transform is the whole scene-to-screen
+/// mapping. Returns false when the gesture has no anchored solution and the
+/// caller should fall back to the angular sweep.
+fn apply_anchored_globe_drag(
+    state: &mut AppState,
+    response: &Response,
+    scene: &Scene,
+    camera_key: &str,
+    delta: Vec2,
+) -> bool {
+    if !delta.is_finite() || delta == vec2(0.0, 0.0) {
+        return false;
+    }
+    let Some(pointer) = response.interact_pointer_pos() else {
+        return false;
+    };
+    let transform = ViewportTransform::fit(scene.width, scene.height, response.rect);
+    let to = transform.to_canvas(pointer);
+    let from = transform.to_canvas(pointer - delta);
+    let camera = *state.result_camera_mut(camera_key);
+    let (center, radius) = alas_report::families::mission::route_globe_disk(&camera.into());
+    state
+        .result_camera_mut(camera_key)
+        .apply_surface_anchored_drag(from, to, center, radius)
 }
 
 fn should_apply_orbit(double_clicked: bool, dragged: bool) -> bool {
@@ -134,6 +203,15 @@ fn should_apply_orbit(double_clicked: bool, dragged: bool) -> bool {
 
 fn should_apply_camera_zoom(maximized: bool, hovered: bool, scroll_y: f32) -> bool {
     maximized && hovered && scroll_y.is_finite() && scroll_y.abs() > f32::EPSILON
+}
+
+fn clamp_maximized_route_zoom(state: &mut AppState, camera_key: &str) {
+    let camera = state.result_camera_mut(camera_key);
+    camera.zoom = if camera.zoom.is_finite() {
+        camera.zoom.clamp(0.15, MAX_ROUTE_ZOOM)
+    } else {
+        1.0
+    };
 }
 
 fn camera_cache_revision(camera: PreviewCamera, maximized: bool) -> u64 {
@@ -148,8 +226,9 @@ fn camera_cache_revision(camera: PreviewCamera, maximized: bool) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::{
-        camera_cache_revision, is_orbitable_result, result_camera, result_camera_key,
-        should_apply_camera_zoom, should_apply_orbit, MISSION_ROUTE_3D,
+        camera_cache_revision, is_orbitable_result, is_route_camera_key, result_camera,
+        result_camera_key, should_apply_camera_zoom, should_apply_orbit, MAX_ROUTE_ZOOM,
+        MISSION_ROUTE_3D,
     };
     use crate::state::{AppState, PreviewCamera};
 
@@ -207,5 +286,32 @@ mod tests {
             camera_cache_revision(camera, false),
             camera_cache_revision(camera, true)
         );
+    }
+
+    #[test]
+    fn the_globe_camera_is_recognized_through_the_composed_and_maximized_keys() {
+        let embedded = result_camera_key(7, MISSION_ROUTE_3D);
+        let maximized = format!("fullscreen_camera::{embedded}");
+        assert!(is_route_camera_key(&embedded));
+        assert!(is_route_camera_key(&maximized));
+        assert!(is_route_camera_key(MISSION_ROUTE_3D));
+        assert!(!is_route_camera_key(&result_camera_key(
+            7,
+            "mass_breakdown"
+        )));
+    }
+
+    #[test]
+    fn maximized_route_zoom_is_capped_at_the_globe_textures_own_resolution() {
+        let mut state = AppState::default();
+        state.result_cameras.insert(
+            "route".to_owned(),
+            PreviewCamera {
+                zoom: 8.0,
+                ..PreviewCamera::top()
+            },
+        );
+        super::clamp_maximized_route_zoom(&mut state, "route");
+        assert_eq!(state.result_cameras["route"].zoom, MAX_ROUTE_ZOOM);
     }
 }

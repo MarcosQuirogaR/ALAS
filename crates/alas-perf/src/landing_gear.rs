@@ -13,8 +13,8 @@
 //! stability-derived envelope), then adds enough wheels per strut to carry
 //! that load with margin, drawing from [`TIRE_DATABASE`]. The resulting gear
 //! capacity is converted back to [`LandingGearLayout::pct_load_nlg_max`] and
-//! [`LandingGearLayout::pct_load_mlg_max`] -- the same fractions
-//! `MassModelConfig` carries as a fallback -- so a design is only
+//! [`LandingGearLayout::pct_load_mlg_max`]: the same fractions
+//! `MassModelConfig` carries as a fallback, so a design is only
 //! gear-constrained if its real wheel/tire capacity, sized with margin, still
 //! falls short of the aerodynamic envelope.
 //!
@@ -25,7 +25,7 @@
 use alas_config::{EffectiveGearStationExt, EffectiveMainGearStation, LandingGearConfig};
 
 /// A representative transport-category tire class, at conceptual-design
-/// fidelity (not a specific certified part number) -- the `TireSpec` records
+/// fidelity (not a specific certified part number): the `TireSpec` records
 /// upstream's `TIRE_DATABASE` entries carry.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TireSpec {
@@ -74,18 +74,18 @@ const HEAVY: TireSpec = TireSpec {
     width_m: 0.56,
 };
 
-/// The tire classes in ascending capacity -- the order [`select_tire`] walks
+/// The tire classes in ascending capacity: the order [`select_tire`] walks
 /// to auto-select the smallest that covers a load. Mirrors upstream's
 /// `_TIRE_ORDER`.
 pub const TIRE_DATABASE: [TireSpec; 4] = [LIGHT, NARROWBODY, WIDEBODY, HEAVY];
 
 /// Standard main-gear bogie sizes (wheels per strut) a preliminary design
-/// chooses between -- odd counts and anything above 6/strut are not realistic
+/// chooses between: odd counts and anything above 6/strut are not realistic
 /// for a twin/quad-leg configuration at this design stage. Upstream's
 /// `_STANDARD_BOGIE_SIZES`.
 const STANDARD_BOGIE_SIZES: [i64; 3] = [2, 4, 6];
 
-/// The tire class named by `code`, or `None` if it is not one of the four --
+/// The tire class named by `code`, or `None` if it is not one of the four:
 /// `TIRE_DATABASE.__contains__`/`__getitem__` on the class key.
 fn tire_by_class(code: &str) -> Option<TireSpec> {
     match code {
@@ -97,7 +97,7 @@ fn tire_by_class(code: &str) -> Option<TireSpec> {
     }
 }
 
-/// Representative strut material by tire class -- informational/labelling only
+/// Representative strut material by tire class, informational/labelling only
 /// (this tool runs no structural analysis of the strut). Upstream's
 /// `STRUT_MATERIALS.get(code, STRUT_MATERIALS["narrowbody"])`, so an
 /// unrecognized code falls back to the narrowbody steel.
@@ -217,7 +217,7 @@ pub struct LandingGearLayout {
 
 /// Pick a tire class: an explicit choice, or the smallest whose rating covers
 /// `design_load_per_wheel_kg`. Falls back to the heaviest class (which may
-/// still be under-rated) -- `_select_tire`.
+/// still be under-rated): `_select_tire`.
 fn select_tire(design_load_per_wheel_kg: f64, tire_class: &str) -> TireSpec {
     if let Some(spec) = tire_by_class(tire_class) {
         return spec;
@@ -231,7 +231,7 @@ fn select_tire(design_load_per_wheel_kg: f64, tire_class: &str) -> TireSpec {
 }
 
 /// Smallest standard bogie size + matching tire whose capacity covers
-/// `strut_load_kg` -- `_size_bogie`.
+/// `strut_load_kg`: `_size_bogie`.
 ///
 /// The tire is re-selected for each candidate wheel count (the per-wheel load
 /// it would actually see) and the same tire is checked against the design load
@@ -255,7 +255,7 @@ fn size_bogie(
             return (n, tire);
         }
     }
-    // Nothing in the standard ladder covers it -- return the largest bogie
+    // Nothing in the standard ladder covers it: return the largest bogie
     // with the tire sized for its actual per-wheel load (may still be
     // under-rated; a legitimate finding, not silently hidden).
     let n = STANDARD_BOGIE_SIZES[STANDARD_BOGIE_SIZES.len() - 1];
@@ -292,7 +292,7 @@ fn mlg_strut_positions(n_mlg_struts: i64, half_track: f64) -> Vec<(String, f64)>
 }
 
 /// Size the landing gear from real static reaction loads at the aerodynamic
-/// centre-of-gravity limits -- `size_landing_gear`.
+/// centre-of-gravity limits: `size_landing_gear`.
 ///
 /// `x_nlg`/`x_mlg` are the physical fuselage stations of the nose/main gear;
 /// `aero_fwd_lim_x`/`aero_aft_lim_x` are the physical stations of the
@@ -384,7 +384,7 @@ pub fn size_landing_gear_with_group_stations(
     let r_nlg_design = r_nlg(aero_fwd_lim_x).max(0.0);
     let r_mlg_total_design = (mtow_kg - r_nlg(aero_aft_lim_x)).max(0.0);
 
-    // -- Nose gear --------------------------------------------------------
+    // Nose gear
     let n_nlg_wheels = if gear_config.n_nlg_wheels != 0 {
         gear_config.n_nlg_wheels
     } else if mtow_kg >= gear_config.nlg_dual_wheel_mtow_kg {
@@ -395,7 +395,7 @@ pub fn size_landing_gear_with_group_stations(
     let nlg_load_per_wheel = r_nlg_design / n_nlg_wheels.max(1) as f64;
     let nlg_tire = select_tire(nlg_load_per_wheel, &gear_config.tire_class);
 
-    // -- Main gear --------------------------------------------------------
+    // Main gear
     // Keep one load reaction per leg for preliminary sizing. A source-backed
     // heterogeneous wheel list then controls each bogie's actual count; an
     // omitted or malformed list falls back to the existing scalar/automatic
@@ -440,7 +440,7 @@ pub fn size_landing_gear_with_group_stations(
         .max_by(|left, right| left.rated_load_kg.total_cmp(&right.rated_load_kg))
         .unwrap_or(NARROWBODY);
 
-    // -- Derived strength limits (fraction of MTOW) ------------------------
+    // Derived strength limits (fraction of MTOW)
     let nlg_capacity_kg = n_nlg_wheels as f64 * nlg_tire.rated_load_kg;
     let mlg_capacity_kg: f64 = mlg_wheels_per_strut
         .iter()
@@ -450,14 +450,14 @@ pub fn size_landing_gear_with_group_stations(
     let pct_load_nlg_max = nlg_capacity_kg / mtow_kg.max(1.0);
     let pct_load_mlg_max = mlg_capacity_kg / mtow_kg.max(1.0);
 
-    // -- Strut material label ----------------------------------------------
+    // Strut material label
     let strut_material = if gear_config.strut_material != "auto" {
         gear_config.strut_material.clone()
     } else {
         strut_material_for(mlg_tire.code).to_owned()
     };
 
-    // -- Lateral track width ------------------------------------------------
+    // Lateral track width
     // A published track is a source baseline whose definition is already a
     // centreline-to-centreline dimension (A380's 14.34 m is specifically the
     // wing-gear track). The preset's track_diameter_factor is the source
@@ -474,7 +474,7 @@ pub fn size_landing_gear_with_group_stations(
         fuselage_diameter_m * gear_config.track_diameter_factor + wheels_per_strut as f64 * 0.05
     };
 
-    // -- Lateral turnover angle (Raymer Ch.11 / Currey overturn criterion).
+    //: Lateral turnover angle (Raymer Ch.11 / Currey overturn criterion).
     // The tip-over axis runs from the nose-gear contact to a main-gear
     // contact; in plan view it makes angle delta with the centreline. The
     // lateral lever arm is l_n*sin(delta), smallest at the forward CG limit.
@@ -488,7 +488,7 @@ pub fn size_landing_gear_with_group_stations(
     let turnover_angle_deg = cg_height_estimate_m.max(0.1).atan2(lever).to_degrees();
     let turnover_ok = turnover_angle_deg <= gear_config.turnover_angle_limit_deg;
 
-    // -- Wheel positions for the planform figure -----------------------------
+    // Wheel positions for the planform figure
     let mut wheels: Vec<Wheel> = Vec::new();
     let nlg_spacing = nlg_tire.width_m * 1.6;
     for i in 0..n_nlg_wheels {
@@ -570,7 +570,7 @@ mod tests {
     #[test]
     fn select_tire_honours_an_explicit_class_even_when_it_is_under_rated() {
         // An explicit "light" is returned though the load far exceeds its
-        // rating -- the explicit branch does not fall through to a bigger tire.
+        // rating: the explicit branch does not fall through to a bigger tire.
         let tire = select_tire(1_000_000.0, "light");
         assert_eq!(tire.code, "light");
     }

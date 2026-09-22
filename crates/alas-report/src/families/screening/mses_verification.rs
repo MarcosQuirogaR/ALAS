@@ -45,7 +45,7 @@ pub fn fig_mses_verification(
     let canvas_h = ((0.6 * n as f64 + 1.2).max(3.2)) * 100.0;
     let mut scene = Scene::new(650.0, canvas_h, Some(Color::from_hex(pal.bg)));
     scene.title =
-        Some("MSES verification -- real shock/viscous effects vs the VLM+Korn estimate".to_owned());
+        Some("MSES verification: real shock/viscous effects vs the VLM+Korn estimate".to_owned());
 
     let max_ld = ld_vlm
         .iter()

@@ -5,7 +5,7 @@
 //!
 //! `alas-math::spline` solves a different linear system from SciPy's own
 //! (second derivatives rather than first), so this is not a translation
-//! check in the usual sense -- both describe the unique cubic spline through
+//! check in the usual sense, both describe the unique cubic spline through
 //! the same knots, values and boundary conditions, and this fixture is what
 //! proves the from-scratch implementation actually is that spline. Compared
 //! at the `linalg` tier: two different linear solves of an equivalent system

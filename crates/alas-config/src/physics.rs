@@ -9,7 +9,7 @@
 //! The parasite-drag estimate is Raymer's component method and the transonic
 //! rise is the Korn equation, and both are parameterized by a handful of
 //! technology and interference factors. In the scripts this program grew out
-//! of these were inline literals -- `* 1.10`, `0.95`, `radians(32)` -- which
+//! of these were inline literals, `* 1.10`, `0.95`, `radians(32)`, which
 //! made the fidelity assumptions invisible and unadjustable. Gathering them
 //! here is what makes them either.
 //!
@@ -143,7 +143,7 @@ mod tests {
     #[test]
     fn a_field_with_no_declared_unit_takes_one_from_its_name() {
         // None of these names end in a unit suffix, so all of them are
-        // dimensionless -- which is the point: the derived unit is the empty
+        // dimensionless, which is the point: the derived unit is the empty
         // string rather than a guess.
         let schema = DragModelConfig::default().schema();
         let viscous = schema.field("viscous_margin").unwrap();

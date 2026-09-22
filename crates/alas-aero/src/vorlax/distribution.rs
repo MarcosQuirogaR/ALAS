@@ -11,7 +11,7 @@
 //! Each lifting surface is cut into `n_sw` spanwise strips and each strip
 //! into `n_cw` chordwise panels. Every panel gets four corners, a bound
 //! vortex a quarter of the way back, and a control point three quarters of
-//! the way back, in that panel's own local chord -- and then the whole strip
+//! the way back, in that panel's own local chord, and then the whole strip
 //! is rotated about its leading edge by the local incidence, offset by the
 //! accumulated sweep and dihedral, and moved to the wing's origin.
 //!
@@ -26,7 +26,7 @@
 //!
 //! Left untranslated for the same reason: the camber line, because no wing
 //! the mission runner builds carries an `Airfoil` and the fallback camber is
-//! thirty zeros -- every `np.interp` against it returns zero, so every
+//! thirty zeros, every `np.interp` against it returns zero, so every
 //! `z_c_*` term is identically zero and the twist pivot is the leading edge
 //! exactly; the control-surface chord cuts, which reduce to the identity
 //! interpolation when no surface is discretized; and the quaternion hinge

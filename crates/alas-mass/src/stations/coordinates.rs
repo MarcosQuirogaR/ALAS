@@ -3,8 +3,8 @@
 
 //! The lumped ten-group coordinates read off the component stations.
 //!
-//! Every consumer of the legacy breakdown -- the trim anchor, the model CG
-//! envelope, the figures -- reads one point per group. Deriving those points
+//! Every consumer of the legacy breakdown: the trim anchor, the model CG
+//! envelope, the figures: reads one point per group. Deriving those points
 //! from the same stations the item ledger places its rows at is what keeps
 //! the two representations from disagreeing about where the aircraft
 //! balances: the ledger's gear centroid is the mass-weighted nose and main

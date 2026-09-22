@@ -827,12 +827,12 @@ def main() -> int:
         "working_tree_status": dirty,
         "license": "Apache-2.0 (pinned Aviary source)",
         "reference": PINNED_NASA_REFERENCE,
-        "alas_reference_manifest": str(Path(".agent/data/flops-reference-20260911/manifest.json").resolve()),
+        "alas_reference_manifest": str(Path("out/evidence/data/flops-reference-20260911/manifest.json").resolve()),
         "alas_raw": str(raw_path),
         "alas_raw_sha256": raw_hash,
         "generated_by": "reproducible tools/a320_flops_aviary_audit.py",
     }
-    reference_manifest_path = Path(".agent/data/flops-reference-20260911/manifest.json").resolve()
+    reference_manifest_path = Path("out/evidence/data/flops-reference-20260911/manifest.json").resolve()
     if reference_manifest_path.exists():
         source_manifest["alas_reference_manifest_sha256"] = sha256(reference_manifest_path)
     write_json(out / "source_manifest.json", source_manifest)

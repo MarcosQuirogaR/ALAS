@@ -107,10 +107,46 @@ impl ToolLocator {
             openvsp_exe: self.discover_openvsp(openvsp_dir).ready_path(),
             vspaero_exe: self.discover_vspaero(openvsp_dir).ready_path(),
             avl_exe: self.discover_avl(avl_exe).ready_path(),
-            flowunsteady_exe: env::var_os("ALAS_FLOWUNSTEADY_EXE")
-                .map(PathBuf::from)
-                .filter(|path| path.is_file()),
+            // No caller threads a configured path through here: unlike every
+            // other tool resolved above, FLOWUnsteady has no adjacent-tool
+            // discovery convention (no bundled or well-known install layout
+            // to search), so the persisted preference is read directly
+            // rather than adding a parameter with nothing else to combine it
+            // with. The GUI already persists this preference to disk on
+            // every edit (`save_direct_tool_preferences`), so this reflects
+            // the current value.
+            flowunsteady_exe: self
+                .discover_flowunsteady(Path::new(
+                    self.load_preferences()
+                        .flowunsteady_exe
+                        .as_deref()
+                        .unwrap_or(""),
+                ))
+                .ready_path(),
         }
+    }
+
+    /// Inspect the configured FLOWUnsteady/Julia adapter launcher.
+    ///
+    /// The configured preference overrides discovery, mirroring how
+    /// `avl_exe`/`openvsp_dir` already override their own adjacent-tool
+    /// discovery. `ALAS_FLOWUNSTEADY_EXE` remains a valid override for
+    /// headless/CI use when no preference is configured.
+    pub fn discover_flowunsteady(&self, configured: &Path) -> ExecutableDiscovery {
+        if !configured.as_os_str().is_empty() {
+            return if configured.is_file() {
+                ExecutableDiscovery::Ready(configured.to_path_buf())
+            } else {
+                ExecutableDiscovery::Incomplete {
+                    directory: configured.to_path_buf(),
+                    missing: vec!["FLOWUnsteady/Julia executable".to_owned()],
+                }
+            };
+        }
+        env::var_os("ALAS_FLOWUNSTEADY_EXE")
+            .map(PathBuf::from)
+            .filter(|path| path.is_file())
+            .map_or(ExecutableDiscovery::Absent, ExecutableDiscovery::Ready)
     }
 
     /// Inspect the configured and adjacent MSC Nastran installation.

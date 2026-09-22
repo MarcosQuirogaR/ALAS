@@ -8,6 +8,7 @@ use super::super::no_data_scene;
 use super::helpers::linspace;
 use super::render::{render, CgEnvelopeRenderData};
 use crate::chart_kit::draw_title;
+use crate::families::MAIN_GEAR_STATION_NOT_MEASURED;
 use crate::scene::{Color, Scene};
 use crate::theme::get_palette;
 use alas_config::AlasConfig;
@@ -70,12 +71,21 @@ pub fn figure_cg_envelope(
 
     let fallback_x_nlg = fus_start_x + fus_len * nlg_x_frac;
     let fallback_x_mlg = x_mac_le + mlg_x_frac_mac * mac;
-    let gear_stations = config.landing_gear.resolved_station_positions(
+    // Resolved through the shared gate rather than from a fallback rebuilt
+    // here. The gear-strength boundaries of this envelope are moments about
+    // the main-gear station, so drawing them for an aircraft whose station
+    // the mass model refuses would put a limit line where nothing was
+    // measured. The figure says so instead.
+    let Ok(gear_stations) = alas_pipeline::gear_stations::resolved_gear_stations(
+        config,
+        plane,
         fallback_x_nlg,
         fallback_x_mlg,
         fus_start_x,
         fus_len,
-    );
+    ) else {
+        return no_data_scene(scene, pal, MAIN_GEAR_STATION_NOT_MEASURED);
+    };
     let x_nlg = gear_stations.x_nlg_m;
     let x_mlg = gear_stations.x_mlg_m;
     let wheelbase = x_mlg - x_nlg;
@@ -173,7 +183,7 @@ pub fn figure_cg_envelope(
     let tip_over_pct = to_pct(x_mlg);
 
     // Gear strength limits: the same wheel/tire-derived values the optimizer's
-    // CG check enforces, computed from the aerodynamic limits above -- so this
+    // CG check enforces, computed from the aerodynamic limits above, so this
     // plot shows exactly the boundary a design is actually held to. Python
     // wraps this in a `try/except`, falling back to `MassModelConfig`'s fixed
     // fractions on any failure; `size_landing_gear` here is infallible given

@@ -7,9 +7,9 @@
 //! `docs/PORTING.md` carries this row with no third-party provenance: nothing
 //! here is translated from a specific file. It exists because the future
 //! `alas-geom::aircraft::airfoil` repanel needs the same construction SciPy's
-//! `CubicSpline` provides -- resampling an airfoil's coordinates onto new
+//! `CubicSpline` provides, resampling an airfoil's coordinates onto new
 //! stations while pinning the leading-edge tangent and leaving the trailing
-//! edge's curvature free -- and that construction has one mathematically
+//! edge's curvature free, and that construction has one mathematically
 //! correct answer given the same knots, values and boundary conditions,
 //! independent of which of several equivalent linear systems a particular
 //! implementation happens to solve. This module solves the classical one:
@@ -17,16 +17,16 @@
 //! second derivatives ("moments") at each knot. SciPy's own `CubicSpline`
 //! solves an equivalent system in terms of first derivatives instead; the two
 //! agree to a handful of ulps because they describe the same unique spline,
-//! not because either copies the other -- confirmed directly against SciPy's
+//! not because either copies the other: confirmed directly against SciPy's
 //! output for this crate's fixture, at the `linalg` tier the disagreement
 //! between two different linear solves is sized for.
 //!
 //! # Boundary conditions
 //!
 //! Each end independently takes either [`Boundary::FirstDerivative`] (the
-//! spline's slope at that end is pinned to a given vector -- "clamped", in
+//! spline's slope at that end is pinned to a given vector: "clamped", in
 //! SciPy's terms) or [`Boundary::SecondDerivative`] (the spline's curvature
-//! is pinned instead -- "natural" when the value is zero). SciPy's
+//! is pinned instead: "natural" when the value is zero). SciPy's
 //! `CubicSpline` also offers `'not-a-knot'` and `'periodic'` as whole-spline
 //! presets; neither is translated here because the one caller this module is
 //! built for (`Airfoil.repanel`, via `scipy.interpolate.CubicSpline(...,
@@ -213,8 +213,8 @@ impl CubicSpline {
     /// The spline's value at `query_x`.
     ///
     /// Outside `[x[0], x[last]]`, this extrapolates using the polynomial of
-    /// the nearest segment -- the same default `CubicSpline(...,
-    /// extrapolate=True)` uses upstream -- rather than clamping or returning
+    /// the nearest segment, the same default `CubicSpline(...,
+    /// extrapolate=True)` uses upstream, rather than clamping or returning
     /// `NaN`, since nothing that calls this needs either of those yet.
     pub fn evaluate(&self, query_x: f64) -> Vec<f64> {
         let segment = self.segment_for(query_x);
@@ -327,7 +327,7 @@ fn solve_moments(
 ///
 /// `sub[0]` and `sup[len-1]` are never read (there is no sub-diagonal entry
 /// on the first row or super-diagonal entry on the last). Panics only if
-/// `rhs` is empty, which [`solve_moments`] never constructs -- a spline with
+/// `rhs` is empty, which [`solve_moments`] never constructs: a spline with
 /// at least 2 knots always has at least 2 rows.
 fn thomas_solve(sub: &[f64], diag: &[f64], sup: &[f64], mut rhs: Vec<Vec<f64>>) -> Vec<Vec<f64>> {
     let len = diag.len();
@@ -439,7 +439,7 @@ mod tests {
     #[test]
     fn vector_valued_dimensions_interpolate_independently() {
         // A (x, y)-pair spline built from two unrelated scalar splines should
-        // agree with them dimension by dimension -- the shared tridiagonal
+        // agree with them dimension by dimension: the shared tridiagonal
         // solve must not let one dimension's data leak into another's.
         let x = [0.0, 1.0, 2.0, 3.0];
         let y = vec![

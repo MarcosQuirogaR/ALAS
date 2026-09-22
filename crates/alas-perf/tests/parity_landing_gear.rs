@@ -5,11 +5,11 @@
 //! `golden/generators/gen_perf_landing_gear.py`.
 //!
 //! The buildup is closed-form arithmetic over a discrete tire ladder, so the
-//! continuous quantities -- reaction loads, strength fractions, track width,
-//! turnover angle and every wheel coordinate -- are checked at `Tier::Closed`,
-//! matching `docs/PORTING.md`. The discrete outputs the same buildup produces
-//! -- wheel/strut counts, the selected tire class and its published
-//! dimensions, the strut-material label and the turnover verdict -- are
+//! continuous quantities: reaction loads, strength fractions, track width,
+//! turnover angle and every wheel coordinate, are checked at `Tier::Closed`,
+//! matching `docs/PORTING.md`. The discrete outputs the same buildup produces:
+//! wheel/strut counts, the selected tire class and its published
+//! dimensions, the strut-material label and the turnover verdict, are
 //! integers, strings and a bool, so they are checked for exact equality
 //! rather than through a tolerance.
 

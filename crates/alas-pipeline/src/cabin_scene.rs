@@ -306,8 +306,8 @@ pub struct MissingInput {
 ///
 /// [`AnalysisReport`] carries a polar sweep, a trim solution and a mass
 /// breakdown; the scene reads three of its fields. Naming that subset lets a
-/// caller that already holds resolved geometry and a payload layout -- a
-/// figure gallery, a renderer regression test -- build the same scene without
+/// caller that already holds resolved geometry and a payload layout (a
+/// figure gallery, a renderer regression test) build the same scene without
 /// first running an analysis it does not use, and keeps the two paths building
 /// it through one function rather than two that can drift.
 #[derive(Debug, Clone, Copy)]
