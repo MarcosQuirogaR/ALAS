@@ -77,8 +77,15 @@ one.
 
 External solvers run as separate processes. MSES and MSC Nastran are
 proprietary and always user-supplied. AVL (GPL-2.0) is bundled with the
-Windows release, and NASTRAN-95 (NOSA 1.3) may be bundled when its complete
+Windows release; the Linux release ships the same AVL source and licence with
+a build note instead, since this project has only reviewed and tested the
+Windows executable. NASTRAN-95 (NOSA 1.3) may be bundled when its complete
 reviewed source/notice staging is present — see `THIRD-PARTY-NOTICES.md` and
 `docs/downloads.md` for the exact per-tool boundary. Every analysis that needs
 a solver reports itself unavailable when it is absent, rather than
 substituting an approximation without saying so.
+
+Both a Windows portable package (`.zip`) and a Linux portable package
+(`.tar.gz`, glibc 2.35 baseline) are produced by `cargo xtask dist`; see
+`docs/downloads.md` for what each contains and the Linux package's system
+requirements.

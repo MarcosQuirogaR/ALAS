@@ -10,6 +10,8 @@
 mod bench;
 mod checks;
 mod dist;
+mod dist_archive;
+mod dist_avl;
 mod evidence;
 mod ledger;
 mod source_size;

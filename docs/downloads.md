@@ -1,37 +1,58 @@
 # ALAS downloads and standalone packaging
 
-The supported Windows download is a portable ZIP produced by `cargo xtask
-dist`. It contains the native standalone application, its release metadata,
-the corresponding AGPL source snapshot, configuration templates, and the
-notices needed to audit the package. No installer or machine-wide runtime
-registration is required.
+The supported downloads are a portable Windows ZIP and a portable Linux
+tar.gz, both produced by `cargo xtask dist`. Each contains the native
+standalone application, its release metadata, the corresponding AGPL source
+snapshot, configuration templates, and the notices needed to audit the
+package. No installer or machine-wide runtime registration is required on
+either platform.
 
 A "package" can mean three different things, and this page is only ever about
 the third one:
 
 1. a **local package** a developer produced on their own machine with `cargo
    xtask dist` (see below) — never distributed automatically;
-2. a **CI preflight artifact** produced by the manual
-   `release-preflight.yml` GitHub Actions workflow on a clean Windows
-   runner and uploaded as a workflow-run artifact for reviewers with
-   repository access — reproducibility evidence, not a download, and not
-   published; see [`release-packaging.md`](release-packaging.md#ci-release-preflight);
+2. a **CI workflow artifact** produced by the manual `release-preflight.yml`
+   (Windows only) or `release-package.yml` (Windows and Linux) GitHub Actions
+   workflows on a clean runner and uploaded as a workflow-run artifact for
+   reviewers with repository access — reproducibility evidence, not a
+   download, and not published; see
+   [`release-packaging.md`](release-packaging.md#ci-release-preflight);
 3. an **externally published release** — a maintainer-reviewed, tagged
    package a human deliberately publishes for public download. That is the
    only kind of package this downloads page describes below.
 
+## Linux package requirements
+
+The Linux package is built on `ubuntu-22.04` (glibc 2.35) deliberately, not a
+newer or rolling image, so it keeps running on any distribution with glibc
+2.35 or newer already installed — most currently supported Linux desktop and
+server distributions qualify. The desktop application needs the ordinary
+desktop graphics stack an X11 or Wayland session already provides (an X11 or
+Wayland client library, fontconfig, and a working OpenGL/Vulkan driver — the
+same libraries a modern browser or any other `egui`/`wgpu` desktop
+application needs); nothing beyond that is required to be installed
+separately for a normal desktop session. ALAS also runs fully headless from
+the command line (`ALAS --config <file> --output <dir> ...`, `ALAS --help`)
+for scripted or server-side use, with no display required at all. The exact
+system packages this project installs to *build* the Linux package in CI are
+listed in [`release-packaging.md`](release-packaging.md#ci-release-package-windows-and-linux);
+they are build-time dependencies, not something an end user extracting the
+package needs to install.
+
 ## What a standalone package contains
 
-After extraction, start `ALAS.exe` from the package directory. Keep the
-directory intact: the executable resolves its adjacent `configs/`, source
-manifest, notices, and any separately distributed solver directories relative
-to the package. The exact archive name is version- and target-specific, for
-example `alas-v1.2.0-windows-x86_64.zip`; the release manifest records the
-actual version, target, source revision, dirty-worktree flag, and hashes.
+After extraction, start `ALAS.exe` (Windows) or `./ALAS` (Linux) from the
+package directory. Keep the directory intact: the executable resolves its
+adjacent `configs/`, source manifest, notices, and any separately distributed
+solver directories relative to the package. The exact archive name is
+version- and target-specific, for example `alas-v1.2.0-windows-x86_64.zip` or
+`alas-v1.2.0-linux-x86_64.tar.gz`; the release manifest records the actual
+version, target, source revision, dirty-worktree flag, and hashes.
 
 Every accepted package includes:
 
-- `ALAS.exe`, the native desktop application;
+- `ALAS.exe` or `ALAS`, the native desktop application;
 - `RELEASE-MANIFEST.json`, including byte counts, SHA-256 hashes, and the
   status of every adjacent external tool;
 - `SOURCE-MANIFEST.json` and the matching `source/` AGPL snapshot;
@@ -41,12 +62,15 @@ Every accepted package includes:
   provenance README, and acquisition script. This is transition data for an
   installed MSES process; it is not the MSES executable bundle.
 
-The archive also has a sibling `.zip.sha256` file. Verify that checksum before
-extracting a download. The release task validates `--help`, configuration
-round-tripping, a headless run through a path containing spaces, and the
-required AVL evidence before it writes the archive. Packaging metadata is
-provenance, not a claim that every optional discipline has converged or that
-the aircraft is certified.
+The archive also has a sibling `.zip.sha256` (Windows) or `.tar.gz.sha256`
+(Linux) file. Verify that checksum before extracting a download. The release
+task always validates `--help`, configuration round-tripping, and a headless
+run through a path containing spaces before it writes the archive; on the
+Windows package it additionally requires the bundled AVL executable to
+produce its total-force evidence (see "External tools and redistribution"
+below for why the Linux package does not carry that same requirement).
+Packaging metadata is provenance, not a claim that every optional discipline
+has converged or that the aircraft is certified.
 
 ## External tools and redistribution
 
@@ -56,9 +80,18 @@ field for it. The manifest distinguishes a packaged tool from a deliberately
 user-supplied or unavailable one.
 
 - AVL 3.52 may be aggregated when the package carries its unchanged
-  executable, corresponding source archive, and GPL-2.0 notice. The current
-  distribution validation requires this child executable for the independent
-  aerodynamic cross-check.
+  executable, corresponding source archive, and GPL-2.0 notice. Today that is
+  the Windows package alone, where this project has actually reviewed and
+  tested the win32 build; its distribution validation requires this child
+  executable for the independent aerodynamic cross-check. The Linux package
+  ships the same GPL source archive and licence text plus
+  `external tools/AVL-LINUX-BUILD.txt`, a written note pointing at the
+  archive's own `gfortran` build targets, and is recorded `not_bundled` with
+  that reason; ALAS runs its own analytical vortex-lattice stage there and
+  the AVL cross-check is simply absent from Model Comparison until a built or
+  acquired executable is configured under Tools. This project does not build
+  AVL from that source unattended in CI, and never ships the Windows
+  executable inside a package for a platform it cannot run on.
 - NASTRAN-95 is optional. It may be included only when the complete reviewed
   NOSA 1.3 staging tree is present: executable, rigid formats, runtime DLL
   inventory, licence, modification record, source archive, and source/build
@@ -91,9 +124,12 @@ From the ALAS checkout:
 cargo xtask dist
 ```
 
-The command writes `dist/<package>/` and then creates the ZIP only after the
-standalone validation succeeds. To require a fully reviewed NASTRAN-95 bundle
-instead of accepting an omitted optional tool, set
+The command writes `dist/<package>/` and then creates the archive (ZIP on
+Windows, tar.gz elsewhere) only after the standalone validation succeeds.
+This command builds for whatever platform it runs on: there is no Linux
+cross-build from a Windows checkout, so a Linux package can only be produced
+by running this command on Linux, locally or in CI. To require a fully
+reviewed NASTRAN-95 bundle instead of accepting an omitted optional tool, set
 `ALAS_STRICT_BUNDLED_NASTRAN95=1` before running the command. Review
 [`release-packaging.md`](release-packaging.md) for the source allowlist,
 manifest checks, and the boundary between packaging verification and physical
@@ -102,10 +138,11 @@ solver qualification.
 A locally produced package reflects whatever is on that machine, including an
 uncommitted change (recorded via the manifest's dirty-worktree flag). To
 reproduce packaging from a clean checkout and the committed `Cargo.lock`
-instead, run the manual `release-preflight.yml` workflow from the Actions tab
-and download its workflow-run artifact; see [CI release
-preflight](release-packaging.md#ci-release-preflight). That artifact is still
-not a published release.
+instead, run the manual `release-package.yml` workflow (Windows and Linux) or
+the Windows-only `release-preflight.yml` workflow from the Actions tab and
+download its workflow-run artifact; see [CI release
+package](release-packaging.md#ci-release-package-windows-and-linux). That
+artifact is still not a published release.
 
 ## Accepting a package locally
 
@@ -118,6 +155,10 @@ $env:ALAS_W55_PACKAGE_DIR = "dist/alas-v1.2.0-windows-x86_64"
 cargo test -p alas-acceptance --test distribution_license_boundary
 cargo test -p alas-acceptance --test distribution_acceptance
 ```
+
+(On Linux, `export ALAS_W55_PACKAGE_DIR=dist/alas-v1.2.0-linux-x86_64` and the
+same two `cargo test` commands; both suites read whatever package directory
+the variable names, on either platform.)
 
 `distribution_license_boundary` is the redistribution check: no packaged file
 is one of the programs this project has no licence to redistribute (MSES's
