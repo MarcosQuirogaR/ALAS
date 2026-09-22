@@ -4,6 +4,19 @@
 **Workspace snapshot:** 2026-09-11  
 **Scope:** aircraft design-space optimization, mission sizing, aerodynamic-solver coupling, and the planned mixed-architecture/MDO workflow
 
+**Superseded (2026-09-22):** the MADS-default/SQP-alternate dispatch this
+document analyzes (Sections 5.1-5.3 and the method-dispatch table) has been
+replaced. MADS, SQP, NSGA-II, TuRBO and CMA-ES are removed; the sole product
+search kernel is now L-SHADE differential evolution under the
+epsilon-constrained method (`alas-opt::search_methods::lshade_de`), described
+in `docs/methods.md` ("Multidisciplinary sizing loop and the L-SHADE
+epsilon-constrained driver") and `docs/OPTIMIZATION.md`. A saved
+configuration naming a retired method token is migrated to
+`differential_evolution` when it loads, with a note the caller can surface
+(`alas_config::settings_load_notes`). The sections below are kept as the
+dated audit record they were; read them as history of the driver that
+existed at the 2026-09-11 snapshot, not as the current dispatch.
+
 ## How to read this document
 
 This is the single summary of the ALAS optimization strategy. It deliberately separates:
@@ -722,7 +735,7 @@ The consolidated strategy is derived from these local sources:
 
 - [Operational optimization guide](OPTIMIZATION.md) — user-facing inputs, pipeline flow, policies, fuel/tank settings, and documented method catalogue.
 - [MDO research/design baseline](research/optimization-mdo.md) — target architecture, typed assessment contract, mixed-architecture funnel, fidelity, UQ, caching, ranking, and verification plan.
-- [Methods and model notes](methods.md) — mission closure, fuel policy, mass methods, FLOPS scope, residuals, MADS rationale, and SQP details.
+- [Methods and model notes](methods.md) — mission closure, fuel policy, mass methods, FLOPS scope, residuals, and the L-SHADE epsilon-constrained driver.
 - [Current status](STATUS.md) — delivered behavior, superseding product-objective decisions, and known verification/external-tool limits.
 - [Fuel/mission roadmap](FUEL_MISSION_ROADMAP.md) — delivered P1/P2/P4 scope and remaining P3/P5 mission/UQ work.
 - [Handoff snapshot](../handoff.md) — recorded workspace test/gate evidence and external-tool status.
@@ -732,9 +745,8 @@ Key implementation files are:
 - [`design_variables.rs`](../crates/alas-config/src/design_variables.rs) — canonical 16-coordinate vector registry.
 - [`design_space.rs`](../crates/alas-config/src/optimizer/design_space.rs) — clean-sheet, reference-adaptation, and baseline-sandbox envelopes.
 - [`differential_evolution_optimizer.rs`](../crates/alas-opt/src/differential_evolution_optimizer.rs) — product/compatibility dispatch, bounds, initialization, and result assembly.
-- [`mads.rs`](../crates/alas-opt/src/search/mads.rs) — current product progressive-barrier MADS driver.
-- [`sqp_search.rs`](../crates/alas-opt/src/sqp_search.rs) — current product SQP branch.
-- [`search_methods`](../crates/alas-opt/src/search_methods) — isolated feasibility-first DE, CMA-ES, constrained NSGA-II, and bounded RBF-surrogate kernels.
+- [`search_methods/lshade_de.rs`](../crates/alas-opt/src/search_methods/lshade_de.rs) — the one product search kernel: L-SHADE differential evolution under the epsilon-constrained method.
+- [`search/staged.rs`](../crates/alas-opt/src/search/staged.rs) — the Stage A broad scan that seeds the L-SHADE population.
 - [`sizing.rs`](../crates/alas-opt/src/mdo/sizing.rs) — candidate preparation and mission-sized assessment.
 - [`mda.rs`](../crates/alas-opt/src/mdo/mda.rs) — mass/fuel/CG closure loop.
 - [`cost.rs`](../crates/alas-opt/src/mdo/cost.rs) — objective normalization, policies, residuals, and scalar cost.

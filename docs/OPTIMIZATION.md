@@ -17,11 +17,13 @@ driver"); this page is the wiring and the input list.
    `run(bounds, Some(preset design vector))`. The bounds are the sixteen
    design-variable bounds of `alas_config::design_variables::SPECS`, recentred
    on the preset when one is loaded.
-3. **Method dispatch.** `optimizer.solver.method` selects the driver:
-   `differential_evolution` (the SciPy-parity loop, feasibility first),
-   `feasibility_first_de`, `nsga2`, `turbo_1`, `cma_es`, or `sqp` (the
-   gradient-based driver). Every method scores candidates through the same
-   `DesignObjective`.
+3. **The one driver.** `optimizer.solver.method` is `differential_evolution`,
+   the only optimizer this build runs: L-SHADE differential evolution under
+   the epsilon-constrained method (`search_methods::lshade_de`; see
+   `docs/methods.md`). A saved configuration naming a retired token (`sqp`,
+   `nsga2`, `turbo_1`, `cma_es`, `feasibility_first_de`) is migrated to
+   `differential_evolution` when it loads, with a note the caller can
+   surface. Every candidate scores through the same `DesignObjective`.
 4. **One evaluation.** Geometry build from the design vector; the candidate
    payload load case; a two-pass mass analysis with the payload layout;
    cruise trim and drag polar by the vortex-lattice method; then the sizing
@@ -59,11 +61,17 @@ holds; presets override the physical inputs.
 
 ### `optimizer.solver`: how the search is run
 
-`method`, `max_iterations`, `population_size` (multiplier on the sixteen
-variables), `tolerance`, `seed`, `workers`, `seed_near_initial_design` and
-`seed_perturbation_fraction`, and for the SQP driver `finite_difference_step`
-(fraction of each bound range) and `constraint_tolerance` (normalised). The
-`strategy` field is the differential-evolution mutation scheme.
+`method` (always `differential_evolution`), `max_iterations` (generation
+budget), `population_size` (multiplier on the sixteen variables, before
+L-SHADE's linear population-size reduction), `tolerance` (population
+design-space spread and best-feasible-cost relative-improvement threshold),
+`convergence_stagnation_generations` (the stagnation window that tolerance
+applies over), `seed` and `workers` (worker count changes only wall time; a
+seeded run replays bit-identically at any count). `strategy`,
+`seed_near_initial_design`, `seed_perturbation_fraction`,
+`finite_difference_step` and `constraint_tolerance` remain loadable for the
+frozen reference-compatibility replay and for saved-file compatibility with
+the retired SQP driver; the product search does not read them.
 
 ### `optimizer.plausibility`: the model's validity domain
 

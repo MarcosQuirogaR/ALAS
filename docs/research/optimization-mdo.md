@@ -4,6 +4,15 @@ Status: completed research/design note, resumed from saved workspace
 
 Date: 2026-08-26
 
+**Superseded implementation references (2026-09-22):** `search_methods/
+{nsga2,cma_es,turbo}.rs` and `search/mads.rs` named below are deleted; the
+product search is now L-SHADE differential evolution under the
+epsilon-constrained method (`search_methods/lshade_de.rs`), the sole
+`optimizer.solver.method` value. The target-architecture and evidence-plan
+discussion below is otherwise unchanged and still describes future work, not
+the current dispatch; see `docs/STATUS.md` and `docs/methods.md` for what
+ships today.
+
 Scope: multidisciplinary aircraft conceptual optimization, mixed
 discrete/continuous architecture search, feasibility handling, multiobjective
 methods, design-space parameterization, DOE, surrogate management,
