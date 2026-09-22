@@ -1,4 +1,0 @@
-ALAS storage root
-This directory is managed by ALAS. Manage Storage may delete what is
-inside it. Delete this file to stop ALAS from reclaiming this directory.
-category=generated_outputs
