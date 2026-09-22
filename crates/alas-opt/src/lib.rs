@@ -25,7 +25,6 @@ pub mod cancellation;
 pub mod differential_evolution;
 pub mod envelope;
 pub mod evaluator;
-pub mod gradient;
 pub mod history;
 pub mod mdo;
 mod mesh_correction;
@@ -52,9 +51,6 @@ pub use envelope::{
     StaticMarginPreferenceAssessment,
 };
 pub use evaluator::{ObjectiveEvaluation, ObjectiveEvaluator};
-pub use gradient::{
-    run_sqp, solve_qp, ConstrainedEvaluator, ConstrainedPoint, QpSolution, SqpOutcome, SqpSettings,
-};
 pub use history::OptimizationHistory;
 pub use mdo::{
     assess_candidate, assess_candidate_with_polar, assess_product_candidate, canonicalize_design,

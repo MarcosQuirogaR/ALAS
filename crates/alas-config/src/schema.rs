@@ -256,14 +256,7 @@ impl OptionSource {
                 "currenttobest1bin",
                 "currenttobest1exp",
             ]),
-            Self::OptimizerMethod => Some(&[
-                "differential_evolution",
-                "feasibility_first_de",
-                "nsga2",
-                "turbo_1",
-                "cma_es",
-                "sqp",
-            ]),
+            Self::OptimizerMethod => Some(&["differential_evolution"]),
             Self::AircraftType => Some(&["passenger", "cargo"]),
             Self::MassArchitecture => Some(&[
                 "pure_flops_transport_v1",

@@ -565,7 +565,7 @@ fn declared_landing_mass_ratio(preset: &crate::AircraftPreset) -> Option<f64> {
 
 #[path = "settings_load_notes.rs"]
 mod load_notes;
-pub use load_notes::{legacy_mission_disabled, ConfigLoadNotes};
+pub use load_notes::{legacy_mission_disabled, legacy_solver_method, ConfigLoadNotes};
 
 // A test asserts on values it constructed here directly, so a failed unwrap
 // or expect is the assertion failing, not a library invariant being broken.

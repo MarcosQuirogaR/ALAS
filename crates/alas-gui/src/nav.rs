@@ -289,11 +289,11 @@ pub const ADVANCED_SETTINGS_PAGES: &[Page] = &[
         ..Page::form("mission_advanced", "Mission Analysis", "mission")
     },
     Page {
-        description: Some("The mission-sized objective, explicit requirement policies, and the MADS search settings. Whether a run optimizes at all is chosen on Inputs; the selected catalogue engine remains fixed."),
+        description: Some("The mission-sized objective, explicit requirement policies, and the differential-evolution search settings. Whether a run optimizes at all is chosen on Inputs; the selected catalogue engine remains fixed."),
         detail: &[
             "Every candidate is built, mass-balanced and trimmed, then closed by the design mission: mass, centre of gravity, trim, mission fuel and takeoff mass are iterated until the design weights converge. The objective is what that converged mission costs (block fuel, takeoff mass, empty mass or fuel per seat-kilometre); the frozen lift-to-drag formulation of the Python reference is replayed only by the parity fixtures.",
             "Each requirement family (mass and fuel, balance, airworthiness performance, geometry) is a hard constraint by default: a candidate that misses one is infeasible and ranks behind every compliant candidate. A family can be made soft (a priced preference), diagnostic (reported only) or switched off.",
-            "MADS (Mesh Adaptive Direct Search) polls deterministic, signed directions on a refining mesh and uses a progressive barrier to rank hard feasibility before mission cost. The run records whether its evaluation budget, mesh, iteration limit or fixed bounds stopped the search; that status describes termination, not a proof of global optimality.",
+            "The search is L-SHADE differential evolution under the epsilon-constrained method: a population of candidate aircraft evolves generation by generation, a shrinking constraint-violation boundary lets it explore past a locally-blocking limit early on and enforces the limit exactly once that boundary reaches zero, and the reported winner is always the least-violating (or best feasible) design any generation actually evaluated. The run records whether it reached its own convergence test, exhausted its generation budget, or was cancelled; that status describes termination, not a proof of global optimality.",
         ],
         ..Page::form("optimizer", "Optimizer", "optimizer")
     },

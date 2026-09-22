@@ -23,6 +23,62 @@ continuously enforced by `cargo xtask gate`.
 
 ---
 
+## DE-only optimizer: L-SHADE under the epsilon-constrained method, 2026-09-22
+
+- **MADS, SQP, NSGA-II, TuRBO and CMA-ES are removed.** The product search
+  is now exactly one kernel: L-SHADE differential evolution under the
+  epsilon-constrained method (`alas-opt::search_methods::lshade_de`; basis
+  and citations in the module doc and in `docs/methods.md`). `search/mads.rs`,
+  `sqp_search.rs`, `gradient/`, and `search_methods/{cma_es,nsga2,turbo,
+  constrained_de}.rs` are deleted; the frozen SciPy-parity DE replay behind
+  `DesignOptimizer::new_reference_compatibility` is unchanged (it is DE, and
+  no product or GUI path constructs it).
+- **Constraint handling.** Two candidates within a shrinking `epsilon` of
+  feasible are ranked by objective alone; otherwise the less-violating one
+  wins. `epsilon` decays to exactly zero at a fifth of the generation
+  budget, after which the rule is exactly Deb's feasibility ordering. The
+  reported winner is tracked as the strict feasibility minimum over every
+  candidate the run ever evaluated, independent of which candidates the
+  epsilon-relaxed comparison lets survive inside the live population, so a
+  design reported feasible always satisfied every hard constraint at full
+  coupled fidelity (`alas-opt::mdo`: geometry/mass build, mission sizing
+  closure, trim/CG closure). No feasible candidate found returns the typed
+  `NoFeasibleDesign` error with the least-violating candidate as diagnostics,
+  never a reported optimum.
+- **Determinism.** One generation's trial vectors are built in fixed order
+  from the seeded stream, then evaluated as a single batch; `solver.workers`
+  changes only how that batch is spread across threads, so a seeded run
+  replays bit-identically at any worker count. The frozen
+  reference-compatibility replay keeps its own pre-existing, deliberately
+  different worker-count behavior (see its own docs).
+- **Convergence.** A real termination distinction: `converged` (population
+  design-space spread and best-feasible-cost relative improvement both
+  below `tolerance` for `convergence_stagnation_generations` generations,
+  never claimed without a feasible design), `iteration_limit`, or
+  `cancelled`.
+- **Config migration.** `optimizer.solver.method` accepts only
+  `differential_evolution`. A saved configuration naming a retired token
+  (`sqp`, `nsga2`, `turbo_1`, `cma_es`, `feasibility_first_de`) is migrated
+  to it when the document loads, with a note the caller can surface
+  (`alas_config::settings_load_notes::legacy_solver_method`). A
+  `SolverSettings` built directly with a legacy token, bypassing that load
+  boundary, is rejected by `is_supported_method` rather than silently
+  running anything. New setting: `convergence_stagnation_generations`.
+  `finite_difference_step`, `constraint_tolerance`, `strategy`,
+  `seed_near_initial_design` and `seed_perturbation_fraction` remain
+  loadable (read only by the frozen replay, or unused) for saved-file
+  compatibility.
+- **GUI.** The Optimizer page's "MADS settings" group is now "Differential
+  evolution settings", showing population multiplier, max generations,
+  seed, workers, convergence tolerance and the stagnation window. The run
+  log's search diagnostics report generations completed, evaluations,
+  feasible fraction of the final population, and the epsilon level at the
+  last generation, alongside the existing counts.
+- **Not done in this pass:** the geometric wing-fuselage-junction
+  plausibility constraints and the A380 default-optimization defect are a
+  separate, concurrent lane (`mdo/residuals_geometry.rs`, `mdo/build.rs`);
+  this rewrite does not touch either file.
+
 ## What runs today
 
 - `cargo run --bin ALAS` launches the desktop GUI (`alas-gui`); `ALAS --gui`

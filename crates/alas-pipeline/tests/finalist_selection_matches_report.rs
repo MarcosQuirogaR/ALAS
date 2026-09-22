@@ -6,10 +6,11 @@
 //! vector at one identical closed takeoff mass.
 //!
 //! `alas_opt::assess_product_candidate` (via `mdo::sizing` +
-//! `mdo::residuals::build`) is the typed assessment MADS's progressive-barrier
-//! search uses to decide whether a candidate is its `best_feasible` incumbent,
-//! and `pipeline.rs` re-runs it and hard-errors the whole run if it disagrees
-//! at that boundary ("optimized finalist is not hard-feasible on replay").
+//! `mdo::residuals::build`) is the typed assessment the L-SHADE
+//! epsilon-constrained search (`search_methods::lshade_de`) uses to decide
+//! whether a candidate is strictly feasible, and `pipeline.rs` re-runs it and
+//! hard-errors the whole run if it disagrees at that boundary ("optimized
+//! finalist is not hard-feasible on replay").
 
 // This file is a test binary: a failed expect is the assertion failing.
 #![allow(clippy::unwrap_used, clippy::expect_used)]

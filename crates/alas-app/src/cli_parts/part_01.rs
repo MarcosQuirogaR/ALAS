@@ -172,7 +172,7 @@ fn print_help() {
     println!("      --seed <INT>          Random seed for optimization");
     println!("      --aero-solver <MODE>  Result model: vlm, avl, or both");
     println!("      --optimization-solver <MODE>  Optimizer: vlm, avl, or both");
-    println!("      --optimization-method <METHOD>  differential_evolution, feasibility_first_de, nsga2, turbo_1, cma_es, or sqp");
+    println!("      --optimization-method <METHOD>  differential_evolution (the only supported search)");
     println!("      --quiet               Reduce console logging");
     println!("      --save-config <PATH>  Write effective configuration to YAML and exit");
     println!("      --download-navdata    Download missing navigation-data files and exit");

@@ -7,7 +7,7 @@ use std::sync::atomic::AtomicBool;
 
 use super::*;
 use crate::cancellation::{CancelPhase, CancelScope};
-use crate::search_methods::product_de::{self, Kernel};
+use crate::search_methods::product_de;
 
 /// Whether the caller supplied a single literal fuselage-length bound.
 ///
@@ -29,9 +29,6 @@ fn explicit_fuselage_length_bound(bounds: Option<&[(f64, f64)]>) -> bool {
         .get(index)
         .is_some_and(|&(lower, upper)| lower == upper)
 }
-
-#[path = "sqp_search.rs"]
-mod sqp_search;
 
 impl DesignOptimizer {
     /// Construct a new design optimizer with `config`.
@@ -221,12 +218,12 @@ impl DesignOptimizer {
 
     /// [`Self::run`], observing an optional pipeline cancellation flag.
     ///
-    /// `cancel` is threaded into the Differential Evolution generation loop
-    /// (see `search_methods::constrained_de::run_feasibility_first_de`) and
-    /// checked once per completed generation; a cancelled run still returns
-    /// `Ok`, with `OptimizationResult::termination` set to `"cancelled"`
-    /// rather than `"converged"` or `"iteration_limit"`, and its winner is
-    /// always a fully scored candidate, never a partial trial. The frozen
+    /// `cancel` is threaded into the L-SHADE generation loop (see
+    /// `search_methods::lshade_de::run`) and checked once per generation
+    /// batch; a cancelled run still returns `Ok`, with
+    /// `OptimizationResult::termination` set to `"cancelled"` rather than
+    /// `"converged"` or `"iteration_limit"`, and its winner is always a
+    /// fully scored candidate, never a partial trial. The frozen
     /// reference-compatibility replay (`Self::new_reference_compatibility`)
     /// is not on any pipeline cancellation path and does not observe `cancel`.
     ///
@@ -409,11 +406,11 @@ impl DesignOptimizer {
         // path while leaving the normal sixteen-variable population unchanged.
         let pop_size = (pop_mult * n_dof).max(6);
         // Native objective evaluation is thread-safe after cloning its
-        // configuration. The setting is resolved in one place so the DE
-        // driver, the staged search and SQP cannot disagree about what the
-        // automatic count is.
+        // configuration. The setting is resolved in one place so this frozen
+        // replay driver and the product L-SHADE search cannot disagree about
+        // what the automatic count is.
         //
-        // Differential evolution is the one driver whose *result* depends on
+        // This frozen replay is the one driver whose *result* depends on
         // this, because a batched generation defers the population update and
         // a serial one lets an accepted trial influence later trial vectors
         // in the same generation. Those are different algorithms, so the
@@ -600,7 +597,15 @@ impl DesignOptimizer {
         }
     }
 
-    fn run_product_search<E: sqp_search::ConstrainedSearch>(
+    /// Run the one product search kernel: L-SHADE differential evolution
+    /// under the epsilon-constrained method (`search_methods::lshade_de`).
+    ///
+    /// Stage A below only ever *seeds* the population; the kernel is what
+    /// selects the winner, and every candidate it reports as feasible was
+    /// scored by `objective`, the same full coupled evaluation (geometry and
+    /// mass build, mission sizing closure, trim/CG closure; see
+    /// [`crate::mdo`]) as everything else in this run's history.
+    fn run_product_search<E: SearchObjective>(
         &self,
         bounds: Option<&[(f64, f64)]>,
         initial_design: Option<&DesignVector>,
@@ -610,20 +615,8 @@ impl DesignOptimizer {
     ) -> OptimizationResult {
         let solver = &self.config.optimizer.solver;
         let scope = CancelScope::attach(cancel);
-        let kernel = product_de::kernel_for(&solver.method);
-        if kernel == Kernel::Sqp {
-            return sqp_search::run(
-                &self.config,
-                bounds.unwrap_or(&DesignVector::bounds()),
-                initial_design,
-                objective,
-                progress_callback,
-                cancel,
-            );
-        }
         let default_bounds = DesignVector::bounds();
         let bounds = bounds.unwrap_or(&default_bounds);
-        let generations = solver.max_iterations.max(0) as usize;
         let seed = solver.seed.map_or_else(runtime_seed, |value| value as u64);
         let mut initial_values = initial_design.map(DesignVector::to_array);
         // The analysis-start instant for this stage.  Every elapsed time
@@ -640,14 +633,15 @@ impl DesignOptimizer {
 
         // Stage A: a broad low-resolution scan over the whole envelope, then
         // a full-fidelity re-evaluation of its finalists, which supplies the
-        // MADS starting point.  The scan ranks candidates on a reduced
+        // L-SHADE population's seed.  The scan ranks candidates on a reduced
         // aerodynamic mesh and a loosened sizing closure, so it may only
         // *nominate* a start; every candidate that can be accepted below is
-        // ranked by the full objective.
+        // ranked by the full objective, and the DE kernel itself decides the
+        // winner from there (see the method's own doc comment above).
         let scan = self.broad_scan(bounds, initial_values.as_deref(), &staged, &scope);
         // Under an already-observed cancellation the verification block is
-        // cut to the nominal point alone. Stage B is not going to start, so
-        // ranking three scan finalists at full fidelity buys nothing and
+        // cut to the nominal point alone. The search is not going to start,
+        // so ranking three scan finalists at full fidelity buys nothing and
         // costs three coupled analyses of drain; scoring the nominal keeps a
         // real analysed candidate to report instead of the unevaluated
         // sentinel. See `verify_scan_finalists`.
@@ -668,17 +662,16 @@ impl DesignOptimizer {
 
         // Cancellation observed during Stage A. The verification block above
         // has already run - it is bounded at the nominal plus three finalists,
-        // so it always leaves a fully scored candidate to report - and Stage B
-        // is skipped rather than started on a signal that is already set. A
-        // search stopped here has decided nothing: the result is reported
-        // `cancelled`, never `converged` or a budget reason, and its winner is
-        // the best *verified* point, which is the nominal design unless a scan
-        // finalist beat it under the full coupled objective.
+        // so it always leaves a fully scored candidate to report - and the
+        // search is skipped rather than started on a signal that is already
+        // set. A search stopped here has decided nothing: the result is
+        // reported `cancelled`, never `converged` or a budget reason, and its
+        // winner is the best *verified* point, which is the nominal design
+        // unless a scan finalist beat it under the full coupled objective.
         if scan.cancelled || scope.requested() {
             scope.search_finished(CANCELLED);
             return self.cancelled_before_search_result(
                 objective,
-                kernel,
                 initial_values.as_deref(),
                 verified_start,
                 &scan,
@@ -688,167 +681,75 @@ impl DesignOptimizer {
             );
         }
 
-        // Stage B, Differential Evolution: the configured method names this
-        // kernel, so it is what runs and what the result reports.  The scan
-        // above supplies its starting point exactly as it does for MADS.
-        if kernel == Kernel::DifferentialEvolution {
-            let de = product_de::Settings::from_solver(solver, bounds.len(), seed);
-            report(&format!(
-                "differential evolution | population {} | generations {} | seed {} | evaluation_budget {}",
-                de.population,
-                de.generations,
-                de.seed,
-                de.evaluation_budget()
-            ));
-            // The DE kernel times each candidate itself through the scope, so
-            // this adapter stays inert: a block of one counted twice would
-            // make the per-evaluation bound unreadable.
-            let mut evaluator = BatchEvaluator {
-                objective,
-                workers: staged.workers,
-                scope: CancelScope::attach(None),
-            };
-            let history_before_search = evaluator.objective.history().n_evaluations();
-            let (outcome, cancelled) = product_de::run(
-                bounds,
-                initial_values.as_deref(),
-                de,
-                &scope,
-                &mut |values| {
-                    crate::search::mads::Evaluate::evaluate_block(
-                        &mut evaluator,
-                        &[values.to_vec()],
-                    )
-                    .pop()
-                    .unwrap_or_else(|| product_de::unevaluated(values))
-                },
-            );
-            // No convergence test is implemented, so a run that exhausts its
-            // generation budget may never be called converged.
-            // `iteration_limit` is the shared termination vocabulary a
-            // budget-exhausted, non-converged search reports elsewhere
-            // (`run_search`'s own DE path, `sqp_search`); inventing a
-            // distinct string here would silently break every caller that
-            // checks termination against that fixed set. `cancelled` is the
-            // one lifecycle this kernel can reach that is neither: a caller
-            // observed the pipeline's own cancellation signal at a
-            // generation boundary and stopped before either budget or
-            // convergence decided the run.
-            let termination = if cancelled {
-                CANCELLED
-            } else {
-                "iteration_limit"
-            };
-            scope.search_finished(termination);
-            // Analyses this search *executed*, not the budget it was given.
-            // A cancelled run stops mid-budget, and reporting the budget made
-            // a run that ran 94 analyses claim 576 of them. For an
-            // uncancelled run the two agree by construction.
-            let executed = objective
-                .history()
-                .n_evaluations()
-                .saturating_sub(history_before_search);
-            // The kernel scores the initial population first and then one
-            // trial per candidate per generation, so the executed count
-            // divides exactly into completed generations; a generation cut
-            // short by cancellation floors to the ones that finished.
-            let generations_completed = executed
-                .saturating_sub(de.population)
-                .checked_div(de.population)
-                .unwrap_or(0);
-            let mut result = result_from_method(
-                outcome,
-                kernel.reported_name(),
-                kernel.reported_strategy(),
-                termination,
-                objective.history(),
-                started.elapsed().as_secs_f64(),
-            );
-            result.search_diagnostics = Some(SearchDiagnostics {
-                converged: false,
-                analysis_evaluations: executed,
-                cache_hits: 0,
-                poll_iterations: generations_completed,
-                screening_evaluations: scan.screened,
-                screening_feasible: scan.feasible_screened,
-                verification_evaluations: scan_verification,
-                scan_wall_time_s: scan.elapsed_s,
-                search_wall_time_s: started.elapsed().as_secs_f64() - scan.elapsed_s,
-                workers: staged.workers,
-                poll_block_size: de.population,
-                first_feasible_cost: None,
-                relative_improvement: None,
-            });
-            return result;
-        }
-
-        // Stage B: MADS over the full coupled objective, from the verified
-        // start.  Legacy method names remain loadable for saved
-        // configurations, but every product run uses this single driver; the
-        // compatibility constructor above is the only path that still replays
-        // differential evolution.
-        // MADS reads the flag between poll blocks, so the block is the bound
-        // and the adapter times it.
+        let de = product_de::Settings::from_solver(solver, bounds.len(), seed);
+        report(&format!(
+            "differential evolution | population {} | generations {} | seed {} | evaluation_budget {}",
+            de.population,
+            de.generations,
+            de.seed,
+            de.evaluation_budget()
+        ));
+        // The DE kernel times each generation's batch itself through the
+        // scope, so this adapter stays inert: a block counted twice would
+        // make the per-generation cancellation bound unreadable.
         let mut evaluator = BatchEvaluator {
             objective,
             workers: staged.workers,
-            scope: scope.clone(),
+            scope: CancelScope::attach(None),
         };
-        let search_result = crate::search::mads::run_cancellable(
+        let outcome = product_de::run(
             bounds,
             initial_values.as_deref(),
-            crate::search::mads::Settings {
-                max_iterations: generations.max(staged.minimum_poll_iterations),
-                max_evaluations: staged.max_evaluations,
-                seed,
-                convergence_mesh_size: staged.convergence_mesh_size,
-                minimum_relative_improvement: staged.minimum_relative_improvement,
-                poll_block_size: staged.poll_block_size,
-                watchdog: staged.watchdog,
-                // The sixteen-variable product space pays the adjacent
-                // diagonals on every failed poll, which are exactly the polls
-                // that contract the mesh; see `search::directions`.
-                pair_diagonal_directions: bounds.len() <= 4,
-                minimal_positive_basis: staged.minimal_positive_basis,
-                ..Default::default()
-            },
-            cancel,
-            &mut evaluator,
-            progress_callback,
+            de,
+            &scope,
+            &mut |points: &[Vec<f64>]| evaluator.evaluate_block(points),
         );
-
-        // `TerminationReason::Cancelled` already spells itself `"cancelled"`,
-        // which is the shared label every kernel reports; the assertion keeps
-        // the two vocabularies from drifting apart silently.
-        debug_assert!(
-            !search_result.termination.is_cancelled() || {
-                search_result.termination.as_str() == CANCELLED
-            }
-        );
-        let termination = search_result.termination.as_str();
+        // `converged` is the kernel's own verdict (population spread plus
+        // best-feasible-cost stagnation; see `search_methods::lshade_de`) and
+        // is never true without a feasible design. `iteration_limit` is the
+        // shared termination vocabulary a budget-exhausted, non-converged
+        // search reports elsewhere (`run_search`'s own frozen DE path);
+        // inventing a distinct string here would silently break every caller
+        // that checks termination against that fixed set. `cancelled` is the
+        // one lifecycle this kernel can reach that is neither: a caller
+        // observed the pipeline's own cancellation signal at a generation
+        // boundary and stopped before either budget or convergence decided
+        // the run.
+        let termination = if outcome.cancelled {
+            CANCELLED
+        } else if outcome.converged {
+            "converged"
+        } else {
+            "iteration_limit"
+        };
         scope.search_finished(termination);
         let mut result = result_from_method(
-            search_result.outcome,
-            kernel.reported_name(),
-            kernel.reported_strategy(),
+            MethodOutcome {
+                winner: outcome.winner,
+                pareto_front: Vec::new(),
+            },
+            product_de::METHOD,
+            product_de::STRATEGY,
             termination,
             objective.history(),
             started.elapsed().as_secs_f64(),
         );
         result.search_diagnostics = Some(SearchDiagnostics {
-            converged: search_result.termination.is_converged(),
-            analysis_evaluations: search_result.evaluations,
-            cache_hits: search_result.cache_hits,
-            poll_iterations: search_result.iterations,
+            converged: outcome.converged,
+            analysis_evaluations: outcome.evaluations,
+            cache_hits: 0,
+            poll_iterations: outcome.generations_completed,
             screening_evaluations: scan.screened,
             screening_feasible: scan.feasible_screened,
             verification_evaluations: scan_verification,
             scan_wall_time_s: scan.elapsed_s,
-            search_wall_time_s: search_result.elapsed_s,
+            search_wall_time_s: started.elapsed().as_secs_f64() - scan.elapsed_s,
             workers: staged.workers,
-            poll_block_size: staged.poll_block_size,
-            first_feasible_cost: search_result.first_feasible_cost,
-            relative_improvement: search_result.relative_improvement,
+            poll_block_size: de.population,
+            first_feasible_cost: outcome.first_feasible_cost,
+            relative_improvement: outcome.relative_improvement,
+            feasible_fraction: outcome.feasible_fraction,
+            epsilon_level: outcome.epsilon_final,
         });
         result
     }
@@ -922,7 +823,7 @@ impl DesignOptimizer {
         // nominates are identical to the single-batch form for an uncancelled
         // run; only how far it gets changes. `workers` still decides how one
         // block is spread, never which points are evaluated.
-        let block_size = settings.poll_block_size.max(1);
+        let block_size = settings.scan_block_size.max(1);
         let mut scores: Vec<(f64, bool)> = Vec::with_capacity(sample.len());
         let mut cancelled = false;
         for (index, block) in sample.chunks(block_size).enumerate() {
@@ -986,7 +887,7 @@ impl DesignOptimizer {
     }
 
     /// The result a product search reports when cancellation was observed
-    /// before Stage B could start.
+    /// before the L-SHADE search could start.
     ///
     /// `verified` is the best point the bounded verification block scored with
     /// the run's own full objective; when the scan was cancelled before it
@@ -999,7 +900,6 @@ impl DesignOptimizer {
     fn cancelled_before_search_result<E: SearchObjective + ?Sized>(
         &self,
         objective: &mut E,
-        kernel: Kernel,
         start: Option<&[f64]>,
         verified: Option<ScoredPoint>,
         scan: &ScanOutcome,
@@ -1014,17 +914,17 @@ impl DesignOptimizer {
                 winner,
                 pareto_front: Vec::new(),
             },
-            kernel.reported_name(),
-            kernel.reported_strategy(),
+            product_de::METHOD,
+            product_de::STRATEGY,
             CANCELLED,
             objective.history(),
             elapsed,
         );
         result.search_diagnostics = Some(SearchDiagnostics {
             converged: false,
-            // Stage B never ran, so no analysis is attributable to the search
-            // itself; the scan and verification counts below are the whole
-            // cost of this run.
+            // The search never ran, so no analysis is attributable to it;
+            // the scan and verification counts below are the whole cost of
+            // this run.
             analysis_evaluations: 0,
             cache_hits: 0,
             poll_iterations: 0,
@@ -1037,6 +937,8 @@ impl DesignOptimizer {
             poll_block_size: 0,
             first_feasible_cost: None,
             relative_improvement: None,
+            feasible_fraction: 0.0,
+            epsilon_level: 0.0,
         });
         result
     }
@@ -1054,7 +956,7 @@ impl DesignOptimizer {
 /// Re-evaluate the scan's finalists with the run's own full objective.
 ///
 /// Under an already-requested cancellation the list is cut to the nominal
-/// point: Stage B will not start, so ranking the finalists decides nothing,
+/// point: the search will not start, so ranking the finalists decides nothing,
 /// and each one is a full coupled analysis of drain. Scoring the nominal is
 /// what keeps a cancelled run's reported winner an analysed design rather
 /// than the unevaluated sentinel - the smallest amount of work that preserves
@@ -1109,12 +1011,14 @@ fn verify_scan_finalists<E: SearchObjective + ?Sized>(
     (best, points.len())
 }
 
-/// Adapter that evaluates one independent MADS block through the objective's
-/// own worker pool.
+/// Adapter that evaluates one independent generation batch through the
+/// objective's own worker pool.
 ///
-/// The block boundary is chosen by the search (see `search::mads`), so the
-/// worker count changes only how the block is distributed, never which points
-/// are evaluated or the order they are considered in.
+/// The batch boundary is chosen by the search (one L-SHADE generation; see
+/// `search_methods::lshade_de`), so the worker count changes only how the
+/// batch is distributed, never which points are evaluated or the order they
+/// are considered in: candidates are scored in `points`' own order and that
+/// order is what the kernel built deterministically from its seed.
 struct BatchEvaluator<'a, E: SearchObjective + ?Sized> {
     objective: &'a mut E,
     workers: usize,
@@ -1123,7 +1027,7 @@ struct BatchEvaluator<'a, E: SearchObjective + ?Sized> {
     scope: CancelScope<'a>,
 }
 
-impl<E: SearchObjective + ?Sized> crate::search::mads::Evaluate for BatchEvaluator<'_, E> {
+impl<E: SearchObjective + ?Sized> BatchEvaluator<'_, E> {
     fn evaluate_block(&mut self, points: &[Vec<f64>]) -> Vec<ScoredPoint> {
         let before = self.objective.history().n_evaluations();
         let scores = {

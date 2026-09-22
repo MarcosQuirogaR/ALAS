@@ -125,7 +125,12 @@ pub fn native_field(path: &str, key: &str) -> bool {
         // addition rather than a disagreement about a value.
         || (path.ends_with(".mission.profile") && key == "climb_descent_speed_reference")
         || (path.ends_with(".optimizer.solver")
-            && matches!(key, "finite_difference_step" | "constraint_tolerance"))
+            && matches!(
+                key,
+                "finite_difference_step"
+                    | "constraint_tolerance"
+                    | "convergence_stagnation_generations"
+            ))
         || (path.ends_with(".drag_model") && key == "exclude_buried_main_wing_area")
         // The cargo capacity objective (clarified ledger App Features 2,
         // decision D10) is a requested target the frozen configuration has no

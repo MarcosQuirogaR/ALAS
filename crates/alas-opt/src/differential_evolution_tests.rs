@@ -88,7 +88,7 @@ fn default_de_returns_the_valid_candidate_when_invalid_is_cheaper() {
     // rejected one, which is the behavior under test.
     let mut config = AlasConfig::default();
     // A zero iteration budget only evaluates the single bounds-midpoint
-    // point under the current single-MADS-driver product path, so there is
+    // point under the current single-L-SHADE-driver product path, so there is
     // never a competing invalid candidate to prefer the valid one over.
     // One iteration also runs the search-phase sampling that actually
     // exercises multiple candidates across the free span coordinate.
@@ -233,13 +233,7 @@ fn configured_methods_and_seeds_keep_boundary_results_typed_and_feasible() {
         .map(|value| (value - 1.0e-12, value + 1.0e-12))
         .collect();
 
-    for method in [
-        "differential_evolution",
-        "feasibility_first_de",
-        "nsga2",
-        "turbo_1",
-        "cma_es",
-    ] {
+    for method in ["differential_evolution"] {
         for seed in [0_i64, 42_i64] {
             for bounds in [exact_bounds.as_slice(), near_bounds.as_slice()] {
                 let mut config = AlasConfig::default();
@@ -457,51 +451,71 @@ fn native_worker_batches_merge_history_in_candidate_order() {
 }
 
 #[test]
-fn every_supported_method_name_dispatches_to_the_kernel_it_names() {
-    // `optimizer.solver.method` selects the kernel and the result reports
-    // the kernel that ran, so a run can never be presented as an algorithm
-    // that did not execute. The differential-evolution names reach the
-    // feasibility-first kernel; `nsga2`, `turbo_1` and `cma_es` stay
-    // loadable for saved configurations
-    // (`SolverSettings::is_supported_method`) but have no population kernel
-    // behind them, so they run mesh adaptive direct search and say `mads`.
-    // Every supported name must still reach a finite, evaluated result
-    // through the same evaluator.
-    for (method, reported) in [
-        ("differential_evolution", "feasibility_first_de"),
-        ("feasibility_first_de", "feasibility_first_de"),
-        ("nsga2", "mads"),
-        ("turbo_1", "mads"),
-        ("cma_es", "mads"),
-    ] {
+fn the_only_supported_method_name_dispatches_to_the_lshade_kernel() {
+    // DE is the only optimizer this build runs, so the one supported name
+    // must reach a finite, evaluated result and report itself, not a legacy
+    // label.
+    let mut config = AlasConfig::default();
+    config.optimizer.solver.method = "differential_evolution".to_owned();
+    config.optimizer.solver.max_iterations = 1;
+    config.optimizer.solver.population_size = 1;
+    config.optimizer.solver.seed = Some(42);
+    let mut optimizer = DesignOptimizer::new(config);
+    let mut evaluator = |design: &DesignVector| {
+        let values = design.to_array();
+        let cost = values.iter().map(|value| value * value).sum();
+        ObjectiveEvaluation {
+            cost,
+            valid: true,
+            l_over_d: 1.0 / (1.0 + cost),
+            span_m: design.span_m,
+            alpha_deg: 3.0,
+            area_m2: design.span_m * design.root_chord_m,
+            trim_ih_deg: 0.0,
+            reject_reason: String::new(),
+        }
+    };
+
+    let result = optimizer
+        .run_with_evaluator(None, Some(&DesignVector::default()), &mut evaluator, None)
+        .expect("the test objective accepts every candidate");
+
+    assert_eq!(result.method, "differential_evolution");
+    assert_eq!(result.strategy, "lshade_eps_de");
+    assert!(result.best_cost.is_finite());
+    assert!(result.history.n_evaluations() > 0);
+}
+
+#[test]
+fn a_legacy_method_token_set_directly_is_rejected_rather_than_silently_run() {
+    // A saved configuration document migrates a legacy token
+    // (`sqp`, `nsga2`, `turbo_1`, `cma_es`, `feasibility_first_de`) to
+    // `differential_evolution` at the load boundary, with a note the caller
+    // can surface (`alas_config::settings_load_notes`). A caller that builds
+    // `SolverSettings` directly, bypassing that boundary, gets a clear
+    // validation error instead of the token silently running MADS, SQP or
+    // any other algorithm this build no longer implements.
+    for method in ["sqp", "nsga2", "turbo_1", "cma_es", "feasibility_first_de"] {
         let mut config = AlasConfig::default();
         config.optimizer.solver.method = method.to_owned();
-        config.optimizer.solver.max_iterations = 1;
-        config.optimizer.solver.population_size = 1;
-        config.optimizer.solver.seed = Some(42);
         let mut optimizer = DesignOptimizer::new(config);
-        let mut evaluator = |design: &DesignVector| {
-            let values = design.to_array();
-            let cost = values.iter().map(|value| value * value).sum();
-            ObjectiveEvaluation {
-                cost,
-                valid: true,
-                l_over_d: 1.0 / (1.0 + cost),
-                span_m: design.span_m,
-                alpha_deg: 3.0,
-                area_m2: design.span_m * design.root_chord_m,
-                trim_ih_deg: 0.0,
-                reject_reason: String::new(),
-            }
+        let mut calls = 0;
+        let mut evaluator = |_design: &DesignVector| {
+            calls += 1;
+            ObjectiveEvaluation::rejected(0.0, "should_not_run")
         };
-
-        let result = optimizer
-            .run_with_evaluator(None, Some(&DesignVector::default()), &mut evaluator, None)
-            .expect("the test objective accepts every candidate");
-
-        assert_eq!(result.method, reported, "{method}");
-        assert!(result.best_cost.is_finite(), "{method}");
-        assert!(result.history.n_evaluations() > 0, "{method}");
+        let error = optimizer
+            .run_with_evaluator(None, None, &mut evaluator, None)
+            .expect_err("a legacy token built directly must not silently run a search");
+        assert_eq!(calls, 0, "{method}");
+        assert!(
+            matches!(
+                &error,
+                OptimizationError::InvalidConfiguration(reason)
+                    if reason.contains("unknown optimizer method")
+            ),
+            "{method}: {error:?}"
+        );
     }
 }
 
@@ -595,8 +609,12 @@ fn a_cancelled_de_run_reports_the_analyses_it_executed_and_not_its_budget() {
     let mut calls = 0usize;
     let mut evaluator = |design: &DesignVector| {
         calls += 1;
-        // Halfway through the second generation: a point no per-generation
-        // boundary falls on.
+        // Mid-batch, in the second generation: the L-SHADE kernel checks the
+        // flag once per generation, before that generation's batch is
+        // dispatched, not between the candidates inside it (see
+        // `search_methods::lshade_de`'s cancellation contract), so this
+        // request is observed at the *third* generation's boundary and the
+        // second generation still completes in full.
         if calls == population * 2 + population / 2 {
             cancel.store(true, Ordering::Relaxed);
         }
@@ -633,16 +651,17 @@ fn a_cancelled_de_run_reports_the_analyses_it_executed_and_not_its_budget() {
         "a cancelled run may not report its full {max_iterations}-generation budget: {}",
         diagnostics.poll_iterations
     );
-    // The kernel scores the initial population, then one trial per candidate
-    // per generation, and `poll_block_size` carries that population, so the
-    // generation count is recoverable from the analysis count. The identity
-    // is what keeps the two fields from drifting apart.
-    assert_eq!(
-        diagnostics.poll_iterations,
-        diagnostics
-            .analysis_evaluations
-            .saturating_sub(diagnostics.poll_block_size)
-            / diagnostics.poll_block_size.max(1)
+    // The request landed mid-batch in generation two, and a batch is never
+    // cut short (see the comment on `evaluator` above), so at least the
+    // first two generations must have completed in full before the flag was
+    // observed at the third generation's boundary. L-SHADE's own population
+    // size reduction means the analysis count is no longer a fixed multiple
+    // of the generation count, so the two are asserted independently rather
+    // than one being re-derived from the other.
+    assert!(
+        diagnostics.poll_iterations >= 2,
+        "two full generations must have completed before the flag was observed: {}",
+        diagnostics.poll_iterations
     );
 }
 
@@ -781,34 +800,7 @@ fn a_reporting_fidelity_rejection_also_refuses_the_delivered_feasibility_verdict
 }
 
 #[test]
-fn a_legacy_population_method_token_runs_mads_and_the_result_says_mads() {
-    // `nsga2` has no kernel behind it. The run must not be reported as the
-    // algorithm the token names, and it must not be reported as differential
-    // evolution either: a reader has to be able to tell which search produced
-    // the design without reading the dispatch source.
-    //
-    // One token is exercised end to end here because each one costs a real
-    // screening scan; that `turbo_1` and `cma_es` select the same kernel is
-    // asserted directly on the dispatch in
-    // `search_methods::product_de::tests::a_method_name_selects_the_kernel_it_names`.
-    let mut config = cancellable_de_config(1);
-    config.optimizer.solver.method = "nsga2".to_owned();
-    let mut optimizer = DesignOptimizer::new(config);
-    let result = optimizer
-        .run_with_evaluator(
-            None,
-            Some(&DesignVector::default()),
-            &mut synthetic_objective,
-            None,
-        )
-        .expect("the synthetic objective accepts every candidate");
-
-    assert_eq!(result.method, "mads");
-    assert_eq!(result.strategy, "progressive_barrier");
-}
-
-#[test]
-fn the_differential_evolution_token_runs_the_de_kernel_and_not_mads() {
+fn the_differential_evolution_token_runs_the_lshade_kernel() {
     let mut optimizer = DesignOptimizer::new(cancellable_de_config(1));
     let result = optimizer
         .run_with_evaluator(
@@ -819,33 +811,6 @@ fn the_differential_evolution_token_runs_the_de_kernel_and_not_mads() {
         )
         .expect("the synthetic objective accepts every candidate");
 
-    assert_eq!(result.method, "feasibility_first_de");
-    assert_eq!(result.strategy, "best1bin_feasibility_first");
-    assert_ne!(
-        result.method, "mads",
-        "a configuration that asks for differential evolution must not silently run MADS"
-    );
-}
-
-#[test]
-fn a_cancelled_gradient_run_reports_cancelled_rather_than_a_stationarity_verdict() {
-    let mut config = cancellable_de_config(40);
-    config.optimizer.solver.method = "sqp".to_owned();
-    let mut optimizer = DesignOptimizer::new(config);
-    let cancel = AtomicBool::new(true);
-
-    let result = optimizer
-        .run_with_evaluator_cancellable(
-            None,
-            Some(&DesignVector::default()),
-            &mut synthetic_objective,
-            None,
-            Some(&cancel),
-        )
-        .expect("a cancelled gradient run returns a result, not an error");
-
-    assert_eq!(result.method, "sqp");
-    assert_eq!(result.termination, crate::CANCELLED);
-    assert!(!result.converged());
-    assert!(!result.is_delivered_feasible());
+    assert_eq!(result.method, "differential_evolution");
+    assert_eq!(result.strategy, "lshade_eps_de");
 }

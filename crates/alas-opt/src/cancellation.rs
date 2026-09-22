@@ -82,16 +82,10 @@ pub enum CancelPhase {
     ScreeningScanBlock,
     /// Full-fidelity re-evaluation of the Stage-A finalists.
     ScanVerification,
-    /// Scoring the initial Differential Evolution population.
+    /// Scoring the initial L-SHADE population.
     DeInitialPopulation,
-    /// One Differential Evolution generation.
+    /// One L-SHADE generation batch.
     DeGeneration,
-    /// The bounded MADS search phase that precedes polling.
-    MadsSearchBlock,
-    /// One MADS poll block.
-    MadsPollBlock,
-    /// One SQP major iteration.
-    SqpMajorIteration,
     /// A supervised external solver process is in flight.
     ExternalSolverCall,
     /// The reporting-fidelity re-evaluation of the delivered candidate.
@@ -110,12 +104,9 @@ impl CancelPhase {
             Self::ScanVerification => 3,
             Self::DeInitialPopulation => 4,
             Self::DeGeneration => 5,
-            Self::MadsSearchBlock => 6,
-            Self::MadsPollBlock => 7,
-            Self::SqpMajorIteration => 8,
-            Self::ExternalSolverCall => 9,
-            Self::ReportingFidelityVerification => 10,
-            Self::SearchFinished => 11,
+            Self::ExternalSolverCall => 6,
+            Self::ReportingFidelityVerification => 7,
+            Self::SearchFinished => 8,
         }
     }
 
@@ -129,12 +120,9 @@ impl CancelPhase {
             3 => Self::ScanVerification,
             4 => Self::DeInitialPopulation,
             5 => Self::DeGeneration,
-            6 => Self::MadsSearchBlock,
-            7 => Self::MadsPollBlock,
-            8 => Self::SqpMajorIteration,
-            9 => Self::ExternalSolverCall,
-            10 => Self::ReportingFidelityVerification,
-            11 => Self::SearchFinished,
+            6 => Self::ExternalSolverCall,
+            7 => Self::ReportingFidelityVerification,
+            8 => Self::SearchFinished,
             _ => Self::NotStarted,
         }
     }
@@ -148,9 +136,6 @@ impl CancelPhase {
             Self::ScanVerification => "scan_verification",
             Self::DeInitialPopulation => "de_initial_population",
             Self::DeGeneration => "de_generation",
-            Self::MadsSearchBlock => "mads_search_block",
-            Self::MadsPollBlock => "mads_poll_block",
-            Self::SqpMajorIteration => "sqp_major_iteration",
             Self::ExternalSolverCall => "external_solver_call",
             Self::ReportingFidelityVerification => "reporting_fidelity_verification",
             Self::SearchFinished => "search_finished",

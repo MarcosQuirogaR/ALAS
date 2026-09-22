@@ -175,20 +175,27 @@ mod tests {
     }
 
     #[test]
-    fn optimization_method_accepts_every_gui_strategy() {
-        for method in [
-            "differential_evolution",
-            "feasibility_first_de",
-            "nsga2",
-            "turbo_1",
-            "cma_es",
-            "sqp",
-        ] {
+    fn optimization_method_accepts_the_one_supported_search() {
+        let method = "differential_evolution";
+        let args = ["--optimization-method".to_owned(), method.to_owned()];
+        let parsed = parse_args(&args)
+            .unwrap_or_else(|error| panic!("optimization method parses: {error}"))
+            .unwrap_or_else(|| panic!("optimization method does not request help"));
+        assert_eq!(parsed.optimization_method.as_deref(), Some(method));
+    }
+
+    #[test]
+    fn optimization_method_rejects_a_retired_legacy_token() {
+        // Legacy tokens are migrated when a saved configuration document
+        // loads (`alas_config::settings_load_notes`), not accepted as a
+        // distinct CLI flag value; the CLI flag is validated against the
+        // dispatch contract directly.
+        for method in ["feasibility_first_de", "nsga2", "turbo_1", "cma_es", "sqp"] {
             let args = ["--optimization-method".to_owned(), method.to_owned()];
-            let parsed = parse_args(&args)
-                .unwrap_or_else(|error| panic!("optimization method parses: {error}"))
-                .unwrap_or_else(|| panic!("optimization method does not request help"));
-            assert_eq!(parsed.optimization_method.as_deref(), Some(method));
+            let error = parse_args(&args)
+                .err()
+                .unwrap_or_else(|| panic!("{method} must be rejected as a CLI flag value"));
+            assert!(error.contains("invalid optimization method"), "{error}");
         }
     }
 
@@ -207,12 +214,12 @@ mod tests {
     #[test]
     fn optimization_method_overrides_the_effective_configuration() {
         let args = CliArgs {
-            optimization_method: Some("cma_es".to_owned()),
+            optimization_method: Some("differential_evolution".to_owned()),
             ..CliArgs::default()
         };
         let config = load_config(&args)
             .unwrap_or_else(|error| panic!("effective configuration loads: {error}"));
-        assert_eq!(config.optimizer.solver.method, "cma_es");
+        assert_eq!(config.optimizer.solver.method, "differential_evolution");
     }
 
     #[test]

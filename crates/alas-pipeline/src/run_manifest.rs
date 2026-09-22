@@ -11,12 +11,15 @@
 //! under observation. This manifest persists them beside the design database.
 //!
 //! The executed search method is recorded separately from the configured one
-//! on purpose. `optimizer.solver.method` is a loadable configuration string
-//! that still accepts legacy names such as `differential_evolution`, while
-//! every product run outside the frozen compatibility path is dispatched to
-//! the MADS driver (`alas_opt::DesignOptimizer::run_product_search`). Reading
-//! the configured string as the executed algorithm is how a run gets
-//! diagnosed against the wrong search.
+//! on purpose. A saved configuration may still carry a legacy method token
+//! (`sqp`, `nsga2`, `turbo_1`, `cma_es`), which is migrated to
+//! `differential_evolution` at load time
+//! (`alas_config::settings_load_notes`); `configured_method` here is the
+//! string the loaded configuration actually carries, and `executed_method` is
+//! what the optimizer reports back (`alas_opt::DesignOptimizer::run_product_search`,
+//! the L-SHADE epsilon-constrained kernel). Reading the configured string as
+//! the executed algorithm is how a run gets diagnosed against the wrong
+//! search.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -102,7 +105,7 @@ pub struct SearchDiagnosticsManifest {
     pub verification_evaluations: usize,
     /// Wall-clock seconds in the broad scan.
     pub scan_wall_time_s: f64,
-    /// Wall-clock seconds in the MADS stage.
+    /// Wall-clock seconds in the search stage.
     pub search_wall_time_s: f64,
     /// Worker threads used inside one evaluation block.
     pub workers: usize,
@@ -117,6 +120,15 @@ pub struct SearchDiagnosticsManifest {
     /// dimensionless. Absent for the same reason.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub relative_improvement: Option<f64>,
+    /// Fraction of the final generation's population that was strictly
+    /// feasible. Absent (`0.0`) on a manifest written before this field
+    /// existed.
+    #[serde(default)]
+    pub feasible_fraction: f64,
+    /// The epsilon-constrained method's boundary at the last generation
+    /// evaluated; `0` once past the epsilon control fraction of the budget.
+    #[serde(default)]
+    pub epsilon_level: f64,
 }
 
 impl From<&alas_opt::SearchDiagnostics> for SearchDiagnosticsManifest {
@@ -135,6 +147,8 @@ impl From<&alas_opt::SearchDiagnostics> for SearchDiagnosticsManifest {
             poll_block_size: diagnostics.poll_block_size,
             first_feasible_cost: diagnostics.first_feasible_cost,
             relative_improvement: diagnostics.relative_improvement,
+            feasible_fraction: diagnostics.feasible_fraction,
+            epsilon_level: diagnostics.epsilon_level,
         }
     }
 }
@@ -331,6 +345,8 @@ mod tests {
             poll_block_size: 4,
             first_feasible_cost: Some(1.25),
             relative_improvement: Some(0.083),
+            feasible_fraction: 0.92,
+            epsilon_level: 0.0,
         }
     }
 
@@ -357,6 +373,8 @@ mod tests {
         assert_eq!(manifest.poll_block_size, source.poll_block_size);
         assert_eq!(manifest.first_feasible_cost, source.first_feasible_cost);
         assert_eq!(manifest.relative_improvement, source.relative_improvement);
+        assert_eq!(manifest.feasible_fraction, source.feasible_fraction);
+        assert_eq!(manifest.epsilon_level, source.epsilon_level);
     }
 
     #[test]
@@ -384,7 +402,7 @@ mod tests {
         // older run's manifest stays readable rather than becoming a parse
         // error that looks like a corrupt run.
         let json = serde_json::json!({
-            "executed_method": "mads",
+            "executed_method": "differential_evolution",
             "configured_method": "differential_evolution",
             "strategy": "staged",
             "termination": "converged",

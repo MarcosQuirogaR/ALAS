@@ -1366,10 +1366,10 @@ fn format_matrix_report(document: &Value) -> String {
         document["all_success"]
     ));
     text.push_str(
-        "Definitions. Kernel is the search that actually executed, which is not always the\n\
-         configured method token: the legacy population names have no kernel behind them and\n\
-         run mesh adaptive direct search, reported as `mads`. Conv is the search's verdict on\n\
-         its own stopping criterion; a cancelled, watchdog-stopped or budget-exhausted run is\n\
+        "Definitions. Kernel is the search that actually executed: differential evolution\n\
+         (L-SHADE, epsilon-constrained) is the only kernel this build runs; a saved config\n\
+         naming a retired token is migrated to it at load time. Conv is the search's verdict on\n\
+         its own stopping criterion; a cancelled or budget-exhausted run is\n\
          never converged. Feas is the optimizer's delivered-candidate verdict: a valid winner,\n\
          a finite objective, not cancelled, and accepted by the reporting-fidelity\n\
          re-evaluation. Phys additionally requires convergence, no governing error-severity\n\
