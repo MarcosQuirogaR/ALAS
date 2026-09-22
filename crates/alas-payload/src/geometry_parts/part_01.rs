@@ -7,7 +7,7 @@ use alas_geom::aircraft::airplane::Airplane;
 use crate::numeric::interp;
 
 /// The main wing is found by name, and everything else falls back to the first
-/// wing -- upstream's `next((w for w in plane.wings if w.name == "Main Wing"),
+/// wing: upstream's `next((w for w in plane.wings if w.name == "Main Wing"),
 /// plane.wings[0])`.
 const MAIN_WING: &str = "Main Wing";
 
@@ -23,7 +23,7 @@ const MAX_CONTAINMENT_STEP_M: f64 = 0.10;
 
 /// Minimum clear deck-to-deck band, as a fraction of inner half-height.
 ///
-/// This reserves approximately 0.15--0.20 m in a widebody for the floor beam,
+/// This reserves approximately 0.15 to 0.20 m in a widebody for the floor beam,
 /// panels and systems instead of letting the hold ceiling touch the cabin
 /// floor geometrically.
 const MIN_DECK_SEPARATION_FRAC: f64 = 0.06;
@@ -70,7 +70,7 @@ pub enum InteriorEnvelopeError {
 ///
 /// `width_factor` scales the internal width to the usable floor width, which
 /// accounts for a deck sitting off the section centre where the cross-section
-/// is narrower -- a lower hold in a circular body is a chord of the circle,
+/// is narrower: a lower hold in a circular body is a chord of the circle,
 /// not its diameter.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DeckSpec {

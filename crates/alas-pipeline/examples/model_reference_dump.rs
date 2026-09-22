@@ -3,10 +3,10 @@
 
 //! Dump every model output that has a real-world counterpart, per preset.
 //!
-//! Companion to the hand-researched reference datasets under
-//! `.agent/validation/`. This writes `MODEL.json` in the same key structure so
-//! the two can be merged into a correlation table. It is a scratch validation
-//! instrument, not a shipped artifact.
+//! Companion to the hand-researched reference datasets kept in an internal
+//! validation directory. This writes `MODEL.json` in the same key structure
+//! so the two can be merged into a correlation table. It is a scratch
+//! validation instrument, not a shipped artifact.
 #![allow(clippy::print_stdout, clippy::print_stderr, missing_docs)]
 // Standalone fixture diagnostics fail immediately when their curated inputs are invalid.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
@@ -21,6 +21,7 @@ use alas_geom::builder::AircraftBuilder;
 use alas_payload::{build_payload_layout, ItemMeta};
 use alas_perf::landing_gear::size_landing_gear_with_group_stations;
 use alas_pipeline::full_analysis::FullAnalysis;
+use alas_pipeline::gear_stations::resolved_gear_stations;
 use alas_pipeline::{DesignPipeline, PipelineOptions, RunEnvironment};
 use serde_json::{json, Value};
 
@@ -119,7 +120,7 @@ fn main() {
     let out = PathBuf::from(
         std::env::args()
             .nth(1)
-            .unwrap_or_else(|| ".agent/validation/MODEL.json".to_owned()),
+            .unwrap_or_else(|| "out/MODEL.json".to_owned()),
     );
     let mut all = serde_json::Map::new();
     for name in presets::available() {
@@ -190,12 +191,18 @@ fn dump(name: &str) -> Result<Value, String> {
     let fallback_x_nlg =
         fuselage_start_x + (fuselage_end_x - fuselage_start_x) * config.mass_model.nlg_x_fraction;
     let fallback_x_mlg = x_mac_le + config.mass_model.mlg_x_fraction_mac * c_ref;
-    let gear_stations = config.landing_gear.resolved_station_positions(
+    // Resolved through the shared gate, not rebuilt here: a diagnostic export
+    // that invented a main-gear station the mass model refuses would be the
+    // one artifact a reviewer trusts to show what the model actually holds.
+    let gear_stations = resolved_gear_stations(
+        &config,
+        &report.airplane,
         fallback_x_nlg,
         fallback_x_mlg,
         fuselage_start_x,
         fuselage_end_x - fuselage_start_x,
-    );
+    )
+    .map_err(|refusal| format!("main_gear_station_not_measured: {refusal}"))?;
     let gear_mass_kg: f64 = report.component_masses.values().copied().sum();
     let gear_layout = size_landing_gear_with_group_stations(
         gear_mass_kg,

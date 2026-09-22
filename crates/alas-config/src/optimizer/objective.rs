@@ -3,8 +3,8 @@
 
 //! What the design search minimises, and which requirements bound it.
 //!
-//! A conceptual transport is sized by a mission -- payload over a design
-//! range under a reserve policy -- and judged by what that mission costs,
+//! A conceptual transport is sized by a mission: payload over a design
+//! range under a reserve policy, and judged by what that mission costs,
 //! with the certification and operating requirements as boundaries rather
 //! than as prices. This group selects that formulation. The objective is a
 //! mission quantity such as block fuel or takeoff mass; the maximum takeoff
@@ -70,7 +70,7 @@ pub enum MtowSizing {
     /// never re-applied as a dispatch ceiling, an Aitken-extrapolation
     /// admissibility bound, or a landing-mass-fraction basis on any later
     /// pass, and the mission-required mass is not checked against it. This
-    /// is a calibration/validation mode -- it asks what the closure lands on
+    /// is a calibration/validation mode; it asks what the closure lands on
     /// with nothing but the seed pinned to the declared aircraft, not a
     /// sizing mode for producing a certifiable design against a declared
     /// requirement.
@@ -215,7 +215,7 @@ pub struct ObjectiveConfig {
     #[config(
         label = "Maximum wingspan",
         unit = "m",
-        help = "Largest wingspan the intended aerodrome reference code admits: 36 m for code C, 52 m for D, 65 m for E and 80 m for F (ICAO Annex 14). Zero disables the limit."
+        help = "Largest wingspan allowed by the selected aerodrome reference-code case. The 36/52/65/80 m values are study inputs representing codes C/D/E/F; this configuration does not infer a code from an ICAO identifier or runway length. Zero disables the limit."
     )]
     pub max_span_m: f64,
 
@@ -223,7 +223,7 @@ pub struct ObjectiveConfig {
     #[config(
         label = "Maximum approach speed",
         unit = "kt",
-        help = "Upper bound on the reference landing speed at the maximum landing mass. Approach category C ends at 140 kt and D at 165 kt (ICAO PANS-OPS). Zero disables the limit."
+        help = "Upper bound on reference approach speed at maximum landing mass for the selected operating/aerodrome category. The category and source must be selected explicitly; the configuration does not infer them from an ICAO identifier. Zero disables the limit."
     )]
     pub max_approach_speed_kt: f64,
 

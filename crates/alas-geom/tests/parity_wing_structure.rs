@@ -7,15 +7,15 @@
 //!
 //! Two tiers are in play, matching `docs/PORTING.md`'s `closed` row for this
 //! module with one carve-out. Everything the module computes from planform
-//! geometry alone -- `local_chord`/`x_le`/`z_le`/`rib_vector`/
+//! geometry alone: `local_chord`/`x_le`/`z_le`/`rib_vector`/
 //! `le_direction`, `get_rib_lengths`, `compute_spar_intersections`, and every
 //! [`RibStation`](alas_geom::wing_structure::RibStation) field except its
-//! surface points -- never reads an airfoil coordinate and is checked at
+//! surface points, never reads an airfoil coordinate and is checked at
 //! [`Tier::Closed`]. `airfoil_zu_zl`, `spar_height`, and rib
 //! `extrados`/`intrados` all sample the root section this test builds with
 //! `build_section`, which repanels through a cubic spline
-//! (`alas-math::spline`) on its way there -- the same reason
-//! `alas-geom::airfoil_library`'s own row is `linalg` -- so those are checked
+//! (`alas-math::spline`) on its way there: the same reason
+//! `alas-geom::airfoil_library`'s own row is `linalg`, so those are checked
 //! at [`Tier::Linalg`] instead of pulling the whole module to a looser tier
 //! it does not otherwise need.
 
@@ -108,7 +108,7 @@ struct Fixture {
 
 /// Rebuild the same geometry the generator did: the default `DesignVector`
 /// and `WingConfig`, the root section via `build_section` on the configured
-/// root airfoil, and the tip section resolved directly -- the exact call
+/// root airfoil, and the tip section resolved directly: the exact call
 /// pattern `pipeline.py`'s structural-analysis stage uses.
 fn build_geometry(fixture: &Fixture) -> WingStructureGeometry {
     let dv = DesignVector::default();

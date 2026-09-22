@@ -1,6 +1,6 @@
 # Stability and control research for conceptual aircraft design
 
-Status: research and architecture note for ALAS-rust
+Status: research and architecture note for ALAS
 Date: 2026-08-26
 Scope: static and dynamic stability, trim, primary-control sizing, engine-out controllability, handling qualities, gust response, flight-envelope and CG coverage, and optimization coupling.
 
@@ -381,7 +381,7 @@ struct ConstraintResidual {
 
 For a lower-is-better constraint, a consistent normalized violation can be `max(0, (actual-target)/scale)`; for an upper-is-better constraint, reverse the sign. Store the scale and direction so that a residual remains auditable. A missing or invalid metric must not become `0.0` violation.
 
-## 5. ALAS-rust mapping and current gaps
+## 5. ALAS mapping and current gaps
 
 The repository already has a useful low-fidelity foundation. The mapping below identifies what can be used now and what must not yet be inferred from it.
 

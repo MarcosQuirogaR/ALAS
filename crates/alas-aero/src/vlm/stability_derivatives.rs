@@ -12,8 +12,8 @@
 //!
 //! The one call site that reaches this is `alas/physics/dynamics.py`'s
 //! `compute_dynamic_modes`, which calls
-//! `run_with_stability_derivatives(alpha=True, beta=True, p=True, q=True, r=True)`
-//! -- every axis on. Upstream's five boolean flags exist only so a caller that
+//! `run_with_stability_derivatives(alpha=True, beta=True, p=True, q=True, r=True)`,
+//! every axis on. Upstream's five boolean flags exist only so a caller that
 //! needs, say, only the longitudinal derivatives can skip the lateral solves
 //! for speed; the sole caller in this program's inputs wants all five, so they
 //! are not translated as parameters and this always computes the full set.
@@ -29,7 +29,7 @@
 //! per-radian; `p`/`q`/`r` are perturbed and scaled by the same nondimensional
 //! rate factor `(2 V) / b_ref` (or `c_ref` for `q`), so the reported slope is
 //! with respect to the nondimensional rate `p_hat = p b / (2 V)` and its
-//! kin -- exactly the derivatives `flight_dynamics.get_modes` expects. It also
+//! kin, exactly the derivatives `flight_dynamics.get_modes` expects. It also
 //! reports the longitudinal and lateral neutral points `x_np`/`x_np_lateral`,
 //! which upstream appends after the `alpha` and `beta` passes.
 //!
@@ -43,11 +43,11 @@ use super::{VlmError, VlmResult, VlmSystem};
 use crate::operating_point::OperatingPoint;
 
 /// The finite-difference step upstream perturbs `alpha` and `beta` by, in
-/// degrees -- `finite_difference_amounts["alpha"]`/`["beta"]`.
+/// degrees: `finite_difference_amounts["alpha"]`/`["beta"]`.
 const ANGLE_STEP_DEG: f64 = 0.001;
 
 /// The nondimensional-rate step multiplier upstream perturbs `p`, `q`, `r` by,
-/// before dividing by the reference length -- the `0.001` in
+/// before dividing by the reference length: the `0.001` in
 /// `0.001 * (2 * velocity) / b_ref`.
 const RATE_STEP_FRACTION: f64 = 0.001;
 
@@ -83,46 +83,46 @@ struct DerivativePolicy {
 }
 
 /// The six force- and moment-coefficient derivatives with respect to one state
-/// variable -- upstream's `{CL,CD,CY,Cl,Cm,Cn}` + the denominator's
+/// variable: upstream's `{CL,CD,CY,Cl,Cm,Cn}` + the denominator's
 /// abbreviation (`CLa`, `CDa`, ... for the `alpha` pass, and so on). Field
 /// names match [`VlmResult`]'s coefficient names, since each is the derivative
 /// of the like-named coefficient.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CoefficientDerivatives {
-    /// `d CL / d(state)` -- lift-coefficient slope.
+    /// `d CL / d(state)`: lift-coefficient slope.
     pub cl_lift: f64,
-    /// `d CD / d(state)` -- drag-coefficient slope.
+    /// `d CD / d(state)`: drag-coefficient slope.
     pub cd_drag: f64,
-    /// `d CY / d(state)` -- side-force-coefficient slope.
+    /// `d CY / d(state)`: side-force-coefficient slope.
     pub cy_side: f64,
-    /// `d Cl / d(state)` -- rolling-moment-coefficient slope.
+    /// `d Cl / d(state)`: rolling-moment-coefficient slope.
     pub cl_roll: f64,
-    /// `d Cm / d(state)` -- pitching-moment-coefficient slope.
+    /// `d Cm / d(state)`: pitching-moment-coefficient slope.
     pub cm_pitch: f64,
-    /// `d Cn / d(state)` -- yawing-moment-coefficient slope.
+    /// `d Cn / d(state)`: yawing-moment-coefficient slope.
     pub cn_yaw: f64,
 }
 
 /// The base [`super::run`] result plus the stability derivatives with respect
-/// to each state variable and the two neutral points -- the superset dict
+/// to each state variable and the two neutral points: the superset dict
 /// `run_with_stability_derivatives` returns.
 #[derive(Debug, Clone, PartialEq)]
 pub struct VlmStabilityResult {
     /// The unperturbed [`super::run`] output.
     pub base: VlmResult,
-    /// Derivatives with respect to angle of attack, per radian -- the `*a`
+    /// Derivatives with respect to angle of attack, per radian: the `*a`
     /// keys (`CLa`, `Cma`, ...).
     pub d_alpha: CoefficientDerivatives,
-    /// Derivatives with respect to sideslip, per radian -- the `*b` keys
+    /// Derivatives with respect to sideslip, per radian: the `*b` keys
     /// (`CYb`, `Cnb`, ...).
     pub d_beta: CoefficientDerivatives,
-    /// Derivatives with respect to the nondimensional roll rate -- the `*p`
+    /// Derivatives with respect to the nondimensional roll rate: the `*p`
     /// keys (`Clp`, ...).
     pub d_p: CoefficientDerivatives,
-    /// Derivatives with respect to the nondimensional pitch rate -- the `*q`
+    /// Derivatives with respect to the nondimensional pitch rate: the `*q`
     /// keys (`Cmq`, ...).
     pub d_q: CoefficientDerivatives,
-    /// Derivatives with respect to the nondimensional yaw rate -- the `*r`
+    /// Derivatives with respect to the nondimensional yaw rate: the `*r`
     /// keys (`Cnr`, `Clr`, ...).
     pub d_r: CoefficientDerivatives,
     /// Longitudinal neutral point `x_np = xyz_ref[0] - Cma (c_ref / CLa)`.
@@ -198,7 +198,7 @@ impl DerivativeEvaluation<'_> {
 }
 
 /// Run a vortex-lattice solve of `airplane` at `op_point` and the stability
-/// derivatives about it -- `VortexLatticeMethod(...).run_with_stability_derivatives()`
+/// derivatives about it: `VortexLatticeMethod(...).run_with_stability_derivatives()`
 /// with every axis flag `true`, the only way this program's inputs call it.
 ///
 /// # Errors

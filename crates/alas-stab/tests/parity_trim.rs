@@ -6,18 +6,18 @@
 //!
 //! # Two tiers, and the split is a tightening
 //!
-//! `docs/PORTING.md` names `closed` + `linalg` for this row. Half the module --
-//! `static_margin`, `neutral_point`, `autobalance` and `stability_and_trim` --
+//! `docs/PORTING.md` names `closed` + `linalg` for this row. Half the module:
+//! `static_margin`, `neutral_point`, `autobalance` and `stability_and_trim`:
 //! reports numbers that come out of a dense VLM AIC solve, which is exactly the
 //! construction `linalg` describes, and those are compared there. The other
-//! half -- `munk_apparent_mass_factor`, `fuselage_cm_alpha` and
-//! `tail_volume_coefficients` -- never goes near a factorization: it is a table
+//! half: `munk_apparent_mass_factor`, `fuselage_cm_alpha` and
+//! `tail_volume_coefficients`, never goes near a factorization: it is a table
 //! interpolation, a midpoint quadrature over the fuselage station list and two
 //! ratios of wing areas and moment arms, all closed-form `f64` arithmetic that
 //! both implementations evaluate in the same order. Comparing that half at
 //! `linalg` would let three orders of magnitude through on formulas that in
-//! fact agree to about 1.5e-16 relative -- one ulp, with every `munk` case
-//! bit-identical -- so it is compared at `closed`, the tier the tolerance table
+//! fact agree to about 1.5e-16 relative, one ulp, with every `munk` case
+//! bit-identical, so it is compared at `closed`, the tier the tolerance table
 //! defines for exactly this construction. `parity_analysis.rs` and
 //! `parity_layout.rs` already run their two comparisons side by side the same
 //! way.
@@ -102,7 +102,7 @@ struct AutobalanceInputs {
 #[derive(Debug, Deserialize)]
 struct AutobalanceCase {
     inputs: AutobalanceInputs,
-    /// `null` where the static margin was NaN -- see `gen_stab_trim.py`.
+    /// `null` where the static margin was NaN, see `gen_stab_trim.py`.
     sm_before: Option<f64>,
     xyz_ref_x_after: f64,
 }
@@ -152,12 +152,12 @@ struct Fixture {
     tail_volume: HashMap<String, TailVolumeCase>,
 }
 
-/// A `null` scalar is a NaN one -- the generator's `_scalar` convention.
+/// A `null` scalar is a NaN one: the generator's `_scalar` convention.
 fn or_nan(value: Option<f64>) -> f64 {
     value.unwrap_or(f64::NAN)
 }
 
-/// The nominal aircraft -- the generator's
+/// The nominal aircraft: the generator's
 /// `AircraftBuilder(GeometryConfig()).build()`.
 fn build() -> Airplane {
     let mut plane = AircraftBuilder::new_reference_compatibility(Some(GeometryConfig::default()))
@@ -172,7 +172,7 @@ fn build() -> Airplane {
     plane
 }
 
-/// The nominal aircraft with the horizontal stabilizer removed -- the
+/// The nominal aircraft with the horizontal stabilizer removed: the
 /// generator's `_without_wing(plane, HSTAB)`.
 fn without_hstab(plane: &Airplane) -> Airplane {
     let mut stripped = plane.clone();
@@ -180,7 +180,7 @@ fn without_hstab(plane: &Airplane) -> Airplane {
     stripped
 }
 
-/// The nominal aircraft keeping only its first `count` wings, in order -- the
+/// The nominal aircraft keeping only its first `count` wings, in order: the
 /// generator's `_first_wings(plane, count)`, which is what
 /// `tail_volume_coefficients` indexes by position.
 fn first_wings(plane: &Airplane, count: usize) -> Airplane {
@@ -222,7 +222,7 @@ fn the_two_implementations_are_analysing_the_same_aeroplane() {
     );
     discrete.finish();
 
-    // Geometry reference dimensions, pinned at `closed` in builder.json --
+    // Geometry reference dimensions, pinned at `closed` in builder.json:
     // the sanity check `parity_analysis.rs` makes the same way.
     let mut numeric = Comparison::new("trim.airplane", Tier::Closed);
     numeric.scalar("s_ref", plane.s_ref, fixture.airplane.s_ref);

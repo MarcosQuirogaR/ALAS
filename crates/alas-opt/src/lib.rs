@@ -21,10 +21,10 @@
 // controls, so a failed unwrap there is the assertion failing.
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
+pub mod cancellation;
 pub mod differential_evolution;
 pub mod envelope;
 pub mod evaluator;
-pub mod gradient;
 pub mod history;
 pub mod mdo;
 mod mesh_correction;
@@ -35,18 +35,22 @@ mod search;
 mod search_methods;
 pub mod transport_planform;
 
+pub use cancellation::{
+    watch_for, CancelEvent, CancelEventKind, CancelPhase, CancelScope, CancelSnapshot, CancelWatch,
+    StopReason,
+};
 pub use differential_evolution::{
-    DesignOptimizer, NoFeasibleDesign, OptimizationError, OptimizationResult, ParetoCandidate,
+    DeliveredAcceptance, DesignOptimizer, NoFeasibleDesign, OptimizationError, OptimizationResult,
+    ParetoCandidate, SearchDiagnostics, CANCELLED, REPORTING_FIDELITY_FALLBACK,
+    REPORTING_FIDELITY_REJECTED,
 };
 pub use envelope::{
-    assess_model_cg_envelope, check_cg_envelope, CgEnvelopeResult, ModelCgConstraint,
-    ModelCgConstraintAssessment, ModelCgEnvelopeAssessment, ModelCgEnvelopeError,
-    ModelCgLoadingAssessment, ModelCgLoadingState, StaticMarginPreferenceAssessment,
+    assess_model_cg_envelope, check_cg_envelope, AftCgLimitGovernance, CgEnvelopeResult,
+    ModelCgConstraint, ModelCgConstraintAssessment, ModelCgEnvelopeAssessment,
+    ModelCgEnvelopeError, ModelCgLoadingAssessment, ModelCgLoadingState,
+    StaticMarginPreferenceAssessment,
 };
 pub use evaluator::{ObjectiveEvaluation, ObjectiveEvaluator};
-pub use gradient::{
-    run_sqp, solve_qp, ConstrainedEvaluator, ConstrainedPoint, QpSolution, SqpOutcome, SqpSettings,
-};
 pub use history::OptimizationHistory;
 pub use mdo::{
     assess_candidate, assess_candidate_with_polar, assess_product_candidate, canonicalize_design,

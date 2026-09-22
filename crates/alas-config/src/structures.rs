@@ -7,15 +7,15 @@
 //! The wingbox the structural analysis sizes, and how it is solved.
 //!
 //! The split here follows [`crate::mses`]: everything the user chooses in
-//! advance -- how many spars and where, which materials, the rib pattern, the
-//! safety margin -- lives in this struct, and everything that follows from
-//! those choices -- cap dimensions, rib spacing, the skin thickness bump --
+//! advance: how many spars and where, which materials, the rib pattern, the
+//! safety margin: lives in this struct, and everything that follows from
+//! those choices (cap dimensions, rib spacing, the skin thickness bump)
 //! is computed rather than stored. A derived quantity kept as a field is a
 //! second source of truth that drifts from the first.
 //!
 //! Running a real finite-element solve is opt-in, because it needs a licensed
-//! install and takes minutes. Everything else -- the sizing, the mesh files,
-//! and the analytical deflection, stress and frequency estimates -- is
+//! install and takes minutes. Everything else: the sizing, the mesh files,
+//! and the analytical deflection, stress and frequency estimates, is
 //! computed whenever the analysis is enabled, so the absence of a solver
 //! degrades the results rather than removing them.
 //!
@@ -57,7 +57,7 @@ pub struct StructuresConfig {
     /// Whether a partial-span third spar runs from the root to the kink.
     #[config(
         label = "Add center spar (root-to-kink)",
-        help = "Adds an optional third spar running only from the root to the wing break/kink station, at center_spar_chord_fraction of local chord -- the partial-span reinforcement spar common on widebody wings (extra bending/shear capacity where root load is highest, without the mass of running it all the way to the tip). Off by default (classic 2-spar box). This spar carries no load and contributes no mass outboard of the kink -- it simply doesn't exist there."
+        help = "Adds an optional third spar running only from the root to the wing break/kink station, at center_spar_chord_fraction of local chord: the partial-span reinforcement spar common on widebody wings (extra bending/shear capacity where root load is highest, without the mass of running it all the way to the tip). Off by default (classic 2-spar box). This spar carries no load and contributes no mass outboard of the kink; it simply doesn't exist there."
     )]
     pub center_spar_enabled: bool,
 
@@ -113,7 +113,7 @@ pub struct StructuresConfig {
     #[config(
         label = "Skin gauge",
         unit = "m",
-        help = "Wing skin thickness -- this is the value actually used (no shear-flow/buckling upsizing is modeled, see structural_sizing.py), so treat it as a practical starting assumption for this class of aircraft, not a bare absolute-minimum gauge. 6mm matches the reference sizing scripts' own baseline for a large long-range wing; a much thinner value (e.g. 2mm) understates real skin panel buckling resistance and inflates the auto-derived rib count substantially, since rib spacing scales with sqrt(t_skin)."
+        help = "Wing skin thickness; this is the value actually used (no shear-flow/buckling upsizing is modeled, see structural_sizing.py), so treat it as a practical starting assumption for this class of aircraft, not a bare absolute-minimum gauge. 6mm matches the reference sizing scripts' own baseline for a large long-range wing; a much thinner value (e.g. 2mm) understates real skin panel buckling resistance and inflates the auto-derived rib count substantially, since rib spacing scales with sqrt(t_skin)."
     )]
     pub t_skin_min_m: f64,
 
@@ -161,7 +161,7 @@ pub struct StructuresConfig {
     #[config(
         label = "Rib spacing buckling coefficient",
         unit = "-",
-        help = "Empirical panel-buckling coefficient (c) in the Euler skin-panel critical stress formula used to auto-derive rib spacing/count -- higher allows wider rib spacing for the same skin thickness."
+        help = "Empirical panel-buckling coefficient (c) in the Euler skin-panel critical stress formula used to auto-derive rib spacing/count: higher allows wider rib spacing for the same skin thickness."
     )]
     pub rib_buckling_coeff: f64,
 
@@ -198,7 +198,7 @@ pub struct StructuresConfig {
     #[config(
         hidden,
         label = "NASTRAN executable path",
-        help = "Path (repo-root-relative or absolute) to nastran.exe. Leave blank to only generate .bdf files and use the theoretical (analytical) deformation/stress/frequency estimates -- no NASTRAN install is required for that path. Set on Setup > External Tools."
+        help = "Path (repo-root-relative or absolute) to nastran.exe. Leave blank to only generate .bdf files and use the theoretical (analytical) deformation/stress/frequency estimates, no NASTRAN install is required for that path. Set on Setup > External Tools."
     )]
     pub nastran_exe_path: String,
 
@@ -349,7 +349,7 @@ pub struct StructuresConfig {
     #[config(
         hidden,
         label = "Patran executable path",
-        help = "Path (repo-root-relative or absolute) to patran.exe. Leave blank to skip -- no Patran install is required for anything else in Structural Analysis. Set on Setup > External Tools."
+        help = "Path (repo-root-relative or absolute) to patran.exe. Leave blank to skip, no Patran install is required for anything else in Structural Analysis. Set on Setup > External Tools."
     )]
     pub patran_exe_path: String,
 
@@ -357,7 +357,7 @@ pub struct StructuresConfig {
     #[config(
         hidden,
         label = "Render Patran deformation plots",
-        help = "After a successful NASTRAN SOL 101 static solve, batch-replay a Patran session per load case to export a deformation-plot PNG (same view MSC Patran's own interactive GUI shows). On by default; needs a real licensed Patran install and launches it as a subprocess per load case (a few seconds each) -- has no effect when patran_exe_path isn't configured. Requires run_nastran and run_sol_static to both be on. Set on Setup > External Tools."
+        help = "After a successful NASTRAN SOL 101 static solve, batch-replay a Patran session per load case to export a deformation-plot PNG (same view MSC Patran's own interactive GUI shows). On by default; needs a real licensed Patran install and launches it as a subprocess per load case (a few seconds each), has no effect when patran_exe_path isn't configured. Requires run_nastran and run_sol_static to both be on. Set on Setup > External Tools."
     )]
     pub run_patran_export: bool,
 }
@@ -395,10 +395,9 @@ impl Default for StructuresConfig {
             run_nastran: true,
             run_sol_static: true,
             run_sol_modes: true,
-            // Keep the product default deliberately bounded for interactive
-            // runs; the NASTRAN adapter honors any explicit user/reference
-            // value rather than silently clipping it.
-            run_sol_vibration_sine: false,
+            // SOL 111 is part of the default structural response set; the
+            // NASTRAN adapter still honors explicit user/reference limits.
+            run_sol_vibration_sine: true,
             // A unit force PSD makes SOL 111 immediately observable; a user
             // can replace it with the aircraft-specific excitation level.
             run_sol_vibration_random: true,
@@ -453,7 +452,7 @@ mod tests {
     #[test]
     fn the_center_spar_is_appended_and_marked_as_partial_span() {
         // It stops at the kink, so anything building the box has to know not
-        // to run it to the tip -- which is what the second list carries.
+        // to run it to the tip, which is what the second list carries.
         let config = StructuresConfig {
             center_spar_enabled: true,
             ..Default::default()

@@ -10,7 +10,7 @@
 //!
 //! Every plotted quantity comes from [`alas_prop::cycle::compute_turbofan_cycle`]
 //! or one of its [`alas_prop::cycle::sweeps`] wrappers, evaluated at the
-//! current [`AlasConfig`]'s engine and flight-condition fields -- matching
+//! current [`AlasConfig`]'s engine and flight-condition fields, matching
 //! upstream's five `figure_propulsion_*` functions plus
 //! `figure_engine_designer_preview` in `alas/reporting/visualization.py`.
 //! None of those six Python functions reads its `report` parameter (checked
@@ -22,6 +22,8 @@ mod cycle;
 mod support;
 mod sweeps;
 mod technology;
+mod ts_preview;
+mod turboprop_cycle;
 
 pub use altitude::figure_propulsion_altitude_sweep;
 pub use cycle::{

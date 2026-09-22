@@ -16,9 +16,9 @@
 //!
 //! # Definitions, not measurements
 //!
-//! The values are the exact legal definitions -- the international yard and
+//! The values are the exact legal definitions: the international yard and
 //! pound agreement of 1959 for length and mass, the standard gravity of
-//! 9.80665 m/s^2 for force -- rather than transcriptions of what mission analysis model's unit
+//! 9.80665 m/s^2 for force, rather than transcriptions of what mission analysis model's unit
 //! library happens to compute. Derived units are written as their definitions
 //! (`PSI` is a pound-force over a square inch) so the source of each is on the
 //! page.
@@ -34,7 +34,7 @@
 /// Defined exactly by the third CGPM, 1901.
 pub const STANDARD_GRAVITY: f64 = 9.80665;
 
-// -- Length. International yard and pound agreement, 1959. ------------------
+// Length. International yard and pound agreement, 1959.
 
 /// Metres in a metre.
 pub const METER: f64 = 1.0;
@@ -47,7 +47,7 @@ pub const INCH: f64 = 0.0254;
 /// Metres in a nautical mile, defined exactly since 1929.
 pub const NAUTICAL_MILE: f64 = 1852.0;
 
-// -- Mass -------------------------------------------------------------------
+// Mass
 
 /// Kilograms in a kilogram.
 pub const KILOGRAM: f64 = 1.0;
@@ -60,14 +60,14 @@ pub const GRAM: f64 = 0.001;
 /// Kilograms in a pound-mass.
 pub const POUND_MASS: f64 = 0.45359237;
 
-// -- Force ------------------------------------------------------------------
+// Force
 
 /// Newtons in a newton.
 pub const NEWTON: f64 = 1.0;
 /// Newtons in a pound-force: a pound-mass under standard gravity.
 pub const POUND_FORCE: f64 = POUND_MASS * STANDARD_GRAVITY;
 
-// -- Time and speed ---------------------------------------------------------
+// Time and speed
 
 /// Seconds in a second.
 pub const SECOND: f64 = 1.0;
@@ -76,12 +76,12 @@ pub const HOUR: f64 = 3600.0;
 /// Metres per second in a knot: one nautical mile per hour.
 pub const KNOT: f64 = NAUTICAL_MILE / HOUR;
 
-// -- Angle ------------------------------------------------------------------
+// Angle
 
 /// Radians in a degree.
 pub const DEGREE: f64 = std::f64::consts::PI / 180.0;
 
-// -- Temperature ------------------------------------------------------------
+// Temperature
 
 /// Kelvin in a degree Rankine.
 ///
@@ -89,19 +89,19 @@ pub const DEGREE: f64 = std::f64::consts::PI / 180.0;
 /// intervals and absolute temperatures alike.
 pub const DEGREE_RANKINE: f64 = 5.0 / 9.0;
 
-// -- Pressure ---------------------------------------------------------------
+// Pressure
 
 /// Pascals in a pascal.
 pub const PASCAL: f64 = 1.0;
 /// Pascals in a pound-force per square inch.
 pub const PSI: f64 = POUND_FORCE / (INCH * INCH);
 
-// -- Volume -----------------------------------------------------------------
+// Volume
 
 /// Cubic metres in a US liquid gallon, defined as 231 cubic inches.
 pub const GALLON: f64 = 231.0 * INCH * INCH * INCH;
 
-// -- Power ------------------------------------------------------------------
+// Power
 
 /// Watts in a watt.
 pub const WATT: f64 = 1.0;

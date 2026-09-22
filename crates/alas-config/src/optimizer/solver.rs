@@ -35,41 +35,59 @@ use crate::ConfigNode;
 #[serde(deny_unknown_fields)]
 pub struct SolverSettings {
     /// Top-level optimizer selected for product searches.
+    ///
+    /// This is the only value a saved file may carry going forward. A legacy
+    /// token from an earlier build (`sqp`, `nsga2`, `turbo_1`, `cma_es`,
+    /// `feasibility_first_de`) is migrated to this one at load time, with a
+    /// note the caller can surface (`alas_config::settings_load_notes`); it
+    /// is never silently accepted as a distinct algorithm.
     #[serde(default = "default_optimizer_method")]
     #[config(
         options = OptimizerMethod,
         label = "Optimization method",
-        help = "Select the search algorithm. Differential evolution preserves the historical scalar search; feasibility-first DE gives physical validity priority; NSGA-II retains a Pareto set; TuRBO-1 uses a local trust-region surrogate for expensive evaluations; CMA-ES adapts correlated continuous design steps; SQP is the gradient-based sequential quadratic programming driver over the converged sizing loop, with finite-difference derivatives and explicit inequality constraints."
+        help = "The one search algorithm this build runs: L-SHADE differential evolution under the epsilon-constrained method (success-history parameter adaptation, current-to-pbest/1 mutation with an archive, linear population size reduction, and a constraint boundary that decays to strict feasibility as the search proceeds)."
     )]
     pub method: String,
 
-    /// Finite-difference step for the gradient-based driver.
+    /// Finite-difference step for the retired gradient-based driver.
+    ///
+    /// No kernel reads this any more; it is retained only so a file saved by
+    /// an earlier build that carried an explicit value still loads without
+    /// losing it.
     #[serde(
         default = "default_finite_difference_step",
         skip_serializing_if = "is_default_finite_difference_step"
     )]
     #[config(
-        label = "Finite-difference step",
-        help = "Forward-difference step of the SQP driver, as a fraction of each design variable's bound range. It must exceed the numerical noise of the sizing closure (a 1 kg takeoff-mass tolerance on a 100 t aircraft is 1e-5) and stay below the scale on which the objective bends; 0.001-0.005 is the usual window."
+        label = "Finite-difference step (retired)",
+        help = "Unused: the SQP driver this setting configured has been removed. Retained so a configuration saved by an earlier build still loads with its value intact."
     )]
     pub finite_difference_step: f64,
 
-    /// Normalized constraint violation accepted as feasible by the driver.
+    /// Normalized constraint violation accepted as feasible by the retired
+    /// gradient-based driver.
+    ///
+    /// No kernel reads this any more; see [`Self::finite_difference_step`].
     #[serde(
         default = "default_constraint_tolerance",
         skip_serializing_if = "is_default_constraint_tolerance"
     )]
     #[config(
-        label = "Constraint tolerance",
-        help = "Largest normalized inequality-constraint violation (violation divided by the limit) the SQP driver accepts at convergence. 1e-4 is one part in ten thousand of every limit."
+        label = "Constraint tolerance (retired)",
+        help = "Unused: the SQP driver this setting configured has been removed. Retained so a configuration saved by an earlier build still loads with its value intact."
     )]
     pub constraint_tolerance: f64,
 
     /// How new candidates are generated from the population.
+    ///
+    /// Read only by the frozen SciPy-parity replay
+    /// (`DesignOptimizer::new_reference_compatibility`), which no product
+    /// pipeline or GUI path constructs. The product L-SHADE search always
+    /// uses current-to-pbest/1/bin and does not read this field.
     #[config(
         options = Strategy,
-        label = "DE mutation/crossover strategy",
-        help = "SciPy differential_evolution strategy name (e.g. 'best1bin', 'rand1bin', 'best2bin') -- controls how new candidate designs are generated from the population each generation."
+        label = "DE mutation/crossover strategy (parity replay only)",
+        help = "SciPy differential_evolution strategy name (e.g. 'best1bin', 'rand1bin', 'best2bin'), read only by the frozen reference-compatibility replay used for regression comparison against the Python baseline. The product search always uses current-to-pbest/1/bin and ignores this field."
     )]
     pub strategy: String,
 
@@ -83,16 +101,28 @@ pub struct SolverSettings {
     /// Population size, as a multiple of the number of design variables.
     #[config(
         label = "Population size multiplier",
-        help = "Population size as a multiplier on the number of design variables -- more candidates per generation explores more broadly but costs more evaluations."
+        help = "Population size as a multiplier on the number of design variables: more candidates per generation explores more broadly but costs more evaluations."
     )]
     pub population_size: i64,
 
     /// How converged the population has to be before stopping early.
     #[config(
         label = "Convergence tolerance",
-        help = "Relative tolerance for convergence; the solver stops early once the population's cost spread falls below this."
+        help = "The search stops early once two things both hold: the population's normalized design-space spread has fallen below this fraction of the bounds, and the best feasible cost's relative improvement has stayed below this fraction for the stagnation window below."
     )]
     pub tolerance: f64,
+
+    /// Generations the best feasible cost may fail to improve by more than
+    /// `tolerance` before a converged spread is honoured.
+    #[serde(
+        default = "default_convergence_stagnation_generations",
+        skip_serializing_if = "is_default_convergence_stagnation_generations"
+    )]
+    #[config(
+        label = "Convergence stagnation window",
+        help = "Consecutive generations the best feasible cost may fail to improve by more than the convergence tolerance before the search may report convergence, once the population's design-space spread has also fallen below that tolerance."
+    )]
+    pub convergence_stagnation_generations: i64,
 
     /// The random seed, or unset for a different search each run.
     #[config(
@@ -102,9 +132,16 @@ pub struct SolverSettings {
     pub seed: Option<i64>,
 
     /// How many native-objective workers evaluate a candidate batch at once.
+    ///
+    /// `0` means "decide from the machine". The worker count changes only how
+    /// a batch is distributed, never which designs are evaluated or what they
+    /// score, so this is a wall-clock setting and not a modelling one; the
+    /// batch is a fixed set of points and each point is scored independently.
+    /// A positive value is used exactly as given, so a configuration that
+    /// states `1` keeps one worker.
     #[config(
         label = "Parallel worker processes",
-        help = "Number of native worker threads for differential-evolution candidate batches (>1 enables parallel evaluation; non-positive values are treated as 1). External evaluator adapters remain serial because they own mutable process/session state."
+        help = "Number of native worker threads for candidate batches. 0 (the default) picks a count from the machine's available parallelism; a positive value is used exactly as written; negative values are treated as 1. The product L-SHADE search always evaluates one whole generation as a single deterministic batch, in the order it built the generation from its seed, so this setting changes only how long a batch takes, never which points are evaluated or the winner: a seeded run replays bit-identically at any worker count. The frozen reference-compatibility replay is the one exception: its legacy driver defers a whole generation only when more than one worker is requested, which changes the trial interleaving and is preserved that way for exact regression comparison against the Python baseline. External evaluator adapters remain serial because they own mutable process/session state."
     )]
     pub workers: i64,
 
@@ -116,16 +153,24 @@ pub struct SolverSettings {
     pub display_progress: bool,
 
     /// Whether generation zero clusters around the initial design.
+    ///
+    /// Read only by the frozen SciPy-parity replay, like [`Self::strategy`];
+    /// the product L-SHADE search always seeds its population's first
+    /// individual directly from the supplied design and draws the rest from
+    /// a Latin hypercube over the bounds.
     #[config(
-        label = "Seed search near the initial design",
-        help = "Initialize the population as a tight cluster of small perturbations around the initial/preset design (plus the design itself, unperturbed) instead of SciPy's default uniform latin-hypercube coverage of the whole bounds space. Guarantees at least one known-valid, physically-balanced design is in generation 0, and lets the solver refine from there instead of having to rediscover CG/stability balance from scratch across the full 16-D space. Disable to fall back to the old full-space exploration (e.g. if you specifically want to explore far from the initial design)."
+        label = "Seed search near the initial design (parity replay only)",
+        help = "Initialize the population as a tight cluster of small perturbations around the initial/preset design (plus the design itself, unperturbed) instead of SciPy's default uniform latin-hypercube coverage of the whole bounds space. Read only by the frozen reference-compatibility replay; the product L-SHADE search seeds its population's first individual directly from the supplied design instead and does not read this field."
     )]
     pub seed_near_initial_design: bool,
 
     /// How tight that cluster is.
+    ///
+    /// Read only by the frozen SciPy-parity replay; see
+    /// [`Self::seed_near_initial_design`].
     #[config(
-        label = "Seed cluster perturbation size",
-        help = "Size of the initial random perturbation around the initial design, as a fraction of each design variable's (upper - lower) bound range. Only used when seed_near_initial_design is enabled. Small values (e.g. 0.05) start with a tight, mostly-valid cluster; larger values explore more broadly from the start at the cost of more of the population starting off invalid."
+        label = "Seed cluster perturbation size (parity replay only)",
+        help = "Size of the initial random perturbation around the initial design, as a fraction of each design variable's (upper - lower) bound range. Read only by the frozen reference-compatibility replay when seed_near_initial_design is enabled; the product L-SHADE search does not read this field."
     )]
     pub seed_perturbation_fraction: f64,
 }
@@ -140,8 +185,9 @@ impl Default for SolverSettings {
             max_iterations: 15,
             population_size: 6,
             tolerance: 0.01,
+            convergence_stagnation_generations: default_convergence_stagnation_generations(),
             seed: None,
-            workers: 1,
+            workers: 0,
             display_progress: true,
             seed_near_initial_design: true,
             seed_perturbation_fraction: 0.05,
@@ -149,27 +195,56 @@ impl Default for SolverSettings {
     }
 }
 
+/// The largest automatic worker count.
+///
+/// The measured evidence for worker scaling on this product covers one and
+/// eight workers (2.24x on B787-9 and 2.76x on AVE, with the evaluation count
+/// and the winning design identical at both). Eight is therefore the largest
+/// count the automatic setting will choose on its own: a bigger number is an
+/// extrapolation past what has been measured, and on a batch of a few hundred
+/// coupled analyses it also starts competing with the desktop session for
+/// cores. A configuration that states more than eight is still honoured.
+pub const MAXIMUM_AUTOMATIC_WORKERS: usize = 8;
+
+/// Method tokens an earlier build accepted and this one no longer implements
+/// as a distinct kernel. A saved configuration document that carries one of
+/// these is migrated to `"differential_evolution"` at load time, with a note
+/// the caller can surface (see `crate::settings_load_notes`); a
+/// [`SolverSettings`] built directly with one of them, bypassing that
+/// boundary, is rejected by [`SolverSettings::is_supported_method`] rather
+/// than silently running an algorithm this build does not have.
+pub const LEGACY_METHOD_TOKENS: &[&str] =
+    &["feasibility_first_de", "nsga2", "turbo_1", "cma_es", "sqp"];
+
 impl SolverSettings {
-    /// Whether `method` names an optimizer implemented by the product.
+    /// The worker count to actually evaluate a batch with.
     ///
-    /// Keep this list next to the serialized setting so configuration
-    /// validation and dispatch cannot drift into different spellings.
-    pub fn is_supported_method(method: &str) -> bool {
-        matches!(
-            method,
-            "differential_evolution"
-                | "feasibility_first_de"
-                | "nsga2"
-                | "turbo_1"
-                | "cma_es"
-                | "sqp"
-        )
+    /// Resolves the `0` automatic setting against the machine, so the
+    /// product search and the frozen reference-compatibility replay cannot
+    /// disagree about what "automatic" means. A machine that does not report
+    /// its parallelism falls back to one worker rather than guessing, which
+    /// is the same conservative answer the setting had before it could be
+    /// automatic.
+    #[must_use]
+    pub fn resolved_workers(&self) -> usize {
+        if self.workers > 0 {
+            // `as` on a checked-positive i64 is the count the user asked for.
+            return usize::try_from(self.workers).unwrap_or(usize::MAX);
+        }
+        if self.workers < 0 {
+            return 1;
+        }
+        std::thread::available_parallelism()
+            .map_or(1, |count| count.get().min(MAXIMUM_AUTOMATIC_WORKERS))
     }
 
-    /// Whether `method` is the gradient-based driver, which reads the
-    /// finite-difference and constraint-tolerance settings.
-    pub fn is_gradient_method(method: &str) -> bool {
-        method == "sqp"
+    /// Whether `method` names an optimizer implemented by the product.
+    ///
+    /// `"differential_evolution"` is the only supported value; see
+    /// [`LEGACY_METHOD_TOKENS`] for the names a saved file may still carry
+    /// and where they are migrated.
+    pub fn is_supported_method(method: &str) -> bool {
+        method == "differential_evolution"
     }
 
     /// Whether `strategy` is one of the DE mutation/crossover strategies.
@@ -213,6 +288,14 @@ fn default_constraint_tolerance() -> f64 {
 
 fn is_default_constraint_tolerance(value: &f64) -> bool {
     *value == default_constraint_tolerance()
+}
+
+fn default_convergence_stagnation_generations() -> i64 {
+    5
+}
+
+fn is_default_convergence_stagnation_generations(value: &i64) -> bool {
+    *value == default_convergence_stagnation_generations()
 }
 
 // A test asserts on values it constructed here directly, so a failed unwrap
@@ -310,5 +393,21 @@ mod tests {
         ));
         assert!(SolverSettings::is_supported_strategy("best1bin"));
         assert!(!SolverSettings::is_supported_strategy("best1bni"));
+    }
+
+    #[test]
+    fn every_legacy_method_token_is_unsupported_directly_and_named_for_migration() {
+        // `SolverSettings::is_supported_method` is the dispatch contract's own
+        // check, and it must reject every legacy token exactly like an
+        // unknown one: migration is a document-loading concern
+        // (`crate::settings_load_notes`), not a dispatch fallback.
+        for &method in LEGACY_METHOD_TOKENS {
+            assert!(!SolverSettings::is_supported_method(method), "{method}");
+        }
+        assert!(LEGACY_METHOD_TOKENS.contains(&"sqp"));
+        assert!(LEGACY_METHOD_TOKENS.contains(&"nsga2"));
+        assert!(LEGACY_METHOD_TOKENS.contains(&"turbo_1"));
+        assert!(LEGACY_METHOD_TOKENS.contains(&"cma_es"));
+        assert!(LEGACY_METHOD_TOKENS.contains(&"feasibility_first_de"));
     }
 }

@@ -52,6 +52,10 @@ pub fn figure_drag_preview(
         .max(1e-4);
     let mut scene = Scene::new(720.0, 520.0, Some(Color::from_hex(pal.bg)));
     scene.title = Some("Drag vs Mach (illustrative)".to_owned());
+    // The explicit chart heading below includes the operating-point CL. Keep
+    // that informative title and suppress Scene's automatic metadata heading
+    // so the live preview does not paint the same title twice.
+    scene.suppress_derived_title();
     let axes = Axes2D::new(
         (92.0, 55.0, 584.0, 340.0),
         (0.3, 0.92),
@@ -145,5 +149,9 @@ mod tests {
             footer[1] - x_label[1] >= 40.0,
             "x-axis label and footer need a readable vertical gutter: {x_label:?}, {footer:?}"
         );
+        assert!(!scene.render_title);
+        assert!(scene.elements.iter().any(|element| {
+            matches!(element, SceneElement::Text { text, .. } if text.contains("CL="))
+        }));
     }
 }

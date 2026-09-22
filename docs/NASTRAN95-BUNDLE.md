@@ -2,7 +2,7 @@
 
 NASTRAN-95 remains a separate NOSA 1.3 program launched by ALAS. It is not
 linked into, translated into, or relicensed as part of the AGPL application.
-The Windows package may aggregate a reviewed build beside `alas.exe` at
+The Windows package may aggregate a reviewed build beside `ALAS.exe` at
 `external tools/NASTRAN-95`.
 
 This is an engineering and release-control policy, not legal advice. Before a
@@ -75,9 +75,9 @@ still requires the regression and correlation checks above.
 ## Kernel-whitelist optimization (2026-09-11)
 
 The selective `-O3` option was built and run for the first time, with GNU
-Fortran 16.2.0 (winlibs) and Ninja 1.13.2 unpacked under the ALAS
-`.agent/tools/` directory because the MSYS2 installation the old CMake cache
-referenced no longer exists. It fails the production SOL 101 deck with USER
+Fortran 16.2.0 (winlibs) and Ninja 1.13.2 unpacked under a local tools
+directory because the MSYS2 installation the old CMake cache referenced no
+longer exists. It fails the production SOL 101 deck with USER
 FATAL MESSAGE 321 (`mis/ifp.f`) after 0.16 s, so `ifp1c.f` is not the only
 routine the optimizer breaks. `-O2 -fno-aggressive-loop-optimizations
 -fno-strict-aliasing` over every file fails the same way; excluding the

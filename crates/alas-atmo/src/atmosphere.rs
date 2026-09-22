@@ -16,7 +16,7 @@
 //! in temperature, so which one a discipline uses is part of what that
 //! discipline computes. A translated module picks the method its Python
 //! counterpart picked, and [`Method::default`] is [`Method::Differentiable`]
-//! for the same reason upstream's default is -- so that a call site that
+//! for the same reason upstream's default is, so that a call site that
 //! names no method reproduces one that named no method.
 //!
 //! Two gravitational accelerations appear in this crate, deliberately not
@@ -30,7 +30,7 @@
 //! this crate exists to make impossible.
 //!
 //! `atmosphere.py` also defines `effective_collision_diameter` at module
-//! scope. No method in the class reads it -- it is dead code upstream -- so
+//! scope. No method in the class reads it (it is dead code upstream) so
 //! it has no counterpart here; nothing this crate computes would depend on
 //! it.
 
@@ -177,13 +177,13 @@ pub struct Atmosphere {
     /// Celsius, since it is an offset rather than a scale). Added after the
     /// base temperature, so it shifts [`Atmosphere::temperature`] and
     /// everything computed from it, but leaves [`Atmosphere::pressure`]
-    /// untouched -- matching the upstream model, which computes pressure and
+    /// untouched, matching the upstream model, which computes pressure and
     /// temperature independently rather than from each other.
     pub temperature_deviation_k: f64,
 }
 
 impl Default for Atmosphere {
-    /// Sea level, the differentiable model, no temperature deviation -- the
+    /// Sea level, the differentiable model, no temperature deviation: the
     /// upstream class's defaults.
     fn default() -> Self {
         Self {

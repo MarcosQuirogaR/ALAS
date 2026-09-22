@@ -66,24 +66,35 @@ impl AlasConfig {
     ///
     /// A declared `flops_structure.design_gross_mass_kg` pins the basis in
     /// every mode: it is the user saying the structure was designed for that
-    /// weight, whatever the closure does. Otherwise the fixed-aircraft modes
-    /// size at `requirements.mtow_kg` and the mode-aware landing limit, and
-    /// the clean-sheet mode couples.
+    /// weight, whatever the closure does. When that explicit DG has no WLDG,
+    /// the configured landing-mass fraction is applied to the same DG. With
+    /// no DG override, the fixed-aircraft modes size at
+    /// `requirements.mtow_kg` and the mode-aware landing limit, and the
+    /// clean-sheet mode couples.
     pub fn mass_sizing_basis(&self) -> MassSizingBasis {
         let structure = &self.mass_model.flops_structure;
-        let fixed = |design_gross_mass_kg: f64| MassSizingBasis::FixedAircraft {
-            design_gross_mass_kg,
-            design_landing_mass_kg: structure
-                .design_landing_mass_kg
-                .unwrap_or_else(|| self.landing_mass_limit_kg(design_gross_mass_kg)),
-        };
         if let Some(declared) = structure.design_gross_mass_kg {
-            return fixed(declared);
+            // An explicit DG override defines a fixed aircraft variant. If
+            // WLDG is omitted, apply the configured landing-mass fraction to
+            // that same DG; a registered preset's absolute certified MLW is
+            // tied to its registry MTOW and would otherwise exceed a smaller
+            // user-declared design weight (for example DG=60 t, MLW=66 t).
+            return MassSizingBasis::FixedAircraft {
+                design_gross_mass_kg: declared,
+                design_landing_mass_kg: structure
+                    .design_landing_mass_kg
+                    .unwrap_or(declared * self.mass_model.mlw_fraction_mtow),
+            };
         }
         match self.optimizer.design_space.mode {
             DesignMode::CleanSheet => MassSizingBasis::Coupled,
             DesignMode::BaselineSandbox | DesignMode::ReferenceAdaptation => {
-                fixed(self.requirements.mtow_kg)
+                MassSizingBasis::FixedAircraft {
+                    design_gross_mass_kg: self.requirements.mtow_kg,
+                    design_landing_mass_kg: structure
+                        .design_landing_mass_kg
+                        .unwrap_or_else(|| self.landing_mass_limit_kg(self.requirements.mtow_kg)),
+                }
             }
         }
     }
@@ -195,6 +206,20 @@ mod tests {
             MassSizingBasis::FixedAircraft {
                 design_gross_mass_kg: 79_000.0,
                 design_landing_mass_kg: 79_000.0 * declared.mass_model.mlw_fraction_mtow,
+            }
+        );
+    }
+
+    #[test]
+    fn an_explicit_lower_dg_derives_wldg_from_the_same_fixed_aircraft_basis() {
+        let mut config = a320(DesignMode::BaselineSandbox);
+        config.mass_model.flops_structure.design_gross_mass_kg = Some(60_000.0);
+
+        assert_eq!(
+            config.mass_sizing_basis(),
+            MassSizingBasis::FixedAircraft {
+                design_gross_mass_kg: 60_000.0,
+                design_landing_mass_kg: 60_000.0 * config.mass_model.mlw_fraction_mtow,
             }
         );
     }

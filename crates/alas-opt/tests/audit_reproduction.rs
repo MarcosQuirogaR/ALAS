@@ -13,11 +13,8 @@
 
 use alas_config::design_variables::DesignVector;
 use alas_config::{AlasConfig, MtowSizing, ObjectiveKind};
+use alas_opt::assess_candidate;
 use alas_opt::objective::DesignObjective;
-use alas_opt::{
-    assess_candidate, run_sqp, ConstrainedEvaluator, ConstrainedPoint, DesignOptimizer,
-    ObjectiveEvaluation, SqpSettings,
-};
 use alas_payload::apply_cabin_preset;
 
 fn candidate_capacity(config: &AlasConfig, design: &DesignVector) -> i64 {
@@ -186,106 +183,13 @@ fn short_mission_loses_aerodynamic_sensitivity() {
     );
 }
 
-struct Analytic<F: FnMut(&[f64]) -> ConstrainedPoint>(F);
-
-impl<F: FnMut(&[f64]) -> ConstrainedPoint> ConstrainedEvaluator for Analytic<F> {
-    fn evaluate_batch(&mut self, designs: &[Vec<f64>]) -> Vec<ConstrainedPoint> {
-        designs.iter().map(|x| (self.0)(x)).collect()
-    }
-}
-
-/// Finding 9: a difference probe that fails on both sides leaves a zero
-/// gradient, and the driver reports convergence on a sloped function.
-#[test]
-fn sqp_reports_convergence_after_failed_probes() {
-    let run = |step: f64| {
-        let mut evaluator = Analytic(|x: &[f64]| {
-            if (x[0] - 0.5).abs() <= 0.0004 {
-                ConstrainedPoint {
-                    objective: x[0],
-                    constraints: Vec::new(),
-                    valid: true,
-                    cost: x[0],
-                }
-            } else {
-                ConstrainedPoint::invalid(1.0e3)
-            }
-        });
-        let settings = SqpSettings {
-            max_iterations: 20,
-            finite_difference_step: step,
-            constraint_tolerance: 1e-6,
-            objective_tolerance: 1e-9,
-            step_tolerance: 1e-4,
-        };
-        run_sqp(&[(0.0, 1.0)], &[0.5], &settings, &mut evaluator, None)
-    };
-    let coarse = run(0.001);
-    let fine = run(0.0001);
-    println!(
-        "sqp: step 0.001 -> {} (converged {}), x {:?}, objective {}, evaluations {}",
-        coarse.termination,
-        coarse.converged,
-        coarse.best_values,
-        coarse.best.objective,
-        coarse.evaluations
-    );
-    println!(
-        "sqp: step 0.0001 -> {} (converged {}), x {:?}, objective {}, evaluations {}",
-        fine.termination, fine.converged, fine.best_values, fine.best.objective, fine.evaluations
-    );
-}
-
-/// Finding 10: NSGA-II returns a point worse than the best scalar cost it
-/// evaluated.
-#[test]
-fn nsga2_loses_the_scalar_incumbent() {
-    let mut config = AlasConfig::default();
-    config.optimizer.solver.method = "nsga2".to_owned();
-    config.optimizer.solver.max_iterations = 5;
-    config.optimizer.solver.population_size = 1;
-    config.optimizer.solver.seed = Some(42);
-    // Fixed coordinates still have to be inside the selected design-mode
-    // envelope. Zero was valid for several dimensionless bumps in the old
-    // evaluator-only harness, but it is outside the chord bounds and now
-    // correctly fails before NSGA-II starts. Pin each coordinate at its
-    // declared nominal value and leave span free for this probe.
-    let mut bounds: Vec<_> = alas_config::DESIGN_VARIABLE_SPECS
-        .iter()
-        .map(|spec| (spec.default, spec.default))
-        .collect();
-    bounds[0] = (60.0, 80.0);
-    let mut best_seen = f64::INFINITY;
-    let mut evaluator = |design: &DesignVector| {
-        // Bowl in span with a span "objective" that pulls the front away.
-        let x = (design.span_m - 60.0) / 20.0;
-        let cost = 0.5 + 8.0 * (x - 0.5).powi(2);
-        best_seen = best_seen.min(cost);
-        ObjectiveEvaluation {
-            cost,
-            valid: true,
-            l_over_d: 18.0,
-            span_m: design.span_m,
-            alpha_deg: 2.0,
-            area_m2: 400.0,
-            trim_ih_deg: 0.0,
-            reject_reason: String::new(),
-        }
-    };
-    let start = DesignVector {
-        span_m: 70.0,
-        ..DesignVector::default()
-    };
-    let result = DesignOptimizer::new(config)
-        .run_with_evaluator(Some(&bounds), Some(&start), &mut evaluator, None)
-        .unwrap();
-    println!(
-        "nsga2: best scalar seen {best_seen:.6}, returned {:.6} at span {:.4}, front size {}",
-        result.best_cost,
-        result.best_design.span_m,
-        result.pareto_front.len()
-    );
-}
+// Findings 9 (SQP false convergence under a failed finite-difference probe)
+// and 10 (NSGA-II returning a point worse than its own best scalar cost) are
+// no longer reproducible here: both kernels were retired when the product
+// moved to the single L-SHADE epsilon-constrained driver (see
+// `search_methods::lshade_de`), which is guided by the coupled objective and
+// its constraint violations directly rather than a finite-difference
+// gradient or a Pareto front a scalar caller has to second-guess.
 
 /// Method-selection evidence: evaluation cost, and the objective's
 /// smoothness along one variable at three finite-difference scales.
@@ -370,8 +274,8 @@ fn evaluation_cost_and_smoothness_probe() {
             );
         }
     }
-    let root =
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.agent/probes/smoothness");
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../out/evidence/probes/smoothness");
     std::fs::create_dir_all(&root).ok();
     std::fs::write(root.join("sweeps.csv"), csv).ok();
 }

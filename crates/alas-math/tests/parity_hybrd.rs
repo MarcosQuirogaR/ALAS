@@ -11,7 +11,7 @@
 //! rather than on its residual and therefore returns wherever the iteration
 //! was standing. So the fixture records every point the reference evaluated
 //! at, in call order, and this test asserts that the port evaluated at the
-//! same points in the same order -- 390 of them across eight systems. A
+//! same points in the same order: 390 of them across eight systems. A
 //! divergence in the finite-difference step, in the dogleg blend, in the
 //! trust-region update or in the rank-one Broyden correction shows up here as
 //! the index at which the two paths part, which is most of the diagnosis.
@@ -29,7 +29,7 @@
 //! the port drives its *own* iteration, and a residual looked up by index
 //! would make the log agree with itself. They are transcribed from
 //! `gen_math_hybrd.py`, which chose them to be closed-form algebra for this
-//! reason -- no library call whose last ulp could differ between the two
+//! reason, no library call whose last ulp could differ between the two
 //! languages sits between the unknowns and the residual.
 //!
 //! That transcription has to preserve *associativity*, not just the formula.
@@ -37,7 +37,7 @@
 //! `1.5e-8`, so a one-ulp difference in a residual at a probe point is
 //! amplified by eight orders into a Jacobian entry and straight into the next
 //! trial point. Writing `sqrt(10) * (d*d)` as `(sqrt(10) * d) * d` is enough
-//! to part the two paths at the first step -- which is what happened while
+//! to part the two paths at the first step, which is what happened while
 //! this test was being written, and why each system below is transcribed
 //! bracket for bracket rather than merely term for term. The same sensitivity
 //! is what makes the call log worth recording: it detects at the first step
@@ -48,7 +48,7 @@
 //!
 //! A residual is what a system is trying to drive to zero, so its components
 //! pass through zero, and several of them do so by subtracting nearly equal
-//! numbers -- Rosenbrock's second row is literally `1 - x[0]` as `x[0]`
+//! numbers: Rosenbrock's second row is literally `1 - x[0]` as `x[0]`
 //! approaches one. There, a difference in the last ulp of an `x` that the
 //! tier already permits is amplified into a large *relative* difference in
 //! `f`, while the absolute difference stays around `5e-12`. That is
@@ -56,13 +56,13 @@
 //! solvers, and framing it as one would be reading the tier backwards.
 //!
 //! `hybrd` itself never reads a residual component in isolation: every
-//! decision it makes -- accept the step, grow or shrink the trust region,
-//! declare convergence -- goes through `enorm(fvec)`, and the components
+//! decision it makes: accept the step, grow or shrink the trust region,
+//! declare convergence: goes through `enorm(fvec)`, and the components
 //! enter the Jacobian only as differences that are then factored. So the norm
 //! is compared along the whole path, because that is the quantity the
 //! iteration branches on, and the components are compared at the one
 //! evaluation where both implementations stand at exactly the same point by
-//! construction -- the starting point -- which is where a mistranscribed
+//! construction (the starting point) which is where a mistranscribed
 //! system would show up. Anywhere later, a mistranscribed system moves the
 //! path, and the `x` comparison catches it first and more clearly.
 
@@ -250,7 +250,7 @@ fn hybrd_matches_scipy_fsolve() {
             comparison.finish();
             panic!(
                 "{subject}: the iteration paths agree for {index} evaluations and part at \
-                 #{index}, but that point compared equal -- the divergence detector and the \
+                 #{index}, but that point compared equal: the divergence detector and the \
                  comparison disagree"
             );
         }
@@ -258,7 +258,7 @@ fn hybrd_matches_scipy_fsolve() {
         // Every point agreed. Check the residual too: component by component
         // at the starting point, where both sides stand at exactly `x0` and a
         // mistranscribed system is the only thing that could differ, and by
-        // norm everywhere after -- for the reason this file's header gives.
+        // norm everywhere after, for the reason this file's header gives.
         let mut path = Comparison::new(format!("{subject} [path]"), Tier::Linalg);
         for (index, (got, want)) in log.iter().zip(&case.evaluations).enumerate() {
             if index == 0 {

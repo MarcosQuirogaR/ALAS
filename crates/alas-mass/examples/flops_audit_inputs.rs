@@ -233,6 +233,20 @@ fn row(name: &str) -> Result<Value, Box<dyn Error>> {
                 "fuel_system_kg": p.fuel_system_kg,
                 "total_kg": p.total_kg,
             })),
+            "turboprop_propulsion": build.airframe.turboprop_propulsion.as_ref().map(|p| json!({
+                "engine_mass_source": p.engine_mass_source,
+                "engine_each_kg": p.engine_each_kg,
+                "engines_kg": p.engines_kg,
+                "gearboxes_kg": p.gearboxes_kg,
+                "propeller_each_kg": p.propeller_each_kg,
+                "propellers_kg": p.propellers_kg,
+                "nacelles_kg": p.nacelles_kg,
+                "pylons_kg": p.pylons_kg,
+                "engine_installation_kg": p.engine_installation_kg,
+                "fuel_system_kg": p.fuel_system_kg,
+                "unusable_fuel_kg": p.unusable_fuel_kg,
+                "total_without_nacelles_kg": p.total_without_nacelles_kg,
+            })),
             "nacelle_kg": build.nacelle_kg(),
             "propulsion_without_nacelles_kg": build.propulsion_without_nacelles_kg(),
             "masses_kg": {
@@ -252,20 +266,41 @@ fn row(name: &str) -> Result<Value, Box<dyn Error>> {
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let output = std::env::args()
-        .nth(1)
+    let mut args = std::env::args().skip(1);
+    let output = args
+        .next()
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("outputs/a320-flops-audit/alas-inputs.json"));
     if let Some(parent) = output.parent() {
         fs::create_dir_all(parent)?;
     }
-    let rows = ["A320-200", "A220-300"]
-        .into_iter()
-        .map(row)
-        .collect::<Result<Vec<_>, _>>()?;
+    // Any remaining arguments name the presets to audit. With none given the
+    // deck covers every registered preset, so a preset that the pure FLOPS
+    // product cannot evaluate is recorded with its refusal rather than
+    // aborting the whole audit.
+    let requested: Vec<String> = args.collect();
+    let names: Vec<String> = if requested.is_empty() {
+        presets::available()
+            .into_iter()
+            .map(str::to_owned)
+            .collect()
+    } else {
+        requested
+    };
+    let rows: Vec<Value> = names
+        .iter()
+        .map(|name| match row(name) {
+            Ok(value) => value,
+            Err(error) => json!({
+                "preset": name,
+                "status": "unavailable",
+                "reason": error.to_string(),
+            }),
+        })
+        .collect();
     let report = json!({
-        "schema_version": 1,
-        "generated_by": "cargo run -p alas-mass --example flops_audit_inputs",
+        "schema_version": 2,
+        "generated_by": "cargo run -p alas-mass --example flops_audit_inputs -- <out.json> [preset...]",
         "architecture": "pure_flops_transport_v1",
         "aircraft": rows,
     });

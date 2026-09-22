@@ -10,8 +10,8 @@
 //! The four passes run in a fixed order because each depends on the last. The
 //! seating carves out the bays; the monuments and exits fill them; the baggage
 //! is trimmed toward the centre of gravity the seating produced. The order they
-//! append their items in is part of the result -- a deck plan walking the list
-//! differently would draw monuments over seats -- so it is reproduced exactly.
+//! append their items in is part of the result: a deck plan walking the list
+//! differently would draw monuments over seats, so it is reproduced exactly.
 
 use alas_config::{CargoDeckConfig, CertifiedExitLayout, DesignRequirements, PassengerCabinConfig};
 

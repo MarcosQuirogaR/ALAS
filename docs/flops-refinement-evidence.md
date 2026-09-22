@@ -25,7 +25,7 @@ For an engine candidate, the **literal line delta** is:
   * installed engine count
 ```
 
-That arithmetic assumes the source boundary matches `WENGB` on the no-separate-inlet/nozzle Eq. 80 branch and leaves NASA Eq. 86 reversers and Eq. 89 starters unchanged. It is deliberately labelled literal rather than an approved production correction. The conditional values in [refinement_candidates.json](../.agent/data/flops-refinement-evidence/refinement_candidates.json) remove the current FLOPS starter estimate where the engine TCDS makes the starter part of engine type design. The A340 record also shows a named scenario removing the CFM56-5C adapter/reverser term. Exact installation/EBU part weights are still needed before promotion.
+That arithmetic assumes the source boundary matches `WENGB` on the no-separate-inlet/nozzle Eq. 80 branch and leaves NASA Eq. 86 reversers and Eq. 89 starters unchanged. It is deliberately labelled literal rather than an approved production correction. The conditional values in `refinement_candidates.json` (retained in the maintainers' local audit trail, not published with this checkout) remove the current FLOPS starter estimate where the engine TCDS makes the starter part of engine type design. The A340 record also shows a named scenario removing the CFM56-5C adapter/reverser term. Exact installation/EBU part weights are still needed before promotion.
 
 A dry engine is not an installed propulsion system. Nacelle, pylon/strut, inlet, nozzle, reverser, starter, controls, fuel-system plumbing and fluids are separate unless the source explicitly places them inside the quoted value. In particular, the A220 ARP `engine & nacelle assembly` value is a whole-assembly diagnostic and must not be added to a dry-engine delta.
 
@@ -60,7 +60,7 @@ The conditional total deltas are recorded numerically in the JSON artifact. The 
 | DC-10-30 | 107,184.428 | No exact retained OEW anchor or exact CF6-50C installation mass. | Leave source gaps explicit. |
 | AVE-v1 | 160,827.179 | No aircraft anchor; AVE is notional. | Do not call the AVE value actual or use it to calibrate 777-9. |
 
-The full residuals, source IDs, and literal post-correction values are in [mass_gap_diagnostics.json](../.agent/data/flops-refinement-evidence/mass_gap_diagnostics.json). A scalar OEW residual cannot identify whether the mismatch is structural, installed propulsion, systems, cabin, water, catering, containers, unusable fuel, or a definition boundary.
+The full residuals, source IDs, and literal post-correction values are in `mass_gap_diagnostics.json` (retained in the maintainers' local audit trail, not published with this checkout). A scalar OEW residual cannot identify whether the mismatch is structural, installed propulsion, systems, cabin, water, catering, containers, unusable fuel, or a definition boundary.
 
 ## A220 component diagnostics
 
@@ -73,7 +73,7 @@ The current Airbus ACP/ARP material is useful for falsification but not for addi
 
 ## Boeing 777-9 matched planning case
 
-[matched_7779_case.json](../.agent/data/flops-refinement-evidence/matched_7779_case.json) is a source-locked planning case for `777-9 / GE9X-105B1A / D6-86073 Rev. G (September 2025)`. It contains no fabricated OEW. Verified public planning fields include:
+`matched_7779_case.json` (retained in the maintainers' local audit trail, not published with this checkout) is a source-locked planning case for `777-9 / GE9X-105B1A / D6-86073 Rev. G (September 2025)`. It contains no fabricated OEW. Verified public planning fields include:
 
 - MTW 352,441 kg, MTOW 351,534 kg, MLW 266,258 kg, MZFW 254,918 kg;
 - usable fuel 197,356 L / 157,477 kg using Boeing's 0.803 kg/L planning density;
@@ -96,7 +96,7 @@ NASA Appendix D defines `FCOMP` as a composite utilization factor ranging from 0
 
 ## Source register and reproduction
 
-The complete 21-entry source register (20 primary/authority sources plus the existing secondary ALAS anchor registry), revisions, URLs, local paths and SHA-256 values is [source_manifest.json](../.agent/data/flops-refinement-evidence/source_manifest.json). Primary page text extracts are [primary-extracts.json](../.agent/data/flops-refinement-evidence/extracts/primary-extracts.json); the existing Boeing 777X and A220 extracts are retained separately in the same directory.
+The complete 21-entry source register (20 primary/authority sources plus the existing secondary ALAS anchor registry), revisions, URLs, local paths and SHA-256 values is `source_manifest.json` (retained in the maintainers' local audit trail, not published with this checkout). Primary page text extracts are `extracts/primary-extracts.json` alongside it; the existing Boeing 777X and A220 extracts are retained separately there.
 
 Key primary sources:
 
@@ -114,7 +114,7 @@ Key primary sources:
 - [Boeing 777X product page](https://www.boeing.com/commercial/777x), accessed 11 September 2026: current 777-8/777-9 comparison.
 - [Boeing certification-status article](https://www.boeing.com/features/2026/07/certification-progress-reported-737-max-777-9), 16 July 2026; [FAA N779XZ record](https://registry.faa.gov/AircraftInquiry/Search/NNumberResult?nNumberTxt=779XZ); [GE9X product page](https://www.geaerospace.com/commercial/aircraft-engines/ge9x), accessed 11 September 2026.
 
-The binary source hashes and exact local paths are machine-readable in the manifest. JSON files were parsed with the bundled Python 3 runtime and the retained PDFs were extracted with `pypdf`; no production files were modified. [refinement_candidates.json](../.agent/data/flops-refinement-evidence/refinement_candidates.json) is the handoff artifact for the lead, and [mass_gap_diagnostics.json](../.agent/data/flops-refinement-evidence/mass_gap_diagnostics.json) is the validation artifact.
+The binary source hashes and exact local paths are machine-readable in the manifest. JSON files were parsed with the bundled Python 3 runtime and the retained PDFs were extracted with `pypdf`; no production files were modified. `refinement_candidates.json` is the handoff artifact for the lead, and `mass_gap_diagnostics.json` is the validation artifact (both retained in the maintainers' local audit trail, not published with this checkout).
 
 ## Remaining gaps
 

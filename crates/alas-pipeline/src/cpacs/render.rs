@@ -270,7 +270,7 @@ fn write_aircraft(
         xml,
         8,
         "description",
-        "Computed outer geometry exported by ALAS-rust; no unmodelled internal geometry is implied.",
+        "Computed outer geometry exported by ALAS; no unmodelled internal geometry is implied.",
     );
     write_reference(xml, airplane);
     if !airplane.fuselages.is_empty() {

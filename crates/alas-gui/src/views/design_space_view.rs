@@ -11,7 +11,7 @@ use egui::{DragValue, RichText, ScrollArea, Ui};
 
 use crate::state::AppState;
 use crate::views::form::dynamic_form;
-use crate::views::{tr, tr_fields};
+use crate::views::tr;
 
 /// A search variable needs room for its three numeric values. Two columns are
 /// useful on a desktop, but a third makes the labels and bounds too narrow to
@@ -45,13 +45,16 @@ pub fn show_design_space_view(state: &mut AppState, ui: &mut Ui) {
     ui.heading(tr("Design Space"));
     ui.label(
         RichText::new(
-            tr("Choose a clean-sheet study, a bounded reference adaptation, or a fixed-aircraft baseline. Each row shows the starting design and the limits handed to MADS."),
+            tr("The starting design and the optimization choice on Inputs set the study. Each row shows the starting design and the limits handed to the optimizer."),
         )
         .weak(),
     );
     ui.add_space(6.0);
-
-    show_design_mode_card(state, ui);
+    let mode = state.design_mode();
+    crate::theme::card_frame(ui).show(ui, |ui| {
+        ui.set_min_width(ui.available_width());
+        show_design_mode_settings(state, ui, mode);
+    });
     ui.add_space(8.0);
 
     // Fixed rows are enforced at the view boundary as well as immediately
@@ -89,61 +92,6 @@ pub(crate) fn design_mode_display_name(mode: DesignMode) -> String {
         DesignMode::ReferenceAdaptation => "Adapt reference",
         DesignMode::BaselineSandbox => "Analyze reference",
     })
-}
-
-fn design_mode_description(mode: DesignMode) -> &'static str {
-    match mode {
-        DesignMode::CleanSheet => {
-            "Clean-sheet mode lets the declared geometry variables move inside their global bounds. The cabin-sizing option may derive fuselage length, while the selected catalogue engine stays fixed."
-        }
-        DesignMode::ReferenceAdaptation => {
-            "Reference adaptation starts from the selected aircraft preset. Fixed variables stay at their reference values; mutable variables move only inside the explicit windows below."
-        }
-        DesignMode::BaselineSandbox => {
-            "Baseline sandbox analyzes the selected reference aircraft and load case with every design variable fixed. Mission and accommodation inputs remain editable; use Analyze reference to run this path."
-        }
-    }
-}
-
-fn show_design_mode_card(state: &mut AppState, ui: &mut Ui) {
-    crate::theme::card_frame(ui).show(ui, |ui| {
-        ui.set_min_width(ui.available_width());
-        ui.label(RichText::new(tr("Design study")).strong());
-        ui.add_space(3.0);
-        let selected = state.design_mode();
-        ui.label(RichText::new(design_mode_display_name(selected)).strong());
-        ui.label(
-            RichText::new(tr(
-                "The starting design and the optimization toggle on Inputs set this mode.",
-            ))
-            .weak()
-            .small(),
-        );
-        ui.label(
-            RichText::new(tr(design_mode_description(selected)))
-                .weak()
-                .small(),
-        );
-        let config = state.typed_config().unwrap_or_default();
-        let nominal = state.current_design().unwrap_or_default();
-        let envelopes = config.optimizer.design_space.envelope(&nominal);
-        let fixed = envelopes.iter().filter(|variable| variable.fixed).count();
-        let mutable = envelopes.len().saturating_sub(fixed);
-        ui.add_space(4.0);
-        ui.label(
-            RichText::new(tr_fields(
-                "Envelope: {fixed} fixed / {mutable} mutable variables",
-                &[
-                    ("fixed", fixed.to_string()),
-                    ("mutable", mutable.to_string()),
-                ],
-            ))
-            .weak()
-            .small(),
-        );
-
-        show_design_mode_settings(state, ui, selected);
-    });
 }
 
 fn show_design_mode_settings(state: &mut AppState, ui: &mut Ui, mode: DesignMode) {

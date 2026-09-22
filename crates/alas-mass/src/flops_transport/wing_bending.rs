@@ -16,8 +16,8 @@
 //! Two recurrences are typeset ambiguously in the memorandum (equations 29
 //! and 30). They are resolved the way the FLOPS source resolves them, as
 //! read in NASA Aviary's `wing_detailed.py` (Apache-2.0) and checked against
-//! the FLOPS-run `LargeSingleAisle1FLOPS` validation case recorded in
-//! `.agent/reports/flops-aviary-validation-data.md`: the sweep-bucket
+//! the FLOPS-run `LargeSingleAisle1FLOPS` validation case recorded in an
+//! internal FLOPS/Aviary validation report: the sweep-bucket
 //! bracket of equation 31 divides the unadjusted factor, and the engine
 //! moment arm accumulates the per-strip load-path secant. The arm sums over
 //! every pod outboard of a station (equation 30's `EETA`), which for one pod

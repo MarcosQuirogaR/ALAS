@@ -86,8 +86,10 @@ struct MissionEvidence {
     segments: Vec<MissionSegment>,
 }
 
-// These fixture fields are retained for deserialization completeness but are
-// not consumed by the current parity assertions.
+// `tag`, `converged` and `selected_points` are consumed by the parity assertions
+// below. `throttle` and `body_angle_rad` are retained for deserialization
+// completeness only: the assertions that mention those two names read them off an
+// `alas_mission::Segment`, not off this fixture struct.
 #[allow(dead_code)]
 #[derive(Deserialize)]
 struct MissionSegment {

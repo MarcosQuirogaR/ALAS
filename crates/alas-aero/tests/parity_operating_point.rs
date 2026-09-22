@@ -4,8 +4,8 @@
 //! Compares `alas-aero::operating_point` against AeroSandbox's
 //! `OperatingPoint`, via `golden/generators/gen_aero_operating_point.py`.
 //!
-//! Everything checked here is closed-form `f64` arithmetic -- dot products,
-//! a handful of sines and cosines, a 3x3 rotation product -- so the whole
+//! Everything checked here is closed-form `f64` arithmetic: dot products,
+//! a handful of sines and cosines, a 3x3 rotation product, so the whole
 //! row is compared at `Tier::Closed`, the tier `docs/PORTING.md` names for
 //! it.
 

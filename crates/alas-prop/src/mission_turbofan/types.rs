@@ -10,9 +10,9 @@
 //! The per-station output records one pass through the turbofan network fills.
 //!
 //! Each struct mirrors one mission reference component's `.outputs` bag: `Ram.outputs`,
-//! `Compressor.outputs`, `Thrust.outputs` and so on. They carry no behaviour --
+//! `Compressor.outputs`, `Thrust.outputs` and so on. They carry no behaviour:
 //! [`super::size_turbofan`]'s network walk fills them and [`super::components`]'
-//! functions read and return them -- and live here, apart from the walk itself,
+//! functions read and return them, and live here, apart from the walk itself,
 //! only so the module that drives them stays under the file-length limit. The
 //! parent re-exports the whole set, so `super::RamOutput` and
 //! `alas_prop::mission_turbofan::RamOutput` both resolve.

@@ -8,7 +8,7 @@
 //! buildup, the mass-coordinate scaffold, and the mass-weighted centre of
 //! gravity every other physics module reads.
 //!
-//! [`transport_weight`] is the transport-category empty-weight buildup --
+//! [`transport_weight`] is the transport-category empty-weight buildup:
 //! `Weights_Transport.evaluate()` and the `empty_weight` correlation family
 //! it composes. Unlike [`torenbeek`], nothing in this program's own package
 //! reaches it as a general-purpose geometry model: it is an analysis attached

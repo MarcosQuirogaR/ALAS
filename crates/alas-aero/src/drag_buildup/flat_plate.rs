@@ -43,14 +43,14 @@ fn corrections(re: f64, mach: f64, temp_k: f64) -> (f64, f64) {
 /// `xt`, a fraction of the chord.
 ///
 /// `xt` outside `[0, 1]` is not physical and upstream raises on it. Nothing
-/// here may panic, and no caller can supply one -- `transition_x_upper` and
+/// here may panic, and no caller can supply one (`transition_x_upper` and
 /// `transition_x_lower` are wing fields that `vehicle_builder.py` leaves at
-/// their `0.0` default -- so the bound is left to that caller rather than
+/// their `0.0` default) so the bound is left to that caller rather than
 /// checked here, and the `xt == 0.0` degeneracy upstream guards against is
 /// reproduced below.
 pub fn compressible_mixed_flat_plate(re: f64, mach: f64, temp_k: f64, xt: f64) -> SkinFriction {
-    // Upstream's `Rex[Rex==0.0] = 0.0001`. At `xt == 0` -- which is every
-    // wing this program builds -- `Rex` is zero and the laminar terms below
+    // Upstream's `Rex[Rex==0.0] = 0.0001`. At `xt == 0`, which is every
+    // wing this program builds, `Rex` is zero and the laminar terms below
     // would be a division by it; the substitute keeps them finite and they
     // are then multiplied by `xt`, which is zero, so nothing it contributes
     // survives. Reproduced rather than short-circuited, because `xeff`

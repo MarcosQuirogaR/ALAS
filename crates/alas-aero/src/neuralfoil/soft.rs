@@ -12,7 +12,7 @@
 //!
 //! Every one of these exists because native aerodynamic model is written to be
 //! differentiated. A `max` has a kink, an `if` has a jump, and an optimizer
-//! walking through either gets a gradient that lies to it -- so the library
+//! walking through either gets a gradient that lies to it, so the library
 //! replaces them with functions that agree with the sharp version away from
 //! the switch and round it off nearby. That rounding is not a detail to
 //! approximate here: `alas-aero::neuralfoil`'s critical-Mach fit, its
@@ -25,8 +25,8 @@
 //! `alas-aero::neuralfoil` is the only thing in this port that reaches any of
 //! them, and they are scoped to what it reaches. They are translations of two
 //! native aerodynamic model modules rather than primitives nobody owns, so the rule
-//! `alas-payload::numeric` states -- private code with no upstream module of
-//! its own moves to `alas-math` when a second crate needs it -- does not
+//! `alas-payload::numeric` states: private code with no upstream module of
+//! its own moves to `alas-math` when a second crate needs it, does not
 //! apply: if a second consumer appears these move to the aircraft tree beside
 //! `alas-geom::aircraft::spacing`, which is where a translation carrying an
 //! upstream file's provenance belongs.
@@ -38,7 +38,7 @@
 //!
 //! One upstream quirk worth naming, because it looks like a bug and is:
 //! `sigmoid`'s first branch reads `if sigmoid_type == ("tanh" or "logistic")`,
-//! which Python evaluates as `== "tanh"` -- so asking for `"logistic"`, which
+//! which Python evaluates as `== "tanh"`, so asking for `"logistic"`, which
 //! the docstring says is the same curve, falls through to the `else` and
 //! raises. Nothing reaches it, because everything takes the default. There is
 //! no behaviour to reproduce from a branch that cannot be entered, so this is
@@ -62,7 +62,7 @@ pub(super) fn swish(x: f64) -> f64 {
 ///
 /// The subtract-the-max-then-exponentiate form and its `-500` floor are
 /// upstream's, and they are what keeps this finite when the inputs are far
-/// apart relative to `softness` -- the wave-drag schedule takes a softmax of
+/// apart relative to `softness`: the wave-drag schedule takes a softmax of
 /// two quantities scaled by 0.5, so an argument two hundred wide is ordinary
 /// here.
 pub(super) fn softmax(values: &[f64], softness: f64) -> f64 {
@@ -81,7 +81,7 @@ pub(super) fn softmax(values: &[f64], softness: f64) -> f64 {
     (largest + total.ln()) * softness
 }
 
-/// A soft minimum over `values` -- the negated softmax of the negated
+/// A soft minimum over `values`: the negated softmax of the negated
 /// inputs, exactly as upstream defines it.
 pub(super) fn softmin(values: &[f64], softness: f64) -> f64 {
     let negated: Vec<f64> = values.iter().map(|value| -value).collect();
@@ -109,7 +109,7 @@ pub(super) fn blend(switch: f64, high: f64, low: f64) -> f64 {
 }
 
 /// A patch joining two lines with a cosine, matching their values and slopes
-/// at each end -- `cosine_hermite_patch(..., extrapolation="continue")`.
+/// at each end: `cosine_hermite_patch(..., extrapolation="continue")`.
 ///
 /// `alas-aero::neuralfoil`'s wave-drag schedule uses it to carry the drag
 /// rise from drag divergence up to Mach 1.1, where the two ends are a

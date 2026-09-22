@@ -8,7 +8,7 @@
 //!
 //! `figure_cg_envelope` and `figure_mass_distribution` alone translate close
 //! to 980 lines of `visualization.py`, past what one file under this crate's
-//! 500-line limit can hold, so this became a directory module -- the same
+//! 500-line limit can hold, so this became a directory module: the same
 //! split `alas-geom::aircraft::airfoil` already uses. [`cg_envelope`] and
 //! [`mass_distribution`] hold those two.
 //!
@@ -26,9 +26,25 @@ use alas_geom::aircraft::airplane::Airplane;
 use alas_mass::breakdown::{
     run_mass_analysis_with_model_checked_product_with_gear, MassCoordinateModel,
 };
+use alas_payload::build::build_payload_layout;
+use alas_payload::oew::oew_and_cg;
 use alas_pipeline::full_analysis::{AnalysisReport, DesignPoint, PolarFit, PolarFitStatus};
 
 pub use super::mass_balance_layout::{figure_landing_gear_planform, figure_mass_breakdown};
+
+/// Explain which mass architecture owns the live preview's values. The
+/// preview invokes the same mass-analysis product path as a full run, but it
+/// deliberately does not fabricate a completed aerodynamic or mission report.
+pub(crate) fn mass_method_note(config: &AlasConfig) -> &'static str {
+    match config.mass_model.mass_architecture {
+        alas_config::MassArchitecture::PureFlopsTransportV1 => {
+            "Mass method: FLOPS-based transport with declared cabin and installation methods"
+        }
+        alas_config::MassArchitecture::LegacyReferenceCompatibleComparison => {
+            "Mass method: reference-compatible comparison (live preview uses the selected equations)"
+        }
+    }
+}
 pub use cg_envelope::figure_cg_envelope;
 pub use mass_distribution::figure_mass_distribution;
 
@@ -36,26 +52,119 @@ pub use mass_distribution::figure_mass_distribution;
 /// surface previews. The preview deliberately does not run aerodynamic VLM;
 /// those figures only read the airplane, mass coordinates, and static-margin
 /// fallback from the report shell.
+///
+/// # The preview resolves the same cabin the analysis does
+///
+/// `alas_mass::analysis::complete_mass_analysis` prices the payload on
+/// `requirements.num_passengers` when it is handed no layout, and on the
+/// capacity the cabin engine resolves from the candidate's own geometry when it
+/// is. `DesignRequirements` declares the second authoritative: "Passenger
+/// capacity is always recomputed for each candidate shell", and
+/// `resolves_payload_from_candidate_geometry` is unconditionally true, so
+/// `num_passengers` is a seed, not a loading.
+///
+/// This preview used to pass `None` while every residual, baseline and export
+/// path passes a layout, so the centre-of-gravity envelope, the landing-gear
+/// planform and the control-surface figure were drawn for a **different
+/// loading** than the feasibility verdict shown beside them: measured on the
+/// registered presets, up to 3 000 kg of payload and 21.7 points of %MAC apart
+/// (`alas-payload/examples/payload_placement_divergence.rs`). It now runs the
+/// same two passes `alas_pipeline::baseline` does: a lumped pass for the
+/// operating empty mass and its station, then the resolved cabin, so the
+/// previewed aircraft is the evaluated aircraft.
+///
+/// # What this deliberately does not do
+///
+/// No mission, optimizer or aerodynamic stage is pulled in: the second pass is
+/// the same `run_mass_analysis_with_model_checked_product_with_gear` call the
+/// preview already made, plus one cabin layout.
+///
+/// The FLOPS operating items are repriced on the seated count through
+/// `alas_pipeline::full_analysis::cabin_sync`, which is now shared rather than
+/// mirrored: duplicating cabin logic across crates is what produced this
+/// divergence in the first place, and there is still exactly one
+/// implementation. (It could not move to `alas-mass` instead:
+/// `cabin_synchronized` reads an `alas_payload::layout::PayloadLayout` and
+/// `alas-payload` already depends on `alas-mass`.) With both halves of the
+/// rule applied, this preview's operating empty mass matches the full
+/// analysis's to the milligram on every probed preset, against +1 226 kg on
+/// the A320-200 and +12 012 kg on the A380-800 before: see
+/// `examples/preview_cabin_parity.rs`.
 pub fn quick_preview_report(
     airplane: Airplane,
     config: &AlasConfig,
     design: DesignVector,
 ) -> Result<AnalysisReport, String> {
     let geometry = config.geometry.clone();
+    // The same one-cabin-per-case rule the full analysis applies, taken from
+    // its own module rather than mirrored here: a cabin declared by count is
+    // the first pass's cabin, and once a layout exists the FLOPS operating
+    // items are repriced on the seats it placed. Without this the preview's
+    // operating empty mass prices `requirements.num_passengers` while the
+    // payload beside it prices the layout - on the A320-200 a 30-seat
+    // difference in the furnishings, passenger-service, cabin-crew and
+    // air-conditioning terms.
+    let product_cabin = config.cabin.passenger.canonicalized_for_product();
+    let mut product_config = config.clone();
+    product_config.cabin.passenger = product_cabin.clone();
     let analysis_mass_model = config.analysis_mass_model(config.requirements.mtow_kg);
-    let (masses, coordinates, physical_cg) =
+    let (declared_requirements, analysis_mass_model) =
+        alas_pipeline::full_analysis::cabin_sync::declared_cabin(
+            &config.requirements,
+            &analysis_mass_model,
+            &product_cabin,
+        );
+    let run = |requirements: &alas_config::DesignRequirements,
+               mass_model: &alas_config::MassModelConfig,
+               layout: Option<&alas_mass::breakdown::PayloadLayoutSummary>| {
         run_mass_analysis_with_model_checked_product_with_gear(
             &airplane,
-            &config.requirements,
+            requirements,
             &geometry,
-            &config.cabin,
-            &config.control_surfaces,
-            Some(&analysis_mass_model),
-            None,
-            MassCoordinateModel::StructuralWingbox(&config.structures),
-            &config.landing_gear,
+            &product_config.cabin,
+            &product_config.control_surfaces,
+            Some(mass_model),
+            layout,
+            MassCoordinateModel::StructuralWingbox(&product_config.structures),
+            &product_config.landing_gear,
         )
-        .map_err(|error| error.to_string())?;
+        .map_err(|error| error.to_string())
+    };
+
+    // First pass, lumped: its only product is the operating empty mass and the
+    // station the cabin engine balances the payload against.
+    let (masses_init, coords_init, cg_init) =
+        run(&declared_requirements, &analysis_mass_model, None)?;
+    let (oew, x_oew) = oew_and_cg(&masses_init, &coords_init);
+
+    // Second pass, on the resolved cabin. A cabin that will not resolve is a
+    // real state for a candidate the user is still editing, and it must leave a
+    // preview the interface can draw rather than an error: the lumped pass
+    // stands, and `payload_layout` stays `None` so a reader can tell which of
+    // the two this report is.
+    let (payload_layout, masses, coordinates, physical_cg) =
+        match build_payload_layout(&airplane, &product_config, oew, x_oew) {
+            Ok(layout) => {
+                let summary = alas_mass::breakdown::PayloadLayoutSummary {
+                    total_mass: layout.total_mass,
+                    cg_x: layout.cg_x,
+                    cg_y: layout.cg_y,
+                };
+                let (cabin_requirements, cabin_mass_model) =
+                    alas_pipeline::full_analysis::cabin_sync::cabin_synchronized_for_cabin(
+                        &declared_requirements,
+                        &analysis_mass_model,
+                        &product_cabin,
+                        &layout,
+                    );
+                match run(&cabin_requirements, &cabin_mass_model, Some(&summary)) {
+                    Ok((masses, coordinates, cg)) => (Some(layout), masses, coordinates, cg),
+                    Err(_) => (None, masses_init, coords_init, cg_init),
+                }
+            }
+            Err(_) => (None, masses_init, coords_init, cg_init),
+        };
+
     let component_masses = masses
         .as_pairs()
         .into_iter()
@@ -102,7 +211,7 @@ pub fn quick_preview_report(
         flops_mass_buildup: None,
         mass_coordinates,
         physical_cg,
-        payload_layout: None,
+        payload_layout,
         trimmed_design_point: None,
         cg_envelope_ok: None,
     })
@@ -111,7 +220,7 @@ pub fn quick_preview_report(
 use crate::scene::{Color, Scene, SceneElement, TextAlign, TextBaseline};
 use crate::theme::Palette;
 
-/// Fade a color's alpha channel to `alpha` (`0.0`-`1.0`) -- shared by the CG
+/// Fade a color's alpha channel to `alpha` (`0.0`-`1.0`): shared by the CG
 /// envelope's dotted/translucent reference lines and the mass distribution's
 /// translucent wing/fuselage/nacelle fills, matching matplotlib's per-artist
 /// `alpha=` kwarg both Python figures set throughout.
@@ -126,7 +235,7 @@ fn with_alpha(color: Color, alpha: f64) -> Color {
     )
 }
 
-/// Centered placeholder text for a figure with no mass/coordinate data yet --
+/// Centered placeholder text for a figure with no mass/coordinate data yet:
 /// the Python side's early-return `ax.text(0.5, 0.5, ..., ha="center", va="center")`.
 fn no_data_scene(mut scene: Scene, pal: &Palette, message: &str) -> Scene {
     scene.add(SceneElement::Text {
@@ -140,4 +249,33 @@ fn no_data_scene(mut scene: Scene, pal: &Palette, message: &str) -> Scene {
         bold: false,
     });
     scene
+}
+
+#[cfg(test)]
+mod preview_tests {
+    use super::*;
+
+    #[test]
+    fn default_preview_mass_evaluation_is_verified() {
+        let config = AlasConfig::default();
+        let design = DesignVector::default();
+        let airplane = alas_geom::builder::AircraftBuilder::new(Some(config.geometry.clone()))
+            .build(Some(&design), true)
+            .expect("default preview aircraft builds");
+        let report = quick_preview_report(airplane, &config, design)
+            .unwrap_or_else(|error| panic!("default preview FLOPS mass is unverified: {error}"));
+        assert!(!report.component_masses.is_empty());
+    }
+
+    #[test]
+    fn named_cabin_preview_mass_evaluation_is_verified_after_materialization() {
+        let mut config = AlasConfig::default();
+        let design = DesignVector::default();
+        alas_payload::apply_cabin_preset(&mut config, Some(&design)).expect("cabin preset");
+        let airplane = alas_geom::builder::AircraftBuilder::new(Some(config.geometry.clone()))
+            .build(Some(&design), true)
+            .expect("default preview aircraft builds");
+        let result = quick_preview_report(airplane, &config, design);
+        assert!(result.is_ok(), "materialized cabin FLOPS mass: {result:?}");
+    }
 }

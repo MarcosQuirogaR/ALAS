@@ -8,8 +8,8 @@
 //!
 //! The other three registries in this crate bundle a handful of overrides on
 //! one configuration struct. An entry here is a whole aeroplane: a design
-//! vector, a geometry scaffold, a set of requirements, an engine, and -- for
-//! the types the global assumptions do not fit -- its own mass-model and
+//! vector, a geometry scaffold, a set of requirements, an engine, and, for
+//! the types the global assumptions do not fit: its own mass-model and
 //! field-performance calibration. Selecting one is how a user starts from
 //! something that flies rather than from a blank form, and it is how this
 //! program is checked against reality: an A320 that comes out sixteen tonnes
@@ -34,7 +34,7 @@
 //! configuration-loading boundary would resolve it. Exactly one caller did.
 //! The geometry builder, the full analysis and the acceptance matrix all read
 //! `preset.geometry` directly, so every turbofan preset was weighed, drawn and
-//! flown as a 467 kN GE9X regardless of what it declared -- a constant 10.3 t
+//! flown as a 467 kN GE9X regardless of what it declared: a constant 10.3 t
 //! of propulsion mass per engine, and a 2.1 m-radius nacelle on an A320.
 //! Resolving it here makes the declared engine the one every discipline sees;
 //! the loading boundary still applies saved or user-provided overrides on top,
@@ -43,7 +43,7 @@
 //!
 //! Nor does a preset fit the design space it is offered in. The bounds in
 //! [`crate::design_variables`] are one global set describing AVE's family, so
-//! every published type here starts outside at least one of them -- an A320's
+//! every published type here starts outside at least one of them: an A320's
 //! fuselage is twenty-eight metres shorter than the shortest the search will
 //! consider. That is upstream's arrangement and not an oversight: whoever runs
 //! a search narrows the bounds around the design it starts from, and the
@@ -52,7 +52,7 @@
 //!
 //! The remaining boundary is the two per-aircraft calibrations. They are
 //! [`Option`]s, and
-//! `None` means "use the global default" rather than "no calibration" --
+//! `None` means "use the global default" rather than "no calibration":
 //! [`crate::AlasConfig::from_value`] is where they are applied, because a
 //! headless run that skipped them would silently revert an A220 to the
 //! widebody-calibrated mass fractions its entry exists to correct.

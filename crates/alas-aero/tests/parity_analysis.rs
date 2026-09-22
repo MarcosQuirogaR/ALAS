@@ -14,7 +14,7 @@
 //! `compressible_report_alpha`, `parasite_drag`, `wave_drag` and
 //! `drag_components` evaluate closed-form `f64` arithmetic over a geometry
 //! and an atmosphere, with no factorization anywhere in them, and they are
-//! compared at `Tier::Closed` -- which is a *tighter* bound than the row
+//! compared at `Tier::Closed`, which is a *tighter* bound than the row
 //! names, not a looser one. Comparing them at `linalg` would let three orders
 //! of magnitude of drift through on a formula whose two implementations
 //! evaluate the same products in the same order. This is the split
@@ -25,7 +25,7 @@
 //!
 //! Unlike `parity_asb_vlm.rs`, which stands a small probe airplane in for the
 //! real geometry, this test runs on the frozen-reference aircraft built by
-//! `alas-geom::builder::new_reference_compatibility` -- the historical
+//! `alas-geom::builder::new_reference_compatibility`: the historical
 //! geometry pinned by `golden/geom/builder.json`. The product builder owns a
 //! newer transport-planform default and is tested on its own path. Here,
 //! `parasite_drag` reads the fuselage's end stations, the nacelle count, every
@@ -327,7 +327,7 @@ fn a_trimmed_evaluation_leaves_the_aircraft_it_was_given_unaltered() {
     // Upstream overwrites the stabilizer's twist for the duration of the
     // solve and restores it afterwards; this port copies instead. Either way
     // the aircraft a caller holds must come back unchanged, or every
-    // evaluation after the first would run on different geometry -- which is
+    // evaluation after the first would run on different geometry, which is
     // the property the generator asserts on its side too.
     let fixture: Fixture = alas_testkit::load("aero", "analysis");
     let plane = build(true);

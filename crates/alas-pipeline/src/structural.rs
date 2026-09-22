@@ -22,7 +22,7 @@ use alas_struct::mesh::{build_wing_mesh_bdf, MeshHealthReport};
 use alas_struct::nastran::ResultStatus;
 use alas_struct::nastran::{run_nastran_analysis, NastranResults};
 use alas_struct::nastran95::run_nastran95_from_config_or_env;
-use alas_struct::sizing::{size_wingbox, WingboxSizing};
+use alas_struct::sizing::WingboxSizing;
 
 use crate::full_analysis::AnalysisReport;
 use crate::patran::run_patran_export;
@@ -218,7 +218,58 @@ pub fn run_structural_analysis_with_environment_events(
         }
     };
 
-    let sizing = size_wingbox(&wsg, scfg, req, skin_mat, web_mat, cap_mat, rib_mat);
+    // Size the box the mass path weighs, not a different one. `size_wingbox`
+    // reliefs the bending moment with a geometric tank estimate and no
+    // powerplant; `alas-mass`'s wing reconciliation reliefs it with the
+    // aircraft's *declared* integral fuel capacity and its wing-mounted engine
+    // point loads. Solving one box and weighing another put 14 299.5 kg
+    // against 15 128.2 kg per semi-wing on the A340-300, a 5.5 % divergence
+    // between the structure this stage reports and the structure the mass
+    // ledger charges. Required consumer correction C2, from an internal
+    // handoff note on pushing the components results; the two call sites now
+    // share one relief.
+    let stations = alas_struct::sizing::sizing_stations(&wsg, scfg);
+    let (box_front, box_rear) = alas_struct::sizing::box_chord_band(&wsg);
+    // The *structural design weight*, not this run's dispatch mass. The
+    // manoeuvre loads, the fuel relief bound and the engine point loads must
+    // all be built at the mass the box is designed for, which is the rule
+    // `alas-mass`'s wing reconciliation applies
+    // (`design_gross_mass_kg`: a declared FLOPS `DG` override where one
+    // exists, the requirement otherwise). `config.requirements` is the raw
+    // requirement, and under a fixed-aircraft basis the two differ whenever
+    // the pipeline evaluates at a dispatch mass - the box that is solved was
+    // then sized *and bounded* at the mission mass while the box that is
+    // weighed was sized at the design mass. Required consumer correction C1,
+    // from an internal handoff note on load-case relief, on top of C2 from
+    // the components-results push handoff note below, which made the two
+    // call sites share one relief in the first place.
+    let mut design_req = config.requirements.clone();
+    design_req.mtow_kg = alas_mass::wing_reconciliation::design_gross_mass_kg(config);
+    let declared_fuel_kg_m = alas_mass::wing_reconciliation::declared_integral_wing_fuel_kg_m(
+        config,
+        dv,
+        &design_req,
+        &wsg,
+        &stations,
+        box_front,
+        box_rear,
+    );
+    let wing_mounted_point_masses = alas_struct::loads::engine_point_loads_n(
+        &config.geometry.engine,
+        &config.mass_model,
+        &design_req,
+    );
+    let sizing = alas_struct::sizing::size_wingbox_with_wing_carried_mass(
+        &wsg,
+        scfg,
+        &design_req,
+        skin_mat,
+        web_mat,
+        cap_mat,
+        rib_mat,
+        declared_fuel_kg_m.as_deref(),
+        &wing_mounted_point_masses,
+    );
 
     let analytical_report = analyze_structure(
         &wsg,

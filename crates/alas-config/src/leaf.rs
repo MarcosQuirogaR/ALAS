@@ -10,7 +10,7 @@
 //! Python's dataclass fields carry no usable type at that point. Here the
 //! decision is a trait implemented once per value type, which gets the same
 //! answers with the compiler checking that every configuration field's type
-//! has one at all -- a field of some type nobody thought about is a build
+//! has one at all: a field of some type nobody thought about is a build
 //! error rather than a form row reading "unsupported".
 //!
 //! One classification depends on the value and not only on the type, and is
@@ -24,8 +24,8 @@ use crate::Kind;
 
 /// Field-name endings that mark a real number as a relative weight.
 ///
-/// These are the objective function's knobs -- a term's scale, a per-metre
-/// cost, a penalty floor -- and the interface offers them as sliders because
+/// These are the objective function's knobs (a term's scale, a per-metre
+/// cost, a penalty floor) and the interface offers them as sliders because
 /// only their ratio to each other means anything.
 const WEIGHT_SUFFIXES: &[&str] = &["_scale", "_per_m", "_weight", "_floor", "_cost", "_floor_m"];
 
@@ -37,7 +37,7 @@ pub trait Leaf: Serialize {
 
     /// The value, as the interface receives it.
     ///
-    /// A value that cannot be represented as JSON -- a non-finite float --
+    /// A value that cannot be represented as JSON (a non-finite float)
     /// becomes null rather than an error: the schema describes a form, and a
     /// form with one unrepresentable default is still worth rendering.
     fn value(&self) -> serde_json::Value {

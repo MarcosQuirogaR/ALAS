@@ -255,14 +255,6 @@ pub fn collect(
 }
 
 /// Extract absolute, allow-listed shop links from one saved category page.
-pub fn discover_page_links(
-    page_url: &str,
-    html: &str,
-    policy: &CrawlPolicy,
-) -> Result<Vec<String>, CollectorError> {
-    discover_page_links_with_policy(page_url, html, policy)
-}
-
 fn discover_page_links_with_policy(
     page_url: &str,
     html: &str,

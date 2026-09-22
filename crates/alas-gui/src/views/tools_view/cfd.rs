@@ -48,7 +48,7 @@ pub(crate) fn save_cfd_environment_preferences(state: &mut AppState) {
     }
 }
 
-pub(super) fn status_rows(state: &AppState, ui: &mut Ui) {
+pub(super) fn status_rows(state: &AppState, ui: &mut Ui, parafoam: Option<&std::path::Path>) {
     status_row(
         ui,
         "OpenFOAM CFD",
@@ -67,6 +67,50 @@ pub(super) fn status_rows(state: &AppState, ui: &mut Ui) {
         "ParaView",
         describe_optional_executable(state.cfd.paraview_executable.as_deref()),
     );
+    status_row(
+        ui,
+        "paraFoam",
+        parafoam.map_or_else(
+            || tr("not found in the configured OpenFOAM project"),
+            |path| path.display().to_string(),
+        ),
+    );
+}
+
+/// Locate the official OpenFOAM ParaView launcher shipped beside a native
+/// project.  It is a shell script, so the GUI reports it separately from the
+/// native solver executables and leaves execution to the documented MSYS2
+/// wrapper when exporting contours.
+pub(super) fn detect_parafoam(state: &AppState) -> Option<std::path::PathBuf> {
+    if let Some(project) = state.cfd.openfoam_preferences.native_project_dir.as_deref() {
+        let root = std::path::Path::new(project);
+        for name in ["paraFoam", "paraFoam.exe"] {
+            let candidate = root.join("bin").join(name);
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+    }
+    let mut ancestor = state
+        .cfd
+        .openfoam_preferences
+        .native_bin_dir
+        .as_deref()
+        .map(std::path::PathBuf::from)?;
+    for _ in 0..8 {
+        if let Some(parent) = ancestor.parent() {
+            ancestor = parent.to_path_buf();
+        } else {
+            break;
+        }
+        for name in ["paraFoam", "paraFoam.exe"] {
+            let candidate = ancestor.join("bin").join(name);
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+    }
+    None
 }
 
 fn describe_optional_executable(path: Option<&str>) -> String {

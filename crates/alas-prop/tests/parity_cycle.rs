@@ -5,13 +5,13 @@
 //! `golden/generators/gen_prop_cycle.py`.
 //!
 //! The cycle is closed-form compressible-flow arithmetic whose only external
-//! input is the ambient state -- read here through `Atmosphere::new`, the same
-//! fitted model upstream's `asb.Atmosphere(...)` selects -- so every continuous
+//! input is the ambient state: read here through `Atmosphere::new`, the same
+//! fitted model upstream's `asb.Atmosphere(...)` selects, so every continuous
 //! output (specific thrust, TSFC, the fuel-air ratio, the efficiency
 //! decomposition, every station temperature and both exit velocities) is
 //! checked at `Tier::Closed`, matching `docs/PORTING.md`. The discrete outputs
-//! the same buildup produces -- the feasibility flag, the reason text and the
-//! bypass-ratio classification label -- are a bool and strings, so they are
+//! the same buildup produces: the feasibility flag, the reason text and the
+//! bypass-ratio classification label, are a bool and strings, so they are
 //! checked for exact equality.
 //!
 //! A value the reference leaves `NaN` (every output of an infeasible cycle, and
@@ -325,7 +325,7 @@ fn turbofan_cycle_matches_python_across_flight_and_feasibility_cases() {
         compare_result(&mut comparison, &case.name, &got, &case.result);
     }
 
-    // -- anchor_mass_flow_kg_s -----------------------------------------------
+    // anchor_mass_flow_kg_s
     let anchor = &fixture.anchor;
     let (mdot, static_result) = anchor_mass_flow_kg_s(
         anchor.inputs.thrust_kn,
@@ -343,7 +343,7 @@ fn turbofan_cycle_matches_python_across_flight_and_feasibility_cases() {
         &anchor.static_result,
     );
 
-    // -- compute_carpet_plot -------------------------------------------------
+    // compute_carpet_plot
     let c = &fixture.carpet_plot;
     let carpet = compute_carpet_plot(
         &c.inputs.compressor_pressure_ratio_vector,
@@ -382,7 +382,7 @@ fn turbofan_cycle_matches_python_across_flight_and_feasibility_cases() {
         &c.feasible_mask,
     );
 
-    // -- compute_bpr_sensitivity ---------------------------------------------
+    // compute_bpr_sensitivity
     let b = &fixture.bpr_sensitivity;
     let bpr = compute_bpr_sensitivity(
         &b.inputs.bpr_vector,
@@ -412,7 +412,7 @@ fn turbofan_cycle_matches_python_across_flight_and_feasibility_cases() {
     );
     comparison.exact("bpr: feasible_mask", &bpr.feasible_mask, &b.feasible_mask);
 
-    // -- compute_efficiency_decomposition ------------------------------------
+    // compute_efficiency_decomposition
     let e = &fixture.efficiency_decomposition;
     let eff = compute_efficiency_decomposition(
         &e.inputs.pi_c_vector,
@@ -448,7 +448,7 @@ fn turbofan_cycle_matches_python_across_flight_and_feasibility_cases() {
     );
     comparison.exact("eff: feasible_mask", &eff.feasible_mask, &e.feasible_mask);
 
-    // -- compute_altitude_sweep ----------------------------------------------
+    // compute_altitude_sweep
     let a = &fixture.altitude_sweep;
     let alt = compute_altitude_sweep(
         &a.inputs.altitude_vector_m,
@@ -482,7 +482,7 @@ fn turbofan_cycle_matches_python_across_flight_and_feasibility_cases() {
     );
     comparison.exact("alt: feasible_mask", &alt.feasible_mask, &a.feasible_mask);
 
-    // -- classify_engine_by_bpr ----------------------------------------------
+    // classify_engine_by_bpr
     for case in &fixture.classify {
         let got = classify_engine_by_bpr(case.bypass_ratio);
         comparison.exact(

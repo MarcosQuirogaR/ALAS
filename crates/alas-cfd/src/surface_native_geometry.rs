@@ -66,8 +66,8 @@ pub(crate) fn face(points: &[[f64; 3]], ids: &[usize]) -> Result<Geometry, Surfa
         minz = minz.min(p[2]);
         maxz = maxz.max(p[2]);
     }
-    for j in 0..3 {
-        center[j] /= ids.len() as f64;
+    for coordinate in &mut center {
+        *coordinate /= ids.len() as f64;
     }
     for k in 0..ids.len() {
         let a = *points.get(ids[k]).ok_or_else(|| {
@@ -142,7 +142,6 @@ pub(crate) fn sample(
 pub(crate) fn order_faces(
     samples: &[SurfaceSample],
     faces: &[Vec<usize>],
-    points: &[[f64; 3]],
     start: usize,
 ) -> (Vec<usize>, Vec<f64>, bool) {
     let mut edges: HashMap<(usize, usize), Vec<usize>> = HashMap::new();
@@ -194,7 +193,6 @@ pub(crate) fn order_faces(
     }
     let positions = samples.iter().map(|s| s.center_m).collect::<Vec<_>>();
     let (order, arcs) = order_points(&positions);
-    let _ = points;
     (order, arcs, false)
 }
 fn arcs(order: &[usize], samples: &[SurfaceSample]) -> Vec<f64> {

@@ -27,11 +27,49 @@ use serde::{Deserialize, Serialize};
 
 use super::{AirfoilSnapshot, CfdStudyConfig};
 
-/// Version of the native Gmsh geometry contract.
-pub const GMSH_TEMPLATE_VERSION: &str = "alas-airfoil-gmsh-openfoam-v1";
+/// Version of the native Gmsh geometry contract.  `v2` adds the optional
+/// leading-edge refinement field; at refinement level zero the emitted source
+/// is identical to `v1` apart from this header line.  `v3` sizes the
+/// boundary-layer stack from the estimated turbulent boundary-layer thickness
+/// instead of emitting exactly the configured layer count, so a `v2` case and
+/// a `v3` case are not directly comparable.  `v4` additionally sizes the first
+/// cell from the configured y+ target rather than taking `first_layer_height_m`
+/// literally; the literal value remains available through
+/// `MeshSettings::derive_first_layer_from_target_y_plus`.
+///
+/// `v6` fans the boundary-layer stack around BOTH trailing-edge corners of a
+/// blunt section instead of only a sharp edge, which removes the stitched
+/// region behind the trailing edge that was the worst face and the worst cell
+/// of every `v5` mesh.  A `v5` mesh of the same case is geometrically the same
+/// section at the same resolution; only the local topology behind the trailing
+/// edge differs.
+pub const GMSH_TEMPLATE_VERSION: &str = "alas-airfoil-gmsh-openfoam-v6";
 
 /// Expansion ratio used by the generated boundary-layer field.
 pub const BOUNDARY_LAYER_EXPANSION_RATIO: f64 = 1.2;
+
+/// Multiple of the estimated turbulent boundary-layer thickness that the
+/// prism stack must span.
+///
+/// The stack is the only part of the mesh with wall-normal grading; outside
+/// it the background field is isotropic and an order of magnitude coarser.
+/// A stack that stops inside the boundary layer therefore leaves the outer
+/// shear layer to one or two isotropic cells, which thickens the modelled
+/// layer and inflates pressure drag.  Spanning `1.5` times the flat-plate
+/// estimate keeps the whole layer inside the graded region with margin for
+/// the adverse-pressure-gradient thickening the flat-plate correlation does
+/// not capture, at a negligible cell cost because the outer layers are the
+/// largest ones.
+pub const BOUNDARY_LAYER_COVERAGE_FACTOR: f64 = 1.5;
+
+/// Upper bound on the derived layer count.
+///
+/// `MeshSettings::n_layers` is the user's requested minimum and stays bounded
+/// by its own validation range.  The derived count may exceed it to reach
+/// [`BOUNDARY_LAYER_COVERAGE_FACTOR`], but never without bound: a very small
+/// first layer on a very high Reynolds number would otherwise request an
+/// unusable stack instead of reporting the shortfall.
+pub const MAX_DERIVED_BOUNDARY_LAYERS: u32 = 60;
 
 /// Maximum number of distinct boundary points accepted at either chordwise
 /// extreme.  One point represents a sharp edge and two points represent a
@@ -103,8 +141,14 @@ pub struct AirfoilTopology {
 pub struct BoundaryLayerSizing {
     /// Whether a Gmsh `BoundaryLayer` field is emitted.
     pub enabled: bool,
-    /// Number of requested layers.
+    /// Number of layers actually emitted.  This is the configured count when
+    /// that already spans [`Self::target_total_thickness_m`], and otherwise
+    /// the smallest count that does, bounded by
+    /// [`MAX_DERIVED_BOUNDARY_LAYERS`].
     pub n_layers: u32,
+    /// Layer count requested through `MeshSettings::n_layers`, retained so a
+    /// derived increase is visible rather than silent.
+    pub configured_n_layers: u32,
     /// Geometric expansion ratio between successive layers.
     pub expansion_ratio: f64,
     /// Configured distance from the wall to the first cell centre in metres.
@@ -112,9 +156,10 @@ pub struct BoundaryLayerSizing {
     /// Wall distance derived from target y+ and the estimated friction
     /// velocity, in metres.
     pub derived_wall_distance_m: f64,
-    /// Distance selected from the explicit `first_layer_height_m` setting.
-    /// The explicit setting remains authoritative; the derived value is
-    /// retained so a caller can report an inconsistent y+ target.
+    /// Distance actually used by the emitted stack: the derived value when
+    /// `MeshSettings::derive_first_layer_from_target_y_plus` is set, otherwise
+    /// the explicit `first_layer_height_m`.  Both alternatives are retained
+    /// above so the choice is auditable from the report alone.
     pub selected_wall_distance_m: f64,
     /// First-layer thickness sent to Gmsh's `Size` property, in metres.
     /// This is twice [`Self::selected_wall_distance_m`] under the cell-centre
@@ -122,6 +167,20 @@ pub struct BoundaryLayerSizing {
     pub first_layer_thickness_m: f64,
     /// Total thickness sent to the Gmsh `BoundaryLayer` field, in metres.
     pub total_thickness_m: f64,
+    /// Smooth flat-plate turbulent boundary-layer thickness at the trailing
+    /// edge, `delta = 0.37 c Re_c^(-1/5)`, in metres.  This is a sizing
+    /// estimate for an attached, fully turbulent layer at zero pressure
+    /// gradient; it is not a solved boundary-layer thickness and is not valid
+    /// for separated, transitional or shock-affected flow.
+    pub estimated_boundary_layer_thickness_m: f64,
+    /// Stack thickness the layer count targets, in metres:
+    /// [`BOUNDARY_LAYER_COVERAGE_FACTOR`] times
+    /// [`Self::estimated_boundary_layer_thickness_m`].
+    pub target_total_thickness_m: f64,
+    /// `total_thickness_m / estimated_boundary_layer_thickness_m`.  A value
+    /// below one means the graded stack ends inside the estimated boundary
+    /// layer and the outer layer is carried by isotropic background cells.
+    pub boundary_layer_coverage_ratio: f64,
     /// Estimated friction velocity used for the y+ calculation, in m/s.
     pub friction_velocity_m_s: f64,
     /// Estimated y+ at the first cell centre using the selected wall distance.
@@ -216,18 +275,50 @@ pub struct BoundaryPatchReport {
 }
 #[path = "mesh_boundary.rs"]
 mod boundary;
+#[path = "mesh_domain.rs"]
+mod domain;
 #[path = "mesh_generation.rs"]
 mod generation;
+#[path = "mesh_geometry.rs"]
+mod geometry_audit;
+#[path = "mesh_preflight.rs"]
+mod preflight;
+#[path = "mesh_presets.rs"]
+mod presets;
 
 pub use boundary::{
     ensure_boundary_patch_types, inspect_boundary_patch_types, required_boundary_types,
+};
+pub use domain::{
+    domain_template, patch_contract, DomainExtents, DomainTemplate, FrameStatement, PatchRole,
+    PatchSpec, WakeBox, DOMAIN_TEMPLATE_VERSION, MAX_RECOMMENDED_BLOCKAGE,
+    RECOMMENDED_DOWNSTREAM_CHORDS, RECOMMENDED_HALF_HEIGHT_CHORDS, RECOMMENDED_UPSTREAM_CHORDS,
 };
 pub use generation::{
     boundary_layer_sizing, build_gmsh_geo, derive_first_layer_wall_distance_m, generate_gmsh_geo,
 };
 #[cfg(test)]
 use generation::{coordinate_hash, geometric_layer_sum};
+pub use geometry_audit::{
+    audit_airfoil_geometry, AirfoilGeometryAudit, ClosureKind, GeometryIssue, GeometryIssueCode,
+    IssueSeverity, SectionMetrics, TrailingEdgeMeshing, TrailingEdgeTreatment, Winding,
+    GEOMETRY_AUDIT_VERSION, MAX_THICKNESS_RATIO, MAX_TRAILING_EDGE_GAP, MIN_LOOP_POINTS,
+    MIN_THICKNESS_RATIO, NEGLIGIBLE_SEGMENT,
+};
+pub use preflight::{
+    run_mesh_preflight, write_mesh_manifest, ExpectedArtifacts, MeshPreflight, MeshPreflightBundle,
+    MeshQualityThresholds, PreflightIssue, PreflightIssueSource, PreflightStatus,
+    ToolchainExpectation, MESH_MANIFEST_FILE, MESH_MANIFEST_VERSION,
+};
+pub use presets::{
+    mesh_resolution, preset_catalogue, InflationSpec, MeshResolutionSpec, PresetSummary,
+    RefinementSpec, YPlusConsistency, MAX_RECOMMENDED_INFLATION_CHORDS, PRESET_CATALOGUE_VERSION,
+    Y_PLUS_CONSISTENCY_BAND,
+};
 #[cfg(test)]
+// Tests assert on values they parsed or built here, so a failed expect is
+// the assertion failing rather than a library invariant breaking.
+#[allow(clippy::expect_used)]
 mod tests {
     use super::*;
 
@@ -258,20 +349,152 @@ mod tests {
         assert!(artifact.source.contains("Physical Surface(\"airfoil\")"));
         assert!(artifact.source.contains("Field[1] = BoundaryLayer;"));
         assert!(artifact.source.contains("Field[1].Thickness"));
-        if artifact.report.topology.trailing_edge == EdgeKind::Sharp {
-            assert!(artifact.source.contains("Field[1].FanPointsList"));
-        } else {
-            assert!(!artifact.source.contains("Field[1].FanPointsList"));
-        }
-        assert!(artifact.source.contains("Physical Volume(\"fluid\")"));
+        // Both edge kinds fan now.  Excluding a blunt edge was measured to be
+        // the cause of the worst face and the worst cell in every generated
+        // mesh; see the emitter for the before/after numbers.  A sharp edge
+        // fans its single closing point, a blunt edge its two corners.
+        let fan = artifact
+            .source
+            .lines()
+            .find(|line| line.starts_with("Field[1].FanPointsList"))
+            .unwrap_or_else(|| panic!("no fan points emitted"));
+        let expected_corners = match artifact.report.topology.trailing_edge {
+            EdgeKind::Sharp => 1,
+            EdgeKind::Blunt => 2,
+        };
         assert_eq!(
-            artifact.report.boundary_layer.total_thickness_m,
+            fan.matches(char::is_numeric).count().min(2),
+            expected_corners.min(2),
+            "{fan}"
+        );
+        assert_eq!(fan.split(',').count(), expected_corners, "{fan}");
+        assert!(artifact.source.contains("Physical Volume(\"fluid\")"));
+        let layer = &artifact.report.boundary_layer;
+        assert_eq!(layer.configured_n_layers, 8);
+        // The emitted stack is still an exact geometric sum, but the count is
+        // whatever spans the estimated boundary layer rather than the
+        // configured floor.
+        assert_eq!(
+            layer.total_thickness_m,
             geometric_layer_sum(
-                artifact.report.boundary_layer.first_layer_thickness_m,
+                layer.first_layer_thickness_m,
                 BOUNDARY_LAYER_EXPANSION_RATIO,
-                8
+                layer.n_layers
             )
         );
+        assert!(layer.n_layers > layer.configured_n_layers);
+        assert!(layer.boundary_layer_coverage_ratio >= BOUNDARY_LAYER_COVERAGE_FACTOR);
+        assert!(artifact
+            .source
+            .contains(&format!("Field[1].NbLayers = {};", layer.n_layers)));
+    }
+
+    #[test]
+    fn a_configured_stack_shorter_than_the_boundary_layer_is_extended_to_cover_it() {
+        let config = CfdStudyConfig::default();
+        let sizing = match boundary_layer_sizing(&config) {
+            Ok(sizing) => sizing,
+            Err(error) => panic!("failed to size layers: {error}"),
+        };
+        let configured_thickness = geometric_layer_sum(
+            sizing.first_layer_thickness_m,
+            BOUNDARY_LAYER_EXPANSION_RATIO,
+            sizing.configured_n_layers,
+        );
+        // Negative control: the previous contract emitted exactly the
+        // configured count, which for the default 1 m / Re 3.45e6 case stops
+        // inside the boundary layer.
+        assert!(configured_thickness < sizing.estimated_boundary_layer_thickness_m);
+        assert!(sizing.total_thickness_m >= sizing.target_total_thickness_m);
+        assert!(sizing.n_layers <= MAX_DERIVED_BOUNDARY_LAYERS);
+    }
+
+    #[test]
+    fn the_first_cell_is_sized_from_the_y_plus_target_unless_the_override_is_set() {
+        let config = CfdStudyConfig::default();
+        let derived = match boundary_layer_sizing(&config) {
+            Ok(sizing) => sizing,
+            Err(error) => panic!("failed to size layers: {error}"),
+        };
+        assert!(config.mesh.derive_first_layer_from_target_y_plus);
+        assert_eq!(
+            derived.selected_wall_distance_m,
+            derived.derived_wall_distance_m
+        );
+        assert_eq!(
+            derived.requested_wall_distance_m,
+            config.mesh.first_layer_height_m
+        );
+        // The whole point: the estimate now lands on the configured target
+        // instead of wherever the raw length happened to fall.
+        assert!(
+            (derived.estimated_y_plus - config.mesh.target_y_plus).abs() < 1.0e-9,
+            "estimated y+ {} vs target {}",
+            derived.estimated_y_plus,
+            config.mesh.target_y_plus
+        );
+
+        let mut literal = CfdStudyConfig::default();
+        literal.mesh.derive_first_layer_from_target_y_plus = false;
+        let literal = match boundary_layer_sizing(&literal) {
+            Ok(sizing) => sizing,
+            Err(error) => panic!("failed to size layers: {error}"),
+        };
+        assert_eq!(
+            literal.selected_wall_distance_m,
+            literal.requested_wall_distance_m
+        );
+        // Negative control for the defect: taken literally, the default length
+        // misses its own y+ target by a third at the default Reynolds number,
+        // and by more at higher ones because the length does not move with the
+        // flow state at all.
+        assert!(
+            literal.estimated_y_plus / literal.target_y_plus > 1.3,
+            "literal estimate {} vs target {}",
+            literal.estimated_y_plus,
+            literal.target_y_plus
+        );
+        assert!(literal.selected_wall_distance_m > derived.selected_wall_distance_m);
+    }
+
+    #[test]
+    fn a_stack_that_already_covers_the_boundary_layer_is_left_alone() {
+        let config = CfdStudyConfig {
+            mesh: super::super::MeshSettings {
+                boundary_layers: true,
+                n_layers: 30,
+                first_layer_height_m: 5.0e-4,
+                derive_first_layer_from_target_y_plus: false,
+                ..super::super::MeshSettings::default()
+            },
+            ..CfdStudyConfig::default()
+        };
+        let sizing = match boundary_layer_sizing(&config) {
+            Ok(sizing) => sizing,
+            Err(error) => panic!("failed to size layers: {error}"),
+        };
+        assert_eq!(sizing.n_layers, sizing.configured_n_layers);
+        assert!(sizing.boundary_layer_coverage_ratio > BOUNDARY_LAYER_COVERAGE_FACTOR);
+    }
+
+    #[test]
+    fn disabled_boundary_layers_emit_no_stack_and_report_no_coverage() {
+        let config = CfdStudyConfig {
+            mesh: super::super::MeshSettings {
+                boundary_layers: false,
+                ..super::super::MeshSettings::default()
+            },
+            ..CfdStudyConfig::default()
+        };
+        let sizing = match boundary_layer_sizing(&config) {
+            Ok(sizing) => sizing,
+            Err(error) => panic!("failed to size layers: {error}"),
+        };
+        assert_eq!(sizing.n_layers, 0);
+        assert_eq!(sizing.configured_n_layers, 0);
+        assert_eq!(sizing.total_thickness_m, 0.0);
+        assert_eq!(sizing.boundary_layer_coverage_ratio, 0.0);
+        assert!(sizing.estimated_boundary_layer_thickness_m > 0.0);
     }
 
     #[test]
@@ -304,6 +527,7 @@ mod tests {
                 n_layers: 4,
                 first_layer_height_m: 2.0e-4,
                 target_y_plus: 30.0,
+                derive_first_layer_from_target_y_plus: false,
                 ..super::super::MeshSettings::default()
             },
             ..CfdStudyConfig::default()
@@ -313,7 +537,7 @@ mod tests {
             Err(error) => panic!("failed to size layers: {error}"),
         };
         assert_eq!(sizing.first_layer_thickness_m, 4.0e-4);
-        assert_eq!(sizing.n_layers, 4);
+        assert_eq!(sizing.configured_n_layers, 4);
         assert!(sizing.derived_wall_distance_m.is_finite());
         assert!(sizing.estimated_y_plus.is_finite());
     }

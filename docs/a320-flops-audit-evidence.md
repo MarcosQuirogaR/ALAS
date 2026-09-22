@@ -6,12 +6,14 @@ The package is `READY_WITH_GAPS`. Identity, certified limits, selected fuel tabl
 
 ## Machine-readable artifacts
 
-- [`source_manifest.json`](../.agent/data/a320-flops-audit-evidence/source_manifest.json): URLs, authority, revision/date, local file, SHA256, page/section locators, applicability and uncertainty.
-- [`reconstructed_input_deck.json`](../.agent/data/a320-flops-audit-evidence/reconstructed_input_deck.json): source-conditioned candidate inputs, per-field status, FLOPS variable mapping, current/prior snapshots, OEW verdict and holdout freeze recommendation.
-- [`equation_map.json`](../.agent/data/a320-flops-audit-evidence/equation_map.json): NASA transport equations 1–17, 46, 50, 56, 63–69, 73–92, 97, 101–126 and 136–145, variable definitions, ALAS mapping and coverage gaps.
-- [`raw_source_anchors.json`](../.agent/data/a320-flops-audit-evidence/raw_source_anchors.json): short raw text anchors with source IDs, local files, PDF pages, claims and uncertainty.
-- [`quantity_comparison.csv`](../.agent/data/a320-flops-audit-evidence/quantity_comparison.csv): 97 quantity-by-quantity rows comparing pure baseline, prior cabin refinement and the reconstructed candidate.
-- [Detailed reconstruction report](../.agent/reports/luna-a320-reconstruction.md): evidence interpretation and bounded gaps.
+This document is the published record of the audit. The underlying machine-readable working files are retained in the maintainers' local audit trail; they are not part of the repository checkout and are not published, and should be regenerated from the primary sources cited below before relying on them:
+
+- `source_manifest.json`: URLs, authority, revision/date, local file, SHA256, page/section locators, applicability and uncertainty.
+- `reconstructed_input_deck.json`: source-conditioned candidate inputs, per-field status, FLOPS variable mapping, current/prior snapshots, OEW verdict and holdout freeze recommendation.
+- `equation_map.json`: NASA transport equations 1–17, 46, 50, 56, 63–69, 73–92, 97, 101–126 and 136–145, variable definitions, ALAS mapping and coverage gaps.
+- `raw_source_anchors.json`: short raw text anchors with source IDs, local files, PDF pages, claims and uncertainty.
+- `quantity_comparison.csv`: 97 quantity-by-quantity rows comparing pure baseline, prior cabin refinement and the reconstructed candidate.
+- A detailed reconstruction report with the evidence interpretation and bounded gaps.
 
 ## Values that are safe to carry as selected-case inputs
 

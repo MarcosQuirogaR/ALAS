@@ -5,13 +5,26 @@ impl AlasApp {
     /// Top-bar entry point for standalone analyses that do not require a
     /// whole-aircraft pipeline run.
     fn render_analysis_menu(&mut self, ui: &mut Ui) {
+        // An immediate egui viewport lives only while its parent keeps
+        // showing it, so the detached window is dispatched beside its entry.
+        crate::views::wing_analysis_view::show_wing_analysis_window(&mut self.state, ui.ctx());
         ui.menu_button(tr("Analysis"), |ui| {
+            if ui.button(tr("Open Wing Analysis")).clicked() {
+                crate::views::wing_analysis_view::open_wing_analysis(ui.ctx());
+                ui.close_menu();
+            }
             if ui.button(tr("Open Airfoil CFD")).clicked() {
                 self.state.cfd.window_open = true;
                 self.state.cfd.tab = crate::cfd::CfdTab::Study;
                 ui.close_menu();
             }
             if ui.button(tr("Open Airfoil Screening")).clicked() {
+                // Opening an already-open workspace means "show it to me": the
+                // window may be behind the main one, where setting the flag
+                // again would look like the action did nothing.
+                if self.state.screening.window_open {
+                    crate::views::screening_window::focus_window(ui.ctx());
+                }
                 self.state.screening.window_open = true;
                 ui.close_menu();
             }
@@ -33,7 +46,7 @@ impl AlasApp {
                 ui.close_menu();
             }
             ui.separator();
-            let exports_enabled = self.state.pipeline_result.is_some();
+            let exports_enabled = self.state.pipeline_result_complete;
             if ui
                 .add_enabled(
                     exports_enabled,
@@ -83,13 +96,13 @@ impl AlasApp {
     fn render_view_menu(&mut self, ctx: &Context, ui: &mut Ui) {
         ui.menu_button(tr("View"), |ui| {
             ui.set_min_width(layout::MENU_MIN_WIDTH);
-            let label = if self.state.show_view_panel {
-                "Hide View panel"
+            let run_log_label = if self.state.run_log_open {
+                "Hide Run Log"
             } else {
-                "Detach View options"
+                "Show Run Log"
             };
-            if ui.button(tr(label)).clicked() {
-                self.state.show_view_panel = !self.state.show_view_panel;
+            if ui.button(tr(run_log_label)).clicked() {
+                self.state.run_log_open = !self.state.run_log_open;
                 ui.close_menu();
             }
             ui.separator();
@@ -135,6 +148,23 @@ impl AlasApp {
                 self.state.show_advanced_guide = true;
                 ui.close_menu();
             }
+            if ui.button(tr("External Tools Overview...")).clicked() {
+                self.state.show_tool_intro = true;
+                ui.close_menu();
+            }
+            ui.separator();
+            if ui
+                .selectable_label(self.state.help_verbose, tr("Learn-more help"))
+                .clicked()
+            {
+                self.state.help_verbose = !self.state.help_verbose;
+                ui.close_menu();
+            }
+            if ui.button(tr("Documentation")).clicked() {
+                ui.ctx()
+                    .open_url(egui::OpenUrl::new_tab(ALAS_DOCUMENTATION_URL));
+                ui.close_menu();
+            }
             ui.separator();
             if ui.button(tr("About ALAS")).clicked() {
                 self.state.show_about = true;
@@ -143,6 +173,9 @@ impl AlasApp {
         });
     }
 }
+
+/// Official ALAS documentation opened from Help > Documentation.
+const ALAS_DOCUMENTATION_URL: &str = "https://alas.uvigo.es/docs/";
 
 /// Export ordered SVG figure sources as a user-facing archive.
 fn export_figures(state: &mut AppState) {
@@ -192,7 +225,7 @@ fn export_report(state: &mut AppState) {
 
 #[cfg(test)]
 mod tests {
-    use super::AlasApp;
+    use super::{AlasApp, ALAS_DOCUMENTATION_URL};
     use crate::state::{AppState, Language};
     use crate::view_controls::{
         auto_zoom_factor, auto_zoom_for_physical_size, zoom_after_command, ZoomCommand,
@@ -224,7 +257,10 @@ mod tests {
             "Light",
             "Grey",
             "3D Live Preview",
-            "Learn-more help",
+            "Show Run Log",
+            "Hide Run Log",
+            "Close",
+            "Reduced Animations",
             "Automatic zoom",
             "English",
             "Spanish",
@@ -234,6 +270,8 @@ mod tests {
             "Help",
             "Replay Walkthrough",
             "Advanced Walkthrough...",
+            "Learn-more help",
+            "Documentation",
             "About ALAS",
             "Figure archive with {count} SVG sources written to {path}.",
             "Figure archive failed: {error}",
@@ -252,6 +290,28 @@ mod tests {
         let _app = AlasApp::from_state(state);
 
         assert_eq!(alas_i18n::get_language(), "es");
+        alas_i18n::set_language(Some("en"));
+    }
+
+    #[test]
+    fn documentation_menu_target_is_the_official_alas_docs_url() {
+        assert_eq!(ALAS_DOCUMENTATION_URL, "https://alas.uvigo.es/docs/");
+    }
+
+    #[test]
+    fn fresh_state_enables_explanatory_help_by_default() {
+        assert!(AppState::default().help_verbose);
+    }
+
+    #[test]
+    fn explicit_help_preference_survives_explicit_state_constructor() {
+        let state = AppState {
+            help_verbose: false,
+            ..Default::default()
+        };
+        let app = AlasApp::from_state(state);
+
+        assert!(!app.state.help_verbose);
         alas_i18n::set_language(Some("en"));
     }
 

@@ -7,9 +7,9 @@ authors.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+alas-fonts = { path = "../alas-fonts" }
 alas-report = { path = "../alas-report" }
 egui = { workspace = true }
-tracing = { workspace = true }
 plotters = { workspace = true }
 plotters-backend = { workspace = true }
 resvg = { workspace = true }
@@ -20,4 +20,3 @@ tiny-skia = { workspace = true }
 rayon = { workspace = true }
 
 [dev-dependencies]
-alas-testkit = { path = "../alas-testkit" }

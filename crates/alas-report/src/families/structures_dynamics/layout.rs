@@ -21,7 +21,7 @@ pub fn panel_rects(n: usize, area: (f64, f64, f64, f64), gutter: f64) -> Vec<(f6
 }
 
 /// One bar of a grouped bar chart, spanning `[x0, x1]` in data coordinates
-/// from `0` up to `val`, mapped through `axes` -- shared by the frequency and
+/// from `0` up to `val`, mapped through `axes`: shared by the frequency and
 /// RMS grouped bar charts, both of which need the bar's canvas width and
 /// height computed from the (possibly log-scaled) axes rather than a fixed
 /// pixel width.

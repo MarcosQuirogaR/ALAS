@@ -2,7 +2,10 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 use super::{PdfFigure, PdfSection};
-use crate::scene::{Color, Scene, SceneElement, TextAlign};
+use crate::scene::{
+    wrap_text_to_width, Color, Scene, SceneElement, TextAlign, CSS_PIXELS_PER_POINT,
+    TEXT_LINE_HEIGHT_EM,
+};
 
 const PAGE_WIDTH: f64 = 595.28;
 const PAGE_HEIGHT: f64 = 841.89;
@@ -276,6 +279,23 @@ fn append_scene(out: &mut String, scene: &Scene) {
                 align,
                 ..
             } => append_scene_text(out, text, pos[0], pos[1], *font_size, *color, *align),
+            SceneElement::TextBlock {
+                text,
+                pos,
+                width,
+                font_size,
+                color,
+                ..
+            } => {
+                let line_height = font_size * CSS_PIXELS_PER_POINT * TEXT_LINE_HEIGHT_EM;
+                for (index, line) in wrap_text_to_width(text, *font_size, *width)
+                    .lines()
+                    .enumerate()
+                {
+                    let y = pos[1] + index as f64 * line_height;
+                    append_scene_text(out, line, pos[0], y, *font_size, *color, TextAlign::Left);
+                }
+            }
         }
     }
 }

@@ -12,8 +12,8 @@
 //! Three rules separate this from a pretty picture of a fuselage:
 //!
 //! 1. One plane. A transverse section has exactly one longitudinal coordinate.
-//!    The station is selected for coverage -- seat rows on every passenger
-//!    deck first, then cargo, a hold contour, overhead runs and seat count --
+//!    The station is selected for coverage: seat rows on every passenger
+//!    deck first, then cargo, a hold contour, overhead runs and seat count,
 //!    and every drawn part is cut by that plane. A deck with no row there is
 //!    drawn empty rather than filled from a neighbouring frame.
 //! 2. Nothing is resized to fit. Seats keep their solved width, ULDs keep the

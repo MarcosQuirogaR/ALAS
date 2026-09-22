@@ -21,40 +21,9 @@ use crate::theme::get_palette;
 const PREVIEW_WIDTH: f64 = 960.0;
 const PREVIEW_HEIGHT: f64 = 540.0;
 const MAX_MESH_BYTES: u64 = 64 * 1024 * 1024;
-const MAX_PROJECTED_FACES: usize = 5_000;
 
 fn status_scene(title: &str, message: &str, ok: bool, theme: Option<&str>) -> Scene {
-    let pal = get_palette(theme);
-    const MESSAGE_TOP: f64 = 82.0;
-    const LINE_HEIGHT: f64 = 17.0;
-    const BOTTOM_MARGIN: f64 = 16.0;
-    let wrapped = crate::chart_kit::wrap_text(message, 100);
-    let line_count = wrapped.lines().count().max(1) as f64;
-    let height = (240.0_f64).max(MESSAGE_TOP + line_count * LINE_HEIGHT + BOTTOM_MARGIN);
-    let mut scene = Scene::new(760.0, height, Some(Color::from_hex(pal.bg)));
-    scene.title = Some(title.to_owned());
-    scene.suppress_derived_title();
-    scene.add(SceneElement::Text {
-        text: title.to_owned(),
-        pos: [24.0, 34.0],
-        font_size: 16.0,
-        color: Color::from_hex(if ok { "#27ae60" } else { "#c0392b" }),
-        align: TextAlign::Left,
-        baseline: TextBaseline::Top,
-        angle_deg: 0.0,
-        bold: true,
-    });
-    scene.add(SceneElement::Text {
-        text: wrapped,
-        pos: [24.0, MESSAGE_TOP],
-        font_size: 12.0,
-        color: Color::from_hex(pal.tick),
-        align: TextAlign::Left,
-        baseline: TextBaseline::Top,
-        angle_deg: 0.0,
-        bold: false,
-    });
-    scene
+    crate::status_figure::figure_status_message(title, message, ok, theme)
 }
 
 /// Display OpenVSP's native CAD screenshot when the retained run produced it.
@@ -117,6 +86,7 @@ fn native_preview_scene(export: &OpenVspExportResult, theme: Option<&str>) -> Sc
         Some(Color::from_hex(pal.bg)),
     );
     scene.title = Some("OpenVSP Native CAD Preview".to_owned());
+    scene.suppress_derived_title();
     scene.add(SceneElement::Text {
         text: format!(
             "OpenVSP native preview - status: {}",
@@ -131,7 +101,8 @@ fn native_preview_scene(export: &OpenVspExportResult, theme: Option<&str>) -> Sc
         bold: true,
     });
     scene.add(SceneElement::Text {
-        text: preview.display().to_string(),
+        text: "Native OpenVSP shaded view: open the model to rotate, zoom, and inspect components."
+            .to_owned(),
         pos: [20.0, 49.0],
         font_size: 9.0,
         color: Color::from_hex(pal.tick),
@@ -149,15 +120,37 @@ fn native_preview_scene(export: &OpenVspExportResult, theme: Option<&str>) -> Sc
         fill: None,
         stroke: Some(Stroke::new(Color::from_hex(pal.border), 1.0)),
     });
+    let [image_width, image_height] = native_image_size(preview);
     scene.add(SceneElement::Image {
         source: preview.to_string_lossy().replace('\\', "/"),
-        x: 20.0,
-        y: 76.0,
-        width: PREVIEW_WIDTH,
-        height: PREVIEW_HEIGHT,
+        x: 20.0 + (PREVIEW_WIDTH - image_width) * 0.5,
+        y: 76.0 + (PREVIEW_HEIGHT - image_height) * 0.5,
+        width: image_width,
+        height: image_height,
         source_rect: None,
     });
     scene
+}
+
+fn native_image_size(path: &std::path::Path) -> [f64; 2] {
+    use std::io::Read;
+    let mut header = [0_u8; 24];
+    let dimensions = fs::File::open(path)
+        .and_then(|mut file| file.read_exact(&mut header))
+        .ok()
+        .filter(|_| &header[..8] == b"\x89PNG\r\n\x1a\n" && &header[12..16] == b"IHDR")
+        .map(|_| {
+            (
+                u32::from_be_bytes([header[16], header[17], header[18], header[19]]),
+                u32::from_be_bytes([header[20], header[21], header[22], header[23]]),
+            )
+        });
+    if let Some((w, h)) = dimensions.filter(|(w, h)| *w > 0 && *h > 0) {
+        let scale = (PREVIEW_WIDTH / f64::from(w)).min(PREVIEW_HEIGHT / f64::from(h));
+        [f64::from(w) * scale, f64::from(h) * scale]
+    } else {
+        [PREVIEW_WIDTH, PREVIEW_HEIGHT]
+    }
 }
 
 fn mesh_projection_scene(export: &OpenVspExportResult, theme: Option<&str>) -> Option<Scene> {
@@ -196,7 +189,11 @@ fn mesh_projection_scene(export: &OpenVspExportResult, theme: Option<&str>) -> O
     scene.add(SceneElement::Text {
         text: format!(
             "Projected from native full-aircraft VSPGEOM mesh: {} ({} faces)",
-            export.cad_preview_geometry_path.display(),
+            export
+                .cad_preview_geometry_path
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy(),
             projected.len()
         ),
         pos: [20.0, 49.0],
@@ -208,9 +205,7 @@ fn mesh_projection_scene(export: &OpenVspExportResult, theme: Option<&str>) -> O
         bold: false,
     });
     scene.add(SceneElement::Text {
-        text: "Vector evidence from a preview-only OpenVSP VSPAERO geometry call (fuselage, \
-               landing gear, and wings); no surrogate raster was generated and the aerodynamic \
-               solver never reads this mesh."
+        text: "Native OpenVSP fuselage, landing gear, and wings. Preview geometry is separate from the aerodynamic solver."
             .to_owned(),
         pos: [20.0, 66.0],
         font_size: 9.0,
@@ -221,14 +216,16 @@ fn mesh_projection_scene(export: &OpenVspExportResult, theme: Option<&str>) -> O
         bold: false,
     });
 
-    for (depth, points) in projected {
-        let shade = depth.clamp(0.0, 1.0);
+    for (shade, points) in projected {
+        let shade = shade.clamp(0.0, 1.0);
         let green = 105_u8.saturating_add((shade * 70.0).round() as u8);
         let blue = 180_u8.saturating_add((shade * 60.0).round() as u8);
         scene.add(SceneElement::Polygon {
             points,
-            fill: Some(Fill::new(Color::rgba(35, green, blue, 190))),
-            stroke: Some(Stroke::new(Color::rgba(15, 45, 80, 125), 0.35)),
+            fill: Some(Fill::new(Color::rgba(35, green, blue, 255))),
+            // Same-color subpixel coverage prevents antialiasing cracks
+            // between adjacent opaque faces in vector renderers.
+            stroke: Some(Stroke::new(Color::rgba(35, green, blue, 255), 0.35)),
         });
     }
     scene.add(SceneElement::Rect {
@@ -300,11 +297,15 @@ fn read_vspgeom_mesh(path: &std::path::Path) -> Option<VspGeomMesh> {
     if face_count == 0 || face_count > 2_000_000 {
         return None;
     }
-    let mut faces = Vec::with_capacity(face_count.min(MAX_PROJECTED_FACES * 2));
+    let mut faces = Vec::with_capacity(face_count);
     for _ in 0..face_count {
         let row = lines.next()?.split_whitespace().collect::<Vec<_>>();
         let vertex_count = row.first()?.parse::<usize>().ok()?;
-        if !(vertex_count == 3 || vertex_count == 4) || row.len() < vertex_count + 1 {
+        // Native OpenVSP surfaces are not limited to triangles and quads.
+        // The retained full-aircraft export contains tessellated polygons
+        // with more boundary vertices, so reject pathological rows while
+        // preserving the face topology OpenVSP actually wrote.
+        if !(3..=64).contains(&vertex_count) || row.len() < vertex_count + 1 {
             return None;
         }
         let mut face = Vec::with_capacity(vertex_count);
@@ -324,9 +325,10 @@ fn project_mesh(points: &[[f64; 3]], faces: &[Vec<usize>]) -> Vec<(f64, Vec<[f64
     let projected_points = points
         .iter()
         .map(|point| {
-            let horizontal = 0.82 * point[0] + 0.55 * point[1];
-            let vertical = 0.95 * point[2] - 0.20 * point[0] + 0.18 * point[1];
-            let depth = 0.25 * point[0] - 0.30 * point[1] + 0.70 * point[2];
+            // Orthonormal camera basis; depth increases toward the viewer.
+            let horizontal = 0.8 * point[0] + 0.6 * point[1];
+            let vertical = -0.3 * point[0] + 0.4 * point[1] + (3.0_f64.sqrt() / 2.0) * point[2];
+            let depth = (3.0_f64.sqrt() / 2.0) * (0.6 * point[0] - 0.8 * point[1]) + 0.5 * point[2];
             [horizontal, vertical, depth]
         })
         .collect::<Vec<_>>();
@@ -334,39 +336,30 @@ fn project_mesh(points: &[[f64; 3]], faces: &[Vec<usize>]) -> Vec<(f64, Vec<[f64
     let mut max_horizontal = f64::NEG_INFINITY;
     let mut min_vertical = f64::INFINITY;
     let mut max_vertical = f64::NEG_INFINITY;
-    let mut min_depth = f64::INFINITY;
-    let mut max_depth = f64::NEG_INFINITY;
     for point in &projected_points {
         min_horizontal = min_horizontal.min(point[0]);
         max_horizontal = max_horizontal.max(point[0]);
         min_vertical = min_vertical.min(point[1]);
         max_vertical = max_vertical.max(point[1]);
-        min_depth = min_depth.min(point[2]);
-        max_depth = max_depth.max(point[2]);
     }
     let horizontal_span = (max_horizontal - min_horizontal).max(1.0e-9);
     let vertical_span = (max_vertical - min_vertical).max(1.0e-9);
-    let depth_span = (max_depth - min_depth).max(1.0e-9);
     let plot_left = 20.0;
     let plot_top = 84.0;
     let plot_width = PREVIEW_WIDTH;
     let plot_height = PREVIEW_HEIGHT;
+    let scale = ((plot_width - 56.0) / horizontal_span).min((plot_height - 56.0) / vertical_span);
     let to_canvas = |point: &[f64; 3]| {
         [
-            plot_left + (point[0] - min_horizontal) / horizontal_span * plot_width,
-            plot_top + (max_vertical - point[1]) / vertical_span * plot_height,
+            plot_left
+                + plot_width * 0.5
+                + (point[0] - (min_horizontal + max_horizontal) * 0.5) * scale,
+            plot_top + plot_height * 0.5 - (point[1] - (min_vertical + max_vertical) * 0.5) * scale,
         ]
     };
 
-    let stride = faces
-        .len()
-        .saturating_add(MAX_PROJECTED_FACES - 1)
-        .checked_div(MAX_PROJECTED_FACES)
-        .unwrap_or(1)
-        .max(1);
     let mut projected_faces = faces
         .iter()
-        .step_by(stride)
         .filter_map(|face| {
             let polygon = face
                 .iter()
@@ -380,11 +373,34 @@ fn project_mesh(points: &[[f64; 3]], faces: &[Vec<usize>]) -> Vec<(f64, Vec<[f64
                 .map(|index| projected_points[*index][2])
                 .sum::<f64>()
                 / face.len() as f64;
-            Some(((depth - min_depth) / depth_span, polygon))
+            // Newell normal supports native polygons with collinear vertices.
+            let mut normal = [0.0_f64; 3];
+            for i in 0..face.len() {
+                let a = projected_points[face[i]];
+                let b = projected_points[face[(i + 1) % face.len()]];
+                normal[0] += (a[1] - b[1]) * (a[2] + b[2]);
+                normal[1] += (a[2] - b[2]) * (a[0] + b[0]);
+                normal[2] += (a[0] - b[0]) * (a[1] + b[1]);
+            }
+            // Two-sided lighting also supports thin lifting surfaces.
+            if normal[2] < 0.0 {
+                normal = normal.map(|v| -v);
+            }
+            let length = normal.iter().map(|v| v * v).sum::<f64>().sqrt();
+            let diffuse = if length > 1.0e-12 {
+                ((-0.3 * normal[0] + 0.4 * normal[1] + (3.0_f64.sqrt() / 2.0) * normal[2]) / length)
+                    .max(0.0)
+            } else {
+                0.0
+            };
+            Some((depth, polygon, 0.25 + 0.75 * diffuse))
         })
         .collect::<Vec<_>>();
     projected_faces.sort_by(|left, right| left.0.total_cmp(&right.0));
     projected_faces
+        .into_iter()
+        .map(|(_, polygon, shade)| (shade, polygon))
+        .collect()
 }
 
 fn polygon_area(points: &[[f64; 2]]) -> f64 {
@@ -434,6 +450,10 @@ mod tests {
         "# vspgeom v3\n1\n8 6 3\n-1 -1 -1\n1 -1 -1\n1 1 -1\n-1 1 -1\n-1 -1 1\n1 -1 1\n1 1 1\n-1 1 1\n6\n4 1 2 3 4\n4 5 8 7 6\n4 1 5 6 2\n4 2 6 7 3\n4 3 7 8 4\n4 5 1 4 8\n"
     }
 
+    fn concave_pentagon_vspgeom() -> &'static str {
+        "# vspgeom v3\n1\n5 1 3\n0 0 0\n2 0 0\n2 2 0\n1 1 0\n0 2 0\n1\n5 1 2 3 4 5\n"
+    }
+
     #[test]
     fn missing_native_preview_is_explained_without_inventing_a_figure() {
         let scene = figure_openvsp_cad_preview(
@@ -444,12 +464,38 @@ mod tests {
             None,
         );
         assert!(scene.elements.iter().any(|element| {
-            matches!(element, SceneElement::Text { text, .. } if text.contains("expected artifact"))
+            matches!(element, SceneElement::Text { text, .. } | SceneElement::TextBlock { text, .. } if text.contains("expected artifact"))
         }));
         assert!(!scene
             .elements
             .iter()
             .any(|element| matches!(element, SceneElement::Image { .. })));
+    }
+
+    #[test]
+    fn cropped_native_screenshot_keeps_its_aspect_ratio_and_replaces_mesh() {
+        let path =
+            std::env::temp_dir().join(format!("alas-native-aspect-{}.png", std::process::id()));
+        let mut header = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
+        header.extend_from_slice(&800_u32.to_be_bytes());
+        header.extend_from_slice(&800_u32.to_be_bytes());
+        fs::write(&path, header).unwrap();
+        let mut result = export(
+            path.with_extension("vspscript"),
+            OpenVspExportStatus::Vsp3Materialized,
+        );
+        result.preview_available = true;
+        result.preview_path = path.clone();
+        result.cad_preview_geometry_available = true;
+        let scene = figure_openvsp_cad_preview(Some(&result), Some("dark"));
+        assert!(scene.elements.iter().any(|e| matches!(e,
+            SceneElement::Image { width, height, x, .. }
+            if (*width - 540.0).abs() < 1.0e-9 && (*height - 540.0).abs() < 1.0e-9 && (*x - 230.0).abs() < 1.0e-9)));
+        assert!(!scene
+            .elements
+            .iter()
+            .any(|e| matches!(e, SceneElement::Polygon { .. })));
+        fs::remove_file(path).unwrap();
     }
 
     #[test]
@@ -471,6 +517,49 @@ mod tests {
             })
             .collect::<Vec<_>>();
         assert_eq!(title_elements, vec![(Color::from_hex("#c0392b"), true)]);
+    }
+
+    #[test]
+    fn unavailable_diagnostics_wrap_inside_the_content_box() {
+        use crate::scene::conservative_char_budget;
+        use crate::status_figure::{STATUS_BODY_FONT_SIZE, STATUS_MARGIN, STATUS_WIDTH};
+        let long_path = format!(r"C:\runs\{}\aircraft.preview.png", "diagnostic".repeat(40));
+        let message = format!("status=runtime_rejected; expected artifact: {long_path}");
+        let scene = status_scene(
+            "OpenVSP CAD preview unavailable",
+            &message,
+            false,
+            Some("grey"),
+        );
+        let body = scene
+            .elements
+            .iter()
+            .find_map(|element| match element {
+                SceneElement::TextBlock {
+                    text, pos, width, ..
+                } => Some((text.as_str(), *pos, *width)),
+                _ => None,
+            })
+            .expect("unavailable diagnostic body");
+        assert_eq!(body.0, message, "the diagnostic is retained verbatim");
+        assert_eq!(body.1[0], STATUS_MARGIN);
+        assert_eq!(body.1[0] + body.2, STATUS_WIDTH - STATUS_MARGIN);
+
+        let svg = crate::svg::render_svg(&scene);
+        assert!(svg.contains("viewBox=\"0 0 760.0"));
+        let budget = conservative_char_budget(STATUS_BODY_FONT_SIZE, body.2);
+        let rows = svg
+            .split("<tspan")
+            .skip(1)
+            .filter_map(|row| {
+                let start = row.find('>')? + 1;
+                let end = row.find("</tspan>")?;
+                Some(&row[start..end])
+            })
+            .collect::<Vec<_>>();
+        assert!(rows.len() > 3, "long path should use multiple rows");
+        assert!(rows.iter().all(|row| row.chars().count() <= budget));
+        assert_eq!(svg.matches("x=\"32.00\"").count(), rows.len());
     }
 
     #[test]
@@ -502,6 +591,85 @@ mod tests {
             matches!(element, SceneElement::Text { text, .. } if text.contains("VSPGEOM"))
         }));
         fs::remove_dir_all(root).expect("remove temporary report fixture directory");
+    }
+
+    #[test]
+    fn native_mesh_keeps_openvsp_faces_with_more_than_four_vertices() {
+        let root = std::env::temp_dir().join(format!(
+            "alas-openvsp-report-polygon-{}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&root).expect("temporary report fixture directory");
+        let mesh_path = root.join("aircraft.cad_preview.vspgeom");
+        fs::write(&mesh_path, concave_pentagon_vspgeom()).expect("write polygon VSPGEOM fixture");
+        let mut result = export(
+            root.join("aircraft.vspscript"),
+            OpenVspExportStatus::Vsp3Materialized,
+        );
+        result.cad_preview_geometry_path = mesh_path;
+        result.cad_preview_geometry_available = true;
+
+        let scene = figure_openvsp_cad_preview(Some(&result), None);
+        assert!(scene.elements.iter().any(
+            |element| matches!(element, SceneElement::Polygon { points, .. } if points.len() == 5)
+        ));
+        fs::remove_dir_all(root).expect("remove temporary report fixture directory");
+    }
+
+    #[test]
+    fn projection_keeps_every_face_above_the_old_limit() {
+        let face_count = 10_230;
+        let mut points = Vec::with_capacity(face_count * 3);
+        let mut faces = Vec::with_capacity(face_count);
+        for index in 0..face_count {
+            let x = index as f64;
+            let base = points.len();
+            points.extend_from_slice(&[[x, 0.0, 0.0], [x + 0.4, 0.0, 0.0], [x, 0.4, 0.0]]);
+            faces.push(vec![base, base + 1, base + 2]);
+        }
+
+        let projected = project_mesh(&points, &faces);
+        assert_eq!(projected.len(), face_count);
+        assert!(projected.iter().all(|(_, polygon)| polygon.len() == 3));
+    }
+
+    #[test]
+    fn projection_preserves_camera_plane_lengths_and_margins() {
+        // Unit square in the camera plane: both edges must have equal screen length.
+        let up = [-0.3, 0.4, 3.0_f64.sqrt() / 2.0];
+        let points = [
+            [0.0, 0.0, 0.0],
+            [0.8, 0.6, 0.0],
+            [0.8 + up[0], 0.6 + up[1], up[2]],
+            up,
+        ];
+        let projected = project_mesh(&points, &[vec![0, 1, 2, 3]]);
+        let polygon = &projected[0].1;
+        let distance = |a: [f64; 2], b: [f64; 2]| (a[0] - b[0]).hypot(a[1] - b[1]);
+        assert!(
+            (distance(polygon[0], polygon[1]) - distance(polygon[1], polygon[2])).abs() < 1.0e-9
+        );
+        for p in polygon {
+            assert!(p[0] >= 48.0 - 1.0e-9 && p[0] <= 20.0 + PREVIEW_WIDTH - 28.0 + 1.0e-9);
+            assert!(p[1] >= 112.0 - 1.0e-9 && p[1] <= 84.0 + PREVIEW_HEIGHT - 28.0 + 1.0e-9);
+        }
+    }
+
+    /// Optional visual audit against a real native export, without invoking OpenVSP.
+    #[test]
+    #[ignore = "set ALAS_PREVIEW_MESH and ALAS_PREVIEW_SVG for a local visual audit"]
+    fn render_native_preview_for_visual_audit() {
+        let mesh =
+            std::path::PathBuf::from(std::env::var_os("ALAS_PREVIEW_MESH").expect("mesh path"));
+        let output = std::env::var_os("ALAS_PREVIEW_SVG").expect("SVG output path");
+        let mut result = export(
+            mesh.with_extension("vspscript"),
+            OpenVspExportStatus::Vsp3Materialized,
+        );
+        result.cad_preview_geometry_path = mesh;
+        result.cad_preview_geometry_available = true;
+        let scene = mesh_projection_scene(&result, Some("dark")).expect("valid native mesh");
+        fs::write(output, crate::svg::render_svg(&scene)).expect("write visual audit");
     }
 
     /// Negative control for the reported bug. Even when the solver-only,
@@ -538,7 +706,7 @@ mod tests {
             .iter()
             .any(|element| matches!(element, SceneElement::Image { .. })));
         assert!(scene.elements.iter().any(|element| {
-            matches!(element, SceneElement::Text { text, .. } if text.contains("expected artifact"))
+            matches!(element, SceneElement::Text { text, .. } | SceneElement::TextBlock { text, .. } if text.contains("expected artifact"))
         }));
         fs::remove_dir_all(root).expect("remove temporary report fixture directory");
     }

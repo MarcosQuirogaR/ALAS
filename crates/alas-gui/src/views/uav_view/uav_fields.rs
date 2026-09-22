@@ -132,11 +132,14 @@ fn number_step(value: f64) -> f64 {
     }
 }
 
+/// The same display-unit policy the schema forms use, so `m2` and `kg/m3`
+/// read as `m<superscript 2>` and `kg/m<superscript 3>` here too.
 fn unit_suffix(suffix: &str) -> String {
-    if suffix.is_empty() {
+    let unit = crate::views::form::display_unit(suffix);
+    if unit.is_empty() {
         String::new()
     } else {
-        format!(" {suffix}")
+        format!(" {unit}")
     }
 }
 

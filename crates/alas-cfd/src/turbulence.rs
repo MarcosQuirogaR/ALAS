@@ -11,22 +11,18 @@ use serde::{Deserialize, Serialize};
 /// constrains the far-field eddy viscosity directly.  The length-scale form
 /// remains available for studies whose tunnel or inflow specification gives a
 /// physical integral scale instead.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum TurbulenceSpecification {
     /// Derive omega from `nu_t/nu` and molecular kinematic viscosity.
     ViscosityRatio,
     /// Derive omega from the configured turbulence length scale.
+    ///
+    /// This preserves the interpretation of configurations written before
+    /// the explicit specification field existed.  `CfdStudyConfig::default`
+    /// opts into the documented external-flow viscosity-ratio setup.
+    #[default]
     LengthScale,
-}
-
-impl Default for TurbulenceSpecification {
-    fn default() -> Self {
-        // This preserves the interpretation of configurations written before
-        // the explicit specification field existed.  CfdStudyConfig::default
-        // opts into the documented external-flow viscosity-ratio setup.
-        Self::LengthScale
-    }
 }
 
 impl TurbulenceSpecification {

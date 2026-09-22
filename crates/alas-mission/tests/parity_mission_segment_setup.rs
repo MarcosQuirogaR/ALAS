@@ -6,7 +6,7 @@
 //!
 //! Everything here is `exact`, and none of it is a physical result: it is the
 //! analysis settings, the engine's fixed component parameters and the segment
-//! schedule -- copied constants, every one, and every one a thing a port can
+//! schedule: copied constants, every one, and every one a thing a port can
 //! silently substitute its own value for. A wrong constant here produces a
 //! mission that agrees about arithmetic while flying something else, and the
 //! numbers alone cannot tell the two apart.

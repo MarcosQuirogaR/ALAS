@@ -18,7 +18,7 @@
 //!
 //! It began private to `alas-payload::numeric`, which was the first module in
 //! the port to need it; `alas-aero::analysis` is the second, and that crate's
-//! own doc states the rule this move follows -- a primitive with a second
+//! own doc states the rule this move follows: a primitive with a second
 //! consumer lives here rather than being copied.
 
 /// NumPy's `np.interp(x, xp, fp)` for one query point: piecewise-linear
@@ -26,7 +26,7 @@
 ///
 /// `xp` must be ascending, which is what every caller's construction
 /// guarantees. Returns NaN when `xp` is empty or `fp` is a different length,
-/// where NumPy raises -- library code reports the surprise in its value
+/// where NumPy raises: library code reports the surprise in its value
 /// rather than panicking (`CONTRIBUTING.md`), and no caller here can reach
 /// either case.
 pub fn interp(x: f64, xp: &[f64], fp: &[f64]) -> f64 {

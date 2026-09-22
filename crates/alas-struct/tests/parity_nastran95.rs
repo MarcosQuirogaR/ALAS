@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! Validates `alas-struct::nastran95` -- the deck this program writes for the
-//! open-source 1995 solver -- with no Python original to translate.
+//! Validates `alas-struct::nastran95`: the deck this program writes for the
+//! open-source 1995 solver, with no Python original to translate.
 //!
 //! # An external-solver, cross-solver parity test
 //!
 //! There is nothing to agree with in the usual way: this row has no reference
 //! implementation. So what it agrees with is a *second solver*. The same wingbox
-//! is written twice from one mesh -- once in the NASTRAN-95 dialect, once for a
-//! modern solver -- and both are solved, and the two are held to **converge on
+//! is written twice from one mesh; once in the NASTRAN-95 dialect, once for a
+//! modern solver, and both are solved, and the two are held to **converge on
 //! each other as the mesh is refined**. That is a stronger claim than any fixed
 //! tolerance: a coarse-mesh disagreement that halves each time the mesh is
 //! refined is the signature of two `CQUAD4` formulations approaching the same
@@ -18,7 +18,7 @@
 //! # What runs where
 //!
 //! One check needs no solver and always runs: the deck this crate writes obeys
-//! the NASTRAN-95 dialect rules -- every bulk field fits eight columns, every
+//! the NASTRAN-95 dialect rules, every bulk field fits eight columns, every
 //! real shows a decimal point, and the cards that overflow eight fields continue
 //! rather than being silently dropped. Three of those rules fail *without a
 //! diagnostic* in the solver, so checking them here is the only place a
@@ -27,7 +27,7 @@
 //! The convergence check needs both solvers. NASTRAN-95 is found through
 //! `ALAS_NASTRAN95_DIR`/`ALAS_NASTRAN95_RUNTIME` and the modern solver through
 //! `ALAS_MSC_LAUNCHER`/`ALAS_MSC_SOLVER`; when either is unset the check skips,
-//! loudly, rather than failing -- the same contract the MSES row keeps.
+//! loudly, rather than failing: the same contract the MSES row keeps.
 //!
 //! # Scope: statics
 //!
@@ -69,7 +69,7 @@ use support::{build_geometry, materials_for, MaterialsRecord};
 const REFINEMENTS: [(i64, i64); 3] = [(5, 6), (9, 10), (16, 20)];
 
 /// The relative cross-solver disagreement the finest mesh must sit inside. It is
-/// a ceiling, not the claim -- the claim is that the disagreement is shrinking.
+/// a ceiling, not the claim: the claim is that the disagreement is shrinking.
 const FINEST_TOLERANCE: f64 = 0.05;
 
 /// `golden/struct/nastran95.json`: the recorded convergence evidence.
@@ -144,8 +144,8 @@ fn wingbox(num_ribs: i64, chordwise: i64) -> Wingbox {
 
 #[test]
 fn the_nastran95_static_deck_obeys_every_dialect_rule() {
-    // No solver needed: this is the check that a formatter regression -- the
-    // kind that fails silently inside NASTRAN-95 -- is caught anywhere.
+    // No solver needed: this is the check that a formatter regression (the
+    // kind that fails silently inside NASTRAN-95) is caught anywhere.
     let mut rivets_seen = false;
     for (num_ribs, chordwise) in REFINEMENTS {
         let (deck, node_index, req, cfg) = wingbox(num_ribs, chordwise);
@@ -155,7 +155,7 @@ fn the_nastran95_static_deck_obeys_every_dialect_rule() {
     }
     // The finest mesh grows transition-rib rivets, so the sweep exercises the
     // `RBE3` -> `CRBE3` rename on a real card rather than only asserting its
-    // absence -- a coarse mesh has none, which is why the rename is checked
+    // absence: a coarse mesh has none, which is why the rename is checked
     // here, across the sweep, and not on every deck.
     assert!(
         rivets_seen,
@@ -167,8 +167,8 @@ fn the_nastran95_static_deck_obeys_every_dialect_rule() {
 /// eighty columns the fixed field allows. Case-control lines (before
 /// `BEGIN BULK`) are free-form and exempt.
 ///
-/// The field-level rules -- eight columns each, a decimal point on every real,
-/// the no-`E` exponent shorthand -- are pinned by the formatter's own unit
+/// The field-level rules (eight columns each, a decimal point on every real,
+/// the no-`E` exponent shorthand) are pinned by the formatter's own unit
 /// tests, which reach cases a wingbox deck does not; this is the deck-level
 /// check that those rules survive assembly of the real thing, since three of
 /// them fail without any diagnostic inside the solver.
@@ -277,7 +277,7 @@ fn the_two_solvers_converge_on_the_same_static_deflection() {
             "ribs={num_ribs}: peak grid moved from the recorded evidence"
         );
         // The solve is deterministic for a fixed deck and build, so live results
-        // must reproduce the recorded ones -- a regression check on top of the
+        // must reproduce the recorded ones: a regression check on top of the
         // convergence one.
         assert_close(n95_peak.1, recorded.n95_peak_t3, "n95 peak", num_ribs);
         assert_close(msc_peak.1, recorded.msc_peak_t3, "msc peak", num_ribs);
@@ -417,7 +417,7 @@ fn sturm_gate_rejects_a_parsed_list_with_an_omitted_lowest_root() {
 
 /// Write `golden/struct/nastran95.json` from a live cross-solver run.
 ///
-/// The fixture is the captured convergence evidence -- there is no reference
+/// The fixture is the captured convergence evidence; there is no reference
 /// implementation to generate it, so the generator is the test itself, run with
 /// both solvers present and `ALAS_NASTRAN95_REGEN` set.
 #[allow(clippy::print_stderr)]
@@ -446,7 +446,7 @@ fn regenerate_fixture(live: &[Live]) {
     eprintln!("wrote {}", path.display());
 }
 
-/// A live number must match the recorded one to a determinism tolerance -- the
+/// A live number must match the recorded one to a determinism tolerance: the
 /// last-digit round-off two runs of the same solver can differ by.
 fn assert_close(got: f64, want: f64, what: &str, num_ribs: i64) {
     let relative = (got - want).abs() / want.abs().max(1e-30);
@@ -478,7 +478,7 @@ fn peak_deflection(tables: &[Vec<(i64, [f64; 6])>]) -> (i64, f64) {
 }
 
 /// A modern solver driven the way the working harness drives MSC Nastran
-/// Student Edition -- the launcher pointed at Patran's `analysis.exe`.
+/// Student Edition: the launcher pointed at Patran's `analysis.exe`.
 struct Msc {
     launcher: String,
     solver: String,
@@ -597,7 +597,7 @@ fn the_msc_command_token_removes_whitespace_from_the_configured_solver() {
     );
 }
 
-/// A short scratch directory, emptied first -- NASTRAN-95 needs the path short
+/// A short scratch directory, emptied first: NASTRAN-95 needs the path short
 /// (its `/DOSNAM/` is `CHARACTER*72`), so this uses the drive root, not the
 /// system temp under a long profile path.
 fn scratch_dir(label: &str) -> PathBuf {

@@ -9,8 +9,8 @@
 
 use super::sources::{
     unknown, A220_ACP, A220_ARP, A320_ACAP_REV46, A320_F_HDRF_SHEET, A340_ACAP_REV33,
-    A380_ACAP_REV20, A380_AGGREGATOR, ATR_FACTSHEET, B777X_ACAP_REV_G, B787_ACAP_REV_L, DC10_ACAP,
-    DC10_ACAP_30CF, RETRIEVED,
+    A380_ACAP_REV20, A380_AGGREGATOR, ATR_FACTSHEET, B777X_ACAP_REV_G, B777X_SECONDARY_PROJECTION,
+    B787_ACAP_REV_L, DC10_ACAP, DC10_ACAP_30CF, ELSEVIER_DATA_A, RETRIEVED,
 };
 use super::{
     InclusionStatus, OewApplicability, OewCaseAnchor, OewInclusionList, OewReference,
@@ -25,26 +25,35 @@ pub(super) static RECORDS: &[OewReference] = &[
         definition_label: "none: notional design",
         reference_configuration: OewReferenceConfiguration {
             model: "AVE-v1",
-            weight_variant: "notional design requirement",
+            weight_variant: "notional design requirement; user-selected Boeing 777-9 planning benchmark (351,534 kg MTOW)",
             mtow_kg: Some(358_670.0),
-            engine: "GE9X family conceptual installation",
-            modification_state: "AVE-v1 design baseline",
-            cabin: "auto-sized product cabin",
+            engine: "GE9X family conceptual installation; benchmark GE9X-105B1A",
+            modification_state: "AVE-v1 design baseline; benchmark D6-86073 Rev G 777-9 planning configuration",
+            cabin: "auto-sized product cabin; benchmark 777-9 planning layouts 426 two-class / 357 three-class",
         },
         differences_from_preset: &[],
         inclusion: unknown(),
         source: None,
         uncertainty_kg: None,
         case_anchor: None,
-        other_published_values: &[PublishedOewValue {
-            label: "Boeing 777-9 planning benchmark: no numeric OEW published",
-            value_kg: 0.0,
-            is_operating_empty: false,
-            source: B777X_ACAP_REV_G,
-            note: "the 777-9 is a benchmark for AVE's geometry class, not a measurement of AVE",
-        }],
+        other_published_values: &[
+            PublishedOewValue {
+                label: "Boeing 777-9 current planning benchmark: no numeric OEW published",
+                value_kg: 0.0,
+                is_operating_empty: false,
+                source: B777X_ACAP_REV_G,
+                note: "the current Rev G planning document defines OEW but leaves its numeric value TBD; the 777-9 is a reference configuration for AVE, not a measurement of AVE",
+            },
+            PublishedOewValue {
+                label: "Boeing 777-9X early secondary OEW projection",
+                value_kg: 188_241.0,
+                is_operating_empty: true,
+                source: B777X_SECONDARY_PROJECTION,
+                note: "secondary 2014 projection for a 4-class 300-seat 777-9X, repeated in an independent aviation report and attributed to Aspire Aviation/Boeing sources; the cabin, design revision, and inclusion list do not match the current Rev G planning case, so this row is context only and is excluded from every validation or AVE metric",
+            },
+        ],
         structural_payload_basis_oew_kg: None,
-        notes: "AVE is notional; no aircraft OEW exists and none may be inferred from the 777-9.",
+        notes: "AVE is notional and uses the Boeing 777-9 as its user-selected reference configuration. The current Rev G primary document has no numeric OEW; the old 188,241 kg projection is retained only as a secondary, pre-certification context row and cannot be transferred to AVE or used for calibration/validation.",
     },
     OewReference {
         preset: "A340-300",
@@ -91,9 +100,16 @@ pub(super) static RECORDS: &[OewReference] = &[
                 },
                 note: "a maintenance configuration weight, not an operating empty weight",
             },
+            PublishedOewValue {
+                label: "A340-300 'Operational empty', Elsevier Data A Table 1",
+                value_kg: 129_850.0,
+                is_operating_empty: true,
+                source: ELSEVIER_DATA_A,
+                note: "secondary anchor only. An independent compilation that is 1,365 kg below the Airbus jacking figure this record compares against, which brackets that figure rather than replacing it; the site states no inclusion list and warns that each manufacturer defines the data differently. The book's A330-300 and A340-300 columns share their geometry rows, so its dimensions are the A330/A340 common airframe and must not be read as the -300 stretch.",
+            },
         ],
         structural_payload_basis_oew_kg: None,
-        notes: "Primary Airbus figure labelled OEW but not tied to WV029 or to a cabin; comparable only as a typical-configuration anchor with a stated uncertainty. The declared structural payload 48,600 kg is an upstream value with no documented OEW derivation.",
+        notes: "Primary Airbus figure labelled OEW but not tied to WV029 or to a cabin; comparable only as a typical-configuration anchor with a stated uncertainty. The declared structural payload 48,600 kg is an upstream value with no documented OEW derivation. An independent Elsevier Data A compilation value of 129,850 kg is registered as a secondary anchor and does not enter any metric.",
     },
     OewReference {
         preset: "A380-800",
@@ -154,7 +170,20 @@ pub(super) static RECORDS: &[OewReference] = &[
             cabin: "product cabin 42 business / 260 economy (302 seats)",
         },
         differences_from_preset: &[],
-        inclusion: unknown(),
+        // Rev Q prints no value, but it does print the definition, and the
+        // definition is readable on its own. Boeing D6-58333 Rev Q section 2.1
+        // states the operating empty weight without unit load devices, and FAA
+        // AC 120-27F says the same of basic operating weight while AC 120-85B
+        // treats a ULD as tare tracked with the load. That one field is
+        // therefore Excluded rather than Unknown; every other field stays
+        // Unknown because Rev Q does not itemize them. This does not make the
+        // list complete and does not change `counts_toward_validation`, which
+        // stays false on a `SourceGap` record - it records, in the registry
+        // instead of in a handoff, the boundary the mass model computes on.
+        inclusion: OewInclusionList {
+            cargo_containers: InclusionStatus::Excluded,
+            ..unknown()
+        },
         source: None,
         uncertainty_kg: None,
         case_anchor: Some(OewCaseAnchor {
@@ -256,9 +285,16 @@ pub(super) static RECORDS: &[OewReference] = &[
                 },
                 note: "not present in the cited current document; retained only as the basis of the declared structural payload",
             },
+            PublishedOewValue {
+                label: "A320-200 'Operational empty', Elsevier Data A Table 1",
+                value_kg: 41_310.0,
+                is_operating_empty: true,
+                source: ELSEVIER_DATA_A,
+                note: "secondary anchor only. Independent of the F-HDRF operator sheet the case anchor uses and 258 kg above it, which is the strongest corroboration available for this preset; the site states no inclusion list and no weight variant, so it neither identifies WV017 nor replaces the reconstructed case.",
+            },
         ],
         structural_payload_basis_oew_kg: Some(41_244.0),
-        notes: "The registered aircraft has no configuration-matched OEW. The 41,052 kg sheet is compared only through the reconstructed 77 t / 180Y / fence-tip case.",
+        notes: "The registered aircraft has no configuration-matched OEW. The 41,052 kg sheet is compared only through the reconstructed 77 t / 180Y / fence-tip case. An independent Elsevier Data A compilation value of 41,310 kg is registered as a secondary anchor and does not enter any metric.",
     },
     OewReference {
         preset: "A220-300",
@@ -306,7 +342,13 @@ pub(super) static RECORDS: &[OewReference] = &[
     },
     OewReference {
         preset: "ATR72-600",
-        applicability: OewApplicability::UnsupportedModel,
+        // The model is no longer unsupported: the shaft-power propulsion
+        // group evaluates this aircraft through the production path, so a
+        // prediction now exists and the record must say what it may be
+        // compared with. It is still not a validation anchor - the factsheet
+        // does not state the definition's inclusion list, and the two
+        // published bases differ by 440 kg.
+        applicability: OewApplicability::ConditionalMismatch,
         reference_oew_kg: Some(13_450.0),
         definition_label: "typical in-service operational empty weight",
         reference_configuration: OewReferenceConfiguration {
@@ -317,7 +359,11 @@ pub(super) static RECORDS: &[OewReference] = &[
             modification_state: "ATR 72-600 commercial standard",
             cabin: "72-seat factsheet reference",
         },
-        differences_from_preset: &["the pure FLOPS transport model has no propeller or shaft-power branch; no prediction exists to compare with"],
+        differences_from_preset: &[
+            "the published figure is a typical in-service operational empty weight, whose inclusion list the factsheet does not state; the technical-specification basis below is 440 kg lower",
+            "the FLOPS airframe, systems and passenger-driven operating items are evaluated as published, but the propulsion group is the declared shaft-power method, not a FLOPS equation",
+            "the operator interior and standard-equipment fit behind the in-service figure are not stated",
+        ],
         inclusion: unknown(),
         source: Some(ATR_FACTSHEET),
         uncertainty_kg: Some(440.0),
@@ -334,7 +380,7 @@ pub(super) static RECORDS: &[OewReference] = &[
             note: "the 440 kg spread between the factsheet bases is the standard-equipment / in-service allowance",
         }],
         structural_payload_basis_oew_kg: Some(13_450.0),
-        notes: "Manufacturer record retained for the aircraft; the model is unsupported, so the record is excluded from every metric.",
+        notes: "Manufacturer record retained for the aircraft. The shaft-power propulsion group makes a prediction available, so the record is a visible conditional comparison; it is still excluded from validation metrics because the definition carries no inclusion list.",
     },
     OewReference {
         preset: "DC-10",
@@ -384,13 +430,22 @@ pub(super) static RECORDS: &[OewReference] = &[
             uncertainty_kg: Some(2_000.0),
             residual_mismatch: &["same document and cabin as the comparable value; only the weight option differs"],
         }),
-        other_published_values: &[PublishedOewValue {
-            label: "Series 30CF passenger-mode Operating Weight Empty",
-            value_kg: 121_904.0,
-            is_operating_empty: true,
-            source: DC10_ACAP_30CF,
-            note: "convertible-freighter airframe in passenger mode (MLW 186,427 kg, MZFW 177,355 kg); a different model column that earlier audits mislabelled as the standard passenger row",
-        }],
+        other_published_values: &[
+            PublishedOewValue {
+                label: "Series 30CF passenger-mode Operating Weight Empty",
+                value_kg: 121_904.0,
+                is_operating_empty: true,
+                source: DC10_ACAP_30CF,
+                note: "convertible-freighter airframe in passenger mode (MLW 186,427 kg, MZFW 177,355 kg); a different model column that earlier audits mislabelled as the standard passenger row",
+            },
+            PublishedOewValue {
+                label: "DC10-30 'Operational empty', Elsevier Data A Table 1",
+                value_kg: 121_364.0,
+                is_operating_empty: true,
+                source: ELSEVIER_DATA_A,
+                note: "secondary anchor only. 450 kg above the Douglas ACAP passenger OWE this record compares against and 540 kg below the 30CF column, i.e. it sits between the two published Douglas columns rather than distinguishing them; the site states no inclusion list and no weight option.",
+            },
+        ],
         structural_payload_basis_oew_kg: Some(120_914.0),
         notes: "The ACAP defines OWE as structure, power plant, furnishing, systems, unusable fuel and other unusable propulsion agents, standard items, personnel, equipment and supplies necessary for full operation, excluding fuel and payload. The preset's 120,914 kg, 190,962 kg landing weight and 46,008 kg structural payload are exactly the passenger column with the 572,000 lb footnote applied.",
     },

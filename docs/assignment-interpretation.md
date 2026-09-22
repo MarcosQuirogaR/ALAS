@@ -159,7 +159,7 @@ until supported by the required analysis, test, and authority-approved data.
 1. Define the canonical object model, applicability profile, floor ledger, and
    typed residuals (CAB-02, CAB-08, CAB-11).
 2. Make the builder reserve envelope/safety/accessibility/service geometry and
-   then solve the three-class seat layout (CAB-03--CAB-07, CAB-12).
+   then solve the three-class seat layout (CAB-03 to CAB-07, CAB-12).
 3. Replace named presets and Custom semantics; remove/migrate the capacity
    switch (CAB-04, CAB-09, CAB-10).
 4. Route the canonical result into mass/CG, feasibility, reports, GUI estimates,

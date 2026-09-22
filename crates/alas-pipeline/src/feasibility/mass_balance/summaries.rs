@@ -49,6 +49,8 @@ pub struct LedgerItemSummary {
     pub id: String,
     /// Functional group label.
     pub group: &'static str,
+    /// Actual correlation or declared source used for this mass.
+    pub method: &'static str,
     /// Mass, kg.
     pub mass_kg: f64,
     /// Reference point, m.

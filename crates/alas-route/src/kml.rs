@@ -6,8 +6,8 @@
 
 //! Importing a dispatch route exported by hand as KML.
 //!
-//! A flight planner's "download as KML" export packs the whole route --
-//! departure procedure, airway waypoints, arrival procedure -- into a single
+//! A flight planner's "download as KML" export packs the whole route:
+//! departure procedure, airway waypoints, arrival procedure: into a single
 //! `<coordinates>` block of `lon,lat,alt` triples. That is a real dispatched
 //! lateral path including the terminal procedures this program's own airway
 //! routing does not model, and it needs no account or API key to produce: the

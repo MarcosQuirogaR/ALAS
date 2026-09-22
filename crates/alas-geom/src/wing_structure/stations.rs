@@ -3,7 +3,7 @@
 
 //! The full station generator: cosine-spaced chordwise sampling with each
 //! spar's exact chord fraction and the rib's own truncation point injected,
-//! so spar elements land on real mesh nodes -- `get_rib_stations`.
+//! so spar elements land on real mesh nodes: `get_rib_stations`.
 
 use super::support::{argmin_abs_diff, is_close, linspace, round6};
 use super::types::RibStation;
@@ -40,7 +40,7 @@ impl WingStructureGeometry {
                 .collect();
 
             // Snap the nearest chordwise sample to each spar's exact
-            // fraction (in spar order), then to `frac_actual` last -- the
+            // fraction (in spar order), then to `frac_actual` last: the
             // same order the reference mutates its array in, since a later
             // snap can retarget an index an earlier one already claimed.
             let mut critical_pts: Vec<f64> = frac_spars

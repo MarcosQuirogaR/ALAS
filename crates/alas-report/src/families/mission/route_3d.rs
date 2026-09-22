@@ -14,10 +14,12 @@ use alas_route::route::Route;
 
 use crate::chart_kit::draw_colorbar;
 use crate::colormap::Colormap;
-use crate::families::mission::earth::{draw_textured_earth, project_visible_path};
+use crate::families::mission::earth::{
+    draw_textured_earth, globe_disk, project_visible_path, viewport_contains,
+};
 use crate::route_geometry::{route_to_xyz, EARTH_RADIUS_KM, PATH_VISIBILITY_OFFSET_KM};
 use crate::scene::{
-    Camera3D, Color, Fill, Point3D, Scene, SceneElement, Stroke, TextAlign, TextBaseline,
+    Camera3D, Color, Fill, Point2D, Point3D, Scene, SceneElement, Stroke, TextAlign, TextBaseline,
 };
 use crate::theme::get_palette;
 
@@ -25,6 +27,9 @@ const ARC_SAMPLES_PER_LEG: usize = 32;
 const VIEWPORT: (f64, f64, f64, f64) = (30.0, 50.0, 720.0, 450.0);
 const GLOBE_FRAMING_SPAN_KM: f64 = 1.12 * EARTH_RADIUS_KM;
 const MIN_WAYPOINT_LABEL_SEPARATION_PX: f64 = 64.0;
+/// Room a waypoint label needs inside the globe viewport before it would run
+/// under the colorbar or the figure footnote.
+const LABEL_EDGE_MARGIN_PX: f64 = 28.0;
 
 fn normalize(point: Point3D) -> Point3D {
     let norm = (point[0] * point[0] + point[1] * point[1] + point[2] * point[2]).sqrt();
@@ -147,6 +152,16 @@ pub fn route_focused_camera(route: &Route) -> Camera3D {
     }
 }
 
+/// Scene-space disk the route globe occupies for a given camera: its centre
+/// and radius in the figure's own coordinates.
+///
+/// An interactive viewport needs this to convert a pointer position into a
+/// point on the globe surface, so the framing constants stay owned by the
+/// figure that draws them.
+pub fn route_globe_disk(camera: &Camera3D) -> (Point2D, f64) {
+    globe_disk(camera, VIEWPORT, GLOBE_FRAMING_SPAN_KM)
+}
+
 /// Draw an orbitable globe route with optional mass and altitude profiles.
 pub fn figure_mission_route_3d(
     route: &Route,
@@ -226,6 +241,12 @@ pub fn figure_mission_route_3d(
             continue;
         }
         let projected = camera.project(xyz, center, span, VIEWPORT);
+        // A zoomed globe pushes most of its surface outside the framed
+        // viewport; a marker drawn there would sit on the title or colorbar
+        // with no globe under it.
+        if !viewport_contains(projected, VIEWPORT) {
+            continue;
+        }
         let marker = if index == 0 {
             "#2ecc71"
         } else if index + 1 == route.waypoints.len() {
@@ -245,7 +266,16 @@ pub fn figure_mission_route_3d(
             let dy = projected[1] - previous[1];
             dx * dx + dy * dy >= MIN_WAYPOINT_LABEL_SEPARATION_PX.powi(2)
         });
-        if !waypoint.ident.is_empty() && (is_endpoint || separated) {
+        let label_fits = viewport_contains(
+            projected,
+            (
+                VIEWPORT.0 + LABEL_EDGE_MARGIN_PX,
+                VIEWPORT.1 + LABEL_EDGE_MARGIN_PX,
+                VIEWPORT.2 - 2.0 * LABEL_EDGE_MARGIN_PX,
+                VIEWPORT.3 - 2.0 * LABEL_EDGE_MARGIN_PX,
+            ),
+        );
+        if !waypoint.ident.is_empty() && label_fits && (is_endpoint || separated) {
             let vertical_offset = if index % 2 == 0 { -7.0 } else { 8.0 };
             scene.add(SceneElement::Text {
                 text: waypoint.ident.clone(),
@@ -418,6 +448,52 @@ mod tests {
             text_position(&zoomed, "WEST")
         );
     }
+
+    #[test]
+    fn a_zoomed_globe_keeps_every_plotted_object_inside_its_viewport() {
+        let route = Route::new(
+            vec![
+                Waypoint::named(51.4700, -0.4543, "EGLL"),
+                Waypoint::named(48.0, 10.0, "MIDDLE"),
+                Waypoint::named(25.2532, 55.3657, "OMDB"),
+            ],
+            RouteSource::GreatCircle,
+        );
+        let camera = Camera3D {
+            zoom: MAX_ROUTE_ZOOM_UNDER_TEST,
+            ..route_focused_camera(&route)
+        };
+        let scene = figure_mission_route_3d(
+            &route,
+            Some(&[70_000.0, 67_000.0, 65_000.0]),
+            Some(&[0.0, 10_000.0, 0.0]),
+            Some(camera),
+            Some("dark"),
+        );
+
+        let (x, y, width, height) = VIEWPORT;
+        let inside = |point: &[f64; 2]| {
+            (x..=x + width).contains(&point[0]) && (y..=y + height).contains(&point[1])
+        };
+        for element in &scene.elements {
+            match element {
+                SceneElement::Polyline { points, .. } => {
+                    assert!(points.iter().all(inside), "polyline outside the viewport");
+                }
+                SceneElement::Circle { center, radius, .. } if (*radius - 3.4).abs() < 1e-9 => {
+                    assert!(inside(center), "waypoint marker outside the viewport");
+                }
+                _ => {}
+            }
+        }
+        let (disk_center, disk_radius) = route_globe_disk(&camera);
+        assert!(disk_radius > height * 0.5, "test camera is not zoomed in");
+        assert_eq!(disk_center, [x + width * 0.5, y + height * 0.5]);
+    }
+
+    /// The GUI's maximized-view cap, kept here so the figure is exercised at
+    /// the closest zoom a user can reach.
+    const MAX_ROUTE_ZOOM_UNDER_TEST: f64 = 4.0;
 
     #[test]
     fn initial_camera_centers_the_visible_hemisphere_on_the_route() {

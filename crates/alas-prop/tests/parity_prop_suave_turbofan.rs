@@ -6,8 +6,8 @@
 //! the historical fixture and test filename for reproducibility.
 //!
 //! Every reported quantity is closed-form compressible-flow arithmetic over the
-//! ambient state -- read here through `alas_atmo::us1976_compute_values`, the
-//! same US Standard 1976 model SUAVE's mission stack uses -- so the whole cycle
+//! ambient state: read here through `alas_atmo::us1976_compute_values`, the
+//! same US Standard 1976 model SUAVE's mission stack uses, so the whole cycle
 //! is checked at `Tier::Closed`, matching `docs/PORTING.md`. The fixture records
 //! every intermediate station of both the cruise sizing pass and the
 //! sea-level-static replay, on two presets (AVE/GE9X and A320-200/LEAP-1A), so

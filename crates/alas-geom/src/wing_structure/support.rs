@@ -2,14 +2,14 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 //! Small numeric and geometric primitives [`super::WingStructureGeometry`]'s
-//! methods share -- interpolation, spacing, rounding, line intersection --
+//! methods share (interpolation, spacing, rounding, line intersection)
 //! kept apart from the wingbox logic that calls them since none of them is
 //! specific to a wing.
 
 use crate::aircraft::airfoil::Airfoil;
 
 /// `(x_upper, z_upper, x_lower, z_lower)`, each ascending in `x` and
-/// normalized to unit chord -- native aerodynamic model's own coordinate orientation
+/// normalized to unit chord: native aerodynamic model's own coordinate orientation
 /// isn't guaranteed leading-to-trailing edge, so this sorts explicitly
 /// rather than assume it.
 pub(super) fn airfoil_surfaces(airfoil: &Airfoil) -> (Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>) {
@@ -92,9 +92,10 @@ pub(super) fn clamped_interp(x: f64, xp: &[f64], fp: &[f64]) -> f64 {
     fp[last]
 }
 
-/// Evenly spaced points from `start` to `stop`, inclusive -- NumPy's
-/// `linspace(start, stop, num, endpoint=True)`. Duplicated from
-/// `aircraft::spacing::linspace`, which is private to the aircraft module.
+/// Evenly spaced points from `start` to `stop`, inclusive: NumPy's
+/// `linspace(start, stop, num, endpoint=True)`. A copy of
+/// `aircraft::spacing::linspace`, which is reachable from here: the copy is
+/// historical, not a visibility workaround.
 pub(super) fn linspace(start: f64, stop: f64, num: usize) -> Vec<f64> {
     if num == 0 {
         return Vec::new();
@@ -109,7 +110,7 @@ pub(super) fn linspace(start: f64, stop: f64, num: usize) -> Vec<f64> {
     values
 }
 
-/// `x` rounded to 6 decimal places -- `np.round(x, 6)`.
+/// `x` rounded to 6 decimal places: `np.round(x, 6)`.
 ///
 /// NumPy rounds halfway cases to even; this rounds halfway cases away from
 /// zero, `f64::round`'s behaviour. The chord fractions this module rounds
@@ -127,7 +128,7 @@ pub(super) fn is_close(a: f64, b: f64) -> bool {
 }
 
 /// The index of `values`'s entry closest to `target`, first occurrence on a
-/// tie -- `np.argmin(np.abs(values - target))`.
+/// tie: `np.argmin(np.abs(values - target))`.
 pub(super) fn argmin_abs_diff(values: &[f64], target: f64) -> usize {
     let mut best_index = 0;
     let mut best_diff = f64::INFINITY;

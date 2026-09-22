@@ -27,6 +27,7 @@ use alas_perf::performance::{
 use crate::full_analysis::AnalysisReport;
 use crate::mission_stage::SelectedLoadCase;
 
+mod acceptance;
 mod cruise_equilibrium;
 mod dispatch;
 mod fuel;
@@ -34,9 +35,13 @@ mod mass_balance;
 mod planning;
 mod report_format;
 mod reported_attitude;
+mod static_thrust;
 mod structural_mass;
 mod types;
 
+pub use acceptance::{
+    DeliveryBlocker, DeliveryClassification, DeliveryVerdict, DesignProvenance, RunCompletion,
+};
 pub(crate) use cruise_equilibrium::assess as assess_cruise_equilibrium;
 pub use cruise_equilibrium::CruiseEquilibriumAssessment;
 pub use dispatch::{DispatchAssessment, DispatchOutcome};
@@ -179,6 +184,14 @@ fn append_model_cg_findings(
             constraint.unit(),
         ));
     }
+    // The aft-boundary governance diagnostic that explains a nose-load
+    // violation is carried on the typed assessment itself
+    // (`ModelCgEnvelopeAssessment::aft_limit_governance`) and reported by
+    // `report_format` and `acceptance`. It is deliberately not a
+    // `PhysicalFinding`: `FindingCode` is an interface whose exhaustive
+    // consumers live outside this crate's ownership boundary, and the
+    // diagnostic changes no verdict: a layout whose gear cannot carry the
+    // envelope still fails `MinimumNoseGearLoadViolation` above.
 }
 
 /// Evaluate conservation laws and configured limits on a completed run.
@@ -328,9 +341,44 @@ pub fn assess_physical_feasibility_with_load_case(
             PlanningCgStatus::AftLimitViolation => cg_envelope.aft_limit_pct_mac,
             _ => None,
         };
+        // The violation stands as reported. What is added is the frame
+        // evidence a reader needs to act on it: the moment sum is built on
+        // the model's own component stations while the percentage is referred
+        // to the manufacturer's published leading edge and chord, so a datum
+        // or chord offset between the two shifts every reported percentage
+        // systematically. Stating the offset does not resolve which reference
+        // is wrong for this preset (that is a source reconciliation) and it
+        // does not move a published vertex or a verdict.
+        let frame_note = if cg_envelope.mac_references_disagree() {
+            let datum_shift = cg_envelope
+                .mac_datum_shift_pct_mac()
+                .map(|shift| format!("{shift:+.2} % MAC"))
+                .unwrap_or_else(|| "unknown".to_owned());
+            format!(
+                "; the built model's MAC leading edge sits {} from the published planning one \
+                 ({} of the published chord) and its chord differs by {} m, so this percentage is \
+                 referred to a different chord from the limit it is compared against and the \
+                 comparison needs source reconciliation before the exceedance is attributed to \
+                 the loading state",
+                cg_envelope
+                    .model_mac_leading_edge_offset_m
+                    .map(|offset| format!("{offset:+.3} m"))
+                    .unwrap_or_else(|| "an unknown distance".to_owned()),
+                datum_shift,
+                cg_envelope
+                    .model_mac_length_difference_m
+                    .map(|difference| format!("{difference:+.3}"))
+                    .unwrap_or_else(|| "an unknown amount".to_owned()),
+            )
+        } else {
+            String::new()
+        };
         findings.push(error(
             FindingCode::PublicPlanningCgEnvelopeViolation,
-            "analyzed CG lies outside the manufacturer public planning envelope; actual aircraft WBM controls",
+            format!(
+                "analyzed CG lies outside the manufacturer public planning envelope; actual \
+                 aircraft WBM controls{frame_note}"
+            ),
             cg_envelope.cg_pct_mac,
             limit,
             "% MAC",
@@ -383,12 +431,53 @@ pub fn assess_physical_feasibility_with_load_case(
         .copied()
         .or(Some(report.airplane.s_ref))
         .unwrap_or(f64::NAN);
-    let n_engines = config.geometry.engine.spanwise_positions_m.len() as f64;
     let mtow_kg = config.requirements.mtow_kg;
     let takeoff_mass_kg = fuel_loading.analyzed_takeoff_mass_kg;
     let gravity_m_s2 = config.requirements.gravity_m_s2;
-    let static_thrust_n = n_engines * config.geometry.engine.thrust_kn() * 1000.0;
+    // The installed sea-level reference thrust, taken from whichever physical
+    // model the aircraft actually has: the certificated jet rating for a
+    // turbofan, the propeller model's ground-roll mean thrust for a
+    // turboprop. The jet rating stays exactly zero for a shaft-power engine,
+    // so a propeller aircraft no longer arrives here with nothing, and it is
+    // the roll mean rather than the static value because a propeller's thrust
+    // falls through the roll. See `static_thrust`.
+    //
+    // The propeller branch needs the lift-off speed the roll mean is taken
+    // against, so resolve the departure field's own V speeds first; a field
+    // that cannot be resolved leaves the speed unusable and the module
+    // reports a typed absence rather than guessing one.
+    let departure_airport = alas_config::airports::get(&config.departure_airport).ok();
+    let departure_density_ratio = departure_airport
+        .map(|airport| density_ratio(airport.elevation_m, airport.isa_deviation_c))
+        .unwrap_or(f64::NAN);
+    let lift_off_true_airspeed_m_s = departure_airport
+        .map(|airport| {
+            compute_v_speeds_at_masses(
+                takeoff_mass_kg,
+                takeoff_mass_kg,
+                wing_area_m2,
+                airport,
+                config.performance.cl_max_to,
+                config.performance.cl_max_land,
+                &config.performance,
+            )
+            .v_r_ms
+        })
+        .unwrap_or(f64::NAN);
+    let sea_level_static_thrust =
+        static_thrust::resolve(config, lift_off_true_airspeed_m_s, departure_density_ratio);
+    let static_thrust_n = sea_level_static_thrust.thrust_n;
     let static_tw = static_thrust_n / (takeoff_mass_kg * gravity_m_s2);
+    if let Some(note) = sea_level_static_thrust.provenance_note() {
+        findings.push(PhysicalFinding {
+            code: FindingCode::FieldPerformanceUnavailable,
+            severity: FindingSeverity::Warning,
+            message: note,
+            actual: Some(static_tw),
+            limit: None,
+            unit: "fraction weight",
+        });
+    }
     let mlw_limit_kg = config.landing_mass_limit_kg(mtow_kg);
     let landing_mass_kg = fuel_loading
         .analyzed_landing_mass_kg
@@ -540,18 +629,51 @@ pub fn assess_physical_feasibility_with_load_case(
                 continue;
             }
         };
-        if !wing_area_m2.is_finite()
-            || wing_area_m2 <= 0.0
-            || !takeoff_mass_kg.is_finite()
-            || takeoff_mass_kg <= 0.0
-            || (role == "departure" && (!static_tw.is_finite() || static_tw <= 0.0))
-        {
+        // Report the input that actually failed. This guard covers three
+        // different quantities but used to publish `wing_area_m2` as the
+        // finding's `actual` whichever one of them was at fault, so the ATR
+        // 72-600 - whose wing area is a perfectly healthy 61.0 m2 - reported
+        // "inputs are not finite and positive (actual 61.000 m^2, limit
+        // 0.000 m^2)". A reader cannot act on that, and the quantity really
+        // at fault there is the static thrust-to-weight ratio.
+        let unusable = |value: f64| !value.is_finite() || value <= 0.0;
+        let failure = if unusable(wing_area_m2) {
+            Some(("wing reference area", wing_area_m2, "m^2"))
+        } else if unusable(takeoff_mass_kg) {
+            Some(("analyzed take-off mass", takeoff_mass_kg, "kg"))
+        } else if role == "departure" && unusable(static_tw) {
+            Some((
+                "static thrust-to-weight ratio",
+                static_tw,
+                "fraction weight",
+            ))
+        } else {
+            None
+        };
+        if let Some((quantity, value, unit)) = failure {
+            // When it is the thrust that is missing, the propulsion model
+            // already said why in its own terms; repeat that rather than
+            // implying the geometry is malformed. A turboprop no longer
+            // reaches this on a zero jet rating, because the propeller deck
+            // supplies the static thrust, so an unavailable thrust here means
+            // the deck itself could not be built or evaluated.
+            let thrust_reason = match &sea_level_static_thrust.source {
+                static_thrust::StaticThrustSource::Unavailable { reason }
+                    if quantity == "static thrust-to-weight ratio" =>
+                {
+                    format!("; {reason}")
+                }
+                _ => String::new(),
+            };
             findings.push(error(
                 FindingCode::FieldPerformanceUnavailable,
-                format!("{role} field-performance inputs are not finite and positive"),
-                Some(wing_area_m2),
+                format!(
+                    "{role} field performance could not be evaluated: \
+                     {quantity} is not finite and positive{thrust_reason}"
+                ),
+                Some(value),
                 Some(0.0),
-                "m^2",
+                unit,
             ));
             continue;
         }

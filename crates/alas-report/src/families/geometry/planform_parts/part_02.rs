@@ -4,7 +4,7 @@
 
 /// Generate the design-evolution montage: filled planform overlays of
 /// sampled valid designs from an optimization run, rebuilt from their design
-/// vectors and coloured first (cool) to last (warm) evaluation --
+/// vectors and coloured first (cool) to last (warm) evaluation:
 /// `figure_design_evolution`. Returns `None` when the history has no valid
 /// evaluation, matching upstream's early return.
 pub fn figure_design_evolution(

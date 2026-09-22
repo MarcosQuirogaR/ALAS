@@ -16,7 +16,7 @@ use crate::theme::{get_palette, BASELINE_COLOR, OPTIMIZED_COLOR};
 use super::shared::{airplane_bbox, draw_planform, equal_aspect_ranges};
 
 /// Generate the three-projection (top / side / front) geometry view of an
-/// [`Airplane`]'s wings and fuselages -- `figure_geometry`.
+/// [`Airplane`]'s wings and fuselages: `figure_geometry`.
 ///
 /// Reproduces upstream's fuselage silhouette exactly, including the
 /// documented quirk it does *not* fix: every `FuselageXSec` uses `width / 2`
@@ -155,7 +155,7 @@ pub fn figure_geometry(plane: &Airplane, theme: Option<&str>) -> Scene {
     scene
 }
 
-/// One wing's `(x, y, z)` leading-edge-then-reversed-trailing-edge loop --
+/// One wing's `(x, y, z)` leading-edge-then-reversed-trailing-edge loop:
 /// upstream's local `wing_loops`.
 fn wing_loop(w: &Wing) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
     let le: Vec<[f64; 3]> = w.xsecs.iter().map(|s| s.xyz_le).collect();
@@ -182,7 +182,7 @@ fn wing_loop(w: &Wing) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
     (x, y, z)
 }
 
-/// Fill a closed loop given as parallel `(u, v)` data-coordinate slices --
+/// Fill a closed loop given as parallel `(u, v)` data-coordinate slices:
 /// `ax.fill(u, v, ...)`. `invert_v` negates `v` before mapping, for a panel
 /// built over a negated range (see [`inverted_y`](super::shared::inverted_y)).
 #[allow(clippy::too_many_arguments)]
@@ -231,7 +231,7 @@ fn panel_label(
 }
 
 /// Generate a top-view planform overlay of a baseline and an optimized
-/// airplane -- `figure_planform_comparison`.
+/// airplane: `figure_planform_comparison`.
 pub fn figure_planform_comparison(
     baseline: &Airplane,
     optimized: &Airplane,

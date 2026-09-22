@@ -6,15 +6,15 @@
 //!
 //! This is the branch that matters. Upstream's default is the fit, so this is
 //! the model every module that writes `asb.Atmosphere(altitude=...)` gets,
-//! and it disagrees with the closed form by about a per cent -- `parity_atmo.rs`
+//! and it disagrees with the closed form by about a per cent: `parity_atmo.rs`
 //! is the other branch and neither substitutes for the other.
 //!
 //! Compared at the `linalg` tier. The fit's coefficients come out of a dense
 //! Gaussian elimination here and out of CasADi's own solver upstream, which
 //! do not pivot identically; the tier table names exactly this case ("anything
 //! through a factorization, spline fit or least squares"). Every case below
-//! in fact agrees to better than 1e-12 -- which is what makes the `closed`
-//! tier still reachable for the disciplines built on top of this -- but the
+//! in fact agrees to better than 1e-12, which is what makes the `closed`
+//! tier still reachable for the disciplines built on top of this, but the
 //! tier describes the construction and not today's margin, and a knot grid
 //! spanning seven million metres is not a place to bet on the last two digits
 //! surviving a different platform's `pow`.
@@ -93,8 +93,8 @@ fn the_fitted_altitudes_are_the_ones_aerosandbox_fits_at() {
     // is a different atmosphere, and every value below would move with it.
     //
     // Two tiers, because the grid is two different kinds of number. The
-    // altitudes upstream assigns -- the hand-picked list and each fan's
-    // endpoints -- are copied, not computed, and are compared at `exact`.
+    // altitudes upstream assigns (the hand-picked list and each fan's
+    // endpoints) are copied, not computed, and are compared at `exact`.
     // The interior fan points are `10**x` evaluated by two different libm
     // implementations, and one of the thirty-eight (418,445.4 m, an altitude
     // 400 km up that exists only to keep an optimizer's gradients finite)

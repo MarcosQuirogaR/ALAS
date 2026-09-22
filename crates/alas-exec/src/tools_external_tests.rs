@@ -238,6 +238,7 @@ fn preferences_keep_all_nastran_paths_and_openvsp_directory() {
         avl_exe: Some("C:/AVL/avl.exe".to_owned()),
         navdata_dir: Some("C:/ALAS/navdata".to_owned()),
         routes_dir: Some("C:/ALAS/routes".to_owned()),
+        flowunsteady_exe: Some("C:/FLOWUnsteady/launch.exe".to_owned()),
     };
     assert!(locator.save_preferences(&expected).is_ok());
     assert_eq!(locator.load_preferences(), expected);

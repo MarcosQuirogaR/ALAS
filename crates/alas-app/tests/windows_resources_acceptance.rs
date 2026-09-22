@@ -7,7 +7,10 @@
 //! PE layout: https://learn.microsoft.com/en-us/windows/win32/debug/pe-format
 
 #![cfg(windows)]
-#![allow(clippy::expect_used, clippy::unwrap_used)]
+// This file is a test binary, so a failing expect or unwrap is the assertion
+// failing rather than a library invariant breaking, and what it reports about
+// the inspected resource tree belongs on the console with the test output.
+#![allow(clippy::expect_used, clippy::unwrap_used, clippy::print_stderr)]
 
 use std::{env, fs};
 
@@ -29,7 +32,7 @@ struct Resources {
 impl Resources {
     fn load() -> Self {
         let path =
-            env::var_os("ALAS_RESOURCE_EXE").unwrap_or_else(|| env!("CARGO_BIN_EXE_alas").into());
+            env::var_os("ALAS_RESOURCE_EXE").unwrap_or_else(|| env!("CARGO_BIN_EXE_ALAS").into());
         let exe = fs::read(&path).expect("built application is readable");
         assert_eq!(&exe[..2], b"MZ");
         let pe = u32_at(&exe, 0x3c) as usize;
@@ -148,7 +151,7 @@ fn version_resource_identifies_the_product_and_repository_metadata() {
     for (key, value) in [
         ("ProductName", "ALAS"),
         ("FileDescription", "ALAS"),
-        ("OriginalFilename", "alas.exe"),
+        ("OriginalFilename", "ALAS.exe"),
         ("CompanyName", env!("CARGO_PKG_AUTHORS")),
         ("LegalCopyright", env!("CARGO_PKG_AUTHORS")),
         ("Comments", env!("CARGO_PKG_LICENSE")),

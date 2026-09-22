@@ -1,7 +1,7 @@
 {
   "fixtures": {
     "landing_gear": {
-      "description": "alas.physics.landing_gear.size_landing_gear across MTOW/CG-limit/fuselage/LandingGearConfig cases reaching each tire-selection, bogie-sizing, gear-count and turnover branch -- full LandingGearLayout",
+      "description": "alas.physics.landing_gear.size_landing_gear across MTOW/CG-limit/fuselage/LandingGearConfig cases reaching each tire-selection, bogie-sizing, gear-count and turnover branch: full LandingGearLayout",
       "generator": "gen_perf_landing_gear.py",
       "runtime": "alas",
       "alas_commit": "7d1555c1f4db5110cf6cd187c156718e1a033b50",

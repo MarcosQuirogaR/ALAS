@@ -11,8 +11,8 @@
 //! What the operator asks for is where the *aircraft* should balance, but what
 //! the loader can place is the payload. Given an operating-empty mass and its
 //! own centre of gravity, the payload centre of gravity that puts the loaded
-//! aircraft on target follows from a moment balance, and that -- not the target
-//! itself -- is what the positions are trimmed to. Without an operating-empty
+//! aircraft on target follows from a moment balance, and that, not the target
+//! itself, is what the positions are trimmed to. Without an operating-empty
 //! mass there is nothing to balance against, so the payload is trimmed to the
 //! target directly, which is the branch every caller that only wants the
 //! payload's own centre of gravity takes.

@@ -1,6 +1,6 @@
 # Conventional transport-aircraft systems architecture and preliminary sizing
 
-Research note for ALAS-rust
+Research note for ALAS
 Prepared: 2026-08-27
 Scope: ECS and pressurisation, electrical generation and distribution, avionics loads, hydraulics and actuation, ice protection, fire protection, APU, water and waste, and aircraft thermal management
 Recommended new owner: `alas-systems`, with typed interfaces to geometry, payload, propulsion, mission, mass, aerodynamics, performance, structures, reporting, and acceptance

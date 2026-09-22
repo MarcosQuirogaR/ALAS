@@ -18,6 +18,7 @@ use alas_geom::aircraft::wing::Wing;
 use alas_perf::performance::breguet_range_m;
 use alas_pipeline::feasibility::{assess_fuel_capacity, FuelCapacityEvidence};
 use alas_pipeline::full_analysis::AnalysisReport;
+use alas_pipeline::quick_analysis::payload_capacity_estimate;
 
 use super::support::format_thousands;
 use crate::chart_kit::draw_title;
@@ -251,27 +252,22 @@ pub fn payload_range_data(
         .ok()
         .and_then(|preset| preset.reference.mzfw_kg)
         .map(|mzfw_kg| mzfw_kg - oew_kg);
-    let payload_limits = [
-        configured_payload_limit,
-        effective_payload_limit.unwrap_or(f64::NAN),
-        published_mzfw_payload_limit.unwrap_or(f64::NAN),
-    ];
-    let structural_payload_kg = payload_limits
+    // Achievable payload: the declared cap, the effective or MZFW-derived limit
+    // and the MTOW - OEW budget, resolved by the same estimator the sandbox
+    // Quick Analysis uses so both surfaces publish one capacity basis.
+    let mzfw_limit_kg = [effective_payload_limit, published_mzfw_payload_limit]
         .into_iter()
+        .flatten()
         .filter(|value| value.is_finite() && *value > 0.0)
         .reduce(f64::min);
-    let (max_payload_kg, payload_basis) = match structural_payload_kg {
-        Some(value)
-            if effective_payload_limit.is_some() || published_mzfw_payload_limit.is_some() =>
-        {
-            (value, "effective structural payload bounded by MZFW")
-        }
-        Some(value) => (value, "configured structural payload cap"),
-        None => (
-            analyzed_payload_kg,
-            "analyzed payload (no structural cap registered)",
-        ),
-    };
+    let capacity = payload_capacity_estimate(
+        configured_payload_limit,
+        mzfw_limit_kg,
+        analyzed_payload_kg,
+        mtow_kg,
+        oew_kg,
+    );
+    let (max_payload_kg, payload_basis) = (capacity.capacity_kg, capacity.basis);
 
     let fuel_capacity = assess_fuel_capacity(config, &report.design, report);
     let fuel_capacity_kg = fuel_capacity
@@ -311,7 +307,10 @@ pub fn payload_range_data(
             )
         }
         ActiveEngineModel::Turboprop(spec) => {
-            let fuel_flow_kg_h = spec.maximum_cruise_fuel_flow_kg_h;
+            // The catalogue anchor is a two-engine figure; scale it with the
+            // installed engine count so an edited installation changes range.
+            let installed = config.geometry.engine.spanwise_positions_m.len();
+            let fuel_flow_kg_h = spec.installed_cruise_fuel_flow_kg_h(installed)?;
             if !fuel_flow_kg_h.is_finite() || fuel_flow_kg_h <= 0.0 {
                 return None;
             }
@@ -363,6 +362,12 @@ pub fn payload_range_data(
 
 // Retained as an explicit compatibility/reference correlation for standalone
 // comparison tests; product capacity comes from typed feasibility evidence.
+// It has no product caller and it has DRIFTED from the two live implementations:
+// this one uses `unfolded_area`/`unfolded_span` while
+// `families::mass_balance_layout::fuel_volume::wing_fuel_volume_m3` and
+// `alas_opt::objective_model` use `reference_area`/`reference_span`. It is a
+// second, different answer to the same question and must not be quoted as
+// agreeing with either. Delete-or-reconcile is recorded as a report-owner item.
 #[allow(dead_code)]
 fn wing_fuel_volume_m3(wing: &Wing, usable_fraction: f64) -> f64 {
     if wing.xsecs.len() < 2 {
@@ -379,20 +384,7 @@ fn wing_fuel_volume_m3(wing: &Wing, usable_fraction: f64) -> f64 {
 }
 
 fn status_scene(title: &str, message: &str, theme: Option<&str>) -> Scene {
-    let pal = get_palette(theme);
-    let mut scene = Scene::new(600.0, 300.0, Some(Color::from_hex(pal.bg)));
-    scene.title = Some(title.to_owned());
-    scene.add(SceneElement::Text {
-        text: message.to_owned(),
-        pos: [300.0, 150.0],
-        font_size: 12.0,
-        color: Color::from_hex(pal.tick),
-        align: TextAlign::Center,
-        baseline: TextBaseline::Middle,
-        angle_deg: 0.0,
-        bold: false,
-    });
-    scene
+    crate::status_figure::figure_status_message(title, message, false, theme)
 }
 
 #[cfg(test)]

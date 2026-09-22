@@ -182,3 +182,132 @@ fn literal_arguments(source: &str, function: &str) -> Vec<String> {
     }
     found
 }
+
+/// The two optimizer policy groups Q11 and D02 surface in Advanced Settings.
+///
+/// The whole-schema test above is the standing contract, but it fails on
+/// unrelated groups whose catalogue entries other work still owes, and a
+/// failure there would hide a regression here. This one is scoped to the
+/// groups this surface owns: the validity domain, its fourteen windows, and
+/// the relaxation policy, label and help sentence alike.
+#[test]
+fn the_optimizer_policy_groups_have_spanish_catalog_provenance() {
+    let base = alas_i18n::es::catalog();
+    let desktop = alas_i18n::es::desktop_catalog();
+    let schema = alas_config::AlasConfig::default().schema();
+    let optimizer = schema
+        .fields
+        .iter()
+        .find(|field| field.name == "optimizer")
+        .expect("the optimizer group reaches the form");
+    let alas_config::Entry::Node(optimizer) = &optimizer.entry else {
+        panic!("the optimizer group is a node");
+    };
+
+    let mut checked = 0;
+    let mut missing = Vec::new();
+    for group in ["plausibility", "relaxation"] {
+        let field = optimizer
+            .fields
+            .iter()
+            .find(|field| field.name == group)
+            .unwrap_or_else(|| panic!("{group} reaches the form rather than being skipped"));
+        let mut pending = vec![field];
+        while let Some(field) = pending.pop() {
+            for (kind, text) in [("label", field.label), ("help", field.help)] {
+                if text.is_empty() {
+                    missing.push(format!("{} has no {kind}", field.name));
+                    continue;
+                }
+                checked += 1;
+                if !base.contains_key(text) && !desktop.contains_key(text) {
+                    missing.push(format!("{} {kind}: {text}", field.name));
+                }
+            }
+            if let alas_config::Entry::Node(node) = &field.entry {
+                pending.extend(node.fields.iter());
+            }
+        }
+    }
+    assert!(missing.is_empty(), "{}", missing.join("\n"));
+    // Two groups, fourteen plausibility windows and two relaxation controls,
+    // each with a label and a help sentence.
+    assert_eq!(checked, 2 * (2 + 14 + 2));
+}
+
+/// The two surfaces this work added: Q12's search-diagnostics block and
+/// D01-D03's Inputs constraint-policy card.
+///
+/// Scoped for the same reason as the test above: the whole-source contract
+/// stops at the first uncatalogued literal anywhere in the crate, so a
+/// regression in these two files would be masked by an unrelated one.
+#[test]
+fn the_search_diagnostics_and_constraint_policy_views_have_spanish_provenance() {
+    let base = alas_i18n::es::catalog();
+    let desktop = alas_i18n::es::desktop_catalog();
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let mut total = 0;
+    for relative in [
+        "src/views/run_log/search_diagnostics.rs",
+        "src/views/inputs_relaxation.rs",
+    ] {
+        let source = std::fs::read_to_string(root.join(relative)).expect("the view source");
+        let mut keys = literal_arguments(&source, "tr");
+        keys.extend(literal_arguments(&source, "tr_fields"));
+        assert!(
+            keys.len() >= 7,
+            "{relative} sends almost nothing through the boundary, so this would pass vacuously: {keys:?}"
+        );
+        total += keys.len();
+        for key in keys {
+            assert!(
+                base.contains_key(&key) || desktop.contains_key(&key),
+                "{relative} sends an uncatalogued literal: {key:?}"
+            );
+        }
+    }
+    assert!(
+        total >= 27,
+        "expected every field label and note, got {total}"
+    );
+}
+
+/// The surfaces the 2026-09-17 High GUI corrections added: the responsive
+/// landing layout's notice, the reason a run is blocked, the schema form's
+/// modification marker and the sandbox component context.
+///
+/// Scoped for the same reason as the two tests above: the whole-source
+/// contract stops at the first uncatalogued literal anywhere in the crate,
+/// so a regression in these files would be masked by an unrelated one.
+#[test]
+fn the_narrow_layout_run_gate_and_sandbox_context_views_have_spanish_provenance() {
+    let base = alas_i18n::es::catalog();
+    let desktop = alas_i18n::es::desktop_catalog();
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let mut total = 0;
+    for relative in [
+        "src/app_parts/part_01.rs",
+        "src/views/notices.rs",
+        "src/views/form_feedback.rs",
+        "src/views/form_parts/part_01.rs",
+        "src/views/form_parts/part_02.rs",
+        "src/views/control_bar.rs",
+        "src/sandbox/panel.rs",
+        "src/sandbox/viewport.rs",
+    ] {
+        let source = std::fs::read_to_string(root.join(relative)).expect("the view source");
+        let mut keys = literal_arguments(&source, "tr");
+        keys.extend(literal_arguments(&source, "tr_fields"));
+        total += keys.len();
+        for key in keys {
+            assert!(
+                base.contains_key(&key) || desktop.contains_key(&key),
+                "{relative} sends an uncatalogued literal: {key:?}"
+            );
+        }
+    }
+    assert!(
+        total >= 30,
+        "expected every corrected surface's prose, got {total}"
+    );
+}

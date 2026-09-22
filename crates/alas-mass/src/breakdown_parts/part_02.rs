@@ -3,7 +3,7 @@
 
 use super::*;
 
-/// Calculate the masses of all primary aircraft components in kg --
+/// Calculate the masses of all primary aircraft components in kg:
 /// `calculate_component_masses`.
 ///
 /// Uses Torenbeek empirical methods calibrated for CS-25/FAR-25 class
@@ -107,7 +107,7 @@ pub fn calculate_component_masses(
     let m_furn = mm.furnishings_mass_fraction * mtow_target;
     let m_payload = requirements.payload_kg();
 
-    // OEW, MZFW, fuel -- named the same as upstream's own intermediates so
+    // OEW, MZFW, fuel: named the same as upstream's own intermediates so
     // the summation order (and therefore the last-bit rounding) matches.
     let m_str = m_wing + m_hstab + m_vstab + m_fus + m_gear;
     let m_oew = m_str + m_prop + m_sys + m_furn;
@@ -273,7 +273,7 @@ pub fn calculate_flops_mass_buildup(
     control_surfaces: &ControlSurfacesConfig,
     mass_model: Option<&MassModelConfig>,
     landing_gear: &LandingGearConfig,
-    _cabin_config: &CabinConfig,
+    cabin_config: &CabinConfig,
 ) -> Result<ProductMassBuildup, ComponentMassError> {
     let default_mass_model = MassModelConfig::default();
     let mm = mass_model.unwrap_or(&default_mass_model);
@@ -297,6 +297,7 @@ pub fn calculate_flops_mass_buildup(
             requirements,
             geometry_config,
             control_surfaces,
+            cabin_config,
             mm,
         )
         .map(|built| ProductMassBuildup::PureFlops(Box::new(built)));

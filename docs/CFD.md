@@ -7,7 +7,7 @@ identity, the exact coordinate snapshot and hash, the SI operating point, the
 boundary and mesh settings, the solver settings, and the versioned case
 template in `study.json`.
 
-The current template is `alas-airfoil-2d-openfoam-gmsh-v2`.  Gmsh creates an
+The current template is `alas-airfoil-2d-openfoam-gmsh-v5`.  Gmsh creates an
 exact straight-edge polygon from the section coordinates, a chord-scaled outer
 domain, and a one-layer extrusion.  `gmshToFoam` converts the mesh and the
 runner enforces these patch contracts:
@@ -35,7 +35,10 @@ to `/mnt/<drive>/...`.  Commands are passed as argument vectors, so spaces and
 Unicode in a case path do not depend on shell quoting.
 
 The required OpenFOAM utilities are `gmshToFoam`, `checkMesh`, `simpleFoam`,
-and `postProcess`.  Gmsh is a separate required dependency for the current
+`rhoSimpleFoam`, and `postProcess`; the selected solver depends on the
+Mach-derived regime.  The runner invokes `checkMesh -writeAllFields` so native
+cell-quality fields (`nonOrthoAngle`, `skewness`, `aspectRatio`, and
+`cellVolume`) are retained for distribution plots.  Gmsh is a separate required dependency for the current
 mesh route.  `potentialFoam` is optional: when available, the runner executes
 `potentialFoam -initialiseUBCs -writephi` before SIMPLE and records its output.
 The native serial OpenCFD distribution uses its serial Pstream library.  MPI
@@ -48,6 +51,13 @@ The probe reports each utility, the detected OpenFOAM version, and missing
 dependencies.  A run captures bounded stdout and stderr, writes one log file
 per utility under `logs/`, forwards selected live diagnostics to the GUI, and
 terminates the owned process tree on cancellation or timeout.
+
+The native v2606 distribution also supplies `bin/paraFoam` as the official
+ParaView launcher.  It is a shell script, so the Windows route executes it
+through the distribution's MSYS2 `bash.exe`.  `paraFoam -vtk` selects
+ParaView's built-in OpenFOAM reader; it is not a second solver or a separate
+CFD backend.  The launcher is verified locally at
+`C:/Proyectos/OpenFOAM-v2606/msys64/home/ofuser/OpenFOAM/OpenFOAM-v2606/bin/paraFoam`.
 
 For a native Windows smoke run, configure the directories and run the example
 from the repository root:
@@ -87,8 +97,52 @@ integrator.  Pressure in the incompressible `p` field is kinematic pressure in
 `m^2/s^2`; the GUI accepts a physical pressure reference in Pa and the case
 converts it by dividing by density.
 
-The initial solver is incompressible steady `kOmegaSST`.  The default
-external-flow turbulence input is intensity `0.052%` and turbulent-to-molecular
+The study also records static freestream temperature in K and derives the
+dry-air speed of sound `a = sqrt(gamma R T)` and Mach `M = U/a`, with
+`gamma = 1.4` and `R = 287.05287 J/(kg K)`.  Below `M = 0.3`, the case uses
+the incompressible steady `simpleFoam` path.  At and above `M = 0.3`, it
+automatically selects `rhoSimpleFoam`, `hePsiThermo` with a perfect-gas
+equation of state, absolute pressure and temperature fields, density/energy
+residuals, and bounded shock-safe transport.  The `M = 0.8 .. 1.2` band is
+reported as transonic; it receives a longer SIMPLE budget, bounded-upwind
+startup, limited gradients, GAMG pressure, PBiCGStab/DILU transport solves,
+and damped relaxation.  The steady contract is bounded at `M <= 2.0` and
+reports a blocking input error above that limit.
+
+A Mach contour exported from this workflow is a derived field `|U|/a` in the
+incompressible path and uses local solved temperature in the compressible
+path.  In low-Mach cases a pressure contour in Pa is gauge pressure
+`rho * p_kinematic`, relative to the stored reference; in compressible cases
+it is `p_absolute - p_reference`.  The selected solver, regime, static
+pressure and automatic controls are written to the case README, the effective
+configuration view and `study.json`.
+The supplied `tools/openfoam_render_fields.py` batch renderer evaluates these
+definitions on the native solved `U` and `p` fields with ParaView's
+`pvpython`, writing `postProcessing/alas-field-figures/mach-contour.png` and
+`pressure-contour.png` plus a provenance text file.  The reproducible
+`tools/openfoam_parafoam_render.py` wrapper first runs
+`paraFoam -vtk -case <case> -touch` through MSYS2 and then invokes that
+renderer against the exact `.foam` marker created by paraFoam.  It also keeps
+the launcher and renderer logs beside the images.  The Airfoil CFD Results
+tab loads those exact PNG artifacts when they are present; if they have not
+been rendered, it leaves the contour card unavailable and keeps the native
+fields available for the ParaView handoff.
+
+For an existing case, run the wrapper after the solver has written a finite
+`U` and `p` field (replace the paths with the installed locations):
+
+```powershell
+python tools/openfoam_parafoam_render.py <case-directory> 1.225 288.15 `
+  --parafoam C:/path/to/OpenFOAM-v2606/bin/paraFoam `
+  --bash C:/path/to/OpenFOAM-v2606/msys64/usr/bin/bash.exe `
+  --pvpython C:/path/to/ParaView/bin/pvpython.exe
+```
+
+The wrapper does not alter the solution; it writes only the `.foam` marker
+and derived display artifacts under the case's `postProcessing` directory.
+
+Both paths use steady `kOmegaSST`.  The default external-flow turbulence input
+is intensity `0.052%` and turbulent-to-molecular
 viscosity ratio `0.009`; the generated `k`, `omega`, estimated eddy viscosity,
 and implied length scale are recorded in the case README.  A length-scale
 input remains available for tunnel or inflow data specified that way.  The
@@ -98,13 +152,14 @@ first-cell-centre target of `1e-5 m`, and target `y+ = 1`.  The flat-plate
 estimate is sizing evidence only.  The solved yPlus summary is retained in
 `MeshQuality.near_wall` when the solver emitted a finite patch result.
 
-The initial model is intended for attached or mildly separated turbulent
-section flow at low Mach number.  It does not silently claim validity for
-laminar or transition-sensitive flow, low-Reynolds separation, stall,
-transonic compressibility, or unsteady shedding.  Domain extents and
-turbulence inputs remain engineering settings; they require a grid/domain
-study and matched validation data before coefficients are used for a design
-decision.
+The model is intended for attached or mildly separated turbulent section flow.
+The compressible path supports the numerical transonic equation set, but this
+does not claim physical validation for shock position, drag divergence,
+buffet, laminar or transition-sensitive flow, low-Reynolds separation, stall,
+or unsteady shedding.  Domain extents, turbulence inputs, the perfect-gas
+assumption and steady RANS closure remain engineering settings; they require
+grid/domain and Mach sensitivity studies plus matched validation data before
+coefficients are used for a design decision.
 
 ## Lifecycle and acceptance
 
@@ -116,21 +171,26 @@ no failed checks even when its exit code is zero.  The quality record retains
 cell count, maximum non-orthogonality, maximum skewness, and minimum cell
 volume.
 
-Numerical convergence requires all of the following evidence from the same
-latest outer SIMPLE iteration:
+Numerical status reports all of the following evidence from the same latest
+outer SIMPLE iteration when available:
 
 * finite initial and inner linear-solver residuals for `p`, `Ux`, `Uy`, `k`,
-  and `omega`, with the initial residuals below the configured tolerance;
+  and `omega` on the incompressible path, with `e` added on the compressible
+  path, and with the initial residuals below the configured tolerance;
 * a stabilized final-stage `Cd`, `Cl`, and `Cm` force window, excluding
   inherited startup samples after a staged restart;
 * finite force coefficients and latest local/global continuity errors within
   the configured tolerance.
 
 The cumulative continuity error remains audit evidence and is not compared
-with a per-iteration limit.  Process completion without these checks is
-`unconverged`, never a successful CFD result.  Cancellation, timeout, missing
-dependencies, failed mesh checks, post-processing failure, and solver failure
-retain their logs and a `results.json`/`report.md` failure artifact.
+with a per-iteration limit.  These criteria classify the run and remain visible
+in `results.json`, the report, and the GUI.  They do not hide finite native
+force histories, wall samples, or sweep points from inspection: a completed run
+that misses a threshold is labelled `unconverged` and its curves are explicitly
+provisional.  Mesh contract failures, cancellation, timeout, missing
+dependencies, post-processing failure, and solver failure retain their
+distinct status and logs; invalid or failed mesh output is not promoted into
+aerodynamic curves.
 
 ## Results and reproducibility
 
@@ -158,22 +218,45 @@ The GUI also supports sequential angle-of-attack or Reynolds sweeps.  Every
 point gets its own isolated case and retains its own status, result, effective
 speed/Reynolds values, and provenance.  Editing inputs invalidates the current
 result revision, and a late worker result cannot replace a newer input state.
+For angle-of-attack sweeps, the Results tab plots `CL(alpha)`, `CL(CD)`, and
+`CL/CD(alpha)` from finite force samples returned by completed, mesh-valid
+cases.  Each point retains its persisted numerical outcome; unconverged points
+are included as provisional evidence and remain visibly labelled in the table
+and warning text.  The same tab can load an existing case `results.json`
+without rerunning a solver, preserving its exact geometry snapshot, field
+artifacts, quality distributions, and convergence status.  The Results tab
+also plots both the initial and final residual histories against the parsed
+outer SIMPLE iteration for each equation (the initial series is the status
+criterion) and percentile curves from native non-orthogonality, skewness,
+aspect-ratio, cell-volume, and solved wall y+ fields when those fields are
+present.  Missing native distributions are shown as unavailable; they are
+never reconstructed from max/min checkMesh summaries.
+
+`tools/openfoam_make_figures.py` consumes the same persisted finite samples for
+standalone PNG/SVG evidence sheets.  It keeps the card, grid, tick, spine,
+accent, warning, and success colours synchronized with the desktop design
+palettes.  Its default `--theme all` output writes the light filenames used by
+reports plus `-dark` and `-grey` variants matching the Dark and Grey app
+themes; `--theme light`, `--theme dark-accessible`, or
+`--theme grey-accessible` selects one variant.  These exports are static
+renderings, while the in-app plots read `ui.visuals()` on every frame and
+therefore follow live theme changes.
 
 ## Measured native smoke evidence
 
 On 2026-09-13 the native OpenCFD v2606 MinGW serial installation was exercised
 with Gmsh 4.15.2 on an AMD Ryzen 7 5800X (8 physical cores, 16 logical
-processors).  The fresh NACA0012 case in
-`.agent/openfoam-validation/native-run-010-final` generated 86,649 cells;
-Gmsh, `gmshToFoam`, `checkMesh`, `potentialFoam`, staged `simpleFoam`, and
-solver-attached post-processing all exited successfully.  The ten-iteration
-smoke run was reported as `unconverged` because its final outer residuals had
-not reached the configured threshold, and it recorded airfoil y+ from 0.299 to
-2.820 (average 1.583), a finite face-resolved surface distribution, and the
-complete case logs.  The installation checksum, paths, transport choice,
-hardware, and the separate tutorial smoke result are recorded in
-`.agent/openfoam-installation.json`.  These artifacts demonstrate executable
-and bookkeeping integration; they are not an experimental accuracy claim.
+processors).  The fresh NACA0012 case, run on the development host, generated
+86,649 cells; Gmsh, `gmshToFoam`, `checkMesh`, `potentialFoam`, staged
+`simpleFoam`, and solver-attached post-processing all exited successfully.
+The ten-iteration smoke run was reported as `unconverged` because its final
+outer residuals had not reached the configured threshold, and it recorded
+airfoil y+ from 0.299 to 2.820 (average 1.583), a finite face-resolved surface
+distribution, and the complete case logs.  The installation checksum, paths,
+transport choice, hardware, and the separate tutorial smoke result are
+recorded in an internal installation log (not shipped).  These artifacts
+demonstrate executable and bookkeeping integration; they are not an
+experimental accuracy claim.
 
 ## Verification boundaries
 

@@ -7,7 +7,7 @@
 //! The label and unit a field gets when it does not state its own.
 //!
 //! Most configuration fields are named after the quantity they hold and the
-//! unit it is in -- `wing_area_m2`, `cruise_speed_m_s` -- so the interface can
+//! unit it is in (`wing_area_m2`, `cruise_speed_m_s`) so the interface can
 //! read both straight off the identifier, and several hundred fields upstream
 //! rely on that rather than repeating themselves. Reproducing the rule is not
 //! optional: a field whose derived label differs by so much as its
@@ -44,7 +44,7 @@ const UNIT_SUFFIXES: &[(&str, &str)] = &[
 /// The unit suffix is stripped from the label when one matches, and what is
 /// left becomes sentence case: underscores to spaces, first character upper,
 /// the rest lower. That last part is Python's `str.capitalize`, which lowers
-/// the tail rather than leaving it alone -- so `Max_thickness_LOC` reads
+/// the tail rather than leaving it alone, so `Max_thickness_LOC` reads
 /// "Max thickness loc" here, as it does upstream.
 pub fn humanize(name: &str) -> (String, &'static str) {
     let mut unit = "";

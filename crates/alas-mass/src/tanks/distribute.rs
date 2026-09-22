@@ -9,6 +9,42 @@
 //! Loading fills the tanks burned last first, so the aircraft always has the
 //! outboard-most fuel it would keep longest already on board; burning walks
 //! the same order forward.
+//!
+//! # The fill order is an assumption, not a source
+//!
+//! Only the *burn* order is sourced. The fill order above is this module's own
+//! rule, and the fuel-tank research the layouts are built from (an internal
+//! study, 2026-09-05, section 9.4) states the opposite posture for it:
+//! refuelling fill order "was not retrieved
+//! for any of the eight and should not be asserted", because it lives in
+//! Weight and Balance Manuals that are not public. Section 10 keeps it as an
+//! open gap for every registered aircraft.
+//!
+//! [`crate::wing_reconciliation::declared_wing_fuel_case`] faces the same
+//! missing document on the structural side and takes the other branch: it keeps
+//! the declared spanwise shape, invents no sequence, and records a bracket. The
+//! two are not coupled - the wingbox sizing never reads `burn_priority` - so
+//! this rule reaches only the balance:
+//! [`crate::product_stations::analyzed_fuel_centroid`], the feasibility
+//! mass-balance states, and [`FuelTankLayout::fuel_cg_curve`].
+//!
+//! What the rule costs is measured, not hypothetical. On the A380-800, whose
+//! burn order puts the tailplane trim tank third of four, a partial load fills
+//! the trim tank and the outer wing to capacity and leaves the inner feed tanks
+//! empty; the fuel centroid then sits 12.75 m further aft than an inner-first
+//! fill of the same mass, aft of the main-gear station, and it is the whole of
+//! that aircraft's `static_margin_floor` and `min_nose_gear_load` exceedance.
+//! That inner cell lumps in Feed 2 and Feed 3 (EASA.A.110 Issue 17, section
+//! 3.3), two of the four tanks the engines are fed from, so the state the rule
+//! produces is one the aircraft cannot dispatch in - which rules this rule out
+//! without supplying the one that replaces it.
+//! `tests::a_partial_a380_load_fills_the_trim_and_outer_tanks_and_moves_the_fuel_aft`
+//! pins that consequence so the rule cannot be changed without reading it.
+//!
+//! Choosing a different rule needs the missing document, not a better guess:
+//! every candidate sequence moves the A380-800 take-off centre of gravity by
+//! about 28 times the margin any one constraint is short by, so fitting one to
+//! a constraint would be calibration.
 
 use alas_geom::aircraft::spacing::linspace;
 
@@ -77,7 +113,7 @@ impl FuelTankLayout {
         let mut remaining_kg = usable_fuel_kg;
         // Tanks that share a burn priority (mirrored left/right pairs, most
         // often) split their group's fill by capacity share rather than
-        // sequentially by index -- a stable sort on equal keys would
+        // sequentially by index: a stable sort on equal keys would
         // otherwise always saturate the first-listed tank of the tie before
         // touching the other, biasing every partial load toward one side of
         // a symmetric aircraft with no physical cause.

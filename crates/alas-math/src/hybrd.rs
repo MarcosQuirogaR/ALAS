@@ -10,9 +10,9 @@
 //! segment converges through.
 //!
 //! Without this, a mission segment has a residual and no way to zero it. mission analysis model
-//! poses each segment as a system of nonlinear equations -- for a cruise leg,
+//! poses each segment as a system of nonlinear equations, for a cruise leg,
 //! the throttle and body angle at each of sixteen control points against the
-//! horizontal and vertical force balance there -- and hands it to
+//! horizontal and vertical force balance there, and hands it to
 //! `scipy.optimize.fsolve`, which is a thin wrapper over this routine.
 //!
 //! # Why this is a translation and not a call to a root finder
@@ -23,7 +23,7 @@
 //! region shrinks below `xtol * ||x||`, not when the residual reaches zero, so
 //! the answer it returns is wherever the iteration happened to be standing at
 //! that moment. Two solvers that agree to their own tolerance still disagree
-//! in the sixth or seventh digit of the throttle -- and that throttle sets the
+//! in the sixth or seventh digit of the throttle, and that throttle sets the
 //! fuel flow, which integrates over the segment into the block fuel this whole
 //! phase exists to compute. Reproducing the answer therefore means reproducing
 //! the iteration.
@@ -35,7 +35,7 @@
 //! gave up would report a different mission, not a better one.
 //!
 //! So the fixture behind this row records the full log of residual
-//! evaluations, in call order, across eight systems -- and the parity test
+//! evaluations, in call order, across eight systems, and the parity test
 //! replays it. Matching the root is not the claim; matching every trial point
 //! that led there is.
 //!
@@ -48,14 +48,14 @@
 //! linear model predicted the observed reduction well and halves when it did
 //! not. Rather than refactor after every step, the Jacobian is corrected by
 //! Broyden's rank-one update applied directly to `Q` and `R`
-//! ([`qr::r1updt`], [`qr::r1mpyq`]) -- and only after two consecutive
+//! ([`qr::r1updt`], [`qr::r1mpyq`]), and only after two consecutive
 //! unsuccessful steps is a fresh Jacobian built. That is the "hybrid": Newton
 //! where the model is good, steepest descent where it is not, and
 //! quasi-Newton in between to keep residual evaluations down.
 //!
 //! Residual evaluations are the cost that shapes the whole design. One of them
-//! is an entire segment analysis chain -- atmosphere, propulsion, drag
-//! buildup, weights, stability -- and a Jacobian costs `n` of them.
+//! is an entire segment analysis chain: atmosphere, propulsion, drag
+//! buildup, weights, stability, and a Jacobian costs `n` of them.
 //!
 //! # Scope
 //!
@@ -76,7 +76,7 @@
 // often by a stride that is not one, and the loop that advances it is the same
 // loop that indexes a second array. Both idioms clippy objects to here are that
 // pattern, and rewriting either as a zipped iterator would put the Rust and the
-// Fortran on different lines -- which is the one thing that must not happen in
+// Fortran on different lines, which is the one thing that must not happen in
 // a file whose correctness argument is a line-for-line reading of `hybrd.f`.
 // Applies to the submodules below as well as to this file.
 #![allow(clippy::explicit_counter_loop, clippy::needless_range_loop)]
@@ -94,12 +94,12 @@ use qr::{qform, qrfac, r1mpyq, r1updt};
 /// MINPACK's own machine epsilon, `dpmpar(1)`, which is **not** `f64::EPSILON`.
 ///
 /// `dpmpar.f` carries its machine constants as decimal literals, and the IEEE
-/// entry it selects is `2.22044604926d-16` -- eleven significant digits, where
+/// entry it selects is `2.22044604926d-16`: eleven significant digits, where
 /// `2^-52` is `2.220446049250313e-16`. The two differ by a relative `4.4e-12`,
 /// which sounds like nothing until it reaches [`jacobian::fdjac1`]: the
 /// finite-difference step is `sqrt(epsmch)`, so the difference lands in the
-/// eleventh digit of every probe, and at an unknown sitting at zero -- where
-/// the step is absolute rather than relative -- it is the whole of the probe
+/// eleventh digit of every probe, and at an unknown sitting at zero (where
+/// the step is absolute rather than relative) it is the whole of the probe
 /// point. From there it is a different Jacobian, a different Newton step, and
 /// within thirty evaluations a visibly different path.
 ///
@@ -118,8 +118,8 @@ const RATIO_ACCEPT: f64 = 1e-4;
 /// How the iteration stopped.
 ///
 /// Only [`Status::Converged`] is a success. mission analysis model's `converge_root` treats
-/// every other value alike -- it prints the message and sets
-/// `segment.converged = False` -- but the distinction is preserved because it
+/// every other value alike (it prints the message and sets
+/// `segment.converged = False`) but the distinction is preserved because it
 /// says whether to give the solver more budget, a better starting guess, or a
 /// different problem.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -397,7 +397,7 @@ where
 
             // Convergence is tested alone and exits at once. The four failure
             // tests below are then all evaluated, and the *last* one that
-            // matches is the one reported -- the Fortran assigns `info` in
+            // matches is the one reported: the Fortran assigns `info` in
             // sequence without branching out, so a run that has both
             // exhausted its budget and stalled reports the stall. Taking the
             // first match instead would report a different reason for the

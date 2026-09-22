@@ -79,3 +79,47 @@ fn an_output_run_writes_a_supported_openvsp_script_without_claiming_runtime_succ
     fs::remove_dir_all(&output)
         .unwrap_or_else(|error| panic!("remove {}: {error}", output.display()));
 }
+
+#[test]
+fn disabled_external_downstream_stages_do_not_emit_artifacts_or_solver_requests() {
+    let output = std::env::temp_dir().join(format!(
+        "alas-disabled-downstream-{}-{:?}",
+        std::process::id(),
+        std::thread::current().id()
+    ));
+    let _ = fs::remove_dir_all(&output);
+
+    let mut config = AlasConfig::default();
+    config.mission.enabled = false;
+    config.structures.enabled = false;
+    config.mses.enabled = false;
+    config.downstream.openvsp = false;
+    config.downstream.vspaero = false;
+    config.downstream.avl = false;
+    config.downstream.flowunsteady = false;
+    let options = PipelineOptions {
+        optimize: false,
+        compare_baseline: false,
+        parallel: false,
+        aerodynamic_solver: Default::default(),
+        optimization_solver: Default::default(),
+        output_dir: Some(output.clone()),
+        save_plots: false,
+        seed: None,
+        quiet: true,
+    };
+
+    let result = DesignPipeline::new(config)
+        .run(&options, &RunEnvironment::default())
+        .unwrap_or_else(|error| panic!("disabled downstream pipeline: {error}"));
+
+    assert!(result.openvsp_export.is_none());
+    assert!(result.vspaero_result.is_none());
+    assert!(result.avl_result.is_none());
+    assert!(result.flowunsteady_result.is_none());
+    assert!(!output.join("openvsp").exists());
+    assert!(!output.join("flowunsteady").exists());
+
+    fs::remove_dir_all(&output)
+        .unwrap_or_else(|error| panic!("remove {}: {error}", output.display()));
+}

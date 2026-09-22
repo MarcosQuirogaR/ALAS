@@ -1,7 +1,7 @@
 {
   "fixtures": {
     "breakdown": {
-      "description": "alas.physics.mass.run_mass_analysis on the nominal AircraftBuilder(GeometryConfig()).build aircraft (with engines), across DesignRequirements/MassModelConfig overrides and the payload-layout branch -- component masses, coordinates and global CG",
+      "description": "alas.physics.mass.run_mass_analysis on the nominal AircraftBuilder(GeometryConfig()).build aircraft (with engines), across DesignRequirements/MassModelConfig overrides and the payload-layout branch: component masses, coordinates and global CG",
       "generator": "gen_mass_breakdown.py",
       "runtime": "alas",
       "alas_commit": "7d1555c1f4db5110cf6cd187c156718e1a033b50",

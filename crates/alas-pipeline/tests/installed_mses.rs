@@ -199,13 +199,32 @@ fn installed_mses_keeps_the_requested_local_section_condition_visible() {
     assert!(
         matches!(
             polar.status,
-            MsesStatus::Ok | MsesStatus::PartialConvergence | MsesStatus::Error
+            MsesStatus::Ok
+                | MsesStatus::PartialConvergence
+                | MsesStatus::Incomplete
+                | MsesStatus::Error
         ),
         "MSES exposes the solver outcome rather than fabricating a result: {:?}",
         polar.error
     );
     assert!((polar.mach - expected_mach).abs() < 1e-12);
     assert_pressure_result_is_coherent(&pressure);
+    if polar.status == MsesStatus::Incomplete {
+        assert_eq!(polar.converged_alpha_count, 0);
+        assert!(polar.point_diagnostics.is_empty());
+        assert!(polar.osmap_required);
+        assert_eq!(polar.osmap_status.as_str(), "missing");
+        assert!(polar
+            .error
+            .as_deref()
+            .is_some_and(|error| error.contains("osmapDP.dat")));
+        assert_eq!(pressure.status, MsesStatus::Incomplete);
+        assert!(pressure
+            .error
+            .as_deref()
+            .is_some_and(|error| error.contains("No solver retries were run")));
+        return;
+    }
     assert_eq!(polar.requested_alpha_count, alpha_sweep_n_points);
     assert_eq!(polar.converged_alpha_count, polar.alpha_deg.len());
     assert_eq!(polar.point_diagnostics.len(), polar.requested_alpha_count);

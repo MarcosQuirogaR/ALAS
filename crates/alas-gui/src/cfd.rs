@@ -8,6 +8,7 @@
 //! state, cancellation, and the revision gate that prevents a late worker
 //! result from replacing a result for newer inputs.
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::mpsc::Receiver;
@@ -25,9 +26,10 @@ mod cfd_parts;
 static NEXT_CASE_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 /// The visible tabs in the standalone Airfoil CFD window.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum CfdTab {
     /// Routine flow, geometry, and boundary controls.
+    #[default]
     Study,
     /// Mesh, solver, and resource controls.
     Advanced,
@@ -37,26 +39,15 @@ pub enum CfdTab {
     Log,
 }
 
-impl Default for CfdTab {
-    fn default() -> Self {
-        Self::Study
-    }
-}
-
 /// Axis varied by a sequential CFD sweep.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum CfdSweepVariable {
     /// Vary geometric angle of attack while retaining the selected operating
     /// input (speed or Reynolds number).
+    #[default]
     AngleOfAttack,
     /// Vary chord Reynolds number and derive speed for every point.
     Reynolds,
-}
-
-impl Default for CfdSweepVariable {
-    fn default() -> Self {
-        Self::AngleOfAttack
-    }
 }
 
 impl CfdSweepVariable {
@@ -313,6 +304,15 @@ pub struct AirfoilCfdState {
     pub last_case_dir: Option<PathBuf>,
     /// Field artifact selected for inspection in the Results tab.
     pub selected_field: Option<String>,
+    /// Decoded native contour figures keyed by their exact artifact path.
+    /// The cache is process-local UI state; the source PNGs remain in the
+    /// reproducible case directory and are never synthesized by the GUI.
+    pub contour_textures: BTreeMap<String, egui::TextureHandle>,
+    /// Editable path used to import a previously completed, reproducible
+    /// `results.json` artifact into the detached window.  Keeping this
+    /// explicit lets a user inspect a production case after restarting ALAS
+    /// without reconstructing or rerunning it.
+    pub result_json_path: String,
     /// Revision incremented whenever any study input changes.
     pub input_revision: u64,
     /// Monotonic ID for worker runs.  IDs are never reused during a session.

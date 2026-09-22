@@ -25,6 +25,7 @@ pub mod case;
 pub mod editors;
 pub mod estimates;
 pub mod fuselage_editor;
+pub mod overlays;
 pub mod panel;
 pub mod viewport;
 pub mod windows;

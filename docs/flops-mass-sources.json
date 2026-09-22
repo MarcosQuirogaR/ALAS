@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
-  "purpose": "Pinned primary sources for the ALAS FLOPS transport mass model. Durable copy of .agent/data/flops-reference-20260911/manifest.json, which is an ignored artifact directory.",
+  "purpose": "Pinned primary sources for the ALAS FLOPS transport mass model. Durable copy of an internal manifest.json kept in a local, git-ignored artifact directory.",
   "retrieved_utc": "2026-09-11",
-  "local_copy_directory": ".agent/data/flops-reference-20260911/",
+  "local_copy_directory": "local, git-ignored artifact directory (not versioned)",
   "note": "Aviary is NASA OpenMDAO, Apache-2.0. NASA/TM-2017-219627 Vol. I is the equation source; Aviary at the pinned commit is the numeric reference implementation. Neither is physical aircraft validation.",
   "sources": [
     {

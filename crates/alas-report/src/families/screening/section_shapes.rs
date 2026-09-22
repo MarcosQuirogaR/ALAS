@@ -18,10 +18,10 @@ use alas_screen::AirfoilScreeningResult;
 use super::{ok_candidates, refined_candidates};
 
 /// Colour-blind-safe (Okabe-Ito derived) series palette, cycled by draw
-/// order -- `series` upstream.
+/// order: `series` upstream.
 const SERIES_COLORS: [&str; 5] = ["#4f8cff", "#ff8a5c", "#43c59e", "#f5c518", "#c792ea"];
 
-/// Dash patterns cycled alongside [`SERIES_COLORS`] -- `dashes` upstream.
+/// Dash patterns cycled alongside [`SERIES_COLORS`]: `dashes` upstream.
 /// `None` is solid; a trailing `(0.0, 0.0)` pair means "two-element
 /// pattern", matching the reference's shorter tuples.
 const DASHES: [Option<(f64, f64, f64, f64)>; 5] = [
@@ -32,7 +32,7 @@ const DASHES: [Option<(f64, f64, f64, f64)>; 5] = [
     Some((4.0, 1.5, 1.0, 1.5)),
 ];
 
-/// The vertical stagger between overlaid sections -- `offset_step` upstream.
+/// The vertical stagger between overlaid sections: `offset_step` upstream.
 const OFFSET_STEP: f64 = 0.16;
 
 struct Section {
@@ -93,7 +93,7 @@ pub fn fig_section_shapes(result: &AirfoilScreeningResult, theme: Option<&str>) 
 
     let pal = get_palette(theme);
     let mut scene = Scene::new(650.0, 380.0, Some(Color::from_hex(pal.bg)));
-    scene.title = Some("Section shapes -- top picks vs current".to_owned());
+    scene.title = Some("Section shapes: top picks vs current".to_owned());
 
     let (x_lo, x_hi, y_lo, y_hi) = combined_offset_bbox(&sections);
     let plot_rect = (60.0, 40.0, 520.0, 280.0);
@@ -105,7 +105,7 @@ pub fn fig_section_shapes(result: &AirfoilScreeningResult, theme: Option<&str>) 
     let mut legend_entries = Vec::new();
     for section in &sections {
         // Faint per-section chord reference line, spanning the full plotted
-        // width -- `ax.axhline(offset, ...)`.
+        // width: `ax.axhline(offset, ...)`.
         let p0 = axes.map_point(axes.x_min, section.offset);
         let p1 = axes.map_point(axes.x_max, section.offset);
         let mut chord_color = Color::from_hex(pal.spine);
@@ -183,7 +183,7 @@ fn combined_offset_bbox(sections: &[Section]) -> (f64, f64, f64, f64) {
 }
 
 /// Two axis ranges sharing one data-units-per-pixel scale, centred on each
-/// data interval -- the substitute for `ax.set_aspect("equal")` this crate's
+/// data interval: the substitute for `ax.set_aspect("equal")` this crate's
 /// [`Axes2D`] has no flag for. Duplicated from
 /// `families::geometry::shared::equal_aspect_ranges`, which is `pub(super)`
 /// to that family and out of reach from here.

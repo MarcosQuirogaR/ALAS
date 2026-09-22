@@ -19,25 +19,25 @@ use super::{
     MassCoordinates, PayloadLayoutSummary, ProductMassBuildup, AERODYNAMIC_CENTER_CHORD_FRACTION,
 };
 
-/// Determine the X, Y, Z physical locations of the centroid of each component
-/// -- `define_mass_coordinates`.
+/// Determine the X, Y, Z physical locations of the centroid of each component:
+/// `define_mass_coordinates`.
 ///
-/// Payload is placed at the centre of the *occupied* cabin length (payload
-/// mass / `mass_model.cabin_payload_density_kg_m`, capped at the full
-/// available cabin) rather than always the full available cabin. This means
-/// that stretching the fuselage beyond what the required payload physically
-/// needs does NOT shift the payload CG aft for free -- the optimizer must pay
-/// a CG-mismatch penalty for unrealistic stretch.
+/// The three cabin groups (systems, furnishings and the lumped planning
+/// payload) are all placed as fractions of the **installed cabin**, because
+/// all three are distributed over the same floor. See `x_payload` below for why
+/// the payload no longer sits at the centre of a block beginning at the forward
+/// bulkhead, and what that was worth per aircraft.
 pub fn define_mass_coordinates(
     plane: &Airplane,
     geometry_config: &GeometryConfig,
     requirements: Option<&DesignRequirements>,
     mass_model: Option<&MassModelConfig>,
 ) -> MassCoordinates {
-    let default_mass_model = MassModelConfig::default();
-    let mm = mass_model.unwrap_or(&default_mass_model);
-    let default_requirements = DesignRequirements::default();
-    let req = requirements.unwrap_or(&default_requirements);
+    // Retained so the signature and every call site stay unchanged while the
+    // cabin groups are placed from geometry alone; the payload's linear density
+    // is still what `alas_mass::stations` uses for the payload station's
+    // spatial extent.
+    let _ = (requirements, mass_model);
 
     let wing = wing_named_or_first(&plane.wings, "Main Wing");
     let fus = &plane.fuselages[0];
@@ -53,34 +53,62 @@ pub fn define_mass_coordinates(
     let tailcone_len = geometry_config.fuselage.tailcone_length_m;
     let cabin_len = (fus_len - cabin_start - tailcone_len).max(1.0);
 
-    // Occupied cabin length: how much of the available cabin the PAYLOAD
-    // actually needs at the configured linear density, capped at what's
-    // physically available. A fuselage stretched beyond that need does not
-    // move the payload centroid (and therefore the CG) aft "for free". This
-    // must stay scoped to Payload only -- Systems and Furnishings are OEW
-    // (installed-equipment) components below and use the full cabin_len
-    // instead: they are physically present over the whole installed cabin
-    // regardless of how many of those seats a particular run happens to book,
-    // so their position must NOT move when only num_passengers/payload_kg
-    // changes (e.g. switching a cabin preset from all-economy to a lower-
-    // density 3-class at the SAME fuselage length). Tying OEW-component
-    // position to occupied_len instead would drag the entire OEW-component CG
-    // forward whenever a preset books fewer passengers, purely as an artifact
-    // of the shorter occupied length rather than any real change to where the
-    // installed equipment sits, corrupting CG-envelope compliance for an
-    // otherwise correct lower-density 3-class config.
-    let occupied_len = cabin_len.min(req.payload_kg() / mm.cabin_payload_density_kg_m.max(1e-6));
-
     // Systems (avionics, ECS, APU) are concentrated in the forward equipment
-    // bay and central cabin zone, including APU. Scaled with the full
-    // installed cabin length (NOT occupied_len -- see note above).
+    // bay and central cabin zone, including APU. Scaled with the installed
+    // cabin: they are physically present over the whole of it regardless of how
+    // many of its seats a particular run happens to book, so their position
+    // must not move when only `num_passengers`/`payload_kg` changes: switching
+    // a cabin preset from all-economy to a lower-density three-class at the
+    // same fuselage length, for instance.
     let x_systems = cabin_start + 0.45 * cabin_len;
-    // Furnishings (seats, galleys, etc.) and operational items -- also
-    // installed over the full cabin, not the currently-booked payload.
+    // Furnishings (seats, galleys, etc.) and operational items, also installed
+    // over the whole cabin, for the same reason.
     let x_furn = cabin_start + 0.50 * cabin_len;
-    // Payload CG at the centre of the occupied cabin section (the one place
-    // occupied_len is the physically correct choice).
-    let x_payload = cabin_start + 0.50 * occupied_len;
+    // Payload CG at the centre of the cabin it is distributed over.
+    //
+    // The tempting form is `cabin_start + 0.50 * occupied_len`, the centre of a
+    // block that always begins at the FORWARD BULKHEAD. Whenever the payload
+    // does not fill the cabin that is the aircraft's forward loading extreme
+    // applied as if it were the neutral case, and it is asymmetric against the
+    // two lines directly above: `x_systems` and `x_furn` are placed as
+    // fractions of the installed cabin, because that is where installed
+    // equipment sits. A lumped planning payload is distributed over the same
+    // floor and an operator trims it into the certified envelope; it is not
+    // loaded nose first.
+    //
+    // Measured (`alas-mass/examples/payload_station_matrix.rs`), the forward-
+    // bulkhead form put the centroid this far forward of the cabin centre, and
+    // moved the centre of gravity at maximum take-off mass by:
+    //
+    //   ATR72-600  fill 0.495  4.583 m forward  ->  1.435 m of CG
+    //   A220-300   fill 0.570  6.125 m          ->  1.178 m
+    //   A320-200   fill 0.706  3.910 m          ->  0.752 m
+    //   AVE        fill 0.771  6.485 m          ->  0.633 m
+    //   A340-300   fill 0.785  4.955 m          ->  0.553 m
+    //   B787-9     fill 0.800  4.530 m          ->  0.516 m
+    //   DC-10      fill 0.811  3.650 m          ->  0.352 m
+    //   A380-800   fill 1.000  0.000 m          ->  0.000 m
+    //
+    // On the ATR 72-600 that 1.435 m is 57.4 % of its 2.499 m mean aerodynamic
+    // chord. The correction consults no centre-of-gravity target and adds no
+    // coefficient: it is the one symmetric placement available, and on an
+    // aircraft whose payload fills its cabin it is exactly the previous value.
+    //
+    // The retired comment's concern was that a fuselage stretched beyond the
+    // payload's need would shift the payload centre of gravity aft "for free",
+    // so the optimizer "must pay a CG-mismatch penalty for unrealistic
+    // stretch". That is an optimizer-stability argument, not a physical one: a
+    // longer cabin carrying the same payload over a uniformly loaded floor does
+    // move its centroid aft, exactly as `x_systems` and `x_furn` already do. An
+    // implausible stretch is the geometry plausibility windows' to reject (the
+    // fuselage fineness window exists for it), not something to suppress by
+    // placing mass where it is not.
+    //
+    // The occupied length itself is no longer needed here: it describes the
+    // payload's spatial EXTENT, which these lumped coordinates do not carry.
+    // `alas_mass::stations::ComponentStations::payload_fallback` still reports
+    // it, as that station's `extent_m`, which is the field that means it.
+    let x_payload = cabin_start + 0.50 * cabin_len;
 
     let mut coords = MassCoordinates {
         fuselage: [fus_len * 0.46, 0.0, fus_z],
@@ -133,8 +161,8 @@ pub fn define_mass_coordinates(
 
 /// Determine component coordinates using an explicit coordinate model.
 ///
-/// The reference-compatible path is infallible and numerically identical to
-/// [`define_mass_coordinates`]. The structural path reports invalid wingbox
+/// The reference-compatible path preserves the frozen forward-loaded payload
+/// convention. The product path uses the installed-cabin centroid and reports invalid wingbox
 /// geometry or material configuration as a typed error; it never silently
 /// falls back to the legacy point, because that would make an apparently
 /// physical CG depend on an unreported compatibility behavior.
@@ -146,6 +174,18 @@ pub fn define_mass_coordinates_with_model(
     coordinate_model: MassCoordinateModel<'_>,
 ) -> Result<MassCoordinates, WingCentroidError> {
     let mut coordinates = define_mass_coordinates(plane, geometry_config, requirements, mass_model);
+    if matches!(
+        coordinate_model,
+        MassCoordinateModel::ReferenceCompatibility
+    ) {
+        restore_reference_payload_coordinate(
+            &mut coordinates,
+            plane,
+            geometry_config,
+            requirements,
+            mass_model,
+        );
+    }
     if let MassCoordinateModel::StructuralWingbox(structures) = coordinate_model {
         let default_requirements = DesignRequirements::default();
         let requirements = requirements.unwrap_or(&default_requirements);
@@ -161,7 +201,30 @@ pub fn define_mass_coordinates_with_model(
     Ok(coordinates)
 }
 
-/// Calculate the global center of gravity location `[X, Y, Z]` in meters --
+/// Frozen Python replay only. Product planning payloads remain centered in
+/// the installed cabin; detailed layouts replace this coordinate afterwards.
+fn restore_reference_payload_coordinate(
+    coordinates: &mut MassCoordinates,
+    plane: &Airplane,
+    geometry: &GeometryConfig,
+    requirements: Option<&DesignRequirements>,
+    mass_model: Option<&MassModelConfig>,
+) {
+    let default_requirements = DesignRequirements::default();
+    let default_model = MassModelConfig::default();
+    let requirements = requirements.unwrap_or(&default_requirements);
+    let model = mass_model.unwrap_or(&default_model);
+    let fuselage = &plane.fuselages[0];
+    let length = fuselage.xsecs.last().map_or(0.0, |x| x.xyz_c[0])
+        - fuselage.xsecs.first().map_or(0.0, |x| x.xyz_c[0]);
+    let start = geometry.fuselage.cabin_start_x_m;
+    let cabin_length = (length - start - geometry.fuselage.tailcone_length_m).max(1.0);
+    let occupied_length =
+        cabin_length.min(requirements.payload_kg() / model.cabin_payload_density_kg_m.max(1.0e-6));
+    coordinates.payload[0] = start + 0.5 * occupied_length;
+}
+
+/// Calculate the global center of gravity location `[X, Y, Z]` in meters:
 /// `calculate_physical_cg`.
 pub fn calculate_physical_cg(masses: &MassBreakdown, coords: &MassCoordinates) -> [f64; 3] {
     let mut moment = [0.0; 3];
@@ -190,7 +253,7 @@ pub fn calculate_physical_cg(masses: &MassBreakdown, coords: &MassCoordinates) -
     ]
 }
 
-/// Execute the full weight and balance analysis -- `run_mass_analysis`.
+/// Execute the full weight and balance analysis: `run_mass_analysis`.
 ///
 /// A positive [`PayloadLayoutSummary`] replaces lumped payload and recomputes
 /// [`super::FUEL`], so the optimizer's final CG reflects the detailed layout.
@@ -202,8 +265,15 @@ pub fn run_mass_analysis(
     payload_layout: Option<&PayloadLayoutSummary>,
 ) -> (MassBreakdown, MassCoordinates, [f64; 3]) {
     let masses = calculate_component_masses(plane, requirements, geometry_config, mass_model);
-    let coordinates =
+    let mut coordinates =
         define_mass_coordinates(plane, geometry_config, Some(requirements), mass_model);
+    restore_reference_payload_coordinate(
+        &mut coordinates,
+        plane,
+        geometry_config,
+        Some(requirements),
+        mass_model,
+    );
     complete_mass_analysis(masses, coordinates, requirements, payload_layout)
 }
 
@@ -242,7 +312,7 @@ pub fn run_mass_analysis_checked(
 /// frozen Python fixture and [`MassCoordinateModel::StructuralWingbox`] for a
 /// physical product analysis. For one fixed aircraft input, both coordinate
 /// paths share that run's component masses and detailed-payload replacement;
-/// only the main-wing coordinate differs. This does not mean different
+/// the main-wing and fallback payload coordinates differ. This does not mean different
 /// presets have identical masses: systems/furnishings scale with their
 /// selected mass model and MTOW (or with declared FLOPS architecture).
 pub fn run_mass_analysis_with_model(

@@ -19,7 +19,7 @@
 //! second copy that can drift, so they are read from the one that already
 //! exists and the provenance cites the preset's own source.
 //!
-//! **Declared.** Quantities nothing in the configuration carries -- maximum
+//! **Declared.** Quantities nothing in the configuration carries: maximum
 //! operating Mach, hydraulic working pressure, minimum flight crew, engine
 //! mounting, variable-sweep architecture. Each is written out per aircraft
 //! with the document, revision and locator it came from.
@@ -43,8 +43,8 @@
 //!   source establishes otherwise, which none does.
 
 use crate::{
-    FlopsInputEvidence, FlopsInputProvenance, FlopsStructureConfig, FlopsTransportConfig,
-    FlopsTransportProvenance, FuelTankLayoutConfig,
+    CargoHoldLoading, FlopsInputEvidence, FlopsInputProvenance, FlopsStructureConfig,
+    FlopsTransportConfig, FlopsTransportProvenance, FlopsTurbopropConfig, FuelTankLayoutConfig,
 };
 
 /// The FLOPS architecture registered for one aircraft.
@@ -54,6 +54,10 @@ pub struct PresetFlopsInputs {
     pub transport: FlopsTransportConfig,
     /// Technology factors and declared airframe/propulsion overrides.
     pub structure: FlopsStructureConfig,
+    /// Declared shaft-power propulsion-group inputs, for a turboprop.
+    ///
+    /// Left at its undeclared default for every jet, which never reads it.
+    pub turboprop: FlopsTurbopropConfig,
 }
 
 /// A cabin class split, in installed seats.
@@ -104,6 +108,16 @@ struct DeclaredArchitecture {
     maximum_fuel_capacity_kg: Option<f64>,
     /// FLOPS `WCARGO`, kilograms of containerised cargo.
     containerized_cargo_kg: f64,
+    /// How this aircraft's holds are loaded, which decides whether its
+    /// checked baggage carries a unit-load-device tare.
+    cargo_loading: CargoHoldLoading,
+    /// Containerised share of the checked baggage, for a mixed arrangement.
+    containerized_baggage_fraction: Option<f64>,
+    /// Which method prices this aircraft's cabin equipment and
+    /// occupant-driven operating items.
+    cabin_equipment_method: crate::CabinEquipmentMethod,
+    /// Which LTH operating-item relation this aircraft would take.
+    haul_class: crate::OperatingHaulClass,
     /// Evidence for the mission family.
     mission: Evidence,
     /// Evidence for the cabin family.
@@ -140,8 +154,8 @@ impl Evidence {
 /// A wing cell is one tank per side, because that is what the aircraft has
 /// and what the arrangement's own symmetric volume describes; the centre,
 /// trim and auxiliary cells are one each. Where the aircraft's published fuel
-/// system has a finer split than the arrangement models -- the A380's four
-/// feed tanks are carried inside its inner and mid cells here -- the preset
+/// system has a finer split than the arrangement models (the A380's four
+/// feed tanks are carried inside its inner and mid cells here) the preset
 /// declares the published count instead and this derivation is not used.
 fn tank_count_from_layout(layout: &FuelTankLayoutConfig) -> usize {
     let wing_cells = [&layout.inner_wing, &layout.mid_wing, &layout.outer_wing]
@@ -172,6 +186,22 @@ pub fn inputs_for(preset_name: &str) -> Option<PresetFlopsInputs> {
             .map(tank_count_from_layout)
     })?;
 
+    // ATR's published hotel-mode architecture supplies onboard power from a
+    // running engine instead of carrying an APU. Keep the generic FLOPS
+    // default present for every other preset and retain the source statement
+    // in the architecture provenance rather than applying a turboprop-wide
+    // assumption.
+    let apu_installed = preset_name != "ATR72-600";
+    let mut architecture_provenance = declared.architecture.into_provenance();
+    if !apu_installed {
+        architecture_provenance.applicability.push_str(
+            "; ATR hotel mode supplies aircraft power from the engine instead of an APU (ATR, https://www.atr-aircraft.com/innovation/a-history-of-innovation/)",
+        );
+        architecture_provenance
+            .uncertainty
+            .push_str("; APU absent by ATR hotel-mode architecture");
+    }
+
     let transport = FlopsTransportConfig {
         maximum_mach: Some(declared.maximum_mach),
         design_range_nmi: Some(declared.design_range_nmi),
@@ -192,17 +222,23 @@ pub fn inputs_for(preset_name: &str) -> Option<PresetFlopsInputs> {
         maximum_fuel_capacity_kg: declared
             .maximum_fuel_capacity_kg
             .or(preset.reference.usable_fuel_mass_kg),
+        apu_installed,
         containerized_cargo_kg: Some(declared.containerized_cargo_kg),
+        cargo_loading: Some(declared.cargo_loading),
+        containerized_baggage_fraction: declared.containerized_baggage_fraction,
+        cabin_equipment_method: declared.cabin_equipment_method,
+        haul_class: Some(declared.haul_class),
         provenance: FlopsTransportProvenance {
             mission: declared.mission.into_provenance(),
             cabin: declared.cabin.into_provenance(),
-            architecture: declared.architecture.into_provenance(),
+            architecture: architecture_provenance,
         },
     };
 
     Some(PresetFlopsInputs {
         transport,
         structure: declared_structure(preset_name),
+        turboprop: declared_turboprop(preset_name),
     })
 }
 
@@ -211,7 +247,8 @@ mod architecture;
 #[path = "preset_flops/structure.rs"]
 mod structure;
 use architecture::declared_architecture;
-use structure::declared_structure;
+pub(crate) use architecture::declared_cargo_loading;
+use structure::{declared_structure, declared_turboprop};
 
 #[cfg(test)]
 #[path = "preset_flops/tests.rs"]

@@ -246,7 +246,10 @@ impl Integrator<'_> {
             };
         let mut floor = idle;
         if idle.thrust_n <= required_n && required_n <= rated.thrust_n {
-            match deck.at_thrust(*flight, required_n, step.cap) {
+            // The rating and the idle floor above are this deck's points at
+            // this flight condition, so hand them over rather than paying for
+            // them twice per step.
+            match deck.at_thrust_between(*flight, required_n, step.cap, Some(idle), Some(rated)) {
                 Ok(point) => {
                     if point.limit != ThrustLimit::IdleFloor || point.thrust_n <= required_n {
                         return Ok(planned(point, pending_installment, false));

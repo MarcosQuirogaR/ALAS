@@ -51,7 +51,7 @@ pub const PAYLOAD: &str = "Payload";
 /// not a physical negative fuel load.
 pub const FUEL: &str = "Fuel";
 
-/// The components that make up the Operating Empty Weight -- everything
+/// The components that make up the Operating Empty Weight, everything
 /// except payload and fuel. This is the single canonical definition; every
 /// other module that needs the OEW component set imports it from here rather
 /// than redefining its own copy (upstream's module doc names
@@ -158,7 +158,7 @@ impl std::error::Error for ComponentMassError {
 }
 
 /// Every native aerodynamic model `Wing::aerodynamic_center` call in this module reads the
-/// quarter-chord point -- upstream's `mass.py` never passes a
+/// quarter-chord point: upstream's `mass.py` never passes a
 /// `chord_fraction` of its own, and native aerodynamic model's own default is 0.25.
 const AERODYNAMIC_CENTER_CHORD_FRACTION: f64 = 0.25;
 
@@ -167,8 +167,9 @@ const AERODYNAMIC_CENTER_CHORD_FRACTION: f64 = 0.25;
 /// [`Self::ReferenceCompatibility`] is the translated Python coordinate and
 /// remains available so the frozen parity fixture keeps testing the reference
 /// implementation rather than an improvement. [`Self::StructuralWingbox`]
-/// replaces only the main-wing point with a first moment integrated from the
-/// configured spars, skins, ribs, materials, and ultimate maneuver load.
+/// places the main-wing point from the configured structural first moment and
+/// uses a cabin-centered planning payload rather than the frozen forward-load
+/// convention. A resolved payload layout supersedes either fallback.
 #[derive(Debug, Clone, Copy)]
 pub enum MassCoordinateModel<'a> {
     /// Exact `alas/physics/mass.py` coordinate behavior.
@@ -177,7 +178,7 @@ pub enum MassCoordinateModel<'a> {
     StructuralWingbox(&'a StructuresConfig),
 }
 
-/// The mass of each primary component, in kg -- upstream's `Dict[str, float]`
+/// The mass of each primary component, in kg: upstream's `Dict[str, float]`
 /// with one field per canonical component name (see the module doc).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MassBreakdown {
@@ -229,7 +230,7 @@ impl MassBreakdown {
     }
 
     /// Every component paired with its canonical name, in the order upstream's
-    /// dict literal writes them -- the generic iteration
+    /// dict literal writes them: the generic iteration
     /// [`calculate_physical_cg`] and [`OEW_KEYS`]'s summation need.
     pub fn as_pairs(&self) -> [(&'static str, f64); 10] {
         [
@@ -247,7 +248,7 @@ impl MassBreakdown {
     }
 
     /// The mass named `name`, or `None` if it is not one of the ten canonical
-    /// components -- `dict.get`, for a caller (such as [`run_mass_analysis`]'s
+    /// components: `dict.get`, for a caller (such as [`run_mass_analysis`]'s
     /// [`OEW_KEYS`] summation) that only has the name.
     pub fn get(&self, name: &str) -> Option<f64> {
         self.as_pairs()
@@ -257,7 +258,7 @@ impl MassBreakdown {
     }
 }
 
-/// The `[x, y, z]` centroid of each primary component, in meters -- upstream's
+/// The `[x, y, z]` centroid of each primary component, in meters: upstream's
 /// `Dict[str, List[float]]` with one field per canonical component name.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MassCoordinates {
@@ -304,7 +305,7 @@ impl MassCoordinates {
 
 /// The three attributes `run_mass_analysis` reads off upstream's
 /// `PayloadLayout` (`alas/physics/payload.py`, ported separately as
-/// `alas-payload::payload`) -- see the module doc for why this is a small
+/// `alas-payload::payload`), see the module doc for why this is a small
 /// local type rather than a dependency on that unported crate.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PayloadLayoutSummary {
@@ -316,7 +317,7 @@ pub struct PayloadLayoutSummary {
     pub cg_y: f64,
 }
 
-/// The wing named `name`, or the first wing if none matches -- the
+/// The wing named `name`, or the first wing if none matches: the
 /// `next((w for w in plane.wings if w.name == name), fallback)` pattern
 /// `calculate_component_masses` and `define_mass_coordinates` both use to find
 /// the main wing.

@@ -22,10 +22,10 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 
 const DEFAULTS = Object.freeze({
-  modelPath: '.agent/validation/MODEL.json',
+  modelPath: 'out/validation/MODEL.json',
   contractPath: 'golden/aircraft/real_aircraft_parity.json',
-  outputDir: '.agent/validation',
-  reportPath: '.agent/reports/2026-09-09-aircraft-parity.html',
+  outputDir: 'out/validation',
+  reportPath: 'out/reports/2026-09-09-aircraft-parity.html',
 });
 
 function finite(value) {
@@ -124,7 +124,7 @@ function compareNumeric(modelValue, sourceValue, tolerance) {
     const relativeError = sourceValue === 0 ? null : absoluteError / Math.abs(sourceValue);
     // Both bounds must hold when both are declared. An OR combination lets a
     // generous absolute bound (sized for a large aircraft in the same
-    // category) mask a large relative error on a smaller one -- e.g. a 2000 kg
+    // category) mask a large relative error on a smaller one: e.g. a 2000 kg
     // absolute mass tolerance swallows a 10.7% error on a 13,450 kg airframe.
     const hasAbsolute = tolerance.absolute !== undefined && tolerance.absolute !== null;
     const hasRelative = tolerance.relative !== undefined && tolerance.relative !== null;

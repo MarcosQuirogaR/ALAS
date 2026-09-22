@@ -54,13 +54,13 @@ Each future catalogue entry should separate:
 ## Implemented transport mission deck
 
 All ten turbofan catalogue rows now dispatch through the same typed
-Battel--Young/OpenAP thrust-lapse model in total-energy missions. The
+Bartel-Young/OpenAP thrust-lapse model in total-energy missions. The
 top-of-climb reference is no longer embedded in mission code.
 
 For identity-qualified ICAO rows, the typed empirical payload uses the ICAO
 sea-level-static rated thrust. The ICAO takeoff bypass ratio is stored
 separately from the conceptual cycle/design bypass ratio and is used only by
-the Battel--Young takeoff lapse correlation. This prevents parameters from
+the Bartel-Young takeoff lapse correlation. This prevents parameters from
 different operating conditions being silently treated as one number. Older
 typed configuration files that predate this split fall back explicitly to the
 cycle BPR and remain readable.

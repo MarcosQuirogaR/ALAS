@@ -6,7 +6,7 @@
 
 //! Helpers shared by every `geometry` figure: the top-view planform outline
 //! (`_draw_planform` upstream), and an equal-aspect axis-range fitter that
-//! substitutes for Matplotlib's `ax.set_aspect("equal")` -- [`crate::scene::Axes2D`]
+//! substitutes for Matplotlib's `ax.set_aspect("equal")`: [`crate::scene::Axes2D`]
 //! maps its X and Y ranges independently onto a fixed pixel box and has no
 //! notion of an equal data-to-pixel scale, so every multi-panel geometry
 //! figure computes one here instead of leaving the aircraft visibly
@@ -17,7 +17,7 @@ use alas_geom::aircraft::airplane::Airplane;
 use crate::scene::{Color, Fill, Point2D, Scene, SceneElement, Stroke};
 
 /// Data-space bounding box of every wing planform and fuselage silhouette on
-/// `plane`, mirrored across `y = 0` where a wing is symmetric -- used to size
+/// `plane`, mirrored across `y = 0` where a wing is symmetric: used to size
 /// every geometry figure's axes from the real aircraft rather than a fixed
 /// magic-number range.
 ///
@@ -64,7 +64,7 @@ pub(super) fn airplane_bbox(plane: &Airplane) -> (f64, f64, f64, f64, f64, f64) 
 }
 
 /// Two axis ranges, one per pixel extent (`u_px`, `v_px`), that share a
-/// single data-units-per-pixel scale and are centred on each data interval --
+/// single data-units-per-pixel scale and are centred on each data interval:
 /// the self-contained substitute for `ax.set_aspect("equal")` this crate's
 /// [`crate::scene::Axes2D`] cannot do on its own. `pad_frac` grows both data
 /// intervals before fitting, so drawn geometry does not touch the panel
@@ -88,12 +88,12 @@ pub(super) fn equal_aspect_ranges(
     ((u_c - u_half, u_c + u_half), (v_c - v_half, v_c + v_half))
 }
 
-/// Draw every wing's top-view planform outline on `plane` -- `_draw_planform`.
+/// Draw every wing's top-view planform outline on `plane`: `_draw_planform`.
 ///
 /// `fill_alpha`, when set, fills each planform (used by the design-evolution
 /// montage and baseline/optimized overlays); otherwise the outline is
 /// stroked, dashed when `dashed`. `invert_y`, when true, negates the
-/// longitudinal coordinate before mapping -- the effect of Matplotlib's
+/// longitudinal coordinate before mapping: the effect of Matplotlib's
 /// `ax.invert_yaxis()`, which [`crate::scene::Axes2D`] has no flag for; the
 /// caller's axes must have been built over the negated `(-x_hi, -x_lo)`
 /// range to match.

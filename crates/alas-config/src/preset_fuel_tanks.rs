@@ -14,9 +14,9 @@
 //! tanks extend into the inboard wing and carry more than half the fuel;
 //! they are declared as centre tanks with their published volume, so the
 //! capacity is exact while the centroid is the carry-through box's. Sources
-//! and the estimation method are in the 2026-09-05 fuel-tank-layout research
-//! note (`.agent/reports/research-2026-09-05-fuel-tank-layouts.md`), which
-//! cites EASA.A.064 III.9, EASA.A.110, the Airbus A220 operator WBM Table
+//! and the estimation method are in an internal 2026-09-05 fuel-tank-layout
+//! research note, which cites EASA.A.064 III.9, EASA.A.110, the Airbus A220
+//! operator WBM Table
 //! 3-1, the Boeing 787 ACAP Rev Q, the DC-10 ACAP and EASA.A.084.
 
 use crate::{
@@ -114,15 +114,50 @@ pub fn layout_for(preset_name: &str) -> Option<FuelTankLayoutConfig> {
             trim: trim(1, 6_230.0),
             ..base
         },
-        // A380-800: no centre tank. Feed 2/3 plus inner (2 x 74,649 L),
-        // feed 1/4 plus mid (2 x 63,632 L), outer 2 x 9,524 L and the
-        // 23,698 L trim tank, from the Airbus A380 AC fuel table; stations
-        // are volume-consistent estimates. Inner feeds first, then mid,
-        // trim, and the outers last.
+        // A380-800: no centre tank. Certified per-tank usable volumes from
+        // EASA TCDS EASA.A.110 Issue 17, 2026-08-05, section 3.3 "Fluid
+        // Capacities", p.14 of 20, lumped onto the cells this layout
+        // declares (litres, at the sheet's own 0.800 kg/L convention):
+        //   inner_wing = Feed 2 + Feed 3 + Inner L + Inner R
+        //              = 29,349 + 29,349 + 46,142 + 46,142 = 150,982 L
+        //   mid_wing   = Feed 1 + Feed 4 + Mid L + Mid R
+        //              = 27,632 + 27,632 + 36,461 + 36,461 = 128,186 L
+        //   outer_wing = Outer L + Outer R = 10,340 + 10,340 = 20,680 L
+        //   trim       = Trim                                = 23,698 L
+        // Tank total 323,546 L, 258,836.8 kg at 0.800 kg/L. These supersede
+        // the secondary Airbus AC-derived cells this entry carried
+        // (149,298 / 127,264 / 19,048 L, 319,308 L), which were 4,238 L
+        // (1.33 %) short of the certified tanks; the trim tank was already
+        // certified-exact.
+        //
+        // The preset declares 324,339 L (`presets::widebody::a380_800`),
+        // which is the same table's *aeroplane* total: the extra 793 L is its
+        // "Systems" row, usable fuel held in lines and engines rather than in
+        // a tank, so it has no tank station and is deliberately not modelled
+        // here. The declared total is kept as the certified aeroplane figure
+        // and the residual between it and these cells is now exactly that
+        // 793 L (0.245 %), where before it was an unexplained 5,031 L.
+        // `calibrate_to_published_capacity` cannot close it in either case:
+        // every A380 cell carries its own published volume, so the
+        // calibration has no geometric cell to absorb the difference and is
+        // the identity.
+        //
+        // The same table gives unusable fuel 1,086 L (869 kg at 0.800 kg/L),
+        // 0.00335 of the usable total, against the generic 0.007 in
+        // `FuelPolicyConfig::unusable_fuel_fraction`. That fraction is a
+        // global study default with no per-aircraft seam, and on the default
+        // pure-FLOPS architecture the operating-items unusable fuel comes
+        // from FLOPS equation 121 rather than from it, so the certified
+        // figure is recorded and not wired here.
+        //
+        // Span stations remain volume-consistent estimates, not published.
+        // Burn order is unchanged and stays as the Airbus A380 AC fuel
+        // subject describes the transfer: inner feeds first, then mid, trim,
+        // and the outers last.
         "A380-800" => FuelTankLayoutConfig {
-            inner_wing: wing(0.09, 0.33, 1, 149_298.0),
-            mid_wing: wing(0.33, 0.72, 2, 127_264.0),
-            outer_wing: wing(0.72, 0.85, 4, 19_048.0),
+            inner_wing: wing(0.09, 0.33, 1, 150_982.0),
+            mid_wing: wing(0.33, 0.72, 2, 128_186.0),
+            outer_wing: wing(0.72, 0.85, 4, 20_680.0),
             trim: trim(3, 23_698.0),
             ..base
         },
@@ -246,5 +281,69 @@ mod tests {
         }
         let a340 = layout_for("A340-300").expect("registered arrangement");
         assert!(a340.trim.enabled);
+
+        // The A380-800 has no centre tank, so the loop above cannot reach it,
+        // and its trim tank had no guard anywhere. Pin the whole order: it is
+        // the only ordering this layout carries, and
+        // `alas_mass::tanks::FuelTankLayout::distribute` derives the ground
+        // fill order from it by reversal, so the trim tank's value decides
+        // where a partial load sits. This records the registered order (the
+        // Airbus A380 AC fuel subject's transfer order) so that changing it
+        // is a deliberate edit; it does not endorse the reversal rule, which
+        // is unsourced and documented as such in that module.
+        let a380 = layout_for("A380-800").expect("registered arrangement");
+        assert!(!a380.center.enabled, "the A380-800 has no centre tank");
+        assert!(a380.trim.enabled);
+        assert_eq!(a380.inner_wing.burn_priority, 1);
+        assert_eq!(a380.mid_wing.burn_priority, 2);
+        assert_eq!(a380.trim.burn_priority, 3);
+        assert_eq!(a380.outer_wing.burn_priority, 4);
+    }
+
+    #[test]
+    fn the_a380_cells_carry_the_certified_tank_volumes() {
+        // EASA TCDS EASA.A.110 Issue 17, 2026-08-05, section 3.3 "Fluid
+        // Capacities", p.14 of 20, at the sheet's 0.800 kg/L convention. Each
+        // cell is the sum of the certified tanks it lumps, written out so a
+        // future edit has to restate which tanks it is claiming.
+        let a380 = layout_for("A380-800").expect("registered arrangement");
+        let published = |cell: &WingTankConfig| {
+            cell.published_usable_volume_l
+                .expect("published wing cell volume")
+        };
+        assert_eq!(
+            published(&a380.inner_wing),
+            29_349.0 + 29_349.0 + 46_142.0 + 46_142.0,
+            "Feed 2 + Feed 3 + Inner Left + Inner Right"
+        );
+        assert_eq!(
+            published(&a380.mid_wing),
+            27_632.0 + 27_632.0 + 36_461.0 + 36_461.0,
+            "Feed 1 + Feed 4 + Mid Left + Mid Right"
+        );
+        assert_eq!(
+            published(&a380.outer_wing),
+            10_340.0 + 10_340.0,
+            "Outer Left + Outer Right"
+        );
+        assert_eq!(a380.trim.published_usable_volume_l, Some(23_698.0));
+
+        // The tanks sum to the certified tank total, and what the preset
+        // declares beyond it is exactly the certified 793 L "Systems"
+        // inventory: fuel in lines and engines, which is not a tank and is
+        // not modelled as one. Litres are exact integers here, so these are
+        // exact comparisons rather than banded ones.
+        let tanks_l = published(&a380.inner_wing)
+            + published(&a380.mid_wing)
+            + published(&a380.outer_wing)
+            + a380.trim.published_usable_volume_l.expect("published trim");
+        assert_eq!(tanks_l, 323_546.0);
+        let declared_l = crate::presets::get("A380-800")
+            .expect("registered preset")
+            .reference
+            .usable_fuel_volume_l
+            .expect("declared usable volume");
+        assert_eq!(declared_l, 324_339.0);
+        assert_eq!(declared_l - tanks_l, 793.0);
     }
 }

@@ -190,7 +190,7 @@ fn the_mean_chord_is_no_more_mesh_dependent_than_the_ported_subdivision() {
     // which measures along the *quarter-chord* path. On a twisted wing the
     // quarter-chord point carries a `chord * sin(twist)` offset in Z, and
     // that is not linear along a section even though chord and twist each
-    // are -- so the measured span, and with it the weighting, shifts very
+    // are, so the measured span, and with it the weighting, shifts very
     // slightly as stations are added.
     //
     // This is a property of the existing area measure, not of how the
@@ -248,7 +248,7 @@ fn a_vertical_fin_is_measured_by_its_own_span() {
     for &station in &stations_of(&fin) {
         assert!(contains_station(&stations_of(&meshed), station));
     }
-    // Two sections, twelve panels, six each -- and the station between them
+    // Two sections, twelve panels, six each, and the station between them
     // is still exactly where the fin is cranked.
     let stations = stations_of(&meshed);
     let upper = stations.iter().filter(|s| **s > 0.25 + 1.0e-12).count();

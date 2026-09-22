@@ -6,13 +6,13 @@
 
 //! Shared side-view/metrics scalar quantities, computed once from the
 //! [`AnalysisReport`] (no new VLM runs) so [`super::side_view`] and
-//! [`super::metrics`] stay numerically consistent with each other --
+//! [`super::metrics`] stay numerically consistent with each other:
 //! `_stability_scalars`.
 
 use alas_geom::aircraft::wing::Wing;
 use alas_pipeline::full_analysis::AnalysisReport;
 
-/// The chord fraction [`Wing::aerodynamic_center`] is read at -- the
+/// The chord fraction [`Wing::aerodynamic_center`] is read at: the
 /// quarter-chord native aerodynamic model's own default (`Wing.aerodynamic_center()` with
 /// no argument) uses. Same value `alas-stab::trim`'s own `AC_CHORD_FRACTION`
 /// carries.
@@ -24,7 +24,7 @@ const FALLBACK_STATIC_MARGIN: f64 = 0.10;
 
 /// Scalar geometry and stability quantities shared by
 /// [`super::side_view::figure_stability_side_view`] and
-/// [`super::metrics::figure_stability_metrics`] -- the dict `_stability_scalars`
+/// [`super::metrics::figure_stability_metrics`]: the dict `_stability_scalars`
 /// returns, as a struct.
 pub struct StabilityScalars<'a> {
     /// The main wing: by name (`"Main Wing"`), falling back to the first wing.
@@ -61,7 +61,7 @@ pub struct StabilityScalars<'a> {
 }
 
 impl StabilityScalars<'_> {
-    /// Convert a longitudinal position `x` to percent MAC from LEMAC -- the
+    /// Convert a longitudinal position `x` to percent MAC from LEMAC: the
     /// `pct` closure both figures define locally.
     pub fn pct(&self, x: f64) -> f64 {
         (x - self.x_lemac) / self.c_ref * 100.0

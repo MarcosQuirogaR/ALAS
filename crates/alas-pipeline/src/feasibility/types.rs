@@ -32,6 +32,11 @@ pub enum FindingCode {
     /// A loading state exceeds the modeled main-gear tire capacity.
     MainGearStrengthViolation,
     /// A loading state carries too little nose load for steering authority.
+    ///
+    /// When this fires it is often a *symptom* rather than the defect: see
+    /// [`alas_opt::AftCgLimitGovernance`], carried on
+    /// [`FeasibilityReport::model_cg`], for whether the envelope's aft
+    /// boundary is the one that actually governs the layout.
     MinimumNoseGearLoadViolation,
     /// The analyzed point lies outside a public manufacturer planning envelope.
     PublicPlanningCgEnvelopeViolation,
@@ -90,6 +95,56 @@ pub enum FindingCode {
     /// The item ledger and the lumped model disagree about the takeoff
     /// centre of gravity by more than the reporting band.
     MassModelDisagreement,
+}
+
+impl FindingCode {
+    /// Machine-stable spelling, for manifests, exports and the acceptance
+    /// record that has to name which check rejected a delivered design.
+    ///
+    /// These strings are an interface: a reader matching on one is entitled
+    /// to expect it not to change under them, so a rename of a variant must
+    /// keep its spelling here or be treated as a breaking change.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::InvalidEnvelopeSpeedOrder => "invalid_envelope_speed_order",
+            Self::InvalidCruiseAerodynamics => "invalid_cruise_aerodynamics",
+            Self::NonPositiveFuel => "non_positive_fuel",
+            Self::TankLimitedTakeoffMass => "tank_limited_takeoff_mass",
+            Self::FuelCapacityUnavailable => "fuel_capacity_unavailable",
+            Self::CgEnvelopeViolation => "cg_envelope_violation",
+            Self::ModelCgAssessmentUnavailable => "model_cg_assessment_unavailable",
+            Self::ModelCgForwardRangeViolation => "model_cg_forward_range_violation",
+            Self::NoseGearStrengthViolation => "nose_gear_strength_violation",
+            Self::MainGearStrengthViolation => "main_gear_strength_violation",
+            Self::MinimumNoseGearLoadViolation => "minimum_nose_gear_load_violation",
+            Self::PublicPlanningCgEnvelopeViolation => "public_planning_cg_envelope_violation",
+            Self::TrimUnavailable => "trim_unavailable",
+            Self::InsufficientStaticMargin => "insufficient_static_margin",
+            Self::WingAreaLimit => "wing_area_limit",
+            Self::ReportedCruiseAttitudeOutsideWindow => "reported_cruise_attitude_outside_window",
+            Self::MissionUnavailable => "mission_unavailable",
+            Self::MissionNotConverged => "mission_not_converged",
+            Self::InvalidMissionFuelBurn => "invalid_mission_fuel_burn",
+            Self::MissionFuelShortfall => "mission_fuel_shortfall",
+            Self::InvalidCruiseForceBalance => "invalid_cruise_force_balance",
+            Self::FieldPerformanceUnavailable => "field_performance_unavailable",
+            Self::FieldTakeoffDistanceViolation => "field_takeoff_distance_violation",
+            Self::FieldLandingDistanceViolation => "field_landing_distance_violation",
+            Self::LandingMassLimitViolation => "landing_mass_limit_violation",
+            Self::ThrustMarginViolation => "thrust_margin_violation",
+            Self::MissionThrottleLimitViolation => "mission_throttle_limit_violation",
+            Self::PassengerCapacityShortfall => "passenger_capacity_shortfall",
+            Self::CargoCapacityShortfall => "cargo_capacity_shortfall",
+            Self::MaximumZeroFuelWeightViolation => "maximum_zero_fuel_weight_violation",
+            Self::StructuralPayloadLimitViolation => "structural_payload_limit_violation",
+            Self::ReserveFuelShortfall => "reserve_fuel_shortfall",
+            Self::DispatchNotConverged => "dispatch_not_converged",
+            Self::FuelPolicyUnavailable => "fuel_policy_unavailable",
+            Self::MassLedgerUnavailable => "mass_ledger_unavailable",
+            Self::FuelTankLayoutUnavailable => "fuel_tank_layout_unavailable",
+            Self::MassModelDisagreement => "mass_model_disagreement",
+        }
+    }
 }
 
 /// Severity of a physical finding.
@@ -157,6 +212,83 @@ pub struct CgEnvelopeAssessment {
     pub source: Option<CgEnvelopeSource>,
     /// Document that controls actual-aircraft dispatch and loading.
     pub controlling_document: Option<&'static str>,
+    /// How far the built model's own mean-aerodynamic-chord leading edge sits
+    /// aft of the published planning one, in metres, positive aft.
+    ///
+    /// The comparison this assessment makes is only like for like when the
+    /// two references describe the same chord at the same station: the mass
+    /// stations summed into [`Self::cg_pct_mac`] are placed on the **model's**
+    /// geometry, while the percentage they are expressed as is referred to the
+    /// **manufacturer's** published leading edge and chord. A non-zero offset
+    /// here is a systematic shift of every reported percentage and is
+    /// therefore reported beside the verdict rather than absorbed into it.
+    ///
+    /// [`None`] when no planning envelope is registered or the built geometry
+    /// carries no usable chord.
+    pub model_mac_leading_edge_offset_m: Option<f64>,
+    /// Built model mean aerodynamic chord less the published planning chord,
+    /// in metres.
+    ///
+    /// Reported for the same reason as
+    /// [`Self::model_mac_leading_edge_offset_m`]: a percentage of one chord
+    /// compared against a limit stated as a percentage of a different chord
+    /// is a scale error on top of the datum offset.
+    pub model_mac_length_difference_m: Option<f64>,
+    /// The published planning mean aerodynamic chord the percentages above are
+    /// referred to, in metres, when one is registered.
+    pub published_mac_chord_m: Option<f64>,
+}
+
+/// Datum offset, as a fraction of the published chord, beyond which the model
+/// and published MAC references are reported as disagreeing.
+///
+/// Below it the shift is smaller than the rounding of the published vertices
+/// themselves; above it the reported percentage moves by an amount comparable
+/// with the width of the envelope's own margins.
+const MAC_DATUM_AGREEMENT_FRACTION: f64 = 0.01;
+
+/// The same, for the chord length. A chord scale error shifts every reported
+/// percentage proportionally rather than uniformly, so it is allowed a wider
+/// band before it is called a disagreement.
+const MAC_LENGTH_AGREEMENT_FRACTION: f64 = 0.02;
+
+impl CgEnvelopeAssessment {
+    /// Whether the model and published MAC references disagree by enough to
+    /// make the reported percentage a frame artefact rather than a measured
+    /// position.
+    ///
+    /// This does not change a verdict. A reported violation stays a reported
+    /// violation; this says whether the number that produced it is referred to
+    /// the chord its limit is stated in.
+    pub fn mac_references_disagree(&self) -> bool {
+        let Some(chord_m) = self
+            .published_mac_chord_m
+            .filter(|chord| chord.is_finite() && *chord > 0.0)
+        else {
+            return false;
+        };
+        self.model_mac_leading_edge_offset_m
+            .is_some_and(|offset| offset.abs() > MAC_DATUM_AGREEMENT_FRACTION * chord_m)
+            || self
+                .model_mac_length_difference_m
+                .is_some_and(|difference| {
+                    difference.abs() > MAC_LENGTH_AGREEMENT_FRACTION * chord_m
+                })
+    }
+
+    /// How far the reported percentage is shifted by the datum offset alone,
+    /// in percent MAC of the published chord, when both are known.
+    ///
+    /// A positive value means the model's chord starts aft of the published
+    /// one, so an unshifted model station reads *lower* than it should; the
+    /// sign is stated rather than left for the reader to derive.
+    pub fn mac_datum_shift_pct_mac(&self) -> Option<f64> {
+        let chord_m = self
+            .published_mac_chord_m
+            .filter(|chord| chord.is_finite() && *chord > 0.0)?;
+        let offset_m = self.model_mac_leading_edge_offset_m?;
+        offset_m.is_finite().then(|| 100.0 * offset_m / chord_m)
+    }
 }
 
 impl Default for CgEnvelopeAssessment {
@@ -170,6 +302,9 @@ impl Default for CgEnvelopeAssessment {
             aft_limit_pct_mac: None,
             source: None,
             controlling_document: None,
+            model_mac_leading_edge_offset_m: None,
+            model_mac_length_difference_m: None,
+            published_mac_chord_m: None,
         }
     }
 }

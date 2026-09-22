@@ -1,7 +1,7 @@
 # Requirements-first aircraft conceptual design: research note
 
 Research date: 2026-08-26
-Repository: ALAS-rust
+Repository: ALAS
 Scope: TLAR and stakeholder-needs capture, requirement quality, load-case and policy semantics, architecture synthesis, traceability, verification and validation, the MBSE/MDO boundary, and the representation of certification and operational constraints without claiming to certify an aircraft.
 
 ## Executive conclusion
@@ -25,7 +25,7 @@ The two CFR PDFs are annual 2025 snapshots. They are useful for reproducible res
 
 The local PDF corpus is limited to:
 
-    C:\Proyectos\ALAS-rust\bib\requirements-systems\
+    <repository root>\bib\requirements-systems\
 
 No existing source files were changed for this research note.
 

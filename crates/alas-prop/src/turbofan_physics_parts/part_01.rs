@@ -270,7 +270,7 @@ const ARGON: NasaSpecies = NasaSpecies {
     high: [2.5, 0.0, 0.0, 0.0, 0.0, -745.375, 4.379_674_91],
 };
 
-/// Returns temperature-dependent ideal-gas mixture properties over 200--2000 K.
+/// Returns temperature-dependent ideal-gas mixture properties over 200 to 2000 K.
 ///
 /// Species enthalpies are shifted independently to zero at 298.15 K so that
 /// the returned mixture enthalpy is sensible enthalpy, suitable for pairing
@@ -366,9 +366,9 @@ pub struct NozzleResult {
     pub exit_velocity_m_s: f64,
     /// Exit Mach number.
     pub exit_mach: f64,
-    /// Exit density, kg/m--.
+    /// Exit density, kg/m^3.
     pub exit_density_kg_m3: f64,
-    /// Area required to pass the supplied mass flow, m--.
+    /// Area required to pass the supplied mass flow, m^2.
     pub required_area_m2: f64,
     /// Gross momentum flux `mass_flow * exit_velocity`, N.
     pub momentum_thrust_n: f64,

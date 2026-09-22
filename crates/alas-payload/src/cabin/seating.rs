@@ -11,7 +11,7 @@
 //! # Why the deck is laid out twice
 //!
 //! The mid-cabin monument bays sit at the door stations, and how many doors a
-//! deck needs depends on how many people end up seated on it -- which depends
+//! deck needs depends on how many people end up seated on it, which depends
 //! on how much floor the bays took. The pass below breaks that circle the way
 //! upstream does: a simulation seats the deck with no mid-cabin bays to find
 //! out how many door pairs it will want, the bays are charged against the
@@ -22,7 +22,7 @@
 //!
 //! # Why the pitch is stretched
 //!
-//! Every deck's pitch is scaled up -- never down -- so the seated block spans
+//! Every deck's pitch is scaled up (never down) so the seated block spans
 //! the whole available floor. A real high-density layout spreads its seats
 //! across the entire cabin up to whichever limit binds; it does not bunch them
 //! forward and leave bare floor at the back. Where the requested count already
@@ -177,7 +177,7 @@ pub(super) fn place_seats(
         let deck = segment.deck;
         let deck_cap = deck_caps.for_deck(deck.name);
 
-        let (sim_len, sim_seated) = simulate_segment(
+        let (sim_len, sim_seated, sim_class_bays) = simulate_segment(
             g, classes, ci, aisle_w, deck_cap, segment.x0, segment.x1, deck,
         );
 
@@ -190,14 +190,30 @@ pub(super) fn place_seats(
         };
         let n_mid = (n_pairs_est - 1).max(0);
 
+        // The loop below also carves a bay at every class boundary it crosses,
+        // and the simulation reports how many that is. Charging only the
+        // door bays here would stretch the pitch over floor the class bays
+        // then take, so the block would run past the aft bay and the last row
+        // would be truncated: the fast auto-sizer
+        // (`crate::build::count_deck`) budgets `classes + 1 + n_mid` bays for
+        // exactly this reason, and the two product passes have to agree.
+        // The frozen Python replay charged only the door bays, so the
+        // compatibility interior keeps that budget and its item-for-item
+        // parity fixture with it.
+        let n_charged_bays = if product_exit_capacity {
+            n_mid + sim_class_bays
+        } else {
+            n_mid
+        };
+
         let l_avail = segment.x1 - segment.x0 - 2.0 * MONUMENT_LEN;
-        let seating_room = (l_avail - n_mid as f64 * MONUMENT_LEN).max(0.0);
+        let seating_room = (l_avail - n_charged_bays as f64 * MONUMENT_LEN).max(0.0);
         let pitch_stretch = if sim_len > 0.0 {
             (seating_room / sim_len).max(1.0)
         } else {
             1.0
         };
-        let block_len = sim_len * pitch_stretch + n_mid as f64 * MONUMENT_LEN;
+        let block_len = sim_len * pitch_stretch + n_charged_bays as f64 * MONUMENT_LEN;
         deck_utilization.push((
             deck.name,
             if l_avail > 0.0 {
@@ -311,10 +327,13 @@ pub(super) fn place_seats(
 }
 
 /// Seat one deck stretch without placing anything, to find the length the
-/// block will want and the count the door sizing keys off.
+/// block will want, the count the door sizing keys off, and the number of
+/// class-boundary bays the real pass will carve out of the same floor.
 ///
 /// This runs at the configured pitch: the stretch factor it feeds is derived
-/// from the length it reports, so applying it here would be circular.
+/// from the length it reports, so applying it here would be circular. The
+/// reported length is seats only; the bays are returned separately because
+/// they are charged at full size whatever the pitch does.
 #[allow(clippy::too_many_arguments)] // The simulation reads the same seven
                                      // quantities the real pass does; bundling them into a struct used once would
                                      // name the pass's own locals twice.
@@ -327,18 +346,20 @@ fn simulate_segment(
     x0: f64,
     x1: f64,
     deck: &crate::geometry::DeckSpec,
-) -> (f64, i64) {
+) -> (f64, i64, i64) {
     let mut remaining: Vec<i64> = classes.iter().map(|class| class.remaining).collect();
     let mut ci = start_class;
     let mut x = x0 + MONUMENT_LEN;
     let mut length = 0.0;
     let mut seated = 0i64;
+    let mut class_bays = 0i64;
 
     while ci < classes.len() && x < x1 - MONUMENT_LEN && seated < deck_cap {
         if remaining[ci] <= 0 {
             ci += 1;
             if ci < classes.len() {
                 x += MONUMENT_LEN;
+                class_bays += 1;
             }
             continue;
         }
@@ -351,5 +372,5 @@ fn simulate_segment(
         seated += seats;
         x += pitch;
     }
-    (length, seated)
+    (length, seated, class_bays)
 }

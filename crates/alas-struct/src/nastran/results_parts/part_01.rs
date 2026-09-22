@@ -205,8 +205,8 @@ pub fn read_static(op2: &Op2, node_index: &MeshNodeIndex, cases: &[LoadCase]) ->
 ///
 /// [`read_modes`] sorts the front-spar line by span station, which upstream
 /// reads off the BDF model it is handed. A trait rather than the concrete
-/// [`Deck`] because that is what the reader actually wants -- one coordinate
-/// per grid, not a deck -- and because it lets the parity test supply the
+/// [`Deck`] because that is what the reader actually wants (one coordinate
+/// per grid, not a deck) and because it lets the parity test supply the
 /// reference's own grid table instead of rebuilding a mesh around it.
 pub trait SpanStations {
     /// The span station of grid `nid`, or `NaN` if there is no such grid.
@@ -279,13 +279,21 @@ pub fn read_modes(
     result.mode_shape_y_m = Some(ordered.iter().map(|&(y, _)| y).collect());
 
     for &mode in &kept {
-        let Some(shape) = eigenvectors.data.get(mode) else {
-            continue;
-        };
-        let out_of_plane: Vec<f64> = ordered
-            .iter()
-            .map(|&(_, row)| shape.get(row).map_or(f64::NAN, |values| values[2]))
-            .collect();
+        // Keep one shape slot for every retained frequency, even when an OP2
+        // omits that mode's vector table.  `frequencies_hz` and
+        // `mode_shapes` are parallel by contract; silently skipping a vector
+        // would shift every later shape onto the wrong frequency and could
+        // make the report compare unrelated modes.
+        let out_of_plane: Vec<f64> = eigenvectors
+            .data
+            .get(mode)
+            .map(|shape| {
+                ordered
+                    .iter()
+                    .map(|&(_, row)| shape.get(row).map_or(f64::NAN, |values| values[2]))
+                    .collect()
+            })
+            .unwrap_or_else(|| vec![f64::NAN; ordered.len()]);
         // Upstream's `float(np.max(np.abs(t3))) or 1.0`: a mode that is
         // identically zero on this line normalizes by one rather than by zero.
         let peak = out_of_plane
@@ -310,7 +318,7 @@ pub fn read_modes(
 /// Either solve may be absent, and each populates a different half of the
 /// result: the sine sweep gives the transfer function and, through Miles' rule,
 /// an RMS estimate from it; the random solve gives an RMS by integrating the
-/// response PSD directly. Reporting both is the point -- they are the estimate
+/// response PSD directly. Reporting both is the point; they are the estimate
 /// and the solve of the same quantity.
 pub fn read_vibration(
     sine: Option<&Op2>,

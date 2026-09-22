@@ -82,6 +82,7 @@ fn render_element(svg: &mut String, element: &Value) -> Result<(), String> {
             optional_stroke(data.get("stroke"))?,
         )),
         "Text" => render_text(svg, data)?,
+        "TextBlock" => render_text_block(svg, data)?,
         "Image" => render_image(svg, data)?,
         // The headless bridge cannot project an equirectangular texture onto
         // a sphere.  Keep the same stable globe silhouette as the canonical
@@ -187,6 +188,93 @@ fn render_text(svg: &mut String, data: &Value) -> Result<(), String> {
         escape_xml(text),
     ));
     Ok(())
+}
+
+fn render_text_block(svg: &mut String, data: &Value) -> Result<(), String> {
+    let text = data
+        .get("text")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "text block content is missing".to_owned())?;
+    let width = field_number(data, "width")?;
+    let font_size = field_number(data, "font_size")?;
+    let color = data
+        .get("color")
+        .and_then(Value::as_object)
+        .ok_or_else(|| "text block color is missing".to_owned())?;
+    let bold = data.get("bold").and_then(Value::as_bool).unwrap_or(false);
+    let weight = if bold { " font-weight=\"bold\"" } else { "" };
+    let lines = wrap_text_block(text, width, font_size);
+    let line_height = font_size.max(0.1) * CSS_PIXELS_PER_POINT * TEXT_LINE_HEIGHT_EM;
+
+    svg.push_str(&format!(
+        "  <text x=\"{:.2}\" y=\"{:.2}\" font-family=\"sans-serif\" font-size=\"{:.1}\" fill=\"{}\" fill-opacity=\"{:.3}\" text-anchor=\"start\" dominant-baseline=\"central\"{}>",
+        point_number(data, "pos", 0)?,
+        point_number(data, "pos", 1)?,
+        font_size,
+        color_hex(color)?,
+        color_alpha(color)?,
+        weight,
+    ));
+    for (index, line) in lines.iter().enumerate() {
+        let y = point_number(data, "pos", 1)? + (index as f64 + 0.5) * line_height;
+        svg.push_str(&format!(
+            "<tspan x=\"{:.2}\" y=\"{y:.2}\">{}</tspan>",
+            point_number(data, "pos", 0)?,
+            escape_xml(line),
+        ));
+    }
+    svg.push_str("</text>");
+    Ok(())
+}
+
+const CSS_PIXELS_PER_POINT: f64 = 96.0 / 72.0;
+const TEXT_LINE_HEIGHT_EM: f64 = 1.2;
+const CONSERVATIVE_ADVANCE_EM: f64 = 0.75;
+
+fn wrap_text_block(text: &str, width: f64, font_size: f64) -> Vec<String> {
+    let advance = font_size.max(0.1) * CSS_PIXELS_PER_POINT * CONSERVATIVE_ADVANCE_EM;
+    let budget = (width / advance).floor().max(1.0) as usize;
+    let mut lines = Vec::new();
+    for paragraph in text.split('\n') {
+        let mut current = String::new();
+        for word in paragraph.split_whitespace() {
+            let word_len = word.chars().count();
+            if word_len > budget {
+                if !current.is_empty() {
+                    lines.push(std::mem::take(&mut current));
+                }
+                let mut remaining = word;
+                while remaining.chars().count() > budget {
+                    let split_at = remaining
+                        .char_indices()
+                        .nth(budget)
+                        .map_or(remaining.len(), |(index, _)| index);
+                    let (chunk, rest) = remaining.split_at(split_at);
+                    lines.push(chunk.to_owned());
+                    remaining = rest;
+                }
+                current.push_str(remaining);
+                continue;
+            }
+            let candidate_len = if current.is_empty() {
+                word_len
+            } else {
+                current.chars().count() + 1 + word_len
+            };
+            if candidate_len > budget && !current.is_empty() {
+                lines.push(std::mem::take(&mut current));
+            }
+            if !current.is_empty() {
+                current.push(' ');
+            }
+            current.push_str(word);
+        }
+        lines.push(current);
+    }
+    if lines.is_empty() {
+        lines.push(String::new());
+    }
+    lines
 }
 
 fn render_image(svg: &mut String, data: &Value) -> Result<(), String> {
@@ -465,5 +553,29 @@ mod tests {
         let svg = render_scene_svg(&scene).unwrap_or_default();
         assert!(svg.contains("<circle cx=\"50.00\" cy=\"40.00\" r=\"30.00\" fill=\"#08213d\""));
         assert!(svg.contains("Embedded Earth texture is unavailable"));
+    }
+
+    #[test]
+    fn text_blocks_render_as_wrapped_svg_text() {
+        let scene = json!({
+            "width": 120.0,
+            "height": 80.0,
+            "background": null,
+            "elements": [{
+                "TextBlock": {
+                    "text": "A long diagnostic message",
+                    "pos": [4.0, 6.0],
+                    "width": 100.0,
+                    "font_size": 10.0,
+                    "color": {"r": 255, "g": 0, "b": 0, "a": 255},
+                    "bold": false
+                }
+            }]
+        });
+
+        let svg = render_scene_svg(&scene).unwrap_or_default();
+        assert!(svg.contains("<text "));
+        assert!(svg.contains("<tspan "));
+        assert!(svg.contains("diagnostic"));
     }
 }

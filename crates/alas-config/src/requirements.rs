@@ -4,13 +4,14 @@
 // Ported from alas/config/requirements.py
 // Reference: alas @ rust-port-baseline.
 
-//! What the user is asking for: the mission targets the design must meet.
+//! The stable wire group for mission targets and aircraft-level limits.
 //!
-//! This is the input, as distinct from every other module here, which is an
-//! assumption. The optimizer searches the design space for the geometry that
-//! best satisfies what is stated here, so a value in this module is a
-//! requirement the search is trying to meet rather than a modelling choice
-//! it is working under.
+//! The original configuration grouped mission requirements, discipline inputs
+//! and a few study bounds here. The optimizer still reads this group as the
+//! compatibility authority, but new code should classify each field explicitly
+//! as a requirement, model input, preference or numerical setting. The audit
+//! and migration ledger lives in `docs/design-constraints.md`; moving fields
+//! requires a saved-file migration rather than silently changing their meaning.
 //!
 //! The defaults reproduce the long-range transport the reference
 //! implementation was tuned against, so the program produces a real aircraft
@@ -54,7 +55,7 @@ pub struct DesignRequirements {
     /// The speed the aircraft is sized around.
     #[config(
         label = "Cruise Mach number",
-        help = "Design cruise Mach number -- the primary speed target the optimizer sizes the aircraft around."
+        help = "Design cruise Mach number: the primary speed target the optimizer sizes the aircraft around."
     )]
     pub cruise_mach: f64,
 
@@ -70,7 +71,7 @@ pub struct DesignRequirements {
     #[config(
         label = "Max take-off weight (MTOW)",
         unit = "kg",
-        help = "Target maximum take-off weight -- anchors the whole weight & balance / sizing pipeline."
+        help = "Target maximum take-off weight: anchors the whole weight & balance / sizing pipeline."
     )]
     pub mtow_kg: f64,
 
@@ -78,7 +79,7 @@ pub struct DesignRequirements {
     #[config(
         options = AircraftType,
         label = "Aircraft type",
-        help = "'passenger' or 'cargo' -- switches which cabin-preset list and payload model apply."
+        help = "'passenger' or 'cargo': switches which cabin-preset list and payload model apply."
     )]
     pub aircraft_type: String,
 
@@ -104,7 +105,7 @@ pub struct DesignRequirements {
     /// Derived passenger capacity, retained in the serialized model.
     #[config(
         hidden,
-        help = "Target passenger count (if aircraft_type is 'passenger'). Auto-recomputed when a cabin preset is active -- only editable with cabin_preset set to 'Custom'."
+        help = "Target passenger count (if aircraft_type is 'passenger'). Auto-recomputed when a cabin preset is active, only editable with cabin_preset set to 'Custom'."
     )]
     pub num_passengers: i64,
 
@@ -113,16 +114,35 @@ pub struct DesignRequirements {
         label = "Cargo payload capacity",
         unit = "kg",
         readonly_unless(field = "cabin_preset", value = "Custom"),
-        help = "Target cargo payload capacity (if aircraft_type is 'cargo'). Auto-recomputed when a cabin preset is active -- only editable with cabin_preset set to 'Custom'."
+        help = "Target cargo payload capacity (if aircraft_type is 'cargo'). Auto-recomputed when a cabin preset is active, only editable with cabin_preset set to 'Custom'."
     )]
     pub cargo_payload_kg: f64,
+
+    /// The freight mass the design is asked to match, kg.
+    ///
+    /// The user's requested cargo objective: deliberately a different
+    /// quantity from `cargo_payload_kg` (the capacity a cabin preset
+    /// determines and the load case requests) and from the payload a
+    /// candidate actually carries. A cabin preset writes the capacity and
+    /// never this field, because a request that preset application
+    /// overwrote would not be a requirement at all. Read it through
+    /// [`Self::cargo_target_kg`], the mass the objective scores a
+    /// candidate's deviation from.
+    #[serde(default)]
+    #[config(
+        advanced,
+        label = "Cargo capacity objective",
+        unit = "kg",
+        help = "Cargo capacity objective: the cargo payload mass requested of a freighter (aircraft_type 'cargo'), which the search is rewarded for getting closer to. It stays separate from the cargo payload capacity above and from the payload a candidate actually carries, so it redefines neither, and it is not a floor a candidate must clear: mass, volume, structural-loading and mission feasibility are judged exactly as before. 0 = disabled (the default), and the objective then follows the configured cargo payload capacity."
+    )]
+    pub cargo_objective_kg: f64,
 
     /// The most the airframe may carry, whatever the hold could hold.
     #[config(
         advanced,
         label = "Max structural payload",
         unit = "kg",
-        help = "Maximum structural payload (= MZFW - OEW), i.e. the most the airframe may carry regardless of how much the belly could physically hold. In passenger mode the detailed layout fills the lower-deck belly with revenue freight (on top of passengers + checked bags) up to this structural limit, so the payload -- and therefore the residual fuel (MTOW - OEW - payload) -- matches the real aircraft's max-payload point. A widebody belly can volumetrically hold far more than this structural cap, so without it 'fill the belly' overshoots. 0 = disabled (use the explicit Cabin & Payload belly_cargo_kg instead)."
+        help = "Maximum structural payload (= MZFW - OEW), i.e. the most the airframe may carry regardless of how much the belly could physically hold. In passenger mode the detailed layout fills the lower-deck belly with revenue freight (on top of passengers + checked bags) up to this structural limit, so the payload, and therefore the residual fuel (MTOW - OEW - payload), matches the real aircraft's max-payload point. A widebody belly can volumetrically hold far more than this structural cap, so without it 'fill the belly' overshoots. 0 = disabled (use the explicit Cabin & Payload belly_cargo_kg instead)."
     )]
     pub max_structural_payload_kg: f64,
 
@@ -130,7 +150,7 @@ pub struct DesignRequirements {
     #[config(
         advanced,
         label = "Minimum passenger capacity",
-        help = "Hard floor on the geometry-resolved passenger capacity: a candidate whose class-mix and geometry produce fewer than this many seats is scored infeasible under the configured geometry constraint policy. 0 = disabled (the default) -- capacity is otherwise always dynamic, whatever the configured cabin class-mix percentages and the candidate's actual fuselage/cabin geometry produce, with no minimum."
+        help = "Hard floor on the geometry-resolved passenger capacity: a candidate whose class-mix and geometry produce fewer than this many seats is scored infeasible under the configured geometry constraint policy. 0 = disabled (the default): capacity is otherwise always dynamic, whatever the configured cabin class-mix percentages and the candidate's actual fuselage/cabin geometry produce, with no minimum."
     )]
     pub min_passenger_capacity: i64,
 
@@ -138,7 +158,7 @@ pub struct DesignRequirements {
     #[config(
         advanced,
         label = "Ultimate load factor (n_ult)",
-        help = "Limit load factor times the 1.5 safety margin, fed into the Torenbeek structural mass formulas."
+        help = "Structural screening input fed into the Torenbeek mass formulas. The shipped 3.75 is 1.5 x 2.5; verify the selected certification basis, amendment, aircraft category and load case before treating it as an airworthiness value."
     )]
     pub ultimate_load_factor: f64,
 
@@ -147,7 +167,7 @@ pub struct DesignRequirements {
         advanced,
         label = "Design dive speed (V_dive)",
         unit = "m/s",
-        help = "Structural design dive speed, fed into the Torenbeek structural mass formulas. Also VD on the V-n diagram; design cruise speed VC is derived as VD/1.25 (CS-25.335(b) minimum margin) rather than a separate field."
+        help = "Structural screening dive speed, fed into the Torenbeek mass formulas and the V-n diagram. The project may derive VC as VD/1.25 for this study; verify speed type, altitude/Mach envelope, certification basis and amendment before treating that relation as an airworthiness result."
     )]
     pub dive_speed_m_s: f64,
 
@@ -155,7 +175,7 @@ pub struct DesignRequirements {
     #[config(
         advanced,
         label = "Limit load factor, negative (n_lim,neg)",
-        help = "CS-25.337(c) negative limit load factor for the V-n diagram. The positive limit load factor is derived as ultimate_load_factor / 1.5 (CS-25.303) rather than a separate field."
+        help = "Negative V-n screening input. The shipped -1.0 follows the large-aeroplane CS-25 reference case up to VC; verify the selected certification basis, amendment, speed range and category before using it for qualification. The positive limit value is derived as ultimate_load_factor / 1.5."
     )]
     pub limit_load_factor_neg: f64,
 
@@ -173,7 +193,7 @@ pub struct DesignRequirements {
         advanced,
         label = "Minimum wing loading (MTOW/S)",
         unit = "kg/m^2",
-        help = "Lower bound on wing loading (MTOW / wing area) -- keeps the wing from being sized too large for the mass it carries."
+        help = "Lower bound on wing loading (MTOW / wing area): keeps the wing from being sized too large for the mass it carries."
     )]
     pub min_wing_loading_kg_m2: f64,
 
@@ -217,7 +237,7 @@ pub struct DesignRequirements {
         advanced,
         label = "Mass per passenger",
         unit = "kg",
-        help = "Combined average mass per occupant (body + baggage). FAA AC 120-27E standard is 100 kg; airlines may use 90-105 kg. This is the single load-case authority for every product path (report, GUI preview, pipeline, export and the optimizer): every seated passenger, of any class, is priced at this combined mass, with cabin.passenger.checked_bag_mass_kg as the baggage share and the occupant slot the remainder. Per-class seat masses (e.g. a named cabin preset's business/economy figures) are cosmetic/geometry seeds only and are overwritten by this value."
+        help = "Combined average mass per occupant (body + baggage). The shipped 100 kg is a transparent project load-case default; FAA AC 120-27F is operator weight-and-balance guidance and does not establish a universal passenger mass. Record the operator, population, baggage method and date before using another value operationally. This remains the single load-case authority for report, GUI preview, pipeline, export and optimizer paths: cabin.passenger.checked_bag_mass_kg supplies the baggage share and the occupant slot the remainder."
     )]
     pub passenger_mass_kg: f64,
 
@@ -242,6 +262,7 @@ impl Default for DesignRequirements {
             optimize_passenger_capacity: true,
             num_passengers: 350,
             cargo_payload_kg: 102_100.0,
+            cargo_objective_kg: 0.0,
             max_structural_payload_kg: 0.0,
             min_passenger_capacity: 0,
             ultimate_load_factor: 3.75,
@@ -280,7 +301,7 @@ impl DesignRequirements {
     /// configuration anything downstream can act on: the payload model
     /// selected by the type would be reading a layout meant for the other
     /// one. Upstream does this when a requirements object is constructed,
-    /// and reproducing where it happens matters -- laying a partial
+    /// and reproducing where it happens matters, laying a partial
     /// configuration over an existing one does *not* re-run it there, so a
     /// file that sets only the aircraft type leaves a mismatched preset in
     /// place, and this port must not quietly fix that.
@@ -315,6 +336,26 @@ impl DesignRequirements {
             return self.cargo_payload_kg;
         }
         self.num_passengers as f64 * self.passenger_mass_kg
+    }
+
+    /// The cargo payload mass the objective scores a candidate against, kg.
+    ///
+    /// The requested [`Self::cargo_objective_kg`] when the user entered one,
+    /// otherwise the configured [`Self::cargo_payload_kg`] capacity, which is
+    /// the mass the objective used before a request could be entered: a study
+    /// that enters none is scored exactly as it was. A non-finite or
+    /// non-positive request is no request, since a payload mass is positive
+    /// by definition and zero or below is outside the target's valid domain
+    /// rather than a request to carry nothing.
+    ///
+    /// This resolves the target only; it writes neither field, so the request
+    /// can redefine neither the capacity a cabin preset determined nor the
+    /// payload the load case actually carries.
+    pub fn cargo_target_kg(&self) -> f64 {
+        if self.cargo_objective_kg.is_finite() && self.cargo_objective_kg > 0.0 {
+            return self.cargo_objective_kg;
+        }
+        self.cargo_payload_kg
     }
 
     /// The lift coefficient needed to hold level flight: `CL = W / (q * S)`.
@@ -385,6 +426,90 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(freighter.payload_kg(), freighter.cargo_payload_kg);
+    }
+
+    #[test]
+    fn the_cargo_objective_is_disabled_by_default_and_the_capacity_is_the_target() {
+        // Nothing entered: the objective is scored against the configured
+        // capacity, which is the mass it was scored against before a request
+        // could be entered at all.
+        let defaults = DesignRequirements::default();
+        assert_eq!(defaults.cargo_objective_kg, 0.0);
+        assert_eq!(defaults.cargo_target_kg(), defaults.cargo_payload_kg);
+    }
+
+    #[test]
+    fn an_entered_cargo_objective_is_the_target_and_leaves_the_capacity_alone() {
+        let requirements = DesignRequirements {
+            aircraft_type: "cargo".to_owned(),
+            cargo_payload_kg: 45_000.0,
+            cargo_objective_kg: 60_000.0,
+            ..Default::default()
+        };
+        assert_eq!(requirements.cargo_target_kg(), 60_000.0);
+        // The request is the target and nothing else: the capacity, and so
+        // the payload the load case asks the hold for, are untouched.
+        assert_eq!(requirements.cargo_payload_kg, 45_000.0);
+        assert_eq!(requirements.payload_kg(), 45_000.0);
+    }
+
+    #[test]
+    fn a_cargo_objective_outside_its_valid_domain_is_no_request() {
+        // A payload mass is positive and finite. Anything else is not a
+        // smaller target, it is no target, and the capacity keeps the role.
+        for request in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+            let requirements = DesignRequirements {
+                cargo_objective_kg: request,
+                ..Default::default()
+            };
+            assert_eq!(
+                requirements.cargo_target_kg(),
+                requirements.cargo_payload_kg,
+                "request {request}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_cargo_objective_survives_a_save_and_load_round_trip() {
+        let requirements = DesignRequirements {
+            aircraft_type: "cargo".to_owned(),
+            cabin_preset: "Max payload".to_owned(),
+            cargo_objective_kg: 62_500.0,
+            ..Default::default()
+        };
+        let saved = serde_json::to_value(requirements.clone()).unwrap();
+        assert_eq!(saved["cargo_objective_kg"], 62_500.0);
+        let loaded: DesignRequirements = serde_json::from_value(saved).unwrap();
+        assert_eq!(loaded, requirements);
+        assert_eq!(loaded.cargo_target_kg(), 62_500.0);
+    }
+
+    #[test]
+    fn a_file_written_before_the_cargo_objective_existed_loads_with_it_disabled() {
+        let mut saved = serde_json::to_value(DesignRequirements::default()).unwrap();
+        saved.as_object_mut().unwrap().remove("cargo_objective_kg");
+        let loaded: DesignRequirements = serde_json::from_value(saved).unwrap();
+        assert_eq!(loaded.cargo_objective_kg, 0.0);
+        assert_eq!(loaded, DesignRequirements::default());
+    }
+
+    #[test]
+    fn the_cargo_objective_is_an_advanced_field_in_kilograms() {
+        // Advanced, so the guided requirements card keeps exactly the fields
+        // it had: the objective is rendered there by the Inputs view itself,
+        // and only for a freighter. It is a free input at all times, unlike
+        // the capacity a cabin preset owns.
+        let schema = DesignRequirements::default().schema();
+        let field = schema
+            .field("cargo_objective_kg")
+            .expect("the cargo objective is in the schema");
+        assert_eq!(field.unit, "kg");
+        assert!(field.advanced);
+        match &field.entry {
+            crate::Entry::Leaf(leaf) => assert!(leaf.readonly_unless.is_none()),
+            crate::Entry::Node(_) => panic!("a payload mass is not a group"),
+        }
     }
 
     #[test]

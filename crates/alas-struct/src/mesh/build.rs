@@ -5,10 +5,10 @@
 //! element family to [`super::elements`] in the order that numbers them.
 //!
 //! The classification is what everything downstream is written against. A rib
-//! is one of three things -- it carries skin, it was truncated by the root
+//! is one of three things; it carries skin, it was truncated by the root
 //! plane and gets rivetted to the skin instead, or it reaches so little of its
-//! nominal chord that it is aerodynamic surface with no structure in it at all
-//! -- and which one it is decides whether it gets panels, which panels, and
+//! nominal chord that it is aerodynamic surface with no structure in it at all,
+//! and which one it is decides whether it gets panels, which panels, and
 //! how thick they are.
 
 use std::collections::HashSet;
@@ -29,11 +29,11 @@ use super::{
 use crate::sizing::WingboxSizing;
 
 /// A rib whose realized cut is this fraction of its nominal chord or less
-/// carries no structure -- it is aerodynamic surface only, and is left out of
+/// carries no structure; it is aerodynamic surface only, and is left out of
 /// the mesh entirely.
 const AERO_ONLY_CHORD_RATIO: f64 = 0.20;
 
-/// Build the semi-wing wingbox deck -- `build_wing_mesh_bdf`.
+/// Build the semi-wing wingbox deck: `build_wing_mesh_bdf`.
 ///
 /// Ribs are generated fresh at the mesh's own resolution (`sizing.num_ribs`
 /// stations, `cfg.mesh_chordwise_points` chordwise points), which is generally
@@ -218,7 +218,7 @@ pub fn build_wing_mesh_bdf(
     Ok((deck, report, node_index))
 }
 
-/// Which ribs carry skin, which are truncated, and which carry no structure --
+/// Which ribs carry skin, which are truncated, and which carry no structure:
 /// the classification every element loop below is written against.
 pub(super) struct RibRegions {
     /// Ribs the skin panels span, root first.
@@ -268,7 +268,7 @@ fn classify_ribs(wsg: &WingStructureGeometry, stations: &mut [RibStation]) -> Ri
         if ratio <= AERO_ONLY_CHORD_RATIO {
             aero_only.insert(i);
             warnings.push(format!(
-                "Rib {i} (y={:.2} m) aero-only: {:.1}% nominal chord -- excluded.",
+                "Rib {i} (y={:.2} m) aero-only: {:.1}% nominal chord, excluded.",
                 station.y_station,
                 ratio * 100.0
             ));

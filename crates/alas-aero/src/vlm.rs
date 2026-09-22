@@ -19,7 +19,7 @@
 //! as a separate parameter. `run_symmetric_if_possible` defaults `false`, and
 //! when a caller sets it upstream unconditionally raises
 //! `NotImplementedError` before reaching the (also dead, commented-out)
-//! symmetric-solve branch -- no call site in this program's inputs sets it,
+//! symmetric-solve branch, no call site in this program's inputs sets it,
 //! so `run_symmetric` is always `false` and there is no symmetric-solve
 //! branch to translate at all; this module has no parameter for it.
 //! `vortex_core_radius` defaults `1e-8` and is never overridden, so
@@ -37,7 +37,7 @@
 //! # `run`'s panel mesh
 //!
 //! Every wing is optionally [`Wing::subdivide_sections`]'d (only when
-//! `spanwise_resolution > 1`, upstream's own guard -- at the default
+//! `spanwise_resolution > 1`, upstream's own guard, at the default
 //! resolution of `1` this branch is skipped entirely, but
 //! `AnalysisConfig.fine_spanwise_resolution` defaults to `2` and is used by
 //! the full-analysis path through this same code, so the branch is real
@@ -45,9 +45,9 @@
 //! meshed with [`Wing::mesh_thin_surface`] at `chordwise_resolution`,
 //! `add_camber=true`. `is_trailing_edge` and `areas`, upstream's other two
 //! per-panel byproducts of this step, are not computed here: neither is read
-//! by anything [`run`] itself does with the mesh -- `is_trailing_edge` only
+//! by anything [`run`] itself does with the mesh: `is_trailing_edge` only
 //! feeds `calculate_streamlines`'s seed-point heuristic and `areas` is never
-//! read at all in `run` -- and both are P11-only (`calculate_streamlines`) or
+//! read at all in `run`, and both are P11-only (`calculate_streamlines`) or
 //! entirely unused, confirmed against the upstream source read in full for
 //! this row.
 //!
@@ -56,8 +56,8 @@
 //! Reached only from `alas/physics/dynamics.py`'s `compute_dynamic_modes`
 //! (P7), which needs the full derivative set (`alpha, beta, p, q, r` all
 //! `true`, per that module's own doc comment). It is straightforward
-//! finite-differencing on top of [`run`] -- central perturbations around each
-//! state variable with an explicit step-refinement seam -- and lives in the
+//! finite-differencing on top of [`run`]: central perturbations around each
+//! state variable with an explicit step-refinement seam, and lives in the
 //! [`stability_derivatives`] submodule. See `docs/PORTING.md` for why its five
 //! per-axis boolean flags are not translated as parameters.
 //!

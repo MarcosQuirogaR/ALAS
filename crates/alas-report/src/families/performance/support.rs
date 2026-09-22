@@ -14,8 +14,7 @@
 use alas_config::airports::{Airport, UnknownAirport};
 use alas_config::AlasConfig;
 
-use crate::scene::{Color, Fill, Point2D, Scene, SceneElement, Stroke, TextAlign, TextBaseline};
-use crate::theme::get_palette;
+use crate::scene::{Color, Fill, Point2D, Scene, SceneElement, Stroke};
 
 /// Standard gravity as `performance.py` writes it locally (`_G`), reproduced
 /// here rather than imported since `alas_perf::performance`'s own copy is
@@ -68,38 +67,12 @@ pub(super) fn static_thrust_to_weight(config: &AlasConfig, default: f64) -> f64 
     n_eng * spec.rated_thrust_kn * 1000.0 / mtow_g
 }
 
-/// A centered placeholder figure for data that could not be resolved -- the
-/// role upstream's `viz.figure_status_message` plays. No equivalent exists
-/// yet anywhere in this crate (the retired figure audit listed it as
-/// unported), so this reproduces just the two figures here need: a title and
-/// a centered, possibly multi-line, message.
+/// A placeholder figure for data that could not be resolved, the role
+/// upstream's `viz.figure_status_message` plays, drawn by the shared
+/// placeholder in [`crate::status_figure`] so the message wraps inside the
+/// canvas. A caller-inserted `\n` remains a paragraph break.
 pub(super) fn status_message_scene(title: &str, message: &str, theme: Option<&str>) -> Scene {
-    let pal = get_palette(theme);
-    // `wrap_text` reflows any caller line that is still too long for the
-    // canvas onto multiple rows; a caller-inserted `\n` remains a required
-    // paragraph break (see `wrap_text`'s doc comment).
-    let wrapped = crate::chart_kit::wrap_text(message, 84);
-    let lines = wrapped.lines().collect::<Vec<_>>();
-    const MESSAGE_TOP: f64 = 140.0;
-    const LINE_HEIGHT: f64 = 16.0;
-    const BOTTOM_MARGIN: f64 = 24.0;
-    let height =
-        (300.0_f64).max(MESSAGE_TOP + lines.len().max(1) as f64 * LINE_HEIGHT + BOTTOM_MARGIN);
-    let mut scene = Scene::new(600.0, height, Some(Color::from_hex(pal.bg)));
-    scene.title = Some(title.to_owned());
-    for (i, line) in lines.into_iter().enumerate() {
-        scene.add(SceneElement::Text {
-            text: line.to_owned(),
-            pos: [300.0, MESSAGE_TOP + (i as f64) * LINE_HEIGHT],
-            font_size: 12.0,
-            color: Color::from_hex(pal.tick),
-            align: TextAlign::Center,
-            baseline: TextBaseline::Middle,
-            angle_deg: 0.0,
-            bold: false,
-        });
-    }
-    scene
+    crate::status_figure::figure_status_message(title, message, false, theme)
 }
 
 /// Format a non-negative magnitude with thousands separators, matching
@@ -146,7 +119,7 @@ pub(super) fn draw_arrow(scene: &mut Scene, p0: Point2D, p1: Point2D, color: Col
 
 /// Vertices of a diamond centered at `center` with "radius" `r` -- the V-n
 /// diagram's cruise-point marker (matplotlib's `marker="D"`).
-#[allow(dead_code)] // The enhanced envelope renderer owns the only current call site.
+// The enhanced envelope renderer owns the only current call site (envelope.rs:333).
 pub(super) fn diamond_points(center: Point2D, r: f64) -> Vec<Point2D> {
     vec![
         [center[0], center[1] - r],

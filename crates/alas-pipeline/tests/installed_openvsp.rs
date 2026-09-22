@@ -3,6 +3,10 @@
 
 //! Opt-in product-path evidence against an installed OpenVSP runtime.
 
+// This file is itself a test binary, so an unwrap that fails is the
+// assertion failing.
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 use std::fs;
 use std::path::PathBuf;
 
@@ -82,15 +86,27 @@ fn installed_openvsp_materializes_and_validates_the_native_project() {
         export.preview_path,
         export.script_path.with_extension("preview.png")
     );
+    if std::env::var_os("ALAS_REQUIRE_NATIVE_PREVIEW").is_some() {
+        assert!(
+            export.preview_available,
+            "native screenshot required: {:?}",
+            export.preview_error
+        );
+        assert!(export.preview_error.is_none());
+        let capture_stdout =
+            fs::read_to_string(export.script_path.with_extension("preview.stdout.txt")).unwrap();
+        assert!(capture_stdout.contains("ALAS_NATIVE_CAPTURE_COMPLETE"));
+    }
     if export.preview_available {
         assert!(export.preview_path.is_file());
     } else {
         assert!(!export.preview_path.exists());
-        assert!(export
-            .preview_error
-            .as_deref()
-            .is_some_and(|error| error.contains("no graphics-capable GUI build")
-                || error.contains("no fresh valid PNG preview")));
+        assert!(export.preview_error.as_deref().is_some_and(|error| error
+            .contains("no graphics-capable GUI build")
+            || error.contains("no fresh valid PNG preview")
+            || error.contains("Native preview runtime unavailable")
+            || error.contains("Native screenshot failed")
+            || error.contains("Native preview stopped")));
         assert!(
             stdout.contains("ALAS_OPENVSP_PREVIEW_UNAVAILABLE")
                 || stdout.contains("ALAS_OPENVSP_PREVIEW_WARNING")

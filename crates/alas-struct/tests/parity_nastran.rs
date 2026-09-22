@@ -8,7 +8,7 @@
 //! These decks are written card by card rather than assembled through a model,
 //! so unlike the mesh they are compared as *text*: the fixture holds each
 //! deck's lines and the test holds the port to producing the same ones. That is
-//! the strongest claim available here and the right one -- a case-control line
+//! the strongest claim available here and the right one: a case-control line
 //! that differs by a character is a different solve, not a rounding difference.
 //!
 //! One family of lines is exempt, and it is the same seam the mesh row draws.
@@ -92,7 +92,7 @@ struct Fixture {
 
 /// Split a `FORCE` card into its exact fields and its magnitude.
 ///
-/// `FORCE,sid,grid,cid,magnitude,0.,0.,1.` -- everything but field four is a
+/// `FORCE,sid,grid,cid,magnitude,0.,0.,1.`, everything but field four is a
 /// copied constant, so only field four is a number that has to be compared as
 /// one.
 fn split_force(line: &str) -> Option<(Vec<&str>, f64)> {

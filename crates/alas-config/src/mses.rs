@@ -13,12 +13,13 @@
 //! parasite and wave drag, and the mission analysis is trajectory-integrated.
 //! Running MSES on the optimized design's root section is what lets the model
 //! comparison show what a real coupled viscous-compressible solve sees that
-//! the other two cannot -- transition location, separation, shock-induced
+//! the other two cannot: transition location, separation, shock-induced
 //! drag.
 //!
-//! MSES is licensed separately by MIT and is not distributed with this
-//! program. Without it the comparison omits the MSES column rather than
-//! failing.
+//! MSES is licensed separately by MIT and its executables are not distributed
+//! with this program. ALAS does ship the compatible GPL XFOIL
+//! Orr-Sommerfeld map used by free-transition cases; without the MSES
+//! executables the comparison omits the MSES column rather than failing.
 
 use serde::{Deserialize, Serialize};
 
@@ -40,11 +41,11 @@ pub struct MsesConfig {
     #[config(
         hidden,
         label = "MSES executables directory",
-        help = "Path (repo-root-relative or absolute) to the folder containing mset.exe/mses.exe/mplot.exe. MSES is licensed separately by MIT and is not distributed with ALAS -- obtain it yourself and point this at your own install. Without it the Model Comparison tab simply omits the MSES column. Set on Setup > External Tools."
+        help = "Path (repo-root-relative or absolute) to the folder containing mset.exe/mses.exe/mplot.exe. MSES is licensed separately by MIT and its executables are not distributed with ALAS: obtain them yourself and point this at your own install. The compatible GPL osmapDP.dat transition map is bundled separately and selected automatically. Without the executables the Model Comparison tab simply omits the MSES column. Set on Setup > External Tools."
     )]
     pub mses_dir: String,
 
-    /// Optional double-precision Orr--Sommerfeld database used by MSES when
+    /// Optional double-precision Orr-Sommerfeld database used by MSES when
     /// transition is left free.  The path is intentionally hidden from the
     /// ordinary setup form: it is an advanced, installation-specific resource
     /// and is resolved relative to `mses_dir` when it is not absolute.
@@ -52,7 +53,7 @@ pub struct MsesConfig {
     #[config(
         hidden,
         label = "MSES Orr-Sommerfeld database",
-        help = "Optional path to the double-precision osmapDP.dat resource used by MSES free-transition calculations. If empty, ALAS looks beside the MSES executables. The selected path and compatibility check are recorded in the run manifest; a single-precision osmap.dat is rejected."
+        help = "Optional path to the double-precision osmapDP.dat resource used by MSES free-transition calculations. If empty, ALAS checks beside the MSES executables and then the release-bundled assets/mses resource. The selected path and compatibility check are recorded in the run manifest; a single-precision osmap.dat is rejected."
     )]
     pub osmap_path: Option<String>,
 
@@ -75,7 +76,7 @@ pub struct MsesConfig {
     /// Newton iteration cap per angle of attack.
     #[config(
         label = "Max solver iterations",
-        help = "Newton iteration cap per angle of attack -- MSES reports non-convergence rather than looping forever, but a hard cap keeps a single stubborn point from stalling the whole sweep."
+        help = "Newton iteration cap per angle of attack: MSES reports non-convergence rather than looping forever, but a hard cap keeps a single stubborn point from stalling the whole sweep."
     )]
     pub max_iterations: i64,
 
@@ -125,7 +126,7 @@ pub struct MsesConfig {
     /// Streamwise grid stretching.
     #[config(
         label = "MSET grid density exponent (e)",
-        help = "Streamwise grid stretching parameter for the MSET mesh -- larger values cluster more points near the airfoil."
+        help = "Streamwise grid stretching parameter for the MSET mesh: larger values cluster more points near the airfoil."
     )]
     pub mset_e: f64,
 

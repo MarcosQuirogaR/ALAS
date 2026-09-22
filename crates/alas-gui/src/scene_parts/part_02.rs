@@ -366,18 +366,68 @@ pub fn build_screening_figure(state: &AppState, id: &str, theme: &str) -> Option
 mod tests {
     use super::{cap_interactive_preview_mesh, localize_scene_text};
     use alas_config::AlasConfig;
+    use alas_report::scene::SceneElement;
 
     #[test]
     fn interactive_preview_caps_mesh_without_changing_solver_configuration() {
         let original = AlasConfig::default();
+        let original_wing_subdivisions = original.geometry.wing.n_subdivisions;
+        let original_empennage_subdivisions = original.geometry.empennage.n_subdivisions;
         let mut preview = original.clone();
 
         cap_interactive_preview_mesh(&mut preview);
 
         assert_eq!(preview.geometry.wing.n_subdivisions, 2);
         assert_eq!(preview.geometry.empennage.n_subdivisions, 2);
-        assert_eq!(original.geometry.wing.n_subdivisions, 8);
-        assert_eq!(original.geometry.empennage.n_subdivisions, 6);
+        assert_eq!(original.geometry.wing.n_subdivisions, original_wing_subdivisions);
+        assert_eq!(
+            original.geometry.empennage.n_subdivisions,
+            original_empennage_subdivisions
+        );
+    }
+
+    #[test]
+    fn mass_live_previews_use_the_materialized_cabin_flops_without_unverified_warning() {
+        let state = crate::state::AppState::default();
+        for id in ["landing_gear", "control_surfaces"] {
+            let scene = super::build_page_preview(&state, id).expect("mass preview scene");
+            let text = scene
+                .elements
+                .iter()
+                .filter_map(|element| match element {
+                    SceneElement::Text { text, .. } | SceneElement::TextBlock { text, .. } => {
+                        Some(text.as_str())
+                    }
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join(" ")
+                .to_ascii_lowercase();
+            assert!(!text.contains("unverified"), "{id} warning: {text}");
+        }
+    }
+
+    #[test]
+    fn a_failed_preview_is_titled_after_the_figure_it_replaces() {
+        // One `Err` arm serves three previews. It used to title all of them
+        // "Mass and balance preview unavailable", so the Landing Gear page
+        // reported a failure of a different artefact.
+        let gear = super::preview_unavailable_title("landing_gear");
+        let envelope = super::preview_unavailable_title("mass_cg");
+        let surfaces = super::preview_unavailable_title("control_surfaces");
+        for (id, title) in [
+            ("Landing-gear planform", &gear),
+            ("CG envelope (illustrative)", &envelope),
+            ("Control-surface layout", &surfaces),
+        ] {
+            assert!(
+                title.contains(&crate::views::tr(id)),
+                "{title} does not name {id}"
+            );
+        }
+        assert_ne!(gear, envelope);
+        assert_ne!(gear, surfaces);
+        assert_ne!(envelope, surfaces);
     }
 
     #[test]
@@ -445,7 +495,7 @@ mod tests {
             "  Tapas de larguero: 5,470 kg"
         );
         assert_eq!(
-            localize_scene_text("Landing Gear Planform -- NLG: 2xHeavy"),
+            localize_scene_text("Landing Gear Planform: NLG: 2xHeavy"),
             "Planta del tren de aterrizaje: NLG: 2xHeavy"
         );
     }

@@ -20,6 +20,9 @@ use crate::families::performance::support::{
 use crate::scene::{Axes2D, Color, Fill, Scene, SceneElement, Stroke, TextAlign, TextBaseline};
 use crate::theme::get_palette;
 
+/// Fill colour shared by the plotted design-point marker and its legend swatch.
+const DESIGN_POINT_COLOUR: &str = "#f1c40f";
+
 const AIRPORT_COLOURS: [&str; 6] = [
     "#e74c3c", "#e67e22", "#f1c40f", "#2ecc71", "#1abc9c", "#9b59b6",
 ];
@@ -235,7 +238,7 @@ fn draw_matching_chart(data: &MatchingChartData, oei_gradient: f64, theme: Optio
         scene.add(SceneElement::Circle {
             center,
             radius: 5.0,
-            fill: Some(Fill::new(Color::from_hex("#f1c40f"))),
+            fill: Some(Fill::new(Color::from_hex(DESIGN_POINT_COLOUR))),
             stroke: Some(Stroke::new(Color::from_hex("#ffffff"), 0.8)),
         });
     }
@@ -277,17 +280,15 @@ fn draw_matching_chart(data: &MatchingChartData, oei_gradient: f64, theme: Optio
             LegendMarker::Line(Stroke::dashed(colour, 1.4, 2.0, 4.0)),
         ));
     }
+    if data.design_ws_pa.is_some() && data.design_tw.is_some() {
+        legend.push((
+            "Design point (W/S, T0/W0)".to_owned(),
+            LegendMarker::Circle(Color::from_hex(DESIGN_POINT_COLOUR)),
+        ));
+    }
+    // The OEI SLS diagnostic is reported through the pipeline feasibility
+    // findings; the figure itself carries no status text.
     draw_legend(&mut scene, [675.0, 70.0], &legend, pal, 8.0);
-    scene.add(SceneElement::Text {
-        text: data.oei_climb_assessment.diagnostic.to_owned(),
-        pos: [675.0, 190.0],
-        font_size: 9.0,
-        color: Color::from_hex(pal.tick),
-        align: TextAlign::Left,
-        baseline: TextBaseline::Top,
-        angle_deg: 0.0,
-        bold: false,
-    });
     scene
 }
 
@@ -366,7 +367,7 @@ mod tests {
             0.024,
             None,
         );
-        assert!(scene.elements.iter().any(|element| matches!(
+        assert!(!scene.elements.iter().any(|element| matches!(
             element,
             SceneElement::Text { text, .. }
                 if text.contains("conceptual in-flight only")
@@ -375,5 +376,72 @@ mod tests {
             element,
             SceneElement::Text { text, .. } if text.contains("OEI climb >=")
         )));
+    }
+
+    fn chart_data(design: Option<(f64, f64)>) -> MatchingChartData {
+        MatchingChartData {
+            ws_pa: vec![2_000.0, 10_000.0],
+            tw_cruise: vec![0.12, 0.18],
+            tw_oei_climb: 0.0,
+            oei_climb_assessment: alas_perf::performance::OeiClimbAssessment {
+                status: OeiClimbStatus::NotApplicable,
+                required_inflight_tw: None,
+                required_sls_tw: None,
+                diagnostic: "OEI SLS evidence gap: synthetic status that must not be drawn",
+            },
+            tw_takeoff: vec![("LEMD".to_owned(), vec![0.20, 0.30])],
+            ws_land_limits: vec![("LEMD".to_owned(), 8_000.0)],
+            design_ws_pa: design.map(|(ws, _)| ws),
+            design_tw: design.map(|(_, tw)| tw),
+        }
+    }
+
+    fn legend_texts(scene: &Scene) -> Vec<String> {
+        scene
+            .elements
+            .iter()
+            .filter_map(|element| match element {
+                SceneElement::Text { text, .. } => Some(text.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn the_design_point_marker_is_named_in_the_legend() {
+        let scene = draw_matching_chart(&chart_data(Some((6_000.0, 0.30))), 0.024, None);
+        let texts = legend_texts(&scene);
+        assert!(
+            texts.iter().any(|text| text.starts_with("Design point")),
+            "legend texts: {texts:?}"
+        );
+        let swatch = Color::from_hex(DESIGN_POINT_COLOUR);
+        let circles = scene
+            .elements
+            .iter()
+            .filter(|element| {
+                matches!(
+                    element,
+                    SceneElement::Circle { fill: Some(fill), .. } if fill.color == swatch
+                )
+            })
+            .count();
+        assert_eq!(circles, 2, "plotted marker plus one legend swatch");
+    }
+
+    #[test]
+    fn the_figure_carries_no_oei_status_text() {
+        for design in [None, Some((6_000.0, 0.30))] {
+            let scene = draw_matching_chart(&chart_data(design), 0.024, None);
+            let texts = legend_texts(&scene);
+            assert!(
+                !texts.iter().any(|text| text.contains("evidence gap")),
+                "status text drawn: {texts:?}"
+            );
+            assert_eq!(
+                texts.iter().any(|text| text.starts_with("Design point")),
+                design.is_some()
+            );
+        }
     }
 }

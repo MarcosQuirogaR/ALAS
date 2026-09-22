@@ -3,10 +3,13 @@
 /tmp/
 /.landmark-backups/
 /exports/
-/.codex/
-/.agent/
-/.codex-metadata.json
 /.alas-onboarding-seen
+
+# Local editor, assistant and scratch state. Never part of the project; listed
+# so that a working copy cannot accidentally publish it.
+/.agent/
+/.codex/
+/.codex-metadata.json
 /.claude/
 /CONTEXT.md
 /MISSING-THINGS.md
@@ -17,6 +20,7 @@
 /out/
 /runs/
 /outputs/
+/crates/*/outputs/
 /dist/
 /exported_figures/
 /reference_figures/
@@ -40,8 +44,25 @@
 # Session hand-off notes, kept local: working scratch, not project record.
 /NOTE.md
 
-# Scratch outputs of hand-run MSES sessions inside the bundled tool directory.
-/external tools/Mses3.12c-win32/*.png
-/external tools/Mses3.12c-win32/*.ps
-/external tools/Mses3.12c-win32/*.csv
-/external tools/Mses3.12c-win32/mdat.*
+# External tools are acquired by the user, never redistributed by this
+# repository. MSES is proprietary (MIT Technology Licensing Office) and OpenVSP
+# is only redistributable from a specifically reviewed release, so neither may
+# be committed here. See THIRD-PARTY-NOTICES.md for the terms of each tool and
+# docs/downloads.md for how the application acquires them.
+#
+# AVL is the exception and stays tracked: GPL-2.0 permits redistribution, and
+# the binary, its corresponding source archive and the licence text are all
+# present, which is what `bundle_avl` in xtask/src/dist.rs packages.
+/external tools/*
+!/external tools/AVL-GPL-2.0.txt
+!/external tools/avl352.exe
+!/external tools/avl3.52.tgz
+!/external tools/cpacs_schema.xsd
+!/external tools/alas_uav_cpacs35.xsd
+
+# Runtime user configuration written by the application at run time.
+/alas-config.json
+
+# A global or editor ignore rule for build/ directories would otherwise hide
+# this module, which is ordinary Rust source rather than a build output.
+!crates/alas-pipeline/src/cabin_scene/build/

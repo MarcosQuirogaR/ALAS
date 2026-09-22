@@ -17,7 +17,7 @@
 //! generated* plan and nothing else: there is no free way to ask for a new
 //! dispatch for a particular city pair. So the workflow is to generate the plan
 //! for the exact pair on the planner's own site, and then run the analysis for
-//! that same pair -- and if the fetched plan turns out to be for somewhere
+//! that same pair, and if the fetched plan turns out to be for somewhere
 //! else, it is either someone else's or a stale one, and this says so rather
 //! than silently flying the wrong route.
 //!
@@ -185,7 +185,7 @@ pub fn route_from_document(
 /// The unreserved set of RFC 3986 plus the path characters `/` and `~`, which
 /// is what Python's `urllib.parse.quote` leaves alone by default. A dispatch
 /// identifier is in practice alphanumeric, so this almost never changes
-/// anything -- it is here so that one containing a space produces a request
+/// anything; it is here so that one containing a space produces a request
 /// rather than a malformed URL.
 fn percent_encode(value: &str) -> String {
     let mut encoded = String::with_capacity(value.len());

@@ -1,20 +1,20 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-use alas_config::{ActiveEngineModel, ConfigNode, EngineConfig};
-use egui::{vec2, ComboBox, RichText, Ui};
+use alas_config::{ActiveEngineModel, EngineConfig};
+use egui::{vec2, RichText, Ui};
 
-use crate::nav::Page;
+use crate::nav::{Page, Surface};
 use crate::state::AppState;
-use crate::views::form::{dynamic_form, FormEdit};
+use crate::views::form::{dynamic_form, dynamic_form_with_open_root_nodes, FormEdit};
 use crate::views::tr;
 
 #[path = "../form_page/aux_preset.rs"]
 mod aux_preset;
 #[path = "../mission_form.rs"]
 mod mission_form;
-#[path = "../mission_profile_preview.rs"]
-mod mission_profile_preview;
+#[path = "../form_page/placement.rs"]
+pub(crate) mod placement;
 #[path = "../form_page_sections.rs"]
 mod sections;
 
@@ -22,13 +22,39 @@ use aux_preset::show_aux_preset_picker;
 use mission_form::render_mission_form;
 use sections::{page_sections, render_sectioned_form};
 
+/// The notice a page carries while a registered preset protects its geometry.
+pub const PRESET_LOCK_NOTICE: &str =
+    "Preset geometry is protected from manual edits here as well; open the sandbox for geometry experiments.";
+
 /// Render one Advanced Settings form page.
 pub fn show_form_page(state: &mut AppState, ui: &mut Ui, page: &Page) {
+    show_form_page_locked(state, ui, page, false);
+}
+
+/// Render one Advanced Settings form page, with its editors optionally locked.
+///
+/// Locking a page is not done by wrapping it whole in `add_enabled_ui(false)`. egui's
+/// disabled scope fades every painted colour toward the background, so the page
+/// title, its description, every field *label* and the page actions all dropped
+/// to the disabled token together (measured 4.28-4.68:1 against 12-15:1 on an
+/// active page) and the page read as failed to load rather than as protected.
+/// Only the editors are disabled here, and the lock notice sits under the page
+/// title instead of above it, inside the page's own heading hierarchy.
+pub fn show_form_page_locked(state: &mut AppState, ui: &mut Ui, page: &Page, locked: bool) {
     let Some(group) = page.group else { return };
+    placement::sync_preview_tab(state, ui.ctx(), page);
 
     let heading = ui.heading(alas_i18n::t(Some(page.title), None));
     if let Some(desc) = page.description {
         heading.on_hover_text(alas_i18n::t(Some(desc), None));
+    }
+    if locked {
+        ui.add_space(2.0);
+        ui.label(
+            RichText::new(tr(PRESET_LOCK_NOTICE))
+                .color(ui.visuals().warn_fg_color)
+                .small(),
+        );
     }
     if state.help_verbose {
         if let Some(desc) = page.description {
@@ -78,8 +104,10 @@ pub fn show_form_page(state: &mut AppState, ui: &mut Ui, page: &Page) {
 
     ui.horizontal(|ui| {
         ui.label(RichText::new(tr("Parameter values")).strong());
+        // A framed button, not frameless text: "Reset page" changes every
+        // value on the page and must look like the action it is.
         if ui
-            .add(egui::Button::new(tr("Reset page")).small().frame(false))
+            .add_enabled(!locked, egui::Button::new(tr("Reset page")).small())
             .on_hover_text(tr(
                 "Restore this page's default values; other pages are unchanged.",
             ))
@@ -90,92 +118,30 @@ pub fn show_form_page(state: &mut AppState, ui: &mut Ui, page: &Page) {
     });
     ui.add_space(4.0);
 
-    let visible_fields = if group == "optimizer" {
-        optimizer_ui_fields(&fields)
-    } else {
-        fields
-            .iter()
-            .filter(|field| !is_external_tools_field(group, field.name))
-            .cloned()
-            .collect()
-    };
-    render_editor(state, ui, group, &visible_fields, &error_fields, lang);
+    let visible_fields = placement::visible_fields(page, group, &fields);
+    ui.add_enabled_ui(!locked, |ui| {
+        render_editor(
+            state,
+            ui,
+            group,
+            page.surface,
+            &visible_fields,
+            &error_fields,
+            lang,
+        );
+        placement::render_extra_sections(state, ui, page, &error_fields, lang);
+    });
+    if group == "mission" && page.surface == Surface::Advanced {
+        crate::views::mission_profile_inputs::show_mission_profile_advanced(state, ui);
+    }
     render_preview(state, ui, page.preview, page.preview_title);
-}
-
-/// Keep machine- and user-specific locations out of the model form. Their
-/// values remain in the mission configuration at the pipeline boundary, but
-/// Setup > External Tools is the single human-facing place to manage them.
-fn is_external_tools_field(group: &str, name: &str) -> bool {
-    group == "mission" && matches!(name, "navdata_dir" | "texture_path" | "routes_dir")
-}
-
-/// Keep the optimizer page focused on the one product search contract. Legacy
-/// method/strategy controls remain loadable by the config and parity paths,
-/// but exposing them here would suggest that the product still dispatches a
-/// menu of algorithms. The dedicated Design Space page owns `design_space`.
-const LEGACY_OPTIMIZER_FIELDS: &[&str] = &[
-    "weights",
-    "design_space",
-    "method",
-    "strategy",
-    "finite_difference_step",
-    "constraint_tolerance",
-    "tolerance",
-    "workers",
-    "display_progress",
-    "seed_near_initial_design",
-    "seed_perturbation_fraction",
-];
-
-fn optimizer_ui_fields(fields: &[alas_config::Field]) -> Vec<alas_config::Field> {
-    fields
-        .iter()
-        .filter_map(|field| {
-            if LEGACY_OPTIMIZER_FIELDS.contains(&field.name) {
-                return None;
-            }
-            if field.name != "solver" {
-                return Some(field.clone());
-            }
-            let alas_config::Entry::Node(node) = &field.entry else {
-                return Some(field.clone());
-            };
-            let mut filtered = field.clone();
-            let mut solver = node.clone();
-            solver.fields = solver
-                .fields
-                .into_iter()
-                .filter(|child| !LEGACY_OPTIMIZER_FIELDS.contains(&child.name))
-                .map(|mut child| {
-                    match child.name {
-                        "max_iterations" => {
-                            child.label = "MADS poll/search iterations";
-                            child.help = "Maximum number of MADS poll/search iterations before the run reports iteration_limit.";
-                        }
-                        "population_size" => {
-                            child.label = "MADS evaluation budget multiplier";
-                            child.help = "Multiplier used by the current product driver to derive the bounded MADS evaluation budget from the design dimension and poll iterations.";
-                        }
-                        "seed" => {
-                            child.label = "MADS random seed";
-                            child.help = "Optional integer seed for reproducible MADS search points and poll directions.";
-                        }
-                        _ => {}
-                    }
-                    child
-                })
-                .collect();
-            filtered.entry = alas_config::Entry::Node(solver);
-            Some(filtered)
-        })
-        .collect()
 }
 
 fn render_editor(
     state: &mut AppState,
     ui: &mut Ui,
     group: &str,
+    surface: Surface,
     fields: &[alas_config::Field],
     error_fields: &std::collections::HashSet<String>,
     lang: Option<&str>,
@@ -184,12 +150,44 @@ fn render_editor(
     // preview so the preview cannot disappear behind the resizable run log.
     ui.vertical(|ui| {
         let show_help = state.help_verbose;
-        let edits = if group == "mission" {
+        let edits = if group == "mission" && surface != Surface::Advanced {
             render_mission_form(state, ui, fields, error_fields, lang, show_help)
         } else if group == "propulsion_cycle" {
-            render_propulsion_editor(state, ui, fields, error_fields, lang, show_help)
+            placement::render_propulsion_editor(
+                state,
+                ui,
+                surface,
+                fields,
+                error_fields,
+                lang,
+                show_help,
+            )
+        } else if group == "cabin" {
+            // Passenger and cargo are the two primary cabin controls. Keep
+            // both root nodes open and render one root node per form pass so
+            // the page reads as two stacked, immediately editable cards even
+            // in a wide window. The generic form intentionally uses adaptive
+            // columns for dense scalar settings; cabin's two large cards need
+            // the available width for their nested fields instead.
+            if let Some(values) = state.group_mut(group) {
+                let mut edits = Vec::new();
+                for field in fields {
+                    edits.extend(dynamic_form_with_open_root_nodes(
+                        ui,
+                        std::slice::from_ref(field),
+                        values,
+                        error_fields,
+                        lang,
+                        show_help,
+                        true,
+                    ));
+                }
+                edits
+            } else {
+                Vec::new()
+            }
         } else if let Some(values) = state.group_mut(group) {
-            if let Some(sections) = page_sections(group) {
+            if let Some(sections) = page_sections(group, surface) {
                 render_sectioned_form(
                     ui,
                     group,
@@ -280,106 +278,6 @@ fn engine_editor_model(engine: &EngineConfig) -> Result<EngineEditorModel, Strin
         #[allow(unreachable_patterns)]
         _ => Err("selected propulsion technology is not supported by this editor".to_owned()),
     }
-}
-
-fn render_propulsion_editor(
-    state: &mut AppState,
-    ui: &mut Ui,
-    cycle_fields: &[alas_config::Field],
-    error_fields: &std::collections::HashSet<String>,
-    lang: Option<&str>,
-    show_help: bool,
-) -> Vec<FormEdit> {
-    let current_name = state
-        .config_values
-        .pointer("/geometry/engine/engine_name")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("")
-        .to_owned();
-    let mut chosen = None;
-    ui.horizontal_wrapped(|ui| {
-        ui.label(RichText::new(tr("Engine model")).strong());
-        ComboBox::from_id_salt("engine_designer_engine")
-            .selected_text(&current_name)
-            .show_ui(ui, |ui| {
-                for name in &state.engine_names {
-                    if ui.selectable_label(*name == current_name, name).clicked() {
-                        chosen = Some(name.clone());
-                    }
-                }
-            });
-    });
-    if let Some(name) = chosen {
-        state.set_engine(&name);
-    }
-
-    let model = state
-        .typed_config()
-        .ok_or_else(|| "configuration cannot be decoded".to_owned())
-        .and_then(|config| engine_editor_model(&config.geometry.engine));
-    match &model {
-        Ok(model) => render_engine_physics_summary(ui, model),
-        Err(error) => {
-            ui.colored_label(ui.visuals().error_fg_color, error);
-            return Vec::new();
-        }
-    }
-
-    ui.add_space(6.0);
-    let mut edits = Vec::new();
-    let installation_names = [
-        "nacelle_profile",
-        "radius_scale_m",
-        "spanwise_positions_m",
-        "z_m",
-        "inlet_x_offset_m",
-    ];
-    let installation_fields: Vec<_> = EngineConfig::default()
-        .schema()
-        .fields
-        .into_iter()
-        .filter(|field| installation_names.contains(&field.name))
-        .collect();
-    crate::theme::card_frame(ui).show(ui, |ui| {
-        egui::CollapsingHeader::new(RichText::new(tr("Installation & nacelle")).strong())
-            .id_salt("propulsion::installation")
-            .default_open(true)
-            .show(ui, |ui| {
-                if let Some(values) = state.config_values.pointer_mut("/geometry/engine") {
-                    edits.extend(dynamic_form(
-                        ui,
-                        &installation_fields,
-                        values,
-                        error_fields,
-                        lang,
-                        show_help,
-                    ));
-                }
-            });
-    });
-
-    if matches!(model, Ok(EngineEditorModel::Turbofan { .. })) {
-        ui.add_space(6.0);
-        if let Some(values) = state.group_mut("propulsion_cycle") {
-            edits.extend(render_engine_designer_form(
-                ui,
-                cycle_fields,
-                values,
-                error_fields,
-                lang,
-                show_help,
-            ));
-        }
-    } else {
-        ui.label(
-            RichText::new(tr(
-                "Turbofan BPR, OPR, FPR, T4, TSFC and ICAO LTO controls do not apply to this shaft-power propulsion model.",
-            ))
-            .weak()
-            .small(),
-        );
-    }
-    edits
 }
 
 fn render_engine_physics_summary(ui: &mut Ui, model: &EngineEditorModel) {

@@ -28,6 +28,7 @@ use alas_config::airports::get as get_airport;
 use alas_config::design_variables::DesignVector;
 use alas_config::presets;
 use alas_config::{AlasConfig, Severity};
+use alas_exec::storage::{mark_storage_root, StorageCategoryId};
 use alas_exec::{RunEnvironment, ToolLocator};
 use alas_geom::aircraft::airplane::Airplane;
 use alas_mission::MissionResult;
@@ -39,6 +40,7 @@ use alas_route::route::{Route, RouteSource};
 use alas_route::{fetch_route_with_status, SimbriefFetchStatus};
 use serde::{Deserialize, Serialize};
 
+use crate::acceptance::AcceptanceRoute;
 use crate::avl::{run_avl_takeoff_comparison, AvlAnalysisResult};
 use crate::baseline::{analyze_baseline, BaselineReport};
 use crate::cabin_scene::export_cabin_scene;
@@ -68,12 +70,14 @@ use crate::vspaero::{run_vspaero_analysis, VspaeroAnalysisResult};
 mod curl_transport;
 use curl_transport::SystemCurlTransport;
 mod helpers;
+mod snapshots;
 #[cfg(test)]
 use helpers::optimizer_config;
 use helpers::{
-    add_manifest_artifact, add_manifest_artifact_if_exists, persist_mses_polar_diagnostics,
-    persist_mses_raw_exports, validate_bounds,
+    add_manifest_artifact, add_manifest_artifact_if_exists, check_preset_policy,
+    persist_mses_polar_diagnostics, persist_mses_raw_exports, validate_bounds,
 };
+use snapshots::SnapshotPublisher;
 
 /// The 2-D section condition sent to MSES for a 3-D swept-wing cruise case.
 ///
@@ -97,6 +101,33 @@ fn check_cancelled(cancel: Option<&AtomicBool>) -> Result<(), String> {
     } else {
         Ok(())
     }
+}
+
+/// Create and, for a retained output directory, claim this run's analysis
+/// workspace: `output_dir` when the caller wants results kept, otherwise a
+/// process/nonce-unique directory under the system temporary directory.
+///
+/// The claim is made here, at creation, rather than left to be inferred from
+/// whatever a writer produces later: a run cancelled immediately after setup
+/// would otherwise leave a directory Manage Storage cannot recognize as its
+/// own. The temporary fallback is solver scratch, already recognized by its
+/// `alas-analysis-` prefix ([`alas_exec::storage::SCRATCH_PREFIXES`]); it is
+/// not a configured, retained root and must not carry the same claim a
+/// user-set output directory gets.
+fn prepare_analysis_workspace(output_dir: Option<PathBuf>) -> Result<PathBuf, String> {
+    let analysis_dir = output_dir.clone().unwrap_or_else(|| {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or_default();
+        std::env::temp_dir().join(format!("alas-analysis-{}-{nonce}", std::process::id()))
+    });
+    std::fs::create_dir_all(&analysis_dir)
+        .map_err(|error| format!("analysis workspace creation failed: {error}"))?;
+    if output_dir.is_some() {
+        let _ = mark_storage_root(StorageCategoryId::GeneratedOutputs, &analysis_dir);
+    }
+    Ok(analysis_dir)
 }
 
 fn emit_event(events: Option<&(dyn Fn(RunEvent) + Sync)>, run_clock: Instant, event: RunEvent) {
@@ -595,7 +626,7 @@ type MissionStageOutputs = (
     Option<SelectedLoadCase>,
 );
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct PlannedRoute {
     route: Route,
     status: RoutePlanningStatus,
@@ -632,6 +663,21 @@ pub struct DesignPipeline {
     /// aircraft. The public constructor keeps the existing configuration
     /// workflow unchanged.
     aircraft_override: Option<Airplane>,
+}
+
+/// The three independently optional observation seams a design-space run can
+/// publish through, grouped so
+/// [`DesignPipeline::run_with_design_space_events_and_snapshots`] keeps a
+/// single logical "how do you want to watch this run" input rather than three
+/// unrelated positional callbacks.
+pub struct RunObservers<'a> {
+    /// Typed per-stage lifecycle events, as reported by [`emit_diagnostic`].
+    pub events: &'a (dyn Fn(RunEvent) + Sync),
+    /// Cumulative, immutable [`PipelineResult`] snapshots published as report
+    /// data becomes available.
+    pub snapshots: &'a (dyn Fn(PipelineResult) + Sync),
+    /// Cooperative cancellation flag, observed at safe stage boundaries.
+    pub cancel: &'a AtomicBool,
 }
 
 impl DesignPipeline {
@@ -680,7 +726,58 @@ impl DesignPipeline {
         options: &PipelineOptions,
         environment: &RunEnvironment,
     ) -> Result<PipelineResult, String> {
-        self.run_inner(options, environment, None, None, None, None, None, None)
+        self.run_inner(
+            options,
+            environment,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+    }
+
+    /// Execute the same headless run as [`Self::run`] under a cooperative
+    /// cancellation flag.
+    ///
+    /// This is the seam a headless supervisor (an acceptance harness with a
+    /// wall-clock guard, a batch runner) needs: [`Self::run`] has no way to
+    /// stop, so such a caller could only abandon its worker thread, which
+    /// leaves the optimizer running unmonitored against whatever the
+    /// supervisor does next. Setting `cancel` stops the run at the next stage
+    /// boundary *and*, because the flag is threaded into the optimizer's own
+    /// generation and poll loops, at the next boundary inside an active
+    /// search; the call then returns an `Err` whose message begins
+    /// `"Cancelled safely"`, so the worker can be joined rather than
+    /// abandoned.
+    ///
+    /// Cancellation is cooperative and bounded, not immediate: the longest a
+    /// set flag can go unobserved is one evaluation block of the active
+    /// search, or one supervised external-tool call, whichever the run is
+    /// inside.
+    ///
+    /// # Errors
+    ///
+    /// Same as [`Self::run`], plus the cancellation message above.
+    pub fn run_cancellable(
+        &self,
+        options: &PipelineOptions,
+        environment: &RunEnvironment,
+        cancel: &AtomicBool,
+    ) -> Result<PipelineResult, String> {
+        self.run_inner(
+            options,
+            environment,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some(cancel),
+            None,
+        )
     }
 
     /// Execute a run using the one resolved external-tool environment shared
@@ -699,7 +796,7 @@ impl DesignPipeline {
     /// The event stream is where a run's per-stage `elapsed_ms`/`duration_ms`
     /// already live; before this seam existed only the desktop
     /// design-space entry point could observe them, so a command-line run had
-    /// no record of where its wall time went. The run itself is unchanged --
+    /// no record of where its wall time went. The run itself is unchanged:
     /// the callback is the only added argument.
     pub fn run_with_environment_and_events(
         &self,
@@ -715,6 +812,7 @@ impl DesignPipeline {
             None,
             None,
             Some(events),
+            None,
             None,
         )
     }
@@ -734,6 +832,7 @@ impl DesignPipeline {
             options,
             environment,
             dispatched_route,
+            None,
             None,
             None,
             None,
@@ -765,6 +864,7 @@ impl DesignPipeline {
             None,
             None,
             None,
+            None,
         )
     }
 
@@ -789,6 +889,7 @@ impl DesignPipeline {
             Some(*initial_design),
             Some(bounds),
             Some(progress),
+            None,
             None,
             None,
         )
@@ -816,6 +917,39 @@ impl DesignPipeline {
             None,
             Some(events),
             Some(cancel),
+            None,
+        )
+    }
+
+    /// Execute a desktop design-space run while publishing typed, immutable
+    /// result snapshots as report data becomes available. The snapshots use
+    /// the same [`PipelineResult`] shape as the final run, with downstream
+    /// fields left `None` until their stages finish, so the GUI can render its
+    /// ordinary Results gallery without inventing progress-only figures.
+    /// Snapshots are cumulative and published in completion order, including
+    /// during parallel downstream work. Their feasibility record is not yet
+    /// assessed: only the successful return value is a completed run suitable
+    /// for a feasibility verdict or final report export. The callback must
+    /// enqueue promptly rather than render or block the analysis worker.
+    pub fn run_with_design_space_events_and_snapshots(
+        &self,
+        options: &PipelineOptions,
+        environment: &RunEnvironment,
+        initial_design: &DesignVector,
+        bounds: &[(f64, f64)],
+        observers: RunObservers<'_>,
+    ) -> Result<PipelineResult, String> {
+        validate_bounds(bounds)?;
+        self.run_inner(
+            options,
+            environment,
+            None,
+            Some(*initial_design),
+            Some(bounds),
+            None,
+            Some(observers.events),
+            Some(observers.cancel),
+            Some(observers.snapshots),
         )
     }
 
@@ -831,6 +965,7 @@ impl DesignPipeline {
         progress: Option<&(dyn Fn(&str) + Sync)>,
         events: Option<&(dyn Fn(RunEvent) + Sync)>,
         cancel: Option<&AtomicBool>,
+        snapshots: Option<&(dyn Fn(PipelineResult) + Sync)>,
     ) -> Result<PipelineResult, String> {
         let run_clock = Instant::now();
         let report = |message: &str| {
@@ -840,7 +975,7 @@ impl DesignPipeline {
         };
         report("Validating run configuration");
         check_cancelled(cancel)?;
-        validate_run_configuration(&self.config)?;
+        validate_run_configuration(&self.config, initial_design.as_ref(), bounds)?;
         if self.aircraft_override.is_some() && options.optimize {
             return Err(
                 "CPACS-backed runs currently require --no-optimize; design variables cannot replace imported geometry"
@@ -856,15 +991,7 @@ impl DesignPipeline {
         // `output_dir` controls retention, not which physics stages run:
         // without it every writer and external adapter works in an isolated
         // temporary workspace rather than treating `None` as "disabled".
-        let analysis_dir = options.output_dir.clone().unwrap_or_else(|| {
-            let nonce = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .map(|duration| duration.as_nanos())
-                .unwrap_or_default();
-            std::env::temp_dir().join(format!("alas-analysis-{}-{nonce}", std::process::id()))
-        });
-        std::fs::create_dir_all(&analysis_dir)
-            .map_err(|error| format!("analysis workspace creation failed: {error}"))?;
+        let analysis_dir = prepare_analysis_workspace(options.output_dir.clone())?;
         report("Analysis workspace ready");
         emit_diagnostic(events, run_clock, "setup", "Analysis workspace ready");
         // The desktop design editor owns an explicit vector.  Preserve it
@@ -875,6 +1002,22 @@ impl DesignPipeline {
         // reviewed, and would also rewrite a named preset on a no-opt run.
         let nominal_design = initial_design.unwrap_or_else(|| self.configured_nominal_design());
         let fixed_design_review = bounds.is_some_and(bounds_are_fixed);
+
+        // The route depends on the configuration, not on the design, so plan
+        // it once here rather than inside the mission stage. Two callers now
+        // need it: the mission stage as before, and the optimizer's
+        // reporting-fidelity acceptance check, which has to fly the same
+        // route the published mission will. Planning it twice would also mean
+        // two SimBrief fetches per run.
+        let planned_route = if self.config.mission.enabled {
+            let planned = self.plan_active_route(dispatched_route);
+            if planned.is_some() {
+                emit_diagnostic(events, run_clock, "setup", "Route planned for this run");
+            }
+            planned
+        } else {
+            None
+        };
 
         // Stage 0: Baseline W&B + stability estimation.
         report("Stage 1/7: baseline weight, balance, and stability");
@@ -909,6 +1052,34 @@ impl DesignPipeline {
                 "Optimization skipped"
             },
         );
+        // Resolve the two airports once, with the same fallback
+        // `evaluate_active_mission` applies: a planned route carries its
+        // endpoint records only when the planner had them, and a great-circle
+        // plan for a configured city pair does not. Doing it here keeps the
+        // acceptance check and the published mission on one route.
+        let acceptance_route = planned_route.as_ref().and_then(|planned| {
+            let origin = planned
+                .route
+                .origin_airport
+                .clone()
+                .or_else(|| get_airport(&self.config.departure_airport).ok().cloned())?;
+            let destination = planned
+                .route
+                .dest_airport
+                .clone()
+                .or_else(|| get_airport(&self.config.arrival_airport).ok().cloned())?;
+            Some(AcceptanceRoute {
+                origin,
+                destination,
+                distance_m: planned.route.total_distance_m(),
+            })
+        });
+        // The optimization stage is where a cancellation request almost
+        // always lands: it is the only stage whose duration is a search
+        // budget rather than a fixed sequence of analyses. Marking it means a
+        // telemetry snapshot can say "the request arrived in the search" and
+        // not merely "somewhere in the pipeline".
+        alas_opt::CancelScope::attach(cancel).enter(alas_opt::CancelPhase::PipelineStage, 2);
         let solver_optimizations = if options.optimize {
             Some(run_solver_optimizations(
                 &self.config,
@@ -919,6 +1090,8 @@ impl DesignPipeline {
                 &nominal_design,
                 bounds,
                 Some(analysis_dir.as_path()),
+                acceptance_route.as_ref(),
+                cancel,
             ))
         } else {
             None
@@ -957,6 +1130,50 @@ impl DesignPipeline {
         } else {
             (nominal_design, None, None)
         };
+        // Say what the reporting-fidelity re-evaluation did, in the run log,
+        // before any downstream stage speaks. A user who sees a converged
+        // search and an infeasible aircraft is entitled to read which of the
+        // two the run is actually claiming.
+        if let Some(acceptance) = optimization_result
+            .as_ref()
+            .and_then(|optimization| optimization.delivered_acceptance.as_ref())
+        {
+            let (severity, message) = if acceptance.verified
+                && acceptance.delivered_is_search_finalist
+            {
+                (
+                    RunEventSeverity::Info,
+                    format!(
+                        "Finalist accepted at reporting fidelity ({} candidate(s) re-evaluated, {:.2} s)",
+                        acceptance.candidates_evaluated, acceptance.wall_time_s
+                    ),
+                )
+            } else if acceptance.verified {
+                (
+                    RunEventSeverity::Warning,
+                    format!(
+                        "Search finalist rejected at reporting fidelity by {} ({}); delivered a verified fallback candidate instead ({} candidate(s) re-evaluated, {:.2} s). This run is NOT reported as converged.",
+                        acceptance.finalist_rejected_by.join(", "),
+                        acceptance.rejection_messages.join("; "),
+                        acceptance.candidates_evaluated,
+                        acceptance.wall_time_s
+                    ),
+                )
+            } else {
+                (
+                    RunEventSeverity::Error,
+                    format!(
+                        "No candidate survived the reporting-fidelity re-evaluation; the delivered design is rejected by {} ({}) ({} candidate(s) re-evaluated, {:.2} s). This run is NOT reported as converged.",
+                        acceptance.delivered_rejected_by.join(", "),
+                        acceptance.rejection_messages.join("; "),
+                        acceptance.candidates_evaluated,
+                        acceptance.wall_time_s
+                    ),
+                )
+            };
+            report(&message);
+            emit_diagnostic_with_severity(events, run_clock, "optimization", &message, severity);
+        }
         finish_stage(events, run_clock, stage_clock, 2, "optimization");
         check_cancelled(cancel)?;
 
@@ -1014,8 +1231,28 @@ impl DesignPipeline {
                     }
                 ));
             }
+            // Bind the report to the vector the assessment was *evaluated*
+            // on, not the one it was handed. A clean-sheet design space
+            // derives the fuselage coordinate from the cabin load case, so
+            // the two are the same vector for an optimizer finalist and can
+            // differ for any other supplied design (see
+            // `alas_opt::ResolvedProductState::design`). Reporting the
+            // caller's vector there would publish a different aeroplane from
+            // the one this gate just passed.
+            let assessed_design = assessment.resolved.design;
+            if assessed_design != optimized_design {
+                emit_diagnostic(
+                    events,
+                    run_clock,
+                    "full_analysis",
+                    &format!(
+                        "Finalist geometry re-derived by the design space: fuselage length {:.6} m evaluated against {:.6} m supplied; the report is bound to the evaluated aircraft",
+                        assessed_design.fuselage_length_m, optimized_design.fuselage_length_m,
+                    ),
+                );
+            }
             optimized_report = full.run_at_sized_takeoff_mass(
-                &optimized_design,
+                &assessed_design,
                 true,
                 assessment.sized.takeoff_mass_kg,
             )?;
@@ -1042,6 +1279,44 @@ impl DesignPipeline {
                 optimized_report.design_point.l_over_d,
             ),
         );
+        // The optimized report is the first complete figure-producing data
+        // boundary. Publish it before CPACS/export/downstream work starts so
+        // the desktop can render the same report gallery it will keep after
+        // the run, while the remaining stages continue in the worker.
+        let live_results = SnapshotPublisher::new(snapshots, || PipelineResult {
+            config: self.config.clone(),
+            optimized_design: Some(optimized_design),
+            optimized_report: Some(optimized_report.clone()),
+            optimization_result: optimization_result.clone(),
+            solver_optimizations: solver_optimizations.clone(),
+            baseline_report: baseline_report.clone(),
+            baseline_analysis: None,
+            baseline_analysis_error: None,
+            route: planned_route.as_ref().map(|planned| planned.route.clone()),
+            route_status: planned_route.as_ref().map(|planned| planned.status.clone()),
+            mission_result: None,
+            mission_load_case: None,
+            feasibility: FeasibilityReport::default(),
+            mses_result: None,
+            mses_pressure: None,
+            structural_result: None,
+            design_database: None,
+            openvsp_export: None,
+            cpacs_export: None,
+            cpacs_manifest: None,
+            vspaero_result: None,
+            avl_result: None,
+            flowunsteady_result: None,
+            execution: PipelineExecutionStatus {
+                parallel_requested: options.parallel,
+                parallel_effective: false,
+                aerodynamic_solver: options.aerodynamic_solver,
+                optimization_solver: options.optimization_solver,
+                seed_requested: options.seed,
+                seed_applied: options.optimize && options.seed.is_some(),
+                quiet_requested: options.quiet,
+            },
+        });
         finish_stage(events, run_clock, stage_clock, 3, "full_analysis");
         check_cancelled(cancel)?;
 
@@ -1068,10 +1343,14 @@ impl DesignPipeline {
                 .to_airplane()
                 .map_err(|error| format!("CPACS canonicalization failed: {error}"))?;
         }
+        live_results.update(|snapshot| {
+            snapshot.optimized_report = Some(optimized_report.clone());
+            snapshot.cpacs_export = cpacs_export.clone();
+        });
         finish_stage(events, run_clock, stage_clock, 4, "geometry_export");
         check_cancelled(cancel)?;
 
-        let openvsp_export = {
+        let openvsp_export = if self.config.downstream.openvsp {
             let af_path = analysis_dir.join("airfoils/optimized_root.dat");
             let openvsp_path = analysis_dir.join("openvsp/optimized_aircraft.vspscript");
             let _ = export_airfoil_dat(&optimized_report, &self.config, &af_path, "ALAS_Optimized");
@@ -1085,14 +1364,28 @@ impl DesignPipeline {
                     None
                 }
             }
+        } else {
+            None
         };
-        let avl_requested = matches!(
-            options.aerodynamic_solver,
-            AerodynamicSolverMode::Avl | AerodynamicSolverMode::Both
-        );
+        live_results.update(|snapshot| snapshot.openvsp_export = openvsp_export.clone());
+        let avl_requested = self.config.downstream.avl
+            && matches!(
+                options.aerodynamic_solver,
+                AerodynamicSolverMode::Avl | AerodynamicSolverMode::Both
+            );
         let run_vspaero = || {
             let stage_clock =
                 begin_component(events, run_clock, "downstream/vspaero", "VSPAERO analysis");
+            if !self.config.downstream.vspaero {
+                finish_component(
+                    events,
+                    run_clock,
+                    stage_clock,
+                    "downstream/vspaero",
+                    "Skipped",
+                );
+                return None;
+            }
             let result = openvsp_export.as_ref().map(|openvsp| {
                 run_vspaero_analysis(
                     &optimized_report,
@@ -1105,6 +1398,7 @@ impl DesignPipeline {
                     900.0,
                 )
             });
+            live_results.update(|snapshot| snapshot.vspaero_result = result.clone());
             finish_component(
                 events,
                 run_clock,
@@ -1136,6 +1430,7 @@ impl DesignPipeline {
                 environment.avl_exe.as_deref(),
                 300.0,
             ));
+            live_results.update(|snapshot| snapshot.avl_result = result.clone());
             finish_component(
                 events,
                 run_clock,
@@ -1152,6 +1447,16 @@ impl DesignPipeline {
                 "downstream/flowunsteady",
                 "FLOWUnsteady analysis",
             );
+            if !self.config.downstream.flowunsteady {
+                finish_component(
+                    events,
+                    run_clock,
+                    stage_clock,
+                    "downstream/flowunsteady",
+                    "Skipped",
+                );
+                return None;
+            }
             let result = Some(run_flowunsteady_analysis(
                 &optimized_report,
                 &self.config,
@@ -1159,6 +1464,7 @@ impl DesignPipeline {
                 environment.flowunsteady_exe.as_deref(),
                 900.0,
             ));
+            live_results.update(|snapshot| snapshot.flowunsteady_result = result.clone());
             finish_component(
                 events,
                 run_clock,
@@ -1185,6 +1491,9 @@ impl DesignPipeline {
                 );
                 (None, None)
             } else if !options.optimize && self.aircraft_override.is_none() {
+                live_results.update(|snapshot| {
+                    snapshot.baseline_analysis = Some(optimized_report.clone());
+                });
                 finish_component(
                     events,
                     run_clock,
@@ -1198,6 +1507,10 @@ impl DesignPipeline {
                     Ok(report) => (Some(report), None),
                     Err(error) => (None, Some(error)),
                 };
+                live_results.update(|snapshot| {
+                    snapshot.baseline_analysis = result.0.clone();
+                    snapshot.baseline_analysis_error = result.1.clone();
+                });
                 finish_component(
                     events,
                     run_clock,
@@ -1215,7 +1528,15 @@ impl DesignPipeline {
                 "downstream/mission",
                 "Mission and route analysis",
             );
-            let result = self.evaluate_active_mission(&optimized_report, dispatched_route);
+            let result = self.evaluate_active_mission(&optimized_report, planned_route.as_ref());
+            if let Ok((route, status, mission, load_case)) = &result {
+                live_results.update(|snapshot| {
+                    snapshot.route = route.clone();
+                    snapshot.route_status = status.clone();
+                    snapshot.mission_result = mission.clone();
+                    snapshot.mission_load_case = load_case.clone();
+                });
+            }
             finish_component(
                 events,
                 run_clock,
@@ -1234,6 +1555,10 @@ impl DesignPipeline {
                 begin_component(events, run_clock, "downstream/mses", "MSES analysis");
             let result =
                 self.run_mses_stage(&optimized_report, environment.mses_dir.as_deref(), cancel);
+            live_results.update(|snapshot| {
+                snapshot.mses_result = result.0.clone();
+                snapshot.mses_pressure = result.1.clone();
+            });
             let (polar, pressure) = &result;
             let polar_summary = polar.as_ref().map_or_else(
                 || "unavailable".to_owned(),
@@ -1327,6 +1652,7 @@ impl DesignPipeline {
                         run_clock,
                     ),
                 );
+                live_results.update(|snapshot| snapshot.structural_result = result.clone());
                 finish_component(
                     events,
                     run_clock,
@@ -1362,6 +1688,9 @@ impl DesignPipeline {
                 "Downstream analyses (sequential)"
             },
         );
+        live_results.update(|snapshot| {
+            snapshot.execution.parallel_effective = options.parallel;
+        });
         let (
             vspaero_result,
             avl_result,
@@ -1868,13 +2197,18 @@ impl DesignPipeline {
     fn evaluate_active_mission(
         &self,
         report: &AnalysisReport,
-        dispatched_route: Option<Route>,
+        planned_route: Option<&PlannedRoute>,
     ) -> Result<MissionStageOutputs, String> {
         if !self.config.mission.enabled {
             return Ok((None, None, None, None));
         }
-        let planned = self
-            .plan_active_route(dispatched_route)
+        // The route is planned once per run, before the search starts,
+        // because it depends on the configuration and not on the design. That
+        // is what lets the optimizer's reporting-fidelity acceptance check fly
+        // the same route this stage does, instead of a second route fetched
+        // from a network service that may answer differently.
+        let planned = planned_route
+            .cloned()
             .ok_or_else(|| "mission is enabled but route planning produced no route".to_owned())?;
         let selected_origin = get_airport(&self.config.departure_airport)
             .map_err(|error| format!("mission departure airport could not be resolved: {error}"))?;
@@ -2095,14 +2429,12 @@ fn fixed_review_error_is_reportable(error: &str) -> bool {
 /// Enforce the blocking cross-field configuration contract at the public
 /// execution boundary. The GUI performs the same check for button state, but
 /// library and CLI callers must receive it even when they bypass that UI.
-fn validate_run_configuration(config: &AlasConfig) -> Result<(), String> {
-    if !config.preset.is_empty() {
-        presets::get(&config.preset).map_err(|error| {
-            format!(
-                "configuration preset identity is not registered: {error}; clear the preset field or select a registered aircraft preset"
-            )
-        })?;
-    }
+fn validate_run_configuration(
+    config: &AlasConfig,
+    initial_design: Option<&DesignVector>,
+    bounds: Option<&[(f64, f64)]>,
+) -> Result<(), String> {
+    check_preset_policy(config, initial_design, bounds)?;
     let errors = alas_config::validate(config)
         .into_iter()
         .filter(|issue| issue.severity == Severity::Error)
