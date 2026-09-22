@@ -2703,5 +2703,9 @@
   "Population size per generation": "Tamaño de población por generación",
   "Feasible fraction of the final population": "Fracción factible de la población final",
   "Constraint boundary (epsilon) at the last generation": "Límite de restricción (epsilon) en la última generación",
-  "0 (strict feasibility)": "0 (factibilidad estricta)"
+  "0 (strict feasibility)": "0 (factibilidad estricta)",
+  "Download everything ALAS may fetch for you": "Descargar todo lo que ALAS puede obtener por ti",
+  "One consent for every item in this group, each under the licence stated in its own row below. The tools under \"You supply these\" are not included: their licences do not allow ALAS to download them for you.": "Un único consentimiento para todos los elementos de este grupo, cada uno bajo la licencia indicada en su propia fila más abajo. Las herramientas de «Debes aportar estos» no se incluyen: sus licencias no permiten que ALAS las descargue por ti.",
+  "I consent to every download in this group": "Doy mi consentimiento para todas las descargas de este grupo",
+  "Download all": "Descargar todo"
 }

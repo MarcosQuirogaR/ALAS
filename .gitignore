@@ -20,6 +20,7 @@
 /out/
 /runs/
 /outputs/
+/crates/*/outputs/
 /dist/
 /exported_figures/
 /reference_figures/
