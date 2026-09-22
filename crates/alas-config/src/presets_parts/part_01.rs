@@ -437,8 +437,8 @@ impl AircraftPreset {
                 // ATR 72-600 factsheet's 275 KTAS at 95% MTOW/ISA/optimum FL
                 // (~273.5 KTAS at 17,000 ft ISA), but the factsheet does not
                 // state which FL is "optimum," so that agreement is not
-                // evidence of validation, see
-                // `.agent/reports/2026-09-07-atr-physics.html`.
+                // evidence of validation, see an internal ATR performance
+                // study (2026-09-07).
                 0.44,
                 "Representative European regional-sector default; operational example only, not an ATR design-mission claim",
             ),
@@ -582,8 +582,7 @@ pub fn atr72_600_takeoff_speed_m_s(mtow_kg: f64, wing_area_m2: f64, cl_max_takeo
 /// segment), which a PW127M-powered turboprop cannot fly: the mission deck
 /// rejected it with a typed climb energy deficit at 991 m and 128.6 m/s.
 ///
-/// Sourced values (ATR 72-600 factsheet, 2020, page 2; local copy
-/// `.agent/evidence/manufacturer/atr72-600-factsheet-2020.pdf`):
+/// Sourced values (ATR 72-600 factsheet, 2020, page 2):
 /// - optimum climb speed 170 KCAS (initial climb and both step climbs);
 /// - V2 min 116 KCAS. This is a published *minimum* at an unspecified
 ///   weight, configuration and atmosphere, not a V2 valid at every mass: at
@@ -610,8 +609,8 @@ pub fn atr72_600_takeoff_speed_m_s(mtow_kg: f64, wing_area_m2: f64, cl_max_takeo
 /// ladder (altitudes, calibrated speeds and rates: the factsheet publishes
 /// no altitude-resolved climb or descent table) and the 3-degree-like
 /// approach rate. None of it is calibrated to the factsheet's block fuel or
-/// time figures; see `.agent/reports/2026-09-07-speed-schedule-integration.html`
-/// for the comparison that was actually run.
+/// time figures; see an internal speed-schedule-integration study
+/// (2026-09-07) for the comparison that was actually run.
 fn apply_atr72_600_speed_schedule(
     profile: &mut crate::MissionProfileConfig,
     mtow_kg: f64,

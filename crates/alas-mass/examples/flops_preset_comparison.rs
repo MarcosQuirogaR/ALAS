@@ -15,7 +15,7 @@
 //! ```text
 //! cargo run -p alas-mass --example flops_preset_comparison -- \
 //!     outputs/pure-flops-production/raw.json \
-//!     .agent/data/pure-flops-evidence/mass_reference_anchors.json
+//!     path/to/mass_reference_anchors.json
 //! ```
 
 #![allow(clippy::print_stdout)]
@@ -181,7 +181,7 @@ fn reference_json(preset: &AircraftPreset, evidence: Option<&Value>) -> Value {
         "cg_evidence": format!("{:?}", reference.cg_evidence),
         "source_documents": reference.sources,
         "mass_reference_source": if evidence_row(evidence, preset.name).is_some() {
-            ".agent/data/pure-flops-evidence/mass_reference_anchors.json"
+            "out/evidence/data/pure-flops-evidence/mass_reference_anchors.json"
         } else {
             "registered preset reference metadata"
         },
@@ -442,7 +442,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     });
     let evidence_path = args.next().map(PathBuf::from).unwrap_or_else(|| {
         Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../.agent/data/pure-flops-evidence/mass_reference_anchors.json")
+            .join("../../out/evidence/data/pure-flops-evidence/mass_reference_anchors.json")
     });
     if args.next().is_some() {
         return Err(
@@ -476,11 +476,11 @@ fn main() -> Result<(), Box<dyn Error>> {
         "sources": {
             "nasa_tm": "https://ntrs.nasa.gov/citations/20170005851",
             "aviary_pinned_commit": "https://github.com/OpenMDAO/Aviary/tree/c7affbbe54dcbeded7373eae05f771882e2bb28a",
-            "local_source_copy": ".agent/data/flops-reference-20260911/",
+            "local_source_copy": "out/evidence/data/flops-reference-20260911/",
             "reference_manifest": "docs/flops-mass-sources.json",
             "mass_reference_anchors": evidence.as_ref().map(|_| evidence_path.display().to_string()),
-            "aircraft_input_evidence": ".agent/data/pure-flops-evidence/aircraft_inputs.json",
-            "aircraft_source_manifest": ".agent/data/pure-flops-evidence/source_manifest.json",
+            "aircraft_input_evidence": "out/evidence/data/pure-flops-evidence/aircraft_inputs.json",
+            "aircraft_source_manifest": "out/evidence/data/pure-flops-evidence/source_manifest.json",
         },
         "summary": {
             "aircraft_count": rows.len(),

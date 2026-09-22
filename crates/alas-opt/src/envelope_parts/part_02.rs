@@ -89,8 +89,8 @@ fn unmeasured_main_gear_station(
 /// therefore not evaluated (see [`is_flight_eligible_state`]); its ground
 /// static-reaction constraints (gear strength and minimum nose-gear load,
 /// see [`ground_reaction_constraint`]) remain in force, so an OEW state that
-/// fails ground equilibrium is still caught. See
-/// `.agent/reports/2026-09-09-a220-five-state-cg-replay.html`, which traced
+/// fails ground equilibrium is still caught. See an internal A220 five-state
+/// CG replay (2026-09-09), which traced
 /// a `ConfiguredForwardCgRange` finding to bare OEW alone: a loaded-flight
 /// constraint this ground-only reference condition was not meant to be
 /// gated by.
@@ -669,13 +669,13 @@ mod tests {
         ));
     }
 
-    /// Regression for the 2026-09-09 A220 replay
-    /// (`.agent/reports/2026-09-09-a220-five-state-cg-replay.html`): bare OEW
-    /// was failing `ConfiguredForwardCgRange`, a flight constraint, even
-    /// though OEW is a ground-only reference condition. This asserts the
-    /// exact constraint set kept per state, so reintroducing the flight
-    /// constraints on OEW (or dropping ground checks from it) both fail
-    /// immediately regardless of the numeric CG/mass values in play.
+    /// Regression for the 2026-09-09 A220 replay (an internal five-state CG
+    /// replay): bare OEW was failing `ConfiguredForwardCgRange`, a flight
+    /// constraint, even though OEW is a ground-only reference condition.
+    /// This asserts the exact constraint set kept per state, so
+    /// reintroducing the flight constraints on OEW (or dropping ground
+    /// checks from it) both fail immediately regardless of the numeric
+    /// CG/mass values in play.
     #[test]
     fn bare_oew_keeps_ground_checks_but_not_flight_cg_constraints() {
         let mut config = AlasConfig::default();

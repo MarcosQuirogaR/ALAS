@@ -43,8 +43,8 @@ pub(super) fn render_geo(
     // when the 2-D surface itself has no invalid cells.
     // Pin the meshing RNG so the only remaining source of run-to-run variation
     // is named rather than anonymous.  Measured on this host with Gmsh 4.15.2,
-    // single-threaded, on a byte-identical `.geo`
-    // (`.agent/opus-cfd-convergence-20260916/q16/`): three runs gave 89 794 /
+    // single-threaded, on a byte-identical `.geo` (internal CFD convergence
+    // study, 2026-09-16, case q16): three runs gave 89 794 /
     // 89 732 / 89 902 nodes.  Pinning the seed does NOT remove that, and
     // neither does `Mesh.Optimize = 0`, `Mesh.OptimizeNetgen = 0`,
     // `Mesh.RandomFactor`, nor `Mesh.Algorithm = 6`.  Deleting

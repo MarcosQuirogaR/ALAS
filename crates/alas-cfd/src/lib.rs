@@ -705,10 +705,10 @@ mod tests {
 
     #[test]
     fn a_finite_but_impossible_coefficient_is_refused_as_a_failed_result() {
-        // Exactly the measured tail of dispatch relaxation probe `P3`
-        // (`.agent/opus-cfd-20260916/cases/P3-relax-07-08`): the process exited
-        // cleanly, checkMesh passed, and the solver reported finite numbers no
-        // section can produce.  Before this screen it was labelled only
+        // Exactly the measured tail of an internal relaxation probe (2026-09-16),
+        // case `P3-relax-07-08`: the process exited cleanly, checkMesh passed,
+        // and the solver reported finite numbers no section can produce.
+        // Before this screen it was labelled only
         // `unconverged`, which reads as "nearly there".
         let config = CfdStudyConfig::default();
         let mesh = MeshQuality {
@@ -893,8 +893,8 @@ mod tests {
     #[test]
     fn the_solver_stage_budget_covers_the_work_actually_requested() {
         // The shipped 1800 s is a fine guard for gmsh and checkMesh and a bad
-        // one for the solver.  Cell counts are the measured ones from
-        // `.agent/opus-cfd-convergence-20260916`.
+        // one for the solver.  Cell counts are the measured ones from an
+        // internal CFD convergence study (2026-09-16).
         let solver = SolverSettings::default();
         assert_eq!(solver.timeout_seconds, 1_800);
         assert_eq!(solver.max_iterations, 2_000);
@@ -933,9 +933,9 @@ mod tests {
 
     #[test]
     fn an_equation_that_stopped_being_solved_cannot_satisfy_the_residual_gate() {
-        // Every residual series below is the measured tail of a real case in
-        // `.agent/opus-cfd-convergence-20260916`, because the whole question is
-        // which of two behaviours the artifacts actually show.
+        // Every residual series below is the measured tail of a real case in an
+        // internal CFD convergence study (2026-09-16), because the whole
+        // question is which of two behaviours the artifacts actually show.
         let config = CfdStudyConfig::default();
         let stationary_forces = (0..config.solver.force_window)
             .map(|index| force_sample(0.46 + index as f64 * 1.0e-9, 0.0105, -0.0038))

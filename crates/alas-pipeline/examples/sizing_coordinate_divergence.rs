@@ -12,7 +12,7 @@
 //!
 //! The mass lane measured a lumped-payload-against-resolved-layout spread of
 //! `+14.91` points of %MAC on the A320-200 and `+1.15` on the A380-800
-//! (`opus-payload-cg-consistency-handoff.md`). That measurement is about two
+//! (an internal payload/CG consistency study). That measurement is about two
 //! *payload* models. This probe asks a narrower question at the
 //! mission/optimizer boundary: with the loading held identical, do the two
 //! sides still place the aeroplane differently?

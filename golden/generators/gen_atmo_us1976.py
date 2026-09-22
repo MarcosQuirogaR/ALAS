@@ -22,7 +22,7 @@ geopotential-space entry point directly; this fixture only has to prove the
 public, geometric-altitude API agrees with SUAVE end to end.
 
 This module is separate from ``gen_atmo.py`` because it needs SUAVE on the
-path (``.suave-venv``), not AeroSandbox -- see CLAUDE.md's generator table.
+path (``.suave-venv``), not AeroSandbox.
 """
 
 from __future__ import annotations

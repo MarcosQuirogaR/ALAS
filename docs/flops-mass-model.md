@@ -22,7 +22,7 @@ validation. See [mass robustness and OEW verification](flops-robustness.md).
 
 Both are pinned with retrieval URLs and SHA-256 digests in
 [`docs/flops-mass-sources.json`](flops-mass-sources.json); the files
-themselves are kept under `.agent/data/flops-reference-20260911/`.
+themselves are kept in a local, git-ignored evidence directory.
 
 Reference parity establishes that this port evaluates the published
 equations the way FLOPS itself does. **It is not physical validation against
@@ -211,7 +211,7 @@ pinned `distributed_prop.py`.
 
 ```sh
 cargo run -p alas-mass --example flops_preset_comparison -- outputs/pure-flops-production/raw.json \
-    .agent/data/pure-flops-evidence/mass_reference_anchors.json
+    <path-to-local-evidence-copy>/mass_reference_anchors.json
 uv run --with matplotlib python tools/report_flops_comparison.py \
     outputs/pure-flops-production/raw.json outputs/pure-flops-production
 ```

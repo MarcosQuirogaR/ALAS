@@ -9,8 +9,8 @@
 //!
 //! Only the material family travels here: metallic vs composite wing box.
 //! Spar stations and structural gauges remain with the study/defaults, because
-//! no manufacturer document in `.agent/evidence/` establishes them and the
-//! spars bound the fuel tank box (which is already calibrated against
+//! no manufacturer document on file establishes them and the spars bound the
+//! fuel tank box (which is already calibrated against
 //! published usable volumes in [`crate::preset_fuel_tanks`]).
 
 use crate::StructuresConfig;
@@ -63,7 +63,8 @@ pub fn config_for(preset_name: &str) -> Option<StructuresConfig> {
             ..StructuresConfig::default()
         }),
 
-        // Open source gap: the real wing box is composite, but no document in .agent/evidence/ states it.
+        // Open source gap: the real wing box is composite, but no manufacturer
+        // document on file states it.
         // Assigned as an effective isotropic proxy, not a verified material.
         // ACAP D6-58333 Rev Q contains ZERO occurrences of composite/carbon fibre/CFRP/laminate.
         // The previously cited boeing-787-acap-p18.png is section 2.1.1 General Characteristics for the
@@ -80,7 +81,8 @@ pub fn config_for(preset_name: &str) -> Option<StructuresConfig> {
             ..StructuresConfig::default()
         }),
 
-        // Open source gap: the real wing box is composite, but no document in .agent/evidence/ states it.
+        // Open source gap: the real wing box is composite, but no manufacturer
+        // document on file states it.
         // Assigned as an effective isotropic proxy, not a verified material.
         // A220 ACP Issue 013's 34 composite mentions are all maintenance-facility text (composite clean
         // room, refinishing shop). It carries no composite-materials figure in any of its 650 pages.

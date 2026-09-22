@@ -30,7 +30,7 @@ fn text_shapes(shapes: &[Shape]) -> Vec<&TextShape> {
 
 fn long_diagnostic() -> String {
     let long_path = format!(
-        r"C:\Users\Marcos\ALAS\runs\{}\aircraft.history",
+        r"C:\Users\Example\ALAS\runs\{}\aircraft.history",
         "diagnostic".repeat(30)
     );
     format!("{long_path}: The system cannot find the file specified. (os error 2)")

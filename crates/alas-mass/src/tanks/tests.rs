@@ -540,7 +540,7 @@ fn the_default_aircraft_resolves_a_finite_layout_with_positive_capacity() {
 /// first and leaves the inner feed tanks empty, so the fuel centroid moves
 /// *aft* as the load falls -- past the mean aerodynamic chord's trailing edge.
 ///
-/// Measured consequence, recorded by `opus-mass-atr-a380-closure-20260917`:
+/// Measured consequence, recorded in an internal mass-closure study (2026-09-17):
 /// at the mission-closed load the A380-800's analyzed fuel centroid is
 /// 115.9 %MAC, 9.5 m aft of the effective main-gear station, and it is the
 /// whole of the preset's `min_nose_gear_load` blocker. Whether a dispatch

@@ -27,8 +27,8 @@ pub struct BoundarySettings {
     /// characteristic is an over-specification, and it is measurable: at
     /// `y = ±10 c` the free-stream turbulence has decayed several orders below
     /// the imposed value, the clamp fights the decayed interior, and those
-    /// cells limit-cycle for the whole run (evidence
-    /// `.agent/opus-cfd-convergence-20260916`, `q17-field-change.py` on case
+    /// cells limit-cycle for the whole run (an internal CFD convergence
+    /// study, 2026-09-16, `q17-field-change.py` on case
     /// `T1-gradfree-turbupwind`).  `inletOutlet` is `fixedValue` wherever the
     /// flow enters and `zeroGradient` wherever it leaves, so it imposes the
     /// same free-stream state on inflow and simply convects the interior value
@@ -51,8 +51,8 @@ pub struct BoundarySettings {
     ///
     /// This is kept separate from [`FarFieldCondition::Freestream`], which also
     /// switches the pressure to `freestreamPressure` on every outer patch and
-    /// was measured to break the mass-balance criterion outright (dispatch
-    /// evidence `.agent/opus-cfd-20260916`, case `E15`: continuity `3.87e-4`
+    /// was measured to break the mass-balance criterion outright (internal
+    /// CFD study, 2026-09-16, case `E15`: continuity `3.87e-4`
     /// against a `1e-5` gate).  Here the pressure treatment is untouched, so
     /// the pressure level stays anchored by the outlet.
     #[serde(default)]

@@ -438,7 +438,7 @@ def write_report(output: Path, cases: list[dict], summary: list[dict]) -> None:
 
 
 def main() -> int:
-    root = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(".agent/openfoam-report-study-20260914")
+    root = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("out/openfoam-report-study")
     root = root.resolve()
     output = root / "figures"
     output.mkdir(parents=True, exist_ok=True)

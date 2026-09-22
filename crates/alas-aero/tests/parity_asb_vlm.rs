@@ -435,7 +435,7 @@ fn run_with_stability_derivatives_matches_aerosandbox() {
 fn the_fixture_exercises_the_cosspace_subdivide_branch() {
     // A fixture that never used spanwise_resolution > 1 would not catch a
     // wrong spacing function in Wing::subdivide_sections, see the module
-    // doc and CLAUDE.md's brief for this row.
+    // doc's brief for this row.
     let fixture: Fixture = alas_testkit::load("aero", "asb_vlm");
     assert!(
         fixture

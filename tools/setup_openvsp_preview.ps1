@@ -11,7 +11,7 @@ An existing cache may contain python.zip, openvsp-python.zip and numpy.zip.
 [CmdletBinding()]
 param(
     [string]$Destination = (Join-Path $PSScriptRoot '../external tools/OpenVSP-3.51.2-win64/preview-runtime'),
-    [string]$CacheDirectory = (Join-Path $PSScriptRoot '../.agent/openvsp-runtime'),
+    [string]$CacheDirectory = (Join-Path $PSScriptRoot '../out/openvsp-runtime'),
     [switch]$Force
 )
 

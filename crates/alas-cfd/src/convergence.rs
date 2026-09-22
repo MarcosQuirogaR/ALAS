@@ -270,7 +270,7 @@ pub fn classify_convergence(
     // has been inflated by a field that ran away, and once it does the equation
     // stays frozen while the rest of the solution keeps evolving.
     //
-    // Measured on this host, `.agent/opus-cfd-convergence-20260916`, case
+    // Measured on this host, internal CFD convergence study (2026-09-16), case
     // `T2-gradfree-turblinup`: at outer iteration 102 the omega residual is
     // 9.998e-1, at 103 it is 1.805e-17, and from 110 onward it is fixed at
     // 1.99328871654e-16 with `No Iterations 0` for the rest of the run while

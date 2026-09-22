@@ -8,7 +8,7 @@
 //! mission models. Three of four converged application runs measured before
 //! this contract existed reported the delivered aircraft INFEASIBLE while
 //! still labelling the search converged
-//! (`opus-optimizer-independent-verification-handoff.md` §2.3).
+//! (an internal optimizer independent-verification handoff record, §2.3).
 //!
 //! These tests hold the contract that closes that gap: a design the
 //! application rejects is never returned as a converged result, a verified

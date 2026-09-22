@@ -143,7 +143,7 @@ result measures preset/model correlation rather than optimizer behavior.\n\n\
 ## Reproduce the bundle\n\n\
 ```powershell\n\
 $env:PATH = \"$env:USERPROFILE\\.cargo\\bin;$env:PATH\"\n\
-Set-Location C:\\Proyectos\\ALAS-rust\n\
+Set-Location <path to your ALAS checkout>\n\
 cargo run --profile test -p alas-acceptance --bin correlation_audit -- `\n\
   --output-dir outputs\\all_preset_correlation_20260824\n\
 ```\n\n\

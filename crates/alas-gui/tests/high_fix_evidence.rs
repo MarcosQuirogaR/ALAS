@@ -4,8 +4,8 @@
 //! Headless renders of the three High defects the 2026-09-17 native
 //! screenshot review confirmed, before and after the corrections.
 //!
-//! Run with `--ignored`; the images land in
-//! `.agent/reports/gui-high-fixes-20260917/`. Glyphs are rasterized as their
+//! Run with `--ignored`; the images land in an internal evidence
+//! directory (2026-09-17). Glyphs are rasterized as their
 //! mean font-atlas coverage, so text reads as blocks rather than letters:
 //! these images are evidence about layout, selection state and which
 //! surfaces are present, not about typography.
@@ -27,7 +27,7 @@ const CONTENT_MARGIN: Margin = Margin {
 
 fn evidence_dir() -> std::path::PathBuf {
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../.agent/reports/gui-high-fixes-20260917");
+        .join("../../out/evidence/gui-high-fixes-20260917");
     std::fs::create_dir_all(&dir).expect("evidence directory");
     dir
 }

@@ -1127,9 +1127,9 @@ mod tests {
     /// - distance: the relative footprint error.
     ///
     /// The asserted numbers are chosen numerical acceptance thresholds; the
-    /// measured errors are reported separately by the
-    /// `.agent/probes/atr-physics` probe (worst speed gap 3.24 m/s at 4
-    /// sub-rungs on this 4.6 km climb when this test was written). The worst
+    /// measured errors are reported separately by an internal ATR physics
+    /// probe (worst speed gap 3.24 m/s at 4 sub-rungs on this 4.6 km climb
+    /// when this test was written). The worst
     /// speed gap is first order in the sub-rung width and the midpoint-rule
     /// footprint error second order (the previous test checks the
     /// ~4x-per-doubling rate).

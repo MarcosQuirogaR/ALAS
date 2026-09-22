@@ -399,13 +399,13 @@ fn nearer_fuselage_skin_covers_wing_and_tail_roots_from_every_camera() {
 }
 
 /// Writes the oracle comparison log and before/after renders of the worst
-/// cameras to `.agent/reports/sandbox-depth-layout-scale-2026-09-14/`; run
+/// cameras to an internal evidence directory (2026-09-14); run
 /// with `--ignored`.
 #[test]
 #[ignore = "writes evidence images"]
 fn write_occlusion_evidence() {
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../.agent/reports/sandbox-depth-layout-scale-2026-09-14");
+        .join("../../out/evidence/sandbox-depth-layout-scale-2026-09-14");
     std::fs::create_dir_all(&dir).expect("evidence directory");
     let mut state = AppState::default();
     state.sandbox.viewport_size = Some((WIDTH as f32, HEIGHT as f32));
@@ -494,7 +494,7 @@ fn mismatch_png(image: &[Painted], nearest: &[Option<SceneComponent>], edges: &[
 #[ignore = "writes evidence images"]
 fn write_occlusion_mismatch_maps() {
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../.agent/reports/sandbox-depth-layout-scale-2026-09-14");
+        .join("../../out/evidence/sandbox-depth-layout-scale-2026-09-14");
     std::fs::create_dir_all(&dir).expect("evidence directory");
     let mut state = AppState::default();
     state.sandbox.viewport_size = Some((WIDTH as f32, HEIGHT as f32));

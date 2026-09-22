@@ -241,5 +241,5 @@ has been validated against flight or operational-flight-plan data.
 - EASA CS-25.29, CS-25.959 and AFM weight/CG/fuel guidance.
 - EASA AMC 20-6 and FAA AC 120-42B for later EDTO/ETOPS work.
 
-The current research report is local at
-`.agent/reports/2026-08-29-fuel-mass-mission-investigation.html`.
+The current research report is an internal investigation (2026-08-29),
+not versioned in this repository.

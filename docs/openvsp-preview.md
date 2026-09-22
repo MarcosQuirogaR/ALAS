@@ -54,7 +54,7 @@ The script pins and verifies SHA-256 hashes for:
 | OpenVSP bindings, Python 3.13, Windows x64 | 3.51.2 | [OpenVSP distribution](https://openvsp.org/zips/old/windows/OpenVSP-3.51.2-win64-Python3.13.zip) |
 | NumPy wheel, CPython 3.13, Windows x64 | 2.3.3 | [PyPI release metadata](https://pypi.org/pypi/numpy/2.3.3/json) |
 
-Verified archives are cached under `.agent/openvsp-runtime`. To reuse downloaded
+Verified archives are cached under `out/openvsp-runtime`. To reuse downloaded
 archives elsewhere, provide `-CacheDirectory` containing `python.zip`,
 `openvsp-python.zip`, and `numpy.zip`; missing archives are downloaded. Cached
 files are also verified, and a hash mismatch stops setup.

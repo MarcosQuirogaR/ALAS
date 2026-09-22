@@ -92,7 +92,7 @@ pub enum WingFuelDesignCase {
 /// The estimate's spread against the declared capacities it stands in for.
 ///
 /// Measured on this product's own registered fleet at their nominal designs
-/// (`.agent/reports/structures-residual-20260917/wingbox-sizing-diagnosis-before.txt`):
+/// (an internal structures study, 2026-09-17):
 /// the enclosed-volume estimate lands between `0.86` (A340-300) and `2.24`
 /// (B787-9) times the declared integral wing capacity, because how much of an
 /// aircraft's fuel sits in the wing rather than in a centre or auxiliary tank is

@@ -80,9 +80,9 @@
 //!   The frozen Python loop mesh is one chordwise panel, which samples the
 //!   mean camber line only where it is zero and so makes every section a
 //!   flat plate; the measurements behind the product values, cross-checked
-//!   against AeroSandbox on identical geometry, are in
-//!   `.agent/reports/2026-09-11-vlm-resolution-sensitivity.html` and
-//!   summarized in `alas_config::analysis`'s module doc. Both the frozen
+//!   against AeroSandbox on identical geometry, are from an internal VLM
+//!   resolution-sensitivity study (2026-09-11) and summarized in
+//!   `alas_config::analysis`'s module doc. Both the frozen
 //!   and the corrected value are pinned below.
 //!
 //! `label` is compared always, including where it was derived from the field
@@ -410,7 +410,7 @@ fn product_default_correction(path: &str) -> Option<(Value, Value)> {
     // and trailing edges (where it is zero) so every section is a flat
     // plate and the search cannot see camber at all. Measured over four
     // presets and cross-checked against AeroSandbox 4.2.8 on identical
-    // geometry (`.agent/reports/2026-09-11-vlm-resolution-sensitivity.html`):
+    // geometry in an internal VLM resolution-sensitivity study (2026-09-11):
     // that costs 1.1-4.1 deg of cruise attitude, -14.4 to +2.9 % of L/D, and
     // it mis-ranks neighbouring candidates (Spearman 0.77). Eight panels rank
     // them exactly. The spanwise fields move the other way: the builder has

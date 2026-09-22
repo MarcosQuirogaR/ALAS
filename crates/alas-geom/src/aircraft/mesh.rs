@@ -42,8 +42,8 @@
 //! with `xsec.airfoil.local_camber(x_over_c=x_nondim)`, the *un-indexed*
 //! outer parameter, not `xsec_x_nondim`. At `mesh_thin_surface`'s one call
 //! site `x_nondim` is always a bare scalar, so `x_nondim == xsec_x_nondim`
-//! there and the two reads are indistinguishable: `CLAUDE.md` already
-//! flags this as "harmless where it is called." [`Wing::mesh_line`] here uses
+//! there and the two reads are indistinguishable: this was already
+//! flagged as "harmless where it is called." [`Wing::mesh_line`] here uses
 //! the correct per-cross-section value (`xsec_x_nondim`, called `x` in the
 //! loop below) for the camber lookup rather than the outer parameter. This is
 //! a translate-the-fix decision, not a `deviation-candidate`: no input this

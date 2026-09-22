@@ -343,8 +343,8 @@ impl AlasConfig {
                     // A registered aircraft's wing-box material family is aircraft data, not a
                     // global study default: the default's CFRP spar cap lands on metallic wings
                     // that no source describes that way. Only the material family travels here;
-                    // gauges and spar stations stay with the study, because no source in
-                    // .agent/evidence/ establishes them and the spars bound the fuel tank box.
+                    // gauges and spar stations stay with the study, because no source on
+                    // file establishes them and the spars bound the fuel tank box.
                     // The overlay below still lets a file change any of it.
                     if let Some(structures) = crate::preset_structures::config_for(name) {
                         instance.structures = structures;

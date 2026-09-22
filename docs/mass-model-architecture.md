@@ -14,8 +14,8 @@ cargo run -p alas-pipeline --release --example mass_experiment_matrix -- \
 ```
 
 and its results, before and after the corrections of 2026-09-12, are under
-`outputs/mass-model-consolidation/`. The self-contained report is
-`.agent/reports/mass-model-consolidation.html`.
+`outputs/mass-model-consolidation/`. The self-contained report is kept in a
+local, git-ignored reports directory.
 
 ## One production architecture
 

@@ -35,8 +35,7 @@
 //! aerodrome code letters, and a declared maximum weight is established under
 //! 14 CFR/CS 25.25 rather than estimated. The second is a measured error band
 //! on this program's own model of the quantity. The project's cross-domain
-//! physical-validation ledger
-//! (`.agent/alas-dispatch-2026-09-16/cross-domain-physical-validation-ledger-20260917.md`)
+//! physical-validation ledger (an internal audit record dated 2026-09-17)
 //! records that no such band exists for any constrained quantity: field
 //! lengths are `NotAvailable` because ALAS reports no matched take-off or
 //! landing field length at all, static margin and CG envelope are

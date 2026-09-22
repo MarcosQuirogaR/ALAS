@@ -19,7 +19,7 @@
 //! reported `converged`, the feasibility stage reported the delivered
 //! aircraft INFEASIBLE, and both statements were printed by the same run. The
 //! measured rate was three of four converged application runs
-//! (`opus-optimizer-independent-verification-handoff.md` §2.3).
+//! (an internal optimizer independent-verification study, §2.3).
 //!
 //! What this module does is deliberately narrow. It re-evaluates a candidate
 //! exactly the way the application's own stages 3, 5 and 6 do — same

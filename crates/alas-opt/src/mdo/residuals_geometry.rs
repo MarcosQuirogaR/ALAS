@@ -90,9 +90,9 @@ pub(super) fn geometry_residuals(
     }
 
     // A tail-volume window is a plausibility band, not a requirement: the
-    // surveyed tools rank it as a preference (research note
-    // `.agent/reports/research-2026-09-05-mdo-drivers.md`, tier S), and the
-    // legacy objective scores it as a quadratic add-on. Under a hard family
+    // surveyed tools rank it as a preference (internal research note,
+    // 2026-09-05, tier S), and the legacy objective scores it as a
+    // quadratic add-on. Under a hard family
     // it is therefore ranked soft; diagnostic and off follow the family.
     let preference = match policy {
         ConstraintPolicy::Hard => ConstraintPolicy::Soft,

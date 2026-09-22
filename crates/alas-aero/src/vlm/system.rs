@@ -42,7 +42,7 @@ const PARALLEL_PANEL_THRESHOLD: usize = 128;
 /// treated as a flow field, see [`VlmError::IllConditionedAic`].
 ///
 /// Measured across the registered presets at every mesh from 1x1 to 10x16
-/// (`.agent/reports/2026-09-11-vlm-resolution-sensitivity.html`): meshes whose
+/// in an internal VLM resolution-sensitivity study (2026-09-11): meshes whose
 /// lift is correct report 2 to 60, and every mesh that returns a negative or
 /// absurd lift coefficient reports above 1e4: the A320 at a spanwise
 /// resolution of ten and one chordwise panel reports 9.1e7 and a lift

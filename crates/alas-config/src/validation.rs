@@ -665,8 +665,8 @@ const MIN_SPANWISE_PANELS: i64 = 4;
 /// three-fold width discontinuity at every original station and panels thin
 /// enough that the near-field induced-drag integration stops converging.
 ///
-/// Measured on the registered presets (`.agent/reports/
-/// 2026-09-11-vlm-resolution-sensitivity.html`): at a multiplier of 3 the
+/// Measured on the registered presets in an internal VLM
+/// resolution-sensitivity study (2026-09-11): at a multiplier of 3 the
 /// swept presets over-predict the induced-drag factor by 4-50 %, at 6 the
 /// A320 trim solve diverges outright, and at 10 (AeroSandbox's own default,
 /// and so a value a user may reasonably type) the influence matrix is

@@ -2,7 +2,7 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 //! Headless regression tests for the Medium and Low findings of the
-//! 2026-09-17 native screenshot review (`opus-gui-image-review-20260917`).
+//! 2026-09-17 native screenshot review.
 //!
 //! Each test renders the real view and inspects the shapes egui emits, which
 //! is the same evidence the review measured on the captured bitmaps. These are

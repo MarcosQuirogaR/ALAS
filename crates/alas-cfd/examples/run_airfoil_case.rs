@@ -11,7 +11,7 @@
 //! $env:ALAS_OPENFOAM_BIN = 'C:/.../platforms/win64MingwDPInt32Opt/bin'
 //! $env:ALAS_OPENFOAM_PROJECT = 'C:/.../OpenFOAM-v2606'
 //! $env:ALAS_GMSH = 'C:/.../gmsh.exe'
-//! cargo run -p alas-cfd --example run_airfoil_case -- .agent/airfoil-run naca0012 0
+//! cargo run -p alas-cfd --example run_airfoil_case -- out/airfoil-run naca0012 0
 //! ```
 
 use std::env;

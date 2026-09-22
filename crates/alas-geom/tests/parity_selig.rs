@@ -33,7 +33,7 @@ struct Fixture {
 /// `gen_geom_selig.py`'s `_fnv1a64` exactly. Not a cryptographic hash: this
 /// is a corruption-detection digest for one static data file, and pulling in
 /// a hashing crate for that would be a dependency change this test has no
-/// standing to make (`CLAUDE.md`). The algorithm
+/// standing to make. The algorithm
 /// (http://www.isthe.com/chongo/tech/comp/fnv/) is simple enough to implement
 /// identically on both sides of the port from its specification alone; the
 /// known-vector test below is what confirms this side got it right.

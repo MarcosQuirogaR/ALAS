@@ -1645,9 +1645,9 @@ mod tests {
     /// falls outside the deck's zero-to-rating domain). Both are the same
     /// underlying non-attainable descent/idle boundary, just surfacing
     /// through different typed rejections; this test accepts either. The
-    /// product path (report-derived polar) is exercised by the
-    /// `.agent/probes/atr-physics` probe. This test pins that the climb-side
-    /// deficit is gone and that whatever remains is one of these typed
+    /// product path (report-derived polar) is exercised by an internal ATR
+    /// physics probe. This test pins that the climb-side deficit is gone
+    /// and that whatever remains is one of these typed
     /// descent/idle-domain outcomes, not a silent mis-fly.
     #[test]
     fn the_atr_preset_flies_its_calibrated_schedule_and_still_rejects_the_jet_default() {

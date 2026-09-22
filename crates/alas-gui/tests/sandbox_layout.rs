@@ -373,15 +373,15 @@ fn the_summary_button_toggles_the_metric_card_beside_the_stack_without_orbiting(
 
 /// Writes headless workspace renders for the three themes in English and
 /// Spanish on a wide and a narrow viewport, and the four camera presets
-/// plus two orbit views, to
-/// `.agent/reports/sandbox-depth-layout-scale-2026-09-14/`; run with
+/// plus two orbit views, to an internal evidence directory
+/// (2026-09-14); run with
 /// `--ignored`. Glyphs render as coverage blocks (no font texture in the
 /// rasterizer), so these show layout, colours and states, not legible text.
 #[test]
 #[ignore = "writes evidence images"]
 fn write_workspace_evidence_images() {
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../.agent/reports/sandbox-depth-layout-scale-2026-09-14");
+        .join("../../out/evidence/sandbox-depth-layout-scale-2026-09-14");
     std::fs::create_dir_all(&dir).expect("evidence directory");
     alas_i18n::es::install();
     for (lang, code) in [

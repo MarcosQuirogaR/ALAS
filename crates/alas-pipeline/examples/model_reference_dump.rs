@@ -3,10 +3,10 @@
 
 //! Dump every model output that has a real-world counterpart, per preset.
 //!
-//! Companion to the hand-researched reference datasets under
-//! `.agent/validation/`. This writes `MODEL.json` in the same key structure so
-//! the two can be merged into a correlation table. It is a scratch validation
-//! instrument, not a shipped artifact.
+//! Companion to the hand-researched reference datasets kept in an internal
+//! validation directory. This writes `MODEL.json` in the same key structure
+//! so the two can be merged into a correlation table. It is a scratch
+//! validation instrument, not a shipped artifact.
 #![allow(clippy::print_stdout, clippy::print_stderr, missing_docs)]
 // Standalone fixture diagnostics fail immediately when their curated inputs are invalid.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
@@ -120,7 +120,7 @@ fn main() {
     let out = PathBuf::from(
         std::env::args()
             .nth(1)
-            .unwrap_or_else(|| ".agent/validation/MODEL.json".to_owned()),
+            .unwrap_or_else(|| "out/MODEL.json".to_owned()),
     );
     let mut all = serde_json::Map::new();
     for name in presets::available() {

@@ -68,8 +68,8 @@
 //! (a whole row) where every other reader in mission reference uses `[0][0]` (the scalar
 //! x); with `center_of_gravity` never populated its y/z are `0.0` too, so the
 //! distinction never shows numerically. That is a harmless latent indexing bug:
-//! the same category as CLAUDE.md's `mesh_line` note, and this port takes
-//! the scalar x, not the broadcast row.
+//! the same category as the previously noted `mesh_line` issue, and this
+//! port takes the scalar x, not the broadcast row.
 //!
 //! # Other always-default fields, hardcoded with a note
 //!

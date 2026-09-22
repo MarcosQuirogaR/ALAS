@@ -129,13 +129,13 @@ fn layout_only_result() -> alas_cfd::CfdResults {
     }
 }
 
-/// Writes headless renders of every CFD tab to
-/// `.agent/reports/alas-dispatch-2026-09-16/`; run with `--ignored`.
+/// Writes headless renders of every CFD tab to an internal evidence
+/// directory (2026-09-16); run with `--ignored`.
 #[test]
 #[ignore = "writes evidence images"]
 fn write_cfd_layout_evidence_images() {
-    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../.agent/reports/alas-dispatch-2026-09-16");
+    let dir =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../out/evidence/gui-2026-09-16");
     std::fs::create_dir_all(&dir).expect("evidence directory");
     let cases: [(
         &str,
@@ -239,7 +239,7 @@ fn write_cfd_layout_evidence_images() {
 /// Its recorded outcome is `failed` with a long refusal detail; that verdict is
 /// rendered exactly as the artifact carries it.
 const ACTUAL_RESULT_JSON: &str =
-    "../../.agent/opus-cfd-convergence-20260916/cases/V1-inletoutlet-coarse/results.json";
+    "../../out/evidence/cfd-convergence-20260916/cases/V1-inletoutlet-coarse/results.json";
 
 /// Writes headless renders driven by the **actual** persisted OpenFOAM result
 /// above, through the same `load_result_json` path the desktop uses; run with
@@ -257,7 +257,7 @@ fn write_cfd_actual_result_evidence_images() {
         );
         return;
     }
-    let dir = root.join("../../.agent/reports/alas-dispatch-2026-09-16");
+    let dir = root.join("../../out/evidence/gui-2026-09-16");
     std::fs::create_dir_all(&dir).expect("evidence directory");
     let cases: [(&str, AppTheme, &str, egui::Vec2, fn(&mut AppState, &mut Ui)); 8] = [
         (
@@ -373,7 +373,7 @@ fn use_language(language: &str) {
 /// wrong, because on these two fine-preset cases it is already mesh-gated.
 fn archived_case_with_current_verdicts(case: &str) -> Option<alas_cfd::CfdResults> {
     let case_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../.agent/opus-cfd-convergence-20260916/cases")
+        .join("../../out/evidence/cfd-convergence-20260916/cases")
         .join(case);
     let text = std::fs::read_to_string(case_dir.join("results.json")).ok()?;
     let mut result: alas_cfd::CfdResults = serde_json::from_str(&text).ok()?;
@@ -442,8 +442,8 @@ fn parse_outcome(recorded: &str) -> Option<alas_cfd::CfdOutcome> {
 #[test]
 #[ignore = "writes evidence images"]
 fn write_cfd_qualification_status_images() {
-    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../.agent/reports/alas-dispatch-2026-09-16");
+    let dir =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../out/evidence/gui-2026-09-16");
     std::fs::create_dir_all(&dir).expect("evidence directory");
     let size = vec2(1500.0, 1500.0);
     for (name, case) in [
@@ -484,7 +484,7 @@ fn write_cfd_qualification_status_images() {
 /// absolute form. No recorded value is altered.
 fn surface_and_contour_case() -> Option<alas_cfd::CfdResults> {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let case_dir = root.join(".agent/nasa-kc135-m030-a04-coarse-ti00052");
+    let case_dir = root.join("out/evidence/nasa-kc135-m030-a04-coarse-ti00052");
     let text = std::fs::read_to_string(case_dir.join("results.json")).ok()?;
     let mut result: alas_cfd::CfdResults = serde_json::from_str(&text).ok()?;
     // Not `canonicalize`: on Windows it returns a `\?` verbatim prefix,
@@ -497,8 +497,8 @@ fn surface_and_contour_case() -> Option<alas_cfd::CfdResults> {
 #[test]
 #[ignore = "writes evidence images"]
 fn write_cfd_surface_and_contour_images() {
-    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../.agent/reports/alas-dispatch-2026-09-16");
+    let dir =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../out/evidence/gui-2026-09-16");
     std::fs::create_dir_all(&dir).expect("evidence directory");
     let Some(result) = surface_and_contour_case() else {
         eprintln!("skipped: no case with wall samples and contour artifacts");
@@ -592,8 +592,8 @@ fn write_cropped_band(
 #[test]
 #[ignore = "writes evidence images"]
 fn write_cfd_contour_band_image() {
-    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../.agent/reports/alas-dispatch-2026-09-16");
+    let dir =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../out/evidence/gui-2026-09-16");
     write_cropped_band(
         &dir.join("cfd-surface-contours-dark-wide.png"),
         &dir.join("cfd-contour-band-dark.png"),

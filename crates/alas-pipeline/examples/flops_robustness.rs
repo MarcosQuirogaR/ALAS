@@ -13,7 +13,7 @@
 //!
 //! ```text
 //! cargo run -p alas-pipeline --release --example flops_robustness -- \
-//!     .agent/data/flops-robustness-20260920/reference-conditioned-cases.json
+//!     out/reference-conditioned-cases.json
 //! ```
 #![allow(clippy::print_stdout)]
 
@@ -392,9 +392,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let output = std::env::args()
         .nth(1)
         .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            PathBuf::from(".agent/data/flops-robustness-20260920/reference-conditioned-cases.json")
-        });
+        .unwrap_or_else(|| PathBuf::from("out/reference-conditioned-cases.json"));
     let labels = [
         "AVE_7779_reference",
         "A340_typical_335",

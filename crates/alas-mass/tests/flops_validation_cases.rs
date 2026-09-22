@@ -14,9 +14,9 @@
 //!
 //! ## Provenance
 //!
-//! The numbers below were taken from the **pinned** sources recorded in
-//! `.agent/data/flops-reference-20260911/manifest.json` (copied to
-//! `docs/flops-mass-sources.json`), each with its retrieval URL and SHA-256:
+//! The numbers below were taken from the **pinned** sources recorded in an
+//! internal manifest (2026-09-11), copied to
+//! `docs/flops-mass-sources.json`, each with its retrieval URL and SHA-256:
 //!
 //! * Aviary commit `c7affbbe54dcbeded7373eae05f771882e2bb28a`, files
 //!   `large_single_aisle_1_FLOPS_data.py`,
@@ -25,9 +25,8 @@
 //! * NASA/TM-2017-219627 Vol. I, the NTRS PDF and its extracted text,
 //!   `sha256:819a48fc9c8f34f14595d93f3e3d54dc8454298e83e64048c14ac7bda00bb51d`.
 //!
-//! This supersedes the earlier unpinned, model-transcribed summary in
-//! `.agent/reports/flops-aviary-validation-data.md`, which is retained only
-//! as a narrative note.
+//! This supersedes the earlier unpinned, model-transcribed summary in an
+//! internal report, which is retained only as a narrative note.
 //!
 //! This is implementation verification against the published equations as
 //! FLOPS itself evaluates them, not physical validation against weighed

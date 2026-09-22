@@ -2,8 +2,8 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Native addition, not part of the upstream port documented in the parent
-// module, see `2026-09-09-claude-mac-parity-derivation.html` under
-// `.agent/reports/` for the derivation this method is grounded in.
+// module, see the internal MAC-parity derivation study (2026-09-09) for
+// the derivation this method is grounded in.
 
 impl Wing {
     /// The manufacturer "theoretical" or reference-wing mean aerodynamic

@@ -22,10 +22,10 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 
 const DEFAULTS = Object.freeze({
-  modelPath: '.agent/validation/MODEL.json',
+  modelPath: 'out/validation/MODEL.json',
   contractPath: 'golden/aircraft/real_aircraft_parity.json',
-  outputDir: '.agent/validation',
-  reportPath: '.agent/reports/2026-09-09-aircraft-parity.html',
+  outputDir: 'out/validation',
+  reportPath: 'out/reports/2026-09-09-aircraft-parity.html',
 });
 
 function finite(value) {

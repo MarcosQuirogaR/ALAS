@@ -25,9 +25,9 @@
 //! which samples the mean camber line only at the leading and trailing
 //! edges (where it is zero) so every section is a flat plate, and it
 //! spends its high-fidelity budget spanwise, where the builder has already
-//! converged the discretisation. Measured in
-//! `.agent/reports/2026-09-11-vlm-resolution-sensitivity.html` and
-//! cross-checked against AeroSandbox on identical geometry. The frozen
+//! converged the discretisation. Measured in an internal VLM
+//! resolution-sensitivity study (2026-09-11) and cross-checked against
+//! AeroSandbox on identical geometry. The frozen
 //! values stay pinned by `mesh_resolution_correction`; the product values
 //! are pinned by property in `fidelity_presets`' own unit tests.
 

@@ -82,8 +82,7 @@ const PLAUSIBILITY_IDS: &[&str] = &[
 ///
 /// In `DesignMode::ReferenceAdaptation`, which is the mode a registered
 /// aircraft is actually optimized in, the fuselage is not re-derived and the
-/// distortion does not occur: the all-preset benchmark
-/// (`.agent/alas-dispatch-2026-09-16/bench/all-presets-reference.jsonl`)
+/// distortion does not occur: an internal all-preset benchmark (2026-09-16)
 /// records no plausibility residual among any preset's rejection reasons.
 /// The defect is therefore in the cabin-derived fuselage sizing, which is not
 /// this worker's slice.

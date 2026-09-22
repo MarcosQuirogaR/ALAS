@@ -236,10 +236,9 @@ pub struct MeshSettings {
     /// 0.67 .. 4.99, straddling the viscous/log switch of the blended
     /// `omegaWallFunction`; deriving the distance instead puts it at
     /// 0.28 .. 2.04 and drops the limiting omega residual by a factor of four
-    /// on an otherwise identical case (dispatch evidence
-    /// `.agent/opus-cfd-20260916`, cases `E10` and `G10`).  Both the requested
-    /// and the derived distance stay in `BoundaryLayerSizing`, so which one was
-    /// used is always visible.
+    /// on an otherwise identical case (internal CFD study, 2026-09-16,
+    /// cases `E10` and `G10`).  Both the requested and the derived distance
+    /// stay in `BoundaryLayerSizing`, so which one was used is always visible.
     #[serde(default = "default_derive_first_layer")]
     pub derive_first_layer_from_target_y_plus: bool,
     /// Whether layer controls are emitted for a later validated layer study.
@@ -304,8 +303,8 @@ pub struct SolverSettings {
     /// fastest setting, while smaller values damp it.  Relaxation selects the
     /// path to the fixed point; it does not change the discrete equations the
     /// residual gate measures, so a converged solution is the same solution at
-    /// any stable factor.  The default is measured, not assumed: see
-    /// `.agent/opus-cfd-20260916` for the relaxation probe.
+    /// any stable factor.  The default is measured, not assumed: see the
+    /// internal CFD study (2026-09-16) for the relaxation probe.
     #[serde(default = "default_pressure_relaxation")]
     pub pressure_relaxation: f64,
     /// Under-relaxation factor applied to the momentum equations.
@@ -451,8 +450,8 @@ pub fn default_pressure_relative_tolerance(preset: MeshPreset) -> f64 {
 /// default case DIVERGED at outer iteration 621 on one mesh instance and left
 /// the pressure residual pinned at 1.8e-4 .. 2.6e-4 on every other setting
 /// tried, while removing it alone dropped that residual by a factor of twenty.
-/// Evidence: `.agent/opus-cfd-convergence-20260916`, cases `S0`..`S6` and
-/// `V4-inletoutlet-celllimited`.
+/// Evidence: internal CFD convergence study (2026-09-16), cases `S0`..`S6`
+/// and `V4-inletoutlet-celllimited`.
 fn default_gradient_limiter() -> f64 {
     0.0
 }
@@ -975,7 +974,8 @@ impl MeshSettings {
 /// Wall-clock seconds one outer iteration costs per cell, single core.
 ///
 /// Measured on this host (AMD Ryzen 7 5800X, OpenFOAM v2606 native Windows,
-/// serial) from two certified cases in `.agent/opus-cfd-convergence-20260916`:
+/// serial) from two certified cases in an internal CFD convergence study
+/// (2026-09-16):
 /// `V2-inletoutlet-medium` took `1219.443 s` of OpenFOAM `ExecutionTime` for
 /// 1030 outer iterations on 183 071 cells, i.e. `6.47e-6 s` per cell-iteration,
 /// while several other solves shared the machine; `V1-inletoutlet-coarse` took

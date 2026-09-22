@@ -196,8 +196,8 @@ pub fn parse_bl_dump(text: &str) -> BlDumpColumns {
 /// appends the three fields inside one `try`, so a partial parse could
 /// misalign the arrays; this keeps a row only when all three parse, which
 /// cannot differ on a flowfield dump (every data row is numeric in those three
-/// columns): the same translate-the-harmless-latent-bug call `CLAUDE.md`
-/// records for the reference's `mesh_line`.
+/// columns): the same translate-the-harmless-latent-bug call recorded
+/// for the reference's `mesh_line`.
 /// The columns of an `mplot` flowfield dump (`x`, `y`, Mach and pressure
 /// coefficient per grid point) and the offsets at which each structured
 /// grid row starts.

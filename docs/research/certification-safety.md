@@ -1,7 +1,7 @@
 # Certification and safety research for the ALAS conceptual aircraft-design wizard
 
 **Research date:** 2026-08-26
-**Repository:** `C:\Proyectos\ALAS-rust`
+**Repository:** ALAS
 **Scope:** preliminary certification and system-safety modelling for a serious conceptual aircraft-design wizard
 **Status:** research input; not a certification basis, approved means of compliance, compliance finding, or claim that any ALAS design is certified
 

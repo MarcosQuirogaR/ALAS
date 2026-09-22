@@ -35,7 +35,7 @@ use alas_config::AlasConfig;
 use alas_pipeline::{export::report_to_database, FullAnalysis};
 
 /// Exact `design_vector` block from the r5 nominal run's own
-/// `design_database.json` (`.agent/bench/nominal-r5-claude-20260909/`), not a
+/// `design_database.json` (an internal benchmark run, 2026-09-09), not a
 /// hand-picked or simplified fixture.
 fn r5_finalist_design() -> DesignVector {
     DesignVector {

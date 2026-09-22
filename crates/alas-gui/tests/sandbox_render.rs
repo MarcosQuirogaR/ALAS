@@ -226,13 +226,13 @@ fn rasterize(shapes: Vec<egui::Shape>, rect: Rect, background: Option<Color>) ->
     render_scene_png(&scene).expect("png")
 }
 
-/// Writes headless before/after renders of the desktop tessellation to
-/// `.agent/reports/sandbox-corrections-2026-09-14/`; run with `--ignored`.
+/// Writes headless before/after renders of the desktop tessellation to an
+/// internal evidence directory (2026-09-14); run with `--ignored`.
 #[test]
 #[ignore = "writes evidence images"]
 fn write_tessellation_evidence_images() {
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../.agent/reports/sandbox-corrections-2026-09-14");
+        .join("../../out/evidence/sandbox-corrections-2026-09-14");
     std::fs::create_dir_all(&dir).expect("evidence directory");
     let rect = Rect::from_min_max(pos2(0.0, 0.0), pos2(920.0, 730.0));
     let mut state = AppState::default();
@@ -374,7 +374,7 @@ fn rasterize_frame(ctx: &Context, output: egui::FullOutput, background: egui::Co
 fn write_workspace_layout_evidence_images() {
     use alas_gui::theme::AppTheme;
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../.agent/reports/sandbox-corrections-2026-09-14");
+        .join("../../out/evidence/sandbox-corrections-2026-09-14");
     std::fs::create_dir_all(&dir).expect("evidence directory");
     for (name, theme, search) in [
         ("dark", AppTheme::Dark, ""),

@@ -23,8 +23,8 @@
 //! mean line is zero, and the panel is the flat chord line. The camber is
 //! not approximated coarsely; it is absent.
 //!
-//! Measured across four registered presets (`.agent/reports/
-//! 2026-09-11-vlm-resolution-sensitivity.html`, cross-checked against
+//! Measured across four registered presets in an internal VLM
+//! resolution-sensitivity study (2026-09-11, cross-checked against
 //! AeroSandbox 4.2.8 on identical geometry): at one chordwise panel the
 //! trimmed cruise attitude is 1.1 to 4.1 degrees high depending on how much
 //! camber the section carries, the induced-drag factor is wrong by -5 to

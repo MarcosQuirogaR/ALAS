@@ -28,7 +28,7 @@ only command you need.
 
 ## The three commands that matter
 
-Run these from the repository root (`C:\Proyectos\ALAS` on this machine).
+Run these from the repository root.
 
 ```powershell
 cargo test              # check that everything still agrees with Python
@@ -166,7 +166,7 @@ Only needed if a fixture has to change. The generators read the Python
 implementation and write into `golden/`.
 
 ```powershell
-& "C:\Users\Marcos\OneDrive\Proyectos\Universidad\ALAS\.suave-venv\Scripts\python.exe" golden\generators\gen_units.py
+& "<path to the Python reference>\.suave-venv\Scripts\python.exe" golden\generators\gen_units.py
 ```
 
 Use `.suave-venv` for anything touching SUAVE and `.venv` for anything touching

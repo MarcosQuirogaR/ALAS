@@ -207,7 +207,7 @@ engines.
 Verification uses the two FLOPS-run validation cases NASA's Aviary
 distributes (`LargeSingleAisle1FLOPS`, detailed wing, and
 `LargeSingleAisle2FLOPS`, simple wing; inputs and FLOPS outputs recorded in
-`.agent/reports/flops-aviary-validation-data.md`, test
+an internal validation-data note, test
 `crates/alas-mass/tests/flops_validation_cases.rs`). Every structural,
 propulsion, systems and operating-item output is reproduced within the
 data file's quoted precision (one part in a thousand; the simple bending

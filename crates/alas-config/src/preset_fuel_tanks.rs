@@ -14,9 +14,9 @@
 //! tanks extend into the inboard wing and carry more than half the fuel;
 //! they are declared as centre tanks with their published volume, so the
 //! capacity is exact while the centroid is the carry-through box's. Sources
-//! and the estimation method are in the 2026-09-05 fuel-tank-layout research
-//! note (`.agent/reports/research-2026-09-05-fuel-tank-layouts.md`), which
-//! cites EASA.A.064 III.9, EASA.A.110, the Airbus A220 operator WBM Table
+//! and the estimation method are in an internal 2026-09-05 fuel-tank-layout
+//! research note, which cites EASA.A.064 III.9, EASA.A.110, the Airbus A220
+//! operator WBM Table
 //! 3-1, the Boeing 787 ACAP Rev Q, the DC-10 ACAP and EASA.A.084.
 
 use crate::{

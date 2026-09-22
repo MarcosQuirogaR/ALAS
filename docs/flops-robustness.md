@@ -98,7 +98,7 @@ cargo test -p alas-mass --locked --no-fail-fast
 cargo test -p alas-pipeline --lib
 cargo test -p alas-opt --locked --lib
 cargo check -p alas-report -p alas-gui --locked
-cargo run -p alas-pipeline --example flops_robustness --locked -- .agent/data/flops-robustness-20260920/reference-conditioned-cases.json
+cargo run -p alas-pipeline --example flops_robustness --locked -- out/reference-conditioned-cases.json
 ```
 
 The matrix includes all eight registered product presets and eight
@@ -108,7 +108,7 @@ Its cabin fields distinguish installed counts used for OEW from seated payload
 occupancy. A configuration that misses these contracts causes a failing exit
 status after the diagnostic artifact is written.
 
-The 2026-09-20 implementation and evidence artifacts are retained in the ignored
-`.agent/data/flops-robustness-20260920/` directory and the corresponding HTML
-report under `.agent/reports/`. Historical comparison outputs from earlier
-revisions are not current validation results.
+The 2026-09-20 implementation and evidence artifacts are retained in a local,
+git-ignored evidence directory and the corresponding HTML report alongside it.
+Historical comparison outputs from earlier revisions are not current
+validation results.

@@ -25,7 +25,7 @@ The two CFR PDFs are annual 2025 snapshots. They are useful for reproducible res
 
 The local PDF corpus is limited to:
 
-    C:\Proyectos\ALAS-rust\bib\requirements-systems\
+    <repository root>\bib\requirements-systems\
 
 No existing source files were changed for this research note.
 

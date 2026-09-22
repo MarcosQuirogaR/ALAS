@@ -70,9 +70,8 @@
 //! (`wing_parts/part_04.rs`) is a native addition computing the
 //! manufacturer/TCDS "theoretical wing" MAC convention, distinct from the
 //! ported [`Wing::mean_aerodynamic_chord`]'s physical planform integral. See
-//! that method's doc comment and `.agent/reports/
-//! 2026-09-09-claude-mac-parity-derivation.html` for the evidence it is
-//! grounded in.
+//! that method's doc comment and an internal MAC-parity derivation study
+//! (2026-09-09) for the evidence it is grounded in.
 
 include!("wing_parts/part_01.rs");
 include!("wing_parts/part_02.rs");

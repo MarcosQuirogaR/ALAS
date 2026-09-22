@@ -246,17 +246,17 @@ therefore follow live theme changes.
 
 On 2026-09-13 the native OpenCFD v2606 MinGW serial installation was exercised
 with Gmsh 4.15.2 on an AMD Ryzen 7 5800X (8 physical cores, 16 logical
-processors).  The fresh NACA0012 case in
-`.agent/openfoam-validation/native-run-010-final` generated 86,649 cells;
-Gmsh, `gmshToFoam`, `checkMesh`, `potentialFoam`, staged `simpleFoam`, and
-solver-attached post-processing all exited successfully.  The ten-iteration
-smoke run was reported as `unconverged` because its final outer residuals had
-not reached the configured threshold, and it recorded airfoil y+ from 0.299 to
-2.820 (average 1.583), a finite face-resolved surface distribution, and the
-complete case logs.  The installation checksum, paths, transport choice,
-hardware, and the separate tutorial smoke result are recorded in
-`.agent/openfoam-installation.json`.  These artifacts demonstrate executable
-and bookkeeping integration; they are not an experimental accuracy claim.
+processors).  The fresh NACA0012 case, run on the development host, generated
+86,649 cells; Gmsh, `gmshToFoam`, `checkMesh`, `potentialFoam`, staged
+`simpleFoam`, and solver-attached post-processing all exited successfully.
+The ten-iteration smoke run was reported as `unconverged` because its final
+outer residuals had not reached the configured threshold, and it recorded
+airfoil y+ from 0.299 to 2.820 (average 1.583), a finite face-resolved surface
+distribution, and the complete case logs.  The installation checksum, paths,
+transport choice, hardware, and the separate tutorial smoke result are
+recorded in an internal installation log (not shipped).  These artifacts
+demonstrate executable and bookkeeping integration; they are not an
+experimental accuracy claim.
 
 ## Verification boundaries
 

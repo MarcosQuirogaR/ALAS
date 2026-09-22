@@ -106,7 +106,7 @@ The AND-tolerance fix above is no longer a hypothetical rerun: it is the checked
 `node --test tools/aircraft_parity.test.cjs` (17/17 pass, exit 0) and
 
 ```text
-node tools/aircraft_parity.cjs --out .agent/validation/parity-rerun-20260922 --report .agent/reports/2026-09-22-aircraft-parity.html
+node tools/aircraft_parity.cjs --out out/parity-rerun-20260922 --report out/2026-09-22-aircraft-parity.html
 ```
 
 against the *same, still-unregenerated* `MODEL.json` (SHA-256
@@ -116,15 +116,14 @@ Exit 0; result JSON SHA-256 `87E9255BB18E1FCC3DF52F57D7274AEB401AF2FE2E2BA089518
 summary is exactly the post-fix row from the table above (69 `within_tolerance`, 5
 `out_of_tolerance`, 70 `diagnostic`, 21 `unsupported`, 76 `evidence_gap`, 0 `source_conflict`),
 confirming the fix is now simply the harness's ordinary, unmodified behavior rather than a special
-case. A per-preset status figure generated directly from this run's JSON is at
-`.agent/reports/2026-09-22-aircraft-parity-status-by-preset.svg` (SHA-256
-`7201405CABB26E47022188AC4406DCDDB4F4EC798C3425113E30C1436FB036C9`); it is a comparison-status
-count chart, not a certification pass/fail figure, and its own caption says so.
+case. A per-preset status figure generated directly from this run's JSON was saved to an internal
+report path (SHA-256 `7201405CABB26E47022188AC4406DCDDB4F4EC798C3425113E30C1436FB036C9`); it is a
+comparison-status count chart, not a certification pass/fail figure, and its own caption says so.
 
 This rerun deliberately used the isolated `--out`/`--report` paths rather than overwriting the
-canonical `.agent/validation/AIRCRAFT_PARITY.json` and `.agent/reports/2026-09-09-aircraft-parity.html`,
-for the same reason given above: those canonical paths are left alone so other in-flight work is not
-silently changed underneath it.
+tool's canonical default output locations (`AIRCRAFT_PARITY.json` and
+`2026-09-09-aircraft-parity.html`), for the same reason given above: those canonical outputs are
+left alone so other in-flight work is not silently changed underneath it.
 
 **The underlying `MODEL.json` was not regenerated and is now materially stale.** It is 13 days old
 relative to this rerun, and the working tree has an active, uncommitted A320 cabin/mass regression
@@ -135,7 +134,7 @@ model_reference_dump` was therefore not run this session; every A320-200 row in 
 the pre-regression-fix model state, not the current source tree. Once that lane's Cargo access is
 released and the regression is resolved, the correct sequence to refresh this section is: `cargo run
 -p alas-pipeline --example model_reference_dump` then `node tools/aircraft_parity.cjs` (writing over
-the canonical `.agent/validation` output once no other lane depends on the old copy), and updating
+the canonical default output once no other lane depends on the old copy), and updating
 the SHA-256 values and status table above from that fresh run, not from this one.
 
 A parallel, independent read-only research pass and a code-level circularity trace performed the

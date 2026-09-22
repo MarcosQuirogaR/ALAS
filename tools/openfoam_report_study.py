@@ -13,7 +13,7 @@ Typical usage (from the ALAS repository):
 
 Every case is independent.  The default worker count is two so another
 native OpenFOAM study can run on the same workstation.  Results and all
-solver logs are written below ``.agent/openfoam-report-study-20260914``.
+solver logs are written below ``out/openfoam-report-study``.
 """
 
 from __future__ import annotations
@@ -32,14 +32,17 @@ from typing import Sequence
 
 
 REPO = Path(__file__).resolve().parents[1]
-REPORT_PATH = Path(r"C:\Users\Marcos\OneDrive\Descargas\informe_tecnico_P1.md")
+REPORT_PATH = Path(
+    os.environ.get("ALAS_OPENFOAM_REPORT", str(REPO / "out" / "informe_tecnico_P1.md"))
+)
 COORDINATE_PATH = REPO / "crates" / "alas-geom" / "data" / "selig.txt"
-OUTPUT_ROOT = REPO / ".agent" / "openfoam-report-study-20260914"
+OUTPUT_ROOT = REPO / "out" / "openfoam-report-study"
+# OpenFOAM is installed by the user and is not part of this repository.
 OPENFOAM_ROOT = Path(
-    r"C:\Proyectos\OpenFOAM-v2606\msys64\home\ofuser\OpenFOAM\OpenFOAM-v2606"
+    os.environ.get("ALAS_OPENFOAM_ROOT", r"C:\OpenFOAM\OpenFOAM-v2606")
 )
 OPENFOAM_BIN = OPENFOAM_ROOT / "platforms" / "win64MingwDPInt32Opt" / "bin"
-GMSH = Path(r"C:\Proyectos\.agent\tools\gmsh-4.15.2-Windows64\gmsh.exe")
+GMSH = REPO / "external tools" / "gmsh-4.15.2-Windows64" / "gmsh.exe"
 
 GAMMA = 1.4
 R_AIR = 287.05287

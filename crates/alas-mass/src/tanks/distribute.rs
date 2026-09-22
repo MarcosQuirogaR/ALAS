@@ -13,9 +13,9 @@
 //! # The fill order is an assumption, not a source
 //!
 //! Only the *burn* order is sourced. The fill order above is this module's own
-//! rule, and the fuel-tank research the layouts are built from
-//! (`.agent/reports/research-2026-09-05-fuel-tank-layouts.md`, section 9.4)
-//! states the opposite posture for it: refuelling fill order "was not retrieved
+//! rule, and the fuel-tank research the layouts are built from (an internal
+//! study, 2026-09-05, section 9.4) states the opposite posture for it:
+//! refuelling fill order "was not retrieved
 //! for any of the eight and should not be asserted", because it lives in
 //! Weight and Balance Manuals that are not public. Section 10 keeps it as an
 //! open gap for every registered aircraft.

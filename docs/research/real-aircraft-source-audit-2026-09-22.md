@@ -200,12 +200,12 @@ particular needs a circularity check before any such update.
 
 ## Provenance note carried over, not fixed here
 
-`crates/alas-config/src/oew_reference/sources.rs` embeds `.agent/evidence/...`
-and `.agent/data/...` local paths in several `OewSource.local_path` fields
+`crates/alas-config/src/oew_reference/sources.rs` embeds internal,
+machine-local evidence paths in several `OewSource.local_path` fields
 (A320 ACAP, A220 ACP, A340 ACAP, A380 ACAP, DC-10 ACAP, ATR factsheet).
 These paths are not usable outside the authoring checkout. This is source
 code, outside this note's ownership; it is recorded here so a release
-reviewer sees it, per the existing `LUNA_TEXT_AUDIT.md` LT-03 finding. The
+reviewer sees it, per an existing internal text-audit finding (LT-03). The
 public `title`/`publisher`/`url`/`quote`/`tier` fields on the same records are
 unaffected.
 

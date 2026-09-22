@@ -370,8 +370,8 @@ fn evaluation_cost_and_smoothness_probe() {
             );
         }
     }
-    let root =
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.agent/probes/smoothness");
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../out/evidence/probes/smoothness");
     std::fs::create_dir_all(&root).ok();
     std::fs::write(root.join("sweeps.csv"), csv).ok();
 }

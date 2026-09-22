@@ -621,7 +621,7 @@ mod tests {
     // same CAS against the same ambient state rather than two conventions
     // that happen to be close. The acceptance thresholds below are chosen
     // numerical criteria; the measured gaps are in the failure messages and
-    // in the `.agent/probes/atr-physics` probe output.
+    // recorded in an internal ATR physics probe run.
     #[test]
     fn native_and_mdo_calibrated_footprints_agree_at_matching_conditions() {
         let config = AlasConfig::from_value(&serde_json::json!({"preset": "ATR72-600"})).unwrap();

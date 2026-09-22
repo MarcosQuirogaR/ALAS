@@ -7,7 +7,7 @@ use alas_report::{families::propulsion::figure_engine_designer_preview, svg::ren
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let output = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../.agent/reports/propulsion-cycle");
+        .join("../../out/evidence/propulsion-cycle");
     std::fs::create_dir_all(&output)?;
     let turboprop = AlasConfig::from_value(&serde_json::json!({"preset":"ATR72-600"}))?;
     for (name, config) in [

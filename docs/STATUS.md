@@ -16,7 +16,7 @@ it in the commit that fixes or introduces the thing it describes, rather than
 letting it drift and doing a retroactive sweep later.
 
 **Last swept:** 2026-09-05, during the remediation of the 2026-09-03 codebase
-audit (`.agent/reports/2026-09-03-codebase-audit.html`, findings F1-F12; the
+audit (the internal codebase-audit report (2026-09-03), findings F1-F12; the
 closure record is the "Audit remediation" section below). Re-verify anything older than a few weeks before
 relying on it — this file records what an audit found, not what is
 continuously enforced by `cargo xtask gate`.
@@ -48,8 +48,8 @@ an earlier one for the same claim.
    acceptance run found 0/8 presets pass end-to-end acceptance; 5/8 fail
    basic physical screening (CG, ZFW, or passenger capacity out of bounds).
    The project's own "no exceptions" acceptance bar is not met.
-   (`.agent/reports/2026-09-01-independent-external-acceptance-interim.html`,
-   data under `.agent/external_preset_native_audit_20260901/`.)
+   (the internal independent-external-acceptance-interim report (2026-09-01),
+   with its supporting native preset audit data.)
 2. **Propulsion is internally inconsistent.** The cycle model
    (`alas-prop::cycle`) over-subtracts ram drag and has a choked-nozzle
    energy inconsistency; the mission-flown model
@@ -58,13 +58,13 @@ an earlier one for the same claim.
    rating regardless of flight phase. GUI engine-config edits do not change
    flown fuel/thrust, and are overwritten by `AircraftBuilder::new` during
    geometry rebuild.
-   (`.agent/reports/2026-08-30-propulsion-model-audit.html`,
-   `.agent/reports/2026-09-01-independent-propulsion-verification.html`;
+   (the internal propulsion-model-audit report (2026-08-30),
+   the internal independent-propulsion-verification report (2026-09-01);
    not confirmed fixed since.)
 3. **CPACS round-trip is split-brained.** Re-importing a CPACS export only
    replaces geometry; polar, trim, mass/CG and feasibility are left stale
    from before the round-trip. P0 in
-   `.agent/reports/2026-08-31-alas-mdo-pipeline-audit.html`.
+   the internal alas-mdo-pipeline-audit report (2026-08-31).
 4. **Wingbox margin diagnostics were misleading; now fixed.** The strength
    gate's failure message rounded the controlling margin to six decimals,
    so any shortfall between roughly `-5e-7` and `0` displayed as the
@@ -74,9 +74,9 @@ an earlier one for the same claim.
    spar/station. This is a diagnostics fix, not a tolerance policy — no
    numerical band has been calibrated, so a genuinely small negative margin
    still fails the gate exactly as before, now legibly.
-   (`.agent/reports/2026-09-01-wingbox-sizing-error-prevention.html`.)
+   (the internal wingbox-sizing-error-prevention report (2026-09-01).)
 5. **Known figure/geometry inconsistencies**, per
-   `.agent/reports/2026-08-31-alas-mdo-pipeline-audit.html`: the three-view
+   the internal alas-mdo-pipeline-audit report (2026-08-31): the three-view
    and design-summary figures have disagreed on span (68 m vs 81.11 m) for
    at least one case; not confirmed fixed. The V-n ordering defect is fixed
    2026-09-05: `alas-perf` validates VS < VA <= VC < VD, an invalid order is
@@ -99,7 +99,7 @@ an earlier one for the same claim.
    reported finding that the optimizer's own validity flag does not see.
 8. **Route-globe fullscreen rendering** was slow (~8.4 FPS / 101.8 ms per
    frame) after a correctness fix removed a cached-raster shortcut
-   (`.agent/reports/2026-08-31-route-globe-performance.html`). Resolved
+   (the internal route-globe-performance report (2026-08-31)). Resolved
    2026-09-11: the cost was the SVG round-trip of the vector overlay (about
    70 ms of the frame), not the sphere. Orbit views now draw the vector
    elements as egui shapes (`SceneView::vector_overlay`) and rasterize only
@@ -109,7 +109,7 @@ an earlier one for the same claim.
 
 ## Audit remediation, 2026-09-05
 
-Closure record for `.agent/reports/2026-09-03-codebase-audit.html`. "Closed"
+Closure record for the internal codebase-audit report (2026-09-03). "Closed"
 means the mechanism is in place and its tests pass on the working tree at
 this date; it is not a claim that any preset is a verified aircraft mission.
 
@@ -150,7 +150,7 @@ this date; it is not a claim that any preset is a verified aircraft mission.
   so the NOSA characterization is incomplete and redistribution stays
   blocked. Selective optimization is opt-in and untested on this host.
 - **F10 (untracked status file): obsolete;** this file is tracked. The
-  `.agent/reports/` evidence it cites remains unversioned by design.
+  internal evidence it cites remains unversioned by design.
 - **F11 (check backlog, no supply-chain check): closed.** Repository
   checks pass; `cargo deny --locked check` passes on advisories, bans,
   licenses and sources with two named maintenance-notice exceptions
@@ -188,7 +188,7 @@ above against flight data.
 Delivered as a coherent increment on the working tree; the closure record
 for the design intent is `docs/FUEL_MISSION_ROADMAP.md` ("Delivery status")
 and the state-of-the-art basis is the three research notes under
-`.agent/reports/research-2026-09-05-*.md` (fuel regulations, tank layouts,
+the three internal research notes of 2026-09-05 (fuel regulations, tank layouts,
 mass/CG/inertia methods, MDO drivers).
 
 - **One mass model for every aircraft.** The product analysis places each
@@ -281,8 +281,8 @@ sizing loop and gradient-based driver").
 - **Verification status.** Every FLOPS group reproduces the two FLOPS-run
   validation cases NASA Aviary distributes (simple and detailed wing) to the
   data file's quoted precision (`crates/alas-mass/tests/
-  flops_validation_cases.rs`, data in `.agent/reports/
-  flops-aviary-validation-data.md`). The SQP driver is verified on analytic
+  flops_validation_cases.rs`, data in an internal
+  FLOPS/Aviary validation-data note). The SQP driver is verified on analytic
   constrained problems and a bound-constrained delegated objective, and
   exercised for one major iteration on the native mission-sized objective.
   No physical validation against weighed aircraft, and no optimization
@@ -375,7 +375,7 @@ quirks, not regressions. See `docs/PORTING.md` and `CONTRIBUTING.md`'s
 - `docs/FUEL_MISSION_ROADMAP.md` — the mission/fuel model rebuild plan.
 - `docs/C0_GUI_ACCEPTANCE_MATRIX.md` — GUI acceptance scenarios, separate
   from and stricter than a passing Rust or SVG test.
-- `.agent/reports/` — the underlying investigation reports this file
+- Internal investigation reports, which this file
   summarizes. Not version-controlled long-term evidence; treat as an
   audit trail, and re-run an investigation rather than trusting an old one
   past its relevance.
