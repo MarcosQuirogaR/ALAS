@@ -56,10 +56,10 @@ pub struct OptimizationResult {
     /// Mutation/crossover strategy used by the search.
     #[serde(default = "default_result_strategy")]
     pub strategy: String,
-    /// Durable search lifecycle reason.  For product MADS this is one of
-    /// `evaluation_budget`, `mesh_limit`, `iteration_limit`, `fixed_bounds`
-    /// or `invalid_input`; it is kept separate from the legacy strategy
-    /// label so a budget stop is not mistaken for convergence.
+    /// Durable search lifecycle reason.  For the product L-SHADE search this
+    /// is one of `converged`, `iteration_limit` or `cancelled`; it is kept
+    /// separate from the legacy strategy label so a budget stop is not
+    /// mistaken for convergence.
     #[serde(default = "default_result_termination")]
     pub termination: String,
     /// Final nondominated set for a multi-objective method.
@@ -104,7 +104,7 @@ pub struct SearchDiagnostics {
     pub verification_evaluations: usize,
     /// Wall-clock seconds in the broad scan.
     pub scan_wall_time_s: f64,
-    /// Wall-clock seconds in the MADS stage.
+    /// Wall-clock seconds in the search stage.
     pub search_wall_time_s: f64,
     /// Worker threads used inside one evaluation block.
     pub workers: usize,
@@ -116,6 +116,18 @@ pub struct SearchDiagnostics {
     /// Relative improvement of the winner over that first feasible point,
     /// dimensionless.
     pub relative_improvement: Option<f64>,
+    /// Fraction of the final generation's population that was strictly
+    /// feasible, `0` when the search never ran a generation. Absent (`0.0`
+    /// on a saved run predating this field) for anything other than the
+    /// L-SHADE product kernel.
+    #[serde(default)]
+    pub feasible_fraction: f64,
+    /// The epsilon-constrained method's boundary at the last generation
+    /// evaluated, `0` once past the epsilon control fraction of the budget
+    /// (see `search_methods::lshade_de`). Deb's ordinary feasibility rule
+    /// applies exactly when this is `0`.
+    #[serde(default)]
+    pub epsilon_level: f64,
 }
 
 /// Termination label for a run whose delivered design was rejected by the
@@ -138,13 +150,12 @@ pub const CANCELLED: &str = "cancelled";
 
 /// The one termination label that is itself a convergence certificate.
 ///
-/// Every current product kernel reports convergence through
+/// The product L-SHADE kernel reports convergence through
 /// `SearchDiagnostics::converged` instead, which is the authority
-/// [`OptimizationResult::converged`] prefers: `mads` maps its own
-/// `TerminationReason`, `sqp` carries the driver's stationarity verdict, and
-/// the product DE kernel implements no convergence test at all and is never
-/// converged. This string covers the legacy reference-compatibility DE driver,
-/// which predates the diagnostics record and reports only a label.
+/// [`OptimizationResult::converged`] prefers (population spread plus
+/// best-feasible-cost stagnation; see `search_methods::lshade_de`). This
+/// string covers the legacy reference-compatibility DE driver, which
+/// predates the diagnostics record and reports only a label.
 const CONVERGED_TERMINATION: &str = "converged";
 
 impl OptimizationResult {

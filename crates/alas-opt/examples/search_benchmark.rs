@@ -8,8 +8,9 @@
 //!
 //! - the analysis-start instant of the optimization stage, and the wall-clock
 //!   seconds from it to the search's own termination;
-//! - whether the run converged, under the criterion in `search::mads`, or
-//!   stopped on a budget, mesh floor, iteration count or watchdog;
+//! - whether the run converged, under the population-spread and
+//!   best-feasible-cost stagnation criterion in `search_methods::lshade_de`,
+//!   or stopped on the generation budget or a cancellation;
 //! - the coupled analyses executed, the reduced-model screening analyses, and
 //!   the cache hits that cost nothing;
 //! - the winning design's objective, feasibility, takeoff mass, operating
@@ -114,7 +115,7 @@ fn benchmark(preset: &str, workers: i64, seed: i64, mode: &str, twist_policy: &s
     let mut optimizer = DesignOptimizer::new(config.clone());
     let mut last_line = String::new();
     let mut progress = |line: &str| {
-        if line.starts_with("mads termination") || line.starts_with("staged scan") {
+        if line.starts_with("differential evolution") || line.starts_with("staged scan") {
             eprintln!("  [{preset}] {line}");
         }
         last_line = line.to_owned();

@@ -183,29 +183,27 @@ fn the_reject_reason_lists_violated_ids_joined_by_plus() {
     assert_eq!(history.soft_violation.len(), history.n_evaluations());
 }
 
-/// (6) A trivial `feasibility_first_de` run (seeded near the default design,
-/// with the default `Hard` geometry policy) returns `Ok`, or reports
-/// `NoFeasibleDesign` naming the residuals that failed, both are
-/// legitimate outcomes of this contract, so the assertion accepts either.
+/// (6) A trivial differential-evolution run (population seeded from the
+/// default design plus a Latin-hypercube fill, with the default `Hard`
+/// geometry policy) returns `Ok`, or reports `NoFeasibleDesign` naming the
+/// residuals that failed; both are legitimate outcomes of this contract, so
+/// the assertion accepts either.
 ///
-/// With seed `1` this returns `Ok`. The exact default design vector is
-/// itself marginally hard-infeasible under the default `Hard` geometry
-/// policy (its built wing area sits a few parts per million over
-/// `max_wing_area_m2`, and both tail-volume coefficients sit a few percent
-/// under their configured minimum window: the legacy weighted-penalty
-/// objective these defaults were tuned against treats both as soft
-/// preferences, not hard bounds), but `seed_near_initial_design` draws a
-/// small pool of candidates perturbed around it rather than the exact
-/// vector, and for this seed at least one perturbation clears every hard
-/// residual, which is what `Ok` reports.
+/// The exact default design vector is itself marginally hard-infeasible
+/// under the default `Hard` geometry policy (its built wing area sits a few
+/// parts per million over `max_wing_area_m2`, and both tail-volume
+/// coefficients sit a few percent under their configured minimum window: the
+/// legacy weighted-penalty objective these defaults were tuned against
+/// treats both as soft preferences, not hard bounds), so whether this
+/// particular seed's population contains a candidate that clears every hard
+/// residual is itself part of what the test exercises.
 #[test]
-fn a_trivial_feasibility_first_de_run_returns_ok_or_names_the_failing_residuals() {
+fn a_trivial_de_run_returns_ok_or_names_the_failing_residuals() {
     let mut config = block_fuel_config();
-    config.optimizer.solver.method = "feasibility_first_de".to_owned();
+    config.optimizer.solver.method = "differential_evolution".to_owned();
     config.optimizer.solver.population_size = 1;
     config.optimizer.solver.max_iterations = 0;
     config.optimizer.solver.seed = Some(1);
-    config.optimizer.solver.seed_near_initial_design = true;
 
     let result = DesignOptimizer::new(config).run(None, None, None);
 

@@ -49,8 +49,8 @@ fn converged_result() -> OptimizationResult {
         best_valid: true,
         history,
         wall_time_s: 48.0,
-        method: "mads".to_owned(),
-        strategy: "progressive_barrier".to_owned(),
+        method: "differential_evolution".to_owned(),
+        strategy: "lshade_eps_de".to_owned(),
         termination: "converged".to_owned(),
         pareto_front: Vec::new(),
         search_diagnostics: Some(SearchDiagnostics {
@@ -67,6 +67,8 @@ fn converged_result() -> OptimizationResult {
             poll_block_size: 16,
             first_feasible_cost: Some(2.0),
             relative_improvement: Some(0.5),
+            feasible_fraction: 0.9,
+            epsilon_level: 0.0,
         }),
         delivered_acceptance: None,
     }

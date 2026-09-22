@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-//! The staged search strategy: how the run's budget is split between a broad
-//! low-resolution scan, the full-fidelity verification of its finalists, and
-//! the coupled MADS search.
+//! Stage A of the product search: a broad low-resolution scan that seeds the
+//! L-SHADE population's starting point.
 //!
 //! # Why the scan is separate from the search
 //!
@@ -14,7 +13,9 @@
 //! all aircraft that neither balance nor close their weight budget. The scan
 //! therefore ranks a broad deterministic sample on a *reduced* model and only
 //! nominates a handful of starting points, which are re-evaluated by the real
-//! objective before any of them can be called a candidate.
+//! objective before any of them can be called a candidate, and even then only
+//! seed the search's population; the search itself decides the winner (see
+//! `search_methods::lshade_de`).
 //!
 //! # What "reduced" means here, exactly
 //!
@@ -40,11 +41,7 @@
 //! and the full objective decides. A scan that finds nothing better than the
 //! caller's nominal design leaves the search starting where it used to.
 
-use std::time::Duration;
-
 use alas_config::{AlasConfig, SolverSettings};
-
-use super::directions::{from_normalized, mix_seed, permutation};
 
 /// Chordwise vortex-lattice panels per strip during the broad scan.
 pub(crate) const SCAN_CHORDWISE_RESOLUTION: i64 = 2;
@@ -53,81 +50,36 @@ pub(crate) const SCAN_SIZING_PASSES: i64 = 3;
 /// Takeoff-mass closure tolerance during the broad scan, kg.
 pub(crate) const SCAN_SIZING_TOLERANCE_KG: f64 = 1_000.0;
 
-/// The MADS mesh starts at 0.25 and halves on every failed poll, so reaching
-/// the 1e-2 convergence spacing takes five consecutive failed polls plus the
-/// successful polls before them. A configured generation count below this
-/// would make convergence unreachable by construction, which is exactly the
-/// "ran out of iterations" outcome the staged strategy exists to remove.
-const MINIMUM_POLL_ITERATIONS: usize = 60;
-/// Wall-clock safety limit for one search. A watchdog exit is reported as not
-/// converged; it exists so a pathological configuration cannot run unbounded,
-/// not as a stopping criterion.
-const WATCHDOG_SECONDS: u64 = 900;
-
-/// How the staged strategy is sized for one run.
+/// How the staged scan is sized for one run.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct Settings {
     /// Deterministic low-resolution samples drawn over the envelope.
     pub scan_points: usize,
     /// Scan finalists re-evaluated by the full objective.
     pub scan_finalists: usize,
-    /// Coupled analyses the MADS stage may execute.
-    pub max_evaluations: usize,
-    /// Lower bound on poll iterations, so a small configured generation count
-    /// cannot stop the search before the mesh can contract to the convergence
-    /// spacing.
-    pub minimum_poll_iterations: usize,
-    /// Normalized mesh spacing that counts as converged.
-    pub convergence_mesh_size: f64,
-    /// Relative objective improvement convergence requires.
-    pub minimum_relative_improvement: f64,
-    /// Points evaluated per opportunistic poll block.
-    pub poll_block_size: usize,
-    /// Worker threads used inside one block.
+    /// Points evaluated per scan block, so the cancellation flag is checked
+    /// at a bounded interval rather than only once for the whole sample.
+    pub scan_block_size: usize,
+    /// Worker threads used inside one evaluation block.
     pub workers: usize,
-    /// Whether an unsuccessful poll only has to exhaust a minimal positive
-    /// basis before the mesh contracts.
-    pub minimal_positive_basis: bool,
-    /// Wall-clock safety limit for the whole search.
-    pub watchdog: Option<Duration>,
     /// Seed for the deterministic scan sample.
     pub seed: u64,
 }
 
 impl Settings {
-    /// Derive the staged settings from the saved solver group.
-    ///
-    /// `population_size` and `max_iterations` keep their saved meaning as the
-    /// run's *budget*: their product is how many coupled analyses the user is
-    /// willing to pay for. How that budget is spent is the search's decision,
-    /// not a per-generation population as it was under differential
-    /// evolution.
+    /// Derive the staged scan settings from the saved solver group.
     pub(crate) fn from_solver(solver: &SolverSettings, dimension: usize) -> Self {
-        let population = (solver.population_size.max(1) as usize).saturating_mul(dimension.max(1));
-        let generations = solver.max_iterations.max(1) as usize;
-        let budget = population
-            .saturating_mul(generations.saturating_add(1))
-            .max(1);
         Self {
             // Broad enough to cover the envelope without consuming the
             // coupled budget: two low-resolution samples per design variable,
             // bounded so a large space stays affordable.
             scan_points: (2 * dimension).clamp(8, 64),
             scan_finalists: 3,
-            max_evaluations: budget,
-            minimum_poll_iterations: MINIMUM_POLL_ITERATIONS,
-            convergence_mesh_size: 1.0e-2,
-            minimum_relative_improvement: 1.0e-4,
-            // Sixteen points per block keeps a failed poll of a 48-direction
-            // spanning set to three synchronisation points while staying a
-            // fixed, hardware-independent number.
-            poll_block_size: 16,
+            // Sixteen points per block keeps a cancellation check at a
+            // bounded interval while staying a fixed, hardware-independent
+            // number.
+            scan_block_size: 16,
             workers: solver.resolved_workers(),
-            // Above a handful of variables the maximal spanning set's extra
-            // analyses per failed poll are what decides the run's wall clock,
-            // and the failed polls are the ones that contract the mesh.
-            minimal_positive_basis: dimension > 4,
-            watchdog: Some(Duration::from_secs(WATCHDOG_SECONDS)),
             seed: solver.seed.map_or(0, |value| value as u64),
         }
     }
@@ -167,6 +119,42 @@ pub(crate) fn scan_sample(bounds: &[(f64, f64)], count: usize, seed: u64) -> Vec
             from_normalized(&normalized, bounds)
         })
         .collect()
+}
+
+fn from_normalized(values: &[f64], bounds: &[(f64, f64)]) -> Vec<f64> {
+    values
+        .iter()
+        .zip(bounds)
+        .map(|(&value, &(lower, upper))| {
+            if upper == lower {
+                lower
+            } else {
+                lower + value.clamp(0.0, 1.0) * (upper - lower)
+            }
+        })
+        .collect()
+}
+
+fn permutation(length: usize, mut state: u64) -> Vec<usize> {
+    let mut values = (0..length).collect::<Vec<_>>();
+    for index in (1..length).rev() {
+        let swap = (next_u64(&mut state) % (index as u64 + 1)) as usize;
+        values.swap(index, swap);
+    }
+    values
+}
+
+fn mix_seed(seed: u64, stream: u64) -> u64 {
+    let mut state = seed.wrapping_add(stream.wrapping_mul(0x9e37_79b9_7f4a_7c15));
+    next_u64(&mut state)
+}
+
+fn next_u64(state: &mut u64) -> u64 {
+    *state = state.wrapping_add(0x9e37_79b9_7f4a_7c15);
+    let mut value = *state;
+    value = (value ^ (value >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    value = (value ^ (value >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    value ^ (value >> 31)
 }
 
 // A test asserts on values it constructed here directly, so a failed unwrap
@@ -260,13 +248,12 @@ mod tests {
     }
 
     #[test]
-    fn the_budget_is_the_saved_solver_product_and_iterations_have_a_floor() {
+    fn the_settings_are_a_pure_function_of_the_solver_and_dimension() {
         let solver = SolverSettings::default();
         let settings = Settings::from_solver(&solver, 16);
-        assert_eq!(settings.max_evaluations, 6 * 16 * (15 + 1));
-        assert_eq!(settings.minimum_poll_iterations, MINIMUM_POLL_ITERATIONS);
-        assert!(settings.minimal_positive_basis);
         assert_eq!(settings.scan_points, 32);
-        assert!(settings.watchdog.is_some());
+        assert_eq!(settings.scan_finalists, 3);
+        assert_eq!(settings.scan_block_size, 16);
+        assert!(settings.workers >= 1);
     }
 }
