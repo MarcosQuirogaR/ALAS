@@ -48,10 +48,30 @@
 //! deliverable.
 
 mod limits;
+mod limits_layout;
 
-pub use limits::REVIEWED_LIMITS;
+use std::sync::OnceLock;
 
 use super::relaxation::ConstraintRelaxation;
+
+/// Every residual identifier the optimizer can emit, with its D02
+/// determination: [`limits::CORE_LIMITS`] followed by
+/// [`limits_layout::LAYOUT_LIMITS`] (`mdo::residuals_layout`'s
+/// wing-to-fuselage family, split into its own file so its growth does not
+/// compete with this one's for the same budgeted file), joined once and
+/// cached so every function below reads one list without restating the join.
+pub fn reviewed_limits() -> &'static [ReviewedLimit] {
+    static COMBINED: OnceLock<Vec<ReviewedLimit>> = OnceLock::new();
+    COMBINED
+        .get_or_init(|| {
+            limits::CORE_LIMITS
+                .iter()
+                .chain(limits_layout::LAYOUT_LIMITS)
+                .copied()
+                .collect()
+        })
+        .as_slice()
+}
 
 /// What the D02 review concluded about one limit.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -96,19 +116,19 @@ impl ReviewedLimit {
 /// opinion: a typo in a saved document would otherwise be a silent no-op that
 /// looks like a policy.
 pub fn review_for(id: &str) -> Option<&'static ReviewedLimit> {
-    REVIEWED_LIMITS.iter().find(|limit| limit.id == id)
+    reviewed_limits().iter().find(|limit| limit.id == id)
 }
 
 /// How many limits the review covers.
 pub fn reviewed_count() -> usize {
-    REVIEWED_LIMITS.len()
+    reviewed_limits().len()
 }
 
 /// How many limits the review currently admits for relaxation.
 ///
 /// Zero as shipped. See the module documentation for why.
 pub fn eligible_count() -> usize {
-    REVIEWED_LIMITS
+    reviewed_limits()
         .iter()
         .filter(|limit| limit.is_listable())
         .count()
@@ -163,7 +183,7 @@ mod tests {
     #[test]
     fn the_review_covers_every_identifier_once_and_says_why() {
         let mut seen = std::collections::BTreeSet::new();
-        for limit in REVIEWED_LIMITS {
+        for limit in reviewed_limits() {
             assert!(
                 seen.insert(limit.id),
                 "{} is reviewed twice; a limit has one determination",
@@ -207,7 +227,7 @@ mod tests {
                 "{id} is enforced as never relaxable but reviewed otherwise"
             );
         }
-        for limit in REVIEWED_LIMITS {
+        for limit in reviewed_limits() {
             if limit.review == RelaxationReview::NeverRelaxable {
                 assert!(
                     NON_RELAXABLE_RESIDUAL_IDS.contains(&limit.id),

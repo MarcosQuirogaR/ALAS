@@ -29,7 +29,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use alas_config::AlasConfig;
-use alas_opt::{assess_candidate, DesignObjective};
+use alas_opt::{assess_candidate, DesignObjective, DesignOptimizer, OptimizationError};
 
 /// Load a registered preset exactly the way selecting it in the GUI does:
 /// the preset name alone, with every other setting left at its default.
@@ -96,4 +96,88 @@ fn every_registered_preset_nominal_candidate_is_evaluable() {
         "registered presets whose own nominal design is not evaluable:\n  {}",
         rejected.join("\n  ")
     );
+}
+
+/// The default A380-800 search reports a typed, attributable ground-reaction
+/// cause instead of the opaque `mass_coordinates`/`unknown` bucket the
+/// original report carried.
+///
+/// # What this test does and does not claim
+///
+/// This does **not** assert that the default run finds a feasible design.
+/// The nominal A380-800's own `AnalyzedTakeoff` loading state (full design
+/// mission fuel over the default EGLL-OMDB route) has its physical CG about
+/// 0.37 m aft of the weighted main-gear station, which the search correctly
+/// rejects on `min_nose_gear_load` (and, more tightly, `static_margin_floor`)
+/// -- see `the_a380_default_nominal_candidate_is_evaluable` above: the
+/// nominal candidate is *evaluable* (a real, typed, sized aircraft) but not
+/// *hard-feasible*.
+///
+/// The root cause is traced to `alas_mass::tanks::distribute`'s ground
+/// fill-order rule (tanks burned last are filled first): the A380-800's
+/// sourced burn order puts its tailplane trim tank third of four, so this
+/// partial-fuel state fills the trim tank and the outer wing cells before
+/// the inner feed tanks and pulls the fuel centre of gravity about 12.75 m
+/// aft of an inner-first fill of the same mass -- see that module's own doc
+/// comment and
+/// `alas_mass::tanks::distribute::tests::a_partial_a380_load_fills_the_trim_and_outer_tanks_and_moves_the_fuel_aft`,
+/// which already pins the consequence. That fill-order rule is explicitly
+/// documented as unsourced (the real ground fill order lives in a
+/// non-public Weight and Balance Manual) and is `alas-mass` territory, not
+/// `alas-opt`'s: fixing it here would mean adjusting a design-space bound or
+/// a search weight to paper over a genuine, correctly-flagged mass-model
+/// gap, which is not a fix.
+///
+/// What *is* this crate's contract, and what regresses if it breaks, is that
+/// the search evaluates real candidates and reports *why* they were
+/// rejected in a form a caller can act on: not a single opaque phase label
+/// covering 98% of the population.
+#[test]
+fn the_a380_default_search_reports_a_typed_ground_reaction_cause() {
+    let (mut config, _) = default_preset_route("A380-800");
+    // A reduced but honest budget (mirrors `staged_search.rs`'s convention):
+    // small enough to run in a unit test, large enough that a differential-
+    // evolution generation actually completes and the population's rejection
+    // reasons are the search's own rather than a single seed point's.
+    config.optimizer.solver.seed = Some(20_260_922);
+    config.optimizer.solver.max_iterations = 3;
+    config.optimizer.solver.population_size = 2;
+
+    let mut optimizer = DesignOptimizer::new(config);
+    match optimizer.run(None, None, None) {
+        Ok(_) => {
+            // A future `alas-mass` fix (a trim-tank-aware fill order, or the
+            // missing WBM source) may make the default route fully feasible.
+            // That is strictly better than today's contract and this test
+            // must not forbid it.
+        }
+        Err(OptimizationError::NoFeasibleDesign(evidence)) => {
+            assert!(
+                evidence.evaluated_candidates > 0,
+                "the search must evaluate real candidates before reporting no feasible design"
+            );
+            assert!(
+                !evidence
+                    .rejection_reason_counts
+                    .contains_key("mass_coordinates"),
+                "the rejection reason must name the physical invariant that failed, not the \
+                 phase that noticed it: {:?}",
+                evidence.rejection_reason_counts
+            );
+            assert!(
+                !evidence.rejection_reason_counts.contains_key("unknown"),
+                "every rejected candidate in this run has a typed reason: {:?}",
+                evidence.rejection_reason_counts
+            );
+            assert!(
+                evidence
+                    .rejection_reason_counts
+                    .contains_key("min_nose_gear_load"),
+                "the known cause (the fuel-tank fill-order gap in \
+                 alas_mass::tanks::distribute) must still be visible under its own name: {:?}",
+                evidence.rejection_reason_counts
+            );
+        }
+        Err(error) => panic!("the A380-800 default route must not fail bounds/config: {error}"),
+    }
 }

@@ -31,7 +31,7 @@ mod weights;
 pub use design_space::{DesignMode, DesignSpaceConfig, VariableEnvelope};
 pub use objective::{ConstraintPolicy, MtowSizing, ObjectiveConfig, ObjectiveKind};
 pub use plausibility::PlausibilityLimits;
-pub use policy_review::{review_for, RelaxationReview, ReviewedLimit, REVIEWED_LIMITS};
+pub use policy_review::{review_for, reviewed_limits, RelaxationReview, ReviewedLimit};
 pub use relaxation::{ConstraintRelaxation, RelaxableLimit, NON_RELAXABLE_RESIDUAL_IDS};
 pub use solver::{SolverSettings, LEGACY_METHOD_TOKENS};
 pub use weights::ObjectiveWeights;
