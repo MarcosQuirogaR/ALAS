@@ -98,12 +98,6 @@ const SOURCE_REJECTED_PATH_COMPONENTS: [&str; 7] = [
 const SOURCE_REJECTED_FILE_PREFIXES: [&str; 5] =
     [".env", "credentials", "secret", "private", "id_rsa"];
 
-// Admitted by the broad `docs/*.md` extension rule but maintainer-only: no
-// concrete user-facing build/run dependency requires it in a public source
-// or release package. Exclude by exact path so the rest of `docs/*.md`
-// packaging is unaffected. Add entries only after the same per-file review.
-const SOURCE_MAINTAINER_ONLY_DOCUMENT_FILES: [&str; 1] = ["docs/agent-control.md"];
-
 #[derive(Debug, Clone)]
 struct BundleStatus {
     status: &'static str,
@@ -566,13 +560,6 @@ fn source_path_allowed(path: &str) -> bool {
     }
 
     if has_rejected_path_component(&normalized) {
-        return false;
-    }
-
-    if SOURCE_MAINTAINER_ONLY_DOCUMENT_FILES
-        .iter()
-        .any(|candidate| *candidate == normalized)
-    {
         return false;
     }
 
@@ -2004,13 +1991,7 @@ mod tests {
     }
 
     #[test]
-    fn maintainer_only_agent_control_doc_is_excluded_from_the_release_source_package() {
-        // docs/agent-control.md documents the internal AI-assisted-development
-        // control panel (see its own maintainer-only banner). It has no
-        // user-facing build/run dependency, so it must not ride along on the
-        // broad docs/*.md extension rule that admits ordinary documentation.
-        assert!(!source_path_allowed("docs/agent-control.md"));
-        // The broad docs/*.md rule still admits ordinary release documentation.
+    fn ordinary_release_documentation_stays_in_the_source_package() {
         assert!(source_path_allowed("docs/release-packaging.md"));
     }
 
