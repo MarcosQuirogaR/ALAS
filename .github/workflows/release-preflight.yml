@@ -1,0 +1,97 @@
+name: Release preflight (manual, non-publishing)
+
+# Manual only: this workflow never runs on push or pull_request. It builds
+# and checks a Windows package from a clean checkout and the committed
+# Cargo.lock, and uploads it as a workflow-run artifact for review. It does
+# not create a GitHub Release, does not push a tag, and does not publish
+# anything outside its own workflow-run artifact. See
+# docs/release-packaging.md#ci-release-preflight for the three-tier
+# distinction between a local package, this preflight artifact, and an
+# externally published release.
+on:
+  workflow_dispatch:
+    inputs:
+      strict_nastran95:
+        description: "Require a fully reviewed NASTRAN-95 bundle instead of accepting an omitted optional tool"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-preflight-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  windows-package:
+    name: Build and check the Windows package (locked, non-publishing)
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install the repository Rust toolchain
+        uses: dtolnay/rust-toolchain@1.97.1
+
+      - name: Record exact toolchain and target
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path preflight-metadata | Out-Null
+          $record = "preflight-metadata/toolchain.txt"
+          "workspace version:" | Out-File -FilePath $record -Encoding utf8
+          (Select-String -Path Cargo.toml -Pattern '^version = ').Line | Out-File -FilePath $record -Append -Encoding utf8
+          "" | Out-File -FilePath $record -Append -Encoding utf8
+          "rustc -vV:" | Out-File -FilePath $record -Append -Encoding utf8
+          rustc -vV | Out-File -FilePath $record -Append -Encoding utf8
+          "" | Out-File -FilePath $record -Append -Encoding utf8
+          "cargo -vV:" | Out-File -FilePath $record -Append -Encoding utf8
+          cargo -vV | Out-File -FilePath $record -Append -Encoding utf8
+          "" | Out-File -FilePath $record -Append -Encoding utf8
+          "runner:" | Out-File -FilePath $record -Append -Encoding utf8
+          "${{ runner.os }} ${{ runner.arch }} (github.com runner image ${{ runner.name }})" | Out-File -FilePath $record -Append -Encoding utf8
+          Get-Content $record
+
+      - name: Run the existing gate before packaging
+        run: cargo xtask gate
+
+      - name: Build and assemble the standalone package from the locked dependency graph
+        shell: pwsh
+        env:
+          ALAS_STRICT_BUNDLED_NASTRAN95: ${{ inputs.strict_nastran95 == true && '1' || '' }}
+        run: cargo xtask dist
+
+      - name: Collect provenance and package artifacts
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path preflight-artifact | Out-Null
+          Copy-Item -Path preflight-metadata/toolchain.txt -Destination preflight-artifact/
+          Copy-Item -Path dist/*.zip -Destination preflight-artifact/
+          Copy-Item -Path dist/*.zip.sha256 -Destination preflight-artifact/
+          Get-ChildItem -Path dist -Directory | ForEach-Object {
+            Copy-Item -Path (Join-Path $_.FullName 'RELEASE-MANIFEST.json') -Destination preflight-artifact/
+            Copy-Item -Path (Join-Path $_.FullName 'SOURCE-MANIFEST.json') -Destination preflight-artifact/
+          }
+          Get-ChildItem preflight-artifact
+
+      - name: Upload preflight artifact (workflow-run only, not a published release)
+        uses: actions/upload-artifact@v4
+        with:
+          name: alas-windows-release-preflight
+          path: preflight-artifact/
+          if-no-files-found: error
+
+  linux-compile-check:
+    name: Linux compile check only (no package, no artifact)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install the repository Rust toolchain
+        uses: dtolnay/rust-toolchain@1.97.1
+
+      - name: Compile-check the workspace from the locked dependency graph
+        run: cargo check --workspace --locked --all-targets

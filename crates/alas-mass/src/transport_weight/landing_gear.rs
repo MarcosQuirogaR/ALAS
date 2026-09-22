@@ -7,7 +7,7 @@
 
 //! Main- and nose-gear masses, a fixed fraction of takeoff weight.
 
-/// The landing gear as a fraction of takeoff weight -- upstream's
+/// The landing gear as a fraction of takeoff weight: upstream's
 /// `landing_gear_wt_factor` default, never overridden by
 /// [`super::empty_weight`].
 const GEAR_MASS_FRACTION: f64 = 0.04;
@@ -19,7 +19,7 @@ pub(crate) struct LandingGear {
     pub nose_kg: f64,
 }
 
-/// The landing-gear mass split -- `landing_gear`. The total is 4% of takeoff
+/// The landing-gear mass split: `landing_gear`. The total is 4% of takeoff
 /// weight, split 90% main / 10% nose.
 pub(crate) fn landing_gear(mtow_kg: f64) -> LandingGear {
     let weight_kg = GEAR_MASS_FRACTION * mtow_kg;

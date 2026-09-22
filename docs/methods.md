@@ -207,7 +207,7 @@ engines.
 Verification uses the two FLOPS-run validation cases NASA's Aviary
 distributes (`LargeSingleAisle1FLOPS`, detailed wing, and
 `LargeSingleAisle2FLOPS`, simple wing; inputs and FLOPS outputs recorded in
-`.agent/reports/flops-aviary-validation-data.md`, test
+an internal validation-data note, test
 `crates/alas-mass/tests/flops_validation_cases.rs`). Every structural,
 propulsion, systems and operating-item output is reproduced within the
 data file's quoted precision (one part in a thousand; the simple bending
@@ -220,7 +220,7 @@ does not renormalise when the stations stop short of the tip. This is
 implementation verification against the published equations as FLOPS
 evaluates them, not physical validation against weighed aircraft.
 
-# Multidisciplinary sizing loop and gradient-based driver
+# Multidisciplinary sizing loop and the L-SHADE epsilon-constrained driver
 
 `alas-opt::mdo::mda` closes each candidate as a converged multidisciplinary
 analysis rather than a single pass: mass and centre of gravity at the
@@ -237,25 +237,72 @@ the single trim at the takeoff-mass ceiling). The number of passes and
 re-trims and the residual centre-of-gravity inconsistency are reported with
 the sized candidate.
 
-`optimizer.solver.method = sqp` runs a gradient-based driver over that loop
-in the multidisciplinary-feasible architecture: only the design variables
-are unknowns and every evaluation is a converged aircraft. The driver is
-line-search sequential quadratic programming with an l1 merit function and
-a damped BFGS Hessian in variables normalised to the unit box (Nocedal and
-Wright, *Numerical Optimization*, Algorithm 18.3, Procedure 18.2). Each
-major iteration linearises the objective and every hard requirement
-residual by forward differences evaluated as one parallel batch
-(`finite_difference_step` of the bound range per variable), solves the
-elastic quadratic subproblem (slack variables with an l1 penalty keep the
-linearised constraints consistent, as in SNOPT's elastic mode) with a
-dense Mehrotra predictor-corrector interior-point method, and backtracks
-on the merit function. Soft residuals enter the objective through the
-configured penalty weight; hard residuals are the constraints, signed so
-that zero is the limit. The run stops when the step falls below 1e-4 of
-the box with every constraint within `constraint_tolerance`, when the
-feasible objective has stopped changing to `tolerance` over two
-iterations, or on the iteration budget or a failed line search, and the
-termination reason is reported in place of the population strategy. The
-best feasible point seen, or the least-infeasible one when none was
-feasible, is returned. Under a delegated evaluator the driver has no
-constraint vector and reduces to a bound-constrained search.
+This is the coupling chain every candidate goes through, one discipline
+feeding the next (`alas-opt::mdo`, one module per stage): `build` evaluates
+geometry (`alas-geom`), a two-pass mass breakdown with structural feedback
+(`alas-mass`), and the trimmed aerodynamic operating point (`alas-aero`,
+`alas-stab`) that do not depend on the takeoff mass; `sizing` closes the
+takeoff-mass fixed point analytically against that trimmed drag polar, flying
+the design mission under the configured fuel policy (`alas-mission`);
+`residuals` turns the sized candidate into a typed table, one entry per
+requirement family (mass and fuel, balance, airworthiness performance,
+geometry), instead of folding every requirement into a single weighted
+penalty; and `cost` assembles that table into the scalar the search
+minimises, ranking feasibility ahead of the objective value. Every candidate
+the search ranks, including the reported winner, went through this whole
+chain; nothing downstream of `build` is skipped or approximated for a
+"cheap" evaluation inside the search (the reduced-fidelity Stage A screening
+described below is explicitly excluded from ever becoming the winner).
+
+`optimizer.solver.method = differential_evolution` is the only search this
+build runs, over the design vector, with every candidate a converged
+aircraft from the chain above: **L-SHADE differential evolution under the
+epsilon-constrained method** (`alas-opt::search_methods::lshade_de`).
+
+- **L-SHADE**: R. Tanabe and A. S. Fukunaga, "Improving the Search
+  Performance of SHADE Using Linear Population Size Reduction," IEEE
+  Congress on Evolutionary Computation (CEC) 2014, DOI
+  10.1109/CEC.2014.6900380. Success-history parameter adaptation for the
+  mutation factor `F` and crossover rate `CR` (weighted Lehmer/arithmetic
+  means into a circular memory), `current-to-pbest/1` mutation with an
+  external archive (J. Zhang and A. C. Sanderson, "JADE: Adaptive
+  Differential Evolution With Optional External Archive," IEEE Trans. Evol.
+  Comput. 13(5), 2009, DOI 10.1109/TEVC.2009.2014613), and linear population
+  size reduction from an initial population (`population_size` times the
+  sixteen design variables) down to a small floor as the generation budget
+  (`max_iterations`) is spent.
+- **Epsilon-constrained method**: T. Takahama and S. Sakai, "Constrained
+  Optimization by the epsilon Constrained Differential Evolution with
+  Gradient-Based Mutation and Feasible Elites," CEC 2006, DOI
+  10.1109/CEC.2006.1688283, and "...with an Archive and Gradient-Based
+  Mutation," CEC 2010, DOI 10.1109/CEC.2010.5586484. Two candidates within a
+  shrinking `epsilon` of feasible are ranked by objective alone, otherwise
+  the less-violating one wins; `epsilon` decays to exactly zero at a fifth of
+  the generation budget, after which the comparison is exactly Deb's
+  feasibility rule (K. Deb, CMAME 186(2-4), 2000). This lets the search
+  explore past a locally-blocking hard limit early on without ever reporting
+  a candidate that violates one: `Outcome::winner` is tracked as the
+  strict feasibility minimum over every candidate the run ever evaluated,
+  independent of the epsilon-relaxed dynamics that decide which candidates
+  survive inside the live population.
+- **Bound handling**: midpoint-to-parent repair - a mutant component that
+  leaves its bound is placed halfway between the bound it crossed and the
+  parent's own value there, rather than reflected or clamped to the bound.
+- **Convergence**: the population's normalised design-space spread and the
+  best feasible cost's relative improvement both have to fall below
+  `tolerance` for `convergence_stagnation_generations` consecutive
+  generations, and only once a feasible design has been found; a run
+  reports exactly one of `converged`, `iteration_limit` or `cancelled`.
+- **Determinism**: one generation's trial vectors are built in fixed index
+  order from the seeded stream, then evaluated as a single batch; the
+  worker count changes only how that batch is spread across threads, never
+  which points are evaluated or the winner, so a seeded run replays
+  bit-identically at any `optimizer.solver.workers`.
+
+A low-resolution Stage A scan seeds the population's first individual (see
+`alas-opt::search::staged`); it never selects the winner, since the search
+still decides it from the seed by the rule above. The frozen weighted
+lift-to-drag objective of the Python reference, and the SciPy-parity DE loop
+that replays it, remain reachable only through
+`DesignOptimizer::new_reference_compatibility` for the parity fixtures; no
+product or GUI path constructs it.

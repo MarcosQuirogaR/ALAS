@@ -9,10 +9,10 @@
 //! explicit structural families: bending caps, spar webs, wingbox skins, and
 //! ribs. Cap area follows the classical fully-stressed beam relation
 //! `A = M / (sigma h)`; see A. Ning, *Flight Vehicle Design*, section 8.2,
-//! equations 8.3--8.5:
+//! equations 8.3 to 8.5:
 //! <https://flowlab.groups.et.byu.net/me415/flight.pdf>. The stationwise
 //! skin/web treatment is consistent with the preliminary wingbox procedure in
-//! NASA TP-1158, pp. 8--12:
+//! NASA TP-1158, pp. 8 to 12:
 //! <https://ntrs.nasa.gov/api/citations/19780017136/downloads/19780017136.pdf>.
 //!
 //! This is a centroid model, not a replacement for the Torenbeek total wing

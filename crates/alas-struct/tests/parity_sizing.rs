@@ -6,16 +6,16 @@
 //!
 //! The buildup is closed-form arithmetic over the (already `green`)
 //! `WingStructureGeometry` and the shared load model, so every continuous
-//! quantity -- station chords, per-spar caps/webs/margins, rib spacing and the
-//! mass breakdown -- is checked at `Tier::Closed`, matching `docs/PORTING.md`.
+//! quantity: station chords, per-spar caps/webs/margins, rib spacing and the
+//! mass breakdown, is checked at `Tier::Closed`, matching `docs/PORTING.md`.
 //! The rib count and the sizing load-case name are an integer and a string and
 //! are checked for exact equality. A `+inf` margin of safety (where the local
 //! demand is below 1 N.m) is recorded as JSON `null`; the test maps that back
 //! to an infinity check rather than a tolerance.
 //!
 //! The `WingStructureGeometry` is rebuilt exactly as the green
-//! `parity_wing_structure.rs` does -- default `DesignVector`/`WingConfig`, the
-//! root section via `build_section`, the tip via `AirfoilLibrary::get` -- with
+//! `parity_wing_structure.rs` does: default `DesignVector`/`WingConfig`, the
+//! root section via `build_section`, the tip via `AirfoilLibrary::get`, with
 //! the resolved spar list taken from the fixture, since `resolve_spar_geometry`
 //! is not itself ported. The `StructuresConfig` is rebuilt from a default plus
 //! the recorded overrides.

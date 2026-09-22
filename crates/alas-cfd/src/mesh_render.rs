@@ -6,22 +6,55 @@ use super::super::{
     GMSH_TEMPLATE_VERSION,
 };
 use crate::MeshPreset;
+
+/// Exact polygon and topology of the section being meshed.
+pub(super) struct PolygonGeometry<'a> {
+    pub(super) points: &'a [(f64, f64)],
+    pub(super) signed_area_unit: f64,
+    pub(super) topology: &'a AirfoilTopology,
+}
+
+/// Outer rectangle extent and extrusion span, in metres.
+pub(super) struct DomainGeometry {
+    pub(super) min_x_m: f64,
+    pub(super) max_x_m: f64,
+    pub(super) min_y_m: f64,
+    pub(super) max_y_m: f64,
+    pub(super) extrusion_span_m: f64,
+}
+
+/// Background, wake, and surface characteristic mesh sizes, in metres.
+pub(super) struct MeshSizes {
+    pub(super) far_size_m: f64,
+    pub(super) wake_size_m: f64,
+    pub(super) surface_size_m: f64,
+}
+
 pub(super) fn render_geo(
     config: &CfdStudyConfig,
     airfoil: &AirfoilSnapshot,
-    points: &[(f64, f64)],
-    signed_area_unit: f64,
-    topology: &AirfoilTopology,
+    polygon: &PolygonGeometry<'_>,
     sizing: &BoundaryLayerSizing,
-    domain_min_x_m: f64,
-    domain_max_x_m: f64,
-    domain_min_y_m: f64,
-    domain_max_y_m: f64,
-    extrusion_span_m: f64,
-    far_size_m: f64,
-    wake_size_m: f64,
-    surface_size_m: f64,
+    domain: &DomainGeometry,
+    sizes: &MeshSizes,
 ) -> String {
+    let PolygonGeometry {
+        points,
+        signed_area_unit,
+        topology,
+    } = *polygon;
+    let DomainGeometry {
+        min_x_m: domain_min_x_m,
+        max_x_m: domain_max_x_m,
+        min_y_m: domain_min_y_m,
+        max_y_m: domain_max_y_m,
+        extrusion_span_m,
+    } = *domain;
+    let MeshSizes {
+        far_size_m,
+        wake_size_m,
+        surface_size_m,
+    } = *sizes;
     // Outer points are first so Gmsh's Extrude side-surface order is stable:
     // bottom, right, top, left, then the airfoil boundary lines.  These are
     // the IDs used by the physical patch declarations below.
@@ -41,6 +74,18 @@ pub(super) fn render_geo(
     // Frontal-Delaunay variant (algorithm 6).  The distinction is material
     // after extrusion: algorithm 6 can leave high-skew TE side faces even
     // when the 2-D surface itself has no invalid cells.
+    // Pin the meshing RNG so the only remaining source of run-to-run variation
+    // is named rather than anonymous.  Measured on this host with Gmsh 4.15.2,
+    // single-threaded, on a byte-identical `.geo` (internal CFD convergence
+    // study, 2026-09-16, case q16): three runs gave 89 794 /
+    // 89 732 / 89 902 nodes.  Pinning the seed does NOT remove that, and
+    // neither does `Mesh.Optimize = 0`, `Mesh.OptimizeNetgen = 0`,
+    // `Mesh.RandomFactor`, nor `Mesh.Algorithm = 6`.  Deleting
+    // `BoundaryLayer Field` does: three runs then produce bit-identical meshes
+    // (77 556 nodes each, identical md5).  The non-determinism is inside Gmsh's
+    // `BoundaryLayer` field, so the seed is necessary hygiene and the real fix
+    // is an explicit prism-layer construction that does not use that field.
+    out.push_str("Mesh.RandomSeed = 1;\n");
     out.push_str("Mesh.Algorithm = 5;\n");
     out.push_str("Mesh.Algorithm3D = 1;\n");
     out.push_str("Mesh.ElementOrder = 1;\n");
@@ -132,13 +177,55 @@ pub(super) fn render_geo(
         dist_min = if sizing.enabled { sizing.total_thickness_m.max(config.chord_m * 0.005) } else { config.chord_m * 0.005 },
         dist_max = config.chord_m * 0.75,
     ));
+    let (_, _, wake_y_min_m, wake_y_max_m) = wake_box(config);
     out.push_str("Field[4] = Box;\n");
     out.push_str(&format!(
         "Field[4].VIn = {wake_size_m:.16e};\nField[4].VOut = {far_size_m:.16e};\nField[4].XMin = 0;\nField[4].XMax = {domain_max_x_m:.16e};\nField[4].YMin = {y_min:.16e};\nField[4].YMax = {y_max:.16e};\nField[4].ZMin = 0;\nField[4].ZMax = {extrusion_span_m:.16e};\n",
-        y_min = -2.0 * config.chord_m,
-        y_max = 2.0 * config.chord_m,
+        y_min = wake_y_min_m,
+        y_max = wake_y_max_m,
     ));
-    out.push_str("Field[5] = Min;\nField[5].FieldsList = {3, 4};\nBackground Field = 5;\n\n");
+    let le_size_m = leading_edge_size(config, surface_size_m);
+    if config.mesh.leading_edge_refinement > 0 && le_size_m < surface_size_m {
+        // Optional leading-edge refinement (template v2): a Distance/Threshold
+        // pair around the minimum-x coordinate, combined through the same Min
+        // field.  At level zero this block is absent and the source is
+        // identical to template v1.
+        let le_index = points
+            .iter()
+            .enumerate()
+            .min_by(|left, right| left.1 .0.total_cmp(&right.1 .0))
+            .map_or(0, |(index, _)| index);
+        out.push_str("Field[6] = Distance;\n");
+        out.push_str(&format!(
+            "Field[6].PointsList = {{{}}};\n",
+            point_offset + le_index as i32
+        ));
+        out.push_str("Field[7] = Threshold;\nField[7].InField = 6;\n");
+        out.push_str(&format!(
+            // `SizeMax` must be the FAR-FIELD size, not the surface size.
+            // `Field[5]` is `Min{3, 4, 7}` and a `Threshold` returns its
+            // `SizeMax` everywhere beyond `DistMax`, so a leading-edge field
+            // that relaxes only to the surface size clamps the whole domain to
+            // it: `Field[3]` and `Field[4]` both relax to `far_size_m`, and the
+            // `Min` then throws that away.  Measured on this host with the
+            // medium preset at level 2 (surface `1.0e-2 m`, far field
+            // `1.667e-1 m`, domain 30 m by 20 m), the background cell size
+            // outside the leading-edge ball fell by 16.7x, which is a 280x
+            // area-density increase over roughly 600 m^2; Gmsh 4.15.2 reached
+            // 2.6 GB of resident memory and had produced no mesh after eight
+            // minutes, against ten seconds at level 0.  Relaxing to
+            // `far_size_m` makes the field impose nothing outside its own ball,
+            // which is what "leading-edge refinement" is supposed to mean.
+            "Field[7].SizeMin = {le_size_m:.16e};\nField[7].SizeMax = {far_size_m:.16e};\nField[7].DistMin = {dist_min:.16e};\nField[7].DistMax = {dist_max:.16e};\n",
+            dist_min = LEADING_EDGE_REFINEMENT_INNER_CHORDS * config.chord_m,
+            dist_max = LEADING_EDGE_REFINEMENT_OUTER_CHORDS * config.chord_m,
+        ));
+        out.push_str(
+            "Field[5] = Min;\nField[5].FieldsList = {3, 4, 7};\nBackground Field = 5;\n\n",
+        );
+    } else {
+        out.push_str("Field[5] = Min;\nField[5].FieldsList = {3, 4};\nBackground Field = 5;\n\n");
+    }
 
     if sizing.enabled {
         out.push_str("// SI boundary-layer field: Size is first-cell thickness, twice wall-centre distance.\n");
@@ -153,21 +240,61 @@ pub(super) fn render_geo(
             ratio = sizing.expansion_ratio,
             n_layers = sizing.n_layers,
         ));
-        // A fan is used only for a genuinely sharp TE.  Blunt TE faces have
-        // two separate endpoints and are left to the normal boundary-layer
-        // intersection handling to avoid degenerate quads.
-        if topology.trailing_edge == EdgeKind::Sharp {
-            if let Some((te_index, _)) = points
+        // Both trailing-edge corners are convex corners of the fluid domain, and
+        // the prism stack has to turn through them.  Told to fan, Gmsh sweeps
+        // the layers around the corner; left alone, it stitches the upper and
+        // lower stacks together behind the section with whatever elements close
+        // the gap, and those elements are the worst in the mesh.
+        //
+        // A blunt edge is fanned here too. The intuition against it is that
+        // its two separate endpoints make fanned quads degenerate.
+        // **Measured, that intuition is wrong and excluding them is what
+        // costs mesh quality.** On
+        // `n0012` (blunt), fanning both corners and changing nothing else:
+        //
+        // | preset | max non-orthogonality | max skewness |
+        // |---|---|---|
+        // | coarse | 37.891 -> 37.321 deg | 1.8138 -> 0.6441 |
+        // | medium | 46.185 -> 50.235 deg | 1.8138 -> 0.5948 |
+        // | **fine** | **71.369 -> 39.812 deg** | 1.8138 -> 0.6013 |
+        //
+        // The fine preset violated the declared `70 deg` limit before and clears
+        // it by 30 deg after.  The identical `1.8138019812` skewness at all
+        // three presets was the stitched region itself, and it is gone.  Cell
+        // count and meshing time are unchanged to within 0.1 %, aspect ratio to
+        // within 0.3 %, and `checkMesh` reports `Mesh OK` in every case.  No
+        // size field, layer count, layer thickness, first-layer height or
+        // coordinate changed: this is a local topology correction only.
+        let fan_points: Vec<i32> = match topology.trailing_edge {
+            // The closing point of a sharp edge is the single rearmost point.
+            EdgeKind::Sharp => points
                 .iter()
                 .enumerate()
                 .max_by(|left, right| left.1 .0.total_cmp(&right.1 .0))
-            {
-                out.push_str("Mesh.BoundaryLayerFanElements = 7;\n");
-                out.push_str(&format!(
-                    "Field[1].FanPointsList = {{{}}};\n",
-                    point_offset + te_index as i32
-                ));
+                .map(|(index, _)| vec![point_offset + index as i32])
+                .unwrap_or_default(),
+            // A blunt edge is closed by the segment from the last point back to
+            // the first, so its corners are exactly those two endpoints.
+            EdgeKind::Blunt => {
+                if points.len() >= 2 {
+                    vec![point_offset, point_offset + points.len() as i32 - 1]
+                } else {
+                    Vec::new()
+                }
             }
+        };
+        if !fan_points.is_empty() {
+            if topology.trailing_edge == EdgeKind::Sharp {
+                out.push_str("Mesh.BoundaryLayerFanElements = 7;\n");
+            }
+            out.push_str(&format!(
+                "Field[1].FanPointsList = {{{}}};\n",
+                fan_points
+                    .iter()
+                    .map(i32::to_string)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
         }
         out.push_str("BoundaryLayer Field = 1;\n\n");
     }
@@ -193,7 +320,10 @@ pub(super) fn render_geo(
     out
 }
 
-pub(super) fn characteristic_lengths(config: &CfdStudyConfig, chord: f64) -> (f64, f64, f64) {
+pub(in crate::mesh) fn characteristic_lengths(
+    config: &CfdStudyConfig,
+    chord: f64,
+) -> (f64, f64, f64) {
     // Keep spacing tied to the chord and preset.  If the outer rectangle is
     // enlarged, the physical resolution must remain unchanged; deriving it
     // from domain width would silently coarsen the wake and far field.  The
@@ -215,7 +345,7 @@ pub(super) fn characteristic_lengths(config: &CfdStudyConfig, chord: f64) -> (f6
     (far_size_m, wake_size_m, surface_size_m)
 }
 
-pub(super) fn domain_bounds(config: &CfdStudyConfig) -> (f64, f64, f64, f64) {
+pub(in crate::mesh) fn domain_bounds(config: &CfdStudyConfig) -> (f64, f64, f64, f64) {
     let chord = config.chord_m;
     (
         -config.mesh.upstream_chords * chord,
@@ -223,4 +353,27 @@ pub(super) fn domain_bounds(config: &CfdStudyConfig) -> (f64, f64, f64, f64) {
         -config.mesh.half_height_chords * chord,
         config.mesh.half_height_chords * chord,
     )
+}
+
+/// Radius (chords) inside which the leading-edge refinement size applies.
+pub(super) const LEADING_EDGE_REFINEMENT_INNER_CHORDS: f64 = 0.02;
+/// Radius (chords) beyond which the surface size applies again.
+pub(super) const LEADING_EDGE_REFINEMENT_OUTER_CHORDS: f64 = 0.15;
+/// Smallest leading-edge size, as a chord fraction.
+pub(super) const MIN_LEADING_EDGE_SIZE_CHORDS: f64 = 0.0005;
+
+/// Leading-edge target size in metres for the configured refinement level.
+///
+/// Level zero returns the surface size unchanged; each level halves it,
+/// bounded below by [`MIN_LEADING_EDGE_SIZE_CHORDS`].
+pub(in crate::mesh) fn leading_edge_size(config: &CfdStudyConfig, surface_size_m: f64) -> f64 {
+    let divisor = 2_f64.powi(config.mesh.leading_edge_refinement as i32);
+    (surface_size_m / divisor).max(MIN_LEADING_EDGE_SIZE_CHORDS * config.chord_m)
+}
+
+/// Wake refinement box `(x_min, x_max, y_min, y_max)` in metres: from the
+/// trailing-edge plane to the outlet, two chords above and below the chord line.
+pub(in crate::mesh) fn wake_box(config: &CfdStudyConfig) -> (f64, f64, f64, f64) {
+    let (_, max_x, _, _) = domain_bounds(config);
+    (0.0, max_x, -2.0 * config.chord_m, 2.0 * config.chord_m)
 }

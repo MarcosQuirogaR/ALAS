@@ -7,7 +7,7 @@
 //! The tables are the port's one deliberate change of medium: upstream writes
 //! them as constructor calls in Python, and here they are JSON. That makes
 //! this test do double duty. It checks the numbers agree, and it checks that
-//! the copy the crate embeds and the copy under `golden/` have not drifted --
+//! the copy the crate embeds and the copy under `golden/` have not drifted,
 //! two files with the same content is exactly the arrangement where they
 //! quietly stop having the same content.
 //!
@@ -188,7 +188,7 @@ fn every_engine_matches_the_reference() {
 #[test]
 fn every_nacelle_profile_matches_the_reference() {
     // The silhouette is derived from the engine's length rather than stored,
-    // so it is the one part of this table that is computed -- and a wrong
+    // so it is the one part of this table that is computed, and a wrong
     // station fraction draws a plausible nacelle of the wrong shape.
     let fixture: EnginesFixture = alas_testkit::load("config", "engines");
     let mut comparison = Comparison::new("alas-config::engines nacelle profiles", Tier::Closed);

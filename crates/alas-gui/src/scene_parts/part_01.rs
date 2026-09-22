@@ -9,16 +9,14 @@ use alas_perf::performance::build_vn_diagram;
 use alas_report::families::aerodynamics::{
     figure_aero_panel, figure_airfoil_reynolds, figure_drag_breakdown, figure_model_comparison,
     figure_mses_convergence, figure_mses_cp_contours, figure_mses_mach_contours,
-    figure_mses_pressure_distribution,
-    figure_optimized_aircraft_comparison, figure_polar_comparison, figure_span_loading,
-    figure_status_message, figure_vlm_flow, figure_vspaero_load_distribution,
-    figure_vspaero_polar, figure_vspaero_wake_convergence,
+    figure_mses_pressure_distribution, figure_optimized_aircraft_comparison,
+    figure_polar_comparison, figure_span_loading, figure_status_message, figure_vlm_flow,
+    figure_vspaero_load_distribution, figure_vspaero_polar, figure_vspaero_wake_convergence,
 };
 use alas_report::families::geometry::{
     figure_airfoil_evolution, figure_design_evolution, figure_exterior_3d, figure_geometry,
     figure_openvsp_cad_preview, figure_planform_comparison, figure_threeview,
-    figure_wireframe_empennage,
-    figure_wireframe_fuselage, figure_wireframe_wing,
+    figure_wireframe_empennage, figure_wireframe_fuselage, figure_wireframe_wing,
 };
 use alas_report::families::mass_balance::{
     figure_cg_envelope, figure_landing_gear_planform, figure_mass_breakdown,
@@ -81,8 +79,11 @@ pub fn localize_scene_for_display(mut scene: Scene) -> Scene {
         *title = localize_scene_text(title);
     }
     for element in &mut scene.elements {
-        if let SceneElement::Text { text, .. } = element {
-            *text = localize_scene_text(text);
+        match element {
+            SceneElement::Text { text, .. } | SceneElement::TextBlock { text, .. } => {
+                *text = localize_scene_text(text);
+            }
+            _ => {}
         }
     }
     scene
@@ -154,6 +155,17 @@ fn build_structures_preview(
 
 /// The live-preview scene for the unified aircraft viewer's current mode.
 pub fn build_preview_scene(state: &AppState) -> Option<Scene> {
+    // Exterior live preview and Sandbox must share one renderer and one
+    // section sampling policy. This keeps arbitrary sandbox stations, wing
+    // twists and fuselage lofts visible at the same fidelity in both places.
+    if state.preview_tab == PreviewTab::Exterior {
+        if let Some(scene) = crate::sandbox::scene::build_live_preview_scene(
+            state,
+            state.active_preview_camera().into(),
+        ) {
+            return Some(scene);
+        }
+    }
     let id = match state.preview_tab {
         PreviewTab::Cabin => "cabin_3d",
         PreviewTab::Exterior => state.selected_preview_id.as_str(),
@@ -244,7 +256,7 @@ pub fn build_page_preview_with_camera(
                 Ok(report) => report,
                 Err(error) => {
                     return Some(localize_scene_for_display(figure_status_message(
-                        "Mass and balance preview unavailable",
+                        &preview_unavailable_title(id),
                         &format!("Invalid structural mass-coordinate model: {error}"),
                         false,
                         Some(&theme),
@@ -260,6 +272,25 @@ pub fn build_page_preview_with_camera(
         _ => return None,
     };
     Some(localize_scene_for_display(scene))
+}
+
+/// The title a status figure carries when it stands in for preview `id`.
+///
+/// One `Err` arm serves the CG envelope, the landing-gear planform and the
+/// control-surface layout, and it used to hard-code
+/// "Mass and balance preview unavailable" for all three, so the Landing Gear
+/// page displayed an error titled for a different artefact. The panel title is
+/// already declared once, in [`crate::nav`], so the status figure takes it
+/// from there instead of restating it.
+pub(crate) fn preview_unavailable_title(id: &str) -> String {
+    let figure = crate::nav::all_pages()
+        .find(|page| page.preview == Some(id))
+        .and_then(|page| page.preview_title)
+        .unwrap_or("Preview");
+    crate::views::tr_fields(
+        "{figure} unavailable",
+        &[("figure", crate::views::tr(figure))],
+    )
 }
 
 /// The results-gallery scene for the current result selection.

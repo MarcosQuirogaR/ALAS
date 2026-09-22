@@ -6,17 +6,17 @@
 //!
 //! This is Phase 3's centerpiece check: the fixture is the actual nominal
 //! aircraft (`AircraftBuilder(GeometryConfig()).build(dv=None, ...)`), so
-//! comparing against it exercises every other module in this crate together
-//! -- all three of `AirfoilLibrary::get`'s name-resolution branches, the
+//! comparing against it exercises every other module in this crate together,
+//! all three of `AirfoilLibrary::get`'s name-resolution branches, the
 //! root section's `build_section` shaping, and both `asb::wing`/
-//! `asb::fuselage` lofting -- on real input rather than a synthetic probe.
+//! `asb::fuselage` lofting, on real input rather than a synthetic probe.
 //!
 //! Two tiers are in play, the same split `wing_structure`'s and
 //! `airfoil_library`'s own parity tests use. Every quantity native to
-//! `Wing`/`WingXSec`/`Fuselage`/`FuselageXSec`/`Airplane` themselves --
+//! `Wing`/`WingXSec`/`Fuselage`/`FuselageXSec`/`Airplane` themselves:
 //! positions, chords, twists, areas, spans, the mean aerodynamic chord, the
 //! aerodynamic center, the taper ratio, the fuselage stations, the returned
-//! `Airplane`'s reference quantities -- is closed-form arithmetic and is
+//! `Airplane`'s reference quantities, is closed-form arithmetic and is
 //! checked at `Tier::Closed`, the tier `docs/PORTING.md` names for this row.
 //! The wing sections' airfoil coordinate arrays are the one exception: the
 //! root and break sections pass through `build_section`'s cubic-spline

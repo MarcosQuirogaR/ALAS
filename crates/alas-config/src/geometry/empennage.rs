@@ -10,7 +10,7 @@
 //! scale when the aircraft is built, so what this struct holds is the shape of
 //! the empennage and not its size: the chords and tip positions describe a
 //! reference tail that the optimizer then grows or shrinks as one piece. The
-//! two offsets from the tail tip are the exception -- they place the surfaces
+//! two offsets from the tail tip are the exception; they place the surfaces
 //! along the fuselage, which fixes the moment arm every static-stability
 //! result depends on.
 //!
@@ -81,7 +81,7 @@ pub struct EmpennageConfig {
     #[config(
         label = "H-stab root twist",
         unit = "deg",
-        help = "Incidence of the horizontal stabiliser root -- usually slightly negative to trim the wing's nose-down pitching moment."
+        help = "Incidence of the horizontal stabiliser root, usually slightly negative to trim the wing's nose-down pitching moment."
     )]
     pub hstab_root_twist_deg: f64,
 
@@ -113,7 +113,7 @@ pub struct EmpennageConfig {
     #[config(
         label = "V-stab vertical offset",
         unit = "m",
-        help = "Vertical placement of the vertical-stabiliser root relative to the fuselage centerline -- where the fin meets the top of the tailcone."
+        help = "Vertical placement of the vertical-stabiliser root relative to the fuselage centerline, where the fin meets the top of the tailcone."
     )]
     pub vstab_z_m: f64,
 

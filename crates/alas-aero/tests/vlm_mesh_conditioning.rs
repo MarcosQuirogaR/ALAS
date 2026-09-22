@@ -6,8 +6,8 @@
 //! `AnalysisConfig::spanwise_resolution` multiplies a surface the geometry
 //! builder has already subdivided, so a large value produces sliver panels
 //! whose horseshoe legs approach collinearity. The linear solve stays accurate
-//! throughout -- the normalized residual sits at machine precision at every
-//! mesh measured -- while the circulation it returns stops being a flow field:
+//! throughout: the normalized residual sits at machine precision at every
+//! mesh measured; while the circulation it returns stops being a flow field:
 //! before this was guarded, the A320 at ten spanwise by one chordwise returned
 //! a lift coefficient of -2.1e7 with `converged == true` and every downstream
 //! finiteness check passing.

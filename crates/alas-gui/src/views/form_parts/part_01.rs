@@ -14,16 +14,21 @@ mod form_feedback;
 #[path = "../form_options.rs"]
 mod form_options;
 
-use form_feedback::{is_modified, paint_modified_indicator, record_modified};
+use form_feedback::{differs_from_default, modified_marker};
+pub(crate) use form_options::display_unit;
 use form_options::{
-    bounds, display_option, is_editable, leaf_decimals, number_step, readonly_unless,
-    resolved_options, value_as_str,
+    bounds, display_option, format_number, is_editable, leaf_decimals, number_step, optional_hint,
+    parse_number_or_sentinel, readonly_unless, resolved_options, sentinel_text, value_as_str,
 };
 
 /// The log-slider mapping a `weight_slider` field uses, matching the
 /// reference's 0.001..1000 logarithmic range.
 const WEIGHT_MIN: f64 = 0.001;
 const WEIGHT_MAX: f64 = 1000.0;
+
+/// The reset affordance of a modified field: U+21BA ANTICLOCKWISE OPEN CIRCLE
+/// ARROW, which the bundled default fonts cover (asserted in `form_tests`).
+const RESET_GLYPH: &str = "\u{21ba}";
 
 /// The narrowest readable form column and adaptive label bounds.
 const MIN_FORM_COLUMN_WIDTH: f32 = 300.0;
@@ -290,9 +295,12 @@ fn render_one(
                 None => return false,
             };
             let mut changed = false;
-            let modified_id = egui::Id::new(("alas-form-modified", id_prefix, field.name));
-
-            let modified = is_modified(ui, modified_id);
+            // One source for the marker and the reset arrow: the value the
+            // field holds against the default the schema declares. A field
+            // stays marked for as long as it differs, whatever the focus is
+            // doing, and the editor below never repeats the word inside its
+            // own value text.
+            let modified = !readonly && differs_from_default(slot, &leaf.value);
             let mut draw = |ui: &mut Ui| {
                 let mut text = RichText::new(&label);
                 if has_error {
@@ -300,35 +308,42 @@ fn render_one(
                 }
                 text = text.size(label_text_size(ui.available_width()));
                 if leaf.kind == Kind::Bool {
-                    ui.add_enabled_ui(!readonly, |ui| {
-                        changed = edit_leaf(
-                            ui,
-                            field,
-                            leaf.kind,
-                            slot,
-                            id_prefix,
-                            options.as_deref(),
-                            modified,
-                            &label,
-                        );
-                    })
-                    .response
-                    .on_hover_text(&help);
+                    ui.horizontal(|ui| {
+                        ui.add_enabled_ui(!readonly, |ui| {
+                            changed = edit_leaf(
+                                ui,
+                                field,
+                                leaf.kind,
+                                slot,
+                                id_prefix,
+                                options.as_deref(),
+                                &label,
+                            );
+                        })
+                        .response
+                        .on_hover_text(&help);
+                        modified_marker(ui, modified);
+                    });
                 } else {
                     ui.horizontal(|ui| {
                         ui.add(egui::Label::new(text).truncate())
                             .on_hover_text(&help);
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            // A framed reset glyph, not a bare ASCII arrow:
+                            // `<-` rendered as dim body text beside the label
+                            // with no frame, no colour coding and no legend,
+                            // and could not be told from the label itself.
                             if !readonly
                                 && *slot != leaf.value
                                 && ui
-                                    .add(egui::Button::new("<-").frame(false))
+                                    .add(egui::Button::new(RESET_GLYPH).small())
                                     .on_hover_text(tr("Reset this value"))
                                     .clicked()
                             {
                                 *slot = leaf.value.clone();
                                 changed = true;
                             }
+                            modified_marker(ui, modified && !changed);
                         });
                     });
                     ui.add_enabled_ui(!readonly, |ui| {
@@ -339,14 +354,12 @@ fn render_one(
                             slot,
                             id_prefix,
                             options.as_deref(),
-                            modified,
                             &label,
                         );
                     });
                 }
             };
             ui.vertical(&mut draw);
-            record_modified(ui, modified_id, changed);
             if changed {
                 edits.push(FormEdit {
                     label,
@@ -363,12 +376,19 @@ fn feedback_value(field: &Field, value: &Value) -> String {
         Value::String(value) => value.clone(),
         Value::Bool(value) => value.to_string(),
         Value::Null => tr("none"),
+        Value::Number(number) => match number.as_f64() {
+            // The echo quotes the value the editor shows, so it uses the same
+            // decimal policy rather than serde's full float rendering.
+            Some(v) => format_number(v, number_step(v, field.unit, leaf_decimals(field)).0),
+            None => number.to_string(),
+        },
         value => value.to_string(),
     };
-    if field.unit.is_empty() || !value.is_number() {
+    let unit = display_unit(field.unit);
+    if unit.is_empty() || !value.is_number() {
         text
     } else {
-        format!("{text} {}", field.unit)
+        format!("{text} {unit}")
     }
 }
 

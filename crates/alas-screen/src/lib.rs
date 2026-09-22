@@ -21,8 +21,7 @@ pub mod types;
 pub mod verify_mses;
 
 pub use refine::{
-    refine_candidate_3d, refine_candidate_3d_product, refine_candidate_3d_reference_compatibility,
-    ScreeningMassModel,
+    refine_candidate_3d, refine_candidate_3d_reference_compatibility, ScreeningMassModel,
 };
 pub use runner::{
     blend_scores, filter_names, run_airfoil_screening, run_airfoil_screening_product,

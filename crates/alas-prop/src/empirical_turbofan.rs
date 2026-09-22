@@ -3,7 +3,7 @@
 
 //! Empirical off-design thrust deck for transport turbofans.
 //!
-//! This implements the three-region Bartel--Young maximum-climb correlation
+//! This implements the three-region Bartel-Young maximum-climb correlation
 //! as published by OpenAP. It is deliberately separate from the conceptual
 //! fixed-area cycle: a mission deck must reproduce an installed engine's
 //! certified static rating and an explicitly sourced or estimated
@@ -12,7 +12,7 @@
 use crate::mission_turbofan::components::part_power_fuel_fraction;
 use crate::system::*;
 
-/// Data required by the Bartel--Young/OpenAP lapse correlation.
+/// Data required by the Bartel-Young/OpenAP lapse correlation.
 #[derive(Debug, Clone, PartialEq)]
 pub struct EmpiricalTurbofanDeck {
     /// Installed all-engine sea-level-static takeoff thrust, N.
@@ -285,7 +285,7 @@ impl PropulsionSystemModel for EmpiricalTurbofanModel {
             active_limits,
             residuals: Vec::new(),
             validity: ValidityStatus::Extrapolated {
-                reason: "thrust uses the Battel--Young/OpenAP correlation; fuel interpolates between declared ICAO takeoff and cruise-TSFC anchors and remains uncalibrated between anchors".to_owned(),
+                reason: "thrust uses the Bartel-Young/OpenAP correlation; fuel interpolates between declared ICAO takeoff and cruise-TSFC anchors and remains uncalibrated between anchors".to_owned(),
             },
             provenance: self.provenance.clone(),
             trace: None,
@@ -315,7 +315,7 @@ impl PropulsionSystemModel for EmpiricalTurbofanModel {
             maximum_shaft_power_w: None,
             active_limits: Vec::new(),
             validity: ValidityStatus::Extrapolated {
-                reason: "Bartel--Young/OpenAP empirical mission thrust deck".to_owned(),
+                reason: "Bartel-Young/OpenAP empirical mission thrust deck".to_owned(),
             },
             provenance: self.provenance.clone(),
         })

@@ -10,7 +10,7 @@
 //! by `#[derive(ConfigNode)]` rather than written by hand. The shape follows
 //! the reference implementation's: an ordered list of fields, each carrying
 //! what to call it, what unit it is in, what it means, and either its current
-//! value or -- when the field is itself a configuration group -- the same
+//! value or (when the field is itself a configuration group) the same
 //! description one level down.
 //!
 //! Two things the reference does at this boundary are deliberately not done
@@ -141,7 +141,7 @@ pub enum Kind {
     Optional,
     /// A list of numbers.
     NumberList,
-    /// A list of number pairs -- a small table.
+    /// A list of number pairs: a small table.
     TupleList,
     /// A nested configuration group.
     ///
@@ -158,8 +158,8 @@ pub enum Kind {
 
 /// Where a string field's accepted values come from.
 ///
-/// Most of these lists are owned by crates that sit above this one -- the
-/// airfoil library, the engine deck, the material database -- so this names
+/// Most of these lists are owned by crates that sit above this one (the
+/// airfoil library, the engine deck, the material database) so this names
 /// the list and something that can see both resolves it. The lists that
 /// depend on nothing are resolved by [`OptionSource::options`] here.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -197,10 +197,31 @@ pub enum OptionSource {
     StructuralMassMethod,
     /// Versioned propulsion-group mass method.
     PropulsionMassMethod,
+    /// Which method prices the engine pylons FLOPS itself omits.
+    PylonMassMethod,
+    /// Which method prices the cabin equipment and operating items.
+    CabinEquipmentMethod,
+    /// Which LTH operating-item relation an aircraft takes.
+    OperatingHaulClass,
     /// Which FLOPS wing bending-material factor is evaluated.
     FlopsWingBendingMethod,
+    /// Whether the FLOPS engine starter is inside the declared baseline mass.
+    FlopsStarterScope,
+    /// Whether the FLOPS engine nozzle is inside the declared baseline mass.
+    FlopsNozzleScope,
+    /// Blade material and pitch-change hardware of a turboprop propeller.
+    PropellerConstruction,
+    /// Whether the cargo compartments are loose-loaded or take unit load
+    /// devices.
+    CargoHoldLoading,
     /// The operating rule a design mission's reserves are sized under.
     FuelScheme,
+    /// The container or pallet loaded on the main cargo deck.
+    MainDeckUld,
+    /// The lower-hold container format, including the physical auto-selector.
+    LowerDeckUld,
+    /// How the cargo loader distributes payload between available positions.
+    CargoLoadingStrategy,
     /// The scalar the mission-sized design search minimises.
     ObjectiveKind,
     /// Whether the takeoff mass is a fixed input, closed by the mission up
@@ -235,14 +256,7 @@ impl OptionSource {
                 "currenttobest1bin",
                 "currenttobest1exp",
             ]),
-            Self::OptimizerMethod => Some(&[
-                "differential_evolution",
-                "feasibility_first_de",
-                "nsga2",
-                "turbo_1",
-                "cma_es",
-                "sqp",
-            ]),
+            Self::OptimizerMethod => Some(&["differential_evolution"]),
             Self::AircraftType => Some(&["passenger", "cargo"]),
             Self::MassArchitecture => Some(&[
                 "pure_flops_transport_v1",
@@ -261,6 +275,27 @@ impl OptionSource {
                 Some(&["reference_compatible", "flops_transport_v1"])
             }
             Self::FlopsWingBendingMethod => Some(&["simplified", "detailed"]),
+            Self::PylonMassMethod => Some(&["none", "lth_box_beam_v1"]),
+            Self::FlopsStarterScope => Some(&[
+                "separate_equation_89",
+                "included_in_baseline",
+                "hardware_included_system_unresolved",
+                "unknown_conservative_separate",
+            ]),
+            Self::FlopsNozzleScope => Some(&[
+                "included_in_baseline",
+                "separate_equation_78",
+                "outside_unmodelled",
+                "unknown",
+            ]),
+            Self::CabinEquipmentMethod => Some(&["flops_transport_v1", "lth_civil_transport_v1"]),
+            Self::OperatingHaulClass => Some(&["short_medium_haul", "long_haul"]),
+            Self::PropellerConstruction => Some(&[
+                "aluminium_double_acting",
+                "aluminium_single_acting",
+                "composite",
+            ]),
+            Self::CargoHoldLoading => Some(&["bulk", "containerized", "mixed"]),
             Self::FuelScheme => Some(&[
                 "easa_basic",
                 "faa_domestic",
@@ -268,6 +303,9 @@ impl OptionSource {
                 "study_convention",
                 "trip_fuel_only",
             ]),
+            Self::CargoLoadingStrategy => {
+                Some(&["target_cg", "min_pallets", "door_proximity", "uniform"])
+            }
             Self::ObjectiveKind => Some(&[
                 "block_fuel",
                 "takeoff_mass",

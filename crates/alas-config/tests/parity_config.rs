@@ -6,7 +6,7 @@
 //! interface about each of its fields.
 //!
 //! Both halves are compared at `exact`. A default is copied, not computed, so
-//! any difference at all is a transposed digit -- and a transposed digit here
+//! any difference at all is a transposed digit, and a transposed digit here
 //! produces a plausible aircraft rather than a failure, which is the worst
 //! kind of defect this program can have. The form description is compared for
 //! the same reason one step removed: a field offered with the wrong unit or
@@ -35,11 +35,15 @@
 //! * The structures enable/station help names the native structural wing-mass
 //!   centroid consumer. Both old and corrected prose are pinned below; values,
 //!   field order, and exact comparison remain unchanged.
-//! * The seven solver/mission help fields listed by
+//! * The solver/mission help fields listed by
 //!   [`solver_agnostic_help_correction`] remove retired implementation
 //!   attribution from product-facing prose. Their corrected text and the
 //!   frozen reference text are both compared exactly below; no tolerance is
 //!   widened and no schema/value contract is relaxed.
+//! * `strategy`, `seed_near_initial_design` and `seed_perturbation_fraction`
+//!   also changed *label*, not only help, to say they are read only by the
+//!   frozen reference-compatibility replay now that L-SHADE is the one
+//!   product search kernel; see [`solver_agnostic_label_correction`].
 //! * The active transport planform adds four explicit side-of-body/kink
 //!   fields to `WingConfig`. The frozen Python schema has none of them, so the
 //!   absent upstream fields and the source-corrected Rust values/schema are
@@ -61,13 +65,28 @@
 //!   instead of the historical airline name. The serialized identifiers
 //!   ('Ryanair', 'Iberia', 'Emirates') and every preset value are unchanged;
 //!   both the corrected and frozen prose are pinned below.
+//! * `PropulsionCycleConfig` now carries the two conceptual free-turbine
+//!   design inputs `turboprop_overall_pressure_ratio` and
+//!   `turboprop_turbine_inlet_temperature_k`. The frozen Python cycle is
+//!   turbofan-only and has neither, so they are native additions whose
+//!   defaults and migration are pinned by
+//!   `propulsion::tests::older_cycle_configs_receive_explicit_turboprop_design_defaults`.
+//! * The three structural-screening requirements (`ultimate_load_factor`,
+//!   `dive_speed_m_s`, `limit_load_factor_neg`) keep their frozen values and
+//!   names, while their help no longer states a certification result the
+//!   project has not established. Both the corrected and the frozen prose are
+//!   pinned below; no value, bound or schema entry changed.
+//! * The three cargo-deck fields (`main_deck_uld`, `lower_deck_uld`,
+//!   `loading_strategy`) offer an option list the frozen Python schema did
+//!   not. The list membership is owned by `cabin::cargo`'s own schema test;
+//!   here both the frozen absence and the product list are pinned.
 //! * The four vortex-lattice mesh resolutions diverge in value and in help.
 //!   The frozen Python loop mesh is one chordwise panel, which samples the
 //!   mean camber line only where it is zero and so makes every section a
 //!   flat plate; the measurements behind the product values, cross-checked
-//!   against AeroSandbox on identical geometry, are in
-//!   `.agent/reports/2026-09-11-vlm-resolution-sensitivity.html` and
-//!   summarized in `alas_config::analysis`'s module doc. Both the frozen
+//!   against AeroSandbox on identical geometry, are from an internal VLM
+//!   resolution-sensitivity study (2026-09-11) and summarized in
+//!   `alas_config::analysis`'s module doc. Both the frozen
 //!   and the corrected value are pinned below.
 //!
 //! `label` is compared always, including where it was derived from the field
@@ -192,7 +211,7 @@ fn checked_types() -> Vec<(&'static str, Box<dyn Checkable>)> {
         // those fields. See the note in `golden/generators/gen_config.py`.
         ("EngineConfig", Box::new(EngineConfig::default())),
         // The aggregate. Its own fields are the preset name and the two
-        // airports; what this entry pins down is the composition -- which
+        // airports; what this entry pins down is the composition, which
         // groups a run is made of, in which order the settings screen lists
         // them, and that each arrives at its own defaults.
         ("ALASConfig", Box::new(AlasConfig::default())),
@@ -248,6 +267,51 @@ fn every_field_description_matches_the_reference() {
             &config.schema(),
             &entry.schema,
             &entry.declared,
+        );
+    }
+    comparison.finish();
+}
+
+/// The two free-turbine design inputs are absent from the frozen Python
+/// cycle, so the comparisons above skip them rather than report every saved
+/// file as a parity drift. Their defaults are pinned here instead, on both
+/// sides, so "native addition" does not quietly become "unchecked value":
+/// `propulsion`'s own migration test proves an older file receives them and
+/// that they reach the form with a unit, but not what they are worth.
+///
+/// SI: the pressure ratio is dimensionless, the turbine inlet temperature is
+/// a total temperature in kelvin. Both are conceptual design-cycle
+/// assumptions, not certified engine data, which is what their help says.
+#[test]
+fn the_native_turboprop_design_inputs_are_absent_upstream_and_pinned_here() {
+    let fixture = fixture();
+    let mut comparison = Comparison::new("alas-config turboprop design cycle", Tier::Exact);
+
+    let defaults = serde_json::to_value(PropulsionCycleConfig::default()).unwrap();
+    for (key, expected) in [
+        ("turboprop_overall_pressure_ratio", serde_json::json!(15.0)),
+        (
+            "turboprop_turbine_inlet_temperature_k",
+            serde_json::json!(1400.0),
+        ),
+    ] {
+        for type_key in ["PropulsionCycleConfig", "ALASConfig"] {
+            let frozen = &fixture.types.get(type_key).unwrap().defaults;
+            let frozen = if type_key == "ALASConfig" {
+                frozen.get("propulsion_cycle").unwrap()
+            } else {
+                frozen
+            };
+            comparison.exact(
+                &format!("{type_key}.{key}: frozen Python field absent"),
+                &frozen.get(key).is_some(),
+                &false,
+            );
+        }
+        comparison.exact(
+            &format!("PropulsionCycleConfig.{key}: product default"),
+            defaults.get(key).unwrap_or(&Value::Null),
+            &expected,
         );
     }
     comparison.finish();
@@ -340,19 +404,17 @@ fn compare_values(comparison: &mut Comparison, path: &str, actual: &Value, expec
 /// configuration. The reference values remain checked explicitly so a product
 /// optimization cannot silently become a parity drift.
 fn product_default_correction(path: &str) -> Option<(Value, Value)> {
-    if path.ends_with(".run_sol_vibration_sine") {
-        Some((Value::Bool(true), Value::Bool(false)))
-    } else if path.ends_with(".freq_sweep_max_hz") {
+    if path.ends_with(".freq_sweep_max_hz") {
         Some((serde_json::json!(500.0), serde_json::json!(60.0)))
     } else if path.ends_with(".n_modes") {
         Some((serde_json::json!(30), serde_json::json!(16)))
     }
     // The vortex-lattice mesh. Upstream evaluates the optimizer loop at one
     // chordwise panel, which samples the mean camber line only at the leading
-    // and trailing edges -- where it is zero -- so every section is a flat
+    // and trailing edges (where it is zero) so every section is a flat
     // plate and the search cannot see camber at all. Measured over four
     // presets and cross-checked against AeroSandbox 4.2.8 on identical
-    // geometry (`.agent/reports/2026-09-11-vlm-resolution-sensitivity.html`):
+    // geometry in an internal VLM resolution-sensitivity study (2026-09-11):
     // that costs 1.1-4.1 deg of cruise attitude, -14.4 to +2.9 % of L/D, and
     // it mis-ranks neighbouring candidates (Spearman 0.77). Eight panels rank
     // them exactly. The spanwise fields move the other way: the builder has
@@ -373,6 +435,23 @@ fn product_default_correction(path: &str) -> Option<(Value, Value)> {
     // `alas_geom::aircraft::spanwise`.
     else if path.ends_with(".wing.n_subdivisions") || path == "WingConfig.n_subdivisions" {
         Some((serde_json::json!(8), serde_json::json!(24)))
+    }
+    // The native worker count. The frozen value is a literal one; the product
+    // default is `0`, meaning "resolve against this machine", which the
+    // product L-SHADE search uses to evaluate each generation's batch in
+    // parallel (measured 2.24x on the B787-9 and 2.76x on AVE at eight
+    // workers, with the evaluation count and the winner unchanged, on the
+    // predecessor staged search this replaced). The frozen
+    // reference-compatibility replay is deliberately *not* covered by that:
+    // its generation loop batches only when a configuration explicitly asks
+    // for more than one worker, because a batched generation defers the
+    // population update and is a different algorithm from the serial one.
+    // See `SolverSettings::resolved_workers` and the guard in
+    // `alas_opt::DesignOptimizer::run_search`.
+    else if path.ends_with(".optimizer.solver.workers")
+        || path == "OptimizerConfig.solver.workers"
+    {
+        Some((serde_json::json!(1), serde_json::json!(0)))
     } else {
         None
     }
@@ -393,7 +472,7 @@ fn compare_node(
     compare_transport_planform_schema(comparison, label, node, expected_fields);
 
     // A field the interface never shows is omitted by both sides, so the two
-    // lists are directly comparable -- and a field one side hides and the
+    // lists are directly comparable, and a field one side hides and the
     // other does not shows up here as an ordering disagreement, which is
     // exactly what it is.
     let fields: Vec<&Field> = node
@@ -412,6 +491,7 @@ fn compare_node(
                             | "structural_mass_method"
                             | "propulsion_mass_method"
                             | "flops_structure"
+                            | "flops_turboprop"
                             | "geometric_component_stations"
                     ))
         })
@@ -620,8 +700,8 @@ fn compare_transport_planform_schema(
 }
 
 fn is_native_config_field(path: &str, key: &str) -> bool {
-    (matches!(key, "fuel_policy" | "fuel_tanks")
-        && (path.ends_with("AlasConfig") || path.is_empty()))
+    (matches!(key, "fuel_policy" | "fuel_tanks" | "downstream")
+        && (path.ends_with("AlasConfig") || path.ends_with("ALASConfig") || path.is_empty()))
         // Source-backed landing-gear references and heterogeneous bogie
         // counts are native additions; the frozen Python schema predates
         // them. Their values are checked by landing-gear unit/config tests.
@@ -645,8 +725,15 @@ fn is_native_config_field(path: &str, key: &str) -> bool {
                 | "oei_asymmetric_trim_cd"
                 | "oei_windmilling_cd"
         ) && (path.ends_with("PerformanceConfig") || path.ends_with(".performance")))
-        || (matches!(key, "objective" | "design_space")
-            && (path.ends_with("OptimizerConfig") || path.ends_with(".optimizer")))
+        // The mission-sized objective, the design-space boundary, the
+        // correlation validity domain and the D01-D03 relaxation policy are
+        // native product additions; the frozen Python optimizer schema
+        // predates all four. Their values, bounds and review are checked by
+        // the optimizer config tests and by `optimizer::policy_review`.
+        || (matches!(
+            key,
+            "objective" | "design_space" | "plausibility" | "relaxation"
+        ) && (path.ends_with("OptimizerConfig") || path.ends_with(".optimizer")))
         // Native speed-reference switch for the climb/descent legs. Its
         // serialization skips the `TrueAirspeed` default, so a legacy file
         // and the frozen default tree round-trip unchanged.
@@ -670,15 +757,36 @@ fn is_native_config_field(path: &str, key: &str) -> bool {
         // inputs are native product additions. Their migration, schema and
         // source-evidence contracts are checked by mass-architecture and
         // preset-FLOPS tests rather than the frozen Python fixture.
-        || (matches!(key, "schema_version" | "mass_architecture" | "flops_transport")
-            && (path.ends_with("MassModelConfig") || path.ends_with(".mass_model")))
         || (matches!(
             key,
-            "method" | "finite_difference_step" | "constraint_tolerance"
+            "schema_version" | "mass_architecture" | "flops_transport" | "flops_turboprop"
+        )
+            && (path.ends_with("MassModelConfig") || path.ends_with(".mass_model")))
+        // The conceptual free-turbine design cycle. The frozen Python
+        // propulsion configuration models a turbofan only and declares
+        // neither field; their defaults and the migration that supplies them
+        // to an older saved file are checked by
+        // `older_cycle_configs_receive_explicit_turboprop_design_defaults`.
+        || (matches!(
+            key,
+            "turboprop_overall_pressure_ratio" | "turboprop_turbine_inlet_temperature_k"
+        ) && (path.ends_with("PropulsionCycleConfig")
+            || path.ends_with(".propulsion_cycle")))
+        || (matches!(
+            key,
+            "method"
+                | "finite_difference_step"
+                | "constraint_tolerance"
+                | "convergence_stagnation_generations"
         ) && (path.ends_with("SolverSettings") || path.ends_with(".solver")))
         || (key == "random_force_psd_n2_per_hz"
             && (path.ends_with("StructuresConfig") || path.ends_with(".structures")))
-        || (key == "optimize_passenger_capacity"
+        // The cargo capacity objective (clarified ledger App Features 2,
+        // decision D10) is a native product addition; the frozen Python
+        // requirements schema predates it. Its default, valid domain,
+        // round-trip and schema entry are checked by the
+        // `DesignRequirements` unit tests.
+        || (matches!(key, "optimize_passenger_capacity" | "cargo_objective_kg")
             && (path.ends_with("DesignRequirements") || path.ends_with(".requirements")))
         || (matches!(
             key,
@@ -764,6 +872,18 @@ fn compare_field(
             &expected.get("label").and_then(Value::as_str).unwrap_or(""),
             &frozen_label,
         );
+    } else if let Some((source_corrected, frozen_python)) = solver_agnostic_label_correction(label)
+    {
+        comparison.exact(
+            &format!("{label}.label: source-corrected Rust value"),
+            &field.label,
+            &source_corrected,
+        );
+        comparison.exact(
+            &format!("{label}.label: frozen Python value"),
+            &expected.get("label").and_then(Value::as_str).unwrap_or(""),
+            &frozen_python,
+        );
     } else {
         compare_string(
             comparison,
@@ -794,7 +914,7 @@ fn compare_field(
     // required to add, so what is checked instead is that it was added.
     if label.ends_with(".fuel_volume_penalty_scale") {
         assert_eq!(field.help, "Deprecated compatibility field. MTOW minus zero-fuel mass is a mass allowance, not mission-required fuel, so it is no longer used by the optimizer. Tank capacity will be constrained against mission fuel plus the selected reserve policy.");
-        assert_eq!(expected["help"], "Penalizes the wing's physical usable fuel-tank volume (physics.performance.wing_fuel_volume_m3, Torenbeek geometric estimate) being too small to hold the fuel mass the weight & balance analysis says this design actually needs -- a wing that's too thin/small/tapered to carry its own required fuel is not a buildable aircraft, independent of whether the MTOW fuel-mass budget itself closes. Quadratic on the fractional shortfall (required_fuel - tank_capacity) / required_fuel.");
+        assert_eq!(expected["help"], "Penalizes the wing's physical usable fuel-tank volume (physics.performance.wing_fuel_volume_m3, Torenbeek geometric estimate) being too small to hold the fuel mass the weight & balance analysis says this design actually needs: a wing that's too thin/small/tapered to carry its own required fuel is not a buildable aircraft, independent of whether the MTOW fuel-mass budget itself closes. Quadratic on the fractional shortfall (required_fuel - tank_capacity) / required_fuel.");
     } else if label.ends_with(".share_pct") {
         comparison.exact(
             &format!("{label}.help: product seat-share semantics"),
@@ -863,6 +983,19 @@ fn compare_field(
         );
     } else if let Some((source_corrected, frozen_python)) =
         passenger_mass_authority_help_correction(label)
+    {
+        comparison.exact(
+            &format!("{label}.help: source-corrected Rust value"),
+            &field.help,
+            &source_corrected,
+        );
+        comparison.exact(
+            &format!("{label}.help: frozen Python value"),
+            &expected.get("help").and_then(Value::as_str).unwrap_or(""),
+            &frozen_python,
+        );
+    } else if let Some((source_corrected, frozen_python)) =
+        structural_screening_help_correction(label)
     {
         comparison.exact(
             &format!("{label}.help: source-corrected Rust value"),
@@ -1019,7 +1152,7 @@ fn wing_centroid_help_correction(label: &str) -> Option<(&'static str, &'static 
     if label == "StructuresConfig.enabled" || label.ends_with(".structures.enabled") {
         Some((
             "Size a generic wingbox (skin/spars/ribs) for the optimized design's main wing, write NASTRAN .bdf files, and compute theoretical (no-NASTRAN) deformations/stresses/frequencies as part of a normal Run, populating the Structural Analysis Results tab. This switch controls the downstream structural solve; the configured spars, materials, and gauges still define the main-wing mass centroid used by weight and balance, without replacing the Torenbeek total wing mass.",
-            "Size a generic wingbox (skin/spars/ribs) for the optimized design's main wing, write NASTRAN .bdf files, and compute theoretical (no-NASTRAN) deformations/stresses/frequencies as part of a normal Run, populating the Structural Analysis Results tab. Does not affect the mass model, CG, or optimizer -- purely a downstream analysis, like MSES/Propulsion Analysis.",
+            "Size a generic wingbox (skin/spars/ribs) for the optimized design's main wing, write NASTRAN .bdf files, and compute theoretical (no-NASTRAN) deformations/stresses/frequencies as part of a normal Run, populating the Structural Analysis Results tab. Does not affect the mass model, CG, or optimizer, purely a downstream analysis, like MSES/Propulsion Analysis.",
         ))
     } else if label == "StructuresConfig.spanwise_stations"
         || label.ends_with(".structures.spanwise_stations")
@@ -1033,8 +1166,53 @@ fn wing_centroid_help_correction(label: &str) -> Option<(&'static str, &'static 
     }
 }
 
+/// Labels that changed to say a field is now read only by the frozen
+/// reference-compatibility replay, alongside [`solver_agnostic_help_correction`]
+/// for the same fields.
+fn solver_agnostic_label_correction(label: &str) -> Option<(&'static str, &'static str)> {
+    match label {
+        "OptimizerConfig.solver.strategy" | "ALASConfig.optimizer.solver.strategy" => Some((
+            "DE mutation/crossover strategy (parity replay only)",
+            "DE mutation/crossover strategy",
+        )),
+        "OptimizerConfig.solver.seed_near_initial_design"
+        | "ALASConfig.optimizer.solver.seed_near_initial_design" => Some((
+            "Seed search near the initial design (parity replay only)",
+            "Seed search near the initial design",
+        )),
+        "OptimizerConfig.solver.seed_perturbation_fraction"
+        | "ALASConfig.optimizer.solver.seed_perturbation_fraction" => Some((
+            "Seed cluster perturbation size (parity replay only)",
+            "Seed cluster perturbation size",
+        )),
+        _ => None,
+    }
+}
+
 fn solver_agnostic_help_correction(label: &str) -> Option<(&'static str, &'static str)> {
     match label {
+        // `strategy`, `tolerance`, `seed_near_initial_design` and
+        // `seed_perturbation_fraction` all changed prose to say which driver
+        // actually reads them now that L-SHADE is the one product kernel
+        // (see `search_methods::lshade_de`); the frozen text is unchanged.
+        "OptimizerConfig.solver.strategy" | "ALASConfig.optimizer.solver.strategy" => Some((
+            "SciPy differential_evolution strategy name (e.g. 'best1bin', 'rand1bin', 'best2bin'), read only by the frozen reference-compatibility replay used for regression comparison against the Python baseline. The product search always uses current-to-pbest/1/bin and ignores this field.",
+            "SciPy differential_evolution strategy name (e.g. 'best1bin', 'rand1bin', 'best2bin'): controls how new candidate designs are generated from the population each generation.",
+        )),
+        "OptimizerConfig.solver.tolerance" | "ALASConfig.optimizer.solver.tolerance" => Some((
+            "The search stops early once two things both hold: the population's normalized design-space spread has fallen below this fraction of the bounds, and the best feasible cost's relative improvement has stayed below this fraction for the stagnation window below.",
+            "Relative tolerance for convergence; the solver stops early once the population's cost spread falls below this.",
+        )),
+        "OptimizerConfig.solver.seed_near_initial_design"
+        | "ALASConfig.optimizer.solver.seed_near_initial_design" => Some((
+            "Initialize the population as a tight cluster of small perturbations around the initial/preset design (plus the design itself, unperturbed) instead of SciPy's default uniform latin-hypercube coverage of the whole bounds space. Read only by the frozen reference-compatibility replay; the product L-SHADE search seeds its population's first individual directly from the supplied design instead and does not read this field.",
+            "Initialize the population as a tight cluster of small perturbations around the initial/preset design (plus the design itself, unperturbed) instead of SciPy's default uniform latin-hypercube coverage of the whole bounds space. Guarantees at least one known-valid, physically-balanced design is in generation 0, and lets the solver refine from there instead of having to rediscover CG/stability balance from scratch across the full 16-D space. Disable to fall back to the old full-space exploration (e.g. if you specifically want to explore far from the initial design).",
+        )),
+        "OptimizerConfig.solver.seed_perturbation_fraction"
+        | "ALASConfig.optimizer.solver.seed_perturbation_fraction" => Some((
+            "Size of the initial random perturbation around the initial design, as a fraction of each design variable's (upper - lower) bound range. Read only by the frozen reference-compatibility replay when seed_near_initial_design is enabled; the product L-SHADE search does not read this field.",
+            "Size of the initial random perturbation around the initial design, as a fraction of each design variable's (upper - lower) bound range. Only used when seed_near_initial_design is enabled. Small values (e.g. 0.05) start with a tight, mostly-valid cluster; larger values explore more broadly from the start at the cost of more of the population starting off invalid.",
+        )),
         "MSESConfig.alpha_sweep_n_points" | "ALASConfig.mses.alpha_sweep_n_points" => Some((
             "Number of alpha points in the MSES polar sweep. Kept small relative to the native VLM sweep (analysis.sweep_n_points) since each MSES point is a real viscous-compressible solve (~1-2s) rather than a linear-algebra VLM solve.",
             "Number of alpha points in the MSES polar sweep. Kept small relative to AeroSandbox's own VLM sweep (analysis.sweep_n_points) since each MSES point is a real viscous-compressible solve (~1-2s) rather than a linear-algebra VLM solve.",
@@ -1042,7 +1220,7 @@ fn solver_agnostic_help_correction(label: &str) -> Option<(&'static str, &'stati
         "WingConfig.n_subdivisions"
         | "GeometryConfig.wing.n_subdivisions"
         | "ALASConfig.geometry.wing.n_subdivisions" => Some((
-            "Spanwise panels across the whole wing semispan for the vortex-lattice solver. This is an absolute count, not a count per section: a planform with a side-of-body station and a kink gets the same mesh density as one without, and adding a station no longer changes the panel count underneath a search. Every planform station -- root, side-of-body, kink, tip -- is always kept as a panel edge whatever the count, so refining the mesh never averages a kink away. The default of 24 is converged: a twelve-fold refinement moves the trimmed cruise attitude by 0.01 deg.",
+            "Spanwise panels across the whole wing semispan for the vortex-lattice solver. This is an absolute count, not a count per section: a planform with a side-of-body station and a kink gets the same mesh density as one without, and adding a station no longer changes the panel count underneath a search. Every planform station (root, side-of-body, kink, tip) is always kept as a panel edge whatever the count, so refining the mesh never averages a kink away. The default of 24 is converged: a twelve-fold refinement moves the trimmed cruise attitude by 0.01 deg.",
             "Spanwise panel refinement per wing section for the vortex-lattice solver. Higher = more accurate, slower.",
         )),
         "EmpennageConfig.n_subdivisions"
@@ -1053,7 +1231,7 @@ fn solver_agnostic_help_correction(label: &str) -> Option<(&'static str, &'stati
         )),
         "AnalysisConfig.spanwise_resolution"
         | "ALASConfig.analysis.spanwise_resolution" => Some((
-            "Multiplier on each surface's built-in spanwise panel subdivision for the vortex-lattice solver. Leave at 1: the geometry builder has already subdivided every surface (24 strips per semispan on the main wing), and that is converged -- refining it further moves the trimmed cruise attitude by 0.01 deg. Values above 2 are rejected, because this multiplier re-applies a cosine spacing inside each existing strip and the induced drag then stops converging. Part of the Fidelity preset.",
+            "Multiplier on each surface's built-in spanwise panel subdivision for the vortex-lattice solver. Leave at 1: the geometry builder has already subdivided every surface (24 strips per semispan on the main wing), and that is converged, refining it further moves the trimmed cruise attitude by 0.01 deg. Values above 2 are rejected, because this multiplier re-applies a cosine spacing inside each existing strip and the induced drag then stops converging. Part of the Fidelity preset.",
             "Multiplier on each surface's built-in spanwise panel subdivision for the vortex-lattice solver. Higher = finer mesh, slower. Part of the Fidelity preset.",
         )),
         "AnalysisConfig.chordwise_resolution"
@@ -1063,8 +1241,8 @@ fn solver_agnostic_help_correction(label: &str) -> Option<(&'static str, &'stati
         )),
         "AnalysisConfig.fine_spanwise_resolution"
         | "ALASConfig.analysis.fine_spanwise_resolution" => Some((
-            "Spanwise panel resolution used ONLY for the once-per-run final/reported analysis (drag polar, trimmed cruise point, neutral point) -- not the optimizer loop. Leave at 1 for the same reason as the in-loop field: the span is already converged, so raising this doubles the panel count to change the answer by about 1 percent. Spend the panels on fine_chordwise_resolution instead.",
-            "Spanwise panel resolution used ONLY for the once-per-run final/reported analysis (drag polar, trimmed cruise point, neutral point) -- not the optimizer loop. Higher fidelity where speed doesn't matter.",
+            "Spanwise panel resolution used ONLY for the once-per-run final/reported analysis (drag polar, trimmed cruise point, neutral point), not the optimizer loop. Leave at 1 for the same reason as the in-loop field: the span is already converged, so raising this doubles the panel count to change the answer by about 1 percent. Spend the panels on fine_chordwise_resolution instead.",
+            "Spanwise panel resolution used ONLY for the once-per-run final/reported analysis (drag polar, trimmed cruise point, neutral point), not the optimizer loop. Higher fidelity where speed doesn't matter.",
         )),
         "AnalysisConfig.fine_chordwise_resolution"
         | "ALASConfig.analysis.fine_chordwise_resolution" => Some((
@@ -1093,27 +1271,69 @@ fn solver_agnostic_help_correction(label: &str) -> Option<(&'static str, &'stati
             "Total pressure ratio through the core compressors (LPC x HPC combined, NOT including the fan). Feeds mission compressor sizing (split into a fixed LPC ratio + a solved HPC ratio) and the Propulsion Analysis cycle's compressor_pressure_ratio.",
             "Total pressure ratio through the core compressors (LPC x HPC combined, NOT including the fan). Feeds SUAVE's compressor sizing (split into a fixed LPC ratio + a solved HPC ratio) and the Propulsion Analysis cycle's compressor_pressure_ratio.",
         )),
+        // The corrected prose no longer says parallel evaluation is free,
+        // because it is not, for the one driver where it still is not: the
+        // frozen reference-compatibility replay defers a whole generation
+        // only when more than one worker is requested, which changes the
+        // trial interleaving and is preserved that way for exact regression
+        // comparison against the Python baseline
+        // (`seeded_example_replays_the_python_winner`). The product
+        // L-SHADE search is the case where the count really does change only
+        // the wall time: it always evaluates one generation as a single
+        // deterministic batch, so a seeded run replays bit-identically at
+        // any worker count, and the text now says so.
         "OptimizerConfig.solver.workers" | "ALASConfig.optimizer.solver.workers" => Some((
-            "Number of native worker threads for differential-evolution candidate batches (>1 enables parallel evaluation; non-positive values are treated as 1). External evaluator adapters remain serial because they own mutable process/session state.",
-            "Number of worker processes for parallel evaluation (>1 uses multiprocessing). Requires a picklable objective -- already the case for ALAS's optimizer.",
+            "Number of native worker threads for candidate batches. 0 (the default) picks a count from the machine's available parallelism; a positive value is used exactly as written; negative values are treated as 1. The product L-SHADE search always evaluates one whole generation as a single deterministic batch, in the order it built the generation from its seed, so this setting changes only how long a batch takes, never which points are evaluated or the winner: a seeded run replays bit-identically at any worker count. The frozen reference-compatibility replay is the one exception: its legacy driver defers a whole generation only when more than one worker is requested, which changes the trial interleaving and is preserved that way for exact regression comparison against the Python baseline. External evaluator adapters remain serial because they own mutable process/session state.",
+            "Number of worker processes for parallel evaluation (>1 uses multiprocessing). Requires a picklable objective, already the case for ALAS's optimizer.",
         )),
         _ => None,
     }
 }
 
-/// `passenger_mass_kg` now documents the product passenger-mass authority
+/// `passenger_mass_kg` documents the product passenger-mass authority
 /// decision: every seated passenger, of any class, is priced at this
 /// combined (occupant + checked bag) mass, and the per-class occupant slot
-/// is the derived remainder. Only the prose changed; the value and every
-/// other field are unchanged, and both texts stay pinned here.
+/// is the derived remainder. The prose also no longer presents the shipped
+/// 100 kg as a standard: AC 120-27F is operator weight-and-balance guidance,
+/// so the text names the number as a project load-case default and says what
+/// must be recorded before another value is used operationally. Only the
+/// prose changed; the value and every other field are unchanged, and both
+/// texts stay pinned here.
 fn passenger_mass_authority_help_correction(label: &str) -> Option<(&'static str, &'static str)> {
     match label {
         "DesignRequirements.passenger_mass_kg" | "ALASConfig.requirements.passenger_mass_kg" => {
             Some((
-                "Combined average mass per occupant (body + baggage). FAA AC 120-27E standard is 100 kg; airlines may use 90-105 kg. This is the single load-case authority for every product path (report, GUI preview, pipeline, export and the optimizer): every seated passenger, of any class, is priced at this combined mass, with cabin.passenger.checked_bag_mass_kg as the baggage share and the occupant slot the remainder. Per-class seat masses (e.g. a named cabin preset's business/economy figures) are cosmetic/geometry seeds only and are overwritten by this value.",
+                "Combined average mass per occupant (body + baggage). The shipped 100 kg is a transparent project load-case default; FAA AC 120-27F is operator weight-and-balance guidance and does not establish a universal passenger mass. Record the operator, population, baggage method and date before using another value operationally. This remains the single load-case authority for report, GUI preview, pipeline, export and optimizer paths: cabin.passenger.checked_bag_mass_kg supplies the baggage share and the occupant slot the remainder.",
                 "Combined average mass per occupant (body + baggage). FAA AC 120-27E standard is 100 kg; airlines may use 90-105 kg.",
             ))
         }
+        _ => None,
+    }
+}
+
+/// The three structural-screening requirements keep their frozen values,
+/// names, bounds and schema entries. Only their prose changed: the frozen
+/// text presented a shipped default as a certification result (an amendment
+/// clause, a CS-25 paragraph, a derived VC relation), and the product text
+/// names the same number as a screening input whose certification basis the
+/// reader must establish. Both texts stay pinned so this remains a recorded
+/// documentation decision rather than dropped parity coverage.
+fn structural_screening_help_correction(label: &str) -> Option<(&'static str, &'static str)> {
+    match label {
+        "DesignRequirements.ultimate_load_factor"
+        | "ALASConfig.requirements.ultimate_load_factor" => Some((
+            "Structural screening input fed into the Torenbeek mass formulas. The shipped 3.75 is 1.5 x 2.5; verify the selected certification basis, amendment, aircraft category and load case before treating it as an airworthiness value.",
+            "Limit load factor times the 1.5 safety margin, fed into the Torenbeek structural mass formulas.",
+        )),
+        "DesignRequirements.dive_speed_m_s" | "ALASConfig.requirements.dive_speed_m_s" => Some((
+            "Structural screening dive speed, fed into the Torenbeek mass formulas and the V-n diagram. The project may derive VC as VD/1.25 for this study; verify speed type, altitude/Mach envelope, certification basis and amendment before treating that relation as an airworthiness result.",
+            "Structural design dive speed, fed into the Torenbeek structural mass formulas. Also VD on the V-n diagram; design cruise speed VC is derived as VD/1.25 (CS-25.335(b) minimum margin) rather than a separate field.",
+        )),
+        "DesignRequirements.limit_load_factor_neg"
+        | "ALASConfig.requirements.limit_load_factor_neg" => Some((
+            "Negative V-n screening input. The shipped -1.0 follows the large-aeroplane CS-25 reference case up to VC; verify the selected certification basis, amendment, speed range and category before using it for qualification. The positive limit value is derived as ultimate_load_factor / 1.5.",
+            "CS-25.337(c) negative limit load factor for the V-n diagram. The positive limit load factor is derived as ultimate_load_factor / 1.5 (CS-25.303) rather than a separate field.",
+        )),
         _ => None,
     }
 }
@@ -1207,17 +1427,36 @@ fn compare_leaf(comparison: &mut Comparison, path: &str, leaf: &LeafField, expec
     let expected_options = expected.get("options");
     match leaf.options {
         Some(source) => {
-            comparison.exact(
-                &format!("{path}: names an option list"),
-                &true,
-                &expected_options.is_some(),
-            );
-            if let Some(resolved) = source.options() {
+            // Reaching this arm is itself the statement that the product
+            // field offers a list, so for the cargo-deck fields what is left
+            // to check is the frozen side: upstream offered none.
+            if product_cargo_option_field(path).is_some() {
                 comparison.exact(
-                    &format!("{path}.options"),
-                    &serde_json::to_value(resolved).unwrap(),
-                    expected_options.unwrap_or(&Value::Null),
+                    &format!("{path}: frozen Python field has no option list"),
+                    &expected_options.is_some(),
+                    &false,
                 );
+            } else {
+                comparison.exact(
+                    &format!("{path}: names an option list"),
+                    &true,
+                    &expected_options.is_some(),
+                );
+            }
+            if let Some(resolved) = source.options() {
+                if let Some(Some(product_list)) = product_cargo_option_field(path) {
+                    comparison.exact(
+                        &format!("{path}.options: product list"),
+                        &serde_json::to_value(resolved).unwrap(),
+                        &serde_json::to_value(product_list).unwrap(),
+                    );
+                } else {
+                    comparison.exact(
+                        &format!("{path}.options"),
+                        &serde_json::to_value(resolved).unwrap(),
+                        expected_options.unwrap_or(&Value::Null),
+                    );
+                }
             }
             comparison.exact(
                 &format!("{path}.editable"),
@@ -1229,12 +1468,38 @@ fn compare_leaf(comparison: &mut Comparison, path: &str, leaf: &LeafField, expec
             );
         }
         None => {
+            // A cargo-deck field that stopped offering its list would
+            // otherwise agree with a frozen schema that never had one, so it
+            // is required here rather than merely permitted.
             comparison.exact(
                 &format!("{path}: names an option list"),
                 &false,
-                &expected_options.is_some(),
+                &(expected_options.is_some() || product_cargo_option_field(path).is_some()),
             );
         }
+    }
+}
+
+/// The three cargo-deck fields that offer an option list the frozen Python
+/// schema did not. The outer `Some` marks the field as one of them; the inner
+/// option is the list where this crate can resolve it, and `None` where the
+/// membership is owned by a crate above this one and checked there.
+///
+/// `cabin::cargo`'s own schema test pins which `OptionSource` each field
+/// names; what is added here is that upstream offered nothing to compare it
+/// with, so the divergence stays recorded instead of unchecked.
+fn product_cargo_option_field(path: &str) -> Option<Option<&'static [&'static str]>> {
+    if path.ends_with(".cargo.main_deck_uld") || path.ends_with(".cargo.lower_deck_uld") {
+        Some(None)
+    } else if path.ends_with(".cargo.loading_strategy") {
+        Some(Some(&[
+            "target_cg",
+            "min_pallets",
+            "door_proximity",
+            "uniform",
+        ]))
+    } else {
+        None
     }
 }
 

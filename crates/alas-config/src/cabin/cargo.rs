@@ -14,7 +14,7 @@
 //!
 //! Zero means "work it out" for every position field: a door position of zero
 //! is not a door at the nose, it is a door the layout places. That convention
-//! is upstream's and is reproduced, including its one sharp edge -- a target
+//! is upstream's and is reproduced, including its one sharp edge: a target
 //! centre of gravity at or below zero means the centre of the envelope, so
 //! there is no way to ask for a trim point at the datum itself.
 //!
@@ -37,18 +37,21 @@ pub struct CargoDeckConfig {
 
     /// Which container the main deck is loaded with.
     #[config(
-        help = "Unit load device code for the main deck -- the pallets and boxes a freighter's main deck takes, which are far larger than anything that fits a lower hold."
+        options = MainDeckUld,
+        help = "Unit load device code for the main deck: the pallets and boxes a freighter's main deck takes, which are far larger than anything that fits a lower hold."
     )]
     pub main_deck_uld: String,
 
     /// Which container the lower holds are loaded with.
     #[config(
+        options = LowerDeckUld,
         help = "Loading format for lower holds, including passenger baggage. 'BLK' permits loose bulk only and never enables a container system. Use 'AUTO' to compare physically feasible uniform ULD formats. Other explicit codes degrade to a shorter container and then bulk when they cannot fit."
     )]
     pub lower_deck_uld: String,
 
     /// How the load is distributed among the available positions.
     #[config(
+        options = CargoLoadingStrategy,
         help = "How to place the load: 'target_cg' spreads it and trims to the target centre of gravity, 'min_pallets' concentrates full containers near that point, 'door_proximity' favours the positions nearest the doors for a fast turnaround, and 'uniform' spreads it evenly regardless."
     )]
     pub loading_strategy: String,
@@ -136,15 +139,18 @@ mod tests {
     }
 
     #[test]
-    fn no_string_field_here_claims_an_option_list() {
-        // The container codes and the loading strategy are validated by
-        // whatever resolves them, not by the form: upstream's schema offers
-        // no list for any of the three, and offering one here would be this
-        // port inventing a constraint.
+    fn cargo_choice_fields_declare_their_option_sources() {
         let schema = CargoDeckConfig::default().schema();
-        for name in ["main_deck_uld", "lower_deck_uld", "loading_strategy"] {
+        for (name, options) in [
+            ("main_deck_uld", crate::OptionSource::MainDeckUld),
+            ("lower_deck_uld", crate::OptionSource::LowerDeckUld),
+            (
+                "loading_strategy",
+                crate::OptionSource::CargoLoadingStrategy,
+            ),
+        ] {
             match &schema.field(name).unwrap().entry {
-                crate::Entry::Leaf(leaf) => assert_eq!(leaf.options, None, "{name}"),
+                crate::Entry::Leaf(leaf) => assert_eq!(leaf.options, Some(options), "{name}"),
                 crate::Entry::Node(_) => panic!("{name} is not a group"),
             }
         }

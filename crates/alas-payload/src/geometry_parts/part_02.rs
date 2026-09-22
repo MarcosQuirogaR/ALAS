@@ -65,7 +65,7 @@ fn decks(height_m: Option<f64>, diameter_m: f64) -> (Vec<DeckSpec>, DeckSpec) {
                 name: crate::layout::LOWER,
                 floor_frac: -0.71,
                 ceil_frac: -0.02 - MIN_DECK_SEPARATION_FRAC,
-                // A narrowbody remains one ULD across, while a 5.6--6.0 m
+                // A narrowbody remains one ULD across, while a 5.6 to 6.0 m
                 // widebody gets the two-across lower-hold arrangement seen
                 // in aircraft cargo plans.
                 width_factor: 0.90,

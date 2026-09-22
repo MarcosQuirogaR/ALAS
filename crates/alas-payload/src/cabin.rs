@@ -17,8 +17,8 @@
 //! # Why the exit capacity caps the seating rather than following from it
 //!
 //! A real aircraft is exit-limited, not floor-limited. There are only so many
-//! places along a deck where a door pair can structurally go, and that count
-//! -- not the length of bare floor -- is what decides how many passengers may
+//! places along a deck where a door pair can structurally go, and that count,
+//! not the length of bare floor, is what decides how many passengers may
 //! be carried. Deriving the door count from an already-chosen passenger count
 //! inverts the constraint and produces a body with doors every two metres: an
 //! A380 seating 1,400 rather than the 853 it is certified for.
@@ -119,7 +119,7 @@ pub(crate) const SEAT_BOX_H: f64 = 1.25;
 const AISLE_W_SMALL: f64 = 0.30;
 
 /// FAR/CS-25.815 minimum main-aisle width above that, which is the twenty-inch
-/// upper-body clearance and therefore the one that governs at armrest level --
+/// upper-body clearance and therefore the one that governs at armrest level,
 /// where the seats-abreast budget is actually spent.
 const AISLE_W_LARGE: f64 = 0.51;
 
@@ -261,7 +261,7 @@ pub struct DeckCapacities {
 
 impl DeckCapacities {
     /// One deck's ceiling, falling back to the total for a deck that was not
-    /// laid out -- upstream's `deck_caps.get(name, deck_caps["total"])`.
+    /// laid out: upstream's `deck_caps.get(name, deck_caps["total"])`.
     pub fn for_deck(&self, name: &str) -> i64 {
         self.per_deck
             .iter()
@@ -419,7 +419,7 @@ pub(crate) fn effective_pair_capacity(spec: &ExitSpec, pax: &PassengerCabinConfi
 /// FAR/CS-25.817 allows at most three seats between any passenger and an
 /// aisle, so a single aisle admits six abreast and two admit twelve. Whichever
 /// legal option seats more in the local floor width wins, and a tie goes to the
-/// single aisle -- a second aisle that adds no seats has only spent floor.
+/// single aisle: a second aisle that adds no seats has only spent floor.
 pub fn abreast_and_aisles(
     class: &alas_config::SeatClassConfig,
     deck: &DeckSpec,
@@ -575,8 +575,8 @@ pub enum MonumentSide {
 ///
 /// Items of the same side pack back to back from the wall, the first one's
 /// outer edge flush with the usable width. Once a bay holds more than its
-/// half-width can fit at full size -- routine once the monument count exceeds
-/// the bay count, see [`monument_fill_order`] -- the item is *narrowed* to
+/// half-width can fit at full size (routine once the monument count exceeds
+/// the bay count, see [`monument_fill_order`]) the item is *narrowed* to
 /// whatever room is left rather than moved: kept at full width it would either
 /// cross the centreline into the other side's territory or, clamped there,
 /// overlap the item already stacked behind it.

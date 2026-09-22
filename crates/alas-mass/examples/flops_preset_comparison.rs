@@ -15,7 +15,7 @@
 //! ```text
 //! cargo run -p alas-mass --example flops_preset_comparison -- \
 //!     outputs/pure-flops-production/raw.json \
-//!     .agent/data/pure-flops-evidence/mass_reference_anchors.json
+//!     path/to/mass_reference_anchors.json
 //! ```
 
 #![allow(clippy::print_stdout)]
@@ -181,7 +181,7 @@ fn reference_json(preset: &AircraftPreset, evidence: Option<&Value>) -> Value {
         "cg_evidence": format!("{:?}", reference.cg_evidence),
         "source_documents": reference.sources,
         "mass_reference_source": if evidence_row(evidence, preset.name).is_some() {
-            ".agent/data/pure-flops-evidence/mass_reference_anchors.json"
+            "out/evidence/data/pure-flops-evidence/mass_reference_anchors.json"
         } else {
             "registered preset reference metadata"
         },
@@ -223,6 +223,14 @@ fn resolved_inputs_json(build: &FlopsMassBuildup) -> Value {
         "maximum_fuel_capacity_kg": inputs.maximum_fuel_capacity_kg,
         "fuel_tank_count": inputs.fuel_tank_count,
         "containerized_cargo_kg": inputs.containerized_cargo_kg,
+        // The three declarations that decide how the cabin equipment, the
+        // occupant operating items and the container tare are priced. They are
+        // resolved by one rule for a preset and for a configuration built
+        // without one; a matrix that does not print them cannot show that.
+        "cabin_equipment_method": inputs.cabin_equipment_method.as_str(),
+        "cargo_loading": inputs.cargo_loading.as_str(),
+        "haul_class": inputs.haul_class.as_str(),
+        "containerized_baggage_kg": inputs.containerized_baggage_kg,
     })
 }
 
@@ -250,8 +258,15 @@ fn groups_json(build: &FlopsMassBuildup) -> Value {
             "unusable_fuel_kg": operating.unusable_fuel_kg,
             "engine_oil_kg": operating.engine_oil_kg,
             "passenger_service_kg": operating.passenger_service_kg,
-            "cargo_containers_kg": operating.cargo_containers_kg,
+            // Reported outside operating empty mass: Boeing D6-58333 Rev Q
+            // section 2.1 and FAA AC 120-27F both exclude unit load devices,
+            // and AC 120-85B tracks them with the load. FLOPS is the outlier
+            // in carrying `WCON` inside `WOPIT`, and its own convention is
+            // kept reproducible on the line below.
+            "cargo_containers_outside_oew_kg": operating.cargo_containers_kg,
             "total_kg": operating.total_kg,
+            "flops_wopit_total_with_cargo_containers_kg":
+                operating.total_with_cargo_containers_kg,
         },
         "airframe": {
             "structure": structure.map(|group| json!({
@@ -288,6 +303,11 @@ fn groups_json(build: &FlopsMassBuildup) -> Value {
                 "starters_kg": group.starters_kg,
                 "misc_kg": group.misc_kg,
                 "fuel_system_kg": group.fuel_system_kg,
+                // Outside the published FLOPS boundary: NASA/TM-2017-219627
+                // Vol. I has no pylon equation at all, so this line is a
+                // declared addition and has to be visible as one rather than
+                // disappearing into the group total.
+                "pylons_kg": group.pylons_kg,
                 "total_kg": group.total_kg,
             })),
         },
@@ -422,7 +442,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     });
     let evidence_path = args.next().map(PathBuf::from).unwrap_or_else(|| {
         Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../.agent/data/pure-flops-evidence/mass_reference_anchors.json")
+            .join("../../out/evidence/data/pure-flops-evidence/mass_reference_anchors.json")
     });
     if args.next().is_some() {
         return Err(
@@ -456,11 +476,11 @@ fn main() -> Result<(), Box<dyn Error>> {
         "sources": {
             "nasa_tm": "https://ntrs.nasa.gov/citations/20170005851",
             "aviary_pinned_commit": "https://github.com/OpenMDAO/Aviary/tree/c7affbbe54dcbeded7373eae05f771882e2bb28a",
-            "local_source_copy": ".agent/data/flops-reference-20260911/",
+            "local_source_copy": "out/evidence/data/flops-reference-20260911/",
             "reference_manifest": "docs/flops-mass-sources.json",
             "mass_reference_anchors": evidence.as_ref().map(|_| evidence_path.display().to_string()),
-            "aircraft_input_evidence": ".agent/data/pure-flops-evidence/aircraft_inputs.json",
-            "aircraft_source_manifest": ".agent/data/pure-flops-evidence/source_manifest.json",
+            "aircraft_input_evidence": "out/evidence/data/pure-flops-evidence/aircraft_inputs.json",
+            "aircraft_source_manifest": "out/evidence/data/pure-flops-evidence/source_manifest.json",
         },
         "summary": {
             "aircraft_count": rows.len(),

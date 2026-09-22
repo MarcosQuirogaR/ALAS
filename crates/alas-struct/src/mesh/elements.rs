@@ -45,7 +45,7 @@ const CAP_ORIENTATION: [f64; 3] = [1.0, 0.0, 0.0];
 const CAP_OFFT: &str = "GGG";
 
 /// A quadrilateral panel, degenerating to a triangle when two of its corners
-/// are the same grid and vanishing when three are -- `_add_q`.
+/// are the same grid and vanishing when three are: `_add_q`.
 pub(super) fn add_quad(deck: &mut Deck, eid: &mut i64, corners: [i64; 4], pid: i64) {
     let mut unique = vec![corners[0]];
     for &corner in &corners[1..] {
@@ -71,7 +71,7 @@ pub(super) fn add_quad(deck: &mut Deck, eid: &mut i64, corners: [i64; 4], pid: i
     }
 }
 
-/// An explicitly triangular panel -- the zipper's pivot fan, as opposed to a
+/// An explicitly triangular panel: the zipper's pivot fan, as opposed to a
 /// quadrilateral that happened to collapse.
 pub(super) fn add_tria(deck: &mut Deck, eid: &mut i64, corners: [i64; 3], pid: i64) {
     deck.trias.push(Shell {
@@ -83,7 +83,7 @@ pub(super) fn add_tria(deck: &mut Deck, eid: &mut i64, corners: [i64; 3], pid: i
 }
 
 /// Skin panels between two consecutive skin ribs, bridging any difference in
-/// their chordwise point counts with a fan of triangles -- `_zipper_skin_strip`.
+/// their chordwise point counts with a fan of triangles: `_zipper_skin_strip`.
 pub(super) fn zipper_skin_strip(
     deck: &mut Deck,
     eid: &mut i64,
@@ -168,7 +168,7 @@ pub(super) fn add_rib_panels(
         // The reference writes this as a nested conditional whose two
         // spar-reaching branches do the same thing: a main skin rib stops its
         // panels at the rear spar, and so does a truncated one. Only a rib that
-        // is neither -- the root rib, or one whose cut reaches no spar at all --
+        // is neither (the root rib, or one whose cut reaches no spar at all)
         // is closed all the way to its last chordwise point.
         let stops_at_spar = last_spar != -1 && (skin_ribs_main.contains(&rib) || !station.is_full);
         let end = if stops_at_spar {
@@ -298,9 +298,9 @@ pub(super) fn add_spar_caps(
                 .sqrt()
                 .max(0.05);
 
-            // The flange the sizing carried at this station -- the tapered
-            // root section, sized up wherever the local moment demanded more
-            // -- so the mesh and the sizing describe the same cap.
+            // The flange the sizing carried at this station (the tapered
+            // root section, sized up wherever the local moment demanded more)
+            // so the mesh and the sizing describe the same cap.
             let sized_thickness = station_value(eta_mid, &sizing.eta_stations, &root_sizing.t_cap);
             let sized_width = station_value(eta_mid, &sizing.eta_stations, &root_sizing.w_cap);
             let flange_thickness = sized_thickness.min(height / 3.0);

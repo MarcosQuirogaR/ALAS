@@ -10,8 +10,8 @@
 //! actually call: the `xsecs`/`name` fields, `FuselageXSec.xyz_c`/`.width`/
 //! `.height`, `.translate(...)` on both classes, and `Fuselage.area_wetted()`.
 //! `docs/PORTING.md` records the scoping decision and a prior grep across all
-//! of `alas/`, not just `alas/geometry/`, for what reaches these two classes
-//! -- both `FuselageXSec`'s `radius=` and `width=`/`height=` constructor
+//! of `alas/`, not just `alas/geometry/`, for what reaches these two classes,
+//! both `FuselageXSec`'s `radius=` and `width=`/`height=` constructor
 //! branches are reached (`_build_fuselage`'s circular and ovoid cases), and
 //! both the main-fuselage build (no `.translate()` on the `Fuselage` itself)
 //! and the per-nacelle build (`.translate([x, y, z])`, each nacelle a
@@ -30,13 +30,13 @@
 use super::vector3::add3;
 
 /// The default `shape` a `FuselageXSec` is constructed with when nothing
-/// overrides it -- `FuselageXSec.__init__`'s `shape: float = 2.0`, a
+/// overrides it: `FuselageXSec.__init__`'s `shape: float = 2.0`, a
 /// superellipse exponent of 2 being an ordinary ellipse (a circle, when
 /// `width == height`).
 pub const DEFAULT_SHAPE: f64 = 2.0;
 
 /// [`FuselageXSec::new`] rejects specifying both `radius` and
-/// (`width`, `height`), and rejects specifying neither -- the same two
+/// (`width`, `height`), and rejects specifying neither: the same two
 /// conditions upstream's two `raise ValueError(...)`s guard, restated as a
 /// typed error since this crate does not panic (`CONTRIBUTING.md`).
 #[derive(Debug, Clone, Copy, PartialEq, thiserror::Error)]
@@ -53,7 +53,7 @@ pub enum FuselageXSecError {
 }
 
 /// A fuselage cross-section: center point, width, height and superellipse
-/// shape exponent -- `FuselageXSec`, scoped to the fields this program uses
+/// shape exponent: `FuselageXSec`, scoped to the fields this program uses
 /// (no normal vector, no analysis-specific options; see the module doc).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FuselageXSec {
@@ -63,15 +63,15 @@ pub struct FuselageXSec {
     pub width: f64,
     /// The cross-section's height, m (its extent along the local Z axis).
     pub height: f64,
-    /// The superellipse shape exponent. Stored but not otherwise used here
-    /// -- see the module doc for what queries it (none, in this program's
+    /// The superellipse shape exponent. Stored but not otherwise used here,
+    /// see the module doc for what queries it (none, in this program's
     /// current scope).
     pub shape: f64,
 }
 
 impl FuselageXSec {
     /// A new cross-section at `xyz_c`, sized by either `radius` (which sets
-    /// `width = height = 2 * radius`) or by `width` and `height` directly --
+    /// `width = height = 2 * radius`) or by `width` and `height` directly:
     /// `FuselageXSec.__init__`'s `radius`/`width`/`height` validation.
     ///
     /// # Errors
@@ -105,7 +105,7 @@ impl FuselageXSec {
         }
     }
 
-    /// A copy of this cross-section translated by `xyz` -- `FuselageXSec.translate`.
+    /// A copy of this cross-section translated by `xyz`: `FuselageXSec.translate`.
     pub fn translate(&self, xyz: [f64; 3]) -> Self {
         Self {
             xyz_c: add3(self.xyz_c, xyz),
@@ -114,7 +114,7 @@ impl FuselageXSec {
     }
 
     /// This cross-section's perimeter ("circumference" for a circular
-    /// section) -- `FuselageXSec.xsec_perimeter`, a closed-form
+    /// section): `FuselageXSec.xsec_perimeter`, a closed-form
     /// symbolic-regression fit to the exact (infinite-series) superellipse
     /// perimeter. See upstream's docstring for the fit's derivation and
     /// stated error bounds (at most 0.2%, over `1 <= shape < infinity`).
@@ -140,11 +140,11 @@ impl FuselageXSec {
 }
 
 /// A fuselage (or other slender body: pod, fuel tank, nacelle): a name and an
-/// ordered list of cross-sections -- `Fuselage`, scoped to the fields and
+/// ordered list of cross-sections: `Fuselage`, scoped to the fields and
 /// methods this program uses (see the module doc).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Fuselage {
-    /// The fuselage's name, e.g. `"Fuselage"` or `"Nacelle R"` -- later
+    /// The fuselage's name, e.g. `"Fuselage"` or `"Nacelle R"`: later
     /// modules distinguish a nacelle from the main fuselage by substring
     /// matching on this field.
     pub name: String,
@@ -162,7 +162,7 @@ impl Fuselage {
         }
     }
 
-    /// A copy of this fuselage translated by `xyz` -- `Fuselage.translate`.
+    /// A copy of this fuselage translated by `xyz`: `Fuselage.translate`.
     pub fn translate(&self, xyz: [f64; 3]) -> Self {
         Self {
             name: self.name.clone(),
@@ -171,7 +171,7 @@ impl Fuselage {
     }
 
     /// The fuselage's wetted area: each adjacent pair of stations'
-    /// perimeters, trapezoidally integrated along X -- `Fuselage.area_wetted`.
+    /// perimeters, trapezoidally integrated along X: `Fuselage.area_wetted`.
     pub fn area_wetted(&self) -> f64 {
         let perimeters: Vec<f64> = self.xsecs.iter().map(FuselageXSec::perimeter).collect();
         let mut area = 0.0;
@@ -255,7 +255,7 @@ mod tests {
     #[test]
     fn area_wetted_of_a_uniform_cylinder_is_close_to_circumference_times_length() {
         // `xsec_perimeter`'s fit is stated accurate to -0.1% at shape=2 (a
-        // circle), not exact -- see the method's doc comment -- so this
+        // circle), not exact (see the method's doc comment) so this
         // checks the port lands within that stated bound rather than
         // asserting bit-exact agreement with the closed-form circumference.
         let fuselage = Fuselage::new(

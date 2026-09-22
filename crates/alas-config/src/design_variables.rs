@@ -7,7 +7,7 @@
 //! The design space the optimizer searches.
 //!
 //! Sixteen degrees of freedom. In the scripts this program grew out of they
-//! were a bare list addressed by index -- `x[10]`, `x[4]` -- which made every
+//! were a bare list addressed by index (`x[10]`, `x[4]`) which made every
 //! call site a place to get the ordering wrong silently. Here they are named,
 //! and the flat vector the optimizer works in is derived from the names
 //! rather than the other way round.
@@ -23,7 +23,7 @@
 //! exists as a test, but it is now checking a property the construction
 //! already guarantees rather than one a maintainer has to preserve.
 //!
-//! This is not part of the settings form -- nothing here carries form
+//! This is not part of the settings form, nothing here carries form
 //! metadata upstream either. The design space is presented as its own table,
 //! which is what [`SPECS`] is for.
 
@@ -58,8 +58,8 @@ pub struct DesignVariableSpec {
     pub description: &'static str,
     /// Decimal places to show, for display only.
     ///
-    /// These are full-precision values internally -- an optimizer result, or
-    /// a preset's exact vector -- and rendering that precision raw reads as
+    /// These are full-precision values internally (an optimizer result, or
+    /// a preset's exact vector) and rendering that precision raw reads as
     /// noise rather than information. The count is chosen per variable's
     /// working resolution, which is why the surface bumps get more of them
     /// than the spans do: their entire useful range spans about `0.005`, so
@@ -200,7 +200,7 @@ mod tests {
     fn the_named_vector_and_the_spec_table_describe_the_same_space() {
         // Upstream asserts this at import because its two views are written
         // twice. Here they come from one table, so this checks a property the
-        // construction already guarantees -- which is the point: the failure
+        // construction already guarantees, which is the point: the failure
         // it used to guard against can no longer be expressed.
         let vector = DesignVector::default();
         assert_eq!(vector.to_array().len(), SPECS.len());

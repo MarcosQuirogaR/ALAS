@@ -31,7 +31,7 @@
 //!
 //! [`aero_from_coordinates`] is what `visualization.py:2013` reaches, through
 //! `neuralfoil.get_aero_from_coordinates`. It normalizes and fits the same
-//! way -- and then calls the *raw network*, with no Mach number and no
+//! way, and then calls the *raw network*, with no Mach number and no
 //! post-stall blending anywhere. A port that routed the two through one
 //! implementation would agree at Mach zero and low incidence and disagree
 //! everywhere else.
@@ -51,7 +51,7 @@
 //!
 //! `include_360_deg_effects` is not translated as a switch either. It
 //! defaults to true, neither call site overrides it, and the false path is
-//! simply the true path with the post-stall blend removed -- so the blend is
+//! simply the true path with the post-stall blend removed, so the blend is
 //! unconditional here rather than guarded by a flag no caller sets.
 //!
 //! Vectorization, `nf.bl_x_points`, the three unshipped model sizes, and
@@ -62,8 +62,8 @@
 //!
 //! The database this surrogate is swept over contains multi-element high-lift
 //! decks (`30p-30n` is one). An eight-weight-per-side Kulfan fit cannot
-//! represent one: the weights diverge -- 1.4e7 on the last lower-surface mode
-//! -- and the network overflows to infinity rather than reporting low
+//! represent one: the weights diverge (1.4e7 on the last lower-surface mode)
+//! and the network overflows to infinity rather than reporting low
 //! confidence. That is faithful upstream behaviour and this port reproduces
 //! it, but it is not a fixture case: every expected value would be an
 //! infinity, and infinities compare equal whatever produced them. Whether the
@@ -143,7 +143,7 @@ pub struct Conditions {
 
 impl Conditions {
     /// A condition at upstream's defaults for everything but incidence and
-    /// Reynolds number -- `n_crit = 9`, natural transition on both surfaces.
+    /// Reynolds number: `n_crit = 9`, natural transition on both surfaces.
     ///
     /// Nothing in this program overrides those three, so this is the
     /// constructor every caller here wants; the fields stay public for a
@@ -164,7 +164,7 @@ impl Conditions {
     }
 }
 
-/// The raw network on a section already reduced to Kulfan weights --
+/// The raw network on a section already reduced to Kulfan weights:
 /// `neuralfoil.get_aero_from_kulfan_parameters`.
 ///
 /// No compressibility, no post-stall blending: this is the incompressible,
@@ -183,7 +183,7 @@ pub fn aero_from_kulfan_parameters(
 }
 
 /// The surrogate on a section already reduced to Kulfan weights, with
-/// compressibility and post-stall behaviour applied --
+/// compressibility and post-stall behaviour applied:
 /// `KulfanAirfoil.get_aero_from_neuralfoil`.
 ///
 /// # Errors
@@ -244,7 +244,7 @@ pub fn aero_from_kulfan_airfoil_sweep(
 }
 
 /// The surrogate on a section given as coordinates, with compressibility and
-/// post-stall behaviour applied -- `Airfoil.get_aero_from_neuralfoil`, which
+/// post-stall behaviour applied: `Airfoil.get_aero_from_neuralfoil`, which
 /// is what `alas/analysis/airfoil_screening.py` calls.
 ///
 /// # Errors
@@ -264,8 +264,8 @@ pub fn aero_from_airfoil(
 /// flight conditions.
 ///
 /// [`aero_from_airfoil`] normalizes the section and fits its Kulfan weights
-/// on every call, and that fit -- a least-squares solve over a few hundred
-/// vertices -- costs more than the network it feeds (about 210 us against
+/// on every call, and that fit (a least-squares solve over a few hundred
+/// vertices) costs more than the network it feeds (about 210 us against
 /// 140 us per call, 2026-09-11). A caller sweeping angle of attack over one
 /// section, as the airfoil screening does, prepares once and evaluates per
 /// angle; the result is identical to calling [`aero_from_airfoil`] each time.
@@ -291,7 +291,7 @@ impl PreparedAirfoil {
         &self.framed.airfoil
     }
 
-    /// Evaluate at `conditions` -- exactly what [`aero_from_airfoil`] returns
+    /// Evaluate at `conditions`, exactly what [`aero_from_airfoil`] returns
     /// for the same section and conditions.
     ///
     /// # Errors
@@ -311,7 +311,7 @@ impl PreparedAirfoil {
     }
 
     /// Evaluate at every condition of a schedule with one batched network
-    /// pass -- in order, exactly what [`Self::aero`] returns for each.
+    /// pass, in order, exactly what [`Self::aero`] returns for each.
     ///
     /// # Errors
     ///
@@ -336,7 +336,7 @@ impl PreparedAirfoil {
     }
 }
 
-/// The raw network on a section given as coordinates --
+/// The raw network on a section given as coordinates:
 /// `neuralfoil.get_aero_from_coordinates`, which is what
 /// `alas/reporting/visualization.py` calls.
 ///
@@ -366,8 +366,8 @@ pub fn aero_from_coordinates(
 /// avoid it: the network expects a unit-chord section at zero incidence, and
 /// an arbitrary set of coordinates is neither. The incidence the section
 /// carried becomes part of the angle of attack, its chord divides the
-/// Reynolds number, and its quarter-chord point -- which is where the moment
-/// is reported about -- moves.
+/// Reynolds number, and its quarter-chord point, which is where the moment
+/// is reported about, moves.
 struct Framed {
     airfoil: KulfanAirfoil,
     alpha_offset_deg: f64,
@@ -466,7 +466,7 @@ mod tests {
         // camber line, so a cambered section's two trailing-edge points do
         // not straddle y = 0 and its chord is not exactly one. `naca2412`
         // comes out 0.08 degrees nose-down and 78 parts per million short,
-        // which is small and is not zero -- so the surrogate's frame
+        // which is small and is not zero, so the surrogate's frame
         // correction is doing something on every section this program builds.
         let framed = Framed::of(&naca("naca2412")).expect("a fittable section");
         assert!((framed.alpha_offset_deg - 0.080_247_414_566).abs() < 1e-9);
@@ -486,7 +486,7 @@ mod tests {
         let raw = aero_from_coordinates(&section.coordinates, &conditions, ModelSize::Large)
             .expect("a fit");
         // Within the half per cent the softened Prandtl-Glauert factor costs
-        // even at Mach zero -- see `corrections`' own test for that.
+        // even at Mach zero, see `corrections`' own test for that.
         assert!((compressible.cl - raw.cl).abs() < 0.01 * raw.cl.abs().max(0.1));
         assert!((compressible.cd - raw.cd).abs() < 1e-4);
     }

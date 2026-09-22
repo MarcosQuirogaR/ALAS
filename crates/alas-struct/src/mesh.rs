@@ -9,7 +9,7 @@
 //! [`build_wing_mesh_bdf`] turns a sized wingbox into grids, skin and rib
 //! shells, spar webs, tapered cap bars, a root constraint, engine point masses
 //! and the rivets that tie it together. **The mesh is not simple, and two of
-//! its mechanisms are load-bearing rather than incidental** -- both are ported
+//! its mechanisms are load-bearing rather than incidental**, both are ported
 //! as they stand, because the reference's own docstring records that they exist
 //! to fix a specific failure:
 //!
@@ -27,7 +27,7 @@
 //! Five geometric health checks come back in a [`MeshHealthReport`] rather than
 //! being printed: rib-to-leading-edge perpendicularity, shell warping,
 //! degenerate triangles, spar straightness, and that no grid sits inboard of
-//! the root plane. The severities are the reference's own -- a degenerate
+//! the root plane. The severities are the reference's own: a degenerate
 //! triangle or a grid at negative span is a corrupt mesh and comes back as a
 //! [`MeshError`], while the other three are warnings a caller reports.
 //!
@@ -50,14 +50,14 @@ pub use cards::{
 };
 
 /// The shell warping coefficient above which a panel is reported as badly
-/// non-planar -- `WARPING_THRESHOLD`.
+/// non-planar: `WARPING_THRESHOLD`.
 pub const WARPING_THRESHOLD: f64 = 0.05;
 
 /// Span below which a grid is treated as part of the constrained root and kept
-/// out of the rivets' independent-grid pool, metres -- `_Y_ROOT_EXCL`.
+/// out of the rivets' independent-grid pool, metres: `_Y_ROOT_EXCL`.
 const Y_ROOT_EXCL: f64 = 0.01;
 
-/// How much thinner a secondary (truncated) rib is than a main one --
+/// How much thinner a secondary (truncated) rib is than a main one:
 /// `_SEC_RIB_THICKNESS_FACTOR`.
 const SEC_RIB_THICKNESS_FACTOR: f64 = 0.5;
 
@@ -139,7 +139,7 @@ impl MeshHealthReport {
 pub enum MeshError {
     /// The zipper bridging produced triangles with no area.
     #[error(
-        "{count} CTRIA3 elements are degenerate (zero area or duplicate nodes) -- \
+        "{count} CTRIA3 elements are degenerate (zero area or duplicate nodes): \
          the zipper-triangle skin-bridging logic produced an invalid mesh"
     )]
     DegenerateTriangles {
@@ -149,7 +149,7 @@ pub enum MeshError {
     /// A grid landed inboard of the root plane, which the semi-wing model has
     /// no meaning for.
     #[error(
-        "{count} nodes have Y < 0 (worst={worst:.4} m) -- the wing must not extend \
+        "{count} nodes have Y < 0 (worst={worst:.4} m): the wing must not extend \
          past the root; check the rib lengths' root-plane truncation"
     )]
     NodeBelowRoot {
@@ -161,12 +161,12 @@ pub enum MeshError {
 }
 
 /// Whether the rib at position `pos` in the main skin-rib list gets
-/// trailing-edge panels -- `_te_rib_selected`.
+/// trailing-edge panels: `_te_rib_selected`.
 ///
 /// `step_<n>` with a step of zero is the one input the reference cannot answer:
 /// it reaches a modulo by zero, which raises rather than returning a decision.
 /// There is nothing to reproduce in a raised exception, so it takes the same
-/// exit as any other unrecognized mode -- every rib selected.
+/// exit as any other unrecognized mode, every rib selected.
 fn te_rib_selected(mode: &str, pos: usize, y_station: f64, y_break: f64, n_inboard: usize) -> bool {
     let mode = mode.to_ascii_lowercase();
     match mode.as_str() {

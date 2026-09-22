@@ -44,7 +44,7 @@
 //! *entirely* in `f32`, because upstream's `settings.floating_point_precision`
 //! is `np.float32` and `compute_wing_induced_velocity` casts to it
 //! explicitly. The influence matrix and the circulation solve are `f64` over
-//! those `f32` entries, which is upstream's arrangement too -- `np.linalg.solve`
+//! those `f32` entries, which is upstream's arrangement too: `np.linalg.solve`
 //! receives a double array because the direction cosines it is multiplied by
 //! are double. Every rounding point is marked where it happens. That is what
 //! puts this row at `alas-testkit`'s `f32` tier, and the ledger records that
@@ -83,7 +83,7 @@ pub use wings::{convert_sweep_segments, span_breaks, SpanBreak, SweepSection};
 ///
 /// The rate terms are divided by the speed, so a literal zero is not usable.
 /// `VLM` raises on one unless `use_surrogate` is set, and substitutes this
-/// when it is -- which is the branch the training grid takes, because
+/// when it is, which is the branch the training grid takes, because
 /// `sample_training` builds its conditions with the velocity left at zero.
 /// The substituted value is small enough that the rate terms stay zero to
 /// machine precision when the rates themselves are zero, which they are on
@@ -94,7 +94,7 @@ const ZERO_VELOCITY_SUBSTITUTE: f64 = 1e-6;
 ///
 /// The panelization depends on the geometry alone and is built once. The
 /// influence matrix depends on the Mach number alone and is built once per
-/// distinct one -- upstream does the same, through `np.unique`, and it is
+/// distinct one: upstream does the same, through `np.unique`, and it is
 /// what makes an eighty-point training grid affordable at eight Mach
 /// numbers.
 pub fn run(
@@ -116,7 +116,7 @@ pub fn run(
     // Group the conditions by Mach number. Two conditions with the same Mach
     // share an influence matrix *and* an assembled left-hand side, since the
     // direction cosines the matrix is contracted with come from the
-    // panelization rather than from the condition -- so one elimination
+    // panelization rather than from the condition, so one elimination
     // answers every condition in the group.
     let mut groups: Vec<(f64, Vec<usize>)> = Vec::new();
     for (index, condition) in conditions.iter().enumerate() {

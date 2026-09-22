@@ -5,8 +5,8 @@
 //!
 //! [`super::product`] resolves the declared architecture into
 //! [`super::FlopsTransportInputs`]; this module answers the one question in
-//! that set that is pure geometry -- how much movable area the configured
-//! control-surface runs actually cut from the built planform -- and states
+//! that set that is pure geometry: how much movable area the configured
+//! control-surface runs actually cut from the built planform, and states
 //! the convention it resolves `SFLAP` under.
 
 use alas_config::ControlSurfacesConfig;
@@ -39,7 +39,7 @@ use super::product::main_wing;
 /// an absolute integral, keeps the wing's own authoritative area convention
 /// and makes the full-span band return exactly 1.
 ///
-/// Returns `None` -- never a clamped or silently reordered answer -- when
+/// Returns `None` (never a clamped or silently reordered answer) when
 /// `start` or `end` is non-finite, outside `0..=1`, or out of order, or when
 /// the planform spans no projected `y`.
 pub(super) fn chord_band_fraction(wing: &Wing, start: f64, end: f64) -> Option<f64> {
@@ -121,7 +121,7 @@ pub(super) fn chord_band_fraction(wing: &Wing, start: f64, end: f64) -> Option<f
 ///   and rudder are added. A default ratio is a starting value, not evidence
 ///   about what the fitted coefficients absorbed.
 /// * Equation 35's `W2` is a wing structural term, so tail area sits oddly in
-///   it -- but equation 97's `WSC` is an all-aircraft flight-controls group,
+///   it, but equation 97's `WSC` is an all-aircraft flight-controls group,
 ///   where tail movables plainly belong, and FLOPS feeds both from the same
 ///   `SFLAP`. The source is simply not self-consistent here.
 ///

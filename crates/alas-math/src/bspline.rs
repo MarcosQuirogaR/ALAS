@@ -10,15 +10,15 @@
 //! B-spline fitted through the ISA at thirty-eight altitudes, built so that a
 //! gradient-based optimizer sees a smooth function. Every module in the
 //! reference implementation that writes `Atmosphere(altitude=...)`
-//! without naming a method -- the turbofan cycle, the performance envelope,
-//! the aerodynamic analysis, stability -- flies against that fit and not
+//! without naming a method: the turbofan cycle, the performance envelope,
+//! the aerodynamic analysis, stability: flies against that fit and not
 //! against the ISA. The two disagree by up to 1% in temperature, so a port
 //! that substituted the closed form would be wrong by four thousand times the
 //! `closed` tier before any physics had happened. This module is what makes
 //! reproducing the fit possible; `alas-atmo::differentiable` is the fit
 //! itself.
 //!
-//! Upstream reaches the spline through three layers -- native aerodynamic model's
+//! Upstream reaches the spline through three layers: native aerodynamic model's
 //! `InterpolatedModel`, its `numpy.interpn` shim, and finally CasADi's
 //! `interpolant(..., "bspline", ...)`. Nothing here is translated from any of
 //! them. What CasADi builds in the one-dimensional cubic case is the
@@ -29,7 +29,7 @@
 //! `x`. The two points adjacent to each end are deliberately not knots, which
 //! is what makes the system square and names the end condition. This module
 //! solves that system directly, and the parity fixture records CasADi's own
-//! output as the check on it -- the same arrangement [`crate::CubicSpline`]
+//! output as the check on it: the same arrangement [`crate::CubicSpline`]
 //! has with SciPy.
 //!
 //! That knot rule is the same one Dierckx's `regrid` uses at a smoothing
@@ -326,7 +326,7 @@ mod tests {
     #[test]
     fn the_end_conditions_leave_no_curvature_break_at_the_second_point_in() {
         // "Not a knot" means the second and second-to-last data points are
-        // not knots, so the third derivative is continuous across them --
+        // not knots, so the third derivative is continuous across them,
         // which is the whole content of the end condition and the one thing a
         // natural or clamped spline through the same data would not satisfy.
         let x: [f64; 7] = [0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0];

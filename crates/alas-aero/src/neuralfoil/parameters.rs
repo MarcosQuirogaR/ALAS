@@ -11,7 +11,7 @@
 //! Everything else in this port is a formula that can be read and checked.
 //! This is not: the weights *are* the model, and there is nothing to derive
 //! them from. So they are shipped as data, exported from the installed
-//! NeuralFoil package by `golden/generators/gen_aero_neuralfoil.py` -- which
+//! NeuralFoil package by `golden/generators/gen_aero_neuralfoil.py`, which
 //! also records a digest of each blob in `golden/aero/neuralfoil.json`, so
 //! that a file here drifting from the package it came from is a failing test
 //! and not a silently different aeroplane.
@@ -20,16 +20,16 @@
 //!
 //! NeuralFoil ships eight sizes. This program can ask for five:
 //! `AirfoilSweepScreen.tsx`'s `MODEL_SIZES` offers `small` through `xxlarge`,
-//! and every default in the reference -- `airfoil_screening.py`'s, the sweep
+//! and every default in the reference: `airfoil_screening.py`'s, the sweep
 //! request's, and the one `neuralfoil.get_aero_from_coordinates` applies when
-//! `visualization.py` passes none -- names `large`, which is inside that set.
+//! `visualization.py` passes none: names `large`, which is inside that set.
 //! `xxsmall`, `xsmall` and `xxxlarge` are unreachable from any input this
 //! program accepts, and `xxxlarge` alone would add 5.7 MB. A documented scope
 //! boundary, not a `deviation-candidate`.
 //!
 //! The five do not share a depth: `small` has four weight layers, `medium`
 //! and `large` five, `xlarge` and `xxlarge` six. That is the point of
-//! shipping more than one -- a reader that assumed a fixed architecture would
+//! shipping more than one: a reader that assumed a fixed architecture would
 //! agree on `large` and be wrong on `small`.
 //!
 //! # The blob format, and why binary
@@ -49,8 +49,8 @@
 //! *arithmetic* is not: NumPy promotes `f32 @ f64` to `f64` before
 //! multiplying, so every product upstream evaluates is a double. The blobs
 //! therefore keep the `f32` bit patterns and this module widens them once at
-//! load, which reproduces both halves of that -- `f32`-precision values,
-//! `f64` arithmetic -- and stores half of what a pre-widened blob would.
+//! load, which reproduces both halves of that: `f32`-precision values,
+//! `f64` arithmetic, and stores half of what a pre-widened blob would.
 
 use std::sync::OnceLock;
 
@@ -164,7 +164,7 @@ struct Layer {
 /// A trained network, as a stack of affine layers.
 ///
 /// Only [`decode_network`] constructs one, and it refuses any blob whose
-/// layers do not chain from [`INPUTS`] to [`OUTPUTS`] -- so [`Network::evaluate`]
+/// layers do not chain from [`INPUTS`] to [`OUTPUTS`], so [`Network::evaluate`]
 /// is total rather than fallible, and the shape invariant is checked once at
 /// load rather than at every call.
 pub(super) struct Network {
@@ -201,7 +201,7 @@ impl Network {
     /// Bit-identical to calling [`Self::evaluate`] on each input: every
     /// output is accumulated over the columns in the same order and the bias
     /// and activation are applied at the same point. The batch only changes
-    /// the loop nest -- activations are held feature-major so that the
+    /// the loop nest: activations are held feature-major so that the
     /// innermost loop runs across the batch with one weight, which the
     /// compiler vectorizes and which reads each weight once per layer rather
     /// than once per input. An airfoil sweep of a few dozen angles, each
@@ -262,7 +262,7 @@ pub(super) struct Distribution {
 }
 
 impl Distribution {
-    /// How many inputs the distribution describes -- the `N_inputs` upstream
+    /// How many inputs the distribution describes: the `N_inputs` upstream
     /// divides the penalty by.
     pub(super) fn inputs(&self) -> usize {
         self.mean.len()
@@ -520,7 +520,7 @@ mod tests {
 
     #[test]
     fn the_inverse_covariance_is_symmetric_and_positive_on_its_diagonal() {
-        // Not a translation check -- an assertion that the export landed the
+        // Not a translation check: an assertion that the export landed the
         // 25x25 matrix in the right shape and orientation. It is symmetric to
         // about 1e-10 relative rather than exactly: upstream inverted a
         // symmetric matrix numerically and stored what came out, and the
@@ -570,7 +570,7 @@ mod tests {
     fn a_blob_with_trailing_bytes_is_refused() {
         // Slack at the end means the reader and the writer disagree about the
         // layout, which is exactly the drift the digest fixture exists to
-        // catch -- but this catches it at load rather than at test time.
+        // catch, but this catches it at load rather than at test time.
         let mut padded = LARGE.to_vec();
         padded.push(0);
         assert!(decode_network(&padded).is_none());

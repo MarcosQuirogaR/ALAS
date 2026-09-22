@@ -97,7 +97,7 @@ fn build() -> Vec<SolverPreset> {
         SolverPreset {
             name: "quick_draft",
             display_name: "Quick Draft",
-            description: "Fast, rough pass -- small population and few generations. Good for \
+            description: "Fast, rough pass: small population and few generations. Good for \
                           iterating on requirements/geometry before committing to a full run.",
             settings: SolverSettings {
                 strategy: "best1bin".to_owned(),
@@ -112,8 +112,7 @@ fn build() -> Vec<SolverPreset> {
         SolverPreset {
             name: "balanced",
             display_name: "Balanced (Recommended)",
-            description:
-                "The default tradeoff -- good convergence in a reasonable wall-clock time.",
+            description: "The default tradeoff: good convergence in a reasonable wall-clock time.",
             // Whatever `SolverSettings` itself defaults to, so the recommended
             // preset and an unconfigured run are the same run.
             settings: SolverSettings::default(),
@@ -136,7 +135,7 @@ fn build() -> Vec<SolverPreset> {
         SolverPreset {
             name: "exhaustive",
             display_name: "Exhaustive",
-            description: "Widest search -- large population, many generations, tight tolerance. \
+            description: "Widest search: large population, many generations, tight tolerance. \
                           Slowest option; use for a final high-confidence optimization.",
             settings: SolverSettings {
                 strategy: "best1bin".to_owned(),

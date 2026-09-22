@@ -4,9 +4,9 @@
 //! The fuel a mission carries, quantity by quantity, and the physics that
 //! prices each one.
 //!
-//! Every operating rule decomposes the fuel on board the same way -- taxi,
+//! Every operating rule decomposes the fuel on board the same way: taxi,
 //! trip, contingency, destination alternate, final reserve, additional and
-//! extra fuel -- and differs only in how each part is computed. [`FuelPlan`]
+//! extra fuel, and differs only in how each part is computed. [`FuelPlan`]
 //! holds the decomposition with the rule that produced every kilogram, so a
 //! plan reads as evidence rather than as a total. [`FuelBurnModel`] is the
 //! seam the policy evaluation reaches the aircraft through: a trip over a

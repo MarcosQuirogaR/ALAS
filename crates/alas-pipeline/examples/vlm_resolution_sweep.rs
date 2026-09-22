@@ -8,12 +8,12 @@
 //! `fine_chordwise_resolution` mesh the once-per-run reported analysis. This
 //! example measures what those four numbers actually buy, in three modes:
 //!
-//! * `probe <preset>` -- one aircraft, a full factorial of meshes, reporting
+//! * `probe <preset>`, one aircraft, a full factorial of meshes, reporting
 //!   panel count, wall time, lift slope, zero-lift angle, neutral point,
 //!   static margin and the trimmed cruise state at each.
-//! * `camber <preset>` -- the same mesh grid against the five camber design
+//! * `camber <preset>`: the same mesh grid against the five camber design
 //!   variables, measuring whether the mesh can see them at all.
-//! * `objective <preset> <n>` -- the optimizer's own scalar cost, at the
+//! * `objective <preset> <n>`: the optimizer's own scalar cost, at the
 //!   nominal design vector and `n` perturbed neighbours, on each mesh.
 //!
 //! Output is CSV on stdout, one header per mode.
@@ -82,7 +82,7 @@ fn main() {
 /// where the solver's `spanwise_resolution` subdivides an already-subdivided
 /// wing again with `Cosspace` and leaves a sawtooth at every original
 /// station. Sweeping it answers whether the default strip count is
-/// spanwise-converged at all -- a question the solver's own knob cannot ask.
+/// spanwise-converged at all: a question the solver's own knob cannot ask.
 fn config_for(preset: &str) -> Result<(AlasConfig, DesignVector), String> {
     let value = serde_json::json!({ "preset": preset });
     let mut config = AlasConfig::from_value(&value).map_err(|error| error.to_string())?;
@@ -114,9 +114,9 @@ fn build(config: &AlasConfig, design: &DesignVector) -> Result<Airplane, String>
 
 /// The meshes swept, coarsest first.
 ///
-/// Both multipliers scale the panel count exactly linearly -- a spanwise
+/// Both multipliers scale the panel count exactly linearly, a spanwise
 /// subdivision by `r` turns each surface's `n - 1` lofted sections into
-/// `r (n - 1)`, and the chordwise resolution is a literal panel count -- so
+/// `r (n - 1)`, and the chordwise resolution is a literal panel count, so
 /// `strips * span * chord` predicts the mesh size before it is built, and
 /// meshes above [`PANEL_CAP`] are dropped without paying for the assembly.
 ///
@@ -391,7 +391,7 @@ fn camber(preset: &str) {
 }
 
 /// A design vector perturbed within a fraction of each variable's own range,
-/// clamped to its bounds -- the neighbourhood a converging search samples.
+/// clamped to its bounds: the neighbourhood a converging search samples.
 fn perturb(nominal: &DesignVector, rng: &mut Rng, fraction: f64) -> DesignVector {
     let bounds = DesignVector::bounds();
     let values: Vec<f64> = nominal

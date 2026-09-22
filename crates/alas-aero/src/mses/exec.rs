@@ -25,6 +25,7 @@ use std::thread;
 use std::time::{Duration, Instant, SystemTime};
 
 use alas_exec::process::{kill_process_tree, NewProcessGroup, NoConsoleWindow};
+use alas_exec::SupervisedSpawn;
 use thiserror::Error;
 
 /// How often the run loop checks whether the child has exited.
@@ -40,7 +41,7 @@ static WORKDIR_COUNTER: AtomicU64 = AtomicU64::new(0);
 /// and it must be gone afterwards. There is no `tempfile` crate here (a
 /// dependency this workspace declines to add for one directory), so the name is
 /// made unique from the process id, a monotonic counter and the wall clock, and
-/// [`Drop`] removes the tree -- best-effort, since a caller cannot act on a
+/// [`Drop`] removes the tree: best-effort, since a caller cannot act on a
 /// failed cleanup of a directory that is about to be forgotten anyway.
 pub struct WorkDir {
     path: PathBuf,
@@ -117,7 +118,7 @@ pub enum RunError {
         /// The timeout it exceeded, in seconds.
         seconds: f64,
     },
-    /// A stdout/stderr reader thread panicked -- should not happen.
+    /// A stdout/stderr reader thread panicked, should not happen.
     #[error("output reader for {command} failed")]
     Reader {
         /// The command whose output could not be read.
@@ -177,6 +178,15 @@ pub fn run_tool_with_cancel(
 /// environment overrides.
 ///
 /// This is used for solver resources such as MSES's `MSES_OSMAP` hook. The
+/// The ledger role for one MSES-suite launch: `MSES mset`, `MSES mses`, `MSES mplot`.
+fn mses_role(exe: &Path) -> String {
+    let tool = exe
+        .file_stem()
+        .map(|stem| stem.to_string_lossy())
+        .unwrap_or_default();
+    format!("MSES {tool}")
+}
+
 /// overrides are applied only to the child process; ALAS never changes the
 /// host environment, so one run cannot leak a map path into another project or
 /// into the user's shell.
@@ -209,7 +219,7 @@ pub fn run_tool_with_env_and_cancel(
         .stderr(Stdio::piped())
         .no_window()
         .new_process_group()
-        .spawn()
+        .spawn_supervised(&mses_role(exe))
         .map_err(|source| RunError::Spawn {
             command: command.clone(),
             source,
@@ -304,7 +314,7 @@ pub fn run_tool_with_env_and_cancel(
 ///
 /// The `key = value` summary scanner keys off `\n` and spaces, so a trailing
 /// `\r` on the last value of a Windows line would otherwise make it fail to
-/// parse (and read back as NaN) -- exactly the bytes Python never sees, because
+/// parse (and read back as NaN), exactly the bytes Python never sees, because
 /// its text-mode capture has already normalized them.
 fn normalize_newlines(text: String) -> String {
     if text.contains('\r') {

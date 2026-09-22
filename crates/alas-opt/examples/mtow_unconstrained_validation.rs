@@ -7,8 +7,8 @@
 //! ([`AircraftReferenceData::mtow_kg`](alas_config::AircraftReferenceData) is
 //! `Some`, which naturally excludes the synthetic "AVE" preset), this runs
 //! the preset's own design vector through [`assess_product_candidate`]
-//! exactly as documented -- the preset's own configuration, unmodified apart
-//! from `optimizer.objective.mtow_sizing` -- twice: once with
+//! exactly as documented: the preset's own configuration, unmodified apart
+//! from `optimizer.objective.mtow_sizing`, twice: once with
 //! [`MtowSizing::Unconstrained`], where the declared MTOW seeds only the
 //! first pass and is never re-applied as a dispatch ceiling, an Aitken
 //! admissibility bound, or a landing-mass-fraction basis, and once with the
@@ -62,7 +62,7 @@
 //! outright before a takeoff mass was ever closed.
 //!
 //! The fix (see `objective_model::apply_candidate_payload_load_case`) makes
-//! that FLOPS class-count sync unconditional -- always derived from
+//! that FLOPS class-count sync unconditional, always derived from
 //! whatever total the dynamic cabin solve just produced, for every design,
 //! clean-sheet included, so the two can never disagree by construction. A
 //! new, advanced-only `DesignRequirements::min_passenger_capacity` (0 =
@@ -238,7 +238,7 @@ fn main() {
     );
     if abs_pct_errors.is_empty() {
         println!(
-            "No preset converged to a comparable takeoff mass -- see the per-row status column \
+            "No preset converged to a comparable takeoff mass, see the per-row status column \
              above and the module doc comment for the FLOPS/dispatch gaps this can still \
              legitimately reflect (e.g. ATR72-600's unsupported_propulsion_technology)."
         );

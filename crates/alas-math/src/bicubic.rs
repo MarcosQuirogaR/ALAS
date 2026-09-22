@@ -21,7 +21,7 @@
 //! adjacent to each end are deliberately not knots, which is what makes the
 //! system square and gives the resulting curve its not-a-knot end behaviour.
 //! Nothing about that placement follows from the words "cubic interpolation",
-//! and getting it wrong produces a smooth, plausible, wrong surface -- so the
+//! and getting it wrong produces a smooth, plausible, wrong surface, so the
 //! parity fixture records the knot vectors themselves and not only the values.
 //!
 //! Outside the data rectangle the argument is clamped to the boundary knots,

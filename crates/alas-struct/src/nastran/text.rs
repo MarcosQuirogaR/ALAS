@@ -30,7 +30,7 @@ const LINE_BOUNDARIES: [char; 9] = [
     '\n',       // line feed
     '\r',       // carriage return
     '\u{b}',    // line tabulation
-    '\u{c}',    // form feed -- the one an .f06 is full of
+    '\u{c}',    // form feed: the one an .f06 is full of
     '\u{1c}',   // file separator
     '\u{1d}',   // group separator
     '\u{1e}',   // record separator
@@ -41,8 +41,8 @@ const LINE_BOUNDARIES: [char; 9] = [
 /// Split `text` into lines the way Python's `str.splitlines` does.
 ///
 /// Breaks at any of [`LINE_BOUNDARIES`] (and at `\u{85}`, the Unicode next-line
-/// character), treats `\r\n` as a single boundary, and -- like Python, unlike a
-/// naive split -- does not yield a trailing empty line for a text that ends in
+/// character), treats `\r\n` as a single boundary, and (like Python, unlike a
+/// naive split) does not yield a trailing empty line for a text that ends in
 /// a boundary. An empty input yields no lines at all.
 pub fn splitlines(text: &str) -> Vec<&str> {
     let mut lines = Vec::new();

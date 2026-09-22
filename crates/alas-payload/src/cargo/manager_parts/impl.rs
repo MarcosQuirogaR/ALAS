@@ -379,7 +379,7 @@ impl<'g> CargoLoadManager<'g> {
     /// Position indices ranked by `priority`, best first.
     ///
     /// The sort is stable, as Python's is, so positions that rank equally stay
-    /// in the order the decks were walked -- which is what decides the load
+    /// in the order the decks were walked, which is what decides the load
     /// plan whenever a strategy ranks a whole hold alike.
     fn ranked(&self, priority: &dyn Fn(&CargoSlot) -> f64) -> Vec<usize> {
         let mut order: Vec<usize> = (0..self.slots.len()).collect();

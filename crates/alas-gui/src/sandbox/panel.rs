@@ -6,11 +6,17 @@
 //! There is no Parameter Panel: the geometry categories are separate
 //! buttons floating down the left edge of the viewport, each of which opens
 //! the Discipline Window of that category and isolates its component in the
-//! preview, exactly as the window's own Open editor action does. Above them
+//! preview, exactly as the window's own Open editor action does. The stack
+//! (Search box and buttons) is centred about the viewport's horizontal
+//! centreline, within the space left free between the camera row and the
+//! bottom action block, so it never overlaps either. Above the buttons
 //! sits the Search box; while it holds text, the matching fields are listed
 //! in a transient results card with the shared editors, so a parameter can
 //! be edited from a search hit without a permanent duplicate of every
-//! editor. Clearing the search removes the card.
+//! editor. Clearing the search removes the card. Below the category buttons
+//! sits the Summary button: it toggles a card beside the stack listing the
+//! derived geometry metrics (`S_ref`, `b`, `MAC`, `AR`, sweeps, taper and
+//! fuselage length), so they no longer clutter the action block.
 
 use egui::{pos2, vec2, Rect, RichText, ScrollArea, TextEdit, Ui};
 
@@ -19,16 +25,32 @@ use crate::views::tr;
 
 use super::editors::show_field;
 use super::fields::{grouped, Discipline, SandboxField};
+use super::overlays::{metric_chips, CONVENTIONS};
 use super::viewport::{
-    floating_button, register_overlay_rect, was_lit, CAMERA_ROW_HEIGHT, OVERLAY_INSET, REST_OPACITY,
+    floating_control, register_overlay_rect, was_lit, OVERLAY_INSET, REST_OPACITY,
 };
 
 /// Width of the floating column of category buttons, in points.
 pub const CATEGORY_COLUMN_WIDTH: f32 = 168.0;
 /// Vertical spacing between category buttons, in points.
 pub const CATEGORY_SPACING: f32 = 10.0;
+/// Smallest vertical gap between stack rows once the free band between the
+/// camera row and the action block is shorter than the stack's natural
+/// height (a short window). Below `CATEGORY_SPACING` the buttons keep their
+/// own size; only the air between them gives way.
+const CATEGORY_SPACING_MIN: f32 = 3.0;
+/// Automatic gaps inside the stack: one between each of the seven rows
+/// (Search, the five category buttons and Summary).
+const STACK_GAP_COUNT: f32 = 6.0;
 /// Width of the search results card, in points.
 const RESULTS_WIDTH: f32 = 400.0;
+/// Width of the Summary card, in points.
+const SUMMARY_WIDTH: f32 = 220.0;
+/// Nominal height of the Summary card, used to keep it inside the free band.
+const SUMMARY_HEIGHT: f32 = 210.0;
+
+/// The matching fields of a search, grouped by discipline and group.
+type Hits = Vec<(Discipline, Vec<(&'static str, Vec<SandboxField>)>)>;
 
 /// Whether a field matches the search text by label, identifier, group or
 /// discipline, in the current language.
@@ -51,8 +73,7 @@ pub fn open_discipline_window(state: &mut AppState, discipline: Discipline) {
     if !state.sandbox.layout.open_disciplines.contains(&id) {
         state.sandbox.layout.open_disciplines.push(id);
     }
-    state.sandbox.set_focus(Some(discipline));
-    state.reproject_sandbox_scene();
+    state.set_sandbox_focus(Some(discipline));
 }
 
 /// The tag a category button registers its rectangle under.
@@ -66,11 +87,69 @@ fn category_tag(discipline: Discipline) -> &'static str {
     }
 }
 
+/// The top of the category stack: centred about the viewport's horizontal
+/// centreline, clamped to the free band between `free_top` and
+/// `free_bottom`; when the band is shorter than the stack, the stack starts
+/// at the top of the band.
+pub fn stack_top(viewport: Rect, free_top: f32, free_bottom: f32, height: f32) -> f32 {
+    let centred = viewport.center().y - height * 0.5;
+    centred.clamp(free_top, (free_bottom - height).max(free_top))
+}
+
+fn stack_height_id() -> egui::Id {
+    egui::Id::new("sandbox_category_stack_height")
+}
+
+/// The stack's own last full-spacing height: the reference this shrinks
+/// from. Kept separate from [`stack_height_id`] (the *actual*, possibly
+/// already-shrunk, height used to position the stack) so a shrunk frame
+/// never corrupts the baseline the next frame's shrink is computed from,
+/// which would otherwise have the stack alternate between a full-spacing
+/// frame that overflows the band and a shrunk frame that fits it forever.
+fn stack_natural_height_id() -> egui::Id {
+    egui::Id::new("sandbox_category_stack_natural_height")
+}
+
+/// The vertical gap between stack rows that keeps the stack's `natural`
+/// (full-spacing) height inside `available` points of free band.
+///
+/// `natural` only ever reflects a frame actually rendered at
+/// [`CATEGORY_SPACING`], so this is a pure function of two frame-stable
+/// numbers rather than a decision re-made from "does it fit right now",
+/// which is what would make it oscillate.
+fn category_stack_spacing(natural: f32, available: f32) -> f32 {
+    if natural <= available {
+        return CATEGORY_SPACING;
+    }
+    let overflow = natural - available;
+    (CATEGORY_SPACING - overflow / STACK_GAP_COUNT).max(CATEGORY_SPACING_MIN)
+}
+
 /// Render the Search box, the category buttons and, while a search is
-/// active, the results card, all floating over `viewport`.
-pub fn show_parameter_access(state: &mut AppState, ui: &mut Ui, viewport: Rect) {
+/// active, the results card, all floating over `viewport` within the
+/// vertical band `free_top..free_bottom` the other overlays leave free.
+pub fn show_parameter_access(
+    state: &mut AppState,
+    ui: &mut Ui,
+    viewport: Rect,
+    free_top: f32,
+    free_bottom: f32,
+) {
     let width = CATEGORY_COLUMN_WIDTH.min((viewport.width() - 2.0 * OVERLAY_INSET).max(1.0));
-    let top = viewport.top() + 2.0 * OVERLAY_INSET + CAMERA_ROW_HEIGHT;
+    let ctx = ui.ctx().clone();
+    let measured = ctx
+        .data(|d| d.get_temp::<f32>(stack_height_id()))
+        .unwrap_or(196.0);
+    // The free band between the camera row and the action block: on a short
+    // window it can be narrower than the stack's seven rows at their full
+    // spacing, so the gap between rows gives way before anything overlaps
+    // the block below.
+    let available = (free_bottom - free_top).max(0.0);
+    let natural = ctx
+        .data(|d| d.get_temp::<f32>(stack_natural_height_id()))
+        .unwrap_or(measured);
+    let spacing = category_stack_spacing(natural, available);
+    let top = stack_top(viewport, free_top, free_bottom, measured);
     let column = Rect::from_min_max(
         pos2(viewport.left() + OVERLAY_INSET, top),
         pos2(
@@ -78,29 +157,128 @@ pub fn show_parameter_access(state: &mut AppState, ui: &mut Ui, viewport: Rect) 
             viewport.bottom() - OVERLAY_INSET,
         ),
     );
-    let mut results_top = column.top();
-    ui.allocate_new_ui(egui::UiBuilder::new().max_rect(column), |ui| {
-        ui.spacing_mut().item_spacing.y = CATEGORY_SPACING;
+    let mut results_top = free_top;
+    let mut summary_top = free_top;
+    let stack = ui.allocate_new_ui(egui::UiBuilder::new().max_rect(column), |ui| {
+        ui.spacing_mut().item_spacing.y = spacing;
         show_search_box(state, ui, width);
-        results_top = ui.cursor().top();
+        results_top = results_top.min(ui.cursor().top());
+        // The selected component is `SandboxSession::focus` and nothing else.
+        // The category stack, the camera row's context label and the isolated
+        // scene all render from this one read, so they cannot disagree.
+        let focus = state.sandbox.focus();
         for discipline in Discipline::ALL {
             let button = egui::Button::new(tr(discipline.title())).min_size(vec2(width, 0.0));
-            if floating_button(ui, category_tag(discipline), button)
-                .on_hover_text(tr("Open this discipline in its own window."))
-                .clicked()
+            if floating_control(
+                ui,
+                category_tag(discipline),
+                true,
+                focus == Some(discipline),
+                button,
+            )
+            .on_hover_text(tr("Open this discipline in its own window."))
+            .clicked()
             {
                 open_discipline_window(state, discipline);
             }
         }
+        // The Summary card is a whole-aircraft readout, not a sixth
+        // component, but it shares the stack's own uniform row spacing
+        // (rather than a second, independently-sized gap) so the stack's
+        // total height stays the exact `STACK_GAP_COUNT`-gap quantity
+        // `category_stack_spacing` shrinks.
+        summary_top = ui.cursor().top();
+        let summary_open = state.sandbox.layout.summary_open;
+        let summary = egui::Button::new(tr("Summary")).min_size(vec2(width, 0.0));
+        if floating_control(ui, "summary", true, summary_open, summary)
+            .on_hover_text(tr(
+                "Show or hide the derived geometry metrics of the whole aircraft; the selected component is unchanged.",
+            ))
+            .clicked()
+        {
+            state.sandbox.layout.summary_open = !summary_open;
+        }
     });
-    if !state.sandbox.search.trim().is_empty() {
-        show_search_results(
-            state,
-            ui,
-            viewport,
-            column.right() + OVERLAY_INSET,
-            results_top,
-        );
+    let used = stack.response.rect;
+    register_overlay_rect(&ctx, "stack", used);
+    let height = used.height().max(1.0);
+    if (height - measured).abs() > 0.5 {
+        ctx.data_mut(|d| d.insert_temp(stack_height_id(), height));
+        ctx.request_repaint();
+    }
+    // Only a frame actually rendered at the full `CATEGORY_SPACING` may
+    // update the shrink baseline: a shrunk frame's height must never be
+    // mistaken for "how tall the stack wants to be", or the next frame would
+    // see it fit, spring back to full spacing, overflow again, and shrink
+    // again forever.
+    if (spacing - CATEGORY_SPACING).abs() < 0.01 && (height - natural).abs() > 0.5 {
+        ctx.data_mut(|d| d.insert_temp(stack_natural_height_id(), height));
+        ctx.request_repaint();
+    }
+    let search_active = !state.sandbox.search.trim().is_empty();
+    let mut summary_left = column.right() + OVERLAY_INSET;
+    if search_active {
+        show_search_results(state, ui, viewport, summary_left, results_top, free_bottom);
+        summary_left += RESULTS_WIDTH
+            .min((viewport.right() - OVERLAY_INSET - summary_left).max(1.0))
+            + OVERLAY_INSET;
+    }
+    if state.sandbox.layout.summary_open {
+        // The card's own last measured height, not the `SUMMARY_HEIGHT`
+        // nominal guess: the guess undercounted the frame margin and row
+        // spacing of eight metric rows, so a card placed against it grew
+        // past `free_bottom` and into the action block below.
+        let card_height = ctx
+            .data(|d| d.get_temp::<f32>(summary_card_height_id()))
+            .unwrap_or(SUMMARY_HEIGHT);
+        let top = summary_top.min(free_bottom - card_height).max(free_top);
+        show_summary_card(state, ui, viewport, summary_left, top, free_bottom);
+    }
+}
+
+fn summary_card_height_id() -> egui::Id {
+    egui::Id::new("sandbox_summary_card_height")
+}
+
+/// The Summary card: the derived geometry metrics of the drawn aircraft,
+/// one monospace row each with the conventions as hover text, in a card
+/// beside the category stack (beside the search results while a search is
+/// active). Each row registers as a `metric` overlay and the card as
+/// `summary_card`, so a gesture on it never orbits.
+fn show_summary_card(
+    state: &AppState,
+    ui: &mut Ui,
+    viewport: Rect,
+    left: f32,
+    top: f32,
+    bottom: f32,
+) {
+    let width = SUMMARY_WIDTH.min((viewport.right() - OVERLAY_INSET - left).max(1.0));
+    let card = Rect::from_min_max(pos2(left, top), pos2(left + width, bottom.max(top + 40.0)));
+    let chips = metric_chips(state);
+    let response = ui.allocate_new_ui(egui::UiBuilder::new().max_rect(card), |ui| {
+        egui::Frame::popup(ui.style()).show(ui, |ui| {
+            ui.set_width(width - 2.0 * ui.spacing().window_margin.left);
+            ui.label(RichText::new(tr("Whole-aircraft summary")).strong())
+                .on_hover_text(tr(
+                    "These metrics describe the whole drawn aircraft, not the selected component.",
+                ));
+            for text in &chips {
+                let row = ui.label(RichText::new(text).monospace());
+                register_overlay_rect(ui.ctx(), "metric", row.rect);
+                row.on_hover_text(tr(CONVENTIONS));
+            }
+        });
+    });
+    register_overlay_rect(ui.ctx(), "summary_card", response.response.rect);
+    let ctx = ui.ctx().clone();
+    let height = response.response.rect.height().max(1.0);
+    let stored = ctx
+        .data(|d| d.get_temp::<f32>(summary_card_height_id()))
+        .unwrap_or(SUMMARY_HEIGHT);
+    if (height - stored).abs() > 0.5 {
+        ctx.data_mut(|d| d.insert_temp(summary_card_height_id(), height));
+        ctx.request_repaint();
     }
 }
 
@@ -122,17 +300,21 @@ fn show_search_box(state: &mut AppState, ui: &mut Ui, width: f32) {
 }
 
 /// The matching fields, grouped by discipline and group, with the shared
-/// editors, in a transient card beside the category buttons, level with the
-/// first of them, so the buttons stay usable while a search is active.
-fn show_search_results(state: &mut AppState, ui: &mut Ui, viewport: Rect, left: f32, top: f32) {
+/// editors, in a transient card beside the category buttons that spans the
+/// free band, so the buttons stay usable while a search is active.
+fn show_search_results(
+    state: &mut AppState,
+    ui: &mut Ui,
+    viewport: Rect,
+    left: f32,
+    top: f32,
+    bottom: f32,
+) {
     let needle = state.sandbox.search.trim().to_owned();
     let fields = state.sandbox.fields.clone();
     let width = RESULTS_WIDTH.min((viewport.right() - OVERLAY_INSET - left).max(1.0));
-    let card = Rect::from_min_max(
-        pos2(left, top),
-        pos2(left + width, viewport.bottom() - OVERLAY_INSET),
-    );
-    let hits: Vec<(Discipline, Vec<(&'static str, Vec<SandboxField>)>)> = Discipline::ALL
+    let card = Rect::from_min_max(pos2(left, top), pos2(left + width, bottom.max(top + 40.0)));
+    let hits: Hits = Discipline::ALL
         .into_iter()
         .map(|discipline| {
             let groups: Vec<(&'static str, Vec<SandboxField>)> = grouped(&fields, discipline)
@@ -229,6 +411,90 @@ mod tests {
         assert!(matches(span, "planform"));
         assert!(matches(span, "wing"));
         assert!(!matches(span, "nacelle"));
+    }
+
+    #[test]
+    fn the_stack_centres_on_the_viewport_and_stays_inside_the_free_band() {
+        let viewport = Rect::from_min_max(pos2(0.0, 100.0), pos2(1000.0, 700.0));
+        // Tall viewport: centred about y = 400.
+        assert!((stack_top(viewport, 150.0, 600.0, 200.0) - 300.0).abs() < 1e-6);
+        // The bottom block pushes it up when centring would overlap it.
+        assert!((stack_top(viewport, 150.0, 450.0, 200.0) - 250.0).abs() < 1e-6);
+        // The camera row pushes it down on a short viewport.
+        let short = Rect::from_min_max(pos2(0.0, 100.0), pos2(1000.0, 360.0));
+        assert!((stack_top(short, 150.0, 300.0, 200.0) - 150.0).abs() < 1e-6);
+    }
+
+    /// A sandbox state whose registered-preset protections are still the
+    /// ones `enter_sandbox` installs.
+    fn sandbox_state() -> AppState {
+        let mut state = AppState::default();
+        assert!(state.enter_sandbox(true));
+        state
+    }
+
+    #[test]
+    fn one_value_drives_the_category_stack_the_context_label_and_the_scene() {
+        let mut state = sandbox_state();
+        assert_eq!(state.sandbox.focus(), None, "a new sandbox has no focus");
+
+        for discipline in Discipline::ALL {
+            open_discipline_window(&mut state, discipline);
+            // The selection the stack highlights, the title the camera row
+            // prints and the component the scene isolates are all this read.
+            assert_eq!(state.sandbox.focus(), Some(discipline));
+            assert_eq!(
+                Discipline::ALL
+                    .into_iter()
+                    .filter(|d| state.sandbox.focus() == Some(*d))
+                    .count(),
+                1,
+                "exactly one category is selected at a time"
+            );
+        }
+
+        state.set_sandbox_focus(None);
+        assert_eq!(state.sandbox.focus(), None, "Overview clears the selection");
+    }
+
+    #[test]
+    fn the_summary_toggle_never_changes_the_selected_component() {
+        let mut state = sandbox_state();
+        open_discipline_window(&mut state, Discipline::Wing);
+        assert_eq!(state.sandbox.focus(), Some(Discipline::Wing));
+
+        state.sandbox.layout.summary_open = !state.sandbox.layout.summary_open;
+        assert!(state.sandbox.layout.summary_open);
+        assert_eq!(
+            state.sandbox.focus(),
+            Some(Discipline::Wing),
+            "the whole-aircraft summary is not a component selection"
+        );
+
+        // And the reverse: selecting a component leaves the summary alone.
+        open_discipline_window(&mut state, Discipline::Propulsion);
+        assert_eq!(state.sandbox.focus(), Some(Discipline::Propulsion));
+        assert!(state.sandbox.layout.summary_open);
+    }
+
+    #[test]
+    fn a_focused_component_keeps_its_window_open_and_stays_selected() {
+        let mut state = sandbox_state();
+        open_discipline_window(&mut state, Discipline::Propulsion);
+        assert!(state
+            .sandbox
+            .layout
+            .open_disciplines
+            .contains(&Discipline::Propulsion.id().to_owned()));
+        // A second selection does not lose the first window, and the
+        // selection follows the last chosen component.
+        open_discipline_window(&mut state, Discipline::Fuselage);
+        assert!(state
+            .sandbox
+            .layout
+            .open_disciplines
+            .contains(&Discipline::Propulsion.id().to_owned()));
+        assert_eq!(state.sandbox.focus(), Some(Discipline::Fuselage));
     }
 
     #[test]

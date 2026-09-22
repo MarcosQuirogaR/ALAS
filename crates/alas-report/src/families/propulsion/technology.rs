@@ -23,22 +23,13 @@ pub(super) fn binding_error_scene(
     let Err(error) = config.geometry.engine.active_model() else {
         return None;
     };
-    let pal = get_palette(theme);
-    let mut scene = Scene::new(size.0, size.1, Some(Color::from_hex(pal.bg)));
-    scene.title = Some("Propulsion model unavailable".to_owned());
-    draw_title(&mut scene, "Propulsion model unavailable", pal);
-    scene.suppress_derived_title();
-    scene.add(SceneElement::Text {
-        text: format!("Propulsion binding error: {error}"),
-        pos: [size.0 * 0.5, size.1 * 0.5],
-        font_size: 10.0,
-        color: Color::from_hex(pal.title),
-        align: TextAlign::Center,
-        baseline: TextBaseline::Middle,
-        angle_deg: 0.0,
-        bold: true,
-    });
-    Some(scene)
+    Some(crate::status_figure::sized_status_scene(
+        "Propulsion model unavailable",
+        &format!("Propulsion binding error: {error}"),
+        false,
+        get_palette(theme),
+        size.0,
+    ))
 }
 
 fn spec(config: &AlasConfig) -> &TurbopropEngineSpec {

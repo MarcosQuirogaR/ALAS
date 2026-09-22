@@ -15,8 +15,10 @@ use std::sync::atomic::Ordering;
 use std::sync::mpsc::channel;
 #[test]
 fn selecting_airfoil_only_changes_the_study_and_invalidates_results() {
-    let mut state = AirfoilCfdState::default();
-    state.result = Some(test_result_fixture());
+    let mut state = AirfoilCfdState {
+        result: Some(test_result_fixture()),
+        ..Default::default()
+    };
     let revision = state.input_revision;
     assert!(state.select_airfoil("rae2822"));
     assert_eq!(state.selected_airfoil(), "rae2822");
@@ -66,10 +68,12 @@ fn cancellation_is_safe_when_idle_and_sets_the_owned_flag_when_running() {
 
 #[test]
 fn late_finished_run_clears_busy_state_without_installing_stale_result() {
-    let mut state = AirfoilCfdState::default();
-    state.running = true;
-    state.run_id = 9;
-    state.input_revision = 4;
+    let mut state = AirfoilCfdState {
+        running: true,
+        run_id: 9,
+        input_revision: 4,
+        ..Default::default()
+    };
     let (tx, rx) = channel();
     state.rx = Some(rx);
     tx.send(CfdWorkerMessage::Finished {
@@ -179,10 +183,12 @@ fn startup_restores_cfd_environment_paths_for_the_worker() {
     let locator = ToolLocator::new(root.join("app"), root.join("prefs"));
     let path = environment_preferences_path(&locator);
     std::fs::create_dir_all(path.parent().unwrap_or(root.as_path())).expect("create test prefs");
-    let mut openfoam = OpenFoamPreferences::default();
-    openfoam.native_bin_dir = Some("C:/OpenFOAM/bin".to_owned());
-    openfoam.native_project_dir = Some("C:/OpenFOAM/project".to_owned());
-    openfoam.gmsh_executable = Some("C:/tools/gmsh.exe".to_owned());
+    let openfoam = OpenFoamPreferences {
+        native_bin_dir: Some("C:/OpenFOAM/bin".to_owned()),
+        native_project_dir: Some("C:/OpenFOAM/project".to_owned()),
+        gmsh_executable: Some("C:/tools/gmsh.exe".to_owned()),
+        ..Default::default()
+    };
     let preferences = CfdEnvironmentPreferences {
         openfoam,
         gmsh_executable: None,
@@ -211,15 +217,19 @@ fn startup_restores_cfd_environment_paths_for_the_worker() {
 
 #[test]
 fn changing_environment_inputs_discards_the_previous_probe_result() {
-    let mut state = AirfoilCfdState::default();
-    state.capabilities = Some(alas_exec::openfoam::OpenFoamCapabilities {
-        backend: alas_exec::openfoam::OpenFoamBackend::Native,
-        version: Some("OpenFOAM-test".to_owned()),
-        commands: std::collections::BTreeMap::new(),
-        available: true,
-        detail: "test probe".to_owned(),
-    });
-    state.status = "Native Windows (OpenFOAM-test)".to_owned();
+    let mut state = AirfoilCfdState {
+        capabilities: Some(alas_exec::openfoam::OpenFoamCapabilities {
+            backend: alas_exec::openfoam::OpenFoamBackend::Native,
+            version: Some("OpenFOAM-test".to_owned()),
+            commands: std::collections::BTreeMap::new(),
+            available: true,
+            detail: "test probe".to_owned(),
+            parsed_version: None,
+            version_support: alas_exec::openfoam::OpenFoamVersionAssessment::default(),
+        }),
+        status: "Native Windows (OpenFOAM-test)".to_owned(),
+        ..Default::default()
+    };
     let (tx, rx) = channel();
     state.probing = true;
     state.probe_rx = Some(rx);
@@ -248,9 +258,11 @@ fn default_state_can_save_relative_study_and_sweep_paths() {
     let _ = std::fs::remove_file(&study_path);
     let _ = std::fs::remove_file(&sweep_path);
 
-    let mut state = AirfoilCfdState::default();
-    state.saved_study_path = study_path.clone();
-    state.saved_sweep_path = sweep_path.clone();
+    let state = AirfoilCfdState {
+        saved_study_path: study_path.clone(),
+        saved_sweep_path: sweep_path.clone(),
+        ..Default::default()
+    };
     let saved = state.save_study().expect("save study settings");
 
     assert_eq!(saved, study_path);
@@ -258,6 +270,43 @@ fn default_state_can_save_relative_study_and_sweep_paths() {
     assert!(sweep_path.is_file());
     let _ = std::fs::remove_file(study_path);
     let _ = std::fs::remove_file(sweep_path);
+}
+
+#[test]
+fn persisted_openfoam_result_loads_without_restarting_a_solver() {
+    let root = std::env::temp_dir().join(format!(
+        "alas-cfd-gui-result-import-{}-{}",
+        std::process::id(),
+        NEXT_CASE_COUNTER.load(Ordering::Relaxed)
+    ));
+    std::fs::create_dir_all(&root).expect("create result-import directory");
+    let path = root.join("results.json");
+    let fixture = test_result_fixture();
+    std::fs::write(
+        &path,
+        serde_json::to_string_pretty(&fixture).expect("encode CFD result fixture"),
+    )
+    .expect("write CFD result fixture");
+
+    let mut state = AirfoilCfdState {
+        input_revision: 11,
+        ..Default::default()
+    };
+    let revision = state.input_revision;
+    state
+        .load_result_json(&path)
+        .expect("load CFD result fixture");
+
+    assert_eq!(
+        state.result.as_ref().map(|result| result.outcome),
+        Some(CfdOutcome::Unconverged)
+    );
+    assert_eq!(state.tab, CfdTab::Results);
+    assert_eq!(state.result_json_path, path.display().to_string());
+    assert!(!state.running);
+    assert!(state.input_revision > revision);
+    assert_eq!(state.run_input_revision, state.input_revision);
+    let _ = std::fs::remove_dir_all(root);
 }
 
 #[test]
@@ -313,6 +362,7 @@ fn test_result_fixture() -> CfdResults {
             effective_speed_m_s: config.effective_speed_m_s(),
             effective_reynolds: config.effective_reynolds(),
             frame: alas_cfd::FrameConvention::default(),
+            reference: None,
             backend: None,
             openfoam_version: None,
             file_hashes: std::collections::BTreeMap::new(),
@@ -325,6 +375,9 @@ fn test_result_fixture() -> CfdResults {
         surface: None,
         surface_error: None,
         command_logs: std::collections::BTreeMap::new(),
+        field_updates: Default::default(),
+        mesh_qualification: Default::default(),
+        numerical_convergence: CfdOutcome::Unconverged,
         status_detail: String::new(),
     }
 }

@@ -15,7 +15,7 @@
 //! freestream state (which [`super`]'s network walk fills in once, from the
 //! `Ram` outputs, exactly as mission reference stores them on `conditions.freestream`)
 //! plus the one component's linked stagnation inputs, and returns the outputs
-//! the next component reads. The functions carry no state of their own -- the
+//! the next component reads. The functions carry no state of their own: the
 //! in-place mutation of shared component objects that makes the *fixture*
 //! generator monkeypatch its way around a cruise/sea-level-static aliasing
 //! trap (see `gen_prop_mission_turbofan.py`) is a property of mission reference's object
@@ -80,7 +80,7 @@ pub(super) fn ram(freestream: &Freestream) -> RamOutput {
 /// The negative-pressure guard is reproduced: when the recovered stagnation
 /// pressure falls below ambient, it is clamped to ambient (upstream's
 /// `Pt_out[Pt_out<Po] = Po`), which drives the recovered Mach and exit
-/// velocity to zero -- exactly what the sea-level-static point produces.
+/// velocity to zero, exactly what the sea-level-static point produces.
 /// `static_pressure` is not among the outputs because this branch never sets
 /// it upstream.
 pub(super) fn compression_nozzle(
@@ -292,7 +292,7 @@ const REFERENCE_PRESSURE_PA: f64 = 1.013_25e5;
 /// on the cruise sizing pass (before [`super`] backs it out of the design
 /// thrust), so the dimensional thrust, mass flow, fuel flow and power all come
 /// out zero there while the specific thrust, TSFC and specific impulse remain
-/// meaningful -- faithfully what mission reference records when `Thrust.size` runs
+/// meaningful: faithfully what mission reference records when `Thrust.size` runs
 /// `compute` before it has solved the scale factor.
 ///
 /// The mission command is a normalized requested net-thrust fraction, not a

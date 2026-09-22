@@ -4,10 +4,10 @@
 //! The operational fuel-planning policy a design mission is sized under.
 //!
 //! A route that ends with zero usable fuel is not a flyable mission. Every
-//! operating rule this program can be asked to respect -- ICAO Annex 6 Part I
+//! operating rule this program can be asked to respect: ICAO Annex 6 Part I
 //! 4.3.6, the EASA Air OPS basic fuel scheme (CAT.OP.MPA.181 and its AMC),
 //! 14 CFR 121.639 for United States domestic operations and 14 CFR 121.645
-//! for flag and supplemental turbine operations -- decomposes the fuel on
+//! for flag and supplemental turbine operations: decomposes the fuel on
 //! board into the same named quantities: taxi, trip, contingency, destination
 //! alternate, final reserve, additional, extra and discretionary fuel. This
 //! group selects which rule supplies each quantity and holds the operator

@@ -9,19 +9,19 @@
 //! This is P9's second external-solver row, and it means the same thing the
 //! first one did: the numbers a solve reports come out of a compiled solver,
 //! not out of arithmetic this crate performs. What is this crate's own is the
-//! deck it hands over -- [`build_sol101_bulk`] and its three siblings -- and
+//! deck it hands over ([`build_sol101_bulk`] and its three siblings) and
 //! that is what the parity test holds to the reference.
 //!
 //! The decks are text, written card by card, and are compared as text. Only the
 //! `FORCE` cards escape that: their magnitudes distribute a load case's total
 //! over the mesh's front-spar node line, which is arithmetic over grid
 //! coordinates, so the parity test compares the number rather than its
-//! rendering. Everything else -- every case-control line, every set
-//! identifier, every comment -- is byte-for-byte.
+//! rendering. Everything else, every case-control line, every set
+//! identifier, every comment, is byte-for-byte.
 //!
 //! Three identifier ranges never overlap: load combinations from 1, gravity
 //! sets from 100, force sets from 200. The reference records why, and it is not
-//! a style preference -- an earlier scheme multiplied the subcase number, and
+//! a style preference: an earlier scheme multiplied the subcase number, and
 //! pull-up's force set collided with push-down's gravity set, which NASTRAN
 //! would have merged into one load set without complaining.
 
@@ -67,7 +67,7 @@ pub struct MonitorNodes {
 }
 
 impl MonitorNodes {
-    /// The four grids, in the order the reference's dictionary lists them --
+    /// The four grids, in the order the reference's dictionary lists them,
     /// which is the order a vibration result reports its monitors in.
     pub fn labelled(self) -> [(&'static str, i64); 4] {
         [
@@ -84,7 +84,7 @@ impl MonitorNodes {
     }
 }
 
-/// The monitor grids for one mesh -- `_monitor_set`.
+/// The monitor grids for one mesh: `_monitor_set`.
 ///
 /// An aircraft with no wing-mounted engine has nothing hanging off the wing to
 /// drive the sweep from, so the break station stands in: it is the stiffness

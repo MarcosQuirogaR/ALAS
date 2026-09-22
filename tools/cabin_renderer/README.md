@@ -5,7 +5,7 @@ Standalone prototype that consumes resolved `alas.cabin-scene/v2` SI geometry, v
 ## Install and run
 
 ```powershell
-cd C:\Proyectos\ALAS\tools\cabin_renderer
+cd tools\cabin_renderer
 py -m venv .venv
 .venv\Scripts\pip install -r requirements.txt
 $env:PYTHONPATH = (Get-Location).Path

@@ -6,8 +6,8 @@
 //! `golden/generators/gen_struct_analytical.py`.
 //!
 //! The solve is closed-form arithmetic over the (already `green`) sized
-//! wingbox and load model -- I-section stiffness, virtual-work deflection,
-//! cap stress, and a Rayleigh-quotient modal estimate -- so every continuous
+//! wingbox and load model: I-section stiffness, virtual-work deflection,
+//! cap stress, and a Rayleigh-quotient modal estimate, so every continuous
 //! quantity is checked at `Tier::Closed`, matching `docs/PORTING.md`. A `+inf`
 //! margin of safety is recorded as JSON `null` and mapped back to an infinity
 //! check. The `WingStructureGeometry` and configs are rebuilt exactly as

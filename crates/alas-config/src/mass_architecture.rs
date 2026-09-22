@@ -3,8 +3,8 @@
 
 //! The one selector that decides which method owns every production mass group.
 //!
-//! Before this module the buildup carried three independent selectors --
-//! systems, structure and propulsion -- each defaulting to the frozen
+//! Before this module the buildup carried three independent selectors:
+//! systems, structure and propulsion, each defaulting to the frozen
 //! Torenbeek/fraction method. Eight combinations were reachable and six of
 //! them were hybrids: a FLOPS wing paired with a fraction systems group, a
 //! FLOPS propulsion group whose nacelles were owned by the *structural*
@@ -12,9 +12,9 @@
 //! "FLOPS" from a selection it had not been given the buildup for.
 //!
 //! A mass model is not a menu of interchangeable parts. FLOPS distributes
-//! items between groups on its own conventions -- nacelles are structure but
+//! items between groups on its own conventions: nacelles are structure but
 //! ride with the engines, furnishings sit inside the systems group, operating
-//! items sit above empty mass -- and a correlation from a different method
+//! items sit above empty mass, and a correlation from a different method
 //! set does not honour any of them. Mixing the two produces a number that
 //! belongs to no published method and cannot be audited against either.
 //!
@@ -22,8 +22,8 @@
 //! [`MassArchitecture::PureFlopsTransportV1`] by default. The legacy buildup
 //! remains reachable, but only as
 //! [`MassArchitecture::LegacyReferenceCompatibleComparison`], whose name says
-//! what it is for: comparison and regression evidence. It is never a fallback
-//! -- a FLOPS group that cannot be evaluated returns its blockers and the
+//! what it is for: comparison and regression evidence. It is never a fallback:
+//! a FLOPS group that cannot be evaluated returns its blockers and the
 //! analysis fails, rather than quietly reverting to a fraction of takeoff
 //! mass.
 
@@ -33,9 +33,9 @@ use crate::{Kind, Leaf, PropulsionMassMethod, StructuralMassMethod, SystemsMassM
 
 /// Current [`crate::MassModelConfig`] schema version.
 ///
-/// * **1** -- three independent group selectors, all defaulting to the frozen
+/// * **1**, three independent group selectors, all defaulting to the frozen
 ///   reference-compatible methods. Hybrid selections were representable.
-/// * **2** -- one [`MassArchitecture`]. The three group selectors are derived
+/// * **2**, one [`MassArchitecture`]. The three group selectors are derived
 ///   from it and are no longer written to saved files.
 pub const MASS_MODEL_SCHEMA_VERSION: u32 = 2;
 
@@ -211,9 +211,9 @@ impl MassArchitectureMigration {
                 propulsion_was_flops,
             } => Some(format!(
                 "This configuration mixed mass methods (systems: {}, structure: {}, \
-                 propulsion: {}). A mixed selection belongs to no published method -- \
+                 propulsion: {}). A mixed selection belongs to no published method: \
                  FLOPS assigns nacelles, furnishings and operating items on its own \
-                 conventions -- so it has been migrated to the pure NASA FLOPS transport \
+                 conventions, so it has been migrated to the pure NASA FLOPS transport \
                  buildup rather than reconstructed. Its masses will differ from the \
                  saved run.",
                 method_label(systems_was_flops),

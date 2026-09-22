@@ -18,6 +18,7 @@ use crate::envelope::{
 };
 
 use super::residuals_geometry::geometry_residuals;
+use super::residuals_layout::layout_residuals;
 use super::residuals_performance::performance_residuals;
 use super::sizing::SizingOutcome;
 use super::types::ConstraintFamily::{Balance, Mass};
@@ -51,6 +52,11 @@ pub(crate) fn build(
         objective.geometry_constraints,
         target_num_passengers,
         target_cargo_payload_kg,
+    ));
+    residuals.extend(layout_residuals(
+        outcome,
+        config,
+        objective.geometry_constraints,
     ));
     residuals
 }

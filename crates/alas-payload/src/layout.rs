@@ -7,8 +7,8 @@
 //! What a laid-out interior is: an ordered list of physical things, each with
 //! a size, a place and a mass, and the mass properties that fall out of them.
 //!
-//! Both layout engines return this one type, because all three consumers --
-//! the weight-and-balance analysis, the deck-plan drawings and the report --
+//! Both layout engines return this one type, because all three consumers:
+//! the weight-and-balance analysis, the deck-plan drawings and the report:
 //! want the same thing from a cabin and from a hold full of freight. The
 //! engines differ in what they put in the list, not in what the list is.
 //!
@@ -26,7 +26,7 @@
 //! same change: a key that is spelled wrong in one of the two implementations
 //! is a compile error here and a silently missing value there. The variants
 //! carry exactly the keys upstream writes, including the ones that differ
-//! between two kinds that look alike -- a containerised bag records the fill
+//! between two kinds that look alike: a containerised bag records the fill
 //! fraction it achieved, a main-deck container records that plus the net load
 //! inside it.
 
@@ -347,7 +347,7 @@ pub struct PayloadLayout {
     pub summary: LayoutSummary,
 }
 
-/// Total mass and the two centre-of-gravity coordinates of a set of items --
+/// Total mass and the two centre-of-gravity coordinates of a set of items:
 /// `PayloadLayout.recompute_cg`, as a function so a builder can compute them
 /// before it has a summary to construct the layout with.
 ///
@@ -427,8 +427,8 @@ mod tests {
 
     #[test]
     fn a_massless_monument_places_itself_without_moving_the_balance() {
-        // A galley at the nose has no mass here -- it is counted in the
-        // furnishings weight -- so it must not drag the payload CG forward.
+        // A galley at the nose has no mass here (it is counted in the
+        // furnishings weight) so it must not drag the payload CG forward.
         let items = vec![
             item(MAIN, ItemKind::Galley, 0.0, 0.0),
             item(MAIN, ItemKind::SeatRow, 10.0, 100.0),

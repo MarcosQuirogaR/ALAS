@@ -40,37 +40,7 @@ fn title(scene: &mut Scene, axes: &Axes2D, text: &str, color: Color) {
 }
 
 fn status_scene(title_text: &str, message: &str, ok: bool, theme: Option<&str>) -> Scene {
-    let pal = get_palette(theme);
-    const MESSAGE_TOP: f64 = 88.0;
-    const LINE_HEIGHT: f64 = 17.0;
-    const BOTTOM_MARGIN: f64 = 16.0;
-    let wrapped = crate::chart_kit::wrap_text(message, 130);
-    let line_count = wrapped.lines().count().max(1) as f64;
-    let height = (300.0_f64).max(MESSAGE_TOP + line_count * LINE_HEIGHT + BOTTOM_MARGIN);
-    let mut scene = Scene::new(900.0, height, Some(Color::from_hex(pal.bg)));
-    scene.title = Some(title_text.to_owned());
-    scene.suppress_derived_title();
-    scene.add(SceneElement::Text {
-        text: title_text.to_owned(),
-        pos: [24.0, 42.0],
-        font_size: 16.0,
-        color: Color::from_hex(if ok { ACCEPTED_COLOR } else { REJECTED_COLOR }),
-        align: TextAlign::Left,
-        baseline: TextBaseline::Top,
-        angle_deg: 0.0,
-        bold: true,
-    });
-    scene.add(SceneElement::Text {
-        text: wrapped,
-        pos: [24.0, MESSAGE_TOP],
-        font_size: 12.0,
-        color: Color::from_hex(pal.tick),
-        align: TextAlign::Left,
-        baseline: TextBaseline::Top,
-        angle_deg: 0.0,
-        bold: false,
-    });
-    scene
+    crate::status_figure::figure_status_message(title_text, message, ok, theme)
 }
 
 fn point_is_finite(point: &VspaeroPolarPoint) -> bool {
@@ -371,19 +341,14 @@ pub fn figure_vspaero_wake_convergence(
         .map(|case| case.rows.len() as f64)
         .fold(0.0, f64::max);
     let axes = [
-        Axes2D::new((60.0, 55.0, 370.0, 270.0), alpha, residual)
-            .with_y_tick_decimals(2),
+        Axes2D::new((60.0, 55.0, 370.0, 270.0), alpha, residual).with_y_tick_decimals(2),
         Axes2D::new(
             (480.0, 55.0, 370.0, 270.0),
             alpha,
             (0.0, (max_iterations + 1.0).max(2.0)),
         ),
     ];
-    let mut scene = Scene::new(
-        900.0,
-        WAKE_LEGEND_TOP + 42.0,
-        Some(Color::from_hex(pal.bg)),
-    );
+    let mut scene = Scene::new(900.0, WAKE_LEGEND_TOP + 42.0, Some(Color::from_hex(pal.bg)));
     scene.title = Some("VSPAERO Native Wake Convergence".to_owned());
     axes[0].draw_frame_with_labels(
         &mut scene,
@@ -417,7 +382,7 @@ pub fn figure_vspaero_wake_convergence(
     let iteration_stroke = Stroke::new(Color::from_hex("#56b4e9"), 1.6);
     axes[0].add_line_series(&mut scene, &residual_points, residual_stroke.clone());
     axes[1].add_line_series(&mut scene, &iteration_points, iteration_stroke.clone());
-    for (&(alpha_deg, change), point) in residual_points.iter().zip(&cases) {
+    for &(alpha_deg, change) in &residual_points {
         let color = if change <= WAKE_TOLERANCE {
             Color::from_hex(ACCEPTED_COLOR)
         } else {
@@ -429,7 +394,6 @@ pub fn figure_vspaero_wake_convergence(
             fill: Some(Fill::new(color)),
             stroke: None,
         });
-        let _ = point;
     }
     scene.add(SceneElement::Line {
         p1: axes[0].map_point(alpha.0, WAKE_TOLERANCE),
@@ -533,10 +497,8 @@ mod tests {
 
     #[test]
     fn wake_scene_limits_residual_ticks_and_keeps_legend_clear_of_x_labels() {
-        let stem = std::env::temp_dir().join(format!(
-            "alas-vspaero-wake-layout-{}",
-            std::process::id()
-        ));
+        let stem =
+            std::env::temp_dir().join(format!("alas-vspaero-wake-layout-{}", std::process::id()));
         let history_path = stem.with_extension("history");
         let history = "# Name Value Units\n\
             AoA_ -2.0 deg\n\
@@ -560,9 +522,7 @@ mod tests {
                 .elements
                 .iter()
                 .filter_map(|element| match element {
-                    SceneElement::Text { text, pos, .. } if text == "alpha [deg]" => {
-                        Some(pos[1])
-                    }
+                    SceneElement::Text { text, pos, .. } if text == "alpha [deg]" => Some(pos[1]),
                     _ => None,
                 })
                 .collect::<Vec<_>>();
@@ -582,7 +542,7 @@ mod tests {
             assert!(residual_ticks.iter().all(|label| {
                 label
                     .split_once('.')
-                    .map_or(true, |(_, fraction)| fraction.len() <= 2)
+                    .is_none_or(|(_, fraction)| fraction.len() <= 2)
             }));
 
             let legend_y = scene
@@ -593,7 +553,10 @@ mod tests {
                         if matches!(
                             text.as_str(),
                             "Native residual" | "Iteration count" | "Acceptance tolerance"
-                        ) => Some(pos[1]),
+                        ) =>
+                    {
+                        Some(pos[1])
+                    }
                     _ => None,
                 })
                 .collect::<Vec<_>>();

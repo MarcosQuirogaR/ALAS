@@ -13,7 +13,7 @@ use alas_mass::tanks::FuelTankLayout;
 /// configured tank arrangement cannot be resolved on the built geometry.
 ///
 /// A registered preset's published volumes are honoured as they stand only
-/// when `design` still equals the preset's own design vector -- the same
+/// when `design` still equals the preset's own design vector: the same
 /// rule `alas_pipeline::feasibility::assess_fuel_capacity` applies to the
 /// finalist report; `alas-opt` cannot depend on `alas-pipeline`, so the
 /// small preset lookup is reproduced here. For any other design the

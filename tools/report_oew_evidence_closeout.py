@@ -13,7 +13,7 @@ Inputs (all produced from one frozen tree):
 Outputs, under ``outputs/oew-evidence-closeout/``: ``oew-reference-registry.csv``,
 ``conditional-comparison.csv``, ``before-after-oew.csv``, ``before-after-components.csv``,
 ``payload-policy-before-after.csv``, ``validation-metrics.json``, ``test-summary.json``,
-``frozen-state-manifest.json`` and ``.agent/reports/oew-evidence-closeout.html``.
+``frozen-state-manifest.json`` and ``out/reports/oew-evidence-closeout.html``.
 
 Usage (repository root)::
 
@@ -38,7 +38,7 @@ BEFORE = OUT / "matrix-before-engine"
 PARITY = OUT / "aviary-parity"
 EVIDENCE = OUT / "evidence" / "external-evidence.json"
 CONSOLIDATION_AFTER = ROOT / "outputs" / "mass-model-consolidation" / "after" / "raw.json"
-REPORT = ROOT / ".agent" / "reports" / "oew-evidence-closeout.html"
+REPORT = ROOT / "out" / "reports" / "oew-evidence-closeout.html"
 GROUPS = ["Wing", "H-Stab", "V-Stab", "Fuselage", "Gear", "Propulsion", "Systems", "Furnishings"]
 SOURCE_FILES = [
     "crates/alas-config/src/oew_reference.rs",
@@ -522,14 +522,14 @@ def main() -> int:
     doc.append("<h2>11. Evidence and reproducibility</h2>")
     doc.append(table(evidence["records"], ["id", "aircraft_or_engine", "quantity", "value", "unit", "status", "document", "revision", "locator", "url_or_local_path"]))
     doc.append("<pre>" + esc("\n".join([
-        "CARGO_TARGET_DIR=.agent/mass-target cargo build --release -p alas-pipeline --example mass_experiment_matrix -p alas-mass --example flops_audit_inputs --example flops_preset_comparison",
-        ".agent/mass-target/release/examples/mass_experiment_matrix.exe outputs/oew-evidence-closeout/matrix-after",
-        ".agent/mass-target/release/examples/mass_experiment_matrix.exe outputs/oew-evidence-closeout/matrix-before-engine --engine-fallback",
-        ".agent/mass-target/release/examples/flops_audit_inputs.exe outputs/oew-evidence-closeout/aviary-parity/alas-inputs.json",
-        ".agent/mass-target/release/examples/flops_preset_comparison.exe outputs/oew-evidence-closeout/aviary-parity/raw.json",
+        "CARGO_TARGET_DIR=target/mass-target cargo build --release -p alas-pipeline --example mass_experiment_matrix -p alas-mass --example flops_audit_inputs --example flops_preset_comparison",
+        "target/mass-target/release/examples/mass_experiment_matrix.exe outputs/oew-evidence-closeout/matrix-after",
+        "target/mass-target/release/examples/mass_experiment_matrix.exe outputs/oew-evidence-closeout/matrix-before-engine --engine-fallback",
+        "target/mass-target/release/examples/flops_audit_inputs.exe outputs/oew-evidence-closeout/aviary-parity/alas-inputs.json",
+        "target/mass-target/release/examples/flops_preset_comparison.exe outputs/oew-evidence-closeout/aviary-parity/raw.json",
         "uv run python outputs/oew-evidence-closeout/aviary-parity/replay_same_state.py",
         "uv run python tools/report_oew_evidence_closeout.py",
-        "CARGO_TARGET_DIR=.agent/mass-target-dbg cargo test -p alas-config -p alas-payload -p alas-opt -p alas-mass; cargo test -p alas-pipeline --tests --no-fail-fast; cargo test -p alas-acceptance --test acceptance_matrix",
+        "CARGO_TARGET_DIR=target/mass-target-dbg cargo test -p alas-config -p alas-payload -p alas-opt -p alas-mass; cargo test -p alas-pipeline --tests --no-fail-fast; cargo test -p alas-acceptance --test acceptance_matrix",
     ])) + "</pre>")
     doc.append("<div class='scroll'><table><thead><tr><th>File</th><th>SHA-256</th></tr></thead><tbody>" + "".join(f"<tr><td>{esc(k)}</td><td><code>{esc(v)}</code></td></tr>" for k, v in {**manifest['source_files'], **manifest['artifacts']}.items()) + "</tbody></table></div>")
     doc.append("</body></html>")

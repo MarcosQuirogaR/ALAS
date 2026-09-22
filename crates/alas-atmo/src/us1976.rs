@@ -13,8 +13,8 @@
 //! Every mission analysis model mission segment attaches one of these to compute pressure,
 //! temperature and the gas properties the segment solver needs at whatever
 //! altitude it is currently integrating through. It is a different reference
-//! implementation from [`crate::isa`] -- mission analysis model's break-point table rather than
-//! native aerodynamic model's -- so the two are kept as separate submodules rather than
+//! implementation from [`crate::isa`]: mission analysis model's break-point table rather than
+//! native aerodynamic model's, so the two are kept as separate submodules rather than
 //! merged into one "the" atmosphere: nothing here assumes agreement with
 //! `isa`, and a caller that needs mission analysis model parity must use this one.
 //!
@@ -67,7 +67,7 @@ const SUTHERLAND_S: f64 = 110.4;
 /// Used only to convert a geometric altitude into a geopotential one; mission analysis model's
 /// `compute_gravity` (a `g0 * (Re / (Re + H))^2` correction) is a separate,
 /// unrelated method on the same class that this module does not call, because
-/// `compute_values` itself never calls it either -- gravity is held at
+/// `compute_values` itself never calls it either: gravity is held at
 /// [`SEA_LEVEL_GRAVITY`] throughout.
 const MEAN_RADIUS_M: f64 = 6.371e6;
 
@@ -82,9 +82,9 @@ struct Break {
     altitude_m: f64,
     temperature_k: f64,
     pressure_pa: f64,
-    /// Published kg/m^3 at this break. `compute_values` never reads this --
+    /// Published kg/m^3 at this break. `compute_values` never reads this;
     /// it recomputes density from `p` and `T` through the ideal gas law
-    /// instead -- so this field exists only for fidelity to the source table
+    /// instead, so this field exists only for fidelity to the source table
     /// and is not consumed by anything in this module.
     #[allow(dead_code)] // carried for fidelity to the upstream table; see above
     density_kg_m3: f64,
@@ -299,7 +299,7 @@ impl std::error::Error for Us1976Error {}
 /// the table's range, `[-2000, 84852]` m; a request outside that range is
 /// logged and clamped rather than extrapolated, matching upstream's
 /// `warnings.warn`-and-clamp behaviour (translated as [`tracing::warn!`],
-/// since library code here reports through `tracing` rather than printing --
+/// since library code here reports through `tracing` rather than printing,
 /// see `CONTRIBUTING.md`).
 pub fn compute_values(altitude_m: f64, temperature_deviation_k: f64) -> Values {
     let geopotential_altitude_m = altitude_m / (1.0 + altitude_m / MEAN_RADIUS_M);
@@ -357,7 +357,7 @@ pub fn try_compute_values(
 /// The part of [`compute_values`] that operates purely in geopotential
 /// altitude, split out so tests can probe the break-point table's own
 /// behaviour (clamping, segment selection, continuity) without also going
-/// through the geometric-to-geopotential conversion -- which shifts a
+/// through the geometric-to-geopotential conversion, which shifts a
 /// geometric input away from the geopotential value of the same number, so a
 /// test that wants to land exactly on a break has to reason about both at
 /// once unless they are separated like this.
@@ -459,7 +459,7 @@ mod tests {
     fn pressure_and_temperature_nearly_agree_either_side_of_every_segment_boundary() {
         // Unlike `crate::isa`'s table, which chains the barometric formula
         // layer by layer, mission analysis model's break-point table stores independently
-        // published pressure and temperature constants at each break -- they
+        // published pressure and temperature constants at each break; they
         // are not derived from each other, so evaluating the segment below a
         // boundary at its own top does not reproduce the segment above's
         // stored base value to floating-point precision. Confirmed against
@@ -469,7 +469,7 @@ mod tests {
         // checks that the jump stays of that small, table-rounding size (a
         // wrong segment or a sign error would be wrong by orders of
         // magnitude more, not a few parts per million), not that there is no
-        // jump at all -- there genuinely is one, faithfully reproduced.
+        // jump at all; there genuinely is one, faithfully reproduced.
         for boundary in &BREAKS[1..BREAKS.len() - 1] {
             let below = values_at_geopotential_altitude(boundary.altitude_m - 1e-3, 0.0);
             let above = values_at_geopotential_altitude(boundary.altitude_m + 1e-3, 0.0);
@@ -494,7 +494,7 @@ mod tests {
         // `segment_for`'s documentation claims the higher-indexed segment
         // wins at an exact break, matching mission analysis model's mask-overwrite loop.
         // Confirmed against the Python reference directly: querying exactly
-        // 11000 m geopotential returns 22632.1 Pa -- `BREAKS[2]`'s own
+        // 11000 m geopotential returns 22632.1 Pa: `BREAKS[2]`'s own
         // stored base pressure, not a value derived from segment 1's formula
         // extrapolated up to that point.
         for interior_break in &BREAKS[1..BREAKS.len() - 1] {
@@ -534,9 +534,9 @@ mod tests {
     #[test]
     fn requests_outside_the_table_are_clamped_not_extrapolated() {
         // `BREAKS[0].altitude_m`/`BREAKS[last].altitude_m` are geopotential
-        // values, not valid geometric input for `compute_values` -- the
+        // values, not valid geometric input for `compute_values`, the
         // conversion would shift them off the table's true edge (see
-        // `values_at_geopotential_altitude`'s documentation) -- so the
+        // `values_at_geopotential_altitude`'s documentation), so the
         // reference values here are taken in geopotential space directly,
         // and only the clamping behaviour itself is exercised through the
         // public, geometric-altitude entry point.

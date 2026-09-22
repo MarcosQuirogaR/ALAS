@@ -169,7 +169,7 @@ pub struct ObjectiveWeights {
     /// Linear cost per metre of span, standing in for structural weight.
     #[config(
         label = "Wingspan penalty (per metre)",
-        help = "Small linear penalty per metre of span -- discourages excessively large wings."
+        help = "Small linear penalty per metre of span: discourages excessively large wings."
     )]
     pub span_penalty_per_m: f64,
 
@@ -197,7 +197,7 @@ pub struct ObjectiveWeights {
     /// Retained so old saved configurations still load.
     #[config(
         label = "(Legacy, unused) CG/aero-balance mismatch weight",
-        help = "NOT read by the cost function (objective.py) -- kept only so old saved YAML configs referencing this key still load without error. Originally intended to penalize (Delta x_cg / MAC)^2, but that formula was never actually wired up; the field's real runtime effect was fully redundant with static_margin_penalty_scale, since both applied to the identical static-margin-vs-target term, so the two are consolidated into that single, correctly-named, appropriately-soft term. Physical CG-envelope compliance is enforced separately by cg_envelope_penalty_scale/cg_envelope_reward below."
+        help = "NOT read by the cost function (objective.py): kept only so old saved YAML configs referencing this key still load without error. Originally intended to penalize (Delta x_cg / MAC)^2, but that formula was never actually wired up; the field's real runtime effect was fully redundant with static_margin_penalty_scale, since both applied to the identical static-margin-vs-target term, so the two are consolidated into that single, correctly-named, appropriately-soft term. Physical CG-envelope compliance is enforced separately by cg_envelope_penalty_scale/cg_envelope_reward below."
     )]
     pub cg_penalty_scale: f64,
 
@@ -232,7 +232,7 @@ pub struct ObjectiveWeights {
     /// Pull toward the target static margin.
     #[config(
         label = "Static-margin target penalty weight",
-        help = "SOFT preference nudging compliant-but-suboptimal candidates toward requirements.target_static_margin -- NOT a hard requirement (the physical floor, min_physical_static_margin, and the CG-envelope itself are enforced separately and are what actually keep a design safe/legal). Kept deliberately small relative to -L/D (typically 15-25) so this doesn't crowd out genuine aerodynamic improvements: raising it much above ~20-30 risks the optimizer chasing an exact SM match instead of exploring shape space, overwhelming the L/D signal the search is meant to prioritize."
+        help = "SOFT preference nudging compliant-but-suboptimal candidates toward requirements.target_static_margin, NOT a hard requirement (the physical floor, min_physical_static_margin, and the CG-envelope itself are enforced separately and are what actually keep a design safe/legal). Kept deliberately small relative to -L/D (typically 15-25) so this doesn't crowd out genuine aerodynamic improvements: raising it much above ~20-30 risks the optimizer chasing an exact SM match instead of exploring shape space, overwhelming the L/D signal the search is meant to prioritize."
     )]
     pub static_margin_penalty_scale: f64,
 
@@ -296,7 +296,7 @@ pub struct ObjectiveWeights {
     /// Upper bound on the horizontal tail volume coefficient.
     #[config(
         label = "Maximum H-stab volume coefficient (Vh)",
-        help = "Upper bound on Vh -- penalises an oversized tail / an unnecessarily stretched fuselage moment arm."
+        help = "Upper bound on Vh: penalises an oversized tail / an unnecessarily stretched fuselage moment arm."
     )]
     pub max_hstab_volume_coef: f64,
 
@@ -354,7 +354,7 @@ pub struct ObjectiveWeights {
     /// Cost of a reflex corner at the wing root trailing edge.
     #[config(
         label = "Wing-root trailing-edge angle penalty weight",
-        help = "Penalizes the wing's root-to-break trailing edge (seen in planform) making an angle greater than 90 deg with the fuselage centerline -- i.e. the break station's trailing edge sitting forward of the root's. That creates a reflex (concave) corner at the wing-fuselage junction: a severe stress concentration no real transport-category wing root has, caused by a short root chord combined with a comparatively long break chord and/or too little sweep. Quadratic on the angle exceedance beyond 90 deg."
+        help = "Penalizes the wing's root-to-break trailing edge (seen in planform) making an angle greater than 90 deg with the fuselage centerline: i.e. the break station's trailing edge sitting forward of the root's. That creates a reflex (concave) corner at the wing-fuselage junction: a severe stress concentration no real transport-category wing root has, caused by a short root chord combined with a comparatively long break chord and/or too little sweep. Quadratic on the angle exceedance beyond 90 deg."
     )]
     pub te_root_angle_penalty_scale: f64,
 
@@ -379,7 +379,7 @@ pub struct ObjectiveWeights {
     /// How far aft the wing must sit.
     #[config(
         label = "Minimum wing position (fraction of fuselage length)",
-        help = "Wing-root leading edge must sit at least this fraction of fuselage length aft of the nose -- prevents the optimizer placing the wing in the cockpit. Typical transports: 25-55%."
+        help = "Wing-root leading edge must sit at least this fraction of fuselage length aft of the nose: prevents the optimizer placing the wing in the cockpit. Typical transports: 25-55%."
     )]
     pub min_wing_position_fraction: f64,
 
@@ -393,7 +393,7 @@ pub struct ObjectiveWeights {
     /// Cost of not fitting the requested payload.
     #[config(
         label = "Payload-shortfall penalty weight",
-        help = "Steep quadratic penalty on the fractional shortfall vs. the target passenger count / cargo payload -- guides the optimizer to grow the fuselage long enough to actually fit the requested payload."
+        help = "Steep quadratic penalty on the fractional shortfall vs. the target passenger count / cargo payload: guides the optimizer to grow the fuselage long enough to actually fit the requested payload."
     )]
     pub payload_shortfall_penalty_scale: f64,
 
@@ -421,7 +421,7 @@ pub struct ObjectiveWeights {
     /// Severity of the static-margin floor penalty.
     #[config(
         label = "Instability reject cost",
-        help = "Severity scale for the static-margin-floor penalty applied to a candidate that builds and analyses successfully but is rejected as physically invalid (static margin below requirements.min_physical_static_margin). NOT a flat returned cost -- this floor is graduated, not an early return (objective.py's `(deficit * severity)**3` term, where this field sets `severity` so raising/lowering it steepens/relaxes the penalty without editing code; the default reproduces the exact cubic constant used before this field was wired up). Kept distinct from failure_cost so run diagnostics can tell 'geometry/analysis crashed' apart from 'physically unstable' rejects (see OptimizationHistory.reject_reason_counts)."
+        help = "Severity scale for the static-margin-floor penalty applied to a candidate that builds and analyses successfully but is rejected as physically invalid (static margin below requirements.min_physical_static_margin). NOT a flat returned cost; this floor is graduated, not an early return (objective.py's `(deficit * severity)**3` term, where this field sets `severity` so raising/lowering it steepens/relaxes the penalty without editing code; the default reproduces the exact cubic constant used before this field was wired up). Kept distinct from failure_cost so run diagnostics can tell 'geometry/analysis crashed' apart from 'physically unstable' rejects (see OptimizationHistory.reject_reason_counts)."
     )]
     pub instability_failure_cost: f64,
 }

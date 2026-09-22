@@ -60,6 +60,15 @@ pub fn show_run_log(state: &mut AppState, ui: &mut Ui) {
                 state.run_log_export_status = Some(export_log(state));
             }
         }
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if crate::theme::close_icon_button(ui, tr("Close")).clicked() {
+                if state.sandbox.active() {
+                    state.sandbox.layout.log_window_open = false;
+                } else {
+                    state.run_log_open = false;
+                }
+            }
+        });
     });
     if let Some(status) = &state.run_log_export_status {
         ui.label(RichText::new(status).weak().small());

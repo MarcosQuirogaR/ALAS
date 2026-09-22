@@ -7,9 +7,10 @@
 
 //! Rayleigh-versus-MSC/NASTRAN-95 normal-mode frequencies and spanwise shapes.
 //!
-//! Each solver's modes are paired to the analytical trial modes by nearest
-//! frequency, not by list position. A real finite-element solve may contain
-//! torsional or local-panel modes that have no Rayleigh counterpart.
+//! Each solver's modes are paired to the analytical trial modes by a
+//! deterministic one-to-one frequency assignment, not by list position. A
+//! real finite-element solve may contain torsional or local-panel modes that
+//! have no Rayleigh counterpart.
 
 use alas_pipeline::structural::StructuralAnalysisResult;
 use alas_struct::nastran::ResultStatus;
@@ -20,12 +21,16 @@ use crate::chart_kit::{draw_legend, draw_title, LegendMarker};
 use crate::scene::{Axes2D, Color, Fill, Scene, SceneElement, Stroke, TextAlign, TextBaseline};
 use crate::theme::get_palette;
 
-const TITLE: &str = "Structural Analysis -- Modes";
+const TITLE: &str = "Structural Analysis: Modes";
 const BLUE: &str = "tab:blue";
 const RED: &str = "tab:red";
 const ORANGE: &str = "tab:orange";
 
 /// Return the index of the NASTRAN frequency nearest to an analytical one.
+///
+/// This helper is retained for callers that need one independent lookup. The
+/// renderer uses [`match_frequency_indices`] instead, because a mode identity
+/// must not be reused for two analytical modes.
 pub fn nearest_frequency_index(frequency_hz: f64, nastran_frequencies_hz: &[f64]) -> Option<usize> {
     nastran_frequencies_hz
         .iter()
@@ -36,6 +41,177 @@ pub fn nearest_frequency_index(frequency_hz: f64, nastran_frequencies_hz: &[f64]
                 .total_cmp(&(*b - frequency_hz).abs())
         })
         .map(|(index, _)| index)
+}
+
+#[derive(Debug, Clone)]
+struct AssignmentScore {
+    matched: usize,
+    frequency_cost: f64,
+    /// Stable tie-break key: frequency-sorted analytical/solver positions.
+    /// Equal-cardinality/equal-cost assignments prefer the earliest
+    /// analytical mode, then the earliest solver mode.
+    matched_pairs: Vec<(usize, usize)>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct AssignmentParent {
+    previous_i: usize,
+    previous_j: usize,
+    matched: bool,
+}
+
+fn score_is_better(candidate: &AssignmentScore, incumbent: &AssignmentScore) -> bool {
+    candidate.matched > incumbent.matched
+        || (candidate.matched == incumbent.matched
+            && (candidate
+                .frequency_cost
+                .total_cmp(&incumbent.frequency_cost)
+                .is_lt()
+                || (candidate
+                    .frequency_cost
+                    .total_cmp(&incumbent.frequency_cost)
+                    .is_eq()
+                    && candidate.matched_pairs < incumbent.matched_pairs)))
+}
+
+fn update_assignment(
+    scores: &mut [Vec<Option<AssignmentScore>>],
+    parents: &mut [Vec<Option<AssignmentParent>>],
+    next_i: usize,
+    next_j: usize,
+    candidate: AssignmentScore,
+    parent: AssignmentParent,
+) {
+    let replace = scores[next_i][next_j]
+        .as_ref()
+        .is_none_or(|incumbent| score_is_better(&candidate, incumbent));
+    if replace {
+        scores[next_i][next_j] = Some(candidate);
+        parents[next_i][next_j] = Some(parent);
+    }
+}
+
+/// Pair analytical modes with solver modes using a deterministic one-to-one
+/// frequency assignment.
+///
+/// A finite-element solution can contain local or torsional modes that have
+/// no Rayleigh counterpart, so unmatched solver modes are allowed. The
+/// assignment maximizes the number of matched analytical modes first and then
+/// minimizes the sum of absolute frequency differences. Non-finite
+/// frequencies remain unmatched. This solves mode identity before any sign
+/// alignment; changing an eigenvector's sign cannot repair a duplicated or
+/// swapped pairing.
+pub fn match_frequency_indices(
+    analytical_frequencies_hz: &[f64],
+    solver_frequencies_hz: &[f64],
+) -> Vec<Option<usize>> {
+    let mut analytical_order: Vec<usize> = analytical_frequencies_hz
+        .iter()
+        .enumerate()
+        .filter(|(_, frequency)| frequency.is_finite())
+        .map(|(index, _)| index)
+        .collect();
+    analytical_order.sort_by(|&left, &right| {
+        analytical_frequencies_hz[left]
+            .total_cmp(&analytical_frequencies_hz[right])
+            .then_with(|| left.cmp(&right))
+    });
+    let mut solver_order: Vec<usize> = solver_frequencies_hz
+        .iter()
+        .enumerate()
+        .filter(|(_, frequency)| frequency.is_finite())
+        .map(|(index, _)| index)
+        .collect();
+    solver_order.sort_by(|&left, &right| {
+        solver_frequencies_hz[left]
+            .total_cmp(&solver_frequencies_hz[right])
+            .then_with(|| left.cmp(&right))
+    });
+
+    let n = analytical_order.len();
+    let m = solver_order.len();
+    let mut scores = vec![vec![None; m + 1]; n + 1];
+    let mut parents = vec![vec![None; m + 1]; n + 1];
+    scores[0][0] = Some(AssignmentScore {
+        matched: 0,
+        frequency_cost: 0.0,
+        matched_pairs: Vec::new(),
+    });
+
+    for i in 0..=n {
+        for j in 0..=m {
+            let Some(score) = scores[i][j].clone() else {
+                continue;
+            };
+            if i < n {
+                update_assignment(
+                    &mut scores,
+                    &mut parents,
+                    i + 1,
+                    j,
+                    score.clone(),
+                    AssignmentParent {
+                        previous_i: i,
+                        previous_j: j,
+                        matched: false,
+                    },
+                );
+            }
+            if j < m {
+                update_assignment(
+                    &mut scores,
+                    &mut parents,
+                    i,
+                    j + 1,
+                    score.clone(),
+                    AssignmentParent {
+                        previous_i: i,
+                        previous_j: j,
+                        matched: false,
+                    },
+                );
+            }
+            if i < n && j < m {
+                let frequency_cost = (analytical_frequencies_hz[analytical_order[i]]
+                    - solver_frequencies_hz[solver_order[j]])
+                    .abs();
+                update_assignment(
+                    &mut scores,
+                    &mut parents,
+                    i + 1,
+                    j + 1,
+                    AssignmentScore {
+                        matched: score.matched + 1,
+                        frequency_cost: score.frequency_cost + frequency_cost,
+                        matched_pairs: score
+                            .matched_pairs
+                            .iter()
+                            .copied()
+                            .chain(std::iter::once((i, j)))
+                            .collect(),
+                    },
+                    AssignmentParent {
+                        previous_i: i,
+                        previous_j: j,
+                        matched: true,
+                    },
+                );
+            }
+        }
+    }
+
+    let mut matches = vec![None; analytical_frequencies_hz.len()];
+    let (mut i, mut j) = (n, m);
+    while i > 0 || j > 0 {
+        let Some(parent) = parents[i][j] else {
+            break;
+        };
+        if parent.matched {
+            matches[analytical_order[i - 1]] = Some(solver_order[j - 1]);
+        }
+        (i, j) = (parent.previous_i, parent.previous_j);
+    }
+    matches
 }
 
 /// Natural frequencies and their Rayleigh/MSC/NASTRAN-95 mode-shape comparison.
@@ -79,18 +255,14 @@ pub fn figure_structures_modes(
         .filter(|_| has_n95)
         .map(|m| m.frequencies_hz.as_slice())
         .unwrap_or(&[]);
-    let msc_matches: Vec<Option<usize>> = analysis
-        .modal
-        .frequencies_hz
-        .iter()
-        .map(|&frequency| nearest_frequency_index(frequency, msc_frequencies))
-        .collect();
-    let n95_matches: Vec<Option<usize>> = analysis
-        .modal
-        .frequencies_hz
-        .iter()
-        .map(|&frequency| nearest_frequency_index(frequency, n95_frequencies))
-        .collect();
+    // Pair modes before changing their arbitrary global signs.  Independent
+    // nearest-frequency lookups can reuse one solver mode for two Rayleigh
+    // modes when frequencies are close, which makes the second curve look
+    // like a sign error while it is actually a mode-identity error.  The
+    // assignment is one-to-one and deterministic; a sign flip is applied only
+    // after this pairing has been selected.
+    let msc_matches = match_frequency_indices(&analysis.modal.frequencies_hz, msc_frequencies);
+    let n95_matches = match_frequency_indices(&analysis.modal.frequencies_hz, n95_frequencies);
     let msc_shape_available = has_matched_shape(msc_modes, &msc_matches);
     let n95_shape_available = has_matched_shape(n95_modes, &n95_matches);
 
@@ -174,16 +346,16 @@ pub fn figure_structures_modes(
     if has_msc {
         entries.push((
             if has_n95 {
-                "MSC NASTRAN SOL 103 (nearest-frequency match)".to_owned()
+                "MSC NASTRAN SOL 103 (one-to-one frequency match)".to_owned()
             } else {
-                "NASTRAN SOL 103 (nearest-frequency match)".to_owned()
+                "NASTRAN SOL 103 (one-to-one frequency match)".to_owned()
             },
             LegendMarker::Patch(Color::from_hex(RED)),
         ));
     }
     if has_n95 {
         entries.push((
-            "NASTRAN-95 SOL 103 (nearest-frequency match)".to_owned(),
+            "NASTRAN-95 SOL 103 (one-to-one frequency match)".to_owned(),
             LegendMarker::Patch(Color::from_hex(ORANGE)),
         ));
     }
@@ -225,10 +397,12 @@ pub fn figure_structures_modes(
                 modes.mode_shape_y_m.as_ref(),
                 modes.mode_shapes.get(*msc_index),
             ) {
+                let aligned_shape =
+                    aligned_display_shape_at_stations(&analysis.y, shape, stations, nastran_shape);
                 let points: Vec<(f64, f64)> = stations
                     .iter()
                     .copied()
-                    .zip(nastran_shape.iter().copied())
+                    .zip(aligned_shape)
                     .filter(|(y, value)| y.is_finite() && value.is_finite())
                     .collect();
                 nastran_axes.add_line_series(
@@ -246,10 +420,12 @@ pub fn figure_structures_modes(
                 modes.mode_shape_y_m.as_ref(),
                 modes.mode_shapes.get(*n95_index),
             ) {
+                let aligned_shape =
+                    aligned_display_shape_at_stations(&analysis.y, shape, stations, n95_shape);
                 let points: Vec<(f64, f64)> = stations
                     .iter()
                     .copied()
-                    .zip(n95_shape.iter().copied())
+                    .zip(aligned_shape)
                     .filter(|(y, value)| y.is_finite() && value.is_finite())
                     .collect();
                 nastran_axes.add_line_series(
@@ -396,7 +572,115 @@ fn span_range(values: &[f64]) -> (f64, f64) {
     }
 }
 
-/// A solver is only said to have shapes when a nearest-frequency pairing
+const MODE_SIGN_EPS: f64 = 1.0e-12;
+
+/// Align a solver's displayed out-of-plane mode shape with its matched
+/// Rayleigh mode. Both vectors are compared in their physical spanwise
+/// coordinate, and both use the third displacement component (`T3`, the
+/// out-of-plane `z` component). Normal-mode eigenvectors have an arbitrary
+/// global sign, so this changes neither frequency, shape magnitude, nor
+/// normalization.
+///
+/// The endpoint is selected by the largest finite solver station and the
+/// Rayleigh shape is linearly interpolated there. If that endpoint is
+/// effectively zero or unavailable, a finite-vector correlation over the
+/// stations common to both grids supplies a deterministic fallback instead of
+/// forcing a sign from numerical noise. A shape with no common finite samples
+/// is left unchanged.
+fn aligned_display_shape_at_stations(
+    reference_y: &[f64],
+    reference: &[f64],
+    candidate_y: &[f64],
+    candidate: &[f64],
+) -> Vec<f64> {
+    let sign = mode_sign_at_stations(reference_y, reference, candidate_y, candidate);
+    candidate.iter().map(|value| value * sign).collect()
+}
+
+fn mode_sign_at_stations(
+    reference_y: &[f64],
+    reference: &[f64],
+    candidate_y: &[f64],
+    candidate: &[f64],
+) -> f64 {
+    let endpoint = candidate_y
+        .iter()
+        .copied()
+        .zip(candidate.iter().copied())
+        .filter(|(y, value)| y.is_finite() && value.is_finite())
+        .max_by(|(left_y, _), (right_y, _)| left_y.total_cmp(right_y));
+    if let Some((candidate_endpoint_y, candidate_endpoint)) = endpoint {
+        if candidate_endpoint.abs() > MODE_SIGN_EPS {
+            if let Some(reference_endpoint) =
+                interpolate_shape(reference_y, reference, candidate_endpoint_y)
+            {
+                if reference_endpoint.abs() > MODE_SIGN_EPS {
+                    return if reference_endpoint.signum() == candidate_endpoint.signum() {
+                        1.0
+                    } else {
+                        -1.0
+                    };
+                }
+            }
+        }
+    }
+
+    let correlation = candidate_y
+        .iter()
+        .copied()
+        .zip(candidate.iter().copied())
+        .filter_map(|(y, candidate_value)| {
+            if !y.is_finite() || !candidate_value.is_finite() {
+                return None;
+            }
+            interpolate_shape(reference_y, reference, y)
+                .filter(|reference_value| reference_value.is_finite())
+                .map(|reference_value| reference_value * candidate_value)
+        })
+        .sum::<f64>();
+    if correlation.is_finite() && correlation < -MODE_SIGN_EPS {
+        -1.0
+    } else {
+        1.0
+    }
+}
+
+/// Interpolate a finite shape at a span station without extrapolating beyond
+/// the reference grid. The NASTRAN and Rayleigh grids need not have identical
+/// station counts, but they are both expressed in the same positive-right Y
+/// frame.
+fn interpolate_shape(y: &[f64], shape: &[f64], query: f64) -> Option<f64> {
+    let mut samples: Vec<(f64, f64)> = y
+        .iter()
+        .copied()
+        .zip(shape.iter().copied())
+        .filter(|(station, value)| station.is_finite() && value.is_finite())
+        .collect();
+    if !query.is_finite() || samples.is_empty() {
+        return None;
+    }
+    samples.sort_by(|(left, _), (right, _)| left.total_cmp(right));
+    if query < samples[0].0 || query > samples[samples.len() - 1].0 {
+        return None;
+    }
+    for &(station, value) in &samples {
+        if station == query {
+            return Some(value);
+        }
+    }
+    for window in samples.windows(2) {
+        let [(left_station, left_value), (right_station, right_value)] = window else {
+            continue;
+        };
+        if *left_station <= query && query <= *right_station && right_station > left_station {
+            let fraction = (query - left_station) / (right_station - left_station);
+            return Some(left_value + fraction * (right_value - left_value));
+        }
+    }
+    None
+}
+
+/// A solver is only said to have shapes when a one-to-one frequency pairing
 /// yields a drawable curve. A frequency list alone must not produce a legend
 /// that promises a curve which the parser could not supply.
 fn has_matched_shape(
@@ -469,6 +753,21 @@ mod tests {
     fn nearest_frequency_matching_chooses_the_physically_closest_mode() {
         assert_eq!(nearest_frequency_index(9.7, &[3.0, 10.0, 22.0]), Some(1));
         assert_eq!(nearest_frequency_index(1.0, &[]), None);
+    }
+
+    #[test]
+    fn mode_assignment_does_not_reuse_one_solver_mode() {
+        let matches = match_frequency_indices(&[10.0, 10.2], &[10.1]);
+        assert_eq!(matches, vec![Some(0), None]);
+
+        let matches = match_frequency_indices(&[10.0, 10.2], &[10.11, 10.01]);
+        assert_eq!(matches, vec![Some(1), Some(0)]);
+
+        let matches = match_frequency_indices(&[10.0, 11.0], &[9.0, 10.1, 11.1]);
+        assert_eq!(matches, vec![Some(1), Some(2)]);
+
+        let matches = match_frequency_indices(&[10.0, 10.2, 11.0], &[10.1, 11.1]);
+        assert_eq!(matches, vec![Some(0), None, Some(1)]);
     }
 
     #[test]
@@ -549,5 +848,39 @@ mod tests {
                 if stroke.color == Color::from_hex(TAB10[0])
                     && stroke.dash_array == Some(vec![2.0, 2.0]))
         }));
+    }
+
+    #[test]
+    fn matched_solver_shapes_flip_as_a_whole_to_match_the_rayleigh_endpoint() {
+        let stations = [0.0, 1.0, 2.0];
+        let reference = [0.0, 0.4, 1.0];
+        let candidate = [0.0, -0.4, -1.0];
+        assert_eq!(
+            aligned_display_shape_at_stations(&stations, &reference, &stations, &candidate),
+            reference.to_vec()
+        );
+    }
+
+    #[test]
+    fn zero_endpoint_uses_finite_vector_correlation_for_sign_alignment() {
+        let stations = [0.0, 1.0, 2.0];
+        let reference = [0.5, 0.0, 0.0];
+        let candidate = [-0.5, 0.0, 0.0];
+        assert_eq!(
+            aligned_display_shape_at_stations(&stations, &reference, &stations, &candidate),
+            reference.to_vec()
+        );
+    }
+
+    #[test]
+    fn sign_alignment_interpolates_the_rayleigh_endpoint_on_a_different_grid() {
+        let reference_y = [0.0, 2.0];
+        let candidate_y = [0.0, 1.0, 2.0];
+        let reference = [0.0, 1.0];
+        let candidate = [0.0, -0.5, -1.0];
+        assert_eq!(
+            aligned_display_shape_at_stations(&reference_y, &reference, &candidate_y, &candidate),
+            vec![0.0, 0.5, 1.0]
+        );
     }
 }

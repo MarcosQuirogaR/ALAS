@@ -14,9 +14,9 @@
 //! atmosphere, a wrong orientation, a wrong thrust and a wrong mass integral
 //! are four different failures rather than one.
 //!
-//! Two tiers, `exact` + `linalg`. The discrete facts -- the segment schedule,
+//! Two tiers, `exact` + `linalg`. The discrete facts: the segment schedule,
 //! the analysis settings, the engine's fixed component parameters, which
-//! branch of the surrogate was built -- are `exact`, because they are copied
+//! branch of the surrogate was built, are `exact`, because they are copied
 //! constants and a port that assumed a different one would agree about
 //! arithmetic while flying a different aeroplane.
 //!
@@ -26,7 +26,7 @@
 //! to the arithmetic. Nothing here is solved: the unknowns are *held*, and one
 //! pass of the chain is one deterministic evaluation whose loosest step is a
 //! bicubic spline. `linalg` is what that construction is, and it carries an
-//! absolute floor, which `iter` does not -- and this comparison needs one,
+//! absolute floor, which `iter` does not, and this comparison needs one,
 //! because a segment flown at constant speed has quantities that are
 //! analytically zero. `alas-mission::solve` keeps `iter`, where it belongs.
 //!
@@ -51,7 +51,7 @@ use support::segments::{fixture, Held};
 /// walk and a full drag buildup, over an atmosphere evaluated at an altitude
 /// that came out of a pseudospectral quadrature. The spline is the loosest
 /// step in that, and it is `linalg`'s. Measured, 925 of the 961 values agree
-/// to better than 1e-15 relative and the worst of the rest by 6.5e-14 --
+/// to better than 1e-15 relative and the worst of the rest by 6.5e-14,
 /// five decades inside the tier, which is therefore what the construction
 /// calls for rather than what the numbers need.
 const TIER: Tier = Tier::Linalg;
@@ -123,15 +123,15 @@ fn every_update_method_agrees_at_a_held_unknown_vector() {
         );
 
         // `update_acceleration` differentiates a velocity vector that is
-        // constant along every segment this mission flies -- constant
-        // airspeed, constant rate -- so its output is analytically zero, and
+        // constant along every segment this mission flies (constant
+        // airspeed, constant rate) so its output is analytically zero, and
         // what both implementations produce is the rounding noise of a dense
         // 16x16 differentiation operator applied to a constant: about 1e-14
         // m/s^2, against the 5 m/s^2 the residual is built from. There is no
         // quantity here to hold the port to; comparing the noise would be
         // comparing summation order and nothing else. What is checked is that
         // both sides are zero to the operator's precision, and the residual
-        // below -- which is the only place the acceleration is consumed --
+        // below, which is the only place the acceleration is consumed,
         // is compared in full. `docs/PORTING.md` records this.
         c.exact(
             "update_acceleration is zero to operator precision on both sides",
@@ -253,7 +253,7 @@ fn every_update_method_agrees_at_a_held_unknown_vector() {
             // update_orientations. The angle of attack falls out of the body
             // angle and the flight path rather than being given, and both
             // transforms are compared entry by entry because a wrong rotation
-            // order produces a plausible force from a wrong tensor -- which is
+            // order produces a plausible force from a wrong tensor, which is
             // the fault this comparison actually caught.
             (
                 "update_orientations/angle_of_attack_rad",

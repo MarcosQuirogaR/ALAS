@@ -76,11 +76,19 @@ impl FullAnalysis {
         design: &DesignVector,
         airplane: Airplane,
     ) -> Result<AnalysisReport, String> {
+        // Premium economy is retained in saved cabins for compatibility, but
+        // the product cabin and FLOPS contract have three classes. Fold that
+        // legacy slot before either pass builds a payload or prices the cabin;
+        // otherwise a declared Premium count can be added to FLOPS tourist
+        // while the row packer silently ignores it.
+        let product_cabin = self.config.cabin.passenger.canonicalized_for_product();
+        let mut product_cabin_config = self.config.cabin.clone();
+        product_cabin_config.passenger = product_cabin.clone();
         // A cabin declared by count is the first pass's cabin too (`cabin_sync`).
         let (declared_requirements, analysis_mass_model) = cabin_sync::declared_cabin(
             &self.config.requirements,
             &self.config.analysis_mass_model(self.config.requirements.mtow_kg),
-            &self.config.cabin.passenger,
+            &product_cabin,
         );
         let req = &declared_requirements;
         let mut plane = airplane;
@@ -114,7 +122,7 @@ impl FullAnalysis {
                 &plane,
                 req,
                 &self.config.geometry,
-                &self.config.cabin,
+                &product_cabin_config,
                 &self.config.control_surfaces,
                 Some(&analysis_mass_model),
                 None,
@@ -132,6 +140,7 @@ impl FullAnalysis {
         let effective_structural_payload_limit_kg =
             effective_structural_payload_limit_kg(&self.config, design, oew);
         let mut payload_config = self.config.clone();
+        payload_config.cabin.passenger = product_cabin.clone();
         if let Some(limit_kg) = effective_structural_payload_limit_kg {
             payload_config.requirements.max_structural_payload_kg = limit_kg;
         }
@@ -148,7 +157,12 @@ impl FullAnalysis {
         });
         // One cabin per case (see `cabin_sync`).
         let (cabin_requirements, cabin_mass_model) =
-            cabin_sync::cabin_synchronized(req, &analysis_mass_model, &payload_layout);
+            cabin_sync::cabin_synchronized_for_cabin(
+                req,
+                &analysis_mass_model,
+                &product_cabin,
+                &payload_layout,
+            );
 
         let (masses, coords, _, flops_mass_buildup) = if self.reference_compatibility {
             let (masses, coords, cg) =
@@ -170,7 +184,7 @@ impl FullAnalysis {
                 &plane,
                 &cabin_requirements,
                 &self.config.geometry,
-                &self.config.cabin,
+                &payload_config.cabin,
                 &self.config.control_surfaces,
                 Some(&cabin_mass_model),
                 layout_summary.as_ref(),
@@ -319,7 +333,7 @@ impl FullAnalysis {
 /// and `MZFW - modeled OEW`, because the modeled OEW can be heavier than the
 /// source OEW and the layout would otherwise respect the cap while producing
 /// an overweight zero-fuel mass. Notional designs inherit no published MZFW.
-fn effective_structural_payload_limit_kg(
+pub(crate) fn effective_structural_payload_limit_kg(
     config: &AlasConfig,
     design: &DesignVector,
     modeled_oew_kg: f64,

@@ -86,6 +86,13 @@ pub struct ToolPreferences {
     /// Directory containing user-imported and saved flight routes.
     #[serde(default)]
     pub routes_dir: Option<String>,
+    /// Configured FLOWUnsteady/Julia adapter launcher executable.
+    ///
+    /// This overrides the `ALAS_FLOWUNSTEADY_EXE` environment variable at
+    /// resolution time; the variable remains a valid override for
+    /// headless/CI launches that never write a preferences file.
+    #[serde(default)]
+    pub flowunsteady_exe: Option<String>,
 }
 
 /// Result of inspecting one MSES installation directory.

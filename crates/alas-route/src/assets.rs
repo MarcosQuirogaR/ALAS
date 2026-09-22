@@ -60,6 +60,40 @@ pub struct NavdataFile {
     pub name: &'static str,
     /// The floor a completed transfer must clear.
     pub min_bytes: u64,
+    /// A SHA-256, lowercase hex, of the last content a maintainer reviewed
+    /// and accepted for this file, or `None` when no review has pinned one
+    /// yet, in which case `min_bytes` alone still gates a completed
+    /// transfer, exactly as before this field existed.
+    ///
+    /// This is a **reviewed-content pin, not an official release checksum**:
+    /// this mirror (`NAVDATA_BASE_URL` above) publishes no version tags, so a
+    /// pinned value here can only mean "matches what a maintainer looked at
+    /// and accepted on the stated review date," never "matches what X-Plane
+    /// or the mirror's author intended to ship." A mismatch means the
+    /// content changed since that review and needs a human to look at it
+    /// again: an ordinary upstream edit to the tracked `master` branch
+    /// produces the same symptom as tampering, so a mismatch must not be
+    /// reported as proof of the latter.
+    ///
+    /// The three values below were pinned 2026-09-22 from a direct HTTPS
+    /// fetch of each file at `NAVDATA_BASE_URL`, cross-checked against the
+    /// byte sizes GitHub's contents API independently reports for the same
+    /// commit, with the mirror's GPL-3.0 licence claim confirmed from its
+    /// own `README.md` (matching `THIRD-PARTY-NOTICES.md`). Retained
+    /// fetch logs, headers and hash evidence:
+    /// `deliverables/alas-v1.2-dispatch/navdata-review/`. This mirror is a
+    /// single-maintainer personal repository with no cryptographic release
+    /// signature and no push since 2019; the pin only attests to content
+    /// reviewed on that date, not to the publisher's identity or intent.
+    ///
+    /// To refresh a value after a legitimate upstream change: fetch the file
+    /// over HTTPS, read and accept its content, then hash it (`sha256sum
+    /// <file>` on Linux, `Get-FileHash <file> -Algorithm SHA256` on Windows),
+    /// place the lowercase hex digest here, and update the review note
+    /// above: the verification itself is already implemented and enforced
+    /// by `alas_exec::download::download_files` whenever a spec carries a
+    /// hash.
+    pub expected_sha256: Option<&'static str>,
 }
 
 /// The three files a complete navigation-data set has.
@@ -67,14 +101,17 @@ pub static NAVDATA_FILES: [NavdataFile; 3] = [
     NavdataFile {
         name: "earth_fix.dat",
         min_bytes: 1_000_000,
+        expected_sha256: Some("ae60780b7bab8f09f93c3396349d63b4c3b471c27206bd8bb87baa21a3c15ed6"),
     },
     NavdataFile {
         name: "earth_awy.dat",
         min_bytes: 1_000_000,
+        expected_sha256: Some("eb2c2671c2e29618c8769677e00c05ccfcd976697632cb74dfb34bfb8be96e24"),
     },
     NavdataFile {
         name: "earth_nav.dat",
         min_bytes: 500_000,
+        expected_sha256: Some("1968bbe7bc24a189f15a6df2bfdff4b3502856bc8487f025b86c6cbfd81b0fae"),
     },
 ];
 

@@ -15,13 +15,13 @@
 //! wants, which is derived from this aircraft's own trimmed cruise lift-to-drag
 //! and its maximum takeoff weight.
 //!
-//! Scope. Upstream reads five things off an `AnalysisReport` -- a P10 type this
-//! crate is below -- so, following the same "take the fields you read, not the
+//! Scope. Upstream reads five things off an `AnalysisReport`: a P10 type this
+//! crate is below, so, following the same "take the fields you read, not the
 //! type" scoping `alas-perf`'s `build_vn_diagram` and `alas-aero`'s
 //! `trimmed_performance` use, this builder takes a [`ReportView`] of exactly
 //! those five. Two are lift-to-drag ratios that decide the cruise thrust; the
-//! other three -- the design vector, the geometry summary and the component
-//! masses -- are report dictionaries with no native type until P10, so they
+//! other three: the design vector, the geometry summary and the component
+//! masses, are report dictionaries with no native type until P10, so they
 //! pass through as [`serde_json::Value`] unchanged, exactly as the reference
 //! carries them through unread.
 
@@ -271,7 +271,7 @@ mod tests {
         }
     }
 
-    // The trimmed point is preferred and the untrimmed one is the fallback --
+    // The trimmed point is preferred and the untrimmed one is the fallback,
     // and a present-but-nonpositive trimmed ratio does *not* fall through to the
     // untrimmed one, matching `trimmed or plain` on the point rather than on its
     // ratio.

@@ -7,10 +7,10 @@
 //! Three tiers, and the middle one is the point of the row. The training grid
 //! and the fuselage correction are copied constants and are `exact`. The
 //! sampled training tables come straight out of `alas-aero::vorlax` and carry
-//! its `f32` tier -- comparing them at anything tighter would be asserting
+//! its `f32` tier, comparing them at anything tighter would be asserting
 //! something about the single-precision kernel that its own row does not
-//! claim. Everything the spline itself produces -- the knot vectors, the
-//! coefficients, and the evaluations -- is `linalg`, the tier
+//! claim. Everything the spline itself produces: the knot vectors, the
+//! coefficients, and the evaluations, is `linalg`, the tier
 //! `docs/PORTING.md` assigns this row and the tier
 //! `alas-math::BicubicSpline`'s own row already carries, since the fit is a
 //! pair of dense collocation solves.
@@ -147,7 +147,7 @@ fn every_fitted_surface_has_the_knots_and_coefficients_the_reference_fitted() {
         let (knots_x, knots_y) = actual.knots();
         // The knot vectors are copied data points, not computed values, so a
         // difference in them is a different placement rule rather than a
-        // different arithmetic -- which is why they are checked exactly even
+        // different arithmetic, which is why they are checked exactly even
         // inside a `linalg` comparison.
         c.exact(&format!("{name}/knots_x"), &knots_x.to_vec(), &want.knots_x);
         c.exact(&format!("{name}/knots_y"), &knots_y.to_vec(), &want.knots_y);

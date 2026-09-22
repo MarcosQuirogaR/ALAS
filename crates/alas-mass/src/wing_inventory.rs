@@ -9,7 +9,7 @@
 //! frozen empirical remainder of a baseline aircraft. A clean-sheet design has
 //! no baseline, so the remainder has to be modelled item by item. This module
 //! builds that item list from correlations that are functions of geometry,
-//! design gross mass and load factor only -- never of the sized box -- so that
+//! design gross mass and load factor only (never of the sized box) so that
 //! a stiffer or heavier sized box always produces a heavier aircraft rather
 //! than being cancelled by a complementary remainder. By construction
 //! `d(total wing)/d(sized box) = 1`.

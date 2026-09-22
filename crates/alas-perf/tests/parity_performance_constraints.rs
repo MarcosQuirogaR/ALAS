@@ -5,9 +5,9 @@
 //! `alas.physics.performance`, via `golden/generators/gen_perf_performance.py`:
 //! the density ratio, the four constraint curves, and the assembled chart.
 //!
-//! Every quantity is closed-form `f64` arithmetic -- the atmospheric constants
+//! Every quantity is closed-form `f64` arithmetic: the atmospheric constants
 //! reach through `Atmosphere::new` (the same fitted model `alas-prop::cycle`
-//! checks at this tier), everything else is algebra over its result -- so the
+//! checks at this tier), everything else is algebra over its result, so the
 //! surface is checked at `Tier::Closed`, matching `docs/PORTING.md`. The
 //! design point is an `Option` on both sides, so its `None` branch is a real
 //! assertion rather than a number.

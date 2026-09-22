@@ -4,8 +4,8 @@
 //! Compares `alas-mass::torenbeek` against AeroSandbox's
 //! `torenbeek_weights.py`, via `golden/generators/gen_mass_torenbeek.py`.
 //!
-//! Every quantity here is closed-form `f64` arithmetic -- no factorization,
-//! spline fit or iteration -- so the whole row is checked at `Tier::Closed`,
+//! Every quantity here is closed-form `f64` arithmetic, no factorization,
+//! spline fit or iteration, so the whole row is checked at `Tier::Closed`,
 //! matching `docs/PORTING.md`.
 
 // This file is itself a test binary, so an unwrap or expect that fails is
@@ -19,8 +19,8 @@ use alas_mass::torenbeek::{mass_fuselage_simple, mass_wing};
 use alas_testkit::{Comparison, Tier};
 use serde::Deserialize;
 
-/// The three wings the generator builds -- shaped like `aircraft_builder.py`'s
-/// main wing, hstab and vstab -- rebuilt from the same literal values the
+/// The three wings the generator builds (shaped like `aircraft_builder.py`'s
+/// main wing, hstab and vstab) rebuilt from the same literal values the
 /// generator's own docstring records. Identical to the geometry
 /// `parity_asb_wing.rs` already reconstructs; duplicated here rather than
 /// shared, since a parity test's whole point is to stand on its own.
@@ -109,7 +109,7 @@ fn wing_by_name(name: &str) -> Wing {
     }
 }
 
-/// Evenly spaced points from `start` to `stop`, inclusive -- NumPy's
+/// Evenly spaced points from `start` to `stop`, inclusive: NumPy's
 /// `linspace(start, stop, num, endpoint=True)`. Duplicated from
 /// `alas_geom::asb::spacing::linspace` for the reason
 /// `alas-mass::torenbeek` itself already duplicates it: that module is

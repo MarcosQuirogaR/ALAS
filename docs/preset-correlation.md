@@ -1,13 +1,15 @@
 # Preset correlation and model corrections
 
 The audit generator is `tools/preset_correlation.cjs`. Its local inputs are the
-evidence-graded aircraft datasets and solver records in `.agent/validation`.
-It writes CSV, JSON, and `.agent/reports/2026-09-04-preset-real-world-correlation.html`.
-Those research artifacts are ignored; the generator and its tests are tracked.
+evidence-graded aircraft datasets and solver records in a local, git-ignored
+validation directory (defaulted in the script; pass a directory argument to
+use a different one). It writes CSV, JSON, and an internal correlation report
+(2026-09-04). Those research artifacts are ignored; the generator and its
+tests are tracked.
 
 ```powershell
-cargo run --profile test -p alas-pipeline --example model_reference_dump -- .agent/validation/MODEL.json
-node tools/preset_correlation.cjs
+cargo run --profile test -p alas-pipeline --example model_reference_dump -- out/validation/MODEL.json
+node tools/preset_correlation.cjs out/validation
 node --test tools/preset_correlation.test.cjs
 ```
 

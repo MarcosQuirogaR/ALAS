@@ -180,7 +180,7 @@ pub const fn far25_landing_climb_gradient() -> f64 {
     0.032
 }
 
-/// Density ratio sigma = rho/rho0 at field elevation with an ISA offset --
+/// Density ratio sigma = rho/rho0 at field elevation with an ISA offset:
 /// `density_ratio`.
 ///
 /// The ISA offset is added to the model temperature and the density is

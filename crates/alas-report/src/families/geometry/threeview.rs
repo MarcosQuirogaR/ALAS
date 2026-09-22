@@ -10,7 +10,7 @@
 //! The four-panel top/front/side/isometric wireframe three-view.
 //!
 //! The reference `figure_threeview` calls `Airplane.draw_three_view(show=False)`
-//! at its default `style="shaded"`, a full lit `Poly3DCollection` render --
+//! at its default `style="shaded"`, a full lit `Poly3DCollection` render,
 //! not reproducible by this crate's line/polygon SVG scene graph, and not a
 //! numeric quantity a fixture could hold either way (`draw_three_view`
 //! returns Matplotlib axes, not data). This port instead exercises the
@@ -18,7 +18,7 @@
 //! [`crate::scene::Camera3D`] projections of the real airplane, at the four
 //! preset view angles `draw_three_view` itself uses (`"XZ"` top, `"-YZ"`
 //! front, `"XY"` side, `"left_isometric"`), reusing
-//! [`super::wireframe::draw_wing_wireframe`]/`draw_fuselage_wireframe` --
+//! [`super::wireframe::draw_wing_wireframe`]/`draw_fuselage_wireframe`:
 //! the same reachable wireframe content [`super::wireframe`]'s isolated
 //! component figures draw, and the same geometry every panel here shares one
 //! frame for, so the four views stay to scale with each other.
@@ -44,7 +44,7 @@ struct Panel {
 }
 
 /// Generate the four-panel wireframe three-view (top / front / side /
-/// isometric) of an [`Airplane`] -- `figure_threeview`. See the module
+/// isometric) of an [`Airplane`]: `figure_threeview`. See the module
 /// doc for how this differs from upstream's default shaded render.
 pub fn figure_threeview(plane: &Airplane, theme: Option<&str>) -> Scene {
     let pal = get_palette(theme);

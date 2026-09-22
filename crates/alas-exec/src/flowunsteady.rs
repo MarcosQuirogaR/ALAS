@@ -14,6 +14,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use crate::process::{kill_process_tree, NewProcessGroup, NoConsoleWindow};
+use crate::supervise::SupervisedSpawn;
 
 /// Process outcome before parsing adapter output.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -119,7 +120,7 @@ pub fn run_flowunsteady_adapter(
         .stderr(Stdio::from(stderr))
         .no_window()
         .new_process_group();
-    let mut child = match command.spawn() {
+    let mut child = match command.spawn_supervised("FLOWUnsteady analysis") {
         Ok(child) => child,
         Err(error) => {
             result.status = FlowUnsteadyProcessStatus::LaunchFailed;

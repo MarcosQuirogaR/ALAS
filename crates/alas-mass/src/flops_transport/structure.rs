@@ -350,6 +350,15 @@ pub struct FlopsStructureInputs {
     pub paint_area_density_kg_m2: f64,
     /// Total painted wetted area, m^2.
     pub painted_wetted_area_m2: f64,
+    /// Nacelle mass for every nacelle, kg, when the FLOPS thrust-based
+    /// equation 69 does not apply.
+    ///
+    /// A turboprop has no rated thrust, so equation 69 has no argument. The
+    /// shaft-power group of [`super::turboprop`] evaluates the nacelle from
+    /// the NASA GASP area-density relation instead and injects the result
+    /// here, so the nacelle still reaches the structural total exactly once
+    /// and from exactly one method.
+    pub nacelle_mass_override_kg: Option<f64>,
 }
 
 /// The structural group, kg, with the wing terms kept separately.
@@ -409,12 +418,14 @@ pub fn estimate_flops_structure(inputs: &FlopsStructureInputs) -> FlopsStructure
         inputs.design_landing_mass_kg,
         inputs.nose_gear_oleo_length_m,
     );
-    let nacelle = nacelle_kg(
-        inputs.total_nacelles,
-        inputs.nacelle_diameter_m,
-        inputs.nacelle_length_m,
-        inputs.rated_thrust_per_engine_n,
-    );
+    let nacelle = inputs.nacelle_mass_override_kg.unwrap_or_else(|| {
+        nacelle_kg(
+            inputs.total_nacelles,
+            inputs.nacelle_diameter_m,
+            inputs.nacelle_length_m,
+            inputs.rated_thrust_per_engine_n,
+        )
+    });
     let paint = paint_kg(
         inputs.paint_area_density_kg_m2,
         inputs.painted_wetted_area_m2,

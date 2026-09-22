@@ -14,9 +14,9 @@
 //! incidence, so every path from a shape to a polar starts by measuring how
 //! far the shape is from that frame, moving it there, and then correcting the
 //! answer back. The four numbers [`Normalization`] carries are exactly what
-//! that correction needs -- a translation the moment coefficient has to be
+//! that correction needs: a translation the moment coefficient has to be
 //! moved back across, a scale the Reynolds number has to be divided by, and a
-//! rotation the angle of attack has to be offset by -- which is why upstream's
+//! rotation the angle of attack has to be offset by, which is why upstream's
 //! `return_dict=True` branch is the one translated and the bare
 //! airfoil-returning branch is not.
 //!
@@ -25,7 +25,7 @@
 //! The trailing edge is the *midpoint* of the first and last coordinates, not
 //! a vertex: a section with an open trailing edge has two of them and neither
 //! is the point the chord line ends at. The leading edge, by contrast, is
-//! always one of the original vertices -- the one furthest from that midpoint,
+//! always one of the original vertices: the one furthest from that midpoint,
 //! which is what makes the chord the longest line that fits inside the
 //! section. Upstream's `np.argmax` takes the first vertex on a tie, and so
 //! does this.
@@ -49,8 +49,8 @@ use super::Airfoil;
 /// The output of [`Airfoil::normalize`]: the moved section, and the four
 /// numbers describing the move.
 ///
-/// Each field is the *required change* -- what had to be done to the original
-/// to put it in the standard frame -- following upstream's convention, which
+/// Each field is the *required change* (what had to be done to the original
+/// to put it in the standard frame) following upstream's convention, which
 /// is what makes them directly usable as corrections on the way back out.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Normalization {
@@ -71,7 +71,7 @@ pub struct Normalization {
 impl Airfoil {
     /// A copy of this airfoil with its leading edge at `(0, 0)`, its trailing
     /// edge at `(1, 0)` and unit chord, together with the translation, scale
-    /// and rotation that got it there -- `normalize(return_dict=True)`.
+    /// and rotation that got it there: `normalize(return_dict=True)`.
     ///
     /// An airfoil with no coordinates comes back unchanged with an identity
     /// transform, since there is no trailing edge to measure from. Upstream
@@ -135,7 +135,7 @@ impl Airfoil {
         }
     }
 
-    /// Every coordinate moved by `(translate_x, translate_y)` -- `translate`.
+    /// Every coordinate moved by `(translate_x, translate_y)`: `translate`.
     fn translated(&self, translate_x: f64, translate_y: f64) -> Self {
         Self {
             name: self.name.clone(),
@@ -148,7 +148,7 @@ impl Airfoil {
     }
 
     /// Every coordinate scaled about the origin by `factor` in both
-    /// directions -- `scale(scale_x=f, scale_y=f)` for positive `f`. See the
+    /// directions: `scale(scale_x=f, scale_y=f)` for positive `f`. See the
     /// module documentation for why the negative branches are not here.
     fn scaled(&self, factor: f64) -> Self {
         Self {
@@ -162,7 +162,7 @@ impl Airfoil {
     }
 
     /// Every coordinate rotated counter-clockwise about the origin by
-    /// `angle` radians -- `rotate(angle)` at its default centre.
+    /// `angle` radians: `rotate(angle)` at its default centre.
     fn rotated(&self, angle: f64) -> Self {
         let (sin, cos) = angle.sin_cos();
         Self {
@@ -216,7 +216,7 @@ mod tests {
 
     #[test]
     fn normalizing_puts_the_leading_edge_at_the_origin_and_the_trailing_edge_at_one() {
-        // Take the wedge somewhere else entirely -- moved, grown and tilted --
+        // Take the wedge somewhere else entirely (moved, grown and tilted)
         // and check the frame comes back, not just the numbers describing it.
         let tilted = wedge().translated(3.0, -1.0).scaled(4.0).rotated(0.3);
         let normalized = tilted.normalize();

@@ -18,7 +18,7 @@
 //! tier. The planned tier came from a true statement read one step too far:
 //! the trained parameters are stored as `f32`, so the row was written down as
 //! `f32`. But NumPy promotes `f32 @ f64` to `f64` before multiplying, so
-//! every product upstream evaluates is a double -- the *values* are
+//! every product upstream evaluates is a double: the *values* are
 //! `f32`-precision, the *arithmetic* is not. Reproducing that means holding
 //! the same `f32` values and working in `f64`, which is what this port does.
 //! Every one of the five thousand or so quantities this fixture records
@@ -27,7 +27,7 @@
 //!
 //! Not `closed`, though it would pass there today. What this row does is
 //! accumulate dot products 128 to 256 terms long, six layers deep, against a
-//! BLAS whose blocking decides its own summation order -- the same free
+//! BLAS whose blocking decides its own summation order: the same free
 //! variable `alas-math::lstsq`'s doc declines to bet on, and the construction
 //! `linalg` exists to frame. The two coordinate-taking entry points also run
 //! a least-squares fit on the way in, which the tier table names outright.
@@ -306,7 +306,7 @@ fn the_raw_network_matches_neuralfoil_on_every_case() {
 
 #[test]
 fn every_shipped_model_size_is_exercised_by_the_fixture() {
-    // The five differ in depth as well as width -- four, five, five, six and
+    // The five differ in depth as well as width, four, five, five, six and
     // six weight layers. A port that assumed a fixed architecture would agree
     // on `large` and fail here, which is the point of not testing one size.
     let fixture: Fixture = alas_testkit::load("aero", "neuralfoil");
@@ -418,7 +418,7 @@ fn the_visualization_entry_point_reaches_the_raw_network_and_not_the_corrections
             &case.coordinates,
             &Conditions::new(case.alpha, case.reynolds),
             // `visualization.py` passes no `model_size`, so the default of
-            // the function it calls applies -- and that default is `large`,
+            // the function it calls applies, and that default is `large`,
             // not the `xlarge` its neighbours in `neuralfoil.main` default to.
             ModelSize::Large,
         )

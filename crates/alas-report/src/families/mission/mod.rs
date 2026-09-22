@@ -38,7 +38,7 @@ pub use aero::{figure_mission_aero_coefficients, figure_mission_aero_forces};
 pub use drag::figure_mission_drag_components;
 pub use profile::figure_mission_profile;
 pub use route::figure_mission_route_2d;
-pub use route_3d::{figure_mission_route_3d, route_focused_camera};
+pub use route_3d::{figure_mission_route_3d, route_focused_camera, route_globe_disk};
 pub use velocities::{figure_mission_flight_path, figure_mission_velocities};
 
 use crate::scene::{Axes2D, Color, Scene, SceneElement, Stroke, TextAlign, TextBaseline};
@@ -335,12 +335,22 @@ mod test_support {
                     status: Status::Converged,
                     evaluations: 0,
                     throttle_limited: false,
+                    peak_throttle: 0.5,
+                    minimum_throttle: 0.4,
+                    available_throttle_floor: f64::NAN,
+                    idle_floor_limited: false,
+                    sub_idle_points: 0,
                 },
                 SegmentSolution {
                     converged: true,
                     status: Status::Converged,
                     evaluations: 0,
                     throttle_limited: false,
+                    peak_throttle: 0.5,
+                    minimum_throttle: 0.4,
+                    available_throttle_floor: f64::NAN,
+                    idle_floor_limited: false,
+                    sub_idle_points: 0,
                 },
             ],
             scheduled_segment_count: 2,

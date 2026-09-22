@@ -38,6 +38,7 @@ pub mod registry;
 mod registry_export;
 pub mod route_geometry;
 pub mod scene;
+pub mod status_figure;
 pub mod svg;
 pub mod theme;
 

@@ -5,7 +5,7 @@
 //! configuration structs themselves.
 //!
 //! Everything a user can tune lives in a struct in `alas-config`, and the
-//! interface that edits those values is not written by hand -- it is rendered
+//! interface that edits those values is not written by hand; it is rendered
 //! from a description each struct produces of its own fields. This derive is
 //! where that description comes from. The reference implementation builds the
 //! same description by walking a dataclass at run time
@@ -35,7 +35,7 @@
 //! `label` and `unit` are optional: without them both are derived from the
 //! field's name by the rule in [`names`], which is what several hundred
 //! upstream fields rely on. `help` is not optional, and neither is saying
-//! `skip` instead -- see CONTRIBUTING.md on why an undocumented field is a
+//! `skip` instead, see CONTRIBUTING.md on why an undocumented field is a
 //! defect rather than a shortcut.
 //!
 //! # Nesting

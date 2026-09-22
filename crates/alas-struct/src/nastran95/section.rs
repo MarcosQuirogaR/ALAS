@@ -8,7 +8,7 @@
 //! that internally, so the spar caps this mesh describes as `PBARL,...,I` have
 //! to arrive here as an explicit area and three moments. This is the one place
 //! the row does arithmetic a modern solver hides, and getting it wrong makes the
-//! two decks model different beams -- so the numbers are held to a modern
+//! two decks model different beams, so the numbers are held to a modern
 //! solver's own reduction rather than assumed.
 //!
 //! The mesh writes the six I dimensions in pyNastran's order,
@@ -16,8 +16,8 @@
 //! it builds has the two flanges equal (`W_bottom == W_top`,
 //! `t_flange_bottom == t_flange_top`), which is the symmetric doubly-flanged I
 //! the closed forms below assume. The bending constants were checked against MSC
-//! Nastran: a cantilever of these caps reports the same tip *rotation* -- the
-//! pure `M L / (E I)` quantity, with no shear in it -- to five figures, which is
+//! Nastran: a cantilever of these caps reports the same tip *rotation*: the
+//! pure `M L / (E I)` quantity, with no shear in it, to five figures, which is
 //! the statement that `I1` here equals the modern solver's own. The tip
 //! *deflection* differs at the fourth figure, which is transverse shear: `PBARL`
 //! gives its I-section a shear area and a bare `PBAR` has none. That difference
@@ -66,7 +66,7 @@ pub fn i_section(dim: &[f64]) -> Option<BarConstants> {
 
     let area = 2.0 * b * s + h * t;
     // Strong axis: the full rectangle b*d less the two side voids (b - t) wide
-    // and h tall, all about the centroid -- the standard doubly-symmetric I.
+    // and h tall, all about the centroid: the standard doubly-symmetric I.
     let i1 = (b * d.powi(3) - (b - t) * h.powi(3)) / 12.0;
     // Weak axis: two flanges b wide and s thick, plus the thin web t wide.
     let i2 = (2.0 * s * b.powi(3) + h * t.powi(3)) / 12.0;

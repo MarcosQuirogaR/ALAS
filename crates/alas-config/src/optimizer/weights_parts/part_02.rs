@@ -91,7 +91,7 @@ mod tests {
     fn a_threshold_that_happens_to_end_in_a_weight_suffix_is_offered_as_one_too() {
         // `thickness_floor`, `fuselage_floor_m` and the two costs are
         // physical thresholds rather than relative weights, and the naming
-        // rule catches them anyway. Reproduced rather than corrected --
+        // rule catches them anyway. Reproduced rather than corrected:
         // recorded as a deviation-candidate in docs/PORTING.md.
         assert_eq!(kind_of("thickness_floor"), Kind::WeightSlider);
         assert_eq!(kind_of("fuselage_floor_m"), Kind::WeightSlider);
@@ -131,7 +131,7 @@ mod tests {
     #[test]
     fn the_envelope_penalty_dominates_the_lift_to_drag_reward() {
         // A design outside its CG envelope is not flyable, so the penalty has
-        // to outweigh any aerodynamic gain that could be traded for it --
+        // to outweigh any aerodynamic gain that could be traded for it,
         // otherwise the search buys L/D with legality.
         let weights = ObjectiveWeights::default();
         assert!(weights.cg_envelope_penalty_scale > weights.ld_weight * 1000.0);

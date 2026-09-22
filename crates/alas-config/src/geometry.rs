@@ -7,9 +7,9 @@
 //! The scaffold the design vector hangs on.
 //!
 //! [`crate::design_variables`] holds the degrees of freedom the optimizer may
-//! vary. This module holds everything else the aircraft is built from --
+//! vary. This module holds everything else the aircraft is built from:
 //! vertical placements, section twists, the empennage layout, the fuselage
-//! stations, the nacelle silhouette -- which is fixed for the length of a run
+//! stations, the nacelle silhouette, which is fixed for the length of a run
 //! and configurable between runs. The split is what makes a run reproducible:
 //! the search moves inside a family of aircraft, and this is the definition of
 //! the family.
@@ -21,15 +21,17 @@
 
 mod empennage;
 mod engine;
+mod frame;
 mod fuselage;
 mod wing;
 
 pub use empennage::EmpennageConfig;
 pub use engine::{ActiveEngineModel, EngineBindingError, EngineConfig};
-pub use fuselage::FuselageConfig;
+pub use frame::{BodyFuselageExtent, LongitudinalStationFrame, MacFrame};
+pub use fuselage::{FuselageConfig, FuselageSection, FuselageSectionError};
 pub use wing::{
     InboardAerodynamicStation, MainWingPanel, MainWingStation, MainWingStationKind,
-    TransportPlanform, TransportPlanformError, WingConfig,
+    TransportPlanform, TransportPlanformError, WingConfig, WingSection, WingSectionError,
 };
 
 use serde::{Deserialize, Serialize};
@@ -67,7 +69,7 @@ pub struct GeometryConfig {
     #[config(
         hidden,
         nested,
-        help = "Podded engine / nacelle placement, shape, and design parameters -- edited on the dedicated 'Engine Designer' Advanced Settings tab, not here."
+        help = "Podded engine / nacelle placement, shape, and design parameters: edited on the dedicated 'Engine Designer' Advanced Settings tab, not here."
     )]
     pub engine: EngineConfig,
 

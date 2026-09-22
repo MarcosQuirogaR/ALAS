@@ -3,8 +3,8 @@
 
 //! `alas-mission::profile` against `golden/mission/profile.json`.
 //!
-//! Each case names the inputs the reference used -- a preset (empty is the
-//! default configuration) and two airport codes -- and the parity test rebuilds
+//! Each case names the inputs the reference used: a preset (empty is the
+//! default configuration) and two airport codes, and the parity test rebuilds
 //! those with `AlasConfig::from_value({"preset": name})` and
 //! `airports::get(icao)`, supplying the independently recorded baseline profile
 //! from `golden/config/defaults.json`. It then compares the

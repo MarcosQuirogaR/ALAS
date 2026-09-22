@@ -14,7 +14,7 @@
 /// `pax.belly_cargo_kg`, subject to the physical hold capacity alongside the
 /// bags: a zero request means zero revenue freight, not an automatic fill to
 /// the structural limit. The [`CargoMassSemantics::ReferenceGross`] replay is
-/// the one exception -- it reproduces the frozen Python fixture's behaviour of
+/// the one exception; it reproduces the frozen Python fixture's behaviour of
 /// auto-filling the belly to the airframe's maximum *structural* payload, and
 /// must keep doing so for that historical parity target.
 #[allow(clippy::too_many_arguments)] // The final optional aircraft-CG target is

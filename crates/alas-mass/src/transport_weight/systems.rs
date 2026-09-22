@@ -15,52 +15,52 @@
 //! upstream tests against the *hyphenated* spellings (`"long-range"`,
 //! `"short-range"`, `"medium-range"`). The two never match, so `systems` and
 //! `operating_items` both fall through to their `else` case for every vehicle
-//! this program builds -- the [`AccessoriesType::Other`] variant here.
+//! this program builds: the [`AccessoriesType::Other`] variant here.
 //! Reproduced, not corrected.
 
 use alas_units::POUND_MASS;
 
 use super::{OperationalItems, SystemsBreakdown};
 
-/// `vehicle.systems.control` -- how the flight control system is powered,
+/// `vehicle.systems.control`: how the flight control system is powered,
 /// which scales the flight-control group's weight.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ControlSystemType {
-    /// `"fully powered"` -- every vehicle this program's mission reference bridge builds.
+    /// `"fully powered"`, every vehicle this program's mission reference bridge builds.
     FullyPowered,
     /// `"partially powered"`.
     PartiallyPowered,
-    /// Anything else -- upstream's fully-aerodynamic `else` branch.
+    /// Anything else: upstream's fully-aerodynamic `else` branch.
     Other,
 }
 
-/// `vehicle.systems.accessories` -- the aircraft-type category that selects
+/// `vehicle.systems.accessories`: the aircraft-type category that selects
 /// the instruments, avionics, furnishing and operating-item allowances.
 ///
 /// [`Other`](Self::Other) is upstream's `else` branch, and is what every
 /// vehicle this program builds actually reaches; see the module doc.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AccessoriesType {
-    /// `"short-range"` -- short-range domestic, austere accommodation.
+    /// `"short-range"`: short-range domestic, austere accommodation.
     ShortRange,
-    /// `"medium-range"` -- medium-range domestic.
+    /// `"medium-range"`: medium-range domestic.
     MediumRange,
-    /// `"long-range"` -- long-range overwater.
+    /// `"long-range"`: long-range overwater.
     LongRange,
-    /// `"business"` -- business jet.
+    /// `"business"`: business jet.
     Business,
-    /// `"cargo"` -- all-cargo.
+    /// `"cargo"`: all-cargo.
     Cargo,
-    /// `"commuter"` -- commuter.
+    /// `"commuter"`: commuter.
     Commuter,
-    /// `"sst"` -- supersonic transport.
+    /// `"sst"`: supersonic transport.
     Sst,
-    /// Anything else -- upstream's `else` branch, which every vehicle this
+    /// Anything else: upstream's `else` branch, which every vehicle this
     /// program builds actually reaches.
     Other,
 }
 
-/// The mass of the on-board systems -- `systems`
+/// The mass of the on-board systems: `systems`
 /// (http://aerodesign.stanford.edu/aircraftdesign/structures/componentweight.html).
 ///
 /// `tail_area_m2` is `sum(wing.areas.reference)` over the horizontal and
@@ -101,7 +101,7 @@ pub fn systems(
     let flt_ctrl_kg = (flt_ctrl_scaler * area_hv_ft2) * POUND_MASS;
 
     // The APU floor is `max(apu, 70.)` upstream, where `apu` has already been
-    // converted to kg (via `* Units.lb`) but `70` carries no unit -- so it
+    // converted to kg (via `* Units.lb`) but `70` carries no unit, so it
     // acts as a 70 kg floor, not the 70 lb the surrounding lb-scaled formula
     // reads as. Reproduced literally.
     let apu_raw_kg = if num_seats >= 6.0 {
@@ -163,8 +163,8 @@ pub fn systems(
     }
 }
 
-/// The mass of the operating items -- crew, unusable fuel, engine oil,
-/// passenger service and cargo containers -- `operating_items`
+/// The mass of the operating items (crew, unusable fuel, engine oil,
+/// passenger service and cargo containers) `operating_items`
 /// (http://aerodesign.stanford.edu/aircraftdesign/AircraftDesign.html).
 /// Evaluate mission reference's operating-items correlation from its explicit inputs.
 ///

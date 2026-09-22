@@ -2,22 +2,21 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 use alas_payload::layout::{LayoutSummary, PayloadLayout};
-use alas_pipeline::feasibility::{
-    FindingCode, FindingSeverity, FuelCapacityEvidence, MissionFuelStatus, PhysicalFinding,
-};
+use alas_pipeline::feasibility::{FindingSeverity, FuelCapacityEvidence, MissionFuelStatus};
 use alas_pipeline::AnalysisReport;
 use egui::{Frame, Margin, RichText, Rounding, Stroke, Ui};
 
 use crate::state::AppState;
 use crate::views::{tr, tr_fields};
 
+use super::external::show_tool_status_cards;
 use super::format_cg_pct_mac;
 
 fn stat_tile(ui: &mut Ui, label: &str, value: String) {
     crate::theme::card_frame(ui).show(ui, |ui| {
         ui.set_min_width(ui.available_width());
         ui.vertical(|ui| {
-            ui.label(RichText::new(tr(label)).weak().small());
+            ui.label(RichText::new(tr(label)).small());
             ui.add(egui::Label::new(RichText::new(value).strong().size(16.0)).wrap());
         });
     });
@@ -41,7 +40,23 @@ fn status_frame(ui: &Ui, severity: FindingSeverity) -> Frame {
     )
 }
 
-fn show_status_banner(ui: &mut Ui, result: &alas_pipeline::PipelineResult) {
+fn status_banner_title(completed: bool, errors: usize, warnings: usize) -> &'static str {
+    if !completed {
+        "Assessment incomplete"
+    } else if errors > 0 {
+        "Infeasible under implemented checks"
+    } else if warnings > 0 {
+        "Feasible with engineering warnings"
+    } else {
+        "Feasible under implemented checks"
+    }
+}
+
+fn show_status_banner(
+    ui: &mut Ui,
+    result: &alas_pipeline::PipelineResult,
+    completed: bool,
+) {
     let errors = result
         .feasibility
         .findings
@@ -49,25 +64,35 @@ fn show_status_banner(ui: &mut Ui, result: &alas_pipeline::PipelineResult) {
         .filter(|finding| finding.severity == FindingSeverity::Error)
         .count();
     let warnings = result.feasibility.findings.len().saturating_sub(errors);
-    let (color, title, detail) = if errors > 0 {
+    let counts = tr_fields(
+        "{errors} blocking finding(s), {warnings} warning(s).",
+        &[
+            ("errors", errors.to_string()),
+            ("warnings", warnings.to_string()),
+        ],
+    );
+    let (color, title, detail) = if !completed {
+        (
+            ui.visuals().warn_fg_color,
+            tr(status_banner_title(false, errors, warnings)),
+            tr("The figures below come from finished analysis stages, but the overall feasibility assessment is incomplete. Finalized report exports are unavailable until the pipeline completes."),
+        )
+    } else if errors > 0 {
         (
             ui.visuals().error_fg_color,
-            tr("Infeasible under implemented checks"),
-            format!(
-                "{errors} blocking finding(s) | {warnings} warning(s) | {}",
-                mission_status_label(result)
-            ),
+            tr(status_banner_title(true, errors, warnings)),
+            format!("{counts} {}", mission_status_label(result)),
         )
     } else if warnings > 0 {
         (
             ui.visuals().warn_fg_color,
-            tr("Feasible with engineering warnings"),
-            format!("{warnings} warning(s) | {}", mission_status_label(result)),
+            tr(status_banner_title(true, errors, warnings)),
+            format!("{counts} {}", mission_status_label(result)),
         )
     } else {
         (
             crate::theme::success_color(ui.visuals()),
-            tr("Feasible under implemented checks"),
+            tr(status_banner_title(true, errors, warnings)),
             mission_status_label(result),
         )
     };
@@ -75,12 +100,11 @@ fn show_status_banner(ui: &mut Ui, result: &alas_pipeline::PipelineResult) {
     semantic_frame(ui, color).show(ui, |ui| {
         ui.set_min_width(ui.available_width());
         ui.horizontal_wrapped(|ui| {
-            ui.label(RichText::new(title).strong().size(19.0).color(color));
-            ui.label(RichText::new(detail).weak());
-            ui.label(RichText::new("?").strong().color(color))
+            ui.label(RichText::new(title).strong().size(19.0).color(color))
                 .on_hover_text(tr(
                     "This verdict covers only the physical checks implemented by this run; it is not a certification finding.",
                 ));
+            ui.label(RichText::new(detail));
         });
     });
 }
@@ -108,81 +132,11 @@ fn maximum_mission_range_km(result: &alas_pipeline::PipelineResult) -> Option<f6
     })
 }
 
-fn headline_metrics(result: &alas_pipeline::PipelineResult) -> Vec<(&'static str, String)> {
-    let fuel = &result.feasibility.fuel_loading;
-    let mission = maximum_mission_range_km(result).map_or_else(
-        || mission_status_label(result),
-        |range_km| format!("{range_km:.0} km | {}", mission_status_label(result)),
-    );
-    let fuel_margin = match fuel.mission.status {
-        MissionFuelStatus::Completed | MissionFuelStatus::Exhausted
-            if fuel.analyzed_carried_fuel_kg.is_finite()
-                && fuel
-                    .mission
-                    .burned_fuel_kg
-                    .is_some_and(|burned| burned.is_finite()) =>
-        {
-            let burned = fuel.mission.burned_fuel_kg.unwrap_or_default();
-            let margin_kg = fuel.analyzed_carried_fuel_kg - burned;
-            let qualifier = if fuel.mission.status == MissionFuelStatus::Exhausted {
-                tr("observed at stop")
-            } else {
-                tr("trip margin")
-            };
-            if fuel.analyzed_carried_fuel_kg > 0.0 {
-                let percent = 100.0 * margin_kg / fuel.analyzed_carried_fuel_kg;
-                format!(
-                    "{:+.2} t | {:+.1}% | {qualifier}",
-                    margin_kg / 1_000.0,
-                    percent
-                )
-            } else {
-                format!("{:+.2} t | {qualifier}", margin_kg / 1_000.0)
-            }
-        }
-        MissionFuelStatus::NotConverged => tr("Not established | partial telemetry"),
-        MissionFuelStatus::Unavailable => tr("Not established | mission unavailable"),
-        MissionFuelStatus::NotRequested => tr("Not evaluated"),
-        MissionFuelStatus::Completed | MissionFuelStatus::Exhausted => tr("Not established"),
-    };
-    let mass_margin = if fuel.mtow_shortfall_kg.is_finite() {
-        if fuel.mtow_shortfall_kg.abs() < 0.5 {
-            tr("At MTOW")
-        } else {
-            format!("{:.2} t below MTOW", fuel.mtow_shortfall_kg / 1_000.0)
-        }
-    } else {
-        tr("Not established")
-    };
-    let trim = selected_analysis(result).map_or_else(
-        || tr("Not evaluated"),
-        |report| {
-            report.trimmed_design_point.as_ref().map_or_else(
-                || tr("Not demonstrated"),
-                |point| {
-                    format!(
-                        "Solved | alpha {:.2} deg | iH {:.2} deg | |Cm| {:.2e}",
-                        point.geometric_body_alpha_deg,
-                        point.trim_ih_deg,
-                        point.cm_residual.abs()
-                    )
-                },
-            )
-        },
-    );
-    vec![
-        ("Mission progress", mission),
-        ("Fuel margin", fuel_margin),
-        ("Takeoff mass margin", mass_margin),
-        ("Cruise trim", trim),
-    ]
-}
-
 fn summary_column_count(available_width: f32) -> usize {
     ((available_width / 245.0).floor() as usize).clamp(1, 4)
 }
 
-fn show_stat_tiles(ui: &mut Ui, metrics: &[(&str, String)]) {
+fn show_stat_tiles<L: AsRef<str>>(ui: &mut Ui, metrics: &[(L, String)]) {
     if metrics.is_empty() {
         return;
     }
@@ -190,232 +144,361 @@ fn show_stat_tiles(ui: &mut Ui, metrics: &[(&str, String)]) {
     for row in metrics.chunks(columns) {
         ui.columns(columns, |columns| {
             for (index, (label, value)) in row.iter().enumerate() {
-                stat_tile(&mut columns[index], label, value.clone());
+                stat_tile(&mut columns[index], label.as_ref(), value.clone());
             }
         });
         ui.add_space(8.0);
     }
 }
 
-pub(super) fn show_summary(state: &AppState, ui: &mut Ui, result: &alas_pipeline::PipelineResult) {
-    show_status_banner(ui, result);
-    ui.add_space(10.0);
-    show_stat_tiles(ui, &headline_metrics(result));
-
-    if !result.feasibility.findings.is_empty() {
-        show_findings(ui, &result.feasibility.findings);
-        ui.add_space(10.0);
-    }
-
-    ui.label(
-        RichText::new(tr("Aircraft and mission"))
-            .strong()
-            .size(18.0),
-    );
-    ui.label(
-        RichText::new(tr(
-            "Selected design values, limits, and evidence used by this run.",
-        ))
-        .weak()
-        .small(),
-    );
+fn section_title(ui: &mut Ui, title: &str) {
+    ui.label(RichText::new(tr(title)).strong().size(18.0));
     ui.add_space(5.0);
-    let mut metrics = vec![("Preset", state.active_preset.clone())];
-    if let Some(baseline) = &result.baseline_report {
-        metrics.push((
-            "Baseline static margin",
-            format!("{:.1}%", baseline.static_margin * 100.0),
-        ));
-        metrics.push(("Baseline CG", format_cg_pct_mac(baseline.cg_pct_mac)));
+}
+
+pub(super) fn show_summary(state: &AppState, ui: &mut Ui, result: &alas_pipeline::PipelineResult) {
+    show_status_banner(ui, result, state.pipeline_result_complete);
+    ui.add_space(10.0);
+    if state.pipeline_result_complete {
+        findings_card::show_findings_card(ui, &result.feasibility.findings);
     }
-    if let Some(optimized) = &result.optimized_report {
-        metrics.push((
-            "Optimized static margin",
-            format!("{:.1}%", optimized.static_margin * 100.0),
-        ));
-        let envelope = match optimized.cg_envelope_ok {
-            Some(true) => "OK".to_owned(),
-            Some(false) => tr("Violation"),
-            None => "-".to_owned(),
-        };
-        metrics.push(("CG envelope", envelope));
-    }
-    metrics.extend(aircraft_summary_metrics(result));
-    metrics.extend(fuel_detail_metrics(result));
-    show_stat_tiles(ui, &metrics);
+
+    section_title(ui, "External analyses");
+    show_tool_status_cards(ui, result);
+
+    section_title(ui, "Aircraft and mission");
+    show_stat_tiles(ui, &aircraft_metrics(state, result));
+
+    section_title(ui, "Mission");
+    show_stat_tiles(ui, &mission_metrics(result));
+
+    section_title(ui, "Mass and balance");
+    show_stat_tiles(ui, &mass_metrics(result));
+
+    section_title(ui, "Aerodynamics and trim");
+    show_stat_tiles(ui, &trim_metrics(result));
 
     if let Some(layout) = result_payload_layout(result) {
-        ui.label(RichText::new(tr("Payload and cabin")).strong().size(18.0));
-        ui.label(
-            RichText::new(tr(
-                "Delivered payload, accommodation, and loading arrangement.",
-            ))
-            .weak()
-            .small(),
-        );
-        ui.add_space(5.0);
+        section_title(ui, "Payload and cabin");
         show_stat_tiles(ui, &payload_summary_metrics(layout));
     }
 
-    egui::CollapsingHeader::new(RichText::new(tr("Propulsion cycle details")).strong())
-        .default_open(false)
-        .show(ui, |ui| show_propulsion_cycle_summary(ui, &result.config));
+    section_title(ui, "Propulsion cycle details");
+    show_propulsion_cycle_summary(ui, &result.config);
     ui.add_space(8.0);
-    ui.add(
-        egui::Label::new(
-            RichText::new(tr(
-                "Open a discipline tab above for its figures. Slots that read \"Not available for \
-             this run\" need data this run did not produce.",
-            ))
-            .weak(),
-        )
-        .wrap(),
-    );
 }
 
-fn show_findings(ui: &mut Ui, findings: &[PhysicalFinding]) {
-    ui.horizontal(|ui| {
-        ui.label(
-            RichText::new(tr("Findings requiring attention"))
-                .strong()
-                .size(18.0),
-        );
-        ui.label(RichText::new("?").strong())
-            .on_hover_ui(show_finding_catalog);
-    });
-    ui.add_space(5.0);
-    let columns = if ui.available_width() >= 820.0 { 2 } else { 1 };
-    for row in findings.chunks(columns) {
-        ui.columns(columns, |column_uis| {
-            for (index, finding) in row.iter().enumerate() {
-                show_finding_card(&mut column_uis[index], finding);
+/// Baseline and optimized stability values side by side, in the same units.
+fn static_margin_rows(
+    baseline: Option<f64>,
+    optimized: Option<f64>,
+) -> Vec<(&'static str, String)> {
+    let margin = |value: f64| format!("{:.1} % MAC", value * 100.0);
+    vec![
+        (
+            "Static margin (baseline)",
+            baseline.map_or_else(|| tr("Not evaluated"), margin),
+        ),
+        (
+            "Static margin (optimized)",
+            optimized.map_or_else(|| tr("No optimized design in this run"), margin),
+        ),
+    ]
+}
+
+fn aircraft_metrics(
+    state: &AppState,
+    result: &alas_pipeline::PipelineResult,
+) -> Vec<(&'static str, String)> {
+    let mut metrics = vec![("Preset", state.active_preset.clone())];
+    metrics.extend(static_margin_rows(
+        result
+            .baseline_report
+            .as_ref()
+            .map(|report| report.static_margin),
+        result
+            .optimized_report
+            .as_ref()
+            .map(|report| report.static_margin),
+    ));
+    metrics.push((
+        "CG (baseline)",
+        result.baseline_report.as_ref().map_or_else(
+            || tr("Not evaluated"),
+            |report| format_cg_pct_mac(report.cg_pct_mac),
+        ),
+    ));
+    metrics.push((
+        "CG envelope (optimized)",
+        result.optimized_report.as_ref().map_or_else(
+            || tr("No optimized design in this run"),
+            |report| match report.cg_envelope_ok {
+                Some(true) => "OK".to_owned(),
+                Some(false) => tr("Violation"),
+                None => tr("Not evaluated"),
+            },
+        ),
+    ));
+    if let Some(report) = selected_analysis(result) {
+        if report.airplane.b_ref.is_finite()
+            && report.airplane.b_ref > 0.0
+            && report.airplane.s_ref.is_finite()
+            && report.airplane.s_ref > 0.0
+        {
+            metrics.push(("Wing span", format!("{:.1} m", report.airplane.b_ref)));
+            metrics.push(("Wing area", format!("{:.1} m^2", report.airplane.s_ref)));
+        }
+    }
+    metrics
+}
+
+fn mission_metrics(result: &alas_pipeline::PipelineResult) -> Vec<(&'static str, String)> {
+    let fuel = &result.feasibility.fuel_loading;
+    let mut metrics = vec![("Mission status", mission_status_label(result))];
+    metrics.push((
+        "Maximum mission range",
+        maximum_mission_range_km(result).map_or_else(
+            || tr("Not established"),
+            |range_km| format!("{range_km:.0} km"),
+        ),
+    ));
+    let burned = fuel
+        .mission
+        .burned_fuel_kg
+        .filter(|burned| burned.is_finite());
+    metrics.push((
+        "Mission fuel burn",
+        burned.map_or_else(
+            || tr("Not established"),
+            |burned_kg| format!("{:.2} t", burned_kg / 1_000.0),
+        ),
+    ));
+    metrics.extend(fuel_margin_rows(
+        fuel.mission.status,
+        fuel.analyzed_carried_fuel_kg,
+        burned,
+    ));
+    if fuel.analyzed_carried_fuel_kg.is_finite() && fuel.analyzed_carried_fuel_kg >= 0.0 {
+        metrics.push((
+            "Fuel carried",
+            format!("{:.1} t", fuel.analyzed_carried_fuel_kg / 1_000.0),
+        ));
+        let (capacity, evidence) = match fuel.usable_capacity.capacity_kg {
+            Some(capacity_kg) if capacity_kg.is_finite() && capacity_kg >= 0.0 => (
+                format!("{:.1} t", capacity_kg / 1_000.0),
+                tr(match fuel.usable_capacity.evidence {
+                    FuelCapacityEvidence::PublishedPreset => "Published preset value",
+                    FuelCapacityEvidence::GeometryEstimate => "Geometry estimate",
+                    FuelCapacityEvidence::Unavailable => "Unavailable",
+                }),
+            ),
+            _ => (tr("Unavailable"), tr("Unavailable")),
+        };
+        metrics.push(("Usable fuel capacity", capacity));
+        metrics.push(("Fuel capacity evidence", evidence));
+    }
+    metrics
+}
+
+/// Trip fuel margin as two rows: mass and share of the carried fuel.
+fn fuel_margin_rows(
+    status: MissionFuelStatus,
+    carried_kg: f64,
+    burned_kg: Option<f64>,
+) -> Vec<(&'static str, String)> {
+    let label = match status {
+        MissionFuelStatus::Exhausted => "Fuel margin at stop",
+        _ => "Fuel margin at destination",
+    };
+    match status {
+        MissionFuelStatus::Completed | MissionFuelStatus::Exhausted
+            if carried_kg.is_finite() && burned_kg.is_some() =>
+        {
+            let margin_kg = carried_kg - burned_kg.unwrap_or_default();
+            let mut rows = vec![(label, format!("{:+.2} t", margin_kg / 1_000.0))];
+            if carried_kg > 0.0 {
+                rows.push((
+                    "Fuel margin, share of carried fuel",
+                    format!("{:+.1} %", 100.0 * margin_kg / carried_kg),
+                ));
             }
-        });
-        ui.add_space(6.0);
+            rows
+        }
+        MissionFuelStatus::NotConverged => {
+            vec![(label, tr("Not established (partial telemetry)"))]
+        }
+        MissionFuelStatus::Unavailable => {
+            vec![(label, tr("Not established (mission unavailable)"))]
+        }
+        MissionFuelStatus::NotRequested => vec![(label, tr("Not evaluated"))],
+        MissionFuelStatus::Completed | MissionFuelStatus::Exhausted => {
+            vec![(label, tr("Not established"))]
+        }
     }
 }
 
-fn show_finding_card(ui: &mut Ui, finding: &PhysicalFinding) {
-    let (symbol, color) = match finding.severity {
-        FindingSeverity::Error => ("x", ui.visuals().error_fg_color),
-        FindingSeverity::Warning => ("!", ui.visuals().warn_fg_color),
-    };
-    status_frame(ui, finding.severity).show(ui, |ui| {
-        ui.set_min_width(ui.available_width());
-        ui.horizontal_wrapped(|ui| {
-            ui.label(RichText::new(symbol).strong().color(color));
-            ui.label(RichText::new(finding_title(finding.code)).strong());
-            ui.label(RichText::new("?").strong().color(color))
-                .on_hover_ui(|ui| show_finding_help(ui, finding));
-        });
-        ui.label(
-            RichText::new(affected_disciplines(finding.code))
-                .small()
-                .weak(),
-        );
-        if let (Some(actual), Some(limit)) = (finding.actual, finding.limit) {
-            if !finding.unit.is_empty() {
-                let margin = finding_margin(finding.code, actual, limit);
-                ui.label(
-                    RichText::new(format!("{} {margin:+.3} {}", tr("Margin"), finding.unit))
-                        .strong()
-                        .color(color),
-                );
-            }
-        }
-    });
-}
-
-fn show_finding_help(ui: &mut Ui, finding: &PhysicalFinding) {
-    ui.set_max_width(430.0);
-    ui.label(RichText::new(finding_title(finding.code)).strong());
-    ui.add(egui::Label::new(finding_meaning(finding.code)).wrap());
-    ui.separator();
-    ui.label(RichText::new(tr("Solver output")).strong());
-    ui.add(egui::Label::new(tr(&finding.message)).wrap());
-    if let (Some(actual), Some(limit)) = (finding.actual, finding.limit) {
-        if !finding.unit.is_empty() {
-            ui.label(format!(
-                "{}: {actual:.3} {} | {}: {limit:.3} {}",
-                actual_label(finding.code),
-                finding.unit,
-                limit_label(finding.code),
-                finding.unit
+fn mass_metrics(result: &alas_pipeline::PipelineResult) -> Vec<(&'static str, String)> {
+    let fuel = &result.feasibility.fuel_loading;
+    let mut metrics = Vec::new();
+    if let Some(report) = selected_analysis(result) {
+        if let Some((oew_kg, tow_kg, mtow_kg)) = mass_triplet_kg(
+            &report.component_masses,
+            fuel.analyzed_takeoff_mass_kg,
+            result.config.requirements.mtow_kg,
+        ) {
+            metrics.push(("Operating empty mass", format!("{:.1} t", oew_kg / 1_000.0)));
+            metrics.push(("Takeoff mass", format!("{:.1} t", tow_kg / 1_000.0)));
+            metrics.push((
+                "Maximum takeoff mass",
+                format!("{:.1} t", mtow_kg / 1_000.0),
             ));
         }
     }
-    ui.label(
-        RichText::new(format!(
-            "{}: {}",
-            tr("Inspect next"),
-            finding_next_step(finding.code)
-        ))
-        .small()
-        .weak(),
-    );
-    if finding.code == FindingCode::TrimUnavailable {
-        ui.separator();
-        ui.label(
-            RichText::new(tr("Possible causes hidden by the current solver output:")).strong(),
-        );
-        ui.label(tr(
-            "Aerodynamic probe failure; singular or nearly singular lift/moment response; non-finite angle or stabilizer incidence; a non-converged coupled solve; trimmed-performance evaluation failure; or a pitching-moment residual above |Cm| = 0.001. The Summary tab cannot distinguish these without a future model-output change.",
+    metrics.push((
+        "Takeoff mass margin",
+        takeoff_mass_margin(fuel.mtow_shortfall_kg),
+    ));
+    if fuel.zero_fuel_mass_kg.is_finite() && fuel.zero_fuel_mass_kg >= 0.0 {
+        metrics.push((
+            "Zero-fuel mass",
+            format!("{:.1} t", fuel.zero_fuel_mass_kg / 1_000.0),
         ));
+        metrics.push((
+            "Fuel budget up to MTOW",
+            format!("{:.1} t", fuel.mtow_closure_fuel_kg / 1_000.0),
+        ));
+    }
+    metrics
+}
+
+fn takeoff_mass_margin(mtow_shortfall_kg: f64) -> String {
+    if !mtow_shortfall_kg.is_finite() {
+        tr("Not established")
+    } else if mtow_shortfall_kg.abs() < 0.5 {
+        tr("At MTOW")
+    } else {
+        tr_fields(
+            "{margin} t below MTOW",
+            &[("margin", format!("{:.2}", mtow_shortfall_kg / 1_000.0))],
+        )
     }
 }
 
-fn show_finding_catalog(ui: &mut Ui) {
-    ui.set_max_width(520.0);
-    ui.label(RichText::new(tr("Finding guide")).strong());
-    ui.label(tr(
-        "ALAS may report failures in these groups. Hover the question mark on a specific finding for its exact meaning.",
-    ));
-    ui.separator();
-    for (group, text) in [
-        ("Aerodynamics and trim", "invalid cruise aerodynamics; cruise trim unavailable; non-finite cruise force balance"),
-        ("Fuel and mission", "non-positive fuel; tank-limited takeoff mass; unknown tank capacity; unavailable or non-converged mission; invalid burn; fuel shortfall; throttle above the modeled envelope"),
-        ("Mass, CG, and stability", "model CG unavailable or outside its range; public planning-envelope violation; nose/main gear strength or minimum nose-load violation; insufficient static margin"),
-        ("Geometry and payload", "wing-area limit; passenger seating shortfall; cargo capacity shortfall"),
-        ("Field performance", "airport/input unavailable; takeoff or landing distance violation; maximum landing mass exceeded; insufficient thrust margin"),
-    ] {
-        ui.label(RichText::new(tr(group)).strong());
-        ui.add(egui::Label::new(tr(text)).wrap());
+fn trim_metrics(result: &alas_pipeline::PipelineResult) -> Vec<(&'static str, String)> {
+    let Some(report) = selected_analysis(result) else {
+        return vec![("Cruise trim", tr("Not evaluated"))];
+    };
+    let mut metrics = Vec::new();
+    let (l_over_d, provenance) = report
+        .trimmed_design_point
+        .as_ref()
+        .map(|point| (point.l_over_d, "Trimmed"))
+        .unwrap_or((report.design_point.l_over_d, "Untrimmed"));
+    if l_over_d.is_finite() && l_over_d > 0.0 {
+        metrics.push(("Cruise L/D", format!("{l_over_d:.1}")));
+        metrics.push(("Cruise L/D basis", tr(provenance)));
     }
-    ui.separator();
-    ui.label(
-        RichText::new(tr(
-            "A finding means an implemented preliminary-design check failed or could not be demonstrated. It is not by itself a certification determination.",
-        ))
-        .small()
-        .weak(),
-    );
+    match report.trimmed_design_point.as_ref() {
+        Some(point) => {
+            metrics.push(("Cruise trim", tr("Solved")));
+            metrics.push((
+                "Trim angle of attack",
+                format!("{:.2} deg", point.geometric_body_alpha_deg),
+            ));
+            metrics.push((
+                "Stabilizer incidence",
+                format!("{:.2} deg", point.trim_ih_deg),
+            ));
+            metrics.push((
+                "Residual pitching moment |Cm|",
+                format!("{:.2e}", point.cm_residual.abs()),
+            ));
+        }
+        None => metrics.push(("Cruise trim", tr("Not demonstrated"))),
+    }
+    metrics
 }
 
 fn show_propulsion_cycle_summary(ui: &mut Ui, config: &alas_config::AlasConfig) {
     let lines = alas_report::families::propulsion::propulsion_cycle_summary(config);
-    crate::theme::card_frame(ui).show(ui, |ui| {
-        ui.label(RichText::new(tr("Propulsion cycle summary")).strong());
-        ui.add_space(4.0);
-        let entries: Vec<(String, String)> = lines
-            .into_iter()
-            .filter(|line| !line.is_empty())
-            .map(|line| propulsion_summary_entry(&line))
-            .collect();
-        let columns = usize::from(ui.available_width() >= 620.0).max(1);
-        for row in entries.chunks(columns) {
-            ui.columns(columns, |columns| {
-                for (index, (label, value)) in row.iter().enumerate() {
-                    columns[index].horizontal_wrapped(|ui| {
-                        if !label.is_empty() {
-                            ui.label(RichText::new(label).weak().small());
-                        }
-                        ui.label(RichText::new(value).strong());
-                    });
-                }
-            });
-            ui.add_space(4.0);
+    ui.label(RichText::new(tr("Propulsion cycle summary")).strong());
+    ui.add_space(4.0);
+    let entries = propulsion_summary_entries(&lines);
+    if entries.is_empty() {
+        return;
+    }
+    let columns = summary_column_count(ui.available_width()).min(entries.len());
+    for row in entries.chunks(columns) {
+        ui.columns(columns, |columns| {
+            for (index, (label, value)) in row.iter().enumerate() {
+                propulsion_metric_card(&mut columns[index], label, value);
+            }
+        });
+        ui.add_space(8.0);
+    }
+}
+
+/// Split the shared propulsion summary into independently readable cards.
+///
+/// The cycle producer keeps its report-oriented lines (including the compact
+/// BPR/OPR/FPR/TIT row) as the source of truth. This adapter only changes the
+/// presentation shape; it does not recalculate or round any physical value.
+fn propulsion_summary_entries(lines: &[String]) -> Vec<(String, String)> {
+    let mut entries = Vec::new();
+    for line in lines
+        .iter()
+        .map(String::as_str)
+        .filter(|line| !line.trim().is_empty())
+    {
+        if line.trim_start().starts_with("BPR =") {
+            entries.extend(
+                line.split("    ")
+                    .filter(|metric| !metric.trim().is_empty())
+                    .map(propulsion_summary_entry),
+            );
+        } else {
+            entries.push(propulsion_summary_entry(line));
         }
+    }
+    entries
+}
+
+fn propulsion_metric_card(ui: &mut Ui, label: &str, value: &str) {
+    crate::theme::card_frame(ui).show(ui, |ui| {
+        ui.set_min_width(ui.available_width());
+        if !label.is_empty() {
+            ui.add(
+                egui::Label::new(RichText::new(localized_propulsion_label(label)).small()).wrap(),
+            );
+        }
+        ui.add(egui::Label::new(RichText::new(value).strong().size(14.0)).wrap());
     });
+}
+
+fn localized_propulsion_label(label: &str) -> String {
+    let compact = label.split_whitespace().collect::<Vec<_>>().join(" ");
+    match compact.as_str() {
+        "Engine" => tr("Engine:").trim().to_owned(),
+        "Design point" => tr("Design point: ").trim().to_owned(),
+        "Specific thrust SFn" => format!("{}  SFn", tr("Specific thrust")),
+        "Fuel-air ratio f" => format!("{}  f", tr("Fuel-air ratio")),
+        "TSFC (computed)" => tr("TSFC (computed)"),
+        "TSFC (reference)" => tr("TSFC (reference)"),
+        "Thermal efficiency (eta_t)" => format!("{} (eta_t)", tr("Thermal efficiency")),
+        "Propulsive efficiency (eta_p)" => format!("{} (eta_p)", tr("Propulsive efficiency")),
+        "Overall efficiency (eta_o)" => format!("{} (eta_o)", tr("Overall efficiency")),
+        "Per-engine thrust, static (rated)" => tr("Per-engine thrust, static (rated)"),
+        "Per-engine thrust, this cruise pt" => tr("Per-engine thrust, this cruise pt"),
+        "Cycle infeasible at this design point" => tr("Cycle infeasible at this design point:")
+            .trim_end_matches(':')
+            .to_owned(),
+        _ if compact.starts_with("Total installed thrust") => format!(
+            "{} {}",
+            tr("Total installed thrust"),
+            compact.trim_start_matches("Total installed thrust").trim()
+        ),
+        _ => label.trim().to_owned(),
+    }
 }
 
 fn propulsion_summary_entry(line: &str) -> (String, String) {

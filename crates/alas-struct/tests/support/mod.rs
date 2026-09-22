@@ -5,7 +5,7 @@
 //! the construction that has to match the generator's.
 //!
 //! The deck records are tuple structs because that is the shape the fixture
-//! has -- a card is a row of fields, and naming each position in JSON would
+//! has: a card is a row of fields, and naming each position in JSON would
 //! have doubled a file that is already the largest in `golden/`. Each one's
 //! documentation says what the positions are.
 

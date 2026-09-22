@@ -6,6 +6,7 @@
 //! Provides the primary interactive user environment for conceptual aircraft
 //! design, multi-stage engineering analysis, optimization, and visualization.
 
+pub mod airport_editor;
 pub mod app;
 mod branding;
 pub mod cfd;
@@ -18,7 +19,9 @@ mod layout_debug;
 pub(crate) mod native_viewport;
 pub mod nav;
 mod nav_overlay;
+pub mod openvsp_runtime_setup;
 pub mod path_picker;
+mod result_refresh;
 pub mod run;
 pub mod sandbox;
 pub mod scene;

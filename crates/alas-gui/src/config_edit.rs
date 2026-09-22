@@ -21,12 +21,15 @@ use crate::state::{AppState, LogKind};
 use crate::views::design_space_view::design_mode_display_name;
 use crate::views::{tr, tr_fields};
 
+#[path = "config_edit_custom.rs"]
+mod config_edit_custom;
+
 /// Serialize a configuration for the generic form editor, which edits this
 /// JSON directly and needs every schema field present to find it back.
 ///
 /// `fuel_policy` and `fuel_tanks` skip serialization when they equal their
-/// default, so a fresh or reloaded configuration -- which starts at that
-/// default -- would otherwise be missing both keys entirely.
+/// default, so a fresh or reloaded configuration, which starts at that
+/// default, would otherwise be missing both keys entirely.
 pub(crate) fn full_config_values(config: &AlasConfig) -> Value {
     let mut value = serde_json::to_value(config).unwrap_or(Value::Null);
     if let Some(map) = value.as_object_mut() {
@@ -62,6 +65,7 @@ impl AppState {
             avl_exe: self.tool_preferences.avl_exe.clone(),
             navdata_dir: nonempty(&config.mission.navdata_dir),
             routes_dir: nonempty(&config.mission.routes_dir),
+            flowunsteady_exe: self.tool_preferences.flowunsteady_exe.clone(),
         };
         if let Err(error) = self.tool_locator.save_preferences(&self.tool_preferences) {
             self.log(
@@ -108,6 +112,14 @@ impl AppState {
 
         self.config_values = full_config_values(&config);
         self.active_preset = preset.name.to_owned();
+        // Preset operational profiles are automatic suggestions tied to the
+        // preset route. Start a fresh regeneration policy so a later route
+        // edit regenerates until the user changes a phase deliberately.
+        self.mission_profile_manual_edit = false;
+        self.mission_profile_route_signature =
+            crate::views::mission_profile_inputs::route_signature(&self.config_values);
+        self.mission_profile_regeneration_prompt = false;
+        self.mission_profile_retained_validation = None;
 
         // Recenter the design space on the preset's own design vector, using
         // the selected design-mode envelope rather than the retired fixed
@@ -276,7 +288,7 @@ impl AppState {
 
     /// Apply one aux-preset (the Py6-era fidelity/solver/performance pickers)
     /// on top of the current configuration, overwriting only the group or
-    /// sub-group it names -- unlike an aircraft preset, which replaces the
+    /// sub-group it names, unlike an aircraft preset, which replaces the
     /// whole configuration.
     pub fn apply_aux_preset(&mut self, kind: PresetKind, name: &str) {
         let applied = match kind {
@@ -383,31 +395,6 @@ impl AppState {
         out
     }
 
-    /// Save the current configuration to [`AppState::config_path`] as JSON.
-    pub fn save_config(&mut self) {
-        let text = match serde_json::to_string_pretty(&self.workspace_document()) {
-            Ok(t) => t,
-            Err(e) => {
-                self.log(
-                    tr_fields("Save failed: {error}", &[("error", e.to_string())]),
-                    LogKind::Error,
-                );
-                return;
-            }
-        };
-        let path = self.config_path.clone();
-        match std::fs::write(&path, text) {
-            Ok(()) => self.log(
-                tr_fields("Saved configuration to {path}.", &[("path", path)]),
-                LogKind::Info,
-            ),
-            Err(e) => self.log(
-                tr_fields("Save failed: {error}", &[("error", e.to_string())]),
-                LogKind::Error,
-            ),
-        }
-    }
-
     /// Load a configuration from [`AppState::config_path`] (JSON or YAML).
     pub fn load_config(&mut self) {
         let path = self.config_path.clone();
@@ -427,19 +414,40 @@ impl AppState {
             serde_json::from_str(&text).map_err(|e| e.to_string())
         };
         match parsed {
-            Ok(value) => match self.apply_workspace_document(&value) {
-                Ok(()) => {
-                    self.save_tool_preferences();
+            Ok(value) => {
+                let old_airports = alas_config::airport_io::registered_custom_airports();
+                let old_airfoils = alas_geom::airfoil_io::records();
+                if let Err(error) = self.restore_custom_data_from_workspace(&value) {
                     self.log(
-                        tr_fields("Loaded configuration from {path}.", &[("path", path)]),
-                        LogKind::Info,
+                        tr_fields("Load failed: {error}", &[("error", error)]),
+                        LogKind::Error,
                     );
+                    return;
                 }
-                Err(error) => self.log(
-                    tr_fields("Load failed: {error}", &[("error", error)]),
-                    LogKind::Error,
-                ),
-            },
+                match self.apply_workspace_document(&value) {
+                    Ok(()) => {
+                        self.save_tool_preferences();
+                        self.log(
+                            tr_fields("Loaded configuration from {path}.", &[("path", path)]),
+                            LogKind::Info,
+                        );
+                    }
+                    Err(error) => {
+                        // The workspace envelope is applied before the typed
+                        // configuration. If the latter is rejected, put the
+                        // registries back too, so a failed load is atomic from
+                        // the user's point of view.
+                        let _ = alas_config::airport_io::replace_custom_airports(old_airports);
+                        let _ = alas_geom::airfoil_io::replace_records(old_airfoils);
+                        self.refresh_airport_names();
+                        self.screening.preview.invalidate_filter();
+                        self.log(
+                            tr_fields("Load failed: {error}", &[("error", error)]),
+                            LogKind::Error,
+                        );
+                    }
+                }
+            }
             Err(e) => self.log(
                 tr_fields("Load failed: {error}", &[("error", e.to_string())]),
                 LogKind::Error,

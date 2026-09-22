@@ -14,15 +14,15 @@
 //! `vortex_lattice_method.py`'s `run` and `run_with_stability_derivatives`
 //! were grepped for every `op_point.<name>` and `self.op_point.<name>`
 //! access, which is the whole reached surface: the seven constructor fields
-//! (`atmosphere`, `velocity`, `alpha`, `beta`, `p`, `q`, `r` -- `velocity` is
+//! (`atmosphere`, `velocity`, `alpha`, `beta`, `p`, `q`, `r`: `velocity` is
 //! also read directly, for the stability-derivative finite-difference step
 //! sizes), [`OperatingPoint::dynamic_pressure`],
 //! [`OperatingPoint::freestream_velocity_geometry_axes`],
 //! [`OperatingPoint::rotation_velocity_geometry_axes`] and
 //! [`OperatingPoint::convert_axes`]. `beta`, `p` and `r` are never read as
-//! bare attributes by `run` itself -- the one place upstream does that is
+//! bare attributes by `run` itself: the one place upstream does that is
 //! `# self.op_point.beta == 0 and ...`, commented-out symmetry-detection code
-//! that never executes -- but all three still feed
+//! that never executes, but all three still feed
 //! `rotation_velocity_geometry_axes` and `convert_axes` internally, so every
 //! field is still part of the state this type has to carry.
 //!
@@ -44,13 +44,13 @@
 //!
 //! # `convert_axes`'s four branches, two reached
 //!
-//! [`AxisFrame`] has all four variants upstream's `convert_axes` accepts --
-//! `Geometry`, `Body`, `Wind`, `Stability` -- and every branch of the
+//! [`AxisFrame`] has all four variants upstream's `convert_axes` accepts:
+//! `Geometry`, `Body`, `Wind`, `Stability`, and every branch of the
 //! function is translated, since the branch logic is trivial, symmetric
 //! algebra and cheap to keep complete. But `vortex_lattice_method.py` calls
 //! `convert_axes` in exactly four places (on the near-field force and moment,
 //! twice each), and every one of them is `from_axes="geometry", to_axes="body"`
-//! or `from_axes="body", to_axes="wind"` -- `"stability"` is never reached
+//! or `from_axes="body", to_axes="wind"`: `"stability"` is never reached
 //! from that call site, and the fixture this module is checked against
 //! exercises only those two pairs. The `Stability` branches are checked by
 //! unit tests on properties that hold everywhere instead: round-tripping
@@ -63,7 +63,7 @@
 
 use alas_atmo::Atmosphere;
 
-/// The reference frame a vector is expressed in -- geometry, body, wind or
+/// The reference frame a vector is expressed in: geometry, body, wind or
 /// stability axes. See the module doc for which pairs
 /// [`OperatingPoint::convert_axes`] is actually exercised on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -141,7 +141,7 @@ impl OperatingPoint {
         let alpha_rotation = rotate_y((-self.alpha).to_radians());
         let beta_rotation = rotate_z(self.beta.to_radians());
         // Geometry axes put X downstream and Z down, opposite wind axes'
-        // upstream/up convention -- a 180-degree flip about Y.
+        // upstream/up convention: a 180-degree flip about Y.
         let axes_flip = rotate_y(std::f64::consts::PI);
 
         matmul3(matmul3(axes_flip, alpha_rotation), beta_rotation)
@@ -166,7 +166,7 @@ impl OperatingPoint {
     /// The effective velocity-due-to-rotation the aircraft's own rotation
     /// induces at each of `points`, in geometry axes.
     ///
-    /// This is the velocity the wing *sees*, not the velocity of the wing --
+    /// This is the velocity the wing *sees*, not the velocity of the wing:
     /// the sign of a rigid-body rotation's effect on the apparent local
     /// airflow is opposite the rotation itself, which is why upstream negates
     /// the raw cross product before returning it.
@@ -207,7 +207,7 @@ impl OperatingPoint {
     ///
     /// Wind axes rotations are taken from Eq. 6.7 in Sect. 6.2.2 of Drela's
     /// *Flight Vehicle Aerodynamics*, with axis corrections to go from
-    /// `[D, Y, L]` to true wind axes -- the citation upstream carries.
+    /// `[D, Y, L]` to true wind axes: the citation upstream carries.
     pub fn convert_axes(
         &self,
         x_from: f64,
@@ -334,8 +334,8 @@ mod tests {
     #[test]
     fn every_axis_pair_round_trips_including_stability() {
         // `convert_axes` has no state of its own beyond alpha/beta, so a
-        // round trip through any pair -- including the "stability" branches
-        // the fixture never exercises -- should recover the original vector.
+        // round trip through any pair, including the "stability" branches
+        // the fixture never exercises, should recover the original vector.
         let point = op(12.0, -5.5);
         let pairs = [
             (AxisFrame::Geometry, AxisFrame::Body),

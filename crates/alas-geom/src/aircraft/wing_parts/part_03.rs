@@ -61,7 +61,7 @@ mod tests {
 
     #[test]
     fn subdivide_sections_reuses_the_shared_airfoil_without_blending() {
-        // Same coordinates, same name, but two distinct `Airfoil` values --
+        // Same coordinates, same name, but two distinct `Airfoil` values,
         // exercising structural equality rather than a shared reference.
         let a = naca("naca0012");
         let b = naca("naca0012");
@@ -87,7 +87,7 @@ mod tests {
     #[test]
     fn subdivide_sections_first_new_xsec_at_each_boundary_is_the_inner_airfoil_unblended() {
         // span_fractions_along_section[0] is exactly 0 (linspace's forced
-        // endpoint), so a_weight == 1 there for every section -- the first
+        // endpoint), so a_weight == 1 there for every section: the first
         // new cross-section after each original one always reuses the
         // inner airfoil verbatim, even when the two ends differ.
         let wing = Wing::new(
@@ -134,7 +134,7 @@ mod tests {
     fn subdivide_sections_with_cosspace_bunches_new_cross_sections_near_each_end() {
         // The branch `VortexLatticeMethod.run()` reaches through
         // `spanwise_spacing_function`, exercised directly here rather than
-        // only through `alas-aero::vlm`'s fixture -- see the module doc.
+        // only through `alas-aero::vlm`'s fixture, see the module doc.
         let wing = Wing::new(
             "ForSpacing",
             vec![
@@ -249,7 +249,7 @@ mod tests {
     #[test]
     fn aspect_ratio_uses_the_symmetric_span_and_area_together() {
         // Mirroring doubles both span and area, so AR = (2b)^2 / (2S) is
-        // twice the half-wing's b^2 / S -- the geometric ratio, not a
+        // twice the half-wing's b^2 / S: the geometric ratio, not a
         // per-half one.
         let asymmetric = two_xsec_wing(false);
         let symmetric = two_xsec_wing(true);

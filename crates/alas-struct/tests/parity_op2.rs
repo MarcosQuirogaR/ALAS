@@ -4,7 +4,7 @@
 //! Compares `alas-struct::op2` against pyNastran's own OP2 reader, via
 //! `golden/generators/gen_struct_op2.py`.
 //!
-//! This module is native -- there is no Python in the reference to translate, so
+//! This module is native; there is no Python in the reference to translate, so
 //! the thing it must agree with is the reader the reference *uses*: pyNastran.
 //! Each fixture case carries a real `.op2` file pyNastran wrote (as hex) and the
 //! values pyNastran's reader recovered from it; the test decodes the same bytes

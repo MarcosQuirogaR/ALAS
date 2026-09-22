@@ -63,7 +63,7 @@ pub fn draw_title(scene: &mut Scene, title: &str, pal: &Palette) {
 /// Greedy word-wrap for the scene graph's font-metric-free text primitive.
 ///
 /// `max_chars_per_line` is a coarse character budget, not a measured pixel
-/// width -- this scene graph deliberately has no text-layout engine (see
+/// width; this scene graph deliberately has no text-layout engine (see
 /// [`draw_axes`]'s doc comment). Callers pick a budget from their own canvas
 /// width and font size. A single word longer than the budget is kept whole
 /// on its own line rather than broken mid-token, since these messages are

@@ -22,8 +22,8 @@
 //!   `upper_coordinates()`/`lower_coordinates()`) rather than a hardcoded
 //!   blend, so any bumps or thickness/camber morphing the optimizer applies
 //!   is reflected automatically.
-//! * Every spar gets its own 3-point (root/break/tip) kinked reference line
-//!   -- the reference reserved that treatment for its one rear spar, whose
+//! * Every spar gets its own 3-point (root/break/tip) kinked reference line:
+//!   the reference reserved that treatment for its one rear spar, whose
 //!   position happens to kink at the break because the planform itself
 //!   does. Generalizing it to every spar is what lets `spar_chord_fractions`
 //!   be an arbitrary-length list instead of a fixed front/rear pair.
@@ -31,12 +31,12 @@
 //! Coordinate convention matches native aerodynamic model's airplane frame: X = chordwise
 //! (aft-positive), Y = spanwise (outboard-positive, root = 0), Z = up
 //! (including dihedral). Twist (washout) is **not** applied to the FEM
-//! cross-sections -- a documented simplification matching the reference
+//! cross-sections: a documented simplification matching the reference
 //! scripts' own fidelity level (a few degrees of twist has a second-order
 //! effect on spanwise bending stiffness).
 //!
 //! Ribs are cut perpendicular to the local leading edge (streamwise at the
-//! root -- the root rib is the clamped wall and must be a clean streamwise
+//! root: the root rib is the clamped wall and must be a clean streamwise
 //! cut). Root-adjacent "transition" ribs are truncated where their
 //! perpendicular cut would otherwise extend past the wing root (`Y < 0`);
 //! `alas-struct::mesh` (not this module) is what has to bridge that
@@ -46,7 +46,7 @@
 //! per-file line limit: [`types`] holds the data this module produces and
 //! its error type, [`support`] the small numeric/geometric primitives its
 //! methods share, and `planform`/`spars`/`stations` each contribute one
-//! `impl WingStructureGeometry` block -- planform and airfoil sampling, rib
+//! `impl WingStructureGeometry` block: planform and airfoil sampling, rib
 //! length and spar-intersection geometry, and the full station generator,
 //! respectively.
 
@@ -85,7 +85,7 @@ pub struct WingStructureGeometry {
     pub sweep_out: f64,
     /// Leading-edge X offset at the break station.
     pub dx_break: f64,
-    /// Leading-edge X offset at the tip -- the same formula
+    /// Leading-edge X offset at the tip: the same formula
     /// `AircraftBuilder._build_main_wing` uses, duplicated here rather than
     /// shared because that builder has no Rust counterpart yet.
     pub dx_tip: f64,
@@ -131,7 +131,7 @@ impl WingStructureGeometry {
     ///
     /// `spar_full_span` defaults to "every spar runs the full span" when
     /// `None`, matching the Python default. When both are `Some`, the two
-    /// are paired by position and truncated to the shorter of the two --
+    /// are paired by position and truncated to the shorter of the two:
     /// `Iterator::zip`'s behaviour, which is also Python's `zip`'s, so a
     /// caller-supplied length mismatch is reproduced rather than rejected,
     /// exactly as upstream does.
@@ -180,7 +180,7 @@ impl WingStructureGeometry {
 
         // Sort fracs and full_span together (not two independent sorts) so a
         // partial-span spar's own flag stays attached to its own fraction
-        // regardless of input order -- `sorted(zip(fracs, full_span))` in
+        // regardless of input order: `sorted(zip(fracs, full_span))` in
         // Python, whose tuple comparison breaks a tied fraction by comparing
         // the boolean (False < True) before falling back to input order,
         // which `Vec::sort_by`'s stability also preserves.
@@ -274,7 +274,7 @@ mod tests {
     #[test]
     fn a_partial_span_spar_has_no_intersection_beyond_its_own_break_endpoint() {
         // Sorted by (fraction, full_span): (0.25, true), (0.50, false),
-        // (0.70, true) -- the partial-span spar lands at index 1.
+        // (0.70, true): the partial-span spar lands at index 1.
         let geometry = WingStructureGeometry::new(
             &DesignVector::default(),
             &WingConfig::default(),

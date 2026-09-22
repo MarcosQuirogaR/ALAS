@@ -14,7 +14,7 @@
 //!   columns each, and [`real`] is a formatter that never spends a ninth.
 //! * **A card holds at most eight data fields before it must continue.** In
 //!   fixed field a physical line is the card name (field 1) plus fields 2-9,
-//!   with field 10 -- columns 73-80 -- reserved for a continuation tag that the
+//!   with field 10 (columns 73-80) reserved for a continuation tag that the
 //!   next line repeats in its own field 1. [`Card::render`] chunks a field list
 //!   across as many lines as it needs, minting a unique tag for each break, so
 //!   the mesh's root-rib `SPC1` and every `CRBE3` continue rather than being
@@ -78,7 +78,7 @@ pub struct Card<'a> {
 }
 
 impl<'a> Card<'a> {
-    /// A card named `name` carrying `fields` (field 2 onward -- the name is
+    /// A card named `name` carrying `fields` (field 2 onward: the name is
     /// field 1).
     pub fn new(name: &'a str, fields: Vec<Field>) -> Self {
         Self { name, fields }
@@ -149,7 +149,7 @@ pub fn real(value: f64) -> String {
     }
     // Every finite double fits at one significant digit: a mantissa `d.` and a
     // signed exponent of at most three digits is six columns. A non-finite value
-    // cannot reach here -- the deck's arithmetic is over measured geometry.
+    // cannot reach here: the deck's arithmetic is over measured geometry.
     render_at(value, 1).unwrap_or_else(|| "0.".to_string())
 }
 
@@ -342,7 +342,7 @@ mod tests {
     }
 
     /// Read a fixed-field real, expanding the no-`E` exponent shorthand, the way
-    /// NASTRAN's own scanner does -- used only to check [`real`] round-trips.
+    /// NASTRAN's own scanner does: used only to check [`real`] round-trips.
     fn shorthand_to_f64(text: &str) -> f64 {
         if let Some(position) = text[1..]
             .find(['+', '-'])

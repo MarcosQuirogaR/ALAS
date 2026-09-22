@@ -16,6 +16,18 @@ fn tr(text: &str) -> String {
     alas_i18n::t(Some(text), None).into_owned()
 }
 
+/// Switch the application theme and redraw every live scene that bakes
+/// the palette in: the guided preview, the result figures and the sandbox
+/// scene (its background and outline colours are scene content, so the
+/// live preview would otherwise keep the previous theme).
+pub(crate) fn switch_theme(state: &mut AppState, ctx: &Context, theme: AppTheme) {
+    state.theme = theme;
+    apply_theme(theme, ctx);
+    state.update_preview_scene();
+    state.update_result_scene();
+    state.reproject_sandbox_scene();
+}
+
 /// Render controls shared by the compact View menu and movable panel.
 pub(crate) fn render_view_options(
     state: &mut AppState,
@@ -26,10 +38,7 @@ pub(crate) fn render_view_options(
     for theme in [AppTheme::Dark, AppTheme::Light, AppTheme::Grey] {
         let is_current = state.theme == theme;
         if ui.selectable_label(is_current, tr(theme.name())).clicked() {
-            state.theme = theme;
-            apply_theme(theme, ctx);
-            state.update_preview_scene();
-            state.update_result_scene();
+            switch_theme(state, ctx, theme);
             if close_menu {
                 ui.close_menu();
             }
@@ -42,11 +51,12 @@ pub(crate) fn render_view_options(
     {
         state.preview_open = !state.preview_open;
     }
+    ui.separator();
     if ui
-        .selectable_label(state.help_verbose, tr("Learn-more help"))
+        .selectable_label(state.reduced_animations, tr("Reduced Animations"))
         .clicked()
     {
-        state.help_verbose = !state.help_verbose;
+        state.reduced_animations = !state.reduced_animations;
     }
     ui.separator();
     for (lang, label) in [(Language::En, "English"), (Language::Es, "Spanish")] {
@@ -158,6 +168,33 @@ pub(crate) fn handle_zoom_shortcuts(ctx: &Context, zoom: &mut f32, zoom_auto: &m
         if wheel_factor.is_finite() && wheel_factor > 0.0 && wheel_factor != 1.0 {
             *zoom = (*zoom * wheel_factor).clamp(0.75, 2.2);
             *zoom_auto = false;
+        }
+    }
+}
+
+// Tests assert on values they construct here, so a failed expect is the
+// assertion failing, not a library invariant being broken.
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alas_report::scene::Color;
+
+    #[test]
+    fn switching_the_theme_redraws_the_sandbox_scene_background() {
+        let mut state = AppState::default();
+        assert!(state.enter_sandbox(true));
+        let ctx = Context::default();
+        for theme in [AppTheme::Light, AppTheme::Grey, AppTheme::Dark] {
+            let revision = state.sandbox.scene_revision;
+            switch_theme(&mut state, &ctx, theme);
+            let (scene, _) = state.sandbox.scene.as_ref().expect("sandbox scene");
+            let expected = Color::from_hex(theme.palette().bg);
+            assert_eq!(scene.background, Some(expected), "{theme:?} background");
+            assert!(
+                state.sandbox.scene_revision > revision,
+                "{theme:?} invalidates the cache"
+            );
         }
     }
 }

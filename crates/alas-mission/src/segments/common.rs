@@ -15,8 +15,8 @@
 //! comes out of the altitude; the freestream comes out of the atmosphere and
 //! the velocity; the two analyses turn that plus the two unknowns into a
 //! thrust and a drag polar; and the mass falls by the integral of the fuel
-//! flow. What is left over -- the force that does not balance the
-//! acceleration -- is the residual the solver drives to zero.
+//! flow. What is left over: the force that does not balance the
+//! acceleration, is the residual the solver drives to zero.
 
 use alas_atmo::Us1976Values;
 
@@ -69,7 +69,7 @@ pub fn update_gravity(conditions: &mut Conditions) {
 ///
 /// The speed is formed as the square root of the summed squares of all three
 /// components and the dynamic pressure from the *squared* magnitude before the
-/// root, which is how upstream writes it -- `q` is `0.5 * rho * Vmag2`, not
+/// root, which is how upstream writes it: `q` is `0.5 * rho * Vmag2`, not
 /// `0.5 * rho * Vmag * Vmag`.
 pub fn update_freestream(conditions: &mut Conditions) {
     for point in 0..conditions.len() {
@@ -99,15 +99,99 @@ pub fn update_thrust(
 ) {
     let mut thrusts = Vec::with_capacity(conditions.len());
     for (point, values) in atmosphere.iter().enumerate() {
-        let output = analyses.thrust(
+        let commanded = conditions.throttle[point];
+        let altitude_m = conditions.altitude_m[point];
+        let velocity_m_s = conditions.velocity_m_s[point];
+        let mach = conditions.mach[point];
+        let gravity_m_s2 = conditions.gravity_m_s2[point];
+        // The deck is only ever asked for commands it defines. Outside that
+        // interval the *force* follows the deck's own normalized-force
+        // relation instead: `NormalizedForce(f)` delivers `f` times the force
+        // available at `f = 1`, so `f * F(1)` is that relation carried past
+        // the bound rather than a curve invented here. No coefficient is
+        // fitted and no tolerance is introduced.
+        //
+        // This exists because the root find needs a gradient outside the
+        // deck's domain. Where the command was clamped, every command outside
+        // produced the identical force, so the residual was flat, its
+        // Jacobian column was zero, and `hybrd` stalled with
+        // `NoProgressSinceIterations` instead of reporting a shortfall.
+        //
+        // **Nothing inside the deck's domain changes**: the branch is taken
+        // only where the deck itself says the answer is not the one it was
+        // asked for, so a segment that already converged sees the identical
+        // force it saw before. A point that needs the continuation is out of
+        // envelope by construction and is refused by `converge_root`; the
+        // continuation only lets the solver find that out by descending a
+        // slope instead of wandering a plateau.
+        let evaluated = if analyses.enforce_throttle_envelope {
+            commanded.clamp(0.0, 1.0)
+        } else {
+            commanded
+        };
+        let (output, idle_floor_limited) = analyses.thrust_with_domain(
             values,
-            conditions.altitude_m[point],
-            conditions.velocity_m_s[point],
-            conditions.mach[point],
-            conditions.gravity_m_s2[point],
-            conditions.throttle[point],
+            altitude_m,
+            velocity_m_s,
+            mach,
+            gravity_m_s2,
+            evaluated,
         );
-        conditions.thrust_force_vector_n[point] = [output.thrust_n, 0.0, 0.0];
+        let mut throttle_floor = 0.0;
+        let mut thrust_n = output.thrust_n;
+        if analyses.enforce_throttle_envelope {
+            if commanded > 1.0 {
+                // Above the rating `output` is already `F(1)`.
+                thrust_n = output.thrust_n * commanded;
+            } else if idle_floor_limited {
+                // The deck answered from its own flight-idle floor, so the
+                // command it was handed is *below* the lowest force it will
+                // deliver, and every smaller command produced this same
+                // force. The measured band is wide: on the product turbofan
+                // deck the floor sits at 0.075-0.105 of the maximum-climb
+                // force over an A320-200 descent, so the whole of `[0, 0.105]`
+                // was flat while the mission's envelope still called it
+                // available. A root find that wandered in could not get out
+                // again - measured, the A320-200's `descent_1` stalled
+                // `NoProgressSinceIterations` after 215 residual evaluations
+                // at a request of -6.761 while a root existed at 0.737-0.934,
+                // entirely inside the envelope.
+                //
+                // The deck is never asked to extrapolate through the floor: it
+                // is evaluated at the floor here and at the rating below, the
+                // fuel flow stays the idle value, and no sub-idle point can
+                // reach a published mission because `converge_root` refuses
+                // every segment that asks for one. Only the residual's force
+                // follows the deck's own relation across the band, and only
+                // so the root find can leave.
+                //
+                // **Bounding the continuation at zero force was tried and is
+                // worse.** It is the more conservative-looking choice - an
+                // engine has no reverse in flight - but it puts the plateau
+                // back immediately below zero command, and the measured
+                // A320-200 `descent_1` then stalled again
+                // (`NoProgressSinceIterations`, 176 evaluations, request
+                // -7.333, 48.9 kN of longitudinal force still unbalanced)
+                // instead of recovering the root at 0.737-0.934 that the
+                // unbounded relation finds in 43. The continuation is a
+                // numerical escape from a flat region, not a propulsion
+                // model, and truncating it only hides roots that exist.
+                let rated = analyses
+                    .thrust(values, altitude_m, velocity_m_s, mach, gravity_m_s2, 1.0)
+                    .thrust_n;
+                if rated.is_finite() && rated > 0.0 && output.thrust_n.is_finite() {
+                    throttle_floor = output.thrust_n / rated;
+                    thrust_n = commanded * rated;
+                }
+            }
+        }
+        // Only the force is continued. Fuel flow stays at the value the deck
+        // produced at the bound: the point is rejected either way, and
+        // extrapolating a burn the engine cannot produce - or a burn below
+        // idle that it never stops producing - would feed the mass ODE a mass
+        // it never lost.
+        conditions.available_throttle_floor[point] = throttle_floor;
+        conditions.thrust_force_vector_n[point] = [thrust_n, 0.0, 0.0];
         conditions.vehicle_mass_rate_kg_s[point] = output.fuel_flow_rate_kg_s;
         thrusts.push(output);
     }
@@ -165,7 +249,7 @@ pub fn update_aerodynamics(conditions: &mut Conditions, analyses: &MissionAnalys
 /// Shift the mass array so it begins where the previous segment ended.
 ///
 /// With no predecessor the segment starts at `takeoff_mass_kg`, which is the
-/// one number the weights analysis is reached for from inside a segment --
+/// one number the weights analysis is reached for from inside a segment:
 /// taken as that number rather than as the analysis, the same "take the
 /// fields you read" scoping [`crate::numerics`] already uses for the segment
 /// state it hangs off.
@@ -189,7 +273,7 @@ pub fn initialize_weights(
 
 /// Integrate the fuel flow into the mass, and turn the mass into a weight.
 ///
-/// Row zero of the mass is deliberately left alone -- upstream writes
+/// Row zero of the mass is deliberately left alone: upstream writes
 /// `total_mass[1:, 0]`, because row zero is what
 /// [`initialize_weights`] pinned to the previous segment's final mass and the
 /// integral is defined relative to it. The weight, by contrast, is formed from

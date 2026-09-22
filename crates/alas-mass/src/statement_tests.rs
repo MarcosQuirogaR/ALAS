@@ -155,11 +155,15 @@ fn the_flops_split_preserves_systems_and_furnishings_totals() {
         engine_oil_kg: 60.0,
         passenger_service_kg: 240.0,
         cargo_containers_kg: 90.0,
-        total_kg: 380.0 + 190.0 + 120.0 + 60.0 + 240.0 + 90.0,
+        total_kg: 380.0 + 190.0 + 120.0 + 60.0 + 240.0,
+        total_with_cargo_containers_kg: 380.0 + 190.0 + 120.0 + 60.0 + 240.0 + 90.0,
     };
     let flops = FlopsTransportBreakdown {
         systems,
         operating_items,
+        cabin_equipment_method: alas_config::CabinEquipmentMethod::FlopsTransportV1,
+        propulsion_sizing: crate::flops_transport::PropulsionSizing::RatedThrust,
+        apu_installed: true,
     };
     // The FLOPS buildup puts the equation 138 group less furnishings in the
     // systems slot and furnishings plus the operating items in the
@@ -268,13 +272,20 @@ fn sample_flops() -> FlopsTransportBreakdown {
         engine_oil_kg: 60.0,
         passenger_service_kg: 240.0,
         cargo_containers_kg: 90.0,
-        total_kg: 380.0 + 190.0 + 120.0 + 60.0 + 240.0 + 90.0,
+        total_kg: 380.0 + 190.0 + 120.0 + 60.0 + 240.0,
+        total_with_cargo_containers_kg: 380.0 + 190.0 + 120.0 + 60.0 + 240.0 + 90.0,
     };
     FlopsTransportBreakdown {
         systems,
         operating_items,
+        cabin_equipment_method: alas_config::CabinEquipmentMethod::FlopsTransportV1,
+        propulsion_sizing: crate::flops_transport::PropulsionSizing::RatedThrust,
+        apu_installed: true,
     }
 }
+
+#[path = "statement_robustness_tests.rs"]
+mod robustness;
 
 /// The breakdown the FLOPS buildup writes for `flops`, plus `margin_kg` of
 /// equation 139 empty-mass margin carried in the systems slot.

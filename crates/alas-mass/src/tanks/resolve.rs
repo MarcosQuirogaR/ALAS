@@ -5,9 +5,9 @@
 //! aircraft.
 //!
 //! Each tank family gets its own builder function because each reads a
-//! different piece of the built geometry -- a wing tank the main wing, the
+//! different piece of the built geometry: a wing tank the main wing, the
 //! centre tank the wing root and the side of body, the trim tank the
-//! horizontal stabiliser, the auxiliary tank the fuselage -- and keeping
+//! horizontal stabiliser, the auxiliary tank the fuselage, and keeping
 //! them apart means a change to one family's geometry cannot silently reach
 //! another's.
 

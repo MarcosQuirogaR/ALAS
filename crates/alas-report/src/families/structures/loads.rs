@@ -7,7 +7,7 @@
 //! Bending stiffness `EI(y)` and moment `M(y)` for the sizing-governing load
 //! case (left, dual axis), and the spanwise deflection curve for every load
 //! case with real MSC and NASA NASTRAN-95 tip-deflection markers overlaid when
-//! available (right). Python does not plot torsion anywhere in this figure -- a stale
+//! available (right). Python does not plot torsion anywhere in this figure: a stale
 //! doc comment in the previous stub implied otherwise; verified against
 //! `visualization.py` L5819-5906 directly.
 
@@ -77,7 +77,7 @@ pub fn figure_structures_loads(
 }
 
 /// Left panel: `EI(y)` (blue, filled under the curve, left axis) and `M(y)`
-/// for the governing case (orange dashed, right axis) -- a dual axis built
+/// for the governing case (orange dashed, right axis): a dual axis built
 /// as two [`Axes2D`] sharing one pixel rect and x-range with independent
 /// y-ranges, one frame drawn once, the right axis's ticks placed manually.
 fn draw_stiffness_moment_panel(
@@ -113,7 +113,7 @@ fn draw_stiffness_moment_panel(
     });
 
     // EI(y), filled under the curve down to y=0 (the data baseline, not the
-    // axis minimum -- matches `ax_l.fill_between(y, 0, EI/1e9)`).
+    // axis minimum: matches `ax_l.fill_between(y, 0, EI/1e9)`).
     let ei_pts: Vec<(f64, f64)> = analysis
         .y
         .iter()
@@ -347,7 +347,7 @@ fn load_case_color(name: &str) -> &'static str {
 }
 
 /// A diamond marker (a 4-point polygon rotated 45 degrees), approximating
-/// matplotlib's `marker="D"` scatter point -- this scene graph has no
+/// matplotlib's `marker="D"` scatter point; this scene graph has no
 /// dedicated diamond primitive.
 fn draw_diamond(scene: &mut Scene, center: [f64; 2], half_size: f64, color: Color) {
     let [cx, cy] = center;
@@ -364,7 +364,7 @@ fn draw_diamond(scene: &mut Scene, center: [f64; 2], half_size: f64, color: Colo
 }
 
 /// A hollow circular marker for the local NASTRAN-95 backend, kept visually
-/// distinct from -- and non-occluding of -- the diamond used for the modern
+/// distinct from, and non-occluding of, the diamond used for the modern
 /// MSC result at the same physical tip location.
 fn draw_circle_marker(scene: &mut Scene, center: [f64; 2], radius: f64, color: Color) {
     scene.add(SceneElement::Circle {
@@ -396,7 +396,7 @@ fn autoscale_padded(values: impl Iterator<Item = f64>) -> (f64, f64) {
 }
 
 /// Five evenly spaced tick labels along one axis's Y range, placed outside
-/// the shared frame -- left-aligned-right for the left (EI) axis,
+/// the shared frame: left-aligned-right for the left (EI) axis,
 /// left-aligned for the right (moment) axis.
 fn draw_axis_ticks(
     scene: &mut Scene,
@@ -534,7 +534,7 @@ mod tests {
         assert!(scene
             .elements
             .iter()
-            .any(|e| matches!(e, SceneElement::Text { text, .. } if text.contains("not run"))));
+            .any(|e| matches!(e, SceneElement::Text { text, .. } | SceneElement::TextBlock { text, .. } if text.contains("not run"))));
     }
 
     #[test]

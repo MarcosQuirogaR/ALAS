@@ -12,6 +12,11 @@ use std::path::PathBuf;
 
 use alas_cfd::{generate_case, CfdStudyConfig};
 
+// This binary example's only job is to report the generated case (or the
+// failure) on the console for a human running it manually; there is no other
+// channel to route this through, so stdout/stderr are the intended sinks,
+// not a bypass of library logging.
+#[allow(clippy::print_stdout, clippy::print_stderr)]
 fn main() {
     let mut args = env::args_os().skip(1);
     let case_dir = args

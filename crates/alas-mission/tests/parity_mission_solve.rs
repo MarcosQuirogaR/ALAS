@@ -5,8 +5,8 @@
 //! `golden/mission/mission.json`.
 //!
 //! Twelve segments, sixteen control points each, flown end to end: the default
-//! AVE aircraft from Madrid to Nairobi at 6500 km. Nothing here is held fixed
-//! -- each segment's thirty-two unknowns are searched for by MINPACK exactly
+//! AVE aircraft from Madrid to Nairobi at 6500 km. Nothing here is held fixed,
+//! each segment's thirty-two unknowns are searched for by MINPACK exactly
 //! as `converge_root` searches for them, and each segment starts from the mass,
 //! time, position and ground range the one before it ended at. This is the
 //! only test in the crate that exercises that chain, and the only one in which
@@ -19,8 +19,8 @@
 //! one `export_data.py` writes, which is what the rest of the program reads a
 //! mission through.
 //!
-//! Two tiers. The discrete facts -- which segments were flown, in what order,
-//! how many points each carries, and that every one of them converged -- are
+//! Two tiers. The discrete facts, which segments were flown, in what order,
+//! how many points each carries, and that every one of them converged, are
 //! `exact`. Everything numeric is `iter`, and here that tier is the right one
 //! rather than a fallback: MINPACK stops on its trust region and not on its
 //! residual, so two implementations that agree about every force can still
@@ -44,8 +44,8 @@ use support::{SurrogateTraining, Vehicle};
 /// Every quantity here is downstream of twelve trust-region searches, each
 /// handing its endpoint to the next as a starting condition, so a difference
 /// in one segment's stopping point is carried by every segment after it. The
-/// `linalg`-tier evaluation underneath is not what sets this bound --
-/// `alas-mission::segments` agrees to 6.5e-14 at a held unknown vector -- the
+/// `linalg`-tier evaluation underneath is not what sets this bound:
+/// `alas-mission::segments` agrees to 6.5e-14 at a held unknown vector: the
 /// solver is: the same forces stop the trust region at slightly different
 /// points, four decades looser than the arithmetic that produced them.
 ///

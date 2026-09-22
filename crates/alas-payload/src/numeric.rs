@@ -11,7 +11,7 @@
 //! `round(pct * l_seating / pitch)` is how many rows a class gets;
 //! `np.interp` is the fuselage width at a station, which feeds both. Writing
 //! `(a / b).floor()` and `x.round()` instead would agree almost everywhere and
-//! disagree, by one, exactly at the tie -- which is where a cabin gains or
+//! disagree, by one, exactly at the tie, which is where a cabin gains or
 //! loses a seat abreast.
 //!
 //! So each is reproduced from the reference implementation's own source rather
@@ -27,7 +27,7 @@
 //! * [`interp`] is NumPy's `compiled_interp` together with the
 //!   `binary_search_with_guess` that locates the interval, including its
 //!   clamping at both ends and its NaN retry. It lived here first, and moved
-//!   to `alas-math` when `alas-aero::analysis` became its second consumer --
+//!   to `alas-math` when `alas-aero::analysis` became its second consumer,
 //!   which is exactly what the paragraph below says should happen.
 //!
 //! The two CPython reproductions are private to this crate because it is the
@@ -36,7 +36,7 @@
 
 pub(crate) use alas_math::interp;
 
-/// Python's `a // b` for floats -- CPython's `float_divmod`, whose quotient
+/// Python's `a // b` for floats: CPython's `float_divmod`, whose quotient
 /// comes from `fmod` and is then snapped to the nearest integral value.
 ///
 /// The difference from `(a / b).floor()` is real and is why this exists: `a /
@@ -72,7 +72,7 @@ pub(crate) fn floor_div(a: f64, b: f64) -> f64 {
     }
 }
 
-/// Python's `round(x)` with no digit count: nearest integer, halves to even --
+/// Python's `round(x)` with no digit count: nearest integer, halves to even:
 /// `float.__round__`, reproduced as the two steps it takes.
 pub(crate) fn round_half_even(x: f64) -> f64 {
     let rounded = x.round();
@@ -87,7 +87,7 @@ pub(crate) fn round_half_even(x: f64) -> f64 {
 /// decimal places, halves to even.
 ///
 /// CPython converts to a decimal string of that length and reads it back,
-/// rather than scaling by a power of ten -- the scaling is not exact in binary
+/// rather than scaling by a power of ten: the scaling is not exact in binary
 /// and rounds the wrong way for values that are not representable. Rust's
 /// fixed-precision formatting is the same correctly-rounded, ties-to-even
 /// conversion, so the same out-and-back reproduces it.

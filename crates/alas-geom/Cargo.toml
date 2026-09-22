@@ -18,11 +18,9 @@ alas-config = { path = "../alas-config" }
 alas-math = { path = "../alas-math" }
 serde = { workspace = true }
 thiserror = { workspace = true }
-tracing = { workspace = true }
 
 [dev-dependencies]
 alas-testkit = { path = "../alas-testkit" }
-serde_json = { workspace = true }
 
 [lints]
 workspace = true

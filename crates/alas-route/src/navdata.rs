@@ -16,7 +16,7 @@
 //!
 //! Five-letter fix identifiers are unique only regionally. This dataset's
 //! three-column legacy fix format carries no region code, so a few percent of
-//! identifiers in a global set name two or more unrelated physical fixes -- a
+//! identifiers in a global set name two or more unrelated physical fixes: a
 //! "MITSO" near the United Kingdom and a completely different "MITSO" near
 //! Riyadh. The airway file references its endpoints by identifier alone, so
 //! keeping only the first occurrence of each name can wire a short local
@@ -30,7 +30,7 @@
 //!
 //! # Known simplification
 //!
-//! Terminal procedures are not modeled -- that needs full ARINC 424 parsing,
+//! Terminal procedures are not modeled: that needs full ARINC 424 parsing,
 //! which for non-US data is licence-encumbered. The transition between an
 //! airport and its nearest enroute fix is a straight line.
 //!
@@ -176,7 +176,7 @@ impl NavdataGraph {
     /// airway file joined them.
     ///
     /// Empty for a fix no airway touches, which is not the same as a fix that
-    /// does not exist -- both are unroutable, and neither is an error.
+    /// does not exist, both are unroutable, and neither is an error.
     pub fn neighbors(&self, fix: usize) -> &[(usize, f64)] {
         self.edges.get(&fix).map_or(&[], Vec::as_slice)
     }
@@ -290,7 +290,7 @@ impl NavdataGraph {
 /// first.
 ///
 /// Ties break on the node index, which is the order the reference's own binary
-/// heap imposes on equal distances -- so two paths of exactly equal length
+/// heap imposes on equal distances, so two paths of exactly equal length
 /// resolve the same way in both implementations rather than depending on which
 /// one the heap happened to hold.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -319,7 +319,7 @@ impl PartialOrd for Reachable {
 /// Parse the fix file, keeping every occurrence of every identifier.
 ///
 /// Returns the fixes in file order and an index from identifier to the
-/// positions sharing it -- almost always one, and the whole point of this
+/// positions sharing it: almost always one, and the whole point of this
 /// module's care when it is not.
 fn parse_fixes(data: &str) -> (Vec<Fix>, HashMap<String, Vec<usize>>) {
     let mut fixes = Vec::new();
@@ -374,7 +374,7 @@ fn parse_airways(
 
 /// The pair of fixes an airway segment joins, and the length of the leg.
 ///
-/// Where either identifier names more than one fix, the closest pair wins --
+/// Where either identifier names more than one fix, the closest pair wins,
 /// see the module doc for why the alternative wires segments across continents.
 fn resolve_pair(
     ident_a: &str,

@@ -18,7 +18,7 @@
 //! candidate with the frozen reference fractions while the report balanced it
 //! on the geometric stations, and the two disagreed by several percent of the
 //! mean aerodynamic chord for one identical design vector at one identical
-//! closed takeoff mass -- enough to make a candidate the search accepted as
+//! closed takeoff mass: enough to make a candidate the search accepted as
 //! hard-feasible print as physically infeasible in its own final report.
 
 use alas_config::design_variables::DesignVector;

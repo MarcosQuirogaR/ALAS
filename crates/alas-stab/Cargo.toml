@@ -16,15 +16,15 @@ alas-aero = { path = "../alas-aero" }
 # probe schedule, mesh resolutions, tail efficiency and fuselage-stability
 # switch, exactly as `stability.py` does.
 alas-config = { path = "../alas-config" }
-# Every geometry query -- `Airplane`, each `Wing`'s `aerodynamic_center`/
+# Every geometry query (`Airplane`, each `Wing`'s `aerodynamic_center`/
 # `area`/`aspect_ratio`, the `Fuselage` cross-section area distribution the
-# Munk/Multhopp integral runs on -- is an `alas-geom::aircraft` type.
+# Munk/Multhopp integral runs on) is an `alas-geom::aircraft` type.
 alas-geom = { path = "../alas-geom" }
 # The atmosphere model for the cruise trim condition, and the
 # sea-level default for the low-speed probes.
 alas-atmo = { path = "../alas-atmo" }
 # `munk_apparent_mass_factor` is `np.interp` over a published table, and the
-# 2x2 alpha/incidence trim is `np.linalg.solve` -- the two primitives
+# 2x2 alpha/incidence trim is `np.linalg.solve`: the two primitives
 # `alas-math` already exposes for exactly these.
 alas-math = { path = "../alas-math" }
 
@@ -33,7 +33,6 @@ alas-testkit = { path = "../alas-testkit" }
 # Only the parity test's fixture structs derive `Deserialize`; the library
 # types carry no serde dependency, the same split `alas-aero` makes.
 serde = { workspace = true }
-serde_json = { workspace = true }
 
 [lints]
 workspace = true

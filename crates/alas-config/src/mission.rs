@@ -30,7 +30,12 @@ use crate::ConfigNode;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ConfigNode)]
 #[serde(deny_unknown_fields)]
 pub struct MissionConfig {
-    /// Whether a normal run includes the mission analysis.
+    /// Whether this run includes the mission analysis.
+    ///
+    /// Every normal full run flies the mission: the loading boundary forces
+    /// this to `true` for any document, so a saved file cannot switch it off
+    /// (see [`crate::ConfigLoadNotes`]). Library and command-line callers may
+    /// clear it in memory (`--no-mission`) for diagnostics.
     #[config(
         help = "Fly the design along the configured route as part of a normal Run, producing block fuel and the trajectory figures. On by default: a design that has not been flown has only been evaluated at a single cruise point."
     )]
@@ -83,7 +88,7 @@ pub struct MissionConfig {
     /// Which dispatch account to read a filed flight plan from.
     #[config(
         hidden,
-        help = "Dispatch account name or pilot ID. When set, the routing tries this account's most recently generated flight plan -- real current-cycle departure, arrival and airway routing -- before falling back to imported or great-circle routing. Blank skips that tier. Set on Setup > External Tools."
+        help = "Dispatch account name or pilot ID. When set, the routing tries this account's most recently generated flight plan (real current-cycle departure, arrival and airway routing) before falling back to imported or great-circle routing. Blank skips that tier. Set on Setup > External Tools."
     )]
     pub simbrief_username: String,
 

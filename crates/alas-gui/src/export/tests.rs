@@ -2,8 +2,8 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 use super::{
-    archive_manifest, figure_file_name, sections_from_figures, write_stored_zip, ExportError,
-    ExportedFigure,
+    archive_manifest, export_readiness, figure_file_name, sections_from_figures, write_stored_zip,
+    ExportError, ExportedFigure,
 };
 use alas_report::{Color, Scene};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -43,6 +43,19 @@ fn archive_names_preserve_registry_identity_and_manifest_order() {
         manifest.find("01_aero_panel.svg").expect("aero")
             < manifest.find("02_mission_profile.svg").expect("mission")
     );
+}
+
+#[test]
+fn live_snapshots_are_rejected_until_the_final_result_is_available() {
+    assert!(matches!(
+        export_readiness(true, false),
+        Err(ExportError::IncompletePipelineRun)
+    ));
+    assert!(matches!(
+        export_readiness(false, false),
+        Err(ExportError::NoPipelineRun)
+    ));
+    assert!(export_readiness(true, true).is_ok());
 }
 
 #[test]

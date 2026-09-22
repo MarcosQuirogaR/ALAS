@@ -10,7 +10,7 @@
 //! [`run_nastran`] never fails: a solve that times out, exits non-zero, writes
 //! no `.f06` or writes one containing a fatal message all come back as a
 //! [`NastranRunOutcome`] that is not `ok`, carrying a `detail` a user can act
-//! on. That contract is upstream's and it is the point of the module -- a
+//! on. That contract is upstream's and it is the point of the module: a
 //! pipeline run must not stop because NASTRAN is not installed or a model did
 //! not solve, and "did not converge" with nothing attached is useless on a
 //! machine the author cannot see.
@@ -28,7 +28,7 @@
 //!   the process was launched with.
 //! * A timeout kills the whole process tree, not the child. `nastran.exe` is a
 //!   front end that forks the actual solver, and killing only the front end
-//!   leaves that solver running -- observed directly upstream, still consuming
+//!   leaves that solver running: observed directly upstream, still consuming
 //!   CPU and still holding a licence seat. [`alas_exec::process`] owns that.
 //!
 //! [`solver_arguments`] builds the frozen reference command line and
@@ -38,7 +38,7 @@
 //! [`fatal_lines`] are the text half and are compared
 //! against the reference on fixture data; and everything between the spawn and
 //! the verdict lives in `supervise`, which takes an already-built command and is
-//! therefore driven by stand-ins -- one that exits cleanly, one that never
+//! therefore driven by stand-ins, one that exits cleanly, one that never
 //! terminates. An opt-in installed-solver check establishes the remaining
 //! product boundary where MSC is available.
 
@@ -52,6 +52,7 @@ use std::time::{Duration, Instant};
 use std::os::windows::process::CommandExt;
 
 use alas_exec::process::{kill_process_tree, NewProcessGroup, NoConsoleWindow};
+use alas_exec::SupervisedSpawn;
 
 use super::text;
 
@@ -70,8 +71,8 @@ const FATAL_LINES_REPORTED: usize = 5;
 /// What one solve did, and why it is judged that way.
 ///
 /// Upstream's own docstring makes the case for the `detail` string over a bare
-/// bool, and it holds here: the failures this reports -- a timeout, a non-zero
-/// exit, a missing `.f06`, a fatal message, a process that never launched --
+/// bool, and it holds here: the failures this reports (a timeout, a non-zero
+/// exit, a missing `.f06`, a fatal message, a process that never launched)
 /// are indistinguishable to a caller and completely different to a user.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NastranRunOutcome {
@@ -285,7 +286,7 @@ fn supervise(mut command: Command, solve: &Solve) -> NastranRunOutcome {
         .stderr(Stdio::piped())
         .no_window()
         .new_process_group()
-        .spawn();
+        .spawn_supervised("NASTRAN solve");
     let mut child = match spawned {
         Ok(child) => child,
         Err(error) => {
@@ -354,7 +355,7 @@ fn supervise(mut command: Command, solve: &Solve) -> NastranRunOutcome {
     let f06_path = solve.bdf_path.with_extension("f06");
     if !f06_path.exists() {
         return NastranRunOutcome::failed(format!(
-            "{} exited 0 but wrote no {} in {} -- if this executable is a GUI-mode launcher \
+            "{} exited 0 but wrote no {} in {}; if this executable is a GUI-mode launcher \
              (e.g. a *w.exe variant) it may have opened a window and returned immediately \
              instead of blocking until the solve finished, or it may write output to a \
              different working directory than the one it was launched from. {streams}",
@@ -597,8 +598,8 @@ mod tests {
 
     /// Drive `supervise` with a command standing in for the solver.
     ///
-    /// Everything after the spawn -- the timeout and its tree kill, the exit
-    /// status, the print file and its fatal scan -- is what these exercise.
+    /// Everything after the spawn (the timeout and its tree kill, the exit
+    /// status, the print file and its fatal scan) is what these exercise.
     /// The solver's own arguments are covered separately, by
     /// `the_command_line_names_the_deck_and_scratches_beside_it`.
     fn stand_in(

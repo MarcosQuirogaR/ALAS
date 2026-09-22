@@ -16,7 +16,7 @@
 //! theorem, and does nothing else.
 //!
 //! Axes are the geometry frame every other crate uses: `x` positive aft,
-//! `y` positive starboard, `z` positive up -- JSBSim's structural frame.
+//! `y` positive starboard, `z` positive up: JSBSim's structural frame.
 //! Products of inertia are stored as the integrals `P_xy = int x y dm`
 //! (JSBSim with `negated_crossproduct_inertia="false"`) and appear negated
 //! on the off-diagonal of [`InertiaTensor::matrix`]. AeroSandbox stores the
@@ -317,6 +317,22 @@ pub enum MassMethod {
     /// The takeoff-mass closure remainder, which is an allowance and not a
     /// physical estimate.
     ClosureRemainder,
+}
+
+impl MassMethod {
+    /// Source label retained by reports and exports, without inferring it from
+    /// the architecture that owns the item.
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Correlation(source) => source,
+            Self::TakeoffMassFraction => "takeoff mass fraction",
+            Self::Geometric => "geometry and density",
+            Self::Declared => "declared mass",
+            Self::LayoutPlacement => "payload layout",
+            Self::TankFill => "tank volume and density",
+            Self::ClosureRemainder => "mass closure remainder",
+        }
+    }
 }
 
 /// One row of the ledger.

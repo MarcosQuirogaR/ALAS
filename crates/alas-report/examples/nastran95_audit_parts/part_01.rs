@@ -20,7 +20,7 @@ use alas_struct::sizing::{size_wingbox, WingboxSizing};
 use alas_struct::{mesh::Deck, mesh::MeshNodeIndex};
 use serde_json::{json, Value};
 
-const DEFAULT_OUTPUT: &str = "C:/Proyectos/ALAS-rust/tmp/nastran95_audit_20260822";
+const DEFAULT_OUTPUT: &str = "out/nastran95_audit";
 const SHORT_WORK_ROOT: &str = "C:/nas-run/alas_nastran95_audit";
 
 struct AuditModel {

@@ -12,7 +12,7 @@
 //! sits, how the defining sections are stacked vertically, how they are
 //! twisted, and where the planform cranks. Two runs with different values here
 //! are not searching the same design space, so these are fixed for the length
-//! of a run and configurable between runs -- which is the whole reason they
+//! of a run and configurable between runs, which is the whole reason they
 //! are named fields rather than the constants the original scripts buried
 //! inside their geometry builders.
 

@@ -156,7 +156,7 @@ impl WingBoxIntegral {
 /// describe.
 ///
 /// Each panel's contribution is its overlap with `[start_y_m, end_y_m]`
-/// times the average of its two endpoint sections -- the same treatment
+/// times the average of its two endpoint sections: the same treatment
 /// `alas_opt::transport_planform::wingbox_volume_m3` gives the volume term,
 /// extended here to the moment terms by the same averaging. This
 /// under-resolves a boundary that falls strictly inside a panel rather than

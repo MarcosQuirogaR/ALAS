@@ -29,7 +29,7 @@ pub struct LandingGearConfig {
     /// Margin left in the rated tire load after the static reaction.
     #[config(
         label = "Tire load safety factor",
-        help = "Margin applied to the static reaction load when selecting/verifying tire count -- real gear is sized so the rated tire load is never fully consumed by static load alone, leaving margin for dynamic (braking, turning, rough-field) loads. Raymer: ~1.07 typical for a preliminary sizing pass."
+        help = "Margin applied to the static reaction load when selecting/verifying tire count: real gear is sized so the rated tire load is never fully consumed by static load alone, leaving margin for dynamic (braking, turning, rough-field) loads. Raymer: ~1.07 typical for a preliminary sizing pass."
     )]
     pub tire_safety_factor: f64,
 
@@ -44,14 +44,14 @@ pub struct LandingGearConfig {
     #[config(
         label = "MTOW threshold for dual nose wheels",
         unit = "kg",
-        help = "Auto-sizing switches from a single to a dual (twin) nose wheel above this MTOW -- below it, transport-category aircraft still commonly fly single nose wheels."
+        help = "Auto-sizing switches from a single to a dual (twin) nose wheel above this MTOW: below it, transport-category aircraft still commonly fly single nose wheels."
     )]
     pub nlg_dual_wheel_mtow_kg: f64,
 
     /// Main-gear legs, left and right combined, or zero to size them.
     #[config(
         label = "Main-gear strut count (0 = auto)",
-        help = "Number of main-gear legs (each with its own wheel bogie), left+right combined. 0 = auto: 2 (one per side) below mlg_body_gear_mtow_kg, 4 (adds centreline body gear, e.g. A380/747-class) above it -- real widebodies above roughly 300 t add body gear because a two-leg bogie would need an impractically large tire count/track width to carry the load within tire-pressure limits."
+        help = "Number of main-gear legs (each with its own wheel bogie), left+right combined. 0 = auto: 2 (one per side) below mlg_body_gear_mtow_kg, 4 (adds centreline body gear, e.g. A380/747-class) above it: real widebodies above roughly 300 t add body gear because a two-leg bogie would need an impractically large tire count/track width to carry the load within tire-pressure limits."
     )]
     pub n_mlg_struts: i64,
 
@@ -73,7 +73,7 @@ pub struct LandingGearConfig {
     /// Main-gear track as a multiple of fuselage diameter.
     #[config(
         label = "Main-gear track / fuselage-diameter factor",
-        help = "Main-gear lateral track width, as a multiple of fuselage diameter. Real transports with wing-root-mounted main gear run track/diameter ~1.75-2.0 (777-300ER 2.03, 787-9 1.90, A340-300 1.91, A380-800 2.00, A320-200 1.92, DC-10-30 1.77) -- 1.85 is the fleet-average calibration. An earlier default (1.15) understated real track width by roughly a factor of 1.6, which fed directly into the lateral-turnover check (physics.landing_gear) reading artificially safe."
+        help = "Main-gear lateral track width, as a multiple of fuselage diameter. Real transports with wing-root-mounted main gear run track/diameter ~1.75-2.0 (777-300ER 2.03, 787-9 1.90, A340-300 1.91, A380-800 2.00, A320-200 1.92, DC-10-30 1.77): 1.85 is the fleet-average calibration. An earlier default (1.15) understated real track width by roughly a factor of 1.6, which fed directly into the lateral-turnover check (physics.landing_gear) reading artificially safe."
     )]
     pub track_diameter_factor: f64,
 
@@ -165,7 +165,7 @@ pub struct LandingGearConfig {
     #[config(
         options = TireClass,
         label = "Tire class",
-        help = "Which reference tire (see physics.landing_gear.TIRE_DATABASE) to size with -- 'auto' picks the smallest class whose rated load, combined with a realistic wheel count (<=6/strut), covers the aircraft's static gear loads. Options: auto, light, narrowbody, widebody, heavy."
+        help = "Which reference tire (see physics.landing_gear.TIRE_DATABASE) to size with: 'auto' picks the smallest class whose rated load, combined with a realistic wheel count (<=6/strut), covers the aircraft's static gear loads. Options: auto, light, narrowbody, widebody, heavy."
     )]
     pub tire_class: String,
 
@@ -173,7 +173,7 @@ pub struct LandingGearConfig {
     #[config(
         options = StrutMaterial,
         label = "Strut material",
-        help = "Landing-gear strut/piston material, shown on the planform diagram and in the design report. 'auto' selects by MTOW class (see physics.landing_gear.STRUT_MATERIALS): high-strength steel (300M-class) for larger transports, an aluminium/steel combination for light aircraft. Informational/labelling only -- this preliminary-design tool does not run a structural (FEA) stress analysis of the strut itself."
+        help = "Landing-gear strut/piston material, shown on the planform diagram and in the design report. 'auto' selects by MTOW class (see physics.landing_gear.STRUT_MATERIALS): high-strength steel (300M-class) for larger transports, an aluminium/steel combination for light aircraft. Informational/labelling only; this preliminary-design tool does not run a structural (FEA) stress analysis of the strut itself."
     )]
     pub strut_material: String,
 
@@ -360,7 +360,8 @@ impl LandingGearConfig {
     }
 
     /// Resolve the longitudinal landing-gear stations in the active geometry
-    /// frame.
+    /// frame, **without** checking that the caller's main-gear fallback is
+    /// inside its stated domain.
     ///
     /// A complete source anchor set is expressed as nose-tip drawing
     /// fractions and scales with the active fuselage length.  This preserves
@@ -369,6 +370,22 @@ impl LandingGearConfig {
     /// malformed, the caller's existing model-derived fallback stations are
     /// retained.  Source stations are geometric evidence; they do not use
     /// mass, CG, or reaction loads to calibrate a position.
+    ///
+    /// # When this entry point is the wrong one
+    ///
+    /// `fallback_x_mlg_m` is, for every caller in this workspace, the
+    /// wing-mounted rule `mac_le + mlg_x_fraction_mac * MAC`, which only
+    /// stands where a wing-root gear bay exists (see
+    /// [`WingMountedGearDomain`]). This method cannot tell whether it does,
+    /// so it returns whatever fallback it was handed.
+    ///
+    /// It is retained for the one caller that applies the domain gate itself
+    /// before calling - `alas_mass::stations::main_gear_station`, which owns
+    /// the geometric comparison and raises its own typed missing-datum error.
+    /// **Every other consumer must use
+    /// [`Self::resolved_station_positions_checked`]**, so that a layout
+    /// outside the fallback's domain is refused once, here, rather than being
+    /// re-derived independently at each export, figure and diagnostic.
     pub fn resolved_station_positions(
         &self,
         fallback_x_nlg_m: f64,
@@ -417,7 +434,158 @@ impl LandingGearConfig {
             resolution: effective_main_gear_station(&[fallback_x_mlg_m], None),
         }
     }
+
+    /// [`Self::resolved_station_positions`], refusing the caller's
+    /// wing-mounted main-gear fallback when the layout is outside the rule's
+    /// stated domain.
+    ///
+    /// The order matters and mirrors the mass model's: a complete source
+    /// anchor is a published station scaled onto the active fuselage and is
+    /// admissible on any layout, so `domain` is never consulted when the
+    /// positions come out `source_scaled`. It is consulted exactly when the
+    /// answer would otherwise be the wing-mounted fallback, which is why it
+    /// is taken as a closure - a caller whose domain query costs something
+    /// (a station resolution, a geometry pass) pays for it only on the
+    /// aircraft where it decides the outcome.
+    ///
+    /// # Errors
+    ///
+    /// [`MainGearFallbackRefusal`] when the fallback would be used and
+    /// `domain` reports [`WingMountedGearDomain::WingRootAboveFuselageCrown`].
+    /// The refusal carries the two heights that decided it, in the geometry
+    /// frame (z up, m), so a consumer reports the missing datum rather than a
+    /// number it did not measure.
+    pub fn resolved_station_positions_checked<F>(
+        &self,
+        fallback_x_nlg_m: f64,
+        fallback_x_mlg_m: f64,
+        fuselage_start_x_m: f64,
+        fuselage_length_m: f64,
+        domain: F,
+    ) -> Result<LandingGearStationPositions, MainGearFallbackRefusal>
+    where
+        F: FnOnce() -> WingMountedGearDomain,
+    {
+        let positions = self.resolved_station_positions(
+            fallback_x_nlg_m,
+            fallback_x_mlg_m,
+            fuselage_start_x_m,
+            fuselage_length_m,
+        );
+        if positions.source_scaled {
+            return Ok(positions);
+        }
+        match domain() {
+            WingMountedGearDomain::Applicable => Ok(positions),
+            WingMountedGearDomain::WingRootAboveFuselageCrown {
+                wing_root_z_m,
+                fuselage_crown_z_m,
+            } => Err(MainGearFallbackRefusal {
+                wing_root_z_m,
+                fuselage_crown_z_m,
+            }),
+        }
+    }
 }
+
+/// Whether the wing-mounted main-gear fallback rule applies to a layout.
+///
+/// Without a source station anchor the only main-gear station available is
+/// `mac_le + mlg_x_fraction_mac * MAC`, which places the legs inside the wing
+/// box. That is a **wing-mounted gear** rule (Raymer, *Aircraft Design*,
+/// ch. 11) and it presumes the wing carry-through sits low enough on the
+/// fuselage for the legs to attach to it and retract into the wing or its
+/// root fairing. A wing mounted entirely above the fuselage has no wing-root
+/// gear bay, so the rule has nothing to place gear in.
+///
+/// The boundary is the fuselage's own outer surface at the wing root, not a
+/// tuned coefficient, and carries no margin term: either the root is above
+/// the crown or it is not. This enum is the verdict, not the measurement -
+/// the two heights are supplied by whichever crate holds the built geometry.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum WingMountedGearDomain {
+    /// The wing root is on or below the fuselage crown: low-wing, mid-wing
+    /// and shoulder-wing layouts alike, which is the domain the rule is
+    /// stated for.
+    Applicable,
+    /// The wing root leading edge sits strictly above the fuselage crown at
+    /// the same longitudinal station: a high-wing layout, whose main gear is
+    /// carried somewhere this model does not derive.
+    WingRootAboveFuselageCrown {
+        /// Wing root leading-edge height in the geometry frame, m.
+        wing_root_z_m: f64,
+        /// Fuselage outer top surface at the wing root station, m.
+        fuselage_crown_z_m: f64,
+    },
+}
+
+impl WingMountedGearDomain {
+    /// Decide the verdict from two modelled heights in the geometry frame
+    /// (z up, m).
+    ///
+    /// The comparison is strict and margin-free: a root exactly on the crown
+    /// is not a high-wing layout and keeps the fallback. Heights that are not
+    /// both finite decide nothing, so the fallback stands and the caller's
+    /// own finiteness checks report the degenerate geometry.
+    #[must_use]
+    pub fn from_heights(wing_root_z_m: f64, fuselage_crown_z_m: f64) -> Self {
+        if wing_root_z_m.is_finite()
+            && fuselage_crown_z_m.is_finite()
+            && wing_root_z_m > fuselage_crown_z_m
+        {
+            Self::WingRootAboveFuselageCrown {
+                wing_root_z_m,
+                fuselage_crown_z_m,
+            }
+        } else {
+            Self::Applicable
+        }
+    }
+
+    /// Whether the wing-mounted fallback may be used on this layout.
+    #[inline]
+    #[must_use]
+    pub fn applies(self) -> bool {
+        matches!(self, Self::Applicable)
+    }
+}
+
+/// The wing-mounted main-gear fallback was refused: this aircraft has no
+/// main-gear longitudinal station the model can supply.
+///
+/// This is a missing-datum failure, not a marginal result. It is closed by
+/// registering the aircraft's published gear stations
+/// (`reference_station_fuselage_length_m`, `reference_nlg_x_fraction`,
+/// `reference_mlg_x_fractions`), which
+/// [`LandingGearConfig::resolved_station_positions`] then scales onto the
+/// active fuselage - not by relaxing the gate.
+///
+/// `Eq` is deliberately not derived: the variant carries the two f64 heights
+/// that decided it, and exact equality on floating-point evidence invites
+/// comparisons that are not meaningful.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MainGearFallbackRefusal {
+    /// Wing root leading-edge height in the geometry frame, m.
+    pub wing_root_z_m: f64,
+    /// Fuselage outer top surface at the wing root station, m.
+    pub fuselage_crown_z_m: f64,
+}
+
+impl std::fmt::Display for MainGearFallbackRefusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "no main-gear longitudinal station is available: the landing-gear configuration \
+             registers no reference_mlg_x_fractions anchor, and the wing-mounted fallback \
+             (mlg_x_fraction_mac aft of the MAC leading edge) does not apply because the wing \
+             root leading edge sits at z = {} m, above the fuselage crown at z = {} m, so no \
+             wing-root gear bay exists on this layout",
+            self.wing_root_z_m, self.fuselage_crown_z_m
+        )
+    }
+}
+
+impl std::error::Error for MainGearFallbackRefusal {}
 
 /// Longitudinal landing-gear stations resolved in the active aircraft frame.
 #[derive(Debug, Clone, PartialEq)]
@@ -1108,6 +1276,76 @@ mod tests {
             rej_neg.primary_station_ignoring_rejection(),
             primary_station
         );
+    }
+
+    #[test]
+    fn the_checked_resolution_refuses_a_wing_mounted_fallback_above_the_crown() {
+        // An ATR-like layout: no source anchor registered, so the only
+        // station on offer is the wing-mounted fallback, and the wing root
+        // sits above the fuselage crown. The heights are illustrative
+        // stand-ins for the gate's two inputs, not ATR data.
+        let config = LandingGearConfig::default();
+        let refusal = config
+            .resolved_station_positions_checked(3.0, 11.0, 0.0, 27.166, || {
+                WingMountedGearDomain::from_heights(1.85, 1.385)
+            })
+            .expect_err("a fallback above the crown must be refused");
+        assert_eq!(refusal.wing_root_z_m, 1.85);
+        assert_eq!(refusal.fuselage_crown_z_m, 1.385);
+        assert!(refusal.to_string().contains("no main-gear longitudinal"));
+        assert!(refusal.to_string().contains("no wing-root gear bay exists"));
+    }
+
+    #[test]
+    fn the_checked_resolution_keeps_an_in_domain_fallback_bit_identical() {
+        // The low-wing presets (AVE, B787-9, DC-10) reach the fallback
+        // branch; the gate must not move the station they already had.
+        let config = LandingGearConfig::default();
+        let unchecked = config.resolved_station_positions(3.0, 11.0, 0.0, 27.166);
+        let checked = config
+            .resolved_station_positions_checked(3.0, 11.0, 0.0, 27.166, || {
+                WingMountedGearDomain::from_heights(-0.4, 1.385)
+            })
+            .expect("an in-domain fallback must resolve");
+        assert_eq!(checked, unchecked);
+        assert!(!checked.source_scaled);
+        assert_eq!(checked.x_mlg_m, 11.0);
+    }
+
+    #[test]
+    fn a_source_anchor_is_admissible_on_any_layout_and_never_asks_the_domain() {
+        // A published station scaled onto the active fuselage carries no
+        // wing-mounted assumption, so the high-wing verdict is irrelevant -
+        // and the query must not even run, because it is the expensive one.
+        let config = LandingGearConfig {
+            reference_station_frame: Some("nose_tip_drawing_reference".to_owned()),
+            reference_station_fuselage_length_m: Some(27.166),
+            reference_nlg_x_fraction: Some(0.1),
+            reference_mlg_x_fractions: Some(vec![0.45, 0.45]),
+            n_mlg_struts: 2,
+            ..Default::default()
+        };
+        let mut domain_queries = 0_usize;
+        let resolved = config
+            .resolved_station_positions_checked(3.0, 11.0, 0.0, 27.166, || {
+                domain_queries += 1;
+                WingMountedGearDomain::from_heights(1.85, 1.385)
+            })
+            .expect("a source-anchored station must resolve on any layout");
+        assert!(resolved.source_scaled);
+        assert_eq!(domain_queries, 0);
+    }
+
+    #[test]
+    fn the_domain_boundary_is_strict_and_carries_no_margin() {
+        // A root exactly on the crown is not a high-wing layout, and a pair
+        // of heights that are not both finite decides nothing: the caller's
+        // own finiteness checks own that failure.
+        assert!(WingMountedGearDomain::from_heights(1.385, 1.385).applies());
+        assert!(!WingMountedGearDomain::from_heights(1.385 + 1.0e-12, 1.385).applies());
+        assert!(WingMountedGearDomain::from_heights(f64::NAN, 1.385).applies());
+        assert!(WingMountedGearDomain::from_heights(1.85, f64::NAN).applies());
+        assert!(WingMountedGearDomain::from_heights(-0.4, 1.385).applies());
     }
 
     #[test]

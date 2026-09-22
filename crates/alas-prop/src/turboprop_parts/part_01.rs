@@ -112,12 +112,97 @@ pub struct Pw127m568fModel {
     pub accessory_power_w: f64,
     /// Per-engine residual core exhaust thrust kept outside propeller thrust, N.
     pub residual_jet_thrust_n: f64,
-    /// Reference power-specific fuel consumption, kg/(kW h).
+    /// Fuel flow per unit of **sea-level-rated** maximum-cruise shaft power,
+    /// kg/(kW h), **not** the power-specific fuel consumption the engine
+    /// actually runs at.
+    ///
+    /// The name is historical and the quantity is a rating-basis bookkeeping
+    /// coefficient. ATR publishes 762 kg/h for both engines at maximum cruise
+    /// power, and the typed `MaximumCruise` rating is a *sea-level* 2,132 shp;
+    /// dividing the one by the other gives this number directly:
+    /// `762 / (2 x 1,589.83 kW) = 0.239648 kg/kWh`. The PSFC the model then
+    /// applies at every operating point is this value divided by the shaft
+    /// power lapse at [`Self::fuel_reference_density_kg_m3`], so that the
+    /// anchor is reproduced after the lapse is applied: **0.364630 kg/kWh**
+    /// at the declared inputs.
+    ///
+    /// **The trap this doc comment used to set.** Writing a measured PW120A
+    /// PSFC of 0.295 kg/kWh into this field does *not* give the model a
+    /// 0.295 kg/kWh engine: it gives it `0.295 x 0.657 = 0.194 kg/kWh`, 34 %
+    /// below the intention. Use [`Pw127m568fModel::implied_psfc_kg_kwh`] to
+    /// read what the engine is actually burning, and
+    /// [`Pw127m568fModel::fuel_calibration`] for the whole typed statement.
     pub reference_psfc_kg_kwh: f64,
-    /// Density of the published maximum-cruise fuel-flow anchor, kg/m^3.
+    /// Assumed ambient density of the published maximum-cruise fuel-flow
+    /// anchor, kg/m^3. **An engineering estimate, not a source datum.**
+    ///
+    /// The anchor's stated condition is *"95 % MTOW, ISA, optimum FL, 275
+    /// KTAS"* (ATR 72-600 factsheet; ATR Family brochure p. 19). **ATR does
+    /// not publish which flight level "optimum" is**, and no retrieved
+    /// document states it, so this value is an assumption standing in for a
+    /// missing one. The declared 0.70 kg/m^3 is ISA at about FL180.
+    ///
+    /// It matters more than its size suggests. The 762 kg/h anchor is
+    /// reproduced at *any* value of this field, because the calibration
+    /// divides by the lapse at this same density, but the physical PSFC it
+    /// implies, and therefore **every fuel flow away from the anchor**, moves
+    /// with it: 0.3476 kg/kWh if the anchor is at FL160, 0.3564 at FL170,
+    /// 0.3654 at FL180, 0.3843 at FL200, 0.4376 at FL250. That 26 % spread is
+    /// driven entirely by an undeclared input.
+    /// [`Pw127m568fModel::fuel_calibration`] reports it rather than hiding it.
     pub fuel_reference_density_kg_m3: f64,
-    /// Static figure of merit used only by the actuator-disk static fallback.
+    /// Static figure of merit: the share of shaft power that reaches the
+    /// ideal actuator-disk induced power at zero airspeed.
+    ///
+    /// At `V = 0` this is what separates the thrust from its ideal bound,
+    /// `T = FM^(2/3) T_ideal`, and the same number is the `J = 0` end of
+    /// [`Self::blade_efficiency_cruise`]'s blend.
     pub static_figure_of_merit: f64,
+    /// Share of shaft power that reaches ideal induced power in forward
+    /// flight, i.e. `eta_p / eta_ideal`, once the blade is unstalled.
+    ///
+    /// Momentum theory bounds a propeller's thrust at `P = T (V + v_i)`, but
+    /// that bound is a propeller with **no profile loss at all**: at the ATR's
+    /// FL170 / 275 kt cruise it gives `eta_ideal = V/(V + v_i) = 0.976`, which
+    /// is what this model used to report and is not a physical propeller.
+    /// Real blades lose profile drag, tip and non-uniform-inflow power on top
+    /// of it.
+    ///
+    /// Three independent routes put that loss at 0.86-0.91 for this
+    /// installation, and the declared value is the conservative end:
+    ///
+    /// * the Hamilton Standard four-blade `100 AF, 0.55 CL_i` map of NASA
+    ///   TM-83458 p. 8, interpolated at the cruise `J` and `C_P`, gives an
+    ///   isolated 0.897 and 0.85-0.86 installed;
+    /// * dividing the propeller efficiencies Nita (2008) Table 3.4 p. 41 reads
+    ///   off the Scholz chart *for the ATR 72* by the ideal efficiency at the
+    ///   same disc loading gives 0.878 (second climb segment), 0.880 (cruise)
+    ///   and 0.913 (take-off);
+    /// * closing the aircraft-level published 762 kg/h cruise fuel flow and
+    ///   1,355 ft/min climb rate gives 0.76-0.86 and 0.835.
+    ///
+    /// **This is a bounded surrogate, not a 568F-1 map.** The uncertainty is
+    /// the 0.86-0.91 spread above, about -0/+6 % on every forward-flight
+    /// thrust, and it does not cover a blade operating outside the unstalled
+    /// range the sources describe.
+    pub blade_efficiency_cruise: f64,
+    /// Advance ratio at which the blade efficiency has fully reached
+    /// [`Self::blade_efficiency_cruise`].
+    ///
+    /// The static figure of merit and the forward-flight blade efficiency are
+    /// two different flow states: at `V = 0` a governed blade works at high
+    /// incidence with separated flow, and by the take-off climb-out it is
+    /// unstalled and near its design incidence. The blend between them is a
+    /// smoothstep in `J`, and the knee is the ATR's own take-off advance
+    /// ratio, 115 kt at 1,200 rev/min on a 3.93 m propeller, which is the
+    /// lowest-speed point any retrieved source characterises.
+    pub blade_efficiency_knee_advance_ratio: f64,
+    /// Hard ceiling on propulsive efficiency, whatever the surrogate returns.
+    ///
+    /// A single-rotation propeller of this class does not exceed this in any
+    /// retrieved source; it is a guard against an unphysical operating point
+    /// reaching a mission or a report, not a working part of the model.
+    pub maximum_propulsive_efficiency: f64,
     /// Sea-level reference density for the shaft-power lapse law, kg/m^3.
     pub power_lapse_reference_density_kg_m3: f64,
     /// Exponent in the density-ratio shaft-power lapse law.
@@ -147,6 +232,12 @@ impl Default for Pw127m568fModel {
             reference_psfc_kg_kwh: 0.239_647_943_644_226,
             fuel_reference_density_kg_m3: 0.70,
             static_figure_of_merit: 0.72,
+            // The conservative end of the 0.86-0.91 band the three routes in
+            // the field documentation agree on.
+            blade_efficiency_cruise: 0.86,
+            // 115 KCAS take-off at 1,200 rev/min on 3.93 m: J = 59.2/(20 x 3.93).
+            blade_efficiency_knee_advance_ratio: 0.753,
+            maximum_propulsive_efficiency: 0.88,
             // Minimum-hypothesis lapse calibrated at aircraft level to the
             // published ATR 72-600 time to FL170, without segment-specific
             // schedules: sigma_FL170^0.75 is approximately 0.66.
@@ -215,6 +306,15 @@ pub struct TurbopropOutput {
     pub total_thrust_n: f64,
     /// Jet-A consumption predicted from shaft power and the PSFC prior, kg/s.
     pub fuel_flow_kg_s: f64,
+    /// The power-specific fuel consumption this flow implies, kg/(kW h).
+    ///
+    /// Reported because it is the quantity a reader can compare against a
+    /// measured engine, and because it is **constant**: the model carries no
+    /// variation of PSFC with power setting, altitude or temperature, so this
+    /// field returns the same number at maximum take-off power and at flight
+    /// idle. See [`Pw127m568fModel::fuel_calibration`] for what that constant
+    /// rests on and how far it sits from measurement.
+    pub psfc_kg_kwh: f64,
     /// Blade angle selected by the generic governor, deg.
     pub blade_angle_deg: f64,
     /// Nondimensional advance ratio, `J = V/(n D)`.

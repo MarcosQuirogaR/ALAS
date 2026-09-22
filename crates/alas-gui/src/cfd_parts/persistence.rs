@@ -7,6 +7,7 @@ use super::super::*;
 use alas_cfd::CfdStudyConfig;
 use alas_exec::openfoam::OpenFoamPreferences;
 use alas_exec::ToolLocator;
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -17,22 +18,12 @@ use std::time::{SystemTime, UNIX_EPOCH};
 /// migration from older GUI settings while the typed OpenFOAM preference is
 /// now the source consumed by the worker.  The wrapper is deliberately
 /// versionless and `serde(default)` keeps older files readable.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 pub(super) struct CfdEnvironmentPreferences {
     pub(super) openfoam: OpenFoamPreferences,
     pub(super) gmsh_executable: Option<String>,
     pub(super) paraview_executable: Option<String>,
-}
-
-impl Default for CfdEnvironmentPreferences {
-    fn default() -> Self {
-        Self {
-            openfoam: OpenFoamPreferences::default(),
-            gmsh_executable: None,
-            paraview_executable: None,
-        }
-    }
 }
 
 impl AirfoilCfdState {
@@ -85,6 +76,8 @@ impl AirfoilCfdState {
             paraview_executable: environment.paraview_executable,
             last_case_dir: None,
             selected_field: None,
+            contour_textures: BTreeMap::new(),
+            result_json_path: String::new(),
             input_revision: 0,
             run_id: 0,
             run_input_revision: 0,
@@ -126,6 +119,8 @@ impl Default for AirfoilCfdState {
             paraview_executable: None,
             last_case_dir: None,
             selected_field: None,
+            contour_textures: BTreeMap::new(),
+            result_json_path: String::new(),
             input_revision: 0,
             run_id: 0,
             run_input_revision: 0,

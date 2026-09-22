@@ -1,7 +1,7 @@
 {
   "fixtures": {
     "dynamics": {
-      "description": "alas.physics.dynamics on the nominal AircraftBuilder aircraft: estimate_inertia at two masses (closed-form), and compute_dynamic_modes at a Mach 0.82 / 11 km cruise point -- a run_with_stability_derivatives sweep fed to get_modes, wrapped with each mode's period and stability flag",
+      "description": "alas.physics.dynamics on the nominal AircraftBuilder aircraft: estimate_inertia at two masses (closed-form), and compute_dynamic_modes at a Mach 0.82 / 11 km cruise point: a run_with_stability_derivatives sweep fed to get_modes, wrapped with each mode's period and stability flag",
       "generator": "gen_stab_dynamics.py",
       "runtime": "alas",
       "alas_commit": "7d1555c1f4db5110cf6cd187c156718e1a033b50",
@@ -14,7 +14,7 @@
       }
     },
     "modes": {
-      "description": "aerosandbox.dynamics.flight_dynamics.airplane.get_modes on fixed stability-derivative sets -- the Boeing 737-800 from its own __main__ (all oscillatory modes) and a statically/directionally unstable variant that drives short-period and dutch-roll to the aperiodic branch of get_mode_info",
+      "description": "aerosandbox.dynamics.flight_dynamics.airplane.get_modes on fixed stability-derivative sets: the Boeing 737-800 from its own __main__ (all oscillatory modes) and a statically/directionally unstable variant that drives short-period and dutch-roll to the aperiodic branch of get_mode_info",
       "generator": "gen_stab_modes.py",
       "runtime": "alas",
       "alas_commit": "7d1555c1f4db5110cf6cd187c156718e1a033b50",

@@ -22,6 +22,7 @@ mod movable_area;
 mod product;
 pub mod propulsion;
 pub mod structure;
+pub mod turboprop;
 pub mod wing_bending;
 
 pub use airframe::{
@@ -88,10 +89,72 @@ pub struct FlopsTransportInputs {
     pub variable_sweep_penalty: f64,
     /// Maximum usable aircraft fuel capacity, kilograms, FLOPS `FMXTOT`.
     pub maximum_fuel_capacity_kg: f64,
+    /// Whether the aircraft has an auxiliary power unit for equation 101.
+    /// Engine hotel-mode power can explicitly set this false.
+    pub apu_installed: bool,
     /// Number of fuel tanks, FLOPS `NTANK`.
     pub fuel_tank_count: usize,
-    /// Cargo loaded into containers, kilograms, FLOPS `WCARGO`.
+    /// Revenue cargo loaded into containers, kilograms, part of FLOPS
+    /// `WCARGO`.
     pub containerized_cargo_kg: f64,
+    /// Checked passenger baggage that rides in the containers, kilograms,
+    /// FLOPS `WPBAG`.
+    ///
+    /// NASA/TM-2017-219627 Vol. I equation 126 names only `WCARGO`, but FLOPS
+    /// as it is actually run charges the checked baggage to the containers
+    /// too: NASA Aviary's `LargeSingleAisle1FLOPS` deck (pinned commit
+    /// `c7affbbe`) declares `MISC_CARGO = WING_CARGO = 0` with
+    /// `BAGGAGE_MASS = 7,436 lb` and publishes `CARGO_CONTAINER_MASS =
+    /// 1,400 lb`, which is exactly `175 x ceil(7436 / 950)`. The
+    /// `LargeSingleAisle2FLOPS` deck closes the same way on cargo *plus*
+    /// baggage. Both decks' operating-items totals close to under a pound
+    /// only with the baggage included, so this is the containerized mass the
+    /// equation is fed, not an added allowance.
+    ///
+    /// **This is the containerised part only.** The container tare is real
+    /// hardware, so it exists only where the aircraft has a container to put
+    /// the bags in; a bulk-loaded hold carries none, and the product adapter
+    /// resolves this field from the declared
+    /// [`alas_config::CargoHoldLoading`] rather than charging every aircraft
+    /// the same equation.
+    pub containerized_baggage_kg: f64,
+    /// The declared hold-loading architecture this evaluation used, retained
+    /// so an audit can see which rule produced the container tare.
+    pub cargo_loading: alas_config::CargoHoldLoading,
+    /// Which method prices the cabin equipment and the occupant-driven
+    /// operating items.
+    pub cabin_equipment_method: alas_config::CabinEquipmentMethod,
+    /// Which LTH operating-item relation applies, read only by
+    /// [`alas_config::CabinEquipmentMethod::LthCivilTransportV1`].
+    pub haul_class: alas_config::OperatingHaulClass,
+    /// Which rating sizes the two operating items that read an engine size.
+    pub propulsion_sizing: PropulsionSizing,
+}
+
+/// The engine rating the thrust-dependent operating items are sized on.
+///
+/// Only two of the systems-and-operating-item equations read an engine
+/// rating at all: the unusable fuel of equation 121 and the engine oil of
+/// equation 122. Every other equation in sections 5.4 and 5.5 reads counts,
+/// geometry, Mach number or passengers. A propeller installation therefore
+/// needs a substitute for exactly those two terms and nothing else.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum PropulsionSizing {
+    /// FLOPS equations 121 and 122 evaluated from the rated thrust, which is
+    /// the published transport method.
+    RatedThrust,
+    /// A propeller installation, which has no rated thrust.
+    ///
+    /// The unusable fuel comes from the same document's **alternate**
+    /// equation 161, `WUF = 0.0084 x FMXTOT`, which estimates the same
+    /// quantity with no thrust term. The engine oil is declared, because the
+    /// alternate equation 162 as printed (`240 (NPASS + 39) / 40`, p. 56)
+    /// returns ten times the default equation 122 for the same aircraft and
+    /// is not usable.
+    ShaftPower {
+        /// Declared engine oil for every installed engine together, kg.
+        engine_oil_kg: f64,
+    },
 }
 
 impl FlopsTransportInputs {
@@ -100,6 +163,14 @@ impl FlopsTransportInputs {
         self.first_class_passenger_count
             + self.business_class_passenger_count
             + self.tourist_class_passenger_count
+    }
+
+    /// Checked passenger-count sum for public evaluators that must reject
+    /// hostile or malformed `usize` inputs before a mass power law runs.
+    pub fn checked_passenger_count(&self) -> Option<usize> {
+        self.first_class_passenger_count
+            .checked_add(self.business_class_passenger_count)?
+            .checked_add(self.tourist_class_passenger_count)
     }
 }
 
@@ -141,10 +212,43 @@ pub struct FlopsOperatingItemsBreakdown {
     pub engine_oil_kg: f64,
     /// Passenger service, FLOPS `WSRV`.
     pub passenger_service_kg: f64,
-    /// Cargo containers, FLOPS `WCON`.
+    /// Cargo containers, FLOPS `WCON`: **reported outside operating empty
+    /// mass**, and therefore outside [`Self::total_kg`].
+    ///
+    /// The tare is real, operator-owned hardware and it is computed here for
+    /// every configuration from the declared
+    /// [`alas_config::CargoHoldLoading`], so a bulk-loaded aircraft gets none
+    /// and a container-loaded one gets its full charge. What it is *not* is
+    /// part of the mass the references this product compares against are
+    /// stated on:
+    ///
+    /// * Boeing D6-58333 Rev Q section 2.1 (operating empty weight) and FAA
+    ///   AC 120-27F (basic operating weight) both exclude unit load devices;
+    /// * FAA AC 120-85B treats a ULD as tare tracked **with the load**, not
+    ///   with the aircraft;
+    /// * the Airbus in-house chapter list (Scholz, *Aircraft Design* Ch. 10
+    ///   Fig. 10.3 p. 10-6; Fuchte/Nagel/Gollnick, AIAA AVIATION 2013 Table 1
+    ///   p. 4) puts the aircraft-side cargo loading system in furnishings
+    ///   (ATA 50-8) and does not list the containers at all.
+    ///
+    /// FLOPS is the outlier: it carries `WCON` inside `WOPIT`. Every
+    /// `oew_reference` record in this product reads
+    /// `inclusion.cargo_containers = "unknown"` or `"excluded"`, so the
+    /// comparison is like-for-like only with the tare reported separately,
+    /// which is what this field is for.
+    ///
+    /// Stated uncertainty, not applied: the 175 lb FLOPS container of
+    /// equations 125-126 is 12-20 % lighter than a real AKE/LD-3, so this is a
+    /// low estimate of the tare. It is not scaled.
     pub cargo_containers_kg: f64,
-    /// Sum of all transport operating items above.
+    /// Sum of the operating items that belong inside operating empty mass:
+    /// every item above **except** [`Self::cargo_containers_kg`].
     pub total_kg: f64,
+    /// FLOPS' own `WOPIT`: [`Self::total_kg`] plus the container tare.
+    ///
+    /// Kept so the published convention stays reproducible and auditable; it
+    /// is not what this product's operating empty mass is built from.
+    pub total_with_cargo_containers_kg: f64,
 }
 
 /// Verified FLOPS systems, equipment, and operating items.
@@ -154,6 +258,22 @@ pub struct FlopsTransportBreakdown {
     pub systems: FlopsSystemsBreakdown,
     /// Operating items from section 5.5.
     pub operating_items: FlopsOperatingItemsBreakdown,
+    /// Cabin-equipment and occupant-driven operating-item relation that was
+    /// resolved for this evaluation.
+    ///
+    /// This is copied from [`FlopsTransportInputs`] instead of being inferred
+    /// from component zeros later.  The latter is ambiguous because a real
+    /// zero-valued input and the LTH relation both leave some FLOPS lines at
+    /// zero.
+    pub cabin_equipment_method: alas_config::CabinEquipmentMethod,
+    /// Propulsion rating used for the two propulsion-dependent operating
+    /// items.  A shaft-power installation uses the explicit alternate rather
+    /// than an invented rated thrust.
+    pub propulsion_sizing: PropulsionSizing,
+    /// Whether equation 101's APU term was physically installed for this
+    /// evaluation.  This remains on the breakdown so exports do not have to
+    /// infer an architectural absence from a zero mass.
+    pub apu_installed: bool,
 }
 
 /// A component-level projection when the complete method is not verifiable.
@@ -233,12 +353,29 @@ pub enum FlopsTransportUnverifiedReason {
     UnsupportedPropulsionTechnology,
     /// Containerized cargo mass was absent or negative.
     ContainerizedCargo,
+    /// The cargo compartments are declared as a mixed bulk/containerised
+    /// arrangement without the containerised baggage share the split needs.
+    CargoHoldLoading,
     /// A resolved scalar was nonfinite, nonpositive, or internally inconsistent.
     InvalidResolvedInput,
     /// The built airplane has no horizontal or vertical stabilizer.
     TailGeometry,
     /// No nacelle body or profile with a positive diameter and length.
     NacelleGeometry,
+    /// A declared shaft-power propulsion mass input is nonfinite or out of
+    /// range.
+    TurbopropMassConfiguration,
+    /// A shaft-power operating point is nonfinite or outside the positive
+    /// domain required by its fractional-power relations.
+    TurbopropOperatingPoint,
+    /// No engine is installed, or the take-off shaft-power rating is absent.
+    TurbopropShaftPowerRating,
+    /// Propeller diameter, blade count, activity factor, speed or weight
+    /// coefficient is missing, so the Hamilton Standard regression cannot be
+    /// evaluated.
+    TurbopropPropellerGeometry,
+    /// No nacelle area density is declared for the shaft-power group.
+    TurbopropNacelleArchitecture,
     /// The main wing's lofted thickness ratio is not positive.
     WingThickness,
     /// A FLOPS technology factor or override is outside its fitted range.
@@ -273,9 +410,15 @@ impl FlopsTransportUnverifiedReason {
             Self::ArchitectureProvenance => "architecture_provenance",
             Self::UnsupportedPropulsionTechnology => "unsupported_propulsion_technology",
             Self::ContainerizedCargo => "containerized_cargo",
+            Self::CargoHoldLoading => "cargo_hold_loading",
             Self::InvalidResolvedInput => "invalid_resolved_input",
             Self::TailGeometry => "tail_geometry",
             Self::NacelleGeometry => "nacelle_geometry",
+            Self::TurbopropMassConfiguration => "turboprop_mass_configuration",
+            Self::TurbopropOperatingPoint => "turboprop_operating_point",
+            Self::TurbopropShaftPowerRating => "turboprop_shaft_power_rating",
+            Self::TurbopropPropellerGeometry => "turboprop_propeller_geometry",
+            Self::TurbopropNacelleArchitecture => "turboprop_nacelle_architecture",
             Self::WingThickness => "wing_thickness",
             Self::StructureConfiguration => "structure_configuration",
             Self::DetailedWingRequiresFlopsSystems => "detailed_wing_requires_flops_systems",
@@ -312,9 +455,27 @@ impl FlopsTransportUnverifiedReason {
                 "selected propulsion technology is outside the translated FLOPS equations; propeller/shaft-power mass inputs are not published"
             }
             Self::ContainerizedCargo => "containerized cargo mass is missing or negative",
+            Self::CargoHoldLoading => {
+                "a mixed bulk/containerised hold arrangement needs its containerised baggage share declared"
+            }
             Self::InvalidResolvedInput => "a resolved scalar is invalid or internally inconsistent",
             Self::TailGeometry => "the built aircraft has no valid horizontal or vertical stabilizer",
             Self::NacelleGeometry => "no nacelle body or profile has positive diameter and length",
+            Self::TurbopropMassConfiguration => {
+                "a declared shaft-power propulsion mass input is nonfinite or outside its range"
+            }
+            Self::TurbopropOperatingPoint => {
+                "a shaft-power operating point is nonfinite or outside the positive domain of the mass relations"
+            }
+            Self::TurbopropShaftPowerRating => {
+                "no engine is installed, or the take-off shaft-power rating is missing"
+            }
+            Self::TurbopropPropellerGeometry => {
+                "propeller diameter, blade count, activity factor, speed or weight coefficient is missing"
+            }
+            Self::TurbopropNacelleArchitecture => {
+                "no nacelle area density is declared for the shaft-power propulsion group"
+            }
             Self::WingThickness => "the main wing has no positive lofted thickness ratio",
             Self::StructureConfiguration => "a FLOPS technology factor or override is outside its fitted range",
             Self::DetailedWingRequiresFlopsSystems => {

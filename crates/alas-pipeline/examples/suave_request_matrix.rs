@@ -25,7 +25,7 @@ fn main() {
     let output_dir = args
         .next()
         .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(".agent/suave-requests"));
+        .unwrap_or_else(|| PathBuf::from("out/suave-requests"));
     let requested: Vec<String> = args.collect();
     let names: Vec<String> = if requested.is_empty() {
         presets::available()

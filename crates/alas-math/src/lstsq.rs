@@ -8,15 +8,15 @@
 //! collocation matrix and a vortex-lattice AIC matrix both are. A curve fit is
 //! not square: `alas-aero::kulfan` expresses a few hundred airfoil vertices as
 //! a linear combination of eighteen shape parameters and asks which eighteen
-//! come closest, and there is no exact answer to that -- only a residual to
+//! come closest, and there is no exact answer to that, only a residual to
 //! minimize. That problem has its own numerics and its own failure mode, so it
 //! lives beside the square solve rather than inside it.
 //!
 //! # Why Householder QR and not the normal equations
 //!
 //! `A^T A x = A^T b` is one line and is the wrong line. Forming `A^T A` squares
-//! the condition number, so a fit whose matrix is conditioned at 1e3 -- which
-//! is where the Kulfan fits actually sit -- comes back with about 1e-10
+//! the condition number, so a fit whose matrix is conditioned at 1e3, which
+//! is where the Kulfan fits actually sit: comes back with about 1e-10
 //! relative error where the data supports 1e-13. That is outside `linalg`
 //! (1e-9) once anything is squared twice. Householder QR reduces `A` to
 //! triangular form by orthogonal reflections, which do not amplify the
@@ -33,8 +33,8 @@
 //! a condition number near 1.1e3, six orders clear of the cutoff, and on such
 //! a problem QR and the SVD agree to a few units in the last place.
 //!
-//! So this module detects rank deficiency and refuses it -- [`LeastSquaresError::RankDeficient`]
-//! -- rather than reproducing the minimum-norm branch of a routine that this
+//! So this module detects rank deficiency and refuses it ([`LeastSquaresError::RankDeficient`])
+//! rather than reproducing the minimum-norm branch of a routine that this
 //! program never enters. Refusing is the honest answer: a caller that reached
 //! it would be asking a question this implementation has not been shown to
 //! answer the same way the reference does. It is a documented boundary, not a
@@ -147,8 +147,8 @@ pub fn least_squares(a: &[Vec<f64>], b: &[f64]) -> Result<Vec<f64>, LeastSquares
         for (offset, value) in reflector.iter_mut().enumerate() {
             *value = matrix[column + offset][column];
         }
-        // The sign chosen above makes this strictly nonzero -- it is the pivot
-        // moved away from zero by a nonzero norm, never toward it -- so the
+        // The sign chosen above makes this strictly nonzero (it is the pivot
+        // moved away from zero by a nonzero norm, never toward it) so the
         // norm below cannot vanish and there is no degenerate case to guard.
         reflector[0] -= alpha;
 
@@ -156,7 +156,7 @@ pub fn least_squares(a: &[Vec<f64>], b: &[f64]) -> Result<Vec<f64>, LeastSquares
 
         // Every remaining column's projection onto the reflector is read off
         // the matrix before any of them is written back. The two orders give
-        // identical values -- a column's projection depends only on itself --
+        // identical values (a column's projection depends only on itself)
         // but reading first lets the write walk whole rows.
         let projections: Vec<f64> = (column..columns)
             .map(|target| {
@@ -191,7 +191,7 @@ pub fn least_squares(a: &[Vec<f64>], b: &[f64]) -> Result<Vec<f64>, LeastSquares
     // A pivot small against the largest one means the columns are dependent to
     // working precision. The threshold mirrors what `rcond=None` asks LAPACK
     // for, applied to the triangular factor's diagonal rather than to singular
-    // values -- the two differ by a modest factor and this branch is unreached
+    // values: the two differ by a modest factor and this branch is unreached
     // on every problem in this workspace, which sit six orders clear of it.
     let largest = (0..columns).fold(0.0_f64, |best, k| best.max(matrix[k][k].abs()));
     let threshold =
@@ -335,7 +335,7 @@ mod tests {
     #[test]
     fn an_already_triangular_matrix_is_solved_without_disturbing_it() {
         // Nothing needs eliminating here, so this exercises the reflection on
-        // a sub-column that is already along its axis -- the case where a sign
+        // a sub-column that is already along its axis: the case where a sign
         // choice made toward the pivot rather than away from it would cancel.
         let a = vec![vec![-2.0, 1.0], vec![0.0, 3.0], vec![0.0, 0.0]];
         let b = vec![-4.0, 6.0, 0.0];

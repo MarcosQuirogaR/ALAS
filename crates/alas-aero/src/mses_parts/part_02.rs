@@ -62,7 +62,7 @@ pub fn run_mses_pressure_distribution_with_cancel(
 ///
 /// `checkpoint` is typically one entry of [`MsesPolarResult::checkpoints`]
 /// from a prior [`run_mses_polar_with_cancel`] call on the *same*
-/// airfoil/config/Mach/Reynolds/OSMAP -- picked as whichever checkpoint's
+/// airfoil/config/Mach/Reynolds/OSMAP: picked as whichever checkpoint's
 /// `alpha_deg` is nearest the pressure point actually wanted. Passing a
 /// checkpoint from a different geometry, config, Mach, Reynolds, or OSMAP map
 /// is safe (it is rejected by an exact identity check and this call falls

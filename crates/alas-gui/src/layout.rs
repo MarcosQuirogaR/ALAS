@@ -39,6 +39,22 @@ pub const PREVIEW_DOCK_DEFAULT_WIDTH: f32 = 360.0;
 pub const PREVIEW_DOCK_MIN_WIDTH: f32 = 300.0;
 /// Largest width for the live-preview dock.
 pub const PREVIEW_DOCK_MAX_WIDTH: f32 = 520.0;
+/// Narrowest central content column that still renders the schema-driven
+/// form without clipping.
+///
+/// One form column is `MIN_FORM_COLUMN_WIDTH` = 300 pt wide (see
+/// `views::form`). Around it the central panel spends 26 + 18 pt of frame
+/// margin, a card spends 2 x `theme::CARD_INNER_MARGIN_X` = 28 pt, the card's
+/// collapsing header indents ~18 pt and the page's vertical scroll bar takes
+/// ~10 pt, so 400 pt of panel width is the floor at which every label and
+/// every value box is still fully drawn.
+pub const CONTENT_MIN_WIDTH: f32 = 400.0;
+/// Width the Inputs page's preset and engine selectors need side by side.
+///
+/// A combo box sizes itself to its longest entry and the wrapped layout
+/// cannot break before one, so below this the pair used to widen the whole
+/// page and run under the window's right edge. Above it they share a row.
+pub const SELECTOR_PAIR_MIN_WIDTH: f32 = 460.0;
 
 /// Return the width available to an expanded navigation surface.
 ///
@@ -61,15 +77,33 @@ pub fn preview_placement(_available_width: f32) -> PreviewPlacement {
     PreviewPlacement::Side
 }
 
-/// Return the user-resizable width range for the right-side preview dock.
+/// Return the user-resizable width range for the right-side preview dock, or
+/// `None` when the viewport is too narrow to hold the dock and a readable
+/// form at the same time.
 ///
-/// Keep this range independent of the current client width. `SidePanel` stores
-/// the dragged width between frames; deriving the maximum from a changing
-/// `available_width` would clamp that stored value on the next frame and make
-/// the dock appear to snap back while it is being resized. The side panel and
-/// its central content already handle the available space clamp separately.
-pub fn preview_width_range(_available_width: f32) -> std::ops::RangeInclusive<f32> {
-    PREVIEW_DOCK_MIN_WIDTH..=PREVIEW_DOCK_MAX_WIDTH
+/// `available_width` is the width left after every panel added before the
+/// dock (menu bar, pinned navigation, control bar, run log). It deliberately
+/// does *not* include the dock itself, so the returned maximum is constant
+/// while the splitter is dragged and `SidePanel`'s stored width never snaps
+/// back mid-gesture.
+///
+/// The maximum is the space left once [`CONTENT_MIN_WIDTH`] is reserved for
+/// the form. Below `CONTENT_MIN_WIDTH + PREVIEW_DOCK_MIN_WIDTH` no split can
+/// satisfy both, so the dock yields the whole width to the form rather than
+/// clipping it; the caller keeps the user's own open/closed preference and
+/// says why the dock is not on screen.
+pub fn preview_width_range(available_width: f32) -> Option<std::ops::RangeInclusive<f32>> {
+    if available_width.is_nan() || available_width < CONTENT_MIN_WIDTH + PREVIEW_DOCK_MIN_WIDTH {
+        return None;
+    }
+    let max =
+        (available_width - CONTENT_MIN_WIDTH).clamp(PREVIEW_DOCK_MIN_WIDTH, PREVIEW_DOCK_MAX_WIDTH);
+    Some(PREVIEW_DOCK_MIN_WIDTH..=max)
+}
+
+/// Whether the right-side preview dock has room beside a readable form.
+pub fn preview_dock_fits(available_width: f32) -> bool {
+    preview_width_range(available_width).is_some()
 }
 
 /// Return the largest usable run-log height for a viewport in egui points.
@@ -88,7 +122,10 @@ pub fn run_log_height(viewport_height: f32, requested_height: f32) -> f32 {
 
 #[cfg(test)]
 mod tests {
-    use super::{preview_placement, preview_width_range, PreviewPlacement};
+    use super::{
+        preview_dock_fits, preview_placement, preview_width_range, PreviewPlacement,
+        CONTENT_MIN_WIDTH, PREVIEW_DOCK_MAX_WIDTH, PREVIEW_DOCK_MIN_WIDTH,
+    };
 
     #[test]
     fn preview_stays_to_the_right_of_the_editor_at_every_window_width() {
@@ -99,12 +136,51 @@ mod tests {
 
     #[test]
     fn preview_width_stays_user_resizable_without_responsive_bottom_promotion() {
-        let narrow = preview_width_range(640.0);
-        assert_eq!(*narrow.start(), 300.0);
-        assert_eq!(*narrow.end(), 520.0);
+        // A comfortable window keeps the full, width-independent range, so
+        // dragging the splitter never re-clamps the stored width.
+        for width in [1_000.0, 1_600.0, 3_840.0] {
+            let range = preview_width_range(width).expect("dock fits");
+            assert_eq!(*range.start(), PREVIEW_DOCK_MIN_WIDTH, "width {width}");
+            assert_eq!(*range.end(), PREVIEW_DOCK_MAX_WIDTH, "width {width}");
+        }
+    }
 
-        let wide = preview_width_range(1_600.0);
-        assert_eq!(*wide.start(), 300.0);
-        assert_eq!(*wide.end(), 520.0);
+    #[test]
+    fn the_dock_never_takes_the_width_the_form_needs_to_stay_readable() {
+        // In the transition band the dock may only take what is left once the
+        // form has its readable floor.
+        for width in [720.0, 800.0, 880.0] {
+            let range = preview_width_range(width)
+                .unwrap_or_else(|| panic!("dock should still fit at {width}"));
+            assert_eq!(*range.start(), PREVIEW_DOCK_MIN_WIDTH, "width {width}");
+            assert!(
+                width - *range.end() >= CONTENT_MIN_WIDTH - 0.5,
+                "width {width} leaves only {} for the form",
+                width - *range.end()
+            );
+            assert!(*range.end() <= PREVIEW_DOCK_MAX_WIDTH);
+        }
+    }
+
+    #[test]
+    fn a_viewport_too_narrow_for_both_gives_the_whole_width_to_the_form() {
+        // 466 px is the captured narrow-window regression; every width below
+        // the split threshold must hide the dock rather than clip the form.
+        for width in [320.0, 450.0, 466.0, 640.0, 699.0] {
+            assert!(
+                preview_width_range(width).is_none(),
+                "dock must yield the width at {width}"
+            );
+            assert!(!preview_dock_fits(width), "width {width}");
+        }
+        assert!(preview_dock_fits(
+            CONTENT_MIN_WIDTH + PREVIEW_DOCK_MIN_WIDTH
+        ));
+    }
+
+    #[test]
+    fn a_non_finite_viewport_width_hides_the_dock_instead_of_panicking() {
+        assert!(preview_width_range(f32::NAN).is_none());
+        assert!(preview_width_range(f32::INFINITY).is_some());
     }
 }

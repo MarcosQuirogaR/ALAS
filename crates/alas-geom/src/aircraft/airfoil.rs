@@ -13,9 +13,9 @@
 //! normalization every airfoil surrogate query starts with (see
 //! [`Airfoil::normalize`] and the [`normalize`] submodule).
 //!
-//! Everything else `Airfoil` offers upstream -- XFoil/NeuralFoil polars,
+//! Everything else `Airfoil` offers upstream: XFoil/NeuralFoil polars,
 //! Kulfan parameterization, plotting, `LE_radius`, `TE_angle`,
-//! `TE_thickness` -- is out of scope; a prior research pass grepped every
+//! `TE_thickness`, is out of scope; a prior research pass grepped every
 //! call this program's Python package makes onto an `Airfoil` instance and
 //! none of those reach this module. `docs/PORTING.md` records the scoping
 //! decision. (`get_aero_from_neuralfoil` is reached, and is
@@ -32,8 +32,8 @@
 //! fallback (checked against `alas/config/presets.py`) is `"naca0012"`, which
 //! only ever reaches the first branch, so [`Airfoil::from_name`] implements
 //! only that one. A name that is not a parseable 4-digit NACA designation
-//! returns `None` here -- matching the Python constructor's own
-//! `except (ValueError, NotImplementedError):` on that branch -- rather than
+//! returns `None` here, matching the Python constructor's own
+//! `except (ValueError, NotImplementedError):` on that branch, rather than
 //! falling through to a UIUC lookup or a file read, both of which are
 //! unreached in practice and are not translated. A future caller that needs
 //! an arbitrary named or file-backed airfoil should reach for
@@ -64,9 +64,9 @@ const DEFAULT_N_POINTS_PER_SIDE: usize = 200;
 
 /// An airfoil section: a name and its `(x, y)` coordinates.
 ///
-/// Coordinates are expected in the standard airfoil order -- starting on the
+/// Coordinates are expected in the standard airfoil order (starting on the
 /// upper surface at the trailing edge, forward over the upper surface, around
-/// the nose, aft over the lower surface, back to the trailing edge -- which
+/// the nose, aft over the lower surface, back to the trailing edge) which
 /// is what [`Airfoil::le_index`], [`Airfoil::upper_coordinates`] and
 /// [`Airfoil::lower_coordinates`] assume. Nothing in this module enforces
 /// that order; it is a precondition inherited from upstream, which does not
@@ -102,7 +102,7 @@ impl Airfoil {
     }
 
     /// The index of the leading-edge point: the coordinate with the smallest
-    /// `x`, first occurrence on a tie -- `np.argmin(self.x())`.
+    /// `x`, first occurrence on a tie: `np.argmin(self.x())`.
     ///
     /// Returns `0` for an airfoil with no coordinates, which is the only way
     /// this can avoid panicking on that input; nothing in this crate
@@ -140,7 +140,7 @@ impl Airfoil {
 
     /// The airfoil's thickness (upper `y` minus lower `y`) at each `x/c`
     /// station in `x_over_c`, by piecewise-linear interpolation of each
-    /// surface -- `local_thickness`.
+    /// surface: `local_thickness`.
     ///
     /// Stations outside a surface's own `x` range clamp to that surface's
     /// nearest endpoint value, matching `numpy.interp`'s default (no `left`
@@ -167,8 +167,8 @@ impl Airfoil {
 
     /// The airfoil's mean camber line ordinate (upper `y` plus lower `y`,
     /// halved) at each `x/c` station in `x_over_c`, by the same
-    /// piecewise-linear per-surface interpolation as [`Airfoil::local_thickness`]
-    /// -- `local_camber`. Stations outside a surface's own `x` range clamp
+    /// piecewise-linear per-surface interpolation as [`Airfoil::local_thickness`]:
+    /// `local_camber`. Stations outside a surface's own `x` range clamp
     /// the same way.
     pub fn local_camber(&self, x_over_c: &[f64]) -> Vec<f64> {
         let mut upper: Vec<(f64, f64)> = self.upper_coordinates().to_vec();
@@ -209,7 +209,7 @@ impl Airfoil {
     /// at [`cosspace`]-spaced arc-length stations. The upper surface is
     /// pinned to a zero second derivative at the trailing edge and a first
     /// derivative of `(0, -1)` at the leading edge; the lower surface takes
-    /// the same two conditions in the opposite order -- both matching
+    /// the same two conditions in the opposite order, both matching
     /// `Airfoil.repanel`'s `scipy.interpolate.CubicSpline(..., bc_type=...)`
     /// calls exactly.
     ///
@@ -263,7 +263,7 @@ impl Airfoil {
             .collect();
 
         // Drop the duplicate leading-edge point the lower surface's first
-        // entry would otherwise repeat -- `np.concatenate((new_upper,
+        // entry would otherwise repeat: `np.concatenate((new_upper,
         // new_lower[1:, :]), axis=0)`.
         let mut coordinates = new_upper;
         coordinates.extend(new_lower.into_iter().skip(1));
@@ -274,7 +274,7 @@ impl Airfoil {
         })
     }
 
-    /// A new airfoil blending this one with `other` -- `blend_with_another_airfoil`.
+    /// A new airfoil blending this one with `other`: `blend_with_another_airfoil`.
     ///
     /// Both airfoils are repaneled to `n_points_per_side` first (so the two
     /// coordinate arrays line up point-for-point), then each coordinate is a
@@ -321,16 +321,16 @@ impl Airfoil {
         Ok(Self { name, coordinates })
     }
 
-    /// The airfoil as the text of a Selig-format `.dat` file -- `write_dat`.
+    /// The airfoil as the text of a Selig-format `.dat` file: `write_dat`.
     ///
     /// The name on the first line, then one `x y` line per coordinate formatted
     /// as Python's `"%f %f"` (six decimal places, the `%f` default), joined by
-    /// newlines with no trailing newline -- byte-for-byte what
+    /// newlines with no trailing newline: byte-for-byte what
     /// `Airfoil.write_dat(include_name=True)` returns. Writing it to a path is
     /// the caller's job: upstream both writes the file and returns the string,
     /// and the one consumer here (`alas-aero::mses`, feeding `mset`) writes it
     /// itself, so this crate stays clear of file I/O. Scoped to
-    /// `include_name=True`, the only form that consumer reaches -- `mset` reads
+    /// `include_name=True`, the only form that consumer reaches: `mset` reads
     /// a named `.dat`.
     pub fn write_dat(&self) -> String {
         let mut lines = Vec::with_capacity(self.coordinates.len() + 1);
@@ -343,7 +343,7 @@ impl Airfoil {
 }
 
 /// The cumulative streamwise arc length from `points[0]`, one entry per
-/// point: `[0, |p1-p0|, |p1-p0|+|p2-p1|, ...]` -- `np.diff` + `np.linalg.norm`
+/// point: `[0, |p1-p0|, |p1-p0|+|p2-p1|, ...]`: `np.diff` + `np.linalg.norm`
 /// (per row) + `np.cumsum`, prefixed with the implicit zero at the first
 /// point.
 fn cumulative_arc_length(points: &[(f64, f64)]) -> Vec<f64> {
@@ -395,7 +395,7 @@ fn numpy_interp(x: f64, xp: &[f64], fp: &[f64]) -> f64 {
 }
 
 /// The coordinates of a 4-digit NACA airfoil, or `None` if `name` does not
-/// parse as one -- `get_NACA_coordinates(name=..., n_points_per_side=...)`,
+/// parse as one: `get_NACA_coordinates(name=..., n_points_per_side=...)`,
 /// scoped to its `name`-driven branch (this crate has no caller that supplies
 /// `max_camber`/`camber_loc`/`thickness` directly).
 ///
@@ -416,7 +416,7 @@ pub fn naca_coordinates(name: &str, n_points_per_side: usize) -> Option<Vec<(f64
 ///
 /// Mirrors `get_NACA_coordinates`'s parsing exactly, including its use of
 /// `str.split("naca")` (every occurrence, not just a prefix match) and its
-/// blanket rejection of anything but exactly 4 digits after that split --
+/// blanket rejection of anything but exactly 4 digits after that split:
 /// `NotImplementedError` upstream for 5-digit and other NACA families, folded
 /// into the same `None` here as an unparseable name, since this module has no
 /// other family to fall back to.

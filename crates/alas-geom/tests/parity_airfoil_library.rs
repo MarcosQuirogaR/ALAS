@@ -6,7 +6,7 @@
 //!
 //! Every case here is checked at `Tier::Linalg`: `docs/PORTING.md` assigns
 //! this row `linalg` because it depends on `asb::airfoil::repanel`, which
-//! goes through `alas-math::spline` -- the tier applies to the module as a
+//! goes through `alas-math::spline`: the tier applies to the module as a
 //! whole, not chosen per case.
 
 // This file is itself a test binary, so an unwrap or expect that fails is
@@ -100,7 +100,7 @@ fn compare_points(
 }
 
 /// Resolve `name` through `AirfoilLibrary::get`, failing loudly (not
-/// silently skipping the case) if it does not resolve -- every base name the
+/// silently skipping the case) if it does not resolve, every base name the
 /// fixture names is one this crate's own scope guarantees resolves.
 fn resolve(name: &str) -> alas_geom::asb::airfoil::Airfoil {
     AirfoilLibrary::get(name).unwrap_or_else(|| panic!("{name} did not resolve"))

@@ -3,46 +3,41 @@
 
 use super::*;
 
-pub(crate) fn execute_solver_stage<F>(
+/// Shared, per-stage execution state threaded through the small helpers below.
+///
+/// `adapter` and `emit` stay as direct parameters on each function because
+/// `emit` is generic over the caller's `FnMut(CfdRunEvent)` closure; folding
+/// it into this struct would force every closure capture of `ctx` to go
+/// through a single field instead of Rust's disjoint-capture analysis.
+pub(crate) struct StageContext<'a> {
+    pub(crate) case_dir: &'a Path,
+    pub(crate) timeout_seconds: u64,
+    pub(crate) cancel: &'a Arc<AtomicBool>,
+    pub(crate) started: std::time::Instant,
+    pub(crate) command_logs: &'a mut BTreeMap<String, String>,
+    pub(crate) mesh_output: &'a mut String,
+}
+
+pub(crate) fn execute_solver_stage_with_tool<F>(
     adapter: &OpenFoamAdapter,
-    case_dir: &Path,
-    timeout_seconds: u64,
-    cancel: &Arc<AtomicBool>,
+    ctx: &mut StageContext<'_>,
     emit: &mut F,
-    started: std::time::Instant,
-    command_logs: &mut BTreeMap<String, String>,
-    mesh_output: &mut String,
     stage: CfdStage,
     label: &str,
+    solver: &str,
 ) -> Result<OpenFoamProcessStatus, String>
 where
     F: FnMut(CfdRunEvent),
 {
-    let command = adapter.command("simpleFoam", Some(case_dir), &[])?;
-    execute_resolved_stage(
-        adapter,
-        case_dir,
-        timeout_seconds,
-        cancel,
-        emit,
-        started,
-        command_logs,
-        mesh_output,
-        stage,
-        label,
-        command,
-    )
+    let command = adapter.command(solver, Some(ctx.case_dir), &[])?;
+    execute_resolved_stage(adapter, ctx, emit, stage, label, command)
 }
 
-pub(crate) fn execute_solver_postprocess_stage<F>(
+pub(crate) fn execute_solver_postprocess_stage_with_tool<F>(
     adapter: &OpenFoamAdapter,
-    case_dir: &Path,
-    timeout_seconds: u64,
-    cancel: &Arc<AtomicBool>,
+    ctx: &mut StageContext<'_>,
     emit: &mut F,
-    started: std::time::Instant,
-    command_logs: &mut BTreeMap<String, String>,
-    mesh_output: &mut String,
+    solver: &str,
 ) -> Result<OpenFoamProcessStatus, String>
 where
     F: FnMut(CfdRunEvent),
@@ -51,18 +46,13 @@ where
         .into_iter()
         .map(std::ffi::OsString::from)
         .collect();
-    let command = adapter.command("simpleFoam", Some(case_dir), &args)?;
+    let command = adapter.command(solver, Some(ctx.case_dir), &args)?;
     execute_resolved_stage(
         adapter,
-        case_dir,
-        timeout_seconds,
-        cancel,
+        ctx,
         emit,
-        started,
-        command_logs,
-        mesh_output,
         CfdStage::PostProcessing,
-        "simpleFoam-postProcess",
+        &format!("{solver}-postProcess"),
         command,
     )
 }
@@ -117,13 +107,8 @@ pub(crate) fn final_write_interval(max_iterations: u32, configured: u32) -> u32 
 
 pub(crate) fn execute_stage<F>(
     adapter: &OpenFoamAdapter,
-    case_dir: &Path,
-    timeout_seconds: u64,
-    cancel: &Arc<AtomicBool>,
+    ctx: &mut StageContext<'_>,
     emit: &mut F,
-    started: std::time::Instant,
-    command_logs: &mut BTreeMap<String, String>,
-    mesh_output: &mut String,
     stage: CfdStage,
     tool: &str,
     args: Vec<std::ffi::OsString>,
@@ -131,62 +116,28 @@ pub(crate) fn execute_stage<F>(
 where
     F: FnMut(CfdRunEvent),
 {
-    let command = adapter.command(tool, Some(case_dir), &args)?;
-    execute_resolved_stage(
-        adapter,
-        case_dir,
-        timeout_seconds,
-        cancel,
-        emit,
-        started,
-        command_logs,
-        mesh_output,
-        stage,
-        tool,
-        command,
-    )
+    let command = adapter.command(tool, Some(ctx.case_dir), &args)?;
+    execute_resolved_stage(adapter, ctx, emit, stage, tool, command)
 }
 
 pub(crate) fn execute_gmsh_stage<F>(
     adapter: &OpenFoamAdapter,
-    case_dir: &Path,
-    timeout_seconds: u64,
-    cancel: &Arc<AtomicBool>,
+    ctx: &mut StageContext<'_>,
     emit: &mut F,
-    started: std::time::Instant,
-    command_logs: &mut BTreeMap<String, String>,
-    mesh_output: &mut String,
     stage: CfdStage,
     args: Vec<std::ffi::OsString>,
 ) -> Result<OpenFoamProcessStatus, String>
 where
     F: FnMut(CfdRunEvent),
 {
-    let command = adapter.gmsh_command(case_dir, &args)?;
-    execute_resolved_stage(
-        adapter,
-        case_dir,
-        timeout_seconds,
-        cancel,
-        emit,
-        started,
-        command_logs,
-        mesh_output,
-        stage,
-        "gmsh",
-        command,
-    )
+    let command = adapter.gmsh_command(ctx.case_dir, &args)?;
+    execute_resolved_stage(adapter, ctx, emit, stage, "gmsh", command)
 }
 
 pub(crate) fn execute_resolved_stage<F>(
     adapter: &OpenFoamAdapter,
-    case_dir: &Path,
-    timeout_seconds: u64,
-    cancel: &Arc<AtomicBool>,
+    ctx: &mut StageContext<'_>,
     emit: &mut F,
-    started: std::time::Instant,
-    command_logs: &mut BTreeMap<String, String>,
-    mesh_output: &mut String,
     stage: CfdStage,
     tool: &str,
     command: alas_exec::openfoam::OpenFoamCommand,
@@ -194,25 +145,25 @@ pub(crate) fn execute_resolved_stage<F>(
 where
     F: FnMut(CfdRunEvent),
 {
-    if cancel.load(Ordering::Relaxed) {
+    if ctx.cancel.load(Ordering::Relaxed) {
         return Ok(OpenFoamProcessStatus::Cancelled);
     }
     emit_event(
         emit,
-        started,
+        ctx.started,
         stage,
         CfdEventSeverity::Info,
         format!("Running {tool}..."),
     );
-    command_logs.insert(
+    ctx.command_logs.insert(
         format!("__executable_path:{tool}"),
         command.program.to_string_lossy().into_owned(),
     );
     let mut partial_line = String::new();
     let result = adapter.run_with_callback(
         &command,
-        cancel,
-        Duration::from_secs(timeout_seconds.clamp(1, 86_400)),
+        ctx.cancel,
+        Duration::from_secs(ctx.timeout_seconds.clamp(1, 86_400)),
         |stream, chunk| {
             partial_line.push_str(&chunk);
             while let Some(newline) = partial_line.find('\n') {
@@ -225,7 +176,7 @@ where
                         CfdEventSeverity::Info
                     };
                     let message = truncate_live_line(&format!("{tool}: {line}"));
-                    emit_event(emit, started, stage, severity, message);
+                    emit_event(emit, ctx.started, stage, severity, message);
                 }
             }
         },
@@ -233,16 +184,16 @@ where
     if !partial_line.trim().is_empty() && is_live_diagnostic(partial_line.trim()) {
         emit_event(
             emit,
-            started,
+            ctx.started,
             stage,
             CfdEventSeverity::Info,
             truncate_live_line(&format!("{tool}: {}", partial_line.trim())),
         );
     }
     let combined = format!("{}\n{}", result.stdout, result.stderr);
-    let log_key = unique_log_key(command_logs, tool);
-    command_logs.insert(log_key.clone(), combined.clone());
-    let log_dir = case_dir.join("logs");
+    let log_key = unique_log_key(ctx.command_logs, tool);
+    ctx.command_logs.insert(log_key.clone(), combined.clone());
+    let log_dir = ctx.case_dir.join("logs");
     fs::create_dir_all(&log_dir)
         .map_err(|error| format!("cannot create logs directory: {error}"))?;
     let log_name = if log_dir.join(format!("{tool}.log")).exists() {
@@ -259,7 +210,7 @@ where
     };
     fs::write(log_name, &combined).map_err(|error| format!("cannot write {tool} log: {error}"))?;
     if stage == CfdStage::QualityGate {
-        *mesh_output = combined.clone();
+        *ctx.mesh_output = combined.clone();
     }
     let severity = match result.status {
         OpenFoamProcessStatus::Completed => CfdEventSeverity::Info,
@@ -268,13 +219,13 @@ where
     };
     emit_event(
         emit,
-        started,
+        ctx.started,
         stage,
         severity,
         process_summary(tool, &result),
     );
     if result.status != OpenFoamProcessStatus::Completed {
-        command_logs.insert(
+        ctx.command_logs.insert(
             "__failure".to_owned(),
             format!("{tool}: {}", process_failure_detail(&result, &combined)),
         );

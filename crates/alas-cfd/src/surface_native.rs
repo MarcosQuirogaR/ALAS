@@ -9,6 +9,8 @@ use std::path::Path;
 
 #[path = "surface_native_geometry.rs"]
 mod geometry;
+#[cfg(test)]
+pub(crate) use geometry::integrate;
 #[path = "surface_native_mesh.rs"]
 mod mesh;
 #[path = "surface_native_raw.rs"]
@@ -55,8 +57,8 @@ pub(crate) fn parse_case(
     let time_dir = case.join(time);
     let pressure_path = time_dir.join("p");
     let shear_path = time_dir.join("wallShearStress");
-    let pressure = mesh::field(&read(&pressure_path)?, false, "p")?;
-    let shear = mesh::field(&read(&shear_path)?, true, "wallShearStress")?;
+    let (pressure, pressure_units) = mesh::pressure_field(&read(&pressure_path)?, "p")?;
+    let (shear, shear_units) = mesh::wall_shear_field(&read(&shear_path)?, "wallShearStress")?;
     let pressures = mesh::scalar_patch(&pressure, &owners, patch.start, patch.count)?;
     let shears = mesh::vector_patch(&shear, &owners, patch.start, patch.count)?;
 
@@ -64,18 +66,36 @@ pub(crate) fn parse_case(
     for local in 0..patch.count {
         let global = patch.start + local;
         let face = geometry::face(&points, &faces[global])?;
+        // `SurfaceSample` stores the kinematic pressure convention used by
+        // the incompressible parser.  Convert rhoSimpleFoam's absolute Pa
+        // field by density before handing it to the shared integrator; the
+        // pressure reference is then subtracted exactly once there.
+        let pressure_kinematic = match pressure_units {
+            mesh::PressureUnits::Kinematic => pressures[local],
+            mesh::PressureUnits::Absolute => pressures[local] / reference.density_kg_m3,
+        };
+        let shear_kinematic = match shear_units {
+            mesh::PressureUnits::Kinematic => shears[local],
+            mesh::PressureUnits::Absolute => {
+                let value = shears[local];
+                [
+                    value[0] / reference.density_kg_m3,
+                    value[1] / reference.density_kg_m3,
+                    value[2] / reference.density_kg_m3,
+                ]
+            }
+        };
         source_samples.push(geometry::sample(
             local,
             global,
             face,
-            pressures[local],
-            shears[local],
+            pressure_kinematic,
+            shear_kinematic,
             reference,
         ));
     }
 
-    let (indices, arcs, topology) =
-        geometry::order_faces(&source_samples, &faces, &points, patch.start);
+    let (indices, arcs, topology) = geometry::order_faces(&source_samples, &faces, patch.start);
     if indices.len() != source_samples.len() {
         return Err(SurfaceError::Mismatch(
             "airfoil wall traversal did not include every face".to_owned(),
@@ -111,7 +131,7 @@ pub(crate) fn parse_case(
 pub(crate) fn raw_rows(
     text: &str,
     components: usize,
-) -> Result<(Vec<([f64; 3], Vec<f64>)>, Option<usize>), SurfaceError> {
+) -> Result<(raw::FaceRows, Option<usize>), SurfaceError> {
     raw::raw_rows(text, components)
 }
 
@@ -132,6 +152,9 @@ pub(crate) fn parse_sampled(
 }
 
 #[cfg(test)]
+// Tests assert on values they parsed or built here, so a failed expect is
+// the assertion failing rather than a library invariant breaking.
+#[allow(clippy::expect_used)]
 mod tests {
     use super::*;
     use std::collections::HashSet;
@@ -151,6 +174,54 @@ mod tests {
             internalField uniform 0;
         "#;
         assert!(mesh::field(dimensional, false, "p").is_err());
+    }
+
+    #[test]
+    fn compressible_pressure_field_is_converted_from_absolute_pa() {
+        let dimensional = r#"
+            FoamFile { format ascii; }
+            dimensions [1 -1 -2 0 0 0 0];
+            internalField uniform 101325;
+            boundaryField
+            {
+                airfoil { type zeroGradient; value uniform 101325; }
+            }
+        "#;
+        let (field, units) = mesh::pressure_field(dimensional, "p").expect("absolute p");
+        assert_eq!(units, mesh::PressureUnits::Absolute);
+        let pressure = mesh::scalar_patch(&field, &[0], 0, 1).expect("wall p");
+        let shear_text = r#"
+            FoamFile { format ascii; }
+            dimensions [1 -1 -2 0 0 0 0];
+            internalField uniform (4 5 6);
+            boundaryField
+            {
+                airfoil { type calculated; value uniform (4 5 6); }
+            }
+        "#;
+        let (_, shear_units) =
+            mesh::wall_shear_field(shear_text, "wallShearStress").expect("absolute shear");
+        assert_eq!(shear_units, mesh::PressureUnits::Absolute);
+        let reference = SurfaceReference {
+            density_kg_m3: 1.225,
+            pressure_reference_pa: 101325.,
+            ..SurfaceReference::for_two_dimensional_chord(1., 1.)
+        };
+        let face = geometry::face(
+            &[[0., 0., 0.], [1., 0., 0.], [1., 0., 1.], [0., 0., 1.]],
+            &[0, 1, 2, 3],
+        )
+        .expect("valid wall face");
+        let sample = geometry::sample(
+            0,
+            0,
+            face,
+            pressure[0] / reference.density_kg_m3,
+            [0.; 3],
+            &reference,
+        );
+        assert!((sample.pressure_pa - 101325.).abs() < 1.0e-9);
+        assert!(sample.cp.abs() < 1.0e-12);
     }
 
     #[test]
@@ -188,7 +259,7 @@ mod tests {
                 )
             })
             .collect::<Vec<_>>();
-        let (indices, arcs, topology) = geometry::order_faces(&source, &faces, &points, 0);
+        let (indices, arcs, topology) = geometry::order_faces(&source, &faces, 0);
         assert!(topology);
         assert_eq!(indices.len(), source.len());
         assert_eq!(arcs.len(), source.len());

@@ -14,7 +14,7 @@
 //! meshes the full mplot3d surface: leading/trailing-edge lines, a camber-
 //! following thickness line, *every* cross-section's upper and lower airfoil
 //! outline (via `Wing._compute_frame_of_WingXSec`, a per-section local frame
-//! `docs/PORTING.md` records as left untranslated -- meshing-only, unreached
+//! `docs/PORTING.md` records as left untranslated: meshing-only, unreached
 //! by anything but this figure family), and, for a fuselage, elliptical
 //! bulkheads sampled through `FuselageXSec.get_3D_coordinates` (also
 //! untranslated for the same reason).
@@ -24,8 +24,8 @@
 //! leading/trailing-edge and thickness lines come from [`Wing::mesh_line`]
 //! (`alas-geom::aircraft::mesh`, itself a P5 prerequisite and already green), and
 //! the bulkhead ellipses are computed directly from `FuselageXSec.width`/
-//! `.height` -- the same two fields [`super::planform::figure_geometry`]
-//! already draws a fuselage silhouette from -- rather than reproducing
+//! `.height`: the same two fields [`super::planform::figure_geometry`]
+//! already draws a fuselage silhouette from, rather than reproducing
 //! `get_3D_coordinates`.
 
 use std::f64::consts::PI;
@@ -48,7 +48,7 @@ const HEADER_HEIGHT: f64 = 48.0;
 const WIREFRAME_PADDING: f64 = 0.08;
 
 /// A `(center, max_span)` pair sized from a data-space bounding box, with
-/// modest padding -- what every wireframe figure hands [`Camera3D::project`]
+/// modest padding: what every wireframe figure hands [`Camera3D::project`]
 /// instead of a fixed magic-number span.
 pub(super) fn framing(
     x_min: f64,
@@ -160,7 +160,7 @@ pub(super) fn airplane_fit_points(plane: &Airplane) -> Vec<Point3D> {
 }
 
 /// Draw one wing's leading edge, trailing edge and `x/c = 0.4` upper/lower
-/// thickness lines, mirroring both if [`Wing::symmetric`] -- the reachable
+/// thickness lines, mirroring both if [`Wing::symmetric`]: the reachable
 /// subset of upstream's `draw_wireframe` wing loop (see the module doc).
 pub(crate) fn draw_wing_wireframe(
     scene: &mut Scene,
@@ -227,7 +227,7 @@ pub(crate) fn draw_wing_wireframe(
 }
 
 /// Draw one fuselage's per-station bulkhead ellipses, longerons and
-/// centerline -- the reachable subset of upstream's `draw_wireframe`
+/// centerline: the reachable subset of upstream's `draw_wireframe`
 /// fuselage loop (see the module doc for why the bulkhead is drawn from
 /// `width`/`height` directly rather than through `get_3D_coordinates`).
 pub(crate) fn draw_fuselage_wireframe(
@@ -304,7 +304,7 @@ fn title_text(scene: &mut Scene, text: &str, color: Color) {
     });
 }
 
-/// Isolated 3D wireframe of the main wing -- `figure_wireframe_wing`.
+/// Isolated 3D wireframe of the main wing, `figure_wireframe_wing`.
 pub fn figure_wireframe_wing(plane: &Airplane, theme: Option<&str>) -> Scene {
     let pal = get_palette(theme);
     let mut scene = Scene::new(600.0, 450.0, Some(Color::from_hex(pal.bg)));
@@ -335,7 +335,7 @@ pub fn figure_wireframe_wing(plane: &Airplane, theme: Option<&str>) -> Scene {
     scene
 }
 
-/// Isolated 3D wireframe of the (first) fuselage -- `figure_wireframe_fuselage`.
+/// Isolated 3D wireframe of the (first) fuselage: `figure_wireframe_fuselage`.
 pub fn figure_wireframe_fuselage(plane: &Airplane, theme: Option<&str>) -> Scene {
     let pal = get_palette(theme);
     let mut scene = Scene::new(600.0, 450.0, Some(Color::from_hex(pal.bg)));
@@ -366,7 +366,7 @@ pub fn figure_wireframe_fuselage(plane: &Airplane, theme: Option<&str>) -> Scene
     scene
 }
 
-/// Isolated 3D wireframe of the horizontal and vertical stabilizers --
+/// Isolated 3D wireframe of the horizontal and vertical stabilizers:
 /// `figure_wireframe_empennage`, with upstream's same by-name-then-by-index
 /// fallback (`plane.wings[1]`/`plane.wings[2]`) for a configuration whose
 /// tail surfaces are not named exactly `"Horizontal Stabilizer"`/
@@ -432,7 +432,7 @@ pub fn figure_wireframe_empennage(plane: &Airplane, theme: Option<&str>) -> Scen
 
 /// Live 3D exterior wireframe: wings blue (or grey for a surface not named
 /// with "wing"), the primary fuselage in the theme's title color and any
-/// further fuselage-shaped body (engine nacelles) in orange -- port of
+/// further fuselage-shaped body (engine nacelles) in orange: port of
 /// `alas/sidecar/figures.py::_preview_exterior`.
 ///
 /// Unlike the stub this replaces, `center`/`max_span` are computed from the
@@ -459,7 +459,9 @@ pub fn figure_exterior_3d(
         let color = if wing.name.to_lowercase().contains("wing") {
             Color::from_hex("#2563eb")
         } else {
-            Color::from_hex("#a0a0a0")
+            // Theme-derived: a fixed light grey left the empennage at 2.35:1
+            // on the Light canvas, effectively invisible at a 1 px stroke.
+            Color::from_hex(crate::theme::secondary_surface_line(pal))
         };
         draw_wing_wireframe(&mut scene, &cam, center, span, viewport, wing, color);
     }

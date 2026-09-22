@@ -17,7 +17,7 @@ use super::status::{resolve_structural_result, status_message_scene};
 use crate::scene::{Color, Scene, SceneElement, TextAlign, TextBaseline};
 use crate::theme::get_palette;
 
-const TITLE: &str = "Structural Analysis -- Patran Renders";
+const TITLE: &str = "Structural Analysis: Patran Renders";
 
 /// Display one externally rendered deformation image per available load case.
 pub fn figure_structures_patran(
@@ -114,7 +114,7 @@ mod tests {
         };
         let scene = figure_structures_patran(Some(&result), None);
         assert!(scene.elements.iter().any(|element| {
-            matches!(element, SceneElement::Text { text, .. } if text.contains("working Patran"))
+            matches!(element, SceneElement::Text { text, .. } | SceneElement::TextBlock { text, .. } if text.contains("working Patran"))
         }));
     }
 

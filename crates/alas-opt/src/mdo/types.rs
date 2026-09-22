@@ -15,7 +15,11 @@ use alas_mass::breakdown::{MassBreakdown, MassCoordinates};
 use alas_mass::dispatch::DispatchSolution;
 
 /// Which requirement family a [`ConstraintResidual`] belongs to.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+///
+/// Ordered so that the relaxation policy can count *distinct* violated
+/// discipline groups deterministically (clarified ledger D01). The order is
+/// the declaration order and carries no severity meaning.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ConstraintFamily {
     /// Fuel capacity, the takeoff-mass ceiling and the sizing closure.
     Mass,
@@ -130,6 +134,16 @@ impl ConstraintResidual {
     pub fn signed_normalized(&self) -> f64 {
         if self.normalized_violation > 0.0 {
             self.normalized_violation
+        } else if self.limit == 0.0 {
+            // A limit of exactly zero has no magnitude to take a relative
+            // margin from, and dividing by the `1e-9` floor below would hand
+            // a gradient driver a margin nine orders of magnitude out of
+            // scale with every other constraint. A residual built against a
+            // zero bound already reports `raw_residual` in the unit its
+            // violation is counted in (the boolean sentinels, and the
+            // washout window in `mdo::residuals_geometry`), so that value is
+            // the signed one.
+            self.raw_residual.min(0.0)
         } else {
             (self.raw_residual / self.limit.abs().max(1e-9)).min(0.0)
         }
@@ -402,6 +416,23 @@ impl ProductStateProvenance {
 /// second opinion.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ResolvedProductState {
+    /// The design vector this state was actually evaluated on.
+    ///
+    /// **Not necessarily the vector the caller passed.** A clean-sheet design
+    /// space derives `fuselage_length_m` from the cabin load case
+    /// (`AlasConfig::optimizer.design_space.sizes_fuselage_from_cabin`), so
+    /// the evaluator replaces the caller's coordinate before it builds
+    /// anything. The derivation has fixed points -- an optimizer finalist is
+    /// one, which is why the ordinary search path sees no difference -- but a
+    /// vector pinned by hand, imported, or recorded by an earlier build of
+    /// the cabin need not be one.
+    ///
+    /// A report bound to this assessment must build on **this** vector.
+    /// Building on the caller's instead describes a different aeroplane from
+    /// the one the feasibility gate passed: on the r5 fixture at
+    /// `AlasConfig::default()` the two bodies differ by 4.25 m, which is
+    /// 2 406 kg of fuselage and 1.237 m of payload station.
+    pub design: DesignVector,
     /// Component masses at the closed takeoff mass, kg.
     pub masses: MassBreakdown,
     /// Component centroids the balance was evaluated at, m.
@@ -418,6 +449,38 @@ pub struct ResolvedProductState {
     pub provenance: ProductStateProvenance,
 }
 
+/// What the controlled-relaxation policy made of one candidate's violated
+/// hard residuals (clarified ledger D01-D03).
+///
+/// Empty and `rejected: false` for a strictly feasible candidate, which is
+/// every candidate under the shipped strict policy. A candidate with a
+/// non-empty `relaxed_ids` is *relaxed*, never fully feasible, and every
+/// reader that reports feasibility has to say so.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct RelaxationOutcome {
+    /// Limits that were missed inside their own declared tolerance.
+    pub relaxed_ids: Vec<&'static str>,
+    /// Distinct discipline groups carrying a relaxed miss (D01 counts
+    /// groups, not limits).
+    pub violated_groups: usize,
+    /// Whether the candidate is rejected despite the policy: a miss outside
+    /// its tolerance, a limit that is not eligible, or more violated groups
+    /// than the policy allows.
+    pub rejected: bool,
+}
+
+impl RelaxationOutcome {
+    /// The outcome of a candidate that needed no relaxation at all.
+    pub fn strict() -> Self {
+        Self::default()
+    }
+
+    /// Whether this candidate was admitted only by the relaxation policy.
+    pub fn is_relaxed(&self) -> bool {
+        !self.relaxed_ids.is_empty() && !self.rejected
+    }
+}
+
 /// The residual table and scalar cost for one evaluated candidate.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CandidateAssessment {
@@ -428,8 +491,14 @@ pub struct CandidateAssessment {
     pub resolved: ResolvedProductState,
     /// Every evaluated requirement, as a typed residual.
     pub residuals: Vec<ConstraintResidual>,
-    /// Whether every hard-policy residual is satisfied.
+    /// Whether the candidate is admissible: every hard-policy residual
+    /// satisfied, or every miss admitted by the controlled-relaxation policy.
+    /// Check [`CandidateAssessment::is_strictly_feasible`] before reporting
+    /// an aircraft as feasible.
     pub hard_feasible: bool,
+    /// What the relaxation policy made of the violated hard residuals.
+    /// Empty under the shipped strict policy.
+    pub relaxation: RelaxationOutcome,
     /// Sum of normalized violations across hard-policy residuals.
     pub hard_violation_sum: f64,
     /// Sum of normalized violations across soft-policy residuals.
@@ -441,6 +510,16 @@ pub struct CandidateAssessment {
 }
 
 impl CandidateAssessment {
+    /// Whether every hard-policy residual is met with nothing relaxed.
+    ///
+    /// This is the question a feasibility report has to ask. `hard_feasible`
+    /// admits a relaxed candidate on purpose, so that the search can rank it;
+    /// reporting one as feasible would be exactly the silent relabelling the
+    /// relaxation policy forbids.
+    pub fn is_strictly_feasible(&self) -> bool {
+        self.hard_feasible && !self.relaxation.is_relaxed()
+    }
+
     /// Identifiers of every violated hard-policy residual, in evaluation
     /// order, joined with `+` for a rejected candidate's history entry.
     pub fn violated_hard_ids(&self) -> Vec<&'static str> {

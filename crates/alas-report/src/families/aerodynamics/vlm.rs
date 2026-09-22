@@ -51,19 +51,7 @@ fn solve(report: &AnalysisReport) -> Result<(alas_aero::vlm::VlmResult, Operatin
 }
 
 fn status(theme: Option<&str>, text: &str) -> Scene {
-    let pal = get_palette(theme);
-    let mut scene = Scene::new(700.0, 400.0, Some(Color::from_hex(pal.bg)));
-    scene.add(SceneElement::Text {
-        text: text.to_owned(),
-        pos: [350.0, 200.0],
-        font_size: 12.0,
-        color: Color::from_hex(pal.title),
-        align: TextAlign::Center,
-        baseline: TextBaseline::Middle,
-        angle_deg: 0.0,
-        bold: false,
-    });
-    scene
+    crate::status_figure::figure_status_message(text, "", false, theme)
 }
 
 fn main_wing_span_loading(

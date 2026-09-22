@@ -3,8 +3,8 @@
 
 //! Reading the mission fixtures back into the types the port runs on.
 //!
-//! Both mission fixtures carry the same two input blocks -- the resolved
-//! vehicle and the trained surrogate tables -- because both were written from
+//! Both mission fixtures carry the same two input blocks: the resolved
+//! vehicle and the trained surrogate tables, because both were written from
 //! one SUAVE run, so one reader serves both. Nothing here computes: every
 //! number is transcribed from what the reference's own objects held after
 //! `simple_sizing` and `finalize`, which is the point. A test that rebuilt the

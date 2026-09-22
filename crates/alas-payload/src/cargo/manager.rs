@@ -12,13 +12,13 @@
 //! Filling the highest-priority positions first gets the tonnage aboard and
 //! puts the centre of gravity wherever those positions happen to be. The loop
 //! then moves load from the heavy side to the light side a step at a time until
-//! the balance is close enough, topping the total back up on the way -- because
+//! the balance is close enough, topping the total back up on the way, because
 //! a container that reaches its own limit stops the fill short.
 //!
 //! That top-up is directional, and deliberately so. Removing excess in priority
-//! order can strip exactly the positions the shift step has just filled --
+//! order can strip exactly the positions the shift step has just filled;
 //! whenever the far hold is *further* from the target than the near one, which
-//! is the ordinary case for a forward hold across the wing box -- so every
+//! is the ordinary case for a forward hold across the wing box, so every
 //! shift is undone and the loop stalls at a large error. Adding on the light
 //! side and removing from the heavy side instead means the two steps pull the
 //! same way.

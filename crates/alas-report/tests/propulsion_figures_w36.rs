@@ -17,7 +17,9 @@ fn text_values(scene: &Scene) -> Vec<&str> {
         .elements
         .iter()
         .filter_map(|element| match element {
-            SceneElement::Text { text, .. } => Some(text.as_str()),
+            SceneElement::Text { text, .. } | SceneElement::TextBlock { text, .. } => {
+                Some(text.as_str())
+            }
             _ => None,
         })
         .collect()
@@ -27,8 +29,115 @@ fn has_text(scene: &Scene, needle: &str) -> bool {
     text_values(scene).iter().any(|text| text.contains(needle))
 }
 
+#[test]
+// This test builds its own preview request, so a failing unwrap is the
+// assertion failing.
+#[allow(clippy::unwrap_used)]
+fn designer_preview_dispatches_both_technologies_and_rejects_invalid_states() {
+    let turboprop = AlasConfig::from_value(&serde_json::json!({"preset": "ATR72-600"})).unwrap();
+    for theme in [Some("dark"), Some("light")] {
+        let scene = propulsion::figure_engine_designer_preview(&turboprop, theme);
+        assert!(has_text(&scene, "5 * Power turbine"));
+        assert!(has_text(&scene, "45 * Gas generator"));
+        assert!(!has_text(&scene, "Bypass flow"));
+        assert!(has_text(&scene, "Temperature T [K]"));
+        let scene = propulsion::figure_engine_designer_preview(&AlasConfig::default(), theme);
+        assert!(has_text(&scene, "Core flow"));
+        assert!(has_text(&scene, "45 * HPT"));
+        assert!(has_text(&scene, "Reference closure"));
+    }
+    let mut invalid = AlasConfig::default();
+    invalid.propulsion_cycle.cp_hot_j_kgk = f64::NAN;
+    let scene = propulsion::figure_engine_designer_preview(&invalid, None);
+    assert!(has_text(&scene, "Cycle unavailable"));
+    assert!(!scene
+        .elements
+        .iter()
+        .any(|e| matches!(e, SceneElement::Polyline { .. })));
+}
+
 fn assert_theme_background(scene: &Scene, expected: Color) {
     assert_eq!(scene.background, Some(expected));
+}
+
+#[test]
+// This test builds its own cycle inputs, so a failing unwrap is the assertion
+// failing.
+#[allow(clippy::unwrap_used)]
+fn cycle_diagrams_are_parametric_without_explanation_panels() {
+    fn paths(scene: &Scene) -> Vec<Vec<[f64; 2]>> {
+        scene
+            .elements
+            .iter()
+            .filter_map(|e| match e {
+                SceneElement::Polyline { points, .. } => Some(points.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+    for prop in [false, true] {
+        let config = if prop {
+            AlasConfig::from_value(&serde_json::json!({"preset":"ATR72-600"})).unwrap()
+        } else {
+            AlasConfig::default()
+        };
+        let scene = propulsion::figure_engine_designer_preview(&config, Some("dark"));
+        let original = paths(&scene);
+        assert!(!original.is_empty());
+        for forbidden in [
+            "WORK & HEAT",
+            "Qualitative",
+            "Ratings do not",
+            "Solid:",
+            "Entropy reference:",
+            "No interstage",
+            "drives",
+        ] {
+            assert!(!has_text(&scene, forbidden));
+        }
+        assert!(!scene
+            .elements
+            .iter()
+            .any(|e| matches!(e, SceneElement::TextBlock { .. })));
+        let mut changed = config.clone();
+        changed.propulsion_cycle.hpc_polytropic_efficiency -= 0.03;
+        assert_ne!(
+            original,
+            paths(&propulsion::figure_engine_designer_preview(&changed, None))
+        );
+        changed = config.clone();
+        if prop {
+            changed.propulsion_cycle.turboprop_overall_pressure_ratio *= 1.15;
+        } else {
+            changed
+                .geometry
+                .engine
+                .turbofan
+                .as_mut()
+                .unwrap()
+                .overall_pressure_ratio *= 1.15;
+        }
+        let revised = paths(&propulsion::figure_engine_designer_preview(&changed, None));
+        assert!(!revised.is_empty());
+        assert_ne!(original, revised);
+        changed = config.clone();
+        if prop {
+            changed
+                .propulsion_cycle
+                .turboprop_turbine_inlet_temperature_k += 100.0;
+        } else {
+            changed
+                .geometry
+                .engine
+                .turbofan
+                .as_mut()
+                .unwrap()
+                .turbine_inlet_temp_k += 100.0;
+        }
+        let revised = paths(&propulsion::figure_engine_designer_preview(&changed, None));
+        assert!(!revised.is_empty());
+        assert_ne!(original, revised);
+    }
 }
 
 #[test]

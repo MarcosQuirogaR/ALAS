@@ -22,7 +22,7 @@ pub enum Dialect {
     Modern,
 }
 
-/// The constraint set the mesh writes -- one `SPC1`, set 1.
+/// The constraint set the mesh writes, one `SPC1`, set 1.
 const SPC_SET: i64 = 1;
 
 /// The eigenvalue-extraction set the modes deck selects.
@@ -244,9 +244,9 @@ fn bulk(out: &mut String, tags: &mut ContinuationTags, deck: &Deck, dialect: Dia
         Dialect::Modern => "RBE3",
     };
     for rigid in &deck.rigid_elements {
-        // The same layout in both dialects -- field 2 blank, then the reference
+        // The same layout in both dialects (field 2 blank, then the reference
         // grid and components, the one weight and component group, and the
-        // independent grids -- emitted small-field so MSC's input processor
+        // independent grids) emitted small-field so MSC's input processor
         // accepts the continuation the mesh's large field does not survive.
         let mut fields = vec![
             Field::Int(rigid.eid),
@@ -302,7 +302,7 @@ fn bulk(out: &mut String, tags: &mut ContinuationTags, deck: &Deck, dialect: Dia
 /// identical explicit beam on both sides is what lets the cross-solver
 /// comparison isolate the shell and eigensolver differences, and the reduction
 /// [`super::section`] performs is validated against a modern `PBARL` on its own.
-/// Field 9 -- the mesh's `OFFT` string -- is dropped, because this dialect's
+/// Field 9 (the mesh's `OFFT` string) is dropped, because this dialect's
 /// `CBAR` spends that column on an integer flag and reads the vector directly.
 fn bars(out: &mut String, tags: &mut ContinuationTags, deck: &Deck) {
     let sections: HashMap<i64, &Pbarl> = deck.bar_properties.iter().map(|p| (p.pid, p)).collect();
@@ -348,7 +348,7 @@ fn bars(out: &mut String, tags: &mut ContinuationTags, deck: &Deck) {
 /// The `PARAM`s the mesh carried, translated to `dialect`.
 ///
 /// `AUTOSPC` is the load-bearing one and its value is where the two dialects
-/// disagree -- an integer here, `YES` there. `GRDPNT` passes through; `POST`
+/// disagree: an integer here, `YES` there. `GRDPNT` passes through; `POST`
 /// selects an output file neither of these runs needs and is dropped.
 fn params(out: &mut String, deck: &Deck, dialect: Dialect) {
     let autospc = match dialect {

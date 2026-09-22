@@ -182,5 +182,5 @@ fn no_wings_renders_a_status_message_not_a_panic() {
     assert!(scene
         .elements
         .iter()
-        .any(|e| matches!(e, SceneElement::Text { text, .. } if text.contains("geometry"))));
+        .any(|e| matches!(e, SceneElement::Text { text, .. } | SceneElement::TextBlock { text, .. } if text.contains("geometry"))));
 }

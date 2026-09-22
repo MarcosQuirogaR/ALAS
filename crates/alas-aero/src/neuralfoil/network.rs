@@ -13,13 +13,13 @@
 //!
 //! An airfoil turned upside down at the opposite angle of attack has the
 //! mirror image of the same flow. That is exact, and a network trained on
-//! finite data does not obey it exactly -- so upstream builds it in at
+//! finite data does not obey it exactly, so upstream builds it in at
 //! evaluation time rather than hoping for it: the inputs are flipped (both
 //! surfaces swapped and negated, the leading-edge mode and the
 //! `sin(2*alpha)` feature negated, the two forced-transition stations
 //! exchanged), the network is run again, the outputs are unflipped, and the
 //! two are averaged. The training did the same, so this is not a correction
-//! bolted on afterwards -- it is half of what the model is, and a port that
+//! bolted on afterwards; it is half of what the model is, and a port that
 //! evaluated once would be systematically wrong rather than merely noisier.
 //!
 //! The unflipping permutation is the fiddly part, and it is where a port goes
@@ -44,14 +44,14 @@
 //! every input and broadcasts them to a common length, and both reached call
 //! sites pass scalars (`airfoil_screening.py` sweeps alpha in a Python loop
 //! over candidates, and `visualization.py` loops over its grid). The one
-//! batch shape this program does ask for -- one section at a schedule of
-//! angles -- is [`evaluate_sweep`], which runs the network once over the
+//! batch shape this program does ask for, one section at a schedule of
+//! angles, is [`evaluate_sweep`], which runs the network once over the
 //! whole schedule and returns, bit for bit, what [`evaluate`] returns for
 //! each angle; it exists because the scalar path read every weight once per
 //! angle and made the airfoil screening network-bound.
 //!
-//! `nf.bl_x_points` -- the 32 chord stations the boundary layer is reported
-//! at -- is not translated either. It is externally accessible upstream, and
+//! `nf.bl_x_points`: the 32 chord stations the boundary layer is reported
+//! at, is not translated either. It is externally accessible upstream, and
 //! the only thing in this program that touches it reads its *length*:
 //! `kulfan_airfoil.py` writes `range(len(nf.bl_x_points))` where it means 32.
 
@@ -72,7 +72,7 @@ const WEIGHTS_PER_SIDE: usize = 8;
 pub struct BoundaryLayer {
     /// Momentum thickness, as a fraction of chord.
     pub theta: [f64; BL_STATIONS],
-    /// Shape factor `H` -- displacement thickness over momentum thickness.
+    /// Shape factor `H`: displacement thickness over momentum thickness.
     pub shape_factor: [f64; BL_STATIONS],
     /// Edge velocity over freestream velocity. Signed: the lower surface's
     /// is reported negative by the flip-and-average convention.
@@ -111,7 +111,7 @@ pub struct NetworkAero {
 ///
 /// [`NeuralFoilError::WeightCount`] when the fit did not produce eight
 /// weights per side, and [`NeuralFoilError::ClassExponents`] when the class
-/// function is not the conventional `(0.5, 1.0)` -- the two things upstream
+/// function is not the conventional `(0.5, 1.0)`: the two things upstream
 /// raises `NotImplementedError` for, and for the same reason: the network was
 /// trained on that parameterization and nothing else, so an answer for
 /// another one would be a confident guess.
@@ -142,7 +142,7 @@ pub fn evaluate(
 }
 
 /// [`evaluate`] over a schedule of flight conditions for one section, with
-/// the network run once over the whole batch -- both passes of every
+/// the network run once over the whole batch, both passes of every
 /// condition together. The outputs are, in order, exactly what evaluating
 /// each condition alone returns.
 ///
@@ -285,7 +285,7 @@ fn restore_mirrored(mirrored: &[f64]) -> Vec<f64> {
 /// The logistic curve the confidence channel is squashed through, clipped
 /// first so that `exp` cannot overflow.
 ///
-/// The clip bound is `ln(10 / f64::MAX)`, about -707.7 -- upstream computes
+/// The clip bound is `ln(10 / f64::MAX)`, about -707.7: upstream computes
 /// it the same way rather than writing it down, so that it follows the float
 /// width rather than assuming one.
 fn confidence_sigmoid(x: f64) -> f64 {
@@ -435,7 +435,7 @@ mod tests {
 
     #[test]
     fn every_shipped_model_size_answers_the_same_question_to_within_its_accuracy() {
-        // Not a parity check -- a check that all five decode and run, and
+        // Not a parity check: a check that all five decode and run, and
         // that none of them is wired up to the wrong blob. They disagree by
         // a few per cent, which is the accuracy-for-speed trade the sizes
         // exist to offer; a mis-wired one would disagree by far more.

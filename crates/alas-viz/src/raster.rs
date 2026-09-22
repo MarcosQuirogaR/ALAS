@@ -8,6 +8,9 @@
 //! to the exported figure while moving geometry and text work out of every
 //! egui paint pass.
 
+use alas_fonts::{
+    MATH_FONT_BYTES, MONOSPACE_FONT_BYTES, PROPORTIONAL_FAMILY, PROPORTIONAL_FONT_BYTES,
+};
 use alas_report::scene::{Camera3D, SceneElement};
 use alas_report::{render_svg, Scene};
 use rayon::prelude::*;
@@ -20,9 +23,21 @@ pub type RasterResult = Result<(u32, u32, Vec<u8>), String>;
 /// Rasterize a scene to an RGBA PNG buffer.
 pub fn render_scene_png(scene: &Scene) -> Result<Vec<u8>, String> {
     let (width, height, pixels) = render_scene_rgba(scene)?;
+    encode_png_rgba(width, height, &pixels)
+}
+
+/// Encode premultiplied RGBA pixels (the layout every raster here returns)
+/// as a PNG buffer.
+pub fn encode_png_rgba(width: u32, height: u32, pixels: &[u8]) -> Result<Vec<u8>, String> {
     let mut pixmap = tiny_skia::Pixmap::new(width, height)
         .ok_or_else(|| "allocate figure PNG canvas".to_owned())?;
-    pixmap.data_mut().copy_from_slice(&pixels);
+    if pixmap.data().len() != pixels.len() {
+        return Err(format!(
+            "encode figure PNG: {} bytes for {width} x {height}",
+            pixels.len()
+        ));
+    }
+    pixmap.data_mut().copy_from_slice(pixels);
     pixmap
         .encode_png()
         .map_err(|error| format!("encode figure PNG: {error}"))
@@ -56,11 +71,11 @@ pub fn render_scene_rgba_scaled(scene: &Scene, scale: f64) -> Result<(u32, u32, 
     // otherwise hide the texture layer drawn onto `pixmap` below.
     vector_scene.hide_background_paint();
     let svg = render_svg(&vector_scene);
-    // usvg intentionally starts with an empty font database. Loading system
-    // fonts on every globe orbit frame dominates raster time, so all figure
-    // renders share one immutable desktop font database.
+    // usvg intentionally starts with an empty font database. All figure
+    // renders share the same immutable bundled database, so glyph coverage
+    // and metrics cannot depend on a user's installed fonts.
     let options = resvg::usvg::Options {
-        fontdb: system_font_database(),
+        fontdb: figure_font_database(),
         ..resvg::usvg::Options::default()
     };
     let tree = resvg::usvg::Tree::from_str(&svg, &options)
@@ -88,8 +103,8 @@ pub fn render_scene_rgba_scaled(scene: &Scene, scale: f64) -> Result<(u32, u32, 
     Ok((width, height, pixmap.data().to_vec()))
 }
 
-/// Rasterize only the textured elements of `scene` -- the embedded rasters and
-/// the orthographic globe -- onto a transparent canvas at `scale` pixels per
+/// Rasterize only the textured elements of `scene` (the embedded rasters and
+/// the orthographic globe) onto a transparent canvas at `scale` pixels per
 /// scene unit, leaving every vector element and the background undrawn.
 ///
 /// This is the raster half of the interactive viewport's split rendering:
@@ -131,6 +146,7 @@ fn draw_spherical_textures(scene: &Scene, destination: &mut tiny_skia::Pixmap, s
             radius,
             camera,
             mirror_longitude,
+            clip,
         } = element
         else {
             continue;
@@ -141,8 +157,11 @@ fn draw_spherical_textures(scene: &Scene, destination: &mut tiny_skia::Pixmap, s
         draw_equirectangular_sphere(
             destination,
             texture.as_ref(),
-            *center,
-            *radius,
+            SpherePlacement {
+                center: *center,
+                radius: *radius,
+                clip: *clip,
+            },
             *camera,
             *mirror_longitude,
             scale,
@@ -150,26 +169,59 @@ fn draw_spherical_textures(scene: &Scene, destination: &mut tiny_skia::Pixmap, s
     }
 }
 
+/// Where a projected sphere sits in scene coordinates, and the figure area it
+/// may paint.
+struct SpherePlacement {
+    center: [f64; 2],
+    radius: f64,
+    clip: Option<[f64; 4]>,
+}
+
 fn draw_equirectangular_sphere(
     destination: &mut tiny_skia::Pixmap,
     texture: tiny_skia::PixmapRef<'_>,
-    center: [f64; 2],
-    radius: f64,
+    placement: SpherePlacement,
     camera: Camera3D,
     mirror_longitude: bool,
     scale: f64,
 ) {
+    let SpherePlacement {
+        center,
+        radius,
+        clip,
+    } = placement;
     let center_x = center[0] * scale;
     let center_y = center[1] * scale;
     let radius_px = radius * scale;
-    let left = (center_x - radius_px).floor().max(0.0) as u32;
+    // A zoomed globe is larger than the figure area that frames it. The clip
+    // keeps the sphere inside that area instead of over the figure's title,
+    // footnote and colorbar.
+    let (clip_left, clip_top, clip_right, clip_bottom) = match clip {
+        Some([x, y, width, height]) if [x, y, width, height].iter().all(|v| v.is_finite()) => (
+            x * scale,
+            y * scale,
+            (x + width) * scale,
+            (y + height) * scale,
+        ),
+        _ => (
+            0.0,
+            0.0,
+            f64::from(destination.width()),
+            f64::from(destination.height()),
+        ),
+    };
+    let left = (center_x - radius_px).floor().max(clip_left).max(0.0) as u32;
     let right = (center_x + radius_px)
         .ceil()
-        .min(f64::from(destination.width())) as u32;
-    let top = (center_y - radius_px).floor().max(0.0) as u32;
+        .min(clip_right)
+        .min(f64::from(destination.width()))
+        .max(0.0) as u32;
+    let top = (center_y - radius_px).floor().max(clip_top).max(0.0) as u32;
     let bottom = (center_y + radius_px)
         .ceil()
-        .min(f64::from(destination.height())) as u32;
+        .min(clip_bottom)
+        .min(f64::from(destination.height()))
+        .max(0.0) as u32;
     if bottom <= top || right <= left {
         return;
     }
@@ -291,15 +343,25 @@ fn draw_embedded_textures(scene: &Scene, destination: &mut tiny_skia::Pixmap, sc
     }
 }
 
-fn system_font_database() -> Arc<resvg::usvg::fontdb::Database> {
+fn figure_font_database() -> Arc<resvg::usvg::fontdb::Database> {
     static FONT_DATABASE: OnceLock<Arc<resvg::usvg::fontdb::Database>> = OnceLock::new();
     FONT_DATABASE
-        .get_or_init(|| {
-            let mut database = resvg::usvg::fontdb::Database::new();
-            database.load_system_fonts();
-            Arc::new(database)
-        })
+        .get_or_init(|| Arc::new(bundled_font_database()))
         .clone()
+}
+
+/// Build the deterministic portion of the figure font database.
+///
+/// The load order is intentional: usvg walks its database when a primary face
+/// lacks a glyph, so the mathematical face precedes the monospaced face.
+fn bundled_font_database() -> resvg::usvg::fontdb::Database {
+    let mut database = resvg::usvg::fontdb::Database::new();
+    database.load_font_data(PROPORTIONAL_FONT_BYTES.to_vec());
+    database.load_font_data(MATH_FONT_BYTES.to_vec());
+    database.load_font_data(MONOSPACE_FONT_BYTES.to_vec());
+    database.set_sans_serif_family(PROPORTIONAL_FAMILY);
+    database.set_serif_family(PROPORTIONAL_FAMILY);
+    database
 }
 
 fn blue_marble_texture() -> Option<&'static tiny_skia::Pixmap> {
@@ -317,10 +379,49 @@ fn blue_marble_texture() -> Option<&'static tiny_skia::Pixmap> {
 #[cfg(test)]
 mod tests {
     use super::{
-        render_scene_png, render_scene_rgba, render_scene_rgba_scaled, source_longitude,
-        sphere_sample_direction,
+        bundled_font_database, render_scene_png, render_scene_rgba, render_scene_rgba_scaled,
+        render_scene_textures_rgba_scaled, source_longitude, sphere_sample_direction,
     };
+    use alas_fonts::{MATH_FAMILY, MONOSPACE_FAMILY, PROPORTIONAL_FAMILY};
     use alas_report::scene::{Camera3D, Color, Scene, SceneElement, TextAlign, TextBaseline};
+
+    const ENGINEERING_GLYPH_CORPUS: &str = concat!(
+        "\u{03B1}\u{03B7}\u{03C1}\u{03C3}\u{03C9}\u{1E41}",
+        "\u{2070}\u{00B2}\u{00B3}\u{2080}\u{2092}\u{2095}\u{209A}\u{209C}",
+        "\u{00B0}\u{00B1}\u{00B7}\u{00D7}\u{2212}\u{221A}\u{2264}\u{2265}\u{2260}\u{2192}\u{2202}\u{2207}\u{2211}\u{222B}\u{1D6FC}"
+    );
+
+    #[test]
+    fn bundled_figure_fonts_render_engineering_text_without_host_fonts() {
+        let database = bundled_font_database();
+        assert_eq!(database.len(), 3, "no host fonts belong in a GUI figure");
+        for family in [PROPORTIONAL_FAMILY, MATH_FAMILY, MONOSPACE_FAMILY] {
+            assert!(
+                database
+                    .faces()
+                    .any(|face| face.families.iter().any(|entry| entry.0 == family)),
+                "bundled figure database is missing {family}"
+            );
+        }
+
+        let mut scene = Scene::new(800.0, 160.0, Some(Color::rgb(255, 255, 255)));
+        scene.add(SceneElement::Text {
+            text: ENGINEERING_GLYPH_CORPUS.to_owned(),
+            pos: [20.0, 50.0],
+            font_size: 15.0,
+            color: Color::rgb(0, 0, 0),
+            align: TextAlign::Left,
+            baseline: TextBaseline::Top,
+            angle_deg: 0.0,
+            bold: false,
+        });
+        let (_width, _height, rgba) = render_scene_rgba(&scene).expect("figure rasterizes");
+        assert!(
+            rgba.chunks_exact(4)
+                .any(|pixel| pixel != [255, 255, 255, 255]),
+            "engineering text must paint into the bundled-font raster"
+        );
+    }
 
     /// Regression for the actual GUI figure-card bug: this function used to
     /// clear `scene.background` before calling `render_svg` so the vector
@@ -328,7 +429,7 @@ mod tests {
     /// blinded `visual_title`'s contrast decision (it reads the same field),
     /// so every automatic figure title rendered in its near-black
     /// light-theme color on Grey and Dark, on top of a still-correctly-dark
-    /// background -- reproducing the reported "black global titles on Grey
+    /// background, reproducing the reported "black global titles on Grey
     /// background despite white panel titles". Panel headings were
     /// unaffected because they are colored explicitly from the palette, not
     /// through `visual_title`.
@@ -379,6 +480,34 @@ mod tests {
     }
 
     #[test]
+    fn a_clipped_sphere_paints_inside_its_figure_area_only() {
+        let mut scene = Scene::new(80.0, 80.0, None);
+        scene.add(SceneElement::SphericalImage {
+            source: "embedded://nasa-blue-marble".to_owned(),
+            center: [40.0, 40.0],
+            // A globe zoomed past its own figure area, as the maximized route
+            // view allows.
+            radius: 70.0,
+            camera: Camera3D::front(),
+            mirror_longitude: false,
+            clip: Some([20.0, 25.0, 40.0, 30.0]),
+        });
+
+        let (width, _, pixels) = render_scene_textures_rgba_scaled(&scene, 1.0)
+            .expect("textured scene")
+            .expect("texture raster");
+        for (index, pixel) in pixels.chunks_exact(4).enumerate() {
+            let x = (index as u32 % width) as f64;
+            let y = (index as u32 / width) as f64;
+            let inside = (20.0..60.0).contains(&x) && (25.0..55.0).contains(&y);
+            if !inside {
+                assert_eq!(pixel[3], 0, "sphere painted outside its clip at {x},{y}");
+            }
+        }
+        assert!(pixels.chunks_exact(4).any(|pixel| pixel[3] > 0));
+    }
+
+    #[test]
     fn the_texture_layer_alone_matches_the_full_raster_of_a_texture_only_scene() {
         let mut scene = Scene::new(65.0, 65.0, None);
         scene.add(SceneElement::SphericalImage {
@@ -387,6 +516,7 @@ mod tests {
             radius: 30.0,
             camera: Camera3D::front(),
             mirror_longitude: false,
+            clip: None,
         });
         let full = super::render_scene_rgba_scaled(&scene, 1.5).expect("full raster");
         let textures = super::render_scene_textures_rgba_scaled(&scene, 1.5)
@@ -463,6 +593,7 @@ mod tests {
             radius: 30.0,
             camera: Camera3D::front(),
             mirror_longitude: false,
+            clip: None,
         });
 
         let (_, _, pixels) = render_scene_rgba(&scene).expect("Earth sphere rasterization");

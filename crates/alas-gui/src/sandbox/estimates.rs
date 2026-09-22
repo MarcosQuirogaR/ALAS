@@ -117,10 +117,12 @@ fn show_payload_range(ui: &mut Ui, corners: &QuickPayloadRange) {
     );
     ui.label(
         RichText::new(tr_fields(
-            "OEW {oew} kg, MTOW {mtow} kg, fuel capacity {fuel} kg ({basis})",
+            "OEW {oew} kg, MTOW {mtow} kg, max payload {payload} kg ({payload_basis}), fuel capacity {fuel} kg ({basis})",
             &[
                 ("oew", format!("{:.0}", corners.oew_kg)),
                 ("mtow", format!("{:.0}", corners.mtow_kg)),
+                ("payload", format!("{:.0}", corners.max_payload_kg)),
+                ("payload_basis", tr(&corners.payload_basis)),
                 ("fuel", format!("{:.0}", corners.fuel_capacity_kg)),
                 ("basis", corners.fuel_capacity_basis.clone()),
             ],

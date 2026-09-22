@@ -13,7 +13,7 @@ rust-version.workspace = true
 alas-config = { path = "../alas-config" }
 # The matching chart and V-speed schedule read the ambient state from
 # `Atmosphere::new`, the fitted "differentiable" model, exactly as
-# the performance physics does -- the
+# the performance physics does: the
 # same edge `alas-prop` carries for the same reason.
 alas-atmo = { path = "../alas-atmo" }
 

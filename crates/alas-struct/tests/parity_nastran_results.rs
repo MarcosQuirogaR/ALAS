@@ -6,7 +6,7 @@
 //! `golden/generators/gen_struct_nastran_results.py`.
 //!
 //! The decks this module writes are compared in `parity_nastran.rs`. This is
-//! the other direction -- what it reads back -- and it is checked on OP2 files
+//! the other direction (what it reads back) and it is checked on OP2 files
 //! pyNastran wrote, because reading back otherwise needs a solve and there is
 //! no NASTRAN install here to produce one. Each scenario in the fixture exists
 //! to reach a branch that a complete, healthy result would never reach: a
@@ -24,8 +24,8 @@
 //! frequency compared loosely would let a reader that dropped a mode pass.
 //!
 //! The run report is `exact` throughout, and deliberately so: it is text, and
-//! the thing most likely to go wrong in it -- that a NASTRAN print file is
-//! paginated with form feeds, which Python breaks lines at and Rust does not --
+//! the thing most likely to go wrong in it: that a NASTRAN print file is
+//! paginated with form feeds, which Python breaks lines at and Rust does not:
 //! shows up only as the wrong characters, never as a tolerance.
 
 // This file is itself a test binary, so an unwrap or expect that fails is the
@@ -258,7 +258,7 @@ fn static_results_match_the_reference_across_partial_and_complete_solves() {
             &result.status.as_str().to_owned(),
             &case.expected.status,
         );
-        // Both of these are copied out of the file -- one component of a
+        // Both of these are copied out of the file, one component of a
         // displacement row, and the largest absolute value of a stress column.
         // Neither passes through arithmetic, so both are reachable at `exact`.
         compare_labelled_exact(

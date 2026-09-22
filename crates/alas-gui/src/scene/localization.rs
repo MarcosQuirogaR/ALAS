@@ -84,9 +84,9 @@ pub(super) fn localize_scene_text(text: &str) -> String {
             return format!("{indent}{translated}{value}");
         }
     }
-    if let Some(value) = text.strip_prefix("Landing Gear Planform -- ") {
-        let translated = alas_i18n::t(Some("Landing Gear Planform -- "), None);
-        if translated != "Landing Gear Planform -- " {
+    if let Some(value) = text.strip_prefix("Landing Gear Planform: ") {
+        let translated = alas_i18n::t(Some("Landing Gear Planform: "), None);
+        if translated != "Landing Gear Planform: " {
             return format!("{translated}{value}");
         }
     }

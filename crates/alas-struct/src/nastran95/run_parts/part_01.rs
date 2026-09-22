@@ -39,8 +39,8 @@ const WINDOWS_GNU_RUNTIME_DLLS: [&str; 4] = [
 
 /// Where the built solver and its runtime are, resolved from the environment.
 ///
-/// `ALAS_NASTRAN95_DIR` is the checked-out solver tree -- the executable is
-/// `build/bin/nastran.exe` beneath it and the run-time files are its `rf/` --
+/// `ALAS_NASTRAN95_DIR` is the checked-out solver tree (the executable is
+/// `build/bin/nastran.exe` beneath it and the run-time files are its `rf/`)
 /// and `ALAS_NASTRAN95_RUNTIME` is the directory holding `libgfortran`, which
 /// has to be on `PATH` for the executable to load. `ALAS_NASTRAN95_RF_STAGE`
 /// may name a dedicated short absolute directory for copied rigid-format files
@@ -525,7 +525,7 @@ fn stage(solver: &Nastran95Solver, work_dir: &Path, rf: &Path) -> std::io::Resul
 }
 
 /// A path as the string the solver's `GETENV` reads, with the extended-length
-/// prefix stripped -- the classic scanner does not accept it.
+/// prefix stripped: the classic scanner does not accept it.
 fn short(path: &Path) -> String {
     let text = path.display().to_string();
     text.strip_prefix(r"\\?\").unwrap_or(&text).to_string()
@@ -534,13 +534,13 @@ fn short(path: &Path) -> String {
 /// Spawn, feed the deck, hold to the timeout, and return stdout as the print
 /// file.
 fn supervise(mut command: Command, deck: &str, timeout: Duration) -> RunOutcome {
-    let spawned = command
+    command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .no_window()
-        .new_process_group()
-        .spawn();
+        .new_process_group();
+    let spawned = alas_exec::SupervisedSpawn::spawn_supervised(&mut command, "NASTRAN-95 solve");
     let mut child = match spawned {
         Ok(child) => child,
         Err(error) => return RunOutcome::Failed(format!("failed to launch nastran.exe: {error}")),
@@ -612,7 +612,7 @@ fn supervise(mut command: Command, deck: &str, timeout: Duration) -> RunOutcome 
 }
 
 /// Every fatal message the print file carries, the way [`crate::nastran::run`]
-/// scans for them -- across form feeds, not only newlines.
+/// scans for them: across form feeds, not only newlines.
 fn fatal_lines(print: &str) -> Vec<String> {
     text::splitlines(print)
         .into_iter()

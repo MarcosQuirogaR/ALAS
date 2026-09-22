@@ -192,9 +192,11 @@ pub fn run_airfoil_screening_reference_compatibility(
 
 /// Execute screening with the physical product mass-coordinate model.
 ///
-/// The translated [`run_airfoil_screening`] entry point remains explicitly
-/// reference-compatible so its fixture is not changed by a product-model
-/// improvement. Desktop and other product callers use this entry point.
+/// [`run_airfoil_screening`] is an alias for this product path, not a frozen
+/// one: it forwards here with the same arguments. The reference-compatible
+/// path whose fixture a product-model improvement must not change is
+/// [`run_airfoil_screening_reference_compatibility`]. Desktop and other
+/// product callers reach this function either way.
 #[allow(clippy::too_many_arguments)] // product entry keeps the callback and cancellation contract explicit
 pub fn run_airfoil_screening_product(
     config: &AlasConfig,

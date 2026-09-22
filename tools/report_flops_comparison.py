@@ -14,7 +14,7 @@ Usage::
         outputs/pure-flops-production/raw.json \
         outputs/pure-flops-production
 
-The HTML report is written to ``.agent/reports/pure-flops-production.html``
+The HTML report is written to ``out/reports/pure-flops-production.html``
 unless a third path is supplied.
 """
 
@@ -513,7 +513,7 @@ def html_report(
         f'<figure><img src="../outputs/pure-flops-production/{esc(name)}" alt="{esc(name)}"><figcaption>{esc(name)}</figcaption></figure>'
         for name in figures
     )
-    # The report lives in .agent/reports, one directory above outputs/.
+    # The report lives in out/reports, one directory above outputs/.
     # Relative links therefore make the artifact portable inside the checkout.
     figure_markup = figure_markup.replace("../outputs", "../../outputs")
     source_links = data.get("sources", {})
@@ -557,7 +557,7 @@ def html_report(
 <p class="{'good' if not failed else 'alert'}"><strong>{passing}/{len(checks)} checks passed.</strong> Input SHA256: <code>{hashlib.sha256(input_path.read_bytes()).hexdigest()}</code>.</p>
 <h2>Sources and reproducibility</h2>
 <p>Primary source links and local evidence pointers:</p>{source_html}
-<pre>cargo run -p alas-mass --example flops_preset_comparison -- outputs/pure-flops-production/raw.json .agent/data/pure-flops-evidence/mass_reference_anchors.json
+<pre>cargo run -p alas-mass --example flops_preset_comparison -- outputs/pure-flops-production/raw.json &lt;path-to-local-evidence-copy&gt;/mass_reference_anchors.json
 python tools/report_flops_comparison.py outputs/pure-flops-production/raw.json outputs/pure-flops-production
 </pre>
 <p class="small">Python {esc(platform.python_version())}; matplotlib {esc(matplotlib.__version__)}. The report performs schema, conservation and architecture-label checks. It does not claim physical validation, fit accuracy, or certification.</p>
@@ -606,7 +606,7 @@ def main() -> int:
     report_path = (
         Path(sys.argv[3])
         if len(sys.argv) == 4
-        else Path(__file__).resolve().parents[1] / ".agent/reports/pure-flops-production.html"
+        else Path(__file__).resolve().parents[1] / "out/reports/pure-flops-production.html"
     )
     result = render(input_path, output, report_path)
     print(json.dumps(result, indent=2))

@@ -10,7 +10,7 @@
 //! update that lets it skip rebuilding one.
 //!
 //! A Jacobian costs `n` residual evaluations, and a residual evaluation is a
-//! whole mission-segment analysis chain -- atmosphere, propulsion, drag
+//! whole mission-segment analysis chain: atmosphere, propulsion, drag
 //! buildup, weights. So `hybrd` builds the Jacobian rarely and carries `Q` and
 //! `R` forward across steps, applying Broyden's rank-one correction to the
 //! factors directly rather than refactoring. [`r1updt`] and [`r1mpyq`] are
@@ -20,12 +20,12 @@
 //! # Scope
 //!
 //! Every routine here is square (`m == n`), which is the only shape `hybrd`
-//! calls them with -- it solves `n` equations in `n` unknowns and factors an
+//! calls them with; it solves `n` equations in `n` unknowns and factors an
 //! `n`-by-`n` Jacobian. [`qrfac`] is scoped to `pivot = .false.`, the value
 //! `hybrd` passes, so the column-pivoting branch and the `ipvt` permutation it
 //! maintains are not translated. The one exception is [`r1mpyq`], which
-//! `hybrd` calls twice with different row counts -- once on the `n`-by-`n`
-//! accumulated `Q` and once on the single row `qtf` -- so that one keeps its
+//! `hybrd` calls twice with different row counts; once on the `n`-by-`n`
+//! accumulated `Q` and once on the single row `qtf`, so that one keeps its
 //! row count as a parameter.
 //!
 //! `R` is stored packed by rows, upper triangle only: `r[0]` is `R(1,1)`,
@@ -154,7 +154,7 @@ fn givens(a: f64, b: f64) -> Givens {
 /// columns* and produces an orthogonal `q` making `(s + u v^T) q` lower
 /// trapezoidal again. For a square matrix the lower triangle stored by
 /// columns and the upper triangle stored by rows are the same linear layout,
-/// so the `s` this routine walks is `R^T` -- and transposing its stated
+/// so the `s` this routine walks is `R^T`, and transposing its stated
 /// contract gives `q^T (R + v u^T)` upper triangular. `hybrd` relies on
 /// exactly that reading: it passes the scaled step as `u` and the residual
 /// mismatch as `v`, which is Broyden's correction `R + (Q^T \delta) p^T` only
@@ -359,8 +359,8 @@ mod tests {
 
     #[test]
     fn a_rank_one_update_leaves_a_triangle_that_still_factors_the_updated_matrix() {
-        // Given the `R` of `A`, `r1updt` produces the `R` of `A + col row^T`
-        // -- where `col` is passed as its `v` argument, rotated into the `Q`
+        // Given the `R` of `A`, `r1updt` produces the `R` of `A + col row^T`,
+        // where `col` is passed as its `v` argument, rotated into the `Q`
         // frame, and `row` is passed as its `u` argument. That order is the
         // transposed-storage subtlety the function's own doc comment records,
         // and getting it backwards still yields a triangular matrix, so this

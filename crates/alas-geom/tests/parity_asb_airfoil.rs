@@ -8,7 +8,7 @@
 //! closed-form NACA generation: `docs/PORTING.md` assigns this whole row
 //! `linalg` rather than `closed` because the crate it belongs to
 //! (`alas-geom`) depends on `alas-math::spline` for `repanel`, and that is
-//! the tier the row names for the module as a whole -- not chosen per case.
+//! the tier the row names for the module as a whole, not chosen per case.
 
 // This file is itself a test binary, so an unwrap or expect that fails is
 // the assertion failing.
@@ -166,7 +166,7 @@ fn local_and_max_thickness_match_aerosandbox() {
         );
 
         // `np.linspace(0, 1, 101)`, `max_thickness`'s upstream default
-        // sample grid -- built directly here rather than through this
+        // sample grid: built directly here rather than through this
         // crate's internal `spacing::linspace`, which is private to `asb`
         // and not meant to be reached from outside the crate.
         let default_sample: Vec<f64> = (0..=100).map(|i| f64::from(i) / 100.0).collect();

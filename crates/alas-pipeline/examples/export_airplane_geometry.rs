@@ -6,7 +6,7 @@
 //!
 //! `AircraftBuilder::build` already applies the geometry configuration's own
 //! spanwise subdivision, so what this writes is exactly the `Airplane` the
-//! VLM meshes -- cross-section stations, chords, twists and the resolved
+//! VLM meshes: cross-section stations, chords, twists and the resolved
 //! airfoil coordinates. Rebuilding that in Python from a preset name instead
 //! would reintroduce every difference the comparison is meant to isolate.
 //!

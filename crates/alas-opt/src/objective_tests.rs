@@ -268,3 +268,24 @@ fn passenger_capacity_is_recomputed_without_an_opt_in_switch() {
 
     assert_ne!(config.requirements.num_passengers, target);
 }
+
+#[test]
+fn explicit_count_cabin_survives_optimizer_candidate_preparation() {
+    let mut config = AlasConfig::from_value(&serde_json::json!({"preset": "AVE"}))
+        .expect("the registered preset loads");
+    config.requirements.cabin_preset = "Emirates".to_owned();
+    config.cabin.passenger.class_mix_mode = "count".to_owned();
+    config.cabin.passenger.first.count = 30;
+    config.cabin.passenger.business.count = 60;
+    config.cabin.passenger.premium.count = 10;
+    config.cabin.passenger.economy.count = 300;
+
+    apply_candidate_payload_load_case(&mut config, &DesignVector::default())
+        .expect("the explicit count load case resolves");
+
+    assert_eq!(config.cabin.passenger.first.count, 30);
+    assert_eq!(config.cabin.passenger.business.count, 60);
+    assert_eq!(config.cabin.passenger.premium.count, 0);
+    assert_eq!(config.cabin.passenger.economy.count, 310);
+    assert_eq!(config.requirements.num_passengers, 400);
+}

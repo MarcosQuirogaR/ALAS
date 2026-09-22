@@ -116,7 +116,7 @@ fn check_license_header(display: &str, lines: &[&str]) -> Vec<String> {
 }
 
 /// Whether `phrase` occurs in `text` as whole words. A match that begins or
-/// ends inside a longer word -- the tail of "was", the tail of "where" -- is
+/// ends inside a longer word: the tail of "was", the tail of "where", is
 /// ordinary prose, not change narration.
 fn contains_phrase(text: &str, phrase: &str) -> bool {
     text.match_indices(phrase).any(|(start, matched)| {

@@ -13,13 +13,13 @@
 //! them, and both nozzle expansions. It returns specific thrust per unit
 //! *total* (core + bypass) mass flow, thrust-specific fuel consumption, the
 //! thermal/propulsive/overall efficiency decomposition and every station
-//! stagnation temperature -- or [`TurbofanCycleResult::cycle_feasible`] set
+//! stagnation temperature, or [`TurbofanCycleResult::cycle_feasible`] set
 //! false with a reason when the requested parameters have no physical solution.
 //!
 //! Every equation is first-principles compressible flow (isentropic plus
 //! polytropic-efficiency relations, energy and momentum conservation) with no
 //! curve-fit constants; the only external input is the ambient state, read
-//! from [`alas_atmo::Atmosphere::new`] -- the fitted model upstream's
+//! from [`alas_atmo::Atmosphere::new`]: the fitted model upstream's
 //! `Atmosphere(altitude=...)` selects when no method is named, not the
 //! closed-form ISA.
 //!
@@ -33,6 +33,7 @@
 use alas_atmo::Atmosphere;
 use alas_config::PropulsionCycleConfig;
 
+pub mod states;
 pub mod sweeps;
 
 /// Design-point flight condition and cycle parameters for one evaluation.
@@ -160,16 +161,46 @@ fn expand_nozzle(
     (v_exit, t_exit, p_exit)
 }
 
-/// Evaluate the on-design separate-flow turbofan cycle at one flight condition.
-///
-/// See the module documentation for the returned quantities and the
-/// station-by-station structure. The `cfg` supplies every component efficiency
-/// and pressure loss; upstream defaults it to `PropulsionCycleConfig()`, which
-/// callers reproduce with `PropulsionCycleConfig::default()`.
-pub fn compute_turbofan_cycle(
+/// Every station state the on-design walk produces, before thrust and
+/// efficiency are formed from it. Stagnation quantities carry a `tt`/`pt`
+/// prefix; the nozzle exit states (`t9`, `p9`, `t19`, `p19`) are static.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct CycleWalk {
+    pub(crate) t0: f64,
+    pub(crate) p0: f64,
+    pub(crate) v0: f64,
+    pub(crate) tt0: f64,
+    pub(crate) pt0: f64,
+    pub(crate) tt2: f64,
+    pub(crate) pt2: f64,
+    pub(crate) tt13: f64,
+    pub(crate) pt13: f64,
+    pub(crate) tt25: f64,
+    pub(crate) pt25: f64,
+    pub(crate) tt3: f64,
+    pub(crate) pt3: f64,
+    pub(crate) tt4: f64,
+    pub(crate) pt4: f64,
+    pub(crate) tt45: f64,
+    pub(crate) pt45: f64,
+    pub(crate) tt5: f64,
+    pub(crate) pt5: f64,
+    pub(crate) tt6: f64,
+    pub(crate) pt6: f64,
+    pub(crate) f_ratio: f64,
+    pub(crate) v9: f64,
+    pub(crate) t9: f64,
+    pub(crate) p9: f64,
+    pub(crate) v19: f64,
+    pub(crate) t19: f64,
+    pub(crate) p19: f64,
+}
+
+/// Walk the cycle station by station; `Err` carries the infeasibility reason.
+pub(crate) fn walk_cycle(
     inputs: &TurbofanCycleInputs,
     cfg: &PropulsionCycleConfig,
-) -> TurbofanCycleResult {
+) -> Result<CycleWalk, String> {
     let (gc, cpc) = (cfg.gamma_cold, cfg.cp_cold_j_kgk);
     let (gh, cph) = (cfg.gamma_hot, cfg.cp_hot_j_kgk);
 
@@ -181,26 +212,26 @@ pub fn compute_turbofan_cycle(
     let v0 = m0 * a0;
 
     let tt0 = t0 * (1.0 + 0.5 * (gc - 1.0) * m0.powi(2));
-    let pt0_ideal = p0 * (1.0 + 0.5 * (gc - 1.0) * m0.powi(2)).powf(gc / (gc - 1.0));
-    let pt0 = pt0_ideal * cfg.inlet_pressure_recovery;
-    let (tt2, pt2) = (tt0, pt0);
+    let pt0 = p0 * (1.0 + 0.5 * (gc - 1.0) * m0.powi(2)).powf(gc / (gc - 1.0));
+    let (tt2, pt2) = (tt0, pt0 * cfg.inlet_pressure_recovery);
 
-    // -- Fan branch (parallel to the core compressors, same inlet state) -----
+    // Fan branch (parallel to the core compressors, same inlet state)
     let pi_f = inputs.fan_pressure_ratio.max(1.0);
     let tt13 = tt2 * pi_f.powf((gc - 1.0) / (gc * cfg.fan_polytropic_efficiency));
     let pt13 = pt2 * pi_f * cfg.fan_nozzle_pressure_ratio;
 
-    // -- Core compressors (LPC then HPC) -------------------------------------
+    // Core compressors (LPC then HPC)
     let pi_lpc = cfg.lpc_pressure_ratio_split;
     let pi_hpc = (inputs.overall_pressure_ratio / pi_lpc).max(1.0);
     let tt25 = tt2 * pi_lpc.powf((gc - 1.0) / (gc * cfg.lpc_polytropic_efficiency));
+    let pt25 = pt2 * pi_lpc;
     let tt3 = tt25 * pi_hpc.powf((gc - 1.0) / (gc * cfg.hpc_polytropic_efficiency));
     let pt3 = pt2 * pi_lpc * pi_hpc;
 
-    // -- Combustor -----------------------------------------------------------
+    // Combustor
     let tt4 = inputs.turbine_inlet_temperature_k;
     if tt4 <= tt3 {
-        return infeasible(format!(
+        return Err(format!(
             "Turbine inlet temperature ({tt4:.0} K) must exceed the compressor \
              discharge temperature ({tt3:.0} K)."
         ));
@@ -209,53 +240,115 @@ pub fn compute_turbofan_cycle(
     let h_pr = cfg.fuel_heating_value_kj_kg * 1000.0;
     let denom = cfg.combustor_efficiency * h_pr - cph * tt4;
     if denom <= 0.0 {
-        return infeasible(
+        return Err(
             "Turbine inlet temperature too high relative to the fuel heating value.".to_owned(),
         );
     }
     let f_ratio = (cph * tt4 - cpc * tt3) / denom;
     if f_ratio <= 0.0 {
-        return infeasible("Computed fuel-air ratio is non-positive.".to_owned());
+        return Err("Computed fuel-air ratio is non-positive.".to_owned());
     }
 
-    // -- HPT (drives HPC) ----------------------------------------------------
+    // HPT (drives HPC)
     let hpc_work = cpc * (tt3 - tt25);
     let d_tt_hpt = hpc_work / ((1.0 + f_ratio) * cph * cfg.turbine_mechanical_efficiency);
     let tt45 = tt4 - d_tt_hpt;
     if tt45 <= 0.0 {
-        return infeasible(
-            "HPT work required exceeds available combustor exit enthalpy.".to_owned(),
-        );
+        return Err("HPT work required exceeds available combustor exit enthalpy.".to_owned());
     }
     let pt45 = pt4 * (tt45 / tt4).powf(gh / ((gh - 1.0) * cfg.hpt_polytropic_efficiency));
 
-    // -- LPT (drives LPC + fan) ----------------------------------------------
+    // LPT (drives LPC + fan)
     let lpc_work = cpc * (tt25 - tt2);
     let fan_work = cpc * (tt13 - tt2);
     let d_tt_lpt = (lpc_work + inputs.bypass_ratio * fan_work)
         / ((1.0 + f_ratio) * cph * cfg.turbine_mechanical_efficiency);
     let tt5 = tt45 - d_tt_lpt;
     if tt5 <= 0.0 {
-        return infeasible(
+        return Err(
             "LPT work required (LPC + fan) exceeds available HPT exit enthalpy.".to_owned(),
         );
     }
     let pt5 = pt45 * (tt5 / tt45).powf(gh / ((gh - 1.0) * cfg.lpt_polytropic_efficiency));
 
-    // -- Core nozzle ---------------------------------------------------------
+    // Core nozzle
     let pt6 = pt5 * cfg.core_nozzle_pressure_ratio;
     let tt6 = tt5;
     let (v9, t9, p9) = expand_nozzle(tt6, pt6, p0, gh, cph, cfg.core_nozzle_efficiency);
 
-    // -- Fan nozzle ----------------------------------------------------------
+    // Fan nozzle
     let (v19, t19, p19) = expand_nozzle(tt13, pt13, p0, gc, cpc, cfg.fan_nozzle_efficiency);
 
-    // -- Thrust (per unit CORE mass flow), including pressure-thrust if choked.
+    Ok(CycleWalk {
+        t0,
+        p0,
+        v0,
+        tt0,
+        pt0,
+        tt2,
+        pt2,
+        tt13,
+        pt13,
+        tt25,
+        pt25,
+        tt3,
+        pt3,
+        tt4,
+        pt4,
+        tt45,
+        pt45,
+        tt5,
+        pt5,
+        tt6,
+        pt6,
+        f_ratio,
+        v9,
+        t9,
+        p9,
+        v19,
+        t19,
+        p19,
+    })
+}
+
+/// Evaluate the on-design separate-flow turbofan cycle at one flight condition.
+///
+/// See the module documentation for the returned quantities and the
+/// station-by-station structure. The `cfg` supplies every component efficiency
+/// and pressure loss; upstream defaults it to `PropulsionCycleConfig()`, which
+/// callers reproduce with `PropulsionCycleConfig::default()`. The station
+/// states themselves, with entropy, are exposed by
+/// [`states::compute_turbofan_cycle_states`] from the same walk.
+pub fn compute_turbofan_cycle(
+    inputs: &TurbofanCycleInputs,
+    cfg: &PropulsionCycleConfig,
+) -> TurbofanCycleResult {
+    let (gc, cpc) = (cfg.gamma_cold, cfg.cp_cold_j_kgk);
+    let (gh, cph) = (cfg.gamma_hot, cfg.cp_hot_j_kgk);
+    let walk = match walk_cycle(inputs, cfg) {
+        Ok(walk) => walk,
+        Err(reason) => return infeasible(reason),
+    };
+    let CycleWalk {
+        p0,
+        v0,
+        f_ratio,
+        v9,
+        t9,
+        p9,
+        v19,
+        t19,
+        p19,
+        ..
+    } = walk;
+    let h_pr = cfg.fuel_heating_value_kj_kg * 1000.0;
+
+    //: Thrust (per unit CORE mass flow), including pressure-thrust if choked.
     // Folded into an "equivalent" exit velocity (V9_eq = V9 + (p9-p0)/(rho9*V9))
     // rather than kept as a separate additive pressure term: algebraically
     // identical for the thrust equation, but it also lets the efficiency
     // energy-balance below use the SAME equivalent velocity for its
-    // kinetic-energy term -- required for a choked/underexpanded nozzle, where
+    // kinetic-energy term: required for a choked/underexpanded nozzle, where
     // the exiting flow still carries recoverable pressure energy a longer
     // nozzle would have converted to KE. The bare V9/V19 in the KE-gain
     // denominator let momentum+pressure thrust exceed KE-only accounting
@@ -311,14 +404,14 @@ pub fn compute_turbofan_cycle(
     result.thermal_efficiency = eta_th;
     result.propulsive_efficiency = eta_p;
     result.overall_efficiency = eta_o;
-    result.temperature_t0_k = tt0;
-    result.temperature_t13_k = tt13;
-    result.temperature_t25_k = tt25;
-    result.temperature_t3_k = tt3;
-    result.temperature_t4_k = tt4;
-    result.temperature_t45_k = tt45;
-    result.temperature_t5_k = tt5;
-    result.temperature_t6_k = tt6;
+    result.temperature_t0_k = walk.tt0;
+    result.temperature_t13_k = walk.tt13;
+    result.temperature_t25_k = walk.tt25;
+    result.temperature_t3_k = walk.tt3;
+    result.temperature_t4_k = walk.tt4;
+    result.temperature_t45_k = walk.tt45;
+    result.temperature_t5_k = walk.tt5;
+    result.temperature_t6_k = walk.tt6;
     result.exit_velocity_core_ms = v9;
     result.exit_velocity_fan_ms = v19;
     result
@@ -357,7 +450,7 @@ pub fn anchor_mass_flow_kg_s(
     (mdot_total, static_result)
 }
 
-/// Descriptive label from bypass ratio (informational only -- it feeds no
+/// Descriptive label from bypass ratio (informational only; it feeds no
 /// lookup table, unlike the classic turbojet/LBR/HBR engine-deck buckets).
 pub fn classify_engine_by_bpr(bypass_ratio: f64) -> &'static str {
     if bypass_ratio < 1.0 {

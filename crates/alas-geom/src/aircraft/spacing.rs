@@ -10,7 +10,7 @@
 //! Every non-CasADi call in `spacing.py` bottoms out in NumPy's own
 //! `linspace`, so [`linspace`] reproduces that directly rather than
 //! reimplementing a general-purpose numeric routine from scratch. [`cosspace`]
-//! is `Airfoil.repanel`'s and `get_NACA_coordinates`'s spacing function --
+//! is `Airfoil.repanel`'s and `get_NACA_coordinates`'s spacing function:
 //! cosine spacing bunches points near both ends of the interval, which is
 //! what concentrates panels near an airfoil's leading and trailing edges.
 //!
@@ -20,7 +20,7 @@
 //! values, because the trigonometric round trip (`cos(linspace(pi, 0,
 //! ...))`) does not always land on them bit-for-bit. For `num == 1` this
 //! means the *second* write wins over the first (`stop` ends up written to
-//! the only element, even though the first line asked for `start`) -- an
+//! the only element, even though the first line asked for `start`): an
 //! artifact of the two assignments sharing one index, kept here exactly as
 //! upstream has it. `num == 0` is not reproduced as a crash; see
 //! [`cosspace`].
@@ -46,7 +46,7 @@ pub fn linspace(start: f64, stop: f64, num: usize) -> Vec<f64> {
 /// `[start, stop]`, bunching points near both ends.
 ///
 /// `num == 0` returns an empty vector rather than reproducing the upstream
-/// `IndexError` the endpoint fixup would raise on an empty array -- nothing
+/// `IndexError` the endpoint fixup would raise on an empty array, nothing
 /// in this crate's scope calls it that way, and a panic is not an option here
 /// (see `CONTRIBUTING.md`).
 pub fn cosspace(start: f64, stop: f64, num: usize) -> Vec<f64> {
@@ -61,7 +61,7 @@ pub fn cosspace(start: f64, stop: f64, num: usize) -> Vec<f64> {
         .collect();
 
     // Order matters when `num == 1`: both indices are 0, so the second write
-    // is the one that survives -- reproduced faithfully, see the module doc.
+    // is the one that survives: reproduced faithfully, see the module doc.
     spaced[0] = start;
     let last = spaced.len() - 1;
     spaced[last] = stop;

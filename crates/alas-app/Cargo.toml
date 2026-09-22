@@ -8,25 +8,20 @@ authors.workspace = true
 rust-version.workspace = true
 
 [[bin]]
-name = "alas"
+name = "ALAS"
 path = "src/main.rs"
 
 [dependencies]
-alas-types = { path = "../alas-types" }
 alas-config = { path = "../alas-config" }
 alas-gui = { path = "../alas-gui" }
 alas-report = { path = "../alas-report" }
 alas-pipeline = { path = "../alas-pipeline" }
-alas-aero = { path = "../alas-aero" }
-alas-mission = { path = "../alas-mission" }
-alas-struct = { path = "../alas-struct" }
 alas-exec = { path = "../alas-exec" }
 alas-route = { path = "../alas-route" }
 tracing = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 serde_yaml = { workspace = true }
-thiserror = { workspace = true }
 
 [dev-dependencies]
 alas-testkit = { path = "../alas-testkit" }

@@ -5,18 +5,21 @@
 //! do.
 //!
 //! A run's per-stage timings and its search's evaluation count are both
-//! already computed -- the stage timings ride on [`crate::runs::RunEvent`] and
-//! the search metadata on [`alas_opt::OptimizationResult`] -- but neither was
+//! already computed: the stage timings ride on [`crate::runs::RunEvent`] and
+//! the search metadata on [`alas_opt::OptimizationResult`], but neither was
 //! ever written to disk, so a slow run could only be diagnosed by rerunning it
 //! under observation. This manifest persists them beside the design database.
 //!
 //! The executed search method is recorded separately from the configured one
-//! on purpose. `optimizer.solver.method` is a loadable configuration string
-//! that still accepts legacy names such as `differential_evolution`, while
-//! every product run outside the frozen compatibility path is dispatched to
-//! the MADS driver (`alas_opt::DesignOptimizer::run_product_search`). Reading
-//! the configured string as the executed algorithm is how a run gets
-//! diagnosed against the wrong search.
+//! on purpose. A saved configuration may still carry a legacy method token
+//! (`sqp`, `nsga2`, `turbo_1`, `cma_es`), which is migrated to
+//! `differential_evolution` at load time
+//! (`alas_config::settings_load_notes`); `configured_method` here is the
+//! string the loaded configuration actually carries, and `executed_method` is
+//! what the optimizer reports back (`alas_opt::DesignOptimizer::run_product_search`,
+//! the L-SHADE epsilon-constrained kernel). Reading the configured string as
+//! the executed algorithm is how a run gets diagnosed against the wrong
+//! search.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -56,6 +59,123 @@ pub struct SearchManifest {
     /// Objective evaluations the search recorded.
     pub evaluations: usize,
     /// Search wall-clock seconds.
+    pub wall_time_s: f64,
+    /// Whether the search reached its own convergence criterion *and* the
+    /// design it delivered survived the reporting-fidelity re-evaluation.
+    /// Absent for a search that reports no lifecycle diagnostics.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub converged: Option<bool>,
+    /// What the reporting-fidelity re-evaluation made of the delivered
+    /// design. Absent when no caller performed one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delivered_acceptance: Option<DeliveredAcceptanceManifest>,
+    /// How the search spent its budget. Absent for a search method that
+    /// reports no diagnostics, which is not the same as a search that
+    /// reported zeros.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diagnostics: Option<SearchDiagnosticsManifest>,
+}
+
+/// How a staged search spent its evaluation budget.
+///
+/// Held separately from the optimizer's own `SearchDiagnostics` for the same
+/// reason as [`DeliveredAcceptanceManifest`]: the manifest is a document a
+/// reader parses without tracking the optimizer's internals. The two
+/// optional costs stay optional here rather than becoming zero, because "the
+/// search never reached a feasible point" and "it reached one at zero cost"
+/// are different runs.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SearchDiagnosticsManifest {
+    /// Whether the search reached its own convergence criterion. A budget,
+    /// iteration, mesh-floor or watchdog stop is `false`.
+    pub converged: bool,
+    /// Coupled full-fidelity analyses executed by the search stage.
+    pub analysis_evaluations: usize,
+    /// Repeated mesh nodes served from the search's cache, never analysed.
+    pub cache_hits: usize,
+    /// Poll iterations completed.
+    pub poll_iterations: usize,
+    /// Reduced-model analyses executed by the broad scan. Ranked on a
+    /// coarser mesh and a looser sizing closure, so not comparable with the
+    /// full-fidelity count above.
+    pub screening_evaluations: usize,
+    /// Screened candidates that were feasible under the reduced model.
+    pub screening_feasible: usize,
+    /// Full-fidelity analyses spent verifying the scan finalists.
+    pub verification_evaluations: usize,
+    /// Wall-clock seconds in the broad scan.
+    pub scan_wall_time_s: f64,
+    /// Wall-clock seconds in the search stage.
+    pub search_wall_time_s: f64,
+    /// Worker threads used inside one evaluation block.
+    pub workers: usize,
+    /// Points evaluated per opportunistic poll block, fixed independently of
+    /// `workers` so a result does not change with the hardware.
+    pub poll_block_size: usize,
+    /// Objective of the first feasible point the search reached. Absent when
+    /// it never reached one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub first_feasible_cost: Option<f64>,
+    /// Relative improvement of the winner over that first feasible point,
+    /// dimensionless. Absent for the same reason.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub relative_improvement: Option<f64>,
+    /// Fraction of the final generation's population that was strictly
+    /// feasible. Absent (`0.0`) on a manifest written before this field
+    /// existed.
+    #[serde(default)]
+    pub feasible_fraction: f64,
+    /// The epsilon-constrained method's boundary at the last generation
+    /// evaluated; `0` once past the epsilon control fraction of the budget.
+    #[serde(default)]
+    pub epsilon_level: f64,
+}
+
+impl From<&alas_opt::SearchDiagnostics> for SearchDiagnosticsManifest {
+    fn from(diagnostics: &alas_opt::SearchDiagnostics) -> Self {
+        Self {
+            converged: diagnostics.converged,
+            analysis_evaluations: diagnostics.analysis_evaluations,
+            cache_hits: diagnostics.cache_hits,
+            poll_iterations: diagnostics.poll_iterations,
+            screening_evaluations: diagnostics.screening_evaluations,
+            screening_feasible: diagnostics.screening_feasible,
+            verification_evaluations: diagnostics.verification_evaluations,
+            scan_wall_time_s: diagnostics.scan_wall_time_s,
+            search_wall_time_s: diagnostics.search_wall_time_s,
+            workers: diagnostics.workers,
+            poll_block_size: diagnostics.poll_block_size,
+            first_feasible_cost: diagnostics.first_feasible_cost,
+            relative_improvement: diagnostics.relative_improvement,
+            feasible_fraction: diagnostics.feasible_fraction,
+            epsilon_level: diagnostics.epsilon_level,
+        }
+    }
+}
+
+/// The acceptance record as a run manifest carries it.
+///
+/// Kept structurally separate from the optimizer's own type so the manifest
+/// is a stable document: a reader checking whether a delivered aircraft was
+/// accepted, and by what, does not have to track the optimizer's internals.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct DeliveredAcceptanceManifest {
+    /// Whether the delivered design passed with no error-severity finding.
+    pub verified: bool,
+    /// Findings that rejected the search's own finalist, by identifier.
+    pub finalist_rejected_by: Vec<String>,
+    /// Findings that reject the delivered design, by identifier. Empty when
+    /// the delivered design was accepted.
+    pub delivered_rejected_by: Vec<String>,
+    /// The rejecting findings' own messages: an identifier says which check
+    /// refused the design, only the message says why.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub rejection_messages: Vec<String>,
+    /// Candidates re-evaluated at reporting fidelity, the finalist included.
+    pub candidates_evaluated: usize,
+    /// Whether the delivered design is the search's own finalist.
+    pub delivered_is_search_finalist: bool,
+    /// Wall-clock seconds the re-evaluation cost, inside the search stage.
     pub wall_time_s: f64,
 }
 
@@ -110,6 +230,25 @@ impl RunManifest {
                 termination: optimization.termination.clone(),
                 evaluations: optimization.history.n_evaluations(),
                 wall_time_s: optimization.wall_time_s,
+                converged: optimization
+                    .search_diagnostics
+                    .as_ref()
+                    .map(|diagnostics| diagnostics.converged),
+                delivered_acceptance: optimization.delivered_acceptance.as_ref().map(
+                    |acceptance| DeliveredAcceptanceManifest {
+                        verified: acceptance.verified,
+                        finalist_rejected_by: acceptance.finalist_rejected_by.clone(),
+                        delivered_rejected_by: acceptance.delivered_rejected_by.clone(),
+                        rejection_messages: acceptance.rejection_messages.clone(),
+                        candidates_evaluated: acceptance.candidates_evaluated,
+                        delivered_is_search_finalist: acceptance.delivered_is_search_finalist,
+                        wall_time_s: acceptance.wall_time_s,
+                    },
+                ),
+                diagnostics: optimization
+                    .search_diagnostics
+                    .as_ref()
+                    .map(SearchDiagnosticsManifest::from),
             });
         Self {
             total_wall_time_s,
@@ -137,6 +276,9 @@ impl RunManifest {
     }
 }
 
+// Tests build their own fixtures and assert on them, so a failed expect is
+// the assertion failing rather than a library invariant breaking.
+#[allow(clippy::expect_used)]
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -186,5 +328,89 @@ mod tests {
         }
         assert_eq!(totals["downstream/mses"], 190_000);
         assert_eq!(totals["optimization"], 590_000);
+    }
+
+    fn reported() -> alas_opt::SearchDiagnostics {
+        alas_opt::SearchDiagnostics {
+            converged: true,
+            analysis_evaluations: 225,
+            cache_hits: 17,
+            poll_iterations: 31,
+            screening_evaluations: 480,
+            screening_feasible: 96,
+            verification_evaluations: 8,
+            scan_wall_time_s: 12.5,
+            search_wall_time_s: 131.83,
+            workers: 1,
+            poll_block_size: 4,
+            first_feasible_cost: Some(1.25),
+            relative_improvement: Some(0.083),
+            feasible_fraction: 0.92,
+            epsilon_level: 0.0,
+        }
+    }
+
+    #[test]
+    fn every_reported_diagnostic_reaches_the_manifest_unchanged() {
+        // The manifest is the only durable record of how a search spent its
+        // budget, so a field dropped in this conversion is a measurement
+        // that silently stops existing.
+        let source = reported();
+        let manifest = SearchDiagnosticsManifest::from(&source);
+        assert_eq!(manifest.converged, source.converged);
+        assert_eq!(manifest.analysis_evaluations, source.analysis_evaluations);
+        assert_eq!(manifest.cache_hits, source.cache_hits);
+        assert_eq!(manifest.poll_iterations, source.poll_iterations);
+        assert_eq!(manifest.screening_evaluations, source.screening_evaluations);
+        assert_eq!(manifest.screening_feasible, source.screening_feasible);
+        assert_eq!(
+            manifest.verification_evaluations,
+            source.verification_evaluations
+        );
+        assert_eq!(manifest.scan_wall_time_s, source.scan_wall_time_s);
+        assert_eq!(manifest.search_wall_time_s, source.search_wall_time_s);
+        assert_eq!(manifest.workers, source.workers);
+        assert_eq!(manifest.poll_block_size, source.poll_block_size);
+        assert_eq!(manifest.first_feasible_cost, source.first_feasible_cost);
+        assert_eq!(manifest.relative_improvement, source.relative_improvement);
+        assert_eq!(manifest.feasible_fraction, source.feasible_fraction);
+        assert_eq!(manifest.epsilon_level, source.epsilon_level);
+    }
+
+    #[test]
+    fn a_search_that_never_became_feasible_omits_the_two_costs_rather_than_zeroing_them() {
+        // Absent and zero are different runs, and a reader of the document
+        // has to be able to tell them apart.
+        let mut source = reported();
+        source.first_feasible_cost = None;
+        source.relative_improvement = None;
+        let json = serde_json::to_value(SearchDiagnosticsManifest::from(&source))
+            .expect("the manifest serializes");
+        let object = json.as_object().expect("a JSON object");
+        assert!(!object.contains_key("first_feasible_cost"), "{json}");
+        assert!(!object.contains_key("relative_improvement"), "{json}");
+        assert_eq!(object["analysis_evaluations"], 225);
+
+        let with_costs = serde_json::to_value(SearchDiagnosticsManifest::from(&reported()))
+            .expect("the manifest serializes");
+        assert_eq!(with_costs["first_feasible_cost"], 1.25);
+    }
+
+    #[test]
+    fn a_manifest_written_before_this_field_existed_still_parses() {
+        // `diagnostics` is optional on the way in as well as out, so an
+        // older run's manifest stays readable rather than becoming a parse
+        // error that looks like a corrupt run.
+        let json = serde_json::json!({
+            "executed_method": "differential_evolution",
+            "configured_method": "differential_evolution",
+            "strategy": "staged",
+            "termination": "converged",
+            "evaluations": 225,
+            "wall_time_s": 131.83
+        });
+        let search: SearchManifest = serde_json::from_value(json).expect("an older manifest");
+        assert!(search.diagnostics.is_none());
+        assert!(search.converged.is_none());
     }
 }

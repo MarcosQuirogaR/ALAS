@@ -25,6 +25,61 @@ const ALTITUDE_RESOLUTION_M: f64 = 0.5;
 const ALTITUDE_BISECTION_ITERATIONS: usize = 60;
 /// Vertical segments shorter than this are dropped, m.
 const MINIMUM_SEGMENT_ALTITUDE_M: f64 = 1.0e-6;
+/// ISA sea-level density, kg/m^3. The equivalent-airspeed reference is the
+/// definition of that airspeed, not a property of today's air, so it is the
+/// standard value rather than one read from the atmosphere model - the same
+/// convention `alas_config::validation` uses for the same comparison.
+const SEA_LEVEL_DENSITY_KG_M3: f64 = 1.225;
+
+/// The highest true airspeed a rung spanning `low_m` to `high_m` may be flown
+/// at, m/s, from the aircraft's declared design dive speed.
+/// `f64::INFINITY` when none is declared.
+///
+/// **The bound is evaluated at the end where it binds.** `dive_speed_eas_m_s`
+/// is VD in *equivalent* airspeed, and a fixed true airspeed is a *higher*
+/// equivalent airspeed the lower it is flown, so VD binds at the rung's
+/// **lowest** altitude. Evaluating it at the top silently loosens it: that let
+/// a scaled A320-200 climb rung sit at 184 m/s equivalent against its declared
+/// 180 m/s VD, which is the case this bound exists for.
+///
+/// **There is deliberately no Mach ceiling here, and removing the one this
+/// lane first wrote is a correction, not a relaxation.** That ceiling was
+/// `requirements.cruise_mach`, which is the *design cruise* Mach, the point
+/// the wing and the deck are built at, not MMO. Holding every rung to it
+/// makes an ordinary descent illegal, since a transport's MMO sits above its
+/// cruise Mach and descents are routinely flown faster. Measured: it was the
+/// entire cause of a **2.74 %** disagreement between this model's ATR 72-600
+/// climb/descent footprint and the native pseudospectral schedule's, which
+/// applies no such ceiling; with it removed the two agree to **9.0e-6**, and
+/// VD alone does not bind on that aircraft at all. Nothing in the
+/// configuration declares MMO or VMO, so no aerodynamic ceiling is invented
+/// in its place: the gap is recorded rather than filled with a guess.
+///
+/// # Errors
+///
+/// A standard-atmosphere evaluation that fails at the low end of the band.
+pub fn envelope_limit_m_s(
+    low_m: f64,
+    high_m: f64,
+    dive_speed_eas_m_s: f64,
+    isa_deviation_c: f64,
+) -> Result<f64, FuelModelError> {
+    if !(dive_speed_eas_m_s.is_finite() && dive_speed_eas_m_s > 0.0) {
+        return Ok(f64::INFINITY);
+    }
+    let low_m = low_m.min(high_m);
+    let ambient: Us1976Values =
+        us1976_try_compute_values(low_m, isa_deviation_c).map_err(|error| {
+            FuelModelError::InvalidModel(format!(
+                "structural envelope atmosphere at {low_m} m: {error}"
+            ))
+        })?;
+    let density_ratio = ambient.density_kg_m3 / SEA_LEVEL_DENSITY_KG_M3;
+    if density_ratio <= 0.0 {
+        return Ok(f64::INFINITY);
+    }
+    Ok(dive_speed_eas_m_s / density_ratio.sqrt())
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SegmentKind {
@@ -120,6 +175,9 @@ pub(crate) struct ProfilePlan {
     pub cruise_altitude_m: f64,
     /// Whether the cruise altitude was lowered below the configured one.
     pub adapted: bool,
+    /// The single factor applied to every commanded speed so the leg stays
+    /// inside the aircraft's declared envelope; `1.0` when nothing bound.
+    pub envelope_scale: f64,
     /// Climb ladder, in order, ending at the cruise altitude.
     pub climb: Vec<Segment>,
     /// Cruise rungs `(true airspeed, distance fraction)`, in order.
@@ -178,6 +236,16 @@ pub(crate) struct ProfileGeometry<'a> {
     /// single value the native schedule applies to every segment (the
     /// departure airport's deviation).
     pub isa_deviation_c: f64,
+    /// The aircraft's declared design dive speed, m/s equivalent airspeed.
+    /// Zero or non-finite disables the envelope bound.
+    ///
+    /// This is the *only* envelope term. A design-cruise-Mach ceiling was
+    /// carried here briefly and removed on measurement: `requirements.
+    /// cruise_mach` is the point the wing and the deck are built at, not MMO,
+    /// so holding every rung to it made an ordinary descent illegal. Nothing
+    /// in the configuration declares MMO or VMO, so no aerodynamic ceiling
+    /// replaced it; see [`envelope_limit_m_s`].
+    pub dive_speed_eas_m_s: f64,
 }
 
 impl ProfileGeometry<'_> {
@@ -211,7 +279,7 @@ impl ProfileGeometry<'_> {
     /// A climbing or descending leg from `start_m` to `end_m` flown at
     /// constant calibrated airspeed `cas_m_s`: `subdivisions` segments, each
     /// with true airspeed resolved from `cas_m_s` at its own midpoint
-    /// altitude's real ambient pressure and temperature -- a *discretized*
+    /// altitude's real ambient pressure and temperature: a *discretized*
     /// approximation of constant CAS (each sub-rung still flies one constant
     /// true airspeed), not the continuous exact quantity; see
     /// [`ProfileGeometry::plan`]'s callers for the refinement test showing
@@ -264,8 +332,8 @@ impl ProfileGeometry<'_> {
 
     /// Lowest cruise altitude the ladders can be built at, m.
     pub fn floor_cruise_m(&self, leg: LegKind) -> f64 {
-        // Both legs open with the configured takeoff band -- the diversion
-        // is a go-around from the arrival field, see `diversion_ladders` --
+        // Both legs open with the configured takeoff band (the diversion
+        // is a go-around from the arrival field, see `diversion_ladders`)
         // so neither may cruise below the top of that band. A floor at the
         // field elevation itself let a short alternate distance plan the
         // diversion cruise at 8 m above sea level at the literal cruise true
@@ -333,9 +401,12 @@ impl ProfileGeometry<'_> {
             match p.climb_descent_speed_reference {
                 SpeedReference::TrueAirspeed => {
                     // A true-airspeed profile is literal, including when a
-                    // short-route fit lowers the cruise altitude. The native
-                    // schedule has the same contract; no implicit EAS
-                    // rescaling is allowed here.
+                    // short-route fit lowers the cruise altitude: no implicit
+                    // EAS rescaling. What it is not allowed to be is outside
+                    // the aircraft's own declared envelope, which is the one
+                    // thing the shared schedule cannot know about the
+                    // aeroplane flying it, and `plan_at` applies that bound
+                    // to the assembled ladder as one factor.
                     segments.extend(Segment::vertical(kind, start, end, configured_speed, rate)?);
                 }
                 SpeedReference::CalibratedAirspeed => {
@@ -461,15 +532,171 @@ impl ProfileGeometry<'_> {
     ///
     /// [`FuelModelError::RouteTooShort`] when the ladders do not fit in
     /// `range_m`; [`FuelModelError::InvalidModel`] for unusable kinematics.
+    /// A scheduled true airspeed, bounded by the aircraft's own declared
+    /// flight envelope at `altitude_m`.
+    ///
+    /// The scheduled profile is one document shared by every registered
+    /// aircraft: its climb and descent speeds are the reference twin's
+    /// literal true airspeeds, and only the three cruise rungs are rewritten
+    /// per preset. A true airspeed carries no information about whether the
+    /// airframe can fly it. Two declared quantities bound it, and both are
+    /// read from the configuration rather than chosen here:
+    ///
+    /// * **Structural.** `requirements.dive_speed_m_s` is VD in *equivalent*
+    ///   airspeed. At altitude `h` that is `VD / sqrt(sigma)` in true
+    ///   airspeed. The A320-200 declares 180 m/s and the shared schedule
+    ///   commands 250 m/s true, which is 190 m/s equivalent at 5 500 m: the
+    ///   aeroplane is being flown past its own design dive speed on an
+    ///   ordinary climb rung.
+    /// * **Aerodynamic.** The polar this model carries is the candidate's
+    ///   trimmed cruise polar, and its wave-drag term is a ramp anchored at
+    ///   `requirements.cruise_mach` (see `SegmentMissionModel::wave_drag_at`).
+    ///   Above that Mach the polar is extrapolated past the point it was
+    ///   fitted at, so a leg commanded faster is outside the model's own
+    ///   validity domain as well as the aircraft's normal envelope.
+    ///
+    /// The bound is the tighter of the two. Zero or non-finite declarations
+    /// disable their own term, so a configuration that declares neither is
+    /// unaffected.
+    ///
+    /// Applied through [`Self::envelope_scale`] as one factor for the whole
+    /// leg rather than rung by rung. Bounding each rung independently would
+    /// slow some rungs and not others, and that manufactures speed
+    /// transitions the schedule never asked for: the aeroplane then has to
+    /// accelerate through them at the top of climb, exactly where it has the
+    /// least excess thrust. A single factor flies the configured schedule's
+    /// own shape - every relative speed and every transition preserved -
+    /// uniformly slowed to the fastest version of itself the declared
+    /// envelope admits.
+    /// The two bounds bind at **opposite ends** of a climbing or descending
+    /// rung, so each is evaluated at its own end rather than both at one
+    /// altitude.
+    ///
+    /// * The structural bound is an *equivalent* airspeed. A fixed true
+    ///   airspeed is a *higher* equivalent airspeed the lower it is flown, so
+    ///   VD binds at the rung's **lowest** altitude.
+    /// * The aerodynamic bound is a Mach number. The local speed of sound
+    ///   falls with altitude, so a fixed true airspeed is a *higher* Mach the
+    ///   higher it is flown, and the cruise-Mach limit binds at the rung's
+    ///   **highest** altitude.
+    ///
+    /// Evaluating both at one end silently loosens the other: taking both at
+    /// the top let a scaled A320-200 climb rung sit at 184 m/s equivalent
+    /// against its declared 180 m/s VD.
+    fn envelope_limit_m_s(&self, low_m: f64, high_m: f64) -> Result<f64, FuelModelError> {
+        envelope_limit_m_s(low_m, high_m, self.dive_speed_eas_m_s, self.isa_deviation_c)
+    }
+
+    /// The single factor, at most `1`, that brings every commanded speed of
+    /// this plan inside the declared envelope.
+    ///
+    /// Each vertical rung is checked across its own altitude band, with each
+    /// bound taken at the end where it binds (see
+    /// [`Self::envelope_limit_m_s`]), so a rung that passes is inside the
+    /// envelope throughout. Returns exactly `1.0` when nothing binds, and the
+    /// plan is then untouched.
+    fn envelope_scale(
+        &self,
+        climb: &[Segment],
+        descent: &[Segment],
+        cruise_rungs: &[(f64, f64)],
+        cruise_m: f64,
+    ) -> Result<f64, FuelModelError> {
+        let mut scale: f64 = 1.0;
+        for segment in climb.iter().chain(descent.iter()) {
+            if !segment.tas_m_s.is_finite() || segment.tas_m_s <= 0.0 {
+                continue;
+            }
+            let limit_m_s =
+                self.envelope_limit_m_s(segment.start_altitude_m, segment.end_altitude_m)?;
+            if limit_m_s.is_finite() {
+                scale = scale.min(limit_m_s / segment.tas_m_s);
+            }
+        }
+        let cruise_limit_m_s = self.envelope_limit_m_s(cruise_m, cruise_m)?;
+        for (tas_m_s, _) in cruise_rungs {
+            if tas_m_s.is_finite() && *tas_m_s > 0.0 && cruise_limit_m_s.is_finite() {
+                scale = scale.min(cruise_limit_m_s / tas_m_s);
+            }
+        }
+        Ok(scale.clamp(0.0, 1.0))
+    }
+
+    /// Every speed of `segments`, scaled by `scale`, with the kinematics
+    /// rebuilt so the horizontal footprint stays consistent with the new
+    /// speed. The commanded vertical rates are untouched.
+    fn scaled_segments(segments: &[Segment], scale: f64) -> Result<Vec<Segment>, FuelModelError> {
+        let mut scaled = Vec::with_capacity(segments.len());
+        for segment in segments {
+            scaled.extend(Segment::vertical(
+                segment.kind,
+                segment.start_altitude_m,
+                segment.end_altitude_m,
+                segment.tas_m_s * scale,
+                segment.vertical_rate_m_s.abs(),
+            )?);
+        }
+        Ok(scaled)
+    }
+
+    /// A declared cruise true airspeed, resolved to the level actually
+    /// flown.
+    ///
+    /// The profile's three cruise fields are true airspeeds, and all three
+    /// are declared *for the configured trip cruise level*. Two plans fly a
+    /// cruise rung somewhere else: the altitude bisection, when a short route
+    /// or a weight-limited level forces a step down, and the diversion, whose
+    /// reduced geometry has no alternate field and levels off near the
+    /// holding altitude.
+    ///
+    /// Holding the literal number there is not "keeping the configured
+    /// speed". True airspeed is not invariant with altitude: at the same TAS
+    /// a lower level means a higher dynamic pressure, a higher calibrated
+    /// airspeed and more parasite drag, so stepping down at constant TAS
+    /// makes a level-flight rating shortfall *worse*, which is the opposite
+    /// of what the step-down exists to do. The ATR 72-600 is where that shows
+    /// plainly: its declared 140.7 m/s is the FL170 cruise, at 1 067 m it is
+    /// about 265 kt calibrated - past VMO - and the PW127M cannot hold it
+    /// level at any mass. The dispatch closure failed at both ends of its
+    /// bracket for that reason alone, after the bisection had already stepped
+    /// the level all the way down to the floor.
+    ///
+    /// The rung is therefore flown at the declared *equivalent* airspeed:
+    /// the same dynamic pressure, hence the same lift coefficient at a given
+    /// mass and the same drag coefficient, which is the flight condition the
+    /// declared speed represents. `V = V_declared sqrt(rho_ref / rho)`. No
+    /// coefficient is introduced and no schedule is invented, and a rung at
+    /// the configured level returns the declared number bit-unchanged, so
+    /// nothing that was not adapted moves.
+    fn cruise_tas_at(&self, cruise_m: f64, declared_m_s: f64) -> Result<f64, FuelModelError> {
+        let reference_m = self.configured_cruise_m_for(LegKind::Trip);
+        if !declared_m_s.is_finite() || declared_m_s <= 0.0 {
+            return Ok(declared_m_s);
+        }
+        let resolved_m_s = if cruise_m == reference_m {
+            declared_m_s
+        } else {
+            let reference = self.ambient(reference_m, "configured cruise")?;
+            let flown = self.ambient(cruise_m, "flown cruise")?;
+            if reference.density_kg_m3 > 0.0 && flown.density_kg_m3 > 0.0 {
+                declared_m_s * (reference.density_kg_m3 / flown.density_kg_m3).sqrt()
+            } else {
+                declared_m_s
+            }
+        };
+        Ok(resolved_m_s)
+    }
+
     pub fn plan_at(
         &self,
         leg: LegKind,
         range_m: f64,
         cruise_m: f64,
     ) -> Result<ProfilePlan, FuelModelError> {
-        // Cruise fields are literal true airspeeds. A shortened route may
-        // lower the altitude, but that geometry adaptation must not silently
-        // change the configured speed; this is the legacy/native contract.
+        // Cruise fields are true airspeeds declared for the configured cruise
+        // level. A plan that flies a different level resolves them there by
+        // preserving the declared equivalent airspeed; at the configured
+        // level they are returned bit-unchanged. See `cruise_tas_at`.
         let (climb, descent, cruise_rungs) = match leg {
             LegKind::Trip => {
                 let p = self.profile;
@@ -477,9 +704,18 @@ impl ProfileGeometry<'_> {
                     self.climb_ladder(cruise_m)?,
                     self.descent_ladder(cruise_m)?,
                     vec![
-                        (p.cruise_1_air_speed_m_s, p.cruise_1_distance_fraction),
-                        (p.cruise_2_air_speed_m_s, p.cruise_2_distance_fraction),
-                        (p.cruise_3_air_speed_m_s, p.cruise_3_distance_fraction),
+                        (
+                            self.cruise_tas_at(cruise_m, p.cruise_1_air_speed_m_s)?,
+                            p.cruise_1_distance_fraction,
+                        ),
+                        (
+                            self.cruise_tas_at(cruise_m, p.cruise_2_air_speed_m_s)?,
+                            p.cruise_2_distance_fraction,
+                        ),
+                        (
+                            self.cruise_tas_at(cruise_m, p.cruise_3_air_speed_m_s)?,
+                            p.cruise_3_distance_fraction,
+                        ),
                     ],
                 )
             }
@@ -488,13 +724,40 @@ impl ProfileGeometry<'_> {
                 (
                     climb,
                     descent,
-                    vec![(self.profile.cruise_1_air_speed_m_s, 1.0)],
+                    vec![(
+                        self.cruise_tas_at(cruise_m, self.profile.cruise_1_air_speed_m_s)?,
+                        1.0,
+                    )],
                 )
             }
         };
+        // One factor for the whole leg, so the configured schedule's shape -
+        // every relative speed and every transition between rungs - is
+        // preserved and only its overall pace changes. See `envelope_scale`.
+        let scale = self.envelope_scale(&climb, &descent, &cruise_rungs, cruise_m)?;
+        let (climb, descent, cruise_rungs) = if scale < 1.0 {
+            (
+                Self::scaled_segments(&climb, scale)?,
+                Self::scaled_segments(&descent, scale)?,
+                cruise_rungs
+                    .into_iter()
+                    .map(|(tas_m_s, fraction)| (tas_m_s * scale, fraction))
+                    .collect(),
+            )
+        } else {
+            (climb, descent, cruise_rungs)
+        };
         let plan = ProfilePlan {
             cruise_altitude_m: cruise_m,
+            // `adapted` means one thing and keeps meaning it: the cruise
+            // *altitude* was lowered below the configured one. The envelope
+            // scale is a property of the aircraft and its declared limits,
+            // not an adaptation of the route, and it is reported separately
+            // rather than folded in here - overloading this flag made a
+            // design-range trip at its own configured altitude report itself
+            // as adapted.
             adapted: cruise_m < self.configured_cruise_m_for(leg),
+            envelope_scale: scale,
             climb,
             cruise_rungs,
             descent,
@@ -551,10 +814,28 @@ impl ProfileGeometry<'_> {
     /// Horizontal footprint of the non-cruise phases at the configured
     /// cruise altitude, m.
     pub fn configured_footprint_m(&self, leg: LegKind) -> Result<f64, FuelModelError> {
-        let cruise = self.configured_cruise_m_for(leg);
+        self.footprint_at_m(leg, self.configured_cruise_m_for(leg))
+    }
+
+    /// Horizontal footprint of the non-cruise phases at the **lowest** cruise
+    /// altitude this geometry admits, m.
+    ///
+    /// This is the shortest ladder the aircraft can fly, and therefore the
+    /// shortest route it can fly at all. The configured-altitude footprint
+    /// above is longer and is *not* a limit: [`Self::plan`] lowers the cruise
+    /// level continuously until the ladder fits, which is ordinary dispatch
+    /// practice on a short sector and is what the flown mission already does.
+    /// A route between the two is flown at a lower level; only a route below
+    /// this one is rejected, with [`FuelModelError::RouteTooShort`].
+    pub fn floor_footprint_m(&self, leg: LegKind) -> Result<f64, FuelModelError> {
+        let configured = self.configured_cruise_m_for(leg);
+        self.footprint_at_m(leg, self.floor_cruise_m(leg).min(configured))
+    }
+
+    fn footprint_at_m(&self, leg: LegKind, cruise_m: f64) -> Result<f64, FuelModelError> {
         let (climb, descent) = match leg {
-            LegKind::Trip => (self.climb_ladder(cruise)?, self.descent_ladder(cruise)?),
-            LegKind::Diversion => self.diversion_ladders(cruise)?,
+            LegKind::Trip => (self.climb_ladder(cruise_m)?, self.descent_ladder(cruise_m)?),
+            LegKind::Diversion => self.diversion_ladders(cruise_m)?,
         };
         Ok(climb
             .iter()
@@ -588,6 +869,9 @@ mod tests {
             cruise_altitude_m: cruise_m,
             cas_subdivisions: CAS_SPEED_SUBDIVISIONS,
             isa_deviation_c: 0.0,
+            // The envelope bounds are disabled in these geometry fixtures: they
+            // pin the ladder kinematics of a schedule, not an aircraft.
+            dive_speed_eas_m_s: 0.0,
         };
         let plan = geometry
             .plan_at(LegKind::Diversion, 2_000_000.0, cruise_m)
@@ -669,6 +953,9 @@ mod tests {
             cruise_altitude_m: cruise_m,
             cas_subdivisions: subdivisions,
             isa_deviation_c: 0.0,
+            // The envelope bounds are disabled in these geometry fixtures: they
+            // pin the ladder kinematics of a schedule, not an aircraft.
+            dive_speed_eas_m_s: 0.0,
         };
         let plan = geometry
             .plan_at(LegKind::Diversion, 2_000_000.0, cruise_m)
@@ -718,6 +1005,9 @@ mod tests {
             cruise_altitude_m: 10_668.0, // 35,000 ft, m
             cas_subdivisions: CAS_SPEED_SUBDIVISIONS,
             isa_deviation_c: 0.0,
+            // The envelope bounds are disabled in these geometry fixtures: they
+            // pin the ladder kinematics of a schedule, not an aircraft.
+            dive_speed_eas_m_s: 0.0,
         };
         let range_m = 200.0 * NAUTICAL_MILE;
         let plan = geometry
@@ -763,6 +1053,9 @@ mod tests {
             cruise_altitude_m: 6000.0,
             cas_subdivisions: CAS_SPEED_SUBDIVISIONS,
             isa_deviation_c: 0.0,
+            // The envelope bounds are disabled in these geometry fixtures: they
+            // pin the ladder kinematics of a schedule, not an aircraft.
+            dive_speed_eas_m_s: 0.0,
         };
         let cas_m_s = 170.0 * 0.514_444_444; // 170 KCAS, the ATR optimum-climb figure.
         let rate_m_s = 6.0;
@@ -834,9 +1127,9 @@ mod tests {
     /// - distance: the relative footprint error.
     ///
     /// The asserted numbers are chosen numerical acceptance thresholds; the
-    /// measured errors are reported separately by the
-    /// `.agent/probes/atr-physics` probe (worst speed gap 3.24 m/s at 4
-    /// sub-rungs on this 4.6 km climb when this test was written). The worst
+    /// measured errors are reported separately by an internal ATR physics
+    /// probe (worst speed gap 3.24 m/s at 4 sub-rungs on this 4.6 km climb
+    /// when this test was written). The worst
     /// speed gap is first order in the sub-rung width and the midpoint-rule
     /// footprint error second order (the previous test checks the
     /// ~4x-per-doubling rate).
@@ -850,6 +1143,9 @@ mod tests {
             cruise_altitude_m: 5_182.0,
             cas_subdivisions: CAS_SPEED_SUBDIVISIONS,
             isa_deviation_c: 0.0,
+            // The envelope bounds are disabled in these geometry fixtures: they
+            // pin the ladder kinematics of a schedule, not an aircraft.
+            dive_speed_eas_m_s: 0.0,
         };
         let cas_m_s = 170.0 * 0.514_444_444;
         let rate_m_s = 5.0;

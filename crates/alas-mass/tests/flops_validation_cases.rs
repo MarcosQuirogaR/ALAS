@@ -14,9 +14,9 @@
 //!
 //! ## Provenance
 //!
-//! The numbers below were taken from the **pinned** sources recorded in
-//! `.agent/data/flops-reference-20260911/manifest.json` (copied to
-//! `docs/flops-mass-sources.json`), each with its retrieval URL and SHA-256:
+//! The numbers below were taken from the **pinned** sources recorded in an
+//! internal manifest (2026-09-11), copied to
+//! `docs/flops-mass-sources.json`, each with its retrieval URL and SHA-256:
 //!
 //! * Aviary commit `c7affbbe54dcbeded7373eae05f771882e2bb28a`, files
 //!   `large_single_aisle_1_FLOPS_data.py`,
@@ -25,9 +25,8 @@
 //! * NASA/TM-2017-219627 Vol. I, the NTRS PDF and its extracted text,
 //!   `sha256:819a48fc9c8f34f14595d93f3e3d54dc8454298e83e64048c14ac7bda00bb51d`.
 //!
-//! This supersedes the earlier unpinned, model-transcribed summary in
-//! `.agent/reports/flops-aviary-validation-data.md`, which is retained only
-//! as a narrative note.
+//! This supersedes the earlier unpinned, model-transcribed summary in an
+//! internal report, which is retained only as a narrative note.
 //!
 //! This is implementation verification against the published equations as
 //! FLOPS itself evaluates them, not physical validation against weighed
@@ -44,7 +43,9 @@ use alas_mass::flops_transport::structure::{
 use alas_mass::flops_transport::wing_bending::{
     detailed_bending_factor, elliptical_load_intensity, WingStation,
 };
-use alas_mass::flops_transport::{estimate_flops_transport, FlopsTransportInputs};
+use alas_mass::flops_transport::{
+    estimate_flops_transport, FlopsTransportInputs, PropulsionSizing,
+};
 use alas_units::{FOOT, INCH, POUND_FORCE, POUND_MASS};
 
 fn ft(feet: f64) -> f64 {
@@ -138,6 +139,7 @@ mod large_single_aisle_2 {
             nacelle_length_m: ft(11.65),
             rated_thrust_per_engine_n: lbf(THRUST_LBF),
             paint_area_density_kg_m2: lbm(0.07) / (FOOT * FOOT),
+            nacelle_mass_override_kg: None,
             painted_wetted_area_m2: ft2(8_319.07),
         }
     }
@@ -201,15 +203,20 @@ mod large_single_aisle_2 {
             baseline_thrust_n: lbf(THRUST_LBF),
             baseline_engine_mass_kg: Some(lbm(8_071.35)),
             scaling_exponent: 1.15,
+            starter_scope: alas_config::FlopsStarterScope::SeparateEquation89,
             baseline_inlet_mass_kg: None,
             inlet_scaling_exponent: 1.0,
             baseline_nozzle_mass_kg: None,
             nozzle_scaling_exponent: 1.0,
+            nozzle_scope: alas_config::FlopsNozzleScope::IncludedInBaseline,
             thrust_reversers_installed: true,
             maximum_mach: MAX_MACH,
             nacelle_diameter_m: ft(NACELLE_DIAMETER_FT),
             maximum_fuel_capacity_kg: lbm(FUEL_CAPACITY_LB),
             misc_propulsion_mass_kg: 0.0,
+            // The published deck totals reproduce only on the FLOPS boundary,
+            // which has no pylon term at all.
+            pylon_mass_method: alas_config::PylonMassMethod::None,
         });
         check("engines", propulsion.engines_kg, 16_143.0, QUOTED);
         check(
@@ -261,7 +268,13 @@ mod large_single_aisle_2 {
             variable_sweep_penalty: 0.0,
             maximum_fuel_capacity_kg: lbm(FUEL_CAPACITY_LB),
             fuel_tank_count: 7,
-            containerized_cargo_kg: lbm(4_077.0 + 162.0 * 35.0),
+            containerized_cargo_kg: lbm(4_077.0),
+            apu_installed: true,
+            containerized_baggage_kg: lbm(162.0 * 35.0),
+            cargo_loading: alas_config::CargoHoldLoading::Containerized,
+            cabin_equipment_method: alas_config::CabinEquipmentMethod::FlopsTransportV1,
+            haul_class: alas_config::OperatingHaulClass::ShortMediumHaul,
+            propulsion_sizing: PropulsionSizing::RatedThrust,
         };
         let breakdown = estimate_flops_transport(&inputs).expect("complete inputs");
         let systems = breakdown.systems;
@@ -297,7 +310,28 @@ mod large_single_aisle_2 {
             1e-6,
         );
         check("cargo containers", items.cargo_containers_kg, 1_925.0, 1e-9);
-        check("operating items", items.total_kg, 6_760.422_854_38, 1e-5);
+        // The published deck's `WOPIT` includes the container tare, which is
+        // the FLOPS convention. This product reports the tare outside
+        // operating empty mass, because Boeing D6-58333 Rev Q section 2.1 and
+        // FAA AC 120-27F both exclude unit load devices from the mass their
+        // operating-empty figures are stated on. Reproducing the deck is a
+        // statement about the equations and must stay on the source's own
+        // boundary, so it is checked against the preserved FLOPS total; the
+        // line below then pins that the two differ by exactly the tare and by
+        // nothing else, which is what makes the re-boundary auditable rather
+        // than a quiet loss of 1,925 lb.
+        check(
+            "operating items, FLOPS WOPIT convention",
+            items.total_with_cargo_containers_kg,
+            6_760.422_854_38,
+            1e-5,
+        );
+        check(
+            "operating items inside operating empty mass",
+            items.total_kg,
+            6_760.422_854_38 - 1_925.0,
+            1e-5,
+        );
     }
 
     #[test]
@@ -462,6 +496,7 @@ mod large_single_aisle_1 {
             nacelle_length_m: ft(12.30),
             rated_thrust_per_engine_n: lbf(THRUST_LBF),
             paint_area_density_kg_m2: lbm(0.037) / (FOOT * FOOT),
+            nacelle_mass_override_kg: None,
             painted_wetted_area_m2: ft2(8_275.86),
         });
         check(
@@ -495,15 +530,20 @@ mod large_single_aisle_1 {
             baseline_thrust_n: lbf(THRUST_LBF),
             baseline_engine_mass_kg: Some(lbm(7_400.0)),
             scaling_exponent: 1.15,
+            starter_scope: alas_config::FlopsStarterScope::SeparateEquation89,
             baseline_inlet_mass_kg: None,
             inlet_scaling_exponent: 1.0,
             baseline_nozzle_mass_kg: None,
             nozzle_scaling_exponent: 1.0,
+            nozzle_scope: alas_config::FlopsNozzleScope::IncludedInBaseline,
             thrust_reversers_installed: false,
             maximum_mach: 0.785,
             nacelle_diameter_m: ft(7.94),
             maximum_fuel_capacity_kg: lbm(45_694.0),
             misc_propulsion_mass_kg: 0.0,
+            // The published deck totals reproduce only on the FLOPS boundary,
+            // which has no pylon term at all.
+            pylon_mass_method: alas_config::PylonMassMethod::None,
         });
         check("engines", propulsion.engines_kg, 14_800.0, 1e-9);
         assert_eq!(propulsion.thrust_reversers_kg, 0.0);
@@ -543,7 +583,15 @@ mod large_single_aisle_1 {
             variable_sweep_penalty: 0.0,
             maximum_fuel_capacity_kg: lbm(45_694.0),
             fuel_tank_count: 7,
-            containerized_cargo_kg: lbm(7_436.0),
+            // The deck declares no revenue cargo at all: the whole
+            // containerized mass is the 7,436 lb of checked baggage.
+            containerized_cargo_kg: 0.0,
+            apu_installed: true,
+            containerized_baggage_kg: lbm(7_436.0),
+            cargo_loading: alas_config::CargoHoldLoading::Containerized,
+            cabin_equipment_method: alas_config::CabinEquipmentMethod::FlopsTransportV1,
+            haul_class: alas_config::OperatingHaulClass::ShortMediumHaul,
+            propulsion_sizing: PropulsionSizing::RatedThrust,
         };
         let breakdown = estimate_flops_transport(&inputs).expect("complete inputs");
         let systems = breakdown.systems;

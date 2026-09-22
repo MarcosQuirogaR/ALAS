@@ -97,7 +97,7 @@ fn run_airfoil_screening_with_mass_model(
             if let Some(cb) = progress_callback.as_mut() {
                 if n_completed % 50 == 0 || n_completed == n_total {
                     let msg = format!(
-                        "Stage 1 (2-D): {n_completed}/{n_total} evaluated -- {n_ok} ok, {n_err} errors"
+                        "Stage 1 (2-D): {n_completed}/{n_total} evaluated ({n_ok} ok, {n_err} errors)"
                     );
                     cb(&msg);
                 }
@@ -179,7 +179,7 @@ fn run_airfoil_screening_with_mass_model(
 
             if let Some(ref mut cb) = progress_callback {
                 let msg = format!(
-                    "Stage 2 (3-D wing): {}/{} re-simulated -- {} ok",
+                    "Stage 2 (3-D wing): {}/{} re-simulated ({} ok)",
                     step + 1,
                     shortlist_indices.len(),
                     n_refined
@@ -291,7 +291,7 @@ fn run_airfoil_screening_with_mass_model(
                         }
                         if let Some(ref mut cb) = progress_callback {
                             let msg = format!(
-                                "Stage 3 (MSES): {}/{} verified -- {} ok",
+                                "Stage 3 (MSES): {}/{} verified ({} ok)",
                                 completed_mses,
                                 mses_indices.len(),
                                 n_mses_verified

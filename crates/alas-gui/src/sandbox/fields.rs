@@ -143,15 +143,22 @@ struct Spec {
     dependents: &'static [&'static str],
 }
 
+/// The sandbox validity domain for a field: its editing range and displayed
+/// decimals. Grouped because every bounded config field declares all three
+/// together (see the module doc comment).
+struct Bounds {
+    min: f64,
+    max: f64,
+    decimals: usize,
+}
+
 const fn cfg(
     id: &'static str,
     discipline: Discipline,
     group: &'static str,
     pointer: &'static str,
     kind: FieldKind,
-    min: f64,
-    max: f64,
-    decimals: usize,
+    bounds: Bounds,
 ) -> Spec {
     Spec {
         id,
@@ -159,9 +166,9 @@ const fn cfg(
         group,
         target: FieldTarget::Config(pointer),
         kind,
-        min,
-        max,
-        decimals,
+        min: bounds.min,
+        max: bounds.max,
+        decimals: bounds.decimals,
         dependents: &[],
     }
 }
@@ -229,9 +236,11 @@ const SPECS: &[Spec] = &[
             PLANFORM,
             "/geometry/wing/break_span_fraction",
             FieldKind::Float,
-            0.05,
-            0.95,
-            3,
+            Bounds {
+                min: 0.05,
+                max: 0.95,
+                decimals: 3,
+            },
         )
     },
     cfg(
@@ -240,9 +249,11 @@ const SPECS: &[Spec] = &[
         PLANFORM,
         "/geometry/wing/kink_span_fraction",
         FieldKind::OptionalFloat,
-        0.05,
-        0.95,
-        3,
+        Bounds {
+            min: 0.05,
+            max: 0.95,
+            decimals: 3,
+        },
     ),
     Spec {
         dependents: &["geometry.wing.side_of_body_chord_ratio"],
@@ -252,9 +263,11 @@ const SPECS: &[Spec] = &[
             PLANFORM,
             "/geometry/wing/side_of_body_span_fraction",
             FieldKind::OptionalFloat,
-            0.0,
-            0.9,
-            3,
+            Bounds {
+                min: 0.0,
+                max: 0.9,
+                decimals: 3,
+            },
         )
     },
     cfg(
@@ -263,9 +276,11 @@ const SPECS: &[Spec] = &[
         PLANFORM,
         "/geometry/wing/side_of_body_chord_ratio",
         FieldKind::OptionalFloat,
-        0.2,
-        1.5,
-        3,
+        Bounds {
+            min: 0.2,
+            max: 1.5,
+            decimals: 3,
+        },
     ),
     cfg(
         "geometry.wing.outboard_sweep_decrement_deg",
@@ -273,9 +288,11 @@ const SPECS: &[Spec] = &[
         PLANFORM,
         "/geometry/wing/outboard_sweep_decrement_deg",
         FieldKind::Float,
-        -20.0,
-        30.0,
-        2,
+        Bounds {
+            min: -20.0,
+            max: 30.0,
+            decimals: 2,
+        },
     ),
     cfg(
         "geometry.wing.outboard_le_sweep_deg",
@@ -283,9 +300,11 @@ const SPECS: &[Spec] = &[
         PLANFORM,
         "/geometry/wing/outboard_le_sweep_deg",
         FieldKind::OptionalFloat,
-        -10.0,
-        60.0,
-        2,
+        Bounds {
+            min: -10.0,
+            max: 60.0,
+            decimals: 2,
+        },
     ),
     // Twist and dihedral.
     cfg(
@@ -294,9 +313,11 @@ const SPECS: &[Spec] = &[
         TWIST,
         "/geometry/wing/root_twist_deg",
         FieldKind::Float,
-        -15.0,
-        15.0,
-        2,
+        Bounds {
+            min: -15.0,
+            max: 15.0,
+            decimals: 2,
+        },
     ),
     cfg(
         "geometry.wing.break_twist_deg",
@@ -304,9 +325,11 @@ const SPECS: &[Spec] = &[
         TWIST,
         "/geometry/wing/break_twist_deg",
         FieldKind::Float,
-        -15.0,
-        15.0,
-        2,
+        Bounds {
+            min: -15.0,
+            max: 15.0,
+            decimals: 2,
+        },
     ),
     dv(
         "design.tip_twist_deg",
@@ -320,9 +343,11 @@ const SPECS: &[Spec] = &[
         TWIST,
         "/geometry/wing/root_z_m",
         FieldKind::Float,
-        -15.0,
-        15.0,
-        2,
+        Bounds {
+            min: -15.0,
+            max: 15.0,
+            decimals: 2,
+        },
     ),
     cfg(
         "geometry.wing.break_z_m",
@@ -330,9 +355,11 @@ const SPECS: &[Spec] = &[
         TWIST,
         "/geometry/wing/break_z_m",
         FieldKind::Float,
-        -15.0,
-        15.0,
-        2,
+        Bounds {
+            min: -15.0,
+            max: 15.0,
+            decimals: 2,
+        },
     ),
     cfg(
         "geometry.wing.tip_z_m",
@@ -340,9 +367,11 @@ const SPECS: &[Spec] = &[
         TWIST,
         "/geometry/wing/tip_z_m",
         FieldKind::Float,
-        -15.0,
-        15.0,
-        2,
+        Bounds {
+            min: -15.0,
+            max: 15.0,
+            decimals: 2,
+        },
     ),
     // Placement.
     cfg(
@@ -351,9 +380,11 @@ const SPECS: &[Spec] = &[
         PLACEMENT,
         "/geometry/wing/root_datum_x_m",
         FieldKind::Float,
-        0.0,
-        150.0,
-        2,
+        Bounds {
+            min: 0.0,
+            max: 150.0,
+            decimals: 2,
+        },
     ),
     dv(
         "design.wing_x_shift_m",
@@ -368,9 +399,11 @@ const SPECS: &[Spec] = &[
         AIRFOILS,
         "/geometry/wing/root_airfoil",
         FieldKind::Airfoil,
-        0.0,
-        0.0,
-        0,
+        Bounds {
+            min: 0.0,
+            max: 0.0,
+            decimals: 0,
+        },
     ),
     cfg(
         "geometry.wing.tip_airfoil",
@@ -378,9 +411,11 @@ const SPECS: &[Spec] = &[
         AIRFOILS,
         "/geometry/wing/tip_airfoil",
         FieldKind::Airfoil,
-        0.0,
-        0.0,
-        0,
+        Bounds {
+            min: 0.0,
+            max: 0.0,
+            decimals: 0,
+        },
     ),
     dv(
         "design.airfoil_thickness_scale",
@@ -424,9 +459,11 @@ const SPECS: &[Spec] = &[
         MESH,
         "/geometry/wing/n_subdivisions",
         FieldKind::Int,
-        1.0,
-        64.0,
-        0,
+        Bounds {
+            min: 1.0,
+            max: 64.0,
+            decimals: 0,
+        },
     ),
     // Horizontal tail.
     cfg(
@@ -435,9 +472,11 @@ const SPECS: &[Spec] = &[
         PLANFORM,
         "/geometry/empennage/hstab_root_chord_m",
         FieldKind::Float,
-        0.2,
-        30.0,
-        2,
+        Bounds {
+            min: 0.2,
+            max: 30.0,
+            decimals: 2,
+        },
     ),
     cfg(
         "geometry.empennage.hstab_tip_chord_m",
@@ -445,9 +484,11 @@ const SPECS: &[Spec] = &[
         PLANFORM,
         "/geometry/empennage/hstab_tip_chord_m",
         FieldKind::Float,
-        0.1,
-        20.0,
-        2,
+        Bounds {
+            min: 0.1,
+            max: 20.0,
+            decimals: 2,
+        },
     ),
     cfg(
         "geometry.empennage.hstab_tip_le_m",
@@ -455,9 +496,11 @@ const SPECS: &[Spec] = &[
         PLANFORM,
         "/geometry/empennage/hstab_tip_le_m",
         FieldKind::Vec3,
-        -20.0,
-        40.0,
-        2,
+        Bounds {
+            min: -20.0,
+            max: 40.0,
+            decimals: 2,
+        },
     ),
     cfg(
         "geometry.empennage.hstab_root_twist_deg",
@@ -465,9 +508,11 @@ const SPECS: &[Spec] = &[
         TWIST,
         "/geometry/empennage/hstab_root_twist_deg",
         FieldKind::Float,
-        -15.0,
-        15.0,
-        2,
+        Bounds {
+            min: -15.0,
+            max: 15.0,
+            decimals: 2,
+        },
     ),
     cfg(
         "geometry.empennage.hstab_tip_twist_deg",
@@ -475,9 +520,11 @@ const SPECS: &[Spec] = &[
         TWIST,
         "/geometry/empennage/hstab_tip_twist_deg",
         FieldKind::Float,
-        -15.0,
-        15.0,
-        2,
+        Bounds {
+            min: -15.0,
+            max: 15.0,
+            decimals: 2,
+        },
     ),
     cfg(
         "geometry.empennage.hstab_offset_from_tail_m",
@@ -485,9 +532,11 @@ const SPECS: &[Spec] = &[
         PLACEMENT,
         "/geometry/empennage/hstab_offset_from_tail_m",
         FieldKind::Float,
-        0.0,
-        60.0,
-        2,
+        Bounds {
+            min: 0.0,
+            max: 60.0,
+            decimals: 2,
+        },
     ),
     cfg(
         "geometry.empennage.hstab_z_m",
@@ -495,9 +544,11 @@ const SPECS: &[Spec] = &[
         PLACEMENT,
         "/geometry/empennage/hstab_z_m",
         FieldKind::Float,
-        -10.0,
-        20.0,
-        2,
+        Bounds {
+            min: -10.0,
+            max: 20.0,
+            decimals: 2,
+        },
     ),
     dv(
         "design.tail_scale",
@@ -517,9 +568,11 @@ const SPECS: &[Spec] = &[
         AIRFOILS,
         "/geometry/empennage/tail_airfoil",
         FieldKind::Airfoil,
-        0.0,
-        0.0,
-        0,
+        Bounds {
+            min: 0.0,
+            max: 0.0,
+            decimals: 0,
+        },
     ),
     cfg(
         "geometry.empennage.n_subdivisions",
@@ -527,9 +580,11 @@ const SPECS: &[Spec] = &[
         MESH,
         "/geometry/empennage/n_subdivisions",
         FieldKind::Int,
-        1.0,
-        64.0,
-        0,
+        Bounds {
+            min: 1.0,
+            max: 64.0,
+            decimals: 0,
+        },
     ),
     // Vertical tail.
     cfg(
@@ -538,9 +593,11 @@ const SPECS: &[Spec] = &[
         PLANFORM,
         "/geometry/empennage/vstab_root_chord_m",
         FieldKind::Float,
-        0.2,
-        30.0,
-        2,
+        Bounds {
+            min: 0.2,
+            max: 30.0,
+            decimals: 2,
+        },
     ),
     cfg(
         "geometry.empennage.vstab_tip_chord_m",
@@ -548,9 +605,11 @@ const SPECS: &[Spec] = &[
         PLANFORM,
         "/geometry/empennage/vstab_tip_chord_m",
         FieldKind::Float,
-        0.1,
-        20.0,
-        2,
+        Bounds {
+            min: 0.1,
+            max: 20.0,
+            decimals: 2,
+        },
     ),
     cfg(
         "geometry.empennage.vstab_tip_le_m",
@@ -558,9 +617,11 @@ const SPECS: &[Spec] = &[
         PLANFORM,
         "/geometry/empennage/vstab_tip_le_m",
         FieldKind::Vec3,
-        -20.0,
-        40.0,
-        2,
+        Bounds {
+            min: -20.0,
+            max: 40.0,
+            decimals: 2,
+        },
     ),
     cfg(
         "geometry.empennage.vstab_offset_from_tail_m",
@@ -568,9 +629,11 @@ const SPECS: &[Spec] = &[
         PLACEMENT,
         "/geometry/empennage/vstab_offset_from_tail_m",
         FieldKind::Float,
-        0.0,
-        60.0,
-        2,
+        Bounds {
+            min: 0.0,
+            max: 60.0,
+            decimals: 2,
+        },
     ),
     cfg(
         "geometry.empennage.vstab_z_m",
@@ -578,9 +641,11 @@ const SPECS: &[Spec] = &[
         PLACEMENT,
         "/geometry/empennage/vstab_z_m",
         FieldKind::Float,
-        -5.0,
-        20.0,
-        2,
+        Bounds {
+            min: -5.0,
+            max: 20.0,
+            decimals: 2,
+        },
     ),
     // Fuselage.
     dv(
@@ -597,9 +662,11 @@ const SPECS: &[Spec] = &[
             BODY,
             "/geometry/fuselage/diameter_m",
             FieldKind::Float,
-            0.5,
-            12.0,
-            3,
+            Bounds {
+                min: 0.5,
+                max: 12.0,
+                decimals: 3,
+            },
         )
     },
     cfg(
@@ -608,9 +675,11 @@ const SPECS: &[Spec] = &[
         BODY,
         "/geometry/fuselage/height_m",
         FieldKind::OptionalFloat,
-        0.5,
-        14.0,
-        3,
+        Bounds {
+            min: 0.5,
+            max: 14.0,
+            decimals: 3,
+        },
     ),
     cfg(
         "geometry.fuselage.cabin_start_x_m",
@@ -618,9 +687,11 @@ const SPECS: &[Spec] = &[
         STATIONS,
         "/geometry/fuselage/cabin_start_x_m",
         FieldKind::Float,
-        0.5,
-        40.0,
-        2,
+        Bounds {
+            min: 0.5,
+            max: 40.0,
+            decimals: 2,
+        },
     ),
     cfg(
         "geometry.fuselage.tailcone_length_m",
@@ -628,9 +699,11 @@ const SPECS: &[Spec] = &[
         STATIONS,
         "/geometry/fuselage/tailcone_length_m",
         FieldKind::Float,
-        1.0,
-        50.0,
-        2,
+        Bounds {
+            min: 1.0,
+            max: 50.0,
+            decimals: 2,
+        },
     ),
     cfg(
         "geometry.fuselage.nose_z_m",
@@ -638,9 +711,11 @@ const SPECS: &[Spec] = &[
         PROFILE,
         "/geometry/fuselage/nose_z_m",
         FieldKind::Float,
-        -5.0,
-        5.0,
-        2,
+        Bounds {
+            min: -5.0,
+            max: 5.0,
+            decimals: 2,
+        },
     ),
     cfg(
         "geometry.fuselage.cabin_z_m",
@@ -648,9 +723,11 @@ const SPECS: &[Spec] = &[
         PROFILE,
         "/geometry/fuselage/cabin_z_m",
         FieldKind::Float,
-        -5.0,
-        5.0,
-        2,
+        Bounds {
+            min: -5.0,
+            max: 5.0,
+            decimals: 2,
+        },
     ),
     cfg(
         "geometry.fuselage.tail_z_m",
@@ -658,9 +735,11 @@ const SPECS: &[Spec] = &[
         PROFILE,
         "/geometry/fuselage/tail_z_m",
         FieldKind::Float,
-        -5.0,
-        10.0,
-        2,
+        Bounds {
+            min: -5.0,
+            max: 10.0,
+            decimals: 2,
+        },
     ),
     cfg(
         "geometry.fuselage.n_subdivisions",
@@ -668,9 +747,11 @@ const SPECS: &[Spec] = &[
         MESH,
         "/geometry/fuselage/n_subdivisions",
         FieldKind::Int,
-        1.0,
-        64.0,
-        0,
+        Bounds {
+            min: 1.0,
+            max: 64.0,
+            decimals: 0,
+        },
     ),
     // Propulsion installation.
     cfg(
@@ -679,9 +760,11 @@ const SPECS: &[Spec] = &[
         INSTALLATION,
         "/geometry/engine/engine_name",
         FieldKind::Engine,
-        0.0,
-        0.0,
-        0,
+        Bounds {
+            min: 0.0,
+            max: 0.0,
+            decimals: 0,
+        },
     ),
     cfg(
         "geometry.engine.spanwise_positions_m",
@@ -689,9 +772,11 @@ const SPECS: &[Spec] = &[
         INSTALLATION,
         "/geometry/engine/spanwise_positions_m",
         FieldKind::FloatList,
-        -45.0,
-        45.0,
-        2,
+        Bounds {
+            min: -45.0,
+            max: 45.0,
+            decimals: 2,
+        },
     ),
     cfg(
         "geometry.engine.z_m",
@@ -699,9 +784,11 @@ const SPECS: &[Spec] = &[
         INSTALLATION,
         "/geometry/engine/z_m",
         FieldKind::Float,
-        -10.0,
-        10.0,
-        2,
+        Bounds {
+            min: -10.0,
+            max: 10.0,
+            decimals: 2,
+        },
     ),
     cfg(
         "geometry.engine.inlet_x_offset_m",
@@ -709,9 +796,11 @@ const SPECS: &[Spec] = &[
         INSTALLATION,
         "/geometry/engine/inlet_x_offset_m",
         FieldKind::Float,
-        -10.0,
-        15.0,
-        2,
+        Bounds {
+            min: -10.0,
+            max: 15.0,
+            decimals: 2,
+        },
     ),
     cfg(
         "geometry.engine.radius_scale_m",
@@ -719,9 +808,11 @@ const SPECS: &[Spec] = &[
         NACELLE,
         "/geometry/engine/radius_scale_m",
         FieldKind::Float,
-        0.2,
-        4.0,
-        3,
+        Bounds {
+            min: 0.2,
+            max: 4.0,
+            decimals: 3,
+        },
     ),
     cfg(
         "geometry.engine.nacelle_profile",
@@ -729,9 +820,11 @@ const SPECS: &[Spec] = &[
         NACELLE,
         "/geometry/engine/nacelle_profile",
         FieldKind::PairList,
-        0.0,
-        20.0,
-        3,
+        Bounds {
+            min: 0.0,
+            max: 20.0,
+            decimals: 3,
+        },
     ),
 ];
 

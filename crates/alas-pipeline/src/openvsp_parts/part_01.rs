@@ -10,7 +10,7 @@ use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime};
 
-use alas_config::AlasConfig;
+use alas_config::{AlasConfig, MainGearFallbackRefusal};
 use alas_exec::process::{kill_process_tree, NewProcessGroup, NoConsoleWindow};
 use alas_geom::aircraft::airplane::Airplane;
 use alas_geom::aircraft::fuselage::Fuselage;
@@ -18,10 +18,14 @@ use alas_geom::aircraft::wing::Wing;
 use alas_perf::landing_gear::{size_landing_gear_with_group_stations, LandingGearLayout};
 
 use crate::full_analysis::AnalysisReport;
+use crate::gear_stations::resolved_gear_stations;
 
 #[path = "../openvsp/validation.rs"]
 mod validation;
 use validation::validate_script;
+
+#[path = "../openvsp/native_preview.rs"]
+mod native_preview;
 
 /// Evidence state of an OpenVSP export artifact.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -132,7 +136,17 @@ pub fn export_openvsp_script(
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or("optimized_aircraft.preview.png");
-    let gear = landing_gear_for_report(report, config);
+    // A missing main-gear station fails the export rather than writing an
+    // aeroplane without gear or with gear at an unmeasured station: this
+    // artifact is read downstream as the aircraft, so both would misreport
+    // it. The typed refusal names the missing datum and the two heights that
+    // decided it.
+    let gear = landing_gear_for_report(report, config).map_err(|refusal| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("landing-gear export refused: {refusal}"),
+        )
+    })?;
     let script = render_script(
         &report.airplane,
         Some(&gear),
@@ -331,7 +345,7 @@ pub fn materialize_openvsp_project(
         .stderr(Stdio::from(stderr_file))
         .no_window()
         .new_process_group();
-    let mut child = match command.spawn() {
+    let mut child = match alas_exec::SupervisedSpawn::spawn_supervised(&mut command, "OpenVSP") {
         Ok(child) => child,
         Err(error) => {
             export.status = OpenVspExportStatus::RuntimeLaunchFailed;
@@ -419,6 +433,15 @@ pub fn materialize_openvsp_project(
             "OpenVSP completed the solver-facing export, but no fresh full outer-mold-line preview mesh was written to {}",
             export.cad_preview_geometry_path.display()
         ));
+    }
+    if !export.preview_available {
+        match native_preview::capture(&export, executable) {
+            Ok(()) => {
+                export.preview_available = true;
+                export.preview_error = None;
+            }
+            Err(error) => export.preview_error = Some(error),
+        }
     }
     export
 }
@@ -550,7 +573,22 @@ fn text_tail(text: &str) -> String {
         .join(" | ")
 }
 
-fn landing_gear_for_report(report: &AnalysisReport, config: &AlasConfig) -> LandingGearLayout {
+/// Size the gear this export draws, or report that this aircraft has no
+/// main-gear station to draw it at.
+///
+/// The stations come from [`crate::gear_stations::resolved_gear_stations`]
+/// rather than from a fallback rebuilt here, so an aircraft whose layout is
+/// outside the wing-mounted rule's domain cannot be exported with legs at a
+/// station the mass model refuses to supply. Every aircraft that has a
+/// station keeps exactly the one it had.
+///
+/// # Errors
+///
+/// [`MainGearFallbackRefusal`] when no main-gear station is available.
+fn landing_gear_for_report(
+    report: &AnalysisReport,
+    config: &AlasConfig,
+) -> Result<LandingGearLayout, MainGearFallbackRefusal> {
     let main_wing = &report.airplane.wings[0];
     let mac = report.airplane.c_ref.max(0.001);
     let x_mac_le = main_wing.aerodynamic_center(0.25)[0] - 0.25 * mac;
@@ -568,16 +606,18 @@ fn landing_gear_for_report(report: &AnalysisReport, config: &AlasConfig) -> Land
         .map_or(fus_start, |section| section.xyz_c[0]);
     let fallback_x_nlg = fus_start + (fus_end - fus_start) * config.mass_model.nlg_x_fraction;
     let fallback_x_mlg = x_mac_le + config.mass_model.mlg_x_fraction_mac * mac;
-    let stations = config.landing_gear.resolved_station_positions(
+    let stations = resolved_gear_stations(
+        config,
+        &report.airplane,
         fallback_x_nlg,
         fallback_x_mlg,
         fus_start,
         fus_end - fus_start,
-    );
+    )?;
     let mass_kg = report.component_masses.values().copied().sum();
     let diameter_m = config.geometry.fuselage.diameter_m;
 
-    size_landing_gear_with_group_stations(
+    Ok(size_landing_gear_with_group_stations(
         mass_kg,
         stations.x_nlg_m,
         stations.x_mlg_m,
@@ -587,7 +627,7 @@ fn landing_gear_for_report(report: &AnalysisReport, config: &AlasConfig) -> Land
         diameter_m * 1.1,
         &stations.main_gear_x_m,
         &config.landing_gear,
-    )
+    ))
 }
 
 fn render_script(
@@ -767,6 +807,46 @@ fn emit_fuselage(script: &mut String, index: usize, fuselage: &Fuselage) {
         set_xsec_parm(script, &xsec_id, "XLocPercent", x_fraction);
         set_xsec_parm(script, &xsec_id, "YLocPercent", y_fraction);
         set_xsec_parm(script, &xsec_id, "ZLocPercent", z_fraction);
+
+        // OpenVSP's default FUSELAGE skin leaves tangent strengths at their
+        // nonzero spline defaults. That skin overshoots the ALAS station
+        // envelope between sections, producing visible nose/tail ripples.
+        // Zero tangent strength selects OpenVSP's piecewise-linear skin
+        // interpolation, matching Fuselage's documented linear loft exactly.
+        // Explicit C0 continuity and zero tangents make that choice stable
+        // across OpenVSP defaults. Every ALAS station coordinate and envelope
+        // remains the requested value.
+        let _ = writeln!(
+            script,
+            "    SetXSecContinuity( {xsec_id}, 0 );"
+        );
+        let _ = writeln!(
+            script,
+            "    SetXSecTanAngles( {xsec_id}, XSEC_BOTH_SIDES, 0 );"
+        );
+        let _ = writeln!(
+            script,
+            "    SetXSecTanStrengths( {xsec_id}, XSEC_BOTH_SIDES, 0 );"
+        );
+    }
+
+    // Retain OpenVSP's endpoint angle convention only for point caps. Do not
+    // apply these angles to ordinary nonzero end sections (for example,
+    // nacelle inlet/exit stations), where they would change the intended
+    // end-section shape. Zero tangent strength keeps the linear envelope.
+    if first.width <= 1.0e-9 || first.height <= 1.0e-9 {
+        let first_xsec_id = format!("body_xsec_{index}_0");
+        let _ = writeln!(
+            script,
+            "    SetXSecTanAngles( {first_xsec_id}, XSEC_BOTH_SIDES, 90 );"
+        );
+    }
+    if last.width <= 1.0e-9 || last.height <= 1.0e-9 {
+        let last_xsec_id = format!("body_xsec_{index}_{}", fuselage.xsecs.len() - 1);
+        let _ = writeln!(
+            script,
+            "    SetXSecTanAngles( {last_xsec_id}, XSEC_BOTH_SIDES, -90 );"
+        );
     }
     script.push('\n');
 }

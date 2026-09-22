@@ -13,7 +13,7 @@
 //! shapes, and the frequency response at the four monitor grids.
 //!
 //! Almost all of the content here is the reader's behaviour when something is
-//! *absent*. That is not defensiveness -- it is the normal case. A solve can
+//! *absent*. That is not defensiveness; it is the normal case. A solve can
 //! write some subcases and not others, a `.op2` can carry displacements and no
 //! stress table, a monitor grid can be missing from the result, and every mode
 //! a modal solve finds can be a rigid-body mode below the reporting threshold.
@@ -26,7 +26,7 @@
 //!
 //! * The label-keyed results are [`LabelledValues`], an insertion-ordered list
 //!   of pairs. Upstream's `tip_deflection_m` comes out in load-case order and
-//!   its `miles_rms_m` in monitor order -- root, kink, engine, tip -- and both
+//!   its `miles_rms_m` in monitor order (root, kink, engine, tip) and both
 //!   are read back in that order by anything that reports them. Sorted by name
 //!   they would read `engine, kink, root, tip`, which is nothing.
 //! * The mode-shape reader returns `None` rather than an empty vector for

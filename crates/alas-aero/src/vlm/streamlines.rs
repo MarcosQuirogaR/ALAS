@@ -12,7 +12,7 @@
 //! Per-panel mesh geometry read back off a solved [`super::VlmResult`], for
 //! figures that need more than the net totals `run` reports: the spanwise
 //! lift distribution and the wake streamlines. Both are P11 (Figures)
-//! concerns -- the vortex-lattice solve itself, and its force summation, are
+//! concerns: the vortex-lattice solve itself, and its force summation, are
 //! unchanged by anything in this file; [`calculate_streamlines`] only reuses
 //! the already-solved circulation strengths to sample the flow field at new
 //! points.
@@ -24,7 +24,7 @@ use crate::vector3::{add3, norm3, scale3};
 use super::{TRAILING_VORTEX_DIRECTION, VORTEX_CORE_RADIUS};
 
 /// One panel's raw quad-mesh corners and vortex-lattice points, in `run`'s own
-/// front-left/back-left/back-right/front-right order -- upstream's
+/// front-left/back-left/back-right/front-right order: upstream's
 /// `front_left_vertices`/`back_left_vertices`/`back_right_vertices`/
 /// `front_right_vertices`/`left_vortex_vertices`/`right_vortex_vertices`/
 /// `vortex_centers`/`is_trailing_edge`, one row per panel, aligned with
@@ -45,7 +45,7 @@ pub struct PanelSample {
     pub right_vortex_vertex: [f64; 3],
     /// The midpoint of the bound vortex leg.
     pub vortex_center: [f64; 3],
-    /// Whether this panel is the last chordwise panel of its spanwise strip --
+    /// Whether this panel is the last chordwise panel of its spanwise strip:
     /// upstream's `(arange(len(faces)) + 1) % chordwise_resolution == 0`,
     /// evaluated per wing (including its mirrored half, if symmetric) before
     /// concatenation.
@@ -56,7 +56,7 @@ pub struct PanelSample {
 
 /// The velocity every horseshoe (`panels[i]`, strength `vortex_strengths[i]`)
 /// induces at `points`, plus the freestream and rotation-induced velocity at
-/// each point -- `get_velocity_at_points`, restated over [`PanelSample`]
+/// each point: `get_velocity_at_points`, restated over [`PanelSample`]
 /// rather than [`super::Panel`] so it can be called again after the solve, on
 /// arbitrary points, for a streamline trace.
 fn induced_velocity_field(
@@ -90,7 +90,7 @@ fn induced_velocity_field(
         .collect()
 }
 
-/// Trace streamlines from `seed_points` through the solved flow field --
+/// Trace streamlines from `seed_points` through the solved flow field:
 /// `VortexLatticeMethod.calculate_streamlines`. Forward-Euler integration with
 /// the velocity vector renormalized to a fixed step length at every step;
 /// upstream's own doc says why fancier ODE integration is not worth it near a

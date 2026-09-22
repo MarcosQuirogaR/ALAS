@@ -6,7 +6,7 @@
 //! The run contract is nothing like the modern one [`crate::nastran::run`]
 //! drives. There is no deck argument and no result file keyword: the solver
 //! reads the deck on **stdin**, writes the print file on **stdout**, and is
-//! configured entirely through environment variables -- `DBMEM`, `OCMEM`,
+//! configured entirely through environment variables: `DBMEM`, `OCMEM`,
 //! `RFDIR`, `DIRCTY` and the rest of `mds/nastrn.f`'s `GETENV` list. Four of
 //! those cost a run each to discover and are honoured here: `NASINFO` is read
 //! from `$RFDIR` and not the working directory, so a copy with its timing

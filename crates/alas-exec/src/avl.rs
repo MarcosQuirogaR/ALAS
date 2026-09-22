@@ -307,7 +307,7 @@ pub fn run_avl_with_options(
         .stderr(Stdio::from(stderr))
         .no_window()
         .new_process_group();
-    let mut child = match command.spawn() {
+    let mut child = match crate::SupervisedSpawn::spawn_supervised(&mut command, "AVL sweep") {
         Ok(child) => child,
         Err(error) => {
             result.status = AvlProcessStatus::LaunchFailed;

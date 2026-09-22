@@ -118,7 +118,7 @@ fn build() -> Vec<PerformancePreset> {
         PerformancePreset {
             name: "standard_narrowbody",
             display_name: "Standard Narrow-body (Recommended)",
-            description: "Typical modern narrow-body twin -- the PerformanceConfig defaults.",
+            description: "Typical modern narrow-body twin: the PerformanceConfig defaults.",
             // Whatever `PerformanceConfig` itself defaults to, so the
             // recommended preset and an unconfigured run are the same run.
             settings: PerformanceConfig::default(),
@@ -128,7 +128,7 @@ fn build() -> Vec<PerformancePreset> {
             display_name: "Modern Narrow-body (slats + Fowler flaps)",
             description:
                 "Modern single-aisle twin with leading-edge slats and single/double-slotted \
-                          Fowler flaps (e.g. A320/A220 family) -- higher CLmax than the generic \
+                          Fowler flaps (e.g. A320/A220 family): higher CLmax than the generic \
                           'standard narrow-body' bucket, which undersells this common, \
                           well-documented high-lift system and overestimates V-speeds by ~15-20 kt.",
             settings: PerformanceConfig {

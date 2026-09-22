@@ -4,11 +4,15 @@
 //! Native OpenFOAM wall-field extraction and aerodynamic surface samples.
 //!
 //! In incompressible OpenFOAM cases `p` and `wallShearStress` are kinematic
-//! fields (`m^2/s^2`).  The native mesh parser in [`surface_native`] pairs
-//! those fields with the converted airfoil faces before deriving Cp/Cf.
+//! fields (`m^2/s^2`); rhoSimpleFoam writes absolute pressure and wall stress
+//! (`Pa`).  The native mesh parser in [`surface_native`] accepts both contracts,
+//! normalises them with the configured density, and pairs the fields with the
+//! converted airfoil faces before deriving Cp/Cf.
 
 #[path = "surface_native.rs"]
 mod surface_native;
+#[cfg(test)]
+pub(crate) use surface_native::integrate;
 
 use serde::{Deserialize, Serialize};
 use std::error::Error;

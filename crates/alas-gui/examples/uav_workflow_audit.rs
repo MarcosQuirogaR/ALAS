@@ -10,14 +10,12 @@ use alas_gui::AlasApp;
 fn main() -> Result<(), eframe::Error> {
     alas_i18n::es::install();
     alas_i18n::set_language(Some("es"));
-    let state = AppState {
-        language: Language::Es,
-        active_page: "uav".to_owned(),
-        nav_pinned: true,
-        preview_open: false,
-        boot_frames_remaining: 0,
-        ..AppState::default()
-    };
+    let mut state = AppState::default();
+    state.language = Language::Es;
+    state.active_page = "uav".to_owned();
+    state.nav_pinned = true;
+    state.preview_open = false;
+    state.boot_frames_remaining = 0;
 
     eframe::run_native(
         "ALAS - UAV Workflow Audit",

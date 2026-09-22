@@ -47,8 +47,8 @@ pub struct Section {
 ///
 /// The rounding to `f32` happens once, in [`Surface::append_to`], and that
 /// is where upstream's does too: it computes the whole strip, adds the wing
-/// origin, and only then casts on the way into `VD`. Rounding earlier -- for
-/// instance on the way out of the twist rotation, before the origin shift --
+/// origin, and only then casts on the way into `VD`. Rounding earlier (for
+/// instance on the way out of the twist rotation, before the origin shift)
 /// rounds twice, and the second rounding lands about a hundred of a
 /// three-hundred-panel wing's corners one ulp away. That is invisible in the
 /// corner itself and not invisible in the panel normal, whose streamwise
@@ -131,8 +131,8 @@ impl Surface {
 
     /// Lay one strip's panels down.
     ///
-    /// The three chordwise lines -- inboard edge, outboard edge and the
-    /// strip's own centre -- are built independently, each on its own local
+    /// The three chordwise lines (inboard edge, outboard edge and the
+    /// strip's own centre) are built independently, each on its own local
     /// chord, then all three are rotated about their own leading edge by the
     /// local twist. That is why the bound vortex of a twisted strip is not
     /// the average of the two edge vortices.
@@ -157,7 +157,7 @@ impl Surface {
         let tan_dihedral = section.dihedral_rad.tan();
 
         // The pivot is the leading edge of each chordwise line, before
-        // camber -- which is zero here, so it is also the panel's own leading
+        // camber, which is zero here, so it is also the panel's own leading
         // edge.
         let pivot_x_a = section.x_offset_m + strip.eta_a * tan_sweep;
         let pivot_x_b = section.x_offset_m + strip.eta_b * tan_sweep;
@@ -194,9 +194,9 @@ impl Surface {
         // The camber line is identically zero, so every point of a chordwise
         // line shares its leading edge's height and the rotation's second
         // argument is always zero. Upstream is inconsistent about *which*
-        // camber height two of its ten rotations read -- `xi_prime_ac` takes
+        // camber height two of its ten rotations read (`xi_prime_ac` takes
         // the bottom corner's and `xi_prime_bc` the top one's, neither
-        // matching their own `zeta_prime_*` -- and with the camber line zero
+        // matching their own `zeta_prime_*`) and with the camber line zero
         // there is no difference between those choices to reproduce. A port
         // that grows a camber line inherits the question.
         const CAMBER: f64 = 0.0;
@@ -301,7 +301,7 @@ impl Surface {
         }
 
         // The strip's own chord and incidence, measured between the midpoint
-        // of its leading edge and the midpoint of its trailing edge -- after
+        // of its leading edge and the midpoint of its trailing edge, after
         // twist, and after a vertical surface's reflection, which is why a
         // fin reports zero incidence rather than its geometric twist. Both
         // are taken before the origin shift, as upstream takes them, and are

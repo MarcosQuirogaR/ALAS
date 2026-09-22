@@ -48,7 +48,7 @@ function makeRow(preset, section, key, model, reference) {
     error_pct: reason || !finite(model) ? null : difference};
 }
 
-function main(dir = '.agent/validation') {
+function main(dir = 'out/validation') {
   const read = file => JSON.parse(fs.readFileSync(path.join(dir, file), 'utf8'));
   const model = read('MODEL.json');
   const before = fs.existsSync(path.join(dir, 'MODEL.before-fixes.json')) ? read('MODEL.before-fixes.json') : {};
@@ -124,7 +124,7 @@ function main(dir = '.agent/validation') {
   <h2>Open engineering limitations</h2><div class="open">ATR main-deck baggage compartments and total usable hold volumes are not implemented. Generic cargo geometry does not establish certified capacity. Remaining CD0 and L/D differences require matched Mach, Reynolds number, lift, trim and reference-area evidence. Historical VSPAERO results must be rerun after geometry changes; fitted total-polar Oswald efficiency is not point inviscid span efficiency, and there is no universal swept-wing ceiling at 0.968. Several certified MAC/datum and weight-variant comparisons remain unresolved. Structural external validation is not established by this audit.</div>
   <h2>Verification status</h2><p>${escape(verification?.summary || 'Verification record not supplied; do not infer test success from numeric agreement.')}</p>
   <p>Supporting documentation: <a href="../../docs/preset-correlation.md">corrections and reproducibility</a>, <a href="../../docs/cargo-capacity.md">cargo capacity</a>, <a href="../../docs/methods.md">drag method</a>, <a href="../../docs/route-model.md">routing</a>. All per-row citations refer to <a href="../validation/REFERENCES.bib">the reference bibliography</a>. Source notes remain visible so that estimates and configuration mismatches cannot be mistaken for defects. <a href="../validation/VERIFICATION.json">Detailed verification record</a>.</p>${tables}</main></body></html>`;
-  fs.writeFileSync('.agent/reports/2026-09-04-preset-real-world-correlation.html', html);
+  fs.writeFileSync('out/reports/2026-09-04-preset-real-world-correlation.html', html);
   console.log(`${rows.length} rows; ${scored.length} scored comparisons; ${rows.filter(r => r.status === 'unsupported').length} unsupported outputs`);
 }
 

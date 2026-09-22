@@ -22,7 +22,7 @@
 //!
 //! True airspeed follows from the local speed of sound, `TAS = M * a(T)`, and
 //! equivalent airspeed from the dynamic-pressure equivalence
-//! `EAS = TAS * sqrt(rho / rho0)` -- a different, incompressible-referenced
+//! `EAS = TAS * sqrt(rho / rho0)`: a different, incompressible-referenced
 //! quantity from CAS, not an alternate name for it.
 //!
 //! Primary source, read directly (not via a secondary reproduction): NASA
@@ -38,7 +38,7 @@
 //! sea-level pressure and speed of sound (`p -> p0`, `M -> Vc/a0`), and then
 //! reading the true Mach number back out of the resulting `qc` at the
 //! aircraft's actual ambient pressure, is this module's own derivation built
-//! on the cited NASA relation -- NASA's page does not itself define, or use
+//! on the cited NASA relation: NASA's page does not itself define, or use
 //! the term, calibrated airspeed. This derivation and the resulting
 //! `gamma = 1.4` numeric form are the standard one given in airspeed
 //! textbooks (e.g. Clancy, L. J. (1975), *Aerodynamics*, SS3.12-3.13;
@@ -62,7 +62,7 @@
 //! `ratio_of_specific_heats()`, and every sea-level reference value below is
 //! derived from [`crate::isa::GAS_CONSTANT_AIR`] and the same `p0`, `T0`
 //! this crate's ISA model uses at zero altitude, rather than restated as
-//! independently rounded literals -- see [`sea_level_density_kg_m3`] for why
+//! independently rounded literals, see [`sea_level_density_kg_m3`] for why
 //! that matters for exact sea-level self-consistency.
 //!
 //! # Validity domain
@@ -111,7 +111,7 @@ pub const SEA_LEVEL_DENSITY_DISPLAY_KG_M3: f64 = 1.225;
 /// Standard sea-level density, in kg/m^3: `p0 / (R * T0)`, from this
 /// module's own [`SEA_LEVEL_PRESSURE_PA`], [`SEA_LEVEL_TEMPERATURE_K`] and
 /// [`crate::isa::GAS_CONSTANT_AIR`], the values every EAS/TAS conversion
-/// here actually uses -- see [`SEA_LEVEL_DENSITY_DISPLAY_KG_M3`] for why this
+/// here actually uses, see [`SEA_LEVEL_DENSITY_DISPLAY_KG_M3`] for why this
 /// is not simply the commonly quoted 1.225.
 fn sea_level_density_kg_m3() -> f64 {
     SEA_LEVEL_PRESSURE_PA / (crate::isa::GAS_CONSTANT_AIR * SEA_LEVEL_TEMPERATURE_K)
@@ -309,7 +309,7 @@ pub fn calibrated_from_true(
 
 /// Equivalent airspeed for a given true airspeed at ambient pressure and
 /// temperature: `EAS = TAS * sqrt(rho / rho0)`, the incompressible
-/// dynamic-pressure equivalence -- not calibrated airspeed under another
+/// dynamic-pressure equivalence, not calibrated airspeed under another
 /// name.
 ///
 /// # Errors
@@ -369,7 +369,7 @@ mod tests {
         // TAS = CAS; EAS uses `sea_level_density_kg_m3()`, computed by the
         // same `p0/(R T0)` formula this test evaluates density at, so the
         // density ratio is exactly 1.0 in floating point, not merely close
-        // to it -- these tolerances are round-off-tied, not loosened to
+        // to it; these tolerances are round-off-tied, not loosened to
         // paper over the 1.225-vs-1.224999 rounding gap documented on
         // `SEA_LEVEL_DENSITY_DISPLAY_KG_M3`.
         let cas = 90.0_f64;
@@ -463,7 +463,7 @@ mod tests {
         let cas_eas_difference_fraction = (cas_m_s - eas).abs() / cas_m_s;
         let tas_cas_ratio = tas / cas_m_s;
         // TAS is well above CAS at this altitude (low density, compressible
-        // correction), and EAS visibly differs from CAS -- they are not
+        // correction), and EAS visibly differs from CAS; they are not
         // interchangeable, even though both start from an incompressible
         // dynamic-pressure idea.
         assert!(tas_cas_ratio > 1.5, "tas/cas={tas_cas_ratio}");

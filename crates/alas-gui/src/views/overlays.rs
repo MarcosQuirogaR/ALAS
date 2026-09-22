@@ -4,8 +4,16 @@
 //! The window-level overlays: the boot splash, the first-run walkthrough, the
 //! advanced walkthrough guide, the storage dialog, and the About window.
 
-use egui::{pos2, vec2, Color32, Context, Frame, Rect, RichText, ScrollArea, Stroke, Vec2, Window};
+use egui::{
+    pos2, vec2, Color32, Context, Frame, Id, Rect, RichText, ScrollArea, Stroke, Vec2,
+    ViewportBuilder, Window,
+};
 
+use alas_exec::storage::{
+    clear_storage, reset_tool_preferences, storage_inventory, StorageLocations,
+};
+
+use crate::native_viewport::show_native_viewport;
 use crate::state::AppState;
 use crate::views::guide_data::CHAPTERS;
 use crate::views::tour_data::TOUR_STEPS;
@@ -40,8 +48,8 @@ fn tr_fields(template: &str, fields: &[(&str, String)]) -> String {
 /// Render the boot splash while `boot_frames_remaining` is still counting down.
 ///
 /// The main three-stripe symbol and the smaller symbol/wordmark footer are
-/// positioned independently -- one centred in the full client area, the
-/// other anchored to the bottom with a consistent margin -- rather than as
+/// positioned independently (one centred in the full client area, the
+/// other anchored to the bottom with a consistent margin) rather than as
 /// one fused composite image, so each keeps sensible proportions as the
 /// window is resized instead of both clustering toward the top.
 pub fn show_splash(state: &mut AppState, ctx: &Context) {
@@ -77,7 +85,16 @@ pub fn show_splash(state: &mut AppState, ctx: &Context) {
             crate::branding::logo_natural_size(),
         ) {
             let size = splash_symbol_size(natural, panel, footer_top);
-            ui.put(Rect::from_center_size(panel.center(), size), image);
+            // `Image::from_texture` uses `ImageFit::Exact(texture_size)` with
+            // an unlimited `max_size`.  A surrounding `ui.put` rectangle is
+            // therefore only a placement hint: egui lets the image keep its
+            // native texture dimensions and it overflows that rectangle.  A
+            // real image bound is required to make the computed splash size
+            // reach the painter while retaining the source aspect ratio.
+            ui.put(
+                Rect::from_center_size(panel.center(), size),
+                image.max_size(size),
+            );
         }
     });
 }
@@ -304,6 +321,9 @@ fn walkthrough_panel_position(
 }
 
 /// Render the advanced walkthrough guide window, if it is open.
+/// Reading measure of the Advanced Walkthrough body.
+const GUIDE_MEASURE_WIDTH: f32 = 640.0;
+
 pub fn show_advanced_guide(state: &mut AppState, ctx: &Context) {
     if !state.show_advanced_guide {
         return;
@@ -338,13 +358,15 @@ pub fn show_advanced_guide(state: &mut AppState, ctx: &Context) {
                     ScrollArea::vertical()
                         .id_salt("guide_content")
                         .show(ui, |ui| {
-                            ui.heading(tr(chapter.title));
+                            ui.set_max_width(GUIDE_MEASURE_WIDTH);
+                            ui.label(RichText::new(tr(chapter.title)).strong().size(22.0));
+                            ui.label(RichText::new(tr(chapter.blurb)).italics());
                             for section in chapter.sections {
-                                ui.add_space(8.0);
-                                ui.label(RichText::new(tr(section.heading)).strong());
+                                ui.add_space(14.0);
+                                ui.label(RichText::new(tr(section.heading)).strong().size(16.0));
                                 for para in section.body {
-                                    ui.add_space(4.0);
-                                    ui.label(tr(para));
+                                    ui.add_space(6.0);
+                                    ui.add(egui::Label::new(tr(para)).wrap());
                                 }
                             }
                             ui.add_space(16.0);
@@ -372,58 +394,181 @@ pub fn show_advanced_guide(state: &mut AppState, ctx: &Context) {
 
 /// Render the storage-management dialog, if it is open.
 ///
-/// The reference's dialog is backed by an HTTP maintenance endpoint tracking
-/// extracted-runtime caches this port has no counterpart for (it is one
-/// binary, nothing to extract); the one real reclaimable location here is the
-/// pipeline's own output directory, which this offers to clear directly.
+/// The inventory is built from the same resolved data roots as the pipeline,
+/// so the dialog never clears a path merely because it happens to have a
+/// familiar name. CFD cases remain a separate category when they live below
+/// the run output directory, and the saved tool-path reset removes only the
+/// preferences file and its in-memory path values.
 pub fn show_storage_dialog(state: &mut AppState, ctx: &Context) {
     if !state.show_storage {
         return;
     }
-    let mut open = true;
-    Window::new(tr("Manage storage"))
-        .open(&mut open)
-        .resizable(false)
-        .collapsible(false)
-        .show(ctx, |ui| {
-            let out_dir = state
-                .pipeline_options
-                .output_dir
-                .clone()
-                .unwrap_or_else(|| std::path::PathBuf::from("outputs"));
-            let (exists, size) = directory_size(&out_dir);
-            ui.label(tr_fields(
-                "Output directory: {path}",
-                &[("path", out_dir.display().to_string())],
-            ));
-            ui.label(if exists {
-                tr_fields("{size} on disk", &[("size", format_bytes(size))])
-            } else {
-                tr("Not created yet.")
-            });
-            ui.add_space(8.0);
-            ui.add_enabled_ui(exists, |ui| {
-                if ui.button(tr("Clear exported outputs")).clicked() {
-                    match std::fs::remove_dir_all(&out_dir) {
-                        Ok(()) => state.log(
-                            tr_fields(
-                                "Cleared {path}.",
-                                &[("path", out_dir.display().to_string())],
-                            ),
-                            crate::state::LogKind::Info,
-                        ),
-                        Err(e) => state.log(
-                            tr_fields(
-                                "Could not clear outputs: {error}",
-                                &[("error", e.to_string())],
-                            ),
-                            crate::state::LogKind::Error,
-                        ),
-                    }
-                }
-            });
+    let config = state.typed_config().unwrap_or_default();
+    let output_dir = state
+        .pipeline_options
+        .output_dir
+        .clone()
+        .unwrap_or_else(|| std::path::PathBuf::from("outputs"));
+    let cfd_case_root = std::path::PathBuf::from("outputs/airfoil-cfd");
+    let navdata_dir = std::path::PathBuf::from(config.mission.navdata_dir);
+    let texture_path = std::path::PathBuf::from(config.mission.texture_path);
+    let locations = StorageLocations {
+        output_dir: &output_dir,
+        cfd_case_root: &cfd_case_root,
+        navdata_dir: &navdata_dir,
+        texture_path: &texture_path,
+    };
+    let locator = state.tool_locator.clone();
+    let cache_id = Id::new((
+        "alas_storage_inventory",
+        &output_dir,
+        &cfd_case_root,
+        &navdata_dir,
+        &texture_path,
+    ));
+    let mut entries = ctx
+        .data(|data| data.get_temp::<Vec<alas_exec::storage::StorageEntry>>(cache_id))
+        .unwrap_or_else(|| {
+            let entries = storage_inventory(&locator, &locations);
+            ctx.data_mut(|data| data.insert_temp(cache_id, entries.clone()));
+            entries
         });
-    state.show_storage = open;
+    let response = show_native_viewport(
+        ctx,
+        "manage_storage",
+        tr("Manage storage"),
+        ViewportBuilder::default()
+            .with_title(tr("Manage storage"))
+            .with_inner_size(vec2(760.0, 620.0))
+            .with_min_inner_size(vec2(560.0, 420.0))
+            .with_resizable(true),
+        |_child_ctx, ui, _class| {
+            // Keep the complete body in one scroll area.  The previous fixed
+            // 420-point child area left the saved-path controls below the
+            // viewport on short windows, where the outer viewport itself did
+            // not expose a second scroll bar.
+            ScrollArea::vertical()
+                .id_salt("manage_storage_scroll")
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    ui.label(tr(
+                        "Only ALAS-owned generated data is listed here. Tool installations and saved aircraft documents are not removed.",
+                    ));
+                    if state.is_running {
+                        ui.colored_label(
+                            Color32::YELLOW,
+                            tr("Storage clearing is disabled while an analysis is running."),
+                        );
+                    }
+                    for index in 0..entries.len() {
+                        let entry = entries[index].clone();
+                        ui.group(|ui| {
+                            ui.horizontal(|ui| {
+                                ui.label(RichText::new(tr(entry.label)).strong());
+                                ui.label(if entry.exists {
+                                    tr_fields(
+                                        "{size} * {files} files",
+                                        &[
+                                            ("size", format_bytes(entry.bytes)),
+                                            ("files", entry.files.to_string()),
+                                        ],
+                                    )
+                                } else {
+                                    tr("Not created yet.")
+                                });
+                            });
+                            ui.small(entry.root.display().to_string());
+                            ui.add(egui::Label::new(tr(entry.description)).wrap());
+                            ui.add_enabled_ui(entry.exists && !state.is_running, |ui| {
+                                if ui.button(tr("Clear")).clicked() {
+                                    let outcome = clear_storage(&entry);
+                                    if outcome.failed.is_empty() {
+                                        state.log(
+                                            tr_fields(
+                                                "Cleared {category}.",
+                                                &[("category", tr(entry.label))],
+                                            ),
+                                            crate::state::LogKind::Info,
+                                        );
+                                    } else {
+                                        state.log(
+                                            tr_fields(
+                                                "Cleared {removed} paths; {failed} could not be removed.",
+                                                &[
+                                                    ("removed", outcome.removed.len().to_string()),
+                                                    ("failed", outcome.failed.len().to_string()),
+                                                ],
+                                            ),
+                                            crate::state::LogKind::Warn,
+                                        );
+                                    }
+                                    entries = storage_inventory(&locator, &locations);
+                                    ctx.data_mut(|data| {
+                                        data.insert_temp(cache_id, entries.clone())
+                                    });
+                                }
+                            });
+                        });
+                        ui.add_space(4.0);
+                    }
+                    if ui.button(tr("Refresh inventory")).clicked() {
+                        entries = storage_inventory(&locator, &locations);
+                        ctx.data_mut(|data| data.insert_temp(cache_id, entries.clone()));
+                    }
+                    ui.separator();
+                    ui.label(RichText::new(tr("Saved tool paths")).strong());
+                    ui.add(egui::Label::new(tr(
+                        "Resetting saved paths leaves installed tools untouched; ALAS will discover them again on the next run or launch.",
+                    ))
+                    .wrap());
+                    if ui.button(tr("Reset saved tool paths")).clicked() {
+                        match reset_tool_preferences(&locator) {
+                            Ok(_) => {
+                                reset_session_tool_paths(state);
+                                state.log(
+                                    tr("Saved tool paths reset; installed tools were not removed."),
+                                    crate::state::LogKind::Info,
+                                );
+                            }
+                            Err(error) => state.log(
+                                tr_fields(
+                                    "Could not reset saved tool paths: {error}",
+                                    &[("error", error)],
+                                ),
+                                crate::state::LogKind::Error,
+                            ),
+                        }
+                    }
+                });
+        },
+    );
+    if response.close_requested {
+        state.show_storage = false;
+    }
+}
+
+/// Clear the path fields that are persisted as tool preferences in the live
+/// session as well as on disk. Aircraft, mission and solver behaviour remain
+/// otherwise unchanged; defaults are the discovery starting points.
+fn reset_session_tool_paths(state: &mut AppState) {
+    let Some(mut config) = state.typed_config() else {
+        state.tool_preferences = alas_exec::ToolPreferences::default();
+        return;
+    };
+    let defaults = alas_config::AlasConfig::default();
+    config.mses.mses_dir = defaults.mses.mses_dir;
+    config.structures.nastran_exe_path = defaults.structures.nastran_exe_path;
+    config.structures.nastran_solver_path = defaults.structures.nastran_solver_path;
+    config.structures.nastran95_dir_path = defaults.structures.nastran95_dir_path;
+    config.structures.nastran95_runtime_path = defaults.structures.nastran95_runtime_path;
+    config.structures.nastran95_rf_stage_path = defaults.structures.nastran95_rf_stage_path;
+    config.structures.nastran95_open_core_words = defaults.structures.nastran95_open_core_words;
+    config.structures.patran_exe_path = defaults.structures.patran_exe_path;
+    config.mission.navdata_dir = defaults.mission.navdata_dir;
+    config.mission.routes_dir = defaults.mission.routes_dir;
+    state.config_values = crate::config_edit::full_config_values(&config);
+    state.tool_preferences = alas_exec::ToolPreferences::default();
+    state.on_config_modified();
 }
 
 /// Render the About window, if it is open.
@@ -451,28 +596,6 @@ pub fn show_about(state: &mut AppState, ctx: &Context) {
     state.show_about = open;
 }
 
-fn directory_size(dir: &std::path::Path) -> (bool, u64) {
-    if !dir.exists() {
-        return (false, 0);
-    }
-    let mut total = 0u64;
-    let mut stack = vec![dir.to_path_buf()];
-    while let Some(d) = stack.pop() {
-        let Ok(entries) = std::fs::read_dir(&d) else {
-            continue;
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                stack.push(path);
-            } else if let Ok(meta) = entry.metadata() {
-                total += meta.len();
-            }
-        }
-    }
-    (true, total)
-}
-
 fn format_bytes(n: u64) -> String {
     const UNITS: [&str; 4] = ["B", "KB", "MB", "GB"];
     let mut value = n as f64;
@@ -491,7 +614,7 @@ mod tests {
         SPLASH_FOOTER_HEIGHT, SPLASH_MARGIN, SPLASH_SYMBOL_MAX_HEIGHT, SPLASH_SYMBOL_MAX_WIDTH,
         WALKTHROUGH_ORDER, WALKTHROUGH_WINDOW_HIGHLIGHT_ID,
     };
-    use egui::{pos2, vec2, Rect, Vec2};
+    use egui::{pos2, vec2, Pos2, Rect, Vec2};
 
     #[test]
     fn walkthrough_panel_moves_below_a_target_when_room_exists() {
@@ -534,6 +657,26 @@ mod tests {
             "<- Back",
             "Advanced Walkthrough",
             "Manage storage",
+            "Only ALAS-owned generated data is listed here. Tool installations and saved aircraft documents are not removed.",
+            "Storage clearing is disabled while an analysis is running.",
+            "Generated outputs",
+            "Airfoil CFD cases",
+            "Solver scratch files",
+            "Downloaded navigation data",
+            "Downloaded globe texture",
+            "Results, exports and solver files written by runs; the next run recreates what it needs.",
+            "Airfoil CFD studies with their meshes, solver logs and results; clearing removes every saved study.",
+            "Work directories external solvers left in the system temporary folder after an interrupted run.",
+            "Navigation data for airway routing; downloaded again on demand.",
+            "Earth image for the route globe; downloaded again on demand.",
+            "{size} * {files} files",
+            "Cleared {category}.",
+            "Cleared {removed} paths; {failed} could not be removed.",
+            "Saved tool paths",
+            "Resetting saved paths leaves installed tools untouched; ALAS will discover them again on the next run or launch.",
+            "Reset saved tool paths",
+            "Saved tool paths reset; installed tools were not removed.",
+            "Could not reset saved tool paths: {error}",
             "Output directory: {path}",
             "{size} on disk",
             "Not created yet.",
@@ -618,5 +761,119 @@ mod tests {
         assert!(symbol.min.y >= panel.min.y + SPLASH_MARGIN - f32::EPSILON);
         assert!(symbol.max.y <= footer_top - SPLASH_MARGIN + f32::EPSILON);
         assert!(size.y < SPLASH_SYMBOL_MAX_HEIGHT);
+    }
+
+    /// Run the same egui widget path as the desktop splash and return the
+    /// tessellated bounds of its two embedded image textures.  This catches
+    /// widget-level overflow that a pure `splash_symbol_size` test cannot see.
+    fn rendered_splash_bounds(
+        viewport_size: Vec2,
+        native_pixels_per_point: f32,
+        zoom_factor: f32,
+    ) -> (Rect, Vec<Rect>) {
+        let mut state = crate::state::AppState {
+            boot_frames_remaining: 1,
+            ..Default::default()
+        };
+        let ctx = egui::Context::default();
+        let raw_input = || {
+            let mut input = egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, viewport_size)),
+                ..Default::default()
+            };
+            input
+                .viewports
+                .get_mut(&egui::ViewportId::ROOT)
+                .expect("root viewport")
+                .native_pixels_per_point = Some(native_pixels_per_point);
+            input
+        };
+
+        // A real native zoom change takes effect at the next egui pass.  Feed
+        // one setup pass so the test exercises that same DPI/zoom transition.
+        if (zoom_factor - 1.0).abs() > f32::EPSILON {
+            let _ = ctx.run(raw_input(), |_| {});
+            ctx.set_zoom_factor(zoom_factor);
+        }
+        let output = ctx.run(raw_input(), |ctx| super::show_splash(&mut state, ctx));
+        let panel = ctx.screen_rect();
+        let mut bounds = Vec::new();
+        for primitive in ctx.tessellate(output.shapes, output.pixels_per_point) {
+            let egui::epaint::Primitive::Mesh(mesh) = primitive.primitive else {
+                continue;
+            };
+            // TextureId::default() is egui's font atlas.  The remaining two
+            // meshes are the supplied wordmark and main symbol.
+            if mesh.texture_id == egui::TextureId::default() {
+                continue;
+            }
+            let Some(first) = mesh.vertices.first() else {
+                continue;
+            };
+            let mut rect = Rect::from_min_max(first.pos, first.pos);
+            for vertex in &mesh.vertices[1..] {
+                rect = rect.union(Rect::from_min_max(vertex.pos, vertex.pos));
+            }
+            bounds.push(rect);
+        }
+        (panel, bounds)
+    }
+
+    #[test]
+    fn rendered_splash_contains_the_main_symbol_at_supported_sizes_and_zooms() {
+        let natural = crate::branding::logo_natural_size().expect("embedded logo size");
+        for (viewport_size, native_ppp, zoom_factor) in [
+            (vec2(640.0, 360.0), 1.0, 1.0),
+            (vec2(1_280.0, 820.0), 1.0, 1.0),
+            (vec2(1_920.0, 1_080.0), 1.0, 1.0),
+            (vec2(1_280.0, 820.0), 1.5, 1.0),
+            (vec2(1_280.0, 820.0), 2.0, 1.5),
+        ] {
+            let (panel, mut bounds) =
+                rendered_splash_bounds(viewport_size, native_ppp, zoom_factor);
+            assert_eq!(bounds.len(), 2, "expected main symbol and footer image");
+
+            let footer_top = (panel.max.y - SPLASH_FOOTER_HEIGHT).max(panel.min.y);
+            let expected_size = splash_symbol_size(natural, panel, footer_top);
+            let expected_rect = Rect::from_center_size(panel.center(), expected_size);
+            let main_index = bounds
+                .iter()
+                .position(|rect| (rect.center().y - panel.center().y).abs() < 2.0)
+                .expect("main symbol mesh centered in the client area");
+            let main = bounds.swap_remove(main_index);
+            let footer = bounds.pop().expect("footer mesh");
+
+            // Tessellation rounds image vertices to roughly half a point; a
+            // large excess here means the Image widget escaped its ui.put box.
+            assert!(
+                expected_rect.expand(1.5).contains_rect(main),
+                "main image {:?} escaped its fitted rect {:?} for {:?}, dpi {}, zoom {}",
+                main,
+                expected_rect,
+                viewport_size,
+                native_ppp,
+                zoom_factor
+            );
+            assert!((main.center().x - panel.center().x).abs() < 1.0);
+            assert!((main.center().y - panel.center().y).abs() < 1.0);
+            assert!(
+                ((main.width() / main.height()) - (natural.x / natural.y)).abs() < 0.02,
+                "main image aspect ratio changed: {:?} vs {:?}",
+                main.size(),
+                natural
+            );
+
+            assert!((footer.center().x - panel.center().x).abs() < 1.0);
+            assert!(footer.max.y <= panel.max.y - SPLASH_MARGIN + 1.0);
+            assert!(
+                main.max.y + 1.0 <= footer.min.y,
+                "main symbol {:?} overlaps footer {:?} for {:?}, dpi {}, zoom {}",
+                main,
+                footer,
+                viewport_size,
+                native_ppp,
+                zoom_factor
+            );
+        }
     }
 }

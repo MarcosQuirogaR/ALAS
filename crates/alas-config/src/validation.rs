@@ -42,7 +42,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::AlasConfig;
+use crate::{AlasConfig, PropulsionTechnology};
 
 /// Sea-level density the equivalent airspeed is referred to, in kg/m^3.
 ///
@@ -92,8 +92,359 @@ pub fn validate(config: &AlasConfig) -> Vec<ValidationIssue> {
     issues.extend(empennage_tapers_toward_its_tips(config));
     issues.extend(mses_timeouts_are_positive_and_finite(config));
     issues.extend(optimizer_tokens_are_supported(config));
+    issues.extend(crate::optimizer::policy_review::policy_group_issues(config));
+    issues.extend(active_mass_model_issues(config));
+    issues.extend(passenger_and_mass_inputs_are_coherent(config));
+    issues.extend(custom_geometry_is_physical(config));
     issues.extend(vlm_mesh_is_solvable(config));
     issues
+}
+
+/// Validate only the FLOPS nodes selected by the active mass architecture.
+/// The legacy comparison path intentionally carries those nodes for saved-file
+/// compatibility, but malformed inactive FLOPS/turboprop values must not
+/// prevent a reference-compatibility comparison from running.
+fn active_mass_model_issues(config: &AlasConfig) -> Vec<ValidationIssue> {
+    let mass = &config.mass_model;
+    let mut issues = Vec::new();
+    if !mass.architecture_is_coherent() {
+        issues.push(ValidationIssue {
+            field_path: "mass_model.mass_architecture".to_owned(),
+            message: format!(
+                "Mass architecture {:?} disagrees with one or more derived group selectors; reload or migrate the configuration before running.",
+                mass.mass_architecture
+            ),
+            severity: Severity::Error,
+        });
+    }
+    if !mass.mass_architecture.is_pure_flops() {
+        return issues;
+    }
+    if let Err(error) = mass.flops_structure.validate() {
+        issues.push(ValidationIssue {
+            field_path: structure_validation_path(&error),
+            message: error,
+            severity: Severity::Error,
+        });
+    }
+    if config.geometry.engine.propulsion_technology == PropulsionTechnology::Turboprop {
+        if let Err(field) = mass.flops_turboprop.validate() {
+            issues.push(ValidationIssue {
+                field_path: format!("mass_model.flops_turboprop.{field}"),
+                message: format!(
+                    "FLOPS turboprop input {field} is nonphysical or outside its supported range."
+                ),
+                severity: Severity::Error,
+            });
+        }
+    }
+    issues
+}
+
+fn structure_validation_path(error: &str) -> String {
+    let field = error
+        .strip_prefix("FLOPS ")
+        .and_then(|rest| rest.split_whitespace().next())
+        .unwrap_or("flops_structure");
+    format!("mass_model.flops_structure.{field}")
+}
+
+/// Check the two cross-field contracts that are otherwise only enforced deep
+/// in a mass evaluation: a passenger cabin must resolve to the three counts
+/// FLOPS consumes, and structural `DG`/`WLDG` overrides must describe one
+/// physically ordered fixed-aircraft basis. Passenger count/share edits are
+/// warnings when the canonical cabin resolver can repair them; this keeps the
+/// live validator from rejecting a valid preset before the first analysis
+/// pass has materialized its cabin. Invalid modes and weights remain blocking
+/// errors because no downstream caller can resolve them safely.
+fn passenger_and_mass_inputs_are_coherent(config: &AlasConfig) -> Vec<ValidationIssue> {
+    if !config.mass_model.mass_architecture.is_pure_flops() {
+        return Vec::new();
+    }
+    let mut issues = sizing_basis_override_issues(config);
+
+    let cabin = &config.cabin.passenger;
+    if config.requirements.aircraft_type != "passenger" {
+        for (field_path, value) in [
+            (
+                "mass_model.flops_transport.first_class_passenger_count",
+                config
+                    .mass_model
+                    .flops_transport
+                    .first_class_passenger_count,
+            ),
+            (
+                "mass_model.flops_transport.business_class_passenger_count",
+                config
+                    .mass_model
+                    .flops_transport
+                    .business_class_passenger_count,
+            ),
+            (
+                "mass_model.flops_transport.tourist_class_passenger_count",
+                config
+                    .mass_model
+                    .flops_transport
+                    .tourist_class_passenger_count,
+            ),
+        ] {
+            if value.is_none() {
+                issues.push(ValidationIssue {
+                    field_path: field_path.to_owned(),
+                    message: "FLOPS requires all three passenger class counts for a cargo mass evaluation; enter 0 explicitly for an absent class or select a passenger cabin preset.".to_owned(),
+                    severity: Severity::Error,
+                });
+            }
+        }
+        return issues;
+    }
+
+    if cabin.class_mix_mode != "count" && cabin.class_mix_mode != "percent" {
+        issues.push(ValidationIssue {
+            field_path: "cabin.passenger.class_mix_mode".to_owned(),
+            message: format!(
+                "Passenger class mix mode {:?} is unsupported; choose 'count' or 'percent'.",
+                cabin.class_mix_mode
+            ),
+            severity: Severity::Error,
+        });
+        return issues;
+    }
+
+    for (field_path, count) in [
+        ("cabin.passenger.first.count", cabin.first.count),
+        ("cabin.passenger.business.count", cabin.business.count),
+        ("cabin.passenger.premium.count", cabin.premium.count),
+        ("cabin.passenger.economy.count", cabin.economy.count),
+    ] {
+        if count < 0 {
+            issues.push(ValidationIssue {
+                field_path: field_path.to_owned(),
+                message: format!(
+                    "Passenger seat count {count} must be nonnegative; clear the stale serialized count or use count mode with a deliberate installed cabin."
+                ),
+                severity: Severity::Error,
+            });
+        }
+    }
+
+    for (field_path, share) in [
+        ("cabin.passenger.first.share_pct", cabin.first.share_pct),
+        (
+            "cabin.passenger.business.share_pct",
+            cabin.business.share_pct,
+        ),
+        ("cabin.passenger.economy.share_pct", cabin.economy.share_pct),
+    ] {
+        if !share.is_finite() || !(0.0..=100.0).contains(&share) {
+            issues.push(ValidationIssue {
+                field_path: field_path.to_owned(),
+                message: format!(
+                    "Passenger class share {share:?} must be finite and within [0, 100] percent."
+                ),
+                severity: Severity::Error,
+            });
+        }
+    }
+
+    let resolved = cabin.resolved_flops_counts(config.requirements.num_passengers);
+    let expected = [resolved.first, resolved.business, resolved.tourist];
+    let report_split_mismatch = cabin.class_mix_mode == "count" || cabin.total_seats() > 0;
+    for (field_path, declared, expected_count, label) in [
+        (
+            "mass_model.flops_transport.first_class_passenger_count",
+            config
+                .mass_model
+                .flops_transport
+                .first_class_passenger_count,
+            expected[0],
+            "first",
+        ),
+        (
+            "mass_model.flops_transport.business_class_passenger_count",
+            config
+                .mass_model
+                .flops_transport
+                .business_class_passenger_count,
+            expected[1],
+            "business",
+        ),
+        (
+            "mass_model.flops_transport.tourist_class_passenger_count",
+            config
+                .mass_model
+                .flops_transport
+                .tourist_class_passenger_count,
+            expected[2],
+            "tourist/economy",
+        ),
+    ] {
+        let declared_i64 = declared.and_then(|value| i64::try_from(value).ok());
+        if declared_i64 != Some(expected_count) && (declared.is_none() || report_split_mismatch) {
+            let actual = declared.map_or_else(|| "missing".to_owned(), |value| value.to_string());
+            issues.push(ValidationIssue {
+                field_path: field_path.to_owned(),
+                message: format!(
+                    "FLOPS {label} passenger count is {actual}; the canonical cabin resolver will use {expected_count} for this case. The value is normalizable before the mass pass."
+                ),
+                severity: Severity::Warning,
+            });
+        }
+    }
+    let resolved_total = resolved.total();
+    if cabin.class_mix_mode == "count"
+        && resolved.is_nonempty()
+        && config.requirements.num_passengers != resolved_total
+    {
+        issues.push(ValidationIssue {
+            field_path: "requirements.num_passengers".to_owned(),
+            message: format!(
+                "Passenger requirement is {}, while the declared count-mode cabin resolves to {resolved_total} installed seats; the mass pass will use the declared cabin total.",
+                config.requirements.num_passengers
+            ),
+            severity: Severity::Warning,
+        });
+    }
+    issues
+}
+
+fn sizing_basis_override_issues(config: &AlasConfig) -> Vec<ValidationIssue> {
+    let structure = &config.mass_model.flops_structure;
+    let mut issues = Vec::new();
+    let mlw_fraction = config.mass_model.mlw_fraction_mtow;
+    if !mlw_fraction.is_finite() || !(0.0 < mlw_fraction && mlw_fraction <= 1.0) {
+        issues.push(ValidationIssue {
+            field_path: "mass_model.mlw_fraction_mtow".to_owned(),
+            message: format!(
+                "Maximum landing-mass fraction ({mlw_fraction:?}) must be finite and within [0, 1] so the resolved WLDG cannot exceed DG."
+            ),
+            severity: Severity::Error,
+        });
+    }
+    for (field_path, label, value) in [
+        (
+            "mass_model.flops_structure.design_gross_mass_kg",
+            "DG",
+            structure.design_gross_mass_kg,
+        ),
+        (
+            "mass_model.flops_structure.design_landing_mass_kg",
+            "WLDG",
+            structure.design_landing_mass_kg,
+        ),
+    ] {
+        if let Some(value) = value {
+            if !value.is_finite() || value <= 0.0 {
+                issues.push(ValidationIssue {
+                    field_path: field_path.to_owned(),
+                    message: format!(
+                        "FLOPS {label} override ({value:?} kg) must be finite and greater than zero."
+                    ),
+                    severity: Severity::Error,
+                });
+            }
+        }
+    }
+    match config.mass_sizing_basis() {
+        crate::MassSizingBasis::FixedAircraft {
+            design_gross_mass_kg: dg,
+            design_landing_mass_kg: wldg,
+        } if dg.is_finite() && wldg.is_finite() && wldg > dg => {
+            issues.push(ValidationIssue {
+                field_path: "mass_model.flops_structure.design_landing_mass_kg".to_owned(),
+                message: format!(
+                    "FLOPS WLDG ({wldg:.1} kg) cannot exceed DG ({dg:.1} kg, the resolved design gross mass); lower WLDG or raise the design gross mass."
+                ),
+                severity: Severity::Error,
+            });
+        }
+        crate::MassSizingBasis::Coupled
+            if structure.design_landing_mass_kg.is_some() => issues.push(ValidationIssue {
+                field_path: "mass_model.flops_structure.design_landing_mass_kg".to_owned(),
+                message: "FLOPS WLDG is inactive while clean-sheet sizing has no fixed DG override; leave it blank or declare DG to select a fixed-aircraft basis.".to_owned(),
+                severity: Severity::Warning,
+            }),
+        _ => {}
+    }
+    issues
+}
+
+/// Keep user-defined geometry outside the undefined portions of the loft
+/// model. The builder repeats its planform-dependent checks for the active
+/// design vector; this boundary check catches malformed saved values before a
+/// preview or run can consume them.
+fn custom_geometry_is_physical(config: &AlasConfig) -> Vec<ValidationIssue> {
+    let mut issues = Vec::new();
+    if let Err(error) = config.geometry.wing.validate_custom_sections() {
+        issues.push(ValidationIssue {
+            field_path: wing_section_path(&error),
+            message: error.to_string(),
+            severity: Severity::Error,
+        });
+    }
+    if let Err(error) = config.geometry.fuselage.validate_custom_sections() {
+        issues.push(ValidationIssue {
+            field_path: fuselage_section_path(&error),
+            message: error.to_string(),
+            severity: Severity::Error,
+        });
+    }
+    if let Err(error) = config.geometry.fuselage.validate_generated_sections() {
+        issues.push(ValidationIssue {
+            field_path: generated_fuselage_section_path(&error),
+            message: error.to_string(),
+            severity: Severity::Error,
+        });
+    }
+    issues
+}
+
+fn wing_section_path(error: &crate::WingSectionError) -> String {
+    let index = match error {
+        crate::WingSectionError::NonFinite { index, .. }
+        | crate::WingSectionError::NonPositiveChord { index, .. }
+        | crate::WingSectionError::SpanOutOfRange { index, .. }
+        | crate::WingSectionError::InvalidOrder { index, .. }
+        | crate::WingSectionError::EmptyAirfoil(index) => Some(*index),
+        crate::WingSectionError::DuplicatePlanformStation { .. }
+        | crate::WingSectionError::NonMonotoneChord { .. } => None,
+    };
+    index.map_or_else(
+        || "geometry.wing.custom_sections".to_owned(),
+        |index| format!("geometry.wing.custom_sections[{index}]"),
+    )
+}
+
+fn fuselage_section_path(error: &crate::FuselageSectionError) -> String {
+    let index = match error {
+        crate::FuselageSectionError::NonFinite { index, .. }
+        | crate::FuselageSectionError::NonPositive { index, .. }
+        | crate::FuselageSectionError::XOutOfRange { index, .. }
+        | crate::FuselageSectionError::InvalidOrder { index, .. }
+        | crate::FuselageSectionError::InvalidShape { index, .. } => Some(*index),
+        crate::FuselageSectionError::DuplicateGeneratedStation { .. }
+        | crate::FuselageSectionError::GeneratedSectionCount { .. } => None,
+    };
+    index.map_or_else(
+        || "geometry.fuselage.custom_sections".to_owned(),
+        |index| format!("geometry.fuselage.custom_sections[{index}]"),
+    )
+}
+
+fn generated_fuselage_section_path(error: &crate::FuselageSectionError) -> String {
+    let index = match error {
+        crate::FuselageSectionError::NonFinite { index, .. }
+        | crate::FuselageSectionError::NonPositive { index, .. }
+        | crate::FuselageSectionError::XOutOfRange { index, .. }
+        | crate::FuselageSectionError::InvalidShape { index, .. } => Some(*index),
+        crate::FuselageSectionError::GeneratedSectionCount { .. }
+        | crate::FuselageSectionError::InvalidOrder { .. }
+        | crate::FuselageSectionError::DuplicateGeneratedStation { .. } => None,
+    };
+    index.map_or_else(
+        || "geometry.fuselage.generated_sections".to_owned(),
+        |index| format!("geometry.fuselage.generated_sections[{index}]"),
+    )
 }
 
 /// Keep source-backed landing-gear dimensions and heterogeneous bogie lists
@@ -232,7 +583,7 @@ fn cruise_point_inside_the_flight_envelope(config: &AlasConfig) -> Vec<Validatio
             message: format!(
                 "Cruise design point ({cruise_eas_m_s:.0} m/s EAS at Mach \
                  {:.2} / {} m) exceeds the design dive speed VD \
-                 ({dive_speed:.0} m/s EAS) -- the aircraft would cruise \
+                 ({dive_speed:.0} m/s EAS): the aircraft would cruise \
                  outside its own structural flight envelope.",
                 requirements.cruise_mach,
                 grouped(requirements.cruise_altitude_m),
@@ -245,7 +596,7 @@ fn cruise_point_inside_the_flight_envelope(config: &AlasConfig) -> Vec<Validatio
             field_path: "requirements.dive_speed_m_s".to_owned(),
             message: format!(
                 "Cruise design point ({cruise_eas_m_s:.0} m/s EAS) is above VC \
-                 ({design_cruise_speed:.0} m/s EAS = VD/1.25) -- the aircraft \
+                 ({design_cruise_speed:.0} m/s EAS = VD/1.25): the aircraft \
                  cruises in the V-n diagram's caution band, not normal \
                  operation."
             ),
@@ -298,8 +649,8 @@ const MAX_SPANWISE_RESOLUTION: i64 = 2;
 /// surface rather than a placeholder.
 ///
 /// `geometry.wing.n_subdivisions` and its empennage twin are absolute panel
-/// counts across a whole surface. Four is already far below anything usable
-/// -- the shipped wing uses 24 -- so this rejects nonsense rather than
+/// counts across a whole surface. Four is already far below anything usable:
+/// the shipped wing uses 24, so this rejects nonsense rather than
 /// arbitrating fidelity, which is what the convergence evidence in
 /// `alas_config::analysis` is for.
 const MIN_SPANWISE_PANELS: i64 = 4;
@@ -314,11 +665,11 @@ const MIN_SPANWISE_PANELS: i64 = 4;
 /// three-fold width discontinuity at every original station and panels thin
 /// enough that the near-field induced-drag integration stops converging.
 ///
-/// Measured on the registered presets (`.agent/reports/
-/// 2026-09-11-vlm-resolution-sensitivity.html`): at a multiplier of 3 the
+/// Measured on the registered presets in an internal VLM
+/// resolution-sensitivity study (2026-09-11): at a multiplier of 3 the
 /// swept presets over-predict the induced-drag factor by 4-50 %, at 6 the
-/// A320 trim solve diverges outright, and at 10 -- AeroSandbox's own default,
-/// and so a value a user may reasonably type -- the influence matrix is
+/// A320 trim solve diverges outright, and at 10 (AeroSandbox's own default,
+/// and so a value a user may reasonably type) the influence matrix is
 /// effectively singular while the solve still reports success, returning
 /// L/D near 1 instead of 18. That last case is the reason this is an error
 /// and not a warning: nothing downstream can detect it.
@@ -442,6 +793,135 @@ mod tests {
     #[test]
     fn the_shipped_configuration_is_one_nothing_objects_to() {
         assert!(validate(&AlasConfig::default()).is_empty());
+    }
+
+    #[test]
+    fn stale_percent_mode_floops_counts_are_reported_as_normalizable_warnings() {
+        let mut config = AlasConfig::default();
+        config.requirements.num_passengers = 100;
+        config.cabin.passenger.first.share_pct = 10.0;
+        config.cabin.passenger.business.share_pct = 20.0;
+        config.cabin.passenger.economy.share_pct = 70.0;
+        config.cabin.passenger.first.count = 10;
+        config.cabin.passenger.business.count = 20;
+        config.cabin.passenger.economy.count = 70;
+        config
+            .mass_model
+            .flops_transport
+            .first_class_passenger_count = Some(0);
+        config
+            .mass_model
+            .flops_transport
+            .business_class_passenger_count = Some(0);
+        config
+            .mass_model
+            .flops_transport
+            .tourist_class_passenger_count = Some(350);
+
+        let issues = validate(&config);
+        assert!(issues
+            .iter()
+            .all(|issue| issue.severity == Severity::Warning));
+        assert!(issues.iter().any(|issue| {
+            issue.field_path == "mass_model.flops_transport.first_class_passenger_count"
+                && issue.message.contains("will use 10")
+        }));
+        assert!(issues.iter().any(|issue| {
+            issue.field_path == "mass_model.flops_transport.tourist_class_passenger_count"
+                && issue.message.contains("will use 70")
+        }));
+    }
+
+    #[test]
+    fn missing_passenger_class_counts_are_actionable_without_blocking_normalization() {
+        let mut config = AlasConfig::default();
+        config
+            .mass_model
+            .flops_transport
+            .first_class_passenger_count = None;
+        config
+            .mass_model
+            .flops_transport
+            .business_class_passenger_count = None;
+        config
+            .mass_model
+            .flops_transport
+            .tourist_class_passenger_count = None;
+
+        let issues = validate(&config);
+        assert_eq!(issues.len(), 3);
+        assert!(issues
+            .iter()
+            .all(|issue| issue.severity == Severity::Warning));
+        assert!(issues.iter().all(|issue| {
+            issue.field_path.starts_with("mass_model.flops_transport.")
+                && issue.message.contains("canonical cabin resolver")
+        }));
+    }
+
+    #[test]
+    fn negative_declared_cabin_counts_are_blocking_errors() {
+        let mut config = AlasConfig::default();
+        config.cabin.passenger.class_mix_mode = "count".to_owned();
+        config.cabin.passenger.business.count = -1;
+
+        let issues = validate(&config);
+        assert!(issues.iter().any(|issue| {
+            issue.field_path == "cabin.passenger.business.count"
+                && issue.severity == Severity::Error
+        }));
+    }
+
+    #[test]
+    fn landing_mass_override_must_have_a_gross_basis_and_stay_below_it() {
+        let mut config = AlasConfig::default();
+        config.mass_model.flops_structure.design_landing_mass_kg = Some(80_000.0);
+        let missing_dg = validate(&config);
+        assert!(missing_dg.iter().any(|issue| {
+            issue.field_path == "mass_model.flops_structure.design_landing_mass_kg"
+                && issue.severity == Severity::Warning
+                && issue.message.contains("inactive")
+        }));
+
+        config.mass_model.flops_structure.design_gross_mass_kg = Some(70_000.0);
+        let inverted = validate(&config);
+        assert!(inverted.iter().any(|issue| {
+            issue.field_path == "mass_model.flops_structure.design_landing_mass_kg"
+                && issue.severity == Severity::Error
+                && issue.message.contains("cannot exceed DG")
+        }));
+    }
+
+    #[test]
+    fn landing_mass_override_without_dg_is_valid_when_the_fixed_mode_resolves_dg() {
+        let mut config = AlasConfig::from_value(&serde_json::json!({
+            "preset": "A320-200"
+        }))
+        .unwrap();
+        config.optimizer.design_space.mode = crate::optimizer::DesignMode::BaselineSandbox;
+        config.mass_model.flops_structure.design_landing_mass_kg = Some(60_000.0);
+
+        assert!(!validate(&config).iter().any(|issue| {
+            issue.field_path == "mass_model.flops_structure.design_landing_mass_kg"
+                && issue.severity == Severity::Error
+        }));
+    }
+
+    #[test]
+    fn resolved_reference_landing_mass_cannot_exceed_a_reduced_fixed_mtow() {
+        let mut config = AlasConfig::from_value(&serde_json::json!({
+            "preset": "A320-200"
+        }))
+        .unwrap();
+        config.optimizer.design_space.mode = crate::optimizer::DesignMode::BaselineSandbox;
+        config.requirements.mtow_kg = 60_000.0;
+
+        let issues = validate(&config);
+        assert!(issues.iter().any(|issue| {
+            issue.field_path == "mass_model.flops_structure.design_landing_mass_kg"
+                && issue.severity == Severity::Error
+                && issue.message.contains("cannot exceed DG")
+        }));
     }
 
     #[test]

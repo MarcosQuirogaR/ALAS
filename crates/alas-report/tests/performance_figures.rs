@@ -111,10 +111,13 @@ fn performance_figures_render_from_the_report_and_configuration() {
     ));
     assert!(matching.contains("FEASIBLE"));
     // The default config has no condition-specific OEI thrust/drag evidence.
-    // Its conceptual in-flight estimate is reported as a gap rather than
-    // plotted on the installed SLS T/W axis.
+    // Its conceptual in-flight estimate is reported as a pipeline feasibility
+    // finding rather than plotted on the installed SLS T/W axis, and the
+    // figure carries no status text about it.
     assert!(matching.matches("<polyline").count() >= 3);
-    assert!(matching.contains("OEI SLS evidence gap"));
+    assert!(!matching.contains("OEI SLS evidence gap"));
+    // The yellow design-point marker is identified in the legend.
+    assert!(matching.contains("Design point"));
 
     let departure = render_svg(&performance::figure_lto_departure(&report, &config, None));
     let arrival = render_svg(&performance::figure_lto_arrival(&report, &config, None));

@@ -172,7 +172,7 @@ fn print_help() {
     println!("      --seed <INT>          Random seed for optimization");
     println!("      --aero-solver <MODE>  Result model: vlm, avl, or both");
     println!("      --optimization-solver <MODE>  Optimizer: vlm, avl, or both");
-    println!("      --optimization-method <METHOD>  differential_evolution, feasibility_first_de, nsga2, turbo_1, cma_es, or sqp");
+    println!("      --optimization-method <METHOD>  differential_evolution (the only supported search)");
     println!("      --quiet               Reduce console logging");
     println!("      --save-config <PATH>  Write effective configuration to YAML and exit");
     println!("      --download-navdata    Download missing navigation-data files and exit");
@@ -192,7 +192,7 @@ pub fn load_config(args: &CliArgs) -> Result<AlasConfig, String> {
             serde_yaml::from_str(&content)
                 .map_err(|e| format!("failed to parse config YAML: {e}"))?
         };
-        AlasConfig::from_value(&value).map_err(|e| format!("invalid config structure: {e:?}"))?
+        crate::config_load::load_config_value(&value)?
     } else {
         AlasConfig::default()
     };
@@ -281,15 +281,23 @@ pub fn run_cli(args: &[String]) -> i32 {
         let specs = alas_route::assets::NAVDATA_FILES
             .iter()
             .map(|file| {
-                DownloadSpec::new(
+                let spec = DownloadSpec::new(
                     file.name,
                     alas_route::assets::navdata_file_url(file),
                     file.min_bytes,
-                )
+                );
+                match file.expected_sha256 {
+                    Some(hash) => spec.with_reviewed_sha256(hash),
+                    None => spec,
+                }
             })
             .collect::<Vec<_>>();
-        match download_files(&specs, &target, 120.0) {
-            Ok(summary) => {
+        // Headless/CI use has no interactive cancel control; the flag is
+        // created armed-off and never set.
+        let cancel = std::sync::atomic::AtomicBool::new(false);
+        match download_files(&specs, &target, 120.0, &cancel) {
+            Ok(outcome) => {
+                let summary = outcome.report();
                 println!(
                     "Navigation data ready at {} (downloaded {}, skipped {}).",
                     summary.target_dir.display(),

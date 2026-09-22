@@ -15,7 +15,7 @@ use crate::state::{nav_overlay_open_with_bounds, AppState, LogKind};
 use crate::theme::{card_frame, navigation_overlay_frame};
 use crate::view_controls::{auto_zoom_factor, handle_zoom_shortcuts, render_view_options};
 use crate::views::tour_data::TourTarget;
-use crate::views::{form_page, overlays};
+use crate::views::{form_page, notices, overlays};
 
 fn tr(text: &str) -> String {
     alas_i18n::t(Some(text), None).into_owned()
@@ -39,7 +39,11 @@ impl Default for AlasApp {
         // Register the embedded catalog once so form labels and help text can
         // follow the language selected by the desktop shell.
         alas_i18n::es::install();
-        let state = AppState::default();
+        let mut state = AppState::default();
+        // The desktop shell owns the user-data side effects. `AppState`
+        // itself stays hermetic so tests and embedders are not affected by
+        // whatever this machine's installation has stored.
+        state.load_persisted_custom_airports();
         alas_i18n::set_language(Some(state.language.code()));
         Self {
             state,
@@ -74,6 +78,7 @@ impl App for AlasApp {
             self.layout_debug.begin_frame(ctx);
         }
         self.state.poll_navdata_download();
+        self.state.poll_openvsp_runtime_setup();
         self.state.poll_worker();
         self.state.screening.poll();
         for event in self.state.cfd.poll() {
@@ -112,6 +117,12 @@ impl App for AlasApp {
         {
             ctx.request_repaint();
         }
+        if self.state.openvsp_runtime_setup.running {
+            // The installer streams stage lines from a subprocess; a modest
+            // repaint cadence keeps the stage text current without spinning
+            // the UI at display refresh rate for a multi-minute download.
+            ctx.request_repaint_after(std::time::Duration::from_millis(100));
+        }
         // Automatic sizing follows the client area until a View > Zoom action
         // records an explicit user preference above the native display scale.
         // Reapplying an identical zoom asks egui-winit for another scale pass
@@ -136,6 +147,10 @@ impl App for AlasApp {
             // Sandbox (and reappears when they leave it).
             crate::views::cfd_view::show_cfd_window(&mut self.state, ctx);
             crate::views::screening_window::show_screening_window(&mut self.state, ctx);
+            crate::views::screening_window::show_custom_airfoil_import_window(&mut self.state, ctx);
+            crate::views::wing_analysis_view::show_wing_analysis_window(&mut self.state, ctx);
+            crate::views::airport_window::show_custom_airport_window(&mut self.state, ctx);
+            crate::views::mission_profile_inputs::show_mission_profile_window(&mut self.state, ctx);
             return self.show_detached_view_panel(ctx);
         }
         self.state.prepare_walkthrough_step();
@@ -218,41 +233,44 @@ impl App for AlasApp {
         );
         #[cfg(not(debug_assertions))]
         let _ = control_panel;
-        let viewport_height = ctx.available_rect().height();
-        let log_max_height = layout::run_log_max_height(viewport_height);
-        let log_height = layout::run_log_height(viewport_height, self.state.run_log_height);
-        let log_panel = TopBottomPanel::bottom("run_log")
-            .resizable(true)
-            .default_height(log_height)
-            .height_range(layout::RUN_LOG_MIN_HEIGHT..=log_max_height)
-            .frame(
-                EguiFrame::side_top_panel(ctx.style().as_ref()).inner_margin(egui::Margin {
-                    left: 10.0,
-                    right: 10.0,
-                    top: 12.0,
-                    bottom: 12.0,
-                }),
-            )
-            .show(ctx, |ui| {
-                crate::views::show_run_log(&mut self.state, ui);
-            });
-        self.state.run_log_height = log_panel
-            .response
-            .rect
-            .height()
-            .clamp(layout::RUN_LOG_MIN_HEIGHT, log_max_height);
-        self.state
-            .record_walkthrough_target(TourTarget::RunLog, log_panel.response.rect);
-        #[cfg(debug_assertions)]
-        crate::layout_debug::record(
-            ctx,
-            "run log panel",
-            log_panel.response.rect,
-            crate::layout_debug::RegionKind::RunLog,
-        );
+        if self.state.run_log_open {
+            let viewport_height = ctx.available_rect().height();
+            let log_max_height = layout::run_log_max_height(viewport_height);
+            let log_height = layout::run_log_height(viewport_height, self.state.run_log_height);
+            let log_panel = TopBottomPanel::bottom("run_log")
+                .resizable(true)
+                .default_height(log_height)
+                .height_range(layout::RUN_LOG_MIN_HEIGHT..=log_max_height)
+                .frame(
+                    EguiFrame::side_top_panel(ctx.style().as_ref()).inner_margin(egui::Margin {
+                        left: 10.0,
+                        right: 10.0,
+                        top: 12.0,
+                        bottom: 12.0,
+                    }),
+                )
+                .show(ctx, |ui| {
+                    crate::views::show_run_log(&mut self.state, ui);
+                });
+            self.state.run_log_height = log_panel
+                .response
+                .rect
+                .height()
+                .clamp(layout::RUN_LOG_MIN_HEIGHT, log_max_height);
+            self.state
+                .record_walkthrough_target(TourTarget::RunLog, log_panel.response.rect);
+            #[cfg(debug_assertions)]
+            crate::layout_debug::record(
+                ctx,
+                "run log panel",
+                log_panel.response.rect,
+                crate::layout_debug::RegionKind::RunLog,
+            );
+        }
 
-        if self.state.preview_open {
-            let preview_range = layout::preview_width_range(ctx.available_rect().width());
+        let dock = layout::preview_width_range(ctx.available_rect().width());
+        let dock_hidden = self.state.preview_open && dock.is_none();
+        if let Some(preview_range) = dock.filter(|_| self.state.preview_open) {
             let preview_panel = SidePanel::right("preview_panel")
                 .resizable(true)
                 .default_width(layout::PREVIEW_DOCK_DEFAULT_WIDTH)
@@ -293,6 +311,7 @@ impl App for AlasApp {
                 }),
             )
             .show(ctx, |ui| {
+                notices::show_preview_suppressed(ui, dock_hidden);
                 route_page(&mut self.state, ui);
             });
         self.state
@@ -306,9 +325,13 @@ impl App for AlasApp {
         overlays::show_advanced_guide(&mut self.state, ctx);
         overlays::show_storage_dialog(&mut self.state, ctx);
         overlays::show_about(&mut self.state, ctx);
+        crate::views::tool_intro::show_tool_intro(&mut self.state, ctx);
         crate::sandbox::advanced::show_advanced_settings_window(&mut self.state, ctx);
         crate::views::cfd_view::show_cfd_window(&mut self.state, ctx);
         crate::views::screening_window::show_screening_window(&mut self.state, ctx);
+        crate::views::screening_window::show_custom_airfoil_import_window(&mut self.state, ctx);
+        crate::views::airport_window::show_custom_airport_window(&mut self.state, ctx);
+        crate::views::mission_profile_inputs::show_mission_profile_window(&mut self.state, ctx);
         self.show_detached_view_panel(ctx);
         #[cfg(debug_assertions)]
         self.layout_debug.finish_frame(ctx);
@@ -327,6 +350,14 @@ fn render_nav(state: &mut AppState, ui: &mut Ui) {
     render_nav_contents(state, ui, true);
 }
 
+// These are deliberately shorter than a page transition. The rail is an
+// affordance users may cross on the way to the canvas, so it must confirm
+// entry without making a cursor detour feel sticky. Egui mirrors `cubic_out`
+// for the closing direction: that makes withdrawal start promptly, while its
+// final pixels still settle continuously instead of popping away.
+const NAV_OVERLAY_OPEN_DURATION_S: f32 = 0.14;
+const NAV_OVERLAY_CLOSE_DURATION_S: f32 = 0.10;
+
 fn render_nav_rail(state: &mut AppState, ctx: &Context, body_rect: egui::Rect) {
     let pointer = ctx.pointer_hover_pos();
     let width = layout::expanded_navigation_width(
@@ -341,28 +372,45 @@ fn render_nav_rail(state: &mut AppState, ctx: &Context, body_rect: egui::Rect) {
         width,
     );
     state.nav_hover_open = hovered;
-    // Hovering a navigation rail is a navigational affordance, not a content
-    // transition. Opening it immediately removes the distracting resize
-    // animation while retaining the compact rail when it is not needed.
-    let expansion = if hovered { 1.0 } else { 0.0 };
-    let panel_width = layout::NAV_RAIL_WIDTH + (width - layout::NAV_RAIL_WIDTH) * expansion;
+    let expansion = if state.reduced_animations {
+        // This is an accessibility preference, not a slower motion setting:
+        // every rail state change completes in the current frame.
+        if hovered { 1.0 } else { 0.0 }
+    } else {
+        ctx.animate_bool_with_time_and_easing(
+            egui::Id::new("nav_rail_expansion"),
+            hovered,
+            if hovered {
+                NAV_OVERLAY_OPEN_DURATION_S
+            } else {
+                NAV_OVERLAY_CLOSE_DURATION_S
+            },
+            egui::emath::easing::cubic_out,
+        )
+    };
     let panel_height = (body_rect.height() - 2.0 * layout::NAV_OVERLAY_MARGIN).max(1.0);
+    // Slide a stable, full-width surface out of the rail rather than resizing
+    // it. Resizing would repeatedly reflow the navigation labels and controls
+    // while the cursor is already trying to select them. At rest only the
+    // rightmost eight-point rail remains visible.
     let panel_pos = pos2(
-        body_rect.left(),
+        body_rect.left() - (width - layout::NAV_RAIL_WIDTH) * (1.0 - expansion),
         body_rect.top() + layout::NAV_OVERLAY_MARGIN,
     );
 
     let rail = Area::new(egui::Id::new("nav_rail"))
         .order(Order::Foreground)
+        .constrain(false)
+        .fade_in(false)
         .fixed_pos(panel_pos)
         .show(ctx, |ui| {
             ui.allocate_ui_with_layout(
-                vec2(panel_width, panel_height),
+                vec2(width, panel_height),
                 Layout::top_down(Align::Min),
                 |ui| {
                     let frame = navigation_overlay_frame(ui, expansion);
                     frame.show(ui, |ui| {
-                        if expansion > 0.08 {
+                        if expansion > 0.01 {
                             render_nav_contents(state, ui, false);
                         } else {
                             let response = ui
@@ -459,9 +507,7 @@ fn route_page(state: &mut AppState, ui: &mut Ui) {
         PageKind::Setup => crate::views::show_tools_view(state, ui),
         PageKind::Analyses => crate::views::show_analyses_view(state, ui),
         PageKind::AirfoilScreening => {
-            if !state.screening.window_open {
-                crate::views::show_screening_view(state, ui);
-            }
+            crate::views::screening_window::show_screening_page(state, ui)
         }
         PageKind::Uav => crate::views::show_uav_view(state, ui),
         PageKind::Form => {

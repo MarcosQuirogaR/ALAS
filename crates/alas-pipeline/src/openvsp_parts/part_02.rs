@@ -34,6 +34,11 @@ fn emit_wing(script: &mut String, index: usize, wing: &Wing) {
     }
     let _ = writeln!(script, "    string {surf} = GetXSecSurf( {id}, 0 );");
 
+    // ALAS's root airfoil is normal to the adjacent span segment. Without
+    // this flag OpenVSP scales root thickness by sec(dihedral), singular for
+    // vertical fins. Preserve the same section frame for native CAD.
+    set_parm(script, &id, "RotateMatchDideralFlag", "XSec_0", 1.0);
+
     for section_index in 1..wing.xsecs.len() {
         let inside = &wing.xsecs[section_index - 1];
         let outside = &wing.xsecs[section_index];
@@ -54,6 +59,12 @@ fn emit_wing(script: &mut String, index: usize, wing: &Wing) {
         set_parm(script, &id, "Sweep", &group, sweep);
         set_parm(script, &id, "Sweep_Location", &group, 0.0);
         set_parm(script, &id, "Dihedral", &group, dihedral);
+        // OpenVSP solves the active section's driver group (and adjacent
+        // chords) on Update, not every section changed since the last call.
+        // Flush each segment before moving on so derived Area/AvgChord and
+        // the saved wing totals agree with the requested span/chords. Stale
+        // totals otherwise rescale the whole wing when ReadVSPFile loads it.
+        let _ = writeln!(script, "    Update();");
     }
     // ALAS defines each section's twist about its leading edge.  OpenVSP
     // stores both the root section (XSec_0) and every outboard section's

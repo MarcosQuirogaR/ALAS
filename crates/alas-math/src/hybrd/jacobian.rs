@@ -13,14 +13,14 @@
 //! `fdjac1` has two branches, dense and banded, chosen by whether
 //! `ml + mu + 1` covers the whole system. `scipy.optimize.fsolve` selects the
 //! banded one through its `band` argument, and mission analysis model's `converge_root` never
-//! passes it -- SciPy then sends `ml = mu = -10`, which its C wrapper clips to
+//! passes it: SciPy then sends `ml = mu = -10`, which its C wrapper clips to
 //! `n - 1`, making `ml + mu + 1 = 2n - 1` and taking the dense branch on every
 //! call. So only the dense branch is translated. This was confirmed against
 //! the reference rather than inferred: the fixture's logged evaluations show
 //! `n` probes per Jacobian, each perturbing exactly one unknown.
 //!
-//! The step is relative -- `sqrt(eps) * |x[j]|`, falling back to `sqrt(eps)`
-//! where the unknown is zero -- which is the standard compromise between the
+//! The step is relative: `sqrt(eps) * |x[j]|`, falling back to `sqrt(eps)`
+//! where the unknown is zero, which is the standard compromise between the
 //! truncation error of a one-sided difference and the cancellation error of
 //! subtracting two nearly equal residuals.
 
@@ -117,7 +117,7 @@ mod tests {
         // The one place the two epsilons are directly observable: everywhere
         // else the step is relative and `x[j] + h` rounds the difference away,
         // so a port that used `f64::EPSILON` agrees on every probe but this
-        // one -- and then diverges through the Jacobian. Written as an
+        // one, and then diverges through the Jacobian. Written as an
         // equality on the probe point because that is what the fixture's call
         // log disagreed about. See `super::EPSMCH`.
         let mut probed = 0.0_f64;

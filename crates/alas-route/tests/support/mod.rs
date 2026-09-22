@@ -6,7 +6,7 @@
 //!
 //! The record types mirror `gen_route.py`'s own output shape, and
 //! [`compare_route`] is the one place that decides which parts of a route are
-//! discrete and which are numerical -- so every tier is held to the same
+//! discrete and which are numerical, so every tier is held to the same
 //! standard rather than to whichever assertions its own test happened to make.
 
 // A test binary's failed unwrap or expect is the assertion failing.

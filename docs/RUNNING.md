@@ -28,7 +28,7 @@ only command you need.
 
 ## The three commands that matter
 
-Run these from the repository root (`C:\Proyectos\ALAS` on this machine).
+Run these from the repository root.
 
 ```powershell
 cargo test              # check that everything still agrees with Python
@@ -131,25 +131,32 @@ The workspace also builds `alas-bench` and `external_preset_audit`
 (`alas-acceptance`), so `cargo run` alone is ambiguous — name the binary.
 
 ```powershell
-cargo run --release --bin alas
+cargo run --release --bin ALAS
 ```
 
-starts the desktop application (equivalent to `... --bin alas -- --gui`).
+starts the desktop application (equivalent to `... --bin ALAS -- --gui`).
 `--release` builds the optimized version, which is slower to compile and much
 faster to run — always use it for anything you are timing or actually using.
 
 ```powershell
-cargo run --release --bin alas -- --config path\to\your.yaml --output outputs
+cargo run --release --bin ALAS -- --config path\to\your.yaml --output outputs
 ```
 
 runs an analysis with no interface: `--config` overlays a YAML/JSON
 configuration, `--output` selects the directory the reports and figures are
-written into (default `outputs`). Run `cargo run --bin alas -- --help` for
+written into (default `outputs`). Run `cargo run --bin ALAS -- --help` for
 the full flag list — it includes `--no-optimize`, `--no-mission`,
 `--aero-solver`, `--cpacs-input` and others.
 
-The built executable lands at `target\release\alas.exe` and is standalone —
+The built executable lands at `target\release\ALAS.exe` and is standalone —
 copy it anywhere, no installation, no Python.
+
+On Windows, every solver ALAS launches (AVL, VSPAERO, MSES, OpenVSP, NASTRAN,
+Patran, FLOWUnsteady) is placed in a kill-on-close Job Object owned by the
+ALAS process, so ending ALAS from Task Manager, or a crash, ends those solvers
+and anything they started. Task Manager lists them under their own executable
+names; the Run Log records each launch with its PID and the ALAS task behind
+it. Viewers opened on results, such as ParaView, are not owned and stay open.
 
 ---
 
@@ -159,7 +166,7 @@ Only needed if a fixture has to change. The generators read the Python
 implementation and write into `golden/`.
 
 ```powershell
-& "C:\Users\Marcos\OneDrive\Proyectos\Universidad\ALAS\.suave-venv\Scripts\python.exe" golden\generators\gen_units.py
+& "<path to the Python reference>\.suave-venv\Scripts\python.exe" golden\generators\gen_units.py
 ```
 
 Use `.suave-venv` for anything touching SUAVE and `.venv` for anything touching

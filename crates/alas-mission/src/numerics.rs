@@ -107,7 +107,7 @@ impl Numerics {
     ///
     /// [`ChebyshevError::NonPositiveN`] when the control-point count is not
     /// positive, and [`ChebyshevError::SingularIntegrationOperator`] if the
-    /// integration operator could not be built -- the same two failures the
+    /// integration operator could not be built: the same two failures the
     /// kernel reports.
     pub fn initialize_differentials_dimensionless(&mut self) -> Result<(), ChebyshevError> {
         let ChebyshevData {

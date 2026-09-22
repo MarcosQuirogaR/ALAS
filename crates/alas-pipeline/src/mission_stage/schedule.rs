@@ -617,11 +617,11 @@ mod tests {
     // 16 Chebyshev nodes per leg). At matching elevations, cruise altitude,
     // ISA deviation and profile their planned climb+descent footprints must
     // agree within the MDO discretization error, and to quadrature precision
-    // once the MDO side is refined -- the check that both paths resolve the
+    // once the MDO side is refined: the check that both paths resolve the
     // same CAS against the same ambient state rather than two conventions
     // that happen to be close. The acceptance thresholds below are chosen
     // numerical criteria; the measured gaps are in the failure messages and
-    // in the `.agent/probes/atr-physics` probe output.
+    // recorded in an internal ATR physics probe run.
     #[test]
     fn native_and_mdo_calibrated_footprints_agree_at_matching_conditions() {
         let config = AlasConfig::from_value(&serde_json::json!({"preset": "ATR72-600"})).unwrap();
@@ -728,7 +728,7 @@ mod tests {
     }
 
     // A calibrated schedule the atmosphere cannot fly is a named-leg error
-    // from validation, before any footprint is computed -- including the
+    // from validation, before any footprint is computed, including the
     // case the plain `rate < speed` check on the CAS number cannot see: on a
     // cold day at a low field the true airspeed is *below* the calibrated
     // one, so a rate just under the CAS value exceeds the resolved TAS.

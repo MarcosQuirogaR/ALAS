@@ -11,7 +11,7 @@
 //! out for plotting: an infeasible point leaves its cell `NaN` and its
 //! `feasible_mask` entry false, so a caller reads the trade surface and the
 //! region it exists over from the same result. This is orchestration over the
-//! single-point kernel and adds no new physics -- it is the closed-form
+//! single-point kernel and adds no new physics; it is the closed-form
 //! stand-in for a semi-empirical installed-thrust-lapse table.
 
 use alas_config::PropulsionCycleConfig;

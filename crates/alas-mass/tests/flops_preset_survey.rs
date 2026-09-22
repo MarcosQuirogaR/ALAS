@@ -296,8 +296,70 @@ fn changing_built_geometry_and_engine_thrust_changes_the_same_product_path() {
 }
 
 #[test]
-fn atr_turboprop_is_explicitly_unsupported_without_a_fabricated_mass() {
+fn the_atr_turboprop_evaluates_from_shaft_power_and_never_from_a_thrust() {
     let (config, plane) = preset_case("ATR72-600");
+    let buildup = calculate_flops_mass_buildup(
+        &plane,
+        &config.requirements,
+        &config.geometry,
+        &config.control_surfaces,
+        Some(&config.mass_model),
+        &config.landing_gear,
+        &config.cabin,
+    )
+    .unwrap_or_else(|error| panic!("the declared ATR turboprop record must evaluate: {error}"));
+    let ProductMassBuildup::PureFlops(build) = buildup else {
+        panic!("the ATR must come out of the production architecture, not the comparison one");
+    };
+
+    // No thrust exists anywhere on this path, and the thrust-based FLOPS
+    // propulsion group is not evaluated at all.
+    assert_eq!(build.inputs.rated_thrust_per_engine_n, 0.0);
+    assert!(
+        build.airframe.propulsion.is_none(),
+        "a propeller installation must not carry a thrust-based FLOPS propulsion group"
+    );
+    let group = build
+        .airframe
+        .turboprop_propulsion
+        .expect("the shaft-power propulsion group must be present");
+
+    // The certificated PW127M dry mass, used unchanged at its own rating.
+    assert_eq!(group.engine_mass_source, "declared_certificated_dry_mass");
+    assert!((group.engines_kg - 2.0 * 481.7).abs() < 1e-6);
+    // The reduction gearbox is inside that mass and is not charged twice.
+    assert_eq!(group.gearboxes_kg, 0.0);
+    // A turboprop reverses by blade pitch; there is no reverser mass.
+    let masses = &build.masses;
+    assert!(masses.propulsion > 0.0);
+    // The propulsion slot is the group plus the nacelles, exactly once.
+    assert!(
+        (masses.propulsion - (group.total_without_nacelles_kg + group.nacelles_kg)).abs() < 1e-6,
+        "propulsion {} vs group {} + nacelles {}",
+        masses.propulsion,
+        group.total_without_nacelles_kg,
+        group.nacelles_kg
+    );
+    // Every airframe and systems group is a real FLOPS result.
+    for (name, value) in [
+        ("wing", masses.wing),
+        ("h_stab", masses.h_stab),
+        ("v_stab", masses.v_stab),
+        ("fuselage", masses.fuselage),
+        ("gear", masses.gear),
+        ("systems", masses.systems),
+        ("furnishings", masses.furnishings),
+    ] {
+        assert!(value > 0.0, "{name} must be positive, got {value}");
+    }
+}
+
+#[test]
+fn an_undeclared_turboprop_propulsion_record_is_refused_by_name() {
+    // Removing the declared record must block the buildup with the specific
+    // missing inputs rather than falling back to a fraction or a thrust.
+    let (mut config, plane) = preset_case("ATR72-600");
+    config.mass_model.flops_turboprop = alas_config::FlopsTurbopropConfig::default();
     let result = calculate_flops_mass_buildup(
         &plane,
         &config.requirements,
@@ -308,7 +370,8 @@ fn atr_turboprop_is_explicitly_unsupported_without_a_fabricated_mass() {
         &config.cabin,
     );
     let Err(ComponentMassError::FlopsUnverified { reasons, .. }) = result else {
-        panic!("ATR must not publish a jet-equivalent FLOPS total");
+        panic!("an undeclared turboprop record must not publish a mass");
     };
-    assert!(reasons.contains(&FlopsTransportUnverifiedReason::UnsupportedPropulsionTechnology));
+    assert!(reasons.contains(&FlopsTransportUnverifiedReason::TurbopropPropellerGeometry));
+    assert!(reasons.contains(&FlopsTransportUnverifiedReason::TurbopropNacelleArchitecture));
 }

@@ -12,7 +12,7 @@ use alas_pipeline::full_analysis::{AnalysisReport, DesignPoint, PolarFit, PolarF
 use std::collections::HashMap;
 /// A fully real (built, mass-analyzed) `AnalysisReport`, the same
 /// pipeline shape `full_analysis.rs` produces, minus the expensive VLM
-/// polar/trim/neutral-point solve -- `static_margin` is set to a
+/// polar/trim/neutral-point solve: `static_margin` is set to a
 /// plausible constant rather than re-derived, matching how
 /// `characterization_figures.rs`'s own `sample_report` stays a fixture,
 /// not a second implementation of the physics under test here.
@@ -229,4 +229,80 @@ fn interp_clamps_outside_the_domain_and_is_linear_inside_it() {
     assert_eq!(interp(-5.0, &xs, &ys), 0.0);
     assert_eq!(interp(25.0, &xs, &ys), 100.0);
     assert!((interp(5.0, &xs, &ys) - 50.0).abs() < 1e-12);
+}
+
+/// The registered ATR 72-600 geometry and configuration: a real high-wing
+/// layout that registers no source gear-station anchor, which is exactly the
+/// case the wing-mounted fallback rule does not cover.
+fn atr_case() -> (AlasConfig, alas_geom::aircraft::airplane::Airplane) {
+    let preset = alas_config::presets::get("ATR72-600").expect("registered ATR preset");
+    let mut config = AlasConfig::from_value(&serde_json::json!({ "preset": "ATR72-600" }))
+        .expect("ATR configuration");
+    // Keep this refusal fixture explicit: the production ATR configuration
+    // now carries its measured gear stations.
+    config.landing_gear.reference_station_fuselage_length_m = None;
+    config.landing_gear.reference_nlg_x_fraction = None;
+    config.landing_gear.reference_mlg_x_fractions = None;
+    let airplane = AircraftBuilder::new(Some(config.geometry.clone()))
+        .build(Some(&preset.design_vector), true)
+        .expect("ATR geometry");
+    (config, airplane)
+}
+
+/// Every text string the scene draws.
+fn scene_texts(scene: &crate::scene::Scene) -> Vec<String> {
+    scene
+        .elements
+        .iter()
+        .filter_map(|element| match element {
+            SceneElement::Text { text, .. } => Some(text.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn an_aircraft_with_no_measured_main_gear_station_gets_no_cg_envelope() {
+    // The gear-strength boundaries of this figure are moments about the
+    // main-gear station. With no station measured there is no boundary to
+    // draw, and the figure must say so rather than draw one about a station
+    // the mass model refuses. The lumped masses and coordinates carried here
+    // are the clean-sheet fixture's and are never reached: the refusal is
+    // raised before any limit is formed.
+    let (config, airplane) = atr_case();
+    let mut report = sample_report();
+    report.airplane = airplane;
+    assert!(
+        !report.component_masses.is_empty() && !report.mass_coordinates.is_empty(),
+        "the earlier no-data guards must not be what stops this figure"
+    );
+
+    let texts = scene_texts(&figure_cg_envelope(&report, &config, None));
+    assert!(
+        texts
+            .iter()
+            .any(|text| text.contains("No main-gear station measured")),
+        "the figure must name the missing datum: {texts:?}"
+    );
+    assert!(
+        !texts.iter().any(|text| text.contains("MLG")),
+        "no gear limit may be drawn without a station: {texts:?}"
+    );
+}
+
+#[test]
+fn an_aircraft_with_a_main_gear_station_still_gets_its_full_envelope() {
+    // The clean-sheet default keeps the wing-mounted fallback, so the gate
+    // must be inert: the figure is drawn exactly as before.
+    let texts = scene_texts(&figure_cg_envelope(
+        &sample_report(),
+        &AlasConfig::default(),
+        None,
+    ));
+    assert!(
+        !texts
+            .iter()
+            .any(|text| text.contains("No main-gear station measured")),
+        "an in-domain fallback must not be refused: {texts:?}"
+    );
 }

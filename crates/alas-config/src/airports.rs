@@ -6,8 +6,8 @@
 
 //! Aerodromes the field-performance check and the route are evaluated at.
 //!
-//! Ten major hubs and ten airports that are hard to operate out of -- high
-//! elevation, short runways, hot days -- because a design that meets its
+//! Ten major hubs and ten airports that are hard to operate out of: high
+//! elevation, short runways, hot days, because a design that meets its
 //! field length at sea level on a standard day may not meet it anywhere
 //! interesting. The figures come from published aerodrome charts.
 //!
@@ -89,6 +89,47 @@ pub fn database() -> &'static [Airport] {
     DATABASE.get_or_init(|| parse().airports)
 }
 
+/// Return the curated table plus any user-registered airport records.
+///
+/// The returned vector is a snapshot so callers may safely use it to populate
+/// a selector while another workspace import replaces the registry.
+pub fn database_with_custom() -> Vec<Airport> {
+    let mut airports = database().to_vec();
+    airports.extend(
+        crate::airport_io::registered_custom_airports()
+            .into_iter()
+            .map(|airport| {
+                let physical_length = airport
+                    .runway_lengths_m
+                    .iter()
+                    .copied()
+                    .filter(|length| length.is_finite() && *length > 0.0)
+                    .fold(0.0, f64::max);
+                let (toda_m, lda_m, notes) =
+                    airport.declared_toda_m.zip(airport.declared_lda_m).map_or(
+                        (
+                            physical_length,
+                            physical_length,
+                            "Custom entry; longest physical runway used conservatively",
+                        ),
+                        |(toda, lda)| (toda, lda, "Custom entry; declared distances supplied"),
+                    );
+                Airport {
+                    name: airport.name,
+                    icao: airport.icao,
+                    elevation_m: airport.altitude_m,
+                    toda_m,
+                    lda_m,
+                    isa_deviation_c: airport.isa_delta_c,
+                    notes: notes.to_owned(),
+                    latitude_deg: airport.latitude_deg,
+                    longitude_deg: airport.longitude_deg,
+                }
+            }),
+    );
+    airports
+}
+
 /// Look one aerodrome up by display name or by ICAO code.
 ///
 /// Both are accepted because the configuration stores the display name while
@@ -100,9 +141,13 @@ pub fn database() -> &'static [Airport] {
 /// [`UnknownAirport`] when neither matches. Upstream raises for the same
 /// input.
 pub fn get(name_or_icao: &str) -> Result<&'static Airport, UnknownAirport> {
-    database()
+    if let Some(airport) = database()
         .iter()
         .find(|airport| airport.name == name_or_icao || airport.icao == name_or_icao)
+    {
+        return Ok(airport);
+    }
+    crate::airport_io::legacy_by_name_or_icao(name_or_icao)
         .ok_or_else(|| UnknownAirport(name_or_icao.to_owned()))
 }
 

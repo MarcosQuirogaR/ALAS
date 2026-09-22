@@ -9,7 +9,7 @@
 //! iteration. [`BreguetFuelModel`] prices the same quantities from a
 //! parabolic drag polar, a constant cruise TSFC, and a handful of published
 //! mission-segment fractions for the climb, descent and landing fuel the
-//! Breguet range equation itself does not cover -- closed-form, cheap, and
+//! Breguet range equation itself does not cover: closed-form, cheap, and
 //! deliberately not a substitute for flying the finalist through the real
 //! mission afterwards.
 //!
@@ -130,8 +130,8 @@ impl BreguetFuelModel {
         lift_coefficient / drag_coefficient
     }
 
-    /// Maximum lift-to-drag ratio of the parabolic polar, `1 / (2 sqrt(cd0 k))`
-    /// -- the minimum-drag condition, independent of mass, speed and
+    /// Maximum lift-to-drag ratio of the parabolic polar, `1 / (2 sqrt(cd0 k))`:
+    /// the minimum-drag condition, independent of mass, speed and
     /// density.
     fn max_lift_to_drag(&self) -> f64 {
         1.0 / (2.0 * (self.cd0 * self.induced_factor_k).sqrt())

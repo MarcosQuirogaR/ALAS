@@ -15,7 +15,7 @@
 //! reason [`crate::product_stations`] does. While the reconciliation was
 //! private to the optimizer, the search sized every candidate against the
 //! reconciled wing while the final report published the empirical total for
-//! the same aircraft -- about 1.2 t apart on the r5 nominal finalist, with the
+//! the same aircraft, about 1.2 t apart on the r5 nominal finalist, with the
 //! fuel closure silently absorbing the difference. Two numbers for one wing is
 //! not a reporting detail: it is the operating empty mass the run is
 //! ultimately judged on.
@@ -29,7 +29,7 @@ use alas_config::AlasConfig;
 use alas_geom::aircraft::airplane::Airplane;
 use alas_geom::aircraft::wing::Wing;
 use alas_geom::builder::AircraftBuilder;
-use alas_struct::sizing::{size_wingbox, WingboxSizing};
+use alas_struct::sizing::WingboxSizing;
 
 use crate::breakdown::{
     run_mass_analysis_with_model_checked_product_with_gear, MassCoordinateModel,
@@ -47,6 +47,10 @@ use crate::wingbox_feedback::{
     reconcile_clean_sheet_wing, ReferenceWingMass, SizedWingboxMass, WingboxFeedback,
 };
 
+mod fuel_relief;
+pub use fuel_relief::{
+    declared_integral_wing_fuel_kg_m, declared_wing_fuel_case, DeclaredWingFuelCase,
+};
 mod support;
 pub use support::{design_gross_mass_kg, StructuralInventory};
 use support::{design_requirements, reconcile_against_reference};

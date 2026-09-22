@@ -34,7 +34,7 @@ use crate::{ConfigNode, Kind, Leaf};
 ///
 /// Only those legs: the three cruise legs are always a true airspeed (or, for
 /// a preset's operational route, a true airspeed derived from a commanded
-/// Mach at the configured cruise altitude -- see
+/// Mach at the configured cruise altitude, see
 /// [`crate::AircraftPreset::operational_mission_defaults`]) regardless of
 /// this setting, so switching an aircraft's climb schedule to calibrated
 /// airspeed cannot silently reinterpret an already-correct cruise value.
@@ -123,7 +123,7 @@ fn is_true_airspeed(reference: &SpeedReference) -> bool {
 #[serde(deny_unknown_fields, default)]
 pub struct MissionProfileConfig {
     /// How the takeoff, climb, descent and landing legs' airspeeds below are
-    /// defined. The three cruise legs are unaffected -- see
+    /// defined. The three cruise legs are unaffected, see
     /// [`SpeedReference`].
     #[serde(skip_serializing_if = "is_true_airspeed")]
     #[config(
@@ -276,7 +276,7 @@ pub struct MissionProfileConfig {
 
     /// Airspeed flown on the final descent to the field.
     #[config(
-        help = "Airspeed flown on the final descent to the arrival field's elevation -- an approach speed, well below the descent rungs above it."
+        help = "Airspeed flown on the final descent to the arrival field's elevation: an approach speed, well below the descent rungs above it."
     )]
     pub landing_air_speed_m_s: f64,
 
