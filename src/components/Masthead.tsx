@@ -1,8 +1,18 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { withBase } from '../lib/base'
 
 export default function Masthead() {
   const [isOpen, setIsOpen] = useState(false)
+
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape' && isOpen) {
+        setIsOpen(false)
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [isOpen])
 
   const links = [
     { href: withBase('#overview'), label: 'Overview' },
@@ -12,9 +22,11 @@ export default function Masthead() {
   ]
 
   return (
-    <header className="sticky top-0 z-50 border-b border-rule bg-base/90 backdrop-blur-md">
+    <header className="sticky top-0 z-50 border-b border-rule bg-base">
       <div className="mx-auto flex max-w-[68rem] items-center justify-between gap-6 px-6 py-3.5">
-        <a href={withBase('')} className="flex items-center gap-2.5">
+        {/* wordmark.png already carries the three-stripe mark and the divider;
+            pairing it with mark.png would render the mark twice. */}
+        <a href={withBase('')} className="flex items-center gap-2.5" aria-label="ALAS home">
           <img
             src={withBase('brand/wordmark.png')}
             alt="ALAS"
@@ -23,7 +35,7 @@ export default function Masthead() {
         </a>
 
         {/* Desktop navigation */}
-        <nav className="hidden items-center gap-7 text-[0.86rem] text-fg-dim md:flex">
+        <nav aria-label="Main navigation" className="hidden items-center gap-7 text-[0.86rem] text-fg-dim md:flex">
           {links.map((l) => (
             <a key={l.href} href={l.href} className="transition-colors hover:text-fg-strong">
               {l.label}
@@ -44,7 +56,8 @@ export default function Masthead() {
             type="button"
             onClick={() => setIsOpen(!isOpen)}
             aria-expanded={isOpen}
-            aria-label="Toggle navigation"
+            aria-controls="mobile-nav"
+            aria-label={isOpen ? 'Close navigation menu' : 'Open navigation menu'}
             className="flex h-9 w-9 items-center justify-center border border-rule text-fg-dim transition-colors hover:border-rule-strong hover:text-fg-strong md:hidden"
           >
             {isOpen ? (
@@ -62,8 +75,8 @@ export default function Masthead() {
 
       {/* Mobile dropdown panel */}
       {isOpen && (
-        <div className="border-t border-rule bg-base/98 px-6 py-4 md:hidden">
-          <nav className="flex flex-col gap-3 text-[0.92rem]">
+        <div id="mobile-nav" className="border-t border-rule bg-base px-6 py-4 md:hidden">
+          <nav aria-label="Mobile navigation" className="flex flex-col gap-3 text-[0.92rem]">
             {links.map((l) => (
               <a
                 key={l.href}

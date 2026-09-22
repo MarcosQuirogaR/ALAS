@@ -7,7 +7,7 @@ export default function Colophon() {
     <footer>
       <div className="mx-auto max-w-[68rem] px-6 py-12">
         <div className="flex flex-col gap-6 sm:flex-row sm:items-center sm:justify-between">
-          <a href={withBase('')} className="flex items-center gap-2.5">
+          <a href={withBase('')} className="flex items-center gap-2.5" aria-label="ALAS home">
             <img
               src={withBase('brand/wordmark.png')}
               alt="ALAS"

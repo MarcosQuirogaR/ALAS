@@ -3,24 +3,18 @@
 ALAS is built in Rust as a single native executable. There is no Python runtime,
 no package manager, and no background sidecar service required.
 
-## Executable & Release Status
+## Release v1.1.0
 
 ### Windows
 
-- **Upcoming Release Candidate**: Remains under verification as a native
-  `alas.exe` binary (Rust version 0.1.0) and is not published. The core application runs locally;
-  full multidisciplinary analyses require compatible external solver executables and any
-  necessary licenses.
-- **Legacy binary (v1.0.0, 2026-07-29)**: Historical Python 1.0.0 release (distinct
-  from the current Rust version 0.1.0), available on GitHub Releases for reference while the current
-  candidate undergoes verification.
-- **SmartScreen**: Windows may display an untrusted application warning on first
-  launch of newly published binaries. Select **More info → Run anyway**.
+- **Windows**: Download the portable x86-64 archive from [GitHub Releases](https://github.com/MarcosQuirogaR/ALAS/releases/tag/v1.1.0), verify its SHA-256 file, and run `alas.exe`.
+- **Linux**: Download the portable x86-64 `tar.gz` archive from the same release, verify its SHA-256 file, extract it, and run `./alas`.
+- **Windows trust**: A signed binary identifies its publisher, but a new file can still show a SmartScreen reputation prompt until Microsoft has enough clean download history. Verify the publisher and checksum before running it.
 
 ### Other Platforms
 
-This candidate's Windows distribution is currently being verified; builds for other
-platforms are not verified here at this time.
+The v1.1.0 release provides Windows and Linux x86-64 packages. External solver stages remain
+optional and require compatible user-supplied installations and licences.
 
 ---
 
@@ -41,9 +35,9 @@ Within the core local application, the following capabilities execute without ex
 
 ## Compatible external tools
 
-ALAS couples with specialized external analysis tools across disciplines. Compatible
-tools are required as documented for each distribution; each stage reports itself
-unavailable when a tool is absent:
+ALAS couples with specialized external analysis tools across disciplines. For full setup
+and status code documentation, see the [External tools guide](external-tools.md). Compatible
+tools are user-supplied; each stage reports itself unavailable when a tool is absent:
 
 | Tool | Discipline | Status when absent |
 |---|---|---|

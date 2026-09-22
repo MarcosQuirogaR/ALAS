@@ -10,8 +10,10 @@ failures.
 
 ### Windows SmartScreen warning
 
-Newly published release binaries are not code-signed. Windows SmartScreen may
-display a protective dialog. Select **More info**, then **Run anyway**.
+New release files may still be unfamiliar to SmartScreen while publisher and
+file reputation builds. Check the displayed publisher, compare the release
+SHA-256 checksum, and submit a suspected false positive through the
+[Microsoft Security Intelligence submission portal](https://www.microsoft.com/wdsi/filesubmission).
 
 ### The application will not launch on Linux
 

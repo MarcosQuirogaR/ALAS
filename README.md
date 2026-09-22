@@ -8,9 +8,9 @@ repository.
 
 Two things live here:
 
-- **Landing page** (repo root): Vite + React + TypeScript + Tailwind CSS v4
-  + Framer Motion, served at the site root.
-- **Documentation** (`docs-site/`): MkDocs + Material, a 25-chapter guide
+- **Landing page** (repo root): Vite + React + TypeScript + Tailwind CSS v4,
+  served at the site root.
+- **Documentation** (`docs-site/`): MkDocs + Material, a 26-chapter guide
   built around the AVE reference case, served at
   [`/docs/`](https://alas.uvigo.es/docs/). Every
   figure in it comes from a real ALAS run.
@@ -35,8 +35,6 @@ publishes the combined output to GitHub Pages via
 
 ## Releases
 
-Downloadable installers are attached to
-[GitHub Releases](https://github.com/MarcosQuirogaR/ALAS/releases) on the
-main ALAS repo, built and published by that repo's own release workflow.
-The Download section on this site links to the `latest` release assets
-there by a fixed filename (e.g. `ALAS-windows.exe`).
+Downloadable Windows and Linux packages for v1.1.0 are published on
+[GitHub Releases](https://github.com/MarcosQuirogaR/ALAS/releases). The Download
+section on this site links directly to each tagged asset and its checksums.

@@ -51,8 +51,8 @@ export default function Acknowledgements() {
         </div>
 
         <div className="mt-6 max-w-[54ch]">
-          <h2 className="font-serif text-[1.85rem] font-semibold leading-[1.2] tracking-[-0.015em] text-fg-strong">
-            People who made this
+          <h2 className="text-[1.65rem] font-bold leading-[1.25] tracking-[-0.015em] text-fg-strong">
+            Contributors &amp; acknowledgements
           </h2>
           <p className="mt-5 text-[1rem] leading-[1.65] text-fg">
             ALAS carries one name on the design, but a good deal of it

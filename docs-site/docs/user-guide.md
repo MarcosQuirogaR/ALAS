@@ -96,10 +96,13 @@ Where the external programs live and whether they were found: **AeroSandbox**,
 status, so you can tell at a glance what is available and therefore what a run
 will be able to compute.
 
-AeroSandbox is a hard dependency and always present. MSES ships with the
-application. SUAVE needs its one-time isolated environment. Nastran and Patran
-are yours to license and install; the page links out to Hexagon for both, and
-to SimBrief for a flight-plan account.
+AeroSandbox is a hard dependency and always present. MSES is proprietary and
+not shipped with the application; it is yours to license and install, then
+point the card at your own build. SUAVE needs its one-time isolated
+environment. Nastran and Patran are likewise yours to license and install; the
+page links out to Hexagon for both, and to SimBrief for a flight-plan account.
+See the [External tools guide](external-tools.md) for the full per-tool setup
+path, required files and licence terms.
 
 !!! note "Asset downloads are on the Mission Analysis page"
     The two optional data downloads (the open airway navdata and the Earth

@@ -2,14 +2,14 @@ import { useEffect, useState } from 'react'
 import { withBase } from '../lib/base'
 
 const CAPABILITIES = [
-  'Parametric airframe sizing & geometry optimization',
-  'Multi-point aerodynamics & transonic section diagnostics (MSES)',
-  'Wingbox structural estimation & rib-spacing analysis',
-  'Turbofan cycle analysis & engine matching',
-  'Mass breakdown, CG envelope & longitudinal stability margins',
-  'Flown mission simulation (climb, cruise, descent, reserves)',
-  'Stage execution reporting & external solver diagnostics in progress',
-  'UAS (unmanned aircraft systems) configurations (work in progress)',
+  'Parametric geometry sizing and numerical airframe optimization',
+  'Lifting-line and vortex-lattice aerodynamics with empirical drag build-up',
+  'Optional 2D transonic section diagnostics (via user-supplied MSES)',
+  'Wingbox structural sizing and analytical rib-spacing estimation',
+  'Turbofan thermodynamic cycle matching and thrust-lapse modeling',
+  'Mass breakdown, center-of-gravity envelope, and longitudinal static margin',
+  'Trajectory simulation across climb, cruise, descent, and reserves',
+  'Stage status tracking with explicit diagnostics for unavailable external tools',
 ]
 
 type Figure = {
@@ -66,38 +66,39 @@ export default function Overview() {
   const figures: Figure[] = [
     {
       src: withBase('demo/transonic.png'),
-      caption: 'Transonic section flow diagnostics (MSES coupled Euler/boundary-layer)',
+      caption: 'Transonic section Mach contours (via external MSES when installed)',
     },
     {
       src: withBase('demo/cabin.png'),
-      caption: 'Cabin and payload arrangement preview',
+      caption: 'Cabin seating and payload arrangement preview',
     },
     {
       src: withBase('demo/mission-route.png'),
-      caption: 'Flown mission trajectory, tracking fuel burn and aircraft mass',
+      caption: 'Mission trajectory simulation tracking fuel burn and aircraft mass',
     },
   ]
 
   return (
     <section id="overview" className="border-b border-rule">
-      <div className="mx-auto max-w-[68rem] px-6 py-20">
+      <div className="mx-auto max-w-[68rem] px-6 py-16 sm:py-20">
         <p className="section-mark">Overview</p>
 
         <div className="mt-6 grid gap-x-12 gap-y-8 lg:grid-cols-[1.15fr_1fr]">
           <div>
-            <h2 className="font-serif text-[1.85rem] font-semibold leading-[1.2] tracking-[-0.015em] text-fg-strong">
-              Coupled multidisciplinary stages for preliminary design
+            <h2 className="text-[1.65rem] font-bold leading-[1.25] tracking-[-0.015em] text-fg-strong">
+              Coupled multidisciplinary analysis pipeline
             </h2>
-            <p className="mt-5 max-w-[52ch] text-[0.98rem] leading-[1.65] text-fg">
-              You specify the operational requirements. ALAS explores the geometric design space
-              using preliminary engineering models, evaluating candidate airframes across aerodynamics,
-              structures, propulsion, and trajectory simulation. Stage execution diagnostics report
-              solver status and convergence directly.
+            <p className="mt-4 max-w-[52ch] text-[0.96rem] leading-[1.65] text-fg">
+              ALAS automates preliminary aircraft sizing around mission requirements: design payload,
+              range, cruise speed, and field limits. It evaluates candidate airframes across coupled
+              disciplines, tracking mass properties, aerodynamic polars, structural wingbox limits,
+              and fuel consumption along simulated flight trajectories.
             </p>
             <p className="mt-3 max-w-[52ch] text-[0.86rem] leading-[1.6] text-fg-dim">
-              Intended for engineering exploration and stage diagnostics. Sized configurations
-              represent preliminary approximations, not flight-certified or manufacturer-validated
-              aircraft, with no exact runtime guarantees.
+              Calculations provide conceptual estimates for early trade studies. Sized configurations
+              are not flight-certified or manufacturer-validated aircraft, and ALAS output has not been
+              validated against measured aircraft performance. External solvers require separate
+              installation.
             </p>
           </div>
 

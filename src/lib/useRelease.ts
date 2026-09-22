@@ -18,14 +18,26 @@ const REPO = 'MarcosQuirogaR/ALAS'
 function parse(raw: Record<string, unknown>): Release {
   const assets =
     (raw.assets as { name: string; size: number; browser_download_url?: string }[] | undefined) ?? []
-  const win = assets.find(
-    (a) => a.name === 'ALAS-windows.exe' || a.name.toLowerCase().endsWith('.exe'),
-  )
-  const linux = assets.find(
-    (a) =>
-      a.name === 'ALAS-linux' ||
-      (a.name.toLowerCase().includes('linux') && !a.name.endsWith('.txt')),
-  )
+  const win = assets.find((a) => {
+    const name = a.name.toLowerCase()
+    return (
+      name.includes('windows') &&
+      !name.endsWith('.sha256') &&
+      (name.endsWith('.zip') || name.endsWith('.exe'))
+    )
+  })
+  const linux = assets.find((a) => {
+    const name = a.name.toLowerCase()
+    return (
+      name.includes('linux') &&
+      !name.endsWith('.sha256') &&
+      !name.endsWith('.txt') &&
+      (name.endsWith('.tar.gz') ||
+        name.endsWith('.tar.xz') ||
+        name.endsWith('.zip') ||
+        !name.includes('.'))
+    )
+  })
   return {
     tag: String(raw.tag_name ?? ''),
     name: String(raw.name || raw.tag_name || ''),

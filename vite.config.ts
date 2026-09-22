@@ -5,7 +5,9 @@ import tailwindcss from '@tailwindcss/vite'
 
 // https://vite.dev/config/
 export default defineConfig({
-  base: '/ALAS-site/',
+  // The canonical deployment is the domain root (https://alas.uvigo.es/).
+  // GitHub Pages builds can still opt into a subpath with VITE_BASE.
+  base: process.env.VITE_BASE || '/',
   plugins: [react(), tailwindcss()],
   build: {
     rollupOptions: {

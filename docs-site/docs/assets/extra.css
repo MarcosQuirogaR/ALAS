@@ -1,3 +1,5 @@
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap');
+
 /* ALAS documentation: matched to the site's dark system. */
 
 :root {
@@ -31,12 +33,25 @@
   --md-code-bg-color: #f3f1ec;
 }
 
-/* Headings carry the serif, as on the site. */
+/* Keep the documentation typography aligned with the landing page. */
+body,
+input,
+.md-typeset {
+  font-family: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+.md-typeset code,
+.md-typeset pre,
+.md-typeset kbd {
+  font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+/* Space Grotesk gives headings the site's industrial display treatment. */
 .md-typeset h1,
 .md-typeset h2,
 .md-typeset h3 {
-  font-family: "IBM Plex Serif", Georgia, serif;
-  font-weight: 600;
+  font-family: "Space Grotesk", "IBM Plex Sans", system-ui, sans-serif;
+  font-weight: 700;
   letter-spacing: -0.015em;
 }
 
@@ -88,7 +103,7 @@
 }
 
 .ave-stat .label {
-  font-family: "IBM Plex Mono", monospace;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
   font-size: 0.62rem;
   text-transform: uppercase;
   letter-spacing: 0.11em;
@@ -111,7 +126,7 @@
 }
 
 .md-typeset table:not([class]) th {
-  font-family: "IBM Plex Mono", monospace;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
   font-size: 0.66rem;
   font-weight: 500;
   text-transform: uppercase;

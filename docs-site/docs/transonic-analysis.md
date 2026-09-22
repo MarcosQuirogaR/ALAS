@@ -63,11 +63,10 @@ downstream boundary-layer health.
 The contour field illustrates the vertical extent of the supersonic pocket above the
 airfoil surface. The tight contour gradient at the aft boundary marks the shock.
 
-!!! note "Solved geometry verification"
+!!! note "Discretized section coordinates"
     The section outline plotted above reflects the actual paneled coordinates
-    discretized and solved by MSES. If geometric irregularities or meshing anomalies
-    occur, they are visible in the diagnostic visualization rather than concealed by
-    an idealized spline.
+    passed to MSES. Geometric irregularities or meshing anomalies remain visible
+    in the diagnostic plot rather than masked by idealized splines.
 
 ## Stage execution & convergence diagnostics
 
@@ -111,7 +110,7 @@ axes:
   <figcaption>Overlay of AeroSandbox, SUAVE, and 2D MSES polars on shared CL–CD and CL–α axes.</figcaption>
 </figure>
 
-This comparison is an engineering consistency check, not an experimental validation:
+This comparison provides an engineering consistency check across preliminary models of differing fidelity:
 
 - **AeroSandbox**: Models the full 3D airframe, accounting for induced drag and
   empirical drag build-ups.

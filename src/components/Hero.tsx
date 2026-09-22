@@ -1,10 +1,6 @@
 import { withBase } from '../lib/base'
-import { useReleases } from '../lib/useRelease'
 
 export default function Hero() {
-  const releases = useReleases(1)
-  const latest = releases?.[0]
-
   return (
     <section id="top" className="relative isolate overflow-hidden border-b border-rule">
       {/* Render by Antón Ochoa Castro and Aarón Pérez Pardiñas. See
@@ -19,48 +15,42 @@ export default function Hero() {
       <div aria-hidden="true" className="hero-veil absolute inset-0 -z-10" />
       <div aria-hidden="true" className="hero-fade absolute inset-0 -z-10" />
 
-      <div className="mx-auto max-w-[68rem] px-6 pb-20 pt-24 sm:pb-28 sm:pt-32 lg:pb-36 lg:pt-40">
+      <div className="mx-auto max-w-[68rem] px-6 pb-16 pt-20 sm:pb-24 sm:pt-28 lg:pb-32 lg:pt-36">
         <div className="flex flex-wrap items-center gap-3">
           <p className="section-mark">Aircraft preliminary design</p>
-          <span className="inline-flex items-center gap-1.5 border border-rule-strong bg-raised/80 px-2.5 py-0.5 font-mono text-[0.7rem] text-fg-dim">
-            <span className="h-1.5 w-1.5 rounded-full bg-accent" />
-            <span>Release candidate under verification · Latest public binary: v1.0.0 (2026-07-29)</span>
+          <span className="inline-flex items-center border border-rule bg-raised px-2.5 py-0.5 font-mono text-[0.72rem] text-fg-dim">
+            v1.1.0 · Windows and Linux
           </span>
         </div>
 
-        <h1 className="mt-6 max-w-[24ch] font-serif text-[2.5rem] font-semibold leading-[1.12] tracking-[-0.02em] text-fg-strong sm:text-[3.3rem]">
-          Preliminary airframe sizing, optimization, and multi-disciplinary analysis.
+        <h1 className="mt-6 max-w-[28ch] text-[2.2rem] font-bold leading-[1.15] tracking-[-0.02em] text-fg-strong sm:text-[3rem]">
+          Aircraft preliminary design and multidisciplinary analysis
         </h1>
 
-        <p className="mt-7 max-w-[48ch] text-[1.06rem] leading-[1.62] text-fg">
-          ALAS evaluates aircraft configurations against mission requirements using preliminary
-          engineering models across aerodynamics, wingbox structures, turbofan cycle propulsion, and
-          trajectory simulation. Built for design-space exploration; not flight certification.
+        <p className="mt-6 max-w-[50ch] text-[1.02rem] leading-[1.65] text-fg">
+          ALAS couples parametric geometry sizing, vortex-lattice aerodynamics, wingbox structural
+          estimation, turbofan thermodynamic cycles, and trajectory simulation to evaluate transport
+          aircraft against mission requirements.
         </p>
 
-        <div className="mt-10 flex flex-col gap-4 sm:flex-row sm:items-center">
+        <div className="mt-9 flex flex-col gap-3.5 sm:flex-row sm:items-center">
           <a
             href={withBase('#download')}
-            className="inline-flex items-center justify-center gap-3 bg-accent px-7 py-4 font-semibold text-base transition-colors hover:bg-accent-bright"
+            className="inline-flex items-center justify-center bg-accent px-6 py-3.5 text-[0.92rem] font-semibold text-base transition-colors hover:bg-accent-bright"
           >
-            Downloads &amp; Releases
-            {latest && (
-              <span className="font-mono text-[0.72rem] font-normal opacity-85">
-                {latest.tag}
-              </span>
-            )}
+            Download v1.1.0
           </a>
 
           <a
             href={withBase('docs/')}
-            className="inline-flex items-center justify-center border border-rule-strong px-7 py-4 font-semibold text-fg-strong transition-colors hover:border-accent hover:text-accent-bright"
+            className="inline-flex items-center justify-center border border-rule-strong px-6 py-3.5 text-[0.92rem] font-semibold text-fg-strong transition-colors hover:border-accent hover:text-accent-bright"
           >
-            Read the documentation
+            Documentation
           </a>
         </div>
 
-        <p className="mt-6 font-mono text-[0.72rem] uppercase tracking-[0.13em] text-fg-dim">
-          Free · Open source (AGPL-3.0) · Native Rust binary · Windows &amp; Linux
+        <p className="mt-6 font-mono text-[0.72rem] uppercase tracking-[0.1em] text-fg-dim">
+          Open source (AGPL-3.0-or-later) · Native Rust binaries for Windows and Linux
         </p>
       </div>
     </section>

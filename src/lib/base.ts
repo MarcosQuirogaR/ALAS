@@ -1,6 +1,6 @@
 /**
  * Resolves an application path or anchor against import.meta.env.BASE_URL.
- * Supports subpath deployment such as /ALAS-site/ on GitHub Pages.
+ * Supports both the live domain root and an optional subpath deployment.
  */
 export function withBase(path = ''): string {
   const rawBase = import.meta.env.BASE_URL || '/'

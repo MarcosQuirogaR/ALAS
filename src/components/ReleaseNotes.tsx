@@ -2,25 +2,14 @@ import { formatDate, useReleases } from '../lib/useRelease'
 
 const RELEASES_URL = 'https://github.com/MarcosQuirogaR/ALAS/releases'
 
-/** Release bodies are Markdown. Rather than pull in a renderer (and an HTML
- *  injection surface) for a few bullet points, take the first handful of
- *  lines, strip the markup a changelog actually uses, and render as plain
- *  text: list markers, **bold**, `code` spans, and [links](url) (kept as
- *  their visible text -- a plain-text summary can't offer them as links
- *  anyway). */
-function summarise(body: string, maxLines = 4): string[] {
-  return body
-    .split('\n')
-    .map((l) => l.trim())
-    .filter((l) => l.length > 0 && !l.startsWith('#'))
-    .slice(0, maxLines)
-    .map((l) =>
-      l
-        .replace(/^[-*•]\s*/, '')
-        .replace(/\*\*(.+?)\*\*/g, '$1')
-        .replace(/`([^`]+)`/g, '$1')
-        .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
-    )
+// Keep the landing page's release copy local and deliberate. GitHub release
+// bodies can contain historical branding or editorial notes that do not belong
+// in the current product site.
+const RELEASE_SUMMARIES: Record<string, string[]> = {
+  'v1.1.0': [
+    'Native Rust desktop packages for Windows and Linux.',
+    'Portable archives include a release manifest and a sibling SHA-256 file.',
+  ],
 }
 
 export default function ReleaseNotes() {
@@ -32,11 +21,11 @@ export default function ReleaseNotes() {
         <p className="section-mark">Release notes</p>
 
         <div className="mt-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-          <h2 className="font-serif text-[1.85rem] font-semibold leading-[1.2] tracking-[-0.015em] text-fg-strong">
-            What&rsquo;s changed
+          <h2 className="text-[1.65rem] font-bold leading-[1.25] tracking-[-0.015em] text-fg-strong">
+            Release history
           </h2>
           <a href={RELEASES_URL} className="prose-link text-[0.92rem]">
-            All releases on GitHub →
+            Releases on GitHub →
           </a>
         </div>
 
@@ -51,7 +40,7 @@ export default function ReleaseNotes() {
         ) : (
           <ol className="mt-10 border-t border-rule">
             {releases.map((r) => {
-              const lines = summarise(r.body)
+              const lines = RELEASE_SUMMARIES[r.tag] ?? []
               return (
                 <li
                   key={r.tag}

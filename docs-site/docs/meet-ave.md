@@ -12,17 +12,16 @@ physics stack spanning aerodynamics, structures, propulsion, and mission
 simulation requires an established baseline for benchmarking. AVE exists so
 the application is runnable and verifiable immediately.
 
-AVE is an **uncertified preliminary engineering model**, not a certified or
-flight-ready aircraft. Its geometry, mission parameters, and engine cycle are
-dimensioned around open-literature 777X-class twin-aisle transports. This
-provides meaningful engineering baselines for sanity checks (e.g., verifying
-whether static margin, fuel mass fraction, and payload-range curves reflect
-typical long-range transport behavior) without claiming manufacturer validation.
+AVE is an uncertified preliminary engineering model, dimensioned around
+open-literature 777X-class twin-aisle transport data. It provides a computational
+baseline for sanity checks (e.g., verifying that static margin, fuel mass fraction,
+and payload-range curves reflect typical long-range transport trends) and stage
+execution testing. Its numbers are conceptual estimates and carry no manufacturer
+validation.
 
-AVE is also the configuration used to evaluate stage diagnostics and external
-solver integrations, flying a Madrid-departure long-range flight profile.
-Additional airframe classes, including Unmanned Aircraft Systems (UAS), are
-currently under development as works in progress.
+AVE also serves as the test vehicle for external solver integrations on a
+Madrid-departure flight profile. Additional airframe classes, including
+Unmanned Aircraft Systems (UAS), are in active development.
 
 ## The airframe, as ALAS sees it
 

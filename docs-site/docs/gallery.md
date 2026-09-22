@@ -3,12 +3,10 @@
 Visual output across the multidisciplinary pipeline. Click any figure to
 view it full size.
 
-!!! note "Reference benchmark artifacts"
-    The figures showcased in this gallery represent benchmark output artifacts
-    generated during reference validation runs of the AVE design case. Historical
-    visualization plots from benchmark reference passes are documented here to
-    illustrate the complete chart and scene suite generated across aerodynamics,
-    structures, propulsion, stability, and mission simulation.
+!!! note "Reference design output"
+    The figures below show output generated from baseline analysis passes of the AVE
+    reference case across aerodynamics, structures, propulsion, stability, and mission
+    simulation.
 
 Figures adapt to light and dark themes. Each figure is explained in detail
 in its corresponding walkthrough chapter.
@@ -132,7 +130,7 @@ The viscous, compressible flow a panel method cannot reach.
 
 ## Structures
 
-Sizing the wingbox and proving it survives.
+Sizing the wingbox and checking structural margins.
 
 <figure markdown>
   ![Wingbox sizing](assets/ave-structures-sizing-light.png#only-light)

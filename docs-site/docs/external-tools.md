@@ -7,10 +7,9 @@ fidelity or an independent cross-check, it can also drive a handful of
 specialized external tools as separate child processes. This guide covers
 where to point ALAS at each tool, what each produces, and how to read results.
 
-The active codebase is a Rust rewrite (v0.1.0) still under verification; no
-public release candidate has been published yet. An older, architecturally
-different Python 1.0.0 build (2026-07-29) remains on GitHub Releases for
-reference only — its configuration layout does not carry over.
+The v1.1.0 release is a native Rust build. External solver stages remain
+optional and user-supplied; their configuration is independent of the core
+binary and its portable Windows and Linux packages.
 
 ## Setting Up External Tools
 

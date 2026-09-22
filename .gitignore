@@ -27,3 +27,6 @@ __pycache__/
 *.njsproj
 *.sln
 *.sw?
+
+# Agent review artifacts
+.agent/
