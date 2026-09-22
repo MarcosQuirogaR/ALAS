@@ -236,9 +236,17 @@ pub struct AppState {
     /// The channel a running pipeline reports over.
     pub worker_rx: Option<Receiver<WorkerMessage>>,
     /// Completion channel for the optional navigation-data download.
-    pub navdata_download_rx: Option<Receiver<Result<alas_exec::download::DownloadReport, String>>>,
+    pub navdata_download_rx: Option<Receiver<Result<alas_exec::download::DownloadOutcome, String>>>,
     /// Whether a navigation-data transfer is currently running.
     pub navdata_download_in_progress: bool,
+    /// The flag that asks a running navigation-data download to stop.
+    ///
+    /// Deliberately separate from `cancel_flag` below: the pipeline run and
+    /// the navdata download share no lifecycle, and reusing one flag for
+    /// both would let cancelling one silently abort the other.
+    pub navdata_download_cancel: Arc<AtomicBool>,
+    /// Background state for the optional OpenVSP preview-runtime installer.
+    pub openvsp_runtime_setup: crate::openvsp_runtime_setup::OpenVspRuntimeSetup,
     /// The flag that asks a running pipeline to stop.
     pub cancel_flag: Arc<AtomicBool>,
     /// Whether the user has already requested cancellation for this run.
@@ -315,6 +323,21 @@ pub struct AppState {
     pub show_advanced_guide: bool,
     /// The advanced guide's active chapter index.
     pub guide_chapter: usize,
+    /// Whether the first-start external-tool disclosure screen is open.
+    ///
+    /// Gated on its own marker file, independent of `show_walkthrough`'s: a
+    /// user who skips the general walkthrough must still see this once, and
+    /// dismissing one must never silently mark the other seen.
+    pub show_tool_intro: bool,
+    /// Per-item consent checkbox for the optional X-Plane navigation-data
+    /// download, shown on the first-start disclosure screen. Defaults
+    /// unchecked; the "Download now" button there stays disabled until it is
+    /// checked, so no transfer can start without explicit, per-item consent.
+    pub tool_intro_navdata_consent: bool,
+    /// Per-item consent checkbox for the optional OpenVSP preview-runtime
+    /// download, shown on the first-start disclosure screen. Same unchecked
+    /// default and gating as `tool_intro_navdata_consent`.
+    pub tool_intro_openvsp_preview_consent: bool,
     /// The airfoil-screening sweep's own run state.
     pub screening: crate::screening::ScreeningState,
     /// Independent OpenFOAM airfoil study window and worker state.
@@ -334,6 +357,27 @@ pub struct AppState {
 /// preferences. A launcher's working directory is not stable across shortcuts,
 /// development builds, and packaged executables.
 pub(crate) const ONBOARDING_MARKER_FILE: &str = "onboarding-seen";
+
+/// Marker for the first-start external-tool disclosure screen
+/// ([`crate::views::tool_intro`]), kept separate from
+/// [`ONBOARDING_MARKER_FILE`] so the two once-per-installation screens are
+/// dismissed independently of each other.
+pub(crate) const EXTERNAL_TOOLS_INTRO_MARKER_FILE: &str = "external-tools-intro-seen";
+
+/// Whether `marker_path` is being seen here for the first time: if it is
+/// absent, it is created immediately (matching the "seen" semantics below,
+/// which flip on first display rather than on completion) and `true` is
+/// returned exactly once per marker file.
+fn first_start_marker_gate(marker_path: &Path) -> bool {
+    if marker_path.exists() {
+        return false;
+    }
+    if let Some(parent) = marker_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let _ = std::fs::write(marker_path, b"1");
+    true
+}
 
 /// The maximum retained run-log lines. A long optimization emits one line per
 /// progress update; nobody scrolls back through thousands of superseded lines.
@@ -431,6 +475,8 @@ impl Default for AppState {
             worker_rx: None,
             navdata_download_rx: None,
             navdata_download_in_progress: false,
+            navdata_download_cancel: Arc::new(AtomicBool::new(false)),
+            openvsp_runtime_setup: crate::openvsp_runtime_setup::OpenVspRuntimeSetup::default(),
             cancel_flag: Arc::new(AtomicBool::new(false)),
             cancellation_requested: false,
             run_events: Vec::new(),
@@ -471,6 +517,9 @@ impl Default for AppState {
             walkthrough_restore: None,
             show_advanced_guide: false,
             guide_chapter: 0,
+            show_tool_intro: false,
+            tool_intro_navdata_consent: false,
+            tool_intro_openvsp_preview_consent: false,
             screening: crate::screening::ScreeningState::default(),
             cfd,
             uav: crate::uav::UavWorkflowState::default(),
@@ -494,14 +543,69 @@ impl Default for AppState {
             .tool_locator
             .preferences_path()
             .with_file_name(ONBOARDING_MARKER_FILE);
-        if !onboarding_marker.exists() {
+        if first_start_marker_gate(&onboarding_marker) {
             state.begin_walkthrough();
-            if let Some(parent) = onboarding_marker.parent() {
-                let _ = std::fs::create_dir_all(parent);
-            }
-            let _ = std::fs::write(onboarding_marker, b"1");
+        }
+
+        // Independent first-start gate: a user who dismisses or skips the
+        // walkthrough above must still see, once, what external tools ALAS
+        // can use and whether any of them can be fetched automatically.
+        let tool_intro_marker = state
+            .tool_locator
+            .preferences_path()
+            .with_file_name(EXTERNAL_TOOLS_INTRO_MARKER_FILE);
+        if first_start_marker_gate(&tool_intro_marker) {
+            state.show_tool_intro = true;
         }
 
         state
+    }
+}
+
+#[cfg(test)]
+mod first_start_marker_tests {
+    use super::first_start_marker_gate;
+
+    fn unique_marker_path(label: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!(
+            "alas-gui-first-start-marker-{label}-{}-{:?}",
+            std::process::id(),
+            std::time::Instant::now()
+        ))
+    }
+
+    #[test]
+    fn reports_true_and_creates_the_marker_exactly_once() {
+        let marker = unique_marker_path("once");
+        assert!(!marker.exists());
+
+        assert!(
+            first_start_marker_gate(&marker),
+            "an absent marker must be reported as first-seen"
+        );
+        assert!(marker.exists(), "the gate must create the marker itself");
+        assert!(
+            !first_start_marker_gate(&marker),
+            "a second gate check against the same marker must not report first-seen again"
+        );
+
+        let _ = std::fs::remove_file(&marker);
+    }
+
+    #[test]
+    fn two_independent_markers_gate_independently() {
+        let onboarding = unique_marker_path("onboarding");
+        let tool_intro = unique_marker_path("tool-intro");
+
+        assert!(first_start_marker_gate(&onboarding));
+        // Dismissing/creating one marker must never mark the other seen —
+        // the walkthrough and the tool-intro screen are independent gates.
+        assert!(
+            first_start_marker_gate(&tool_intro),
+            "a distinct marker path must still report first-seen"
+        );
+
+        let _ = std::fs::remove_file(&onboarding);
+        let _ = std::fs::remove_file(&tool_intro);
     }
 }

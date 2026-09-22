@@ -18,8 +18,8 @@ use alas_config::AlasConfig;
 use alas_geom::aircraft::airplane::Airplane;
 use alas_geom::builder::AircraftBuilder;
 use alas_mass::breakdown::{
-    run_mass_analysis_with_model_checked_product_with_gear, MassBreakdown, MassCoordinateModel,
-    MassCoordinates, PayloadLayoutSummary,
+    run_mass_analysis_with_model_checked_product_with_gear, ComponentMassError, MassBreakdown,
+    MassCoordinateModel, MassCoordinates, PayloadLayoutSummary,
 };
 use alas_mass::product_stations::product_mass_coordinates;
 use alas_mass::wingbox_feedback::{ReferenceWingMass, WingboxFeedback};

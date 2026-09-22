@@ -811,9 +811,9 @@ fn add_planning_cabin_corrections(
 /// against this machine": the staged MADS search evaluates a poll block in
 /// parallel at that count without changing which points it evaluates or which
 /// one it returns. Differential evolution is deliberately excluded from the
-/// automatic setting — its generation loop batches only on an explicit
+/// automatic setting - its generation loop batches only on an explicit
 /// request, because a batched generation defers the population update and is a
-/// different algorithm — so the frozen replay keeps the reference
+/// different algorithm - so the frozen replay keeps the reference
 /// interleaving.
 fn add_native_worker_corrections(
     corrections: &mut BTreeMap<String, SourceCorrection>,

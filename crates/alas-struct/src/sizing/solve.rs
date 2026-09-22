@@ -307,8 +307,9 @@ pub(super) fn size_wingbox_with_law(
 
     let composite_declaration = if any_composite {
         Some(CompositeProxyDeclaration {
-            source: "Open source gap: the real wing box is composite, but no document in .agent/evidence/ \
-                     states it. Assigned as an effective isotropic proxy, not a verified material.",
+            source: "Open source gap: the real wing box is composite, but no source has been \
+                     recorded that states it. Assigned as an effective isotropic proxy, not a \
+                     verified material.",
             applicability: "Effective isotropic proxy for a laminate wing box. f_allow is a single \
                             strength-based design allowable, not a laminate allowable; no ply schedule, \
                             stacking sequence, compression-after-impact knockdown, inter-laminar check \

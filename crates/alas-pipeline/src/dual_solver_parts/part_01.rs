@@ -3,6 +3,7 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicBool;
 use std::time::Instant;
 
 use alas_aero::avl::{AvlPolar, AvlPolarPoint};
@@ -21,6 +22,35 @@ use crate::acceptance::{
 use crate::avl::{run_avl_analysis, AvlAnalysisResult, AvlAnalysisStatus};
 use crate::full_analysis::{AnalysisReport, FullAnalysis};
 use crate::solver_mode::{OptimizationSolverMode, SolverKind};
+
+/// Reported when a branch's optimizer stopped on the pipeline's own
+/// cancellation signal rather than a search failure.
+///
+/// The `"Cancelled safely"` prefix matches `pipeline::check_cancelled`'s own
+/// wording, which is the exact prefix `alas-gui` checks
+/// (`crates/alas-gui/src/run.rs`, `e.starts_with("Cancelled safely")`) to
+/// report a run as cancelled instead of failed; this string keeps a
+/// cancelled optimization branch on that same GUI path without any GUI
+/// change.
+const CANCELLED_DURING_OPTIMIZATION: &str = "Cancelled safely during design-space optimization";
+
+/// Wall-clock deadline for one external AVL sweep inside the optimizer's own
+/// evaluation loop, seconds.
+///
+/// Distinct from the 300 s deadline the *final* comparison run uses. Inside
+/// the search this deadline is also the cancellation bound: `alas-exec` polls
+/// the child every 25 ms and force-kills the process tree when the deadline
+/// passes, but it has no cancellation flag, so a sweep already in flight when
+/// the flag is set runs to its own deadline. Sixty seconds is far above any
+/// converging AVL sweep of a transport deck at this mesh and far below the
+/// comparison deadline, which bounds the drain without changing what a
+/// healthy sweep produces. A sweep that needs longer than this was not going
+/// to produce a usable polar for a search candidate.
+const AVL_EVALUATION_TIMEOUT_S: f64 = 60.0;
+
+/// Written to a cancelled branch's own directory so the analyses the search
+/// already paid for survive the cancellation.
+const CANCELLED_SEARCH_RECORD: &str = "cancelled_search.json";
 
 /// Lifecycle state of one requested optimization branch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -154,6 +184,7 @@ pub fn run_solver_optimizations(
     bounds: Option<&[(f64, f64)]>,
     output_dir: Option<&Path>,
     acceptance_route: Option<&AcceptanceRoute>,
+    cancel: Option<&AtomicBool>,
 ) -> SolverOptimizationSet {
     let want_vlm = matches!(
         mode,
@@ -182,6 +213,7 @@ pub fn run_solver_optimizations(
                 bounds.as_deref(),
                 vlm_output,
                 acceptance_route,
+                cancel,
             )
         } else {
             SolverOptimizationResult::not_requested(SolverKind::Vlm)
@@ -196,6 +228,7 @@ pub fn run_solver_optimizations(
                 nominal,
                 bounds.as_deref(),
                 avl_output,
+                cancel,
             )
         } else {
             SolverOptimizationResult::not_requested(SolverKind::Avl)
@@ -263,6 +296,7 @@ fn run_vlm_optimizer(
     bounds: Option<&[(f64, f64)]>,
     output_dir: Option<PathBuf>,
     acceptance_route: Option<&AcceptanceRoute>,
+    cancel: Option<&AtomicBool>,
 ) -> SolverOptimizationResult {
     let output_dir = create_branch_directory(output_dir);
     let effective_config = match seeded_config(&config, seed) {
@@ -270,7 +304,7 @@ fn run_vlm_optimizer(
         Err(error) => return SolverOptimizationResult::failed(SolverKind::Vlm, output_dir, error),
     };
     let mut optimizer = DesignOptimizer::new(effective_config.clone());
-    let mut optimization = match optimizer.run(bounds, Some(&nominal), None) {
+    let mut optimization = match optimizer.run_cancellable(bounds, Some(&nominal), None, cancel) {
         Ok(result) => result,
         Err(error) => {
             return SolverOptimizationResult::failed(
@@ -280,7 +314,24 @@ fn run_vlm_optimizer(
             )
         }
     };
+    if optimization.was_cancelled() {
+        // Stop here, before the reporting-fidelity re-verification ladder
+        // below spends more analyses on a candidate the search itself did
+        // not finish choosing between. What the search *did* produce is
+        // written out first: it is real analysis effort, and discarding it
+        // would make every cancelled run indistinguishable from one that
+        // never started.
+        write_cancelled_search_record(output_dir.as_deref(), &optimization, cancel);
+        return SolverOptimizationResult::failed(
+            SolverKind::Vlm,
+            output_dir,
+            CANCELLED_DURING_OPTIMIZATION,
+        );
+    }
 
+    // The ladder below marks its own phase per candidate; entering it here
+    // as well would put two identical records at the same timestamp.
+    let scope = alas_opt::CancelScope::attach(cancel);
     let started = Instant::now();
     let candidates = optimization.ranked_hard_feasible_candidates(MAX_VERIFIED_CANDIDATES);
     let mut evaluated = 0usize;
@@ -289,23 +340,40 @@ fn run_vlm_optimizer(
     let mut rejection_messages: Vec<String> = Vec::new();
     let mut accepted: Option<(usize, FinalistVerification)> = None;
     for (rank, candidate) in candidates.iter().enumerate() {
-        let verification = match verify_finalist(&config, candidate, acceptance_route) {
-            Ok(verification) => verification,
-            Err(error) if rank == 0 => {
-                // The search returned a design its own replay rejects. That
-                // is an integration error in the search, not a reporting
-                // disagreement, and it stays a branch failure.
-                return SolverOptimizationResult::failed(
-                    SolverKind::Vlm,
-                    output_dir,
-                    format!("VLM finalist replay failed: {error}"),
-                );
-            }
-            Err(error) => {
-                tracing::warn!(%error, rank, "fallback candidate could not be re-evaluated");
-                continue;
-            }
-        };
+        // Rank 0 is always re-evaluated: without it the branch has no
+        // delivered design at all. Beyond it the ladder is optional quality
+        // improvement, so a cancellation stops it at the next candidate
+        // instead of paying up to `MAX_VERIFIED_CANDIDATES` coupled analyses
+        // of drain.
+        if rank > 0 && scope.requested() {
+            scope.work_skipped(format!(
+                "reporting-fidelity ladder stopped after {rank} of {} candidates",
+                candidates.len()
+            ));
+            break;
+        }
+        scope.enter(
+            alas_opt::CancelPhase::ReportingFidelityVerification,
+            rank as u64,
+        );
+        let verification =
+            match scope.evaluation(|| verify_finalist(&config, candidate, acceptance_route)) {
+                Ok(verification) => verification,
+                Err(error) if rank == 0 => {
+                    // The search returned a design its own replay rejects. That
+                    // is an integration error in the search, not a reporting
+                    // disagreement, and it stays a branch failure.
+                    return SolverOptimizationResult::failed(
+                        SolverKind::Vlm,
+                        output_dir,
+                        format!("VLM finalist replay failed: {error}"),
+                    );
+                }
+                Err(error) => {
+                    tracing::warn!(%error, rank, "fallback candidate could not be re-evaluated");
+                    continue;
+                }
+            };
         evaluated += 1;
         if rank == 0 {
             finalist_rejected_by = verification.rejected_by();
@@ -374,6 +442,7 @@ fn run_avl_optimizer(
     nominal: DesignVector,
     bounds: Option<&[(f64, f64)]>,
     output_dir: Option<PathBuf>,
+    cancel: Option<&AtomicBool>,
 ) -> SolverOptimizationResult {
     let Some(executable) = environment.avl_exe.clone() else {
         return SolverOptimizationResult::failed(
@@ -398,19 +467,33 @@ fn run_avl_optimizer(
         config.clone(),
         executable.clone(),
         output_root.join("evaluations"),
+        cancel,
     );
     let mut optimizer = DesignOptimizer::new(effective_config);
-    let optimization =
-        match optimizer.run_with_evaluator(bounds, Some(&nominal), &mut objective, None) {
-            Ok(result) => result,
-            Err(error) => {
-                return SolverOptimizationResult::failed(
-                    SolverKind::Avl,
-                    output_dir,
-                    format!("AVL optimization failed: {error}"),
-                )
-            }
-        };
+    let optimization = match optimizer.run_with_evaluator_cancellable(
+        bounds,
+        Some(&nominal),
+        &mut objective,
+        None,
+        cancel,
+    ) {
+        Ok(result) => result,
+        Err(error) => {
+            return SolverOptimizationResult::failed(
+                SolverKind::Avl,
+                output_dir,
+                format!("AVL optimization failed: {error}"),
+            )
+        }
+    };
+    if optimization.was_cancelled() {
+        write_cancelled_search_record(output_dir.as_deref(), &optimization, cancel);
+        return SolverOptimizationResult::failed(
+            SolverKind::Avl,
+            output_dir,
+            CANCELLED_DURING_OPTIMIZATION,
+        );
+    }
     let design = optimization.best_design;
     let report = match FullAnalysis::new(config.clone()).run(&design, true) {
         Ok(report) => report,
@@ -477,6 +560,75 @@ fn serial_solver_config(config: &AlasConfig, parallel: bool) -> AlasConfig {
     config
 }
 
+/// Persist what a cancelled search produced, in its own branch directory.
+///
+/// # Why a cancelled run writes anything at all
+///
+/// A cancelled branch delivers no design - it is not feasible, not converged,
+/// and the pipeline fails the run - but it did execute real coupled analyses,
+/// and their count, timing and the phase the stop landed in are the evidence
+/// a later run is planned from. Throwing them away is what made every
+/// cancelled run look identical from the outside.
+///
+/// # What this file is not
+///
+/// Every verdict field in it is `false` by construction, and it carries no
+/// design vector: nothing downstream reads it, and nothing in it can be
+/// mistaken for a result. It is a record of effort spent, labelled as such.
+fn write_cancelled_search_record(
+    output_dir: Option<&Path>,
+    optimization: &OptimizationResult,
+    cancel: Option<&AtomicBool>,
+) {
+    let Some(directory) = output_dir else {
+        return;
+    };
+    let diagnostics = optimization.search_diagnostics.as_ref();
+    let telemetry = alas_opt::CancelScope::attach(cancel)
+        .snapshot()
+        .and_then(|snapshot| serde_json::to_value(snapshot).ok());
+    let record = serde_json::json!({
+        "record_kind": "cancelled_search",
+        "explanation": "The search was stopped by its supervisor before it reached any \
+                        stopping criterion of its own. This file records the analyses the run \
+                        had already paid for. It is not a result: no design is delivered, and \
+                        every verdict below is false.",
+        "method": optimization.method,
+        "strategy": optimization.strategy,
+        "termination": optimization.termination,
+        "stop_reason": alas_opt::StopReason::from_termination(&optimization.termination),
+        "converged": false,
+        "delivered_feasible": false,
+        "best_valid": false,
+        "wall_time_s": optimization.wall_time_s,
+        "analyses": {
+            "search_evaluations": diagnostics.map(|d| d.analysis_evaluations),
+            "screening_evaluations": diagnostics.map(|d| d.screening_evaluations),
+            "screening_feasible": diagnostics.map(|d| d.screening_feasible),
+            "verification_evaluations": diagnostics.map(|d| d.verification_evaluations),
+            "cache_hits": diagnostics.map(|d| d.cache_hits),
+            "poll_iterations": diagnostics.map(|d| d.poll_iterations),
+            "history_evaluations": optimization.history.n_evaluations(),
+        },
+        "timing_s": {
+            "scan_wall_time": diagnostics.map(|d| d.scan_wall_time_s),
+            "search_wall_time": diagnostics.map(|d| d.search_wall_time_s),
+        },
+        "cancellation_telemetry": telemetry,
+    });
+    let path = directory.join(CANCELLED_SEARCH_RECORD);
+    match serde_json::to_vec_pretty(&record) {
+        Ok(bytes) => {
+            if let Err(error) = std::fs::write(&path, bytes) {
+                tracing::warn!(%error, path = %path.display(), "cannot persist the cancelled-search record");
+            }
+        }
+        Err(error) => {
+            tracing::warn!(%error, "cannot serialize the cancelled-search record");
+        }
+    }
+}
+
 fn create_branch_directory(output_dir: Option<PathBuf>) -> Option<PathBuf> {
     if let Some(path) = &output_dir {
         let _ = std::fs::create_dir_all(path);
@@ -495,22 +647,40 @@ fn seeded_config(config: &AlasConfig, seed: Option<u64>) -> Result<AlasConfig, S
     Ok(effective)
 }
 
-struct AvlObjective {
+/// The AVL-backed objective: one external solver process per uncached
+/// candidate.
+///
+/// This is the only optimizer evaluation path in the product that spawns a
+/// process, so it is the only one whose cancellation bound is set by
+/// something other than an internal analysis. `alas-exec` owns the child - it
+/// polls it every 25 ms and force-kills the whole process tree on its
+/// deadline - and exposes no cancellation flag, so this objective bounds the
+/// drain the two ways available to a caller: it refuses to *start* a sweep
+/// once cancellation has been requested, and it runs each sweep under
+/// [`AVL_EVALUATION_TIMEOUT_S`] rather than the comparison deadline.
+struct AvlObjective<'a> {
     config: AlasConfig,
     objective: DesignObjective,
     executable: PathBuf,
     output_root: PathBuf,
     cache: BTreeMap<String, ObjectiveEvaluation>,
+    scope: alas_opt::CancelScope<'a>,
 }
 
-impl AvlObjective {
-    fn new(config: AlasConfig, executable: PathBuf, output_root: PathBuf) -> Self {
+impl<'a> AvlObjective<'a> {
+    fn new(
+        config: AlasConfig,
+        executable: PathBuf,
+        output_root: PathBuf,
+        cancel: Option<&'a AtomicBool>,
+    ) -> Self {
         Self {
             objective: DesignObjective::new(config.clone()),
             config,
             executable,
             output_root,
             cache: BTreeMap::new(),
+            scope: alas_opt::CancelScope::attach(cancel),
         }
     }
 
@@ -526,7 +696,7 @@ impl AvlObjective {
     }
 }
 
-impl ObjectiveEvaluator for AvlObjective {
+impl ObjectiveEvaluator for AvlObjective<'_> {
     fn evaluate(&mut self, design: &DesignVector) -> ObjectiveEvaluation {
         let key = Self::cache_key(design);
         if let Some(cached) = self.cache.get(&key) {

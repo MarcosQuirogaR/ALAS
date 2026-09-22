@@ -139,7 +139,9 @@ fn inputs_frame(state: &mut AppState, size: (f32, f32), dock_width: Option<f32>)
                 alas_gui::views::show_control_bar(state, ui);
             });
             egui::CentralPanel::default()
-                .frame(egui::Frame::central_panel(ctx.style().as_ref()).inner_margin(CONTENT_MARGIN))
+                .frame(
+                    egui::Frame::central_panel(ctx.style().as_ref()).inner_margin(CONTENT_MARGIN),
+                )
                 .show(ctx, |ui| show_inputs_view(state, ui));
         }));
     }
@@ -178,7 +180,10 @@ fn write_narrow_window_evidence_images() {
 fn write_invalid_mach_evidence_images() {
     let size = (1_600.0, 900.0);
     let mut state = AppState::default();
-    write("f03-before-edit-valid-mach.png", inputs_frame(&mut state, size, None));
+    write(
+        "f03-before-edit-valid-mach.png",
+        inputs_frame(&mut state, size, None),
+    );
     state.config_values["requirements"]["cruise_mach"] = serde_json::Value::from(3.5);
     state.on_config_modified();
     assert!(state.blocked(), "Mach 3.5 must still block the run");

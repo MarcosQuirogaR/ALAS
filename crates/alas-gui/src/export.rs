@@ -152,7 +152,10 @@ pub fn export_pdf_report(
 }
 
 fn collect_export_figures(state: &AppState) -> Result<Vec<ExportedFigure>, ExportError> {
-    export_readiness(state.pipeline_result.is_some(), state.pipeline_result_complete)?;
+    export_readiness(
+        state.pipeline_result.is_some(),
+        state.pipeline_result_complete,
+    )?;
     let result = state
         .pipeline_result
         .as_ref()

@@ -160,6 +160,21 @@ mod tests {
         }
     }
     #[test]
+    fn walkthrough_setup_analyses_step_marks_mission_analysis_optional_not_always_run() {
+        // `analyses_view.rs` locks exactly four disciplines (aerodynamics,
+        // weight & balance, propulsion cycle, field performance) as
+        // "always runs" and exposes native mission analysis as a per-run
+        // toggle. The tour text must not regress into claiming mission
+        // analysis always runs, which contradicts that screen.
+        let body = TOUR_STEPS[8].body;
+        assert!(!body.contains("mission analysis always run"));
+        assert!(body.contains("native mission, MSES 2-D airfoil analysis"));
+        assert!(body.contains(
+            "Core aerodynamics, weight & balance, propulsion and field performance always run"
+        ));
+    }
+
+    #[test]
     fn the_walkthrough_has_fourteen_steps_in_the_requested_order_and_wording() {
         assert_eq!(TOUR_STEPS.len(), 14);
         assert!(TOUR_STEPS[0]
@@ -178,7 +193,15 @@ mod tests {
         assert!(TOUR_STEPS[6]
             .body
             .contains("\"Help\" > \"Learn-more help\""));
-        assert!(TOUR_STEPS[8].body.contains("mission analysis always run"));
+        // Setup > Analyses (`analyses_view.rs`) locks exactly these four
+        // disciplines as "always runs"; native mission is an optional
+        // per-run toggle, not part of that always-run set.
+        assert!(TOUR_STEPS[8].body.contains(
+            "Core aerodynamics, weight & balance, propulsion and field performance always run"
+        ));
+        assert!(TOUR_STEPS[8]
+            .body
+            .contains("native mission, MSES 2-D airfoil analysis"));
         assert!(TOUR_STEPS[9].body.contains("Balanced"));
         assert!(TOUR_STEPS[11].body.contains("floating window"));
         assert_eq!(

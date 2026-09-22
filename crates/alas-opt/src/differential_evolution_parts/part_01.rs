@@ -126,6 +126,79 @@ pub const REPORTING_FIDELITY_REJECTED: &str = "reporting_fidelity_rejected";
 /// the finalist the search's own convergence certificate belongs to.
 pub const REPORTING_FIDELITY_FALLBACK: &str = "reporting_fidelity_fallback";
 
+/// Termination label for a search stopped by its caller's cooperative
+/// cancellation flag.
+///
+/// This is the one label that says the search reached no stopping criterion of
+/// its own: not convergence, not a budget, not a mesh limit. Every kernel that
+/// observes a cancellation flag reports exactly this string, so a caller can
+/// recognise a cancelled run without parsing per-kernel vocabulary, and the
+/// design such a run carries is never a delivered optimization result.
+pub const CANCELLED: &str = "cancelled";
+
+/// The one termination label that is itself a convergence certificate.
+///
+/// Every current product kernel reports convergence through
+/// `SearchDiagnostics::converged` instead, which is the authority
+/// [`OptimizationResult::converged`] prefers: `mads` maps its own
+/// `TerminationReason`, `sqp` carries the driver's stationarity verdict, and
+/// the product DE kernel implements no convergence test at all and is never
+/// converged. This string covers the legacy reference-compatibility DE driver,
+/// which predates the diagnostics record and reports only a label.
+const CONVERGED_TERMINATION: &str = "converged";
+
+impl OptimizationResult {
+    /// Whether the search stopped on its caller's cancellation flag.
+    #[must_use]
+    pub fn was_cancelled(&self) -> bool {
+        self.termination == CANCELLED
+    }
+
+    /// Whether the search reported reaching its own convergence criterion.
+    ///
+    /// This is the *search*'s verdict on its own stopping condition. It is not
+    /// a feasibility claim and not a manufacturability claim: see
+    /// [`Self::is_delivered_feasible`] for the conjunction a caller must use
+    /// before calling a design a delivered optimization result.
+    #[must_use]
+    pub fn converged(&self) -> bool {
+        match self.search_diagnostics.as_ref() {
+            Some(diagnostics) => diagnostics.converged,
+            None => self.termination == CONVERGED_TERMINATION,
+        }
+    }
+
+    /// Whether this result may be reported as a feasible delivered design.
+    ///
+    /// Every one of these must hold, and each is a distinct way a search can
+    /// end without a usable aircraft:
+    ///
+    /// - the winner satisfied the active constraint set (`best_valid`);
+    /// - the objective is finite, so no failure sentinel is being read as a
+    ///   score;
+    /// - the run was not cancelled, so a search stopped from outside cannot
+    ///   deliver whichever candidate it happened to be holding;
+    /// - the reporting-fidelity re-evaluation, when a caller performed one,
+    ///   verified the delivered design.
+    ///
+    /// Convergence is deliberately *not* required: a budget-exhausted search
+    /// can still deliver a verified feasible aircraft, and it is reported as
+    /// feasible-but-not-converged rather than as either "feasible" alone or a
+    /// failure. Report [`Self::converged`] alongside this, never instead of
+    /// it.
+    #[must_use]
+    pub fn is_delivered_feasible(&self) -> bool {
+        self.best_valid
+            && self.best_cost.is_finite()
+            && !self.was_cancelled()
+            && self.termination != REPORTING_FIDELITY_REJECTED
+            && self
+                .delivered_acceptance
+                .as_ref()
+                .is_none_or(|acceptance| acceptance.verified)
+    }
+}
+
 /// The application's verdict on the design a search actually delivers.
 ///
 /// The search ranks candidates on the in-loop panel mesh and its own coupled

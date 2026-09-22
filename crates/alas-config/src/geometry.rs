@@ -21,11 +21,13 @@
 
 mod empennage;
 mod engine;
+mod frame;
 mod fuselage;
 mod wing;
 
 pub use empennage::EmpennageConfig;
 pub use engine::{ActiveEngineModel, EngineBindingError, EngineConfig};
+pub use frame::{BodyFuselageExtent, LongitudinalStationFrame, MacFrame};
 pub use fuselage::{FuselageConfig, FuselageSection, FuselageSectionError};
 pub use wing::{
     InboardAerodynamicStation, MainWingPanel, MainWingStation, MainWingStationKind,

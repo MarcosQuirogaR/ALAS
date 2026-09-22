@@ -104,6 +104,16 @@ pub fn native_field(path: &str, key: &str) -> bool {
             ))
         || (path.ends_with(".geometry.engine")
             && matches!(key, "turbofan" | "turboprop" | "propulsion_technology"))
+        // The conceptual free-turbine design cycle. The frozen Python
+        // propulsion configuration is turbofan-only and declares neither
+        // field, so no saved file can disagree about a value it never had.
+        // Their defaults are pinned by `parity_config`'s
+        // `the_native_turboprop_design_inputs_are_absent_upstream_and_pinned_here`.
+        || (path.ends_with(".propulsion_cycle")
+            && matches!(
+                key,
+                "turboprop_overall_pressure_ratio" | "turboprop_turbine_inlet_temperature_k"
+            ))
         || (path.ends_with(".mission")
             && matches!(
                 key,
@@ -143,7 +153,7 @@ pub fn operational(path: &str) -> Option<Value> {
     // in *literal true airspeeds* and written for the AVE reference
     // aircraft's FL390/M0.84 design point. A true airspeed is not a flight
     // condition, so that ladder means something different at every other
-    // preset's cruise level — on the A320-200 at FL280 its 250 m/s upper
+    // preset's cruise level - on the A320-200 at FL280 its 250 m/s upper
     // climb rung is about 178 m/s equivalent, and the mission deck refuses it
     // with 57 046 N of drag against 56 106 N of maximum-climb rating. The
     // presets that declare their own calibrated ladder (the ATR 72-600, and

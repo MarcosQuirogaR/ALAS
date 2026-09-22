@@ -8,16 +8,17 @@
 //! the same scored-candidate callback, so changing the search algorithm cannot
 //! silently change the aircraft physics being evaluated.
 
-// The saved `optimizer.solver.method` names that once selected these
-// population methods still load, but no longer choose a distinct search
-// algorithm (see `differential_evolution_tests`); the methods and their
-// shared helpers are kept, with their own tests, until the dispatch is
-// either rebuilt or the modules are retired outright.
+// `product_de` dispatches `optimizer.solver.method`, and the
+// differential-evolution names now select the kernel they name. The
+// remaining population methods are still loadable names without a kernel
+// behind them: they run mesh adaptive direct search and report `mads`. They
+// are kept, with their own tests, until they are wired or retired outright.
 #![allow(dead_code)]
 
 mod cma_es;
 mod constrained_de;
 mod nsga2;
+pub(crate) mod product_de;
 mod turbo;
 
 /// Objective and feasibility data attached to one evaluated design.

@@ -467,12 +467,10 @@ mod tests {
         assert!(scene.elements.iter().any(|element| {
             matches!(element, SceneElement::Text { text, .. } | SceneElement::TextBlock { text, .. } if text.contains("expected artifact"))
         }));
-        assert!(
-            !scene
-                .elements
-                .iter()
-                .any(|element| matches!(element, SceneElement::Image { .. }))
-        );
+        assert!(!scene
+            .elements
+            .iter()
+            .any(|element| matches!(element, SceneElement::Image { .. })));
     }
 
     #[test]
@@ -494,12 +492,10 @@ mod tests {
         assert!(scene.elements.iter().any(|e| matches!(e,
             SceneElement::Image { width, height, x, .. }
             if (*width - 540.0).abs() < 1.0e-9 && (*height - 540.0).abs() < 1.0e-9 && (*x - 230.0).abs() < 1.0e-9)));
-        assert!(
-            !scene
-                .elements
-                .iter()
-                .any(|e| matches!(e, SceneElement::Polygon { .. }))
-        );
+        assert!(!scene
+            .elements
+            .iter()
+            .any(|e| matches!(e, SceneElement::Polygon { .. })));
         fs::remove_file(path).unwrap();
     }
 
@@ -584,18 +580,14 @@ mod tests {
         assert!(scene.elements.iter().any(|element| {
             matches!(element, SceneElement::Text { text, .. } if text.contains("native mesh projection"))
         }));
-        assert!(
-            scene
-                .elements
-                .iter()
-                .any(|element| matches!(element, SceneElement::Polygon { .. }))
-        );
-        assert!(
-            !scene
-                .elements
-                .iter()
-                .any(|element| matches!(element, SceneElement::Image { .. }))
-        );
+        assert!(scene
+            .elements
+            .iter()
+            .any(|element| matches!(element, SceneElement::Polygon { .. })));
+        assert!(!scene
+            .elements
+            .iter()
+            .any(|element| matches!(element, SceneElement::Image { .. })));
         assert!(scene.elements.iter().any(|element| {
             matches!(element, SceneElement::Text { text, .. } if text.contains("VSPGEOM"))
         }));
@@ -706,18 +698,14 @@ mod tests {
         result.preview_error = Some("headless GUI build".to_owned());
 
         let scene = figure_openvsp_cad_preview(Some(&result), None);
-        assert!(
-            !scene
-                .elements
-                .iter()
-                .any(|element| matches!(element, SceneElement::Polygon { .. }))
-        );
-        assert!(
-            !scene
-                .elements
-                .iter()
-                .any(|element| matches!(element, SceneElement::Image { .. }))
-        );
+        assert!(!scene
+            .elements
+            .iter()
+            .any(|element| matches!(element, SceneElement::Polygon { .. })));
+        assert!(!scene
+            .elements
+            .iter()
+            .any(|element| matches!(element, SceneElement::Image { .. })));
         assert!(scene.elements.iter().any(|element| {
             matches!(element, SceneElement::Text { text, .. } | SceneElement::TextBlock { text, .. } if text.contains("expected artifact"))
         }));

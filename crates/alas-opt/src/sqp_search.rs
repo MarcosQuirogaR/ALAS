@@ -18,12 +18,12 @@ use alas_config::design_variables::DesignVector;
 use alas_config::AlasConfig;
 
 use crate::evaluator::ObjectiveEvaluator;
-use crate::gradient::{run_sqp, ConstrainedEvaluator, ConstrainedPoint, SqpSettings};
+use crate::gradient::{run_sqp_cancellable, ConstrainedEvaluator, ConstrainedPoint, SqpSettings};
 use crate::history::OptimizationHistory;
 use crate::mdo::evaluate_mission_sized_with_assessment;
 use crate::objective::DesignObjective;
 
-use super::{DelegatedObjective, OptimizationResult, SearchObjective};
+use super::{DelegatedObjective, OptimizationResult, SearchDiagnostics, SearchObjective};
 
 /// A search objective that can also report the constraint vector.
 pub(super) trait ConstrainedSearch: SearchObjective {
@@ -181,6 +181,7 @@ pub(super) fn run<E: ConstrainedSearch + ?Sized>(
     initial_design: Option<&DesignVector>,
     objective: &mut E,
     progress_callback: Option<&mut dyn FnMut(&str)>,
+    cancel: Option<&std::sync::atomic::AtomicBool>,
 ) -> OptimizationResult {
     let solver = &config.optimizer.solver;
     let started = Instant::now();
@@ -195,21 +196,51 @@ pub(super) fn run<E: ConstrainedSearch + ?Sized>(
     let workers = solver.resolved_workers();
     let outcome = {
         let mut adapter = BatchAdapter { objective, workers };
-        run_sqp(bounds, &initial, &settings, &mut adapter, progress_callback)
+        run_sqp_cancellable(
+            bounds,
+            &initial,
+            &settings,
+            cancel,
+            &mut adapter,
+            progress_callback,
+        )
     };
+    crate::cancellation::CancelScope::attach(cancel).search_finished(&outcome.termination);
     let best_design = DesignVector::from_array(&outcome.best_values).unwrap_or_default();
+    let elapsed_s = started.elapsed().as_secs_f64();
     OptimizationResult {
         best_design,
         best_cost: outcome.best.cost,
         best_valid: outcome.best.valid
             && outcome.best.max_violation() <= settings.constraint_tolerance,
         history: objective.history().clone(),
-        wall_time_s: started.elapsed().as_secs_f64(),
+        wall_time_s: elapsed_s,
         method: "sqp".to_owned(),
         strategy: outcome.termination.to_owned(),
         termination: outcome.termination.to_owned(),
         pareto_front: Vec::new(),
-        search_diagnostics: None,
+        // The driver's own stationarity verdict, which used to be discarded
+        // here. Without it a reader had to infer convergence from the
+        // termination label, and `cancelled` or `iteration_limit` would have
+        // been indistinguishable from `converged_step` to any caller that only
+        // checked `search_diagnostics`.
+        search_diagnostics: Some(SearchDiagnostics {
+            converged: outcome.converged,
+            analysis_evaluations: outcome.evaluations,
+            cache_hits: 0,
+            // The gradient driver has no poll; its major iterations are the
+            // nearest equivalent count.
+            poll_iterations: outcome.iterations,
+            screening_evaluations: 0,
+            screening_feasible: 0,
+            verification_evaluations: 0,
+            scan_wall_time_s: 0.0,
+            search_wall_time_s: elapsed_s,
+            workers,
+            poll_block_size: 0,
+            first_feasible_cost: None,
+            relative_improvement: None,
+        }),
         delivered_acceptance: None,
     }
 }

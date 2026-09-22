@@ -113,10 +113,8 @@ pub fn show_menu_action(state: &mut AppState, ui: &mut egui::Ui) {
         if state.sandbox.layout.advanced_settings_open {
             // The action is also a raise/focus command when the native window
             // already exists behind the main ALAS window.
-            ui.ctx().send_viewport_cmd_to(
-                viewport_id("advanced_settings"),
-                ViewportCommand::Focus,
-            );
+            ui.ctx()
+                .send_viewport_cmd_to(viewport_id("advanced_settings"), ViewportCommand::Focus);
         }
         state.sandbox.layout.advanced_settings_open = true;
     }

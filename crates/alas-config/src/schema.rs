@@ -310,12 +310,9 @@ impl OptionSource {
                 "study_convention",
                 "trip_fuel_only",
             ]),
-            Self::CargoLoadingStrategy => Some(&[
-                "target_cg",
-                "min_pallets",
-                "door_proximity",
-                "uniform",
-            ]),
+            Self::CargoLoadingStrategy => {
+                Some(&["target_cg", "min_pallets", "door_proximity", "uniform"])
+            }
             Self::ObjectiveKind => Some(&[
                 "block_fuel",
                 "takeoff_mass",

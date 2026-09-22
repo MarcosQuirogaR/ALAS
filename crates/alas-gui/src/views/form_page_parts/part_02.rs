@@ -273,7 +273,10 @@ mod tests {
         let state = AppState::default();
         let scene = crate::scene::build_page_preview(&state, page.preview.unwrap())
             .expect("default turbofan cycle preview");
-        assert_eq!(scene.title.as_deref(), Some("Thermodynamic Cycle (T-s)"));
+        // `ts_preview::diagram` embeds the configured engine's name in the
+        // drawn title (distinct from the static page heading asserted
+        // above), so the default GE9X turbofan renders "GE9X · T–s".
+        assert_eq!(scene.title.as_deref(), Some("GE9X · T–s"));
         assert!(
             scene
                 .elements
@@ -285,6 +288,25 @@ mod tests {
                 .count()
                 >= 2
         );
+    }
+
+    #[test]
+    fn propulsion_preview_title_tracks_the_configured_engine_name() {
+        // Locks the routing contract as dynamic, not a hardcoded string: the
+        // rendered preview must always name the engine actually configured,
+        // so renaming the engine changes what the user sees without any
+        // other edit.
+        let mut state = AppState::default();
+        let mut config = state.typed_config().expect("default config");
+        // A real, database-registered turbofan distinct from the default
+        // GE9X (see `crates/alas-config/data/engines.json`), so the binding
+        // stays valid and only the configured name changes.
+        config.geometry.engine.engine_name = "LEAP-1A".to_owned();
+        state.config_values = serde_json::to_value(&config).expect("serialize config");
+
+        let scene = crate::scene::build_page_preview(&state, "engine")
+            .expect("turbofan cycle preview for the renamed engine");
+        assert_eq!(scene.title.as_deref(), Some("LEAP-1A · T–s"));
     }
 
     #[test]

@@ -73,6 +73,8 @@ pub fn show_tools_view(state: &mut AppState, ui: &mut Ui) {
             ui.add_space(8.0);
             cards::avl_card(state, ui);
             ui.add_space(8.0);
+            cards::flowunsteady_card(state, ui);
+            ui.add_space(8.0);
 
             section_heading(ui, "Availability for the next run");
             status_card(state, ui);
@@ -261,6 +263,11 @@ fn apply_completed_path_selection(state: &mut AppState) {
             save_direct_tool_preferences(state);
             "Install directory"
         }
+        ToolPathTarget::FlowUnsteadyExecutable => {
+            state.tool_preferences.flowunsteady_exe = Some(path.clone());
+            save_direct_tool_preferences(state);
+            "Executable path"
+        }
         _ => return,
     };
     state.on_config_modified();
@@ -386,6 +393,17 @@ fn describe_executable(discovery: &ExecutableDiscovery) -> String {
                 ("path", directory.display().to_string()),
                 ("missing", missing.join(", ")),
             ],
+        ),
+    }
+}
+
+fn describe_flowunsteady(discovery: &ExecutableDiscovery) -> String {
+    match discovery {
+        ExecutableDiscovery::Absent => tr("not configured (ALAS_FLOWUNSTEADY_EXE not set)"),
+        ExecutableDiscovery::Ready(path) => path.display().to_string(),
+        ExecutableDiscovery::Incomplete { directory, .. } => tr_fields(
+            "configured path not found: {path}",
+            &[("path", directory.display().to_string())],
         ),
     }
 }

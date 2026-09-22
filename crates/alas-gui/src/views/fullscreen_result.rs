@@ -141,7 +141,10 @@ pub(super) fn show_fullscreen_result(
                         );
                         restore |= response.double_clicked();
                     }
-                    if view_key.split(';').any(|part| part == "figure=openvsp_cad_preview") {
+                    if view_key
+                        .split(';')
+                        .any(|part| part == "figure=openvsp_cad_preview")
+                    {
                         super::openvsp::show_launch_button(state, ui, canvas_rect);
                     }
                 });

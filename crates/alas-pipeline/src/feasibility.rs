@@ -27,6 +27,7 @@ use alas_perf::performance::{
 use crate::full_analysis::AnalysisReport;
 use crate::mission_stage::SelectedLoadCase;
 
+mod acceptance;
 mod cruise_equilibrium;
 mod dispatch;
 mod fuel;
@@ -38,6 +39,9 @@ mod static_thrust;
 mod structural_mass;
 mod types;
 
+pub use acceptance::{
+    DeliveryBlocker, DeliveryClassification, DeliveryVerdict, DesignProvenance, RunCompletion,
+};
 pub(crate) use cruise_equilibrium::assess as assess_cruise_equilibrium;
 pub use cruise_equilibrium::CruiseEquilibriumAssessment;
 pub use dispatch::{DispatchAssessment, DispatchOutcome};
@@ -180,6 +184,14 @@ fn append_model_cg_findings(
             constraint.unit(),
         ));
     }
+    // The aft-boundary governance diagnostic that explains a nose-load
+    // violation is carried on the typed assessment itself
+    // (`ModelCgEnvelopeAssessment::aft_limit_governance`) and reported by
+    // `report_format` and `acceptance`. It is deliberately not a
+    // `PhysicalFinding`: `FindingCode` is an interface whose exhaustive
+    // consumers live outside this crate's ownership boundary, and the
+    // diagnostic changes no verdict — a layout whose gear cannot carry the
+    // envelope still fails `MinimumNoseGearLoadViolation` above.
 }
 
 /// Evaluate conservation laws and configured limits on a completed run.
@@ -329,9 +341,44 @@ pub fn assess_physical_feasibility_with_load_case(
             PlanningCgStatus::AftLimitViolation => cg_envelope.aft_limit_pct_mac,
             _ => None,
         };
+        // The violation stands as reported. What is added is the frame
+        // evidence a reader needs to act on it: the moment sum is built on
+        // the model's own component stations while the percentage is referred
+        // to the manufacturer's published leading edge and chord, so a datum
+        // or chord offset between the two shifts every reported percentage
+        // systematically. Stating the offset does not resolve which reference
+        // is wrong for this preset — that is a source reconciliation — and it
+        // does not move a published vertex or a verdict.
+        let frame_note = if cg_envelope.mac_references_disagree() {
+            let datum_shift = cg_envelope
+                .mac_datum_shift_pct_mac()
+                .map(|shift| format!("{shift:+.2} % MAC"))
+                .unwrap_or_else(|| "unknown".to_owned());
+            format!(
+                "; the built model's MAC leading edge sits {} from the published planning one \
+                 ({} of the published chord) and its chord differs by {} m, so this percentage is \
+                 referred to a different chord from the limit it is compared against and the \
+                 comparison needs source reconciliation before the exceedance is attributed to \
+                 the loading state",
+                cg_envelope
+                    .model_mac_leading_edge_offset_m
+                    .map(|offset| format!("{offset:+.3} m"))
+                    .unwrap_or_else(|| "an unknown distance".to_owned()),
+                datum_shift,
+                cg_envelope
+                    .model_mac_length_difference_m
+                    .map(|difference| format!("{difference:+.3}"))
+                    .unwrap_or_else(|| "an unknown amount".to_owned()),
+            )
+        } else {
+            String::new()
+        };
         findings.push(error(
             FindingCode::PublicPlanningCgEnvelopeViolation,
-            "analyzed CG lies outside the manufacturer public planning envelope; actual aircraft WBM controls",
+            format!(
+                "analyzed CG lies outside the manufacturer public planning envelope; actual \
+                 aircraft WBM controls{frame_note}"
+            ),
             cg_envelope.cg_pct_mac,
             limit,
             "% MAC",

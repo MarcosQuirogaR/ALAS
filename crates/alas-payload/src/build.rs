@@ -705,7 +705,10 @@ mod product_tests {
         };
         assert_eq!(summary.total_pax, 800);
         assert!(summary.seated_pax <= summary.total_pax);
-        assert!(summary.unseated_pax > 0, "the explicit shortfall must remain visible");
+        assert!(
+            summary.unseated_pax > 0,
+            "the explicit shortfall must remain visible"
+        );
         assert_eq!(
             summary.seated_pax + summary.unseated_pax,
             summary.total_pax,

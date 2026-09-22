@@ -83,24 +83,41 @@ fn run_evidence_audit(root: &Path) -> Result<(), String> {
 ///
 /// The repository checks run first because they need no compilation, so a file
 /// that is too long or missing a licence header fails in under a second rather
-/// than after a full build.
+/// than after a full build. Every step below runs even if an earlier one
+/// failed, an array literal evaluates all of its elements before
+/// `report_gate_results` sees any of them, so one failing step can never hide
+/// the others.
 fn gate(root: &Path) -> Result<(), String> {
-    run_checks(root)?;
-    cargo(root, &["fmt", "--all", "--check"])?;
-    cargo(
-        root,
-        &[
-            "clippy",
-            "--workspace",
-            "--all-targets",
-            "--",
-            "-D",
-            "warnings",
-        ],
-    )?;
-    cargo(root, &["test", "--workspace"])?;
-    println!("\ngate: pass");
-    Ok(())
+    let results = [
+        run_checks(root),
+        cargo(root, &["fmt", "--all", "--check"]),
+        cargo(
+            root,
+            &[
+                "clippy",
+                "--workspace",
+                "--all-targets",
+                "--",
+                "-D",
+                "warnings",
+            ],
+        ),
+        cargo(root, &["test", "--workspace"]),
+    ];
+    report_gate_results(results)
+}
+
+/// Reports every failed gate step instead of stopping at the first one.
+fn report_gate_results(results: [Result<(), String>; 4]) -> Result<(), String> {
+    let failures: Vec<String> = results.into_iter().filter_map(Result::err).collect();
+    if failures.is_empty() {
+        println!("\ngate: pass");
+        return Ok(());
+    }
+    for failure in &failures {
+        println!("\ngate: {failure}");
+    }
+    Err(format!("gate: {} of 4 check(s) failed", failures.len()))
 }
 
 fn run_checks(root: &Path) -> Result<(), String> {
@@ -187,4 +204,27 @@ fn repo_root() -> PathBuf {
     manifest
         .parent()
         .map_or(manifest.clone(), Path::to_path_buf)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::report_gate_results;
+
+    #[test]
+    fn report_gate_results_passes_when_all_steps_pass() {
+        let results = [Ok(()), Ok(()), Ok(()), Ok(())];
+        assert!(report_gate_results(results).is_ok());
+    }
+
+    #[test]
+    fn report_gate_results_reports_every_failure_not_just_the_first() {
+        let results = [
+            Err("checks: 1 finding(s)".to_owned()),
+            Ok(()),
+            Err("cargo clippy --workspace --all-targets -- -D warnings failed".to_owned()),
+            Ok(()),
+        ];
+        let error = report_gate_results(results).expect_err("two steps failed");
+        assert_eq!(error, "gate: 2 of 4 check(s) failed");
+    }
 }

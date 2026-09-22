@@ -75,6 +75,10 @@ follow their code into this tree; every translated file names its origin in a
 provenance header, and `THIRD-PARTY-NOTICES.md` lists the components one by
 one.
 
-External solvers — MSES, MSC Nastran, NASTRAN-95, AVL — are separate programs
-supplied by the user. Every analysis that needs one reports itself unavailable
-when it is absent, rather than substituting an approximation without saying so.
+External solvers run as separate processes. MSES and MSC Nastran are
+proprietary and always user-supplied. AVL (GPL-2.0) is bundled with the
+Windows release, and NASTRAN-95 (NOSA 1.3) may be bundled when its complete
+reviewed source/notice staging is present — see `THIRD-PARTY-NOTICES.md` and
+`docs/downloads.md` for the exact per-tool boundary. Every analysis that needs
+a solver reports itself unavailable when it is absent, rather than
+substituting an approximation without saying so.

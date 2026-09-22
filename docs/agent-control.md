@@ -1,5 +1,10 @@
 # ALAS Terminal Agent Control Panel
 
+> Maintainer-only tool documentation. This describes an internal developer
+> dashboard for supervising AI-assisted coding jobs during development; it is
+> not part of ALAS the aircraft-design application and is not needed to
+> build, run, or use it.
+
 A lightweight, terminal-based control panel to monitor running agents, inspect exact prompts, stream outputs and metrics, and track process completion separately from review acceptance.
 
 Built entirely using the **Python standard library** (zero third-party dependencies) with a cross-platform Bash launcher supporting **Git Bash on Windows**, **Linux**, and **macOS**.

@@ -6,13 +6,27 @@ the corresponding AGPL source snapshot, configuration templates, and the
 notices needed to audit the package. No installer or machine-wide runtime
 registration is required.
 
+A "package" can mean three different things, and this page is only ever about
+the third one:
+
+1. a **local package** a developer produced on their own machine with `cargo
+   xtask dist` (see below) — never distributed automatically;
+2. a **CI preflight artifact** produced by the manual
+   `release-preflight.yml` GitHub Actions workflow on a clean Windows
+   runner and uploaded as a workflow-run artifact for reviewers with
+   repository access — reproducibility evidence, not a download, and not
+   published; see [`release-packaging.md`](release-packaging.md#ci-release-preflight);
+3. an **externally published release** — a maintainer-reviewed, tagged
+   package a human deliberately publishes for public download. That is the
+   only kind of package this downloads page describes below.
+
 ## What a standalone package contains
 
 After extraction, start `ALAS.exe` from the package directory. Keep the
 directory intact: the executable resolves its adjacent `configs/`, source
 manifest, notices, and any separately distributed solver directories relative
 to the package. The exact archive name is version- and target-specific, for
-example `alas-v1.1.0-windows-x86_64.zip`; the release manifest records the
+example `alas-v1.2.0-windows-x86_64.zip`; the release manifest records the
 actual version, target, source revision, dirty-worktree flag, and hashes.
 
 Every accepted package includes:
@@ -85,6 +99,14 @@ instead of accepting an omitted optional tool, set
 manifest checks, and the boundary between packaging verification and physical
 solver qualification.
 
+A locally produced package reflects whatever is on that machine, including an
+uncommitted change (recorded via the manifest's dirty-worktree flag). To
+reproduce packaging from a clean checkout and the committed `Cargo.lock`
+instead, run the manual `release-preflight.yml` workflow from the Actions tab
+and download its workflow-run artifact; see [CI release
+preflight](release-packaging.md#ci-release-preflight). That artifact is still
+not a published release.
+
 ## Accepting a package locally
 
 The packaging task validates the package it just wrote. Two opt-in suites
@@ -92,7 +114,7 @@ re-check an assembled package as an external artifact, reading only what the
 package directory contains. Point them at the directory, not the archive:
 
 ```powershell
-$env:ALAS_W55_PACKAGE_DIR = "dist/alas-v1.1.0-windows-x86_64"
+$env:ALAS_W55_PACKAGE_DIR = "dist/alas-v1.2.0-windows-x86_64"
 cargo test -p alas-acceptance --test distribution_license_boundary
 cargo test -p alas-acceptance --test distribution_acceptance
 ```

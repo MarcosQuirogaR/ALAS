@@ -22,4 +22,6 @@ pub mod sqp;
 mod step;
 
 pub use qp::{solve_qp, QpSolution};
-pub use sqp::{run_sqp, ConstrainedEvaluator, ConstrainedPoint, SqpOutcome, SqpSettings};
+pub use sqp::{
+    run_sqp, run_sqp_cancellable, ConstrainedEvaluator, ConstrainedPoint, SqpOutcome, SqpSettings,
+};

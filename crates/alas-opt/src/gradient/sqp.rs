@@ -117,8 +117,31 @@ pub fn run_sqp(
     initial: &[f64],
     settings: &SqpSettings,
     evaluator: &mut dyn ConstrainedEvaluator,
+    progress: Option<&mut dyn FnMut(&str)>,
+) -> SqpOutcome {
+    run_sqp_cancellable(bounds, initial, settings, None, evaluator, progress)
+}
+
+/// [`run_sqp`], observing an optional cooperative cancellation flag.
+///
+/// `cancel` is read at the head of a major iteration **and before every line
+/// search trial**, so the bound on stopping is one finite-difference batch -
+/// which is one batched evaluation of `k + 1` points, the smallest unit this
+/// driver has - or one trial point, whichever is in flight. It is never read
+/// inside a batch, so a cancelled run returns the best point it had already
+/// accepted rather than an unevaluated step. The termination label is
+/// `"cancelled"` and `converged` is false: the driver was stopped from outside
+/// and reached no stationarity test of its own.
+pub fn run_sqp_cancellable(
+    bounds: &[(f64, f64)],
+    initial: &[f64],
+    settings: &SqpSettings,
+    cancel: Option<&std::sync::atomic::AtomicBool>,
+    evaluator: &mut dyn ConstrainedEvaluator,
     mut progress: Option<&mut dyn FnMut(&str)>,
 ) -> SqpOutcome {
+    let scope = crate::cancellation::CancelScope::attach(cancel);
+    let cancel_requested = || scope.requested();
     let scaling = Scaling::new(bounds);
     let tolerance = settings.constraint_tolerance;
     let mut z = scaling.to_normalized(initial);
@@ -156,6 +179,13 @@ pub fn run_sqp(
     let mut iterations = 0;
 
     for iteration in 0..settings.max_iterations {
+        scope.enter(
+            crate::cancellation::CancelPhase::SqpMajorIteration,
+            iteration as u64,
+        );
+        if cancel_requested() {
+            return finish(best, iterations, evaluations, false, "cancelled");
+        }
         iterations = iteration + 1;
         let request = DifferenceRequest {
             scaling: &scaling,
@@ -221,6 +251,14 @@ pub fn run_sqp(
         let mut accepted: Option<(f64, Vec<f64>, ConstrainedPoint)> = None;
         let mut alpha = 1.0;
         for _ in 0..=LINE_SEARCH_HALVINGS {
+            // The line search is the other place a major iteration spends
+            // analyses, so the flag is read here too: without it the bound
+            // would be the whole halving sequence rather than one trial
+            // point. `best` has already been offered every trial evaluated so
+            // far, so stopping here keeps that work.
+            if cancel_requested() {
+                return finish(best, iterations, evaluations, false, "cancelled");
+            }
             let mut trial = z.clone();
             for (column, &i) in scaling.active.iter().enumerate() {
                 trial[i] = (z[i] + alpha * d[column]).clamp(0.0, 1.0);

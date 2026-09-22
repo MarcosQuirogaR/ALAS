@@ -148,6 +148,10 @@ impl AlasApp {
                 self.state.show_advanced_guide = true;
                 ui.close_menu();
             }
+            if ui.button(tr("External Tools Overview...")).clicked() {
+                self.state.show_tool_intro = true;
+                ui.close_menu();
+            }
             ui.separator();
             if ui
                 .selectable_label(self.state.help_verbose, tr("Learn-more help"))

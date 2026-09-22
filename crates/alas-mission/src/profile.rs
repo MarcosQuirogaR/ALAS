@@ -101,7 +101,8 @@ pub fn propose_profile_for_route(
             "mission proposal needs a finite positive cruise Mach, got {cruise_mach}"
         ));
     }
-    let cruise_true_airspeed_m_s = cruise_mach * Atmosphere::isa(cruise_altitude_m).speed_of_sound();
+    let cruise_true_airspeed_m_s =
+        cruise_mach * Atmosphere::isa(cruise_altitude_m).speed_of_sound();
     if !cruise_true_airspeed_m_s.is_finite() || cruise_true_airspeed_m_s <= 0.0 {
         return Err("mission proposal produced a non-finite cruise true airspeed".to_owned());
     }
@@ -274,8 +275,8 @@ fn estimate_non_cruise_distance(
         first_level_midpoint_m,
     )?;
     if active_cruise_legs >= 2 {
-        let second_level_m = (cruise_altitude_m * profile.step_climb_1_altitude_fraction)
-            .max(first_level_m + 300.0);
+        let second_level_m =
+            (cruise_altitude_m * profile.step_climb_1_altitude_fraction).max(first_level_m + 300.0);
         let second_level_midpoint_m = 0.5 * (current_m + second_level_m);
         leg(
             &mut current_m,
@@ -360,7 +361,9 @@ fn resolved_profile_speed(
             pressure_isa(altitude_m),
             temperature_isa(altitude_m),
         )
-        .map_err(|error| format!("mission proposal could not resolve calibrated airspeed: {error}")),
+        .map_err(|error| {
+            format!("mission proposal could not resolve calibrated airspeed: {error}")
+        }),
     }
 }
 

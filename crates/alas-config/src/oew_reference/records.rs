@@ -178,7 +178,7 @@ pub(super) static RECORDS: &[OewReference] = &[
         // therefore Excluded rather than Unknown; every other field stays
         // Unknown because Rev Q does not itemize them. This does not make the
         // list complete and does not change `counts_toward_validation`, which
-        // stays false on a `SourceGap` record — it records, in the registry
+        // stays false on a `SourceGap` record - it records, in the registry
         // instead of in a handoff, the boundary the mass model computes on.
         inclusion: OewInclusionList {
             cargo_containers: InclusionStatus::Excluded,
@@ -345,7 +345,7 @@ pub(super) static RECORDS: &[OewReference] = &[
         // The model is no longer unsupported: the shaft-power propulsion
         // group evaluates this aircraft through the production path, so a
         // prediction now exists and the record must say what it may be
-        // compared with. It is still not a validation anchor — the factsheet
+        // compared with. It is still not a validation anchor - the factsheet
         // does not state the definition's inclusion list, and the two
         // published bases differ by 440 kg.
         applicability: OewApplicability::ConditionalMismatch,

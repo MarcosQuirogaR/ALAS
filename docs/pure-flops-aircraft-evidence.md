@@ -3,16 +3,18 @@
 This document records the aircraft evidence used to map the eight registered
 baseline names to the pinned NASA FLOPS transport model. It is an evidence
 and review artifact, not a claim that every preset has a complete certified
-design mission. The machine-readable records are:
+design mission. The machine-readable records described below are retained in
+the maintainers' local audit trail; they are not part of the repository
+checkout and are not published, and should be regenerated from the primary
+sources cited in this document before relying on them:
 
-- [`aircraft_inputs.json`](../.agent/data/pure-flops-evidence/aircraft_inputs.json),
-  with all 15 scalar FLOPS inputs, source locators, units, variant
-  applicability, status, candidates, and uncertainty.
-- [`mass_reference_anchors.json`](../.agent/data/pure-flops-evidence/mass_reference_anchors.json),
-  with revision-locked mass anchors, the WWE/WOPIT/WOWE definition audit,
-  engine mass coverage, and the no-calibration rule.
-- [`source_manifest.json`](../.agent/data/pure-flops-evidence/source_manifest.json),
-  with source authority, URL, local file, hash, revision, and coverage.
+- `aircraft_inputs.json`, with all 15 scalar FLOPS inputs, source locators,
+  units, variant applicability, status, candidates, and uncertainty.
+- `mass_reference_anchors.json`, with revision-locked mass anchors, the
+  WWE/WOPIT/WOWE definition audit, engine mass coverage, and the
+  no-calibration rule.
+- `source_manifest.json`, with source authority, URL, local file, hash,
+  revision, and coverage.
 
 The bounded collection uses manufacturer, certification-authority, and NASA
 documents first. Operator manuals and derived validation records are retained

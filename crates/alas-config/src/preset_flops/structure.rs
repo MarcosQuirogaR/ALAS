@@ -68,9 +68,9 @@ fn declared_composite_utilization(_name: &str) -> f64 {
 /// FLOPS equation 68 is `WTPNT = WPAINT x SWTWG`, and the published equation
 /// set gives no default: zero means an aircraft delivered in bare metal or
 /// bare composite, which none of these is. NASA's own validated decks declare
-/// it — `large_single_aisle_1_FLOPS.csv` carries
+/// it - `large_single_aisle_1_FLOPS.csv` carries
 /// `aircraft:paint:mass_per_unit_area, 0.037, lbm/ft**2` and
-/// `large_single_aisle_2` carries `0.07` — so the quantity has a source even
+/// `large_single_aisle_2` carries `0.07` - so the quantity has a source even
 /// though the equation has no default.
 ///
 /// The lower of the two published values is declared here, for every
@@ -99,14 +99,14 @@ fn declared_paint_area_density_kg_m2(_name: &str) -> f64 {
 /// wing; see [`crate::PylonMassMethod`] for the source, the derived actual
 /// pylon masses and the validity domain.
 ///
-/// * **AVE, A320-200, A220-300, A340-300, A380-800, B787-9, DC-10-30** —
+/// * **AVE, A320-200, A220-300, A340-300, A380-800, B787-9, DC-10-30** -
 ///   podded wing installations, all above the LTH relation's stated 40 t
 ///   MTOM floor, so the box-beam relation is evaluated on each aircraft's own
 ///   sea-level static thrust. The DC-10's tail-mounted centre engine is
 ///   carried by fin and fuselage structure that the relation was not fitted
 ///   on, and the relation reads the wing-mounted count, so it is charged two
 ///   pylons rather than three.
-/// * **ATR 72-600 — none.** Its nacelles are faired into the wing rather than
+/// * **ATR 72-600 - none.** Its nacelles are faired into the wing rather than
 ///   pylon-mounted, which is an architecture statement and the same one its
 ///   shaft-power group already makes with a zero GASP pylon coefficient. It
 ///   is also a 23 t aircraft, below the LTH relation's own domain.

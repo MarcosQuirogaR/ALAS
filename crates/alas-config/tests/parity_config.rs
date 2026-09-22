@@ -61,6 +61,21 @@
 //!   instead of the historical airline name. The serialized identifiers
 //!   ('Ryanair', 'Iberia', 'Emirates') and every preset value are unchanged;
 //!   both the corrected and frozen prose are pinned below.
+//! * `PropulsionCycleConfig` now carries the two conceptual free-turbine
+//!   design inputs `turboprop_overall_pressure_ratio` and
+//!   `turboprop_turbine_inlet_temperature_k`. The frozen Python cycle is
+//!   turbofan-only and has neither, so they are native additions whose
+//!   defaults and migration are pinned by
+//!   `propulsion::tests::older_cycle_configs_receive_explicit_turboprop_design_defaults`.
+//! * The three structural-screening requirements (`ultimate_load_factor`,
+//!   `dive_speed_m_s`, `limit_load_factor_neg`) keep their frozen values and
+//!   names, while their help no longer states a certification result the
+//!   project has not established. Both the corrected and the frozen prose are
+//!   pinned below; no value, bound or schema entry changed.
+//! * The three cargo-deck fields (`main_deck_uld`, `lower_deck_uld`,
+//!   `loading_strategy`) offer an option list the frozen Python schema did
+//!   not. The list membership is owned by `cabin::cargo`'s own schema test;
+//!   here both the frozen absence and the product list are pinned.
 //! * The four vortex-lattice mesh resolutions diverge in value and in help.
 //!   The frozen Python loop mesh is one chordwise panel, which samples the
 //!   mean camber line only where it is zero and so makes every section a
@@ -248,6 +263,51 @@ fn every_field_description_matches_the_reference() {
             &config.schema(),
             &entry.schema,
             &entry.declared,
+        );
+    }
+    comparison.finish();
+}
+
+/// The two free-turbine design inputs are absent from the frozen Python
+/// cycle, so the comparisons above skip them rather than report every saved
+/// file as a parity drift. Their defaults are pinned here instead, on both
+/// sides, so "native addition" does not quietly become "unchecked value":
+/// `propulsion`'s own migration test proves an older file receives them and
+/// that they reach the form with a unit, but not what they are worth.
+///
+/// SI: the pressure ratio is dimensionless, the turbine inlet temperature is
+/// a total temperature in kelvin. Both are conceptual design-cycle
+/// assumptions, not certified engine data, which is what their help says.
+#[test]
+fn the_native_turboprop_design_inputs_are_absent_upstream_and_pinned_here() {
+    let fixture = fixture();
+    let mut comparison = Comparison::new("alas-config turboprop design cycle", Tier::Exact);
+
+    let defaults = serde_json::to_value(PropulsionCycleConfig::default()).unwrap();
+    for (key, expected) in [
+        ("turboprop_overall_pressure_ratio", serde_json::json!(15.0)),
+        (
+            "turboprop_turbine_inlet_temperature_k",
+            serde_json::json!(1400.0),
+        ),
+    ] {
+        for type_key in ["PropulsionCycleConfig", "ALASConfig"] {
+            let frozen = &fixture.types.get(type_key).unwrap().defaults;
+            let frozen = if type_key == "ALASConfig" {
+                frozen.get("propulsion_cycle").unwrap()
+            } else {
+                frozen
+            };
+            comparison.exact(
+                &format!("{type_key}.{key}: frozen Python field absent"),
+                &frozen.get(key).is_some(),
+                &false,
+            );
+        }
+        comparison.exact(
+            &format!("PropulsionCycleConfig.{key}: product default"),
+            defaults.get(key).unwrap_or(&Value::Null),
+            &expected,
         );
     }
     comparison.finish();
@@ -696,6 +756,16 @@ fn is_native_config_field(path: &str, key: &str) -> bool {
             "schema_version" | "mass_architecture" | "flops_transport" | "flops_turboprop"
         )
             && (path.ends_with("MassModelConfig") || path.ends_with(".mass_model")))
+        // The conceptual free-turbine design cycle. The frozen Python
+        // propulsion configuration models a turbofan only and declares
+        // neither field; their defaults and the migration that supplies them
+        // to an older saved file are checked by
+        // `older_cycle_configs_receive_explicit_turboprop_design_defaults`.
+        || (matches!(
+            key,
+            "turboprop_overall_pressure_ratio" | "turboprop_turbine_inlet_temperature_k"
+        ) && (path.ends_with("PropulsionCycleConfig")
+            || path.ends_with(".propulsion_cycle")))
         || (matches!(
             key,
             "method" | "finite_difference_step" | "constraint_tolerance"
@@ -892,6 +962,19 @@ fn compare_field(
         );
     } else if let Some((source_corrected, frozen_python)) =
         passenger_mass_authority_help_correction(label)
+    {
+        comparison.exact(
+            &format!("{label}.help: source-corrected Rust value"),
+            &field.help,
+            &source_corrected,
+        );
+        comparison.exact(
+            &format!("{label}.help: frozen Python value"),
+            &expected.get("help").and_then(Value::as_str).unwrap_or(""),
+            &frozen_python,
+        );
+    } else if let Some((source_corrected, frozen_python)) =
+        structural_screening_help_correction(label)
     {
         comparison.exact(
             &format!("{label}.help: source-corrected Rust value"),
@@ -1142,19 +1225,50 @@ fn solver_agnostic_help_correction(label: &str) -> Option<(&'static str, &'stati
     }
 }
 
-/// `passenger_mass_kg` now documents the product passenger-mass authority
+/// `passenger_mass_kg` documents the product passenger-mass authority
 /// decision: every seated passenger, of any class, is priced at this
 /// combined (occupant + checked bag) mass, and the per-class occupant slot
-/// is the derived remainder. Only the prose changed; the value and every
-/// other field are unchanged, and both texts stay pinned here.
+/// is the derived remainder. The prose also no longer presents the shipped
+/// 100 kg as a standard: AC 120-27F is operator weight-and-balance guidance,
+/// so the text names the number as a project load-case default and says what
+/// must be recorded before another value is used operationally. Only the
+/// prose changed; the value and every other field are unchanged, and both
+/// texts stay pinned here.
 fn passenger_mass_authority_help_correction(label: &str) -> Option<(&'static str, &'static str)> {
     match label {
         "DesignRequirements.passenger_mass_kg" | "ALASConfig.requirements.passenger_mass_kg" => {
             Some((
-                "Combined average mass per occupant (body + baggage). FAA AC 120-27E standard is 100 kg; airlines may use 90-105 kg. This is the single load-case authority for every product path (report, GUI preview, pipeline, export and the optimizer): every seated passenger, of any class, is priced at this combined mass, with cabin.passenger.checked_bag_mass_kg as the baggage share and the occupant slot the remainder. Per-class seat masses (e.g. a named cabin preset's business/economy figures) are cosmetic/geometry seeds only and are overwritten by this value.",
+                "Combined average mass per occupant (body + baggage). The shipped 100 kg is a transparent project load-case default; FAA AC 120-27F is operator weight-and-balance guidance and does not establish a universal passenger mass. Record the operator, population, baggage method and date before using another value operationally. This remains the single load-case authority for report, GUI preview, pipeline, export and optimizer paths: cabin.passenger.checked_bag_mass_kg supplies the baggage share and the occupant slot the remainder.",
                 "Combined average mass per occupant (body + baggage). FAA AC 120-27E standard is 100 kg; airlines may use 90-105 kg.",
             ))
         }
+        _ => None,
+    }
+}
+
+/// The three structural-screening requirements keep their frozen values,
+/// names, bounds and schema entries. Only their prose changed: the frozen
+/// text presented a shipped default as a certification result (an amendment
+/// clause, a CS-25 paragraph, a derived VC relation), and the product text
+/// names the same number as a screening input whose certification basis the
+/// reader must establish. Both texts stay pinned so this remains a recorded
+/// documentation decision rather than dropped parity coverage.
+fn structural_screening_help_correction(label: &str) -> Option<(&'static str, &'static str)> {
+    match label {
+        "DesignRequirements.ultimate_load_factor"
+        | "ALASConfig.requirements.ultimate_load_factor" => Some((
+            "Structural screening input fed into the Torenbeek mass formulas. The shipped 3.75 is 1.5 x 2.5; verify the selected certification basis, amendment, aircraft category and load case before treating it as an airworthiness value.",
+            "Limit load factor times the 1.5 safety margin, fed into the Torenbeek structural mass formulas.",
+        )),
+        "DesignRequirements.dive_speed_m_s" | "ALASConfig.requirements.dive_speed_m_s" => Some((
+            "Structural screening dive speed, fed into the Torenbeek mass formulas and the V-n diagram. The project may derive VC as VD/1.25 for this study; verify speed type, altitude/Mach envelope, certification basis and amendment before treating that relation as an airworthiness result.",
+            "Structural design dive speed, fed into the Torenbeek structural mass formulas. Also VD on the V-n diagram; design cruise speed VC is derived as VD/1.25 (CS-25.335(b) minimum margin) rather than a separate field.",
+        )),
+        "DesignRequirements.limit_load_factor_neg"
+        | "ALASConfig.requirements.limit_load_factor_neg" => Some((
+            "Negative V-n screening input. The shipped -1.0 follows the large-aeroplane CS-25 reference case up to VC; verify the selected certification basis, amendment, speed range and category before using it for qualification. The positive limit value is derived as ultimate_load_factor / 1.5.",
+            "CS-25.337(c) negative limit load factor for the V-n diagram. The positive limit load factor is derived as ultimate_load_factor / 1.5 (CS-25.303) rather than a separate field.",
+        )),
         _ => None,
     }
 }
@@ -1248,17 +1362,36 @@ fn compare_leaf(comparison: &mut Comparison, path: &str, leaf: &LeafField, expec
     let expected_options = expected.get("options");
     match leaf.options {
         Some(source) => {
-            comparison.exact(
-                &format!("{path}: names an option list"),
-                &true,
-                &expected_options.is_some(),
-            );
-            if let Some(resolved) = source.options() {
+            // Reaching this arm is itself the statement that the product
+            // field offers a list, so for the cargo-deck fields what is left
+            // to check is the frozen side: upstream offered none.
+            if product_cargo_option_field(path).is_some() {
                 comparison.exact(
-                    &format!("{path}.options"),
-                    &serde_json::to_value(resolved).unwrap(),
-                    expected_options.unwrap_or(&Value::Null),
+                    &format!("{path}: frozen Python field has no option list"),
+                    &expected_options.is_some(),
+                    &false,
                 );
+            } else {
+                comparison.exact(
+                    &format!("{path}: names an option list"),
+                    &true,
+                    &expected_options.is_some(),
+                );
+            }
+            if let Some(resolved) = source.options() {
+                if let Some(Some(product_list)) = product_cargo_option_field(path) {
+                    comparison.exact(
+                        &format!("{path}.options: product list"),
+                        &serde_json::to_value(resolved).unwrap(),
+                        &serde_json::to_value(product_list).unwrap(),
+                    );
+                } else {
+                    comparison.exact(
+                        &format!("{path}.options"),
+                        &serde_json::to_value(resolved).unwrap(),
+                        expected_options.unwrap_or(&Value::Null),
+                    );
+                }
             }
             comparison.exact(
                 &format!("{path}.editable"),
@@ -1270,12 +1403,38 @@ fn compare_leaf(comparison: &mut Comparison, path: &str, leaf: &LeafField, expec
             );
         }
         None => {
+            // A cargo-deck field that stopped offering its list would
+            // otherwise agree with a frozen schema that never had one, so it
+            // is required here rather than merely permitted.
             comparison.exact(
                 &format!("{path}: names an option list"),
                 &false,
-                &expected_options.is_some(),
+                &(expected_options.is_some() || product_cargo_option_field(path).is_some()),
             );
         }
+    }
+}
+
+/// The three cargo-deck fields that offer an option list the frozen Python
+/// schema did not. The outer `Some` marks the field as one of them; the inner
+/// option is the list where this crate can resolve it, and `None` where the
+/// membership is owned by a crate above this one and checked there.
+///
+/// `cabin::cargo`'s own schema test pins which `OptionSource` each field
+/// names; what is added here is that upstream offered nothing to compare it
+/// with, so the divergence stays recorded instead of unchecked.
+fn product_cargo_option_field(path: &str) -> Option<Option<&'static [&'static str]>> {
+    if path.ends_with(".cargo.main_deck_uld") || path.ends_with(".cargo.lower_deck_uld") {
+        Some(None)
+    } else if path.ends_with(".cargo.loading_strategy") {
+        Some(Some(&[
+            "target_cg",
+            "min_pallets",
+            "door_proximity",
+            "uniform",
+        ]))
+    } else {
+        None
     }
 }
 

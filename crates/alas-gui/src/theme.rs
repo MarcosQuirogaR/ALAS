@@ -731,13 +731,24 @@ mod tests {
                 contrast_ratio(open, hovered) >= 1.1,
                 "{theme:?}: an open menu must not look hovered"
             );
-            assert!(contrast_ratio(hovered, panel) >= 1.15, "{theme:?}: hover tint invisible");
-            assert!(contrast_ratio(open, panel) >= 1.3, "{theme:?}: open tint invisible");
-            assert!(contrast_ratio(selected, panel) >= 1.7, "{theme:?}: selected fill invisible");
+            assert!(
+                contrast_ratio(hovered, panel) >= 1.15,
+                "{theme:?}: hover tint invisible"
+            );
+            assert!(
+                contrast_ratio(open, panel) >= 1.3,
+                "{theme:?}: open tint invisible"
+            );
+            assert!(
+                contrast_ratio(selected, panel) >= 1.7,
+                "{theme:?}: selected fill invisible"
+            );
             // The selected fill leans on its stroke for the 1.4.11 boundary.
             assert!(contrast_ratio(visuals.selection.stroke.color, panel) >= 3.0);
             // Focus stays separable from hover by its wider ring.
-            assert!(visuals.widgets.active.bg_stroke.width > visuals.widgets.hovered.bg_stroke.width);
+            assert!(
+                visuals.widgets.active.bg_stroke.width > visuals.widgets.hovered.bg_stroke.width
+            );
         }
     }
 

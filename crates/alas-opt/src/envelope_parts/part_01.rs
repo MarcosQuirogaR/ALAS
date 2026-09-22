@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-use alas_config::AlasConfig;
+use alas_config::{AlasConfig, MacFrame};
 use alas_geom::aircraft::airplane::Airplane;
 use alas_mass::breakdown::{MassBreakdown, MassCoordinates};
 use alas_mass::stations::StationError;
@@ -155,6 +155,56 @@ impl StaticMarginPreferenceAssessment {
     }
 }
 
+/// Which physical mechanism actually bounds the aft end of the CG envelope.
+///
+/// A transport's aft centre-of-gravity limit is the **more forward** of two
+/// independent boundaries: the aerodynamic one, where the static margin falls
+/// to its floor, and the ground one, where the nose-gear reaction falls to the
+/// steering-load minimum and the aeroplane approaches tipping back onto its
+/// tail. [`ModelCgEnvelopeAssessment`] has only ever derived the first.
+///
+/// When the aerodynamic boundary lies **aft** of the ground boundary, the
+/// envelope admits loading states that tip the aeroplane, and
+/// [`ModelCgConstraint::MinimumNoseGearLoad`] fires as a symptom at whichever
+/// state happens to land there, with nothing naming the missing boundary.
+/// This enum is that name.
+///
+/// It is a diagnostic, not a new threshold: neither
+/// [`ModelCgEnvelopeAssessment::aerodynamic_aft_limit_pct_mac`] nor
+/// [`ModelCgEnvelopeAssessment::configured_forward_limit_pct_mac`] is
+/// re-derived from it, so no constraint is loosened and no candidate that the
+/// existing limits reject becomes feasible.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum AftCgLimitGovernance {
+    /// No main-gear station or wheelbase was usable, so the ground boundary
+    /// could not be placed and only the aerodynamic one exists.
+    NotEvaluated,
+    /// The aerodynamic boundary is at or forward of the ground boundary: the
+    /// envelope's aft end is the one the assessment already reports.
+    Aerodynamic,
+    /// The ground boundary is forward of the aerodynamic one by
+    /// `margin_pct_mac`, so the reported aft limit is **not** the governing
+    /// one and the gap is the band of CG positions the envelope admits and
+    /// the gear cannot carry.
+    GroundMinimumNoseLoad {
+        /// `aerodynamic_aft_limit_pct_mac - ground_aft_limit_pct_mac`, % MAC,
+        /// strictly positive in this variant.
+        margin_pct_mac: f64,
+    },
+}
+
+impl AftCgLimitGovernance {
+    /// How far the reported aerodynamic aft limit overhangs the ground one,
+    /// % MAC; zero when the aerodynamic boundary governs or none was placed.
+    #[must_use]
+    pub const fn overhang_pct_mac(self) -> f64 {
+        match self {
+            Self::GroundMinimumNoseLoad { margin_pct_mac } => margin_pct_mac,
+            Self::NotEvaluated | Self::Aerodynamic => 0.0,
+        }
+    }
+}
+
 /// Typed preliminary assessment of model stability and ground reactions.
 ///
 /// This is not public planning, AFM, or WBM evidence. Manufacturer-source
@@ -168,7 +218,25 @@ pub struct ModelCgEnvelopeAssessment {
     /// Aft aerodynamic boundary set by the hard physical stability floor.
     pub aerodynamic_aft_limit_pct_mac: f64,
     /// Forward model boundary obtained from the configured CG range.
+    ///
+    /// Deliberately still measured from
+    /// [`Self::aerodynamic_aft_limit_pct_mac`] and **not** from
+    /// [`Self::governing_aft_limit_pct_mac`]: re-anchoring it on the tighter
+    /// of the two boundaries would move the forward limit forward and turn a
+    /// reported forward-CG violation into a silent pass.
     pub configured_forward_limit_pct_mac: f64,
+    /// Effective main-gear longitudinal station in the built model's own MAC
+    /// frame, % MAC; `NaN` when no station could be placed.
+    pub main_gear_station_pct_mac: f64,
+    /// Aft boundary at which the nose-gear reaction falls to
+    /// `mass_model.pct_load_nlg_min`, % MAC; `NaN` when no station could be
+    /// placed.
+    ///
+    /// Derived from the same two-point static split the loading states use:
+    /// `x_cg = x_mlg - pct_load_nlg_min * wheelbase`.
+    pub ground_aft_limit_pct_mac: f64,
+    /// Which of the two aft boundaries actually governs.
+    pub aft_limit_governance: AftCgLimitGovernance,
     /// Soft optimizer preference, reported without governing feasibility.
     pub target_static_margin: StaticMarginPreferenceAssessment,
 }
@@ -180,6 +248,31 @@ impl ModelCgEnvelopeAssessment {
             .iter()
             .flat_map(|state| &state.constraints)
             .all(|constraint| !constraint.violated)
+    }
+
+    /// The more forward of the aerodynamic and ground aft boundaries, % MAC.
+    ///
+    /// Reported only. No constraint in this assessment is evaluated against
+    /// it; see [`Self::configured_forward_limit_pct_mac`] for why.
+    pub fn governing_aft_limit_pct_mac(&self) -> f64 {
+        if self.ground_aft_limit_pct_mac.is_finite() {
+            self.aerodynamic_aft_limit_pct_mac
+                .min(self.ground_aft_limit_pct_mac)
+        } else {
+            self.aerodynamic_aft_limit_pct_mac
+        }
+    }
+
+    /// Whether any loading state left the compression domain of the two-point
+    /// ground split, that is, sat back on its tail.
+    ///
+    /// This separates a layout whose aft boundary is merely mis-attributed
+    /// from one where the mis-attribution has already produced a reaction the
+    /// gear cannot see.
+    pub fn any_ground_reaction_inadmissible(&self) -> bool {
+        self.loading_states
+            .iter()
+            .any(|state| !state.ground_reactions_admissible)
     }
 
     /// Largest normalized hard-constraint exceedance across all load states.

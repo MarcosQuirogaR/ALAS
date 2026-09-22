@@ -18,7 +18,7 @@
 //!
 //! MSES is licensed separately by MIT and its executables are not distributed
 //! with this program. ALAS does ship the compatible GPL XFOIL
-//! Orr–Sommerfeld map used by free-transition cases; without the MSES
+//! Orr-Sommerfeld map used by free-transition cases; without the MSES
 //! executables the comparison omits the MSES column rather than failing.
 
 use serde::{Deserialize, Serialize};

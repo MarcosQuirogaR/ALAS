@@ -107,7 +107,7 @@ mod tests {
     /// declaration. It used to have two: the FLOPS container tare read
     /// `declared_cargo_loading`, the cabin layout engine read
     /// `cabin.cargo.lower_deck_uld`, and they disagreed on the ATR 72-600 and
-    /// the A320-200 — the ATR, which has no lower hold at all, was still being
+    /// the A320-200 - the ATR, which has no lower hold at all, was still being
     /// offered LD3 positions in one.
     #[test]
     fn the_hold_architecture_has_one_declaration_that_both_consumers_agree_on() {
@@ -142,7 +142,7 @@ mod tests {
     /// 40 t maximum takeoff mass **or at least** 70 passenger seats, and the
     /// selection applies both clauses. The ATR 72-600 is admitted by the seat
     /// clause at 72 seats even though it is far below the mass clause, and it
-    /// is the one aircraft the method makes worse — which is exactly why this
+    /// is the one aircraft the method makes worse - which is exactly why this
     /// test exists: the threshold must not be trimmed back to the mass clause
     /// to recover that aircraft's number.
     #[test]
@@ -192,7 +192,7 @@ mod tests {
     /// decided on **one** seat number: the occupancy the mass is computed on.
     ///
     /// This also records, rather than hides, the one aircraft where the
-    /// published cabin and the computed cabin differ — the A380-800, 555
+    /// published cabin and the computed cabin differ - the A380-800, 555
     /// published against 525 computed. The selection is identical under either
     /// reading, so the consolidation moves no mass; the divergence itself is a
     /// configuration mismatch owned by the cabin layout.
@@ -245,8 +245,8 @@ mod tests {
                 "{name}"
             );
         }
-        // Pinned so a future cabin change that silently resolves — or silently
-        // introduces — a published/computed divergence has to say so here.
+        // Pinned so a future cabin change that silently resolves - or silently
+        // introduces - a published/computed divergence has to say so here.
         //
         // Every registered aircraft whose reference OEW belongs to a published
         // cabin seats **fewer** passengers in the model than in that cabin, and

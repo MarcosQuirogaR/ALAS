@@ -564,3 +564,86 @@ fn termination_reason_is_durable_and_has_stable_label() {
     );
     assert_eq!(fixed.termination, TerminationReason::FixedBounds);
 }
+
+#[test]
+fn a_cancellation_flag_stops_the_poll_and_is_never_reported_as_convergence() {
+    // A well-behaved problem with a budget the search would otherwise spend
+    // in full: the only thing that stops it here is the flag.
+    let generous = Settings {
+        max_iterations: 200,
+        max_evaluations: 4_000,
+        seed: 3,
+        initial_mesh_size: 0.25,
+        minimum_mesh_size: 1.0e-8,
+        convergence_mesh_size: 1.0e-8,
+        ..Settings::default()
+    };
+    let quadratic = |values: &[f64]| {
+        let cost = (values[0] - 0.6).powi(2) + (values[1] - 0.3).powi(2);
+        point(values, cost, true, 0.0)
+    };
+
+    // Set at the first boundary the flag can be read at, which is before the
+    // search phase's first block.
+    let cancel = std::sync::atomic::AtomicBool::new(true);
+    let mut evaluate = quadratic;
+    let cancelled = run_cancellable(
+        &[(0.0, 1.0), (0.0, 1.0)],
+        Some(&[0.0, 0.0]),
+        generous,
+        Some(&cancel),
+        &mut evaluate,
+        None,
+    );
+    assert_eq!(cancelled.termination, TerminationReason::Cancelled);
+    assert_eq!(cancelled.termination.as_str(), "cancelled");
+    assert!(!cancelled.termination.is_converged());
+    assert!(cancelled.termination.is_cancelled());
+    assert!(
+        cancelled.outcome.winner.values.len() == 2,
+        "a cancelled run still returns the incumbent it had scored"
+    );
+
+    // Raised mid-run instead: the search must stop well short of the budget
+    // it would otherwise have spent, and must not claim the budget as its
+    // reason for stopping.
+    let midway = std::sync::atomic::AtomicBool::new(false);
+    let mut calls = 0usize;
+    let mut counted = |values: &[f64]| {
+        calls += 1;
+        if calls == 40 {
+            midway.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+        quadratic(values)
+    };
+    let stopped = run_cancellable(
+        &[(0.0, 1.0), (0.0, 1.0)],
+        Some(&[0.0, 0.0]),
+        generous,
+        Some(&midway),
+        &mut counted,
+        None,
+    );
+    assert_eq!(stopped.termination, TerminationReason::Cancelled);
+    assert!(!stopped.termination.is_converged());
+    assert!(
+        stopped.evaluations < generous.max_evaluations,
+        "cancellation must stop short of the {} analysis budget: {} evaluations",
+        generous.max_evaluations,
+        stopped.evaluations
+    );
+
+    // The same settings without a flag are unaffected: cancellation support
+    // must not change an ordinary run.
+    let mut plain = quadratic;
+    let uncancelled = run_cancellable(
+        &[(0.0, 1.0), (0.0, 1.0)],
+        Some(&[0.0, 0.0]),
+        generous,
+        None,
+        &mut plain,
+        None,
+    );
+    assert!(!uncancelled.termination.is_cancelled());
+    assert!(uncancelled.outcome.winner.valid);
+}

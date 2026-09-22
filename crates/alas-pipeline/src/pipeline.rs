@@ -28,6 +28,7 @@ use alas_config::airports::get as get_airport;
 use alas_config::design_variables::DesignVector;
 use alas_config::presets;
 use alas_config::{AlasConfig, Severity};
+use alas_exec::storage::{mark_storage_root, StorageCategoryId};
 use alas_exec::{RunEnvironment, ToolLocator};
 use alas_geom::aircraft::airplane::Airplane;
 use alas_mission::MissionResult;
@@ -100,6 +101,33 @@ fn check_cancelled(cancel: Option<&AtomicBool>) -> Result<(), String> {
     } else {
         Ok(())
     }
+}
+
+/// Create and, for a retained output directory, claim this run's analysis
+/// workspace: `output_dir` when the caller wants results kept, otherwise a
+/// process/nonce-unique directory under the system temporary directory.
+///
+/// The claim is made here, at creation, rather than left to be inferred from
+/// whatever a writer produces later: a run cancelled immediately after setup
+/// would otherwise leave a directory Manage Storage cannot recognize as its
+/// own. The temporary fallback is solver scratch, already recognized by its
+/// `alas-analysis-` prefix ([`alas_exec::storage::SCRATCH_PREFIXES`]); it is
+/// not a configured, retained root and must not carry the same claim a
+/// user-set output directory gets.
+fn prepare_analysis_workspace(output_dir: Option<PathBuf>) -> Result<PathBuf, String> {
+    let analysis_dir = output_dir.clone().unwrap_or_else(|| {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or_default();
+        std::env::temp_dir().join(format!("alas-analysis-{}-{nonce}", std::process::id()))
+    });
+    std::fs::create_dir_all(&analysis_dir)
+        .map_err(|error| format!("analysis workspace creation failed: {error}"))?;
+    if output_dir.is_some() {
+        let _ = mark_storage_root(StorageCategoryId::GeneratedOutputs, &analysis_dir);
+    }
+    Ok(analysis_dir)
 }
 
 fn emit_event(events: Option<&(dyn Fn(RunEvent) + Sync)>, run_clock: Instant, event: RunEvent) {
@@ -696,6 +724,47 @@ impl DesignPipeline {
         )
     }
 
+    /// Execute the same headless run as [`Self::run`] under a cooperative
+    /// cancellation flag.
+    ///
+    /// This is the seam a headless supervisor (an acceptance harness with a
+    /// wall-clock guard, a batch runner) needs: [`Self::run`] has no way to
+    /// stop, so such a caller could only abandon its worker thread, which
+    /// leaves the optimizer running unmonitored against whatever the
+    /// supervisor does next. Setting `cancel` stops the run at the next stage
+    /// boundary *and*, because the flag is threaded into the optimizer's own
+    /// generation and poll loops, at the next boundary inside an active
+    /// search; the call then returns an `Err` whose message begins
+    /// `"Cancelled safely"`, so the worker can be joined rather than
+    /// abandoned.
+    ///
+    /// Cancellation is cooperative and bounded, not immediate: the longest a
+    /// set flag can go unobserved is one evaluation block of the active
+    /// search, or one supervised external-tool call, whichever the run is
+    /// inside.
+    ///
+    /// # Errors
+    ///
+    /// Same as [`Self::run`], plus the cancellation message above.
+    pub fn run_cancellable(
+        &self,
+        options: &PipelineOptions,
+        environment: &RunEnvironment,
+        cancel: &AtomicBool,
+    ) -> Result<PipelineResult, String> {
+        self.run_inner(
+            options,
+            environment,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some(cancel),
+            None,
+        )
+    }
+
     /// Execute a run using the one resolved external-tool environment shared
     /// by the command line and desktop application.
     pub fn run_with_environment(
@@ -909,15 +978,7 @@ impl DesignPipeline {
         // `output_dir` controls retention, not which physics stages run:
         // without it every writer and external adapter works in an isolated
         // temporary workspace rather than treating `None` as "disabled".
-        let analysis_dir = options.output_dir.clone().unwrap_or_else(|| {
-            let nonce = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .map(|duration| duration.as_nanos())
-                .unwrap_or_default();
-            std::env::temp_dir().join(format!("alas-analysis-{}-{nonce}", std::process::id()))
-        });
-        std::fs::create_dir_all(&analysis_dir)
-            .map_err(|error| format!("analysis workspace creation failed: {error}"))?;
+        let analysis_dir = prepare_analysis_workspace(options.output_dir.clone())?;
         report("Analysis workspace ready");
         emit_diagnostic(events, run_clock, "setup", "Analysis workspace ready");
         // The desktop design editor owns an explicit vector.  Preserve it
@@ -1000,6 +1061,12 @@ impl DesignPipeline {
                 distance_m: planned.route.total_distance_m(),
             })
         });
+        // The optimization stage is where a cancellation request almost
+        // always lands: it is the only stage whose duration is a search
+        // budget rather than a fixed sequence of analyses. Marking it means a
+        // telemetry snapshot can say "the request arrived in the search" and
+        // not merely "somewhere in the pipeline".
+        alas_opt::CancelScope::attach(cancel).enter(alas_opt::CancelPhase::PipelineStage, 2);
         let solver_optimizations = if options.optimize {
             Some(run_solver_optimizations(
                 &self.config,
@@ -1011,6 +1078,7 @@ impl DesignPipeline {
                 bounds,
                 Some(analysis_dir.as_path()),
                 acceptance_route.as_ref(),
+                cancel,
             ))
         } else {
             None

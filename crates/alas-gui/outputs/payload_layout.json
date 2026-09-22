@@ -319,6 +319,7 @@
         "fuselage_mounted_engine_count": 0,
         "fuel_tank_count": 3,
         "maximum_fuel_capacity_kg": 200000.0,
+        "apu_installed": true,
         "containerized_cargo_kg": 0.0,
         "cargo_loading": "containerized",
         "containerized_baggage_fraction": null,
@@ -591,6 +592,12 @@
       "psd_base_g2_per_hz": 0.01,
       "patran_exe_path": "",
       "run_patran_export": true
+    },
+    "downstream": {
+      "openvsp": true,
+      "vspaero": true,
+      "avl": true,
+      "flowunsteady": true
     },
     "departure_airport": "London Heathrow (EGLL)",
     "arrival_airport": "Dubai (OMDB)"

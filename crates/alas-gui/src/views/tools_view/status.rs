@@ -18,6 +18,7 @@ struct ExternalToolStatus {
     openvsp: ExecutableDiscovery,
     vspaero: ExecutableDiscovery,
     avl: ExecutableDiscovery,
+    flowunsteady: ExecutableDiscovery,
     parafoam: Option<std::path::PathBuf>,
 }
 
@@ -85,13 +86,18 @@ pub(super) fn resolved_status(state: &AppState, ui: &mut Ui) {
             );
             status_row(ui, "VSPAERO solver", describe_executable(&snapshot.vspaero));
             status_row(ui, "Athena AVL", describe_executable(&snapshot.avl));
+            status_row(
+                ui,
+                "FLOWUnsteady / Julia",
+                describe_flowunsteady(&snapshot.flowunsteady),
+            );
             cfd::status_rows(state, ui, snapshot.parafoam.as_deref());
         });
 }
 
 fn status_fingerprint(state: &AppState, config: &alas_config::AlasConfig) -> String {
     format!(
-        "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
+        "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
         config.mses.mses_dir,
         config.structures.nastran_exe_path,
         config.structures.nastran_solver_path,
@@ -112,6 +118,11 @@ fn status_fingerprint(state: &AppState, config: &alas_config::AlasConfig) -> Str
             .native_bin_dir
             .as_deref()
             .unwrap_or(""),
+        state
+            .tool_preferences
+            .flowunsteady_exe
+            .as_deref()
+            .unwrap_or(""),
     )
 }
 
@@ -126,6 +137,13 @@ fn build_status_snapshot(
     let patran = std::path::Path::new(&config.structures.patran_exe_path);
     let openvsp = std::path::Path::new(state.tool_preferences.openvsp_dir.as_deref().unwrap_or(""));
     let avl = std::path::Path::new(state.tool_preferences.avl_exe.as_deref().unwrap_or(""));
+    let flowunsteady = std::path::Path::new(
+        state
+            .tool_preferences
+            .flowunsteady_exe
+            .as_deref()
+            .unwrap_or(""),
+    );
     // `resolve_environment` performs the same discovery calls that the
     // status card needs.  Calling it and then discovering every executable a
     // second time made the page scan all conventional installation roots
@@ -137,6 +155,7 @@ fn build_status_snapshot(
     let openvsp_status = state.tool_locator.discover_openvsp(openvsp);
     let vspaero_status = state.tool_locator.discover_vspaero(openvsp);
     let avl_status = state.tool_locator.discover_avl(avl);
+    let flowunsteady_status = state.tool_locator.discover_flowunsteady(flowunsteady);
     let ready_path = |discovery: &ExecutableDiscovery| match discovery {
         ExecutableDiscovery::Ready(path) => Some(path.clone()),
         ExecutableDiscovery::Absent | ExecutableDiscovery::Incomplete { .. } => None,
@@ -149,9 +168,7 @@ fn build_status_snapshot(
         openvsp_exe: ready_path(&openvsp_status),
         vspaero_exe: ready_path(&vspaero_status),
         avl_exe: ready_path(&avl_status),
-        flowunsteady_exe: std::env::var_os("ALAS_FLOWUNSTEADY_EXE")
-            .map(std::path::PathBuf::from)
-            .filter(|path| path.is_file()),
+        flowunsteady_exe: ready_path(&flowunsteady_status),
     };
     ExternalToolStatus {
         fingerprint,
@@ -162,6 +179,7 @@ fn build_status_snapshot(
         openvsp: openvsp_status,
         vspaero: vspaero_status,
         avl: avl_status,
+        flowunsteady: flowunsteady_status,
         parafoam: cfd::detect_parafoam(state),
     }
 }
@@ -182,6 +200,20 @@ mod tests {
             status_fingerprint(&state, &config),
             initial,
             "changing an expensive discovery root must invalidate the cached status"
+        );
+    }
+
+    #[test]
+    fn status_cache_fingerprint_tracks_the_configured_flowunsteady_location() {
+        let mut state = AppState::default();
+        let config = state.typed_config().expect("default config");
+        let initial = status_fingerprint(&state, &config);
+
+        state.tool_preferences.flowunsteady_exe = Some("C:\\FLOWUnsteady-test.exe".to_owned());
+        assert_ne!(
+            status_fingerprint(&state, &config),
+            initial,
+            "a configured FLOWUnsteady path must invalidate the cached status the same way openvsp_dir already does"
         );
     }
 }

@@ -128,8 +128,8 @@ fn show_menu_bar(state: &mut AppState, ctx: &Context, ui: &mut Ui) {
         // absence is legible and carries its reason.
         ui.add_enabled(false, egui::Button::new(tr("Analysis")))
             .on_disabled_hover_text(tr(
-                "Standalone analyses open from the guided workspace; leave the sandbox to use them.",
-            ));
+            "Standalone analyses open from the guided workspace; leave the sandbox to use them.",
+        ));
         show_menu_action(state, ui);
         ui.menu_button(tr("Help"), |ui| {
             if ui.button(tr("About ALAS")).clicked() {

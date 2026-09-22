@@ -10,7 +10,7 @@ The harness keeps five kinds of missing or weak evidence explicit:
 - `evidence_gap` means no trustworthy public numeric target was found for the requested quantity.
 - `source_conflict` means the optional local evidence file disagrees with the immutable contract anchor. The harness does not select either value for scoring.
 
-No expected value is copied from `MODEL.json`, and no failed or missing result is replaced with zero. The local evidence files under `.agent/validation` are ignored working data; the result records their SHA-256 hashes so a rerun can be audited.
+No expected value is copied from `MODEL.json`, and no failed or missing result is replaced with zero. The harness writes its working evidence files to a local, git-ignored output directory; the result records their SHA-256 hashes so a rerun can be audited.
 
 ## Reproduce the audit
 
@@ -21,12 +21,12 @@ cargo run -p alas-pipeline --example model_reference_dump
 node tools/aircraft_parity.cjs
 ```
 
-The default outputs are:
+The default outputs (see the `outputDir`/`reportPath` defaults in [tools/aircraft_parity.cjs](../tools/aircraft_parity.cjs), a git-ignored local directory) are:
 
-- `.agent/validation/AIRCRAFT_PARITY.json` — machine-readable rows, source metadata, hashes and status summary.
-- `.agent/validation/AIRCRAFT_PARITY.csv` — flat review table.
-- `.agent/reports/2026-09-09-aircraft-parity.html` — self-contained report with links to sources and regulatory implications.
-- `.agent/reports/2026-09-09-a220-five-state-cg-replay.html` — actual A220 five-state CG/gear replay with phase applicability and source/model findings.
+- `AIRCRAFT_PARITY.json` — machine-readable rows, source metadata, hashes and status summary.
+- `AIRCRAFT_PARITY.csv` — flat review table.
+- a self-contained aircraft-parity HTML report with links to sources and regulatory implications.
+- an A220 five-state CG/gear replay HTML report with phase applicability and source/model findings.
 
 Paths can be overridden for a clean fixture or a release job:
 
@@ -44,7 +44,7 @@ The optional [all_preset_cg_closeout example](../crates/alas-acceptance/examples
 
 ## Current run and interpretation
 
-The 2026-09-09 release-profile run against the freshly regenerated `MODEL.json` contains 241 rows. The fresh model export SHA-256 is `F40A20F265A4654C8D1EADC53A47CE101D8EB87F9442D6023D52F5501D6071B`; the parity result hash is `1DA8F0F84AB3EDE2D31989431469C57D1B471685EAFF1EF268C59887F41E26DF`. The pre-A220-station export is retained as `.agent/validation/MODEL-pre-a220-gear-20260909.json` with SHA-256 `1AF549DC73408497224314DA65FBA75CD3652D1E5720182A5AD4555E80CCE996`, and the pre-station-anchor export remains `.agent/validation/MODEL-pre-gear-20260909.json` with SHA-256 `08CF196BBE3CC381C7A7805ED8B7E0CA1F06E22B70D5C8F9A31DE0442AA68760`.
+The 2026-09-09 release-profile run against the freshly regenerated `MODEL.json` contains 241 rows. The fresh model export SHA-256 is `F40A20F265A4654C8D1EADC53A47CE101D8EB87F9442D6023D52F5501D6071B4` (corrected 2026-09-22; the previously published string here was missing its trailing hex digit); the parity result hash is `1DA8F0F84AB3EDE2D31989431469C57D1B471685EAFF1EF268C59887F41E26DF`. The pre-A220-station export is retained locally (outside this checkout) as `MODEL-pre-a220-gear-20260909.json` with SHA-256 `1AF549DC73408497224314DA65FBA75CD3652D1E5720182A5AD4555E80CCE996`, and the pre-station-anchor export remains `MODEL-pre-gear-20260909.json` with SHA-256 `08CF196BBE3CC381C7A7805ED8B7E0CA1F06E22B70D5C8F9A31DE0442AA68760`.
 
 | Status | Rows | Interpretation |
 | --- | ---: | --- |
@@ -72,12 +72,10 @@ for this (including the zero-source-value and single-bound-declared fallback cas
 full-harness regression test reproducing the ATR-OEW-shaped failure mode.
 
 Re-running the harness with the fixed code against the *same, unregenerated* `MODEL.json`
-(SHA-256 unchanged, `F40A20F265A4654C8D1EADC53A47CE101D8EB87F9442D6023D52F5501D6071B`) and contract
-exposes three previously-hidden misses, written to the isolated fixture at
-`.agent/patches/parity-optional/validation-rerun/` (not the canonical
-`.agent/validation/AIRCRAFT_PARITY.json`, which this audit intentionally leaves untouched so it
-is not silently changed for other in-flight work; the next ordinary reproduction run will pick up
-the fix automatically):
+(SHA-256 unchanged, `F40A20F265A4654C8D1EADC53A47CE101D8EB87F9442D6023D52F5501D6071B4`) and contract
+exposes three previously-hidden misses, written to an isolated local fixture (not the canonical
+harness output, which this audit intentionally leaves untouched so it is not silently changed for
+other in-flight work; the next ordinary reproduction run will pick up the fix automatically):
 
 | Status | Rows (pre-fix) | Rows (post-fix) |
 | --- | ---: | ---: |
@@ -87,10 +85,9 @@ the fix automatically):
 The three newly-exposed misses:
 
 - **ATR72-600 `mass.oew_kg`**: model 12,014.6 kg vs. source 13,450 kg, **−10.67%** (absolute error
-  1,435.4 kg, inside the 2,000 kg absolute bound but far outside the 3% relative bound). This is
-  the row a prior draft audit (`.agent/reports/parity-provenance-draft.md` §4, never executed)
-  flagged as scoring `within_tolerance` "only because of an OR-tolerance defect" — confirmed here
-  by an actual run, not a static read.
+  1,435.4 kg, inside the 2,000 kg absolute bound but far outside the 3% relative bound). This row
+  was suspected of scoring `within_tolerance` only because of the OR-tolerance defect — confirmed
+  here by an actual run, not a static read.
 - **A320-200 `mass.usable_fuel_kg`**: model 19,334 kg vs. source 19,004 kg, **+1.74%** (absolute
   error 330 kg, inside the 500 kg absolute bound but outside the 0.5% relative bound).
 - **DC-10 `geometry.fuselage_length_m`**: model 55.55 m vs. the EASA IM.A.210 (Issue 2) DC-10-30
@@ -101,6 +98,58 @@ The three newly-exposed misses:
 
 None of these were re-tuned, loosened, or removed to make them pass; they are reported as new
 `out_of_tolerance` findings for the geometry/mass owners to investigate.
+
+### 2026-09-22 reproduction and outstanding model-dump staleness
+
+The AND-tolerance fix above is no longer a hypothetical rerun: it is the checked-out
+`tools/aircraft_parity.cjs` (unchanged since 2026-09-15) and it was reproduced today with
+`node --test tools/aircraft_parity.test.cjs` (17/17 pass, exit 0) and
+
+```text
+node tools/aircraft_parity.cjs --out .agent/validation/parity-rerun-20260922 --report .agent/reports/2026-09-22-aircraft-parity.html
+```
+
+against the *same, still-unregenerated* `MODEL.json` (SHA-256
+`F40A20F265A4654C8D1EADC53A47CE101D8EB87F9442D6023D52F5501D6071B4`, dated 2026-09-09) and the
+unchanged contract (SHA-256 `6CFA76B71D091BEDEE3F9FBE483EEA482EEFA77934A2EFD96DDCA2E84F7FF557`).
+Exit 0; result JSON SHA-256 `87E9255BB18E1FCC3DF52F57D7274AEB401AF2FE2E2BA089518F4845A5F4FAD1`. The
+summary is exactly the post-fix row from the table above (69 `within_tolerance`, 5
+`out_of_tolerance`, 70 `diagnostic`, 21 `unsupported`, 76 `evidence_gap`, 0 `source_conflict`),
+confirming the fix is now simply the harness's ordinary, unmodified behavior rather than a special
+case. A per-preset status figure generated directly from this run's JSON is at
+`.agent/reports/2026-09-22-aircraft-parity-status-by-preset.svg` (SHA-256
+`7201405CABB26E47022188AC4406DCDDB4F4EC798C3425113E30C1436FB036C9`); it is a comparison-status
+count chart, not a certification pass/fail figure, and its own caption says so.
+
+This rerun deliberately used the isolated `--out`/`--report` paths rather than overwriting the
+canonical `.agent/validation/AIRCRAFT_PARITY.json` and `.agent/reports/2026-09-09-aircraft-parity.html`,
+for the same reason given above: those canonical paths are left alone so other in-flight work is not
+silently changed underneath it.
+
+**The underlying `MODEL.json` was not regenerated and is now materially stale.** It is 13 days old
+relative to this rerun, and the working tree has an active, uncommitted A320 cabin/mass regression
+in flight (`crates/alas-pipeline/tests/fixed_aircraft_mass_basis.rs` currently fails because the
+cabin/mass path yields 138 seats where the pipeline expects 132) whose owner holds exclusive
+compiler access for the duration of that fix. `cargo run -p alas-pipeline --example
+model_reference_dump` was therefore not run this session; every A320-200 row in this rerun reflects
+the pre-regression-fix model state, not the current source tree. Once that lane's Cargo access is
+released and the regression is resolved, the correct sequence to refresh this section is: `cargo run
+-p alas-pipeline --example model_reference_dump` then `node tools/aircraft_parity.cjs` (writing over
+the canonical `.agent/validation` output once no other lane depends on the old copy), and updating
+the SHA-256 values and status table above from that fresh run, not from this one.
+
+A parallel, independent read-only research pass and a code-level circularity trace performed the
+same day are published in
+[real-aircraft-source-audit-2026-09-22.md](research/real-aircraft-source-audit-2026-09-22.md). Its
+most release-relevant finding: the A320-200 `mass.usable_fuel_kg` model value (19,334 kg) is, for
+the default preset, a hand-entered literal transcribed from a cited certification source
+(`crates/alas-config/src/presets/narrowbody.rs:107-109`, tagged
+`FuelCapacityEvidence::PublishedPreset` in `crates/alas-pipeline/src/feasibility/fuel.rs:341-349`),
+not an independent tank-geometry computation, a confirmed **source/model circularity risk**, not
+independent validation, for that row. It also confirms the ATR72-600 OEW and DC-10 fuselage-length
+misses above are genuine model gaps across every published document vintage, not source-selection
+artifacts, and records EASA TCDS issue-currency updates (A.064 Issue 62, IM.A.570 Issue 25, A.015
+republished 15 Jan 2026, IM.A.115 Issue 30) found during that pass.
 
 ### Model-declared circularity markers (2026-09-09)
 
@@ -116,9 +165,10 @@ tank volume — explicitly excluding plain topology counts (`gear.n_nlg_wheels`,
 coordinates. In the post-fix rerun, **33 of the 74 eligible rows (45%)** carry this note: 15 gear
 station/wheelbase/track rows across the four Airbus presets and 18 fuel-capacity rows across all
 seven presets. A `within_tolerance` result on one of these 33 rows confirms data-entry retention
-through a unit/scaling conversion, not an independently predicted station or fuel volume — see
-the [provenance classification](../.agent/patches/parity-optional/provenance-classification.md)
-audit below for the full independent/transcription/calibrated breakdown of all 74 eligible rows.
+through a unit/scaling conversion, not an independently predicted station or fuel volume. The full
+independent/transcription/calibrated breakdown of all 74 eligible rows is retained in an internal
+working audit that is not published with this checkout; the `model_provenance_note` field itself
+is exposed in every harness run's output and can be inspected directly by reproducing the run.
 
 The two prior out-of-tolerance rows identify further integration work:
 
@@ -128,11 +178,11 @@ The two prior out-of-tolerance rows identify further integration work:
 
 The A380 fuel row is now split by source condition. Airbus AC publishes 323,546 L and 253,983 kg for the wing and trim tank capacity at 0.785 kg/L. The current EASA A.110 TCDS Issue 17 adds 793 L of usable systems inventory and publishes a 324,339 L total at its 0.800 kg/L convention, or 259,471 kg. The A380 preset and current model output use the EASA total (324,339 L, 259,471 kg, 0.800 kg/L), so the Airbus AC rows are retained as condition-limited diagnostics and the TCDS mass row is within tolerance. The TCDS volume row remains `unsupported` because `MODEL.json` does not yet export `payload_range.fuel_capacity_l`.
 
-The ATR 72-600 mission evidence has a material variant/condition boundary. The passenger PW127M/N sheet (2020) publishes 200/300 NM block fuel of 638/879 kg and 61/84 min, but does not print payload, reserve, alternate, taxi, route-profile or atmosphere conditions for those rows. The current response at the historical 2022 passenger URL is a 2026 PW127XT-M sheet with explicit 95 kg passenger, EASA reserve, 100 NM alternate and 10 min taxi conditions and 616/861/1106 kg at 200/300/400 NM; it is a qualified future PW127XT benchmark, not a PW127M comparison. The often-copied 624/869/1115 kg values belong to the separate ATR 72-600F freighter sheet. The current passenger preset route is LEMD-LEPA (348.2 NM, 1,069.5 kg trip fuel) and has no serialized payload-range corners or reserve contract, so no ATR mission row is eligible. See the [ATR mission benchmark and condition audit](../.agent/reports/2026-09-09-atr-mission-benchmark-audit.html) and the hashed [ATR source manifest](../.agent/evidence/manufacturer/atr-source-manifest.json).
+The ATR 72-600 mission evidence has a material variant/condition boundary. The passenger PW127M/N sheet (2020) publishes 200/300 NM block fuel of 638/879 kg and 61/84 min, but does not print payload, reserve, alternate, taxi, route-profile or atmosphere conditions for those rows. The current response at the historical 2022 passenger URL is a 2026 PW127XT-M sheet with explicit 95 kg passenger, EASA reserve, 100 NM alternate and 10 min taxi conditions and 616/861/1106 kg at 200/300/400 NM; it is a qualified future PW127XT benchmark, not a PW127M comparison. The often-copied 624/869/1115 kg values belong to the separate ATR 72-600F freighter sheet. The current passenger preset route is LEMD-LEPA (348.2 NM, 1,069.5 kg trip fuel) and has no serialized payload-range corners or reserve contract, so no ATR mission row is eligible. The underlying ATR mission benchmark/condition analysis and the hashed manufacturer source manifest are retained in an internal audit trail; they are not published with this checkout, so the sheet dates, URLs and conditions cited above are the reproducible record for now.
 
 The certified widebody MAC values cannot be converted to a model `%MAC` frame from the public TCDS pages alone. A340-300 TCDS A.015 Issue 28 gives datum station 0 at 6.382 m forward of the nose and MAC 7.270 m, while B787 TCDS IM.A.115 Issue 30 gives datum station 0 at 1.41732 m forward of the nose and MAC 6.27126 m; neither publishes LEMAC. The source WBM/AFM LEMAC and the reference-wing boundary are therefore still unavailable. As a scale check, the current reference-area/span pairs give A340 `S/b = 361.6/60.30 = 5.996683 m` and B787 `S/b = 360.464/60.12 = 5.995742 m`; the certified B787 MAC is `1.045952 × S/b`, so it must not be relabeled as `S/b`, while the ALAS geometric MAC is 7.547785 m. The model export computes its own frame from the integrated active planform (`x_LEMAC = root_datum_x + wing_x_shift + ∫x c dy / ∫c dy`) and the CG closeout keeps this model frame separate from a source `PlanningMacReference`. Only the A220 currently has a source-grounded LEMAC. Do not add a guessed A340/B787 planning frame or alter their geometry until a WBM/AFM value or coordinate-level reference boundary is available.
 
-The [formula coverage register](../.agent/reports/2026-09-09-formula-coverage-register.html) maps the current mission, fuel, mass/CG, aero, atmosphere and performance equations to their code paths, focused tests, independent evidence and remaining source gaps. The companion [NotebookLM query bundle](../.agent/reports/2026-09-09-notebooklm-formula-query-bundle.md) is prepared for a future authenticated source audit; no NotebookLM result is represented in the current parity status.
+A formula coverage register maps the current mission, fuel, mass/CG, aero, atmosphere and performance equations to their code paths, focused tests, independent evidence and remaining source gaps; it is retained internally and not published with this checkout. A companion NotebookLM query bundle was prepared for a future authenticated source audit; no NotebookLM result is represented in the current parity status.
 
 The model-only `AVE` preset appears in the model hash and is reported as intentionally excluded. Most L/D, CD0, Oswald efficiency, critical-Mach and lift-curve rows are diagnostics because public values come from analytical, fleet-derived or wing-only sources. They are useful formula checks and trend diagnostics, not matched flight-test validation.
 
@@ -144,11 +194,11 @@ The registered product dispatcher now carries the 145-seat source cap into the s
 
 The product capacity test keeps two other source records explicitly incomplete. ATR 72-600 publishes 72 seats (and a separate 78-seat approval), but no revision-locked source exit sequence is registered; the corrected generic Type-III pair proxy therefore exposes 70 seats and the shortfall remains visible. The DC-10 ACAP publishes `255/399` standard/maximum seating for the Series 30, but its extracted source package does not provide a matching LOPA, seat pitch or exit arrangement for this passenger variant. The current generic product row pass seats 243 against the 250-seat registered planning target; the test records this as a source/layout gap while requiring `unseated_pax = 0` and row mass/count closure. No planning count is copied into the model to turn either gap into a false pass.
 
-The source station audit is recorded in [2026-09-09-airbus-gear-station-audit.html](../.agent/reports/2026-09-09-airbus-gear-station-audit.html). It transcribes Airbus Aircraft Characteristics drawings for A220, A320, A340 and A380, records the local PDF hashes and page/figure identifiers, and keeps their rounded nose-tip dimensions separate from certified station data. The A220 ACP source identity is `A220-ACP-Issue013-00-27Nov2025.pdf`, SHA-256 `AC489084AC6FD0B68F7D8DF65BDE42F01644442DC6069B9C0562B42BC7AE678B`; pages 150–156 provide the applicability, stations, wheelbase, track and footprint. The active model applies the registered fractions to the current fuselage length, so shrink and optimization remain continuous; source dimensions do not replace model-derived mass or reaction quantities.
+The source station audit transcribes Airbus Aircraft Characteristics drawings for A220, A320, A340 and A380, records the local PDF hashes and page/figure identifiers, and keeps their rounded nose-tip dimensions separate from certified station data. The A220 ACP source identity is `A220-ACP-Issue013-00-27Nov2025.pdf`, SHA-256 `AC489084AC6FD0B68F7D8DF65BDE42F01644442DC6069B9C0562B42BC7AE678B`; pages 150–156 provide the applicability, stations, wheelbase, track and footprint. The active model applies the registered fractions to the current fuselage length, so shrink and optimization remain continuous; source dimensions do not replace model-derived mass or reaction quantities.
 
-The A320 source maximum-payload load case is exercised separately from the ordinary zero-belly product baseline by [a320_source_max_payload_case_separates_net_tare_gross_and_usable_fuel](../crates/alas-acceptance/tests/acceptance_matrix.rs). The registered A320-214 WV017 references give MZFW 62,500 kg and configuration OEW 41,244 kg, hence 21,256 kg gross payload. With 180 seats, 2,880 kg checked bags and 2,682 kg explicitly requested net belly freight, the source-layout call carries seven ULDs and 574 kg tare, closing at 21,256 kg. The actual CG-targeted `FullAnalysis` call carries the same net load but selects six ULDs and 492 kg tare, producing 21,174 kg gross payload; the 82 kg residual remains visible as a load-plan/model condition difference. Its gross model fuel is 16,964.221 kg, resolved unusable fuel is 135.570 kg, and the corresponding usable closure is 16,828.651 kg. These are model outputs and identities, not a manufacturer fuel or certification claim. See the [CG, payload and fuel closure diagnosis](../.agent/reports/2026-09-09-cg-gear-fuel-closure-diagnosis.html) for the exact frames, units and release action.
+The A320 source maximum-payload load case is exercised separately from the ordinary zero-belly product baseline by [a320_source_max_payload_case_separates_net_tare_gross_and_usable_fuel](../crates/alas-acceptance/tests/acceptance_matrix.rs). The registered A320-214 WV017 references give MZFW 62,500 kg and configuration OEW 41,244 kg, hence 21,256 kg gross payload. With 180 seats, 2,880 kg checked bags and 2,682 kg explicitly requested net belly freight, the source-layout call carries seven ULDs and 574 kg tare, closing at 21,256 kg. The actual CG-targeted `FullAnalysis` call carries the same net load but selects six ULDs and 492 kg tare, producing 21,174 kg gross payload; the 82 kg residual remains visible as a load-plan/model condition difference. Its gross model fuel is 16,964.221 kg, resolved unusable fuel is 135.570 kg, and the corresponding usable closure is 16,828.651 kg. These are model outputs and identities, not a manufacturer fuel or certification claim. The exact frames, units and release action are reproducible from the cited acceptance test above and the `model_reference_dump` example; the full closure diagnosis narrative is retained in an internal audit report not published with this checkout.
 
-The actual A220 five-state replay is recorded in [2026-09-09-a220-five-state-cg-replay.html](../.agent/reports/2026-09-09-a220-five-state-cg-replay.html) and the structured [state artifact](../.agent/validation/A220-cg-five-state-20260909.json). The release product path emitted OEW, analyzed ZFW, operational mid-mission, operational reserve and analyzed TOW records. The current model applies its static-stability, configured-forward-CG and gear checks to all five; the report labels OEW as ground loading and leaves its generic forward-flight verdict open because no minimum-flight-mass/applicability field exists. The source ACP planning frame is compared only with the analyzed loaded TOW. A220 model CG/gear findings therefore remain separate: the forward model finding belongs to OEW (18.128606 %MAC versus 20.672602 %MAC), while the public loaded-TOW finding is 37.990705 %MAC versus 37.053233 %MAC aft. The latter remains an open source-frame result; no acceptance tolerance or envelope limit was changed.
+The actual A220 five-state replay and its structured state artifact are retained internally and not published with this checkout; the figures below are reproducible from the release product path and `all_preset_cg_closeout`. The release product path emitted OEW, analyzed ZFW, operational mid-mission, operational reserve and analyzed TOW records. The current model applies its static-stability, configured-forward-CG and gear checks to all five; the report labels OEW as ground loading and leaves its generic forward-flight verdict open because no minimum-flight-mass/applicability field exists. The source ACP planning frame is compared only with the analyzed loaded TOW. A220 model CG/gear findings therefore remain separate: the forward model finding belongs to OEW (18.128606 %MAC versus 20.672602 %MAC), while the public loaded-TOW finding is 37.990705 %MAC versus 37.053233 %MAC aft. The latter remains an open source-frame result; no acceptance tolerance or envelope limit was changed.
 
 ## What is currently covered
 
@@ -164,7 +214,7 @@ The evidence bundle has primary or traceable anchors for many overall dimensions
 | Subsystem masses | Model now exports component masses, centroids and first moments; no exact public real-aircraft subsystem breakdown | Exact variant definition, component list, unusable fuel/fluids, weighing condition and independent first moments |
 | CG envelope/cruise CG | Model now exports loaded physical CG and its own geometry MAC frame; A220 planning vertices exist locally; others lack public numeric envelopes | Forward/aft limits by weight/configuration, datum/LEMAC/MAC, cabin/fuel case and a cruise CG point |
 | Gear count/position | Model exports sized topology, wheelbase/track, normalized nose-tip stations and wheel coordinates; A220/A320/A340/A380 group anchors are source-backed, while ATR/B787/DC-10 remain source-limited | NLG/MLG topology, wheels per strut/bogie, axle coordinates, frame, track definition and exact variant |
-| SOL101 deformation | `evidence_gap` for every preset (confirmed by a sourced 2026-09-09 negative search, [`sol101-research.md`](../.agent/patches/parity-optional/sol101-research.md)) | Matching load case, constraints, materials, mesh/element basis and an independent displacement/strain measurement or certified test result. Manufacturer press releases (e.g. Boeing 787 limit/ultimate wing-test deflections) state a number and whether it is limit or ultimate but no boundary conditions, load distribution, weight state or variant, so none is usable. The one open lead is Kirmse et al. (DLR ETTC 2021, elib 145368), an in-flight 2 g wing-deformation measurement on DLR's A320-232 "D-ATRA" — the only candidate on an ALAS-preset airframe, not yet retrieved, and in any case a flight-load case rather than a limit/ultimate value. |
+| SOL101 deformation | `evidence_gap` for every preset (confirmed by a sourced 2026-09-09 negative search retained in an internal working note, not published with this checkout) | Matching load case, constraints, materials, mesh/element basis and an independent displacement/strain measurement or certified test result. Manufacturer press releases (e.g. Boeing 787 limit/ultimate wing-test deflections) state a number and whether it is limit or ultimate but no boundary conditions, load distribution, weight state or variant, so none is usable. The one open lead is Kirmse et al. (DLR ETTC 2021, elib 145368), an in-flight 2 g wing-deformation measurement on DLR's A320-232 "D-ATRA" — the only candidate on an ALAS-preset airframe, not yet retrieved, and in any case a flight-load case rather than a limit/ultimate value. |
 
 ## Formula and units audit
 
@@ -201,7 +251,7 @@ The current CG extraction path is explicit about this frame requirement: `model_
 
 No NotebookLM result is included in this audit. The curated NotebookLM connector had expired authentication, browser login could not complete in the available connected surface, and token refresh returned stale credentials. The formulas and source claims above come from the local evidence bibliography and the linked primary/peer-reviewed sources; they are not represented as NotebookLM inference.
 
-The bounded MSES condition audit is recorded in [2026-09-09-mses-section-mapping-audit.html](../.agent/reports/2026-09-09-mses-section-mapping-audit.html). It confirms the current first-order sweep-normal Mach and body/twist/downwash mapping, but retains the nominal r2 MSES run as `not_converged` (`0/7` points) and flags the unresolved `Re≈180e6` versus `12.875 m` root-chord provenance mismatch for lead-owned condition reconciliation.
+The bounded MSES condition audit confirms the current first-order sweep-normal Mach and body/twist/downwash mapping, but retains the nominal r2 MSES run as `not_converged` (`0/7` points) and flags the unresolved `Re≈180e6` versus `12.875 m` root-chord provenance mismatch for lead-owned condition reconciliation.
 
 ## Regulatory and design-space requirements
 
@@ -222,6 +272,6 @@ The OEI API keeps the legacy closed-form `tw_oei_climb_constraint` available for
 
 The supporting flight-test guidance in [FAA AC 25-7D Change 1](https://www.faa.gov/documentLibrary/media/Advisory_Circular/AC_25-7D_Chg_1.pdf) §4.9 (base [AC 25-7D](https://www.faa.gov/documentLibrary/media/Advisory_Circular/AC_25-7D.pdf)) calls for drag polars and one-engine-inoperative yaw-drag data, and distinguishes the gear-extended takeoff trim condition from later configurations. Those data are not available for the generic ALAS presets, so their OEI status remains a conceptual screening result rather than a certification claim. The code tables intentionally return no value for five or more engines; the two-engine-inoperative net-path case is defined only for three- and four-engine airplanes.
 
-The primary regulatory source used for the OEI table is the annual [CFR-2025 title 14 volume 1](https://www.govinfo.gov/app/details/CFR-2025-title14-vol1) edition, retrieved 2026-09-09. The linked eCFR mirror remains useful for navigation, but its daily edition is not treated as the authority in the evidence ledger. The detailed audit and helper signatures are in `.agent/reports/2026-09-09-oei-performance-audit.html`.
+The primary regulatory source used for the OEI table is the annual [CFR-2025 title 14 volume 1](https://www.govinfo.gov/app/details/CFR-2025-title14-vol1) edition, retrieved 2026-09-09. The linked eCFR mirror remains useful for navigation, but its daily edition is not treated as the authority in the evidence ledger. The detailed audit and helper-function signatures are retained in an internal working report, not published with this checkout.
 
 The actionable integration sequence is to add normalized aero-condition metadata and polar arrays, add weight/CG/temperature/engine-state performance records, add component first moments and CG frames, and add gear topology/coordinates. Keep SOL101 external parity disabled until matching load and measurement evidence exists. This lets the harness turn each evidence gap into a reviewable row when a trustworthy source or normalized model export becomes available.

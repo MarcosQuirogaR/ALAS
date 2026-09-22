@@ -24,6 +24,7 @@ pub mod results_view;
 pub mod run_log;
 pub mod screening_view;
 pub(crate) mod screening_window;
+pub mod tool_intro;
 pub mod tools_view;
 pub mod tour_data;
 pub mod uav_view;

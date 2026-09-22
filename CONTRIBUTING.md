@@ -267,17 +267,11 @@ caught it.
 
 ## On tooling assistance
 
-Parts of this codebase are written with the help of AI coding tools. That is
-disclosed here, and it is disclosed in any academic work that reports on this
-program, because the alternative is worse for everyone.
-
-The conventions above are not there to disguise how the code was produced. They
-are there because generated code has characteristic failure modes — restating
-the obvious, narrating its own history, drifting in style between sessions,
-producing plausible numbers with no reference behind them — and every one of
-those is a maintenance cost or a correctness risk on its own terms. A human
-writing "// Here we compute the drag" is making the same mistake and should get
-the same review comment.
+Parts of this codebase are written with the help of AI coding tools. This is
+disclosed here and in any academic work that reports on this program.
+Contributors remain responsible for reviewing and validating what they
+submit, regardless of how it was drafted, and the conventions above apply
+equally to hand-written and generated code.
 
 What is not negotiable is the numerical evidence. No module is trusted because
 it looks right. It is trusted because it agrees with a reference to a stated

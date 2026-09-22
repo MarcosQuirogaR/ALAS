@@ -21,6 +21,7 @@
 // controls, so a failed unwrap there is the assertion failing.
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
+pub mod cancellation;
 pub mod differential_evolution;
 pub mod envelope;
 pub mod evaluator;
@@ -35,14 +36,20 @@ mod search;
 mod search_methods;
 pub mod transport_planform;
 
+pub use cancellation::{
+    watch_for, CancelEvent, CancelEventKind, CancelPhase, CancelScope, CancelSnapshot, CancelWatch,
+    StopReason,
+};
 pub use differential_evolution::{
     DeliveredAcceptance, DesignOptimizer, NoFeasibleDesign, OptimizationError, OptimizationResult,
-    ParetoCandidate, SearchDiagnostics, REPORTING_FIDELITY_FALLBACK, REPORTING_FIDELITY_REJECTED,
+    ParetoCandidate, SearchDiagnostics, CANCELLED, REPORTING_FIDELITY_FALLBACK,
+    REPORTING_FIDELITY_REJECTED,
 };
 pub use envelope::{
-    assess_model_cg_envelope, check_cg_envelope, CgEnvelopeResult, ModelCgConstraint,
-    ModelCgConstraintAssessment, ModelCgEnvelopeAssessment, ModelCgEnvelopeError,
-    ModelCgLoadingAssessment, ModelCgLoadingState, StaticMarginPreferenceAssessment,
+    assess_model_cg_envelope, check_cg_envelope, AftCgLimitGovernance, CgEnvelopeResult,
+    ModelCgConstraint, ModelCgConstraintAssessment, ModelCgEnvelopeAssessment,
+    ModelCgEnvelopeError, ModelCgLoadingAssessment, ModelCgLoadingState,
+    StaticMarginPreferenceAssessment,
 };
 pub use evaluator::{ObjectiveEvaluation, ObjectiveEvaluator};
 pub use gradient::{

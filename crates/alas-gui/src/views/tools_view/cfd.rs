@@ -48,11 +48,7 @@ pub(crate) fn save_cfd_environment_preferences(state: &mut AppState) {
     }
 }
 
-pub(super) fn status_rows(
-    state: &AppState,
-    ui: &mut Ui,
-    parafoam: Option<&std::path::Path>,
-) {
+pub(super) fn status_rows(state: &AppState, ui: &mut Ui, parafoam: Option<&std::path::Path>) {
     status_row(
         ui,
         "OpenFOAM CFD",

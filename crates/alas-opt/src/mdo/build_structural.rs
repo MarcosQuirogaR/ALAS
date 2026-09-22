@@ -7,6 +7,47 @@ fn structural_failure() -> CandidateFailure {
     }
 }
 
+/// Name the typed cause of a failed product mass buildup.
+///
+/// [`run_mass_analysis_with_model_checked_product_with_gear`] already returns
+/// a typed [`ComponentMassError`], and a FLOPS refusal carries the exact
+/// `FlopsTransportUnverifiedReason` blockers that produced it. Discarding
+/// all of that and counting one `mass_coordinates` bucket is what made a
+/// whole-population rejection unreadable: the label named the *phase* that
+/// refused the candidate and never the *invariant* it broke, so a tally of
+/// 1508 identical strings could not distinguish an undeclared aircraft input
+/// from a degenerate candidate geometry. Those have opposite remedies.
+///
+/// Each reason's stable `as_str()` name becomes the rejection label, so
+/// `OptimizationHistory::reject_reason_counts` separates them. The first
+/// blocker is the one named: the reasons are accumulated in a fixed
+/// evaluation order, so it is the earliest invariant that failed rather than
+/// an arbitrary pick.
+///
+/// This adds no tolerance and admits no candidate. A design that fails here
+/// is rejected exactly as before; only the name it is counted under changes.
+fn product_mass_failure(error: &ComponentMassError) -> CandidateFailure {
+    match error {
+        ComponentMassError::FlopsUnverified { reasons, .. } => reasons.first().map_or(
+            CandidateFailure {
+                reason: "flops_unverified",
+            },
+            |reason| CandidateFailure {
+                reason: reason.as_str(),
+            },
+        ),
+        ComponentMassError::Geometry(_) => CandidateFailure {
+            reason: "mass_coordinate_geometry",
+        },
+        ComponentMassError::FlopsIncompleteAirframe => CandidateFailure {
+            reason: "flops_incomplete_airframe",
+        },
+        ComponentMassError::IncoherentMassArchitecture { .. } => CandidateFailure {
+            reason: "incoherent_mass_architecture",
+        },
+    }
+}
+
 /// Name the typed cause of a failed product station placement.
 ///
 /// [`product_mass_coordinates`] reports a message, so the cause a search log
@@ -81,9 +122,7 @@ pub(crate) fn mass_analysis_with_structural_feedback(
         MassCoordinateModel::StructuralWingbox(&config.structures),
         &config.landing_gear,
     )
-    .map_err(|_| CandidateFailure {
-        reason: "mass_coordinates",
-    })?;
+    .map_err(|error| product_mass_failure(&error))?;
 
     // Structural sizing is an independent feasibility/diagnostic check.  Its
     // empirical/Torenbeek reconciliation is deliberately not applied to the
@@ -147,6 +186,38 @@ mod structural_tests {
         let failure = mass_analysis_with_structural_feedback(&config, &dv, &plane, None, None)
             .expect_err("an aircraft with no measured main-gear station is not evaluable");
         assert_eq!(failure.reason, "main_gear_station_not_measured");
+    }
+
+    /// A candidate the FLOPS buildup refuses is counted under the invariant
+    /// it broke, not under the phase that noticed.
+    ///
+    /// Every refusal from the checked product buildup used to arrive as one
+    /// `mass_coordinates` string. A whole-population rejection therefore
+    /// reported the phase and hid the cause: the A380-800 default VLM run
+    /// counted 1508 identical labels, which cannot distinguish an undeclared
+    /// aircraft input from a degenerate candidate geometry, and the two have
+    /// opposite remedies. Clearing one declared input is the smallest way to
+    /// prove the typed reason now survives into the label.
+    ///
+    /// The hydraulic working pressure is used because FLOPS treats its
+    /// 3 000 psi reference as a value inside the equation rather than a
+    /// default for a missing input, so an absent declaration is genuinely
+    /// unevaluable rather than merely unusual.
+    #[test]
+    fn a_flops_input_blocker_is_counted_under_its_own_name() {
+        let (mut config, dv, plane) = clean_sheet_candidate();
+        // The unmodified candidate is evaluable, so the only difference the
+        // assertion below can be reading is the cleared declaration.
+        mass_analysis_with_structural_feedback(&config, &dv, &plane, None, None)
+            .unwrap_or_else(|failure| panic!("{}", failure.reason));
+
+        config.mass_model.flops_transport.hydraulic_pressure_pa = None;
+        let failure = mass_analysis_with_structural_feedback(&config, &dv, &plane, None, None)
+            .expect_err("an undeclared hydraulic working pressure is not an evaluable aircraft");
+        assert_eq!(
+            failure.reason, "hydraulic_pressure",
+            "the rejection names the FLOPS invariant that failed"
+        );
     }
 
     /// The label is specific to the missing datum: a candidate whose stations

@@ -77,7 +77,12 @@ fn placed_passenger_counts(
             _ => {}
         }
     }
-    Some((counts, summary.total_pax, summary.seated_pax, summary.unseated_pax))
+    Some((
+        counts,
+        summary.total_pax,
+        summary.seated_pax,
+        summary.unseated_pax,
+    ))
 }
 
 fn source_case(label: &str) -> (&'static str, Option<f64>, &'static str, &'static str) {
@@ -141,12 +146,27 @@ fn apply_case(label: &str, config: &mut AlasConfig) {
             // planning case.  AVE's geometry and conceptual installation are
             // retained so the residual is visible rather than silently
             // turning the notional aircraft into a 777-9 clone.
-            declare_count_cabin(config, (0, 0.9144, 0.55), (42, 1.55, 0.70), (384, 0.81, 0.46));
+            declare_count_cabin(
+                config,
+                (0, 0.9144, 0.55),
+                (42, 1.55, 0.70),
+                (384, 0.81, 0.46),
+            );
             config.requirements.mtow_kg = 351_534.0;
         }
-        "A220_140Y" => declare_count_cabin(config, (0, 0.9144, 0.55), (0, 0.9144, 0.55), (140, 0.8128, 0.47)),
+        "A220_140Y" => declare_count_cabin(
+            config,
+            (0, 0.9144, 0.55),
+            (0, 0.9144, 0.55),
+            (140, 0.8128, 0.47),
+        ),
         "A320_FHDRF_77t_180Y" => {
-            declare_count_cabin(config, (0, 0.9144, 0.55), (0, 0.9144, 0.55), (180, 0.7874, 0.46));
+            declare_count_cabin(
+                config,
+                (0, 0.9144, 0.55),
+                (0, 0.9144, 0.55),
+                (180, 0.7874, 0.46),
+            );
             config.requirements.mtow_kg = 77_000.0;
             config.mass_model.flops_structure.design_landing_mass_kg = Some(64_500.0);
             config.mass_model.flops_transport.maximum_fuel_capacity_kg = Some(19_476.0);
@@ -155,10 +175,19 @@ fn apply_case(label: &str, config: &mut AlasConfig) {
             declare_count_cabin(config, (30, 2.0, 0.95), (0, 1.55, 0.70), (305, 0.81, 0.46));
             config.mass_model.flops_transport.flight_attendant_count = Some(9);
         }
-        "A380_typical_555" => declare_count_cabin(config, (22, 2.0, 0.95), (96, 1.55, 0.70), (437, 0.81, 0.46)),
-        "B787_typical_290" => declare_count_cabin(config, (0, 2.0, 0.95), (28, 1.55, 0.70), (262, 0.81, 0.46)),
+        "A380_typical_555" => {
+            declare_count_cabin(config, (22, 2.0, 0.95), (96, 1.55, 0.70), (437, 0.81, 0.46))
+        }
+        "B787_typical_290" => {
+            declare_count_cabin(config, (0, 2.0, 0.95), (28, 1.55, 0.70), (262, 0.81, 0.46))
+        }
         "DC10_255_572k" => {
-            declare_count_cabin(config, (0, 0.9144, 0.55), (0, 0.9144, 0.55), (255, 0.7874, 0.46));
+            declare_count_cabin(
+                config,
+                (0, 0.9144, 0.55),
+                (0, 0.9144, 0.55),
+                (255, 0.7874, 0.46),
+            );
             config.requirements.mtow_kg = 259_454.0;
             config.mass_model.flops_structure.design_landing_mass_kg = Some(190_962.0);
         }
@@ -166,7 +195,12 @@ fn apply_case(label: &str, config: &mut AlasConfig) {
             // ATR's factsheet is a nominal 72-seat case.  Preserve the
             // preset's actual geometry and report any seats that cannot be
             // physically placed in `evaluated_cabin` below.
-            declare_count_cabin(config, (0, 0.7874, 0.46), (0, 0.7874, 0.46), (72, 0.7874, 0.46));
+            declare_count_cabin(
+                config,
+                (0, 0.7874, 0.46),
+                (0, 0.7874, 0.46),
+                (72, 0.7874, 0.46),
+            );
         }
         _ => {}
     }
@@ -191,7 +225,9 @@ fn run_case(label: &str, source_conditioned: bool) -> Value {
     };
     let mut config = match AlasConfig::from_value(&json!({"preset": preset_name})) {
         Ok(config) => config,
-        Err(error) => return json!({"label": label, "status": "config_error", "reason": error.to_string()}),
+        Err(error) => {
+            return json!({"label": label, "status": "config_error", "reason": error.to_string()})
+        }
     };
     config.optimizer.design_space.mode = DesignMode::BaselineSandbox;
     if source_conditioned {
@@ -203,7 +239,9 @@ fn run_case(label: &str, source_conditioned: bool) -> Value {
     // runner: it does not fly a mission or run an optimizer.
     let report = match FullAnalysis::new(config.clone()).run(&preset.design_vector, true) {
         Ok(report) => report,
-        Err(error) => return json!({"label": label, "preset": preset_name, "status": "failed", "reason": error}),
+        Err(error) => {
+            return json!({"label": label, "preset": preset_name, "status": "failed", "reason": error})
+        }
     };
     let Some(buildup) = report.flops_mass_buildup.as_deref() else {
         return json!({"label": label, "preset": preset_name, "status": "no_flops_buildup"});
@@ -272,7 +310,8 @@ fn run_case(label: &str, source_conditioned: bool) -> Value {
         })
     });
     let fallback_feasibility = if takeoff_json.is_none() {
-        let feasibility = assess_physical_feasibility(&config, &preset.design_vector, &report, None);
+        let feasibility =
+            assess_physical_feasibility(&config, &preset.design_vector, &report, None);
         Some(json!({
             "mass_balance_available": feasibility.mass_balance.is_some(),
             "is_feasible_all_checks": feasibility.is_feasible(),
@@ -353,7 +392,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     let output = std::env::args()
         .nth(1)
         .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(".agent/data/flops-robustness-20260920/reference-conditioned-cases.json"));
+        .unwrap_or_else(|| {
+            PathBuf::from(".agent/data/flops-robustness-20260920/reference-conditioned-cases.json")
+        });
     let labels = [
         "AVE_7779_reference",
         "A340_typical_335",
@@ -419,9 +460,12 @@ fn main() -> Result<(), Box<dyn Error>> {
         })
         .collect();
     if !quality_failures.is_empty() {
-        return Err(format!("reference-conditioned matrix quality gate failed: {}", quality_failures.join("; ")).into());
+        return Err(format!(
+            "reference-conditioned matrix quality gate failed: {}",
+            quality_failures.join("; ")
+        )
+        .into());
     }
     println!("wrote {}", output.display());
     Ok(())
 }
-

@@ -65,6 +65,7 @@ impl AppState {
             avl_exe: self.tool_preferences.avl_exe.clone(),
             navdata_dir: nonempty(&config.mission.navdata_dir),
             routes_dir: nonempty(&config.mission.routes_dir),
+            flowunsteady_exe: self.tool_preferences.flowunsteady_exe.clone(),
         };
         if let Err(error) = self.tool_locator.save_preferences(&self.tool_preferences) {
             self.log(

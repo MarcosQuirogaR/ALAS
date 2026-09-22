@@ -18,7 +18,7 @@ pub(super) const A320_ACAP_REV46: OewSource = OewSource {
     date: "2026-07-01",
     locator: "",
     url: "https://mediaassets.airbus.com/pm_38_916_916266-iujedqawwy.pdf?fileName=aca32001-jul-2026-2.pdf",
-    local_path: ".agent/evidence/manufacturer/airbus-a320-ac-2026-07.pdf",
+    local_path: "",
     retrieved: RETRIEVED,
     quote: "",
     tier: OewSourceTier::ManufacturerPlanningDocument,
@@ -29,9 +29,9 @@ pub(super) const A320_F_HDRF_SHEET: OewSource = OewSource {
     publisher: "operator / aviapages listing",
     revision: "undated sheet",
     date: "",
-    locator: "weights table",
+    locator: "weights table; not publicly hosted, no public URL was captured for this listing",
     url: "",
-    local_path: ".agent/data/a320-flops-audit-evidence/sources/operator-f-hdrf-a320-spec.pdf",
+    local_path: "",
     retrieved: "2026-09-11",
     quote: "MTOW 77,000 kg; MLW 64,500 kg; MZFW 61,000 kg; max fuel 19,476 kg; empty weight 41,052 kg; max payload 19,087 kg; 180 seats",
     tier: OewSourceTier::OperatorRecord,
@@ -42,9 +42,10 @@ pub(super) const A220_ARP: OewSource = OewSource {
     publisher: "Airbus Canada",
     revision: "BD500-3AB48-10400-00",
     date: "2020-06-17 (data module); publication May/August 2026",
-    locator: "Table 2 Design weights, page 3; Table 3 Operating items; section 2 weight definitions",
+    locator: "Table 2 Design weights, page 3; Table 3 Operating items; section 2 weight \
+              definitions; not publicly hosted, no public URL was captured for this document",
     url: "",
-    local_path: ".agent/data/flops-refinement-evidence/sources/airbus-a220-arp-aug-2026.pdf (PDF pages 99-102)",
+    local_path: "",
     retrieved: RETRIEVED,
     quote: "OEW 81,900 lb 37,149 kg; Max Payload 41,100 lb 18,643 kg. The OEW includes the MEW plus the weight of standard and operational items such as: unusable fuel, engine oil, seats, crew and their baggage, galley equipment, consumables, potable water, waste tank pre-charge, manuals, etc.",
     tier: OewSourceTier::ManufacturerPlanningDocument,
@@ -57,7 +58,7 @@ pub(super) const A220_ACP: OewSource = OewSource {
     date: "2025-11-27",
     locator: "general characteristics table (PDF pages 29-31)",
     url: "https://www.aircraft.airbus.com/sites/g/files/jlcbta126/files/2025-12/A220-ACP-Issue013-00-27Nov2025.pdf",
-    local_path: ".agent/evidence/manufacturer/airbus-a220-acp-2025-11.pdf",
+    local_path: "",
     retrieved: RETRIEVED,
     quote: "Standard seating capacity 140; Operating Weight Empty (OWE) 81,750 lb (37 081 kg); Maximum Zero Fuel Weight (MZFW) 123,000 lb (55 792 kg)",
     tier: OewSourceTier::ManufacturerPlanningDocument,
@@ -70,7 +71,7 @@ pub(super) const A340_ACAP_REV33: OewSource = OewSource {
     date: "2025-12-01",
     locator: "2-14-0 Jacking for Maintenance, page 9, Figure 2-14-0-991-012-B01 (PDF page 143)",
     url: "https://www.aircraft.airbus.com/sites/g/files/jlcbta126/files/2025-12/AC_A340-200-300_20251201.pdf",
-    local_path: ".agent/evidence/manufacturer/airbus-a340-200-300-ac-2025-12.pdf",
+    local_path: "",
     retrieved: RETRIEVED,
     quote: "AIRCRAFT ON WHEELS WITH STANDARD TIRES, OEW 131 215 kg (279 279 lb)",
     tier: OewSourceTier::ManufacturerPlanningDocument,
@@ -81,9 +82,10 @@ pub(super) const A380_AGGREGATOR: OewSource = OewSource {
     publisher: "aggregator",
     revision: "accessed 2026-09-04",
     date: "",
-    locator: "typical three-class operating empty weight",
+    locator:
+        "typical three-class operating empty weight; no public URL was captured for this listing",
     url: "",
-    local_path: ".agent/validation/A380-800.json (mass.oew_kg)",
+    local_path: "",
     retrieved: "2026-09-04",
     quote: "typical operating empty weight 277,000 kg (values consulted span 270.1 t to 285 t)",
     tier: OewSourceTier::Aggregator,
@@ -97,7 +99,7 @@ pub(super) const A380_ACAP_REV20: OewSource = OewSource {
     locator: "2-3-0 ground clearances (PDF page 37)",
     url:
         "https://www.aircraft.airbus.com/sites/g/files/jlcbta126/files/2025-12/AC_A380_20251201.pdf",
-    local_path: ".agent/evidence/manufacturer/airbus-a380-ac-2025-12.pdf",
+    local_path: "",
     retrieved: RETRIEVED,
     quote: "MAXIMUM JACKING WEIGHT = 333 700 kg (735 682 lb)",
     tier: OewSourceTier::ManufacturerPlanningDocument,
@@ -111,7 +113,7 @@ pub(super) const B787_ACAP_REV_L: OewSource = OewSource {
     locator: "page 2-3, typical two-class 290-seat operating empty weight",
     url: "",
     local_path: "",
-    retrieved: "not retrieved; value carried from .agent/validation/B787-9.json",
+    retrieved: "not retrieved from Rev L directly; carried over as a legacy figure, unverified against the primary text",
     quote: "284,000 lb (128,850 kg) attributed to Rev L; Rev Q and Rev P print no operating-empty-weight row",
     tier: OewSourceTier::ManufacturerPlanningDocument,
 };
@@ -123,7 +125,7 @@ pub(super) const DC10_ACAP: OewSource = OewSource {
     date: "2004-04",
     locator: "Figure 2.1 General Airplane Characteristics, Model DC-10 Series 10, 30 and 40, document page 4 (PDF page 10), Series 30 passenger column and the 572,000-pound MTOGW footnote",
     url: "https://www.boeing.com/content/dam/boeing/v2/airports/acaps/DC10.pdf",
-    local_path: ".agent/evidence/manufacturer/boeing-dc10.pdf",
+    local_path: "",
     retrieved: RETRIEVED,
     quote: "OPERATING WEIGHT EMPTY POUNDS 266,191 KILOGRAMS 120,742 ... FOR 572,000-POUND MTOGW: ADD 379 POUNDS TO OWE AND SUBTRACT 379 POUNDS FROM MAXIMUM STRUCTURAL PAYLOAD; INCREASE LANDING WEIGHT TO 421,000 POUNDS",
     tier: OewSourceTier::ManufacturerPlanningDocument,
@@ -142,7 +144,7 @@ pub(super) const ATR_FACTSHEET: OewSource = OewSource {
     date: "2020-07",
     locator: "weights table",
     url: "https://www.atr-aircraft.com/wp-content/uploads/2020/07/Factsheets_-_ATR_72-600.pdf",
-    local_path: ".agent/evidence/manufacturer/atr72-600-factsheet-2020.pdf",
+    local_path: "",
     retrieved: RETRIEVED,
     quote: "typical in-service operational empty weight 13,450 kg (29,652 lb)",
     tier: OewSourceTier::ManufacturerPlanningDocument,
@@ -156,8 +158,8 @@ pub(super) const ATR_FACTSHEET: OewSource = OewSource {
 /// manufacturers sources"* and *"requires careful interpretation since each
 /// manufacturer may define the data in a different way"*, and the row is
 /// labelled *"Operational empty"* with **no inclusion list anywhere on the
-/// site**. It is therefore registered at [`OewSourceTier::Aggregator`] — the
-/// tier defined as a compilation with no primary document behind it — and only
+/// site**. It is therefore registered at [`OewSourceTier::Aggregator`] - the
+/// tier defined as a compilation with no primary document behind it - and only
 /// ever as a secondary anchor in `other_published_values`, never as a record's
 /// comparable value. All Data A quantities are SI.
 ///
@@ -184,7 +186,7 @@ pub(super) const B777X_ACAP_REV_G: OewSource = OewSource {
     date: "2025-09",
     locator: "section 2 (weights) and 3 (payload/range)",
     url: "https://www.boeing.com/content/dam/boeing/v2/airports/acaps/777X_Rev_G.pdf",
-    local_path: ".agent/data/flops-refinement-evidence/sources/boeing-777x-acap-rev-g.pdf",
+    local_path: "",
     retrieved: "2026-09-11",
     quote: "no numeric operating empty weight; payload/range data will be provided at a later date",
     tier: OewSourceTier::ManufacturerPlanningDocument,

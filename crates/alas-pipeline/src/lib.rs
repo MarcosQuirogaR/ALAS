@@ -88,10 +88,11 @@ pub use export::{
 };
 pub use feasibility::{
     assess_physical_feasibility, assess_physical_feasibility_with_load_case, format_feasibility,
-    CarriedFuelBasis, CgEnvelopeAssessment, CruiseEquilibriumAssessment, DispatchAssessment,
-    DispatchOutcome, FeasibilityReport, FindingCode, FindingSeverity, FuelCapacityAssessment,
-    FuelCapacityEvidence, FuelLoadingAssessment, LedgerItemSummary, MassBalanceAssessment,
-    MassStateSummary, MissionFuelAssessment, MissionFuelStatus, PhysicalFinding, PlanningCgStatus,
+    CarriedFuelBasis, CgEnvelopeAssessment, CruiseEquilibriumAssessment, DeliveryBlocker,
+    DeliveryClassification, DeliveryVerdict, DesignProvenance, DispatchAssessment, DispatchOutcome,
+    FeasibilityReport, FindingCode, FindingSeverity, FuelCapacityAssessment, FuelCapacityEvidence,
+    FuelLoadingAssessment, LedgerItemSummary, MassBalanceAssessment, MassStateSummary,
+    MissionFuelAssessment, MissionFuelStatus, PhysicalFinding, PlanningCgStatus, RunCompletion,
     TankSummary,
 };
 pub use flowunsteady::{

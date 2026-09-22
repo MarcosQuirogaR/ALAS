@@ -17,9 +17,11 @@
 //! former premium-economy slot remains in serialized files for compatibility,
 //! but is hidden and excluded from all product allocation calculations.
 
+mod allocation;
 mod cargo;
 mod seat_class;
 
+use allocation::proportional_integer_allocation;
 pub use cargo::CargoDeckConfig;
 pub use seat_class::SeatClassConfig;
 
@@ -473,45 +475,6 @@ impl PassengerCabinConfig {
         self.premium.share_pct = 0.0;
         self.economy.share_pct = share_of(CLASS_NAMES[2]);
     }
-}
-
-fn proportional_integer_allocation(target: i64, weights: [f64; 3]) -> [i64; 3] {
-    if target <= 0 {
-        return [0; 3];
-    }
-    let total: f64 = weights.iter().sum();
-    if !total.is_finite() || total <= 0.0 {
-        return [0, 0, target];
-    }
-
-    let mut allocation = [0_i64; 3];
-    let mut fractional = [0.0_f64; 3];
-    let mut assigned = 0_i64;
-    for (index, weight) in weights.into_iter().enumerate() {
-        let raw = target as f64 * weight / total;
-        let whole = raw.floor() as i64;
-        allocation[index] = whole;
-        fractional[index] = raw - whole as f64;
-        assigned += whole;
-    }
-
-    // At most two seats remain after flooring three class allocations. The
-    // stable index tie-break keeps saved runs reproducible.
-    let mut remaining = (target - assigned).max(0);
-    while remaining > 0 {
-        let index = fractional
-            .iter()
-            .enumerate()
-            .max_by(|(left_index, left), (right_index, right)| {
-                left.total_cmp(right)
-                    .then_with(|| right_index.cmp(left_index))
-            })
-            .map_or(2, |(index, _)| index);
-        allocation[index] += 1;
-        fractional[index] = f64::NEG_INFINITY;
-        remaining -= 1;
-    }
-    allocation
 }
 
 /// The composed cabin and payload configuration.

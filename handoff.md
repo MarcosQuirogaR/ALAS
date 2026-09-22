@@ -1,29 +1,11 @@
-# ALAS audit remediation: closure note
+# Audit remediation: reviewer notes
 
-Snapshot: 2026-09-05, Europe/Madrid. Workspace: `C:\Proyectos\ALAS`, HEAD
-`be31873`, working tree uncommitted. Nothing was committed or pushed.
-
-The durable record is `docs/STATUS.md` ("Audit remediation, 2026-09-05"),
-which lists the closure status of audit findings F1-F12, the physical
-findings the re-pinned acceptance matrix surfaced, and what was not
-verified. `docs/PORTING.md` rows were flipped to `green` only where the
-corresponding parity test passes. This note only records how the final
-verification ended and what a reviewer should look at first.
-
-## Final verification on the working tree
-
-- `cargo fmt --all -- --check`: clean.
-- `cargo xtask checks`: pass (78 reviewed rows in
-  `docs/source-size-budgets.tsv`; the assembled-size ceilings equal the
-  post-remediation sizes and may not grow).
-- `cargo clippy --workspace --all-targets -- -D warnings`: clean.
-- `cargo test --workspace --no-fail-fast`: the standalone --no-fail-fast run aborted on a transient Windows linker file lock (LNK1104 on an example binary) before any suite ran; the gate's own `cargo test --workspace` stage completed: 204 suites, 2305 passed, 0 failed, 17 ignored.
-- `cargo xtask gate`: pass (checks, format, clippy, tests).
-- `cargo deny --locked check` (vendored 0.20.2): advisories, bans, licenses
-  and sources ok, with the two recorded maintenance-notice exceptions.
-
-Logs (ignored, local): `.agent/reports/audit-final*.log`,
-`.agent/probe-*.log`, `.agent/reports/audit-dependencies-2.log`.
+This is a maintainer coordination note, not a user guide or legal notice. The
+durable record is `docs/STATUS.md` ("Audit remediation, 2026-09-05"), which
+lists the closure status of audit findings F1-F12, the physical findings the
+re-pinned acceptance matrix surfaced, and what was not verified. `docs/PORTING.md`
+rows were flipped to `green` only where the corresponding parity test passes.
+This note records what a reviewer should look at first.
 
 ## Review first
 
@@ -50,6 +32,5 @@ Logs (ignored, local): `.agent/reports/audit-final*.log`,
 ## Not done
 
 - NASTRAN-95 was not rebuilt or re-timed; the NOSA record stays incomplete.
-- The CI workflow was edited but not executed remotely.
 - No physical validation against flight data was attempted; a green suite is
   a verified translation and a consistent product, not a verified aircraft.

@@ -42,8 +42,8 @@ pub use cabin_3d::figure_cabin_payload_3d;
 pub use openvsp::figure_openvsp_cad_preview;
 pub use planform::{figure_design_evolution, figure_geometry, figure_planform_comparison};
 pub use sandbox_scene::{
-    figure_sandbox_exterior, FramingReference, SandboxFace, SandboxSceneModel,
-    SandboxSceneOptions, SceneComponent, SceneFraming,
+    figure_sandbox_exterior, FramingReference, SandboxFace, SandboxSceneModel, SandboxSceneOptions,
+    SceneComponent, SceneFraming,
 };
 pub use section::figure_cabin_section;
 #[doc(hidden)]

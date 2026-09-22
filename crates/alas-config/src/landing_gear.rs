@@ -380,7 +380,7 @@ impl LandingGearConfig {
     /// so it returns whatever fallback it was handed.
     ///
     /// It is retained for the one caller that applies the domain gate itself
-    /// before calling — `alas_mass::stations::main_gear_station`, which owns
+    /// before calling - `alas_mass::stations::main_gear_station`, which owns
     /// the geometric comparison and raises its own typed missing-datum error.
     /// **Every other consumer must use
     /// [`Self::resolved_station_positions_checked`]**, so that a layout
@@ -444,7 +444,7 @@ impl LandingGearConfig {
     /// admissible on any layout, so `domain` is never consulted when the
     /// positions come out `source_scaled`. It is consulted exactly when the
     /// answer would otherwise be the wing-mounted fallback, which is why it
-    /// is taken as a closure — a caller whose domain query costs something
+    /// is taken as a closure - a caller whose domain query costs something
     /// (a station resolution, a geometry pass) pays for it only on the
     /// aircraft where it decides the outcome.
     ///
@@ -500,7 +500,7 @@ impl LandingGearConfig {
 ///
 /// The boundary is the fuselage's own outer surface at the wing root, not a
 /// tuned coefficient, and carries no margin term: either the root is above
-/// the crown or it is not. This enum is the verdict, not the measurement —
+/// the crown or it is not. This enum is the verdict, not the measurement -
 /// the two heights are supplied by whichever crate holds the built geometry.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum WingMountedGearDomain {
@@ -558,7 +558,7 @@ impl WingMountedGearDomain {
 /// (`reference_station_fuselage_length_m`, `reference_nlg_x_fraction`,
 /// `reference_mlg_x_fractions`), which
 /// [`LandingGearConfig::resolved_station_positions`] then scales onto the
-/// active fuselage — not by relaxing the gate.
+/// active fuselage - not by relaxing the gate.
 ///
 /// `Eq` is deliberately not derived: the variant carries the two f64 heights
 /// that decided it, and exact equality on floating-point evidence invites
@@ -1315,7 +1315,7 @@ mod tests {
     #[test]
     fn a_source_anchor_is_admissible_on_any_layout_and_never_asks_the_domain() {
         // A published station scaled onto the active fuselage carries no
-        // wing-mounted assumption, so the high-wing verdict is irrelevant —
+        // wing-mounted assumption, so the high-wing verdict is irrelevant -
         // and the query must not even run, because it is the expensive one.
         let config = LandingGearConfig {
             reference_station_frame: Some("nose_tip_drawing_reference".to_owned()),

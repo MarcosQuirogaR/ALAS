@@ -3,7 +3,11 @@
 
 //! Differential-evolution orchestration for the optimizer boundary.
 
+use std::sync::atomic::AtomicBool;
+
 use super::*;
+use crate::cancellation::{CancelPhase, CancelScope};
+use crate::search_methods::product_de::{self, Kernel};
 
 /// Whether the caller supplied a single literal fuselage-length bound.
 ///
@@ -212,6 +216,30 @@ impl DesignOptimizer {
         initial_design: Option<&DesignVector>,
         progress_callback: Option<&mut dyn FnMut(&str)>,
     ) -> Result<OptimizationResult, OptimizationError> {
+        self.run_cancellable(bounds, initial_design, progress_callback, None)
+    }
+
+    /// [`Self::run`], observing an optional pipeline cancellation flag.
+    ///
+    /// `cancel` is threaded into the Differential Evolution generation loop
+    /// (see `search_methods::constrained_de::run_feasibility_first_de`) and
+    /// checked once per completed generation; a cancelled run still returns
+    /// `Ok`, with `OptimizationResult::termination` set to `"cancelled"`
+    /// rather than `"converged"` or `"iteration_limit"`, and its winner is
+    /// always a fully scored candidate, never a partial trial. The frozen
+    /// reference-compatibility replay (`Self::new_reference_compatibility`)
+    /// is not on any pipeline cancellation path and does not observe `cancel`.
+    ///
+    /// # Errors
+    ///
+    /// Same as [`Self::run`].
+    pub fn run_cancellable(
+        &mut self,
+        bounds: Option<&[(f64, f64)]>,
+        initial_design: Option<&DesignVector>,
+        progress_callback: Option<&mut dyn FnMut(&str)>,
+        cancel: Option<&AtomicBool>,
+    ) -> Result<OptimizationResult, OptimizationError> {
         self.validate_request(bounds)?;
         let effective_bounds = self.effective_bounds(bounds, initial_design)?;
         let nominal = self.nominal_design(initial_design)?;
@@ -250,9 +278,21 @@ impl DesignOptimizer {
                 search_initial,
                 &mut objective,
                 progress_callback,
+                cancel,
             )
         };
 
+        // A cancelled search is reported as cancelled, not as an infeasible
+        // design. `ensure_feasible` answers "did the search find a feasible
+        // aircraft"; a run stopped from outside never got to finish asking,
+        // and turning it into `NoFeasibleDesign` would tell the caller
+        // something about the design space that this run did not establish.
+        // The result still carries `best_valid` as scored, so nothing
+        // downstream can read a cancelled run as a delivered feasible design
+        // (see `OptimizationResult::is_delivered_feasible`).
+        if result.was_cancelled() {
+            return Ok(result);
+        }
         let result = ensure_feasible(result)?;
 
         // Keep the run on the same explicit payload load case every
@@ -279,6 +319,29 @@ impl DesignOptimizer {
         initial_design: Option<&DesignVector>,
         evaluator: &mut E,
         progress_callback: Option<&mut dyn FnMut(&str)>,
+    ) -> Result<OptimizationResult, OptimizationError> {
+        self.run_with_evaluator_cancellable(
+            bounds,
+            initial_design,
+            evaluator,
+            progress_callback,
+            None,
+        )
+    }
+
+    /// [`Self::run_with_evaluator`], observing an optional pipeline
+    /// cancellation flag. See [`Self::run_cancellable`] for the semantics.
+    ///
+    /// # Errors
+    ///
+    /// Same as [`Self::run_with_evaluator`].
+    pub fn run_with_evaluator_cancellable<E: ObjectiveEvaluator + ?Sized>(
+        &mut self,
+        bounds: Option<&[(f64, f64)]>,
+        initial_design: Option<&DesignVector>,
+        evaluator: &mut E,
+        progress_callback: Option<&mut dyn FnMut(&str)>,
+        cancel: Option<&AtomicBool>,
     ) -> Result<OptimizationResult, OptimizationError> {
         self.validate_request(bounds)?;
         let effective_bounds = self.effective_bounds(bounds, initial_design)?;
@@ -309,15 +372,24 @@ impl DesignOptimizer {
                 search_initial,
                 &mut objective,
                 progress_callback,
+                cancel,
             )
         };
 
+        // Same cancellation contract as `run_cancellable`.
+        if result.was_cancelled() {
+            return Ok(result);
+        }
         let result = ensure_feasible(result)?;
 
         let _ = apply_candidate_payload_load_case(&mut self.config, &result.best_design);
         Ok(result)
     }
 
+    // Reachable only through `Self::new_reference_compatibility`, which no
+    // pipeline or GUI caller constructs (`alas-opt/tests/parity_optimizer.rs`
+    // is the sole caller): the frozen replay this drives has no cancellation
+    // signal threaded into it.
     fn run_search<E: SearchObjective>(
         &self,
         bounds: Option<&[(f64, f64)]>,
@@ -534,15 +606,19 @@ impl DesignOptimizer {
         initial_design: Option<&DesignVector>,
         objective: &mut E,
         progress_callback: Option<&mut dyn FnMut(&str)>,
+        cancel: Option<&AtomicBool>,
     ) -> OptimizationResult {
         let solver = &self.config.optimizer.solver;
-        if solver.method == "sqp" {
+        let scope = CancelScope::attach(cancel);
+        let kernel = product_de::kernel_for(&solver.method);
+        if kernel == Kernel::Sqp {
             return sqp_search::run(
                 &self.config,
                 bounds.unwrap_or(&DesignVector::bounds()),
                 initial_design,
                 objective,
                 progress_callback,
+                cancel,
             );
         }
         let default_bounds = DesignVector::bounds();
@@ -568,31 +644,158 @@ impl DesignOptimizer {
         // aerodynamic mesh and a loosened sizing closure, so it may only
         // *nominate* a start; every candidate that can be accepted below is
         // ranked by the full objective.
-        let scan = self.broad_scan(bounds, initial_values.as_deref(), &staged);
+        let scan = self.broad_scan(bounds, initial_values.as_deref(), &staged, &scope);
+        // Under an already-observed cancellation the verification block is
+        // cut to the nominal point alone. Stage B is not going to start, so
+        // ranking three scan finalists at full fidelity buys nothing and
+        // costs three coupled analyses of drain; scoring the nominal keeps a
+        // real analysed candidate to report instead of the unevaluated
+        // sentinel. See `verify_scan_finalists`.
         let (verified_start, scan_verification) = verify_scan_finalists(
             objective,
             &scan.candidates,
             initial_values.as_deref(),
             staged.workers,
+            &scope,
         );
-        if verified_start.is_some() {
-            initial_values = verified_start;
+        if let Some(point) = verified_start.as_ref() {
+            initial_values = Some(point.values.clone());
         }
         report(&format!(
-            "staged scan | screened {} | screening_feasible {} | verified {} | elapsed_s {:.3}",
-            scan.screened, scan.feasible_screened, scan_verification, scan.elapsed_s
+            "staged scan | screened {} | screening_feasible {} | verified {} | cancelled {} | elapsed_s {:.3}",
+            scan.screened, scan.feasible_screened, scan_verification, scan.cancelled, scan.elapsed_s
         ));
+
+        // Cancellation observed during Stage A. The verification block above
+        // has already run - it is bounded at the nominal plus three finalists,
+        // so it always leaves a fully scored candidate to report - and Stage B
+        // is skipped rather than started on a signal that is already set. A
+        // search stopped here has decided nothing: the result is reported
+        // `cancelled`, never `converged` or a budget reason, and its winner is
+        // the best *verified* point, which is the nominal design unless a scan
+        // finalist beat it under the full coupled objective.
+        if scan.cancelled || scope.requested() {
+            scope.search_finished(CANCELLED);
+            return self.cancelled_before_search_result(
+                objective,
+                kernel,
+                initial_values.as_deref(),
+                verified_start,
+                &scan,
+                scan_verification,
+                staged.workers,
+                started,
+            );
+        }
+
+        // Stage B, Differential Evolution: the configured method names this
+        // kernel, so it is what runs and what the result reports.  The scan
+        // above supplies its starting point exactly as it does for MADS.
+        if kernel == Kernel::DifferentialEvolution {
+            let de = product_de::Settings::from_solver(solver, bounds.len(), seed);
+            report(&format!(
+                "differential evolution | population {} | generations {} | seed {} | evaluation_budget {}",
+                de.population,
+                de.generations,
+                de.seed,
+                de.evaluation_budget()
+            ));
+            // The DE kernel times each candidate itself through the scope, so
+            // this adapter stays inert: a block of one counted twice would
+            // make the per-evaluation bound unreadable.
+            let mut evaluator = BatchEvaluator {
+                objective,
+                workers: staged.workers,
+                scope: CancelScope::attach(None),
+            };
+            let history_before_search = evaluator.objective.history().n_evaluations();
+            let (outcome, cancelled) = product_de::run(
+                bounds,
+                initial_values.as_deref(),
+                de,
+                &scope,
+                &mut |values| {
+                    crate::search::mads::Evaluate::evaluate_block(
+                        &mut evaluator,
+                        &[values.to_vec()],
+                    )
+                    .pop()
+                    .unwrap_or_else(|| product_de::unevaluated(values))
+                },
+            );
+            // No convergence test is implemented, so a run that exhausts its
+            // generation budget may never be called converged.
+            // `iteration_limit` is the shared termination vocabulary a
+            // budget-exhausted, non-converged search reports elsewhere
+            // (`run_search`'s own DE path, `sqp_search`); inventing a
+            // distinct string here would silently break every caller that
+            // checks termination against that fixed set. `cancelled` is the
+            // one lifecycle this kernel can reach that is neither: a caller
+            // observed the pipeline's own cancellation signal at a
+            // generation boundary and stopped before either budget or
+            // convergence decided the run.
+            let termination = if cancelled {
+                CANCELLED
+            } else {
+                "iteration_limit"
+            };
+            scope.search_finished(termination);
+            // Analyses this search *executed*, not the budget it was given.
+            // A cancelled run stops mid-budget, and reporting the budget made
+            // a run that ran 94 analyses claim 576 of them. For an
+            // uncancelled run the two agree by construction.
+            let executed = objective
+                .history()
+                .n_evaluations()
+                .saturating_sub(history_before_search);
+            // The kernel scores the initial population first and then one
+            // trial per candidate per generation, so the executed count
+            // divides exactly into completed generations; a generation cut
+            // short by cancellation floors to the ones that finished.
+            let generations_completed = if de.population == 0 {
+                0
+            } else {
+                executed.saturating_sub(de.population) / de.population
+            };
+            let mut result = result_from_method(
+                outcome,
+                kernel.reported_name(),
+                kernel.reported_strategy(),
+                termination,
+                objective.history(),
+                started.elapsed().as_secs_f64(),
+            );
+            result.search_diagnostics = Some(SearchDiagnostics {
+                converged: false,
+                analysis_evaluations: executed,
+                cache_hits: 0,
+                poll_iterations: generations_completed,
+                screening_evaluations: scan.screened,
+                screening_feasible: scan.feasible_screened,
+                verification_evaluations: scan_verification,
+                scan_wall_time_s: scan.elapsed_s,
+                search_wall_time_s: started.elapsed().as_secs_f64() - scan.elapsed_s,
+                workers: staged.workers,
+                poll_block_size: de.population,
+                first_feasible_cost: None,
+                relative_improvement: None,
+            });
+            return result;
+        }
 
         // Stage B: MADS over the full coupled objective, from the verified
         // start.  Legacy method names remain loadable for saved
         // configurations, but every product run uses this single driver; the
         // compatibility constructor above is the only path that still replays
         // differential evolution.
+        // MADS reads the flag between poll blocks, so the block is the bound
+        // and the adapter times it.
         let mut evaluator = BatchEvaluator {
             objective,
             workers: staged.workers,
+            scope: scope.clone(),
         };
-        let search_result = crate::search::mads::run(
+        let search_result = crate::search::mads::run_cancellable(
             bounds,
             initial_values.as_deref(),
             crate::search::mads::Settings {
@@ -610,15 +813,25 @@ impl DesignOptimizer {
                 minimal_positive_basis: staged.minimal_positive_basis,
                 ..Default::default()
             },
+            cancel,
             &mut evaluator,
             progress_callback,
         );
 
+        // `TerminationReason::Cancelled` already spells itself `"cancelled"`,
+        // which is the shared label every kernel reports; the assertion keeps
+        // the two vocabularies from drifting apart silently.
+        debug_assert!(
+            !search_result.termination.is_cancelled() || {
+                search_result.termination.as_str() == CANCELLED
+            }
+        );
         let termination = search_result.termination.as_str();
+        scope.search_finished(termination);
         let mut result = result_from_method(
             search_result.outcome,
-            "mads",
-            "progressive_barrier",
+            kernel.reported_name(),
+            kernel.reported_strategy(),
             termination,
             objective.history(),
             started.elapsed().as_secs_f64(),
@@ -652,6 +865,11 @@ struct ScanOutcome {
     feasible_screened: usize,
     /// Wall-clock seconds spent in the scan.
     elapsed_s: f64,
+    /// Whether the scan stopped on the caller's cancellation flag rather than
+    /// exhausting its sample. Its finalists are then drawn from the part of
+    /// the envelope it reached, which is why a cancelled scan may not start a
+    /// search.
+    cancelled: bool,
 }
 
 impl DesignOptimizer {
@@ -668,6 +886,7 @@ impl DesignOptimizer {
         bounds: &[(f64, f64)],
         initial: Option<&[f64]>,
         settings: &crate::search::staged::Settings,
+        scope: &CancelScope<'_>,
     ) -> ScanOutcome {
         let started = Instant::now();
         let empty = ScanOutcome {
@@ -675,9 +894,17 @@ impl DesignOptimizer {
             screened: 0,
             feasible_screened: 0,
             elapsed_s: 0.0,
+            cancelled: false,
         };
+        let cancel_requested = || scope.requested();
         if settings.scan_points == 0 || settings.scan_finalists == 0 || bounds.is_empty() {
             return empty;
+        }
+        if cancel_requested() {
+            return ScanOutcome {
+                cancelled: true,
+                ..empty
+            };
         }
         let sample =
             crate::search::staged::scan_sample(bounds, settings.scan_points, settings.seed);
@@ -689,7 +916,43 @@ impl DesignOptimizer {
             Some(nominal) => DesignObjective::new_with_nominal(screening, nominal),
             None => DesignObjective::new(screening),
         };
-        let scores = objective.evaluate_batch(&sample, settings.workers);
+        // The sample is scored in fixed-size blocks rather than as one batch
+        // so the cancellation flag is read at a bounded interval. Blocks are
+        // taken in sample order and their scores concatenated in that order,
+        // so the scan's history rows, its ranking and the finalists it
+        // nominates are identical to the single-batch form for an uncancelled
+        // run; only how far it gets changes. `workers` still decides how one
+        // block is spread, never which points are evaluated.
+        let block_size = settings.poll_block_size.max(1);
+        let mut scores: Vec<(f64, bool)> = Vec::with_capacity(sample.len());
+        let mut cancelled = false;
+        for (index, block) in sample.chunks(block_size).enumerate() {
+            scope.enter(CancelPhase::ScreeningScanBlock, index as u64);
+            if cancel_requested() {
+                cancelled = true;
+                scope.work_skipped(format!(
+                    "screening scan stopped before block {index} of {}",
+                    sample.len().div_ceil(block_size)
+                ));
+                break;
+            }
+            // One block is uninterruptible, so its measured duration - not
+            // the per-evaluation figure - is the cancellation bound while the
+            // scan is running. The block is reduced-fidelity and spread over
+            // `workers`, which is why it is timed separately.
+            let block_scores = scope.block(block.len() as u64, || {
+                objective.evaluate_batch(block, settings.workers)
+            });
+            scores.extend(block_scores);
+        }
+        let sample: Vec<Vec<f64>> = sample.into_iter().take(scores.len()).collect();
+        if sample.is_empty() {
+            return ScanOutcome {
+                cancelled,
+                elapsed_s: started.elapsed().as_secs_f64(),
+                ..empty
+            };
+        }
         let history = objective.history().clone();
         let mut ranked: Vec<(usize, ScoredPoint)> = sample
             .iter()
@@ -719,7 +982,64 @@ impl DesignOptimizer {
             screened: sample.len(),
             feasible_screened,
             elapsed_s: started.elapsed().as_secs_f64(),
+            cancelled,
         }
+    }
+
+    /// The result a product search reports when cancellation was observed
+    /// before Stage B could start.
+    ///
+    /// `verified` is the best point the bounded verification block scored with
+    /// the run's own full objective; when the scan was cancelled before it
+    /// nominated anything and the caller supplied no nominal, there is no
+    /// scored candidate at all and the winner is the explicit unevaluated
+    /// sentinel (infinite cost, invalid), which can never be mistaken for an
+    /// analysed design. Either way `termination` is [`CANCELLED`] and
+    /// `search_diagnostics.converged` is false.
+    #[allow(clippy::too_many_arguments)]
+    fn cancelled_before_search_result<E: SearchObjective + ?Sized>(
+        &self,
+        objective: &mut E,
+        kernel: Kernel,
+        start: Option<&[f64]>,
+        verified: Option<ScoredPoint>,
+        scan: &ScanOutcome,
+        scan_verification: usize,
+        workers: usize,
+        started: Instant,
+    ) -> OptimizationResult {
+        let winner = verified.unwrap_or_else(|| product_de::unevaluated(start.unwrap_or(&[])));
+        let elapsed = started.elapsed().as_secs_f64();
+        let mut result = result_from_method(
+            MethodOutcome {
+                winner,
+                pareto_front: Vec::new(),
+            },
+            kernel.reported_name(),
+            kernel.reported_strategy(),
+            CANCELLED,
+            objective.history(),
+            elapsed,
+        );
+        result.search_diagnostics = Some(SearchDiagnostics {
+            converged: false,
+            // Stage B never ran, so no analysis is attributable to the search
+            // itself; the scan and verification counts below are the whole
+            // cost of this run.
+            analysis_evaluations: 0,
+            cache_hits: 0,
+            poll_iterations: 0,
+            screening_evaluations: scan.screened,
+            screening_feasible: scan.feasible_screened,
+            verification_evaluations: scan_verification,
+            scan_wall_time_s: scan.elapsed_s,
+            search_wall_time_s: (elapsed - scan.elapsed_s).max(0.0),
+            workers,
+            poll_block_size: 0,
+            first_feasible_cost: None,
+            relative_improvement: None,
+        });
+        result
     }
 }
 
@@ -732,38 +1052,62 @@ impl DesignOptimizer {
 /// it ahead of the nominal, and those evaluations enter the run's history like
 /// any other. Including the nominal in the same block is what makes the
 /// comparison a like-for-like one.
+/// Re-evaluate the scan's finalists with the run's own full objective.
+///
+/// Under an already-requested cancellation the list is cut to the nominal
+/// point: Stage B will not start, so ranking the finalists decides nothing,
+/// and each one is a full coupled analysis of drain. Scoring the nominal is
+/// what keeps a cancelled run's reported winner an analysed design rather
+/// than the unevaluated sentinel - the smallest amount of work that preserves
+/// a real answer. With no nominal to fall back on, nothing is evaluated.
 fn verify_scan_finalists<E: SearchObjective + ?Sized>(
     objective: &mut E,
     candidates: &[Vec<f64>],
     nominal: Option<&[f64]>,
     workers: usize,
-) -> (Option<Vec<f64>>, usize) {
+    scope: &CancelScope<'_>,
+) -> (Option<ScoredPoint>, usize) {
     if candidates.is_empty() {
         return (None, 0);
     }
+    scope.enter(CancelPhase::ScanVerification, 0);
+    let cancelled = scope.requested();
     let mut points: Vec<Vec<f64>> = Vec::with_capacity(candidates.len() + 1);
     if let Some(values) = nominal {
         points.push(values.to_vec());
     }
-    for candidate in candidates {
-        if !points.iter().any(|existing| existing == candidate) {
-            points.push(candidate.clone());
+    if cancelled {
+        scope.work_skipped(format!(
+            "finalist verification cut to {} of {} points on the cancellation request",
+            points.len(),
+            candidates.len() + usize::from(nominal.is_some())
+        ));
+    } else {
+        for candidate in candidates {
+            if !points.iter().any(|existing| existing == candidate) {
+                points.push(candidate.clone());
+            }
         }
     }
+    if points.is_empty() {
+        return (None, 0);
+    }
     let before = objective.history().n_evaluations();
-    let scores = objective.evaluate_batch(&points, workers);
+    let scores = scope.block(points.len() as u64, || {
+        objective.evaluate_batch(&points, workers)
+    });
     let history = objective.history();
-    let mut best: Option<(usize, ScoredPoint)> = None;
+    let mut best: Option<ScoredPoint> = None;
     for (offset, (values, (cost, _))) in points.iter().zip(scores).enumerate() {
         let scored = scored_point_at(values, cost, history, before + offset);
         let better = best
             .as_ref()
-            .is_none_or(|(_, incumbent)| scored.feasibility_key() < incumbent.feasibility_key());
+            .is_none_or(|incumbent| scored.feasibility_key() < incumbent.feasibility_key());
         if better {
-            best = Some((offset, scored));
+            best = Some(scored);
         }
     }
-    (best.map(|(offset, _)| points[offset].clone()), points.len())
+    (best, points.len())
 }
 
 /// Adapter that evaluates one independent MADS block through the objective's
@@ -775,12 +1119,21 @@ fn verify_scan_finalists<E: SearchObjective + ?Sized>(
 struct BatchEvaluator<'a, E: SearchObjective + ?Sized> {
     objective: &'a mut E,
     workers: usize,
+    /// Cancellation telemetry for the block boundary, or an inert scope where
+    /// the caller times its own evaluations.
+    scope: CancelScope<'a>,
 }
 
 impl<E: SearchObjective + ?Sized> crate::search::mads::Evaluate for BatchEvaluator<'_, E> {
     fn evaluate_block(&mut self, points: &[Vec<f64>]) -> Vec<ScoredPoint> {
         let before = self.objective.history().n_evaluations();
-        let scores = self.objective.evaluate_batch(points, self.workers);
+        let scores = {
+            let objective = &mut *self.objective;
+            let workers = self.workers;
+            self.scope.block(points.len() as u64, || {
+                objective.evaluate_batch(points, workers)
+            })
+        };
         let history = self.objective.history();
         points
             .iter()

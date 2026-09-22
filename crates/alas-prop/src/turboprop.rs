@@ -911,8 +911,7 @@ mod tests {
         // A propeller at constant shaft power loses thrust as it accelerates.
         assert!(
             field.static_thrust_per_engine_n > field.mean_ground_roll_thrust_per_engine_n
-                && field.mean_ground_roll_thrust_per_engine_n
-                    > field.lift_off_thrust_per_engine_n
+                && field.mean_ground_roll_thrust_per_engine_n > field.lift_off_thrust_per_engine_n
         );
         // Sea-level static: the lapse is unity, so the available power is the
         // certificated rating itself.
@@ -1005,9 +1004,7 @@ mod tests {
                 "{mode:?} is listed as unsupported but was not refused"
             );
         }
-        assert!(envelope
-            .supported_modes
-            .contains(&TurbopropMode::Governed));
+        assert!(envelope.supported_modes.contains(&TurbopropMode::Governed));
         // A surrogate mode is the opposite case and must be separated from the
         // refused ones: it answers, and the answer is unvalidated. Reading it
         // as supported is the failure this split exists to prevent.

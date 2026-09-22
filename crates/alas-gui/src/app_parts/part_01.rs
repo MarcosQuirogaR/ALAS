@@ -78,6 +78,7 @@ impl App for AlasApp {
             self.layout_debug.begin_frame(ctx);
         }
         self.state.poll_navdata_download();
+        self.state.poll_openvsp_runtime_setup();
         self.state.poll_worker();
         self.state.screening.poll();
         for event in self.state.cfd.poll() {
@@ -115,6 +116,12 @@ impl App for AlasApp {
             || self.state.navdata_download_in_progress
         {
             ctx.request_repaint();
+        }
+        if self.state.openvsp_runtime_setup.running {
+            // The installer streams stage lines from a subprocess; a modest
+            // repaint cadence keeps the stage text current without spinning
+            // the UI at display refresh rate for a multi-minute download.
+            ctx.request_repaint_after(std::time::Duration::from_millis(100));
         }
         // Automatic sizing follows the client area until a View > Zoom action
         // records an explicit user preference above the native display scale.
@@ -318,6 +325,7 @@ impl App for AlasApp {
         overlays::show_advanced_guide(&mut self.state, ctx);
         overlays::show_storage_dialog(&mut self.state, ctx);
         overlays::show_about(&mut self.state, ctx);
+        crate::views::tool_intro::show_tool_intro(&mut self.state, ctx);
         crate::sandbox::advanced::show_advanced_settings_window(&mut self.state, ctx);
         crate::views::cfd_view::show_cfd_window(&mut self.state, ctx);
         crate::views::screening_window::show_screening_window(&mut self.state, ctx);

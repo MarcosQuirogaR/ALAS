@@ -105,10 +105,11 @@ pub use fuel_tanks::{
     AuxiliaryTankConfig, CenterTankConfig, FuelTankLayoutConfig, TrimTankConfig, WingTankConfig,
 };
 pub use geometry::{
-    ActiveEngineModel, EmpennageConfig, EngineBindingError, EngineConfig, FuselageConfig,
-    FuselageSection, FuselageSectionError, GeometryConfig, InboardAerodynamicStation,
-    MainWingPanel, MainWingStation, MainWingStationKind, TransportPlanform, TransportPlanformError,
-    WingConfig, WingSection, WingSectionError,
+    ActiveEngineModel, BodyFuselageExtent, EmpennageConfig, EngineBindingError, EngineConfig,
+    FuselageConfig, FuselageSection, FuselageSectionError, GeometryConfig,
+    InboardAerodynamicStation, LongitudinalStationFrame, MacFrame, MainWingPanel, MainWingStation,
+    MainWingStationKind, TransportPlanform, TransportPlanformError, WingConfig, WingSection,
+    WingSectionError,
 };
 pub use landing_gear::{
     effective_main_gear_station, EffectiveGearStationExt, EffectiveMainGearStation,
@@ -134,10 +135,12 @@ pub use performance::PerformanceConfig;
 pub use performance_presets::{PerformancePreset, UnknownPerformancePreset};
 pub use physics::DragModelConfig;
 pub use presets::{
-    AircraftPreset, AircraftReferenceData, AircraftVariantIdentity, CertifiedExitLayout,
-    CertifiedExitPair, CgEnvelopeCondition, CgEnvelopeEvidence, CgEnvelopeSource, CgEnvelopeVertex,
-    CgLimits, DesignMissionEvidence, DesignMissionReference, MissingDesignMissionDatum,
-    MissionEvidenceApplicability, PartialDesignMissionEvidence, PartialMissionEvidenceKind,
+    applicability_label, datum_label, AircraftPreset, AircraftReferenceData,
+    AircraftVariantIdentity, CertifiedExitLayout, CertifiedExitPair, CgEnvelopeCondition,
+    CgEnvelopeEvidence, CgEnvelopeSource, CgEnvelopeVertex, CgLimits, DesignMissionEvidence,
+    DesignMissionProvenanceSet, DesignMissionReference, MissingDesignMissionDatum,
+    MissionDatumProvenance, MissionEvidenceApplicability, MissionEvidenceTier,
+    MissionPromotionRefusal, PartialDesignMissionEvidence, PartialMissionEvidenceKind,
     PlanningCgEnvelope, PlanningMacReference, PublishedMissionLoadCase, PublishedRange,
     PublishedReserveContract, UnknownAircraftPreset,
 };

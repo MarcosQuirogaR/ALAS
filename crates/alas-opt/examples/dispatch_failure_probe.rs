@@ -49,10 +49,7 @@ fn probe(preset: &str, mode: &str) {
     println!("================ {preset} ({mode}) ================");
     match assess_product_candidate(&config, &design) {
         Ok(assessment) => {
-            println!(
-                "  dispatch status : {:?}",
-                assessment.sized.dispatch.status
-            );
+            println!("  dispatch status : {:?}", assessment.sized.dispatch.status);
             println!(
                 "  takeoff mass    : {:.1} kg | block fuel {:.1} kg",
                 assessment.sized.takeoff_mass_kg, assessment.sized.block_fuel_kg

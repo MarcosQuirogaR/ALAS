@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
+use std::sync::atomic::Ordering;
 use std::sync::mpsc::{channel, TryRecvError};
 use std::thread;
 
@@ -61,24 +62,45 @@ impl AppState {
         let specs = alas_route::assets::NAVDATA_FILES
             .iter()
             .map(|file| {
-                alas_exec::download::DownloadSpec::new(
+                let spec = alas_exec::download::DownloadSpec::new(
                     file.name,
                     alas_route::assets::navdata_file_url(file),
                     file.min_bytes,
-                )
+                );
+                match file.expected_sha256 {
+                    Some(hash) => spec.with_reviewed_sha256(hash),
+                    None => spec,
+                }
             })
             .collect::<Vec<_>>();
         let (sender, receiver) = channel();
         self.navdata_download_rx = Some(receiver);
         self.navdata_download_in_progress = true;
+        self.navdata_download_cancel.store(false, Ordering::Relaxed);
+        let cancel = Arc::clone(&self.navdata_download_cancel);
         self.log(
             format!("Downloading navigation data into {}...", target.display()),
             LogKind::Info,
         );
         thread::spawn(move || {
-            let result = alas_exec::download::download_files(&specs, &target, 120.0);
+            let result = alas_exec::download::download_files(&specs, &target, 120.0, &cancel);
             let _ = sender.send(result);
         });
+    }
+
+    /// Ask a running navigation-data download to stop.
+    ///
+    /// This flips a distinct signal from the pipeline's `cancel_flag` (see
+    /// its doc comment): the two downloads share no lifecycle. The download
+    /// worker checks it between files, and between short waits on the file
+    /// currently transferring, so this returns long before the whole
+    /// transfer would otherwise finish.
+    pub fn cancel_navdata_download(&mut self) {
+        if !self.navdata_download_in_progress {
+            return;
+        }
+        self.navdata_download_cancel.store(true, Ordering::Relaxed);
+        self.log("Cancelling navigation-data download...", LogKind::Warn);
     }
 
     /// Drain a completed navdata transfer without blocking the UI.
@@ -96,7 +118,7 @@ impl AppState {
         self.navdata_download_rx = None;
         self.navdata_download_in_progress = false;
         match result {
-            Ok(summary) => self.log(
+            Ok(alas_exec::download::DownloadOutcome::Completed(summary)) => self.log(
                 format!(
                     "Navigation data ready at {} (downloaded {}, skipped {}).",
                     summary.target_dir.display(),
@@ -105,10 +127,75 @@ impl AppState {
                 ),
                 LogKind::Info,
             ),
+            Ok(alas_exec::download::DownloadOutcome::Cancelled(summary)) => self.log(
+                format!(
+                    "Navigation-data download cancelled (kept {} file(s) already installed before stopping).",
+                    summary.downloaded.len()
+                ),
+                LogKind::Warn,
+            ),
             Err(error) => self.log(
                 format!("Navigation-data download failed: {error}"),
                 LogKind::Error,
             ),
+        }
+    }
+
+    /// Start the optional OpenVSP preview-runtime installer without blocking
+    /// the egui frame.
+    ///
+    /// `force` doubles as reinstall/repair: the only affordance in the GUI is
+    /// this one button, and the underlying script never deletes an existing
+    /// runtime under `-Force`, it backs it up first, so passing `true`
+    /// unconditionally is safe whether or not a runtime is already installed.
+    pub fn start_openvsp_runtime_setup(&mut self) {
+        if self.openvsp_runtime_setup.running {
+            return;
+        }
+        let destination = crate::openvsp_runtime_setup::resolve_destination(
+            self.tool_preferences.openvsp_dir.as_deref(),
+        );
+        self.log(
+            "Starting OpenVSP preview-runtime setup...",
+            LogKind::Info,
+        );
+        self.openvsp_runtime_setup.install(destination, true);
+    }
+
+    /// Ask a running OpenVSP preview-runtime setup to stop before it moves
+    /// any staged files into the destination.
+    pub fn cancel_openvsp_runtime_setup(&mut self) {
+        if !self.openvsp_runtime_setup.running {
+            return;
+        }
+        self.openvsp_runtime_setup.cancel();
+        self.log(
+            "Cancelling OpenVSP preview-runtime setup...",
+            LogKind::Warn,
+        );
+    }
+
+    /// Drain preview-runtime setup stage messages and log its terminal
+    /// outcome, if any, without blocking the UI.
+    pub fn poll_openvsp_runtime_setup(&mut self) {
+        use crate::openvsp_runtime_setup::PreviewInstallEvent;
+        match self.openvsp_runtime_setup.poll() {
+            None => {}
+            Some(PreviewInstallEvent::Completed) => {
+                self.log("OpenVSP preview runtime installed.", LogKind::Info);
+            }
+            Some(PreviewInstallEvent::Cancelled) => {
+                self.log(
+                    "OpenVSP preview-runtime setup cancelled; nothing already installed was touched.",
+                    LogKind::Warn,
+                );
+            }
+            Some(PreviewInstallEvent::Failed(error)) => {
+                self.log(
+                    format!("OpenVSP preview-runtime setup failed: {error}"),
+                    LogKind::Error,
+                );
+            }
         }
     }
 
@@ -160,7 +247,17 @@ impl AppState {
     }
 
     /// Append a run-log line, trimming the oldest once the cap is reached.
+    ///
+    /// An `Error`-severity line always opens the run log, independent of
+    /// whatever the panel's current visibility was. Every pre-run validation
+    /// failure and every Setup > Tools picker failure reports through this
+    /// path, so a user who has closed the log (or never opened it) still sees
+    /// why clicking Run or Browse did nothing. This only flips a visibility
+    /// flag; it does not request keyboard focus.
     pub fn log(&mut self, text: impl Into<String>, kind: LogKind) {
+        if matches!(kind, LogKind::Error) {
+            self.run_log_open = true;
+        }
         let elapsed = self.run_started.map(|started| started.elapsed());
         self.logs.push(LogLine {
             text: text.into(),
@@ -359,6 +456,83 @@ mod walkthrough_tests {
 
         assert!(state.pipeline_result.is_none());
         assert!(!state.pipeline_result_complete);
+    }
+}
+
+#[cfg(test)]
+mod navdata_cancellation_tests {
+    use super::AppState;
+    use alas_exec::download::{DownloadOutcome, DownloadReport};
+    use std::sync::atomic::Ordering;
+    use std::sync::mpsc::channel;
+
+    #[test]
+    fn cancelling_sets_only_the_navdata_flag_leaving_the_pipeline_flag_untouched() {
+        let mut state = AppState::default();
+        state.navdata_download_in_progress = true;
+
+        state.cancel_navdata_download();
+
+        assert!(state.navdata_download_cancel.load(Ordering::Relaxed));
+        assert!(!state.cancel_flag.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn cancelling_with_no_download_in_progress_does_not_arm_the_flag() {
+        let mut state = AppState::default();
+
+        state.cancel_navdata_download();
+
+        assert!(!state.navdata_download_cancel.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn a_cancelled_outcome_clears_progress_and_logs_a_cancellation_not_a_failure() {
+        let mut state = AppState::default();
+        state.navdata_download_in_progress = true;
+        let (sender, receiver) = channel();
+        state.navdata_download_rx = Some(receiver);
+        sender
+            .send(Ok(DownloadOutcome::Cancelled(DownloadReport {
+                target_dir: std::path::PathBuf::from("."),
+                downloaded: Vec::new(),
+                skipped: Vec::new(),
+            })))
+            .expect("deliver a cancelled outcome to the polling state");
+
+        state.poll_navdata_download();
+
+        assert!(!state.navdata_download_in_progress);
+        let last = state.logs.last().expect("a log line was recorded");
+        assert!(last.text.to_lowercase().contains("cancel"), "{}", last.text);
+        assert!(!last.text.to_lowercase().contains("fail"), "{}", last.text);
+    }
+}
+
+#[cfg(test)]
+mod log_visibility_tests {
+    use super::{AppState, LogKind};
+
+    #[test]
+    fn an_error_line_opens_the_run_log_even_when_it_was_closed() {
+        let mut state = AppState::default();
+        state.run_log_open = false;
+
+        state.log("Configuration is not currently valid.", LogKind::Error);
+
+        assert!(state.run_log_open);
+    }
+
+    #[test]
+    fn info_and_warn_lines_do_not_force_the_run_log_open() {
+        let mut state = AppState::default();
+        state.run_log_open = false;
+
+        state.log("Started pipeline execution.", LogKind::Info);
+        assert!(!state.run_log_open);
+
+        state.log("Cancellation requested.", LogKind::Warn);
+        assert!(!state.run_log_open);
     }
 }
 

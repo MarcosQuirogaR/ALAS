@@ -3,6 +3,8 @@
 
 #[path = "../presets/cg_envelope.rs"]
 mod cg_envelope;
+#[path = "../presets/mission_evidence.rs"]
+mod mission_evidence;
 #[path = "../presets/narrowbody.rs"]
 mod narrowbody;
 #[path = "../presets/reference.rs"]
@@ -15,6 +17,10 @@ mod widebody;
 pub use cg_envelope::{
     CgEnvelopeCondition, CgEnvelopeSource, CgEnvelopeVertex, CgLimits, PlanningCgEnvelope,
     PlanningMacReference,
+};
+pub use mission_evidence::{
+    applicability_label, datum_label, DesignMissionProvenanceSet, MissionDatumProvenance,
+    MissionEvidenceTier, MissionPromotionRefusal,
 };
 
 use std::sync::OnceLock;
@@ -668,8 +674,8 @@ const NARROWBODY_V2_OVER_VSR: f64 = 1.13;
 /// written for the AVE reference aircraft's design point (FL390, M0.84):
 /// 250 m/s true on the upper climb rungs. A true airspeed is not a flight
 /// condition. Applied to a narrowbody whose operational cruise is FL280, the
-/// same number lands at about 178 m/s equivalent — roughly 345 kt, past what
-/// an A320 climbs at by a third — and the mission deck refuses it with a typed
+/// same number lands at about 178 m/s equivalent - roughly 345 kt, past what
+/// an A320 climbs at by a third - and the mission deck refuses it with a typed
 /// climb energy deficit: measured at 6 894 m and 250.0 m/s, **57 046 N of drag
 /// against 56 106 N of maximum-climb rating**, so the aircraft cannot hold that
 /// speed level, let alone climb 3 m/s at it. That single defect rejected

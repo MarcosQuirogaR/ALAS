@@ -288,8 +288,17 @@ pub(super) fn assess_mass_balance(
         findings.push(PhysicalFinding {
             code: FindingCode::MassModelDisagreement,
             severity: FindingSeverity::Warning,
+            // Naming which path fed which consumer is the part that makes
+            // this actionable rather than merely noted: the hard model CG and
+            // gear constraints that decide feasibility are evaluated on the
+            // lumped coordinates, while the states published in this
+            // statement — the weight-and-balance evidence a reader acts on —
+            // are the ledger's. While the two disagree by more than the
+            // reporting band, the feasibility verdict and the delivered
+            // balance evidence are not about the same centre of gravity.
             message: format!(
-                "at {takeoff_fuel_kg:.0} kg of fuel the item ledger places the takeoff centre of gravity at {ledger_takeoff_cg_pct_mac:.1} percent MAC and the lumped model at {lumped_takeoff_cg_pct_mac:.1}; the tank fill order and the detailed payload sit differently from the lumped fuel and payload points"
+                "at {takeoff_fuel_kg:.0} kg of fuel the item ledger places the takeoff centre of gravity at {ledger_takeoff_cg_pct_mac:.1} percent MAC and the lumped model at {lumped_takeoff_cg_pct_mac:.1}; the tank fill order and the detailed payload sit differently from the lumped fuel and payload points. The hard model CG and gear constraints are evaluated on the lumped coordinates and the states below are the ledger's, so while the two disagree by {:.1} percent MAC the feasibility verdict and this balance statement do not describe the same centre of gravity",
+                (ledger_takeoff_cg_pct_mac - lumped_takeoff_cg_pct_mac).abs()
             ),
             actual: Some(ledger_takeoff_cg_pct_mac),
             limit: Some(lumped_takeoff_cg_pct_mac),

@@ -281,15 +281,23 @@ pub fn run_cli(args: &[String]) -> i32 {
         let specs = alas_route::assets::NAVDATA_FILES
             .iter()
             .map(|file| {
-                DownloadSpec::new(
+                let spec = DownloadSpec::new(
                     file.name,
                     alas_route::assets::navdata_file_url(file),
                     file.min_bytes,
-                )
+                );
+                match file.expected_sha256 {
+                    Some(hash) => spec.with_reviewed_sha256(hash),
+                    None => spec,
+                }
             })
             .collect::<Vec<_>>();
-        match download_files(&specs, &target, 120.0) {
-            Ok(summary) => {
+        // Headless/CI use has no interactive cancel control; the flag is
+        // created armed-off and never set.
+        let cancel = std::sync::atomic::AtomicBool::new(false);
+        match download_files(&specs, &target, 120.0, &cancel) {
+            Ok(outcome) => {
+                let summary = outcome.report();
                 println!(
                     "Navigation data ready at {} (downloaded {}, skipped {}).",
                     summary.target_dir.display(),

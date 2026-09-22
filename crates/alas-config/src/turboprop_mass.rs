@@ -3,8 +3,8 @@
 
 //! Declared inputs for the turboprop propulsion-group mass method.
 //!
-//! NASA/TM-2017-219627 Vol. I — the FLOPS source the production mass
-//! architecture evaluates — contains **no** propeller, gearbox or shaft-power
+//! NASA/TM-2017-219627 Vol. I - the FLOPS source the production mass
+//! architecture evaluates - contains **no** propeller, gearbox or shaft-power
 //! engine-mass equation: every propulsion term in sections 5.2.9 and 5.3 is
 //! parameterised on sea-level-static *thrust* (equations 69, 75-80, 86, 87,
 //! 89 and 92). Searching the published text for "propeller", "turboprop" or
@@ -23,20 +23,20 @@
 //! |---|---|---|
 //! | Engine (turbomachine + reduction gearbox) | declared certificated dry mass, else GASP specific weight | NASA CR-152303 Vol. V eq. V.1.3-V.1.4 |
 //! | Propeller | source-declared propeller mass, else Hamilton Standard regression | NASA CR-152303 Vol. V eq. V.1.28-V.1.29; NASA TM-83458 p. 5; aircraft source when declared |
-//! | Reduction gearbox | inside the declared engine mass | EASA TCDS IM.E.041 §III.2 |
+//! | Reduction gearbox | inside the declared engine mass | EASA TCDS IM.E.041 sec. III.2 |
 //! | Nacelle | area density times nacelle wetted area | NASA CR-152303 Vol. V eq. V.1.6 |
 //! | Pylon | `F_PYL (W_ENG + W_NAC)^0.736` | NASA CR-152303 Vol. V eq. V.1.7 |
 //! | Thrust reversers | none: reverse is by blade pitch | n/a |
 //! | Engine controls, starters, mounts | declared installation mass | declared |
 //! | Fuel system | FLOPS equation 92 (no thrust term) | NASA/TM-2017-219627 eq. 92 |
 //! | Unusable fuel | FLOPS **alternate** equation 161 | NASA/TM-2017-219627 eq. 161 |
-//! | Engine oil | declared; see below | — |
+//! | Engine oil | declared; see below | - |
 //!
 //! Equations 121 and 122 are the only operating items that read a thrust, so
 //! they are the only two that need a substitute. Section 7.1.4 of the same
 //! NASA document gives thrust-free alternates for both, which keeps the
 //! substitution inside the published source rather than importing a foreign
-//! correlation — but only equation 161 survives inspection. The alternate
+//! correlation - but only equation 161 survives inspection. The alternate
 //! engine oil, equation 162, is printed as `WOIL = 240 (NPASS + 39) / 40`
 //! (p. 56) and returns 1,248 lb of oil for the 169-passenger
 //! `LargeSingleAisle1` case against 130.23 lb from the default equation 122

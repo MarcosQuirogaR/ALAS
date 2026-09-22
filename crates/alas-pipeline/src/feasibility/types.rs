@@ -32,6 +32,11 @@ pub enum FindingCode {
     /// A loading state exceeds the modeled main-gear tire capacity.
     MainGearStrengthViolation,
     /// A loading state carries too little nose load for steering authority.
+    ///
+    /// When this fires it is often a *symptom* rather than the defect: see
+    /// [`alas_opt::AftCgLimitGovernance`], carried on
+    /// [`FeasibilityReport::model_cg`], for whether the envelope's aft
+    /// boundary is the one that actually governs the layout.
     MinimumNoseGearLoadViolation,
     /// The analyzed point lies outside a public manufacturer planning envelope.
     PublicPlanningCgEnvelopeViolation,
@@ -207,6 +212,83 @@ pub struct CgEnvelopeAssessment {
     pub source: Option<CgEnvelopeSource>,
     /// Document that controls actual-aircraft dispatch and loading.
     pub controlling_document: Option<&'static str>,
+    /// How far the built model's own mean-aerodynamic-chord leading edge sits
+    /// aft of the published planning one, in metres, positive aft.
+    ///
+    /// The comparison this assessment makes is only like for like when the
+    /// two references describe the same chord at the same station: the mass
+    /// stations summed into [`Self::cg_pct_mac`] are placed on the **model's**
+    /// geometry, while the percentage they are expressed as is referred to the
+    /// **manufacturer's** published leading edge and chord. A non-zero offset
+    /// here is a systematic shift of every reported percentage and is
+    /// therefore reported beside the verdict rather than absorbed into it.
+    ///
+    /// [`None`] when no planning envelope is registered or the built geometry
+    /// carries no usable chord.
+    pub model_mac_leading_edge_offset_m: Option<f64>,
+    /// Built model mean aerodynamic chord less the published planning chord,
+    /// in metres.
+    ///
+    /// Reported for the same reason as
+    /// [`Self::model_mac_leading_edge_offset_m`]: a percentage of one chord
+    /// compared against a limit stated as a percentage of a different chord
+    /// is a scale error on top of the datum offset.
+    pub model_mac_length_difference_m: Option<f64>,
+    /// The published planning mean aerodynamic chord the percentages above are
+    /// referred to, in metres, when one is registered.
+    pub published_mac_chord_m: Option<f64>,
+}
+
+/// Datum offset, as a fraction of the published chord, beyond which the model
+/// and published MAC references are reported as disagreeing.
+///
+/// Below it the shift is smaller than the rounding of the published vertices
+/// themselves; above it the reported percentage moves by an amount comparable
+/// with the width of the envelope's own margins.
+const MAC_DATUM_AGREEMENT_FRACTION: f64 = 0.01;
+
+/// The same, for the chord length. A chord scale error shifts every reported
+/// percentage proportionally rather than uniformly, so it is allowed a wider
+/// band before it is called a disagreement.
+const MAC_LENGTH_AGREEMENT_FRACTION: f64 = 0.02;
+
+impl CgEnvelopeAssessment {
+    /// Whether the model and published MAC references disagree by enough to
+    /// make the reported percentage a frame artefact rather than a measured
+    /// position.
+    ///
+    /// This does not change a verdict. A reported violation stays a reported
+    /// violation; this says whether the number that produced it is referred to
+    /// the chord its limit is stated in.
+    pub fn mac_references_disagree(&self) -> bool {
+        let Some(chord_m) = self
+            .published_mac_chord_m
+            .filter(|chord| chord.is_finite() && *chord > 0.0)
+        else {
+            return false;
+        };
+        self.model_mac_leading_edge_offset_m
+            .is_some_and(|offset| offset.abs() > MAC_DATUM_AGREEMENT_FRACTION * chord_m)
+            || self
+                .model_mac_length_difference_m
+                .is_some_and(|difference| {
+                    difference.abs() > MAC_LENGTH_AGREEMENT_FRACTION * chord_m
+                })
+    }
+
+    /// How far the reported percentage is shifted by the datum offset alone,
+    /// in percent MAC of the published chord, when both are known.
+    ///
+    /// A positive value means the model's chord starts aft of the published
+    /// one, so an unshifted model station reads *lower* than it should; the
+    /// sign is stated rather than left for the reader to derive.
+    pub fn mac_datum_shift_pct_mac(&self) -> Option<f64> {
+        let chord_m = self
+            .published_mac_chord_m
+            .filter(|chord| chord.is_finite() && *chord > 0.0)?;
+        let offset_m = self.model_mac_leading_edge_offset_m?;
+        offset_m.is_finite().then(|| 100.0 * offset_m / chord_m)
+    }
 }
 
 impl Default for CgEnvelopeAssessment {
@@ -220,6 +302,9 @@ impl Default for CgEnvelopeAssessment {
             aft_limit_pct_mac: None,
             source: None,
             controlling_document: None,
+            model_mac_leading_edge_offset_m: None,
+            model_mac_length_difference_m: None,
+            published_mac_chord_m: None,
         }
     }
 }

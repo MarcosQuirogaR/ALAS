@@ -264,18 +264,18 @@ pub(super) fn declared_architecture(name: &str) -> Option<DeclaredArchitecture> 
 /// cargo compartments (full evidence, with the quotations and the retrieval
 /// failures, in `evidence-cargo-loading.md` of the 2026-09-16 dispatch):
 ///
-/// * **ATR 72-600 — bulk.** The passenger aircraft has no lower hold at all:
+/// * **ATR 72-600 - bulk.** The passenger aircraft has no lower hold at all:
 ///   the forward and aft baggage compartments are on the main deck and are
 ///   loose-loaded against nets (ATR 72-600 factsheet p.22). Only the
 ///   72-600**F** freighter takes seven LD-3s, and it needs a cargo loading
 ///   system and a large door the passenger aircraft does not have (ATR
 ///   72-600F brochure, CM Marketing June 2018, pp.1-2).
-/// * **A220-300 — bulk.** An operator weight-and-balance manual states it
+/// * **A220-300 - bulk.** An operator weight-and-balance manual states it
 ///   verbatim: "Cargo compartments are used only for bulk load, Unit Load
 ///   Devices (ULD) are not used" and "All aircraft are equipped with bulk
 ///   compartments only. CLC not installed." (CSA/Smartwings A220-300 WBM
 ///   Rev 1, sections 1.6 and 1.6.1, p.1-13).
-/// * **A320-200 — bulk.** Airbus AC A320 Rev 44 section 2-6-0 shows ULD
+/// * **A320-200 - bulk.** Airbus AC A320 Rev 44 section 2-6-0 shows ULD
 ///   positions in the forward and aft holds, but containerised loading needs
 ///   a cargo loading system that is a line-fit option or a retrofit (FAA STC
 ///   ST02733LA / EASA 10074113), and the A320 volumes are published without
@@ -283,19 +283,19 @@ pub(super) fn declared_architecture(name: &str) -> Option<DeclaredArchitecture> 
 ///   aircraft is the A320-214 WV017 bulk arrangement; a provision is not a
 ///   configuration. This one is an inference from the certification and
 ///   volume evidence, not a manufacturer statement, and is recorded as such.
-/// * **A340-300, A380-800, B787-9, DC-10-30 — containerised.** All four load
+/// * **A340-300, A380-800, B787-9, DC-10-30 - containerised.** All four load
 ///   LD3/AKE-class containers and pallets in the forward and aft lower holds
 ///   (Airbus AC A340-200/-300 Rev 33 section 2-6-1; Airbus AC A380 Nov 2024
 ///   section 2-6-0; Boeing D6-58333 Rev Q section 2.6.2; Douglas ACAP
 ///   DAC-67803A Rev A section 2.1), which is where checked baggage goes.
 ///   Each also has a separate loose-loaded bulk compartment that cannot take
-///   a container — 12.4 % of the hold volume on the A340-300, 8.2 % on the
-///   A380-800, 6.6 % on the 787-9 and 11.4 % on the DC-10-30 — so declaring
+///   a container - 12.4 % of the hold volume on the A340-300, 8.2 % on the
+///   A380-800, 6.6 % on the 787-9 and 11.4 % on the DC-10-30 - so declaring
 ///   them fully containerised overstates the tare by at most that share,
 ///   about 160 kg on the A340-300. [`CargoHoldLoading::Mixed`] exists for the
 ///   split, but no retrieved source gives the *baggage* share between the two
 ///   holds, and a volume ratio is not that number, so it is not invented here.
-/// * **AVE — containerised**, as a notional widebody study declaration.
+/// * **AVE - containerised**, as a notional widebody study declaration.
 ///
 /// A capability the aircraft does not carry in its registered configuration is
 /// never used here, and an undeclared aircraft keeps the FLOPS convention
@@ -304,7 +304,7 @@ pub(super) fn declared_architecture(name: &str) -> Option<DeclaredArchitecture> 
 /// The residual on the four widebodies is stated rather than removed: each has
 /// a loose-loaded bulk compartment that cannot take a container, so declaring
 /// the whole hold containerised overstates the *reported* tare by at most the
-/// bulk share of the hold volume — 12.4 % (A340-300), 11.4 % (DC-10-30), 8.2 %
+/// bulk share of the hold volume - 12.4 % (A340-300), 11.4 % (DC-10-30), 8.2 %
 /// (A380-800), 6.6 % (B787-9), about 160 kg at the largest. No retrieved
 /// source gives the baggage split between the container holds and the bulk
 /// compartment, and a hold-volume ratio is not that number, so
@@ -325,10 +325,10 @@ pub(super) fn declared_architecture(name: &str) -> Option<DeclaredArchitecture> 
 /// Which method prices each aircraft's cabin equipment and occupant-driven
 /// operating items.
 ///
-/// The rule is the **LTH relations' own stated validity domain** — a civil
+/// The rule is the **LTH relations' own stated validity domain** - a civil
 /// transport whose maximum takeoff mass is *"mindestens 40 Tonnen ... bzw.
 /// sich mindestens 70 Passagiersitze an Bord befinden"*, i.e. **at least 40 t
-/// or at least 70 passenger seats** — applied uniformly through
+/// or at least 70 passenger seats** - applied uniformly through
 /// [`CabinEquipmentMethod::for_civil_transport_size`], and nothing else. The
 /// same function selects the method for a configuration built without a
 /// preset, so the two modes cannot disagree.
@@ -339,7 +339,7 @@ pub(super) fn declared_architecture(name: &str) -> Option<DeclaredArchitecture> 
 /// right and the premise was not: at 72 installed seats the ATR is **inside**
 /// the source's stated domain. The full rule is now applied, the ATR 72-600
 /// takes the LTH relations with every other registered aircraft, and its
-/// operating empty mass gets **280 kg worse** as a result — furnishings
+/// operating empty mass gets **280 kg worse** as a result - furnishings
 /// -1,549 kg, occupant operating items +1,829 kg, +15.09 % to +17.17 % against
 /// the ATR factsheet figure. That is the cost of a domain rule that is not
 /// trimmed to the answer, and it is also evidence in its own right: the ATR's
@@ -378,7 +378,7 @@ pub(super) fn declared_architecture(name: &str) -> Option<DeclaredArchitecture> 
 /// registered one.
 ///
 /// **One seat number.** The occupancy here is
-/// `requirements.num_passengers` — the same count
+/// `requirements.num_passengers` - the same count
 /// [`declared_architecture`] builds the class split from and the same count
 /// the LTH operating-item relation is evaluated at. An earlier revision read
 /// `reference.planning_seats` instead, which is a *reference* datum describing
@@ -397,7 +397,7 @@ pub(super) fn declared_architecture(name: &str) -> Option<DeclaredArchitecture> 
 /// respectively. That is a **configuration mismatch, not a model error**, and
 /// it is not closed here: changing the FLOPS seat input would price a cabin
 /// the rest of the product does not fly. It has to be closed in the cabin
-/// layout, which this module does not own — and until it is, a real share of
+/// layout, which this module does not own - and until it is, a real share of
 /// the remaining operating-empty deficits is a cabin difference rather than a
 /// mass method being wrong.
 fn declared_cabin_equipment_method(preset: &crate::AircraftPreset) -> CabinEquipmentMethod {

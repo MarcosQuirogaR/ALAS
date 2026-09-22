@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use alas_config::design_variables::DesignVector;
 use alas_config::AlasConfig;
 
@@ -12,6 +14,23 @@ use super::{
 use crate::evaluator::ObjectiveEvaluation;
 use crate::history::OptimizationHistory;
 use crate::python_rng::RandomState;
+
+/// A cheap synthetic product objective: every candidate is accepted, and the
+/// cost is a smooth function of the whole vector, so no design or seed makes
+/// the search stall on an all-infeasible generation.
+fn synthetic_objective(design: &DesignVector) -> ObjectiveEvaluation {
+    let values = design.to_array();
+    ObjectiveEvaluation {
+        cost: values.iter().map(|value| value * value).sum(),
+        valid: true,
+        l_over_d: 1.0,
+        span_m: design.span_m,
+        alpha_deg: 3.0,
+        area_m2: design.span_m * design.root_chord_m,
+        trim_ih_deg: 0.0,
+        reject_reason: String::new(),
+    }
+}
 
 #[test]
 fn convergence_uses_population_standard_deviation() {
@@ -438,17 +457,23 @@ fn native_worker_batches_merge_history_in_candidate_order() {
 }
 
 #[test]
-fn every_legacy_method_name_still_dispatches_through_the_single_mads_driver() {
-    // Every product run uses one MADS driver now (see the comment on
-    // `DesignOptimizer::run_product_search`); the legacy per-method names
-    // (`feasibility_first_de`, `nsga2`, `turbo_1`, `cma_es`) remain valid,
-    // loadable `optimizer.solver.method` values for saved configurations
-    // (`SolverSettings::is_supported_method`) but no longer select a
-    // distinct search algorithm or produce a genetic Pareto front. The
-    // shared contract this test actually verifies is that none of those
-    // saved values are rejected and every one reaches a finite, evaluated
-    // result through the same evaluator.
-    for method in ["feasibility_first_de", "nsga2", "turbo_1", "cma_es"] {
+fn every_supported_method_name_dispatches_to_the_kernel_it_names() {
+    // `optimizer.solver.method` selects the kernel and the result reports
+    // the kernel that ran, so a run can never be presented as an algorithm
+    // that did not execute. The differential-evolution names reach the
+    // feasibility-first kernel; `nsga2`, `turbo_1` and `cma_es` stay
+    // loadable for saved configurations
+    // (`SolverSettings::is_supported_method`) but have no population kernel
+    // behind them, so they run mesh adaptive direct search and say `mads`.
+    // Every supported name must still reach a finite, evaluated result
+    // through the same evaluator.
+    for (method, reported) in [
+        ("differential_evolution", "feasibility_first_de"),
+        ("feasibility_first_de", "feasibility_first_de"),
+        ("nsga2", "mads"),
+        ("turbo_1", "mads"),
+        ("cma_es", "mads"),
+    ] {
         let mut config = AlasConfig::default();
         config.optimizer.solver.method = method.to_owned();
         config.optimizer.solver.max_iterations = 1;
@@ -474,8 +499,353 @@ fn every_legacy_method_name_still_dispatches_through_the_single_mads_driver() {
             .run_with_evaluator(None, Some(&DesignVector::default()), &mut evaluator, None)
             .expect("the test objective accepts every candidate");
 
-        assert_eq!(result.method, "mads", "{method}");
+        assert_eq!(result.method, reported, "{method}");
         assert!(result.best_cost.is_finite(), "{method}");
         assert!(result.history.n_evaluations() > 0, "{method}");
     }
+}
+
+fn cancellable_de_config(max_iterations: i64) -> AlasConfig {
+    let mut config = AlasConfig::default();
+    config.optimizer.solver.method = "differential_evolution".to_owned();
+    config.optimizer.solver.population_size = 1;
+    config.optimizer.solver.max_iterations = max_iterations;
+    config.optimizer.solver.seed = Some(11);
+    config
+}
+
+#[test]
+fn a_cancellation_requested_after_one_generation_stops_before_the_generation_budget() {
+    // Measured, not assumed: a zero-generation run only ever evaluates the
+    // initial population, so its evaluation count is that population's size
+    // for this exact config.
+    let mut optimizer = DesignOptimizer::new(cancellable_de_config(0));
+    let baseline = optimizer
+        .run_with_evaluator(
+            None,
+            Some(&DesignVector::default()),
+            &mut synthetic_objective,
+            None,
+        )
+        .expect("the synthetic objective accepts every candidate");
+    let population = baseline.history.n_evaluations();
+    assert!(population > 0);
+
+    let max_iterations = 40;
+    let mut optimizer = DesignOptimizer::new(cancellable_de_config(max_iterations));
+    let cancel = AtomicBool::new(false);
+    let mut calls = 0usize;
+    let mut evaluator = |design: &DesignVector| {
+        calls += 1;
+        // The initial population plus the first generation's trials have
+        // all been scored by this point; request cancellation right at that
+        // generation boundary, not mid-generation.
+        if calls == population * 2 {
+            cancel.store(true, Ordering::Relaxed);
+        }
+        synthetic_objective(design)
+    };
+
+    let result = optimizer
+        .run_with_evaluator_cancellable(
+            None,
+            Some(&DesignVector::default()),
+            &mut evaluator,
+            None,
+            Some(&cancel),
+        )
+        .expect("a cancelled search still returns a scored candidate");
+
+    assert_eq!(result.termination, "cancelled");
+    assert!(
+        result.best_valid,
+        "the returned candidate must be a fully scored one, not a partial trial"
+    );
+    let full_budget = population * (1 + max_iterations as usize);
+    assert!(
+        result.history.n_evaluations() < full_budget,
+        "cancellation must stop well short of the {max_iterations}-generation budget: \
+         {} of {full_budget} evaluations",
+        result.history.n_evaluations()
+    );
+}
+
+/// A cancelled search must report the analyses it ran, not the budget it was
+/// given.
+///
+/// The diagnostics used to carry `de.evaluation_budget()` verbatim, so a run
+/// stopped after 94 coupled analyses claimed 576 of them - a cost figure five
+/// times the truth in the one place a reader looks to size the next run.
+#[test]
+fn a_cancelled_de_run_reports_the_analyses_it_executed_and_not_its_budget() {
+    let mut optimizer = DesignOptimizer::new(cancellable_de_config(0));
+    let baseline = optimizer
+        .run_with_evaluator(
+            None,
+            Some(&DesignVector::default()),
+            &mut synthetic_objective,
+            None,
+        )
+        .expect("the synthetic objective accepts every candidate");
+    let population = baseline.history.n_evaluations();
+
+    let max_iterations = 40;
+    let mut optimizer = DesignOptimizer::new(cancellable_de_config(max_iterations));
+    let cancel = AtomicBool::new(false);
+    let mut calls = 0usize;
+    let mut evaluator = |design: &DesignVector| {
+        calls += 1;
+        // Halfway through the second generation: a point no per-generation
+        // boundary falls on.
+        if calls == population * 2 + population / 2 {
+            cancel.store(true, Ordering::Relaxed);
+        }
+        synthetic_objective(design)
+    };
+
+    let result = optimizer
+        .run_with_evaluator_cancellable(
+            None,
+            Some(&DesignVector::default()),
+            &mut evaluator,
+            None,
+            Some(&cancel),
+        )
+        .expect("a cancelled search still returns a scored candidate");
+
+    let diagnostics = result
+        .search_diagnostics
+        .as_ref()
+        .expect("the DE path always reports diagnostics");
+    let budget = population * (1 + max_iterations as usize);
+    assert!(
+        diagnostics.analysis_evaluations < budget,
+        "a cancelled run may not report its full {budget}-analysis budget: {}",
+        diagnostics.analysis_evaluations
+    );
+    assert_eq!(
+        diagnostics.analysis_evaluations + diagnostics.verification_evaluations,
+        result.history.n_evaluations(),
+        "every analysis in the history is either a finalist verification or a search evaluation"
+    );
+    assert!(
+        diagnostics.poll_iterations < max_iterations as usize,
+        "a cancelled run may not report its full {max_iterations}-generation budget: {}",
+        diagnostics.poll_iterations
+    );
+    // The kernel scores the initial population, then one trial per candidate
+    // per generation, and `poll_block_size` carries that population, so the
+    // generation count is recoverable from the analysis count. The identity
+    // is what keeps the two fields from drifting apart.
+    assert_eq!(
+        diagnostics.poll_iterations,
+        diagnostics
+            .analysis_evaluations
+            .saturating_sub(diagnostics.poll_block_size)
+            / diagnostics.poll_block_size.max(1)
+    );
+}
+
+#[test]
+fn the_same_seed_without_cancellation_still_replays_deterministically() {
+    let run = || {
+        let mut optimizer = DesignOptimizer::new(cancellable_de_config(3));
+        optimizer
+            .run_with_evaluator_cancellable(
+                None,
+                Some(&DesignVector::default()),
+                &mut synthetic_objective,
+                None,
+                None,
+            )
+            .expect("the synthetic objective accepts every candidate")
+    };
+
+    let first = run();
+    let second = run();
+
+    assert_eq!(first.termination, "iteration_limit");
+    assert_eq!(second.termination, "iteration_limit");
+    assert_eq!(first.best_design, second.best_design);
+    assert_eq!(first.best_cost, second.best_cost);
+    assert_eq!(
+        first.history.n_evaluations(),
+        second.history.n_evaluations()
+    );
+}
+
+#[test]
+fn a_flag_already_set_stops_the_run_before_the_search_stage_and_reports_it_as_cancelled() {
+    // The A320 measurement case in miniature: the guard's flag is set while
+    // the run is still in Stage A, so no generation boundary has been reached
+    // yet. The run must still return - joinably, with a verdict - rather than
+    // carry on to the search stage that the flag was set to stop.
+    let mut optimizer = DesignOptimizer::new(cancellable_de_config(40));
+    let cancel = AtomicBool::new(true);
+
+    let result = optimizer
+        .run_with_evaluator_cancellable(
+            None,
+            Some(&DesignVector::default()),
+            &mut synthetic_objective,
+            None,
+            Some(&cancel),
+        )
+        .expect("a cancelled run returns a cancelled result, not a no-feasible-design error");
+
+    assert_eq!(result.termination, crate::CANCELLED);
+    assert!(result.was_cancelled());
+    assert!(
+        !result.converged(),
+        "a run stopped from outside reached no convergence criterion of its own"
+    );
+    assert!(
+        !result.is_delivered_feasible(),
+        "a cancelled search must never present its candidate as a delivered feasible design"
+    );
+    assert!(
+        result
+            .search_diagnostics
+            .as_ref()
+            .is_some_and(|diagnostics| !diagnostics.converged),
+        "the diagnostics must agree with the termination label"
+    );
+}
+
+#[test]
+fn a_cancelled_run_is_never_feasible_even_when_its_winner_scored_valid() {
+    // `best_valid` says the winner satisfied the constraints it was scored
+    // against. It is *not* a licence to deliver that winner: the search was
+    // stopped before it finished comparing candidates, so the feasibility
+    // verdict the reports read must refuse it on the cancellation alone.
+    let mut optimizer = DesignOptimizer::new(cancellable_de_config(40));
+    let cancel = AtomicBool::new(false);
+    let mut calls = 0usize;
+    let mut evaluator = |design: &DesignVector| {
+        calls += 1;
+        if calls == 64 {
+            cancel.store(true, Ordering::Relaxed);
+        }
+        synthetic_objective(design)
+    };
+
+    let result = optimizer
+        .run_with_evaluator_cancellable(
+            None,
+            Some(&DesignVector::default()),
+            &mut evaluator,
+            None,
+            Some(&cancel),
+        )
+        .expect("a cancelled search still returns a scored candidate");
+
+    assert!(result.was_cancelled());
+    assert!(
+        result.best_valid,
+        "this objective accepts every candidate, so the winner is valid; \
+         the point of the test is that validity alone is not feasibility"
+    );
+    assert!(!result.is_delivered_feasible());
+    assert!(!result.converged());
+}
+
+#[test]
+fn a_reporting_fidelity_rejection_also_refuses_the_delivered_feasibility_verdict() {
+    let mut optimizer = DesignOptimizer::new(cancellable_de_config(1));
+    let mut result = optimizer
+        .run_with_evaluator(
+            None,
+            Some(&DesignVector::default()),
+            &mut synthetic_objective,
+            None,
+        )
+        .expect("the synthetic objective accepts every candidate");
+    assert!(
+        result.is_delivered_feasible(),
+        "an uncancelled run with a valid winner and no acceptance record is deliverable"
+    );
+
+    result.record_delivered_acceptance(crate::DeliveredAcceptance {
+        verified: false,
+        finalist_rejected_by: vec!["fuel_policy_unavailable".to_owned()],
+        delivered_rejected_by: vec!["fuel_policy_unavailable".to_owned()],
+        rejection_messages: vec!["analytic dispatch model could not be built".to_owned()],
+        candidates_evaluated: 1,
+        delivered_is_search_finalist: true,
+        wall_time_s: 0.0,
+    });
+
+    assert_eq!(result.termination, crate::REPORTING_FIDELITY_REJECTED);
+    assert!(!result.is_delivered_feasible());
+    assert!(!result.converged());
+}
+
+#[test]
+fn a_legacy_population_method_token_runs_mads_and_the_result_says_mads() {
+    // `nsga2` has no kernel behind it. The run must not be reported as the
+    // algorithm the token names, and it must not be reported as differential
+    // evolution either: a reader has to be able to tell which search produced
+    // the design without reading the dispatch source.
+    //
+    // One token is exercised end to end here because each one costs a real
+    // screening scan; that `turbo_1` and `cma_es` select the same kernel is
+    // asserted directly on the dispatch in
+    // `search_methods::product_de::tests::a_method_name_selects_the_kernel_it_names`.
+    let mut config = cancellable_de_config(1);
+    config.optimizer.solver.method = "nsga2".to_owned();
+    let mut optimizer = DesignOptimizer::new(config);
+    let result = optimizer
+        .run_with_evaluator(
+            None,
+            Some(&DesignVector::default()),
+            &mut synthetic_objective,
+            None,
+        )
+        .expect("the synthetic objective accepts every candidate");
+
+    assert_eq!(result.method, "mads");
+    assert_eq!(result.strategy, "progressive_barrier");
+}
+
+#[test]
+fn the_differential_evolution_token_runs_the_de_kernel_and_not_mads() {
+    let mut optimizer = DesignOptimizer::new(cancellable_de_config(1));
+    let result = optimizer
+        .run_with_evaluator(
+            None,
+            Some(&DesignVector::default()),
+            &mut synthetic_objective,
+            None,
+        )
+        .expect("the synthetic objective accepts every candidate");
+
+    assert_eq!(result.method, "feasibility_first_de");
+    assert_eq!(result.strategy, "best1bin_feasibility_first");
+    assert_ne!(
+        result.method, "mads",
+        "a configuration that asks for differential evolution must not silently run MADS"
+    );
+}
+
+#[test]
+fn a_cancelled_gradient_run_reports_cancelled_rather_than_a_stationarity_verdict() {
+    let mut config = cancellable_de_config(40);
+    config.optimizer.solver.method = "sqp".to_owned();
+    let mut optimizer = DesignOptimizer::new(config);
+    let cancel = AtomicBool::new(true);
+
+    let result = optimizer
+        .run_with_evaluator_cancellable(
+            None,
+            Some(&DesignVector::default()),
+            &mut synthetic_objective,
+            None,
+            Some(&cancel),
+        )
+        .expect("a cancelled gradient run returns a result, not an error");
+
+    assert_eq!(result.method, "sqp");
+    assert_eq!(result.termination, crate::CANCELLED);
+    assert!(!result.converged());
+    assert!(!result.is_delivered_feasible());
 }

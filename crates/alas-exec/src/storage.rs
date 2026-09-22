@@ -93,6 +93,12 @@ impl StorageCategoryId {
 /// system temporary directory.
 pub const SCRATCH_PREFIXES: [&str; 2] = ["alas_mses_", "alas-analysis-"];
 
+#[path = "storage_parts/ownership.rs"]
+mod ownership;
+
+use ownership::{admitted, authorize_root, owns_configured_root, removal_target};
+pub use ownership::{mark_storage_root, OWNERSHIP_SENTINEL};
+
 /// The configured locations the inventory resolves.
 #[derive(Debug, Clone, Copy)]
 pub struct StorageLocations<'a> {
@@ -150,14 +156,18 @@ pub fn storage_inventory_with_temp(
             let (root, removable) = match id {
                 StorageCategoryId::GeneratedOutputs => (
                     output_root.clone(),
-                    children_except(&output_root, &cfd_root),
+                    if owns_configured_root(id, &output_root) {
+                        children_except(&output_root, &cfd_root)
+                    } else {
+                        Vec::new()
+                    },
                 ),
-                StorageCategoryId::AirfoilCfdCases => (cfd_root.clone(), vec![cfd_root.clone()]),
+                StorageCategoryId::AirfoilCfdCases => (cfd_root.clone(), admitted(id, &cfd_root)),
                 StorageCategoryId::SolverScratch => (temp.to_path_buf(), scratch_directories(temp)),
                 StorageCategoryId::DownloadedNavdata => {
-                    (navdata_root.clone(), vec![navdata_root.clone()])
+                    (navdata_root.clone(), admitted(id, &navdata_root))
                 }
-                StorageCategoryId::DownloadedTexture => (texture.clone(), vec![texture.clone()]),
+                StorageCategoryId::DownloadedTexture => (texture.clone(), admitted(id, &texture)),
             };
             let removable: Vec<PathBuf> = removable
                 .into_iter()
@@ -203,7 +213,9 @@ pub fn scratch_directories(temp: &Path) -> Vec<PathBuf> {
 }
 
 /// The direct children of `root` other than `except` (the CFD case root
-/// keeps its own category when it lives inside the output directory).
+/// keeps its own category when it lives inside the output directory) and
+/// other than [`OWNERSHIP_SENTINEL`], which outlives a clear so the root
+/// stays claimed.
 fn children_except(root: &Path, except: &Path) -> Vec<PathBuf> {
     let Ok(entries) = fs::read_dir(root) else {
         return Vec::new();
@@ -212,6 +224,10 @@ fn children_except(root: &Path, except: &Path) -> Vec<PathBuf> {
         .flatten()
         .map(|entry| entry.path())
         .filter(|path| !same_path(path, except))
+        .filter(|path| {
+            path.file_name()
+                .is_none_or(|name| name != OWNERSHIP_SENTINEL)
+        })
         .collect();
     children.sort();
     children
@@ -253,20 +269,86 @@ pub struct ClearOutcome {
     pub failed: Vec<(PathBuf, String)>,
 }
 
-/// Remove every removable path of `entry`. Paths that fail are reported,
-/// not retried; a solver still running in one of them keeps its directory.
+/// Remove every removable path of `entry` that its authorized root admits.
+/// Paths that fail are reported, not retried; a solver still running in one
+/// of them keeps its directory.
+///
+/// Removal is fail-closed and decided here rather than trusted from the
+/// inventory that produced the entry. The category root must be a location
+/// the application may reclaim ([`authorize_root`]), and each path must
+/// resolve to the root itself or to something inside it, compared by path
+/// component so a sibling whose name merely starts with the root's name is
+/// outside it. Anything else -- a `..` segment, a link aimed away from the
+/// root, an entry built against a different configuration -- is refused and
+/// left untouched, with the reason recorded in [`ClearOutcome::failed`].
+///
+/// The root must also be one the application owns
+/// ([`owns_configured_root`]): a claimed root, or one carrying evidence this
+/// program wrote it. A directory the user merely named in a setting is
+/// refused whole, so a mistyped or repointed output location cannot have its
+/// contents removed. Clearing an output root re-claims it, because the
+/// directory survives its own cleanup.
 pub fn clear_storage(entry: &StorageEntry) -> ClearOutcome {
     let mut outcome = ClearOutcome::default();
+    if entry.removable.is_empty() {
+        return outcome;
+    }
+    let root = match authorize_root(&entry.root) {
+        Ok(root) => root,
+        Err(reason) => {
+            for path in &entry.removable {
+                outcome
+                    .failed
+                    .push((path.clone(), format!("refused: {reason}")));
+            }
+            return outcome;
+        }
+    };
+    if !owns_configured_root(entry.id, &entry.root) {
+        for path in &entry.removable {
+            outcome.failed.push((
+                path.clone(),
+                format!(
+                    "refused: {} is not a storage root this application owns",
+                    entry.root.display()
+                ),
+            ));
+        }
+        return outcome;
+    }
     for path in &entry.removable {
-        let result = match path.symlink_metadata() {
-            Ok(metadata) if metadata.is_dir() => fs::remove_dir_all(path),
-            Ok(_) => fs::remove_file(path),
+        let target = match removal_target(path) {
+            Ok(target) if target.starts_with(&root) => target,
+            Ok(target) => {
+                outcome.failed.push((
+                    path.clone(),
+                    format!(
+                        "refused: {} is outside {}",
+                        target.display(),
+                        root.display()
+                    ),
+                ));
+                continue;
+            }
+            Err(reason) => {
+                outcome
+                    .failed
+                    .push((path.clone(), format!("refused: {reason}")));
+                continue;
+            }
+        };
+        let result = match target.symlink_metadata() {
+            Ok(metadata) if metadata.is_dir() => fs::remove_dir_all(&target),
+            Ok(_) => fs::remove_file(&target),
             Err(error) => Err(error),
         };
         match result {
             Ok(()) => outcome.removed.push(path.clone()),
             Err(error) => outcome.failed.push((path.clone(), error.to_string())),
         }
+    }
+    if entry.id == StorageCategoryId::GeneratedOutputs && !outcome.removed.is_empty() {
+        let _ = mark_storage_root(entry.id, &root);
     }
     outcome
 }
@@ -293,6 +375,7 @@ pub fn reset_tool_preferences(locator: &ToolLocator) -> Result<bool, String> {
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 #[cfg(test)]
 mod tests {
+    use super::ownership::home_directory;
     use super::*;
 
     struct Fixture {
@@ -431,5 +514,165 @@ mod tests {
         assert!(!locator.preferences_path().exists());
         assert!(user.join("keep.json").is_file());
         assert_eq!(reset_tool_preferences(&locator), Ok(false));
+    }
+
+    fn entry_for(root: &Path, removable: Vec<PathBuf>) -> StorageEntry {
+        let id = StorageCategoryId::GeneratedOutputs;
+        StorageEntry {
+            id,
+            label: id.label(),
+            description: id.description(),
+            root: root.to_path_buf(),
+            exists: !removable.is_empty(),
+            removable,
+            bytes: 0,
+            files: 0,
+        }
+    }
+
+    #[test]
+    fn clearing_refuses_a_removable_path_that_resolves_outside_its_root() {
+        let fixture = Fixture::new("escape");
+        let inside = fixture.write("app/outputs/design_database.json", 10);
+        let outside = fixture.write("precious/thesis.txt", 10);
+        let root = fixture.root.join("app").join("outputs");
+        let escape = root.join("..").join("..").join("precious");
+
+        let outcome = clear_storage(&entry_for(&root, vec![inside.clone(), escape.clone()]));
+
+        assert_eq!(outcome.removed, vec![inside.clone()]);
+        assert!(!inside.exists(), "the in-root path was not cleared");
+        assert!(outside.is_file(), "cleanup escaped its own root");
+        assert_eq!(outcome.failed.len(), 1);
+        assert_eq!(outcome.failed[0].0, escape);
+        assert!(
+            outcome.failed[0].1.starts_with("refused: "),
+            "{:?}",
+            outcome.failed[0]
+        );
+    }
+
+    #[test]
+    fn clearing_refuses_a_filesystem_root_without_touching_anything() {
+        let fixture = Fixture::new("fsroot");
+        let kept = fixture.write("app/outputs/design_database.json", 10);
+        let filesystem_root = fixture
+            .root
+            .ancestors()
+            .last()
+            .expect("every absolute path has a root")
+            .to_path_buf();
+
+        let outcome = clear_storage(&entry_for(&filesystem_root, vec![kept.clone()]));
+
+        assert!(outcome.removed.is_empty());
+        assert!(kept.is_file(), "a filesystem root was cleared");
+        assert_eq!(outcome.failed.len(), 1);
+        assert!(
+            outcome.failed[0].1.contains("filesystem root"),
+            "{:?}",
+            outcome.failed[0]
+        );
+    }
+
+    #[test]
+    fn clearing_refuses_the_home_directory_and_its_standard_folders() {
+        let fixture = Fixture::new("home");
+        let kept = fixture.write("app/outputs/design_database.json", 10);
+        let Some(home) = home_directory() else {
+            return;
+        };
+        for root in [home.clone(), home.join("Documents")] {
+            if !root.is_dir() {
+                continue;
+            }
+            let outcome = clear_storage(&entry_for(&root, vec![kept.clone()]));
+            assert!(outcome.removed.is_empty(), "{} was cleared", root.display());
+            assert!(kept.is_file());
+            assert_eq!(outcome.failed.len(), 1);
+            assert!(
+                outcome.failed[0].1.starts_with("refused: "),
+                "{:?}",
+                outcome.failed[0]
+            );
+        }
+    }
+
+    #[test]
+    fn an_output_root_without_evidence_of_ownership_is_not_inventoried() {
+        let fixture = Fixture::new("unowned");
+        let app = fixture.root.join("app");
+        let thesis = fixture.write("app/outputs/thesis.docx", 40);
+        let photo = fixture.write("app/outputs/photos/holiday.jpg", 60);
+        let locator = ToolLocator::new(&app, fixture.root.join("user"));
+        let temp = fixture.root.join("temp");
+
+        let entries = storage_inventory_with_temp(&locator, &locations(), &temp);
+        let outputs = entry(&entries, StorageCategoryId::GeneratedOutputs);
+        assert_eq!(outputs.root, app.join("outputs"));
+        assert!(!outputs.exists, "an unowned root was offered for clearing");
+        assert!(outputs.removable.is_empty());
+        assert_eq!((outputs.bytes, outputs.files), (0, 0));
+        assert!(thesis.is_file() && photo.is_file());
+    }
+
+    #[test]
+    fn clearing_refuses_a_root_the_application_does_not_own() {
+        let fixture = Fixture::new("unowned-clear");
+        let thesis = fixture.write("app/outputs/thesis.docx", 40);
+        let root = fixture.root.join("app").join("outputs");
+
+        let outcome = clear_storage(&entry_for(&root, vec![thesis.clone()]));
+
+        assert!(outcome.removed.is_empty());
+        assert!(thesis.is_file(), "an unowned root was cleared");
+        assert_eq!(outcome.failed.len(), 1);
+        assert!(
+            outcome.failed[0].1.contains("not a storage root"),
+            "{:?}",
+            outcome.failed[0]
+        );
+    }
+
+    #[test]
+    fn a_claimed_root_is_owned_and_keeps_its_sentinel_through_a_clear() {
+        let fixture = Fixture::new("claimed");
+        let app = fixture.root.join("app");
+        let data = fixture.write("app/outputs/notes.txt", 40);
+        let root = app.join("outputs");
+        let locator = ToolLocator::new(&app, fixture.root.join("user"));
+        let temp = fixture.root.join("temp");
+        assert!(
+            !owns_configured_root(StorageCategoryId::GeneratedOutputs, &root),
+            "unclaimed and unrecognized"
+        );
+
+        mark_storage_root(StorageCategoryId::GeneratedOutputs, &root).unwrap();
+        assert!(owns_configured_root(
+            StorageCategoryId::GeneratedOutputs,
+            &root
+        ));
+
+        let entries = storage_inventory_with_temp(&locator, &locations(), &temp);
+        let outputs = entry(&entries, StorageCategoryId::GeneratedOutputs);
+        assert_eq!(outputs.removable, vec![data.clone()]);
+        assert_eq!(
+            (outputs.bytes, outputs.files),
+            (40, 1),
+            "the sentinel is not reclaimable storage"
+        );
+
+        let outcome = clear_storage(outputs);
+        assert_eq!(outcome.removed, vec![data.clone()]);
+        assert!(outcome.failed.is_empty());
+        assert!(!data.exists());
+        assert!(
+            root.join(OWNERSHIP_SENTINEL).is_file(),
+            "the claim did not survive its own cleanup"
+        );
+        assert!(owns_configured_root(
+            StorageCategoryId::GeneratedOutputs,
+            &root
+        ));
     }
 }

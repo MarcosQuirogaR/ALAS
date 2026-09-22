@@ -10,7 +10,7 @@
 //! composition, not typography.
 
 use alas_gui::state::AppState;
-use egui::{Color32, Context, FullOutput, Pos2, RawInput, Rect, Shape, vec2};
+use egui::{vec2, Color32, Context, FullOutput, Pos2, RawInput, Rect, Shape};
 
 /// WCAG 2.1 relative-luminance contrast ratio.
 fn contrast_ratio(a: Color32, b: Color32) -> f32 {

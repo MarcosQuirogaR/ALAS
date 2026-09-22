@@ -42,8 +42,8 @@ impl Leaf for SystemsMassMethod {
 ///
 /// FLOPS equations 125-126 charge one 175 lb container for every 950 lb of
 /// containerised mass, and NASA Aviary's decks feed that equation the checked
-/// baggage as well as the revenue cargo. The tare is real hardware — a unit
-/// load device — so it exists only on an aircraft whose holds take one. A
+/// baggage as well as the revenue cargo. The tare is real hardware - a unit
+/// load device - so it exists only on an aircraft whose holds take one. A
 /// regional turboprop or a narrowbody with loose-loaded ("bulk") holds carries
 /// no ULD at all, and charging it one would put roughly a quarter of a tonne
 /// of equipment into an operating empty mass that never contains it.
@@ -299,7 +299,7 @@ impl FlopsTransportProvenance {
 ///
 /// On a single-aisle the three agree to within four percent. On a long-haul
 /// three-class widebody the two independent sources agree with each other and
-/// FLOPS is 40 % below both — about 11.7 t on the A340-300, which is two
+/// FLOPS is 40 % below both - about 11.7 t on the A340-300, which is two
 /// thirds of that aircraft's whole operating-empty-mass deficit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -328,7 +328,7 @@ pub enum CabinEquipmentMethod {
     /// Stated validity, in full: *"bezieht sich ausschliesslich auf zivile
     /// Verkehrsflugzeuge"*, restricted to those for which *"die maximale
     /// Abflugmasse (MTOW) mindestens 40 Tonnen betraegt bzw. sich mindestens
-    /// 70 Passagiersitze an Bord befinden"* — a civil transport with a maximum
+    /// 70 Passagiersitze an Bord befinden"* - a civil transport with a maximum
     /// takeoff mass of **at least 40 t or at least 70 passenger seats**.
     /// [`Self::for_civil_transport_size`] applies exactly that statement, both
     /// clauses, and nothing else.
@@ -369,8 +369,8 @@ impl CabinEquipmentMethod {
     /// reads a resulting error, and there is no per-aircraft exception.
     ///
     /// An earlier revision coded only the mass clause, as `MTOM > 40 t`. That
-    /// was a partial reading of the source, and it excluded the ATR 72-600 —
-    /// 23 t, 72 seats — which the seat clause admits. The rule below is the
+    /// was a partial reading of the source, and it excluded the ATR 72-600 -
+    /// 23 t, 72 seats - which the seat clause admits. The rule below is the
     /// full statement. Applying it moves the ATR 72-600 to the LTH relations,
     /// which makes that aircraft's operating empty mass **280 kg worse**
     /// against its published reference; the rule is applied anyway, because a

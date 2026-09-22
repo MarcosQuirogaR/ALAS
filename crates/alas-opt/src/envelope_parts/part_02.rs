@@ -160,7 +160,12 @@ pub fn assess_model_cg_envelope(
 
     let x_wing_ac = wing.aerodynamic_center(0.25)[0];
     let x_mac_le = x_wing_ac - 0.25 * mac;
-    let to_pct_mac = |x_m: f64| 100.0 * (x_m - x_mac_le) / mac;
+    // One declared MAC reference in the primary aircraft body frame (x aft
+    // from the fuselage nose tip, metres; percent MAC dimensionless), used by
+    // every percent-MAC number this function reports so a station and a limit
+    // cannot end up referred to different chords.
+    let mac_frame = MacFrame::new(x_mac_le, mac).ok_or(ModelCgEnvelopeError::InvalidInput)?;
+    let to_pct_mac = move |x_m: f64| mac_frame.pct_mac(x_m).unwrap_or(f64::NAN);
     let neutral_point_pct_mac = to_pct_mac(x_np);
     let aerodynamic_aft_limit_pct_mac =
         neutral_point_pct_mac - 100.0 * config.requirements.min_physical_static_margin;
@@ -253,11 +258,34 @@ pub fn assess_model_cg_envelope(
         .map(|assessment| assessment.static_margin)
         .ok_or(ModelCgEnvelopeError::InvalidInput)?;
 
+    // The second, independent aft boundary: the centre of gravity at which
+    // the two-point static split leaves exactly `pct_load_nlg_min` of the
+    // weight on the nose wheel. Aft of it the aeroplane runs out of steering
+    // authority and then tips back; it is the tip-back/nose-load limit a real
+    // aft CG limit is the more forward of, and this assessment has never
+    // placed it. Same frame, same chord reference, same wheelbase as the
+    // reactions above, so the comparison is like for like.
+    let ground_aft_limit_x_m = x_main_gear - config.mass_model.pct_load_nlg_min * wheelbase_m;
+    let ground_aft_limit_pct_mac = to_pct_mac(ground_aft_limit_x_m);
+    let main_gear_station_pct_mac = to_pct_mac(x_main_gear);
+    let aft_limit_governance = if !ground_aft_limit_pct_mac.is_finite() {
+        AftCgLimitGovernance::NotEvaluated
+    } else if aerodynamic_aft_limit_pct_mac > ground_aft_limit_pct_mac {
+        AftCgLimitGovernance::GroundMinimumNoseLoad {
+            margin_pct_mac: aerodynamic_aft_limit_pct_mac - ground_aft_limit_pct_mac,
+        }
+    } else {
+        AftCgLimitGovernance::Aerodynamic
+    };
+
     Ok(ModelCgEnvelopeAssessment {
         loading_states: loading_assessments,
         minimum_physical_static_margin: config.requirements.min_physical_static_margin,
         aerodynamic_aft_limit_pct_mac,
         configured_forward_limit_pct_mac,
+        main_gear_station_pct_mac,
+        ground_aft_limit_pct_mac,
+        aft_limit_governance,
         target_static_margin: StaticMarginPreferenceAssessment {
             actual: mtow_static_margin,
             target: config.requirements.target_static_margin,
@@ -406,11 +434,14 @@ pub fn check_cg_envelope(
     }
 }
 
+// Tests assert on inputs they constructed here, so a failed expect or panic is
+// the assertion failing rather than a library invariant breaking.
+#[allow(clippy::expect_used)]
 #[cfg(test)]
 mod tests {
     use super::{
         assess_loading_constraints, assess_model_cg_envelope, check_cg_envelope,
-        ground_reaction_constraint, is_flight_eligible_state, loading_states,
+        ground_reaction_constraint, is_flight_eligible_state, loading_states, AftCgLimitGovernance,
         LoadingConstraintInputs, ModelCgConstraint, ModelCgEnvelopeError, ModelCgLoadingState,
         StationError,
     };
@@ -603,7 +634,9 @@ mod tests {
 
     #[test]
     fn oew_is_the_only_state_excluded_from_flight_eligibility() {
-        assert!(!is_flight_eligible_state(ModelCgLoadingState::OperatingEmpty));
+        assert!(!is_flight_eligible_state(
+            ModelCgLoadingState::OperatingEmpty
+        ));
         for state in [
             ModelCgLoadingState::AnalyzedZeroFuel,
             ModelCgLoadingState::OperationalMidMission,
@@ -625,8 +658,12 @@ mod tests {
         assert!(!ground_reaction_constraint(
             ModelCgConstraint::ConfiguredForwardCgRange
         ));
-        assert!(ground_reaction_constraint(ModelCgConstraint::NoseGearStrength));
-        assert!(ground_reaction_constraint(ModelCgConstraint::MainGearStrength));
+        assert!(ground_reaction_constraint(
+            ModelCgConstraint::NoseGearStrength
+        ));
+        assert!(ground_reaction_constraint(
+            ModelCgConstraint::MainGearStrength
+        ));
         assert!(ground_reaction_constraint(
             ModelCgConstraint::MinimumNoseGearLoad
         ));
@@ -972,5 +1009,200 @@ mod tests {
         )
         .unwrap_or_else(|error| panic!("a registered anchor must restore the assessment: {error}"));
         assert!(!assessment.loading_states.is_empty());
+    }
+
+    /// The A320-200's registered main-gear station — Airbus' 17.71 m
+    /// nose-tip drawing dimension under a 12.64 m EASA A.064 wheelbase — sits
+    /// **forward** of the aerodynamic aft boundary this envelope derives from
+    /// the static-margin floor. That is the root cause of the baseline's
+    /// `minimum nose-gear load` finding on this preset: the envelope's aft
+    /// end is not the boundary that governs, so it admits centres of gravity
+    /// the gear cannot carry and the nose-load constraint fires as a symptom
+    /// at whichever loading state lands there.
+    ///
+    /// The assessment must now name that, and must do so **without** moving
+    /// either published limit.
+    #[test]
+    fn the_a320_200_aerodynamic_aft_limit_is_not_the_governing_one() {
+        let (config, plane, masses, coordinates, cg_x) = preset_case("A320-200");
+        // The neutral point the 2026-09-22 eight-preset baseline measured for
+        // this preset, m aft of the nose tip
+        // (`preset_acceptance_matrix.json`,
+        // `A320-200.model_audit.aerodynamics.neutral_point_x_m`). The shared
+        // fixture's `cg_x + 0.10 * c_ref` stand-in is a synthetic margin about
+        // a lumped centre of gravity and lands 1.7 m forward of it, which is
+        // not the aeroplane whose aft boundary is in question.
+        let x_np = 18.417_621_430_740_57;
+        assert!(
+            x_np > cg_x,
+            "the recorded neutral point must still be aft of this fixture's centre of gravity"
+        );
+        let assessment = assess_model_cg_envelope(
+            &plane,
+            &masses,
+            &coordinates,
+            cg_x,
+            x_np,
+            plane.c_ref,
+            &config,
+        )
+        .unwrap_or_else(|error| panic!("the A320-200 must be assessed: {error}"));
+
+        assert!(
+            assessment.main_gear_station_pct_mac < assessment.aerodynamic_aft_limit_pct_mac,
+            "the registered main gear at {:.3} % MAC is expected forward of the aerodynamic aft \
+             limit at {:.3} % MAC",
+            assessment.main_gear_station_pct_mac,
+            assessment.aerodynamic_aft_limit_pct_mac
+        );
+        match assessment.aft_limit_governance {
+            AftCgLimitGovernance::GroundMinimumNoseLoad { margin_pct_mac } => assert!(
+                margin_pct_mac > 0.0,
+                "the overhang must be positive, got {margin_pct_mac} % MAC"
+            ),
+            other => panic!("the ground boundary must govern this layout, got {other:?}"),
+        }
+
+        // The measured band, pinned so a future geometry, gear-anchor or
+        // neutral-point change that closes or widens it is a visible result
+        // rather than a silent one. The tolerance is loose enough to survive
+        // floating-point drift and tight enough that a centimetre-scale
+        // station change shows up.
+        for (measured, expected, name) in [
+            (assessment.main_gear_station_pct_mac, 33.917, "main gear"),
+            (
+                assessment.aerodynamic_aft_limit_pct_mac,
+                45.782,
+                "aerodynamic aft limit",
+            ),
+            (
+                assessment.ground_aft_limit_pct_mac,
+                27.892,
+                "ground minimum-nose-load aft boundary",
+            ),
+            (
+                assessment.configured_forward_limit_pct_mac,
+                15.782,
+                "configured forward limit",
+            ),
+            (
+                assessment.aft_limit_governance.overhang_pct_mac(),
+                17.890,
+                "overhang",
+            ),
+        ] {
+            assert!(
+                (measured - expected).abs() < 5.0e-3,
+                "{name}: {measured:.4} % MAC against the pinned {expected:.3} % MAC"
+            );
+        }
+
+        // The diagnostic tightens nothing and loosens nothing: the governing
+        // limit is the more forward of the two, and the forward limit is
+        // still measured from the aerodynamic boundary, not from it.
+        assert!(
+            assessment.governing_aft_limit_pct_mac() < assessment.aerodynamic_aft_limit_pct_mac
+        );
+        assert!(
+            (assessment.configured_forward_limit_pct_mac
+                - (assessment.aerodynamic_aft_limit_pct_mac
+                    - config.requirements.cg_range_pct_mac))
+                .abs()
+                < 1.0e-9,
+            "the forward limit must stay anchored on the aerodynamic aft boundary"
+        );
+    }
+
+    /// The contrast case that keeps the diagnostic from being a blanket
+    /// verdict on every aircraft: the A340-300's wheel-count-weighted
+    /// main-gear centroid sits far enough aft that its stability boundary is
+    /// reached first, so the aerodynamic limit does govern and no overhang is
+    /// reported.
+    #[test]
+    fn the_a340_300_aerodynamic_aft_limit_governs_its_own_layout() {
+        let (config, plane, masses, coordinates, cg_x) = preset_case("A340-300");
+        // The same baseline's recorded neutral point for this preset, m aft of
+        // the nose tip, for the same reason as the A320-200 case above.
+        let x_np = 30.944_143_305_533_34;
+        assert!(x_np > cg_x);
+        let assessment = assess_model_cg_envelope(
+            &plane,
+            &masses,
+            &coordinates,
+            cg_x,
+            x_np,
+            plane.c_ref,
+            &config,
+        )
+        .unwrap_or_else(|error| panic!("the A340-300 must be assessed: {error}"));
+
+        assert_eq!(
+            assessment.aft_limit_governance,
+            AftCgLimitGovernance::Aerodynamic,
+            "ground aft limit {:.3} % MAC against aerodynamic {:.3} % MAC",
+            assessment.ground_aft_limit_pct_mac,
+            assessment.aerodynamic_aft_limit_pct_mac
+        );
+        assert_eq!(assessment.aft_limit_governance.overhang_pct_mac(), 0.0);
+        assert!(
+            (assessment.governing_aft_limit_pct_mac() - assessment.aerodynamic_aft_limit_pct_mac)
+                .abs()
+                < 1.0e-12
+        );
+    }
+
+    /// The ground boundary is the same two-point split the loading states
+    /// use, so it must reproduce the nose-load constraint exactly: a centre
+    /// of gravity placed on it carries precisely the configured minimum nose
+    /// load, and the boundary sits forward of the main-gear station by the
+    /// nose-load fraction of the wheelbase.
+    #[test]
+    fn the_ground_aft_boundary_is_the_state_nose_load_split_read_backwards() {
+        let (config, plane, masses, coordinates, cg_x) = preset_case("A320-200");
+        let x_np = cg_x + 0.10 * plane.c_ref;
+        let assessment = assess_model_cg_envelope(
+            &plane,
+            &masses,
+            &coordinates,
+            cg_x,
+            x_np,
+            plane.c_ref,
+            &config,
+        )
+        .unwrap_or_else(|error| panic!("the A320-200 must be assessed: {error}"));
+
+        let fus = &plane.fuselages[0];
+        let fus_start_x = fus.xsecs[0].xyz_c[0];
+        let fus_len = fus.xsecs[fus.xsecs.len() - 1].xyz_c[0] - fus_start_x;
+        let mac = plane.c_ref;
+        let x_mac_le = plane.wings[0].aerodynamic_center(0.25)[0] - 0.25 * mac;
+        let stations = config.landing_gear.resolved_station_positions(
+            fus_start_x + fus_len * config.mass_model.nlg_x_fraction,
+            x_mac_le + config.mass_model.mlg_x_fraction_mac * mac,
+            fus_start_x,
+            fus_len,
+        );
+        assert!(
+            stations.source_scaled,
+            "the A320-200 registers published gear stations"
+        );
+        let wheelbase_m = stations.x_mlg_m - stations.x_nlg_m;
+        let expected_pct_mac = 100.0
+            * (stations.x_mlg_m - config.mass_model.pct_load_nlg_min * wheelbase_m - x_mac_le)
+            / mac;
+        assert!(
+            (assessment.ground_aft_limit_pct_mac - expected_pct_mac).abs() < 1.0e-9,
+            "{} against {expected_pct_mac}",
+            assessment.ground_aft_limit_pct_mac
+        );
+
+        // A state balanced on the boundary carries exactly the minimum.
+        let x_cg = x_mac_le + assessment.ground_aft_limit_pct_mac / 100.0 * mac;
+        let nose_fraction = (stations.x_mlg_m - x_cg) / wheelbase_m;
+        assert!(
+            (nose_fraction - config.mass_model.pct_load_nlg_min).abs() < 1.0e-9,
+            "{nose_fraction} against {}",
+            config.mass_model.pct_load_nlg_min
+        );
     }
 }

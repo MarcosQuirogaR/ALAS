@@ -364,6 +364,50 @@ fn launch_events(event: &RunEvent, launches: &[LaunchRecord]) -> Vec<RunEvent> {
 }
 
 #[cfg(test)]
+mod pre_run_error_visibility_tests {
+    use crate::state::AppState;
+
+    #[test]
+    fn an_invalid_configuration_surfaces_the_run_log_instead_of_doing_nothing() {
+        let mut state = AppState::default();
+        state.run_log_open = false;
+        state.config_values = serde_json::Value::Null;
+
+        state.start_pipeline(false);
+
+        assert!(!state.is_running);
+        assert!(
+            state.run_log_open,
+            "an invalid configuration must surface a visible error, not silently no-op"
+        );
+    }
+
+    #[test]
+    fn an_incomplete_design_vector_surfaces_the_run_log() {
+        let mut state = AppState::default();
+        state.run_log_open = false;
+        state.design_values.clear();
+
+        state.start_pipeline(false);
+
+        assert!(!state.is_running);
+        assert!(state.run_log_open);
+    }
+
+    #[test]
+    fn incomplete_optimizer_bounds_surface_the_run_log() {
+        let mut state = AppState::default();
+        state.run_log_open = false;
+        state.bounds.clear();
+
+        state.start_pipeline(false);
+
+        assert!(!state.is_running);
+        assert!(state.run_log_open);
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use std::time::SystemTime;

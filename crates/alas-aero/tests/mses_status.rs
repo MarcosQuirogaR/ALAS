@@ -52,10 +52,20 @@ fn missing_free_transition_database_stops_before_launching_any_solver() {
     let result = run_mses_polar(&airfoil(), 0.3, 5.0e6, 2.0, &settings, &root);
     assert_eq!(result.status, MsesStatus::Incomplete);
     assert!(result.solver_attempts.is_empty());
-    assert!(result.error.as_deref().unwrap().contains("No solver retries were run"));
+    assert!(result
+        .error
+        .as_deref()
+        .unwrap()
+        .contains("No solver retries were run"));
     assert_eq!(result.converged_alpha_count, 0);
     let pressure = alas_aero::mses::run_mses_pressure_distribution(
-        &airfoil(), 0.3, 5.0e6, 2.0, &settings, &root, None,
+        &airfoil(),
+        0.3,
+        5.0e6,
+        2.0,
+        &settings,
+        &root,
+        None,
     );
     assert_eq!(pressure.status, MsesStatus::Incomplete);
     assert!(pressure.solver_attempts.is_empty());

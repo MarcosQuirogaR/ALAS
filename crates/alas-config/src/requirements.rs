@@ -158,7 +158,7 @@ pub struct DesignRequirements {
     #[config(
         advanced,
         label = "Ultimate load factor (n_ult)",
-        help = "Structural screening input fed into the Torenbeek mass formulas. The shipped 3.75 is 1.5 × 2.5; verify the selected certification basis, amendment, aircraft category and load case before treating it as an airworthiness value."
+        help = "Structural screening input fed into the Torenbeek mass formulas. The shipped 3.75 is 1.5 x 2.5; verify the selected certification basis, amendment, aircraft category and load case before treating it as an airworthiness value."
     )]
     pub ultimate_load_factor: f64,
 

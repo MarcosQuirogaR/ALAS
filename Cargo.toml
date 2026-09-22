@@ -3,7 +3,7 @@ resolver = "2"
 members = ["crates/*", "xtask"]
 
 [workspace.package]
-version = "1.1.0"
+version = "1.2.0"
 edition = "2021"
 license = "AGPL-3.0-or-later"
 authors = ["Marcos Quiroga Rodriguez <marcos.quiroga.rodriguez@gmail.com>"]

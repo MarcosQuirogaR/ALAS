@@ -23,29 +23,29 @@
     "wing_x_shift_m": 0.0
   },
   "geometry": {
-    "tip_chord_m": 1.6,
-    "v_stab_area_m2": 62.23000000000002,
-    "outboard_sweep_deg": 34.0,
-    "reference_area_m2": 535.0038750000001,
     "reference_span_m": 71.75,
-    "break_chord_m": 7.8,
+    "break_span_m": 13.27375,
+    "break_span_fraction": 0.37,
+    "outboard_sweep_deg": 34.0,
+    "h_stab_area_m2": 112.2,
     "inboard_sweep_deg": 34.0,
-    "fuselage_length_m": 76.72,
-    "unfolded_span_m": 72.34096322003373,
-    "aspect_ratio": 9.622477033460736,
+    "taper_ratio": 0.09696969696969697,
+    "tip_chord_m": 1.6,
+    "sweep_deg": 34.0,
+    "span_m": 71.75,
     "wing_area_m2": 535.0038750000001,
     "unfolded_wing_area_m2": 539.6184536174989,
-    "taper_ratio": 0.09696969696969697,
-    "projected_wing_area_m2": 535.0038750000001,
-    "break_span_fraction": 0.37,
     "break_leading_edge_x_offset_m": 8.95325742543716,
+    "break_chord_m": 7.8,
+    "reference_area_m2": 535.0038750000001,
+    "unfolded_span_m": 72.34096322003373,
+    "root_chord_m": 16.5,
+    "v_stab_area_m2": 62.23000000000002,
     "projected_span_m": 71.75,
-    "break_span_m": 13.27375,
-    "h_stab_area_m2": 112.2,
-    "span_m": 71.75,
+    "fuselage_length_m": 76.72,
     "mean_aerodynamic_chord_m": 9.778200117945687,
-    "sweep_deg": 34.0,
-    "root_chord_m": 16.5
+    "projected_wing_area_m2": 535.0038750000001,
+    "aspect_ratio": 9.622477033460736
   },
   "aerodynamics": {
     "aspect_ratio": 9.622477033460736,
@@ -106,8 +106,17 @@
         "V-Stab": 1802.7787498919174,
         "Wing": 41340.073072419036
       },
+      "equation_methods": {
+        "cabin_equipment": "lth_civil_transport_v1",
+        "installed_propulsion": "FLOPS",
+        "nozzle_scope": "included_in_baseline",
+        "pylons": "none",
+        "starter_scope": "separate_equation_89"
+      },
       "inputs": {
+        "apu_installed": true,
         "business_class_passenger_count": 0,
+        "cabin_equipment_method": "lth_civil_transport_v1",
         "containerized_cargo_kg": 0.0,
         "design_gross_mass_kg": 358670.0,
         "design_range_nmi": 7600.0,
@@ -122,6 +131,7 @@
         "fuselage_mounted_engine_count": 0,
         "fuselage_width_m": 6.2,
         "galley_crew_count": 0,
+        "haul_class": "long_haul",
         "hydraulic_pressure_pa": 20684271.879504,
         "maximum_fuel_capacity_kg": 200000.0,
         "maximum_mach": 0.9,
@@ -155,12 +165,12 @@
           "uncertainty": "twin wing-mounted engines, fixed wing, three tanks and 3,000 psi are study inputs"
         },
         "cabin": {
-          "applicability": "generic notional transport; configured run must replace with aircraft evidence when available",
+          "applicability": "generic notional transport; configured run must replace with aircraft evidence when available; canonical cabin resolution for this evaluation uses FLOPS class counts First=0, Business=0, Tourist=525",
           "document": "ALAS pure FLOPS conventional transport default",
           "evidence": "user_declared",
           "location": "FlopsTransportConfig::working_default",
           "revision": "ALAS 2026-09-11",
-          "uncertainty": "the cabin is an all-economy 350-seat study scenario"
+          "uncertainty": "the cabin is an all-economy 350-seat study scenario; the serialized FLOPS class-count seed was superseded by the canonical cabin for this load case"
         },
         "mission": {
           "applicability": "generic notional transport; configured run must replace with aircraft evidence when available",
@@ -183,7 +193,27 @@
         "surface_controls": 3608.952635989901,
         "total": 24893.6454754176
       },
-      "turboprop_propulsion_kg": null
+      "turboprop_propulsion_kg": null,
+      "wing_composite_assumption": {
+        "fcomp": 0.0,
+        "meaning": "FLOPS wing technology coefficient, not aircraft composite mass fraction",
+        "scenario_scope": "fixed geometry, loads and other inputs; not applied to OEW, not an uncertainty interval or aircraft calibration",
+        "scenarios": [
+          {
+            "fcomp": 0.0,
+            "wing_mass_kg": 41340.073072419036
+          },
+          {
+            "fcomp": 0.5,
+            "wing_mass_kg": 35398.19153198666
+          },
+          {
+            "fcomp": 1.0,
+            "wing_mass_kg": 29301.999636214518
+          }
+        ],
+        "zero_meaning": "published no-composite-credit baseline; not evidence that the real aircraft is metallic"
+      }
     },
     "mass_architecture": "pure_flops_transport_v1",
     "mass_coordinates_m": {
@@ -245,8 +275,9 @@
       0.001220230295257479,
       -1.053749571791268
     ],
+    "physical_validation": "not_established_by_equation_evaluation",
     "systems_mass_method": "flops_transport_v1",
-    "systems_mass_status": "verified_architecture"
+    "systems_mass_status": "evaluated_declared_inputs"
   },
   "feasibility": {
     "cruise_equilibrium": {
@@ -470,6 +501,7 @@
           "group": "wing structure",
           "id": "wing",
           "mass_kg": 41340.073072419036,
+          "method": "FLOPS",
           "position_m": [
             38.45857308596194,
             0.0,
@@ -480,6 +512,7 @@
           "group": "horizontal tail",
           "id": "h_stab",
           "mass_kg": 3402.6094724823547,
+          "method": "FLOPS",
           "position_m": [
             71.43207843137253,
             0.0,
@@ -490,6 +523,7 @@
           "group": "vertical tail",
           "id": "v_stab",
           "mass_kg": 1802.7787498919174,
+          "method": "FLOPS",
           "position_m": [
             71.16166929133858,
             0.0,
@@ -500,6 +534,7 @@
           "group": "fuselage",
           "id": "fuselage",
           "mass_kg": 34266.17020154862,
+          "method": "FLOPS",
           "position_m": [
             34.524,
             0.0,
@@ -510,6 +545,7 @@
           "group": "landing gear",
           "id": "nose_gear",
           "mass_kg": 3110.2455903019586,
+          "method": "FLOPS",
           "position_m": [
             7.672000000000001,
             0.0,
@@ -520,6 +556,7 @@
           "group": "landing gear",
           "id": "main_gear",
           "mass_kg": 17624.7250117111,
+          "method": "FLOPS",
           "position_m": [
             39.41829749092429,
             0.0,
@@ -530,6 +567,7 @@
           "group": "propulsion",
           "id": "propulsion-0",
           "mass_kg": 13796.428139270338,
+          "method": "FLOPS",
           "position_m": [
             32.55018346505578,
             9.8,
@@ -540,6 +578,7 @@
           "group": "propulsion",
           "id": "propulsion-1",
           "mass_kg": 13796.428139270338,
+          "method": "FLOPS",
           "position_m": [
             32.55018346505578,
             -9.8,
@@ -550,6 +589,7 @@
           "group": "systems",
           "id": "systems-apu",
           "mass_kg": 1004.960300352511,
+          "method": "FLOPS",
           "position_m": [
             72.884,
             0.0,
@@ -560,6 +600,7 @@
           "group": "systems",
           "id": "systems-instruments",
           "mass_kg": 456.8369867194832,
+          "method": "FLOPS",
           "position_m": [
             7.672000000000001,
             0.0,
@@ -570,6 +611,7 @@
           "group": "systems",
           "id": "systems-avionics",
           "mass_kg": 1119.7251624763076,
+          "method": "FLOPS",
           "position_m": [
             7.672000000000001,
             0.0,
@@ -580,6 +622,7 @@
           "group": "systems",
           "id": "systems-anti_ice",
           "mass_kg": 184.05224925838337,
+          "method": "FLOPS",
           "position_m": [
             38.45857308596194,
             0.0,
@@ -590,6 +633,7 @@
           "group": "systems",
           "id": "systems-hydraulics",
           "mass_kg": 1766.8058693469166,
+          "method": "FLOPS",
           "position_m": [
             31.524,
             0.0,
@@ -600,6 +644,7 @@
           "group": "systems",
           "id": "systems-electrical",
           "mass_kg": 1757.1608874207534,
+          "method": "FLOPS",
           "position_m": [
             31.524,
             0.0,
@@ -610,6 +655,7 @@
           "group": "systems",
           "id": "systems-air_conditioning",
           "mass_kg": 2087.6599318977683,
+          "method": "FLOPS",
           "position_m": [
             31.524,
             0.0,
@@ -620,6 +666,7 @@
           "group": "systems",
           "id": "systems-surface_controls-wing",
           "mass_kg": 2165.3715815939404,
+          "method": "FLOPS",
           "position_m": [
             38.45857308596194,
             0.0,
@@ -630,6 +677,7 @@
           "group": "systems",
           "id": "systems-surface_controls-htail",
           "mass_kg": 721.7905271979803,
+          "method": "FLOPS",
           "position_m": [
             71.43207843137253,
             0.0,
@@ -640,6 +688,7 @@
           "group": "systems",
           "id": "systems-surface_controls-vtail",
           "mass_kg": 721.7905271979803,
+          "method": "FLOPS",
           "position_m": [
             71.16166929133858,
             0.0,
@@ -650,6 +699,7 @@
           "group": "operating items",
           "id": "operating-flight_crew",
           "mass_kg": 0.0,
+          "method": "LTH civil transport cabin",
           "position_m": [
             3.8360000000000003,
             0.0,
@@ -660,6 +710,7 @@
           "group": "operating items",
           "id": "operating-cabin_crew",
           "mass_kg": 0.0,
+          "method": "LTH civil transport cabin",
           "position_m": [
             34.36,
             0.0,
@@ -670,6 +721,7 @@
           "group": "operating items",
           "id": "operating-passenger_service",
           "mass_kg": 38387.87670882273,
+          "method": "LTH civil transport cabin",
           "position_m": [
             34.36,
             0.0,
@@ -680,6 +732,7 @@
           "group": "operating items",
           "id": "operating-engine_oil-0",
           "mass_kg": 68.26756222041743,
+          "method": "FLOPS",
           "position_m": [
             32.55018346505578,
             9.8,
@@ -690,6 +743,7 @@
           "group": "operating items",
           "id": "operating-engine_oil-1",
           "mass_kg": 68.26756222041743,
+          "method": "FLOPS",
           "position_m": [
             32.55018346505578,
             -9.8,
@@ -700,6 +754,7 @@
           "group": "furnishings",
           "id": "furnishings",
           "mass_kg": 12907.491451955573,
+          "method": "LTH civil transport cabin",
           "position_m": [
             34.36,
             0.0,
@@ -710,6 +765,7 @@
           "group": "fuel",
           "id": "wing_inner_right_unusable",
           "mass_kg": 121.13070116879365,
+          "method": "FLOPS equation 121",
           "position_m": [
             37.87231950603147,
             9.937016250612896,
@@ -720,6 +776,7 @@
           "group": "fuel",
           "id": "wing_inner_left_unusable",
           "mass_kg": 121.13070116879365,
+          "method": "FLOPS equation 121",
           "position_m": [
             37.87231950603147,
             -9.937016250612896,
@@ -730,6 +787,7 @@
           "group": "fuel",
           "id": "center_unusable",
           "mass_kg": 128.79018491318152,
+          "method": "FLOPS equation 121",
           "position_m": [
             34.0775,
             0.0,
@@ -740,6 +798,7 @@
           "group": "payload",
           "id": "payload-0-seat_row_0",
           "mass_kg": 840.0,
+          "method": "payload layout",
           "position_m": [
             7.9596226415094335,
             0.0,
@@ -750,6 +809,7 @@
           "group": "payload",
           "id": "payload-1-seat_row_1",
           "mass_kg": 840.0,
+          "method": "payload layout",
           "position_m": [
             8.978867924528302,
             0.0,
@@ -760,6 +820,7 @@
           "group": "payload",
           "id": "payload-2-seat_row_2",
           "mass_kg": 840.0,
+          "method": "payload layout",
           "position_m": [
             9.99811320754717,
             0.0,
@@ -770,6 +831,7 @@
           "group": "payload",
           "id": "payload-3-seat_row_3",
           "mass_kg": 840.0,
+          "method": "payload layout",
           "position_m": [
             11.017358490566039,
             0.0,
@@ -780,6 +842,7 @@
           "group": "payload",
           "id": "payload-4-seat_row_4",
           "mass_kg": 840.0,
+          "method": "payload layout",
           "position_m": [
             12.036603773584908,
             0.0,
@@ -790,6 +853,7 @@
           "group": "payload",
           "id": "payload-5-seat_row_5",
           "mass_kg": 840.0,
+          "method": "payload layout",
           "position_m": [
             13.055849056603776,
             0.0,
@@ -800,6 +864,7 @@
           "group": "payload",
           "id": "payload-6-seat_row_6",
           "mass_kg": 840.0,
+          "method": "payload layout",
           "position_m": [
             14.075094339622645,
             0.0,
@@ -810,6 +875,7 @@
           "group": "payload",
           "id": "payload-7-seat_row_7",
           "mass_kg": 840.0,
+          "method": "payload layout",
           "position_m": [
             15.094339622641513,
             0.0,
@@ -820,6 +886,7 @@
           "group": "payload",
           "id": "payload-8-seat_row_8",
           "mass_kg": 840.0,
+          "method": "payload layout",
           "position_m": [
             16.11358490566038,
             0.0,
@@ -830,6 +897,7 @@
           "group": "payload",
           "id": "payload-9-seat_row_9",
           "mass_kg": 840.0,
+          "method": "payload layout",
           "position_m": [
             17.13283018867925,
             0.0,
@@ -840,6 +908,7 @@
           "group": "payload",
           "id": "payload-10-seat_row_10",
           "mass_kg": 840.0,
+          "method": "payload layout",
           "position_m": [
             18.15207547169812,
             0.0,
@@ -850,6 +919,7 @@
           "group": "payload",
           "id": "payload-11-seat_row_11",
           "mass_kg": 840.0,
+          "method": "payload layout",
           "position_m": [
             19.171320754716987,
             0.0,
@@ -860,6 +930,7 @@
           "group": "payload",
           "id": "payload-12-seat_row_12",
           "mass_kg": 840.0,
+          "method": "payload layout",
           "position_m": [
             21.140566037735855,
             0.0,
@@ -870,6 +941,7 @@
           "group": "payload",
           "id": "payload-13-seat_row_13",
           "mass_kg": 840.0,
+          "method": "payload layout",
           "position_m": [
             22.159811320754724,
             0.0,
@@ -880,6 +952,7 @@
           "group": "payload",
           "id": "payload-14-seat_row_14",
           "mass_kg": 840.0,
+          "method": "payload layout",
           "position_m": [
             23.179056603773592,
             0.0,
@@ -890,6 +963,7 @@
           "group": "payload",
           "id": "payload-15-seat_row_15",
           "mass_kg": 840.0,
+          "method": "payload layout",
           "position_m": [
             24.19830188679246,
             0.0,
@@ -900,6 +974,7 @@
           "group": "payload",
           "id": "payload-16-seat_row_16",
           "mass_kg": 840.0,
+          "method": "payload layout",
           "position_m": [
             25.21754716981133,
             0.0,
@@ -910,6 +985,7 @@
           "group": "payload",
           "id": "payload-17-seat_row_17",
           "mass_kg": 840.0,
+          "method": "payload layout",
           "position_m": [
             26.236792452830198,
             0.0,
@@ -920,6 +996,7 @@
           "group": "payload",
           "id": "payload-18-seat_row_18",
           "mass_kg": 840.0,
+          "method": "payload layout",
           "position_m": [
             27.256037735849066,
             0.0,
@@ -930,6 +1007,7 @@
           "group": "payload",
           "id": "payload-19-seat_row_19",
           "mass_kg": 840.0,
+          "method": "payload layout",
           "position_m": [
             28.275283018867935,
             0.0,
@@ -940,6 +1018,7 @@
           "group": "payload",
           "id": "payload-20-seat_row_20",
           "mass_kg": 840.0,
+          "method": "payload layout",
           "position_m": [
             29.294528301886803,
             0.0,
@@ -950,6 +1029,7 @@
           "group": "payload",
           "id": "payload-21-seat_row_21",
           "mass_kg": 840.0,
+          "method": "payload layout",
           "position_m": [
             30.31377358490567,
             0.0,
@@ -960,6 +1040,7 @@
           "group": "payload",
           "id": "payload-22-seat_row_22",
           "mass_kg": 840.0,
+          "method": "payload layout",
           "position_m": [
             32.28301886792454,
             0.0,
@@ -970,6 +1051,7 @@
           "group": "payload",
           "id": "payload-23-seat_row_23",
           "mass_kg": 840.0,
+          "method": "payload layout",
           "position_m": [
             33.3022641509434,
             0.0,
@@ -980,6 +1062,7 @@
           "group": "payload",
           "id": "payload-24-seat_row_24",
           "mass_kg": 840.0,
+          "method": "payload layout",
           "position_m": [
             34.32150943396227,
             0.0,
@@ -990,6 +1073,7 @@
           "group": "payload",
           "id": "payload-25-seat_row_25",
           "mass_kg": 840.0,
+          "method": "payload layout",
           "position_m": [
             35.34075471698114,
             0.0,
@@ -1000,6 +1084,7 @@
           "group": "payload",
           "id": "payload-26-seat_row_26",
           "mass_kg": 840.0,
+          "method": "payload layout",
           "position_m": [
             36.36000000000001,
             0.0,
@@ -1010,6 +1095,7 @@
           "group": "payload",
           "id": "payload-27-seat_row_27",
           "mass_kg": 840.0,
+          "method": "payload layout",
           "position_m": [
             37.379245283018875,
             0.0,
@@ -1020,6 +1106,7 @@
           "group": "payload",
           "id": "payload-28-seat_row_28",
           "mass_kg": 840.0,
+          "method": "payload layout",
           "position_m": [
             38.398490566037744,
             0.0,
@@ -1030,6 +1117,7 @@
           "group": "payload",
           "id": "payload-29-seat_row_29",
           "mass_kg": 840.0,
+          "method": "payload layout",
           "position_m": [
             39.41773584905661,
             0.0,
@@ -1040,6 +1128,7 @@
           "group": "payload",
           "id": "payload-30-seat_row_30",
           "mass_kg": 840.0,
+          "method": "payload layout",
           "position_m": [
             40.43698113207548,
             0.0,
@@ -1050,6 +1139,7 @@
           "group": "payload",
           "id": "payload-31-seat_row_31",
           "mass_kg": 840.0,
+          "method": "payload layout",
           "position_m": [
             41.45622641509435,
             0.0,
@@ -1060,6 +1150,7 @@
           "group": "payload",
           "id": "payload-32-seat_row_32",
           "mass_kg": 840.0,
+          "method": "payload layout",
           "position_m": [
             42.47547169811322,
             0.0,
@@ -1070,6 +1161,7 @@
           "group": "payload",
           "id": "payload-33-seat_row_33",
           "mass_kg": 840.0,
+          "method": "payload layout",
           "position_m": [
             44.44471698113209,
             0.0,
@@ -1080,6 +1172,7 @@
           "group": "payload",
           "id": "payload-34-seat_row_34",
           "mass_kg": 840.0,
+          "method": "payload layout",
           "position_m": [
             45.46396226415096,
             0.0,
@@ -1090,6 +1183,7 @@
           "group": "payload",
           "id": "payload-35-seat_row_35",
           "mass_kg": 840.0,
+          "method": "payload layout",
           "position_m": [
             46.483207547169826,
             0.0,
@@ -1100,6 +1194,7 @@
           "group": "payload",
           "id": "payload-36-seat_row_36",
           "mass_kg": 840.0,
+          "method": "payload layout",
           "position_m": [
             47.502452830188695,
             0.0,
@@ -1110,6 +1205,7 @@
           "group": "payload",
           "id": "payload-37-seat_row_37",
           "mass_kg": 840.0,
+          "method": "payload layout",
           "position_m": [
             48.52169811320756,
             0.0,
@@ -1120,6 +1216,7 @@
           "group": "payload",
           "id": "payload-38-seat_row_38",
           "mass_kg": 840.0,
+          "method": "payload layout",
           "position_m": [
             49.54094339622643,
             0.0,
@@ -1130,6 +1227,7 @@
           "group": "payload",
           "id": "payload-39-seat_row_39",
           "mass_kg": 840.0,
+          "method": "payload layout",
           "position_m": [
             50.5601886792453,
             0.0,
@@ -1140,6 +1238,7 @@
           "group": "payload",
           "id": "payload-40-seat_row_40",
           "mass_kg": 840.0,
+          "method": "payload layout",
           "position_m": [
             51.57943396226417,
             0.0,
@@ -1150,6 +1249,7 @@
           "group": "payload",
           "id": "payload-41-seat_row_41",
           "mass_kg": 840.0,
+          "method": "payload layout",
           "position_m": [
             52.59867924528304,
             0.0,
@@ -1160,6 +1260,7 @@
           "group": "payload",
           "id": "payload-42-seat_row_42",
           "mass_kg": 840.0,
+          "method": "payload layout",
           "position_m": [
             53.617924528301906,
             0.0,
@@ -1170,6 +1271,7 @@
           "group": "payload",
           "id": "payload-43-seat_row_43",
           "mass_kg": 840.0,
+          "method": "payload layout",
           "position_m": [
             55.58716981132078,
             0.0,
@@ -1180,6 +1282,7 @@
           "group": "payload",
           "id": "payload-44-seat_row_44",
           "mass_kg": 840.0,
+          "method": "payload layout",
           "position_m": [
             56.606415094339646,
             0.0,
@@ -1190,6 +1293,7 @@
           "group": "payload",
           "id": "payload-45-seat_row_45",
           "mass_kg": 840.0,
+          "method": "payload layout",
           "position_m": [
             57.625660377358514,
             0.0,
@@ -1200,6 +1304,7 @@
           "group": "payload",
           "id": "payload-46-seat_row_46",
           "mass_kg": 840.0,
+          "method": "payload layout",
           "position_m": [
             58.64490566037738,
             0.0,
@@ -1210,6 +1315,7 @@
           "group": "payload",
           "id": "payload-47-seat_row_47",
           "mass_kg": 840.0,
+          "method": "payload layout",
           "position_m": [
             59.66415094339625,
             0.0,
@@ -1220,6 +1326,7 @@
           "group": "payload",
           "id": "payload-48-seat_row_48",
           "mass_kg": 840.0,
+          "method": "payload layout",
           "position_m": [
             60.68339622641512,
             0.0,
@@ -1230,6 +1337,7 @@
           "group": "payload",
           "id": "payload-49-seat_row_49",
           "mass_kg": 840.0,
+          "method": "payload layout",
           "position_m": [
             61.70264150943399,
             0.0,
@@ -1240,6 +1348,7 @@
           "group": "payload",
           "id": "payload-50-seat_row_50",
           "mass_kg": 840.0,
+          "method": "payload layout",
           "position_m": [
             62.72188679245286,
             0.0,
@@ -1250,6 +1359,7 @@
           "group": "payload",
           "id": "payload-51-seat_row_51",
           "mass_kg": 840.0,
+          "method": "payload layout",
           "position_m": [
             63.741132075471725,
             0.0,
@@ -1260,6 +1370,7 @@
           "group": "payload",
           "id": "payload-52-seat_row_52",
           "mass_kg": 420.0,
+          "method": "payload layout",
           "position_m": [
             64.7603773584906,
             0.0,
@@ -1270,6 +1381,7 @@
           "group": "payload",
           "id": "payload-53-bag_53",
           "mass_kg": 532.0,
+          "method": "payload layout",
           "position_m": [
             22.340000000000003,
             -0.79,
@@ -1280,6 +1392,7 @@
           "group": "payload",
           "id": "payload-54-bag_54",
           "mass_kg": 1588.0,
+          "method": "payload layout",
           "position_m": [
             23.980000000000004,
             -0.79,
@@ -1290,6 +1403,7 @@
           "group": "payload",
           "id": "payload-55-bag_55",
           "mass_kg": 1588.0,
+          "method": "payload layout",
           "position_m": [
             23.980000000000004,
             0.79,
@@ -1300,6 +1414,7 @@
           "group": "payload",
           "id": "payload-56-bag_56",
           "mass_kg": 1588.0,
+          "method": "payload layout",
           "position_m": [
             43.72,
             -0.79,
@@ -1310,6 +1425,7 @@
           "group": "payload",
           "id": "payload-57-bag_57",
           "mass_kg": 1588.0,
+          "method": "payload layout",
           "position_m": [
             43.72,
             0.79,
@@ -1320,6 +1436,7 @@
           "group": "payload",
           "id": "payload-58-bag_58",
           "mass_kg": 502.0,
+          "method": "payload layout",
           "position_m": [
             45.36,
             -0.79,
@@ -1330,6 +1447,7 @@
           "group": "payload",
           "id": "payload-59-bag_59",
           "mass_kg": 1588.0,
+          "method": "payload layout",
           "position_m": [
             45.36,
             0.79,

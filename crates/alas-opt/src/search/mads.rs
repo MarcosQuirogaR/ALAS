@@ -75,6 +75,7 @@
 //! the same mesh node.
 
 use std::collections::HashMap;
+use std::sync::atomic::AtomicBool;
 use std::time::{Duration, Instant};
 
 use super::{MethodOutcome, ScoredPoint};
@@ -168,6 +169,11 @@ pub(crate) enum TerminationReason {
     /// The wall-clock safety limit was reached.  A diagnostic stop, never
     /// convergence.
     Watchdog,
+    /// The caller's cooperative cancellation flag was observed at an
+    /// evaluation-block or iteration boundary.  Never convergence: the search
+    /// was stopped from outside before any stopping criterion of its own was
+    /// reached, so its incumbent is whatever the run had reached by then.
+    Cancelled,
     /// Bounds, initial values, or mesh settings failed validation.
     InvalidInput,
 }
@@ -182,6 +188,7 @@ impl TerminationReason {
             Self::IterationLimit => "iteration_limit",
             Self::FixedBounds => "fixed_bounds",
             Self::Watchdog => "watchdog",
+            Self::Cancelled => "cancelled",
             Self::InvalidInput => "invalid_input",
         }
     }
@@ -189,6 +196,11 @@ impl TerminationReason {
     /// Whether this reason reports a converged search.
     pub(crate) const fn is_converged(self) -> bool {
         matches!(self, Self::Converged)
+    }
+
+    /// Whether the run stopped on the caller's cancellation flag.
+    pub(crate) const fn is_cancelled(self) -> bool {
+        matches!(self, Self::Cancelled)
     }
 }
 
@@ -324,9 +336,32 @@ pub(crate) fn run(
     initial: Option<&[f64]>,
     settings: Settings,
     evaluate: &mut dyn Evaluate,
+    progress: Option<&mut dyn FnMut(&str)>,
+) -> MadsOutcome {
+    run_cancellable(bounds, initial, settings, None, evaluate, progress)
+}
+
+/// [`run`], observing an optional cooperative cancellation flag.
+///
+/// `cancel` is read at exactly the boundaries the wall-clock watchdog is read
+/// at - between evaluation blocks and at the head of a poll iteration, never
+/// inside a block handed to the evaluator - so a cancelled run returns the
+/// incumbent it had already scored rather than a half-evaluated block, and an
+/// external process the block is waiting on is allowed to finish its call.
+/// The run reports [`TerminationReason::Cancelled`], which is never converged.
+pub(crate) fn run_cancellable(
+    bounds: &[(f64, f64)],
+    initial: Option<&[f64]>,
+    settings: Settings,
+    cancel: Option<&AtomicBool>,
+    evaluate: &mut dyn Evaluate,
     mut progress: Option<&mut dyn FnMut(&str)>,
 ) -> MadsOutcome {
     let started = Instant::now();
+    // The flag still arrives as a bare `&AtomicBool`; the scope is the
+    // telemetry that happens to own it, if any, and is inert otherwise.
+    let scope = crate::cancellation::CancelScope::attach(cancel);
+    let cancel_requested = || scope.requested();
     if !valid_inputs(bounds, initial, settings) {
         return MadsOutcome {
             outcome: invalid_outcome(bounds, initial),
@@ -399,6 +434,7 @@ pub(crate) fn run(
     }
     let initial_fallback = first.point.clone();
     let mut watchdog_hit = false;
+    let mut cancelled = false;
 
     // MADS permits a bounded search phase before polling.  This deterministic
     // Latin-hypercube phase is snapped to the translated initial mesh so it
@@ -411,7 +447,15 @@ pub(crate) fn run(
                 .into_iter()
                 .filter(|point| !same_point(point, &current_values, bounds))
                 .collect();
-        'search: for block in search_points.chunks(block_size) {
+        'search: for (index, block) in search_points.chunks(block_size).enumerate() {
+            scope.enter(
+                crate::cancellation::CancelPhase::MadsSearchBlock,
+                index as u64,
+            );
+            if cancel_requested() {
+                cancelled = true;
+                break;
+            }
             if cache.misses >= max_evaluations || watchdog_expired(&started) {
                 watchdog_hit |= watchdog_expired(&started);
                 break;
@@ -463,6 +507,10 @@ pub(crate) fn run(
         && cache.misses < max_evaluations
         && mesh_size > minimum_mesh_size
     {
+        if cancelled || cancel_requested() {
+            cancelled = true;
+            break;
+        }
         if watchdog_expired(&started) {
             watchdog_hit = true;
             break;
@@ -523,7 +571,15 @@ pub(crate) fn run(
         // change when the caller evaluates a block in parallel.
         let mut infeasible_improved = false;
         for block in poll.chunks(block_size) {
+            scope.enter(
+                crate::cancellation::CancelPhase::MadsPollBlock,
+                iteration as u64,
+            );
             if cache.misses >= max_evaluations {
+                break;
+            }
+            if cancel_requested() {
+                cancelled = true;
                 break;
             }
             if watchdog_expired(&started) {
@@ -631,7 +687,13 @@ pub(crate) fn run(
     // Convergence is decided inside the loop; every reason below reports a
     // run that stopped for a budget, safety or structural reason instead.
     if !termination.is_converged() {
-        if watchdog_hit {
+        // Cancellation outranks every budget reason: a run stopped from
+        // outside has not exhausted anything, and reporting it as
+        // `evaluation_budget` or `iteration_limit` would hide that the search
+        // never got to decide when to stop.
+        if cancelled {
+            termination = TerminationReason::Cancelled;
+        } else if watchdog_hit {
             termination = TerminationReason::Watchdog;
         } else if cache.misses >= max_evaluations {
             termination = TerminationReason::EvaluationBudget;
