@@ -3,7 +3,7 @@
 Research synthesis for the requirements-first aircraft-design wizard and staged candidate evaluator.
 
 **Date:** 2026-08-26
-**Repository:** ALAS-rust
+**Repository:** ALAS
 **Status:** engineering design doctrine; not a certification basis, approved means of compliance, or claim that an ALAS concept is airworthy
 
 ## Executive decision

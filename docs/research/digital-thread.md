@@ -310,7 +310,7 @@ The following is a concrete shape, with illustrative values:
     }
   ],
   "git": {
-    "repository": "ALAS-rust",
+    "repository": "ALAS",
     "commit": "git-commit",
     "dirty": true,
     "working_tree_diff_sha256": "sha256-of-captured-diff-or-null"

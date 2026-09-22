@@ -17,7 +17,7 @@
     <aircraft>
       <model uID="alas-aircraft-model">
         <name>ALAS Aircraft</name>
-        <description>Computed outer geometry exported by ALAS-rust; no unmodelled internal geometry is implied.</description>
+        <description>Computed outer geometry exported by ALAS; no unmodelled internal geometry is implied.</description>
         <reference>
           <area>535.0038750000001</area>
           <length>9.778200117945687</length>

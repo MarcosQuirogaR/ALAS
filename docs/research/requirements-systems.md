@@ -1,7 +1,7 @@
 # Requirements-first aircraft conceptual design: research note
 
 Research date: 2026-08-26
-Repository: ALAS-rust
+Repository: ALAS
 Scope: TLAR and stakeholder-needs capture, requirement quality, load-case and policy semantics, architecture synthesis, traceability, verification and validation, the MBSE/MDO boundary, and the representation of certification and operational constraints without claiming to certify an aircraft.
 
 ## Executive conclusion

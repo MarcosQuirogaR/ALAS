@@ -163,7 +163,7 @@ fn backup(root: &Path) -> Result<(), String> {
         .join("OneDrive")
         .join("Proyectos")
         .join("Universidad")
-        .join("ALAS-rust-backups");
+        .join("ALAS-backups");
     std::fs::create_dir_all(&dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
 
     let target = dir.join("alas-rust.bundle");

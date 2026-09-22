@@ -1,7 +1,7 @@
 # Performance and airport compatibility for conceptual transport aircraft
 
 Research date: 2026-08-26
-Repository: ALAS-rust
+Repository: ALAS
 Scope: takeoff and landing field performance, accelerate-stop/go and balanced
 field length, climb and ceiling requirements, low-speed/high-lift and speed
 limits, atmospheric and runway conditions, pavement compatibility, and fuel

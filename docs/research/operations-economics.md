@@ -1,6 +1,6 @@
 # Operations, airline economics, and maintainability research
 
-Repository: ALAS-rust
+Repository: ALAS
 Captured: 2026-08-26
 Scope: operationally credible conceptual aircraft design, including airline missions and schedules, turnaround and boarding, fleet economics and direct operating cost (DOC), dispatch reliability, maintainability and accessibility, airport compatibility, crew workload, cargo and baggage, and lifecycle cost.
 

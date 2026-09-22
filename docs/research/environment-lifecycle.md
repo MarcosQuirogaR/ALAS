@@ -1,6 +1,6 @@
 # Environmental and lifecycle modelling for requirements-first aircraft conceptual design
 
-Research report for ALAS-rust
+Research report for ALAS
 Prepared: 2026-08-26
 Scope: fuel burn and CO₂, non-CO₂ climate effects, airport noise and procedures, lifecycle assessment, materials/manufacturing/end-of-life, SAF, hydrogen, electric energy, and requirements/objective integration.
 

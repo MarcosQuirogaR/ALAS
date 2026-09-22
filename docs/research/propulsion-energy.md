@@ -1,6 +1,6 @@
 # Propulsion and energy modeling for requirements-first aircraft design
 
-Research report for ALAS-rust
+Research report for ALAS
 Prepared: 2026-08-26
 Scope: conceptual aircraft synthesis, propulsion/airframe coupling, and energy-system screening
 Repository owner boundary: alas-prop, with interfaces to alas-config, alas-mission, alas-perf, alas-mass, alas-aero, alas-struct, alas-opt, and alas-report
