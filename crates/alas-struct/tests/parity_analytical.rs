@@ -266,7 +266,11 @@ fn compare(
 #[test]
 fn analyze_structure_matches_python_across_structures_config_cases() {
     let fixture: Fixture = alas_testkit::load("struct", "analytical");
-    let req = DesignRequirements::default();
+    let mut req = DesignRequirements::default();
+    // The frozen Python fixture was generated with the historical 9.81 m/s^2
+    // default. Preserve that input for this reference-compatibility replay;
+    // production requirements use standard gravity (9.80665 m/s^2).
+    req.gravity_m_s2 = 9.81;
     let engine_cfg = GeometryConfig::default().engine;
     let mass_cfg = MassModelConfig::default();
 

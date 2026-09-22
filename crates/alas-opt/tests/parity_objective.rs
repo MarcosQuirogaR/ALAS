@@ -68,7 +68,10 @@ fn parity_objective() {
     // Obtain its configuration through the compatibility constructor so the
     // standalone fuel-volume and CG checks use the same geometry as the
     // objective replay below.
-    let config = DesignObjective::new_reference_compatibility(AlasConfig::default()).config;
+    let mut historical_config = AlasConfig::default();
+    // The frozen Python objective fixture used g = 9.81 m/s^2.
+    historical_config.requirements.gravity_m_s2 = 9.81;
+    let config = DesignObjective::new_reference_compatibility(historical_config).config;
     let dv_default = DesignVector::default();
     let builder = AircraftBuilder::new_reference_compatibility(Some(config.geometry.clone()));
     let plane = builder
@@ -195,7 +198,9 @@ fn seeded_python_winner_keeps_the_reference_objective_value() {
         -0.000594121555662916,
         0.00010574272521884703,
     ];
-    let mut objective = DesignObjective::new_reference_compatibility(AlasConfig::default());
+    let mut historical_config = AlasConfig::default();
+    historical_config.requirements.gravity_m_s2 = 9.81;
+    let mut objective = DesignObjective::new_reference_compatibility(historical_config);
     let cost = objective.evaluate(&vector);
     let last = objective.history.cost.len() - 1;
 

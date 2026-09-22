@@ -225,15 +225,30 @@ fn the_default_cruise_point_reports_its_wave_state() {
         reduced.requirements.cruise_mach, total.cd0, total.k, base.cd0, base.k, drag.cl, drag.cd_wave, drag.cd_total()
     );
     // With no wave drag among the fitted points the base and total fits agree
-    // exactly; otherwise the correction moves the default aircraft's cruise
-    // drag coefficient by less than 1e-4 (its fitted wave content is small).
+    // exactly. Otherwise the correction removes the fit window's own wave
+    // content from the total polar so the single Korn evaluation at the
+    // requested cruise point is not counted twice. Physics review v1.2
+    // (finding A3) corrected `wave_drag` to the published Lock/Korn law,
+    // `CD_w = 20 (M - M_crit)^4` rather than `20 (M - M_dd)^4`: M_crit sits
+    // below M_dd by `(0.1/80)^(1/3) ~= 0.108`, so the fit window now carries
+    // wave drag starting noticeably before drag divergence instead of being
+    // pinned at zero there. At the default aircraft's M0.84/CL 0.68 cruise
+    // point this raises the duplicate fit-window content to several dozen
+    // drag counts (order 1e-3, ~10% of cd_total here) rather than the < 1
+    // count the superseded law left below M_dd. The physically meaningful
+    // bound is that the correction stays a minority of total drag, not that
+    // it is negligible.
     let shift = (total.cd0 + total.k * drag.cl * drag.cl) - drag.cd_base;
     eprintln!("default cruise cd shift removed by the correction: {shift:.3e}");
     if window.iter().all(|&wave| wave == 0.0) {
         assert!((base.cd0 - total.cd0).abs() < 1e-12);
         assert!((base.k - total.k).abs() < 1e-12);
     } else {
-        assert!(shift.abs() < 1e-4, "shift {shift}");
+        assert!(
+            shift.abs() < 0.3 * drag.cd_total(),
+            "shift {shift} should stay a minority of cd_total {}",
+            drag.cd_total()
+        );
     }
     assert!(drag.cd_total().is_finite() && drag.cd_total() > 0.0);
 }

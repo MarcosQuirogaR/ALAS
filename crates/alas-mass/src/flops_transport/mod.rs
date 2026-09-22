@@ -135,12 +135,12 @@ pub struct FlopsTransportInputs {
 ///
 /// Only two of the systems-and-operating-item equations read an engine
 /// rating at all: the unusable fuel of equation 121 and the engine oil of
-/// equation 122. Every other equation in sections 5.4 and 5.5 reads counts,
+/// equation 123. Every other equation in sections 5.4 and 5.5 reads counts,
 /// geometry, Mach number or passengers. A propeller installation therefore
 /// needs a substitute for exactly those two terms and nothing else.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum PropulsionSizing {
-    /// FLOPS equations 121 and 122 evaluated from the rated thrust, which is
+    /// FLOPS equations 121 and 123 evaluated from the rated thrust, which is
     /// the published transport method.
     RatedThrust,
     /// A propeller installation, which has no rated thrust.
@@ -149,7 +149,7 @@ pub enum PropulsionSizing {
     /// equation 161, `WUF = 0.0084 x FMXTOT`, which estimates the same
     /// quantity with no thrust term. The engine oil is declared, because the
     /// alternate equation 162 as printed (`240 (NPASS + 39) / 40`, p. 56)
-    /// returns ten times the default equation 122 for the same aircraft and
+    /// returns ten times the default equation 123 for the same aircraft and
     /// is not usable.
     ShaftPower {
         /// Declared engine oil for every installed engine together, kg.

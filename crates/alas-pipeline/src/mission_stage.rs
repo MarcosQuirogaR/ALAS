@@ -319,6 +319,10 @@ fn historical_cruise_required_thrust_total_n(
         .ok_or_else(|| {
             "reference mission report has no positive finite lift-to-drag ratio".to_owned()
         })?;
+    // 9.81, not `config.requirements.gravity_m_s2` (9.80665 as of physics
+    // review v1.2, finding F5): this function's whole purpose is
+    // reproducing the frozen 196,878.813 N fixture above, so it keeps the
+    // frozen two-decimal constant rather than the corrected one.
     let thrust_n = config.requirements.mtow_kg * 9.81 / l_over_d;
     if !thrust_n.is_finite() || thrust_n <= 0.0 {
         return Err(
