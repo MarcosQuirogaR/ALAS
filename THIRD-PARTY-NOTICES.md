@@ -155,9 +155,14 @@ great-circle routing when it is absent.
 
 ## Invoked executables
 
-Separate programs invoked through process boundaries. A Windows distribution
-may aggregate the open-source programs identified below; proprietary programs
-remain user-supplied.
+Separate programs invoked through process boundaries. A distribution may
+aggregate the open-source programs identified below; proprietary programs
+remain user-supplied. AVL specifically ships as its unchanged win32
+executable only in the Windows package, the only build this project has
+reviewed and tested; every other package (including Linux) ships the same
+GPL-2.0 corresponding source and licence text with a written build/
+acquisition note instead of an executable that platform cannot run — see
+`docs/release-packaging.md` and `xtask/src/dist_avl.rs`.
 
 | Program | Licence | Used for |
 |---|---|---|

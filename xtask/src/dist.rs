@@ -14,6 +14,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use crate::dist_archive;
+use crate::dist_avl;
+
 const PACKAGE_VERSION: &str = env!("CARGO_PKG_VERSION");
 const NASTRAN_STRICT_ENV: &str = "ALAS_STRICT_BUNDLED_NASTRAN95";
 const SOURCE_MANIFEST_NAME: &str = "SOURCE-MANIFEST.json";
@@ -99,20 +102,20 @@ const SOURCE_REJECTED_FILE_PREFIXES: [&str; 5] =
     [".env", "credentials", "secret", "private", "id_rsa"];
 
 #[derive(Debug, Clone)]
-struct BundleStatus {
-    status: &'static str,
-    reason: Option<String>,
+pub(crate) struct BundleStatus {
+    pub(crate) status: &'static str,
+    pub(crate) reason: Option<String>,
 }
 
 impl BundleStatus {
-    fn bundled() -> Self {
+    pub(crate) fn bundled() -> Self {
         Self {
             status: "bundled",
             reason: None,
         }
     }
 
-    fn not_bundled(reason: impl Into<String>) -> Self {
+    pub(crate) fn not_bundled(reason: impl Into<String>) -> Self {
         Self {
             status: "not_bundled",
             reason: Some(reason.into()),
@@ -136,7 +139,7 @@ impl BundleStatus {
 /// user-selected external release makes redistribution the user's decision,
 /// not this packaging task's. Listed in the release manifest so a reviewer
 /// sees the complete required/optional tool inventory in one place instead of
-/// only the two tools [`bundle_avl`]/[`bundle_nastran95`] can bundle. Full
+/// only the two tools `dist_avl::bundle_avl`/[`bundle_nastran95`] can bundle. Full
 /// licence and provenance detail lives in `THIRD-PARTY-NOTICES.md`, which
 /// travels with the package.
 const USER_SUPPLIED_EXTERNAL_TOOLS: [(&str, &str); 5] = [
@@ -242,7 +245,7 @@ pub fn create_distribution(root: &Path) -> Result<(), String> {
         .map_err(|e| format!("failed to copy binary to {}: {e}", dst_exe.display()))?;
     println!("Copied standalone binary: {}", dst_exe.display());
 
-    let avl_status = bundle_avl(root, &pkg_dir)?;
+    let avl_status = dist_avl::bundle_avl(root, &pkg_dir)?;
     let nastran_status = bundle_nastran95(root, &pkg_dir, strict_nastran)?;
     bundle_mses_osmap(root, &pkg_dir)?;
     bundle_branding(root, &pkg_dir)?;
@@ -290,28 +293,38 @@ pub fn create_distribution(root: &Path) -> Result<(), String> {
 
     // 4. Validate the packaged standalone distribution.
     println!("\nValidating packaged standalone distribution...");
-    validate_distribution(&dst_exe, &sample_config, &release_manifest, &dist_root)?;
+    validate_distribution(
+        &dst_exe,
+        &sample_config,
+        &release_manifest,
+        &dist_root,
+        &avl_status,
+    )?;
 
-    // 5. Create distribution zip archive only after the package has passed its
-    // executable, config, AVL, path-space, and provenance checks.
-    let zip_name = format!("{package_name}.zip");
-    let zip_path = dist_root.join(&zip_name);
-    if zip_path.exists() {
-        let _ = fs::remove_file(&zip_path);
+    // 5. Create the distribution archive only after the package has passed its
+    // executable, config, AVL, path-space, and provenance checks. Windows gets
+    // a .zip, matching shell/Explorer expectations there; every other target
+    // gets a .tar.gz, the native archive format that preserves the executable
+    // bit `fs::copy` already carried onto `ALAS` and the AVL/NASTRAN-95 child
+    // executables when present, which a zip cannot losslessly guarantee.
+    let archive_name = dist_archive::archive_file_name(&package_name);
+    let archive_path = dist_root.join(&archive_name);
+    if archive_path.exists() {
+        let _ = fs::remove_file(&archive_path);
     }
 
-    println!("Creating package archive: {}", zip_path.display());
-    create_zip_archive(&dist_root, &package_name, &zip_name)?;
-    let archive_bytes = fs::read(&zip_path).map_err(|e| {
+    println!("Creating package archive: {}", archive_path.display());
+    dist_archive::create_archive(&dist_root, &package_name, &archive_name)?;
+    let archive_bytes = fs::read(&archive_path).map_err(|e| {
         format!(
             "failed to read created package archive {}: {e}",
-            zip_path.display()
+            archive_path.display()
         )
     })?;
-    let checksum_path = dist_root.join(format!("{zip_name}.sha256"));
+    let checksum_path = dist_root.join(format!("{archive_name}.sha256"));
     fs::write(
         &checksum_path,
-        format!("{}  {zip_name}\n", sha256_hex(&archive_bytes)),
+        format!("{}  {archive_name}\n", sha256_hex(&archive_bytes)),
     )
     .map_err(|e| {
         format!(
@@ -321,7 +334,10 @@ pub fn create_distribution(root: &Path) -> Result<(), String> {
     })?;
     println!("Wrote package archive SHA-256: {}", checksum_path.display());
 
-    println!("\nDistribution packaging complete: {}", zip_path.display());
+    println!(
+        "\nDistribution packaging complete: {}",
+        archive_path.display()
+    );
     Ok(())
 }
 
@@ -1115,41 +1131,6 @@ fn validate_bundled_mses_osmap(package_dir: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// Copy the unchanged GPL AVL program and its corresponding source into the
-/// distribution as an adjacent child executable.
-///
-/// Keeping this process boundary is what lets the AGPL application and the
-/// GPL solver remain separately licensed works. The source archive and the
-/// full GPL text travel with the exact executable used by the package.
-fn bundle_avl(root: &Path, package_dir: &Path) -> Result<BundleStatus, String> {
-    let source_dir = root.join("external tools");
-    let package_tools = package_dir.join("external tools");
-    fs::create_dir_all(&package_tools)
-        .map_err(|e| format!("failed to create {}: {e}", package_tools.display()))?;
-
-    for name in ["avl352.exe", "avl3.52.tgz", "AVL-GPL-2.0.txt"] {
-        let source = source_dir.join(name);
-        if !source.is_file() {
-            return Err(format!(
-                "bundled AVL artifact is missing: {}; release packaging requires the unchanged executable, source archive, and GPL text",
-                source.display()
-            ));
-        }
-        let destination = package_tools.join(name);
-        fs::copy(&source, &destination).map_err(|e| {
-            format!(
-                "failed to copy bundled AVL artifact to {}: {e}",
-                destination.display()
-            )
-        })?;
-    }
-    println!(
-        "Bundled AVL 3.52 child executable, corresponding source, and GPL text in {}",
-        package_tools.display()
-    );
-    Ok(BundleStatus::bundled())
-}
-
 /// Copy NASTRAN-95 as a separately licensed adjacent program when its
 /// executable, runtime dependency declaration, license, modification record,
 /// and source association are all present and internally checkable.
@@ -1368,6 +1349,7 @@ fn validate_distribution(
     packaged_config: &Path,
     release_manifest: &Path,
     dist_root: &Path,
+    avl_status: &BundleStatus,
 ) -> Result<(), String> {
     // 1. Verify --help output.
     let package_root = exe.parent().unwrap_or(dist_root);
@@ -1437,26 +1419,43 @@ fn validate_distribution(
         return Err("packaged binary config round-trip smoke run failed".to_owned());
     }
 
-    let avl_dir = temp_out.join("avl");
-    let avl_force_count = fs::read_dir(&avl_dir)
-        .map_err(|e| format!("packaged AVL output directory is missing: {e}"))?
-        .filter_map(Result::ok)
-        .filter(|entry| {
-            entry
-                .path()
-                .extension()
-                .is_some_and(|extension| extension == "ft")
-        })
-        .count();
-    if avl_force_count == 0 {
-        return Err("packaged run did not produce AVL total-force files".to_owned());
-    }
-    let comparison = temp_out.join("plots/model_comparison.svg");
-    let comparison_text = fs::read_to_string(&comparison)
-        .map_err(|e| format!("packaged Model Comparison figure is missing: {e}"))?;
-    if !comparison_text.contains("Athena AVL") {
-        return Err("packaged Model Comparison figure does not name Athena AVL".to_owned());
-    }
+    // The AVL cross-check only runs when this package actually bundles an
+    // executable for it (see `bundle_avl`): today that is the Windows
+    // package alone. Every other target ran the smoke analysis above through
+    // ALAS's own analytical vortex-lattice stage with no AVL executable
+    // configured, so the total-force files and the "Athena AVL" overlay this
+    // block would otherwise demand never exist; requiring them there would
+    // fail every non-Windows package regardless of whether packaging itself
+    // is correct.
+    let avl_force_count = if avl_status.status == "bundled" {
+        let avl_dir = temp_out.join("avl");
+        let count = fs::read_dir(&avl_dir)
+            .map_err(|e| format!("packaged AVL output directory is missing: {e}"))?
+            .filter_map(Result::ok)
+            .filter(|entry| {
+                entry
+                    .path()
+                    .extension()
+                    .is_some_and(|extension| extension == "ft")
+            })
+            .count();
+        if count == 0 {
+            return Err("packaged run did not produce AVL total-force files".to_owned());
+        }
+        let comparison = temp_out.join("plots/model_comparison.svg");
+        let comparison_text = fs::read_to_string(&comparison)
+            .map_err(|e| format!("packaged Model Comparison figure is missing: {e}"))?;
+        if !comparison_text.contains("Athena AVL") {
+            return Err("packaged Model Comparison figure does not name Athena AVL".to_owned());
+        }
+        Some(count)
+    } else {
+        let comparison = temp_out.join("plots/model_comparison.svg");
+        if !comparison.is_file() {
+            return Err("packaged Model Comparison figure is missing".to_owned());
+        }
+        None
+    };
 
     // The round-trip path above checks a generated config. Run the shipped
     // template as well so a stale or malformed package file cannot hide behind
@@ -1483,9 +1482,14 @@ fn validate_distribution(
         return Err("packaged binary failed to read the shipped configuration template".to_owned());
     }
     validate_release_manifest(release_manifest, package_root)?;
-    println!(
-        "  [OK] Config round-trip, shipped config read, and writable path-with-spaces; bundled AVL completed with {avl_force_count} total-force files and Model Comparison overlay"
-    );
+    match avl_force_count {
+        Some(count) => println!(
+            "  [OK] Config round-trip, shipped config read, and writable path-with-spaces; bundled AVL completed with {count} total-force files and Model Comparison overlay"
+        ),
+        None => println!(
+            "  [OK] Config round-trip, shipped config read, and writable path-with-spaces; no bundled AVL for this target, Model Comparison used the analytical fallback"
+        ),
+    }
 
     let _ = fs::remove_dir_all(&smoke_root);
     println!("  [OK] Isolated headless execution test passed");
@@ -1680,56 +1684,6 @@ fn cargo_target_dir(root: &Path) -> PathBuf {
             }
         },
     )
-}
-
-fn create_zip_archive(dist_root: &Path, folder_name: &str, zip_name: &str) -> Result<(), String> {
-    if cfg!(windows) {
-        let script = format!(
-            "Compress-Archive -LiteralPath '{}' -DestinationPath '{}' -Force",
-            powershell_quote(folder_name),
-            powershell_quote(zip_name)
-        );
-        let status = Command::new("powershell")
-            .current_dir(dist_root)
-            .args(["-NoProfile", "-Command", &script])
-            .status()
-            .map_err(|e| format!("failed to run powershell Compress-Archive: {e}"))?;
-
-        if !status.success() {
-            return Err("Compress-Archive failed".to_owned());
-        }
-    } else {
-        // GNU tar's `-a` selects a compressor from the suffix but does not
-        // create ZIP archives. Prefer the Python standard-library zipfile
-        // module, then fall back to the ubiquitous `zip` utility.
-        let python3 = Command::new("python3")
-            .current_dir(dist_root)
-            .args(["-m", "zipfile", "-c", zip_name, folder_name])
-            .status();
-        if python3.is_ok_and(|status| status.success()) {
-            return Ok(());
-        }
-        let python = Command::new("python")
-            .current_dir(dist_root)
-            .args(["-m", "zipfile", "-c", zip_name, folder_name])
-            .status();
-        if python.is_ok_and(|status| status.success()) {
-            return Ok(());
-        }
-        let zip = Command::new("zip")
-            .current_dir(dist_root)
-            .args(["-q", "-r", zip_name, folder_name])
-            .status()
-            .map_err(|e| format!("failed to run python zipfile or zip packaging: {e}"))?;
-        if !zip.success() {
-            return Err("python zipfile and zip packaging failed".to_owned());
-        }
-    }
-    Ok(())
-}
-
-fn powershell_quote(value: &str) -> String {
-    value.replace('\'', "''")
 }
 
 /// A small dependency-free SHA-256 implementation keeps xtask's manifest
