@@ -23,6 +23,13 @@ on:
   push:
     tags:
       - "v*"
+  # A change to the packaging code or this workflow is proven on both
+  # platforms before it merges, not first discovered at a release tag.
+  pull_request:
+    paths:
+      - "xtask/**"
+      - "Cargo.lock"
+      - ".github/workflows/release-package.yml"
 
 permissions:
   contents: read
