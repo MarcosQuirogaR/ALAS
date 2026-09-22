@@ -61,3 +61,7 @@
 
 # Runtime user configuration written by the application at run time.
 /alas-config.json
+
+# A global or editor ignore rule for build/ directories would otherwise hide
+# this module, which is ordinary Rust source rather than a build output.
+!crates/alas-pipeline/src/cabin_scene/build/
