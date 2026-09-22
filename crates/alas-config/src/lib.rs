@@ -129,7 +129,7 @@ pub use oew_reference::{
 };
 pub use optimizer::{
     ConstraintPolicy, DesignMode, DesignSpaceConfig, MtowSizing, ObjectiveConfig, ObjectiveKind,
-    ObjectiveWeights, OptimizerConfig, SolverSettings, VariableEnvelope,
+    ObjectiveWeights, OptimizerConfig, SolverSettings, VariableEnvelope, LEGACY_METHOD_TOKENS,
 };
 pub use performance::PerformanceConfig;
 pub use performance_presets::{PerformancePreset, UnknownPerformancePreset};

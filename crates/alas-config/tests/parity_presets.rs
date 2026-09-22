@@ -80,9 +80,10 @@ fn every_solver_preset_matches_the_reference() {
                 // Only the balanced preset's worker count diverges, and it
                 // diverges the way the configuration default does: the frozen
                 // literal `1` became `0`, meaning "resolve against this
-                // machine", which the staged MADS search uses to evaluate a
-                // poll block in parallel without changing which points it
-                // evaluates or which one it returns. The other three presets
+                // machine", which the product L-SHADE search uses to
+                // evaluate each generation's batch in parallel without
+                // changing which points it evaluates or which one it
+                // returns. The other three presets
                 // ask for four workers explicitly and are unchanged. The
                 // product value is asserted here so it is pinned on both
                 // sides, and the frozen literal is then compared as it stands.

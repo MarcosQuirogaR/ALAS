@@ -35,11 +35,15 @@
 //! * The structures enable/station help names the native structural wing-mass
 //!   centroid consumer. Both old and corrected prose are pinned below; values,
 //!   field order, and exact comparison remain unchanged.
-//! * The seven solver/mission help fields listed by
+//! * The solver/mission help fields listed by
 //!   [`solver_agnostic_help_correction`] remove retired implementation
 //!   attribution from product-facing prose. Their corrected text and the
 //!   frozen reference text are both compared exactly below; no tolerance is
 //!   widened and no schema/value contract is relaxed.
+//! * `strategy`, `seed_near_initial_design` and `seed_perturbation_fraction`
+//!   also changed *label*, not only help, to say they are read only by the
+//!   frozen reference-compatibility replay now that L-SHADE is the one
+//!   product search kernel; see [`solver_agnostic_label_correction`].
 //! * The active transport planform adds four explicit side-of-body/kink
 //!   fields to `WingConfig`. The frozen Python schema has none of them, so the
 //!   absent upstream fields and the source-corrected Rust values/schema are
@@ -433,14 +437,16 @@ fn product_default_correction(path: &str) -> Option<(Value, Value)> {
         Some((serde_json::json!(8), serde_json::json!(24)))
     }
     // The native worker count. The frozen value is a literal one; the product
-    // default is `0`, meaning "resolve against this machine", which the staged
-    // MADS search uses to evaluate a poll block in parallel (measured 2.24x on
-    // the B787-9 and 2.76x on AVE at eight workers, with the evaluation count
-    // and the winner unchanged). Differential evolution is deliberately *not*
-    // covered by that: its generation loop batches only when a configuration
-    // explicitly asks for more than one worker, because a batched generation
-    // defers the population update and is a different algorithm from the
-    // serial one. See `SolverSettings::resolved_workers` and the guard in
+    // default is `0`, meaning "resolve against this machine", which the
+    // product L-SHADE search uses to evaluate each generation's batch in
+    // parallel (measured 2.24x on the B787-9 and 2.76x on AVE at eight
+    // workers, with the evaluation count and the winner unchanged, on the
+    // predecessor staged search this replaced). The frozen
+    // reference-compatibility replay is deliberately *not* covered by that:
+    // its generation loop batches only when a configuration explicitly asks
+    // for more than one worker, because a batched generation defers the
+    // population update and is a different algorithm from the serial one.
+    // See `SolverSettings::resolved_workers` and the guard in
     // `alas_opt::DesignOptimizer::run_search`.
     else if path.ends_with(".optimizer.solver.workers")
         || path == "OptimizerConfig.solver.workers"
@@ -768,7 +774,10 @@ fn is_native_config_field(path: &str, key: &str) -> bool {
             || path.ends_with(".propulsion_cycle")))
         || (matches!(
             key,
-            "method" | "finite_difference_step" | "constraint_tolerance"
+            "method"
+                | "finite_difference_step"
+                | "constraint_tolerance"
+                | "convergence_stagnation_generations"
         ) && (path.ends_with("SolverSettings") || path.ends_with(".solver")))
         || (key == "random_force_psd_n2_per_hz"
             && (path.ends_with("StructuresConfig") || path.ends_with(".structures")))
@@ -862,6 +871,18 @@ fn compare_field(
             &format!("{label}.label: frozen Python value"),
             &expected.get("label").and_then(Value::as_str).unwrap_or(""),
             &frozen_label,
+        );
+    } else if let Some((source_corrected, frozen_python)) = solver_agnostic_label_correction(label)
+    {
+        comparison.exact(
+            &format!("{label}.label: source-corrected Rust value"),
+            &field.label,
+            &source_corrected,
+        );
+        comparison.exact(
+            &format!("{label}.label: frozen Python value"),
+            &expected.get("label").and_then(Value::as_str).unwrap_or(""),
+            &frozen_python,
         );
     } else {
         compare_string(
@@ -1145,8 +1166,53 @@ fn wing_centroid_help_correction(label: &str) -> Option<(&'static str, &'static 
     }
 }
 
+/// Labels that changed to say a field is now read only by the frozen
+/// reference-compatibility replay, alongside [`solver_agnostic_help_correction`]
+/// for the same fields.
+fn solver_agnostic_label_correction(label: &str) -> Option<(&'static str, &'static str)> {
+    match label {
+        "OptimizerConfig.solver.strategy" | "ALASConfig.optimizer.solver.strategy" => Some((
+            "DE mutation/crossover strategy (parity replay only)",
+            "DE mutation/crossover strategy",
+        )),
+        "OptimizerConfig.solver.seed_near_initial_design"
+        | "ALASConfig.optimizer.solver.seed_near_initial_design" => Some((
+            "Seed search near the initial design (parity replay only)",
+            "Seed search near the initial design",
+        )),
+        "OptimizerConfig.solver.seed_perturbation_fraction"
+        | "ALASConfig.optimizer.solver.seed_perturbation_fraction" => Some((
+            "Seed cluster perturbation size (parity replay only)",
+            "Seed cluster perturbation size",
+        )),
+        _ => None,
+    }
+}
+
 fn solver_agnostic_help_correction(label: &str) -> Option<(&'static str, &'static str)> {
     match label {
+        // `strategy`, `tolerance`, `seed_near_initial_design` and
+        // `seed_perturbation_fraction` all changed prose to say which driver
+        // actually reads them now that L-SHADE is the one product kernel
+        // (see `search_methods::lshade_de`); the frozen text is unchanged.
+        "OptimizerConfig.solver.strategy" | "ALASConfig.optimizer.solver.strategy" => Some((
+            "SciPy differential_evolution strategy name (e.g. 'best1bin', 'rand1bin', 'best2bin'), read only by the frozen reference-compatibility replay used for regression comparison against the Python baseline. The product search always uses current-to-pbest/1/bin and ignores this field.",
+            "SciPy differential_evolution strategy name (e.g. 'best1bin', 'rand1bin', 'best2bin'): controls how new candidate designs are generated from the population each generation.",
+        )),
+        "OptimizerConfig.solver.tolerance" | "ALASConfig.optimizer.solver.tolerance" => Some((
+            "The search stops early once two things both hold: the population's normalized design-space spread has fallen below this fraction of the bounds, and the best feasible cost's relative improvement has stayed below this fraction for the stagnation window below.",
+            "Relative tolerance for convergence; the solver stops early once the population's cost spread falls below this.",
+        )),
+        "OptimizerConfig.solver.seed_near_initial_design"
+        | "ALASConfig.optimizer.solver.seed_near_initial_design" => Some((
+            "Initialize the population as a tight cluster of small perturbations around the initial/preset design (plus the design itself, unperturbed) instead of SciPy's default uniform latin-hypercube coverage of the whole bounds space. Read only by the frozen reference-compatibility replay; the product L-SHADE search seeds its population's first individual directly from the supplied design instead and does not read this field.",
+            "Initialize the population as a tight cluster of small perturbations around the initial/preset design (plus the design itself, unperturbed) instead of SciPy's default uniform latin-hypercube coverage of the whole bounds space. Guarantees at least one known-valid, physically-balanced design is in generation 0, and lets the solver refine from there instead of having to rediscover CG/stability balance from scratch across the full 16-D space. Disable to fall back to the old full-space exploration (e.g. if you specifically want to explore far from the initial design).",
+        )),
+        "OptimizerConfig.solver.seed_perturbation_fraction"
+        | "ALASConfig.optimizer.solver.seed_perturbation_fraction" => Some((
+            "Size of the initial random perturbation around the initial design, as a fraction of each design variable's (upper - lower) bound range. Read only by the frozen reference-compatibility replay when seed_near_initial_design is enabled; the product L-SHADE search does not read this field.",
+            "Size of the initial random perturbation around the initial design, as a fraction of each design variable's (upper - lower) bound range. Only used when seed_near_initial_design is enabled. Small values (e.g. 0.05) start with a tight, mostly-valid cluster; larger values explore more broadly from the start at the cost of more of the population starting off invalid.",
+        )),
         "MSESConfig.alpha_sweep_n_points" | "ALASConfig.mses.alpha_sweep_n_points" => Some((
             "Number of alpha points in the MSES polar sweep. Kept small relative to the native VLM sweep (analysis.sweep_n_points) since each MSES point is a real viscous-compressible solve (~1-2s) rather than a linear-algebra VLM solve.",
             "Number of alpha points in the MSES polar sweep. Kept small relative to AeroSandbox's own VLM sweep (analysis.sweep_n_points) since each MSES point is a real viscous-compressible solve (~1-2s) rather than a linear-algebra VLM solve.",
@@ -1206,19 +1272,18 @@ fn solver_agnostic_help_correction(label: &str) -> Option<(&'static str, &'stati
             "Total pressure ratio through the core compressors (LPC x HPC combined, NOT including the fan). Feeds SUAVE's compressor sizing (split into a fixed LPC ratio + a solved HPC ratio) and the Propulsion Analysis cycle's compressor_pressure_ratio.",
         )),
         // The corrected prose no longer says parallel evaluation is free,
-        // because it is not. Differential evolution's generation loop batches
-        // only when a configuration explicitly asks for more than one worker:
-        // a batched generation defers the population update, so an accepted
-        // trial stops influencing later trial vectors in the same generation,
-        // which is a different algorithm with a different winner. Resolving
-        // the automatic setting against the machine moved the frozen replay
-        // off the reference interleaving and made its result core-count
-        // dependent, which `seeded_example_replays_the_python_winner` catches.
-        // The staged MADS search is the case where the count really does
-        // change only the wall time, and the text now says so of that search
-        // alone.
+        // because it is not, for the one driver where it still is not: the
+        // frozen reference-compatibility replay defers a whole generation
+        // only when more than one worker is requested, which changes the
+        // trial interleaving and is preserved that way for exact regression
+        // comparison against the Python baseline
+        // (`seeded_example_replays_the_python_winner`). The product
+        // L-SHADE search is the case where the count really does change only
+        // the wall time: it always evaluates one generation as a single
+        // deterministic batch, so a seeded run replays bit-identically at
+        // any worker count, and the text now says so.
         "OptimizerConfig.solver.workers" | "ALASConfig.optimizer.solver.workers" => Some((
-            "Number of native worker threads for candidate batches. 0 (the default) picks a count from the machine's available parallelism; a positive value is used exactly as written; negative values are treated as 1. For the staged MADS search this changes only how long a poll block takes, not which points are evaluated or the winner. Differential evolution is different: asking for more than one worker builds a whole generation before evaluating it, so an accepted trial no longer influences later trial vectors in the same generation, which is a different algorithm and a different result. External evaluator adapters remain serial because they own mutable process/session state.",
+            "Number of native worker threads for candidate batches. 0 (the default) picks a count from the machine's available parallelism; a positive value is used exactly as written; negative values are treated as 1. The product L-SHADE search always evaluates one whole generation as a single deterministic batch, in the order it built the generation from its seed, so this setting changes only how long a batch takes, never which points are evaluated or the winner: a seeded run replays bit-identically at any worker count. The frozen reference-compatibility replay is the one exception: its legacy driver defers a whole generation only when more than one worker is requested, which changes the trial interleaving and is preserved that way for exact regression comparison against the Python baseline. External evaluator adapters remain serial because they own mutable process/session state.",
             "Number of worker processes for parallel evaluation (>1 uses multiprocessing). Requires a picklable objective, already the case for ALAS's optimizer.",
         )),
         _ => None,

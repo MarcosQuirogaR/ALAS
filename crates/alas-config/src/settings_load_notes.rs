@@ -10,7 +10,7 @@
 
 use super::AlasConfig;
 use crate::overlay::OverlayError;
-use crate::MassArchitectureMigration;
+use crate::{MassArchitectureMigration, LEGACY_METHOD_TOKENS};
 
 /// What loading a configuration document changed about its meaning.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -20,11 +20,22 @@ pub struct ConfigLoadNotes {
     /// The document said `mission.enabled = false`; the loaded configuration
     /// runs the mission anyway.
     pub mission_forced_on: bool,
+    /// The saved `optimizer.solver.method` token, when it named an algorithm
+    /// this build no longer implements as a separate kernel and the loaded
+    /// configuration was migrated to `differential_evolution` instead.
+    pub legacy_solver_method: Option<&'static str>,
 }
 
 impl ConfigLoadNotes {
     /// The sentence shown when a saved file tried to switch the mission off.
     pub const MISSION_FORCED_ON: &'static str = "Mission analysis is part of every full run; the saved 'mission.enabled = false' was ignored.";
+
+    /// The sentence shown when a saved file named a retired solver method.
+    pub fn legacy_solver_method_message(token: &str) -> String {
+        format!(
+            "The saved optimizer method '{token}' is no longer a separate algorithm; this configuration now runs differential evolution (L-SHADE, epsilon-constrained) instead."
+        )
+    }
 
     /// One sentence per change, for logs and the run log.
     pub fn messages(&self) -> Vec<String> {
@@ -34,6 +45,9 @@ impl ConfigLoadNotes {
         }
         if self.mission_forced_on {
             messages.push(Self::MISSION_FORCED_ON.to_owned());
+        }
+        if let Some(token) = self.legacy_solver_method {
+            messages.push(Self::legacy_solver_method_message(token));
         }
         messages
     }
@@ -45,6 +59,21 @@ pub fn legacy_mission_disabled(data: &serde_json::Value) -> bool {
         .and_then(|mission| mission.get("enabled"))
         .and_then(serde_json::Value::as_bool)
         == Some(false)
+}
+
+/// The legacy solver method token `data` names, if any, matched against the
+/// stable list rather than the run's own default so a document that simply
+/// omits the field is never reported as migrated.
+pub fn legacy_solver_method(data: &serde_json::Value) -> Option<&'static str> {
+    let method = data
+        .get("optimizer")?
+        .get("solver")?
+        .get("method")?
+        .as_str()?;
+    LEGACY_METHOD_TOKENS
+        .iter()
+        .copied()
+        .find(|&token| token == method)
 }
 
 /// Apply the loading-boundary rules to an overlaid configuration and
@@ -59,11 +88,17 @@ pub(super) fn finish(
         loaded.mission.enabled = true;
         tracing::warn!("{}", ConfigLoadNotes::MISSION_FORCED_ON);
     }
+    let legacy_solver_method = legacy_solver_method(data);
+    if let Some(token) = legacy_solver_method {
+        loaded.optimizer.solver.method = "differential_evolution".to_owned();
+        tracing::warn!("{}", ConfigLoadNotes::legacy_solver_method_message(token));
+    }
     (
         loaded,
         ConfigLoadNotes {
             mass_architecture,
             mission_forced_on,
+            legacy_solver_method,
         },
     )
 }
@@ -127,6 +162,54 @@ mod load_notes_tests {
             assert!(!notes.mission_forced_on);
             assert!(notes.messages().is_empty(), "{data}");
         }
+    }
+
+    #[test]
+    fn a_saved_legacy_solver_method_is_migrated_and_reported() {
+        for token in LEGACY_METHOD_TOKENS {
+            let data = serde_json::json!({ "optimizer": { "solver": { "method": token } } });
+            assert_eq!(legacy_solver_method(&data), Some(*token));
+            let (config, notes) = AlasConfig::from_value_with_notes(&data).unwrap();
+            assert_eq!(config.optimizer.solver.method, "differential_evolution");
+            assert_eq!(notes.legacy_solver_method, Some(*token));
+            assert_eq!(
+                notes.messages(),
+                vec![ConfigLoadNotes::legacy_solver_method_message(token)]
+            );
+            // The plain loader applies the same migration; only the note is
+            // unavailable through it.
+            let plain = AlasConfig::from_value(&data).unwrap();
+            assert_eq!(plain.optimizer.solver.method, "differential_evolution");
+        }
+    }
+
+    #[test]
+    fn a_document_that_already_names_the_one_supported_method_carries_no_note() {
+        for data in [
+            serde_json::json!({}),
+            serde_json::json!({ "optimizer": { "solver": { "method": "differential_evolution" } } }),
+        ] {
+            assert_eq!(legacy_solver_method(&data), None);
+            let (config, notes) = AlasConfig::from_value_with_notes(&data).unwrap();
+            assert_eq!(config.optimizer.solver.method, "differential_evolution");
+            assert!(notes.legacy_solver_method.is_none());
+            assert!(notes.messages().is_empty(), "{data}");
+        }
+    }
+
+    #[test]
+    fn an_unrecognized_method_is_left_untouched_for_the_dispatch_boundary_to_reject() {
+        // A token that is neither the supported method nor a known legacy
+        // one is not this loader's concern: it is passed through unchanged,
+        // and `SolverSettings::is_supported_method` refuses it downstream.
+        let data =
+            serde_json::json!({ "optimizer": { "solver": { "method": "not_a_real_method" } } });
+        assert_eq!(legacy_solver_method(&data), None);
+        let config = AlasConfig::from_value(&data).unwrap();
+        assert_eq!(config.optimizer.solver.method, "not_a_real_method");
+        assert!(!crate::SolverSettings::is_supported_method(
+            &config.optimizer.solver.method
+        ));
     }
 
     #[test]

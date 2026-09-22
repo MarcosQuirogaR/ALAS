@@ -808,9 +808,10 @@ fn add_planning_cabin_corrections(
 /// The native worker count.
 ///
 /// `workers` moved from the frozen literal `1` to `0`, meaning "resolve
-/// against this machine": the staged MADS search evaluates a poll block in
-/// parallel at that count without changing which points it evaluates or which
-/// one it returns. Differential evolution is deliberately excluded from the
+/// against this machine": the product L-SHADE search evaluates each
+/// generation's batch in parallel at that count without changing which
+/// points it evaluates or which one it returns. The frozen
+/// reference-compatibility replay is deliberately excluded from the
 /// automatic setting - its generation loop batches only on an explicit
 /// request, because a batched generation defers the population update and is a
 /// different algorithm - so the frozen replay keeps the reference
