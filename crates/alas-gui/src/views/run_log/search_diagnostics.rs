@@ -45,7 +45,8 @@ pub(super) fn show(state: &AppState, ui: &mut Ui) {
     ui.label(RichText::new(tr("Search diagnostics")).strong().small());
     let Some(diagnostics) = current(state) else {
         let message = if search_ran(state) {
-            // A search method outside the staged MADS driver returns no
+            // The frozen reference-compatibility replay is the one search
+            // path outside the product L-SHADE driver, and it returns no
             // lifecycle record. Saying so is not the same as reporting zeros.
             tr("This run's search method reports no diagnostics.")
         } else {
@@ -66,7 +67,7 @@ pub(super) fn show(state: &AppState, ui: &mut Ui) {
                 if diagnostics.converged {
                     tr("Yes")
                 } else {
-                    tr("No: stopped on budget, iterations, mesh floor or watchdog")
+                    tr("No: stopped on the generation budget or was cancelled")
                 },
             );
             row(
@@ -81,7 +82,7 @@ pub(super) fn show(state: &AppState, ui: &mut Ui) {
             );
             row(
                 ui,
-                tr("Poll iterations completed"),
+                tr("Generations completed"),
                 count(diagnostics.poll_iterations),
             );
             row(
@@ -106,7 +107,7 @@ pub(super) fn show(state: &AppState, ui: &mut Ui) {
             );
             row(
                 ui,
-                tr("MADS wall time"),
+                tr("Search wall time"),
                 seconds(diagnostics.search_wall_time_s),
             );
             row(
@@ -116,7 +117,7 @@ pub(super) fn show(state: &AppState, ui: &mut Ui) {
             );
             row(
                 ui,
-                tr("Points per poll block"),
+                tr("Population size per generation"),
                 count(diagnostics.poll_block_size),
             );
             row(
@@ -128,6 +129,20 @@ pub(super) fn show(state: &AppState, ui: &mut Ui) {
                 ui,
                 tr("Relative improvement over it"),
                 optional(diagnostics.relative_improvement, 4),
+            );
+            row(
+                ui,
+                tr("Feasible fraction of the final population"),
+                fraction(diagnostics.feasible_fraction),
+            );
+            row(
+                ui,
+                tr("Constraint boundary (epsilon) at the last generation"),
+                if diagnostics.epsilon_level > 0.0 {
+                    format!("{:.6}", diagnostics.epsilon_level)
+                } else {
+                    tr("0 (strict feasibility)")
+                },
             );
         });
     ui.label(
@@ -148,6 +163,14 @@ fn row(ui: &mut Ui, label: String, value: String) {
 
 fn count(value: usize) -> String {
     value.to_string()
+}
+
+fn fraction(value: f64) -> String {
+    if value.is_finite() {
+        format!("{:.0}%", value * 100.0)
+    } else {
+        tr("unavailable")
+    }
 }
 
 fn seconds(value: f64) -> String {

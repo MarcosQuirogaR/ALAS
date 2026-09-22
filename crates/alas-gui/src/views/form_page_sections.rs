@@ -98,7 +98,7 @@ pub(super) fn page_sections(group: &str, surface: Surface) -> Option<&'static [P
             default_open: true,
         },
         PageSection {
-            title: "MADS settings",
+            title: "Differential evolution settings",
             names: &["solver"],
             default_open: true,
         },

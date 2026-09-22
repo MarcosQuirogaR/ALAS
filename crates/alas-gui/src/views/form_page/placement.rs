@@ -152,10 +152,14 @@ fn prune(
     (surface != Surface::Advanced || is_advanced).then_some(field)
 }
 
-/// Keep the optimizer page focused on the one product search contract. Legacy
-/// method/strategy controls remain loadable by the config and parity paths,
-/// but exposing them here would suggest that the product still dispatches a
-/// menu of algorithms. The dedicated Design Space page owns `design_space`.
+/// Keep the optimizer page focused on the one product search contract.
+/// `method` and `strategy` remain loadable by the config and parity paths
+/// (`method` is a hidden single-choice field with no other value to select;
+/// `strategy`, `seed_near_initial_design` and `seed_perturbation_fraction`
+/// are read only by the frozen reference-compatibility replay), but exposing
+/// them here would suggest that the product still dispatches a menu of
+/// algorithms or that the DE population is seeded that way. The dedicated
+/// Design Space page owns `design_space`.
 const LEGACY_OPTIMIZER_FIELDS: &[&str] = &[
     "weights",
     "design_space",
@@ -163,8 +167,6 @@ const LEGACY_OPTIMIZER_FIELDS: &[&str] = &[
     "strategy",
     "finite_difference_step",
     "constraint_tolerance",
-    "tolerance",
-    "workers",
     "display_progress",
     "seed_near_initial_design",
     "seed_perturbation_fraction",
@@ -192,16 +194,16 @@ pub(super) fn optimizer_ui_fields(fields: &[Field]) -> Vec<Field> {
                 .map(|mut child| {
                     match child.name {
                         "max_iterations" => {
-                            child.label = "MADS poll/search iterations";
-                            child.help = "Maximum number of MADS poll/search iterations before the run reports iteration_limit.";
+                            child.label = "Max generations";
+                            child.help = "Maximum number of L-SHADE differential-evolution generations before the run reports iteration_limit; the search may stop earlier once it converges.";
                         }
                         "population_size" => {
-                            child.label = "MADS evaluation budget multiplier";
-                            child.help = "Multiplier used by the current product driver to derive the bounded MADS evaluation budget from the design dimension and poll iterations.";
+                            child.label = "Population size multiplier";
+                            child.help = "Multiplier on the number of design variables giving the initial population size. L-SHADE shrinks the population toward a small floor as generations proceed, so this sets the starting breadth of the search, not a fixed per-generation cost.";
                         }
                         "seed" => {
-                            child.label = "MADS random seed";
-                            child.help = "Optional integer seed for reproducible MADS search points and poll directions.";
+                            child.label = "Random seed";
+                            child.help = "Optional integer seed for a reproducible differential-evolution search, replayed exactly regardless of the worker count.";
                         }
                         _ => {}
                     }

@@ -310,7 +310,7 @@ mod tests {
     }
 
     #[test]
-    fn optimizer_page_hides_legacy_methods_and_exposes_only_mads_settings() {
+    fn optimizer_page_hides_legacy_fields_and_exposes_de_settings() {
         let config = alas_config::AlasConfig::default();
         let fields = config
             .schema()
@@ -328,28 +328,42 @@ mod tests {
         let solver = filtered
             .iter()
             .find(|field| field.name == "solver")
-            .expect("MADS settings group");
+            .expect("differential evolution settings group");
         let alas_config::Entry::Node(solver) = &solver.entry else {
             panic!("solver must be a group");
         };
+        // `method` and `strategy` stay off the distilled page (hidden or
+        // read only by the frozen parity replay); the DE tolerances,
+        // population, generations, seed and worker count are shown.
         assert!(solver.fields.iter().all(|field| !matches!(
             field.name,
             "method"
                 | "strategy"
                 | "finite_difference_step"
                 | "constraint_tolerance"
-                | "tolerance"
-                | "workers"
                 | "display_progress"
                 | "seed_near_initial_design"
                 | "seed_perturbation_fraction"
         )));
+        for shown in [
+            "max_iterations",
+            "population_size",
+            "seed",
+            "workers",
+            "tolerance",
+            "convergence_stagnation_generations",
+        ] {
+            assert!(
+                solver.fields.iter().any(|field| field.name == shown),
+                "{shown} must be shown on the differential evolution settings page"
+            );
+        }
         if let Some(iterations) = solver
             .fields
             .iter()
             .find(|field| field.name == "max_iterations")
         {
-            assert_eq!(iterations.label, "MADS poll/search iterations");
+            assert_eq!(iterations.label, "Max generations");
         }
     }
 }
