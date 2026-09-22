@@ -11,8 +11,8 @@
 //! finding: it means the model places the centre of gravity *aft of the
 //! main-gear station*, so the aeroplane sits on its tail at every loading
 //! state that is evaluated. This probe prints the three quantities that
-//! decide that sign — the main-gear station, the nose-gear station and the
-//! state centre of gravity — for every registered preset, so the finding can
+//! decide that sign (the main-gear station, the nose-gear station and the
+//! state centre of gravity) for every registered preset, so the finding can
 //! be attributed to the station model or to the mass distribution instead of
 //! being restated as a search rejection.
 //!

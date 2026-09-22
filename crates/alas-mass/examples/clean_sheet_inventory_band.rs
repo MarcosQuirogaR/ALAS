@@ -5,7 +5,7 @@
 //! own non-box band, and by how much.
 //!
 //! The band `[lower, upper]` is two published correlations evaluated on the
-//! candidate — Torenbeek's movable share and the FLOPS non-bending share — and
+//! candidate, Torenbeek's movable share and the FLOPS non-bending share, and
 //! **neither depends on the sized box**. The enumerated secondary inventory does
 //! not either. So the whole effect of a box mass change on the completeness gate
 //! is through `non_box_fraction = secondary / (box + secondary)`, which this

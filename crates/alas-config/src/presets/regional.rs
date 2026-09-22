@@ -265,6 +265,10 @@ pub fn atr72_600() -> AircraftPreset {
 }
 
 #[cfg(test)]
+// Tests assert on the gear anchor fields of the ATR preset this module
+// builds, so a failed expect is the assertion failing, not a library
+// invariant being broken.
+#[allow(clippy::expect_used)]
 mod tests {
     use super::*;
 

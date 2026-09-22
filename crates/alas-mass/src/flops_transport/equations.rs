@@ -224,14 +224,14 @@ pub(super) fn cargo_containers_kg(containerized_mass_kg: f64) -> f64 {
 ///
 /// | case | `l_fus` m | candidate `d_fus` m | this relation kg | Pape kg |
 /// |---|---:|---|---:|---:|
-/// | A320-200 | 37.57 | width 3.95 | 2,878.1 | — |
-/// | A320-200 | 37.57 | depth 4.14 | 3,051.7 | — |
-/// | A320-200 | 37.57 | `sqrt(w d)` 4.0439 | 2,963.5 | — |
+/// | A320-200 | 37.57 | width 3.95 | 2,878.1 | n/a |
+/// | A320-200 | 37.57 | depth 4.14 | 3,051.7 | n/a |
+/// | A320-200 | 37.57 | `sqrt(w d)` 4.0439 | 2,963.5 | n/a |
 /// | **A320-200** | 37.57 | **`(w + d)/2` 4.045** | **2,964.5** | **2,964.5** |
 /// | **A340-300** | 62.47 | **circular 5.64** | **8,707.6** | **8,707.6** |
 ///
 /// Only the arithmetic mean reproduces the published A320-200 value, and the
-/// circular A340-300 case — where every candidate coincides — reproduces
+/// circular A340-300 case, where every candidate coincides, reproduces
 /// exactly as well, which confirms the coefficients and the exponent
 /// independently of the convention. It is also the same `D_av` that FLOPS
 /// equation 56 already uses in this crate (`structure.rs`), so the two methods
@@ -249,9 +249,9 @@ pub(super) fn lth_furnishings_kg(fuselage_length_m: f64, average_fuselage_diamet
 ///
 /// `m_opp = 32.907 n_pax^1.021` short/medium-haul and
 /// `m_opp = 35.782 n_pax^1.1141` long-haul (Pape 2018 equations 2.15 and
-/// 2.16, p. 23). It replaces the occupant-driven FLOPS operating items — the
+/// 2.16, p. 23). It replaces the occupant-driven FLOPS operating items (the
 /// cabin crew and their baggage, the flight crew and theirs, and the passenger
-/// service items — and **not** the unusable fuel or the engine oil, which are
+/// service items) and **not** the unusable fuel or the engine oil, which are
 /// propulsion-side fluids this relation does not price, and **not** the
 /// container tare, which is decided by the hold architecture rather than by
 /// the cabin and is evaluated identically under both methods.
@@ -499,8 +499,8 @@ pub fn estimate_flops_transport(
     // 116-118 defaults because the product contract represents an installed
     // cabin and crew, not an unspecified FLOPS study.
     // The LTH operating-item relation is a single occupant-driven total, so
-    // the three FLOPS items it covers — cabin crew and baggage, flight crew
-    // and baggage, and passenger service — are reported as zero and the whole
+    // the three FLOPS items it covers (cabin crew and baggage, flight crew
+    // and baggage, and passenger service) are reported as zero and the whole
     // is carried on the passenger-service line rather than being split across
     // them by a rule the source does not give. It does not cover the container
     // tare, which is hold architecture.

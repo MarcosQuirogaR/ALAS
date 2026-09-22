@@ -98,13 +98,15 @@ where
     }
     let gmsh_status = match execute_gmsh_stage(
         adapter,
-        case_dir,
-        config.solver.timeout_seconds,
-        cancel,
+        &mut StageContext {
+            case_dir,
+            timeout_seconds: config.solver.timeout_seconds,
+            cancel,
+            started,
+            command_logs: &mut command_logs,
+            mesh_output: &mut mesh_output,
+        },
         &mut emit,
-        started,
-        &mut command_logs,
-        &mut mesh_output,
         CfdStage::Meshing,
         vec![
             "-3".into(),
@@ -128,13 +130,15 @@ where
     }
     let convert_status = match execute_stage(
         adapter,
-        case_dir,
-        config.solver.timeout_seconds,
-        cancel,
+        &mut StageContext {
+            case_dir,
+            timeout_seconds: config.solver.timeout_seconds,
+            cancel,
+            started,
+            command_logs: &mut command_logs,
+            mesh_output: &mut mesh_output,
+        },
         &mut emit,
-        started,
-        &mut command_logs,
-        &mut mesh_output,
         CfdStage::Meshing,
         "gmshToFoam",
         vec!["constant/triSurface/airfoil.msh".into()],
@@ -175,13 +179,15 @@ where
     );
     let check_status = match execute_stage(
         adapter,
-        case_dir,
-        config.solver.timeout_seconds,
-        cancel,
+        &mut StageContext {
+            case_dir,
+            timeout_seconds: config.solver.timeout_seconds,
+            cancel,
+            started,
+            command_logs: &mut command_logs,
+            mesh_output: &mut mesh_output,
+        },
         &mut emit,
-        started,
-        &mut command_logs,
-        &mut mesh_output,
         CfdStage::QualityGate,
         "checkMesh",
         vec!["-writeAllFields".into(), "-meshQuality".into()],
@@ -224,13 +230,15 @@ where
     {
         let init_status = match execute_stage(
             adapter,
-            case_dir,
-            config.solver.timeout_seconds,
-            cancel,
+            &mut StageContext {
+                case_dir,
+                timeout_seconds: config.solver.timeout_seconds,
+                cancel,
+                started,
+                command_logs: &mut command_logs,
+                mesh_output: &mut mesh_output,
+            },
             &mut emit,
-            started,
-            &mut command_logs,
-            &mut mesh_output,
             CfdStage::Initialization,
             "potentialFoam",
             vec!["-initialiseUBCs".into(), "-writephi".into()],
@@ -290,13 +298,15 @@ where
         let startup_label = format!("{solver_name}-startup");
         let startup_status = match execute_solver_stage_with_tool(
             adapter,
-            case_dir,
-            solver_timeout_seconds,
-            cancel,
+            &mut StageContext {
+                case_dir,
+                timeout_seconds: solver_timeout_seconds,
+                cancel,
+                started,
+                command_logs: &mut command_logs,
+                mesh_output: &mut mesh_output,
+            },
             &mut emit,
-            started,
-            &mut command_logs,
-            &mut mesh_output,
             CfdStage::Solution,
             &startup_label,
             solver_name,
@@ -381,13 +391,15 @@ where
     };
     let solution_status = match execute_solver_stage_with_tool(
         adapter,
-        case_dir,
-        solver_timeout_seconds,
-        cancel,
+        &mut StageContext {
+            case_dir,
+            timeout_seconds: solver_timeout_seconds,
+            cancel,
+            started,
+            command_logs: &mut command_logs,
+            mesh_output: &mut mesh_output,
+        },
         &mut emit,
-        started,
-        &mut command_logs,
-        &mut mesh_output,
         CfdStage::Solution,
         &solution_label,
         solver_name,
@@ -405,13 +417,15 @@ where
     }
     let post_status = match execute_solver_postprocess_stage_with_tool(
         adapter,
-        case_dir,
-        solver_timeout_seconds,
-        cancel,
+        &mut StageContext {
+            case_dir,
+            timeout_seconds: solver_timeout_seconds,
+            cancel,
+            started,
+            command_logs: &mut command_logs,
+            mesh_output: &mut mesh_output,
+        },
         &mut emit,
-        started,
-        &mut command_logs,
-        &mut mesh_output,
         solver_name,
     ) {
         Ok(status) => status,

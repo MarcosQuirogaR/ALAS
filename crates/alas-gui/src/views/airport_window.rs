@@ -6,7 +6,7 @@
 //! The editor is reached from the Route card's departure/arrival selectors:
 //! picking [`CUSTOM_AIRPORT_OPTION`] opens this window for that field instead
 //! of writing a value. Keeping the fields, import/export, and registry in a
-//! separate window is what the Inputs page asked for — a route selector is a
+//! separate window is what the Inputs page asked for: a route selector is a
 //! one-line choice, while entering an aerodrome is a form.
 //!
 //! The editor accepts physical runway lengths only.  Field-performance code

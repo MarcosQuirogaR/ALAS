@@ -101,9 +101,8 @@ fn native_preview_scene(export: &OpenVspExportResult, theme: Option<&str>) -> Sc
         bold: true,
     });
     scene.add(SceneElement::Text {
-        text:
-            "Native OpenVSP shaded view — open the model to rotate, zoom, and inspect components."
-                .to_owned(),
+        text: "Native OpenVSP shaded view: open the model to rotate, zoom, and inspect components."
+            .to_owned(),
         pos: [20.0, 49.0],
         font_size: 9.0,
         color: Color::from_hex(pal.tick),

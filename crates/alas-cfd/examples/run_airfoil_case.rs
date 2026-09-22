@@ -22,6 +22,11 @@ use std::sync::Arc;
 use alas_cfd::{run_study, CfdStage, CfdStudyConfig, MeshPreset};
 use alas_exec::openfoam::{OpenFoamAdapter, OpenFoamBackend, OpenFoamPreferences};
 
+// This binary example's only job is to report progress and results on the
+// console for a human running it manually; there is no other channel to
+// route this through, so stdout/stderr are the intended sinks, not a bypass
+// of library logging.
+#[allow(clippy::print_stdout, clippy::print_stderr)]
 fn main() {
     let mut args = env::args_os().skip(1);
     let case_dir = args
@@ -37,8 +42,10 @@ fn main() {
         .and_then(|value| value.into_string().ok())
         .and_then(|value| value.parse::<f64>().ok());
 
-    let mut config = CfdStudyConfig::default();
-    config.airfoil_name = airfoil;
+    let mut config = CfdStudyConfig {
+        airfoil_name: airfoil,
+        ..CfdStudyConfig::default()
+    };
     if let Some(angle_of_attack_deg) = angle_of_attack_deg {
         config.angle_of_attack_deg = angle_of_attack_deg;
     }

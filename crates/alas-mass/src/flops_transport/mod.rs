@@ -212,7 +212,7 @@ pub struct FlopsOperatingItemsBreakdown {
     pub engine_oil_kg: f64,
     /// Passenger service, FLOPS `WSRV`.
     pub passenger_service_kg: f64,
-    /// Cargo containers, FLOPS `WCON` — **reported outside operating empty
+    /// Cargo containers, FLOPS `WCON`: **reported outside operating empty
     /// mass**, and therefore outside [`Self::total_kg`].
     ///
     /// The tare is real, operator-owned hardware and it is computed here for
@@ -241,7 +241,7 @@ pub struct FlopsOperatingItemsBreakdown {
     /// equations 125-126 is 12-20 % lighter than a real AKE/LD-3, so this is a
     /// low estimate of the tare. It is not scaled.
     pub cargo_containers_kg: f64,
-    /// Sum of the operating items that belong inside operating empty mass —
+    /// Sum of the operating items that belong inside operating empty mass:
     /// every item above **except** [`Self::cargo_containers_kg`].
     pub total_kg: f64,
     /// FLOPS' own `WOPIT`: [`Self::total_kg`] plus the container tare.

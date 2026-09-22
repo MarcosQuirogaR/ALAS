@@ -31,7 +31,7 @@ pub struct DownloadSpec {
     ///
     /// `None` means this transfer is validated by `min_bytes` alone, exactly
     /// as before this field existed. When present, a mismatch means the
-    /// source now serves content different from what was last reviewed —
+    /// source now serves content different from what was last reviewed:
     /// for an unpinned mirror (one with no release tags to pin against) an
     /// upstream content edit produces the exact same symptom as tampering,
     /// so this alone must not be reported as proof of tampering. Either way
@@ -82,7 +82,7 @@ pub enum DownloadOutcome {
     Completed(DownloadReport),
     /// The cancellation signal was observed before every spec finished.
     /// `DownloadReport` describes only the files that completed, atomically
-    /// and verified, before the stop — never a partially written file.
+    /// and verified, before the stop, never a partially written file.
     Cancelled(DownloadReport),
 }
 
@@ -112,7 +112,7 @@ impl DownloadOutcome {
 ///
 /// `cancel` is polled between specs and, since the transfer itself runs as a
 /// child process rather than through an in-process streaming client, between
-/// short waits on the file currently in flight — a cancellation request does
+/// short waits on the file currently in flight: a cancellation request does
 /// not wait for the largest single file to finish downloading first.
 pub fn download_files(
     specs: &[DownloadSpec],
@@ -209,7 +209,7 @@ pub fn download_files(
         };
 
         // Poll rather than block on `wait()` so a cancellation request can
-        // kill the transfer in flight instead of waiting for it to finish —
+        // kill the transfer in flight instead of waiting for it to finish:
         // curl is a subprocess here, not an in-process streaming client, so
         // this poll loop is the mechanism available for sub-file
         // responsiveness. Once `try_wait` reports an exit, the child has
@@ -280,7 +280,7 @@ pub fn download_files(
             if !actual.eq_ignore_ascii_case(expected) {
                 let _ = fs::remove_file(&temporary);
                 return Err(format!(
-                    "content hash for {} does not match the last reviewed value (expected {expected}, got {actual}); the source may simply have changed since it was last reviewed, not necessarily tampering — a maintainer must look at the new content and update the pinned hash before it is trusted",
+                    "content hash for {} does not match the last reviewed value (expected {expected}, got {actual}); the source may simply have changed since it was last reviewed, not necessarily tampering. A maintainer must look at the new content and update the pinned hash before it is trusted",
                     spec.name
                 ));
             }

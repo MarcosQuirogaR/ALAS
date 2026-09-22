@@ -83,7 +83,7 @@ fn find_labeled_number(text: &str, label: &str) -> Option<f64> {
 /// converged.  It is deliberately three orders below the default outer
 /// `residual_tolerance` of `1e-5`, so a genuinely converged case never comes
 /// near it: the outer residuals of a live segregated solve settle in the
-/// `1e-6 … 1e-5` band, not at `1e-16`.
+/// `1e-6 ... 1e-5` band, not at `1e-16`.
 pub const LINEAR_SOLVER_RESIDUAL_FLOOR: f64 = 1.0e-8;
 
 // `FROZEN_RESIDUAL_SPREAD`, `FROZEN_RESIDUAL_MIN_RUN`, `frozen_run_length` and
@@ -103,7 +103,7 @@ pub const LINEAR_SOLVER_RESIDUAL_FLOOR: f64 = 1.0e-8;
 // normalisation.  The premise was checked against the written fields and does
 // not hold: `G3-fine-p404`'s omega sits at `1.00x` the floor and
 // `T3-gradfree-wallsolve`'s `k` at `0.67x`, and BOTH fields are completely
-// frozen — `0` of 436 389 and `0` of 82 993 cells changed over the last written
+// frozen: `0` of 436 389 and `0` of 82 993 cells changed over the last written
 // interval, while pressure changed in essentially every cell.  The factor had
 // been drawn through exactly the cases it was derived from, and its only real
 // effect was to accept `G3`, which this evidence says should never have been
@@ -174,7 +174,7 @@ pub fn classify_convergence(
     }
     // A run that completes its process and its mesh gate can still return
     // finite numbers no section could produce.  The dispatch relaxation probe
-    // `P3` did exactly that — Cl -302.74, Cd -230.15, wall y+ to 101 — and was
+    // `P3` did exactly that (Cl -302.74, Cd -230.15, wall y+ to 101) and was
     // classified only `unconverged`, which understates it: `unconverged` says
     // the answer is incomplete, while this says the answer is broken.  Screen
     // before the residual gate so the more specific reason is the one reported.
@@ -261,7 +261,7 @@ pub fn classify_convergence(
         );
     }
     // An equation whose outer residual sits far below the inner linear-solver
-    // tolerance is not converged — it is not being solved.  OpenFOAM stops the
+    // tolerance is not converged. It is not being solved.  OpenFOAM stops the
     // inner solve as soon as the normalised initial residual is under
     // `tolerance`, reports `No Iterations 0`, and leaves the field untouched;
     // the log then shows an initial residual identical to the final one.  On a
@@ -286,8 +286,8 @@ pub fn classify_convergence(
     // a **new measurement or a reproduction**:
     //
     // * `V1` `omega` drifts upward about 5 % every outer iteration
-    //   (4.893e-9, 5.155e-9, 5.422e-9 …) until it crosses the inner
-    //   `tolerance 1e-8`, takes one sweep, and restarts the ramp — a sawtooth.
+    //   (4.893e-9, 5.155e-9, 5.422e-9 ...) until it crosses the inner
+    //   `tolerance 1e-8`, takes one sweep, and restarts the ramp: a sawtooth.
     //   The residual is recomputed from sources that are still moving, so its
     //   contiguous reproduced-run length is 1.
     // * `T3-gradfree-wallsolve` reproduces `omega = 9.79030652798e-14` and
@@ -295,7 +295,7 @@ pub fn classify_convergence(
     //   iterations, because nothing updates either field.
     //
     // Hence: below the floor, no solver work at the last iteration, **and** a
-    // contiguous run of reproduced residuals — plus the clause that keeps this
+    // contiguous run of reproduced residuals, plus the clause that keeps this
     // from refusing a genuinely stationary answer, that some other equation is
     // still moving.  An exactly converged steady solution reproduces every
     // equation's residual and must be accepted; a dead equation is recognised
@@ -312,12 +312,12 @@ pub fn classify_convergence(
     // So the verdict is taken from the field itself: see [`field_update`].
     // OpenFOAM writes `k`, `omega` and `p` every `writeInterval`, and comparing
     // the last two writes answers "is the solver still updating this field"
-    // exactly, with no threshold.  Measured, the separation is total — frozen
+    // exactly, with no threshold.  Measured, the separation is total: frozen
     // equations changed `0` cells of 436 389, live ones changed 99.9 %.
     // Where field evidence exists, it decides on its own and the residual
     // pattern is not consulted at all.  That matters: `L2-medium-le2` has `k`
-    // and `omega` fields frozen solid — `0` of 183 721 cells changed between
-    // its last two writes — while their residuals keep *varying*, because the
+    // and `omega` fields frozen solid (`0` of 183 721 cells changed between
+    // its last two writes) while their residuals keep *varying*, because the
     // residual is recomputed each outer iteration from a pressure field that is
     // still moving.  Every residual-shaped trigger misses it.  The field does
     // not.

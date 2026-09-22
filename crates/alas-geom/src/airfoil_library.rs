@@ -185,7 +185,7 @@ fn numpy_interp(x: f64, xp: &[f64], fp: &[f64]) -> f64 {
 /// Evenly spaced points from `start` to `stop`, inclusive: NumPy's
 /// `linspace(start, stop, num, endpoint=True)`. A copy of
 /// `aircraft::spacing::linspace`, which is reachable from here and from other
-/// crates — the copy is historical, not a visibility workaround, and collapsing
+/// crates: the copy is historical, not a visibility workaround, and collapsing
 /// the three copies in this crate is a separate change with its own parity run.
 fn linspace(start: f64, stop: f64, num: usize) -> Vec<f64> {
     if num == 0 {

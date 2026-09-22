@@ -1,7 +1,7 @@
 {
   "metadata": {
-    "name": "ALAS optimized design",
     "source": "alas.pipeline",
+    "name": "ALAS optimized design",
     "tool": "ALAS"
   },
   "design_vector": {
@@ -23,29 +23,29 @@
     "wing_x_shift_m": 0.0
   },
   "geometry": {
-    "reference_span_m": 71.75,
-    "break_span_m": 13.27375,
-    "break_span_fraction": 0.37,
-    "outboard_sweep_deg": 34.0,
-    "h_stab_area_m2": 112.2,
-    "inboard_sweep_deg": 34.0,
-    "taper_ratio": 0.09696969696969697,
-    "tip_chord_m": 1.6,
-    "sweep_deg": 34.0,
     "span_m": 71.75,
-    "wing_area_m2": 535.0038750000001,
-    "unfolded_wing_area_m2": 539.6184536174989,
-    "break_leading_edge_x_offset_m": 8.95325742543716,
+    "mean_aerodynamic_chord_m": 9.778200117945687,
+    "sweep_deg": 34.0,
+    "v_stab_area_m2": 62.23000000000002,
+    "taper_ratio": 0.09696969696969697,
+    "h_stab_area_m2": 112.2,
+    "projected_span_m": 71.75,
+    "break_span_fraction": 0.37,
     "break_chord_m": 7.8,
-    "reference_area_m2": 535.0038750000001,
+    "tip_chord_m": 1.6,
     "unfolded_span_m": 72.34096322003373,
     "root_chord_m": 16.5,
-    "v_stab_area_m2": 62.23000000000002,
-    "projected_span_m": 71.75,
-    "fuselage_length_m": 76.72,
-    "mean_aerodynamic_chord_m": 9.778200117945687,
+    "break_leading_edge_x_offset_m": 8.95325742543716,
+    "wing_area_m2": 535.0038750000001,
     "projected_wing_area_m2": 535.0038750000001,
-    "aspect_ratio": 9.622477033460736
+    "break_span_m": 13.27375,
+    "unfolded_wing_area_m2": 539.6184536174989,
+    "reference_area_m2": 535.0038750000001,
+    "outboard_sweep_deg": 34.0,
+    "fuselage_length_m": 76.72,
+    "reference_span_m": 71.75,
+    "aspect_ratio": 9.622477033460736,
+    "inboard_sweep_deg": 34.0
   },
   "aerodynamics": {
     "aspect_ratio": 9.622477033460736,

@@ -222,7 +222,7 @@ fn default_numerical_convergence() -> CfdOutcome {
 }
 
 /// Mesh quality evidence from `checkMesh`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct MeshQuality {
     /// Whether checkMesh explicitly reported `Mesh OK` and no failed checks.
     pub passed: bool,
@@ -242,7 +242,7 @@ pub struct MeshQuality {
     /// No angle is claimed at which it would instead *fail*: that number is not
     /// in the log and depends on the release and the generation dictionary.
     ///
-    /// The maximum angle alone cannot be read without this count — on the fine
+    /// The maximum angle alone cannot be read without this count: on the fine
     /// preset one face out of 436 389 cells reaches `71.37 deg` against an
     /// average of `5.35 deg`, which is a different mesh from one where
     /// thousands do.  What the count does **not** establish is that the outlier
@@ -293,27 +293,6 @@ pub struct MeshQuality {
     /// cell-quality distributions because it is a solution diagnostic.
     #[serde(default)]
     pub near_wall_distribution: Option<ScalarDistribution>,
-}
-
-impl Default for MeshQuality {
-    fn default() -> Self {
-        Self {
-            passed: false,
-            cells: None,
-            max_non_orthogonality_deg: None,
-            max_skewness: None,
-            min_volume_m3: None,
-            severely_non_orthogonal_faces: None,
-            max_boundary_skewness: None,
-            max_boundary_skewness_patch: None,
-            skewness_faces_in_error: None,
-            non_orthogonality_faces_in_error: None,
-            raw_output: String::new(),
-            distributions: Vec::new(),
-            near_wall: None,
-            near_wall_distribution: None,
-        }
-    }
 }
 
 /// Finite-value percentile evidence read from a native OpenFOAM scalar field.

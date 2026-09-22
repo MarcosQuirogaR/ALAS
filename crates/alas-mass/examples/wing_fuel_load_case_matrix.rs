@@ -6,7 +6,7 @@
 //! One block per preset. It resolves the declared integral wing capacity, the
 //! fuel the loading envelope guarantees is in the wings at the design gross
 //! mass, and then sizes the same box three times on the same geometry and
-//! materials — dry wing, design case, full tanks — so the sensitivity of the
+//! materials (dry wing, design case, full tanks) so the sensitivity of the
 //! sized box to the relieving fuel is measured rather than asserted.
 //!
 //! The A380-800 block additionally brackets the spanwise distribution of a

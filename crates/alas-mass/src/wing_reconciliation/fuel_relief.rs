@@ -24,8 +24,8 @@
 //! mass to be carried across the root. The two differ whenever the aircraft can
 //! reach its design gross mass without filling its wings, and
 //! [`alas_struct::loads::design_case_wing_fuel_kg`] carries that bound: the
-//! zero-fuel limit `MZFW` is what makes `DG − MZFW` the least fuel on board, and
-//! `min(C, DG − MZFW)` the least of it that can be in the wings. Applying the
+//! zero-fuel limit `MZFW` is what makes `DG - MZFW` the least fuel on board, and
+//! `min(C, DG - MZFW)` the least of it that can be in the wings. Applying the
 //! full capacity regardless credited the ATR 72-600 with 5 065.2 kg of relief
 //! where its envelope guarantees 2 000 kg, and the A380-800 with 236 488 kg
 //! where it guarantees 199 000 kg.
@@ -50,7 +50,7 @@ pub struct DeclaredWingFuelCase {
     /// mass, both wings, kg. Equal to [`Self::capacity_kg`] when the wings
     /// cannot be avoided, and less when they can.
     pub design_case_kg: f64,
-    /// The design gross mass the structural case is applied at, kg — the same
+    /// The design gross mass the structural case is applied at, kg, the same
     /// mass [`alas_struct::loads::load_cases`] reads.
     pub design_gross_mass_kg: f64,
     /// The declared maximum zero-fuel mass the bound was taken against, kg.
@@ -104,11 +104,11 @@ pub fn declared_integral_wing_fuel_kg_m(
 /// is correctly weighted inboard.
 ///
 /// `requirements` must be the same requirements the sizing loads are built from
-/// — [`super::design_gross_mass_kg`] applied, not the raw mission mass — because
+/// ([`super::design_gross_mass_kg`] applied, not the raw mission mass) because
 /// the bound is taken against the mass the manoeuvre is applied at.
 ///
 /// `None` when the aircraft declares no enabled integral wing cell with a
-/// published volume — a notional or clean-sheet configuration — in which case
+/// published volume (a notional or clean-sheet configuration) in which case
 /// the sizer's geometric estimate is the right model and stands.
 ///
 /// # How a partial case is distributed
@@ -119,13 +119,13 @@ pub fn declared_integral_wing_fuel_kg_m(
 /// certainty: a fill that favoured the inboard cells would relieve less and give
 /// a heavier box, one that favoured the outboard cells more and a lighter one.
 /// No source states the sequence, so the declared shape is kept and the bracket
-/// is recorded. On the ATR 72-600 the question does not arise — it declares one
-/// wing cell — and on the A380-800 the factor is a uniform `0.841`.
+/// is recorded. On the ATR 72-600 the question does not arise (it declares one
+/// wing cell), and on the A380-800 the factor is a uniform `0.841`.
 ///
 /// # What is deliberately not counted
 ///
 /// Only `inner_wing`, `mid_wing` and `outer_wing` are integral wing cells. A
-/// centre tank is the wing carry-through box at `y ≈ 0` on the A320-200,
+/// centre tank is the wing carry-through box at `y ~= 0` on the A320-200,
 /// A340-300 and A380-800 and relieves nothing there; on the A220-300, B787-9
 /// and AVE `alas_config::preset_fuel_tanks` records that the centre tank runs
 /// into the inboard wing, so some of that volume **is** wing-carried and is not
@@ -224,7 +224,7 @@ pub fn declared_wing_fuel_case(
 /// `None` for a configuration that names no registered aircraft, or one whose
 /// registered aircraft publishes no zero-fuel limit (the notional `AVE`). There
 /// is no modelled substitute: `requirements.max_structural_payload_kg` is
-/// `MZFW − OEW` and recovering `MZFW` from it would need the operating empty
+/// `MZFW - OEW` and recovering `MZFW` from it would need the operating empty
 /// mass this very sizing pass is an input to.
 fn declared_max_zero_fuel_mass_kg(config: &AlasConfig) -> Option<f64> {
     if config.preset.is_empty() {
@@ -304,7 +304,7 @@ mod tests {
         // A340-300: EASA.A.064 III.9 inner 85,550 L and outer 7,300 L, both
         // sides together, at the preset's own published 0.8 kg/L. Its wings
         // cannot be avoided at 260 000 kg against a 178 000 kg zero-fuel limit
-        // — 82 000 kg must be aboard and they hold 74 280 kg — so the declared
+        // (82 000 kg must be aboard and they hold 74 280 kg) so the declared
         // capacity is the design case unchanged.
         let (resolved, stations) = resolve("A340-300");
         let expected = (85_550.0 + 7_300.0) * 0.8;

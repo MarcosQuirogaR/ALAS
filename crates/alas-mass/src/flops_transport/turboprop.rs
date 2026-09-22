@@ -12,8 +12,8 @@
 //! the thrust reversers (86), the engine controls (87), the starters (89) and,
 //! among the operating items, the unusable fuel (121) and the engine oil
 //! (122). Searching the published text for "propeller", "turboprop" or "shaft
-//! horsepower" returns nothing at all, and NASA Aviary — the reference
-//! implementation of the same source — has no propeller or gearbox component
+//! horsepower" returns nothing at all, and NASA Aviary, the reference
+//! implementation of the same source, has no propeller or gearbox component
 //! in `mass/flops_based/` either.
 //!
 //! A turboprop has no rated thrust to feed those equations. Manufacturing one
@@ -30,16 +30,16 @@
 //! | Component | Method | Source |
 //! |---|---|---|
 //! | Engine (turbomachine and reduction gearbox) | declared certificated dry mass scaled on shaft power, else the GASP turboshaft specific weight `0.5 lb/hp` | NASA CR-152303 Vol. V eq. V.1.3-V.1.4, p. V-1.4 |
-//! | Reduction gearbox | inside the declared engine mass for a PW100-class engine; otherwise the torque relation | EASA TCDS IM.E.041 §III.2; NASA TM-83458 p. 14 eq. 3B |
+//! | Reduction gearbox | inside the declared engine mass for a PW100-class engine; otherwise the torque relation | EASA TCDS IM.E.041 section III.2; NASA TM-83458 p. 14 eq. 3B |
 //! | Propeller | source-declared propeller mass, else Hamilton Standard regression | NASA CR-152303 Vol. V eq. V.1.28-V.1.29, pp. V-1.10 to V-1.12; NASA TM-83458 p. 5; aircraft source when declared |
 //! | Spinner, blade de-icing, governor | declared, because the regression excludes them verbatim | NASA CR-152303 Vol. V p. V-1.11 |
 //! | Nacelle | area density times nacelle wetted area | NASA CR-152303 Vol. V eq. V.1.6, p. V-1.5 |
 //! | Pylon | `F_PYL (W_ENG + W_NAC)^0.736` | NASA CR-152303 Vol. V eq. V.1.7, p. V-1.5 |
-//! | Thrust reversers | none; a turboprop reverses by blade pitch, and that hardware is already inside the propeller regression's double-acting/reversing population | — |
+//! | Thrust reversers | none; a turboprop reverses by blade pitch, and that hardware is already inside the propeller regression's double-acting/reversing population | n/a |
 //! | Engine controls, starters, mounts, fire protection | declared installation mass | declared input |
 //! | Fuel system, tanks and plumbing | FLOPS equation 92, which reads capacity, engine count and Mach and has no thrust term | NASA/TM-2017-219627 eq. 92 |
 //! | Unusable fuel | FLOPS **alternate** equation 161, `0.0084 x FMXTOT`, which has no thrust term | NASA/TM-2017-219627 eq. 161 |
-//! | Engine oil | declared; see below | — |
+//! | Engine oil | declared; see below | n/a |
 //!
 //! ## Why the engine oil is declared rather than taken from equation 162
 //!
@@ -47,7 +47,7 @@
 //! document's alternate equation 162 is thrust-free, but as printed
 //! (`WOIL = 240 (NPASS + 39) / 40`, p. 56) it returns 1,248 lb of engine oil
 //! for the 169-passenger `LargeSingleAisle1` case against 130.23 lb from the
-//! default equation 122 for the same aircraft — a factor of ten, and far
+//! default equation 122 for the same aircraft: a factor of ten, and far
 //! above any real transport's oil charge. The printed alternate constant is
 //! therefore not usable, and the oil is a declared input instead of a wrong
 //! one. Left undeclared it is zero and visible as an accounting gap; on a
@@ -121,7 +121,7 @@ pub fn shaft_torque_n_m(shaft_power_w: f64, propeller_speed_rpm: f64) -> f64 {
 /// 2,500 horsepower range, and the document itself calls the result a rough
 /// estimate. It is evaluated only when the declared engine mass does not
 /// already contain the gearbox; a PW100-class certificated dry weight does
-/// (EASA TCDS IM.E.041 §III.2), and evaluating both would count it twice.
+/// (EASA TCDS IM.E.041 section III.2), and evaluating both would count it twice.
 pub fn gearbox_mass_kg(torque_n_m: f64, engine_to_propeller_ratio: f64) -> f64 {
     if !is_positive(torque_n_m) || !is_positive(engine_to_propeller_ratio) {
         return 0.0;
@@ -267,7 +267,7 @@ pub struct TurbopropPropulsionInputs {
 /// The evaluated shaft-power propulsion group, kg.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TurbopropPropulsionBreakdown {
-    /// One engine, turbomachine and — for a PW100-class declaration — its
+    /// One engine, turbomachine and (for a PW100-class declaration) its
     /// reduction gearbox, kg.
     pub engine_each_kg: f64,
     /// Every installed engine, kg.
@@ -400,8 +400,14 @@ pub fn estimate_turboprop_propulsion(
         reasons.dedup();
         return Err(reasons);
     }
-    let nacelle_area_density_kg_m2 =
-        nacelle_area_density_kg_m2.expect("positive nacelle density checked above");
+    // The `NacelleArchitecture` guard above already rejected a missing or
+    // nonpositive density, so this is `Some` on every reachable path. Report
+    // the same unverified reason rather than substituting a value: a silent
+    // fallback would price the nacelles at zero and return a plausible but
+    // wrong aircraft mass, which this project treats as worse than failing.
+    let Some(nacelle_area_density_kg_m2) = nacelle_area_density_kg_m2 else {
+        return Err(vec![TurbopropMassUnverifiedReason::NacelleArchitecture]);
+    };
 
     let count = inputs.engine_count as f64;
     let baseline_shaft_power_w = config
@@ -584,7 +590,7 @@ mod tests {
             breakdown.engine_mass_source,
             "declared_certificated_dry_mass"
         );
-        // EASA TCDS IM.E.041 §III.2 puts the reduction gearbox inside that
+        // EASA TCDS IM.E.041 section III.2 puts the reduction gearbox inside that
         // certificated mass, so charging one separately would count it twice.
         assert_eq!(breakdown.gearboxes_kg, 0.0);
     }
@@ -686,12 +692,16 @@ mod tests {
         assert!(reasons.contains(&TurbopropMassUnverifiedReason::ShaftPowerRating));
     }
 
+    /// A named field mutator: identifies which input field a case corrupts
+    /// and how, for `the_public_evaluator_rejects_nonphysical_fractional_power_domains`.
+    type FractionalPowerDomainCase = (
+        &'static str,
+        fn(TurbopropPropulsionInputs) -> TurbopropPropulsionInputs,
+    );
+
     #[test]
     fn the_public_evaluator_rejects_nonphysical_fractional_power_domains() {
-        let cases: [(
-            &str,
-            fn(TurbopropPropulsionInputs) -> TurbopropPropulsionInputs,
-        ); 3] = [
+        let cases: [FractionalPowerDomainCase; 3] = [
             ("reduction_ratio", |mut input: TurbopropPropulsionInputs| {
                 input.reduction_ratio = 0.0;
                 input

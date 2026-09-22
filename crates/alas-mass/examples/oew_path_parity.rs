@@ -11,13 +11,13 @@
 //!
 //! Two masses and two seat counts are compared per aircraft:
 //!
-//! * **lumped** — the eight-slot `MassBreakdown` less payload and fuel, which
+//! * **lumped**, the eight-slot `MassBreakdown` less payload and fuel, which
 //!   is what the weight-and-balance artifact publishes;
-//! * **FLOPS groups** — the same run's pure-FLOPS component buildup, summed
+//! * **FLOPS groups**, the same run's pure-FLOPS component buildup, summed
 //!   over the groups the production architecture produced;
-//! * **`pax_req`** — `requirements.num_passengers`, the count the cabin and
+//! * **`pax_req`**, `requirements.num_passengers`, the count the cabin and
 //!   mission paths read;
-//! * **`pax_flops`** — the first + business + tourist class counts the FLOPS
+//! * **`pax_flops`**, the first + business + tourist class counts the FLOPS
 //!   occupant operating items are actually priced on.
 //!
 //! The two seat counts are the ATR 72-600's 70-versus-72 question asked inside

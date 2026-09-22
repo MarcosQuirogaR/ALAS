@@ -72,11 +72,20 @@ pub struct MissionProfileRouteCheck {
 ///
 /// The number of step climbs is selected from the profile's own vertical
 /// levels, rates and speeds. The candidate with the greatest number of active
-/// cruise legs is retained only when its estimated non-cruise footprint fits
-/// the supplied route; otherwise the next simpler candidate is tried. No
-/// route-length constant or aircraft-class threshold is introduced here. A
-/// route that is shorter than even the one-cruise footprint returns a one-leg
-/// proposal plus a failed route check for the caller to display.
+/// cruise legs is retained only when two things both hold: its estimated
+/// non-cruise footprint geometrically fits the supplied route, *and* every
+/// cruise leg that footprint leaves behind would fly for at least
+/// [`MINIMUM_CRUISE_LEG_DURATION_S`] (see
+/// [`cruise_legs_have_enough_time_to_justify_the_ladder`]). Geometric fit
+/// alone is not enough: a step climb's own horizontal footprint is a small
+/// altitude delta and fits inside almost any route, so a purely geometric
+/// test selects the longest ladder that does not overshoot the route even
+/// when the cruise segments it produces are minutes long, an operationally
+/// nonsensical profile no dispatcher would file. When neither condition
+/// holds for a candidate, the next simpler candidate is tried. No
+/// aircraft-class threshold is introduced here. A route that is shorter than
+/// even the one-cruise footprint returns a one-leg proposal plus a failed
+/// route check for the caller to display.
 pub fn propose_profile_for_route(
     config: &AlasConfig,
     origin: &Airport,
@@ -130,7 +139,14 @@ pub fn propose_profile_for_route(
             arrival_elevation_m,
             active_cruise_legs,
         )?;
-        if candidate_distance_m <= route_distance_m {
+        let geometrically_fits = candidate_distance_m <= route_distance_m;
+        let ladder_is_operationally_worth_it = cruise_legs_have_enough_time_to_justify_the_ladder(
+            &profile,
+            route_distance_m,
+            candidate_distance_m,
+            active_cruise_legs,
+        );
+        if geometrically_fits && ladder_is_operationally_worth_it {
             selected_legs = active_cruise_legs;
             selected_distance_m = candidate_distance_m;
             break;
@@ -193,9 +209,41 @@ fn active_cruise_legs(profile: &MissionProfileConfig) -> usize {
     .map_or(1, |index| index + 1)
 }
 
-fn set_active_cruise_legs(profile: &mut MissionProfileConfig, count: usize) {
+/// Minimum time a cruise leg must be flyable for before the step climb that
+/// produces it is worth its own transition cost, in seconds.
+///
+/// A step climb spends a climb segment now, at extra fuel and no forward
+/// progress, in exchange for a lower specific fuel consumption at the new,
+/// weight-reduced optimum altitude. That trade only pays back over time: an
+/// aircraft's optimum altitude rises on the order of 1,000-2,000 ft per hour
+/// of cruise as fuel burns off, so a cruise leg too short to hold the new
+/// level for a meaningful fraction of that hour never recoups the transition
+/// it cost to reach. 30 minutes is a conservative fraction of that
+/// hour-scale figure, visible here rather than buried in the selection loop
+/// below, and unsourced in the same sense as the vertical rates in
+/// `alas_config::presets::narrowbody::apply_a320_200_speed_schedule`: an
+/// engineering judgement call, not a regulatory or manufacturer figure. It
+/// should be revisited if a sourced step-climb interval becomes available.
+/// See `crates/alas-mission/src/profile.rs` tests
+/// `a_short_declared_sector_does_not_receive_the_long_route_step_ladder`
+/// (every ladder candidate's cruise legs fall well under this on a 546 km
+/// sector) and `a_long_route_keeps_the_declared_three_leg_profile` (every
+/// leg clears it by roughly two orders of magnitude on a 12,000 km route)
+/// for where the margin actually falls.
+const MINIMUM_CRUISE_LEG_DURATION_S: f64 = 30.0 * 60.0;
+
+/// The relative share of the post-climb/descent cruise remainder each active
+/// cruise leg would fly, for a candidate with `count` active legs.
+///
+/// Shared by [`set_active_cruise_legs`], which applies this split to the
+/// profile once a candidate is selected, and
+/// [`cruise_legs_have_enough_time_to_justify_the_ladder`], which has to
+/// evaluate the same split for every candidate *before* one is selected: the
+/// two must agree, or the operational check would be gating a different
+/// schedule than the one actually applied.
+fn active_cruise_leg_fractions(profile: &MissionProfileConfig, count: usize) -> [f64; 3] {
     let count = count.clamp(1, 3);
-    let fractions = match count {
+    match count {
         1 => [1.0, 0.0, 0.0],
         2 => [0.5, 0.5, 0.0],
         _ => {
@@ -212,10 +260,65 @@ fn set_active_cruise_legs(profile: &mut MissionProfileConfig, count: usize) {
                 [1.0 / 3.0; 3]
             }
         }
-    };
+    }
+}
+
+fn set_active_cruise_legs(profile: &mut MissionProfileConfig, count: usize) {
+    let fractions = active_cruise_leg_fractions(profile, count);
     profile.cruise_1_distance_fraction = fractions[0];
     profile.cruise_2_distance_fraction = fractions[1];
     profile.cruise_3_distance_fraction = fractions[2];
+}
+
+/// Whether a candidate with `active_cruise_legs` active cruise legs leaves
+/// every one of them long enough to fly for at least
+/// [`MINIMUM_CRUISE_LEG_DURATION_S`], given the route distance left over
+/// after `non_cruise_distance_m` of climb and descent.
+///
+/// A single cruise leg (`active_cruise_legs < 2`) is not a step, it is the
+/// direct cruise every route flies regardless of length, so it is never
+/// gated on a minimum duration; `propose_profile_for_route`'s pre-loop
+/// fallback relies on that to always have a one-leg candidate available.
+/// From two legs up, each additional leg exists only because a step climb
+/// was inserted to produce it, and that climb is what this function is
+/// judging as worth its own cost.
+fn cruise_legs_have_enough_time_to_justify_the_ladder(
+    profile: &MissionProfileConfig,
+    route_distance_m: f64,
+    non_cruise_distance_m: f64,
+    active_cruise_legs: usize,
+) -> bool {
+    if active_cruise_legs < 2 {
+        return true;
+    }
+    let cruise_remainder_m = route_distance_m - non_cruise_distance_m;
+    // Checked for finiteness explicitly rather than as a negated comparison:
+    // a NaN remainder means an unusable route or footprint, and it must fail
+    // the ladder rather than compare its way past the test.
+    if !cruise_remainder_m.is_finite() || cruise_remainder_m <= 0.0 {
+        return false;
+    }
+    let fractions = active_cruise_leg_fractions(profile, active_cruise_legs);
+    let cruise_air_speeds_m_s = [
+        profile.cruise_1_air_speed_m_s,
+        profile.cruise_2_air_speed_m_s,
+        profile.cruise_3_air_speed_m_s,
+    ];
+    fractions
+        .iter()
+        .zip(cruise_air_speeds_m_s.iter())
+        .all(|(&fraction, &speed_m_s)| {
+            if fraction <= 0.0 {
+                // Not one of the active legs; imposes no timing requirement.
+                return true;
+            }
+            if !speed_m_s.is_finite() || speed_m_s <= 0.0 {
+                return false;
+            }
+            let leg_distance_m = cruise_remainder_m * fraction;
+            let leg_duration_s = leg_distance_m / speed_m_s;
+            leg_duration_s >= MINIMUM_CRUISE_LEG_DURATION_S
+        })
 }
 
 fn estimate_non_cruise_distance(
@@ -459,6 +562,9 @@ pub fn build_mission_request(
     }
 }
 
+// These tests build their own configurations and routes, so a failing expect
+// below is the assertion failing rather than a library invariant breaking.
+#[allow(clippy::expect_used)]
 #[cfg(test)]
 mod tests {
     use super::*;

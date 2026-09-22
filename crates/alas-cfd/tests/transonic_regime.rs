@@ -1,5 +1,10 @@
 //! Regression coverage for the Mach-derived compressible airfoil path.
 
+// This file is itself a test binary, so an expect that fails is the
+// assertion failing, and the default-then-mutate config setup below is the
+// normal way tests build a config that overrides a single field.
+#![cfg_attr(test, allow(clippy::expect_used, clippy::field_reassign_with_default))]
+
 use std::fs;
 use std::time::{SystemTime, UNIX_EPOCH};
 

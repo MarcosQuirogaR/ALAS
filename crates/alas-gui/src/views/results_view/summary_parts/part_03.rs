@@ -48,10 +48,7 @@ mod tests {
             collect_text_families(&shape.shape, &mut families);
         }
 
-        for label in [
-            "Thermal efficiency (\u{03b7}\u{209c})",
-            "\u{03b7}\u{209c} = 0.42",
-        ] {
+        for label in ["Thermal efficiency (eta_t)", "\u{03b7}\u{209c} = 0.42"] {
             let family = families
                 .iter()
                 .find(|(text, _)| text == label)

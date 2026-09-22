@@ -30,21 +30,16 @@ const OUTPUT_CHUNK_BYTES: usize = 16 * 1024;
 const OUTPUT_DRAIN_TIMEOUT: Duration = Duration::from_millis(750);
 
 /// Backend used to execute OpenFOAM.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum OpenFoamBackend {
     /// Select a usable native installation first, then WSL2.
+    #[default]
     Auto,
     /// OpenCFD's native Windows/MinGW distribution.
     Native,
     /// A Linux distribution launched through `wsl.exe`.
     Wsl2,
-}
-
-impl Default for OpenFoamBackend {
-    fn default() -> Self {
-        Self::Auto
-    }
 }
 
 impl OpenFoamBackend {
@@ -538,6 +533,10 @@ fn wsl_tool_args(
 }
 
 #[cfg(test)]
+// In a test module a failing expect IS the assertion: fixture construction,
+// a join on a thread the test itself spawned, and round-tripping a legacy
+// record the test wrote are all test-authoring invariants, not library paths.
+#[allow(clippy::expect_used)]
 mod tests {
     use super::*;
     use std::sync::atomic::AtomicBool;

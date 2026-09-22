@@ -464,7 +464,7 @@ fn resolved_gear_stations(
 
 /// The nose landing-gear station.
 ///
-/// The fallback rule here — a fraction of fuselage length aft of the nose —
+/// The fallback rule here (a fraction of fuselage length aft of the nose)
 /// is a fuselage rule and carries no assumption about where the wing is, so
 /// it stands for any layout the geometry admits. Only the main gear's
 /// wing-mounted fallback is layout-specific; see [`main_gear_station`].
@@ -601,8 +601,8 @@ fn fuselage_crown_z_m(fuselage: &Fuselage, x_m: f64) -> Option<f64> {
 /// longitudinal station: a high-wing layout, whose main gear cannot be
 /// carried in the wing root.
 ///
-/// `None` for every layout whose root is on or below the crown — low-wing,
-/// mid-wing and shoulder-wing alike — which is the domain the wing-mounted
+/// `None` for every layout whose root is on or below the crown (low-wing,
+/// mid-wing and shoulder-wing alike), which is the domain the wing-mounted
 /// gear rule is stated for. The comparison is between two modelled heights
 /// with no margin term, so it cannot drift with calibration.
 fn wing_root_above_fuselage_crown(main_wing: &Wing, fuselage: &Fuselage) -> Option<(f64, f64)> {
@@ -740,8 +740,8 @@ fn cabin_station(
 ///
 /// The previous comment's stated intent was that "a stretched fuselage does not
 /// move an unchanged payload's centroid aft for free". That is an optimizer
-/// stability concern rather than a physical one — a longer cabin carrying the
-/// same payload over a uniformly loaded floor *does* move its centroid aft —
+/// stability concern rather than a physical one (a longer cabin carrying the
+/// same payload over a uniformly loaded floor *does* move its centroid aft),
 /// and an implausible stretch belongs to the geometry plausibility windows,
 /// which own it. Recorded here rather than preserved by placing mass where it
 /// is not.

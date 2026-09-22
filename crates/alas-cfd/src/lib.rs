@@ -97,17 +97,23 @@ pub use runner::run_study;
 pub(crate) use stage::{
     emit_event, execute_gmsh_stage, execute_solver_postprocess_stage_with_tool,
     execute_solver_stage_with_tool, execute_stage, final_write_interval,
-    rewrite_solver_control_dict,
+    rewrite_solver_control_dict, StageContext,
 };
 pub use turbulence::*;
 
 #[cfg(test)]
+// Tests assert on values they parsed or built here, so a failed expect (or
+// expect_err, for the deliberately-invalid-config cases) is the assertion
+// failing rather than a library invariant breaking.  Default-then-override
+// is the normal way a test builds a config that changes only the one or two
+// fields under test.
+#[allow(clippy::expect_used, clippy::field_reassign_with_default)]
 mod tests {
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     /// Field-update evidence for a case whose solved fields are all still
-    /// moving — the ordinary situation, and the one under which the
+    /// moving, the ordinary situation, and the one under which the
     /// skipped-equation guard has nothing to act on.
     fn live_fields() -> FieldUpdateEvidence {
         field_evidence(
@@ -1027,7 +1033,7 @@ mod tests {
         assert!(detail.contains("OBSERVATION, not a proven"), "{detail}");
         assert!(!detail.contains("stopped being updated"), "{detail}");
         // `k` is named too.  It sits at `6.661e-9`, only 0.67x the inner
-        // solver's own tolerance, so no residual-depth rule reaches it — but its
+        // solver's own tolerance, so no residual-depth rule reaches it, but its
         // field is just as frozen as omega's, and that is what is measured.
         // This is the negative control the guard previously failed.
         assert!(detail.contains("k 6.661e-9"), "{detail}");
@@ -1037,7 +1043,7 @@ mod tests {
         );
 
         // Late-onset freeze: the turbulence pair dies six iterations before the
-        // solver's own stopping rule fires — the likely case, because the
+        // solver's own stopping rule fires, the likely case, because the
         // residual collapse that kills an equation is itself what lets
         // `residualControl` stop the run.  When the field is frozen, WHEN the
         // freeze started is irrelevant and the verdict is the same.
@@ -1048,8 +1054,8 @@ mod tests {
         // `L2-medium-le2` in miniature, and the reason the residual pattern is
         // no longer a precondition: the field is frozen while the residual keeps
         // varying, because it is recomputed each outer iteration from a pressure
-        // field that is still moving.  Every residual-shaped trigger — run
-        // length, depth, zero solver work — misses this.  The field does not.
+        // field that is still moving.  Every residual-shaped trigger (run
+        // length, depth, zero solver work) misses this.  The field does not.
         let mut varying = Vec::new();
         for step in 0..30_u64 {
             let iteration = 3_971 + step;
@@ -1088,7 +1094,7 @@ mod tests {
 
         // Without field evidence NOTHING certifies, whatever the residual
         // history looks like.  A decimated or holed history is not evidence of
-        // a freeze either — so the verdict is neither `failed` nor
+        // a freeze either; so the verdict is neither `failed` nor
         // `numerically converged`, it is explicitly inconclusive.
         let sparse = build(0, 30)
             .into_iter()
@@ -1127,8 +1133,8 @@ mod tests {
 
         // `V1-inletoutlet-coarse`, verbatim from `logs/simpleFoam-final.log`:
         // omega is below the inner solver's 1e-8 tolerance and reports
-        // `No Iterations 0` in 19 of its last 20 iterations — exactly like a
-        // dead equation — but it drifts about 5 % per iteration in a sawtooth,
+        // `No Iterations 0` in 19 of its last 20 iterations (exactly like a
+        // dead equation) but it drifts about 5 % per iteration in a sawtooth,
         // so it is a new measurement every time and the case is converged.
         let measured = [
             4.893_109_210_71e-9,
@@ -1178,7 +1184,7 @@ mod tests {
         let (outcome, detail) = judge_with(&v1, Some(&live_fields()));
         assert_eq!(outcome, CfdOutcome::NumericallyConverged, "{detail}");
 
-        // NEGATIVE CONTROL 1 — healthy sub-floor equation, `G3-fine-p404`'s
+        // NEGATIVE CONTROL 1: healthy sub-floor equation, `G3-fine-p404`'s
         // omega shape: parked at `1.00x` the inner tolerance, reproduced at the
         // endpoint, no solver work, while pressure moves.  Every residual-only
         // rule this gate has carried called this either dead or alive by
@@ -1217,7 +1223,7 @@ mod tests {
             "an equation parked at the solver floor with a LIVE field is converged: {detail}"
         );
 
-        // NEGATIVE CONTROL 2 — the same trace with the fields frozen, which is
+        // NEGATIVE CONTROL 2: the same trace with the fields frozen, which is
         // what `G3-fine-p404` actually measured: 0 of 436 389 cells changed for
         // both `k` and `omega` while pressure changed in 99.99 % of them.  Same
         // residuals, opposite verdict, and the evidence is what changed.
@@ -1234,7 +1240,7 @@ mod tests {
         assert!(detail.contains("k 9.856e-9"), "{detail}");
         assert!(detail.contains("omega 9.996e-9"), "{detail}");
 
-        // NEGATIVE CONTROL 3 — dead `k` ONLY, at `T3`'s measured `6.661e-9`,
+        // NEGATIVE CONTROL 3: dead `k` ONLY, at `T3`'s measured `6.661e-9`,
         // beside a healthy omega.  This is the hole a residual-depth rule
         // leaves open: `0.67x` the floor is never "far below" anything, so no
         // depth cut-off reaches it, and omega cannot rescue the case by being
@@ -1277,7 +1283,7 @@ mod tests {
         assert!(detail.contains("k 6.661e-9"), "{detail}");
         assert!(!detail.contains("omega"), "omega is alive: {detail}");
 
-        // NEGATIVE CONTROL 4 — no field evidence at all.  The residual history
+        // NEGATIVE CONTROL 4: no field evidence at all.  The residual history
         // cannot decide, so the gate says so and does NOT certify.  Guessing
         // here in either direction is what produced both previous false
         // verdicts.

@@ -6,22 +6,55 @@ use super::super::{
     GMSH_TEMPLATE_VERSION,
 };
 use crate::MeshPreset;
+
+/// Exact polygon and topology of the section being meshed.
+pub(super) struct PolygonGeometry<'a> {
+    pub(super) points: &'a [(f64, f64)],
+    pub(super) signed_area_unit: f64,
+    pub(super) topology: &'a AirfoilTopology,
+}
+
+/// Outer rectangle extent and extrusion span, in metres.
+pub(super) struct DomainGeometry {
+    pub(super) min_x_m: f64,
+    pub(super) max_x_m: f64,
+    pub(super) min_y_m: f64,
+    pub(super) max_y_m: f64,
+    pub(super) extrusion_span_m: f64,
+}
+
+/// Background, wake, and surface characteristic mesh sizes, in metres.
+pub(super) struct MeshSizes {
+    pub(super) far_size_m: f64,
+    pub(super) wake_size_m: f64,
+    pub(super) surface_size_m: f64,
+}
+
 pub(super) fn render_geo(
     config: &CfdStudyConfig,
     airfoil: &AirfoilSnapshot,
-    points: &[(f64, f64)],
-    signed_area_unit: f64,
-    topology: &AirfoilTopology,
+    polygon: &PolygonGeometry<'_>,
     sizing: &BoundaryLayerSizing,
-    domain_min_x_m: f64,
-    domain_max_x_m: f64,
-    domain_min_y_m: f64,
-    domain_max_y_m: f64,
-    extrusion_span_m: f64,
-    far_size_m: f64,
-    wake_size_m: f64,
-    surface_size_m: f64,
+    domain: &DomainGeometry,
+    sizes: &MeshSizes,
 ) -> String {
+    let PolygonGeometry {
+        points,
+        signed_area_unit,
+        topology,
+    } = *polygon;
+    let DomainGeometry {
+        min_x_m: domain_min_x_m,
+        max_x_m: domain_max_x_m,
+        min_y_m: domain_min_y_m,
+        max_y_m: domain_max_y_m,
+        extrusion_span_m,
+    } = *domain;
+    let MeshSizes {
+        far_size_m,
+        wake_size_m,
+        surface_size_m,
+    } = *sizes;
     // Outer points are first so Gmsh's Extrude side-surface order is stable:
     // bottom, right, top, left, then the airfoil boundary lines.  These are
     // the IDs used by the physical patch declarations below.
@@ -175,8 +208,8 @@ pub(super) fn render_geo(
             // that relaxes only to the surface size clamps the whole domain to
             // it: `Field[3]` and `Field[4]` both relax to `far_size_m`, and the
             // `Min` then throws that away.  Measured on this host with the
-            // medium preset at level 2 — surface `1.0e-2 m`, far field
-            // `1.667e-1 m`, domain 30 m by 20 m — the background cell size
+            // medium preset at level 2 (surface `1.0e-2 m`, far field
+            // `1.667e-1 m`, domain 30 m by 20 m), the background cell size
             // outside the leading-edge ball fell by 16.7x, which is a 280x
             // area-density increase over roughly 600 m^2; Gmsh 4.15.2 reached
             // 2.6 GB of resident memory and had produced no mesh after eight
@@ -241,9 +274,13 @@ pub(super) fn render_geo(
                 .unwrap_or_default(),
             // A blunt edge is closed by the segment from the last point back to
             // the first, so its corners are exactly those two endpoints.
-            EdgeKind::Blunt => (points.len() >= 2)
-                .then(|| vec![point_offset, point_offset + points.len() as i32 - 1])
-                .unwrap_or_default(),
+            EdgeKind::Blunt => {
+                if points.len() >= 2 {
+                    vec![point_offset, point_offset + points.len() as i32 - 1]
+                } else {
+                    Vec::new()
+                }
+            }
         };
         if !fan_points.is_empty() {
             if topology.trailing_edge == EdgeKind::Sharp {

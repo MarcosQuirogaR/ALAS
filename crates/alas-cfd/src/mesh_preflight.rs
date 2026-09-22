@@ -75,8 +75,8 @@ pub struct PreflightIssue {
 ///
 /// **These are not the executable acceptance gate, and the field names below
 /// read as if they were.** What actually rejects a converted mesh is
-/// [`MeshQuality::passed`] — `checkMesh` reporting `Mesh OK` with no failed
-/// checks — plus the boundary/patch contract. The numeric fields here are the
+/// [`MeshQuality::passed`] (`checkMesh` reporting `Mesh OK` with no failed
+/// checks) plus the boundary/patch contract. The numeric fields here are the
 /// `checkMesh` defaults this template targets; no code compares a parsed value
 /// against them.
 ///
@@ -95,7 +95,7 @@ pub struct PreflightIssue {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MeshQualityThresholds {
     /// Face non-orthogonality above which `checkMesh` calls a face *severely*
-    /// non-orthogonal, degrees.  Recorded, **not enforced** — see the type
+    /// non-orthogonal, degrees.  Recorded, **not enforced**: see the type
     /// documentation.
     ///
     /// Observed on OpenFOAM v2606 (native Windows, this template's generated
@@ -115,7 +115,7 @@ pub struct MeshQualityThresholds {
     /// asserting one would be inventing a contract.  What the record carries is
     /// the measured maximum and, in
     /// [`MeshQuality::severely_non_orthogonal_faces`], how many faces are past
-    /// this line — one, on the case above.
+    /// this line: one, on the case above.
     pub max_non_orthogonality_deg: f64,
     /// Maximum internal face skewness.
     pub max_internal_skewness: f64,

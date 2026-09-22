@@ -118,7 +118,7 @@ pub(crate) fn build_results_with_quality(
         computed_status_detail
     } else {
         format!(
-            "{} Numerical solver verdict, reported separately and unchanged: {} — {computed_status_detail}",
+            "{} Numerical solver verdict, reported separately and unchanged: {}; {computed_status_detail}",
             mesh_qualification.summary(),
             numerical_convergence.as_str(),
         )
@@ -297,7 +297,7 @@ fn logs_with_prefix(logs: &BTreeMap<String, String>, prefix: &str) -> String {
     let mut combined = String::new();
     for (_, log) in matching {
         if !combined.is_empty() {
-            combined.push_str("\n");
+            combined.push('\n');
         }
         combined.push_str(log);
     }
@@ -579,7 +579,7 @@ fn answer_section(results: &CfdResults) -> String {
         Some(force) => {
             if !converged {
                 out.push_str(
-                    "**PROVISIONAL — this result did not satisfy the convergence criteria.** \
+                    "**PROVISIONAL: this result did not satisfy the convergence criteria.** \
                      The numbers below are the last finite sample the solver produced and are \
                      not a qualified answer.\n\n",
                 );

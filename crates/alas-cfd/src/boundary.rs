@@ -25,7 +25,7 @@ pub struct BoundarySettings {
     /// `fixedValue` clamps the turbulence quantities on **every** outer face,
     /// including faces the flow is leaving.  Imposing a value on an outgoing
     /// characteristic is an over-specification, and it is measurable: at
-    /// `y = ±10 c` the free-stream turbulence has decayed several orders below
+    /// `y = +/-10 c` the free-stream turbulence has decayed several orders below
     /// the imposed value, the clamp fights the decayed interior, and those
     /// cells limit-cycle for the whole run (an internal CFD convergence
     /// study, 2026-09-16, `q17-field-change.py` on case

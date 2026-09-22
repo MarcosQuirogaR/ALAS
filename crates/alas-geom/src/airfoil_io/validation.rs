@@ -30,7 +30,12 @@ pub fn validate_coordinates(
     }
 
     let first = coordinates[0];
-    let last = *coordinates.last().expect("length checked above");
+    // The length check above already guarantees both ends exist. Resolving
+    // them through the slice API rather than asserting it keeps a malformed
+    // file on the error path instead of panicking inside an importer.
+    let Some(&last) = coordinates.last() else {
+        return Err(AirfoilImportError::TooFewCoordinates(coordinates.len()));
+    };
     if distance(first, last) > COORDINATE_TOLERANCE {
         return Err(AirfoilImportError::OpenTrailingEdge);
     }
@@ -45,10 +50,15 @@ pub fn validate_coordinates(
     if leading_edge_x.abs() > COORDINATE_TOLERANCE {
         return Err(AirfoilImportError::MissingLeadingEdge);
     }
-    let leading_edge = coordinates
+    // The minimum was taken from this same slice, so a matching station
+    // exists. Treating its absence as a missing leading edge keeps the
+    // importer total over any input rather than panicking on one.
+    let Some(leading_edge) = coordinates
         .iter()
         .position(|&(x, _)| (x - leading_edge_x).abs() <= DUPLICATE_TOLERANCE)
-        .expect("finite non-empty coordinates have a minimum");
+    else {
+        return Err(AirfoilImportError::MissingLeadingEdge);
+    };
     if leading_edge == 0 || leading_edge >= coordinates.len() - 1 {
         return Err(AirfoilImportError::InvalidOrder {
             line: leading_edge + 1,

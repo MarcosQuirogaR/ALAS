@@ -3,7 +3,7 @@
 
 //! The same aircraft, same geometry, same cabin, priced once the way a
 //! registered preset is priced and once the way a configuration built without
-//! a preset is priced — component by component.
+//! a preset is priced, component by component.
 //!
 //! This exists because the two used to disagree. `declared_cabin_equipment_method`
 //! was reached only from the preset loader, so a configuration built from
@@ -95,8 +95,8 @@ fn evaluate(config: &AlasConfig) -> Result<FlopsMassBuildup, String> {
 /// a configuration built without a preset receives.
 ///
 /// Only that field is substituted, and deliberately. The haul class and the
-/// cargo-hold loading are *declared aircraft properties* — an A320-200 is a
-/// short/medium-haul bulk-loaded aircraft whether or not a preset says so —
+/// cargo-hold loading are *declared aircraft properties* (an A320-200 is a
+/// short/medium-haul bulk-loaded aircraft whether or not a preset says so),
 /// and `FlopsTransportConfig::working_default()` states its own because it is
 /// a 350-seat, 7,600 nmi containerised study scenario, not because the mode
 /// derived them. Substituting those would compare two different aircraft and
@@ -144,14 +144,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut records = Vec::new();
     let mut worst_residual_kg: f64 = 0.0;
     println!(
-        "{:<11} {:>12} {:>12} {:>10} {:>8} {:>11}  {}",
-        "preset",
-        "preset OEW",
-        "clean OEW",
-        "delta kg",
-        "delta %",
-        "at stake kg",
-        "components that differ"
+        "{:<11} {:>12} {:>12} {:>10} {:>8} {:>11}  components that differ",
+        "preset", "preset OEW", "clean OEW", "delta kg", "delta %", "at stake kg"
     );
     for name in presets::available() {
         let preset_config = AlasConfig::from_value(&json!({ "preset": name }))?;

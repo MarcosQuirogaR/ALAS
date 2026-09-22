@@ -275,8 +275,8 @@ mod tests {
             .expect("default turbofan cycle preview");
         // `ts_preview::diagram` embeds the configured engine's name in the
         // drawn title (distinct from the static page heading asserted
-        // above), so the default GE9X turbofan renders "GE9X · T–s".
-        assert_eq!(scene.title.as_deref(), Some("GE9X · T–s"));
+        // above), so the default GE9X turbofan renders "GE9X * T-s".
+        assert_eq!(scene.title.as_deref(), Some("GE9X * T-s"));
         assert!(
             scene
                 .elements
@@ -306,7 +306,7 @@ mod tests {
 
         let scene = crate::scene::build_page_preview(&state, "engine")
             .expect("turbofan cycle preview for the renamed engine");
-        assert_eq!(scene.title.as_deref(), Some("LEAP-1A · T–s"));
+        assert_eq!(scene.title.as_deref(), Some("LEAP-1A * T-s"));
     }
 
     #[test]

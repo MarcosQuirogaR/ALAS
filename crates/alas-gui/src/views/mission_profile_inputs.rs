@@ -249,9 +249,9 @@ pub(crate) fn show_mission_profile_window(state: &mut AppState, ctx: &Context) {
     let response = show_native_viewport(
         ctx,
         "mission_profile_phase",
-        format!("Mission profile — {phase_title}"),
+        format!("Mission profile: {phase_title}"),
         ViewportBuilder::default()
-            .with_title(format!("Mission profile — {phase_title}"))
+            .with_title(format!("Mission profile: {phase_title}"))
             .with_inner_size(vec2(560.0, 430.0))
             .with_min_inner_size(vec2(420.0, 300.0))
             .with_resizable(true),

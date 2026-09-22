@@ -576,6 +576,17 @@ impl CfdStudyConfig {
 }
 
 #[cfg(test)]
+// Tests assert on values they parsed or built here, so a failed expect is
+// the assertion failing rather than a library invariant breaking.
+// Default-then-override is the normal way a test builds a config that
+// changes only the one or two fields under test.  The five-element lookup
+// table on `PatchCondition` is local to one test and not part of the public
+// API surface, so a named type alias would not aid a reader here.
+#[allow(
+    clippy::expect_used,
+    clippy::field_reassign_with_default,
+    clippy::type_complexity
+)]
 mod tests {
     use super::*;
     use crate::surface::{SurfaceReference, SurfaceSample};

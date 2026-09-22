@@ -94,7 +94,7 @@ pub(super) fn clamped_interp(x: f64, xp: &[f64], fp: &[f64]) -> f64 {
 
 /// Evenly spaced points from `start` to `stop`, inclusive: NumPy's
 /// `linspace(start, stop, num, endpoint=True)`. A copy of
-/// `aircraft::spacing::linspace`, which is reachable from here — the copy is
+/// `aircraft::spacing::linspace`, which is reachable from here: the copy is
 /// historical, not a visibility workaround.
 pub(super) fn linspace(start: f64, stop: f64, num: usize) -> Vec<f64> {
     if num == 0 {

@@ -6,9 +6,9 @@
 // 
 // Everything here is assembled from [`Pw127m568fModel::evaluate`] and adds no
 // new physics: it exists because the quantities a field-performance, mission
-// or results consumer needs — a static thrust, a representative ground-roll
+// or results consumer needs (a static thrust, a representative ground-roll
 // thrust, the fuel flow that goes with them, and the band and envelope they
-// are only valid inside — were reachable only by knowing which operating
+// are only valid inside) were reachable only by knowing which operating
 // points to ask for and which caveats to carry. A consumer that reads a bare
 // number out of [`TurbopropOutput`] cannot tell a certificated rating from a
 // single-point calibration; this contract makes that impossible to lose.

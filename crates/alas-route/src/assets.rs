@@ -61,7 +61,7 @@ pub struct NavdataFile {
     /// The floor a completed transfer must clear.
     pub min_bytes: u64,
     /// A SHA-256, lowercase hex, of the last content a maintainer reviewed
-    /// and accepted for this file — `None` when no review has pinned one
+    /// and accepted for this file, or `None` when no review has pinned one
     /// yet, in which case `min_bytes` alone still gates a completed
     /// transfer, exactly as before this field existed.
     ///
@@ -71,7 +71,7 @@ pub struct NavdataFile {
     /// and accepted on the stated review date," never "matches what X-Plane
     /// or the mirror's author intended to ship." A mismatch means the
     /// content changed since that review and needs a human to look at it
-    /// again — an ordinary upstream edit to the tracked `master` branch
+    /// again: an ordinary upstream edit to the tracked `master` branch
     /// produces the same symptom as tampering, so a mismatch must not be
     /// reported as proof of the latter.
     ///
@@ -90,7 +90,7 @@ pub struct NavdataFile {
     /// over HTTPS, read and accept its content, then hash it (`sha256sum
     /// <file>` on Linux, `Get-FileHash <file> -Algorithm SHA256` on Windows),
     /// place the lowercase hex digest here, and update the review note
-    /// above — the verification itself is already implemented and enforced
+    /// above: the verification itself is already implemented and enforced
     /// by `alas_exec::download::download_files` whenever a spec carries a
     /// hash.
     pub expected_sha256: Option<&'static str>,

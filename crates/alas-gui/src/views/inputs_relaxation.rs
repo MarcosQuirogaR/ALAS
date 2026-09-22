@@ -48,7 +48,14 @@ pub(crate) fn show_constraint_policy(state: &mut AppState, ui: &mut Ui) {
 
     ui.add_enabled_ui(enabled, |ui| {
         let mut groups = allowed_groups(state);
-        ui.horizontal(|ui| {
+        // Wrapped, not a plain (non-wrapping) horizontal row: a label placed
+        // in `ui.horizontal` is painted at its full natural width regardless
+        // of how little room is left, so a translation longer than English
+        // (the Spanish string is about a third longer) pushed the drag value
+        // past the window's edge and widened the whole scroll area to match.
+        // `horizontal_wrapped` instead drops the drag value to its own line
+        // when the label alone already fills the row.
+        ui.horizontal_wrapped(|ui| {
             ui.label(tr("Discipline groups that may be missed"));
             if ui
                 .add(DragValue::new(&mut groups).range(0..=DISCIPLINE_GROUP_COUNT))

@@ -630,8 +630,10 @@ mod tests {
 
     #[test]
     fn percent_resolution_keeps_a_materialized_layout_when_it_matches_the_target() {
-        let mut cabin = PassengerCabinConfig::default();
-        cabin.class_mix_mode = "percent".to_owned();
+        let mut cabin = PassengerCabinConfig {
+            class_mix_mode: "percent".to_owned(),
+            ..Default::default()
+        };
         cabin.first.count = 2;
         cabin.business.count = 18;
         cabin.economy.count = 80;
@@ -668,8 +670,10 @@ mod tests {
 
     #[test]
     fn count_resolution_preserves_declared_classes_and_folds_legacy_premium() {
-        let mut cabin = PassengerCabinConfig::default();
-        cabin.class_mix_mode = "count".to_owned();
+        let mut cabin = PassengerCabinConfig {
+            class_mix_mode: "count".to_owned(),
+            ..Default::default()
+        };
         cabin.first.count = 4;
         cabin.business.count = 16;
         cabin.premium.count = 10;
@@ -760,8 +764,10 @@ mod tests {
 
     #[test]
     fn empty_count_mode_uses_the_requirements_seed_until_the_layout_is_materialized() {
-        let mut cabin = PassengerCabinConfig::default();
-        cabin.class_mix_mode = "count".to_owned();
+        let mut cabin = PassengerCabinConfig {
+            class_mix_mode: "count".to_owned(),
+            ..Default::default()
+        };
         cabin.first.share_pct = 0.0;
         cabin.business.share_pct = 0.0;
         cabin.economy.share_pct = 100.0;

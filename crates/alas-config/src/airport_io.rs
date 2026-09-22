@@ -11,10 +11,11 @@
 use serde::{Deserialize, Serialize};
 
 /// The source category retained with a custom airport.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum AirportProvenanceKind {
     /// Entered directly in the application.
+    #[default]
     UserEntered,
     /// Imported from the ALAS airport .dat format.
     DatImport,
@@ -22,12 +23,6 @@ pub enum AirportProvenanceKind {
     JsonImport,
     /// Restored from a saved workspace.
     Workspace,
-}
-
-impl Default for AirportProvenanceKind {
-    fn default() -> Self {
-        Self::UserEntered
-    }
 }
 
 /// Source metadata retained with a custom airport.
@@ -256,6 +251,9 @@ fn annotate_import(
 }
 
 #[cfg(test)]
+// In a test module a failing expect/unwrap_err IS the assertion: the round
+// trip and validation fixtures below are built by the test itself.
+#[allow(clippy::expect_used, clippy::unwrap_used)]
 mod tests {
     use super::*;
 

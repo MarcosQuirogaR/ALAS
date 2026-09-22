@@ -248,11 +248,11 @@ pub(super) fn declared_turboprop(name: &str) -> FlopsTurbopropConfig {
             propeller_accessory_mass_kg: 0.0,
             propeller_assembly_mass_kg: Some(360.9 * 0.453_592_37),
             propeller_assembly_accessories_included: None,
-            nacelle_area_density_kg_m2: 415.5 / (2.0 * 10.543_172_340_348_409),
+            nacelle_area_density_kg_m2: 415.5 / (2.0 * 10.543_172_340_348_41),
             nacelle_reference_mass_kg: Some(415.5 / 2.0),
             // Per-nacelle area from the configured ATR profile through the
             // same Fuselage::area_wetted integration used by the evaluator.
-            nacelle_reference_area_m2: Some(10.543_172_340_348_409),
+            nacelle_reference_area_m2: Some(10.543_172_340_348_41),
             pylon_coefficient: 0.0,
             engine_installation_mass_kg: 308.0,
             engine_oil_mass_kg: 46.220,

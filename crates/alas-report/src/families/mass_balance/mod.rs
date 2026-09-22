@@ -58,9 +58,9 @@ pub use mass_distribution::figure_mass_distribution;
 /// `alas_mass::analysis::complete_mass_analysis` prices the payload on
 /// `requirements.num_passengers` when it is handed no layout, and on the
 /// capacity the cabin engine resolves from the candidate's own geometry when it
-/// is. `DesignRequirements` declares the second authoritative — "Passenger
+/// is. `DesignRequirements` declares the second authoritative: "Passenger
 /// capacity is always recomputed for each candidate shell", and
-/// `resolves_payload_from_candidate_geometry` is unconditionally true — so
+/// `resolves_payload_from_candidate_geometry` is unconditionally true, so
 /// `num_passengers` is a seed, not a loading.
 ///
 /// This preview used to pass `None` while every residual, baseline and export
@@ -69,8 +69,8 @@ pub use mass_distribution::figure_mass_distribution;
 /// loading** than the feasibility verdict shown beside them: measured on the
 /// registered presets, up to 3 000 kg of payload and 21.7 points of %MAC apart
 /// (`alas-payload/examples/payload_placement_divergence.rs`). It now runs the
-/// same two passes `alas_pipeline::baseline` does — a lumped pass for the
-/// operating empty mass and its station, then the resolved cabin — so the
+/// same two passes `alas_pipeline::baseline` does: a lumped pass for the
+/// operating empty mass and its station, then the resolved cabin, so the
 /// previewed aircraft is the evaluated aircraft.
 ///
 /// # What this deliberately does not do
@@ -81,14 +81,14 @@ pub use mass_distribution::figure_mass_distribution;
 ///
 /// The FLOPS operating items are repriced on the seated count through
 /// `alas_pipeline::full_analysis::cabin_sync`, which is now shared rather than
-/// mirrored — duplicating cabin logic across crates is what produced this
+/// mirrored: duplicating cabin logic across crates is what produced this
 /// divergence in the first place, and there is still exactly one
 /// implementation. (It could not move to `alas-mass` instead:
 /// `cabin_synchronized` reads an `alas_payload::layout::PayloadLayout` and
 /// `alas-payload` already depends on `alas-mass`.) With both halves of the
 /// rule applied, this preview's operating empty mass matches the full
 /// analysis's to the milligram on every probed preset, against +1 226 kg on
-/// the A320-200 and +12 012 kg on the A380-800 before — see
+/// the A320-200 and +12 012 kg on the A380-800 before: see
 /// `examples/preview_cabin_parity.rs`.
 pub fn quick_preview_report(
     airplane: Airplane,

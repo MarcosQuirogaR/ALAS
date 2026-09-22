@@ -182,8 +182,8 @@ impl Pw127m568fModel {
         // cruise points used to sit on, at eta_p = 0.98, which no propeller of
         // this class reaches.
         //
-        // The same treatment the static branch already applies — a figure of
-        // merit as an effective-power loss factor — is therefore applied at
+        // The same treatment the static branch already applies (a figure of
+        // merit as an effective-power loss factor) is therefore applied at
         // every airspeed, with the blade efficiency blended from the static
         // figure of merit to the declared forward-flight value. At `V = 0` the
         // two coincide exactly, so the static thrust is unchanged.
@@ -233,7 +233,7 @@ impl Pw127m568fModel {
         // `reference_psfc_kg_kwh` is fuel flow per unit *sea-level-rated*
         // shaft power, not a PSFC; dividing by the lapse at the declared
         // anchor density turns it into the PSFC the engine is actually run at.
-        // That PSFC is a single constant — it is reported on the output so a
+        // That PSFC is a single constant: it is reported on the output so a
         // consumer can see both what the engine burns and that it does not
         // vary with the operating point.
         let calibrated_psfc_kg_kwh = self.implied_psfc_kg_kwh();

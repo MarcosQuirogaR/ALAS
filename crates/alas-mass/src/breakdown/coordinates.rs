@@ -22,8 +22,8 @@ use super::{
 /// Determine the X, Y, Z physical locations of the centroid of each component:
 /// `define_mass_coordinates`.
 ///
-/// The three cabin groups — systems, furnishings and the lumped planning
-/// payload — are all placed as fractions of the **installed cabin**, because
+/// The three cabin groups (systems, furnishings and the lumped planning
+/// payload) are all placed as fractions of the **installed cabin**, because
 /// all three are distributed over the same floor. See `x_payload` below for why
 /// the payload no longer sits at the centre of a block beginning at the forward
 /// bulkhead, and what that was worth per aircraft.
@@ -57,7 +57,7 @@ pub fn define_mass_coordinates(
     // bay and central cabin zone, including APU. Scaled with the installed
     // cabin: they are physically present over the whole of it regardless of how
     // many of its seats a particular run happens to book, so their position
-    // must not move when only `num_passengers`/`payload_kg` changes — switching
+    // must not move when only `num_passengers`/`payload_kg` changes: switching
     // a cabin preset from all-economy to a lower-density three-class at the
     // same fuselage length, for instance.
     let x_systems = cabin_start + 0.45 * cabin_len;
@@ -100,8 +100,8 @@ pub fn define_mass_coordinates(
     // stretch". That is an optimizer-stability argument, not a physical one: a
     // longer cabin carrying the same payload over a uniformly loaded floor does
     // move its centroid aft, exactly as `x_systems` and `x_furn` already do. An
-    // implausible stretch is the geometry plausibility windows' to reject — the
-    // fuselage fineness window exists for it — not something to suppress by
+    // implausible stretch is the geometry plausibility windows' to reject (the
+    // fuselage fineness window exists for it), not something to suppress by
     // placing mass where it is not.
     //
     // The occupied length itself is no longer needed here: it describes the

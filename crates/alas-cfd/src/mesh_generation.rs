@@ -40,18 +40,24 @@ pub fn build_gmsh_geo(
     let source = render::render_geo(
         config,
         airfoil,
-        &points,
-        signed_area_unit,
-        &topology,
+        &render::PolygonGeometry {
+            points: &points,
+            signed_area_unit,
+            topology: &topology,
+        },
         &sizing,
-        domain_min_x_m,
-        domain_max_x_m,
-        domain_min_y_m,
-        domain_max_y_m,
-        extrusion_span_m,
-        far_size_m,
-        wake_size_m,
-        surface_size_m,
+        &render::DomainGeometry {
+            min_x_m: domain_min_x_m,
+            max_x_m: domain_max_x_m,
+            min_y_m: domain_min_y_m,
+            max_y_m: domain_max_y_m,
+            extrusion_span_m,
+        },
+        &render::MeshSizes {
+            far_size_m,
+            wake_size_m,
+            surface_size_m,
+        },
     );
 
     Ok(GmshGeo {

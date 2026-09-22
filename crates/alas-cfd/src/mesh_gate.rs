@@ -3,8 +3,8 @@
 
 //! Enforcement of the declared mesh-quality contract against measured values.
 //!
-//! [`MeshQualityThresholds`] has always published numbers — `70 deg`
-//! non-orthogonality, skewness limits, an aspect-ratio ceiling — while the only
+//! [`MeshQualityThresholds`] has always published numbers (`70 deg`
+//! non-orthogonality, skewness limits, an aspect-ratio ceiling) while the only
 //! thing the runner actually tested was `checkMesh`'s own `Mesh OK` verdict.
 //! Nothing compared a parsed value against a declared limit, so a mesh could
 //! exceed a published maximum and still be accepted.
@@ -17,7 +17,7 @@
 //! A consequence, recorded rather than avoided: the **fine preset does not meet
 //! the declared contract.** `G3-fine-p404` and `P1-fine-preltol001` both mesh to
 //! a maximum face non-orthogonality of `71.3691 deg` against the declared
-//! `70 deg` — one face out of 436 389, but one face is a violation of a maximum.
+//! `70 deg`: one face out of 436 389, but one face is a violation of a maximum.
 //! `checkMesh` calls that a warning and passes the mesh; ALAS's own declared
 //! limit does not. Where the two disagree, the stricter one is applied, and the
 //! numerical-solver verdict is reported separately so a case is never silently
@@ -103,7 +103,7 @@ pub struct MeshQualification {
     /// `true` when no **measured** declared check failed.
     ///
     /// This is deliberately NOT a statement that the contract is fully
-    /// demonstrated — read [`Self::standing`] for that.  It is the value the
+    /// demonstrated: read [`Self::standing`] for that.  It is the value the
     /// combined outcome uses, so a mesh that violates a measured limit fails,
     /// while a mesh with unmeasurable checks is not blocked by evidence this
     /// crate has no way to produce.
@@ -558,7 +558,7 @@ mod tests {
     /// The EXACT boundary maximum is preferred over the faces-in-error count,
     /// and `checkMesh`'s headline `Max skewness` must not stand in for it: that
     /// number is the internal maximum.  Measured on `S6-medium-p404`, internal
-    /// `0.5948238075` versus boundary `0.4197658531` — different quantities,
+    /// `0.5948238075` versus boundary `0.4197658531`: different quantities,
     /// different declared limits (4 and 20).
     #[test]
     fn the_boundary_skewness_maximum_is_read_from_the_boundary_faces() {
@@ -645,7 +645,7 @@ mod tests {
     }
 
     /// With every declared limit measurable, a clean mesh can finally reach
-    /// `FullyQualified` — which nothing could before boundary skewness and the
+    /// `FullyQualified`, which nothing could before boundary skewness and the
     /// patch contract became real measurements.
     #[test]
     fn a_completely_measured_clean_mesh_is_fully_qualified() {

@@ -3,8 +3,8 @@
 
 //! What one propulsion-deck evaluation costs, turboprop against turbofan.
 //!
-//! The turboprop kernel solves two bisections per call — the propeller
-//! governor over blade angle, and the actuator-disk thrust bound — where the
+//! The turboprop kernel solves two bisections per call (the propeller
+//! governor over blade angle, and the actuator-disk thrust bound) where the
 //! turbofan deck evaluates closed forms. A mission integration calls the deck
 //! many times per candidate, so this is the propulsion path's whole possible
 //! contribution to a per-evaluation cost, measured rather than assumed.

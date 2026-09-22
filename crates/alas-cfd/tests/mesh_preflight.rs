@@ -468,7 +468,7 @@ fn leading_edge_refinement_adds_a_threshold_field_only_when_requested() {
 /// fix: level 0 gives 193 302 nodes, level 2 194 360, level 4 198 370 in 10.6 s
 /// with no errors, and levels 5 and 6 saturate at the chord clamp and give
 /// 199 578 nodes in 12.3 s.  This test pins the two properties that make that
-/// true — the far-field relaxation and the size floor — so the range stays
+/// true (the far-field relaxation and the size floor) so the range stays
 /// meshable; level 7 is rejected in preflight instead (see
 /// `preflight_rejects_impossible_configurations`).
 #[test]

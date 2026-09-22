@@ -63,7 +63,7 @@ pub struct SegmentSolution {
     /// find, before the final `iterate` (see the clamp loop below), and the
     /// residual closure itself no longer clamps, so `conditions.throttle` can
     /// never exceed one and a peak read from there is always exactly `1.000`
-    /// whenever the clamp was active — which reports that the limit was hit and nothing about how far
+    /// whenever the clamp was active, which reports that the limit was hit and nothing about how far
     /// short the aeroplane fell. The first version of this field did read it
     /// from there and was measured returning that useless `1.000`.
     pub peak_throttle: f64,
@@ -434,7 +434,7 @@ impl MissionResult {
     /// second kind: when it cannot price a policy it reports only "the route
     /// could not be flown at N kg", and the surviving evidence then says
     /// nothing about whether the aeroplane ran out of fuel, sat on its
-    /// throttle stop, or failed to converge — three findings with three
+    /// throttle stop, or failed to converge: three findings with three
     /// different owners. This names the **cause**, not the symptom.
     ///
     /// Ordering matters here and is deliberately *not* the order
@@ -443,7 +443,7 @@ impl MissionResult {
     /// converge, so a short segment list is a *consequence* of that break. A
     /// refusal that reported the count first would say "only 11 of 12
     /// scheduled segments produced a solution" and hide the segment that
-    /// actually failed — which is what the first version of this function
+    /// actually failed, which is what the first version of this function
     /// did, measured on the AVE finalist. The failing segment is therefore
     /// examined before the count.
     ///
@@ -767,7 +767,7 @@ mod tests {
     /// converge, so a truncated solution list is the *consequence*. Reporting
     /// the count first is what the first version of this function did, and on
     /// the AVE finalist it produced "only 11 of 12 scheduled segments produced
-    /// a solution" — true, and silent about which segment failed and why. A
+    /// a solution": true, and silent about which segment failed and why. A
     /// reader of that finding cannot tell a throttle stop from a root-finder
     /// failure, and those have different owners.
     #[test]
@@ -824,8 +824,8 @@ mod tests {
     /// `converge_root`'s throttle unknowns are clamped into `[0, 1]` after the
     /// root find rather than inside the residual closure, so the published
     /// peak of `conditions.throttle` is exactly `1.000` whenever the clamp was
-    /// active
-    /// — for a 2 % shortfall and a 200 % one alike. Reading it from there is
+    /// active,
+    /// for a 2 % shortfall and a 200 % one alike. Reading it from there is
     /// what the first version of this field did, and the measured AVE case
     /// duly reported `peak throttle 1.000`, which cannot discriminate a
     /// marginal thrust deficit from a diverging root find. A value above one

@@ -123,7 +123,7 @@
   "Work directories external solvers left in the system temporary folder after an interrupted run.": "Directorios de trabajo que los solvers externos dejaron en la carpeta temporal del sistema tras una ejecución interrumpida.",
   "Navigation data for airway routing; downloaded again on demand.": "Datos de navegación para rutas aéreas; se vuelven a descargar cuando se necesitan.",
   "Earth image for the route globe; downloaded again on demand.": "Imagen terrestre del globo de rutas; se vuelve a descargar cuando se necesita.",
-  "{size} · {files} files": "{size} · {files} archivos",
+  "{size} * {files} files": "{size} * {files} archivos",
   "Cleared {category}.": "Se borró {category}.",
   "Cleared {removed} paths; {failed} could not be removed.": "Se borraron {removed} rutas; no se pudieron borrar {failed}.",
   "Saved tool paths": "Rutas guardadas de herramientas",

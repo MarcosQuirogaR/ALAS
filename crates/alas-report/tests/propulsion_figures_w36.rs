@@ -35,13 +35,13 @@ fn designer_preview_dispatches_both_technologies_and_rejects_invalid_states() {
     let turboprop = AlasConfig::from_value(&serde_json::json!({"preset": "ATR72-600"})).unwrap();
     for theme in [Some("dark"), Some("light")] {
         let scene = propulsion::figure_engine_designer_preview(&turboprop, theme);
-        assert!(has_text(&scene, "5 · Power turbine"));
-        assert!(has_text(&scene, "45 · Gas generator"));
+        assert!(has_text(&scene, "5 * Power turbine"));
+        assert!(has_text(&scene, "45 * Gas generator"));
         assert!(!has_text(&scene, "Bypass flow"));
         assert!(has_text(&scene, "Temperature T [K]"));
         let scene = propulsion::figure_engine_designer_preview(&AlasConfig::default(), theme);
         assert!(has_text(&scene, "Core flow"));
-        assert!(has_text(&scene, "45 · HPT"));
+        assert!(has_text(&scene, "45 * HPT"));
         assert!(has_text(&scene, "Reference closure"));
     }
     let mut invalid = AlasConfig::default();

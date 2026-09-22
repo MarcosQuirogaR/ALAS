@@ -66,8 +66,8 @@ pub(crate) fn face(points: &[[f64; 3]], ids: &[usize]) -> Result<Geometry, Surfa
         minz = minz.min(p[2]);
         maxz = maxz.max(p[2]);
     }
-    for j in 0..3 {
-        center[j] /= ids.len() as f64;
+    for coordinate in &mut center {
+        *coordinate /= ids.len() as f64;
     }
     for k in 0..ids.len() {
         let a = *points.get(ids[k]).ok_or_else(|| {

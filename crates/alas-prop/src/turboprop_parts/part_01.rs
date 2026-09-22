@@ -113,7 +113,7 @@ pub struct Pw127m568fModel {
     /// Per-engine residual core exhaust thrust kept outside propeller thrust, N.
     pub residual_jet_thrust_n: f64,
     /// Fuel flow per unit of **sea-level-rated** maximum-cruise shaft power,
-    /// kg/(kW h) — **not** the power-specific fuel consumption the engine
+    /// kg/(kW h), **not** the power-specific fuel consumption the engine
     /// actually runs at.
     ///
     /// The name is historical and the quantity is a rating-basis bookkeeping
@@ -123,7 +123,7 @@ pub struct Pw127m568fModel {
     /// `762 / (2 x 1,589.83 kW) = 0.239648 kg/kWh`. The PSFC the model then
     /// applies at every operating point is this value divided by the shaft
     /// power lapse at [`Self::fuel_reference_density_kg_m3`], so that the
-    /// anchor is reproduced after the lapse is applied — **0.364630 kg/kWh**
+    /// anchor is reproduced after the lapse is applied: **0.364630 kg/kWh**
     /// at the declared inputs.
     ///
     /// **The trap this doc comment used to set.** Writing a measured PW120A
@@ -144,7 +144,7 @@ pub struct Pw127m568fModel {
     ///
     /// It matters more than its size suggests. The 762 kg/h anchor is
     /// reproduced at *any* value of this field, because the calibration
-    /// divides by the lapse at this same density — but the physical PSFC it
+    /// divides by the lapse at this same density, but the physical PSFC it
     /// implies, and therefore **every fuel flow away from the anchor**, moves
     /// with it: 0.3476 kg/kWh if the anchor is at FL160, 0.3564 at FL170,
     /// 0.3654 at FL180, 0.3843 at FL200, 0.4376 at FL250. That 26 % spread is

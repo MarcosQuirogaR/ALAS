@@ -725,6 +725,9 @@ fn conventional_default_provenance(uncertainty: &str) -> FlopsInputProvenance {
 }
 
 #[cfg(test)]
+// A test decodes a fixture it wrote inline here, so a failed expect is the
+// assertion failing, not a library invariant being broken.
+#[allow(clippy::expect_used)]
 mod tests {
     use super::*;
 

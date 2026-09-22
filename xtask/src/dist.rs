@@ -178,7 +178,7 @@ struct SourceSnapshot {
     /// Named rather than only counted: a release snapshot that silently
     /// dropped a file the index still lists would be indistinguishable from
     /// one that lost it. `docs/ALAS-report-clarified.md` is the current such
-    /// path — the report's canonical copy lives outside the repository and the
+    /// path: the report's canonical copy lives outside the repository and the
     /// in-tree duplicate was removed on purpose, so packaging it would ship a
     /// stale second copy.
     deleted_paths: Vec<String>,
@@ -1853,7 +1853,7 @@ mod tests {
     /// This asserts the mechanism against the real repository rather than a
     /// fixture, because the behaviour under test is what git reports about
     /// *this* worktree. It is deliberately tolerant about which paths are
-    /// deleted — that set changes — and strict about the two invariants: a
+    /// deleted (that set changes) and strict about the two invariants: a
     /// deleted path is allowlisted-but-skipped, and the enumeration itself
     /// either succeeds or is a hard error.
     #[test]

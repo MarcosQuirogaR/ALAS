@@ -131,7 +131,7 @@ pub(crate) fn parse_case(
 pub(crate) fn raw_rows(
     text: &str,
     components: usize,
-) -> Result<(Vec<([f64; 3], Vec<f64>)>, Option<usize>), SurfaceError> {
+) -> Result<(raw::FaceRows, Option<usize>), SurfaceError> {
     raw::raw_rows(text, components)
 }
 
@@ -152,6 +152,9 @@ pub(crate) fn parse_sampled(
 }
 
 #[cfg(test)]
+// Tests assert on values they parsed or built here, so a failed expect is
+// the assertion failing rather than a library invariant breaking.
+#[allow(clippy::expect_used)]
 mod tests {
     use super::*;
     use std::collections::HashSet;

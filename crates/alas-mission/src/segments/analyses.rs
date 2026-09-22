@@ -296,7 +296,7 @@ impl MissionAnalyses {
     /// thrust and report that refusal the same way: an
     /// [`alas_prop::system::ActiveLimit`] named [`FLIGHT_IDLE_LIMIT`] with
     /// full utilization. That is the technology-neutral contract this reads,
-    /// not a turbofan-specific detail — the ATR surrogate emits the identical
+    /// not a turbofan-specific detail: the ATR surrogate emits the identical
     /// name from its own idle fallback. The caller needs it because a floored
     /// answer means *the command it asked about is outside the deck's
     /// domain*, so every command below that point produces the same force and

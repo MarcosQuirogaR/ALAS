@@ -270,7 +270,7 @@ const POTENTIAL_FLOW_NON_ORTHOGONAL_CORRECTORS: u32 = 5;
 /// carries no independent information.  That was measurable: in
 /// `V1-inletoutlet-coarse` the pressure residual was `1.00840831099e-5` at outer
 /// iteration 806 and `9.98679938612e-6` at 807, and the run stopped at 807
-/// precisely because it had just crossed `1e-5` — a 0.13 % margin that is
+/// precisely because it had just crossed `1e-5`, a 0.13 % margin that is
 /// necessary rather than earned.  Stopping at half the gate gives a self-stopped
 /// run real headroom, and the gate still binds independently on a run that
 /// exhausts its iteration budget.  This tightens the solver; it does not relax
@@ -385,7 +385,7 @@ fn control_dict(config: &CfdStudyConfig) -> String {
 /// `checkMesh -meshQuality` applies `maxInternalSkewness` to internal faces and
 /// `maxBoundarySkewness` to boundary faces separately and counts the faces in
 /// error, which is this dictionary's contribution: the declared pass/fail.  The
-/// boundary *value* comes from elsewhere — `result_io::read_boundary_skewness_max`
+/// boundary *value* comes from elsewhere: `result_io::read_boundary_skewness_max`
 /// reads the exact maximum out of the `boundaryField` of the written `skewness`
 /// field, and `results.rs` stores it.  Without either route
 /// `max_boundary_skewness` stays `NotMeasured`.

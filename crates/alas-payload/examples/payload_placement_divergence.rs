@@ -11,8 +11,8 @@
 //! payload station, the aircraft centre of gravity and its percentage of mean
 //! aerodynamic chord under each, plus the seat counts behind them.
 //!
-//! What it establishes: the two are **one loading definition — every seat
-//! occupied at `passenger_mass_kg` — priced on two different passenger counts**.
+//! What it establishes: the two are **one loading definition, every seat
+//! occupied at `passenger_mass_kg`, priced on two different passenger counts**.
 //! The layout total is `seated_pax * passenger_mass_kg` exactly, `unseated_pax`
 //! is zero throughout and the non-occupant share is `0.0 kg` on three of the
 //! four, so no belly freight is involved and these are not two design load

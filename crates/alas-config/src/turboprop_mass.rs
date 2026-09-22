@@ -402,6 +402,10 @@ impl FlopsTurbopropConfig {
 }
 
 #[cfg(test)]
+// A test asserts on a density it resolved from a configuration it built here,
+// so a failed unwrap is the assertion failing, not a library invariant being
+// broken.
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 
@@ -419,9 +423,11 @@ mod tests {
 
     #[test]
     fn a_nacelle_reference_pair_resolves_an_explicit_component_density() {
-        let mut config = FlopsTurbopropConfig::default();
-        config.nacelle_reference_mass_kg = Some(207.75);
-        config.nacelle_reference_area_m2 = Some(12.25);
+        let mut config = FlopsTurbopropConfig {
+            nacelle_reference_mass_kg: Some(207.75),
+            nacelle_reference_area_m2: Some(12.25),
+            ..Default::default()
+        };
         assert_eq!(config.validate(), Ok(()));
         assert!(
             (config.resolved_nacelle_area_density_kg_m2().unwrap() - 16.959_183_673_469_4).abs()

@@ -313,7 +313,7 @@ pub struct SolverSettings {
     pub equation_relaxation: f64,
     /// Optional separate under-relaxation factor for `k` and `omega`.
     ///
-    /// `None` — the default — gives the turbulence pair
+    /// `None`, the default, gives the turbulence pair
     /// [`Self::equation_relaxation`], which is exactly the shipped behaviour,
     /// so no existing configuration changes meaning.  It is separable because
     /// the turbulence pair and the momentum pair do not share a stability
@@ -420,10 +420,10 @@ fn default_non_orthogonal_limiter() -> f64 {
 ///
 /// Coarse and medium already reach the stopping rule at `0.05`, so a tighter
 /// inner solve buys the same outer count for half again to twice the inner
-/// work.  The fine preset *cannot* reach it at `0.05` — its outer pressure
+/// work.  The fine preset *cannot* reach it at `0.05` (its outer pressure
 /// residual floors just under the acceptance gate because each outer iteration
 /// leaves the pressure field further from its own solution as the cell count
-/// grows — and at `0.01` it converges in 30 % of the iterations, ending at
+/// grows), and at `0.01` it converges in 30 % of the iterations, ending at
 /// `4.994e-6` instead of `9.971e-6` against the unchanged `1e-5` gate.
 ///
 /// This is a linear-solver stopping rule and cannot move the answer; measured,
@@ -445,7 +445,7 @@ pub fn default_pressure_relative_tolerance(preset: MeshPreset) -> f64 {
 
 /// Default cell-limiter coefficient of the gradient scheme.
 ///
-/// Zero — the unlimited `Gauss linear` gradient.  The shipped `1.0` was
+/// Zero: the unlimited `Gauss linear` gradient.  The shipped `1.0` was
 /// measured to be the dominant destabiliser of this template: with it, the
 /// default case DIVERGED at outer iteration 621 on one mesh instance and left
 /// the pressure residual pinned at 1.8e-4 .. 2.6e-4 on every other setting
@@ -546,19 +546,14 @@ impl TurbulenceConvectionScheme {
 /// engineering default.  A short bounded-upwind warm-up is retained as a
 /// separate, auditable stage because it is substantially more robust from a
 /// potential-flow initial state on coarse or highly stretched meshes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum ConvectionScheme {
     /// First-order bounded Gauss upwind.
     BoundedUpwind,
     /// Bounded Gauss linear upwind with the cell gradient.
+    #[default]
     BoundedLinearUpwind,
-}
-
-impl Default for ConvectionScheme {
-    fn default() -> Self {
-        Self::BoundedLinearUpwind
-    }
 }
 
 impl ConvectionScheme {
@@ -1011,19 +1006,19 @@ const SOLVER_TIMEOUT_SAFETY_FACTOR: f64 = 3.0;
 impl SolverSettings {
     /// Wall-clock budget for one **solver** invocation, in seconds.
     ///
-    /// [`Self::timeout_seconds`] is a reasonable guard for the short utilities —
-    /// `gmsh`, `gmshToFoam`, `checkMesh` and `potentialFoam` all finish in
-    /// seconds to a minute on the shipped presets — but it is not a sane guard
+    /// [`Self::timeout_seconds`] is a reasonable guard for the short utilities
+    /// (`gmsh`, `gmshToFoam`, `checkMesh` and `potentialFoam` all finish in
+    /// seconds to a minute on the shipped presets), but it is not a sane guard
     /// for the solver itself.  At the shipped `1800 s` and the shipped default
-    /// `max_iterations`, a **fine**-preset case (≈434 000 cells) legitimately
+    /// `max_iterations`, a **fine**-preset case (approx 434 000 cells) legitimately
     /// needs of order `2.6e4 s` on one core and is killed less than a quarter of
     /// the way in; the study is then reported as failed with "the solver
     /// exceeded its configured timeout" for a run that was doing exactly what it
     /// was asked to do.  The medium default has under 30 % margin and loses it
     /// on any slower machine or under load.
     ///
-    /// The budget therefore scales with the work requested — cells times the
-    /// iteration budget — and the configured value is kept as a **floor**, so a
+    /// The budget therefore scales with the work requested (cells times the
+    /// iteration budget), and the configured value is kept as a **floor**, so a
     /// user who asks for a longer guard still gets it and nothing shrinks.
     /// Returns the configured value unchanged when the cell count is not known
     /// yet, which is the case for every stage before `checkMesh`.

@@ -64,10 +64,14 @@ fn show_mission_profile_preview_inner(
         ui.add_space(4.0);
 
         let segments = preview_segments(config);
-        let (rect, response) = ui.allocate_exact_size(
-            vec2(ui.available_width().max(420.0), 300.0),
-            Sense::click(),
-        );
+        // The schematic must never demand more width than the card actually
+        // has: forcing a fixed floor here (420 pt) used to widen the whole
+        // Inputs page past `layout::CONTENT_MIN_WIDTH` (400 pt) on a narrow
+        // window, since that floor did not account for the central panel's
+        // and card's own margins. The plot's own inset margins keep it
+        // legible well below the floor this replaced.
+        let (rect, response) =
+            ui.allocate_exact_size(vec2(ui.available_width().max(1.0), 300.0), Sense::click());
         paint_profile(ui, rect, config, &segments);
         let response = response.on_hover_text(tr(
             "Click a phase in the profile to edit its actual mission parameters in a detached window.",

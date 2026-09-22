@@ -141,70 +141,87 @@ fn starting_design_button(ui: &mut Ui, label: &str, hover: &str, selected: bool)
 
 fn show_aircraft_card(state: &mut AppState, ui: &mut Ui) {
     let response = card(ui, "Aircraft Configuration", |ui| {
-        let stacked = ui.available_width() < crate::layout::SELECTOR_PAIR_MIN_WIDTH;
-        ui.horizontal_wrapped(|ui| {
-            ui.label(tr("Preset:"));
-            let names = state.preset_names.clone();
-            let current_display = names
-                .iter()
-                .find(|(n, _)| *n == state.active_preset)
-                .map(|(_, d)| d.clone())
-                .unwrap_or_else(|| tr("Choose a preset..."));
-            let mut chosen = None;
-            let preset_mode = state.starting_design() == StartingDesign::PresetAircraft;
-            ui.add_enabled_ui(preset_mode, |ui| {
-                ComboBox::from_id_salt("inputs_preset_combo")
-                    .selected_text(current_display)
-                    .show_ui(ui, |ui| {
-                        for (name, display) in &names {
-                            if ui
-                                .selectable_label(*name == state.active_preset, display)
-                                .clicked()
-                            {
-                                chosen = Some(name.clone());
-                            }
-                        }
-                    });
-            });
-            if let Some(name) = chosen {
-                state.load_preset(&name);
-            }
-
-            // Consuming the rest of the line forces a new one.
-            if stacked {
-                ui.allocate_space(egui::vec2(ui.available_width(), 0.0));
-            } else {
+        // Below `SELECTOR_PAIR_MIN_WIDTH` the pair stacks onto two full rows
+        // instead of sharing one `horizontal_wrapped` line. Forcing a wrap by
+        // consuming the rest of the line with a zero-height allocation used
+        // to run first: at that point the "Engine:" label's own galley was
+        // still measured against whatever sliver of the old line was left,
+        // not the fresh row it actually landed on, so a short label could be
+        // laid out pre-wrapped across two cramped rows and painted wider than
+        // the words it held. Two independent rows never share that budget.
+        if ui.available_width() < crate::layout::SELECTOR_PAIR_MIN_WIDTH {
+            ui.horizontal(|ui| show_preset_selector(state, ui));
+            ui.add_space(6.0);
+            ui.horizontal(|ui| show_engine_selector(state, ui));
+        } else {
+            ui.horizontal_wrapped(|ui| {
+                show_preset_selector(state, ui);
                 ui.add_space(16.0);
-            }
-            ui.label(tr("Engine:"));
-            let current_engine = state
-                .config_values
-                .get("geometry")
-                .and_then(|g| g.get("engine"))
-                .and_then(|e| e.get("engine_name"))
-                .and_then(Value::as_str)
-                .unwrap_or("")
-                .to_owned();
-            let mut chosen_engine = None;
-            ComboBox::from_id_salt("inputs_engine_combo")
-                .selected_text(&current_engine)
-                .show_ui(ui, |ui| {
-                    for name in &state.engine_names {
-                        if ui.selectable_label(*name == current_engine, name).clicked() {
-                            chosen_engine = Some(name.clone());
-                        }
-                    }
-                });
-            if let Some(name) = chosen_engine {
-                state.set_engine(&name);
-            }
-        });
+                show_engine_selector(state, ui);
+            });
+        }
     });
     if state.walkthrough_targets(TourTarget::AircraftConfig) {
         response.scroll_to_me(Some(egui::Align::Center));
     }
     if ui.clip_rect().intersects(response.rect) {
         state.record_walkthrough_target(TourTarget::AircraftConfig, response.rect);
+    }
+}
+
+/// The preset selector: `Preset:` and its combo box.
+fn show_preset_selector(state: &mut AppState, ui: &mut Ui) {
+    ui.label(tr("Preset:"));
+    let names = state.preset_names.clone();
+    let current_display = names
+        .iter()
+        .find(|(n, _)| *n == state.active_preset)
+        .map(|(_, d)| d.clone())
+        .unwrap_or_else(|| tr("Choose a preset..."));
+    let mut chosen = None;
+    let preset_mode = state.starting_design() == StartingDesign::PresetAircraft;
+    ui.add_enabled_ui(preset_mode, |ui| {
+        ComboBox::from_id_salt("inputs_preset_combo")
+            .selected_text(current_display)
+            .show_ui(ui, |ui| {
+                for (name, display) in &names {
+                    if ui
+                        .selectable_label(*name == state.active_preset, display)
+                        .clicked()
+                    {
+                        chosen = Some(name.clone());
+                    }
+                }
+            });
+    });
+    if let Some(name) = chosen {
+        state.load_preset(&name);
+    }
+}
+
+/// The engine selector: `Engine:` and its combo box.
+fn show_engine_selector(state: &mut AppState, ui: &mut Ui) {
+    ui.label(tr("Engine:"));
+    let current_engine = state
+        .config_values
+        .get("geometry")
+        .and_then(|g| g.get("engine"))
+        .and_then(|e| e.get("engine_name"))
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_owned();
+    let mut chosen_engine = None;
+    ComboBox::from_id_salt("inputs_engine_combo")
+        .selected_text(&current_engine)
+        .show_ui(ui, |ui| {
+            for name in &state.engine_names {
+                if ui.selectable_label(*name == current_engine, name).clicked() {
+                    chosen_engine = Some(name.clone());
+                }
+            }
+        });
+    if let Some(name) = chosen_engine {
+        state.set_engine(&name);
     }
 }
 

@@ -10,13 +10,13 @@
 //!
 //! [`complete_mass_analysis`] takes `payload_layout: Option<&PayloadLayoutSummary>`
 //! and substitutes the layout's mass, station and fuel remainder when one is
-//! supplied. Both arms describe the **same** loading definition — every seat
-//! occupied at `requirements.passenger_mass_kg` — and they disagree only about
+//! supplied. Both arms describe the **same** loading definition, every seat
+//! occupied at `requirements.passenger_mass_kg`, and they disagree only about
 //! how many seats there are:
 //!
-//! * `None` — `requirements.payload_kg()`, which is
+//! * `None`, `requirements.payload_kg()`, which is
 //!   `num_passengers * passenger_mass_kg`, at the cabin centre.
-//! * `Some(layout)` — `seated_pax * passenger_mass_kg`, where `seated_pax` is
+//! * `Some(layout)`, `seated_pax * passenger_mass_kg`, where `seated_pax` is
 //!   the capacity the cabin engine resolves from the candidate's own geometry,
 //!   at that cabin's mass-weighted centroid.
 //!
@@ -34,8 +34,8 @@
 //! ```
 //!
 //! So this is **not** the max-structural-payload point that
-//! `DesignRequirements::max_structural_payload_kg` describes — no belly freight
-//! is involved — and the two arms are **not** two design load cases that should
+//! `DesignRequirements::max_structural_payload_kg` describes (no belly freight
+//! is involved), and the two arms are **not** two design load cases that should
 //! be allowed to differ. `DesignRequirements` states the contract itself:
 //! "Passenger capacity is always recomputed for each candidate shell", and
 //! `resolves_payload_from_candidate_geometry` returns `true` unconditionally.
@@ -47,9 +47,9 @@
 //! overwrites `masses.payload`, `masses.fuel` and `coordinates.payload` in
 //! place, so the returned triple is indistinguishable between the two while
 //! differing by up to 14 456 kg of payload, 2.9 m of station and 21.7 points of
-//! %MAC. `alas-report`'s `quick_preview_report` passes `None` — and it is what
+//! %MAC. `alas-report`'s `quick_preview_report` passes `None` (and it is what
 //! the interface's centre-of-gravity envelope, landing-gear and control-surface
-//! previews read — while every residual and export path passes `Some`.
+//! previews read) while every residual and export path passes `Some`.
 //!
 //! `the_supplied_layout_replaces_the_planning_payload_mass_station_and_fuel`
 //! pins the substitution so the two arms cannot silently converge or drift.

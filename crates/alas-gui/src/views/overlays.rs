@@ -467,7 +467,7 @@ pub fn show_storage_dialog(state: &mut AppState, ctx: &Context) {
                                 ui.label(RichText::new(tr(entry.label)).strong());
                                 ui.label(if entry.exists {
                                     tr_fields(
-                                        "{size} · {files} files",
+                                        "{size} * {files} files",
                                         &[
                                             ("size", format_bytes(entry.bytes)),
                                             ("files", entry.files.to_string()),
@@ -669,7 +669,7 @@ mod tests {
             "Work directories external solvers left in the system temporary folder after an interrupted run.",
             "Navigation data for airway routing; downloaded again on demand.",
             "Earth image for the route globe; downloaded again on demand.",
-            "{size} · {files} files",
+            "{size} * {files} files",
             "Cleared {category}.",
             "Cleared {removed} paths; {failed} could not be removed.",
             "Saved tool paths",

@@ -129,7 +129,7 @@ pub fn compute_turboprop_cycle_states(
             "Requested shaft power leaves insufficient exhaust pressure above ambient.".into(),
         );
     }
-    // Combine h_t = h + V²/2 with V² = gamma R T at choking.
+    // Combine h_t = h + V^2/2 with V^2 = gamma R T at choking.
     // Nozzle efficiency changes critical pressure, not sonic T/Tt = 2/(gamma+1).
     let critical_base = 1.0 - (gh - 1.0) / ((gh + 1.0) * cfg.core_nozzle_efficiency);
     let critical_pressure = pt6 * critical_base.max(0.0).powf(gh / (gh - 1.0));

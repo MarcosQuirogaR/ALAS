@@ -316,6 +316,9 @@ pub use presets::{
     Y_PLUS_CONSISTENCY_BAND,
 };
 #[cfg(test)]
+// Tests assert on values they parsed or built here, so a failed expect is
+// the assertion failing rather than a library invariant breaking.
+#[allow(clippy::expect_used)]
 mod tests {
     use super::*;
 

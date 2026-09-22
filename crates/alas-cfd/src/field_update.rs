@@ -23,9 +23,9 @@
 //!
 //! The separation is total and it is not a threshold: either the solver wrote a
 //! different field or it wrote the same one.  Residual depth below the inner
-//! solver tolerance does **not** separate those populations — `G3`'s omega sits
+//! solver tolerance does **not** separate those populations (`G3`'s omega sits
 //! at `1.00x` the floor and `T3`'s at `9.8e-6x`, yet both fields are equally
-//! frozen — which is why the depth factor that briefly stood here was withdrawn
+//! frozen), which is why the depth factor that briefly stood here was withdrawn
 //! rather than retuned.
 
 use std::path::Path;
@@ -130,8 +130,8 @@ pub struct FieldUpdateEvidence {
     /// Whether the two compared times are separated by exactly
     /// [`Self::write_interval`].
     ///
-    /// `Some(false)` means the pair is not a regular consecutive write — a
-    /// final short interval, a restart, or a missing directory — so the
+    /// `Some(false)` means the pair is not a regular consecutive write (a
+    /// final short interval, a restart, or a missing directory), so the
     /// comparison spans an unknown amount of solver progress.
     #[serde(default)]
     pub write_pair_regular: Option<bool>,
@@ -191,7 +191,7 @@ impl FieldUpdateEvidence {
 ///
 /// Returns evidence with `unavailable_reason` set, rather than an empty
 /// success, when fewer than two times were written or a field could not be
-/// parsed — a caller must be able to tell "not updated" from "not observed".
+/// parsed: a caller must be able to tell "not updated" from "not observed".
 pub fn read_field_update_evidence(case_dir: &Path) -> FieldUpdateEvidence {
     read_field_update_evidence_with_fields(case_dir, &FIELD_UPDATE_FIELDS)
 }
@@ -356,7 +356,7 @@ fn compare_field(earlier: &Path, later: &Path, field: &str) -> Option<(usize, us
             let right = after[cell * components + component];
             // A non-finite value is not evidence of anything.  Skipping it
             // would silently count a NaN/Inf pair, or a finite-versus-Inf
-            // pair, as "unchanged" — which is exactly the reading that must
+            // pair, as "unchanged", which is exactly the reading that must
             // never be manufactured.  The whole field becomes unavailable.
             if !left.is_finite() || !right.is_finite() {
                 return None;

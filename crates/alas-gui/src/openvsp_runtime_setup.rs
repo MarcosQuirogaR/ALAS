@@ -69,7 +69,7 @@ impl PreviewRuntimeStatus {
     pub fn label(&self) -> String {
         match self {
             PreviewRuntimeStatus::Unavailable => {
-                "unavailable — this platform is not 64-bit Windows".to_owned()
+                "unavailable: this platform is not 64-bit Windows".to_owned()
             }
             PreviewRuntimeStatus::NotInstalled => "not installed".to_owned(),
             PreviewRuntimeStatus::Installed {

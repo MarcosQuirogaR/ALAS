@@ -291,6 +291,9 @@ pub fn version_from_directory(path: &Path) -> Option<OpenFoamVersion> {
 }
 
 #[cfg(test)]
+// Tests assert on values they parsed from fixtures built here, so a failed
+// expect is the assertion failing rather than a library invariant breaking.
+#[allow(clippy::expect_used)]
 mod tests {
     use super::*;
 

@@ -34,6 +34,14 @@ use super::viewport::{
 pub const CATEGORY_COLUMN_WIDTH: f32 = 168.0;
 /// Vertical spacing between category buttons, in points.
 pub const CATEGORY_SPACING: f32 = 10.0;
+/// Smallest vertical gap between stack rows once the free band between the
+/// camera row and the action block is shorter than the stack's natural
+/// height (a short window). Below `CATEGORY_SPACING` the buttons keep their
+/// own size; only the air between them gives way.
+const CATEGORY_SPACING_MIN: f32 = 3.0;
+/// Automatic gaps inside the stack: one between each of the seven rows
+/// (Search, the five category buttons and Summary).
+const STACK_GAP_COUNT: f32 = 6.0;
 /// Width of the search results card, in points.
 const RESULTS_WIDTH: f32 = 400.0;
 /// Width of the Summary card, in points.
@@ -92,6 +100,31 @@ fn stack_height_id() -> egui::Id {
     egui::Id::new("sandbox_category_stack_height")
 }
 
+/// The stack's own last full-spacing height: the reference this shrinks
+/// from. Kept separate from [`stack_height_id`] (the *actual*, possibly
+/// already-shrunk, height used to position the stack) so a shrunk frame
+/// never corrupts the baseline the next frame's shrink is computed from,
+/// which would otherwise have the stack alternate between a full-spacing
+/// frame that overflows the band and a shrunk frame that fits it forever.
+fn stack_natural_height_id() -> egui::Id {
+    egui::Id::new("sandbox_category_stack_natural_height")
+}
+
+/// The vertical gap between stack rows that keeps the stack's `natural`
+/// (full-spacing) height inside `available` points of free band.
+///
+/// `natural` only ever reflects a frame actually rendered at
+/// [`CATEGORY_SPACING`], so this is a pure function of two frame-stable
+/// numbers rather than a decision re-made from "does it fit right now",
+/// which is what would make it oscillate.
+fn category_stack_spacing(natural: f32, available: f32) -> f32 {
+    if natural <= available {
+        return CATEGORY_SPACING;
+    }
+    let overflow = natural - available;
+    (CATEGORY_SPACING - overflow / STACK_GAP_COUNT).max(CATEGORY_SPACING_MIN)
+}
+
 /// Render the Search box, the category buttons and, while a search is
 /// active, the results card, all floating over `viewport` within the
 /// vertical band `free_top..free_bottom` the other overlays leave free.
@@ -107,6 +140,15 @@ pub fn show_parameter_access(
     let measured = ctx
         .data(|d| d.get_temp::<f32>(stack_height_id()))
         .unwrap_or(196.0);
+    // The free band between the camera row and the action block: on a short
+    // window it can be narrower than the stack's seven rows at their full
+    // spacing, so the gap between rows gives way before anything overlaps
+    // the block below.
+    let available = (free_bottom - free_top).max(0.0);
+    let natural = ctx
+        .data(|d| d.get_temp::<f32>(stack_natural_height_id()))
+        .unwrap_or(measured);
+    let spacing = category_stack_spacing(natural, available);
     let top = stack_top(viewport, free_top, free_bottom, measured);
     let column = Rect::from_min_max(
         pos2(viewport.left() + OVERLAY_INSET, top),
@@ -118,7 +160,7 @@ pub fn show_parameter_access(
     let mut results_top = free_top;
     let mut summary_top = free_top;
     let stack = ui.allocate_new_ui(egui::UiBuilder::new().max_rect(column), |ui| {
-        ui.spacing_mut().item_spacing.y = CATEGORY_SPACING;
+        ui.spacing_mut().item_spacing.y = spacing;
         show_search_box(state, ui, width);
         results_top = results_top.min(ui.cursor().top());
         // The selected component is `SandboxSession::focus` and nothing else.
@@ -141,10 +183,10 @@ pub fn show_parameter_access(
             }
         }
         // The Summary card is a whole-aircraft readout, not a sixth
-        // component. Separating it from the stack and giving it its own
-        // persistent on/off state stops its button from reading as a
-        // component selection while a component is focused.
-        ui.add_space(6.0);
+        // component, but it shares the stack's own uniform row spacing
+        // (rather than a second, independently-sized gap) so the stack's
+        // total height stays the exact `STACK_GAP_COUNT`-gap quantity
+        // `category_stack_spacing` shrinks.
         summary_top = ui.cursor().top();
         let summary_open = state.sandbox.layout.summary_open;
         let summary = egui::Button::new(tr("Summary")).min_size(vec2(width, 0.0));
@@ -164,6 +206,15 @@ pub fn show_parameter_access(
         ctx.data_mut(|d| d.insert_temp(stack_height_id(), height));
         ctx.request_repaint();
     }
+    // Only a frame actually rendered at the full `CATEGORY_SPACING` may
+    // update the shrink baseline: a shrunk frame's height must never be
+    // mistaken for "how tall the stack wants to be", or the next frame would
+    // see it fit, spring back to full spacing, overflow again, and shrink
+    // again forever.
+    if (spacing - CATEGORY_SPACING).abs() < 0.01 && (height - natural).abs() > 0.5 {
+        ctx.data_mut(|d| d.insert_temp(stack_natural_height_id(), height));
+        ctx.request_repaint();
+    }
     let search_active = !state.sandbox.search.trim().is_empty();
     let mut summary_left = column.right() + OVERLAY_INSET;
     if search_active {
@@ -173,9 +224,20 @@ pub fn show_parameter_access(
             + OVERLAY_INSET;
     }
     if state.sandbox.layout.summary_open {
-        let top = summary_top.min(free_bottom - SUMMARY_HEIGHT).max(free_top);
+        // The card's own last measured height, not the `SUMMARY_HEIGHT`
+        // nominal guess: the guess undercounted the frame margin and row
+        // spacing of eight metric rows, so a card placed against it grew
+        // past `free_bottom` and into the action block below.
+        let card_height = ctx
+            .data(|d| d.get_temp::<f32>(summary_card_height_id()))
+            .unwrap_or(SUMMARY_HEIGHT);
+        let top = summary_top.min(free_bottom - card_height).max(free_top);
         show_summary_card(state, ui, viewport, summary_left, top, free_bottom);
     }
+}
+
+fn summary_card_height_id() -> egui::Id {
+    egui::Id::new("sandbox_summary_card_height")
 }
 
 /// The Summary card: the derived geometry metrics of the drawn aircraft,
@@ -209,6 +271,15 @@ fn show_summary_card(
         });
     });
     register_overlay_rect(ui.ctx(), "summary_card", response.response.rect);
+    let ctx = ui.ctx().clone();
+    let height = response.response.rect.height().max(1.0);
+    let stored = ctx
+        .data(|d| d.get_temp::<f32>(summary_card_height_id()))
+        .unwrap_or(SUMMARY_HEIGHT);
+    if (height - stored).abs() > 0.5 {
+        ctx.data_mut(|d| d.insert_temp(summary_card_height_id(), height));
+        ctx.request_repaint();
+    }
 }
 
 /// The Search box: its own box only, dimmed like the buttons until it is

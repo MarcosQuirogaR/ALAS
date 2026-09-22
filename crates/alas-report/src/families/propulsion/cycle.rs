@@ -533,7 +533,7 @@ mod tests {
             .collect();
         assert!(texts.contains(&"Core flow"));
         assert!(texts.contains(&"Bypass flow"));
-        assert!(texts.contains(&"s - s₀ [kJ/(kg·K)]"));
+        assert!(texts.contains(&"s - s0 [kJ/(kg*K)]"));
     }
 
     #[test]
@@ -547,7 +547,7 @@ mod tests {
                 _ => None,
             })
             .collect();
-        assert!(texts.iter().any(|text| text.contains("s - s₀ [kJ/(kg·K)]")));
+        assert!(texts.iter().any(|text| text.contains("s - s0 [kJ/(kg*K)]")));
         assert!(texts
             .iter()
             .any(|text| text.contains("T [K]") || text.contains("Temperature T")));

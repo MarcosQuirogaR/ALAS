@@ -484,9 +484,9 @@ fn localized_propulsion_label(label: &str) -> String {
         "Fuel-air ratio f" => format!("{}  f", tr("Fuel-air ratio")),
         "TSFC (computed)" => tr("TSFC (computed)"),
         "TSFC (reference)" => tr("TSFC (reference)"),
-        "Thermal efficiency (eta_t)" => format!("{} (ηₜ)", tr("Thermal efficiency")),
-        "Propulsive efficiency (eta_p)" => format!("{} (ηₚ)", tr("Propulsive efficiency")),
-        "Overall efficiency (eta_o)" => format!("{} (ηₒ)", tr("Overall efficiency")),
+        "Thermal efficiency (eta_t)" => format!("{} (eta_t)", tr("Thermal efficiency")),
+        "Propulsive efficiency (eta_p)" => format!("{} (eta_p)", tr("Propulsive efficiency")),
+        "Overall efficiency (eta_o)" => format!("{} (eta_o)", tr("Overall efficiency")),
         "Per-engine thrust, static (rated)" => tr("Per-engine thrust, static (rated)"),
         "Per-engine thrust, this cruise pt" => tr("Per-engine thrust, this cruise pt"),
         "Cycle infeasible at this design point" => tr("Cycle infeasible at this design point:")

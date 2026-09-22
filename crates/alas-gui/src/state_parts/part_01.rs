@@ -598,7 +598,7 @@ mod first_start_marker_tests {
         let tool_intro = unique_marker_path("tool-intro");
 
         assert!(first_start_marker_gate(&onboarding));
-        // Dismissing/creating one marker must never mark the other seen —
+        // Dismissing/creating one marker must never mark the other seen:
         // the walkthrough and the tool-intro screen are independent gates.
         assert!(
             first_start_marker_gate(&tool_intro),

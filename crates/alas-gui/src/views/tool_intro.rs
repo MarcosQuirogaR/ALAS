@@ -19,8 +19,8 @@
 //! screen says so plainly instead of guessing.
 //!
 //! The only two acquisition actions here reuse existing background/atomic/
-//! cancellable mechanisms — [`crate::state::AppState::start_navdata_download`]
-//! and [`crate::state::AppState::start_openvsp_runtime_setup`] — rather than
+//! cancellable mechanisms ([`crate::state::AppState::start_navdata_download`]
+//! and [`crate::state::AppState::start_openvsp_runtime_setup`]) rather than
 //! opening a third download path. Every other tool is disclosed with a
 //! "Configure..." button that only navigates to Setup > External Tools.
 
@@ -103,11 +103,11 @@ fn section_heading(ui: &mut Ui, text: &str) {
 /// Group 1: tools with nothing to configure, per
 /// `EXTERNAL_TOOL_FIRST_START_IMPLEMENTATION_TASK.md`'s FS1 group 1.
 fn ready_now_section(ui: &mut Ui) {
-    section_heading(ui, "Ready now — nothing to do");
+    section_heading(ui, "Ready now: nothing to do");
     ui.label(RichText::new(tr("Athena AVL 3.52 (Windows)")).strong());
     ui.label(
         RichText::new(tr(
-            "Source: the upstream MIT AVL distribution (web.mit.edu/drela/Public/web/avl). Licence: GPL-2.0. The unchanged executable, its source archive, and the GPL notice already ship inside the Windows package — nothing to install or configure.",
+            "Source: the upstream MIT AVL distribution (web.mit.edu/drela/Public/web/avl). Licence: GPL-2.0. The unchanged executable, its source archive, and the GPL notice already ship inside the Windows package: nothing to install or configure.",
         ))
         .weak()
         .small(),
@@ -116,7 +116,7 @@ fn ready_now_section(ui: &mut Ui) {
     ui.label(RichText::new(tr("XFOIL Orr-Sommerfeld transition data (used by MSES)")).strong());
     ui.label(
         RichText::new(tr(
-            "Source: Mark Drela's official XFOIL 6.99 page (web.mit.edu/drela/Public/web/xfoil). Licence: GPL-2.0-or-later. The unmodified map and archive already ship bundled with every release. MSES itself still requires your own installation — see \"You supply these\" below.",
+            "Source: Mark Drela's official XFOIL 6.99 page (web.mit.edu/drela/Public/web/xfoil). Licence: GPL-2.0-or-later. The unmodified map and archive already ship bundled with every release. MSES itself still requires your own installation: see \"You supply these\" below.",
         ))
         .weak()
         .small(),
@@ -124,9 +124,9 @@ fn ready_now_section(ui: &mut Ui) {
 }
 
 /// Group 2: the only two acquisitions this screen may offer, per this
-/// task's non-negotiable boundary — everything else stays user-supplied.
+/// task's non-negotiable boundary: everything else stays user-supplied.
 fn optional_download_section(state: &mut AppState, ui: &mut Ui) {
-    section_heading(ui, "Optional automatic download — off until you opt in");
+    section_heading(ui, "Optional automatic download: off until you opt in");
     navdata_row(state, ui);
     if crate::openvsp_runtime_setup::install_supported() {
         ui.add_space(8.0);
@@ -229,7 +229,7 @@ struct UserSuppliedTool {
 /// Sourced from `THIRD-PARTY-NOTICES.md`'s "Invoked executables" table and
 /// `EXTERNAL_TOOL_MATRIX.md`. OpenFOAM, Gmsh and ParaView have no licence
 /// entry in `THIRD-PARTY-NOTICES.md` yet (a documented, separate gap this
-/// task does not close — see `EXTERNAL_TOOL_MATRIX.md`'s cross-cutting
+/// task does not close: see `EXTERNAL_TOOL_MATRIX.md`'s cross-cutting
 /// gaps), so their rows say that plainly instead of asserting an
 /// unverified SPDX identifier.
 const USER_SUPPLIED_TOOLS: &[UserSuppliedTool] = &[
@@ -261,17 +261,17 @@ const USER_SUPPLIED_TOOLS: &[UserSuppliedTool] = &[
     UserSuppliedTool {
         name: "OpenFOAM",
         source: "official OpenFOAM distribution (openfoam.com)",
-        licence: "not yet recorded in THIRD-PARTY-NOTICES.md — verify on the official site",
+        licence: "not yet recorded in THIRD-PARTY-NOTICES.md: verify on the official site",
     },
     UserSuppliedTool {
         name: "Gmsh",
-        source: "not cited in ALAS's tracked files — see the official Gmsh project site",
-        licence: "not yet recorded in THIRD-PARTY-NOTICES.md — verify on the official site",
+        source: "not cited in ALAS's tracked files: see the official Gmsh project site",
+        licence: "not yet recorded in THIRD-PARTY-NOTICES.md: verify on the official site",
     },
     UserSuppliedTool {
         name: "ParaView",
-        source: "not cited in ALAS's tracked files — see the official ParaView project site",
-        licence: "not yet recorded in THIRD-PARTY-NOTICES.md — verify on the official site",
+        source: "not cited in ALAS's tracked files: see the official ParaView project site",
+        licence: "not yet recorded in THIRD-PARTY-NOTICES.md: verify on the official site",
     },
     UserSuppliedTool {
         name: "FLOWUnsteady / Julia adapter",
@@ -281,7 +281,7 @@ const USER_SUPPLIED_TOOLS: &[UserSuppliedTool] = &[
 ];
 
 fn user_supplied_section(state: &mut AppState, ui: &mut Ui) {
-    section_heading(ui, "You supply these — ALAS never downloads them");
+    section_heading(ui, "You supply these: ALAS never downloads them");
     for tool in USER_SUPPLIED_TOOLS {
         ui.horizontal(|ui| {
             ui.vertical(|ui| {

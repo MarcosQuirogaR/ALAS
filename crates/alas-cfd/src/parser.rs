@@ -137,7 +137,7 @@ fn parse_force_header(line: &str) -> Option<Vec<String>> {
         return None;
     }
     let columns = trimmed
-        .trim_start_matches(|ch| ch == '#' || ch == '/')
+        .trim_start_matches(['#', '/'])
         .split_whitespace()
         .map(normalize_force_column)
         .filter(|column| !column.is_empty())
@@ -228,7 +228,7 @@ fn parse_force_decomposition_header(line: &str) -> Option<Vec<String>> {
         return None;
     }
     let columns = trimmed
-        .trim_start_matches(|ch| ch == '#' || ch == '/')
+        .trim_start_matches(['#', '/'])
         .split_whitespace()
         .map(normalize_force_column)
         .filter(|column| !column.is_empty())

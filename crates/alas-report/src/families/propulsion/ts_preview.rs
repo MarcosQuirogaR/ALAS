@@ -78,7 +78,7 @@ fn diagram(
 ) -> Scene {
     let pal = get_palette(theme);
     let mut scene = Scene::new(900.0, 550.0, Some(Color::from_hex(pal.bg)));
-    let title = format!("{} · T–s", config.geometry.engine.engine_name);
+    let title = format!("{} * T-s", config.geometry.engine.engine_name);
     scene.title = Some(title.clone());
     draw_title(&mut scene, &title, pal);
     scene.suppress_derived_title();
@@ -122,7 +122,7 @@ fn diagram(
     label(
         &mut scene,
         &format!(
-            "M {:.2} · h {:.1} km",
+            "M {:.2} * h {:.1} km",
             config.requirements.cruise_mach,
             config.requirements.cruise_altitude_m / 1000.0
         ),
@@ -147,7 +147,7 @@ fn diagram(
         ),
         (reference.temperature_k * 0.70, t_max * 1.12),
     );
-    axes.draw_frame_with_labels(&mut scene, pal, "s - s₀ [kJ/(kg·K)]", "Temperature T [K]");
+    axes.draw_frame_with_labels(&mut scene, pal, "s - s0 [kJ/(kg*K)]", "Temperature T [K]");
     draw_branch(&mut scene, &axes, reference, core, CORE);
     if !bypass.is_empty() {
         draw_branch(&mut scene, &axes, &bypass[0], &bypass[1..], BYPASS);
@@ -168,14 +168,14 @@ fn diagram(
         }
     }
     for (id, text, dx, dy) in [
-        ("3", "3 · HPC", 12.0, 17.0),
-        ("4", "4 · Burner", -72.0, -15.0),
+        ("3", "3 * HPC", 12.0, 17.0),
+        ("4", "4 * Burner", -72.0, -15.0),
         (
             "45",
             if turboprop {
-                "45 · Gas generator"
+                "45 * Gas generator"
             } else {
-                "45 · HPT"
+                "45 * HPT"
             },
             -122.0,
             0.0,
@@ -183,9 +183,9 @@ fn diagram(
         (
             "5",
             if turboprop {
-                "5 · Power turbine"
+                "5 * Power turbine"
             } else {
-                "5 · LPT"
+                "5 * LPT"
             },
             -120.0,
             -14.0,

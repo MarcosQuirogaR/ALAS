@@ -17,7 +17,7 @@ use crate::views::tr_fields;
 ///
 /// The registry itself is in-memory, and a saved workspace carries a copy, but
 /// entering an airport in the application is expected to survive a restart on
-/// its own — without the user having to remember to save a case file. This
+/// its own, without the user having to remember to save a case file. This
 /// sits beside the tool preferences the same installation already writes, so
 /// one user-data location holds both.
 const CUSTOM_AIRPORT_STORE: &str = "custom-airports.json";

@@ -100,7 +100,7 @@ fn main() {
             .map_or(f64::NAN, |xyz| xyz[0]);
 
         // Operating empty mass on each side. The layout substitutes payload and
-        // fuel only, so this must be unchanged — read it back off the report's
+        // fuel only, so this must be unchanged: read it back off the report's
         // own published component masses rather than off the first pass, or the
         // check is a tautology.
         let oew_after: f64 = OEW_KEYS

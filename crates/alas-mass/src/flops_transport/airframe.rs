@@ -803,17 +803,6 @@ mod tests {
             turboprop_nacelle_wetted_area_m2(&built, &geometry, diameter_m, length_m);
         let (omitted_area_m2, omitted_basis) =
             turboprop_nacelle_wetted_area_m2(&omitted, &geometry, diameter_m, length_m);
-        let cylindrical_proxy_m2 = std::f64::consts::PI * diameter_m * length_m;
-        println!(
-            concat!(
-                "ATR nacelle area: built={:.15} m2, omitted={:.15} m2, ",
-                "cylindrical_proxy={:.15} m2, ratio={:.9}"
-            ),
-            built_area_m2,
-            omitted_area_m2,
-            cylindrical_proxy_m2,
-            built_area_m2 / cylindrical_proxy_m2
-        );
         assert_eq!(built_basis, "built_nacelle_fuselage_wetted_area");
         assert_eq!(omitted_basis, "configured_nacelle_profile_wetted_area");
         assert!(built_area_m2 > 0.0);

@@ -325,18 +325,15 @@ fn resolve_osmap(config: &MsesConfig, mses_dir: &Path) -> OsmapSelection {
         },
         Err(adjacent_error) => {
             for candidate in bundled_osmap_candidates(mses_dir) {
-                match osmap_candidate(candidate, "bundled ALAS") {
-                    Ok(path) => {
-                        return OsmapSelection {
-                            required,
-                            status: MsesOsmapStatus::Available,
-                            path: Some(path),
-                            diagnostic: Some(
-                                "bundled ALAS double-precision osmapDP.dat passed the local header check".to_owned(),
-                            ),
-                        };
-                    }
-                    Err(_) => {}
+                if let Ok(path) = osmap_candidate(candidate, "bundled ALAS") {
+                    return OsmapSelection {
+                        required,
+                        status: MsesOsmapStatus::Available,
+                        path: Some(path),
+                        diagnostic: Some(
+                            "bundled ALAS double-precision osmapDP.dat passed the local header check".to_owned(),
+                        ),
+                    };
                 }
             }
 
