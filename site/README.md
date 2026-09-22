@@ -29,9 +29,19 @@ mkdocs serve -f docs-site/mkdocs.yml
 
 ## Deploy
 
-Pushing to `main` builds both (Vite → `dist/`, MkDocs → `dist/docs/`) and
-publishes the combined output to GitHub Pages via
-`.github/workflows/deploy.yml`.
+There are two destinations, and they are not the same thing.
+
+**The live site, `alas.uvigo.es`,** is an Apache host at the university. It is
+not served by GitHub Pages and no workflow in this repository updates it.
+Publishing there is a separate upload of the built `dist/` tree over SFTP, and
+it has to be done deliberately.
+
+**The Pages mirror** is built and published by
+`.github/workflows/site-pages.yml` at the repository root whenever `site/`
+changes on `main`. It has no custom domain attached.
+
+Earlier revisions of this file claimed that pushing to `main` published the
+live site. That was never true of `alas.uvigo.es`.
 
 ## Releases
 
