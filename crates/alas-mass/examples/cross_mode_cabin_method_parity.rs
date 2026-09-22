@@ -102,7 +102,7 @@ fn evaluate(config: &AlasConfig) -> Result<FlopsMassBuildup, String> {
 /// derived them. Substituting those would compare two different aircraft and
 /// report the difference as an accounting defect.
 ///
-/// The cabin-equipment method is the one field that used to be *derived*, and
+/// The cabin-equipment method is the one field at risk of being *derived*, and
 /// derived by only one of the two paths. Everything else is held: same
 /// geometry, same design vector, same requirements, same cabin, same engines.
 fn as_clean_sheet(config: &AlasConfig) -> AlasConfig {

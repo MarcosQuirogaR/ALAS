@@ -33,7 +33,7 @@ pub fn show_form_page(state: &mut AppState, ui: &mut Ui, page: &Page) {
 
 /// Render one Advanced Settings form page, with its editors optionally locked.
 ///
-/// A locked page used to be wrapped whole in `add_enabled_ui(false)`. egui's
+/// Locking a page is not done by wrapping it whole in `add_enabled_ui(false)`. egui's
 /// disabled scope fades every painted colour toward the background, so the page
 /// title, its description, every field *label* and the page actions all dropped
 /// to the disabled token together (measured 4.28-4.68:1 against 12-15:1 on an

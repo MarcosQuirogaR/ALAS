@@ -121,7 +121,7 @@ impl FullAnalysis {
 /// The message `product_mass_coordinates` reports, prefixed by the stable
 /// [`StationPlacementFailure::as_str`] classification of its typed cause. The
 /// prefix names *which* failure this is; the message that follows keeps the
-/// evidence — for a missing main-gear station, the wing root and fuselage
+/// evidence: for a missing main-gear station, the wing root and fuselage
 /// crown heights (geometry frame, z up, m) that decided it. Neither is
 /// dropped, because a classification without evidence cannot be checked and
 /// evidence without a classification cannot be acted on.

@@ -184,7 +184,6 @@ impl AirfoilCfdState {
         let base_config = self.config.clone();
         let settings = self.sweep_settings.clone();
         let preferences = self.openfoam_preferences.clone();
-        let run_case_dir = run_case_dir;
         let cancel = self.cancel_flag.clone();
         let (tx, rx) = channel();
         self.rx = Some(rx);

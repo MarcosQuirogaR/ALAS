@@ -3,7 +3,7 @@
 
 // Tests assert on values they construct here, so a failed expect is the
 // assertion failing, not a library invariant being broken.
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+// (allow inherited from the `#[allow(...)] mod tests` attribute in session.rs)
 
 use super::*;
 use crate::state::AppState;

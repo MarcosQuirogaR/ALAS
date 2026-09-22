@@ -51,7 +51,7 @@ fn product_mass_failure(error: &ComponentMassError) -> CandidateFailure {
 /// Name the typed cause of a failed product station placement.
 ///
 /// [`product_mass_coordinates`] reports a message, so the cause a search log
-/// needs — a *missing* main-gear datum against a *degenerate* geometry — is
+/// needs, a *missing* main-gear datum against a *degenerate* geometry, is
 /// already flattened by the time it arrives here. Re-resolving the same
 /// stations recovers the typed [`alas_mass::stations::StationError`] without
 /// restating the applicability rule that decides it, which belongs to
@@ -159,8 +159,8 @@ mod structural_tests {
             .unwrap_or_else(|failure| panic!("{}", failure.reason))
     }
 
-    /// An ATR-like candidate — high wing, fuselage sponsons, no registered
-    /// gear-station anchor — is rejected, and the search log says *why*.
+    /// An ATR-like candidate (high wing, fuselage sponsons, no registered
+    /// gear-station anchor) is rejected, and the search log says *why*.
     ///
     /// The candidate was already rejected before this phase, but under the
     /// generic `mass_coordinates` label, which a reject-reason tally cannot

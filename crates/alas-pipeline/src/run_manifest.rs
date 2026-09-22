@@ -262,6 +262,9 @@ impl RunManifest {
     }
 }
 
+// Tests build their own fixtures and assert on them, so a failed expect is
+// the assertion failing rather than a library invariant breaking.
+#[allow(clippy::expect_used)]
 #[cfg(test)]
 mod tests {
     use super::*;

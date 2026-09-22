@@ -211,9 +211,11 @@ mod tests {
 
     #[test]
     fn population_size_is_a_multiplier_on_the_design_variables() {
-        let mut solver = SolverSettings::default();
-        solver.population_size = 6;
-        solver.max_iterations = 15;
+        let mut solver = SolverSettings {
+            population_size: 6,
+            max_iterations: 15,
+            ..Default::default()
+        };
         let resolved = Settings::from_solver(&solver, 16, 7);
         assert_eq!(resolved.population, 96);
         assert_eq!(resolved.generations, 15);

@@ -105,6 +105,7 @@ rather than taking a dependency on a crate that cannot land yet.
 | `alas/proc.py` | 76 | `alas-exec::process` | — | — | todo |
 | `alas/i18n.py` | 90 | `alas-i18n` | — | — | green |
 | `alas/__init__.py` | 36 | — | — | — | dropped: lazy-export shim, no native equivalent needed |
+| — | — | `alas-fonts` | — | — | native: the bundled text face the desktop build draws with, which the Python implementation took from the host system |
 
 ## Configuration
 

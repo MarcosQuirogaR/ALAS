@@ -44,7 +44,7 @@ fn ground_reaction_constraint(constraint: ModelCgConstraint) -> bool {
 ///
 /// A source-scaled resolution is a published station scaled onto the active
 /// fuselage and is admissible on any layout, so the question is only asked
-/// when the fallback is what would otherwise stand in — which is also what
+/// when the fallback is what would otherwise stand in, which is also what
 /// keeps this off the search's hot path for every registered aircraft that
 /// carries an anchor.
 ///
@@ -363,7 +363,7 @@ pub fn check_cg_envelope(
     // Boolean and an exceedance rather than a typed error, so it fails closed:
     // an aircraft with no measured main-gear station has no compliant state
     // to report. No exceedance magnitude is claimed, because none was
-    // measured — a missing datum is not a distance past a limit — and the
+    // measured (a missing datum is not a distance past a limit) and the
     // violation Boolean is what marks the candidate rejected. The frozen
     // reference fixture is a low-wing aircraft whose fallback stands, so its
     // replayed values are unchanged.
@@ -911,8 +911,8 @@ mod tests {
     /// The refusal is scoped to the layout the wing-mounted fallback rule
     /// excludes, not to the absence of a registered anchor. The B787-9 and
     /// the DC-10 register no anchor either and must still be assessed through
-    /// that fallback, at the same station, with every gear constraint —
-    /// `min_nose_gear_load` included — still evaluated.
+    /// that fallback, at the same station, with every gear constraint,
+    /// `min_nose_gear_load` included, still evaluated.
     #[test]
     fn low_wing_fallback_aircraft_keep_their_assessment_and_their_gear_constraints() {
         for preset in ["B787-9", "DC-10"] {
@@ -1011,8 +1011,8 @@ mod tests {
         assert!(!assessment.loading_states.is_empty());
     }
 
-    /// The A320-200's registered main-gear station — Airbus' 17.71 m
-    /// nose-tip drawing dimension under a 12.64 m EASA A.064 wheelbase — sits
+    /// The A320-200's registered main-gear station, Airbus' 17.71 m
+    /// nose-tip drawing dimension under a 12.64 m EASA A.064 wheelbase, sits
     /// **forward** of the aerodynamic aft boundary this envelope derives from
     /// the static-margin floor. That is the root cause of the baseline's
     /// `minimum nose-gear load` finding on this preset: the envelope's aft

@@ -771,8 +771,10 @@ mod tests {
         native_pixels_per_point: f32,
         zoom_factor: f32,
     ) -> (Rect, Vec<Rect>) {
-        let mut state = crate::state::AppState::default();
-        state.boot_frames_remaining = 1;
+        let mut state = crate::state::AppState {
+            boot_frames_remaining: 1,
+            ..Default::default()
+        };
         let ctx = egui::Context::default();
         let raw_input = || {
             let mut input = egui::RawInput {

@@ -187,7 +187,7 @@ fn promote_best(population: &mut [Vec<f64>], scored: &mut [ScoredPoint]) {
 /// factor; it fails closed to `lower` rather than propagating.
 fn reflect_into_bounds(value: f64, lower: f64, upper: f64) -> f64 {
     let width = upper - lower;
-    if !value.is_finite() || !(width > 0.0) {
+    if !value.is_finite() || !width.is_finite() || width <= 0.0 {
         return lower;
     }
     // A reflection at both bounds is periodic over twice the width: the

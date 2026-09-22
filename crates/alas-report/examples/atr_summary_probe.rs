@@ -21,6 +21,9 @@
 // A probe whose entire purpose is its console output.
 #![allow(clippy::print_stdout)]
 
+// A diagnostic probe run by hand: if the registered preset does not load,
+// stopping with that message is the useful outcome.
+#[allow(clippy::expect_used)]
 fn main() {
     let config = alas_config::AlasConfig::from_value(&serde_json::json!({"preset": "ATR72-600"}))
         .expect("the registered ATR 72-600 loads");

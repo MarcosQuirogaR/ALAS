@@ -139,13 +139,9 @@ pub(crate) fn screening_config(config: &AlasConfig) -> AlasConfig {
     let analysis = &mut screening.analysis;
     analysis.chordwise_resolution = analysis
         .chordwise_resolution
-        .min(SCAN_CHORDWISE_RESOLUTION)
-        .max(1);
+        .clamp(1, SCAN_CHORDWISE_RESOLUTION);
     let objective = &mut screening.optimizer.objective;
-    objective.sizing_max_iterations = objective
-        .sizing_max_iterations
-        .min(SCAN_SIZING_PASSES)
-        .max(1);
+    objective.sizing_max_iterations = objective.sizing_max_iterations.clamp(1, SCAN_SIZING_PASSES);
     objective.sizing_tolerance_kg = objective.sizing_tolerance_kg.max(SCAN_SIZING_TOLERANCE_KG);
     screening
 }

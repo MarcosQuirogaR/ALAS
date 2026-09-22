@@ -362,14 +362,14 @@ impl PropulsionDeck {
         // normalized-force demand is itself a governor inverse and the
         // shortcut runs two of them. Answering through `solve_fraction`
         // instead costs 18 us and agrees with this path to twelve significant
-        // figures at 10 000 N and 14 000 N — but *not* at low power, where
+        // figures at 10 000 N and 14 000 N, but *not* at low power, where
         // the PW127M's rating map folds (3 450 N at fraction 0, 1 643 N at
         // fraction 0.082, 38 962 N at fraction 1) and the two inverses land
         // on different operating points: at 6 000 N, 0.1414 kg/s through the
         // governor against 0.0925 kg/s through the rating fraction, a factor
         // of 1.53. Mixing them therefore makes delivered fuel flow
-        // *non-monotone in the request* — 1 557 N at 0.09526 kg/s beside
-        // 3 115 N at 0.03900 kg/s — which
+        // *non-monotone in the request* (1 557 N at 0.09526 kg/s beside
+        // 3 115 N at 0.03900 kg/s), which
         // `the_turboprop_inverse_closes_on_the_request_across_the_whole_thrust_band`
         // now catches. Which of the two inverses is right at low power is a
         // **deck question owned by propulsion**; until it is answered the
@@ -457,9 +457,9 @@ impl PropulsionDeck {
     /// evaluations each time, which made one coupled ATR leg 167 ms against
     /// the A320-200's 0.6 ms. Halving the retained endpoint's residual after
     /// it is retained twice restores superlinear convergence, so the solve
-    /// now reaches the same 1e-6 relative thrust tolerance — more often
+    /// now reaches the same 1e-6 relative thrust tolerance (more often
     /// *inside* it than before, since the old path usually fell out of the
-    /// loop — in a handful of evaluations. Nothing in the deck, the rating
+    /// loop) in a handful of evaluations. Nothing in the deck, the rating
     /// map or the tolerance changes.
     fn solve_fraction(
         &self,

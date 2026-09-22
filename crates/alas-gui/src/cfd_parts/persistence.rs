@@ -18,22 +18,12 @@ use std::time::{SystemTime, UNIX_EPOCH};
 /// migration from older GUI settings while the typed OpenFOAM preference is
 /// now the source consumed by the worker.  The wrapper is deliberately
 /// versionless and `serde(default)` keeps older files readable.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 pub(super) struct CfdEnvironmentPreferences {
     pub(super) openfoam: OpenFoamPreferences,
     pub(super) gmsh_executable: Option<String>,
     pub(super) paraview_executable: Option<String>,
-}
-
-impl Default for CfdEnvironmentPreferences {
-    fn default() -> Self {
-        Self {
-            openfoam: OpenFoamPreferences::default(),
-            gmsh_executable: None,
-            paraview_executable: None,
-        }
-    }
 }
 
 impl AirfoilCfdState {

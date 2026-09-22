@@ -15,7 +15,12 @@
 //! Without it there is nothing to accept, and a checkout must never be
 //! mistaken for a distribution.
 
+// A failing unwrap or expect in a test binary is the assertion failing.
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+// Each test reports on the console why it skipped when no assembled package
+// is named, so that a silent pass cannot be mistaken for a licence check that
+// actually ran.
+#![allow(clippy::print_stderr)]
 
 use std::env;
 use std::fs;

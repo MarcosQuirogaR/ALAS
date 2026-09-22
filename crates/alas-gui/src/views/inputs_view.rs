@@ -824,7 +824,9 @@ mod tests {
             (sandbox.center().x - width * 0.75).abs() < width * 0.08,
             "the second button fills the right half: {sandbox:?}"
         );
-        assert!(STARTING_DESIGN_BUTTON_HEIGHT >= 40.0);
+        // Compile-time accessibility check: the touch target must meet the
+        // 40pt minimum regardless of how the layout constant changes.
+        const { assert!(STARTING_DESIGN_BUTTON_HEIGHT >= 40.0) };
     }
 
     #[test]

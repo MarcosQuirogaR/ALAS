@@ -110,8 +110,8 @@ fn main() {
         };
         println!("\nfirst candidate rejected as `{reason}`:");
         println!(
-            "  {:<28} {:>14} {:>14} {:>14}  {}",
-            "variable", "lower", "value", "upper", "unit"
+            "  {:<28} {:>14} {:>14} {:>14}  unit",
+            "variable", "lower", "value", "upper"
         );
         for (index, spec) in SPECS.iter().enumerate() {
             let (lower, upper) = bounds.get(index).copied().unwrap_or((f64::NAN, f64::NAN));

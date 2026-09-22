@@ -20,7 +20,7 @@ use alas_exec::supervise::{launches_after, LaunchRecord};
 
 #[path = "run/preset_barrier.rs"]
 mod preset_barrier;
-use alas_pipeline::{PipelineResult, RunEvent, RunEventKind, RunEventSeverity};
+use alas_pipeline::{PipelineResult, RunEvent, RunEventKind, RunEventSeverity, RunObservers};
 
 impl AppState {
     /// Launch a full or baseline-only pipeline run in the background.
@@ -187,9 +187,11 @@ impl AppState {
                 &environment,
                 &initial_design,
                 &bounds,
-                &report,
-                &publish_snapshot,
-                &cancel,
+                RunObservers {
+                    events: &report,
+                    snapshots: &publish_snapshot,
+                    cancel: &cancel,
+                },
             );
             let _ = tx.send(WorkerMessage::Finished(Box::new(result)));
         });
@@ -369,9 +371,11 @@ mod pre_run_error_visibility_tests {
 
     #[test]
     fn an_invalid_configuration_surfaces_the_run_log_instead_of_doing_nothing() {
-        let mut state = AppState::default();
-        state.run_log_open = false;
-        state.config_values = serde_json::Value::Null;
+        let mut state = AppState {
+            run_log_open: false,
+            config_values: serde_json::Value::Null,
+            ..Default::default()
+        };
 
         state.start_pipeline(false);
 
@@ -384,8 +388,10 @@ mod pre_run_error_visibility_tests {
 
     #[test]
     fn an_incomplete_design_vector_surfaces_the_run_log() {
-        let mut state = AppState::default();
-        state.run_log_open = false;
+        let mut state = AppState {
+            run_log_open: false,
+            ..Default::default()
+        };
         state.design_values.clear();
 
         state.start_pipeline(false);
@@ -396,8 +402,10 @@ mod pre_run_error_visibility_tests {
 
     #[test]
     fn incomplete_optimizer_bounds_surface_the_run_log() {
-        let mut state = AppState::default();
-        state.run_log_open = false;
+        let mut state = AppState {
+            run_log_open: false,
+            ..Default::default()
+        };
         state.bounds.clear();
 
         state.start_pipeline(false);

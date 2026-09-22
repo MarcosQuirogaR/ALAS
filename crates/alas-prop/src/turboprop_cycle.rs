@@ -196,6 +196,8 @@ pub fn compute_turboprop_cycle_states(
 }
 
 #[cfg(test)]
+// In a test module a failing unwrap or expect is the assertion failing; these
+// cycle fixtures are constructed by the tests themselves.
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;

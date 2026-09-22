@@ -7,7 +7,7 @@
 //! The search reports a rejected candidate by residual identifier, and
 //! `dispatch_model_failed` is a boolean: `mdo::residuals` matches
 //! `DispatchStatus::ModelFailed(_)` and drops the string. That is fine for
-//! ranking and useless for diagnosis — the all-preset matrix recorded the
+//! ranking and useless for diagnosis: the all-preset matrix recorded the
 //! A320-200 as `dispatch_model_failed` on 253 of 253 candidates without ever
 //! saying what failed. The reason is not lost, only unreported:
 //! `CandidateAssessment::sized.dispatch.status` still carries it. This prints

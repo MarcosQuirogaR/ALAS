@@ -542,7 +542,7 @@ mod tests {
             assert!(residual_ticks.iter().all(|label| {
                 label
                     .split_once('.')
-                    .map_or(true, |(_, fraction)| fraction.len() <= 2)
+                    .is_none_or(|(_, fraction)| fraction.len() <= 2)
             }));
 
             let legend_y = scene

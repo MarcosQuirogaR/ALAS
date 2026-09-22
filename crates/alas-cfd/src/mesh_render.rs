@@ -246,9 +246,10 @@ pub(super) fn render_geo(
         // lower stacks together behind the section with whatever elements close
         // the gap, and those elements are the worst in the mesh.
         //
-        // A blunt edge used to be excluded here, on the assumption that its two
-        // separate endpoints would make fanned quads degenerate.  **Measured,
-        // that assumption is wrong and the exclusion was the defect.** On
+        // A blunt edge is fanned here too. The intuition against it is that
+        // its two separate endpoints make fanned quads degenerate.
+        // **Measured, that intuition is wrong and excluding them is what
+        // costs mesh quality.** On
         // `n0012` (blunt), fanning both corners and changing nothing else:
         //
         // | preset | max non-orthogonality | max skewness |

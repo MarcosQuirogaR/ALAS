@@ -42,35 +42,6 @@ pub(super) fn unavailable(theme: Option<&str>, reason: &str) -> Scene {
     crate::status_figure::figure_status_message("MSES figure unavailable", reason, false, theme)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn unavailable_mses_scene_has_one_red_title_and_preserves_reason() {
-        let scene = unavailable(Some("grey"), "solver diagnostics");
-        assert_eq!(scene.title.as_deref(), Some("MSES figure unavailable"));
-        assert!(!scene.render_title);
-        assert_eq!(
-            scene
-                .elements
-                .iter()
-                .filter(|element| matches!(
-                    element,
-                    SceneElement::Text { text, color, bold: true, .. }
-                        if text == "MSES figure unavailable"
-                            && *color == Color::from_hex("#c0392b")
-                ))
-                .count(),
-            1
-        );
-        assert!(scene.elements.iter().any(|element| matches!(
-            element,
-            SceneElement::TextBlock { text, .. } if text == "solver diagnostics"
-        )));
-    }
-}
-
 /// Trace the outer boundary of the structured grid that MPlot actually
 /// exported.  The grid is generally a curved quadrilateral, not the enclosing
 /// Cartesian axes rectangle.  Drawing that boundary prevents the unsolved
@@ -455,4 +426,33 @@ pub fn figure_mses_mach_contours(
         bold: false,
     });
     scene
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unavailable_mses_scene_has_one_red_title_and_preserves_reason() {
+        let scene = unavailable(Some("grey"), "solver diagnostics");
+        assert_eq!(scene.title.as_deref(), Some("MSES figure unavailable"));
+        assert!(!scene.render_title);
+        assert_eq!(
+            scene
+                .elements
+                .iter()
+                .filter(|element| matches!(
+                    element,
+                    SceneElement::Text { text, color, bold: true, .. }
+                        if text == "MSES figure unavailable"
+                            && *color == Color::from_hex("#c0392b")
+                ))
+                .count(),
+            1
+        );
+        assert!(scene.elements.iter().any(|element| matches!(
+            element,
+            SceneElement::TextBlock { text, .. } if text == "solver diagnostics"
+        )));
+    }
 }

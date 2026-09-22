@@ -54,7 +54,7 @@ pub(crate) fn show_interactive_mission_profile_preview(
 }
 
 fn show_mission_profile_preview_inner(
-    mut state: Option<&mut crate::state::AppState>,
+    state: Option<&mut crate::state::AppState>,
     ui: &mut Ui,
     config: &AlasConfig,
 ) {
@@ -77,9 +77,7 @@ fn show_mission_profile_preview_inner(
             "Click a phase in the profile to edit its actual mission parameters in a detached window.",
         ));
         if response.clicked() {
-            if let (Some(pointer), Some(state)) =
-                (response.interact_pointer_pos(), state.as_deref_mut())
-            {
+            if let (Some(pointer), Some(state)) = (response.interact_pointer_pos(), state) {
                 if let Some(phase_id) = phase_at_pointer(rect, &segments, pointer) {
                     crate::views::mission_profile_inputs::open_phase_window(state, phase_id);
                 }

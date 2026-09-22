@@ -292,7 +292,7 @@ pub(super) fn assess_mass_balance(
             // this actionable rather than merely noted: the hard model CG and
             // gear constraints that decide feasibility are evaluated on the
             // lumped coordinates, while the states published in this
-            // statement — the weight-and-balance evidence a reader acts on —
+            // statement (the weight-and-balance evidence a reader acts on)
             // are the ledger's. While the two disagree by more than the
             // reporting band, the feasibility verdict and the delivered
             // balance evidence are not about the same centre of gravity.
@@ -583,7 +583,7 @@ mod tests {
     /// Before this phase both halves returned `None` with a
     /// `FindingSeverity::Warning`, so an aircraft the mass model refused to
     /// place a main gear on was reported as a run that merely lacked an item
-    /// ledger — and `FeasibilityReport::is_feasible`, which fails only on
+    /// ledger, and `FeasibilityReport::is_feasible`, which fails only on
     /// error findings, could still call it feasible. The lumped model is not
     /// a fallback here: its gear point is the same refused station.
     ///

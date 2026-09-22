@@ -67,15 +67,19 @@ pub(super) fn show_surface_distribution(result: &alas_cfd::CfdResults, ui: &mut 
     );
 }
 
+/// Upper and lower `(x/c, value)` point series for one surface quantity, in
+/// parser traversal order: `(upper_cp, lower_cp, upper_cf, lower_cf)`.
+type SurfaceBranchPoints = (
+    Vec<(f64, f64)>,
+    Vec<(f64, f64)>,
+    Vec<(f64, f64)>,
+    Vec<(f64, f64)>,
+);
+
 fn surface_branch_points(
     surface: &alas_cfd::surface::SurfaceDistribution,
     chord_m: f64,
-) -> (
-    Vec<(f64, f64)>,
-    Vec<(f64, f64)>,
-    Vec<(f64, f64)>,
-    Vec<(f64, f64)>,
-) {
+) -> SurfaceBranchPoints {
     if !chord_m.is_finite() || chord_m <= 0.0 {
         return (Vec::new(), Vec::new(), Vec::new(), Vec::new());
     }

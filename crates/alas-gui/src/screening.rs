@@ -279,8 +279,10 @@ mod lifecycle_tests {
 
     #[test]
     fn cancelled_sweep_is_not_reported_as_a_completed_screening() {
-        let mut state = ScreeningState::default();
-        state.cancel_requested = true;
+        let mut state = ScreeningState {
+            cancel_requested: true,
+            ..Default::default()
+        };
         deliver(
             &mut state,
             Ok(AirfoilScreeningResult {
@@ -333,8 +335,10 @@ mod lifecycle_tests {
 
     #[test]
     fn cancel_is_ignored_while_no_sweep_is_running() {
-        let mut state = ScreeningState::default();
-        state.status = "Done: 38 of 40 candidates evaluated.".to_owned();
+        let mut state = ScreeningState {
+            status: "Done: 38 of 40 candidates evaluated.".to_owned(),
+            ..Default::default()
+        };
         state.cancel();
 
         assert!(!state.is_cancelling());
@@ -344,8 +348,10 @@ mod lifecycle_tests {
 
     #[test]
     fn cancel_arms_the_worker_flag_and_reports_the_pending_stop() {
-        let mut state = ScreeningState::default();
-        state.running = true;
+        let mut state = ScreeningState {
+            running: true,
+            ..Default::default()
+        };
         state.cancel();
 
         assert!(state.is_cancelling());
@@ -355,8 +361,10 @@ mod lifecycle_tests {
 
     #[test]
     fn a_finished_sweep_disarms_cancellation_for_the_next_run() {
-        let mut state = ScreeningState::default();
-        state.running = true;
+        let mut state = ScreeningState {
+            running: true,
+            ..Default::default()
+        };
         state.cancel();
         deliver(
             &mut state,
@@ -373,8 +381,10 @@ mod lifecycle_tests {
 
     #[test]
     fn preview_selection_leaves_the_configuration_and_preset_untouched() {
-        let mut state = crate::state::AppState::default();
-        state.active_preset = "A320-200".to_owned();
+        let mut state = crate::state::AppState {
+            active_preset: "A320-200".to_owned(),
+            ..Default::default()
+        };
         let config_before = state.config_values.clone();
         let design_before = state.design_values.clone();
         let preset_before = state.active_preset.clone();

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2026 Marcos Quiroga Rodriguez
+
 //! Regression coverage for the Mach-derived compressible airfoil path.
 
 // This file is itself a test binary, so an expect that fails is the

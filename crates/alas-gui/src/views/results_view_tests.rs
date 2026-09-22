@@ -41,8 +41,10 @@ fn openvsp_center_overlay_takes_the_click_instead_of_the_geometry_canvas() {
     export.status = alas_pipeline::OpenVspExportStatus::Vsp3Materialized;
     export.runtime_executable = Some(directory.join("vspscript.exe"));
     export.cad_preview_vsp3_path = model;
-    let mut state = AppState::default();
-    state.pipeline_result = Some(result);
+    let mut state = AppState {
+        pipeline_result: Some(result),
+        ..Default::default()
+    };
     let ctx = Context::default();
     let mut center = egui::Pos2::ZERO;
     let mut canvas_clicked = false;
@@ -560,8 +562,10 @@ fn a_result_figure_card_shows_its_explanation_only_as_hover_text() {
         .find(|descriptor| !descriptor.description.is_empty())
         .expect("a registered result figure with an explanation");
     let context = Context::default();
-    let mut state = AppState::default();
-    state.help_verbose = true;
+    let mut state = AppState {
+        help_verbose: true,
+        ..Default::default()
+    };
     let config = state
         .typed_config()
         .expect("the default state has a typed configuration");

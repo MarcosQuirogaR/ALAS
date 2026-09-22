@@ -38,6 +38,8 @@ impl<'a, T: Clone> SnapshotPublisher<'a, T> {
 }
 
 #[cfg(test)]
+// In a test module a failing unwrap or expect is the assertion failing, not a
+// library invariant breaking.
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;

@@ -37,8 +37,8 @@ pub(super) fn assess_public_cg_reference(
 /// never said so: the moment sum is built from the **model's** component
 /// stations, and the percentage it is converted to is referred to the
 /// **manufacturer's** published leading edge and chord. That is the only
-/// conversion available — the published table is stated in percent of the real
-/// aeroplane's chord — but it is exact only while the two chords coincide.
+/// conversion available (the published table is stated in percent of the real
+/// aeroplane's chord), but it is exact only while the two chords coincide.
 ///
 /// The offset is therefore reported beside the verdict rather than corrected
 /// away or used to move a vertex: which of the two references is wrong for a
@@ -206,8 +206,8 @@ mod tests {
     /// The A220-300 is the one preset that can fail the planning check, and
     /// its analyzed percentage is built from model stations but referred to
     /// Airbus' published chord. A datum offset of a tenth of a metre is
-    /// already 2.6 % MAC of that chord — comparable with the margin the
-    /// baseline's 41.352 % / 37.089 % exceedance turns on — so it must be
+    /// already 2.6 % MAC of that chord (comparable with the margin the
+    /// baseline's 41.352 % / 37.089 % exceedance turns on), so it must be
     /// reported as a frame disagreement rather than absorbed.
     #[test]
     fn a_datum_offset_larger_than_one_percent_of_the_chord_is_a_frame_disagreement() {

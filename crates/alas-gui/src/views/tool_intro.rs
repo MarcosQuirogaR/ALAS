@@ -327,9 +327,11 @@ mod tests {
 
     #[test]
     fn clicking_configure_on_a_user_supplied_row_navigates_and_closes() {
-        let mut state = AppState::default();
-        state.show_tool_intro = true;
-        state.active_page = "inputs".to_owned();
+        let mut state = AppState {
+            show_tool_intro: true,
+            active_page: "inputs".to_owned(),
+            ..Default::default()
+        };
 
         // Exercise the same state transition the "Configure..." button
         // performs, without depending on an egui test harness for a single

@@ -752,11 +752,10 @@ impl DesignOptimizer {
             // trial per candidate per generation, so the executed count
             // divides exactly into completed generations; a generation cut
             // short by cancellation floors to the ones that finished.
-            let generations_completed = if de.population == 0 {
-                0
-            } else {
-                executed.saturating_sub(de.population) / de.population
-            };
+            let generations_completed = executed
+                .saturating_sub(de.population)
+                .checked_div(de.population)
+                .unwrap_or(0);
             let mut result = result_from_method(
                 outcome,
                 kernel.reported_name(),

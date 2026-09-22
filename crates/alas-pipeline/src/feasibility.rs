@@ -190,7 +190,7 @@ fn append_model_cg_findings(
     // `report_format` and `acceptance`. It is deliberately not a
     // `PhysicalFinding`: `FindingCode` is an interface whose exhaustive
     // consumers live outside this crate's ownership boundary, and the
-    // diagnostic changes no verdict — a layout whose gear cannot carry the
+    // diagnostic changes no verdict: a layout whose gear cannot carry the
     // envelope still fails `MinimumNoseGearLoadViolation` above.
 }
 
@@ -347,7 +347,7 @@ pub fn assess_physical_feasibility_with_load_case(
         // to the manufacturer's published leading edge and chord, so a datum
         // or chord offset between the two shifts every reported percentage
         // systematically. Stating the offset does not resolve which reference
-        // is wrong for this preset — that is a source reconciliation — and it
+        // is wrong for this preset (that is a source reconciliation) and it
         // does not move a published vertex or a verdict.
         let frame_note = if cg_envelope.mac_references_disagree() {
             let datum_shift = cg_envelope

@@ -322,15 +322,13 @@ impl EvaluationCache {
     }
 }
 
-/// Run the bounded MADS progressive-barrier search.
+/// Run the bounded MADS progressive-barrier search without a cancellation
+/// flag.
 ///
-/// At most `settings.max_evaluations` analyses are executed; repeated mesh
-/// nodes are served from the run's cache and are not charged.  Bounds are
-/// finite SI/physical input units supplied by the caller; all poll and mesh
-/// arithmetic is performed in the unitless normalized box.  A malformed
-/// bound/initial vector or invalid mesh setting returns an invalid fallback
-/// without invoking the evaluator, because this legacy result interface has no
-/// `Result` channel for input errors.
+/// Differential evolution drives every production search and always supplies a
+/// cancellation flag, so this convenience wrapper exists only for the tests
+/// below, which exercise the search directly.
+#[cfg(test)]
 pub(crate) fn run(
     bounds: &[(f64, f64)],
     initial: Option<&[f64]>,
@@ -341,7 +339,16 @@ pub(crate) fn run(
     run_cancellable(bounds, initial, settings, None, evaluate, progress)
 }
 
-/// [`run`], observing an optional cooperative cancellation flag.
+/// Run the bounded MADS progressive-barrier search, observing an optional
+/// cooperative cancellation flag.
+///
+/// At most `settings.max_evaluations` analyses are executed; repeated mesh
+/// nodes are served from the run's cache and are not charged.  Bounds are
+/// finite SI/physical input units supplied by the caller; all poll and mesh
+/// arithmetic is performed in the unitless normalized box.  A malformed
+/// bound/initial vector or invalid mesh setting returns an invalid fallback
+/// without invoking the evaluator, because this result interface has no
+/// `Result` channel for input errors.
 ///
 /// `cancel` is read at exactly the boundaries the wall-clock watchdog is read
 /// at - between evaluation blocks and at the head of a poll iteration, never

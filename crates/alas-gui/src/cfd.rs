@@ -26,9 +26,10 @@ mod cfd_parts;
 static NEXT_CASE_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 /// The visible tabs in the standalone Airfoil CFD window.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum CfdTab {
     /// Routine flow, geometry, and boundary controls.
+    #[default]
     Study,
     /// Mesh, solver, and resource controls.
     Advanced,
@@ -38,26 +39,15 @@ pub enum CfdTab {
     Log,
 }
 
-impl Default for CfdTab {
-    fn default() -> Self {
-        Self::Study
-    }
-}
-
 /// Axis varied by a sequential CFD sweep.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum CfdSweepVariable {
     /// Vary geometric angle of attack while retaining the selected operating
     /// input (speed or Reynolds number).
+    #[default]
     AngleOfAttack,
     /// Vary chord Reynolds number and derive speed for every point.
     Reynolds,
-}
-
-impl Default for CfdSweepVariable {
-    fn default() -> Self {
-        Self::AngleOfAttack
-    }
 }
 
 impl CfdSweepVariable {

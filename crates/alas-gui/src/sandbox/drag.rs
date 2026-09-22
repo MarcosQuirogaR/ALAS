@@ -137,6 +137,15 @@ fn handle(
     }
 }
 
+/// Which field component of which dynamic (custom or generated) section
+/// instance a handle edits. Grouped together because a dynamic handle is
+/// always routed by both: the component picks the struct field, the section
+/// index picks which list entry.
+struct DynamicSlot {
+    component: usize,
+    section_index: usize,
+}
+
 fn custom_handle(
     kind: HandleKind,
     discipline: Discipline,
@@ -144,8 +153,7 @@ fn custom_handle(
     point: [f64; 3],
     axis: [f64; 3],
     per_metre: f64,
-    component: usize,
-    section_index: usize,
+    slot: DynamicSlot,
 ) -> Handle {
     Handle {
         kind,
@@ -158,8 +166,8 @@ fn custom_handle(
         point,
         axis,
         per_metre,
-        component: Some(component),
-        section_index: Some(section_index),
+        component: Some(slot.component),
+        section_index: Some(slot.section_index),
     }
 }
 
@@ -200,7 +208,10 @@ fn generated_fuselage_rows(
 ) -> Vec<(FuselageSection, GeneratedFuselageStationPart)> {
     let fuselage = &config.geometry.fuselage;
     let length_m = design.fuselage_length_m;
-    if !(length_m > 0.0) {
+    // Reject NaN explicitly: fuselage geometry cannot be generated from a
+    // non-finite length, and `length_m <= 0.0` alone is false for NaN, which
+    // would silently fall through to station math on garbage input.
+    if !length_m.is_finite() || length_m <= 0.0 {
         return Vec::new();
     }
     let cabin_start_m = fuselage.cabin_start_x_m;
@@ -384,8 +395,10 @@ pub fn handles(
                 [x, y, z],
                 [0.0, 1.0, 0.0],
                 1.0 / tip.y_m.max(1e-9),
-                0,
-                index,
+                DynamicSlot {
+                    component: 0,
+                    section_index: index,
+                },
             ));
             out.push(custom_handle(
                 HandleKind::CustomWingSectionLeadingEdge,
@@ -394,8 +407,10 @@ pub fn handles(
                 [x, y, z],
                 [1.0, 0.0, 0.0],
                 1.0,
-                1,
-                index,
+                DynamicSlot {
+                    component: 1,
+                    section_index: index,
+                },
             ));
             out.push(custom_handle(
                 HandleKind::CustomWingSectionChord,
@@ -404,8 +419,10 @@ pub fn handles(
                 [x + chord, y, z],
                 [1.0, 0.0, 0.0],
                 1.0,
-                2,
-                index,
+                DynamicSlot {
+                    component: 2,
+                    section_index: index,
+                },
             ));
             out.push(custom_handle(
                 HandleKind::CustomWingSectionHeight,
@@ -414,8 +431,10 @@ pub fn handles(
                 [x, y, z],
                 [0.0, 0.0, 1.0],
                 1.0,
-                3,
-                index,
+                DynamicSlot {
+                    component: 3,
+                    section_index: index,
+                },
             ));
             out.push(custom_handle(
                 HandleKind::CustomWingSectionTwist,
@@ -424,8 +443,10 @@ pub fn handles(
                 [x + chord, y, z],
                 [0.0, 0.0, 1.0],
                 (1.0 / chord).to_degrees(),
-                4,
-                index,
+                DynamicSlot {
+                    component: 4,
+                    section_index: index,
+                },
             ));
         }
     }
@@ -581,8 +602,10 @@ pub fn handles(
             [x, 0.0, z],
             [1.0, 0.0, 0.0],
             1.0 / design.fuselage_length_m.max(1e-9),
-            0,
-            index,
+            DynamicSlot {
+                component: 0,
+                section_index: index,
+            },
         ));
         out.push(custom_handle(
             HandleKind::CustomFuselageSectionWidth,
@@ -591,8 +614,10 @@ pub fn handles(
             [x, section.width_m * 0.5, z],
             [0.0, 1.0, 0.0],
             2.0,
-            1,
-            index,
+            DynamicSlot {
+                component: 1,
+                section_index: index,
+            },
         ));
         out.push(custom_handle(
             HandleKind::CustomFuselageSectionHeight,
@@ -601,8 +626,10 @@ pub fn handles(
             [x, 0.0, z + section.height_m * 0.5],
             [0.0, 0.0, 1.0],
             2.0,
-            2,
-            index,
+            DynamicSlot {
+                component: 2,
+                section_index: index,
+            },
         ));
         out.push(custom_handle(
             HandleKind::CustomFuselageSectionZ,
@@ -611,8 +638,10 @@ pub fn handles(
             [x, 0.0, z],
             [0.0, 0.0, 1.0],
             1.0,
-            3,
-            index,
+            DynamicSlot {
+                component: 3,
+                section_index: index,
+            },
         ));
     }
     out.push(handle(
@@ -1012,7 +1041,9 @@ fn generated_fuselage_station_fractions(state: &AppState) -> Vec<f64> {
     };
     let fuselage = &config.geometry.fuselage;
     let length_m = design.fuselage_length_m;
-    if !(length_m > 0.0) {
+    // Reject NaN explicitly: `length_m <= 0.0` alone is false for NaN, which
+    // would fall through to station fraction math on garbage input.
+    if !length_m.is_finite() || length_m <= 0.0 {
         return Vec::new();
     }
     let cabin_start = fuselage.cabin_start_x_m;
@@ -1379,8 +1410,10 @@ mod tests {
             .iter()
             .find(|handle| handle.kind == HandleKind::CustomFuselageSectionStation)
             .expect("custom fuselage station handle");
-        let mut state = AppState::default();
-        state.config_values = serde_json::to_value(&config).expect("config JSON");
+        let mut state = AppState {
+            config_values: serde_json::to_value(&config).expect("config JSON"),
+            ..Default::default()
+        };
         assert_eq!(
             custom_section_scalar(&state.config_values, fuselage_station),
             Some(0.52)
@@ -1424,8 +1457,10 @@ mod tests {
             .iter()
             .all(|handle| handle.section_index.is_some()));
 
-        let mut state = AppState::default();
-        state.config_values = serde_json::to_value(&config).expect("config JSON");
+        let mut state = AppState {
+            config_values: serde_json::to_value(&config).expect("config JSON"),
+            ..Default::default()
+        };
         let target = z_handles
             .iter()
             .find(|handle| handle.section_index == Some(10))

@@ -19,9 +19,9 @@
 //!
 //! It decides between exactly two explanations and refuses to guess:
 //!
-//! * **loading** — the two sides carry different payload or fuel, so the CG
+//! * **loading**: the two sides carry different payload or fuel, so the CG
 //!   difference follows from a mass difference that is visible here;
-//! * **coordinate** — the two sides carry the *same* masses and still place
+//! * **coordinate**: the two sides carry the *same* masses and still place
 //!   the centre of gravity differently, which means a station did not survive
 //!   the convergence.
 //!

@@ -19,11 +19,11 @@
 //! reported `converged`, the feasibility stage reported the delivered
 //! aircraft INFEASIBLE, and both statements were printed by the same run. The
 //! measured rate was three of four converged application runs
-//! (an internal optimizer independent-verification study, §2.3).
+//! (an internal optimizer independent-verification study, section 2.3).
 //!
 //! What this module does is deliberately narrow. It re-evaluates a candidate
-//! exactly the way the application's own stages 3, 5 and 6 do — same
-//! analysis, same mission, same feasibility assessment, same limits — and
+//! exactly the way the application's own stages 3, 5 and 6 do (same
+//! analysis, same mission, same feasibility assessment, same limits) and
 //! reports which findings rejected it. It relaxes nothing: every hard
 //! residual, every limit and every finding stays exactly where it was, and a
 //! design that is rejected here is rejected, not adjusted until it passes.
@@ -42,7 +42,7 @@ use crate::mission_stage::{self, SelectedLoadCase};
 /// fidelity, the search's own finalist included.
 ///
 /// One re-evaluation is a full reported analysis plus a flown mission, about
-/// one to three seconds on the registered presets — the same order as a
+/// one to three seconds on the registered presets: the same order as a
 /// handful of search evaluations, and two orders below the search itself. The
 /// cap exists so a design space whose whole feasible region fails at
 /// reporting fidelity is reported as such promptly rather than walked

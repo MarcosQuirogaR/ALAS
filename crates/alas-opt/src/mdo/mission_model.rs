@@ -422,7 +422,7 @@ impl SegmentMissionModel {
     /// This is the quantity a route has to clear. Testing the route against
     /// the *configured-altitude* footprint instead rejected candidates the
     /// model then flew perfectly well, because [`Self::fly_leg`]'s planner
-    /// lowers the cruise level until the ladder fits — measured on the
+    /// lowers the cruise level until the ladder fits: measured on the
     /// shipped path as `mission_profile_range` rejecting **654 of 654**
     /// A220-300 candidates, whose declared 465.7 km EVRA-ESSA sector is
     /// shorter than the 477.6 km its FL250 ladder occupies but far longer
@@ -1072,7 +1072,6 @@ mod tests {
         assert!(short.leg.fuel_kg < full.leg.fuel_kg);
     }
 
-    #[test]
     /// An adapted plan keeps the configured schedule's *shape* and its
     /// declared equivalent airspeeds, not its literal true airspeeds.
     ///
@@ -1082,7 +1081,7 @@ mod tests {
     /// level is lowered raises dynamic pressure and drag, and the step-down
     /// then makes a rating shortfall *worse* rather than better. On the ATR
     /// 72-600 the declared 140.7 m/s is its FL170 cruise and at 1 067 m it is
-    /// about 265 kt calibrated — past VMO, with a drag the PW127M cannot hold
+    /// about 265 kt calibrated: past VMO, with a drag the PW127M cannot hold
     /// level, which is why its dispatch closure failed at every mass in its
     /// bracket. See `ProfileGeometry::cruise_tas_at`.
     ///
@@ -1198,7 +1197,7 @@ mod tests {
     /// a relaxation.** This test previously asserted that doubling twice cut
     /// the error by at least half (`fine <= 0.5 * coarse`) over counts 4, 8
     /// and 16 against a 64-sub-rung reference. Refining the same fixture
-    /// across 1 … 64 shows why that never followed from the scheme, on this
+    /// across 1 ... 64 shows why that never followed from the scheme, on this
     /// fixture's own numbers (trip fuel, kg):
     ///
     /// | sub-rungs | 4 | 8 | 16 | 32 | 64 |
@@ -1207,8 +1206,8 @@ mod tests {
     ///
     /// The successive-difference ratio over 16/32/64 is **1.95**, an observed
     /// order of **0.96**: clean first order, with the 64-sub-rung value still
-    /// 0.08 % short of the Richardson limit — so the old reference was not
-    /// converged and counts 4–8 are pre-asymptotic, which is the only reason
+    /// 0.08 % short of the Richardson limit, so the old reference was not
+    /// converged and counts 4-8 are pre-asymptotic, which is the only reason
     /// the halving assertion ever held. First order is what the discretization
     /// is built to deliver: the schedule is *piecewise constant* in speed,
     /// with each rung-to-rung change taken instantaneously at a boundary and
@@ -1216,8 +1215,8 @@ mod tests {
     /// `O(dh)` treatment however finely the true airspeed itself is sampled.
     ///
     /// **Open integrator finding, this lane, not fixed here.** The *planned*
-    /// footprint does converge at second order — the descent ladder moves
-    /// 561 m, 172 m, 27 m, 15 m, 1.6 m, 0.4 m over the same doublings — but
+    /// footprint does converge at second order (the descent ladder moves
+    /// 561 m, 172 m, 27 m, 15 m, 1.6 m, 0.4 m over the same doublings), but
     /// the *flown* descent footprint runs away from it: 5.6 km longer than
     /// planned at 1 sub-rung and 38.1 km longer at 64, and at 128 the leg
     /// stops converging altogether (`speed schedule not attained ... 0.1 m/s`
@@ -1801,16 +1800,16 @@ mod tests {
     /// lane.** With the report-derived polar the sector no longer closes *at*
     /// the configured 5 180 m: level flight there at 136.8 m/s needs 13 288 N
     /// against 12 629 N of deck rating, 5.0 % short, and the shortfall does
-    /// not clear with mass — 19 000 kg still levels at 4 697 m. Inverting the
+    /// not clear with mass: 19 000 kg still levels at 4 697 m. Inverting the
     /// rating gives about 1 160 shp per engine at the propeller at FL170,
     /// which is roughly a quarter below the PW127M's published maximum-cruise
     /// rating there, so the binding term is the turboprop deck's altitude
     /// lapse (and secondarily an L/D of 15.4 where the aircraft's is nearer
-    /// 16–17), not the mission schedule. The real ATR 72-600 does cruise at
+    /// 16-17), not the mission schedule. The real ATR 72-600 does cruise at
     /// FL170, so this is a modelling deficiency and is recorded as one; it is
     /// **not** made to pass by widening the altitude assertion. What this test
-    /// now pins is the contract it was written for — the same-target rung
-    /// closure — plus the measured shortfall itself, so that correcting the
+    /// now pins is the contract it was written for (the same-target rung
+    /// closure) plus the measured shortfall itself, so that correcting the
     /// deck fails this test loudly instead of silently.
     #[test]
     fn atr_dispatch_bracket_flies_report_derived_sector_at_configured_altitude() {

@@ -84,7 +84,7 @@ fn update_assignment(
 ) {
     let replace = scores[next_i][next_j]
         .as_ref()
-        .map_or(true, |incumbent| score_is_better(&candidate, incumbent));
+        .is_none_or(|incumbent| score_is_better(&candidate, incumbent));
     if replace {
         scores[next_i][next_j] = Some(candidate);
         parents[next_i][next_j] = Some(parent);

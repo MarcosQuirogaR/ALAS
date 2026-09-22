@@ -3,6 +3,10 @@
 
 //! Opt-in product-path evidence against an installed OpenVSP runtime.
 
+// This file is itself a test binary, so an unwrap that fails is the
+// assertion failing.
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 use std::fs;
 use std::path::PathBuf;
 

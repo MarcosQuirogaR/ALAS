@@ -205,7 +205,7 @@ pub(super) fn run<E: ConstrainedSearch + ?Sized>(
             progress_callback,
         )
     };
-    crate::cancellation::CancelScope::attach(cancel).search_finished(&outcome.termination);
+    crate::cancellation::CancelScope::attach(cancel).search_finished(outcome.termination);
     let best_design = DesignVector::from_array(&outcome.best_values).unwrap_or_default();
     let elapsed_s = started.elapsed().as_secs_f64();
     OptimizationResult {
@@ -219,7 +219,7 @@ pub(super) fn run<E: ConstrainedSearch + ?Sized>(
         strategy: outcome.termination.to_owned(),
         termination: outcome.termination.to_owned(),
         pareto_front: Vec::new(),
-        // The driver's own stationarity verdict, which used to be discarded
+        // The driver's own stationarity verdict, which must not be discarded
         // here. Without it a reader had to infer convergence from the
         // termination label, and `cancelled` or `iteration_limit` would have
         // been indistinguishable from `converged_step` to any caller that only

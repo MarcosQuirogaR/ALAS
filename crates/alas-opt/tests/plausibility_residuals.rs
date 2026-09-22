@@ -24,7 +24,7 @@ use alas_opt::{assess_product_candidate, CandidateAssessment};
 /// is the D09 window around the registered reference and which therefore
 /// rejects a deliberately broken shape with `design_space` before any
 /// plausibility residual is reached. That default is correct for the product
-/// — adapting a registered aircraft is what a preset document asks for — and
+/// (adapting a registered aircraft is what a preset document asks for) and
 /// wrong for these tests, which exist to exercise the residuals themselves.
 fn assess(preset: &str, design: DesignVector) -> Result<CandidateAssessment, String> {
     let mut config = AlasConfig::from_value(&serde_json::json!({ "preset": preset }))

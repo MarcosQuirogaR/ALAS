@@ -659,6 +659,8 @@ fn run_with_timeout(
     }
 }
 
+// The audit binary threads the whole measurement context through one call;
+// grouping it would hide which inputs a row is actually built from.
 #[allow(clippy::too_many_arguments)]
 fn evaluate_preset_optimization(
     name: &str,
@@ -978,6 +980,8 @@ fn error_row(
     })
 }
 
+// A success row is assembled from every measured quantity at once, so the
+// argument list is the row definition rather than incidental coupling.
 #[allow(clippy::too_many_arguments)]
 fn build_success_row(
     name: &str,

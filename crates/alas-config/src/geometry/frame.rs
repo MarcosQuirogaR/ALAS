@@ -16,7 +16,7 @@
 //!
 //! This restates, in one place a consumer can import, the convention
 //! `alas_mass::ledger` declares for the mass ledger and `docs/methods.md`
-//! declares for the program. The origin is the part that used to be implicit:
+//! declares for the program. The origin is the part most often left implicit:
 //! every published station this crate registers is nose-tip referenced, and
 //! nothing in the code said so or checked it.
 //!
@@ -210,7 +210,7 @@ mod tests {
     fn a_published_datum_station_is_moved_to_the_nose_tip_origin() {
         // EASA.A.064 Issue 12 items 15-16: the A320 datum is 2.540 m forward
         // of the nose, so a 20.000 m datum station is 17.460 m aft of the
-        // nose tip. Converting it is the step that used to be absent.
+        // nose tip. Converting it is the step this frame makes explicit.
         let frame = LongitudinalStationFrame::PublishedDatumForwardOfNose {
             datum_forward_of_nose_m: 2.540,
         };

@@ -14,7 +14,7 @@
 //! layout actually loaded (`alas_payload::cargo::engine`), so it equals the
 //! request whenever the hold can take it and saturates at the hold's capacity
 //! when it cannot. The deviation therefore only becomes non-zero where the
-//! aircraft, not the request, is the binding quantity — which is the whole
+//! aircraft, not the request, is the binding quantity, which is the whole
 //! point of keeping the requested target separate from achieved capacity.
 
 // A test asserts on values it constructed or loaded from a fixture it

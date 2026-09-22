@@ -30,6 +30,8 @@ fn has_text(scene: &Scene, needle: &str) -> bool {
 }
 
 #[test]
+// This test builds its own preview request, so a failing unwrap is the
+// assertion failing.
 #[allow(clippy::unwrap_used)]
 fn designer_preview_dispatches_both_technologies_and_rejects_invalid_states() {
     let turboprop = AlasConfig::from_value(&serde_json::json!({"preset": "ATR72-600"})).unwrap();
@@ -59,6 +61,8 @@ fn assert_theme_background(scene: &Scene, expected: Color) {
 }
 
 #[test]
+// This test builds its own cycle inputs, so a failing unwrap is the assertion
+// failing.
 #[allow(clippy::unwrap_used)]
 fn cycle_diagrams_are_parametric_without_explanation_panels() {
     fn paths(scene: &Scene) -> Vec<Vec<[f64; 2]>> {

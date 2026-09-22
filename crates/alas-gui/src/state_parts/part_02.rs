@@ -468,8 +468,10 @@ mod navdata_cancellation_tests {
 
     #[test]
     fn cancelling_sets_only_the_navdata_flag_leaving_the_pipeline_flag_untouched() {
-        let mut state = AppState::default();
-        state.navdata_download_in_progress = true;
+        let mut state = AppState {
+            navdata_download_in_progress: true,
+            ..Default::default()
+        };
 
         state.cancel_navdata_download();
 
@@ -488,8 +490,10 @@ mod navdata_cancellation_tests {
 
     #[test]
     fn a_cancelled_outcome_clears_progress_and_logs_a_cancellation_not_a_failure() {
-        let mut state = AppState::default();
-        state.navdata_download_in_progress = true;
+        let mut state = AppState {
+            navdata_download_in_progress: true,
+            ..Default::default()
+        };
         let (sender, receiver) = channel();
         state.navdata_download_rx = Some(receiver);
         sender
@@ -515,8 +519,10 @@ mod log_visibility_tests {
 
     #[test]
     fn an_error_line_opens_the_run_log_even_when_it_was_closed() {
-        let mut state = AppState::default();
-        state.run_log_open = false;
+        let mut state = AppState {
+            run_log_open: false,
+            ..Default::default()
+        };
 
         state.log("Configuration is not currently valid.", LogKind::Error);
 
@@ -525,8 +531,10 @@ mod log_visibility_tests {
 
     #[test]
     fn info_and_warn_lines_do_not_force_the_run_log_open() {
-        let mut state = AppState::default();
-        state.run_log_open = false;
+        let mut state = AppState {
+            run_log_open: false,
+            ..Default::default()
+        };
 
         state.log("Started pipeline execution.", LogKind::Info);
         assert!(!state.run_log_open);

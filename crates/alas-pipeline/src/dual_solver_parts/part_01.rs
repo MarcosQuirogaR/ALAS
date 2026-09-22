@@ -205,16 +205,16 @@ pub fn run_solver_optimizations(
 
     let run_vlm = || {
         if want_vlm {
-            run_vlm_optimizer(
-                vlm_config,
+            run_vlm_optimizer(VlmOptimizerRequest {
+                config: vlm_config,
                 seed,
-                vlm_environment,
+                _environment: vlm_environment,
                 nominal,
-                bounds.as_deref(),
-                vlm_output,
+                bounds: bounds.as_deref(),
+                output_dir: vlm_output,
                 acceptance_route,
                 cancel,
-            )
+            })
         } else {
             SolverOptimizationResult::not_requested(SolverKind::Vlm)
         }
@@ -282,22 +282,34 @@ pub fn run_solver_optimizations(
 /// clock. If it is accepted, nothing changes but the record. If it is
 /// rejected, the loop offers the search's next-best *hard-feasible* candidate
 /// - never a design the search itself rejected - and the first one the
-/// application accepts is delivered, with the run reported as a
-/// reporting-fidelity fallback rather than as convergence. If none is
-/// accepted the search's own finalist is still returned, with its full
-/// report and every finding intact, and the run is reported as
-/// `reporting_fidelity_rejected`. No limit, residual or tolerance is
-/// weakened anywhere in that ladder.
-fn run_vlm_optimizer(
+///   application accepts is delivered, with the run reported as a
+///   reporting-fidelity fallback rather than as convergence. If none is
+///   accepted the search's own finalist is still returned, with its full
+///   report and every finding intact, and the run is reported as
+///   `reporting_fidelity_rejected`. No limit, residual or tolerance is
+///   weakened anywhere in that ladder.
+struct VlmOptimizerRequest<'a> {
     config: AlasConfig,
     seed: Option<u64>,
     _environment: RunEnvironment,
     nominal: DesignVector,
-    bounds: Option<&[(f64, f64)]>,
+    bounds: Option<&'a [(f64, f64)]>,
     output_dir: Option<PathBuf>,
-    acceptance_route: Option<&AcceptanceRoute>,
-    cancel: Option<&AtomicBool>,
-) -> SolverOptimizationResult {
+    acceptance_route: Option<&'a AcceptanceRoute>,
+    cancel: Option<&'a AtomicBool>,
+}
+
+fn run_vlm_optimizer(request: VlmOptimizerRequest<'_>) -> SolverOptimizationResult {
+    let VlmOptimizerRequest {
+        config,
+        seed,
+        _environment,
+        nominal,
+        bounds,
+        output_dir,
+        acceptance_route,
+        cancel,
+    } = request;
     let output_dir = create_branch_directory(output_dir);
     let effective_config = match seeded_config(&config, seed) {
         Ok(config) => config,

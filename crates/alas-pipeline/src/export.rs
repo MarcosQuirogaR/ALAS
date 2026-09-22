@@ -672,6 +672,8 @@ pub fn format_summary(report: &AnalysisReport, config: Option<&AlasConfig>) -> S
 }
 
 #[cfg(test)]
+// In a test module a failing expect is the assertion failing, and these
+// fixtures are built by the tests themselves.
 #[allow(clippy::expect_used)]
 mod tests {
     use super::report_to_database;

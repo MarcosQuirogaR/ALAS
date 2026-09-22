@@ -92,8 +92,8 @@ impl UserTexture {
             *value = top * (1.0 - fy) + bottom * fy;
         }
         let alpha = sampled[3];
-        for channel in 0..3 {
-            sampled[channel] *= alpha;
+        for value in sampled.iter_mut().take(3) {
+            *value *= alpha;
         }
         sampled
     }

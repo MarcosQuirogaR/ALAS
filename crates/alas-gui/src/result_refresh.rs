@@ -151,8 +151,10 @@ mod tests {
 
     #[test]
     fn final_check_replaces_early_patran_status_with_completed_image_scene() {
-        let mut state = AppState::default();
-        state.pipeline_result = Some(completed_result());
+        let mut state = AppState {
+            pipeline_result: Some(completed_result()),
+            ..Default::default()
+        };
         let config = state.pipeline_result.as_ref().unwrap().config.clone();
         let theme = state.theme.figure_theme_name().to_owned();
         let key = format!(
@@ -205,8 +207,10 @@ mod tests {
     fn retained_openvsp_mesh_replaces_early_status_and_renders_without_graphics_build() {
         let path =
             std::path::PathBuf::from(std::env::var_os("ALAS_CAD_MESH").expect("retained mesh"));
-        let mut state = AppState::default();
-        state.pipeline_result = Some(completed_result());
+        let mut state = AppState {
+            pipeline_result: Some(completed_result()),
+            ..Default::default()
+        };
         let result = state.pipeline_result.as_mut().unwrap();
         let export = result.openvsp_export.as_mut().unwrap();
         export.status = alas_pipeline::OpenVspExportStatus::Vsp3Materialized;

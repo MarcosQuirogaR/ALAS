@@ -599,9 +599,11 @@ mod tests {
         let mut state = crate::state::AppState::default();
         state.config_values["departure_airport"] = json!("EGLL");
         state.config_values["arrival_airport"] = json!("LEMD");
-        let mut profile = MissionProfileConfig::default();
-        profile.cruise_1_distance_fraction = 0.8;
-        profile.cruise_2_distance_fraction = 0.2;
+        let profile = MissionProfileConfig {
+            cruise_1_distance_fraction: 0.8,
+            cruise_2_distance_fraction: 0.2,
+            ..Default::default()
+        };
         state.config_values["mission"]["profile"] =
             serde_json::to_value(profile).expect("profile serializes");
         state.mission_profile_manual_edit = false;
@@ -617,11 +619,16 @@ mod tests {
 
     #[test]
     fn short_route_profile_has_one_active_cruise_leg_by_policy() {
-        let mut profile = MissionProfileConfig::default();
-        profile.cruise_2_distance_fraction = 0.0;
-        profile.cruise_3_distance_fraction = 0.0;
+        let profile = MissionProfileConfig {
+            cruise_2_distance_fraction: 0.0,
+            cruise_3_distance_fraction: 0.0,
+            ..Default::default()
+        };
         assert_eq!(active_cruise_count(&profile), 1);
-        assert!(SHORT_ROUTE_M < 3_000_000.0);
+        // Compile-time sanity bound: the short-route cutoff must stay under
+        // 3,000 km, or the single-cruise-leg policy this test exercises no
+        // longer matches its name.
+        const { assert!(SHORT_ROUTE_M < 3_000_000.0) };
     }
 
     #[test]

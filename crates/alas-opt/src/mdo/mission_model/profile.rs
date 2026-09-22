@@ -44,8 +44,8 @@ const SEA_LEVEL_DENSITY_KG_M3: f64 = 1.225;
 ///
 /// **There is deliberately no Mach ceiling here, and removing the one this
 /// lane first wrote is a correction, not a relaxation.** That ceiling was
-/// `requirements.cruise_mach`, which is the *design cruise* Mach — the point
-/// the wing and the deck are built at — not MMO. Holding every rung to it
+/// `requirements.cruise_mach`, which is the *design cruise* Mach, the point
+/// the wing and the deck are built at, not MMO. Holding every rung to it
 /// makes an ordinary descent illegal, since a transport's MMO sits above its
 /// cruise Mach and descents are routinely flown faster. Measured: it was the
 /// entire cause of a **2.74 %** disagreement between this model's ATR 72-600
@@ -53,7 +53,7 @@ const SEA_LEVEL_DENSITY_KG_M3: f64 = 1.225;
 /// applies no such ceiling; with it removed the two agree to **9.0e-6**, and
 /// VD alone does not bind on that aircraft at all. Nothing in the
 /// configuration declares MMO or VMO, so no aerodynamic ceiling is invented
-/// in its place — the gap is recorded rather than filled with a guess.
+/// in its place: the gap is recorded rather than filled with a guess.
 ///
 /// # Errors
 ///

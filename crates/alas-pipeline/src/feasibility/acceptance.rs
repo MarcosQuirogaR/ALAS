@@ -14,8 +14,8 @@
 //! govern it:
 //!
 //! 1. A **hard-infeasible candidate may still be an optimization incumbent**
-//!    — the search ranks infeasible designs rather than discarding them, so
-//!    the best of a generation can be infeasible — but it is never an
+//!    (the search ranks infeasible designs rather than discarding them, so
+//!    the best of a generation can be infeasible), but it is never an
 //!    accepted feasible success. [`DeliveryVerdict::DiagnosticIncumbent`] is
 //!    that state, named rather than rounded up.
 //! 2. A **calibrated or reference preset** carries a stronger claim than a
@@ -52,7 +52,7 @@ pub enum DesignProvenance {
         /// Registered preset name.
         preset: String,
     },
-    /// A registered aircraft that is not a real one — the notional AVE
+    /// A registered aircraft that is not a real one: the notional AVE
     /// reference, whose envelope is a design requirement rather than a
     /// published limit. Held to the same mission bar as a calibrated preset,
     /// because it is still delivered as a named reference aircraft.
@@ -421,7 +421,6 @@ mod tests {
         presets::get(preset)
             .unwrap_or_else(|error| panic!("{error}"))
             .design_vector
-            .clone()
     }
 
     fn error_finding(code: FindingCode) -> PhysicalFinding {

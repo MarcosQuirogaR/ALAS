@@ -138,15 +138,14 @@ pub(crate) fn show_custom_wing_sections(state: &mut AppState, ui: &mut Ui) {
                 egui::Button::new(tr("Remove last wing section")),
             )
             .clicked()
+            && sections.pop().is_some()
         {
-            if sections.pop().is_some() {
-                set_custom_sections(
-                    state,
-                    "wing",
-                    serde_json::to_value(&sections).unwrap_or(Value::Array(Vec::new())),
-                );
-                state.on_config_modified();
-            }
+            set_custom_sections(
+                state,
+                "wing",
+                serde_json::to_value(&sections).unwrap_or(Value::Array(Vec::new())),
+            );
+            state.on_config_modified();
         }
     });
 }
@@ -287,15 +286,14 @@ pub(crate) fn show_custom_fuselage_sections(state: &mut AppState, ui: &mut Ui) {
                 egui::Button::new(tr("Remove last fuselage section")),
             )
             .clicked()
+            && sections.pop().is_some()
         {
-            if sections.pop().is_some() {
-                set_custom_sections(
-                    state,
-                    "fuselage",
-                    serde_json::to_value(&sections).unwrap_or(Value::Array(Vec::new())),
-                );
-                state.on_config_modified();
-            }
+            set_custom_sections(
+                state,
+                "fuselage",
+                serde_json::to_value(&sections).unwrap_or(Value::Array(Vec::new())),
+            );
+            state.on_config_modified();
         }
     });
 }
@@ -573,7 +571,9 @@ fn generated_fuselage_sections(state: &AppState) -> Vec<FuselageSection> {
     };
     let fuselage = &config.geometry.fuselage;
     let length_m = design.fuselage_length_m;
-    if !(length_m > 0.0) {
+    // Reject NaN explicitly: `length_m <= 0.0` alone is false for NaN, which
+    // would fall through to station generation on garbage input.
+    if !length_m.is_finite() || length_m <= 0.0 {
         return Vec::new();
     }
     let cabin_start_m = fuselage.cabin_start_x_m;
@@ -818,7 +818,9 @@ fn interpolated_fuselage_section(
     let design = state.current_design()?;
     let fuselage = &config.geometry.fuselage;
     let length_m = design.fuselage_length_m;
-    if !(length_m > 0.0) {
+    // Reject NaN explicitly: `length_m <= 0.0` alone is false for NaN, which
+    // would fall through to interpolation on garbage input.
+    if !length_m.is_finite() || length_m <= 0.0 {
         return None;
     }
     let cabin_start_m = fuselage.cabin_start_x_m;

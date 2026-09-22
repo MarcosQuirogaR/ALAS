@@ -85,7 +85,7 @@ fn the_a380_default_nominal_candidate_is_evaluable() {
 fn every_registered_preset_nominal_candidate_is_evaluable() {
     let mut rejected = Vec::new();
     for name in alas_config::presets::available() {
-        let (config, nominal) = default_preset_route(&name);
+        let (config, nominal) = default_preset_route(name);
         let objective = DesignObjective::new(config);
         if let Err(reason) = assess_candidate(&objective, &nominal) {
             rejected.push(format!("{name}: {reason}"));

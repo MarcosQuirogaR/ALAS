@@ -665,6 +665,21 @@ pub struct DesignPipeline {
     aircraft_override: Option<Airplane>,
 }
 
+/// The three independently optional observation seams a design-space run can
+/// publish through, grouped so
+/// [`DesignPipeline::run_with_design_space_events_and_snapshots`] keeps a
+/// single logical "how do you want to watch this run" input rather than three
+/// unrelated positional callbacks.
+pub struct RunObservers<'a> {
+    /// Typed per-stage lifecycle events, as reported by [`emit_diagnostic`].
+    pub events: &'a (dyn Fn(RunEvent) + Sync),
+    /// Cumulative, immutable [`PipelineResult`] snapshots published as report
+    /// data becomes available.
+    pub snapshots: &'a (dyn Fn(PipelineResult) + Sync),
+    /// Cooperative cancellation flag, observed at safe stage boundaries.
+    pub cancel: &'a AtomicBool,
+}
+
 impl DesignPipeline {
     /// Create a new design pipeline with `config`.
     pub fn new(config: AlasConfig) -> Self {
@@ -922,9 +937,7 @@ impl DesignPipeline {
         environment: &RunEnvironment,
         initial_design: &DesignVector,
         bounds: &[(f64, f64)],
-        events: &(dyn Fn(RunEvent) + Sync),
-        snapshots: &(dyn Fn(PipelineResult) + Sync),
-        cancel: &AtomicBool,
+        observers: RunObservers<'_>,
     ) -> Result<PipelineResult, String> {
         validate_bounds(bounds)?;
         self.run_inner(
@@ -934,9 +947,9 @@ impl DesignPipeline {
             Some(*initial_design),
             Some(bounds),
             None,
-            Some(events),
-            Some(cancel),
-            Some(snapshots),
+            Some(observers.events),
+            Some(observers.cancel),
+            Some(observers.snapshots),
         )
     }
 

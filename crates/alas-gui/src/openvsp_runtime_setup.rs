@@ -415,9 +415,7 @@ impl OpenVspRuntimeSetup {
         if let Some(stage) = last_stage {
             self.stage = stage;
         }
-        let Some(event) = finished else {
-            return None;
-        };
+        let event = finished?;
         self.running = false;
         self.cancel_requested = false;
         self.cancel_flag.store(false, Ordering::Relaxed);

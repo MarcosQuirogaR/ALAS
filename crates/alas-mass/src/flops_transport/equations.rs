@@ -548,7 +548,7 @@ pub fn estimate_flops_transport(
     };
     // The unit-load-device tare is decided by the aircraft's hold architecture
     // and by nothing else, so it is evaluated identically under both cabin
-    // methods. It used to be zeroed inside the LTH branch, which made the
+    // methods. Zeroing it inside the LTH branch would make the
     // container accounting a silent side effect of a method selection: the
     // delivered default excluded the tare from every preset by accident, and
     // reverting the cabin method to the published FLOPS equations would have
@@ -833,7 +833,7 @@ mod tests {
 
         // Negative control on the accounting decoupling: the container tare is
         // hold architecture, not a cabin method, so the two methods must agree
-        // on it exactly. It used to be zeroed inside the LTH branch, which made
+        // on it exactly. Zeroing it inside the LTH branch would make
         // the operating-empty container boundary a side effect of a method
         // selection.
         assert!(flops_result.operating_items.cargo_containers_kg > 0.0);

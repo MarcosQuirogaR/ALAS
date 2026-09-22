@@ -77,10 +77,8 @@ fn widest_painted_edge(output: &FullOutput) -> f32 {
                     walk(shape, widest);
                 }
             }
-            Shape::Rect(rect) => {
-                if rect.rect.width() > 10.0 && rect.rect.right().is_finite() {
-                    *widest = widest.max(rect.rect.right());
-                }
+            Shape::Rect(rect) if rect.rect.width() > 10.0 && rect.rect.right().is_finite() => {
+                *widest = widest.max(rect.rect.right());
             }
             _ => {}
         }

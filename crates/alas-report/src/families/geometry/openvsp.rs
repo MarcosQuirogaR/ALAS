@@ -141,8 +141,8 @@ fn native_image_size(path: &std::path::Path) -> [f64; 2] {
         .filter(|_| &header[..8] == b"\x89PNG\r\n\x1a\n" && &header[12..16] == b"IHDR")
         .map(|_| {
             (
-                u32::from_be_bytes(header[16..20].try_into().unwrap()),
-                u32::from_be_bytes(header[20..24].try_into().unwrap()),
+                u32::from_be_bytes([header[16], header[17], header[18], header[19]]),
+                u32::from_be_bytes([header[20], header[21], header[22], header[23]]),
             )
         });
     if let Some((w, h)) = dimensions.filter(|(w, h)| *w > 0 && *h > 0) {

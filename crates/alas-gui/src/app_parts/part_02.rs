@@ -305,8 +305,10 @@ mod tests {
 
     #[test]
     fn explicit_help_preference_survives_explicit_state_constructor() {
-        let mut state = AppState::default();
-        state.help_verbose = false;
+        let state = AppState {
+            help_verbose: false,
+            ..Default::default()
+        };
         let app = AlasApp::from_state(state);
 
         assert!(!app.state.help_verbose);

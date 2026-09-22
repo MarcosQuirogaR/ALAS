@@ -306,9 +306,9 @@ pub enum ModelCgEnvelopeError {
     /// No main-gear longitudinal station is available for this aircraft, so
     /// no ground reaction in this assessment has a point to act about.
     ///
-    /// Every quantity this assessment reports about the ground — both gear
+    /// Every quantity this assessment reports about the ground (both gear
     /// strength limits, the minimum nose-gear load, and the wheelbase that
-    /// normalizes them — is a moment about the main-gear station. When
+    /// normalizes them) is a moment about the main-gear station. When
     /// [`alas_mass::stations`] refuses to supply one, the wing-mounted
     /// fallback this module rebuilds is outside its stated domain, and the
     /// reactions computed from it would be reported as if they were measured.

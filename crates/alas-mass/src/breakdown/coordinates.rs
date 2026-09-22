@@ -66,7 +66,7 @@ pub fn define_mass_coordinates(
     let x_furn = cabin_start + 0.50 * cabin_len;
     // Payload CG at the centre of the cabin it is distributed over.
     //
-    // This used to be `cabin_start + 0.50 * occupied_len`, the centre of a
+    // The tempting form is `cabin_start + 0.50 * occupied_len`, the centre of a
     // block that always begins at the FORWARD BULKHEAD. Whenever the payload
     // does not fill the cabin that is the aircraft's forward loading extreme
     // applied as if it were the neutral case, and it is asymmetric against the

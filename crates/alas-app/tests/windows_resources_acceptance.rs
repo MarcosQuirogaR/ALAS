@@ -7,7 +7,10 @@
 //! PE layout: https://learn.microsoft.com/en-us/windows/win32/debug/pe-format
 
 #![cfg(windows)]
-#![allow(clippy::expect_used, clippy::unwrap_used)]
+// This file is a test binary, so a failing expect or unwrap is the assertion
+// failing rather than a library invariant breaking, and what it reports about
+// the inspected resource tree belongs on the console with the test output.
+#![allow(clippy::expect_used, clippy::unwrap_used, clippy::print_stderr)]
 
 use std::{env, fs};
 

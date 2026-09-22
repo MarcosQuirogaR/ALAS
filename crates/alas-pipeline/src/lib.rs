@@ -111,6 +111,7 @@ pub use payload_layout_export::{
 };
 pub use pipeline::{
     DesignPipeline, PipelineExecutionStatus, PipelineOptions, PipelineResult, RoutePlanningStatus,
+    RunObservers,
 };
 pub use plot::render_scene_svg;
 pub use runs::{RunEvent, RunEventKind, RunEventSeverity, RunRegistry, RunState};

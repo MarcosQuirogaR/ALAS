@@ -149,7 +149,7 @@ pub(super) fn append_structural_mass_findings(
         // The message below deliberately reports the zero-fuel excess against
         // the published MZFW. The operating-empty comparison beside it names
         // the *modeled* buildup, not the closure residual the zero-fuel mass
-        // carries, and states the residual separately when the two differ —
+        // carries, and states the residual separately when the two differ:
         // see `modeled_operating_empty_mass`. Reporting one number for both
         // is what produced the ATR 72-600's 15,257 kg / 15,299 kg conflict.
         let reconciliation = modeled_operating_empty_mass(

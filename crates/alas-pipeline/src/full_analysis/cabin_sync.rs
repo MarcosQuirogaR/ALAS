@@ -169,8 +169,10 @@ mod tests {
 
     #[test]
     fn percent_mode_replaces_stale_seed_counts_before_the_first_mass_pass() {
-        let mut requirements = DesignRequirements::default();
-        requirements.num_passengers = 200;
+        let requirements = DesignRequirements {
+            num_passengers: 200,
+            ..Default::default()
+        };
         let mut cabin = PassengerCabinConfig::default();
         cabin.first.share_pct = 10.0;
         cabin.business.share_pct = 20.0;
@@ -201,10 +203,14 @@ mod tests {
 
     #[test]
     fn count_mode_preserves_the_installed_cabin_and_folds_legacy_premium() {
-        let mut requirements = DesignRequirements::default();
-        requirements.num_passengers = 999;
-        let mut cabin = PassengerCabinConfig::default();
-        cabin.class_mix_mode = "count".to_owned();
+        let requirements = DesignRequirements {
+            num_passengers: 999,
+            ..Default::default()
+        };
+        let mut cabin = PassengerCabinConfig {
+            class_mix_mode: "count".to_owned(),
+            ..Default::default()
+        };
         cabin.first.count = 4;
         cabin.business.count = 16;
         cabin.premium.count = 10;

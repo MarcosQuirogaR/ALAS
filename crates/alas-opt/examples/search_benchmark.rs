@@ -76,6 +76,11 @@ fn main() {
     }
 }
 
+// This binary example's only job is to report benchmark progress and
+// results on the console for a human running it manually; there is no other
+// channel to route this through, so stdout/stderr are the intended sinks,
+// not a bypass of library logging.
+#[allow(clippy::print_stderr)]
 fn benchmark(preset: &str, workers: i64, seed: i64, mode: &str, twist_policy: &str) {
     let mut config = match AlasConfig::from_value(&serde_json::json!({ "preset": preset })) {
         Ok(config) => config,

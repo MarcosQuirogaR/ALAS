@@ -197,7 +197,7 @@ pub(crate) fn display_unit(unit: &str) -> String {
         "chord fraction",
         "root chord ratio",
     ];
-    if unit.is_empty() || dimensionless.iter().any(|known| unit == *known) {
+    if unit.is_empty() || dimensionless.contains(&unit) {
         return String::new();
     }
     // A fraction taken of a named reference keeps the reference only.

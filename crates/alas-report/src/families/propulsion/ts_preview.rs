@@ -380,6 +380,8 @@ fn draw_detail(
 }
 
 #[cfg(test)]
+// In a test module a failing expect is the assertion failing, and these scenes
+// are built from fixtures the tests define.
 #[allow(clippy::expect_used)]
 mod tests {
     use super::*;

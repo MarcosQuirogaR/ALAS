@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2026 Marcos Quiroga Rodriguez
+
 //! Optional graphics process. Its failure must never reject a valid solver export.
 use super::*;
 

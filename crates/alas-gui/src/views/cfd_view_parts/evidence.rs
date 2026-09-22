@@ -137,14 +137,17 @@ fn write_cfd_layout_evidence_images() {
     let dir =
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../out/evidence/gui-2026-09-16");
     std::fs::create_dir_all(&dir).expect("evidence directory");
-    let cases: [(
-        &str,
+    // (evidence file name stem, theme, language, viewport size, tab renderer,
+    // whether a placeholder CFD result must be loaded first)
+    type LayoutEvidenceCase = (
+        &'static str,
         AppTheme,
-        &str,
+        &'static str,
         egui::Vec2,
         fn(&mut AppState, &mut Ui),
         bool,
-    ); 9] = [
+    );
+    let cases: [LayoutEvidenceCase; 9] = [
         (
             "study-dark-wide",
             AppTheme::Dark,
@@ -259,7 +262,15 @@ fn write_cfd_actual_result_evidence_images() {
     }
     let dir = root.join("../../out/evidence/gui-2026-09-16");
     std::fs::create_dir_all(&dir).expect("evidence directory");
-    let cases: [(&str, AppTheme, &str, egui::Vec2, fn(&mut AppState, &mut Ui)); 8] = [
+    // (evidence file name stem, theme, language, viewport size, tab renderer)
+    type ActualResultEvidenceCase = (
+        &'static str,
+        AppTheme,
+        &'static str,
+        egui::Vec2,
+        fn(&mut AppState, &mut Ui),
+    );
+    let cases: [ActualResultEvidenceCase; 8] = [
         (
             "actual-results-dark-wide",
             AppTheme::Dark,

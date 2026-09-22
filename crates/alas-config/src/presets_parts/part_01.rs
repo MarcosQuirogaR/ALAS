@@ -379,8 +379,8 @@ impl AircraftPreset {
     pub fn planning_cabin_config(&self) -> crate::CabinConfig {
         let mut cabin = crate::CabinConfig::default();
         // One declaration of the hold architecture, read here and by the FLOPS
-        // container tare alike. The two used to be written out separately and
-        // disagreed: only the A220-300 carried the bulk cabin declaration,
+        // container tare alike. Writing the two out separately lets them
+        // disagree: only the A220-300 carried the bulk cabin declaration,
         // while `declared_cargo_loading` also declares the ATR 72-600 and the
         // A320-200 bulk. The ATR 72-600 has no lower hold at all (ATR 72-600
         // factsheet p. 22) and was still being offered LD3 positions in one.

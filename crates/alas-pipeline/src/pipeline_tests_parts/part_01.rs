@@ -161,11 +161,11 @@ fn reviewed_fixed_design_config() -> AlasConfig {
 /// flies the route's own cruise altitude, which together changed the sized
 /// mass the wing loading is formed from. What binds instead is
 /// `geometric_body_alpha`, the clean-sheet transport's 2-4 degree cruise body
-/// attitude window — a design target on the trimmed aircraft, applied only in
+/// attitude window: a design target on the trimmed aircraft, applied only in
 /// clean-sheet mode, and the sole violated hard residual on this design
 /// (measured: `violated_hard_ids() == ["geometric_body_alpha"]`). The test
-/// therefore pins the structure it was written for — reviewable, not
-/// promotable, with a named reason — and the residual that is actually
+/// therefore pins the structure it was written for (reviewable, not
+/// promotable, with a named reason) and the residual that is actually
 /// binding today, rather than a reason that no longer applies.
 #[test]
 fn fixed_design_review_exposes_its_binding_constraint_without_promoting_a_finalist() {
