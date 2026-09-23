@@ -3,17 +3,17 @@
 ALAS is built in Rust as a single native executable. There is no Python runtime,
 no package manager, and no background sidecar service required.
 
-## Release v1.1.0
+## Release v1.2.0
 
 ### Windows
 
-- **Windows**: Download the portable x86-64 archive from [GitHub Releases](https://github.com/MarcosQuirogaR/ALAS/releases/tag/v1.1.0), verify its SHA-256 file, and run `alas.exe`.
-- **Linux**: Download the portable x86-64 `tar.gz` archive from the same release, verify its SHA-256 file, extract it, and run `./alas`.
+- **Windows**: Download the portable x86-64 archive from [GitHub Releases](https://github.com/MarcosQuirogaR/ALAS/releases/tag/v1.2.0), verify its SHA-256 file, and run `ALAS.exe`.
+- **Linux**: Download the portable x86-64 `tar.gz` archive from the same release, verify its SHA-256 file, extract it, and run `./ALAS` (glibc 2.35 or newer).
 - **Windows trust**: A signed binary identifies its publisher, but a new file can still show a SmartScreen reputation prompt until Microsoft has enough clean download history. Verify the publisher and checksum before running it.
 
 ### Other Platforms
 
-The v1.1.0 release provides Windows and Linux x86-64 packages. External solver stages remain
+The v1.2.0 release provides Windows and Linux x86-64 packages. External solver stages remain
 optional and require compatible user-supplied installations and licences.
 
 ---
@@ -23,7 +23,7 @@ optional and require compatible user-supplied installations and licences.
 Within the core local application, the following capabilities execute without external solvers:
 
 - Parametric airframe sizing and design space definition
-- Numerical airframe optimization (Differential Evolution, NSGA-II, SQP)
+- Numerical airframe optimization (L-SHADE differential evolution, epsilon-constrained)
 - Vortex-lattice aerodynamics and empirical drag build-ups
 - Turbofan cycle thermodynamic modeling
 - Wingbox structural sizing and analytical rib spacing

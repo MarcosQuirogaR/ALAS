@@ -653,19 +653,16 @@ Population standard deviation alone is not convergence evidence for a coupled ai
 
 ### 12.1 Existing implementation evidence
 
-The workspace handoff/status records the following checks for the documented snapshot:
+For release 1.2 (September 2026) the repository gate passed on hosted Windows
+and ubuntu-22.04: repository checks, formatting, `cargo clippy --workspace
+--all-targets -- -D warnings`, and the full workspace test suite with
+`--no-fail-fast` (3,767 passed, 0 failed, 37 ignored on the maintainer
+workstation). `docs/STATUS.md` ("Release 1.2 evidence") records the preset
+baseline and optimisation matrices and keeps implementation verification,
+numerical results and physical validation apart. FLOPS group calculations
+reproduce two NASA Aviary reference cases to quoted precision.
 
-- `cargo fmt --all -- --check` clean;
-- `cargo xtask checks` passed;
-- `cargo clippy --workspace --all-targets -- -D warnings` clean;
-- the gate test run completed 204 suites with 2,305 passed, 0 failed, and 17 ignored;
-- `cargo xtask gate` passed;
-- `cargo deny --locked check` passed with two documented maintenance exceptions;
-- FLOPS group calculations reproduce two NASA Aviary reference cases to quoted precision;
-- SQP is verified on analytic constrained problems, a delegated bowl objective, and one native major iteration;
-- product mission sizing, policy fuel, tank capacity, AVL assessment, and typed residual paths have targeted unit/integration coverage.
-
-These are implementation and numerical-verification results from the recorded workspace snapshot. They are not a claim that a complete aircraft optimization study has converged or that the model has been physically validated.
+These are implementation and numerical-verification results. They are not a claim that a complete aircraft optimization study has converged or that the model has been physically validated.
 
 ### 12.2 Required verification matrix
 
@@ -738,7 +735,6 @@ The consolidated strategy is derived from these local sources:
 - [Methods and model notes](methods.md): mission closure, fuel policy, mass methods, FLOPS scope, residuals, and the L-SHADE epsilon-constrained driver.
 - [Current status](STATUS.md): delivered behavior, superseding product-objective decisions, and known verification/external-tool limits.
 - [Fuel/mission roadmap](FUEL_MISSION_ROADMAP.md): delivered P1/P2/P4 scope and remaining P3/P5 mission/UQ work.
-- [Handoff snapshot](../handoff.md): recorded workspace test/gate evidence and external-tool status.
 
 Key implementation files are:
 
