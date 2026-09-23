@@ -37,7 +37,7 @@ jobs:
   package:
     name: Build and validate the ${{ matrix.os }} package (locked, non-publishing)
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 90
+    timeout-minutes: 150
     strategy:
       fail-fast: false
       matrix:

@@ -148,7 +148,7 @@ pub trait SupervisedSpawn {
 impl SupervisedSpawn for Command {
     fn spawn_supervised(&mut self, role: &str) -> std::io::Result<Child> {
         let program = self.get_program().to_string_lossy().into_owned();
-        let child = self.spawn()?;
+        let child = spawn_retrying_busy_executable(self)?;
         let supervised = platform::assign(&child).is_ok();
         record(LaunchRecord {
             sequence: 0,
@@ -160,6 +160,28 @@ impl SupervisedSpawn for Command {
         });
         Ok(child)
     }
+}
+
+/// Spawn, retrying briefly while the kernel reports the executable as busy.
+///
+/// On Linux `ETXTBSY` is returned when any process still holds a write
+/// descriptor on the file, which includes a sibling thread's child that was
+/// forked while the file was being written and has not yet reached `exec`.
+/// The condition clears within milliseconds, so a short bounded retry turns a
+/// spurious launch failure into a normal launch; any other error, or a file
+/// that stays busy, is returned unchanged.
+fn spawn_retrying_busy_executable(command: &mut Command) -> std::io::Result<Child> {
+    let mut delay = std::time::Duration::from_millis(10);
+    for _ in 0..6 {
+        match command.spawn() {
+            Err(error) if error.kind() == std::io::ErrorKind::ExecutableFileBusy => {
+                std::thread::sleep(delay);
+                delay *= 2;
+            }
+            result => return result,
+        }
+    }
+    command.spawn()
 }
 
 #[cfg(windows)]

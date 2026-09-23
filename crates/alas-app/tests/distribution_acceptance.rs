@@ -130,6 +130,19 @@ impl Drop for IsolatedPackage {
 }
 
 fn run(package: &IsolatedPackage, args: &[&str]) -> Output {
+    // A sibling test forking while its own copy of the binary is being
+    // written can briefly hold that file open for writing; Linux then refuses
+    // to exec it with ETXTBSY. It clears within milliseconds.
+    let mut delay = std::time::Duration::from_millis(10);
+    for _ in 0..6 {
+        match package.command().args(args).output() {
+            Err(error) if error.kind() == std::io::ErrorKind::ExecutableFileBusy => {
+                std::thread::sleep(delay);
+                delay *= 2;
+            }
+            result => return result.expect("packaged executable starts"),
+        }
+    }
     package
         .command()
         .args(args)
