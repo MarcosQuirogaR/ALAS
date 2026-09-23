@@ -454,7 +454,7 @@ Each tightly coupled candidate uses a deterministic scheduler:
 
 ## 5. Work packages, acceptance evidence, and exit criteria
 
-### WP-00 — Repository integrity and completed headless baseline
+### WP-00: Repository integrity and completed headless baseline
 
 **Depends on:** none.
 **Owners:** `alas-app`, `alas-config`, `alas-exec`, `alas-pipeline`, `alas-report`,
@@ -486,7 +486,7 @@ Acceptance evidence:
 status, residuals, artifacts, and figures without screen control, and the
 repository's own integrity checks agree with that revision.
 
-### WP-01 — Common contracts and digital-thread spine
+### WP-01: Common contracts and digital-thread spine
 
 **Depends on:** WP-00.
 **Owners:** `alas-types`, `alas-units`, `alas-config`, `alas-pipeline`,
@@ -510,7 +510,7 @@ Acceptance evidence:
 **Exit:** all later work can publish a case-specific `StageResult` and immutable
 `Evidence` without depending on GUI or optimizer code.
 
-### WP-02 — Requirement registry, case expansion, and evaluation matrix
+### WP-02: Requirement registry, case expansion, and evaluation matrix
 
 **Depends on:** WP-01.
 **Owners:** `alas-config`, `alas-acceptance`, `alas-pipeline`, `alas-gui`.
@@ -536,7 +536,7 @@ which unsupported requirements are explicitly `NotEvaluated`.
 is visibly blocked by missing evidence; no hard requirement disappears from a
 run.
 
-### WP-03 — Deterministic execution, cache, resources, and V&V harness
+### WP-03: Deterministic execution, cache, resources, and V&V harness
 
 **Depends on:** WP-01; begins in parallel with WP-02.
 **Owners:** `alas-pipeline`, `alas-opt`, `alas-exec`, `alas-testkit`, `xtask`.
@@ -569,7 +569,7 @@ Acceptance evidence:
 **Exit:** later expensive disciplines can run reproducibly and in parallel
 without oversubscription or stale evidence.
 
-### WP-04 — Architecture, authoritative geometry, and packaging closure
+### WP-04: Architecture, authoritative geometry, and packaging closure
 
 **Depends on:** WP-02 and WP-03.
 **Owners:** `alas-config`, `alas-geom`, `alas-payload`, `alas-pipeline`, CPACS and
@@ -599,7 +599,7 @@ whose accommodation, tanks, gear, control surfaces, and solver representations
 agree. Unusual architectures remain unsupported rather than approximated by a
 conventional hidden default.
 
-### WP-05 — Engine-deck and aircraft-systems foundation
+### WP-05: Engine-deck and aircraft-systems foundation
 
 **Depends on:** WP-04.
 **Owners:** `alas-prop`, proposed `alas-systems`, `alas-config`, `alas-mass`,
@@ -628,7 +628,7 @@ quality claim.
 and systems loads for each case. Novel architectures without calibrated decks
 or networks remain `NotEvaluated` beyond transparent Level-0 priors.
 
-### WP-06 — Coupled mass, fuel/energy, and mission closure
+### WP-06: Coupled mass, fuel/energy, and mission closure
 
 **Depends on:** WP-05.
 **Owners:** `alas-mass`, `alas-payload`, `alas-mission`, `alas-prop`,
@@ -656,7 +656,7 @@ mission nonconvergence, and convergence from multiple initial mass seeds.
 answers; all downstream cases consume the correct state snapshot. A closure
 remainder is clearly labeled and cannot satisfy tank or mission requirements.
 
-### WP-07 — Aerodynamics, propulsion, performance, high lift, and gear/brakes
+### WP-07: Aerodynamics, propulsion, performance, high lift, and gear/brakes
 
 **Depends on:** WP-06.
 **Owners:** `alas-aero`, `alas-prop`, `alas-perf`, proposed gear/brake module or
@@ -690,7 +690,7 @@ TOFL, landing, approach, or icing requirements remain `NotEvaluated` when the
 required high-lift, brake, runway, propulsion, or validation evidence is
 absent.
 
-### WP-08 — Structural and aeroelastic feedback closure
+### WP-08: Structural and aeroelastic feedback closure
 
 **Depends on:** WP-07.
 **Owners:** `alas-struct`, `alas-aero`, `alas-mass`, `alas-pipeline`.
@@ -719,7 +719,7 @@ after its mass/mission solve. Flutter, divergence, gust response, control
 reversal, fatigue, and damage tolerance pass only at their required fidelity;
 otherwise they remain explicit gaps.
 
-### WP-09 — Stability, control authority, and envelope closure
+### WP-09: Stability, control authority, and envelope closure
 
 **Depends on:** WP-08.
 **Owners:** `alas-stab`, `alas-aero`, `alas-perf`, `alas-mass`, `alas-systems`,
@@ -748,7 +748,7 @@ analytic modes, and flexible-versus-rigid case distinctions.
 or uncovered case. Handling-quality or certification claims remain
 `NotEvaluated` without the corresponding validation/test level.
 
-### WP-10 — Systems safety and certification-oriented architecture screen
+### WP-10: Systems safety and certification-oriented architecture screen
 
 **Depends on:** WP-09; preliminary FHA work may start after WP-05.
 **Owners:** proposed `alas-safety`, `alas-systems`, `alas-config`,
@@ -775,7 +775,7 @@ forbid `certified`, `approved`, or unqualified `compliant` output.
 or block a candidate by explicit policy. ALAS still makes no certification or
 airworthiness claim.
 
-### WP-11 — Environment, lifecycle, operations, and economics
+### WP-11: Environment, lifecycle, operations, and economics
 
 **Depends on:** WP-10 for system/safety state; deterministic mission outputs
 from WP-06 allow earlier prototypes.
@@ -805,7 +805,7 @@ declared data domain. Missing emissions factors, noise calibration, operator
 reliability, costs, airport resources, or lifecycle inventories remain
 diagnostic/`NotEvaluated` rather than universal defaults.
 
-### WP-12 — Mixed-architecture MDO, robust UQ, and fidelity promotion
+### WP-12: Mixed-architecture MDO, robust UQ, and fidelity promotion
 
 **Depends on:** WP-03 and all disciplines required by the selected study; full
 program exit depends on WP-11.
@@ -839,7 +839,7 @@ mandatory.
 physics. The run reports why architectures died, whether the search converged,
 which evidence promoted the finalist, and which uncertainty remains.
 
-### WP-13 — External substantiation, unified reference campaign, and release
+### WP-13: External substantiation, unified reference campaign, and release
 
 **Depends on:** WP-12.
 **Owners:** all discipline owners, `alas-exec`, `alas-testkit`, `alas-report`,
@@ -1111,7 +1111,7 @@ future parent-added sources.
 | Public Airbus A320 hydraulic, ECS/hot-soak, ground-interface, water and waste data | Named-aircraft topology and operating-point fixtures | Preserve aircraft/configuration/date and manufacturer-specific scope. |
 | Pratt & Whitney APS3200 public concurrent bleed/90 kVA point | APU simultaneous-load fixture | Treat as one named product/condition, not a generic APU deck. |
 | NASA LEWICE 3.2/3.5 | External icing/protection and validation boundary | Pin software/report versions, geometry/cases, validation domain, and limitations. |
-| **Parent-added primary source — reserved** | New component map, network, thermal, safety, or validation evidence | Add source ID/link/path/hash/rights, extracted case, uncertainty, finding IDs, and disposition before use. |
+| **Parent-added primary source, reserved** | New component map, network, thermal, safety, or validation evidence | Add source ID/link/path/hash/rights, extracted case, uncertainty, finding IDs, and disposition before use. |
 
 ### 10.3 Systems research exit
 

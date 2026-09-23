@@ -625,7 +625,7 @@ size.
 
 Run cheap, local checks before expensive solvers.
 
-### G0 — Scalar and frame validity
+### G0: Scalar and frame validity
 
 - all values finite;
 - positive lengths, areas, masses, densities, and frequencies where required;
@@ -634,7 +634,7 @@ Run cheap, local checks before expensive solvers.
 - no NaN or overflow in derived quantities;
 - requirements and architecture choices cross-field consistent.
 
-### G1 — Topology and connectivity
+### G1: Topology and connectivity
 
 - every required component has a supported builder;
 - expected joins exist and attach to intended parent;
@@ -642,7 +642,7 @@ Run cheap, local checks before expensive solvers.
 - intentional gaps are declared; accidental gaps are residuals;
 - discrete configuration is legal for role and fidelity.
 
-### G2 — Planform and loft geometry
+### G2: Planform and loft geometry
 
 - station order and span bounds;
 - positive chords, thickness, segment area, and volume;
@@ -653,7 +653,7 @@ Run cheap, local checks before expensive solvers.
 - bounded camber, thickness, leading-edge radius, and curvature;
 - declared area, span, aspect ratio, and derived MAC agree within tolerance.
 
-### G3 — Accommodation and payload envelope
+### G3: Accommodation and payload envelope
 
 - required decks, floors, clear heights, aisles, exits, monuments, and
   pressure-shell zones exist;
@@ -662,7 +662,7 @@ Run cheap, local checks before expensive solvers.
 - design and maximum cases return capacity, payload, and unfilled residuals;
 - cabin/hold volume does not intersect tanks, gear, frames, or systems.
 
-### G4 — Balance, tail, and gear
+### G4: Balance, tail, and gear
 
 - CG is finite and within loading envelope;
 - horizontal/vertical tail arms are positive and measured from current CG;
@@ -671,7 +671,7 @@ Run cheap, local checks before expensive solvers.
   wing-tip, propulsor, and ground clearances pass;
 - retraction and bay envelopes do not intersect aircraft or payload.
 
-### G5 — Fuel, tanks, and structural intent
+### G5: Fuel, tanks, and structural intent
 
 - usable fuel volume covers required fuel and reserve;
 - tanks remain inside declared surfaces and exclusions;
@@ -679,7 +679,7 @@ Run cheap, local checks before expensive solvers.
 - gear, engine, tail, and high-lift attachments have declared load paths;
 - tank fill sequence and mass/CG effect are available to mass stage.
 
-### G6 — High-lift and controls
+### G6: High-lift and controls
 
 - selected mechanism has hinge/gap/overlap/fairing parameters;
 - deployed surfaces do not self-intersect or leave parent surface;
@@ -687,7 +687,7 @@ Run cheap, local checks before expensive solvers.
 - control-surface area and deflection limits are within calibrated model;
 - clean-wing result is not labelled deployed high-lift result.
 
-### G7 — Analysis-grade representation
+### G7: Analysis-grade representation
 
 - master surfaces are closed or intentionally open with declared boundaries;
 - analysis representation has consistent normals and no zero-area/inverted
@@ -698,7 +698,7 @@ Run cheap, local checks before expensive solvers.
 - structural/CFD material, section, and boundary assignments are complete;
 - preview mesh is reported separately and cannot satisfy this gate by itself.
 
-### G8 — External or finalist fidelity
+### G8: External or finalist fidelity
 
 - AVL/VLM/OAS model converges and returns requested residuals;
 - higher-order aero, mesh, or structures tools receive same source geometry and
@@ -732,12 +732,12 @@ translation table, not a replacement for the requirements document.
 
 | Requirements-first location | Geometry/configuration action | Output or residual |
 | --- | --- | --- |
-| Step 1 — Start with intent | Select role, architecture family, wing/tail/gear/propulsion topology, deck/container strategy, and technology assumptions; create ArchitectureSeed. | Seed ID, discrete choices, supported-builder status, topology residuals. |
-| Step 2 — Mission and route | Use range, reserve, Mach, altitude, climb, and airport data to choose initial wing loading, area/span bounds, propulsion installation, tank strategy, high-lift seed, and field envelope. | Preliminary sizing values; span, wing-loading, fuel-volume, Mach/thickness, and field-screening residuals. |
-| Step 3 — Payload and cabin | Build external fuselage sections and internal decks/holds from passengers, passenger-mass basis, cargo, LD3-45, exits, monuments, and deck requirements. | Requested/placed/capacity/unfilled summary by deck/hold; cabin-intersection and clear-height residuals. |
-| Step 4 — Shape and balance | Materialise wing stations, chords, sweep, twist, x/z position, fuselage loft, tail size/arm, section family, high-lift layout, and initial gear/tank envelopes. | Geometry preview plus master-geometry hash; planform, section, tail-volume, gear-envelope, and layout residuals. |
-| Step 5 — Feasibility and refinement | Run G0–G7 before expensive analysis; feed survivors into mass, payload, CG, fuel, aero, trim, stability, field, and structures stages. | Typed hard/soft/diagnostic residuals; rejection stage/reason; no silent pass when translator unavailable. |
-| Step 6 — Review and launch | Freeze brief, seed, initial geometry, vector, bounds, fidelity policy, and output options. | Immutable run snapshot, source geometry hash, bounds profile, solver settings, provenance. |
+| Step 1: Start with intent | Select role, architecture family, wing/tail/gear/propulsion topology, deck/container strategy, and technology assumptions; create ArchitectureSeed. | Seed ID, discrete choices, supported-builder status, topology residuals. |
+| Step 2: Mission and route | Use range, reserve, Mach, altitude, climb, and airport data to choose initial wing loading, area/span bounds, propulsion installation, tank strategy, high-lift seed, and field envelope. | Preliminary sizing values; span, wing-loading, fuel-volume, Mach/thickness, and field-screening residuals. |
+| Step 3: Payload and cabin | Build external fuselage sections and internal decks/holds from passengers, passenger-mass basis, cargo, LD3-45, exits, monuments, and deck requirements. | Requested/placed/capacity/unfilled summary by deck/hold; cabin-intersection and clear-height residuals. |
+| Step 4: Shape and balance | Materialise wing stations, chords, sweep, twist, x/z position, fuselage loft, tail size/arm, section family, high-lift layout, and initial gear/tank envelopes. | Geometry preview plus master-geometry hash; planform, section, tail-volume, gear-envelope, and layout residuals. |
+| Step 5: Feasibility and refinement | Run G0–G7 before expensive analysis; feed survivors into mass, payload, CG, fuel, aero, trim, stability, field, and structures stages. | Typed hard/soft/diagnostic residuals; rejection stage/reason; no silent pass when translator unavailable. |
+| Step 6: Review and launch | Freeze brief, seed, initial geometry, vector, bounds, fidelity policy, and output options. | Immutable run snapshot, source geometry hash, bounds profile, solver settings, provenance. |
 | Candidate materialisation | Decode continuous vector into named seed and project/validate coupled variables. | DesignVector-to-geometry audit, scaling, and bounds residuals. |
 | Preliminary sizing | Apply wing-loading/AR, cabin length, tail-volume, gear, and fuel-volume relations. | Derived area/span/chord/volume/arm quantities and preliminary feasibility. |
 | Geometry and accommodation | Build exterior and resolve interior from the same source geometry. | Accommodation summary and geometry-validity result. |
@@ -908,7 +908,7 @@ before redistributing any PDF or third-party figure.
   “Collaborative Systems Driven Aircraft Configuration Design Optimization,”
   ICAS, DLR, 2016.
 - **R6.** Martin Siggel, Jan Kleinert, Tobias Stollenwerk, and Reinhold Maierl,
-  “TiGL — An Open Source Computational Geometry Library for Parametric
+  “TiGL: An Open Source Computational Geometry Library for Parametric
   Aircraft Design,” arXiv:1810.10795; journal publication, 2018–2019.
 - **R7.** Jan-N. Walther, Christian Hesse, Marko Alder, Jörn Y.-C.
   Biedermann, and Björn Nagel, “Expansion of the cabin description within the
@@ -936,13 +936,13 @@ before redistributing any PDF or third-party figure.
   Model Using OpenAeroStruct,” EngOpt, 2018.
 - **R16.** Mark Drela and Harold Youngren, AVL User Primer, MIT.
 - **R17.** Brenda M. Kulfan, “A Universal Parametric Geometry Representation
-  Method — ‘CST’,” AIAA-2007-0062, 2007.
+  Method: ‘CST’,” AIAA-2007-0062, 2007.
 - **R18.** Brenda M. Kulfan, “New Supersonic Wing Far-Field
   Composite-Element Wave-Drag Optimization Method,” Journal of Aircraft 46,
   2009.
 - **R19.** Marty K. Bradley, Christopher K. Droney, and Timothy J. Allen,
   “Subsonic Ultra Green Aircraft Research: Truss Braced Wing Design
-  Exploration — Phase II — Volume I,” NASA/CR-2015-218704/VOL1, 2015.
+  Exploration, Phase II, Volume I,” NASA/CR-2015-218704/VOL1, 2015.
 - **R20.** Jianmiao Yi and Feng Deng, “Cooperation of Thin-Airfoil Theory and
   Deep Learning for a Compact Airfoil Shape Parameterization,” Aerospace
   10(7):650, 2023, DOI 10.3390/aerospace10070650.

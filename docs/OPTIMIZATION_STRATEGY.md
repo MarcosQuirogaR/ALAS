@@ -733,23 +733,23 @@ The present optimization should not be described as a complete operational missi
 
 The consolidated strategy is derived from these local sources:
 
-- [Operational optimization guide](OPTIMIZATION.md) — user-facing inputs, pipeline flow, policies, fuel/tank settings, and documented method catalogue.
-- [MDO research/design baseline](research/optimization-mdo.md) — target architecture, typed assessment contract, mixed-architecture funnel, fidelity, UQ, caching, ranking, and verification plan.
-- [Methods and model notes](methods.md) — mission closure, fuel policy, mass methods, FLOPS scope, residuals, and the L-SHADE epsilon-constrained driver.
-- [Current status](STATUS.md) — delivered behavior, superseding product-objective decisions, and known verification/external-tool limits.
-- [Fuel/mission roadmap](FUEL_MISSION_ROADMAP.md) — delivered P1/P2/P4 scope and remaining P3/P5 mission/UQ work.
-- [Handoff snapshot](../handoff.md) — recorded workspace test/gate evidence and external-tool status.
+- [Operational optimization guide](OPTIMIZATION.md): user-facing inputs, pipeline flow, policies, fuel/tank settings, and documented method catalogue.
+- [MDO research/design baseline](research/optimization-mdo.md): target architecture, typed assessment contract, mixed-architecture funnel, fidelity, UQ, caching, ranking, and verification plan.
+- [Methods and model notes](methods.md): mission closure, fuel policy, mass methods, FLOPS scope, residuals, and the L-SHADE epsilon-constrained driver.
+- [Current status](STATUS.md): delivered behavior, superseding product-objective decisions, and known verification/external-tool limits.
+- [Fuel/mission roadmap](FUEL_MISSION_ROADMAP.md): delivered P1/P2/P4 scope and remaining P3/P5 mission/UQ work.
+- [Handoff snapshot](../handoff.md): recorded workspace test/gate evidence and external-tool status.
 
 Key implementation files are:
 
-- [`design_variables.rs`](../crates/alas-config/src/design_variables.rs) — canonical 16-coordinate vector registry.
-- [`design_space.rs`](../crates/alas-config/src/optimizer/design_space.rs) — clean-sheet, reference-adaptation, and baseline-sandbox envelopes.
-- [`differential_evolution_optimizer.rs`](../crates/alas-opt/src/differential_evolution_optimizer.rs) — product/compatibility dispatch, bounds, initialization, and result assembly.
-- [`search_methods/lshade_de.rs`](../crates/alas-opt/src/search_methods/lshade_de.rs) — the one product search kernel: L-SHADE differential evolution under the epsilon-constrained method.
-- [`search/staged.rs`](../crates/alas-opt/src/search/staged.rs) — the Stage A broad scan that seeds the L-SHADE population.
-- [`sizing.rs`](../crates/alas-opt/src/mdo/sizing.rs) — candidate preparation and mission-sized assessment.
-- [`mda.rs`](../crates/alas-opt/src/mdo/mda.rs) — mass/fuel/CG closure loop.
-- [`cost.rs`](../crates/alas-opt/src/mdo/cost.rs) — objective normalization, policies, residuals, and scalar cost.
-- [`part_01.rs`](../crates/alas-pipeline/src/dual_solver_parts/part_01.rs) and [`part_02.rs`](../crates/alas-pipeline/src/dual_solver_parts/part_02.rs) — VLM/AVL optimization branches and finalist re-analysis.
+- [`design_variables.rs`](../crates/alas-config/src/design_variables.rs): canonical 16-coordinate vector registry.
+- [`design_space.rs`](../crates/alas-config/src/optimizer/design_space.rs): clean-sheet, reference-adaptation, and baseline-sandbox envelopes.
+- [`differential_evolution_optimizer.rs`](../crates/alas-opt/src/differential_evolution_optimizer.rs): product/compatibility dispatch, bounds, initialization, and result assembly.
+- [`search_methods/lshade_de.rs`](../crates/alas-opt/src/search_methods/lshade_de.rs): the one product search kernel: L-SHADE differential evolution under the epsilon-constrained method.
+- [`search/staged.rs`](../crates/alas-opt/src/search/staged.rs): the Stage A broad scan that seeds the L-SHADE population.
+- [`sizing.rs`](../crates/alas-opt/src/mdo/sizing.rs): candidate preparation and mission-sized assessment.
+- [`mda.rs`](../crates/alas-opt/src/mdo/mda.rs): mass/fuel/CG closure loop.
+- [`cost.rs`](../crates/alas-opt/src/mdo/cost.rs): objective normalization, policies, residuals, and scalar cost.
+- [`part_01.rs`](../crates/alas-pipeline/src/dual_solver_parts/part_01.rs) and [`part_02.rs`](../crates/alas-pipeline/src/dual_solver_parts/part_02.rs): VLM/AVL optimization branches and finalist re-analysis.
 
 When this summary conflicts with executable behavior, treat the current source, tests, and run manifest as the authority for what happened in a run; treat the research/design baseline as the authority for the intended future contract until the implementation catches up.

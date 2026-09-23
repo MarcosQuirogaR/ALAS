@@ -820,9 +820,9 @@ provenance, residual/tolerance, typed terminal status, and every iterate. The
 fuel-capacity figure uses this selected state; if mission evidence is absent it
 labels the old quantity only as an MTOW fuel budget. A non-converged dispatch
 figure calls retained values the best evaluated iterate, not a dispatch
-solution. The remaining work in this memo—tank-local burn sequencing, full
+solution. The remaining work in this memo (tank-local burn sequencing, full
 inertia tensors, structure-mass feedback,
-and an outer geometry/OEW/mission closure—remains unevaluated rather than being
+and an outer geometry/OEW/mission closure) remains unevaluated rather than being
 implied by this first correction.
 
 The capacity provenance is now numerically reproducible rather than a label

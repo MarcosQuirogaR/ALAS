@@ -523,7 +523,7 @@ These sources are relevant, but the detailed document was not copied because it 
 | [IATA Ground Operations Manual (IGOM)](https://www.iata.org/en/publications/manuals/iata-ground-operations-manual/) | Public description covers passenger handling, baggage, servicing, turnaround, load control, and airside safety; standardization reduces training/risk/cost | Manual is paid. Use the public taxonomy and cite the manual when an operator supplies access. |
 | [IATA ULD Regulations](https://www.iata.org/en/publications/manuals/uld-regulations/) | Public description covers ULD type/identification, aircraft acceptance, handling, continuing airworthiness, repair, and lifecycle | Manual is paid. ALAS should store ULD type and acceptance evidence rather than reproduce IATA tables. |
 | [EASA CS-25 Amendment 28](https://www.easa.europa.eu/en/document-library/certification-specifications/cs-25-amendment-28) | Current official certification-specification page | Current version should be checked for certification work. The preserved open PDF is Amendment 27 for reproducibility. |
-| [DLR comparison of DOC and LCC methods](https://elib.dlr.de/113625/) | Notes that DOC varies by airline and that salaries, operating conditions, and maintenance data are often confidential | Marked “final paper — only DLR internal”; not downloaded. Treat airline cost parameters as supplied assumptions. |
+| [DLR comparison of DOC and LCC methods](https://elib.dlr.de/113625/) | Notes that DOC varies by airline and that salaries, operating conditions, and maintenance data are often confidential | Marked “final paper, only DLR internal”; not downloaded. Treat airline cost parameters as supplied assumptions. |
 
 ## 10. ALAS implementation anchors
 

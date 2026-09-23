@@ -425,7 +425,7 @@ geometry + payload + mission cases
               -> repeat until converged
 ```
 
-The convergence criterion must include system mass, peak source rating, cruise extraction, maximum zone temperature, cabin pressure/temperature residual, and mission consumable state—not only take-off mass.
+The convergence criterion must include system mass, peak source rating, cruise extraction, maximum zone temperature, cabin pressure/temperature residual, and mission consumable state, not only take-off mass.
 
 ## 7. Crate ownership
 
@@ -566,6 +566,6 @@ Rules for the implementation:
 4. manufacturer public data validate only the named aircraft/product and operating point;
 5. DLR certification filters may inspire early architecture rejection but are not authority findings;
 6. every report must separate `Evaluated`, `Screened`, `Unverified`, `NotEvaluated`, and solver `Failed`;
-7. optimisation cannot improve a candidate by omitting a `NotEvaluated` mass, load, or constraint—apply a declared conservative prior or reject the candidate, and report which policy was used.
+7. optimisation cannot improve a candidate by omitting a `NotEvaluated` mass, load, or constraint; apply a declared conservative prior or reject the candidate, and report which policy was used.
 
 The practical fidelity target is **conceptual physical closure with traceable evidence**, not detailed design or certification. Achieving that target would nevertheless be a major increase in physical significance over independent empirical system-weight terms because the same architecture would explain its mass, power, heat, drag, resource availability, and governing aircraft cases.

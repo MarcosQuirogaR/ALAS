@@ -27,7 +27,7 @@ run.
 
 !!! tip "Field labels are the real reference"
     Hover (or focus) almost any field's label in the application for its own
-    explanation, written against the code that consumes it -- no separate icon,
+    explanation, written against the code that consumes it: no separate icon,
     the label itself is the hover target. Pages that need more than a sentence
     also have a collapsible **How this works** panel. This guide is the map;
     those labels are the territory.

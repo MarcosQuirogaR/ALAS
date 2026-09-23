@@ -3,7 +3,7 @@
 This is the answer to "does ALAS work today", as opposed to `docs/PORTING.md`,
 which answers a narrower question: "has this module been checked against the
 Python reference to a stated tolerance". The two used to be the same question.
-They no longer are — most of `alas-pipeline`, `alas-app` and `alas-gui` were
+They no longer are: most of `alas-pipeline`, `alas-app` and `alas-gui` were
 written as native Rust orchestration over already-parity-tested physics
 kernels rather than translated line-by-line from a Python counterpart, so
 their `PORTING.md` rows read `todo` while the crates themselves build, run,
@@ -18,7 +18,7 @@ letting it drift and doing a retroactive sweep later.
 **Last swept:** 2026-09-23, for the 1.2 release (section below). Earlier
 sections record what earlier audits found; the "What does not work yet"
 list keeps its original dates and says where the 1.2 evidence changes an
-item. Re-verify anything older than a few weeks before relying on it — this
+item. Re-verify anything older than a few weeks before relying on it; this
 file records what an audit found, not what is continuously enforced by
 `cargo xtask gate`.
 
@@ -214,7 +214,7 @@ an earlier one for the same claim.
    ambiguous `-0.000000`, indistinguishable from float noise at the root
    boundary. Fixed 2026-09-03: `WingboxSizing::controlling_margin` now
    reports the raw value in scientific notation plus the controlling
-   spar/station. This is a diagnostics fix, not a tolerance policy — no
+   spar/station. This is a diagnostics fix, not a tolerance policy: no
    numerical band has been calibrated, so a genuinely small negative margin
    still fails the gate exactly as before, now legibly.
    (the internal wingbox-sizing-error-prevention report (2026-09-01).)
@@ -485,7 +485,7 @@ sizing loop and gradient-based driver").
   VSPAERO wake convergence still fails its own convergence gate on at least
   one case.
 - **MSES** shows genuine partial numerical non-convergence (3 of 7 angles
-  in the audited sweep) — a solver behavior, not a code defect.
+  in the audited sweep), a solver behavior, not a code defect.
 - **Navdata** is pulled from an unpinned GitHub branch: not reproducible for
   a release build.
 
@@ -498,7 +498,7 @@ quirks, not regressions. See `docs/PORTING.md` and `CONTRIBUTING.md`'s
 - `alas-stab::modes` has an acknowledged factor-of-two phugoid-root error
   vs. AVL, deferred to P14 (deviation-candidate).
 - The differentiable-fit atmosphere disagrees with ISA by up to 1.1% T /
-  0.4% rho / 0.6% sound speed — reproduced faithfully from upstream, not a
+  0.4% rho / 0.6% sound speed, reproduced faithfully from upstream, not a
   defect.
 - The VORLAX kernel is intentionally `f32` (deviation-candidate for a
   future `f64` pass).
@@ -511,12 +511,12 @@ quirks, not regressions. See `docs/PORTING.md` and `CONTRIBUTING.md`'s
 
 ## Elsewhere
 
-- `docs/PORTING.md` — numerical parity against the Python reference and
+- `docs/PORTING.md`: numerical parity against the Python reference and
   licence provenance, module by module. Still the enforcement point for
   `cargo xtask gate`'s "every crate has a row" check, and still the process
   CONTRIBUTING.md's parity rule requires for new translated physics.
-- `docs/FUEL_MISSION_ROADMAP.md` — the mission/fuel model rebuild plan.
-- `docs/C0_GUI_ACCEPTANCE_MATRIX.md` — GUI acceptance scenarios, separate
+- `docs/FUEL_MISSION_ROADMAP.md`: the mission/fuel model rebuild plan.
+- `docs/C0_GUI_ACCEPTANCE_MATRIX.md`: GUI acceptance scenarios, separate
   from and stricter than a passing Rust or SVG test.
 - Internal investigation reports, which this file
   summarizes. Not version-controlled long-term evidence; treat as an

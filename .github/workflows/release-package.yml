@@ -121,8 +121,8 @@ jobs:
 
       # `cargo xtask dist` already ran its own headless validation (--help,
       # manifest/config checks, a config round-trip smoke run under a
-      # path containing spaces, and — only where AVL is actually bundled,
-      # which today is Windows alone — an AVL cross-check) before it wrote
+      # path containing spaces, and, only where AVL is actually bundled,
+      # which today is Windows alone, an AVL cross-check) before it wrote
       # the archive. This step names exactly the package directory that
       # validation ran against, for the acceptance and smoke steps below.
       - name: Locate the assembled package directory
@@ -156,7 +156,7 @@ jobs:
 
       # A second, CI-level headless confirmation beside `cargo xtask dist`'s
       # own: run the archived binary's only supported no-window flag
-      # (`-h`/`--help` — this CLI has no `--version`) directly from the
+      # (`-h`/`--help`; this CLI has no `--version`) directly from the
       # unpacked package. `xvfb-run` wraps the Linux invocation defensively;
       # `--help` does not construct an eframe/winit window today, but this
       # keeps the step correct even if that ever changes, at the cost of one

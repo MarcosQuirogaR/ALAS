@@ -130,7 +130,7 @@ until supported by the required analysis, test, and authority-approved data.
    Premium-Economy-to-Economy surrogate mapping.
 6. **Accessibility:** applicable wheelchair stowage, on-board-wheelchair route,
    transfer/companion seating, movable-armrest, and lavatory checks yield pass,
-   fail, or inconclusive—not an unsupported “compliant”.
+   fail, or inconclusive, not an unsupported “compliant”.
 7. **Visualization:** golden/render review confirms recognizable seats,
    galleys, lavatories, bins, aisles, and exits from useful camera angles without
    clipping or misleading scale.
