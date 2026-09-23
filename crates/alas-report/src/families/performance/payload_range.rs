@@ -2,7 +2,7 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 // Ported from alas/reporting/visualization.py (`figure_payload_range`) and
-// alas/physics/performance.py (`payload_range_diagram`, `wing_fuel_volume_m3`).
+// alas/physics/performance.py (`payload_range_diagram`).
 // Reference: alas @ rust-port-baseline.
 
 //! The conceptual A-B-C-D payload-range curve from the analyzed aircraft.
@@ -14,7 +14,6 @@
 
 use alas_atmo::Atmosphere;
 use alas_config::{presets, ActiveEngineModel, AlasConfig};
-use alas_geom::aircraft::wing::Wing;
 use alas_perf::performance::breguet_range_m;
 use alas_pipeline::feasibility::{assess_fuel_capacity, FuelCapacityEvidence};
 use alas_pipeline::full_analysis::AnalysisReport;
@@ -360,53 +359,6 @@ pub fn payload_range_data(
     })
 }
 
-// Retained as an explicit compatibility/reference correlation for standalone
-// comparison tests; product capacity comes from typed feasibility evidence.
-// It has no product caller and it has DRIFTED from the two live implementations:
-// this one uses `unfolded_area`/`unfolded_span` while
-// `families::mass_balance_layout::fuel_volume::wing_fuel_volume_m3` and
-// `alas_opt::objective_model` use `reference_area`/`reference_span`. It is a
-// second, different answer to the same question and must not be quoted as
-// agreeing with either. Delete-or-reconcile is recorded as a report-owner item.
-#[allow(dead_code)]
-fn wing_fuel_volume_m3(wing: &Wing, usable_fraction: f64) -> f64 {
-    if wing.xsecs.len() < 2 {
-        return 0.0;
-    }
-    let x: Vec<f64> = (0..=100).map(|i| i as f64 / 100.0).collect();
-    let t_over_c_root = wing.xsecs[0].airfoil.max_thickness(&x);
-    let area = wing.unfolded_area();
-    let span = wing.unfolded_span().max(1e-6);
-    let taper = wing.taper_ratio();
-    let taper_term = (1.0 + taper + taper * taper) / (1.0 + taper).powi(2);
-    let geometric_volume = 0.54 * (area * area / span) * t_over_c_root * taper_term;
-    geometric_volume * usable_fraction.clamp(0.0, 1.0)
-}
-
 fn status_scene(title: &str, message: &str, theme: Option<&str>) -> Scene {
     crate::status_figure::figure_status_message(title, message, false, theme)
-}
-
-#[cfg(test)]
-mod tests {
-    // These tests intentionally panic if their constructed fixture violates its precondition.
-    #![allow(clippy::unwrap_used, clippy::expect_used)]
-
-    use super::*;
-    use alas_geom::aircraft::airfoil::Airfoil;
-    use alas_geom::aircraft::wing::{Wing, WingXSec};
-
-    #[test]
-    fn the_wing_fuel_volume_is_zero_when_the_usable_fraction_is_zero() {
-        let airfoil = Airfoil::from_name("naca0012").unwrap();
-        let wing = Wing::new(
-            "Probe",
-            vec![
-                WingXSec::new([0.0, 0.0, 0.0], 3.0, 0.0, airfoil.clone()),
-                WingXSec::new([0.0, 8.0, 0.0], 3.0, 0.0, airfoil),
-            ],
-            true,
-        );
-        assert_eq!(wing_fuel_volume_m3(&wing, 0.0), 0.0);
-    }
 }

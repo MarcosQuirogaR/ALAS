@@ -80,7 +80,7 @@ fn partial_mses_polar_exports_each_requested_point_transcript() {
 #[test]
 fn a_pipeline_seed_reaches_the_optimizer_configuration() {
     let config = AlasConfig::default();
-    let effective = optimizer_config(&config, Some(42))
+    let effective = crate::dual_solver::seeded_config(&config, Some(42))
         .unwrap_or_else(|error| panic!("seed is representable: {error}"));
     assert_eq!(effective.optimizer.solver.seed, Some(42));
     assert_eq!(config.optimizer.solver.seed, None);
@@ -88,7 +88,7 @@ fn a_pipeline_seed_reaches_the_optimizer_configuration() {
 
 #[test]
 fn an_unrepresentable_pipeline_seed_is_rejected_before_optimization() {
-    let error = optimizer_config(&AlasConfig::default(), Some(u64::MAX))
+    let error = crate::dual_solver::seeded_config(&AlasConfig::default(), Some(u64::MAX))
         .err()
         .unwrap_or_else(|| panic!("the optimizer configuration stores signed seeds"));
     assert!(error.contains("seed"));

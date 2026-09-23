@@ -2,13 +2,9 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 
-fn print_structural_summary(result: &PipelineResult, quiet: bool) {
-    if quiet {
+fn print_structural_summary(result: &PipelineResult) {
+    let Some(st) = &result.structural_result else {
         return;
-    }
-    let st = match result.structural_result {
-        Some(ref s) => s,
-        None => return,
     };
     if st.status.as_str() != "ok" {
         println!("\n--- Structural analysis: {} ---", st.status.as_str());
@@ -269,6 +265,35 @@ mod tests {
         assert!(parsed.no_optimize);
         assert!(parsed.no_baseline);
         assert_eq!(parsed.aerodynamic_solver, AerodynamicSolverMode::Both);
+    }
+
+    #[test]
+    fn a_stray_positional_argument_is_rejected_rather_than_ignored() {
+        let args = ["--no-optimize".to_owned(), "config.yaml".to_owned()];
+        let error = parse_args(&args)
+            .err()
+            .unwrap_or_else(|| panic!("a positional argument must be rejected"));
+        assert!(error.contains("unexpected argument: config.yaml"), "{error}");
+    }
+
+    #[test]
+    fn a_seed_outside_the_configuration_range_is_rejected_rather_than_wrapped() {
+        let args = CliArgs {
+            seed: Some(u64::MAX),
+            ..CliArgs::default()
+        };
+        let error = load_config(&args)
+            .err()
+            .unwrap_or_else(|| panic!("a seed above i64::MAX must be rejected"));
+        assert!(error.contains("seed exceeds"), "{error}");
+
+        let args = CliArgs {
+            seed: Some(i64::MAX as u64),
+            ..CliArgs::default()
+        };
+        let config = load_config(&args)
+            .unwrap_or_else(|error| panic!("the largest representable seed loads: {error}"));
+        assert_eq!(config.optimizer.solver.seed, Some(i64::MAX));
     }
 
     #[test]

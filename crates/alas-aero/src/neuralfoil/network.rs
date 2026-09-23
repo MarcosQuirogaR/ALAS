@@ -166,16 +166,18 @@ pub fn evaluate_sweep(
     }
     // Direct at odd, mirrored at even positions: pushed mirrored-first so
     // the swap above keeps `input` usable without a copy.
-    let outputs = network.evaluate_batch(&inputs);
+    // The batch output is owned, so each pair is corrected in place rather
+    // than copied out first.
+    let mut outputs = network.evaluate_batch(&inputs);
     Ok(conditions
         .iter()
-        .zip(inputs.chunks_exact(2).zip(outputs.chunks_exact(2)))
+        .zip(inputs.chunks_exact(2).zip(outputs.chunks_exact_mut(2)))
         .map(|(conditions, (pair_in, pair_out))| {
-            let mut direct = pair_out[1].clone();
+            let (mirrored, direct) = pair_out.split_at_mut(1);
+            let (mirrored, direct) = (&mut mirrored[0], &mut direct[0]);
             direct[0] -= distribution.squared_mahalanobis_distance(&pair_in[1]) / penalty;
-            let mut mirrored = pair_out[0].clone();
             mirrored[0] -= distribution.squared_mahalanobis_distance(&pair_in[0]) / penalty;
-            fuse(&direct, &restore_mirrored(&mirrored), conditions.reynolds)
+            fuse(direct, &restore_mirrored(mirrored), conditions.reynolds)
         })
         .collect())
 }

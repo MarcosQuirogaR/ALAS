@@ -8,7 +8,6 @@ mod topology;
 #[path = "../optimizer/validation.rs"]
 mod validation;
 
-use std::fmt;
 
 use crate::catalog::{Catalog, Dimensions};
 use crate::{Finding, FindingKind, UavDesign, UavReport};
@@ -422,34 +421,18 @@ pub struct OptimizationProgress {
 }
 
 /// Input or physical search failure.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum OptimizationError {
     /// The requested domain or objective is mathematically invalid.
+    #[error("invalid UAV problem: {0}")]
     InvalidProblem(String),
     /// Every generated design failed or lacked required evidence.
+    #[error("no verified UAV design after {} candidates", .0.evaluated_candidates)]
     NoFeasibleDesign(Box<NoFeasibleDesign>),
     /// A caller requested cancellation between deterministic candidates.
+    #[error("UAV optimization cancelled after {evaluated_candidates} candidates")]
     Cancelled {
         /// Number of candidates fully evaluated before cancellation.
         evaluated_candidates: usize,
     },
-}
-
-impl fmt::Display for OptimizationError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::InvalidProblem(message) => write!(formatter, "invalid UAV problem: {message}"),
-            Self::NoFeasibleDesign(summary) => write!(
-                formatter,
-                "no verified UAV design after {} candidates",
-                summary.evaluated_candidates
-            ),
-            Self::Cancelled {
-                evaluated_candidates,
-            } => write!(
-                formatter,
-                "UAV optimization cancelled after {evaluated_candidates} candidates"
-            ),
-        }
-    }
 }

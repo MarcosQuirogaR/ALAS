@@ -28,7 +28,7 @@
 //!   no behaviour here to reproduce, faithfully or otherwise, since the
 //!   function cannot run to completion.
 //! - `mass_propeller`: unused by the translated wing/fuselage path. Turboprop
-//!   propulsion mass is now owned by [`crate::propulsion_mass`], where engine,
+//!   propulsion mass is owned by [`crate::propulsion_mass`], where engine,
 //!   propeller and installation evidence remain explicit.
 //!
 //! `mass_wing`'s and `mass_wing_basic_structure`'s `return_dict: bool` is
@@ -92,9 +92,12 @@ fn sind(degrees: f64) -> f64 {
 /// Eq. C-10.
 ///
 /// `k_f1` and `k_f2` (upstream's flap-configuration factors) are hardcoded
-/// to `1.0`, their upstream defaults: [`mass_wing`], this function's only
-/// caller, never overrides them.
-#[allow(dead_code)]
+/// to `1.0`, their upstream defaults: [`mass_wing`] never overrides them.
+///
+/// Production callers pass the configured flap area through
+/// [`mass_wing_high_lift_devices_with_area`]; this upstream-shaped entry point
+/// exists for the parity fixture, which reads the area off the wing.
+#[cfg(test)]
 fn mass_wing_high_lift_devices(
     wing: &Wing,
     max_airspeed_for_flaps: f64,
@@ -254,7 +257,7 @@ pub struct WingSecondaryMassBreakdown {
 /// The helper keeps `mass_wing`'s existing total-regression behaviour
 /// unchanged while exposing only the two terms that can be added to a sized
 /// analytical box without adding the empirical basic structure again.
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments)] // one argument per Torenbeek correlation input
 pub fn wing_secondary_mass_breakdown_with_control_surface_area(
     wing: &Wing,
     design_mass_togw: f64,
@@ -308,7 +311,7 @@ pub fn wing_secondary_mass_breakdown_with_control_surface_area(
 /// exhausts the physical non-box wing inventory. Call
 /// [`wing_secondary_mass_with_structure_options`] when the product gear or
 /// strut architecture must be reflected in the spoiler term.
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments)] // one argument per Torenbeek correlation input
 pub fn wing_secondary_mass_with_control_surface_area(
     wing: &Wing,
     design_mass_togw: f64,
@@ -339,7 +342,7 @@ pub fn wing_secondary_mass_with_control_surface_area(
 ///
 /// This is the option-complete counterpart to
 /// [`wing_secondary_mass_with_control_surface_area`].
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments)] // one argument per Torenbeek correlation input
 pub fn wing_secondary_mass_with_structure_options(
     wing: &Wing,
     design_mass_togw: f64,
@@ -415,7 +418,7 @@ pub fn mass_wing(
 /// The ordinary [`mass_wing`] entry point remains reference-compatible. This
 /// product seam is used by the checked mass path, where control-surface
 /// configuration is available and must contribute to the high-lift mass.
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments)] // one argument per Torenbeek correlation input
 pub fn mass_wing_with_control_surface_area(
     wing: &Wing,
     design_mass_togw: f64,

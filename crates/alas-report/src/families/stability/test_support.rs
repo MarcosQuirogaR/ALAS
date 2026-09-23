@@ -6,6 +6,7 @@
 //! real geometry (VLM-solvable, unlike an empty [`Airplane`]) without
 //! rebuilding one from scratch per file.
 
+// Test code: a failed unwrap on a fixture it builds is the assertion failing.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::collections::HashMap;

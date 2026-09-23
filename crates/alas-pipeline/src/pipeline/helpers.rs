@@ -167,21 +167,6 @@ pub(super) fn add_manifest_artifact_if_exists(
     }
 }
 
-#[cfg(test)]
-pub(super) fn optimizer_config(
-    config: &AlasConfig,
-    seed: Option<u64>,
-) -> Result<AlasConfig, String> {
-    let mut effective = config.clone();
-    if let Some(seed) = seed {
-        effective.optimizer.solver.seed = Some(
-            i64::try_from(seed)
-                .map_err(|_| "optimizer seed exceeds the supported integer range")?,
-        );
-    }
-    Ok(effective)
-}
-
 /// The dispatch-time preset barrier of clarified App Features 1.2: a run on
 /// a registered preset must name a registered aircraft, and in preset mode
 /// its locked geometry, initial design point and search bounds must match

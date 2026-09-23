@@ -9,5 +9,9 @@
 //! cruise lift. Keeping the branches in separate output namespaces means a
 //! slow or unavailable external executable cannot corrupt the VLM result.
 
+mod branch_config;
+pub(crate) use branch_config::seeded_config;
+use branch_config::{create_branch_directory, serial_solver_config};
+
 include!("dual_solver_parts/part_01.rs");
 include!("dual_solver_parts/part_02.rs");

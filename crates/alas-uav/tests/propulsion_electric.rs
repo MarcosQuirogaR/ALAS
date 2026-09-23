@@ -339,6 +339,24 @@ fn kv_only_motor_estimates_remain_explicitly_unverified() {
         .assumptions
         .iter()
         .any(|assumption| assumption.contains("ideal-motor")));
+
+    // The optimizer consumes the map, which has no assumption list, so the
+    // substitution must reach it through the evidence text.
+    let map = native_propulsion_map(&catalog, &selected_powertrain(), &[10.0], 1.225)
+        .expect("Kv establishes an explicitly ideal map");
+    assert!(map.evidence.contains("ideal-motor"), "{}", map.evidence);
+    let reviewed = native_propulsion_map(
+        &full_catalog().expect("full catalogue parses"),
+        &selected_powertrain(),
+        &[10.0],
+        1.225,
+    )
+    .expect("reviewed selection produces a native map");
+    assert!(
+        !reviewed.evidence.contains("ideal-motor"),
+        "{}",
+        reviewed.evidence
+    );
 }
 
 #[test]

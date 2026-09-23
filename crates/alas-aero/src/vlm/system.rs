@@ -9,9 +9,9 @@
 //! alone: the operating point enters only through the right-hand side, the
 //! freestream and rotation velocity at each collocation point. A polar sweep
 //! over fifteen angles of attack therefore needs one O(n^3) factorization
-//! and fifteen O(n^2) substitutions, not fifteen factorizations. Before this
-//! split the full analysis at the fine product mesh (800 panels) spent most
-//! of its 4.5 s refactoring the same matrix (2026-09-11).
+//! and fifteen O(n^2) substitutions, not fifteen factorizations; at the fine
+//! product mesh (800 panels) refactoring per point would dominate the full
+//! analysis.
 //!
 //! Assembly is row-parallel: every row of the matrix is one collocation
 //! point's view of every horseshoe, independent of every other row, so the
@@ -41,9 +41,8 @@ const PARALLEL_PANEL_THRESHOLD: usize = 128;
 /// The largest `max |pivot| / min |pivot|` a solve may report and still be
 /// treated as a flow field, see [`VlmError::IllConditionedAic`].
 ///
-/// Measured across the registered presets at every mesh from 1x1 to 10x16
-/// in an internal VLM resolution-sensitivity study (2026-09-11): meshes whose
-/// lift is correct report 2 to 60, and every mesh that returns a negative or
+/// Measured across the registered presets at every mesh from 1x1 to 10x16:
+/// meshes whose lift is correct report 2 to 60, and every mesh that returns a negative or
 /// absurd lift coefficient reports above 1e4: the A320 at a spanwise
 /// resolution of ten and one chordwise panel reports 9.1e7 and a lift
 /// coefficient of -2.1e7. Two orders of margin above the usable range keeps

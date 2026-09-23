@@ -33,7 +33,7 @@ pub use objective::{ConstraintPolicy, MtowSizing, ObjectiveConfig, ObjectiveKind
 pub use plausibility::PlausibilityLimits;
 pub use policy_review::{review_for, reviewed_limits, RelaxationReview, ReviewedLimit};
 pub use relaxation::{ConstraintRelaxation, RelaxableLimit, NON_RELAXABLE_RESIDUAL_IDS};
-pub use solver::{SolverSettings, LEGACY_METHOD_TOKENS};
+pub use solver::{SeedOutOfRange, SolverSettings, LEGACY_METHOD_TOKENS};
 pub use weights::ObjectiveWeights;
 
 use serde::{Deserialize, Serialize};

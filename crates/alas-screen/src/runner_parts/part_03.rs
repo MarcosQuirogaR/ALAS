@@ -68,6 +68,25 @@ mod tests {
         );
     }
 
+    /// Stage 3 reads the shared flag after the scheduler returns to decide
+    /// whether the screening was cancelled, so a run that simply finished
+    /// must leave it clear, including when a cancellation monitor ran.
+    #[test]
+    fn a_completed_run_does_not_report_itself_cancelled() {
+        let cancellation = Arc::new(AtomicBool::new(false));
+        let never = || false;
+        let output = run_bounded_indexed(
+            5,
+            2,
+            cancellation.clone(),
+            Some(&never),
+            |index| index,
+            |_, _| {},
+        );
+        assert_eq!(output.len(), 5);
+        assert!(!cancellation.load(Ordering::Relaxed));
+    }
+
     #[test]
     fn bounded_scheduler_caps_concurrency_and_honors_coordinator_cancellation() {
         let active = Arc::new(AtomicUsize::new(0));

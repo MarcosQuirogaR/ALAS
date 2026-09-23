@@ -139,6 +139,8 @@ wrapper, which ALAS calls as
 Every external tool reports one of a small set of outcomes, shown on its card
 under **Results → External tool evidence**: `not_configured`/absent (no usable
 install found), `incomplete` (a folder exists but a required binary doesn't),
+`invalid_timeout` (the configured timeout is not a finite number of seconds
+greater than zero, so the tool was not started),
 `launch_failed`/`timed_out`/`solver_failed` (process-level problems),
 `output_missing`/`parse_failed` (the result file is gone or malformed), and
 finally `completed_not_comparable` or `completed_comparable`, depending on

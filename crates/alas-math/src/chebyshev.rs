@@ -51,9 +51,8 @@ pub enum ChebyshevError {
     /// rather than an exception.
     #[error("N = {0}, must be > 0")]
     NonPositiveN(i64),
-    /// One point cannot define a differentiation or integration interval.
-    /// The previous formula divided by `N - 1` and returned a NaN node; the
-    /// public constructor now rejects that ambiguous contract explicitly.
+    /// One point cannot define a differentiation or integration interval:
+    /// the node formula divides by `N - 1`, so the only node would be NaN.
     #[error("N = {0}, must be >= 2 to define a spectral interval")]
     TooFewNodes(i64),
     /// The `(N - 1) x (N - 1)` submatrix of `differentiation` could not be
@@ -184,9 +183,11 @@ fn integration_matrix(differentiation: &[Vec<f64>]) -> Result<Vec<Vec<f64>>, Che
 
 /// Inverts a square matrix by Gauss-Jordan elimination with partial pivoting.
 ///
-/// `m` is small (the caller uses it for `N - 1` up to 15) so a hand-rolled
-/// dense inverse is in scope; pulling in a linear-algebra crate for one-off
-/// inverses this size would be a larger dependency than the problem needs.
+/// `m` is small (the caller uses it for `N - 1` up to 15). The crate's
+/// `faer` LU would invert it as well, but a different elimination order
+/// moves the operator in its last bits, and every mission segment integrates
+/// through this matrix, so the Gauss-Jordan sequence the fixture and the
+/// product pins were recorded against stays.
 fn invert(matrix: &[Vec<f64>]) -> Result<Vec<Vec<f64>>, ChebyshevError> {
     let m = matrix.len();
     if m == 0 {

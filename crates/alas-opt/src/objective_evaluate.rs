@@ -383,7 +383,7 @@ impl DesignObjective {
                 &mut self.body_alpha_mesh_correction_deg,
             ) {
                 Ok(alpha) => alpha,
-                Err(()) => {
+                Err(_) => {
                     let cost = w.failure_cost;
                     self.history.record(
                         dv,

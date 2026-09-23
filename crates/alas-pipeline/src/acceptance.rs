@@ -15,11 +15,9 @@
 //! mesh's own error, and the analytic dispatch closure can converge to a
 //! takeoff mass the native mission then cannot fly.
 //!
-//! Before this module existed nothing closed that loop. The optimizer
-//! reported `converged`, the feasibility stage reported the delivered
-//! aircraft INFEASIBLE, and both statements were printed by the same run. The
-//! measured rate was three of four converged application runs
-//! (an internal optimizer independent-verification study, section 2.3).
+//! Without this loop a run can report the search as `converged` while the
+//! feasibility stage reports the delivered aircraft INFEASIBLE, two
+//! contradictory statements from the same run.
 //!
 //! What this module does is deliberately narrow. It re-evaluates a candidate
 //! exactly the way the application's own stages 3, 5 and 6 do (same

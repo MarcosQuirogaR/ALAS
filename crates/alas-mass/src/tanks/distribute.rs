@@ -32,18 +32,17 @@
 //! [`crate::product_stations::analyzed_fuel_centroid`], the feasibility
 //! mass-balance states, and [`FuelTankLayout::fuel_cg_curve`].
 //!
-//! What the previous, burn-priority-only rule cost was measured, not
-//! hypothetical. On the A380-800, whose burn order puts the tailplane trim
-//! tank third of four, a partial load filled the trim tank and the outer wing
-//! to capacity and left the inner feed tanks empty; the fuel centroid sat
-//! 12.75 m further aft than an inner-first fill of the same mass, aft of the
-//! main-gear station, and it was the whole of that aircraft's
-//! `static_margin_floor` and `min_nose_gear_load` exceedance. That inner cell
-//! lumps in Feed 2 and Feed 3 (EASA.A.110 Issue 17, section 3.3), two of the
-//! four tanks the engines are fed from, so the state the old rule produced
-//! was one the aircraft cannot dispatch in. Deferring trim alone removed
-//! that aft-CG failure but still left the inner feed-containing cells empty.
-//! The A380 approximation now gives them positive fuel at partial loads.
+//! Why a burn-priority-only fill is not used: on the A380-800, whose burn
+//! order puts the tailplane trim tank third of four, it fills the trim tank
+//! and the outer wing to capacity at a partial load and leaves the inner feed
+//! tanks empty. The fuel centroid then sits 12.75 m further aft than an
+//! inner-first fill of the same mass, aft of the main-gear station, which is
+//! the whole of that aircraft's `static_margin_floor` and
+//! `min_nose_gear_load` exceedance. That inner cell lumps in Feed 2 and Feed 3
+//! (EASA.A.110 Issue 17, section 3.3), two of the four tanks the engines are
+//! fed from, so that state cannot be dispatched. Deferring trim alone removes
+//! the aft-CG failure but still leaves the inner feed-containing cells empty;
+//! the A380 approximation gives them positive fuel at partial loads.
 
 use alas_geom::aircraft::spacing::linspace;
 

@@ -31,6 +31,9 @@ pub enum VspaeroAnalysisStatus {
     GeometryUnavailable,
     /// The SI setup request was invalid or could not be written.
     SetupRejected,
+    /// The configured timeout was not a finite number of seconds greater than
+    /// zero; the solver was not launched.
+    InvalidTimeout,
     /// The native executable could not be launched.
     LaunchFailed,
     /// The native process exceeded its deadline.
@@ -54,6 +57,7 @@ impl VspaeroAnalysisStatus {
             Self::NotConfigured => "not_configured",
             Self::GeometryUnavailable => "geometry_unavailable",
             Self::SetupRejected => "setup_rejected",
+            Self::InvalidTimeout => "invalid_timeout",
             Self::LaunchFailed => "launch_failed",
             Self::TimedOut => "timed_out",
             Self::SolverFailed => "solver_failed",
@@ -204,6 +208,11 @@ pub fn run_vspaero_analysis(
     match process.status {
         VspaeroProcessStatus::InputMissing => {
             result.status = VspaeroAnalysisStatus::GeometryUnavailable;
+            result.error = process.error;
+            return result;
+        }
+        VspaeroProcessStatus::InvalidTimeout => {
+            result.status = VspaeroAnalysisStatus::InvalidTimeout;
             result.error = process.error;
             return result;
         }

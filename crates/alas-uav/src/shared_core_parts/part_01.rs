@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-use std::fmt;
 
 use alas_aero::operating_point::OperatingPoint;
 use alas_aero::vlm::{self, VlmResult};
@@ -89,9 +88,17 @@ pub struct SharedCoreVerification {
 }
 
 /// Why the geometry conversion or shared-core solve did not complete.
-#[derive(Debug, Clone, PartialEq)]
+// The wrapped geometry and VLM errors are formatted into the message rather
+// than exposed as `source`, so a caller printing the chain does not repeat them.
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum SharedCoreFailure {
     /// The requested product path lacks the topology-specific physical model.
+    #[error(
+        "{} is unavailable for {}: {}",
+        .topology.label(),
+        .path.label(),
+        .reason.description()
+    )]
     UnsupportedTopology {
         /// Selected fixed-wing arrangement.
         topology: UavTopology,
@@ -101,40 +108,18 @@ pub enum SharedCoreFailure {
         reason: TopologyUnavailableReason,
     },
     /// An explicit input is invalid or an airfoil name cannot be resolved.
+    #[error("{0}")]
     InvalidInput(String),
     /// The fuselage primitive rejected a generated cross-section.
+    #[error("UAV geometry conversion failed: {0}")]
     Geometry(FuselageXSecError),
     /// The production VLM solver rejected or could not solve the mesh.
+    #[error("shared VLM evaluation failed: {0}")]
     Aerodynamics(vlm::VlmError),
     /// The accepted optimizer result unexpectedly lacks mass or CG evidence.
+    #[error("accepted UAV has no verified {0}")]
     MissingAcceptedEvidence(&'static str),
 }
-
-impl fmt::Display for SharedCoreFailure {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::UnsupportedTopology {
-                topology,
-                path,
-                reason,
-            } => write!(
-                formatter,
-                "{} is unavailable for {}: {}",
-                topology.label(),
-                path.label(),
-                reason.description()
-            ),
-            Self::InvalidInput(message) => formatter.write_str(message),
-            Self::Geometry(error) => write!(formatter, "UAV geometry conversion failed: {error}"),
-            Self::Aerodynamics(error) => write!(formatter, "shared VLM evaluation failed: {error}"),
-            Self::MissingAcceptedEvidence(field) => {
-                write!(formatter, "accepted UAV has no verified {field}")
-            }
-        }
-    }
-}
-
-impl std::error::Error for SharedCoreFailure {}
 
 impl From<FuselageXSecError> for SharedCoreFailure {
     fn from(error: FuselageXSecError) -> Self {

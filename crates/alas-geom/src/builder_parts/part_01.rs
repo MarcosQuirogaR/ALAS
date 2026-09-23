@@ -6,6 +6,7 @@ use alas_config::{DesignVector, GeometryConfig, TransportPlanform};
 use crate::aircraft::airfoil::Airfoil;
 use crate::aircraft::airplane::Airplane;
 use crate::aircraft::fuselage::{Fuselage, FuselageXSec, DEFAULT_SHAPE};
+use crate::aircraft::spacing::linspace;
 use crate::aircraft::wing::{Wing, WingXSec};
 use crate::airfoil_library::{build_section, AirfoilLibrary};
 

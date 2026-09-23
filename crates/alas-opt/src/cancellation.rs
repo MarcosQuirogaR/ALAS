@@ -21,11 +21,11 @@
 //!   when the flag was read: one coupled evaluation, one screening block, or
 //!   one supervised external-solver call.
 //!
-//! The 2026-09-22 A320-200 `quick_draft` smoke reported 28.76 s of drain with
-//! no way to say which of the two it was, or which phase it was spent in. The
-//! instrumentation here answers that: every phase entry, the phase and
-//! evaluation index in flight when the request arrived, the first observation,
-//! the return, and the per-evaluation cost that sets the bound.
+//! A drain time on its own cannot say which of the two it was, or which phase
+//! it was spent in. The instrumentation here answers that: every phase entry,
+//! the phase and evaluation index in flight when the request arrived, the
+//! first observation, the return, and the per-evaluation cost that sets the
+//! bound.
 //!
 //! # How it attaches without changing any signature
 //!
@@ -455,7 +455,7 @@ impl CancelWatch {
         &self.flag
     }
 
-    /// Seconds from this watch's origin, monotonic.
+    /// Nanoseconds from this watch's origin, monotonic.
     fn now_ns(&self) -> u64 {
         u64::try_from(self.origin.elapsed().as_nanos()).unwrap_or(u64::MAX - 1)
     }

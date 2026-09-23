@@ -68,6 +68,22 @@ fn an_output_run_writes_a_supported_openvsp_script_without_claiming_runtime_succ
 
     fs::write(&export.vsp3_path, b"stale result")
         .unwrap_or_else(|error| panic!("write stale fixture: {error}"));
+    // An unusable timeout is refused before the stale project is touched or
+    // anything is launched, and is not reported as a runtime rejection.
+    for timeout_seconds in [f64::NAN, f64::INFINITY, 0.0, -1.0] {
+        let refused = materialize_openvsp_project(
+            export.clone(),
+            &output.join("missing-vspscript.exe"),
+            timeout_seconds,
+        );
+        assert_eq!(refused.status, OpenVspExportStatus::InvalidTimeout);
+        assert!(refused
+            .runtime_error
+            .as_deref()
+            .is_some_and(|error| error.starts_with("OpenVSP timeout must be")));
+        assert!(refused.vsp3_path.exists(), "{timeout_seconds}");
+    }
+
     let attempted = materialize_openvsp_project(export, &output.join("missing-vspscript.exe"), 1.0);
     assert_eq!(attempted.status, OpenVspExportStatus::RuntimeLaunchFailed);
     assert!(attempted

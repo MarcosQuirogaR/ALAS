@@ -5,18 +5,17 @@
 //! registered preset is priced and once the way a configuration built without
 //! a preset is priced, component by component.
 //!
-//! This exists because the two used to disagree. `declared_cabin_equipment_method`
-//! was reached only from the preset loader, so a configuration built from
-//! `FlopsTransportConfig::working_default()` got the published FLOPS cabin
-//! equations and a full unit-load-device charge, while every registered preset
-//! above the LTH domain threshold got the LTH relations and no charge. The
-//! identical 350-seat, 358.7 t aircraft came out **16,515 kg (+10.0 %)**
-//! heavier as a preset than as a clean sheet, and any objective that compares
-//! a preset-derived design against a clean-sheet one was comparing two
-//! accounting systems rather than two aircraft.
+//! The two paths can disagree silently. If `declared_cabin_equipment_method`
+//! were reached only from the preset loader, a configuration built from
+//! `FlopsTransportConfig::working_default()` would get the published FLOPS
+//! cabin equations and a full unit-load-device charge, while every registered
+//! preset above the LTH domain threshold would get the LTH relations and no
+//! charge. The identical 350-seat, 358.7 t aircraft would come out
+//! **16,515 kg (+10.0 %)** heavier as a preset than as a clean sheet, and any
+//! objective comparing a preset-derived design against a clean-sheet one
+//! would compare two accounting systems rather than two aircraft.
 //!
-//! What this probe reports is the residual after the two paths were put on one
-//! rule. A nonzero residual here is a finding, not a tolerance: the two modes
+//! What this probe reports is the residual with the two paths on one rule. A nonzero residual here is a finding, not a tolerance: the two modes
 //! describe the same airframe.
 //!
 //! Usage:
@@ -55,8 +54,8 @@ fn components(build: &FlopsMassBuildup) -> Vec<(&'static str, f64)> {
         ("unusable_fuel", items.unusable_fuel_kg),
         ("engine_oil", items.engine_oil_kg),
         // Reported, and outside operating empty mass on both sides. It is
-        // listed here because it is exactly the quantity that used to move
-        // silently with the method selection.
+        // listed here because it is exactly the quantity that would move
+        // silently with a method selection.
         ("cargo_containers_outside_oew", items.cargo_containers_kg),
     ]
 }
@@ -116,7 +115,7 @@ fn as_clean_sheet(config: &AlasConfig) -> AlasConfig {
 ///
 /// Reported because a residual of zero only means something next to the
 /// magnitude it would have had: on the AVE study configuration the two paths
-/// used to differ by 16,515 kg, and a reader needs to see that the parity
+/// can differ by 16,515 kg, and a reader needs to see that the parity
 /// above is a real agreement rather than a quantity that was always small.
 fn method_selection_gap_kg(config: &AlasConfig) -> Option<f64> {
     use alas_config::CabinEquipmentMethod;
@@ -256,7 +255,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let document = json!({
         "schema_version": "alas-mass/cross-mode-cabin-method-parity-v1",
         "question": "does the same aircraft get the same operating empty mass through the preset path and through the no-preset path",
-        "matched": "geometry, design vector, requirements, cabin, control surfaces, landing gear, engines, haul class and cargo-hold loading are identical on both sides; only the cabin-equipment method, the one field the two paths used to derive differently, is taken from FlopsTransportConfig::working_default() on the clean-sheet side",
+        "matched": "geometry, design vector, requirements, cabin, control surfaces, landing gear, engines, haul class and cargo-hold loading are identical on both sides; only the cabin-equipment method, the one field the two paths could derive differently, is taken from FlopsTransportConfig::working_default() on the clean-sheet side",
         "method_selection_gap_kg": "operating empty mass under the LTH relations minus operating empty mass under the published FLOPS equations, on this aircraft, as the magnitude the parity above is a statement about",
         "physical_validation": "not_performed",
         "worst_operating_empty_mass_residual_kg": worst_residual_kg,

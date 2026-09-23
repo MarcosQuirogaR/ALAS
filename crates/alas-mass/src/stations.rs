@@ -625,15 +625,12 @@ fn wing_root_above_fuselage_crown(main_wing: &Wing, fuselage: &Fuselage) -> Opti
 /// so a rejected explicit declaration stays distinguishable from every valid
 /// outcome in the reported station `method` (gear-integration-review.md F5).
 ///
-/// Physical agreement on missing counts (`None`):
-/// When per-strut bogie wheel counts are not explicitly provided on a multi-strut
-/// aircraft with distinct stations, both `alas_config` (in `resolved_station_positions`)
-/// and `alas_mass` (here) agree on the declared conceptual approximation: an unweighted
-/// arithmetic mean across all installed struts (`sum(x_i) / N`, equal strut load and mass split).
-/// This eliminates the latent 1.635 m force/moment divergence between the mass model
-/// (previously at the primary station 33.58 m) and the config/performance models (at 35.215 m)
-/// for multi-strut layouts (e.g. A380/A340), while keeping single-strut and uniform twin-gear
-/// layouts invariant at their physical axle station.
+/// Without per-strut bogie wheel counts on a multi-strut aircraft, both this
+/// crate and `alas_config::LandingGearConfig::resolved_station_positions` use
+/// the unweighted strut mean (`sum(x_i) / N`, equal strut load); taking the
+/// primary station instead would put the mass model 1.635 m forward of the
+/// performance model on a multi-strut layout (A380/A340). Single-strut and
+/// uniform twin-gear layouts sit at their axle station either way.
 ///
 /// When explicit counts are provided:
 /// - Valid standard counts in `{2, 4, 6}` yield the wheel-count-weighted centroid.
@@ -1057,7 +1054,7 @@ mod tests {
             assert!(payload.extent_m[0] <= cabin_len + 1.0e-9);
             assert!(payload.extent_m[0] > 0.0);
 
-            // The retired forward-bulkhead placement, for the comparison.
+            // The forward-bulkhead placement, for the comparison.
             let nose_first = cabin_start + 0.5 * payload.extent_m[0];
             if fills_the_cabin {
                 assert!(
