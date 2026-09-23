@@ -122,8 +122,16 @@ fn cabin_synchronized_from_layout(
         match name {
             "First" => first += seats,
             "Business" => business += seats,
-            // FLOPS has three cabin classes; premium economy is priced as
-            // tourist, the class its seat and service equations fit.
+            // FLOPS (NASA/TM-2017-219627) has three cabin classes and no
+            // premium-economy term; a "Premium" layout row is priced as
+            // tourist here, the closest published class, rather than
+            // interpolated or given its own unsourced equation. This
+            // understates furnishings (NPF/NPB/NPT eq. 110: 44 lb tourist
+            // vs 78 lb business) and passenger service (eq. 124: 2.529 lb
+            // vs 3.846 lb) by roughly (78-44)+(3.846-2.529) lb, about 20 kg,
+            // per premium seat -- order 0.5 t on a 24-seat premium cabin.
+            // Documented rather than corrected: physics review v1.2,
+            // finding M4.
             _ => tourist += seats,
         }
     }
@@ -160,6 +168,24 @@ fn with_flops_counts(
     synchronized_model
         .flops_transport
         .tourist_class_passenger_count = Some(to_count(counts.tourist));
+    // The module doc promises the cabin-crew term follows the seated cabin
+    // along with furnishings, service and air-conditioning; before this fix
+    // `flight_attendant_count` was declared once at preset resolution and
+    // never revisited here, so a synced cabin that grew (or shrank) kept its
+    // stale crew count. Raise it to the regulatory operational minimum for
+    // the now-seated headcount (14 CFR 121.391(a) / EASA ORO.CC.100: one
+    // cabin crew member per 50 installed passenger seats, rounded up),
+    // without ever lowering a larger declared count: a preset may crew above
+    // the floor (the A320-200 case keeps 4 for 150 seats, above the 3 the
+    // floor alone would give), and synchronization must not silently shed
+    // that margin. Physics review v1.2, finding M3.
+    let regulatory_minimum = to_count(counts.total()).div_ceil(50);
+    let declared = synchronized_model
+        .flops_transport
+        .flight_attendant_count
+        .unwrap_or(0);
+    synchronized_model.flops_transport.flight_attendant_count =
+        Some(declared.max(regulatory_minimum));
     synchronized_model
 }
 

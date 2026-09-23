@@ -4,21 +4,25 @@
 //! Turning a resolved [`FuelTankLayout`] into a fuel load, and a fuel load
 //! into ledger items.
 //!
-//! Every quantity here is downstream of the same two facts the layout
-//! already carries: how much a tank holds, and in what order it burns.
-//! Loading fills the tanks burned last first, so the aircraft always has the
-//! outboard-most fuel it would keep longest already on board; burning walks
-//! the same order forward.
+//! Loading uses tank capacities and arrangement. The A380 arrangement has an
+//! approximate feed-containing-cell and outer-cell rule; other layouts fill tanks burned
+//! last first, with trim last. Burning follows burn priorities independently.
 //!
 //! # The fill order is an assumption, not a source
 //!
-//! Only the *burn* order is sourced. The fill order above is this module's own
-//! rule, and the fuel-tank research the layouts are built from (an internal
-//! study, 2026-09-05, section 9.4) states the opposite posture for it:
-//! refuelling fill order "was not retrieved
-//! for any of the eight and should not be asserted", because it lives in
-//! Weight and Balance Manuals that are not public. Section 10 keeps it as an
-//! open gap for every registered aircraft.
+//! Only the *burn* order is sourced for every registered aircraft. Exact
+//! refuelling sequences were not retrieved in the internal fuel-tank study
+//! (2026-09-05, sections 9.4 and 10). The general reverse-burn fill and
+//! trim-last exception are therefore modelling assumptions. The A380
+//! exception uses inner and mid model cells that each contain feed and
+//! nonfeed tank volume (EASA.A.110 Issue 17, section 3.3) and the outer-cell half-capacity preference (Airbus Training
+//! Center A380 ATA 28, p.0012). Airbus Flight Deck and Systems Briefing
+//! Issue 2, section 10.10 describes automatic ground refuelling chosen from
+//! zero-fuel weight and CG for a target takeoff CG near 39.5% MAC. This API
+//! receives neither input and cannot target that CG or reproduce FQMS. The
+//! approximation supplies the feed-containing model groups at positive
+//! partial loads. It cannot establish fuel in each real feed tank, a
+//! certified dispatch minimum, or dispatchability.
 //!
 //! [`crate::wing_reconciliation::declared_wing_fuel_case`] faces the same
 //! missing document on the structural side and takes the other branch: it keeps
@@ -28,30 +32,127 @@
 //! [`crate::product_stations::analyzed_fuel_centroid`], the feasibility
 //! mass-balance states, and [`FuelTankLayout::fuel_cg_curve`].
 //!
-//! What the rule costs is measured, not hypothetical. On the A380-800, whose
-//! burn order puts the tailplane trim tank third of four, a partial load fills
-//! the trim tank and the outer wing to capacity and leaves the inner feed tanks
-//! empty; the fuel centroid then sits 12.75 m further aft than an inner-first
-//! fill of the same mass, aft of the main-gear station, and it is the whole of
-//! that aircraft's `static_margin_floor` and `min_nose_gear_load` exceedance.
-//! That inner cell lumps in Feed 2 and Feed 3 (EASA.A.110 Issue 17, section
-//! 3.3), two of the four tanks the engines are fed from, so the state the rule
-//! produces is one the aircraft cannot dispatch in - which rules this rule out
-//! without supplying the one that replaces it.
-//! `tests::a_partial_a380_load_fills_the_trim_and_outer_tanks_and_moves_the_fuel_aft`
-//! pins that consequence so the rule cannot be changed without reading it.
-//!
-//! Choosing a different rule needs the missing document, not a better guess:
-//! every candidate sequence moves the A380-800 take-off centre of gravity by
-//! about 28 times the margin any one constraint is short by, so fitting one to
-//! a constraint would be calibration.
+//! What the previous, burn-priority-only rule cost was measured, not
+//! hypothetical. On the A380-800, whose burn order puts the tailplane trim
+//! tank third of four, a partial load filled the trim tank and the outer wing
+//! to capacity and left the inner feed tanks empty; the fuel centroid sat
+//! 12.75 m further aft than an inner-first fill of the same mass, aft of the
+//! main-gear station, and it was the whole of that aircraft's
+//! `static_margin_floor` and `min_nose_gear_load` exceedance. That inner cell
+//! lumps in Feed 2 and Feed 3 (EASA.A.110 Issue 17, section 3.3), two of the
+//! four tanks the engines are fed from, so the state the old rule produced
+//! was one the aircraft cannot dispatch in. Deferring trim alone removed
+//! that aft-CG failure but still left the inner feed-containing cells empty.
+//! The A380 approximation now gives them positive fuel at partial loads.
 
 use alas_geom::aircraft::spacing::linspace;
 
 use crate::inertia::rectangular_prism;
 use crate::ledger::{MassGroup, MassItem, MassMethod, MassProperties, MassRole};
 
-use super::types::{FuelCgPoint, FuelTank, FuelTankLayout, TankLayoutError};
+use super::types::{FuelCgPoint, FuelTank, FuelTankLayout, TankKind, TankLayoutError, TankSide};
+
+/// Match the registered A380 tank arrangement. Resolved layouts carry no
+/// preset name, and candidate tank capacities may scale with wing geometry.
+/// A custom layout with the same seven-cell topology and burn priorities will
+/// also receive this rule; callers must not interpret it as aircraft identity.
+fn is_a380_arrangement(tanks: &[FuelTank]) -> bool {
+    if tanks.len() != 7 {
+        return false;
+    }
+    let pair = |kind, priority| {
+        tanks.iter().filter(|tank| tank.kind == kind).count() == 2
+            && [TankSide::Left, TankSide::Right].into_iter().all(|side| {
+                tanks.iter().any(|tank| {
+                    tank.kind == kind && tank.side == side && tank.burn_priority == priority
+                })
+            })
+    };
+    pair(TankKind::WingInner, 1)
+        && pair(TankKind::WingMid, 2)
+        && pair(TankKind::WingOuter, 4)
+        && tanks.iter().any(|tank| {
+            tank.kind == TankKind::Trim
+                && tank.side == TankSide::Centerline
+                && tank.burn_priority == 3
+        })
+}
+
+/// Add the same fraction of each selected cell's remaining capacity.
+fn fill_to_fraction(
+    tanks: &[FuelTank],
+    fills_kg: &mut [f64],
+    remaining_kg: &mut f64,
+    selected: impl Fn(TankKind) -> bool,
+    limit: f64,
+) {
+    let indices: Vec<usize> = tanks
+        .iter()
+        .enumerate()
+        .filter_map(|(index, tank)| selected(tank.kind).then_some(index))
+        .collect();
+    let space_kg: f64 = indices
+        .iter()
+        .map(|&index| (limit * tanks[index].usable_capacity_kg - fills_kg[index]).max(0.0))
+        .sum();
+    if space_kg <= 0.0 || *remaining_kg <= 0.0 {
+        return;
+    }
+    let added_kg = remaining_kg.min(space_kg);
+    for index in indices {
+        let space = (limit * tanks[index].usable_capacity_kg - fills_kg[index]).max(0.0);
+        fills_kg[index] += added_kg * space / space_kg;
+    }
+    *remaining_kg -= added_kg;
+}
+
+/// Approximate A380 ground load; no ZFW or zero-fuel CG reaches this API.
+fn distribute_a380(tanks: &[FuelTank], usable_fuel_kg: f64) -> FuelState {
+    let mut fills_kg = vec![0.0; tanks.len()];
+    let mut remaining_kg = usable_fuel_kg;
+    // The two inner and two mid cells include feed and nonfeed tank volume.
+    // Positive model-cell fuel cannot prove positive fuel in each actual
+    // feed tank or aircraft dispatchability. Fill all
+    // wing cells together first; then hold the outers at half capacity while
+    // the inner/mid and trim cells have space (Airbus Training Center A380
+    // ATA 28 p.0012: outer tanks <=50% whenever possible). The 39.5% MAC
+    // refuelling target requires ZFW/CG and is not solved here. These stages
+    // are an engineering approximation, not FQMS or a dispatch minimum.
+    fill_to_fraction(
+        tanks,
+        &mut fills_kg,
+        &mut remaining_kg,
+        |kind| {
+            matches!(
+                kind,
+                TankKind::WingInner | TankKind::WingMid | TankKind::WingOuter
+            )
+        },
+        0.5,
+    );
+    fill_to_fraction(
+        tanks,
+        &mut fills_kg,
+        &mut remaining_kg,
+        |kind| matches!(kind, TankKind::WingInner | TankKind::WingMid),
+        1.0,
+    );
+    fill_to_fraction(
+        tanks,
+        &mut fills_kg,
+        &mut remaining_kg,
+        |kind| kind == TankKind::Trim,
+        1.0,
+    );
+    fill_to_fraction(
+        tanks,
+        &mut fills_kg,
+        &mut remaining_kg,
+        |kind| kind == TankKind::WingOuter,
+        1.0,
+    );
+    FuelState { fills_kg }
+}
 
 /// A prism-shaped [`MassItem`] for `mass_kg` of fuel resting in `tank`.
 ///
@@ -83,8 +184,9 @@ fn fuel_prism_item(tank: &FuelTank, mass_kg: f64, role: MassRole, id: String) ->
 }
 
 impl FuelTankLayout {
-    /// Fill every tank with `usable_fuel_kg`, tanks burned last filled
-    /// first.
+    /// Allocate `usable_fuel_kg` to tanks. The A380 arrangement follows the
+    /// approximate rule above; other layouts fill tanks burned last first,
+    /// except trim, which fills last.
     ///
     /// # Errors
     ///
@@ -103,11 +205,21 @@ impl FuelTankLayout {
                 excess_kg: usable_fuel_kg - capacity_kg,
             });
         }
+        if is_a380_arrangement(&self.tanks) {
+            return Ok(distribute_a380(&self.tanks, usable_fuel_kg));
+        }
         let mut fill_order: Vec<usize> = (0..self.tanks.len()).collect();
+        // General-layout assumption: defer trim until the other cells are
+        // full. This is not a sourced ground/taxi CG limit or a claim about
+        // any registered aircraft's actual refuelling sequence.
         fill_order.sort_by(|&a, &b| {
-            self.tanks[b]
-                .burn_priority
-                .cmp(&self.tanks[a].burn_priority)
+            let a_trim = self.tanks[a].kind == TankKind::Trim;
+            let b_trim = self.tanks[b].kind == TankKind::Trim;
+            a_trim.cmp(&b_trim).then_with(|| {
+                self.tanks[b]
+                    .burn_priority
+                    .cmp(&self.tanks[a].burn_priority)
+            })
         });
         let mut fills_kg = vec![0.0; self.tanks.len()];
         let mut remaining_kg = usable_fuel_kg;

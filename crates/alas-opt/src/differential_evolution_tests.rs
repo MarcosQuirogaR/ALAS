@@ -604,17 +604,19 @@ fn a_cancelled_de_run_reports_the_analyses_it_executed_and_not_its_budget() {
     let population = baseline.history.n_evaluations();
 
     let max_iterations = 40;
-    let mut optimizer = DesignOptimizer::new(cancellable_de_config(max_iterations));
+    let mut config = cancellable_de_config(max_iterations);
+    // One worker makes the kernel's evaluation block one candidate, so the
+    // bound asserted below does not depend on the machine's core count.
+    config.optimizer.solver.workers = 1;
+    let mut optimizer = DesignOptimizer::new(config);
     let cancel = AtomicBool::new(false);
     let mut calls = 0usize;
     let mut evaluator = |design: &DesignVector| {
         calls += 1;
         // Mid-batch, in the second generation: the L-SHADE kernel checks the
-        // flag once per generation, before that generation's batch is
-        // dispatched, not between the candidates inside it (see
-        // `search_methods::lshade_de`'s cancellation contract), so this
-        // request is observed at the *third* generation's boundary and the
-        // second generation still completes in full.
+        // flag before every evaluation block (see `search_methods::lshade_de`'s
+        // cancellation contract), so the rest of the second generation is
+        // never dispatched and it does not count as completed.
         if calls == population * 2 + population / 2 {
             cancel.store(true, Ordering::Relaxed);
         }
@@ -651,17 +653,16 @@ fn a_cancelled_de_run_reports_the_analyses_it_executed_and_not_its_budget() {
         "a cancelled run may not report its full {max_iterations}-generation budget: {}",
         diagnostics.poll_iterations
     );
-    // The request landed mid-batch in generation two, and a batch is never
-    // cut short (see the comment on `evaluator` above), so at least the
-    // first two generations must have completed in full before the flag was
-    // observed at the third generation's boundary. L-SHADE's own population
-    // size reduction means the analysis count is no longer a fixed multiple
-    // of the generation count, so the two are asserted independently rather
-    // than one being re-derived from the other.
+    // The request landed mid-batch in generation two and was observed at the
+    // next one-candidate block, so only the first generation completed.
+    assert_eq!(
+        diagnostics.poll_iterations, 1,
+        "the generation the request landed in must not count as completed"
+    );
     assert!(
-        diagnostics.poll_iterations >= 2,
-        "two full generations must have completed before the flag was observed: {}",
-        diagnostics.poll_iterations
+        diagnostics.analysis_evaluations < population * 3,
+        "the rest of generation two must not have been analysed: {}",
+        diagnostics.analysis_evaluations
     );
 }
 

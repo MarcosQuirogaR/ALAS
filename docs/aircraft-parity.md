@@ -23,8 +23,8 @@ node tools/aircraft_parity.cjs
 
 The default outputs (see the `outputDir`/`reportPath` defaults in [tools/aircraft_parity.cjs](../tools/aircraft_parity.cjs), a git-ignored local directory) are:
 
-- `AIRCRAFT_PARITY.json` — machine-readable rows, source metadata, hashes and status summary.
-- `AIRCRAFT_PARITY.csv` — flat review table.
+- `AIRCRAFT_PARITY.json`: machine-readable rows, source metadata, hashes and status summary.
+- `AIRCRAFT_PARITY.csv`: flat review table.
 - a self-contained aircraft-parity HTML report with links to sources and regulatory implications.
 - an A220 five-state CG/gear replay HTML report with phase applicability and source/model findings.
 
@@ -43,6 +43,74 @@ node tools/aircraft_parity.cjs `
 The optional [all_preset_cg_closeout example](../crates/alas-acceptance/examples/all_preset_cg_closeout.rs) can export model/public MAC-frame diagnostics for the seven presets. It is useful for investigation, but the parity harness intentionally leaves CG rows unsupported until the model export carries a normalized CG envelope, cruise CG, datum, LEMAC, MAC, weight case and fuel/cabin condition. A report that only has an aggregate mass or a percent-MAC number without its frame is not a CG parity result.
 
 ## Current run and interpretation
+
+### 2026-09-23 regenerated run (release 1.2 candidate)
+
+`model_reference_dump` was regenerated from the integrated release branch (release profile, after the
+1.2 physics review's wave-drag sweep/thickness and unusable-fuel corrections) and the harness was
+rerun against the unchanged contract:
+
+- `MODEL.json` SHA-256 `50280D42B506981AEB74B28752682107BCC3328699287678D4FF99C478398F4F`
+- contract SHA-256 `DD043B3324978AAE18ACF58BF2E44CC40FEFA7325A4E3D87E24728C4074B68ED`
+- result JSON SHA-256 `A3D778BE67F2F13BBA50595874705A75234330B655ECEC84F78A6D9AC8A0D0EC`
+- harness self-test `node --test tools/aircraft_parity.test.cjs`: 18/18 pass
+
+| Status | Rows |
+| --- | ---: |
+| within_tolerance | 68 |
+| out_of_tolerance | 6 |
+| diagnostic | 70 |
+| unsupported | 21 |
+| evidence_gap | 76 |
+| source_conflict | 0 |
+
+**Reference inputs are now separated from model outputs.** The harness marks a scored row with
+`model_provenance_note` when the model value is a registered input rather than an analysis result:
+source-scaled gear stations, published fuel capacity, and (new in this run) declared preset inputs
+exported straight from the design vector, requirements or gear-layout definition (span, fuselage
+length, engine spanwise position, MTOW, cruise Mach, gear topology counts). The summary reports
+`by_provenance` for the 74 scored rows:
+
+| Scored rows | within_tolerance | out_of_tolerance |
+| --- | ---: | ---: |
+| Registered reference inputs (data retention, not prediction) | 64 | 2 |
+| Independent model outputs | 4 | 4 |
+
+The 68 `within_tolerance` rows therefore do **not** mean 68 validated predictions. Only eight
+scored rows are model outputs:
+
+| Preset | Quantity | Model | Source | Result |
+| --- | --- | ---: | ---: | --- |
+| A320-200 | `geometry.mac_m` | 4.1934 m | 4.1935 m | within |
+| A380-800 | `geometry.wing_area_m2` | 845.0 m2 | 845 m2 | within |
+| ATR72-600 | `geometry.wing_area_m2` | 61.0 m2 | 61 m2 | within |
+| DC-10 | `geometry.wing_area_m2` | 338.84 m2 | 338.8 m2 | within |
+| A340-300 | `geometry.mac_m` | 7.3466 m | 7.27 m | out, +1.05 % |
+| B787-9 | `geometry.mac_m` | 7.5478 m | 6.2713 m | out, +20.4 % |
+| ATR72-600 | `mass.oew_kg` | 15,244 kg | 13,450 kg | out, +13.3 % |
+| ATR72-600 | `mass.max_payload_kg` | 5,679 kg | 7,550 kg | out, -24.8 % |
+
+Wing area is a computed projected planform area, but each preset planform was built from the same
+published geometry, so these three matches are close to calibration rather than prediction. MAC is
+integrated from that planform; the A340-300 and B787-9 misses remain reference-geometry questions
+(see below), not aerodynamic or mass tuning targets. The ATR72-600 OEW moved from -10.7 % (2026-09-09)
+to +13.3 % after the integrated mass and fuel corrections; with the MTOW fixed, the payload
+shortfall follows from it. It is a genuine model gap.
+
+The two out-of-tolerance reference inputs are data-entry discrepancies, not model errors: the A320-200
+usable fuel literal (19,334 kg against 19,004 kg, the circularity case described below) and the DC-10
+declared fuselage length (55.55 m against the EASA IM.A.210 DC-10-30 value of 55.35 m).
+
+The corrections left every scored status unchanged; they move the aerodynamic diagnostics. Cruise
+L/D is the clearest remaining model gap and is not scored: the narrowbodies sit a few percent below
+their estimated references (A320-200 17.5 against 18.1, A220-300 17.6 against 18.5), the widebodies
+far below (A340-300 17.5 against 20.0, A380-800 14.5 against 20.1, B787-9 14.6 against 20.8). These
+references are estimates or secondary sources, so the rows stay diagnostic, but the widebody gap
+is too large to attribute to them and no coefficient was tuned to close it.
+
+None of these rows is certification, weighed-aircraft or flight-test evidence.
+
+### 2026-09-09 run
 
 The 2026-09-09 release-profile run against the freshly regenerated `MODEL.json` contains 241 rows. The fresh model export SHA-256 is `F40A20F265A4654C8D1EADC53A47CE101D8EB87F9442D6023D52F5501D6071B4` (corrected 2026-09-22; the previously published string here was missing its trailing hex digit); the parity result hash is `1DA8F0F84AB3EDE2D31989431469C57D1B471685EAFF1EF268C59887F41E26DF`. The pre-A220-station export is retained locally (outside this checkout) as `MODEL-pre-a220-gear-20260909.json` with SHA-256 `1AF549DC73408497224314DA65FBA75CD3652D1E5720182A5AD4555E80CCE996`, and the pre-station-anchor export remains `MODEL-pre-gear-20260909.json` with SHA-256 `08CF196BBE3CC381C7A7805ED8B7E0CA1F06E22B70D5C8F9A31DE0442AA68760`.
 
@@ -86,12 +154,12 @@ The three newly-exposed misses:
 
 - **ATR72-600 `mass.oew_kg`**: model 12,014.6 kg vs. source 13,450 kg, **−10.67%** (absolute error
   1,435.4 kg, inside the 2,000 kg absolute bound but far outside the 3% relative bound). This row
-  was suspected of scoring `within_tolerance` only because of the OR-tolerance defect — confirmed
+  was suspected of scoring `within_tolerance` only because of the OR-tolerance defect; confirmed
   here by an actual run, not a static read.
 - **A320-200 `mass.usable_fuel_kg`**: model 19,334 kg vs. source 19,004 kg, **+1.74%** (absolute
   error 330 kg, inside the 500 kg absolute bound but outside the 0.5% relative bound).
 - **DC-10 `geometry.fuselage_length_m`**: model 55.55 m vs. the EASA IM.A.210 (Issue 2) DC-10-30
-  anchor of 55.35 m, a **0.20 m** absolute miss — outside the 0.05 m absolute bound declared for
+  anchor of 55.35 m, a **0.20 m** absolute miss, outside the 0.05 m absolute bound declared for
   rounding, though inside the 0.5% relative bound. This is the mirror case: here the *relative*
   bound was the loose one masking a real absolute discrepancy. No production geometry was changed
   to investigate or close this; it is reported as found.
@@ -159,7 +227,7 @@ for ATR72/B787/DC-10, which use an independently modeled nose-relative frame ins
 existing model fields (it invents nothing) and attaches a `model_provenance_note` to any row whose
 model-side quantity is a station/wheelbase/track coordinate derived from a source-scaled drawing
 frame, or a fuel-capacity figure that is the registered published capacity rather than a predicted
-tank volume — explicitly excluding plain topology counts (`gear.n_nlg_wheels`,
+tank volume, explicitly excluding plain topology counts (`gear.n_nlg_wheels`,
 `gear.n_mlg_struts`, wheels-per-strut, total wheels), which are transcribed integers, not scaled
 coordinates. In the post-fix rerun, **33 of the 74 eligible rows (45%)** carry this note: 15 gear
 station/wheelbase/track rows across the four Airbus presets and 18 fuel-capacity rows across all
@@ -213,7 +281,7 @@ The evidence bundle has primary or traceable anchors for many overall dimensions
 | Subsystem masses | Model now exports component masses, centroids and first moments; no exact public real-aircraft subsystem breakdown | Exact variant definition, component list, unusable fuel/fluids, weighing condition and independent first moments |
 | CG envelope/cruise CG | Model now exports loaded physical CG and its own geometry MAC frame; A220 planning vertices exist locally; others lack public numeric envelopes | Forward/aft limits by weight/configuration, datum/LEMAC/MAC, cabin/fuel case and a cruise CG point |
 | Gear count/position | Model exports sized topology, wheelbase/track, normalized nose-tip stations and wheel coordinates; A220/A320/A340/A380 group anchors are source-backed, while ATR/B787/DC-10 remain source-limited | NLG/MLG topology, wheels per strut/bogie, axle coordinates, frame, track definition and exact variant |
-| SOL101 deformation | `evidence_gap` for every preset (confirmed by a sourced 2026-09-09 negative search retained in an internal working note, not published with this checkout) | Matching load case, constraints, materials, mesh/element basis and an independent displacement/strain measurement or certified test result. Manufacturer press releases (e.g. Boeing 787 limit/ultimate wing-test deflections) state a number and whether it is limit or ultimate but no boundary conditions, load distribution, weight state or variant, so none is usable. The one open lead is Kirmse et al. (DLR ETTC 2021, elib 145368), an in-flight 2 g wing-deformation measurement on DLR's A320-232 "D-ATRA" — the only candidate on an ALAS-preset airframe, not yet retrieved, and in any case a flight-load case rather than a limit/ultimate value. |
+| SOL101 deformation | `evidence_gap` for every preset (confirmed by a sourced 2026-09-09 negative search retained in an internal working note, not published with this checkout) | Matching load case, constraints, materials, mesh/element basis and an independent displacement/strain measurement or certified test result. Manufacturer press releases (e.g. Boeing 787 limit/ultimate wing-test deflections) state a number and whether it is limit or ultimate but no boundary conditions, load distribution, weight state or variant, so none is usable. The one open lead is Kirmse et al. (DLR ETTC 2021, elib 145368), an in-flight 2 g wing-deformation measurement on DLR's A320-232 "D-ATRA", the only candidate on an ALAS-preset airframe, not yet retrieved, and in any case a flight-load case rather than a limit/ultimate value. |
 
 ## Formula and units audit
 

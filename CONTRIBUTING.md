@@ -21,7 +21,7 @@ cargo xtask gate
 
 The MSVC toolchain is required; `rust-toolchain.toml` pins the version.
 
-Optional external tools — MSES, MSC Nastran, NASTRAN-95, AVL — are configured
+Optional external tools (MSES, MSC Nastran, NASTRAN-95, AVL) are configured
 in the application and are never needed to build or to run the test suite. The
 tests that use them are marked `#[ignore]` and run with
 `cargo test -- --ignored`.
@@ -38,7 +38,7 @@ tests that use them are marked `#[ignore]` and run with
 1. `cargo xtask gate` passes. It runs formatting, lints, tests and the
    repository checks described below, and it is what the pre-commit hook runs.
 2. If you touched anything numerical, say in the commit body **what changed in
-   the output and why**. "No change expected" is a valid and useful claim — say
+   the output and why**. "No change expected" is a valid and useful claim; say
    it so a reviewer knows to verify it.
 
 ---
@@ -74,7 +74,7 @@ Faithful translation is the default, including of upstream behaviour that is
 wrong. `Airfoil.aerodynamic_center` does not rotate its chordwise offset by the
 section twist; the SUAVE static margin is computed against wing origins because
 `aerodynamic_center` is left at the origin. These are reproduced, because a
-port that silently improves things cannot be validated — every disagreement
+port that silently improves things cannot be validated; every disagreement
 becomes ambiguous between a bug and an intended improvement.
 
 Improvements are wanted. They are made afterwards, one at a time, each of them:
@@ -167,14 +167,14 @@ provenance block is honest.
 ### Other conventions
 
 - **US spelling in identifiers and user-visible strings** (`color`, not
-  `colour`) — a `colour` field next to a `color` field is a real bug. Prose in
+  `colour`): a `colour` field next to a `color` field is a real bug. Prose in
   comments is not policed.
 - **ASCII in source files.** Documentation may use whatever typography it
   likes; source files stay ASCII so they behave identically on every platform
   and editor. Greek letters go in the prose of a doc comment, not in an
   identifier.
 - **Library code logs; it does not print.** `println!` belongs in `alas-app`.
-  Anything in a library crate that wants to report something uses `tracing` —
+  Anything in a library crate that wants to report something uses `tracing`;
   the same code runs under the desktop application and the headless command
   line, and only one of those has a console. The lint denies it, and the deny
   is the policy, not a suggestion.
@@ -188,7 +188,7 @@ provenance block is honest.
   enforced on the *assembled* module: `cargo xtask checks` parses each file,
   follows every `include!()` recursively, and counts what the compiler sees
   as one module, so splicing a file into `*_parts/` fragments does not make
-  it smaller. Long modules are where context gets lost — by a reader, by a
+  it smaller. Long modules are where context gets lost, by a reader, by a
   reviewer, and by a tool with a finite window. The Python implementation has
   a 6,200-line visualization module that nobody can hold in their head at
   once, and reproducing that here would undo half the point of the rewrite.
@@ -196,7 +196,7 @@ provenance block is honest.
   are listed in `docs/source-size-budgets.tsv` with an explicit ceiling equal
   to their reviewed size and a one-line rationale. A listed module may
   shrink but not grow; once it drops to 500 lines the check asks for its row
-  to be removed. Do not add rows for new modules — split them into real
+  to be removed. Do not add rows for new modules; split them into real
   `mod`s with interfaces instead.
 - **No new dependencies without justification.** Every one is a licence to
   audit and a supply chain to trust. Add it in `[workspace.dependencies]`, and
@@ -209,7 +209,7 @@ provenance block is honest.
 This is the part that matters most.
 
 - **Cite your source.** New empirical coefficients, correlations or geometry
-  scaffolds need a reference — textbook, paper, or published data — recorded
+  scaffolds need a reference (textbook, paper, or published data) recorded
   next to the value and, if it is a method, in `docs/methods.md`.
 - **No magic numbers.** If a user might reasonably want to change it, it
   belongs in a configuration struct with `label` and `help` metadata. Those
@@ -234,7 +234,7 @@ Three kinds, and they answer different questions.
 - **Parity tests** compare against fixtures generated from the Python
   implementation at the `rust-port-baseline` tag. They answer "is this the same
   program". Every translated module has one; see the parity rule above.
-- **Property and unit tests** answer "is this self-consistent" — a wing area
+- **Property and unit tests** answer "is this self-consistent": a wing area
   that scales quadratically with span, a round trip through serialization, an
   atmosphere that is monotonic in altitude. These catch the errors parity
   cannot, because a fixture only covers the points it was generated at.
@@ -244,7 +244,7 @@ Three kinds, and they answer different questions.
 
 Also worth a test: anything with a fallback path (a tool missing, a file
 absent, a blank configuration); anything that behaves differently in a release
-build than under `cargo test`; and any bug you fix — the test that would have
+build than under `cargo test`; and any bug you fix: the test that would have
 caught it.
 
 ---
@@ -288,6 +288,6 @@ under that licence.
 **Do not paste code from a source you cannot license.** That includes
 proprietary solvers, textbook code listings, and anything under an incompatible
 licence. Implementing a *published method* from its equations is fine and
-welcome; copying someone's implementation is not — and where this program does
+welcome; copying someone's implementation is not, and where this program does
 translate someone's implementation, it says so in a provenance header and
 carries their licence. See `THIRD-PARTY-NOTICES.md`.

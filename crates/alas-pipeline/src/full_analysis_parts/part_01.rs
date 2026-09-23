@@ -213,7 +213,7 @@ impl FullAnalysis {
         } else {
             AeroAnalysis::new(
                 &plane,
-                design.sweep_deg,
+                AeroAnalysis::quarter_chord_sweep_deg(&plane, design.sweep_deg),
                 Some(self.config.geometry.clone()),
                 Some(self.config.drag_model.clone()),
                 Some(fine_analysis.clone()),

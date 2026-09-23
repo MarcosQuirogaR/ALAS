@@ -157,6 +157,20 @@ fn or_nan(value: Option<f64>) -> f64 {
     value.unwrap_or(f64::NAN)
 }
 
+/// The mesh `golden/stab/trim.json` was generated at.
+///
+/// The reference implementation meshed at one panel in each direction; the
+/// product default has since moved to eight chordwise panels (see
+/// `alas_config::analysis`), so this restores the frozen mesh explicitly
+/// rather than inheriting a default that is no longer it. Mirrors
+/// `alas-aero`'s `tests/support::reference_mesh`, which every other VLM-fed
+/// parity fixture in this workspace already calls.
+fn reference_mesh() -> AnalysisConfig {
+    let mut analysis = AnalysisConfig::default();
+    analysis.restore_reference_mesh();
+    analysis
+}
+
 /// The nominal aircraft: the generator's
 /// `AircraftBuilder(GeometryConfig()).build()`.
 fn build() -> Airplane {
@@ -295,7 +309,7 @@ fn fuselage_cm_alpha_matches_python() {
 fn the_static_margin_and_neutral_point_match_python() {
     let fixture: Fixture = alas_testkit::load("stab", "trim");
     let plane = build();
-    let analysis = AnalysisConfig::default();
+    let analysis = reference_mesh();
 
     let mut comparison = Comparison::new("trim (static margin, neutral point)", Tier::Linalg);
 
@@ -323,7 +337,7 @@ fn the_static_margin_and_neutral_point_match_python() {
 #[test]
 fn autobalance_matches_python() {
     let fixture: Fixture = alas_testkit::load("stab", "trim");
-    let analysis = AnalysisConfig::default();
+    let analysis = reference_mesh();
 
     let mut comparison = Comparison::new("trim.autobalance", Tier::Linalg);
     for name in names(&fixture.autobalance) {
@@ -353,7 +367,7 @@ fn stability_and_trim_matches_python() {
     let fixture: Fixture = alas_testkit::load("stab", "trim");
     let plane = build();
     let plane_no_hstab = without_hstab(&plane);
-    let analysis = AnalysisConfig::default();
+    let analysis = reference_mesh();
 
     let mut comparison = Comparison::new("trim.stability_and_trim", Tier::Linalg);
     for name in names(&fixture.stability_and_trim) {

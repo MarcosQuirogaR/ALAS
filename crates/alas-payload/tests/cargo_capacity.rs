@@ -74,6 +74,40 @@ fn bulk_capacity_is_not_reported_as_uld_capacity() {
     assert_eq!(capacity.uld_positions, 0);
     assert_eq!(capacity.container_internal_volume_m3, 0.0);
     assert!(capacity.bulk_nominal_volume_m3 > 0.0);
+    assert!(capacity.bulk_usable_volume_m3 > 0.0);
+    assert!(capacity.bulk_usable_volume_m3 <= capacity.bulk_nominal_volume_m3);
+}
+
+#[test]
+fn shallow_bulk_slots_scale_volume_and_mass_with_realized_height() {
+    for name in ["A220-300", "A320-200"] {
+        let g = geometry(name);
+        let mut manager = CargoLoadManager::new(
+            &g,
+            CargoDeckConfig {
+                use_main_deck: false,
+                lower_deck_uld: "BLK".to_owned(),
+                ..Default::default()
+            },
+        );
+        let capacity = manager.capacity_summary();
+        assert!(capacity.bulk_positions > 0, "{name}");
+        assert_eq!(capacity.uld_positions, 0, "{name}");
+        assert!(
+            capacity.bulk_usable_volume_m3 < capacity.bulk_nominal_volume_m3,
+            "{name}"
+        );
+        for slot in &manager.slots {
+            assert_eq!(slot.uld.code, "BLK", "{name}");
+            assert!(slot.realized_height_m >= 0.9 && slot.realized_height_m < slot.uld.height);
+            let ratio = slot.realized_height_m / slot.uld.height;
+            assert!((slot.usable_volume_m3() - slot.uld.volume_m3 * ratio).abs() < 1e-9);
+            assert!((slot.max_net() - slot.uld.max_net() * ratio).abs() < 1e-9);
+        }
+        manager.solve(1.0e9, g.x_wing_ac, &|slot| slot.x, true);
+        let loaded: f64 = manager.slots.iter().map(|slot| slot.payload).sum();
+        assert!((loaded - capacity.net_capacity_kg).abs() < 1e-6, "{name}");
+    }
 }
 
 #[test]

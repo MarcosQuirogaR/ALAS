@@ -25,6 +25,7 @@
 
 use alas_config::CargoDeckConfig;
 
+use super::headroom::{realized_height, uld_fits};
 use super::{
     uld_or, CargoSlot, UldType, BULK, LOWER_DECK_DEFAULT, LOWER_HOLD_AUTO_CANDIDATES,
     LOWER_HOLD_FALLBACKS, MAIN_DECK_DEFAULT,

@@ -37,7 +37,7 @@ impl<'g> CargoLoadManager<'g> {
         };
         let ys: Vec<f64> = candidates
             .into_iter()
-            .filter(|&y| self.uld_fits(deck, x, y, uld))
+            .filter(|&y| uld_fits(self.geometry, deck, x, y, uld))
             .collect();
         for (i, y) in ys.iter().enumerate() {
             self.slots.push(CargoSlot {
@@ -46,38 +46,16 @@ impl<'g> CargoLoadManager<'g> {
                 x,
                 y: *y,
                 uld,
+                realized_height_m: if self.geometry.enforces_physical_envelope() {
+                    realized_height(self.geometry, deck, x, uld)
+                        .unwrap_or(uld.height)
+                } else {
+                    uld.height
+                },
                 payload: 0.0,
             });
         }
         ys.len()
-    }
-
-    /// Whether the complete rigid ULD envelope stays inside both its deck and
-    /// the fuselage lining over the full longitudinal footprint.
-    fn uld_fits(&self, deck: &DeckSpec, x: f64, y: f64, uld: &UldType) -> bool {
-        if !self.geometry.enforces_physical_envelope() {
-            return self.geometry.deck_height(deck, x) >= uld.height;
-        }
-        let z_bottom = self.geometry.floor_z(deck, x);
-        let half_length = uld.length * 0.5;
-        let deck_clear = [x - half_length, x, x + half_length]
-            .into_iter()
-            .all(|sample_x| {
-                z_bottom >= self.geometry.floor_z(deck, sample_x)
-                    && z_bottom + uld.height <= self.geometry.ceil_z(deck, sample_x)
-            });
-
-        if !deck_clear {
-            return false;
-        }
-
-        let fits_orientation = |mirrored| {
-            let contour = uld.collision_contour(y, z_bottom, mirrored);
-            self.geometry
-                .check_polygon_containment(x - half_length, x + half_length, &contour)
-                .is_ok()
-        };
-        fits_orientation(false) || (uld.contour.mirrorable && fits_orientation(true))
     }
 
     /// Fill the forward and aft lower holds with rows of one container type,
@@ -135,8 +113,8 @@ impl<'g> CargoLoadManager<'g> {
             if slots.is_empty() {
                 continue;
             }
-            let capacity = slots.len() as f64 * candidate.max_net();
-            let volume = slots.len() as f64 * candidate.volume_m3;
+            let capacity = slots.iter().map(CargoSlot::max_net).sum();
+            let volume = slots.iter().map(CargoSlot::usable_volume_m3).sum();
             let tare = slots.len() as f64 * candidate.tare_weight;
             let replace = best.as_ref().is_none_or(
                 |(best_type, _, best_capacity, best_volume, best_tare)| {
@@ -213,7 +191,7 @@ impl<'g> CargoLoadManager<'g> {
         // requires the bulk footprint to fit, and never double-books hold
         // space a rigid container slot already claims.
         let bulk_admitted = !g.enforces_physical_envelope()
-            || (self.uld_fits(&g.lower_deck, bulk_x, 0.0, BULK)
+            || (uld_fits(g, &g.lower_deck, bulk_x, 0.0, BULK)
                 && !self.slots.iter().any(|slot| {
                     slot.deck == g.lower_deck.name
                         && (slot.x - bulk_x).abs() < (slot.uld.length + BULK.length) * 0.5
@@ -226,6 +204,12 @@ impl<'g> CargoLoadManager<'g> {
                 x: bulk_x,
                 y: 0.0,
                 uld: BULK,
+                realized_height_m: if g.enforces_physical_envelope() {
+                    realized_height(g, &g.lower_deck, bulk_x, BULK)
+                        .unwrap_or(BULK.height)
+                } else {
+                    BULK.height
+                },
                 payload: 0.0,
             });
         }
@@ -339,7 +323,7 @@ impl<'g> CargoLoadManager<'g> {
         } else {
             let per_slot = target_net_mass / self.slots.len() as f64;
             for slot in &mut self.slots {
-                slot.payload = per_slot.min(slot.uld.max_net());
+                slot.payload = per_slot.min(slot.max_net());
             }
         }
 

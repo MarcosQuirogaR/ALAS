@@ -345,7 +345,12 @@ mod tests {
         .expect("version");
         assert_eq!(env.release, Some(2406));
         assert_eq!(env.distribution, OpenFoamDistribution::OpenCfd);
-        let native = version_from_directory(Path::new(r"C:\OpenFOAM\OpenFOAM-v2312")).expect("dir");
+        let native_dir = if cfg!(windows) {
+            r"C:\OpenFOAM\OpenFOAM-v2312"
+        } else {
+            "/opt/OpenFOAM/OpenFOAM-v2312"
+        };
+        let native = version_from_directory(Path::new(native_dir)).expect("dir");
         assert_eq!(native.label, "v2312");
         let debian =
             version_from_directory(Path::new("/usr/lib/openfoam/openfoam2306")).expect("dir");

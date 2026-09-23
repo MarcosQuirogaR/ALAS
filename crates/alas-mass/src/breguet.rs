@@ -21,11 +21,20 @@
 use crate::fuel_plan::{FuelBurnModel, FuelModelError, LegEstimate};
 
 /// Published mission-segment fuel fractions (mass remaining as a fraction of
-/// the mass at the start of the phase), from Raymer, *Aircraft Design: A
-/// Conceptual Approach*, Table 3.2, and the equivalent table in Roskam,
-/// *Airplane Design, Part I*: 0.995 for takeoff, 0.980 for climb to initial
-/// cruise altitude, 0.990 for descent, and 0.995 for approach and landing,
-/// for a jet transport.
+/// the mass at the start of the phase): 0.995 for takeoff, 0.980 for climb
+/// to initial cruise altitude, 0.990 for descent, and 0.995 for approach and
+/// landing, for a jet transport.
+///
+/// Attributed to Roskam, *Airplane Design, Part I*, jet-transport
+/// segment-fraction table, not Raymer's *Aircraft Design: A Conceptual
+/// Approach* Table 3.2 as a previous version of this doc comment said:
+/// Raymer's Table 3.2 lists different values for the same phases (from
+/// recollection: warm-up+takeoff 0.970, climb 0.985, landing 0.995), so the
+/// two tables cannot both be the source of these four numbers (physics
+/// review v1.2, finding F4). The Roskam table and page were not
+/// independently re-opened against the primary text in that review either;
+/// treat this attribution as the best available correction, not a verified
+/// citation.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SegmentFractions {
     /// Mass fraction remaining after takeoff.

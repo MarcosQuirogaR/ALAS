@@ -13,36 +13,39 @@
 //! once, which is why it needs a whole [`AlasConfig`] and cannot live on a
 //! field.
 //!
-//! What a rule produces is a path and a sentence. The path is what the
-//! interface scrolls to and highlights, so a rule that fires correctly and
-//! names the wrong field sends the user to edit something that was never the
-//! problem; the sentence has to say which two values disagree and by how much,
-//! because "invalid configuration" is not actionable.
+//! What a rule produces is a path and a sentence. The path is what the interface scrolls to and
+//! highlights, so a rule that fires correctly and names the wrong field sends the user to edit
+//! something that was never the problem; the sentence has to say which two values disagree and by
+//! how much, because "invalid configuration" is not actionable.
 //!
-//! Severity is not decoration. An [`Severity::Error`] blocks the run and a
-//! [`Severity::Warning`] only highlights, and the V-n rule uses both: past the
-//! dive speed is the diagram's red zone, and between the cruise and dive
-//! speeds is its caution band, which is a real design and not a good one.
+//! Severity is not decoration. An [`Severity::Error`] blocks the run and a [`Severity::Warning`]
+//! only highlights, and the V-n rule uses both: past the dive speed is the diagram's red zone, and
+//! between the cruise and dive speeds is its caution band, which is a real design and not a good one.
 //!
 //! # Two differences from the reference
 //!
-//! Upstream wraps each rule in a `try/except` that swallows anything a rule
-//! raises, because it runs on every keystroke of a debounced live preview and
-//! a field caught mid-edit could break a unit conversion. A rule here reads
-//! typed fields off a constructed configuration and has nothing to raise, so
-//! there is no equivalent and none is needed.
+//! Upstream wraps each rule in a `try/except` that swallows anything a rule raises, because it runs
+//! on every keystroke of a debounced live preview and a field caught mid-edit could break a unit
+//! conversion. A rule here reads typed fields off a constructed configuration and has nothing to
+//! raise, so there is no equivalent and none is needed.
 //!
-//! The cruise rule reproduces the reference's own two lines rather than
-//! calling the V-n diagram builder, for the reason upstream gives: that
-//! builder additionally needs a fully constructed aeroplane for its stall
-//! terms, which is far too expensive to build on every validation tick. It
-//! evaluates the atmosphere through the closed-form ISA where upstream uses
-//! native aerodynamic model's fitted default; the two agree to about 1e-11 and every number
-//! the rule prints is rounded to the nearest whole metre per second.
+//! The cruise rule reproduces the reference's own two lines rather than calling the V-n diagram
+//! builder, for the reason upstream gives: that builder additionally needs a fully constructed
+//! aeroplane for its stall terms, which is far too expensive to build on every validation tick. It
+//! evaluates the atmosphere through the closed-form ISA where upstream uses native aerodynamic
+//! model's fitted default; the two agree to about 1e-11 and every number the rule prints is rounded
+//! to the nearest whole metre per second.
 
 use serde::{Deserialize, Serialize};
 
-use crate::{AlasConfig, PropulsionTechnology};
+#[path = "validation/fuel_scheme.rs"]
+mod fuel_scheme;
+#[path = "validation/mass_model.rs"]
+mod mass_model;
+#[path = "validation/wave_drag.rs"]
+mod wave_drag;
+
+use crate::AlasConfig;
 
 /// Sea-level density the equivalent airspeed is referred to, in kg/m^3.
 ///
@@ -87,66 +90,19 @@ pub struct ValidationIssue {
 pub fn validate(config: &AlasConfig) -> Vec<ValidationIssue> {
     let mut issues = cruise_point_inside_the_flight_envelope(config);
     issues.extend(atmosphere_domain_is_physical(config));
+    issues.extend(wave_drag::rise_is_physical(config));
     issues.extend(fuel_properties_are_physical(config));
     issues.extend(landing_gear_inputs_are_physical(config));
     issues.extend(empennage_tapers_toward_its_tips(config));
     issues.extend(mses_timeouts_are_positive_and_finite(config));
     issues.extend(optimizer_tokens_are_supported(config));
     issues.extend(crate::optimizer::policy_review::policy_group_issues(config));
-    issues.extend(active_mass_model_issues(config));
+    issues.extend(mass_model::active_issues(config));
+    issues.extend(fuel_scheme::fuel_scheme_matches_the_propulsion_type(config));
     issues.extend(passenger_and_mass_inputs_are_coherent(config));
     issues.extend(custom_geometry_is_physical(config));
     issues.extend(vlm_mesh_is_solvable(config));
     issues
-}
-
-/// Validate only the FLOPS nodes selected by the active mass architecture.
-/// The legacy comparison path intentionally carries those nodes for saved-file
-/// compatibility, but malformed inactive FLOPS/turboprop values must not
-/// prevent a reference-compatibility comparison from running.
-fn active_mass_model_issues(config: &AlasConfig) -> Vec<ValidationIssue> {
-    let mass = &config.mass_model;
-    let mut issues = Vec::new();
-    if !mass.architecture_is_coherent() {
-        issues.push(ValidationIssue {
-            field_path: "mass_model.mass_architecture".to_owned(),
-            message: format!(
-                "Mass architecture {:?} disagrees with one or more derived group selectors; reload or migrate the configuration before running.",
-                mass.mass_architecture
-            ),
-            severity: Severity::Error,
-        });
-    }
-    if !mass.mass_architecture.is_pure_flops() {
-        return issues;
-    }
-    if let Err(error) = mass.flops_structure.validate() {
-        issues.push(ValidationIssue {
-            field_path: structure_validation_path(&error),
-            message: error,
-            severity: Severity::Error,
-        });
-    }
-    if config.geometry.engine.propulsion_technology == PropulsionTechnology::Turboprop {
-        if let Err(field) = mass.flops_turboprop.validate() {
-            issues.push(ValidationIssue {
-                field_path: format!("mass_model.flops_turboprop.{field}"),
-                message: format!(
-                    "FLOPS turboprop input {field} is nonphysical or outside its supported range."
-                ),
-                severity: Severity::Error,
-            });
-        }
-    }
-    issues
-}
-
-fn structure_validation_path(error: &str) -> String {
-    let field = error
-        .strip_prefix("FLOPS ")
-        .and_then(|rest| rest.split_whitespace().next())
-        .unwrap_or("flops_structure");
-    format!("mass_model.flops_structure.{field}")
 }
 
 /// Check the two cross-field contracts that are otherwise only enforced deep
@@ -790,6 +746,8 @@ fn grouped(value: f64) -> String {
 mod tests {
     use super::*;
 
+    use crate::{FuelScheme, PropulsionTechnology};
+
     #[test]
     fn the_shipped_configuration_is_one_nothing_objects_to() {
         assert!(validate(&AlasConfig::default()).is_empty());
@@ -857,6 +815,51 @@ mod tests {
             issue.field_path.starts_with("mass_model.flops_transport.")
                 && issue.message.contains("canonical cabin resolver")
         }));
+    }
+
+    #[test]
+    fn faa_flag_supplemental_is_blocked_on_a_turboprop() {
+        let mut config = AlasConfig::default();
+        config.geometry.engine.propulsion_technology = PropulsionTechnology::Turboprop;
+        config.fuel_policy.scheme = FuelScheme::FaaFlagSupplemental;
+
+        let issues = validate(&config);
+        assert!(issues.iter().any(|issue| {
+            issue.field_path == "fuel_policy.scheme" && issue.severity == Severity::Error
+        }));
+    }
+
+    #[test]
+    fn faa_flag_supplemental_is_unblocked_on_a_turbofan() {
+        let mut config = AlasConfig::default();
+        config.geometry.engine.propulsion_technology = PropulsionTechnology::Turbofan;
+        config.fuel_policy.scheme = FuelScheme::FaaFlagSupplemental;
+
+        let issues = validate(&config);
+        assert!(issues
+            .iter()
+            .all(|issue| issue.field_path != "fuel_policy.scheme"));
+    }
+
+    #[test]
+    fn other_schemes_are_unaffected_on_a_turboprop() {
+        let mut config = AlasConfig::default();
+        config.geometry.engine.propulsion_technology = PropulsionTechnology::Turboprop;
+        for scheme in [
+            FuelScheme::EasaBasic,
+            FuelScheme::FaaDomestic,
+            FuelScheme::StudyConvention,
+            FuelScheme::TripFuelOnly,
+        ] {
+            config.fuel_policy.scheme = scheme;
+            let issues = validate(&config);
+            assert!(
+                issues
+                    .iter()
+                    .all(|issue| issue.field_path != "fuel_policy.scheme"),
+                "scheme {scheme:?} should not be blocked on a turboprop"
+            );
+        }
     }
 
     #[test]

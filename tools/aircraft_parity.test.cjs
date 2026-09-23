@@ -170,7 +170,8 @@ test('a gear topology count is not mislabeled as a scaled station', () => {
   }};
   fs.writeFileSync(path.join(f.cwd, 'model.json'), `${JSON.stringify(model)}\n`);
   const result = run({cwd: f.cwd, modelPath: 'model.json', contractPath: 'contract.json', writeOutputs: false});
-  assert.equal(result.rows[0].model_provenance_note, null);
+  assert.doesNotMatch(result.rows[0].model_provenance_note, /scaled/);
+  assert.match(result.rows[0].model_provenance_note, /declared preset input/);
 });
 
 test('an independently placed gear station carries no provenance note', () => {
@@ -199,6 +200,14 @@ test('a published-capacity fuel check carries a model-declared provenance note',
   fs.writeFileSync(path.join(f.cwd, 'model.json'), `${JSON.stringify(model)}\n`);
   const result = run({cwd: f.cwd, modelPath: 'model.json', contractPath: 'contract.json', writeOutputs: false});
   assert.match(result.rows[0].model_provenance_note, /not an independently predicted tank volume/);
+  assert.deepEqual(result.summary.by_provenance, {independent: {}, reference_input: {within_tolerance: 1}});
+});
+
+test('a declared preset input is marked as data entry, not a prediction', () => {
+  const f = fixture({check: check({id: 'mass.mtow_kg'}), modelValue: 10, localValue: 10});
+  const result = run({cwd: f.cwd, modelPath: 'model.json', contractPath: 'contract.json', writeOutputs: false});
+  assert.match(result.rows[0].model_provenance_note, /declared preset input/);
+  assert.equal(result.summary.by_provenance.independent.within_tolerance, undefined);
 });
 
 test('run writes hashed JSON, CSV and escaped HTML outputs', () => {

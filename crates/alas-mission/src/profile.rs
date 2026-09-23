@@ -22,11 +22,15 @@
 //! Mach; the vehicle request carries its own cruise Mach for engine sizing, and
 //! the two do not meet here.
 
+#[path = "profile/step_climb.rs"]
+mod step_climb;
+
 use alas_atmo::{pressure_isa, temperature_isa, Atmosphere};
 use alas_config::airports::Airport;
 use alas_config::mission::{resolve_true_airspeed_m_s, MissionProfileConfig, SpeedReference};
 use alas_config::AlasConfig;
 use serde::Serialize;
+use step_climb::{minimum_cruise_leg_duration_for_step_s, step_climb_levels_m};
 
 /// A route-aware mission-profile proposal for the guided Inputs editor.
 ///
@@ -74,9 +78,10 @@ pub struct MissionProfileRouteCheck {
 /// levels, rates and speeds. The candidate with the greatest number of active
 /// cruise legs is retained only when two things both hold: its estimated
 /// non-cruise footprint geometrically fits the supplied route, *and* every
-/// cruise leg that footprint leaves behind would fly for at least
-/// [`MINIMUM_CRUISE_LEG_DURATION_S`] (see
-/// [`cruise_legs_have_enough_time_to_justify_the_ladder`]). Geometric fit
+/// cruise leg that footprint leaves behind would fly for at least the
+/// physically derived minimum its own step climb needs to pay back
+/// (see [`cruise_legs_have_enough_time_to_justify_the_ladder`] and
+/// [`minimum_cruise_leg_duration_for_step_s`]). Geometric fit
 /// alone is not enough: a step climb's own horizontal footprint is a small
 /// altitude delta and fits inside almost any route, so a purely geometric
 /// test selects the longest ladder that does not overshoot the route even
@@ -145,6 +150,8 @@ pub fn propose_profile_for_route(
             route_distance_m,
             candidate_distance_m,
             active_cruise_legs,
+            cruise_altitude_m,
+            origin_elevation_m,
         );
         if geometrically_fits && ladder_is_operationally_worth_it {
             selected_legs = active_cruise_legs;
@@ -209,29 +216,6 @@ fn active_cruise_legs(profile: &MissionProfileConfig) -> usize {
     .map_or(1, |index| index + 1)
 }
 
-/// Minimum time a cruise leg must be flyable for before the step climb that
-/// produces it is worth its own transition cost, in seconds.
-///
-/// A step climb spends a climb segment now, at extra fuel and no forward
-/// progress, in exchange for a lower specific fuel consumption at the new,
-/// weight-reduced optimum altitude. That trade only pays back over time: an
-/// aircraft's optimum altitude rises on the order of 1,000-2,000 ft per hour
-/// of cruise as fuel burns off, so a cruise leg too short to hold the new
-/// level for a meaningful fraction of that hour never recoups the transition
-/// it cost to reach. 30 minutes is a conservative fraction of that
-/// hour-scale figure, visible here rather than buried in the selection loop
-/// below, and unsourced in the same sense as the vertical rates in
-/// `alas_config::presets::narrowbody::apply_a320_200_speed_schedule`: an
-/// engineering judgement call, not a regulatory or manufacturer figure. It
-/// should be revisited if a sourced step-climb interval becomes available.
-/// See `crates/alas-mission/src/profile.rs` tests
-/// `a_short_declared_sector_does_not_receive_the_long_route_step_ladder`
-/// (every ladder candidate's cruise legs fall well under this on a 546 km
-/// sector) and `a_long_route_keeps_the_declared_three_leg_profile` (every
-/// leg clears it by roughly two orders of magnitude on a 12,000 km route)
-/// for where the margin actually falls.
-const MINIMUM_CRUISE_LEG_DURATION_S: f64 = 30.0 * 60.0;
-
 /// The relative share of the post-climb/descent cruise remainder each active
 /// cruise leg would fly, for a candidate with `count` active legs.
 ///
@@ -271,22 +255,27 @@ fn set_active_cruise_legs(profile: &mut MissionProfileConfig, count: usize) {
 }
 
 /// Whether a candidate with `active_cruise_legs` active cruise legs leaves
-/// every one of them long enough to fly for at least
-/// [`MINIMUM_CRUISE_LEG_DURATION_S`], given the route distance left over
-/// after `non_cruise_distance_m` of climb and descent.
+/// every one of them long enough to fly for at least the minimum duration
+/// the step that produced it is worth
+/// ([`minimum_cruise_leg_duration_for_step_s`]), given the route distance
+/// left over after `non_cruise_distance_m` of climb and descent.
 ///
 /// A single cruise leg (`active_cruise_legs < 2`) is not a step, it is the
 /// direct cruise every route flies regardless of length, so it is never
 /// gated on a minimum duration; `propose_profile_for_route`'s pre-loop
 /// fallback relies on that to always have a one-leg candidate available.
 /// From two legs up, each additional leg exists only because a step climb
-/// was inserted to produce it, and that climb is what this function is
-/// judging as worth its own cost.
+/// was inserted to produce it, and that climb, sized from
+/// [`step_climb_levels_m`] at `cruise_altitude_m` and
+/// `departure_elevation_m`, is what this function is judging as worth its
+/// own cost.
 fn cruise_legs_have_enough_time_to_justify_the_ladder(
     profile: &MissionProfileConfig,
     route_distance_m: f64,
     non_cruise_distance_m: f64,
     active_cruise_legs: usize,
+    cruise_altitude_m: f64,
+    departure_elevation_m: f64,
 ) -> bool {
     if active_cruise_legs < 2 {
         return true;
@@ -304,10 +293,20 @@ fn cruise_legs_have_enough_time_to_justify_the_ladder(
         profile.cruise_2_air_speed_m_s,
         profile.cruise_3_air_speed_m_s,
     ];
+    let levels_m = step_climb_levels_m(profile, cruise_altitude_m, departure_elevation_m);
+    // Leg 1 is the initial climb-out level, not a step; leg 2 is produced by
+    // the step from `levels_m[0]` to `levels_m[1]`; leg 3 by the step from
+    // `levels_m[1]` to `levels_m[2]` (cruise altitude itself).
+    let step_for_leg_m = |leg_index: usize| match leg_index {
+        0 => 0.0,
+        1 => (levels_m[1] - levels_m[0]).max(0.0),
+        _ => (levels_m[2] - levels_m[1]).max(0.0),
+    };
     fractions
         .iter()
         .zip(cruise_air_speeds_m_s.iter())
-        .all(|(&fraction, &speed_m_s)| {
+        .enumerate()
+        .all(|(leg_index, (&fraction, &speed_m_s))| {
             if fraction <= 0.0 {
                 // Not one of the active legs; imposes no timing requirement.
                 return true;
@@ -317,7 +316,7 @@ fn cruise_legs_have_enough_time_to_justify_the_ladder(
             }
             let leg_distance_m = cruise_remainder_m * fraction;
             let leg_duration_s = leg_distance_m / speed_m_s;
-            leg_duration_s >= MINIMUM_CRUISE_LEG_DURATION_S
+            leg_duration_s >= minimum_cruise_leg_duration_for_step_s(step_for_leg_m(leg_index))
         })
 }
 
@@ -705,7 +704,45 @@ mod tests {
     }
 
     #[test]
-    fn a_long_route_keeps_the_declared_three_leg_profile() {
+    fn a_route_at_the_edge_of_the_earth_keeps_the_declared_three_leg_profile() {
+        // Under the corrected, physically derived minimum leg duration
+        // (item 6, physics review v1.2 section 2.3), the default profile's
+        // ~1,200 m step-climb levels each need on the order of six hours of
+        // cruise to be worth flying to (`minimum_cruise_leg_duration_for_step_s`),
+        // so the third leg is only reachable on a route far longer than any
+        // real nonstop sector (the longest scheduled routes run to roughly
+        // 15,000-17,000 km; Earth's antipodal great-circle distance caps out
+        // at about 20,015 km). This route is chosen only to exercise the
+        // three-leg code path, not to model a real one; see
+        // `a_long_route_keeps_the_two_leg_profile_under_the_corrected_minimum`
+        // for the behaviour at a realistic ultra-long-haul distance.
+        let config = AlasConfig::default();
+        let proposal = propose_profile_for_route(
+            &config,
+            &airport("AAAA", 0.0, 0.0),
+            &airport("BBBB", 0.0, 0.0),
+            18_000_000.0,
+        )
+        .expect("the long route has a valid default profile");
+
+        assert_eq!(proposal.active_cruise_legs, 3);
+        assert!(proposal.profile.cruise_1_distance_fraction > 0.0);
+        assert!(proposal.profile.cruise_2_distance_fraction > 0.0);
+        assert!(proposal.profile.cruise_3_distance_fraction > 0.0);
+        assert!(proposal.non_cruise_distance_m <= proposal.route_distance_m);
+    }
+
+    #[test]
+    fn a_long_route_keeps_the_two_leg_profile_under_the_corrected_minimum() {
+        // A 12,000 km sector (longer than all but a handful of real
+        // scheduled routes) geometrically fits the full three-leg ladder,
+        // but the third leg would be too short to recoup its step climb
+        // under the corrected minimum, so the proposal steps back to two
+        // legs instead. This is the intended behaviour change from item 6:
+        // the previous flat 30-minute threshold accepted the third leg here
+        // (see the removed `a_long_route_keeps_the_declared_three_leg_profile`
+        // at 12,000 km), which the physics review found permissive by
+        // roughly 5-8x against the actual optimum-altitude drift rate.
         let config = AlasConfig::default();
         let proposal = propose_profile_for_route(
             &config,
@@ -715,10 +752,10 @@ mod tests {
         )
         .expect("the long route has a valid default profile");
 
-        assert_eq!(proposal.active_cruise_legs, 3);
+        assert_eq!(proposal.active_cruise_legs, 2);
         assert!(proposal.profile.cruise_1_distance_fraction > 0.0);
         assert!(proposal.profile.cruise_2_distance_fraction > 0.0);
-        assert!(proposal.profile.cruise_3_distance_fraction > 0.0);
+        assert_eq!(proposal.profile.cruise_3_distance_fraction, 0.0);
         assert!(proposal.non_cruise_distance_m <= proposal.route_distance_m);
     }
 

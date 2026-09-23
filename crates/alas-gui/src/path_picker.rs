@@ -213,10 +213,13 @@ mod unix_dialog_backend_tests {
 
     impl FakeBinDir {
         fn with_binaries(names: &[&str]) -> Self {
+            // One PATH entry: the name must not contain ':' (the Unix path
+            // separator), which a Debug-formatted Instant does on Linux.
+            static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
             let path = std::env::temp_dir().join(format!(
-                "alas-gui-path-picker-test-{}-{:?}",
+                "alas-gui-path-picker-test-{}-{}",
                 std::process::id(),
-                std::time::Instant::now()
+                COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
             ));
             fs::create_dir_all(&path).expect("create fake PATH directory");
             for name in names {

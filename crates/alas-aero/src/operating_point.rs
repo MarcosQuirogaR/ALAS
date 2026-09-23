@@ -68,7 +68,10 @@ use alas_atmo::Atmosphere;
 /// [`OperatingPoint::convert_axes`] is actually exercised on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AxisFrame {
-    /// X downstream, Z down, origin at the aircraft's geometric datum.
+    /// X downstream (aft), Z up, origin at the aircraft's geometric datum.
+    /// A 180-degree rotation about Y of the wind/body convention (X forward,
+    /// Z down) flips X to aft *and* Z to up, not Z alone; physics review
+    /// v1.2, section 5 "geometry/aero frame" (prior finding, corrected here).
     Geometry,
     /// X forward, Z down, the frame the equations of motion are usually
     /// written in.
@@ -140,8 +143,9 @@ impl OperatingPoint {
     fn rotation_matrix_wind_to_geometry(&self) -> [[f64; 3]; 3] {
         let alpha_rotation = rotate_y((-self.alpha).to_radians());
         let beta_rotation = rotate_z(self.beta.to_radians());
-        // Geometry axes put X downstream and Z down, opposite wind axes'
-        // upstream/up convention: a 180-degree flip about Y.
+        // Geometry axes put X downstream (aft) and Z up: a 180-degree flip
+        // about Y turns wind axes' upstream-X/down-Z into aft-X/up-Z, not
+        // aft-X/down-Z (physics review v1.2, section 5).
         let axes_flip = rotate_y(std::f64::consts::PI);
 
         matmul3(matmul3(axes_flip, alpha_rotation), beta_rotation)

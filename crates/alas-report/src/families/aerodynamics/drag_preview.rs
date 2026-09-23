@@ -28,7 +28,7 @@ pub fn figure_drag_preview(
     let pal = get_palette(theme);
     let aero = AeroAnalysis::new(
         airplane,
-        design.sweep_deg,
+        AeroAnalysis::quarter_chord_sweep_deg(airplane, design.sweep_deg),
         Some(config.geometry.clone()),
         Some(config.drag_model.clone()),
         Some(config.analysis.clone()),

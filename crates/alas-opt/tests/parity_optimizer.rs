@@ -36,6 +36,8 @@ fn parity_optimizer() {
     let fixture: Fixture = alas_testkit::load("opt", "optimizer");
 
     let mut config = AlasConfig::default();
+    // The frozen Python optimizer fixture used g = 9.81 m/s^2.
+    config.requirements.gravity_m_s2 = 9.81;
     config.optimizer.solver.max_iterations = fixture.solver_settings.max_iterations;
     config.optimizer.solver.population_size = fixture.solver_settings.population_size;
     config.optimizer.solver.seed = fixture.solver_settings.seed;
@@ -86,6 +88,7 @@ fn parity_optimizer() {
 #[test]
 fn zero_max_iterations_records_the_initial_population_and_its_feasibility() {
     let mut config = AlasConfig::default();
+    config.requirements.gravity_m_s2 = 9.81;
     config.optimizer.solver.max_iterations = 0;
     config.optimizer.solver.population_size = 1;
     config.optimizer.solver.seed = Some(42);
@@ -119,6 +122,7 @@ fn zero_max_iterations_records_the_initial_population_and_its_feasibility() {
 #[test]
 fn seeded_example_replays_the_python_winner() {
     let mut config = AlasConfig::default();
+    config.requirements.gravity_m_s2 = 9.81;
     config.optimizer.solver.max_iterations = 15;
     config.optimizer.solver.population_size = 6;
     config.optimizer.solver.tolerance = 0.05;

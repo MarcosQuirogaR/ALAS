@@ -30,6 +30,11 @@ use alas_exec::process::{kill_process_tree, NewProcessGroup, NoConsoleWindow};
 /// authoritative.
 const SCRIPT_RELATIVE_PATH: &str = "tools/setup_openvsp_preview.ps1";
 
+/// Where `cargo xtask dist` places the same script in a packaged install:
+/// inside the shipped source snapshot, beside the package's own
+/// `external tools/` directory rather than under a `tools/` one.
+const PACKAGED_SCRIPT_RELATIVE_PATH: &str = "source/alas/tools/setup_openvsp_preview.ps1";
+
 /// The script's own default destination when no OpenVSP install directory is
 /// configured yet, matching `tools/setup_openvsp_preview.ps1`'s `$Destination`
 /// default. Kept here only as a fallback so the status row and the install
@@ -138,12 +143,18 @@ fn read_manifest(path: &Path) -> Option<PreviewManifest> {
 /// finds, so a development checkout resolves immediately while a packaged
 /// install without the script simply reports "not found" instead of
 /// searching the whole filesystem.
-fn locate_repo_root() -> Option<PathBuf> {
-    let exe = std::env::current_exe().ok()?;
-    let mut current = exe.parent();
+/// The install root (the directory holding `external tools/`) and the setup
+/// script, searching upward from `start`: a source checkout keeps the script
+/// under `tools/`, a packaged install under its source snapshot.
+fn locate_from(start: Option<&Path>) -> Option<(PathBuf, PathBuf)> {
+    let mut current = start;
     while let Some(dir) = current {
-        if dir.join(SCRIPT_RELATIVE_PATH).is_file() {
-            return Some(dir.to_path_buf());
+        let script = [SCRIPT_RELATIVE_PATH, PACKAGED_SCRIPT_RELATIVE_PATH]
+            .iter()
+            .map(|relative| dir.join(relative))
+            .find(|path| path.is_file());
+        if let Some(script) = script {
+            return Some((dir.to_path_buf(), script));
         }
         if dir.join("Cargo.toml").is_file() {
             return None;
@@ -153,8 +164,17 @@ fn locate_repo_root() -> Option<PathBuf> {
     None
 }
 
+fn locate_install() -> Option<(PathBuf, PathBuf)> {
+    let exe = std::env::current_exe().ok()?;
+    locate_from(exe.parent())
+}
+
+fn locate_repo_root() -> Option<PathBuf> {
+    locate_install().map(|(root, _)| root)
+}
+
 fn locate_setup_script() -> Option<PathBuf> {
-    locate_repo_root().map(|root| root.join(SCRIPT_RELATIVE_PATH))
+    locate_install().map(|(_, script)| script)
 }
 
 /// Terminal outcome of one install attempt.
@@ -518,6 +538,23 @@ mod worker_tests {
         let script = directory.join("fixture.ps1");
         fs::write(&script, body).expect("write fixture PowerShell script");
         script
+    }
+
+    #[test]
+    fn a_packaged_install_finds_the_script_in_its_source_snapshot() {
+        let package = unique_dir("packaged-layout");
+        let tools = package.join("source").join("alas").join("tools");
+        fs::create_dir_all(&tools).expect("create packaged tools directory");
+        fs::write(tools.join("setup_openvsp_preview.ps1"), "").expect("write script");
+        // The snapshot carries its own Cargo.toml one level below the root;
+        // the search starts at the executable's directory, the package root.
+        fs::write(package.join("source").join("alas").join("Cargo.toml"), "")
+            .expect("write snapshot manifest");
+        let (root, script) =
+            super::locate_from(Some(&package)).expect("the packaged script must be found");
+        assert_eq!(root, package);
+        assert_eq!(script, tools.join("setup_openvsp_preview.ps1"));
+        let _ = fs::remove_dir_all(&package);
     }
 
     #[test]

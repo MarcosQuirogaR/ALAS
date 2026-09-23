@@ -528,33 +528,16 @@ fn the_default_aircraft_resolves_a_finite_layout_with_positive_capacity() {
     }
 }
 
-/// Where a *partial* A380-800 fuel load actually sits, and why it decides the
-/// aeroplane's balance.
-///
-/// This is a characterization test, not an endorsement. `FuelTankLayout::distribute`
-/// fills the tanks burned **last** first (its module doc states the rule, and
-/// `distribute_sums_exactly_and_fills_the_last_burned_tank_first` pins it).
-/// The A380-800's burn order is sourced from the Airbus A380 AC fuel table
-/// (`alas_config::preset_fuel_tanks`): inner 1, mid 2, **trim 3**, **outer 4**.
-/// A partial load therefore fills the tailplane trim tank and the outer wing
-/// first and leaves the inner feed tanks empty, so the fuel centroid moves
-/// *aft* as the load falls -- past the mean aerodynamic chord's trailing edge.
-///
-/// Measured consequence, recorded in an internal mass-closure study (2026-09-17):
-/// at the mission-closed load the A380-800's analyzed fuel centroid is
-/// 115.9 %MAC, 9.5 m aft of the effective main-gear station, and it is the
-/// whole of the preset's `min_nose_gear_load` blocker. Whether a dispatch
-/// load should instead fill the tanks burned first is a fuel-policy decision
-/// coupled to the wing bending relief in
-/// `crate::wing_reconciliation::fuel_relief`, so nothing was changed for it.
-/// **If that rule is revisited, this test is the A380 consequence to re-read.**
-///
-/// Those two figures were measured before the preset's secondary tank volumes
-/// were replaced with the certified EASA.A.110 section 3.3 set (+1.33 % of
-/// layout capacity). The ordering and the sign of the effect are unchanged;
-/// the exact %MAC and offset were not re-measured.
+/// At a mission-representative partial load, the approximate A380 ground
+/// distribution must supply both feed-containing model groups on each side
+/// and remain balanced. Each group also includes nonfeed volume, so the test
+/// cannot establish individual real feed-tank fuel or dispatchability.
+/// EASA.A.110 Issue 17 section 3.3 supplies capacities, Airbus Training
+/// Center A380 ATA 28 p.0012 motivates outer <=50% when possible, and Airbus
+/// Flight Deck and Systems Briefing Issue 2 section 10.10 describes a CG
+/// target that cannot be reproduced without zero-fuel weight and CG inputs.
 #[test]
-fn a_partial_a380_load_fills_the_trim_and_outer_tanks_and_moves_the_fuel_aft() {
+fn a_partial_a380_load_supplies_feed_containing_groups_and_balances_pairs() {
     let config = AlasConfig::from_value(&serde_json::json!({ "preset": "A380-800" }))
         .expect("the registered A380 preset loads");
     let preset = alas_config::presets::get("A380-800").expect("the A380 preset resolves");
@@ -590,63 +573,105 @@ fn a_partial_a380_load_fills_the_trim_and_outer_tanks_and_moves_the_fuel_aft() {
         "resolved {capacity_kg} kg against certified {certified_tank_kg} kg"
     );
 
-    let centroid_x_at = |fuel_kg: f64| -> f64 {
-        layout
-            .distribute(fuel_kg)
-            .expect("the load fits")
-            .properties(&layout)
-            .cg_m[0]
-    };
-    let fill_of = |fuel_kg: f64, id_fragment: &str| -> f64 {
-        layout
-            .distribute(fuel_kg)
-            .expect("the load fits")
-            .mass_items(&layout)
-            .iter()
-            .filter(|item| item.id.contains(id_fragment))
-            .map(|item| item.mass_kg)
-            .sum()
-    };
-
-    // The mission-closed load measured on this preset, as a fraction of its
-    // own usable capacity, so the assertion survives a fuel-density change.
+    // A former loading rule left the inner feed-containing model cells empty.
     let partial_kg = 0.3735 * capacity_kg;
-    let inner_capacity_kg: f64 = layout
+    for fraction in [0.0001, 0.3735, 0.8, 0.95, 1.0] {
+        let requested_kg = fraction * capacity_kg;
+        let state = layout.distribute(requested_kg).expect("load fits");
+        let items = state.mass_items(&layout);
+        assert!((state.total_kg() - requested_kg).abs() < 1.0e-8 * capacity_kg);
+        for tank in layout.tanks() {
+            let fill_kg = items
+                .iter()
+                .find(|item| item.id == tank.id)
+                .map_or(0.0, |item| item.mass_kg);
+            assert!(fill_kg >= 0.0 && fill_kg <= tank.usable_capacity_kg + 1.0e-8 * capacity_kg);
+            if matches!(tank.kind, TankKind::WingInner | TankKind::WingMid) {
+                assert!(
+                    fill_kg > 0.0,
+                    "{} feed-containing group empty at {fraction}",
+                    tank.id
+                );
+            }
+            if tank.kind == TankKind::WingOuter && fraction <= 0.95 {
+                assert!(
+                    fill_kg <= 0.5 * tank.usable_capacity_kg + 1.0e-8 * capacity_kg,
+                    "{} exceeds half capacity at {fraction}",
+                    tank.id
+                );
+            }
+        }
+        for kind in [TankKind::WingInner, TankKind::WingMid, TankKind::WingOuter] {
+            let pair: Vec<_> = layout
+                .tanks()
+                .iter()
+                .filter(|tank| tank.kind == kind)
+                .collect();
+            let left = items
+                .iter()
+                .find(|item| item.id == pair[0].id)
+                .map_or(0.0, |item| item.mass_kg);
+            let right = items
+                .iter()
+                .find(|item| item.id == pair[1].id)
+                .map_or(0.0, |item| item.mass_kg);
+            assert!((left - right).abs() < 1.0e-8 * capacity_kg);
+        }
+        assert!(state.properties(&layout).cg_m[1].abs() < 1.0e-8);
+    }
+    let partial = layout.distribute(partial_kg).expect("load fits");
+    assert!(partial
+        .mass_items(&layout)
+        .iter()
+        .all(|item| item.id != "trim"));
+    let outer: Vec<_> = layout
         .tanks()
         .iter()
-        .filter(|tank| tank.kind == TankKind::WingInner)
+        .filter(|tank| tank.kind == TankKind::WingOuter)
+        .collect();
+    for tank in outer {
+        let fill = partial
+            .mass_items(&layout)
+            .iter()
+            .find(|item| item.id == tank.id)
+            .map_or(0.0, |item| item.mass_kg);
+        assert!(fill <= 0.5 * tank.usable_capacity_kg + 1.0e-8 * capacity_kg);
+    }
+
+    // Until every nonouter cell is full, the outer cells can stay at half.
+    // A kilogram across that breakpoint must go to the outer cells, while
+    // zero and full loads remain exact endpoints of the same allocation.
+    let outer_capacity_kg: f64 = layout
+        .tanks()
+        .iter()
+        .filter(|tank| tank.kind == TankKind::WingOuter)
         .map(|tank| tank.usable_capacity_kg)
         .sum();
-    assert!(
-        inner_capacity_kg > 0.0,
-        "the A380 registers inner wing tanks"
-    );
-    assert_eq!(
-        fill_of(partial_kg, "inner"),
-        0.0,
-        "a partial A380 load leaves the inner feed tanks empty"
-    );
-    assert!(
-        fill_of(partial_kg, "trim") > 0.0,
-        "a partial A380 load fills the tailplane trim tank"
-    );
-
-    // And the centroid moves aft as the load falls, which is the balance
-    // consequence the blocker is made of.
-    let full_x = centroid_x_at(capacity_kg);
-    let partial_x = centroid_x_at(partial_kg);
-    assert!(
-        partial_x > full_x,
-        "partial fuel centroid {partial_x} m is not aft of the full-capacity centroid {full_x} m"
-    );
-
-    // Aft of the mean aerodynamic chord's trailing edge: the fuel is no
-    // longer a wing-box load in this state.
-    let mac = plane.c_ref;
-    let mac_le = plane.wings[0].aerodynamic_center(0.25)[0] - 0.25 * mac;
-    assert!(
-        partial_x > mac_le + mac,
-        "partial fuel centroid {partial_x} m against a MAC trailing edge at {} m",
-        mac_le + mac
-    );
+    let outer_half_break_kg = capacity_kg - 0.5 * outer_capacity_kg;
+    for (requested_kg, expected_outer_kg) in [
+        (outer_half_break_kg - 1.0, 0.5 * outer_capacity_kg),
+        (outer_half_break_kg, 0.5 * outer_capacity_kg),
+        (outer_half_break_kg + 1.0, 0.5 * outer_capacity_kg + 1.0),
+    ] {
+        let state = layout.distribute(requested_kg).expect("load fits");
+        let actual_outer_kg: f64 = state
+            .mass_items(&layout)
+            .iter()
+            .filter(|item| item.id.starts_with("wing_outer"))
+            .map(|item| item.mass_kg)
+            .sum();
+        assert!((actual_outer_kg - expected_outer_kg).abs() < 1.0e-6);
+        assert!((state.total_kg() - requested_kg).abs() < 1.0e-6);
+    }
+    assert_eq!(layout.distribute(0.0).expect("zero fits").total_kg(), 0.0);
+    let full = layout.distribute(capacity_kg).expect("full fits");
+    assert!((full.total_kg() - capacity_kg).abs() < 1.0e-6);
+    for tank in layout.tanks() {
+        let fill = full
+            .mass_items(&layout)
+            .iter()
+            .find(|item| item.id == tank.id)
+            .map_or(0.0, |item| item.mass_kg);
+        assert!((fill - tank.usable_capacity_kg).abs() < 1.0e-6);
+    }
 }

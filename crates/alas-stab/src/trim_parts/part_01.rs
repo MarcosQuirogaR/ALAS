@@ -165,9 +165,14 @@ fn fuselage_cm_alpha_with_reference_mode(
     k_fac * 2.0 * accum / (s_ref * c_ref)
 }
 
-/// Static margin `SM = -dCm/dCL` from two low-speed VLM operating points:
-/// `static_margin`. NaN when the two probes carry the same lift (a degenerate
-/// `dCL`).
+/// Static margin `SM = -dCm/dCL` from two VLM operating points: `static_margin`.
+/// The probe velocity (`autobalance_velocity_m_s`, 250 m/s / M~0.73 at sea
+/// level by default, not "low speed") only sets a valid dynamic pressure:
+/// this VLM route is incompressible and linear, so `CL_alpha` and `Cm_alpha`
+/// are functions of geometry and angle of attack alone, and the ratio
+/// `-dCm/dCL` this function returns does not depend on which velocity was
+/// probed. Physics review v1.2, finding A4. NaN when the two probes carry
+/// the same lift (a degenerate `dCL`).
 ///
 /// # Errors
 ///
@@ -215,10 +220,16 @@ pub fn autobalance(
 }
 
 /// Physically-anchored neutral point, static margin and lift-curve slope:
-/// `neutral_point`, returning `(x_np, static_margin, cl_alpha)`. Probes at the
-/// fixed low-speed reference condition (`autobalance_velocity_m_s`), applies a
-/// tail dynamic-pressure efficiency to the tail's stabilising contribution,
-/// then shifts the neutral point forward by the fuselage (Munk/Multhopp) term.
+/// `neutral_point`, returning `(x_np, static_margin, cl_alpha)`. Probes at a
+/// fixed reference condition (`autobalance_velocity_m_s`, 250 m/s / M~0.73 at
+/// sea level by default). This is an incompressible, linear VLM route with no
+/// Mach or Prandtl-Glauert correction, so the result is invariant to the
+/// probe velocity; "fixed low-speed" in a previous version of this comment
+/// was both the wrong Mach description for the default and beside the point,
+/// since no speed-dependent physics is evaluated here at all (physics review
+/// v1.2, finding A4). Applies a tail dynamic-pressure efficiency to the
+/// tail's stabilising contribution, then shifts the neutral point forward
+/// by the fuselage (Munk/Multhopp) term.
 /// `static_margin` is measured against the real CG (`xyz_ref[0]`). NaN margin
 /// and slope on a degenerate probe.
 ///

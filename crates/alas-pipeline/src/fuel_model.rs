@@ -25,13 +25,20 @@ use alas_opt::SegmentMissionModel;
 
 /// Build the segment burn model from a completed analysis report.
 ///
+/// Despite this function's former name, the model it returns
+/// ([`SegmentMissionModel`]) integrates the trip leg-by-leg over the
+/// analysis report's fitted polar and off-design propulsion deck; it is not
+/// the closed-form Breguet range equation (that model is
+/// `alas_mass::breguet::BreguetFuelModel`, unused in production, see its own
+/// doc comment). Physics review v1.2, finding F4.
+///
 /// The drag components are read at the report's design-point lift, the wing
 /// area is the report's reference area, and thrust and fuel flow come from
 /// the same off-design propulsion deck the optimizer's sizing loop and the
 /// native mission stage use. A report whose fit fell back to constants still
 /// yields a model: the fallback is recorded in the fit's status and the
 /// caller decides whether to trust the plan.
-pub fn breguet_from_report(
+pub fn segment_model_from_report(
     config: &AlasConfig,
     report: &AnalysisReport,
 ) -> Result<SegmentMissionModel, String> {
@@ -216,13 +223,13 @@ mod tests {
     use alas_mass::breguet::{BreguetFuelModel, SegmentFractions};
 
     #[test]
-    fn the_default_aircraft_yields_a_usable_analytic_model() {
+    fn the_default_aircraft_yields_a_usable_segment_model() {
         let config = AlasConfig::default();
         let report = FullAnalysis::new(config.clone())
             .run(&DesignVector::default(), true)
             .unwrap_or_else(|error| panic!("default report: {error}"));
-        let model = breguet_from_report(&config, &report)
-            .unwrap_or_else(|error| panic!("analytic model: {error}"));
+        let model = segment_model_from_report(&config, &report)
+            .unwrap_or_else(|error| panic!("segment model: {error}"));
         assert!(model.cruise_tas_m_s > 200.0);
         let cruise_flow = model
             .cruise_fuel_flow_kg_s(config.requirements.mtow_kg)

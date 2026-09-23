@@ -92,10 +92,14 @@ regimes and novel propulsion architectures.
 
 ## Where AVE's numbers come from
 
-Every figure and statistic in this guide was generated from computational
-runs of ALAS (`alas --no-optimize --plots` or `target/release/alas.exe --seed 42 --output isolated-dir --plots`)
-against AVE inputs: either evaluating the baseline geometry without optimization
-or performing a full optimization pass using `-c configs/example_config.yaml --plots`.
+The gallery figures were regenerated for 1.2 from one run of the default
+configuration (AVE) with baseline comparison and optimization, seed 42, by
+`cargo run --release -p alas-gui --example render_site_gallery -- --seed 42`,
+which draws each figure through the same code path as the desktop results view
+and `alas --plots`. Three groups come from elsewhere: the MSES figures need a
+licensed MSES installation, the Patran figure needs MSC Patran, and the mission
+route figure was drawn from a SimBrief flight plan rather than the default
+notional route.
 
 Because numerical convergence depends on variable bounds, solver tolerances,
 and atmospheric conditions, stage execution times vary; ALAS provides no exact

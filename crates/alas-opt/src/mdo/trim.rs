@@ -259,7 +259,7 @@ pub(crate) fn trim_and_polar(
 
     let aero = AeroAnalysis::new(
         plane,
-        dv.sweep_deg,
+        AeroAnalysis::quarter_chord_sweep_deg(plane, dv.sweep_deg),
         Some(config.geometry.clone()),
         Some(config.drag_model.clone()),
         Some(config.analysis.clone()),

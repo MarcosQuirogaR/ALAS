@@ -107,7 +107,10 @@ struct Fixture {
 #[test]
 fn parity_screening() {
     let fixture: Fixture = alas_testkit::load("screen", "screening");
-    let config = AlasConfig::default();
+    let mut config = AlasConfig::default();
+    // The translated screening fixture used 9.81 m/s^2. Keep that value at
+    // this compatibility boundary; product analyses use 9.80665 m/s^2.
+    config.requirements.gravity_m_s2 = 9.81;
     let dv = DesignVector::default();
 
     // 1. Cruise condition (Closed tier)

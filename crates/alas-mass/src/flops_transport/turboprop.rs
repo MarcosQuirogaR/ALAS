@@ -11,7 +11,7 @@
 //! (equation 69), the engine (75-80, whose transport default is `THRSO/5.5`),
 //! the thrust reversers (86), the engine controls (87), the starters (89) and,
 //! among the operating items, the unusable fuel (121) and the engine oil
-//! (122). Searching the published text for "propeller", "turboprop" or "shaft
+//! (123). Searching the published text for "propeller", "turboprop" or "shaft
 //! horsepower" returns nothing at all, and NASA Aviary, the reference
 //! implementation of the same source, has no propeller or gearbox component
 //! in `mass/flops_based/` either.
@@ -43,11 +43,11 @@
 //!
 //! ## Why the engine oil is declared rather than taken from equation 162
 //!
-//! FLOPS equation 122 reads a thrust, so it cannot be used here. The same
+//! FLOPS equation 123 reads a thrust, so it cannot be used here. The same
 //! document's alternate equation 162 is thrust-free, but as printed
 //! (`WOIL = 240 (NPASS + 39) / 40`, p. 56) it returns 1,248 lb of engine oil
 //! for the 169-passenger `LargeSingleAisle1` case against 130.23 lb from the
-//! default equation 122 for the same aircraft: a factor of ten, and far
+//! default equation 123 for the same aircraft: a factor of ten, and far
 //! above any real transport's oil charge. The printed alternate constant is
 //! therefore not usable, and the oil is a declared input instead of a wrong
 //! one. Left undeclared it is zero and visible as an accounting gap; on a

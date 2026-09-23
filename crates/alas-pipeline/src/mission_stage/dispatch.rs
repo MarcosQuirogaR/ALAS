@@ -23,7 +23,7 @@ use alas_mission::segments::SegmentSpec;
 use alas_mission::MissionRequest;
 
 use crate::feasibility::FuelLoadingAssessment;
-use crate::fuel_model::{breguet_from_report, FlownTripModel};
+use crate::fuel_model::{segment_model_from_report, FlownTripModel};
 use crate::full_analysis::AnalysisReport;
 
 use super::flight::fly_with_guidance;
@@ -110,7 +110,7 @@ pub(super) fn select_load_case(
     if !config.fuel_policy.fly_policy_load_case {
         return Ok(maximum(None));
     }
-    let analytic = match breguet_from_report(config, report) {
+    let analytic = match segment_model_from_report(config, report) {
         Ok(model) => model,
         Err(error) => return Ok(maximum(Some(error))),
     };

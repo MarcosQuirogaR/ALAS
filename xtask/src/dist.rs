@@ -50,6 +50,19 @@ const SOURCE_TOOL_EXTENSIONS: [&str; 10] = [
     "cjs", "js", "mjs", "py", "ps1", "toml", "json", "md", "txt", "tsv",
 ];
 
+// Embedded at compile time by alas-fonts and alas-pipeline. Keep the font
+// licence texts adjacent to the exact font bytes in the source snapshot.
+const SOURCE_EMBEDDED_ASSET_FILES: [&str; 8] = [
+    "crates/alas-fonts/assets/NotoSans-Variable.ttf",
+    "crates/alas-fonts/assets/NotoSansMath-Regular.ttf",
+    "crates/alas-fonts/assets/NotoSansMono-Variable.ttf",
+    "crates/alas-fonts/assets/OFL-NotoSans.txt",
+    "crates/alas-fonts/assets/OFL-NotoSansMath.txt",
+    "crates/alas-fonts/assets/OFL-NotoSansMono.txt",
+    "crates/alas-fonts/assets/README.md",
+    "crates/alas-pipeline/src/openvsp/native_preview.py",
+];
+
 // These directories contain data consumed by production code or by offline
 // tests during compilation. They are named explicitly so an unrelated data
 // dump added to a crate cannot enter a public source archive just because it
@@ -585,6 +598,9 @@ fn source_path_allowed(path: &str) -> bool {
         || SOURCE_BRANDING_FILES
             .iter()
             .any(|candidate| *candidate == normalized)
+        || SOURCE_EMBEDDED_ASSET_FILES
+            .iter()
+            .any(|candidate| *candidate == normalized)
         || normalized == "assets/textures/earth_blue_marble.png"
         || SOURCE_GOLDEN_FIXTURE_FILES
             .iter()
@@ -699,6 +715,10 @@ fn write_source_manifest(source_root: &Path, snapshot: &SourceSnapshot) -> Resul
     json.push_str(&format!(
         "  \"allowed_branding_files\": {},\n",
         json_string_array(&SOURCE_BRANDING_FILES)
+    ));
+    json.push_str(&format!(
+        "  \"allowed_embedded_asset_files\": {},\n",
+        json_string_array(&SOURCE_EMBEDDED_ASSET_FILES)
     ));
     json.push_str("  \"allowed_asset_files\": [\"assets/textures/earth_blue_marble.png\"],\n");
     json.push_str(&format!(
@@ -1788,10 +1808,10 @@ mod tests {
     use std::path::PathBuf;
 
     use super::{
-        assess_nastran95, bundle_branding, bundle_mses_osmap, bundle_status_json,
-        deleted_tracked_paths, package_name, parse_artifact_records, sha256_hex,
-        source_path_allowed, target_label, validate_bundled_mses_osmap, BundleStatus,
-        MSES_OSMAP_RELATIVE_PATH, USER_SUPPLIED_EXTERNAL_TOOLS,
+        assess_nastran95, bundle_branding, bundle_mses_osmap, bundle_source_snapshot,
+        bundle_status_json, deleted_tracked_paths, package_name, parse_artifact_records,
+        sha256_hex, source_path_allowed, target_label, validate_bundled_mses_osmap, BundleStatus,
+        MSES_OSMAP_RELATIVE_PATH, SOURCE_EMBEDDED_ASSET_FILES, USER_SUPPLIED_EXTERNAL_TOOLS,
     };
 
     /// A tracked file deleted on purpose must not fail the release, and must
@@ -1922,6 +1942,18 @@ mod tests {
         assert!(source_path_allowed(".gitattributes"));
         assert!(source_path_allowed("tools/aircraft_parity.cjs"));
         assert!(source_path_allowed("docs/release-packaging.md"));
+        for asset in SOURCE_EMBEDDED_ASSET_FILES {
+            assert!(
+                source_path_allowed(asset),
+                "missing embedded asset: {asset}"
+            );
+        }
+        assert!(!source_path_allowed(
+            "crates/alas-fonts/assets/unreviewed.ttf"
+        ));
+        assert!(!source_path_allowed(
+            "crates/alas-pipeline/src/openvsp/unreviewed.py"
+        ));
         assert!(!source_path_allowed("external tools/AVL-GPL-2.0.txt"));
         assert!(!source_path_allowed(".agent/reports/review.html"));
         assert!(!source_path_allowed("runs/private/output.json"));
@@ -1942,6 +1974,34 @@ mod tests {
         assert!(!source_path_allowed("xtask/src/notes.json"));
         assert!(!source_path_allowed("configs/credentials.yaml"));
         assert!(!source_path_allowed("keys/signing.pem"));
+    }
+
+    #[test]
+    fn source_snapshot_retains_embedded_assets_and_font_licenses() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .map(PathBuf::from)
+            .expect("workspace root beside xtask crate");
+        let package = std::env::temp_dir().join(format!(
+            "alas-embedded-assets-package-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&package);
+        fs::create_dir_all(&package).expect("temporary package directory");
+
+        let snapshot = bundle_source_snapshot(&root, &package).expect("source snapshot");
+        let manifest =
+            fs::read_to_string(package.join("SOURCE-MANIFEST.json")).expect("source manifest");
+        assert!(manifest.contains("\"allowed_embedded_asset_files\""));
+        for asset in SOURCE_EMBEDDED_ASSET_FILES {
+            let original = fs::read(root.join(asset)).expect("tracked embedded asset");
+            let packaged = fs::read(package.join("source/alas").join(asset))
+                .expect("embedded asset in source snapshot");
+            assert_eq!(packaged, original, "source snapshot changed {asset}");
+            assert!(snapshot.records.iter().any(|record| record.path == asset));
+            assert!(manifest.contains(asset), "source manifest omits {asset}");
+        }
+        fs::remove_dir_all(package).expect("remove temporary package");
     }
 
     #[test]

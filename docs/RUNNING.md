@@ -1,7 +1,7 @@
 # Running and checking ALAS
 
 Written for someone who has not used Rust before. You do not need to learn the
-language to check that this program is correct — the tooling is one command,
+language to check that this program is correct; the tooling is one command,
 and the interesting output is in English.
 
 ---
@@ -79,8 +79,8 @@ the diagnosis: one bad value is a boundary case, all of them wrong by the same
 ratio is a unit error, all of them wrong by a growing amount is an accumulating
 index error.
 
-You do not have to diagnose it yourself. Copy the block into a session and ask
-— that is what the `parity-diagnostician` agent exists for. The one thing not
+You do not have to diagnose it yourself. Copy the block into a session and ask;
+that is what the `parity-diagnostician` agent exists for. The one thing not
 to accept is a fix that widens the tolerance until the test passes; the tiers
 are defined in `crates/alas-testkit/src/lib.rs`, each with the reason it
 exists, and a module that cannot meet its tier is a finding.
@@ -97,8 +97,8 @@ cargo test -- --nocapture         # show output the program printed
 ### What the tests do not cover
 
 A parity test only checks the points its fixture was generated at. That is why
-each module also has ordinary tests for properties that should hold everywhere
-— an atmosphere that gets colder with altitude, a wing area that scales
+each module also has ordinary tests for properties that should hold everywhere:
+an atmosphere that gets colder with altitude, a wing area that scales
 correctly, a configuration that survives a save and reload. Both run under
 `cargo test`.
 
@@ -116,7 +116,7 @@ compiler's lints, and the whole test suite. It stops at the first failure and
 says what it wants.
 
 For numerical parity against the Python reference and licence provenance,
-read `docs/PORTING.md` — every translated module has a row there. It is not
+read `docs/PORTING.md`; every translated module has a row there. It is not
 a project-completion tracker any more, since orchestration layers such as
 `alas-pipeline` and `alas-gui` were written natively rather than translated;
 for "does the program work and what is currently wrong with it", read
@@ -128,7 +128,7 @@ for "does the program work and what is currently wrong with it", read
 
 There are two ways in, both through the `alas` binary built from `alas-app`.
 The workspace also builds `alas-bench` and `external_preset_audit`
-(`alas-acceptance`), so `cargo run` alone is ambiguous — name the binary.
+(`alas-acceptance`), so `cargo run` alone is ambiguous; name the binary.
 
 ```powershell
 cargo run --release --bin ALAS
@@ -136,7 +136,7 @@ cargo run --release --bin ALAS
 
 starts the desktop application (equivalent to `... --bin ALAS -- --gui`).
 `--release` builds the optimized version, which is slower to compile and much
-faster to run — always use it for anything you are timing or actually using.
+faster to run; always use it for anything you are timing or actually using.
 
 ```powershell
 cargo run --release --bin ALAS -- --config path\to\your.yaml --output outputs
@@ -145,10 +145,10 @@ cargo run --release --bin ALAS -- --config path\to\your.yaml --output outputs
 runs an analysis with no interface: `--config` overlays a YAML/JSON
 configuration, `--output` selects the directory the reports and figures are
 written into (default `outputs`). Run `cargo run --bin ALAS -- --help` for
-the full flag list — it includes `--no-optimize`, `--no-mission`,
+the full flag list; it includes `--no-optimize`, `--no-mission`,
 `--aero-solver`, `--cpacs-input` and others.
 
-The built executable lands at `target\release\ALAS.exe` and is standalone —
+The built executable lands at `target\release\ALAS.exe` and is standalone:
 copy it anywhere, no installation, no Python.
 
 On Windows, every solver ALAS launches (AVL, VSPAERO, MSES, OpenVSP, NASTRAN,
@@ -191,13 +191,13 @@ Enough to review a change:
 | `///` above an item | What that item does |
 | `let x = ...` | A value; `let mut x` if it changes afterwards |
 | `struct` / `enum` | A record; a choice between alternatives |
-| `Option<T>` | Either a `T` or nothing — absence is explicit |
-| `Result<T, E>` | Either a `T` or an error — failure is explicit |
+| `Option<T>` | Either a `T` or nothing; absence is explicit |
+| `Result<T, E>` | Either a `T` or an error; failure is explicit |
 | `#[test]` | A test, run by `cargo test` |
 | `assert!(...)` | Something that must be true, or the test fails |
 
 The parts worth reviewing are the module doc comment at the top, the constants
-and where they are cited from, and the test names — which are written as
+and where they are cited from, and the test names, which are written as
 sentences stating the property being checked, so the test list reads as a
 description of what the module guarantees.
 
@@ -212,5 +212,5 @@ cargo xtask backup
 ```
 
 That produces a single file containing every branch and every commit, which a
-sync client handles cleanly — unlike the build directory, which produces
+sync client handles cleanly, unlike the build directory, which produces
 thousands of files and would defeat it. Run it after any substantial session.

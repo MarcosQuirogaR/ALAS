@@ -266,13 +266,32 @@ fn mission_aerodynamic_inputs_match_the_pinned_suave_vehicle() {
         .unwrap_or(report.design_point.l_over_d);
     let expected_reference_thrust_n = config.requirements.mtow_kg * 9.81 / l_over_d;
     assert!((legacy.inputs.design_thrust_total_n - expected_reference_thrust_n).abs() < 1.0e-9);
+    // The frozen `golden/mission/mission.json` fixture's `design_thrust_total_n`
+    // was generated against the pre-correction Lock/Korn wave-drag law
+    // (`20 (M - M_dd)^4`, substituting the drag-divergence Mach for the
+    // critical Mach; physics review v1.2, finding A3). `alas-aero::analysis::
+    // AeroAnalysis::wave_drag` now applies the published law,
+    // `20 (M - M_crit)^4`, which raises cruise CD and lowers L/D at this
+    // Mach, so the two sides of this historical-target reproduction no
+    // longer agree exactly and the fixture is not re-pinned (it also backs
+    // the geometry/engine-spec comparisons above, which are unaffected and
+    // still checked exactly). Bound the resulting increase in required
+    // thrust instead of asserting equality: it must be positive (lower L/D
+    // needs more thrust) and stay within a physically reasonable band for a
+    // wave-drag correction at this cruise point -- the default aircraft's
+    // own cruise CD rose by about 10% from this same fix
+    // (`quick_analysis_wave_drag.rs`), so a required-thrust increase of the
+    // same rough order, not e.g. a factor of two, is the expected signature.
+    let thrust_increase_fraction = (legacy.inputs.design_thrust_total_n
+        - vehicle.turbofan.design_thrust_total_n)
+        / vehicle.turbofan.design_thrust_total_n;
     assert!(
-        (legacy.inputs.design_thrust_total_n - vehicle.turbofan.design_thrust_total_n).abs()
-            < 1.0e-6,
-        "reference thrust actual={} fixture={} expected_from_report={}",
+        (0.0..0.30).contains(&thrust_increase_fraction),
+        "reference thrust actual={} fixture={} expected_from_report={} increase_fraction={}",
         legacy.inputs.design_thrust_total_n,
         vehicle.turbofan.design_thrust_total_n,
-        expected_reference_thrust_n
+        expected_reference_thrust_n,
+        thrust_increase_fraction
     );
     let expected_flow = vehicle.turbofan.compressor_nondimensional_massflow
         * legacy.inputs.design_thrust_total_n

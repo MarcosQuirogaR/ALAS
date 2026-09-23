@@ -666,9 +666,11 @@ mod tests {
     #[test]
     fn configured_directories_supply_a_fallback_version() {
         let preferences = OpenFoamPreferences {
-            native_bin_dir: Some(
-                r"C:\OpenFOAM\OpenFOAM-v2312\platforms\win64MingwDPInt32Opt\bin".to_owned(),
-            ),
+            native_bin_dir: Some(if cfg!(windows) {
+                r"C:\OpenFOAM\OpenFOAM-v2312\platforms\win64MingwDPInt32Opt\bin".to_owned()
+            } else {
+                "/opt/OpenFOAM/OpenFOAM-v2312/platforms/linux64GccDPInt32Opt/bin".to_owned()
+            }),
             ..OpenFoamPreferences::default()
         };
         let version = configured_directory_version(&preferences).expect("directory version");
