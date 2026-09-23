@@ -44,6 +44,66 @@ The optional [all_preset_cg_closeout example](../crates/alas-acceptance/examples
 
 ## Current run and interpretation
 
+### 2026-09-23 regenerated run (release 1.2 candidate)
+
+`model_reference_dump` was regenerated from the integrated release branch (release profile) and
+the harness was rerun against the unchanged contract:
+
+- `MODEL.json` SHA-256 `E57AF6D11AE5C430C82BAF9387454033956D8B71A80F68CF24BBE9EE76941252`
+- contract SHA-256 `DD043B3324978AAE18ACF58BF2E44CC40FEFA7325A4E3D87E24728C4074B68ED`
+- result JSON SHA-256 `39D5F29A188F5B4BF379A75C22DDCC085ABB656EFCBD9EE8E206CBDBFEF82672`
+- harness self-test `node --test tools/aircraft_parity.test.cjs`: 18/18 pass
+
+| Status | Rows |
+| --- | ---: |
+| within_tolerance | 68 |
+| out_of_tolerance | 6 |
+| diagnostic | 70 |
+| unsupported | 21 |
+| evidence_gap | 76 |
+| source_conflict | 0 |
+
+**Reference inputs are now separated from model outputs.** The harness marks a scored row with
+`model_provenance_note` when the model value is a registered input rather than an analysis result:
+source-scaled gear stations, published fuel capacity, and (new in this run) declared preset inputs
+exported straight from the design vector, requirements or gear-layout definition (span, fuselage
+length, engine spanwise position, MTOW, cruise Mach, gear topology counts). The summary reports
+`by_provenance` for the 74 scored rows:
+
+| Scored rows | within_tolerance | out_of_tolerance |
+| --- | ---: | ---: |
+| Registered reference inputs (data retention, not prediction) | 64 | 2 |
+| Independent model outputs | 4 | 4 |
+
+The 68 `within_tolerance` rows therefore do **not** mean 68 validated predictions. Only eight
+scored rows are model outputs:
+
+| Preset | Quantity | Model | Source | Result |
+| --- | --- | ---: | ---: | --- |
+| A320-200 | `geometry.mac_m` | 4.1934 m | 4.1935 m | within |
+| A380-800 | `geometry.wing_area_m2` | 845.0 m2 | 845 m2 | within |
+| ATR72-600 | `geometry.wing_area_m2` | 61.0 m2 | 61 m2 | within |
+| DC-10 | `geometry.wing_area_m2` | 338.84 m2 | 338.8 m2 | within |
+| A340-300 | `geometry.mac_m` | 7.3466 m | 7.27 m | out, +1.05 % |
+| B787-9 | `geometry.mac_m` | 7.5478 m | 6.2713 m | out, +20.4 % |
+| ATR72-600 | `mass.oew_kg` | 15,244 kg | 13,450 kg | out, +13.3 % |
+| ATR72-600 | `mass.max_payload_kg` | 5,679 kg | 7,550 kg | out, -24.8 % |
+
+Wing area is a computed projected planform area, but each preset planform was built from the same
+published geometry, so these three matches are close to calibration rather than prediction. MAC is
+integrated from that planform; the A340-300 and B787-9 misses remain reference-geometry questions
+(see below), not aerodynamic or mass tuning targets. The ATR72-600 OEW moved from -10.7 % (2026-09-09)
+to +13.3 % after the integrated mass and fuel corrections; with the MTOW fixed, the payload
+shortfall follows from it. It is a genuine model gap.
+
+The two out-of-tolerance reference inputs are data-entry discrepancies, not model errors: the A320-200
+usable fuel literal (19,334 kg against 19,004 kg, the circularity case described below) and the DC-10
+declared fuselage length (55.55 m against the EASA IM.A.210 DC-10-30 value of 55.35 m).
+
+None of these rows is certification, weighed-aircraft or flight-test evidence.
+
+### 2026-09-09 run
+
 The 2026-09-09 release-profile run against the freshly regenerated `MODEL.json` contains 241 rows. The fresh model export SHA-256 is `F40A20F265A4654C8D1EADC53A47CE101D8EB87F9442D6023D52F5501D6071B4` (corrected 2026-09-22; the previously published string here was missing its trailing hex digit); the parity result hash is `1DA8F0F84AB3EDE2D31989431469C57D1B471685EAFF1EF268C59887F41E26DF`. The pre-A220-station export is retained locally (outside this checkout) as `MODEL-pre-a220-gear-20260909.json` with SHA-256 `1AF549DC73408497224314DA65FBA75CD3652D1E5720182A5AD4555E80CCE996`, and the pre-station-anchor export remains `MODEL-pre-gear-20260909.json` with SHA-256 `08CF196BBE3CC381C7A7805ED8B7E0CA1F06E22B70D5C8F9A31DE0442AA68760`.
 
 | Status | Rows | Interpretation |
