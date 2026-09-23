@@ -46,12 +46,13 @@ The optional [all_preset_cg_closeout example](../crates/alas-acceptance/examples
 
 ### 2026-09-23 regenerated run (release 1.2 candidate)
 
-`model_reference_dump` was regenerated from the integrated release branch (release profile) and
-the harness was rerun against the unchanged contract:
+`model_reference_dump` was regenerated from the integrated release branch (release profile, after the
+1.2 physics review's wave-drag sweep/thickness and unusable-fuel corrections) and the harness was
+rerun against the unchanged contract:
 
-- `MODEL.json` SHA-256 `E57AF6D11AE5C430C82BAF9387454033956D8B71A80F68CF24BBE9EE76941252`
+- `MODEL.json` SHA-256 `50280D42B506981AEB74B28752682107BCC3328699287678D4FF99C478398F4F`
 - contract SHA-256 `DD043B3324978AAE18ACF58BF2E44CC40FEFA7325A4E3D87E24728C4074B68ED`
-- result JSON SHA-256 `39D5F29A188F5B4BF379A75C22DDCC085ABB656EFCBD9EE8E206CBDBFEF82672`
+- result JSON SHA-256 `A3D778BE67F2F13BBA50595874705A75234330B655ECEC84F78A6D9AC8A0D0EC`
 - harness self-test `node --test tools/aircraft_parity.test.cjs`: 18/18 pass
 
 | Status | Rows |
@@ -99,6 +100,13 @@ shortfall follows from it. It is a genuine model gap.
 The two out-of-tolerance reference inputs are data-entry discrepancies, not model errors: the A320-200
 usable fuel literal (19,334 kg against 19,004 kg, the circularity case described below) and the DC-10
 declared fuselage length (55.55 m against the EASA IM.A.210 DC-10-30 value of 55.35 m).
+
+The corrections left every scored status unchanged; they move the aerodynamic diagnostics. Cruise
+L/D is the clearest remaining model gap and is not scored: the narrowbodies sit a few percent below
+their estimated references (A320-200 17.5 against 18.1, A220-300 17.6 against 18.5), the widebodies
+far below (A340-300 17.5 against 20.0, A380-800 14.5 against 20.1, B787-9 14.6 against 20.8). These
+references are estimates or secondary sources, so the rows stay diagnostic, but the widebody gap
+is too large to attribute to them and no coefficient was tuned to close it.
 
 None of these rows is certification, weighed-aircraft or flight-test evidence.
 

@@ -15,11 +15,90 @@ This is a working document, like `PORTING.md` claims to be for itself: update
 it in the commit that fixes or introduces the thing it describes, rather than
 letting it drift and doing a retroactive sweep later.
 
-**Last swept:** 2026-09-05, during the remediation of the 2026-09-03 codebase
-audit (the internal codebase-audit report (2026-09-03), findings F1-F12; the
-closure record is the "Audit remediation" section below). Re-verify anything older than a few weeks before
-relying on it — this file records what an audit found, not what is
-continuously enforced by `cargo xtask gate`.
+**Last swept:** 2026-09-23, for the 1.2 release (section below). Earlier
+sections record what earlier audits found; the "What does not work yet"
+list keeps its original dates and says where the 1.2 evidence changes an
+item. Re-verify anything older than a few weeks before relying on it — this
+file records what an audit found, not what is continuously enforced by
+`cargo xtask gate`.
+
+---
+
+## Release 1.2 evidence, 2026-09-23
+
+What was measured on the release branch, kept apart by kind of claim.
+
+**Implementation verification.** `cargo xtask gate` (repository checks,
+formatting, Clippy with warnings denied, the full workspace suite with
+`--no-fail-fast`) passes on hosted Windows and on ubuntu-22.04. The Windows
+and Linux packages pass the licence-boundary suite and a headless run of the
+packaged binary in the release workflow. The first full Linux run found 21
+failures, none a Windows regression (process races, path fixtures, parity
+tiers set on the MSVC runtime); see the testkit's `REFERENCE_RUNTIME`.
+
+**Numerical results, all eight presets** (baseline matrix, and the
+`balanced` optimisation matrix with seed 20260922, measured at `89c565e`,
+before the physics corrections in the next paragraph):
+
+- Baseline: every preset executes. The model's own physical checks raise
+  findings for two: AVE (analysed zero-fuel CG forward of its configured
+  range) and ATR72-600 (static margin about -22 % MAC, negative nose-gear
+  load, modelled OEW 15,244 kg against 13,450 kg, cruise T/W shortfall).
+- Optimisation: seven presets deliver a numerically feasible candidate;
+  none converges within the `balanced` budget (15 generations), so every
+  termination is `iteration_limit`. ATR72-600 returns `NoFeasibleDesign`
+  (896 candidates; dominant rejections nose-gear load, MTOW-limited dispatch,
+  sizing not closed, static-margin floor). Presets are optimised clean-sheet,
+  so a candidate closes at its own take-off mass; fuel deltas against the
+  registered aircraft are reported as not comparable.
+- Public planning CG is evaluated only for the A220-300, the one preset with
+  a registered public planning envelope; elsewhere it is `NotEvaluated`.
+
+**Physics corrections found by the 1.2 review.** The Korn drag-divergence
+relation, the swept compressibility correction and the main-wing form factor
+now receive the main wing's quarter-chord sweep measured off the built
+geometry; they were given the inboard leading-edge sweep, which alone
+under-predicted wave drag (A380-800 at Mach 0.85: about 13 instead of 25
+drag counts). Korn also now takes the main wing's area-weighted mean t/c,
+the basis the form factor already used, instead of the root section's, the
+thickest station on a tapered wing. Reference-compatibility analyses keep
+the frozen inputs for the parity fixtures. The pure-FLOPS mass model already carries unusable fuel inside
+OEW, and the take-off load case no longer subtracts it a second time from
+the usable fuel (0.1 to 0.3 % of take-off mass). A consequence of the higher,
+corrected wave drag: the default AVE design at its default cruise point
+(M 0.84, 11,887 m) now needs static T/W 0.2676 against the default engine
+rating's 0.2655 and reports a thrust-margin finding in a fixed-design review;
+an optimisation run is free to move away from that point.
+
+**Calibration and physical validation.** None of the above is aircraft-level
+physical validation. No preset has a source-backed design mission, so every
+optimisation row records the mission as `UNVERIFIED`. The real-aircraft
+parity report (241 rows, `docs/aircraft-parity.md`) scores 74 rows, of which
+66 compare registered reference inputs; only eight compare model outputs.
+Specific limits that release notes must not overstate:
+
+- **A380-800 fuel distribution** is an approximate ground distribution over
+  aggregate tank groups. It conserves mass, balances left/right pairs and
+  keeps the feed-containing groups positive at the tested partial load, but
+  each group mixes feed and non-feed tanks, so it does not show fuel in all
+  four physical feed tanks. The Airbus fuel quantity management system
+  distributes fuel from zero-fuel mass and CG, which this API does not take.
+  It is not a certified fuel-loading schedule.
+- **Mission assumptions**: the generic 250 m/s TAS climb schedule used by
+  the preset routes and the 0.9 m bulk-hold handling clearance are
+  engineering assumptions, not aircraft-specific sourced values. The time
+  between step climbs is derived rather than fixed: a step of height dh is
+  taken once fuel burn has lowered the optimum altitude by dh, at the
+  modelled burn rate (about 2.9 h for a 600 m step).
+- **ATR72-600** is outside the mass model's validity domain. The wing datum
+  is sourced and the turboprop propulsion station is ordinary; the negative
+  margin comes from the generic FLOPS transport fuselage, furnishings and
+  systems correlations (Eqs. 104, 106, 110), fitted to larger jet
+  transports. At 23,000 kg MTOW furnishings and fuselage alone are 47 % of
+  the modelled OEW and put the OEW CG near 41 % MAC, against about 21 % for
+  the A320-200. No primary source for the ATR 72-600 empty-weight CG was
+  available, so no calibration was invented; ATR results are not usable
+  until a sourced regional-turboprop mass model replaces these terms.
 
 ---
 
@@ -39,8 +118,9 @@ continuously enforced by `cargo xtask gate`.
   budget, after which the rule is exactly Deb's feasibility ordering. The
   reported winner is tracked as the strict feasibility minimum over every
   candidate the run ever evaluated, independent of which candidates the
-  epsilon-relaxed comparison lets survive inside the live population, so a
-  design reported feasible always satisfied every hard constraint at full
+  epsilon-relaxed comparison lets survive inside the live population, so,
+  under the default strict constraint-relaxation policy, a design reported
+  feasible always satisfied every hard constraint at full
   coupled fidelity (`alas-opt::mdo`: geometry/mass build, mission sizing
   closure, trim/CG closure). No feasible candidate found returns the typed
   `NoFeasibleDesign` error with the least-violating candidate as diagnostics,
@@ -88,8 +168,7 @@ continuously enforced by `cargo xtask gate`.
 
 - `cargo run --bin ALAS` launches the desktop GUI (`alas-gui`); `ALAS --gui`
   is equivalent, and headless flags (`--config`, `--save-config`) drive the
-  same pipeline without it. **`docs/RUNNING.md`'s "not yet possible" is
-  stale — fix pending, see below.**
+  same pipeline without it, as `docs/RUNNING.md` describes.
 - The full design pipeline runs end to end: geometry build, mass/CG, mission
   flight, drag build-up, wingbox sizing, and figure generation, for
   hand-built and CPACS-imported aircraft alike.
@@ -110,7 +189,10 @@ an earlier one for the same claim.
    basic physical screening (CG, ZFW, or passenger capacity out of bounds).
    The project's own "no exceptions" acceptance bar is not met.
    (the internal independent-external-acceptance-interim report (2026-09-01),
-   with its supporting native preset audit data.)
+   with its supporting native preset audit data.) **2026-09-23:** the
+   baseline screening findings are down to two presets (AVE, ATR72-600);
+   the missing source-backed design mission is unchanged (see "Release 1.2
+   evidence" above).
 2. **Propulsion is internally inconsistent.** The cycle model
    (`alas-prop::cycle`) over-subtracts ram drag and has a choked-nozzle
    energy inconsistency; the mission-flown model
