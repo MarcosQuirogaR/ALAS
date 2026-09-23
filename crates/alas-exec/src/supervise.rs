@@ -255,6 +255,7 @@ mod platform {
 mod tests {
     use super::*;
     use crate::process::{kill_process_tree, NoConsoleWindow};
+    #[cfg(windows)]
     use std::time::{Duration, Instant};
 
     /// A child that would run for a minute if nothing stopped it.

@@ -282,9 +282,8 @@ pub fn run_nastran95(
 /// The dependency list is read from the executable rather than assumed for
 /// every NASTRAN-95 build.  This keeps statically linked or differently built
 /// solvers usable, while a binary that actually imports the GNU DLLs receives
-/// a deterministic diagnostic instead of a Windows loader dialog.  Search
-/// order mirrors the Windows loader's useful caller-controlled locations:
-/// configured runtime, executable directory, then the inherited `PATH`.
+/// a deterministic diagnostic instead of a Windows loader dialog. Search order
+/// (Windows loader): configured runtime, executable directory, then `PATH`.
 #[cfg_attr(not(windows), allow(clippy::needless_return))]
 fn validate_runtime_dependencies(
     executable: &Path,
