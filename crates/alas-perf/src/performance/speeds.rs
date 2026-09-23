@@ -69,7 +69,7 @@ pub fn compute_v_speeds(
 /// Compute the certified speed schedule with separate take-off and landing
 /// masses. Take-off speeds remain tied to MTOW, while stall/approach/
 /// touchdown speeds use the arrival mass.
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments)] // one per mass, configuration and field input
 pub fn compute_v_speeds_at_masses(
     mtow_kg: f64,
     landing_mass_kg: f64,
@@ -202,7 +202,7 @@ pub fn compute_field_performance(
 /// landing mass (normally the mission arrival mass or, absent telemetry, the
 /// configured MLW cap). Keeping these masses separate prevents an MTOW-based
 /// LDR from being presented as an arrival performance result.
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments)] // one per mass, configuration and field input
 pub fn compute_field_performance_at_masses(
     mtow_kg: f64,
     landing_mass_kg: f64,

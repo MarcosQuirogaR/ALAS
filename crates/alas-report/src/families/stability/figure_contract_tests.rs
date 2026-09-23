@@ -5,6 +5,7 @@
 //! presentation contract. These tests guard data association and annotations;
 //! they do not approve a new stability presentation.
 
+// Test code: a failed unwrap on a fixture it builds is the assertion failing.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use super::figure_stability_side_view;

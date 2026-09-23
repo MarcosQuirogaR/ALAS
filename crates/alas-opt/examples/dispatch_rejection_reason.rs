@@ -16,6 +16,8 @@
 //! SI throughout: kg, m. Run:
 //! `cargo run --release -p alas-opt --example dispatch_rejection_reason`
 
+// A diagnostic example: its output is the printed report, and a failed
+// unwrap is the probe stopping on an input it cannot run.
 #![allow(clippy::print_stdout, clippy::unwrap_used, clippy::expect_used)]
 
 use alas_config::design_variables::DesignVector;

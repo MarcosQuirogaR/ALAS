@@ -19,6 +19,7 @@ pub(crate) const MAIN_GEAR_STATION_NOT_MEASURED: &str =
     "No main-gear station measured for this layout (no published gear-station anchor; wing root above fuselage crown)";
 
 pub mod aerodynamics;
+mod common;
 pub mod geometry;
 pub mod mass_balance;
 pub mod mass_balance_layout;

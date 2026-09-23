@@ -1,16 +1,25 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
+use super::win_ansi::pdf_literal;
 use super::{PdfFigure, PdfSection};
 use crate::scene::{
-    wrap_text_to_width, Color, Scene, SceneElement, TextAlign, CSS_PIXELS_PER_POINT,
-    TEXT_LINE_HEIGHT_EM,
+    text_line_center_offsets, wrap_text_to_width, Color, Fill, Point2D, Scene, SceneElement,
+    Stroke, TextAlign, TextBaseline, CSS_PIXELS_PER_POINT, TEXT_LINE_HEIGHT_EM,
 };
 
 const PAGE_WIDTH: f64 = 595.28;
 const PAGE_HEIGHT: f64 = 841.89;
 const PAGE_MARGIN: f64 = 42.0;
 const HEADER_HEIGHT: f64 = 54.0;
+
+/// Mean Helvetica advance per character [em], for anchoring centered and
+/// right-aligned text without glyph metrics.
+const HELVETICA_MEAN_ADVANCE_EM: f64 = 0.52;
+/// Distance from the em-box center down to the baseline [em]: half of the
+/// 0.8 em ascent minus 0.2 em descent. SVG places each line with
+/// `dominant-baseline="central"`, i.e. on this center.
+const CENTRAL_TO_BASELINE_EM: f64 = 0.3;
 
 pub(super) fn render_sections(sections: &[&PdfSection]) -> Vec<u8> {
     let mut pages = Vec::new();
@@ -26,41 +35,23 @@ pub(super) fn render_sections(sections: &[&PdfSection]) -> Vec<u8> {
 fn section_page(section: &PdfSection) -> String {
     let mut page = String::new();
     page.push_str("0.04 0.12 0.25 rg\n0 0 595.28 841.89 re f\n");
-    append_page_text(
-        &mut page,
-        PAGE_MARGIN,
-        PAGE_HEIGHT - 150.0,
-        32.0,
-        Color::rgb(255, 255, 255),
-        &section.title,
+    let figure_count = format!(
+        "{} vector figures follow in registry order.",
+        section.figures.len()
     );
-    append_page_text(
-        &mut page,
-        PAGE_MARGIN,
-        PAGE_HEIGHT - 194.0,
-        14.0,
-        Color::rgb(191, 219, 254),
-        "ALAS design report section",
-    );
-    append_page_text(
-        &mut page,
-        PAGE_MARGIN,
-        PAGE_HEIGHT - 250.0,
-        12.0,
-        Color::rgb(226, 232, 240),
-        &format!(
-            "{} vector figures follow in registry order.",
-            section.figures.len()
+    for (offset, size, color, text) in [
+        (150.0, 32.0, Color::rgb(255, 255, 255), section.title.as_str()),
+        (194.0, 14.0, Color::rgb(191, 219, 254), "ALAS design report section"),
+        (250.0, 12.0, Color::rgb(226, 232, 240), figure_count.as_str()),
+        (
+            276.0,
+            11.0,
+            Color::rgb(226, 232, 240),
+            "The companion archive contains the matching SVG source for each page.",
         ),
-    );
-    append_page_text(
-        &mut page,
-        PAGE_MARGIN,
-        PAGE_HEIGHT - 276.0,
-        11.0,
-        Color::rgb(226, 232, 240),
-        "The companion archive contains the matching SVG source for each page.",
-    );
+    ] {
+        append_page_text(&mut page, PAGE_MARGIN, PAGE_HEIGHT - offset, size, color, text);
+    }
     page
 }
 
@@ -107,6 +98,8 @@ fn figure_page(section_title: &str, figure: &PdfFigure) -> String {
         format_number(width),
         format_number(height)
     ));
+    // Scene units are CSS pixels with y down; this maps them onto the page
+    // with y up, so every scene operator below uses scene coordinates.
     page.push_str(&format!(
         "{} 0 0 -{} {} {} cm\n",
         format_number(scale),
@@ -131,12 +124,7 @@ fn append_scene(out: &mut String, scene: &Scene) {
     for element in &scene.elements {
         match element {
             SceneElement::Line { p1, p2, stroke } => {
-                append_stroke(
-                    out,
-                    stroke.color,
-                    stroke.width,
-                    stroke.dash_array.as_deref(),
-                );
+                append_stroke_style(out, stroke);
                 out.push_str(&format!(
                     "{} {} m {} {} l S\n",
                     format_number(p1[0]),
@@ -146,24 +134,8 @@ fn append_scene(out: &mut String, scene: &Scene) {
                 ));
             }
             SceneElement::Polyline { points, stroke } if points.len() >= 2 => {
-                append_stroke(
-                    out,
-                    stroke.color,
-                    stroke.width,
-                    stroke.dash_array.as_deref(),
-                );
-                out.push_str(&format!(
-                    "{} {} m",
-                    format_number(points[0][0]),
-                    format_number(points[0][1])
-                ));
-                for point in &points[1..] {
-                    out.push_str(&format!(
-                        " {} {} l",
-                        format_number(point[0]),
-                        format_number(point[1])
-                    ));
-                }
+                append_stroke_style(out, stroke);
+                append_path(out, points);
                 out.push_str(" S\n");
             }
             SceneElement::Polyline { .. } => {}
@@ -172,29 +144,8 @@ fn append_scene(out: &mut String, scene: &Scene) {
                 fill,
                 stroke,
             } if points.len() >= 2 => {
-                if let Some(fill) = fill {
-                    append_fill(out, fill.color);
-                }
-                if let Some(stroke) = stroke {
-                    append_stroke(
-                        out,
-                        stroke.color,
-                        stroke.width,
-                        stroke.dash_array.as_deref(),
-                    );
-                }
-                out.push_str(&format!(
-                    "{} {} m",
-                    format_number(points[0][0]),
-                    format_number(points[0][1])
-                ));
-                for point in &points[1..] {
-                    out.push_str(&format!(
-                        " {} {} l",
-                        format_number(point[0]),
-                        format_number(point[1])
-                    ));
-                }
+                append_paint_style(out, fill.as_ref(), stroke.as_ref());
+                append_path(out, points);
                 out.push_str(" h ");
                 append_paint_operator(out, fill.is_some(), stroke.is_some());
             }
@@ -208,17 +159,7 @@ fn append_scene(out: &mut String, scene: &Scene) {
                 stroke,
                 ..
             } => {
-                if let Some(fill) = fill {
-                    append_fill(out, fill.color);
-                }
-                if let Some(stroke) = stroke {
-                    append_stroke(
-                        out,
-                        stroke.color,
-                        stroke.width,
-                        stroke.dash_array.as_deref(),
-                    );
-                }
+                append_paint_style(out, fill.as_ref(), stroke.as_ref());
                 out.push_str(&format!(
                     "{} {} {} {} re ",
                     format_number(*x),
@@ -234,17 +175,7 @@ fn append_scene(out: &mut String, scene: &Scene) {
                 fill,
                 stroke,
             } => {
-                if let Some(fill) = fill {
-                    append_fill(out, fill.color);
-                }
-                if let Some(stroke) = stroke {
-                    append_stroke(
-                        out,
-                        stroke.color,
-                        stroke.width,
-                        stroke.dash_array.as_deref(),
-                    );
-                }
+                append_paint_style(out, fill.as_ref(), stroke.as_ref());
                 append_circle_path(out, center[0], center[1], *radius);
                 append_paint_operator(out, fill.is_some(), stroke.is_some());
             }
@@ -255,30 +186,37 @@ fn append_scene(out: &mut String, scene: &Scene) {
                 width,
                 height,
                 ..
-            } => append_external_image_notice(out, source, *x, *y, *width, *height),
+            } => append_external_image_notice(out, source, [*x, *y, *width, *height]),
             SceneElement::SphericalImage {
                 center,
                 radius,
                 source,
                 ..
-            } => {
-                append_external_image_notice(
-                    out,
-                    source,
-                    center[0] - radius,
-                    center[1] - radius,
-                    radius * 2.0,
-                    radius * 2.0,
-                );
-            }
+            } => append_external_image_notice(
+                out,
+                source,
+                [center[0] - radius, center[1] - radius, radius * 2.0, radius * 2.0],
+            ),
             SceneElement::Text {
                 text,
                 pos,
                 font_size,
                 color,
                 align,
+                baseline,
+                angle_deg,
                 ..
-            } => append_scene_text(out, text, pos[0], pos[1], *font_size, *color, *align),
+            } => {
+                let lines = text.split('\n').collect::<Vec<_>>();
+                let style = SceneTextStyle {
+                    font_size_pt: *font_size,
+                    color: *color,
+                    align: *align,
+                    baseline: *baseline,
+                    angle_deg: *angle_deg,
+                };
+                append_scene_text(out, &lines, *pos, &style);
+            }
             SceneElement::TextBlock {
                 text,
                 pos,
@@ -287,17 +225,51 @@ fn append_scene(out: &mut String, scene: &Scene) {
                 color,
                 ..
             } => {
-                let line_height = font_size * CSS_PIXELS_PER_POINT * TEXT_LINE_HEIGHT_EM;
-                for (index, line) in wrap_text_to_width(text, *font_size, *width)
-                    .lines()
-                    .enumerate()
-                {
-                    let y = pos[1] + index as f64 * line_height;
-                    append_scene_text(out, line, pos[0], y, *font_size, *color, TextAlign::Left);
-                }
+                let wrapped = wrap_text_to_width(text, *font_size, *width);
+                let lines = wrapped.lines().collect::<Vec<_>>();
+                let style = SceneTextStyle {
+                    font_size_pt: *font_size,
+                    color: *color,
+                    align: TextAlign::Left,
+                    baseline: TextBaseline::Top,
+                    angle_deg: 0.0,
+                };
+                append_scene_text(out, &lines, *pos, &style);
             }
         }
     }
+}
+
+/// `m` to the first point and `l` to each following one, without a paint
+/// operator.
+fn append_path(out: &mut String, points: &[Point2D]) {
+    for (index, point) in points.iter().enumerate() {
+        out.push_str(&format!(
+            "{}{} {} {}",
+            if index == 0 { "" } else { " " },
+            format_number(point[0]),
+            format_number(point[1]),
+            if index == 0 { "m" } else { "l" },
+        ));
+    }
+}
+
+fn append_paint_style(out: &mut String, fill: Option<&Fill>, stroke: Option<&Stroke>) {
+    if let Some(fill) = fill {
+        append_fill(out, fill.color);
+    }
+    if let Some(stroke) = stroke {
+        append_stroke_style(out, stroke);
+    }
+}
+
+fn append_stroke_style(out: &mut String, stroke: &Stroke) {
+    append_stroke(
+        out,
+        stroke.color,
+        stroke.width,
+        stroke.dash_array.as_deref(),
+    );
 }
 
 fn append_paint_operator(out: &mut String, fill: bool, stroke: bool) {
@@ -309,14 +281,7 @@ fn append_paint_operator(out: &mut String, fill: bool, stroke: bool) {
     });
 }
 
-fn append_external_image_notice(
-    out: &mut String,
-    source: &str,
-    x: f64,
-    y: f64,
-    width: f64,
-    height: f64,
-) {
+fn append_external_image_notice(out: &mut String, source: &str, [x, y, width, height]: [f64; 4]) {
     append_stroke(out, Color::rgb(100, 116, 139), 1.0, Some(&[4.0, 3.0]));
     out.push_str(&format!(
         "{} {} {} {} re S\n",
@@ -325,15 +290,15 @@ fn append_external_image_notice(
         format_number(width),
         format_number(height)
     ));
-    append_scene_text(
-        out,
-        &format!("External image: {source}"),
-        x + 8.0,
-        y + height * 0.5,
-        11.0,
-        Color::rgb(71, 85, 105),
-        TextAlign::Left,
-    );
+    let notice = format!("External image: {source}");
+    let style = SceneTextStyle {
+        font_size_pt: 11.0,
+        color: Color::rgb(71, 85, 105),
+        align: TextAlign::Left,
+        baseline: TextBaseline::Middle,
+        angle_deg: 0.0,
+    };
+    append_scene_text(out, &[notice.as_str()], [x + 8.0, y + height * 0.5], &style);
 }
 
 fn append_circle_path(out: &mut String, x: f64, y: f64, radius: f64) {
@@ -362,31 +327,53 @@ fn append_circle_path(out: &mut String, x: f64, y: f64, radius: f64) {
     out.push_str(" h\n");
 }
 
-fn append_scene_text(
-    out: &mut String,
-    text: &str,
-    x: f64,
-    y: f64,
-    font_size: f64,
+/// How a scene text element is set: the fields of [`SceneElement::Text`]
+/// other than its content and anchor point.
+struct SceneTextStyle {
+    font_size_pt: f64,
     color: Color,
     align: TextAlign,
-) {
-    let width = text.chars().count() as f64 * font_size * 0.52;
-    let x = match align {
-        TextAlign::Left => x,
-        TextAlign::Center => x - width * 0.5,
-        TextAlign::Right => x - width,
-    };
-    out.push_str("BT\n/F1 ");
-    out.push_str(&format_number(font_size));
-    out.push_str(" Tf\n");
-    append_fill(out, color);
-    out.push_str(&format!(
-        "1 0 0 -1 {} {} Tm\n{} Tj\nET\n",
-        format_number(x),
-        format_number(y + font_size * 0.8),
-        pdf_literal(text)
-    ));
+    baseline: TextBaseline,
+    angle_deg: f64,
+}
+
+/// Set text lines in scene coordinates with the same line model as the SVG
+/// exporter: the font size is in points on a CSS-pixel canvas, each line is
+/// centered on [`text_line_center_offsets`], and the whole block is rotated
+/// clockwise by `angle_deg` about `pos`, as SVG `rotate()` does on a y-down
+/// canvas.
+fn append_scene_text(out: &mut String, lines: &[&str], pos: Point2D, style: &SceneTextStyle) {
+    let font_px = style.font_size_pt * CSS_PIXELS_PER_POINT;
+    let line_height = font_px * TEXT_LINE_HEIGHT_EM;
+    let centers = text_line_center_offsets(lines.len(), line_height, style.baseline);
+    let (sin, cos) = style.angle_deg.to_radians().sin_cos();
+    for (line, center) in lines.iter().zip(centers) {
+        let width = line.chars().count() as f64 * font_px * HELVETICA_MEAN_ADVANCE_EM;
+        let along = match style.align {
+            TextAlign::Left => 0.0,
+            TextAlign::Center => -width * 0.5,
+            TextAlign::Right => -width,
+        };
+        let across = center + font_px * CENTRAL_TO_BASELINE_EM;
+        let x = pos[0] + along * cos - across * sin;
+        let y = pos[1] + along * sin + across * cos;
+        out.push_str("BT\n/F1 ");
+        out.push_str(&format_number(font_px));
+        out.push_str(" Tf\n");
+        append_fill(out, style.color);
+        // Glyph space is y-up; the second column flips it against the
+        // y-down scene so the text stands upright, then both rotate.
+        out.push_str(&format!(
+            "{} {} {} {} {} {} Tm\n{} Tj\nET\n",
+            format_number(cos),
+            format_number(sin),
+            format_number(sin),
+            format_number(-cos),
+            format_number(x),
+            format_number(y),
+            pdf_literal(line)
+        ));
+    }
 }
 
 fn append_page_text(out: &mut String, x: f64, y: f64, font_size: f64, color: Color, text: &str) {

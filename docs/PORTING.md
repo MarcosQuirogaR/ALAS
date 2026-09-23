@@ -549,7 +549,7 @@ because nothing in P4 through P9 calls them, not reproduced wrongly.
 | n/a | n/a | `alas-mission::segments` | SUAVE, LGPL-2.1 | `iter` | todo |
 | n/a | n/a | `alas-mission::numerics` | SUAVE, LGPL-2.1 | `linalg` | todo |
 | n/a | n/a | `alas-mission::solve` | SUAVE, LGPL-2.1 | `iter` | todo |
-| n/a | n/a | `alas-math::hybrd` | MINPACK, public domain | `linalg` | todo |
+| n/a | n/a | `alas-math::hybrd` | MINPACK, public domain | `linalg` | green: `golden/math/hybrd.json`; `nfev` and `info` at `exact`, the evaluation path at `linalg` |
 
 The six mission configurations differ only in high-lift deflections, which the
 upstream aerodynamic model does not discretize, so all six evaluate identically.

@@ -580,11 +580,10 @@ mod tests {
     /// A refused main-gear station is an error finding, not a warning, and
     /// the low-wing fallback case beside it is untouched.
     ///
-    /// Before this phase both halves returned `None` with a
-    /// `FindingSeverity::Warning`, so an aircraft the mass model refused to
-    /// place a main gear on was reported as a run that merely lacked an item
-    /// ledger, and `FeasibilityReport::is_feasible`, which fails only on
-    /// error findings, could still call it feasible. The lumped model is not
+    /// A warning would report an aircraft the mass model refused to place a
+    /// main gear on as a run that merely lacked an item ledger, and
+    /// `FeasibilityReport::is_feasible`, which fails only on error findings,
+    /// could still call it feasible. The lumped model is not
     /// a fallback here: its gear point is the same refused station.
     ///
     /// The two halves share one analysis run. The ATR half substitutes the

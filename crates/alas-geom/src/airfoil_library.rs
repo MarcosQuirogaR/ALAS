@@ -26,7 +26,8 @@
 //! same guarantee (the corpus is fully built before any reader can observe
 //! it) without a caller-visible lock.
 
-use crate::aircraft::airfoil::Airfoil;
+use crate::aircraft::airfoil::{numpy_interp, Airfoil};
+use crate::aircraft::spacing::linspace;
 use crate::airfoil_data;
 use crate::airfoil_io;
 use crate::selig;
@@ -149,56 +150,6 @@ fn sorted_ascending_by_x(points: &[(f64, f64)]) -> Vec<(f64, f64)> {
     let mut sorted = points.to_vec();
     sorted.sort_by(|a, b| a.0.total_cmp(&b.0));
     sorted
-}
-
-/// Piecewise-linear interpolation matching `numpy.interp(x, xp, fp)`'s
-/// default behaviour: `xp` assumed sorted ascending, `x` outside
-/// `[xp[0], xp[-1]]` clamped to the nearest endpoint's `fp` value.
-///
-/// Duplicated from the equivalent helper in `aircraft::airfoil` rather than
-/// reused, since that module's helper is private and out of scope for this
-/// module to touch.
-fn numpy_interp(x: f64, xp: &[f64], fp: &[f64]) -> f64 {
-    let Some(&first_x) = xp.first() else {
-        return f64::NAN; // Nothing here calls this with an empty `xp`.
-    };
-    let last = xp.len() - 1;
-    if x <= first_x {
-        return fp[0];
-    }
-    if x >= xp[last] {
-        return fp[last];
-    }
-    for i in 1..xp.len() {
-        if x <= xp[i] {
-            let (x0, x1) = (xp[i - 1], xp[i]);
-            let (y0, y1) = (fp[i - 1], fp[i]);
-            if x1 == x0 {
-                return y0;
-            }
-            return y0 + (y1 - y0) * (x - x0) / (x1 - x0);
-        }
-    }
-    fp[last]
-}
-
-/// Evenly spaced points from `start` to `stop`, inclusive: NumPy's
-/// `linspace(start, stop, num, endpoint=True)`. A copy of
-/// `aircraft::spacing::linspace`, which is reachable from here and from other
-/// crates: the copy is historical, not a visibility workaround, and collapsing
-/// the three copies in this crate is a separate change with its own parity run.
-fn linspace(start: f64, stop: f64, num: usize) -> Vec<f64> {
-    if num == 0 {
-        return Vec::new();
-    }
-    if num == 1 {
-        return vec![start];
-    }
-    let step = (stop - start) / (num - 1) as f64;
-    let mut values: Vec<f64> = (0..num).map(|i| start + i as f64 * step).collect();
-    let last = values.len() - 1;
-    values[last] = stop;
-    values
 }
 
 /// The Euclidean distance between two coordinate pairs: `np.linalg.norm`

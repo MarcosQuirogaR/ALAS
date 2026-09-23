@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-use std::{error::Error, fmt};
 
 use crate::mission_turbofan::{
     evaluate_thrust, Freestream, ThrustOutput, TurbofanInputs, VehicleBuilderParams,
@@ -403,9 +402,10 @@ pub struct PropulsionInstallation {
 }
 
 /// Typed failures; physics implementations must not encode failure as zeros or NaN.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum PropulsionError {
     /// A scalar input was non-finite or outside its elementary valid range.
+    #[error("invalid {field}: {value}")]
     InvalidInput {
         /// Stable name of the invalid input.
         field: &'static str,
@@ -413,38 +413,24 @@ pub enum PropulsionError {
         value: f64,
     },
     /// The technology cannot interpret the requested control semantics.
+    #[error("unsupported propulsion demand: {0}")]
     UnsupportedDemand(&'static str),
     /// The technology cannot represent the selected discrete mode.
+    #[error("unsupported operating mode: {0:?}")]
     UnsupportedMode(OperatingMode),
     /// The technology cannot evaluate the selected installed-unit failures.
+    #[error("unsupported propulsion failure state")]
     UnsupportedFailureState,
     /// The request lies outside the physical or calibrated model domain.
+    #[error("outside propulsion model domain: {0}")]
     OutsideModelDomain(String),
     /// A technology implementation produced a non-finite output.
+    #[error("non-finite propulsion output: {0}")]
     NonFiniteOutput(&'static str),
     /// No propulsion model was configured.
+    #[error("propulsion system contains no technology models")]
     EmptySystem,
     /// Installation geometry cannot be represented by the selected model.
+    #[error("invalid propulsion installation: {0}")]
     InvalidInstallation(String),
 }
-
-impl fmt::Display for PropulsionError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::InvalidInput { field, value } => write!(f, "invalid {field}: {value}"),
-            Self::UnsupportedDemand(reason) => write!(f, "unsupported propulsion demand: {reason}"),
-            Self::UnsupportedMode(mode) => write!(f, "unsupported operating mode: {mode:?}"),
-            Self::UnsupportedFailureState => write!(f, "unsupported propulsion failure state"),
-            Self::OutsideModelDomain(reason) => {
-                write!(f, "outside propulsion model domain: {reason}")
-            }
-            Self::NonFiniteOutput(field) => write!(f, "non-finite propulsion output: {field}"),
-            Self::EmptySystem => write!(f, "propulsion system contains no technology models"),
-            Self::InvalidInstallation(reason) => {
-                write!(f, "invalid propulsion installation: {reason}")
-            }
-        }
-    }
-}
-
-impl Error for PropulsionError {}

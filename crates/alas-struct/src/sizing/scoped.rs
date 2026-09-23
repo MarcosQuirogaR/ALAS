@@ -155,7 +155,7 @@ fn enclosed_box_volume_case(running_mass_kg_m: &[f64], y: &[f64]) -> WingFuelDes
 ///
 /// Shared by both product entry points so there is one loop, one tolerance and
 /// one convergence verdict.
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments)] // the entry points' inputs plus the law they differ in
 pub(super) fn solve_relieved(
     wsg: &WingStructureGeometry,
     cfg: &StructuresConfig,

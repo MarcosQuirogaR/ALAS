@@ -10,6 +10,7 @@
 //! superimposed, since overlaid thin outlines read poorly on a dark panel.
 
 use crate::chart_kit::{draw_legend, LegendMarker};
+use crate::families::common::equal_aspect_ranges;
 use crate::scene::{Axes2D, Color, Scene, SceneElement, Stroke};
 use crate::theme::get_palette;
 use alas_geom::airfoil_library::AirfoilLibrary;
@@ -180,30 +181,6 @@ fn combined_offset_bbox(sections: &[Section]) -> (f64, f64, f64, f64) {
         return (0.0, 1.0, -0.2, 0.2);
     }
     (x_lo, x_hi, y_lo, y_hi)
-}
-
-/// Two axis ranges sharing one data-units-per-pixel scale, centred on each
-/// data interval: the substitute for `ax.set_aspect("equal")` this crate's
-/// [`Axes2D`] has no flag for. Duplicated from
-/// `families::geometry::shared::equal_aspect_ranges`, which is `pub(super)`
-/// to that family and out of reach from here.
-fn equal_aspect_ranges(
-    u_lo: f64,
-    u_hi: f64,
-    u_px: f64,
-    v_lo: f64,
-    v_hi: f64,
-    v_px: f64,
-    pad_frac: f64,
-) -> ((f64, f64), (f64, f64)) {
-    let u_span = (u_hi - u_lo).abs().max(1e-6) * (1.0 + pad_frac);
-    let v_span = (v_hi - v_lo).abs().max(1e-6) * (1.0 + pad_frac);
-    let scale = (u_px / u_span).min(v_px / v_span);
-    let u_half = u_px / scale / 2.0;
-    let v_half = v_px / scale / 2.0;
-    let u_c = (u_lo + u_hi) / 2.0;
-    let v_c = (v_lo + v_hi) / 2.0;
-    ((u_c - u_half, u_c + u_half), (v_c - v_half, v_c + v_half))
 }
 
 #[cfg(test)]

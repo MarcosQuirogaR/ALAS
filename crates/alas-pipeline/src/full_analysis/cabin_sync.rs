@@ -169,16 +169,16 @@ fn with_flops_counts(
         .flops_transport
         .tourist_class_passenger_count = Some(to_count(counts.tourist));
     // The module doc promises the cabin-crew term follows the seated cabin
-    // along with furnishings, service and air-conditioning; before this fix
-    // `flight_attendant_count` was declared once at preset resolution and
-    // never revisited here, so a synced cabin that grew (or shrank) kept its
+    // along with furnishings, service and air-conditioning.
+    // `flight_attendant_count` is declared once at preset resolution, so
+    // without this step a synced cabin that grew (or shrank) would keep a
     // stale crew count. Raise it to the regulatory operational minimum for
     // the now-seated headcount (14 CFR 121.391(a) / EASA ORO.CC.100: one
     // cabin crew member per 50 installed passenger seats, rounded up),
     // without ever lowering a larger declared count: a preset may crew above
     // the floor (the A320-200 case keeps 4 for 150 seats, above the 3 the
     // floor alone would give), and synchronization must not silently shed
-    // that margin. Physics review v1.2, finding M3.
+    // that margin.
     let regulatory_minimum = to_count(counts.total()).div_ceil(50);
     let declared = synchronized_model
         .flops_transport

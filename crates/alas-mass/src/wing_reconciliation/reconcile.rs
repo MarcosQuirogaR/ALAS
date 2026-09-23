@@ -141,12 +141,10 @@ pub fn sized_primary_wing(
     // `alas_struct::sizing::MARGIN_NUMERICAL_ZERO` states the band and derives
     // it from the four inexact operations involved.
     //
-    // This seam used to carry its own `-1.0e-10`, six orders of magnitude
-    // wider than the arithmetic needs and with no stated basis. Reading the
-    // shared constant **tightens** the gate rather than widening it, and puts
-    // this caller and `alas-pipeline`'s own structural gate on one predicate,
-    // so a wingbox cannot be feasible for mass and infeasible for the
-    // structural solve on the same numbers.
+    // Reading the shared constant, rather than a local tolerance, puts this
+    // caller and `alas-pipeline`'s own structural gate on one predicate, so a
+    // wingbox cannot be feasible for mass and infeasible for the structural
+    // solve on the same numbers.
     let strength_margins_ok = sizing
         .spars
         .iter()

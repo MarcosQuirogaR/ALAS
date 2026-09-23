@@ -164,7 +164,7 @@ fn containerized_baggage_kg(
 /// `flops_structure.design_gross_mass_kg` override, which is also how a
 /// fixed-aircraft mission closure keeps the surface-controls term at the
 /// aircraft's design weight while the closure mass moves.
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments)] // one argument per resolved FLOPS input
 pub fn evaluate_product_at_design_gross_mass(
     plane: &Airplane,
     requirements: &DesignRequirements,

@@ -124,52 +124,31 @@ fn sea_level_speed_of_sound_m_s() -> f64 {
 }
 
 /// Why an airspeed conversion was rejected.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, thiserror::Error)]
 pub enum AirspeedError {
     /// The input speed was negative or not finite. Airspeed magnitude is
     /// never negative; zero is the valid still-air boundary.
+    #[error("airspeed must be finite and non-negative, got {0}")]
     InvalidSpeed(f64),
     /// The input Mach number was negative or not finite.
+    #[error("Mach number must be finite and non-negative, got {0}")]
     InvalidMach(f64),
     /// Ambient static pressure was not finite or not strictly positive.
+    #[error("ambient pressure must be finite and positive, got {0} Pa")]
     InvalidPressure(f64),
     /// Ambient temperature was not finite or not strictly positive.
+    #[error("ambient temperature must be finite and positive, got {0} K")]
     InvalidTemperature(f64),
     /// The conversion implies Mach at or above 1, outside the subsonic
     /// isentropic pitot relation this module implements.
+    #[error(
+        "inferred Mach {mach} is at or above 1; the subsonic isentropic pitot relation does not apply"
+    )]
     Supersonic {
         /// The Mach number the inputs implied.
         mach: f64,
     },
 }
-
-impl std::fmt::Display for AirspeedError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::InvalidSpeed(value) => {
-                write!(f, "airspeed must be finite and non-negative, got {value}")
-            }
-            Self::InvalidMach(value) => {
-                write!(f, "Mach number must be finite and non-negative, got {value}")
-            }
-            Self::InvalidPressure(value) => {
-                write!(f, "ambient pressure must be finite and positive, got {value} Pa")
-            }
-            Self::InvalidTemperature(value) => {
-                write!(
-                    f,
-                    "ambient temperature must be finite and positive, got {value} K"
-                )
-            }
-            Self::Supersonic { mach } => write!(
-                f,
-                "inferred Mach {mach} is at or above 1; the subsonic isentropic pitot relation does not apply"
-            ),
-        }
-    }
-}
-
-impl std::error::Error for AirspeedError {}
 
 fn check_speed(speed_m_s: f64) -> Result<f64, AirspeedError> {
     if speed_m_s.is_finite() && speed_m_s >= 0.0 {

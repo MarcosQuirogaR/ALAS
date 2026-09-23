@@ -4,6 +4,7 @@
 //! W3.1 figure contracts: Python's saved reference metadata remains the
 //! source of truth for labels, panel titles, and availability semantics.
 
+// Test code: a failed unwrap on a fixture it builds is the assertion failing.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use alas_aero::analysis::PolarSweep;

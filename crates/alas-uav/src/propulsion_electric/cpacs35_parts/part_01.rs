@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-use std::fmt;
 
 use crate::procurement::{ProcurementEstimate, ProcurementLine};
 
@@ -29,29 +28,18 @@ pub struct UavCpacs35ElectricalData {
 }
 
 /// Why a CPACS electrical extension could not be rendered or injected.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum CpacsUavExtensionError {
     /// A value required by XML Schema double is non-finite.
+    #[error("UAV CPACS extension has a non-finite {field}")]
     NonFinite {
         /// Field whose value cannot be represented as an XML Schema double.
         field: &'static str,
     },
     /// The supplied document is not an injectable CPACS root document.
+    #[error("{0}")]
     InvalidDocument(String),
 }
-
-impl fmt::Display for CpacsUavExtensionError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::NonFinite { field } => {
-                write!(formatter, "UAV CPACS extension has a non-finite {field}")
-            }
-            Self::InvalidDocument(message) => formatter.write_str(message),
-        }
-    }
-}
-
-impl std::error::Error for CpacsUavExtensionError {}
 
 /// Render the CPACS 3.5 `toolspecific` payload without a surrounding document.
 pub fn render_uav_cpacs35_toolspecific(

@@ -14,10 +14,11 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-use alas_exec::process::{kill_process_tree, NewProcessGroup, NoConsoleWindow};
+use alas_exec::process::{
+    drain, timeout_from_seconds, wait_with_timeout, DeadlineWait, NewProcessGroup, NoConsoleWindow,
+};
 use alas_exec::SupervisedSpawn;
 
 use crate::structural::PatranExportResult;
@@ -38,6 +39,10 @@ pub fn run_patran_export(
             png_paths: Vec::new(),
         };
     }
+    let timeout = match timeout_from_seconds("Patran", timeout_seconds) {
+        Ok(timeout) => timeout,
+        Err(error) => return failed(error.to_string()),
+    };
     let work_dir = match absolute_path(work_dir, "work directory") {
         Ok(path) => path,
         Err(error) => return failed(error),
@@ -112,7 +117,7 @@ pub fn run_patran_export(
             continue;
         }
 
-        match run_one(&executable, &session_path, &png_stem, timeout_seconds) {
+        match run_one(&executable, &session_path, &png_stem, timeout) {
             Ok(path) => png_paths.push(((*name).to_owned(), path)),
             Err(detail) => failures.push(format!("{name}: {detail}")),
         }
@@ -157,7 +162,7 @@ fn run_one(
     executable: &Path,
     session_path: &Path,
     png_stem: &Path,
-    timeout_seconds: f64,
+    timeout: Duration,
 ) -> Result<PathBuf, String> {
     let Some(case_dir) = session_path.parent() else {
         return Err("Patran session has no working directory".to_owned());
@@ -192,36 +197,39 @@ fn run_one(
             executable.display()
         )
     })?;
-    let deadline = Instant::now() + Duration::from_secs_f64(timeout_seconds.max(0.0));
-    loop {
-        match child.try_wait() {
-            Ok(Some(_)) => break,
-            Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(25)),
-            Ok(None) => {
-                kill_process_tree(child.id());
-                let _ = child.wait();
-                return Err(format!(
-                    "Timed out after {timeout_seconds:.0}s running: {command_line} (process tree force-killed)"
-                ));
-            }
-            Err(error) => return Err(format!("Cannot poll Patran: {error}")),
+    let stdout = drain(child.stdout.take());
+    let stderr = drain(child.stderr.take());
+    let status = match wait_with_timeout(&mut child, timeout) {
+        DeadlineWait::Exited(status) => status,
+        DeadlineWait::TimedOut => {
+            return Err(format!(
+                "Timed out after {:.0}s running: {command_line} (process tree force-killed)",
+                timeout.as_secs_f64()
+            ))
         }
-    }
-    let output = child
-        .wait_with_output()
-        .map_err(|error| format!("Cannot collect Patran output: {error}"))?;
+        DeadlineWait::PollFailed(error) => {
+            return Err(format!(
+                "Cannot poll Patran: {error} (process tree force-killed)"
+            ))
+        }
+    };
+    let collect = |reader: std::thread::JoinHandle<Vec<u8>>| {
+        reader
+            .join()
+            .map_err(|_| "Patran output reader panicked".to_owned())
+    };
+    let (stdout, stderr) = (collect(stdout)?, collect(stderr)?);
     if let Some(path) = first_png(png_stem) {
         return Ok(path);
     }
     Err(format!(
         "Patran exited (code {}) but wrote no {}*.png. stdout (tail): {} stderr (tail): {} session journal (tail): {}",
-        output
-            .status
+        status
             .code()
             .map_or_else(|| "unknown".to_owned(), |code| code.to_string()),
         png_stem.display(),
-        tail(&String::from_utf8_lossy(&output.stdout)),
-        tail(&String::from_utf8_lossy(&output.stderr)),
+        tail(&String::from_utf8_lossy(&stdout)),
+        tail(&String::from_utf8_lossy(&stderr)),
         session_journal_tail(case_dir)
     ))
 }
@@ -402,6 +410,27 @@ mod tests {
             .error
             .as_deref()
             .is_some_and(|error| error.contains("template.db")));
+    }
+
+    #[test]
+    fn an_unusable_timeout_is_refused_naming_patran_before_anything_else() {
+        for timeout_seconds in [f64::NAN, f64::INFINITY, 0.0, -1.0] {
+            let result = run_patran_export(
+                Path::new("C:/missing-work"),
+                Path::new("C:/missing/bin/patran.exe"),
+                &["pull-up"],
+                timeout_seconds,
+            );
+            assert_eq!(result.status, "error");
+            assert!(
+                result
+                    .error
+                    .as_deref()
+                    .is_some_and(|error| error.starts_with("Patran timeout must be")),
+                "{timeout_seconds}: {:?}",
+                result.error
+            );
+        }
     }
 
     #[test]

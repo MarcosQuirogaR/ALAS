@@ -25,7 +25,7 @@ use alas_config::{DesignRequirements, EngineConfig, MassModelConfig, StructuresC
 use alas_geom::wing_structure::WingStructureGeometry;
 
 use crate::loads;
-use crate::sizing::WingboxSizing;
+use crate::sizing::{trapezoid, WingboxSizing};
 
 /// `(beta*L, sigma)` for the first four cantilever bending modes: the
 /// classical clamped-free eigenvalues and their trial-shape coefficients.
@@ -35,18 +35,6 @@ const CANTILEVER_MODES: [(f64, f64); 4] = [
     (7.8548, 0.9992),
     (10.9955, 1.0000),
 ];
-
-/// NumPy `trapezoid(y, x)`: the trapezoidal integral of `y` over `x`.
-/// Duplicated from [`crate::sizing`]'s private helper for the reason that
-/// module keeps its own copy; it is not part of either module's public
-/// surface.
-fn trapezoid(y: &[f64], x: &[f64]) -> f64 {
-    let mut acc = 0.0;
-    for i in 0..y.len().saturating_sub(1) {
-        acc += (x[i + 1] - x[i]) * (y[i + 1] + y[i]) / 2.0;
-    }
-    acc
-}
 
 /// Per-spar bending stress and margin of safety at every station.
 #[derive(Debug, Clone, PartialEq)]
@@ -221,7 +209,7 @@ fn rayleigh_frequencies(
     n_modes: i64,
 ) -> (Vec<f64>, Vec<Vec<f64>>) {
     let n = y.len();
-    let length = y[n - 1];
+    let length = y.last().copied().unwrap_or(0.0);
     let n_modes = (n_modes.max(0) as usize).min(CANTILEVER_MODES.len());
     let mut freqs = vec![0.0; n_modes];
     let mut shapes: Vec<Vec<f64>> = Vec::with_capacity(n_modes);
@@ -292,7 +280,7 @@ pub fn analyze_structure(
 /// The historical parity path omitted the explicitly sized rib mass from
 /// analytical inertial relief and modal mass. It remains available solely for
 /// replaying the old fixture; product callers should use [`analyze_structure`].
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments)] // mirrors upstream's own signature
 pub fn analyze_structure_reference_compatibility(
     wsg: &WingStructureGeometry,
     sizing: &WingboxSizing,
@@ -427,6 +415,13 @@ fn analyze_structure_with_rib_mass(
 mod tests {
     use super::*;
     use crate::sizing::MassBreakdown;
+
+    #[test]
+    fn an_empty_station_grid_has_zero_frequencies_rather_than_a_panic() {
+        let (frequencies, shapes) = rayleigh_frequencies(&[], &[], &[], 2);
+        assert_eq!(frequencies, [0.0, 0.0]);
+        assert!(shapes.iter().all(Vec::is_empty));
+    }
 
     #[test]
     fn rib_mass_is_conserved_in_the_distributed_analytical_density() {

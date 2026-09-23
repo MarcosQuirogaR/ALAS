@@ -77,6 +77,7 @@
 //!
 //! Usage: `cargo run -p alas-opt --release --example mtow_unconstrained_validation`
 
+// A diagnostic example: its output is the printed report.
 #![allow(clippy::print_stdout)]
 
 use alas_config::{presets, AircraftPreset, AlasConfig, MtowSizing};

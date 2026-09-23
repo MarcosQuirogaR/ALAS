@@ -158,6 +158,18 @@ pub enum MeshError {
         /// The most negative span found, metres.
         worst: f64,
     },
+    /// A card carries a NaN or infinite real, which the bulk-data format
+    /// cannot express and the geometric checks cannot see.
+    #[error(
+        "{count} non-finite real value(s) in the mesh, first on a {card} card: \
+         the wingbox geometry or sizing fed the mesh a NaN or an infinity"
+    )]
+    NonFiniteValue {
+        /// The first card type found carrying one.
+        card: &'static str,
+        /// How many non-finite reals the deck carries in total.
+        count: usize,
+    },
 }
 
 /// Whether the rib at position `pos` in the main skin-rib list gets

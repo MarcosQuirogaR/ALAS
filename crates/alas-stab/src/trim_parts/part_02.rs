@@ -25,7 +25,9 @@ fn tail_volume_coefficients_with_reference_mode(
     let s_ref = airplane.s_ref.max(1.0);
     let c_bar = airplane.c_ref.max(0.1);
     let b_ref = airplane.b_ref.max(1.0);
-    let x_wing_ac = airplane.wings[0].aerodynamic_center(AC_CHORD_FRACTION)[0];
+    let x_wing_ac = airplane.wings.first().map_or(f64::NAN, |wing| {
+        wing.aerodynamic_center(AC_CHORD_FRACTION)[0]
+    });
 
     let vh = if airplane.wings.len() > 1 {
         let hstab = &airplane.wings[1];
@@ -89,14 +91,19 @@ fn resolution(value: i64) -> usize {
     value.max(1) as usize
 }
 
-/// The main wing (or the first wing when none is named [`MAIN_WING_NAME`]):
-/// upstream's `next((w ... if w.name == "Main Wing"), airplane.wings[0])`.
-fn main_wing(airplane: &Airplane) -> &Wing {
+/// The main wing (or the first wing when none is named [`MAIN_WING_NAME`]; `None`
+/// with no wings): upstream's `next((w ... if w.name == "Main Wing"), airplane.wings[0])`.
+fn main_wing(airplane: &Airplane) -> Option<&Wing> {
     airplane
         .wings
         .iter()
         .find(|w| w.name == MAIN_WING_NAME)
-        .unwrap_or(&airplane.wings[0])
+        .or_else(|| airplane.wings.first())
+}
+
+/// The main wing's quarter-MAC aerodynamic-centre station, NaN with no wing.
+fn main_wing_ac_x(airplane: &Airplane) -> f64 {
+    main_wing(airplane).map_or(f64::NAN, |w| w.aerodynamic_center(AC_CHORD_FRACTION)[0])
 }
 
 /// The horizontal stabilizer, if the airplane has one named [`HSTAB_NAME`].
@@ -413,5 +420,19 @@ mod tests {
         let expected = hstab.reference_area() * l_h / (plane.s_ref * plane.c_ref);
         assert!((vh.expect("horizontal tail volume") - expected).abs() < 1e-12);
         assert!((hstab.reference_area() - hstab.unfolded_area()).abs() > 1e-6);
+    }
+
+    #[test]
+    fn geometry_queries_without_wings_or_fuselage_return_values_not_panics() {
+        // No body contributes no fuselage moment; a body with no wing to
+        // place the downwash against is NaN; no wings means no tail volumes.
+        let mut no_fuselage = probe_airplane(false);
+        let mut no_wings = no_fuselage.clone();
+        no_fuselage.fuselages.clear();
+        no_wings.wings.clear();
+        assert_eq!(fuselage_cm_alpha(&no_fuselage, 5.0), 0.0);
+        assert!(fuselage_cm_alpha(&no_wings, 5.0).is_nan());
+        assert!(main_wing_ac_x(&no_wings).is_nan());
+        assert_eq!(tail_volume_coefficients(&no_wings), (None, None));
     }
 }

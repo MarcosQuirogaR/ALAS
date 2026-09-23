@@ -144,6 +144,19 @@ fn robots_uses_the_longest_matching_rule_and_allow_wins_equal_length() {
 }
 
 #[test]
+fn robots_applies_a_group_whose_agent_list_includes_the_wildcard() {
+    // One group, two agents: the wildcard is not the last `User-agent` line,
+    // and its rules still bind this collector.
+    let robots = "User-agent: *\nUser-agent: ExampleBot\nDisallow: /shop/\n\n\
+                  User-agent: OtherBot\nDisallow: /\n";
+    assert!(!robots_allows(
+        robots,
+        "https://rc-innovations.es/shop/item"
+    ));
+    assert!(robots_allows(robots, "https://rc-innovations.es/about"));
+}
+
+#[test]
 fn discovery_removes_queries_duplicates_and_non_product_pages() {
     let sitemap = r#"<urlset>
         <url><loc>https://rc-innovations.es/shop/x-helice-12x6?category=1&amp;page=2</loc></url>

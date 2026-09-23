@@ -15,21 +15,7 @@ use super::status_scene;
 use crate::scene::{Axes2D, Color, Fill, Scene, SceneElement, Stroke, TextAlign, TextBaseline};
 use crate::theme::get_palette;
 
-fn padded_range(values: impl Iterator<Item = f64>, pad_frac: f64) -> (f64, f64) {
-    let mut lo = f64::INFINITY;
-    let mut hi = f64::NEG_INFINITY;
-    for value in values {
-        if value.is_finite() {
-            lo = lo.min(value);
-            hi = hi.max(value);
-        }
-    }
-    if !lo.is_finite() || !hi.is_finite() {
-        return (0.0, 1.0);
-    }
-    let pad = (hi - lo).max(1e-9) * pad_frac;
-    (lo - pad, hi + pad)
-}
+use crate::families::common::padded_range;
 
 /// Render stability markers, the Cm polar, and the derived metrics table.
 pub fn figure_stability_metrics(

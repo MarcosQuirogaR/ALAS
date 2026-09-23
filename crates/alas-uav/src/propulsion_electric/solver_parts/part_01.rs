@@ -287,8 +287,7 @@ pub fn solve_catalogue_powertrain(
         "The selected ESC uses the legacy zero-loss model because no reviewed switching or conduction-loss curve is available.".to_owned(),
         "Thermal state, battery state of charge, wiring resistance, and propeller installation effects are not represented by this source table.".to_owned(),
     ];
-    if resolved.motor.winding_resistance_ohm.is_none() || resolved.motor.no_load_current_a.is_none()
-    {
+    if !super::has_winding_model(resolved.motor) {
         result.assumptions.push(
             "The motor has Kv but no complete winding model; missing resistance or no-load current is represented as zero, so this is an unverified ideal-motor estimate.".to_owned(),
         );
@@ -327,11 +326,8 @@ pub fn native_propulsion_map(
         ));
     }
     let series_cells = selected_series_cells(catalog, &selection.battery_id)?;
-    let performance_file = resolve_catalogue_powertrain(catalog, selection)?
-        .model
-        .propeller
-        .source_file()
-        .to_owned();
+    let resolved = resolve_catalogue_powertrain(catalog, selection)?;
+    let performance_file = resolved.model.propeller.source_file().to_owned();
     let mut points = Vec::with_capacity(speeds.len());
     for speed_m_s in speeds {
         let result = solve_catalogue_powertrain(
@@ -352,7 +348,8 @@ pub fn native_propulsion_map(
         series_cells,
         motor_count: selection.motor_count,
         evidence: format!(
-            "native coupled electric solver; catalogue motor electrical inputs and APC {} coefficient table",
+            "native coupled electric solver; catalogue motor electrical inputs{} and APC {} coefficient table",
+            super::ideal_motor_note(resolved.motor),
             performance_file
         ),
         points,

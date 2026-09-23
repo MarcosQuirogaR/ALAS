@@ -10,6 +10,7 @@
 //! archive preserves the source reference.
 
 mod render;
+mod win_ansi;
 
 use crate::scene::{Scene, SceneElement};
 

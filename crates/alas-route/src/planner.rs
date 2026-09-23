@@ -109,15 +109,16 @@ pub fn plan_route_with_max_stretch(
         let path = routes_dir.join(kml_file_name(origin, dest));
         if path.exists() {
             match std::fs::read_to_string(&path)
-                .map_err(|_| ())
-                .and_then(|document| route_from_kml(&document).map_err(|_| ()))
+                .map_err(|error| error.to_string())
+                .and_then(|document| route_from_kml(&document).map_err(|error| error.to_string()))
             {
                 Ok(route) => return route,
                 // An export that will not parse is not a reason to stop: the
                 // tier below produces a usable route from data this program
                 // already has.
-                Err(()) => tracing::warn!(
+                Err(error) => tracing::warn!(
                     path = %path.display(),
+                    %error,
                     "the exported route could not be read; using the next route tier"
                 ),
             }
@@ -133,19 +134,28 @@ pub fn plan_route_with_max_stretch(
                 dest.longitude_deg,
             );
             let distance = route.total_distance_m();
+            let limit_is_ratio = max_airway_stretch.is_finite() && max_airway_stretch >= 1.0;
             if max_airway_stretch == 0.0
-                || (max_airway_stretch.is_finite()
-                    && max_airway_stretch >= 1.0
-                    && distance <= direct * max_airway_stretch)
+                || (limit_is_ratio && distance <= direct * max_airway_stretch)
             {
                 return route;
             }
-            tracing::warn!(
-                airway_distance_m = distance,
-                great_circle_distance_m = direct,
-                max_airway_stretch,
-                "airway graph exceeds the configured detour limit; using a great-circle approximation"
-            );
+            if limit_is_ratio {
+                tracing::warn!(
+                    airway_distance_m = distance,
+                    great_circle_distance_m = direct,
+                    max_airway_stretch,
+                    "airway graph exceeds the configured detour limit; using a great-circle approximation"
+                );
+            } else {
+                // A limit below one rejects every airway route, a perfectly
+                // direct one included, so the route is not what is at fault.
+                tracing::warn!(
+                    max_airway_stretch,
+                    "the airway stretch limit is neither 0 nor a finite ratio of at least 1; \
+                     using a great-circle approximation"
+                );
+            }
         }
     }
 

@@ -11,17 +11,21 @@
 use std::fmt::Write as FmtWrite;
 use std::fs::{self, File, OpenOptions};
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
-use std::thread;
-use std::time::{Duration, Instant};
+use std::process::{Command, Stdio};
 
-use crate::process::{kill_process_tree, NewProcessGroup, NoConsoleWindow};
+use crate::process::{
+    absolute_path, parent_directory, timeout_from_seconds, wait_with_timeout, DeadlineWait,
+    NewProcessGroup, NoConsoleWindow,
+};
 
 /// Process-level outcome before aerodynamic parsing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AvlProcessStatus {
     /// Geometry, alpha schedule, or another execution input was invalid.
     InputMissing,
+    /// The configured timeout was not a finite number of seconds greater
+    /// than zero; nothing was launched.
+    InvalidTimeout,
     /// The executable or retained command streams could not be launched.
     LaunchFailed,
     /// The deadline expired and the complete process tree was killed.
@@ -99,6 +103,7 @@ impl AvlProcessStatus {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::InputMissing => "input_missing",
+            Self::InvalidTimeout => "invalid_timeout",
             Self::LaunchFailed => "launch_failed",
             Self::TimedOut => "timed_out",
             Self::SolverFailed => "solver_failed",
@@ -212,9 +217,13 @@ pub fn run_avl_with_options(
         return result;
     }
 
-    let Some(timeout) = timeout_duration(timeout_seconds) else {
-        result.error = Some("AVL timeout must be a finite value".to_owned());
-        return result;
+    let timeout = match timeout_from_seconds("AVL", timeout_seconds) {
+        Ok(timeout) => timeout,
+        Err(error) => {
+            result.status = AvlProcessStatus::InvalidTimeout;
+            result.error = Some(error.to_string());
+            return result;
+        }
     };
     if let Some(namespace) = options.result_namespace.as_deref() {
         if let Err(error) = fs::create_dir_all(namespace) {
@@ -237,6 +246,7 @@ pub fn run_avl_with_options(
 
     for path in paths.all_artifacts() {
         if let Err(error) = remove_stale_artifact(path) {
+            result.status = AvlProcessStatus::LaunchFailed;
             result.error = Some(format!("cannot remove stale {}: {error}", path.display()));
             return result;
         }
@@ -319,25 +329,19 @@ pub fn run_avl_with_options(
         }
     };
 
-    let deadline = Instant::now() + timeout;
-    let process_status = loop {
-        match child.try_wait() {
-            Ok(Some(status)) => break status,
-            Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(25)),
-            Ok(None) => {
-                stop_process_tree(&mut child);
-                result.status = AvlProcessStatus::TimedOut;
-                result.error = Some(format!(
-                    "AVL exceeded the {timeout_seconds:.1} s deadline; process tree force-killed"
-                ));
-                return result;
-            }
-            Err(error) => {
-                stop_process_tree(&mut child);
-                result.status = AvlProcessStatus::SolverFailed;
-                result.error = Some(format!("cannot poll AVL: {error}"));
-                return result;
-            }
+    let process_status = match wait_with_timeout(&mut child, timeout) {
+        DeadlineWait::Exited(status) => status,
+        DeadlineWait::TimedOut => {
+            result.status = AvlProcessStatus::TimedOut;
+            result.error = Some(format!(
+                "AVL exceeded the {timeout_seconds:.1} s deadline; process tree force-killed"
+            ));
+            return result;
+        }
+        DeadlineWait::PollFailed(error) => {
+            result.status = AvlProcessStatus::SolverFailed;
+            result.error = Some(format!("cannot poll AVL: {error}"));
+            return result;
         }
     };
     if !process_status.success() {
@@ -511,34 +515,6 @@ fn output_filename(path: &Path) -> String {
         .unwrap_or_else(|| path.as_os_str().to_string_lossy().into_owned())
 }
 
-fn parent_directory(path: &Path) -> &Path {
-    path.parent()
-        .filter(|parent| !parent.as_os_str().is_empty())
-        .unwrap_or_else(|| Path::new("."))
-}
-
-fn absolute_path(path: &Path) -> PathBuf {
-    if path.is_absolute() {
-        return path.to_path_buf();
-    }
-    std::env::current_dir()
-        .map(|directory| directory.join(path))
-        .unwrap_or_else(|_| path.to_path_buf())
-}
-
-fn timeout_duration(timeout_seconds: f64) -> Option<Duration> {
-    if !timeout_seconds.is_finite() {
-        return None;
-    }
-    if timeout_seconds <= 0.1 {
-        return Some(Duration::from_millis(100));
-    }
-    if timeout_seconds >= Duration::MAX.as_secs_f64() {
-        return Some(Duration::MAX);
-    }
-    Some(Duration::from_secs_f64(timeout_seconds))
-}
-
 fn create_fresh_file(path: &Path) -> std::io::Result<File> {
     OpenOptions::new()
         .create_new(true)
@@ -564,11 +540,6 @@ fn remove_stale_artifact(path: &Path) -> std::io::Result<()> {
 fn is_fresh_output(path: &Path) -> bool {
     fs::symlink_metadata(path)
         .is_ok_and(|metadata| metadata.file_type().is_file() && metadata.len() > 100)
-}
-
-fn stop_process_tree(child: &mut Child) {
-    kill_process_tree(child.id());
-    let _ = child.wait();
 }
 
 #[cfg(test)]
@@ -627,6 +598,7 @@ mod tests {
     #[test]
     fn process_status_text_keeps_timeout_and_output_failure_distinct() {
         assert_eq!(AvlProcessStatus::InputMissing.as_str(), "input_missing");
+        assert_eq!(AvlProcessStatus::InvalidTimeout.as_str(), "invalid_timeout");
         assert_eq!(AvlProcessStatus::LaunchFailed.as_str(), "launch_failed");
         assert_eq!(AvlProcessStatus::TimedOut.as_str(), "timed_out");
         assert_eq!(AvlProcessStatus::SolverFailed.as_str(), "solver_failed");

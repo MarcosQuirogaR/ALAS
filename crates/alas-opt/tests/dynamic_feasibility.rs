@@ -3,6 +3,8 @@
 
 //! Public optimizer-boundary probes for valid/invalid candidate ordering.
 
+// A test asserts on values it constructed, so a failed unwrap there is the
+// assertion failing.
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 use alas_config::design_variables::DesignVector;

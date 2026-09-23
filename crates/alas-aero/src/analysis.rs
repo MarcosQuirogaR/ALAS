@@ -251,9 +251,9 @@ impl<'a> AeroAnalysis<'a> {
     ///
     /// The root section's maximum thickness (what [`Self::wing_section_thickness`]
     /// returns) is the thickest station on a tapered wing, so using it for
-    /// the whole surface's form factor biases the factor high: physics
-    /// review v1.2, section 3.1 (root t/c 0.15 against an area-weighted
-    /// ~0.12 costs about +8% wing profile drag on the reviewed case). Each
+    /// the whole surface's form factor biases the factor high
+    /// (root t/c 0.15 against an area-weighted
+    /// ~0.12 costs about +8% wing profile drag on a reviewed preset). Each
     /// panel between consecutive cross-sections contributes the mean of its
     /// two end thicknesses, weighted by that panel's own trapezoidal
     /// planform area (span in the YZ plane, so dihedral is respected, times
@@ -264,18 +264,22 @@ impl<'a> AeroAnalysis<'a> {
     /// Falls back to [`Self::wing_section_thickness`] for a wing with fewer
     /// than two cross-sections, where no panel exists to weight.
     fn area_weighted_thickness(wing: &Wing) -> f64 {
-        let thickness_at = |xsec: &WingXSec| -> f64 {
-            xsec.airfoil
-                .max_thickness(&linspace(0.0, 1.0, MAX_THICKNESS_SAMPLES))
-        };
+        // Each section's thickness is sampled once; interior sections bound
+        // two panels and would otherwise be sampled twice.
+        let samples = linspace(0.0, 1.0, MAX_THICKNESS_SAMPLES);
+        let thicknesses: Vec<f64> = wing
+            .xsecs
+            .iter()
+            .map(|xsec: &WingXSec| xsec.airfoil.max_thickness(&samples))
+            .collect();
         let mut area_sum = 0.0;
         let mut weighted_sum = 0.0;
-        for pair in wing.xsecs.windows(2) {
+        for (pair, t) in wing.xsecs.windows(2).zip(thicknesses.windows(2)) {
             let dy = pair[1].xyz_le[1] - pair[0].xyz_le[1];
             let dz = pair[1].xyz_le[2] - pair[0].xyz_le[2];
             let span_m = (dy * dy + dz * dz).sqrt();
             let panel_area = span_m * (pair[0].chord + pair[1].chord) / 2.0;
-            let panel_thickness = (thickness_at(&pair[0]) + thickness_at(&pair[1])) / 2.0;
+            let panel_thickness = (t[0] + t[1]) / 2.0;
             area_sum += panel_area;
             weighted_sum += panel_area * panel_thickness;
         }
@@ -323,14 +327,9 @@ impl<'a> AeroAnalysis<'a> {
         section_thickness: Option<f64>,
     ) -> f64 {
         let _ = cl;
-        let owned;
-        let atmosphere = match atmosphere {
-            Some(atmosphere) => atmosphere,
-            None => {
-                owned = Atmosphere::new(altitude_m);
-                &owned
-            }
-        };
+        let atmosphere = atmosphere
+            .copied()
+            .unwrap_or_else(|| Atmosphere::new(altitude_m));
         let velocity = mach * atmosphere.speed_of_sound();
         let density = atmosphere.density();
         let viscosity = atmosphere.dynamic_viscosity();
@@ -388,16 +387,14 @@ impl<'a> AeroAnalysis<'a> {
         // separate junction-interference Q factor; `viscous_margin` (1.10)
         // is a lumped total-parasite-drag margin applied once at the end of
         // `parasite_drag`. None of the three represents the fuselage's own
-        // 3D pressure drag, so this buildup is missing that term outright
-        // (physics review v1.2, finding A1), not merely mislabeling it: at
-        // the reviewed transports' fineness ratios (~9.8-10) Raymer's form
-        // factor evaluates to about 1.08-1.09. Adding it here would raise
-        // every preset's fuselage parasite drag (and, compounded with the
-        // A3 wave-drag correction already applied this pass, total cruise
-        // drag) by a similar fraction without a validated recalibration
-        // pass to confirm nothing else in this buildup silently offsets it;
-        // left undone this pass rather than risk an unvalidated
-        // double-count, and recorded here as the A1 finding's disposition.
+        // 3D pressure drag, so this buildup is missing that term outright,
+        // not merely mislabeling it: at the presets' fineness ratios
+        // (~9.8-10) Raymer's form factor evaluates to about 1.08-1.09.
+        // Adding it would raise every preset's fuselage parasite drag, and
+        // with the Lock/Korn wave law total cruise drag, by a similar
+        // fraction; it stays out until a recalibration confirms nothing else
+        // in this buildup already offsets it, so the term is not
+        // double-counted.
         if let Some(fuselage) = self.plane.fuselages.first() {
             let length = Self::body_length(fuselage);
             let diameter = self.geometry.fuselage.diameter_m;
@@ -446,21 +443,16 @@ impl<'a> AeroAnalysis<'a> {
         cd_induced: f64,
         atmosphere: Option<&Atmosphere>,
     ) -> DragComponents {
-        let owned;
-        let atmosphere = match atmosphere {
-            Some(atmosphere) => atmosphere,
-            None => {
-                owned = Atmosphere::new(altitude_m);
-                &owned
-            }
-        };
+        let atmosphere = atmosphere
+            .copied()
+            .unwrap_or_else(|| Atmosphere::new(altitude_m));
         let thickness = self.section_thickness();
         DragComponents {
             cd_parasite: self.parasite_drag(
                 mach,
                 altitude_m,
                 cl,
-                Some(atmosphere),
+                Some(&atmosphere),
                 Some(thickness),
             ),
             cd_induced,

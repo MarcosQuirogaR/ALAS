@@ -9,7 +9,7 @@ use alas_report::scene::{
 use alas_viz::{
     render_scene_to_shapes, to_egui_color, to_egui_stroke, SceneViewState, ViewportTransform,
 };
-use egui::{pos2, Color32, Rect};
+use egui::{pos2, vec2, Color32, Rect};
 
 #[test]
 fn viewport_transform_fit_centers_and_scales_preserving_aspect() {
@@ -37,14 +37,45 @@ fn coordinate_round_trip_mapping_is_consistent() {
 }
 
 #[test]
-fn color_conversion_preserves_rgba_channels() {
-    let col = Color::rgba(25, 100, 200, 128);
-    let egui_col = to_egui_color(&col);
+fn color_conversion_premultiplies_straight_alpha() {
+    let opaque = to_egui_color(&Color::rgb(25, 100, 200));
+    assert_eq!(opaque, Color32::from_rgb(25, 100, 200));
 
-    assert_eq!(egui_col.r(), 25);
-    assert_eq!(egui_col.g(), 100);
-    assert_eq!(egui_col.b(), 200);
+    // `Color32` stores premultiplied channels; passing the straight channels
+    // through would paint a translucent white grid line as opaque white.
+    let egui_col = to_egui_color(&Color::rgba(25, 100, 200, 128));
+    assert_eq!(egui_col.r(), 13);
+    assert_eq!(egui_col.g(), 50);
+    assert_eq!(egui_col.b(), 100);
     assert_eq!(egui_col.a(), 128);
+}
+
+#[test]
+fn thin_scene_lines_keep_their_fractional_screen_width() {
+    let mut scene = Scene::new(100.0, 100.0, None);
+    scene.add(SceneElement::Line {
+        p1: [10.0, 10.0],
+        p2: [90.0, 90.0],
+        stroke: Stroke::new(Color::rgb(0, 0, 0), 0.6),
+    });
+    scene.add(SceneElement::Polyline {
+        points: vec![[10.0, 90.0], [50.0, 50.0], [90.0, 10.0]],
+        stroke: Stroke::new(Color::rgb(0, 0, 0), 1.2),
+    });
+    let rect = Rect::from_min_size(pos2(0.0, 0.0), vec2(100.0, 100.0));
+    let transform = ViewportTransform::fit(100.0, 100.0, rect);
+    let shapes = render_scene_to_shapes(&scene, &transform);
+
+    // Truncating a sub-pixel width to whole pixels gives an invisible stroke.
+    let widths = shapes
+        .iter()
+        .filter_map(|shape| match shape {
+            egui::Shape::LineSegment { stroke, .. } => Some(stroke.width),
+            egui::Shape::Path(path) => Some(path.stroke.width),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(widths, vec![0.6, 1.2]);
 }
 
 #[test]

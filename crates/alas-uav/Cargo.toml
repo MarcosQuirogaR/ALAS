@@ -20,6 +20,8 @@ alas-atmo = { path = "../alas-atmo" }
 # Component records cross the scraper/reviewer boundary as stable typed JSON.
 serde = { workspace = true }
 serde_json = { workspace = true }
+# Error types derive `Display` and `Error` the way the other library crates do.
+thiserror = { workspace = true }
 
 [lints]
 workspace = true

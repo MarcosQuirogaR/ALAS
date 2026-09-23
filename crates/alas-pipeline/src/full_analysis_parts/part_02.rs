@@ -11,23 +11,12 @@ impl FullAnalysis {
         req.required_cruise_cl(q, plane.s_ref)
     }
 
-    fn compute_design_point(&self, plane: &Airplane, polar: &PolarSweep) -> DesignPoint {
-        let cl_target = self.cruise_cl(plane);
-        let mut best_idx = 0usize;
-        let mut min_diff = f64::INFINITY;
-        for (i, &cl) in polar.cl.iter().enumerate() {
-            let diff = (cl - cl_target).abs();
-            if diff < min_diff {
-                min_diff = diff;
-                best_idx = i;
-            }
-        }
-        DesignPoint {
-            alpha_deg: polar.alpha_deg[best_idx],
-            cl: polar.cl[best_idx],
-            cd: polar.cd[best_idx],
-            l_over_d: polar.l_over_d[best_idx],
-        }
+    fn compute_design_point(
+        &self,
+        plane: &Airplane,
+        polar: &PolarSweep,
+    ) -> Result<DesignPoint, String> {
+        design_point_nearest(polar, self.cruise_cl(plane))
     }
 
     fn fit_polar(&self, plane: &Airplane, polar: &PolarSweep) -> PolarFit {

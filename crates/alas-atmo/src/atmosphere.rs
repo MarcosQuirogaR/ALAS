@@ -83,19 +83,23 @@ pub enum DensityAltitudeMethod {
 }
 
 /// Why [`Atmosphere::density_altitude`] could not produce a result.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum DensityAltitudeError {
     /// The caller asked for [`DensityAltitudeMethod::Exact`]. Upstream raises
     /// `NotImplementedError` for the same case; reporting this instead of
     /// silently substituting the approximate formula is the translation of
     /// that.
+    #[error("exact density altitude calculation not yet implemented")]
     ExactNotImplemented,
 }
 
 /// Why a checked atmosphere construction was rejected.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, thiserror::Error)]
 pub enum AtmosphereError {
     /// Altitude or temperature deviation was not finite.
+    #[error(
+        "atmosphere inputs must be finite (altitude={altitude_m:?}, temperature deviation={temperature_deviation_k:?})"
+    )]
     NonFiniteInput {
         /// Geopotential altitude supplied by the caller.
         altitude_m: f64,
@@ -105,6 +109,9 @@ pub enum AtmosphereError {
     /// The requested altitude lies outside the checked physical atmosphere
     /// band. The legacy differentiable fan extends farther for optimizer
     /// robustness, but those values are not admitted at product boundaries.
+    #[error(
+        "altitude {altitude_m} m lies outside the checked physical atmosphere band [{min_m}, {max_m}] m"
+    )]
     AltitudeOutsideModel {
         /// Requested geopotential altitude in metres.
         altitude_m: f64,
@@ -114,6 +121,9 @@ pub enum AtmosphereError {
         max_m: f64,
     },
     /// The resulting thermodynamic state is not physically usable.
+    #[error(
+        "atmosphere returned a nonphysical state (T={temperature_k:?} K, p={pressure_pa:?} Pa, rho={density_kg_m3:?} kg/m^3)"
+    )]
     NonPhysicalState {
         /// Temperature in kelvin.
         temperature_k: f64,
@@ -123,50 +133,6 @@ pub enum AtmosphereError {
         density_kg_m3: f64,
     },
 }
-
-impl std::fmt::Display for AtmosphereError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::NonFiniteInput {
-                altitude_m,
-                temperature_deviation_k,
-            } => write!(
-                f,
-                "atmosphere inputs must be finite (altitude={altitude_m:?}, temperature deviation={temperature_deviation_k:?})"
-            ),
-            Self::AltitudeOutsideModel {
-                altitude_m,
-                min_m,
-                max_m,
-            } => write!(
-                f,
-                "altitude {altitude_m} m lies outside the checked physical atmosphere band [{min_m}, {max_m}] m"
-            ),
-            Self::NonPhysicalState {
-                temperature_k,
-                pressure_pa,
-                density_kg_m3,
-            } => write!(
-                f,
-                "atmosphere returned a nonphysical state (T={temperature_k:?} K, p={pressure_pa:?} Pa, rho={density_kg_m3:?} kg/m^3)"
-            ),
-        }
-    }
-}
-
-impl std::error::Error for AtmosphereError {}
-
-impl std::fmt::Display for DensityAltitudeError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::ExactNotImplemented => {
-                f.write_str("exact density altitude calculation not yet implemented")
-            }
-        }
-    }
-}
-
-impl std::error::Error for DensityAltitudeError {}
 
 /// A point in the atmosphere.
 #[derive(Debug, Clone, Copy, PartialEq)]

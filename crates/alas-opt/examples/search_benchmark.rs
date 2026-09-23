@@ -25,6 +25,8 @@
 //!   `cargo run --release -p alas-opt --example search_benchmark -- \
 //!      [preset|all|AVE] [workers] [seed] [mode] [washout|wash_in]`
 
+// A diagnostic example: its output is the printed report, and a failed
+// unwrap is the probe stopping on an input it cannot run.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::print_stdout)]
 
 use std::time::Instant;

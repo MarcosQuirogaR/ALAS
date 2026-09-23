@@ -7,11 +7,12 @@ use std::fs::File;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::thread;
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Duration, SystemTime};
 
 use alas_config::{AlasConfig, MainGearFallbackRefusal};
-use alas_exec::process::{kill_process_tree, NewProcessGroup, NoConsoleWindow};
+use alas_exec::process::{
+    timeout_from_seconds, wait_with_timeout, DeadlineWait, NewProcessGroup, NoConsoleWindow,
+};
 use alas_geom::aircraft::airplane::Airplane;
 use alas_geom::aircraft::fuselage::Fuselage;
 use alas_geom::aircraft::wing::Wing;
@@ -27,33 +28,9 @@ use validation::validate_script;
 #[path = "../openvsp/native_preview.rs"]
 mod native_preview;
 
-/// Evidence state of an OpenVSP export artifact.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum OpenVspExportStatus {
-    /// The supported input script was written, but no installed runtime read it.
-    ScriptWrittenRuntimeUnverified,
-    /// The configured executable could not be launched.
-    RuntimeLaunchFailed,
-    /// The OpenVSP process exceeded its deadline and its process tree was killed.
-    RuntimeTimedOut,
-    /// OpenVSP ran, but did not satisfy the completion and native-file checks.
-    RuntimeRejected,
-    /// OpenVSP read the script and wrote the requested project file.
-    Vsp3Materialized,
-}
-
-impl OpenVspExportStatus {
-    /// Stable status text for the GUI and retained run evidence.
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::ScriptWrittenRuntimeUnverified => "script_written_runtime_unverified",
-            Self::RuntimeLaunchFailed => "runtime_launch_failed",
-            Self::RuntimeTimedOut => "runtime_timed_out",
-            Self::RuntimeRejected => "runtime_rejected",
-            Self::Vsp3Materialized => "vsp3_materialized",
-        }
-    }
-}
+#[path = "../openvsp/status.rs"]
+mod status;
+pub use status::OpenVspExportStatus;
 
 /// Files and fidelity notes produced by an OpenVSP geometry export.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -206,6 +183,14 @@ pub fn materialize_openvsp_project(
     export.preview_error = None;
     export.cad_preview_geometry_available = false;
     export.cad_preview_geometry_error = None;
+    let timeout = match timeout_from_seconds("OpenVSP", timeout_seconds) {
+        Ok(timeout) => timeout,
+        Err(error) => {
+            export.status = OpenVspExportStatus::InvalidTimeout;
+            export.runtime_error = Some(error.to_string());
+            return export;
+        }
+    };
     let Some(work_dir) = export.script_path.parent().map(Path::to_path_buf) else {
         return reject_runtime(export, "OpenVSP script has no working directory".to_owned());
     };
@@ -356,23 +341,20 @@ pub fn materialize_openvsp_project(
             return export;
         }
     };
-    let deadline = Instant::now() + Duration::from_secs_f64(timeout_seconds.max(0.1));
-    let status = loop {
-        match child.try_wait() {
-            Ok(Some(status)) => break status,
-            Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(25)),
-            Ok(None) => {
-                kill_process_tree(child.id());
-                let _ = child.wait();
-                export.status = OpenVspExportStatus::RuntimeTimedOut;
-                export.runtime_error = Some(format!(
-                    "OpenVSP exceeded the {timeout_seconds:.1} s deadline; process tree force-killed"
-                ));
-                return export;
-            }
-            Err(error) => {
-                return reject_runtime(export, format!("cannot poll OpenVSP: {error}"));
-            }
+    let status = match wait_with_timeout(&mut child, timeout) {
+        DeadlineWait::Exited(status) => status,
+        DeadlineWait::TimedOut => {
+            export.status = OpenVspExportStatus::RuntimeTimedOut;
+            export.runtime_error = Some(format!(
+                "OpenVSP exceeded the {timeout_seconds:.1} s deadline; process tree force-killed"
+            ));
+            return export;
+        }
+        DeadlineWait::PollFailed(error) => {
+            return reject_runtime(
+                export,
+                format!("cannot poll OpenVSP: {error}; process tree force-killed"),
+            );
         }
     };
 

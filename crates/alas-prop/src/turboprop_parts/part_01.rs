@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-use std::{error::Error, f64::consts::PI, fmt};
+use std::f64::consts::PI;
 
 use crate::system::{
     ActiveLimit, DiagnosticItem, DiagnosticsQuery, FailureState, FlightCondition, ModelIdentity,
@@ -116,7 +116,7 @@ pub struct Pw127m568fModel {
     /// kg/(kW h), **not** the power-specific fuel consumption the engine
     /// actually runs at.
     ///
-    /// The name is historical and the quantity is a rating-basis bookkeeping
+    /// Despite the name, the quantity is a rating-basis bookkeeping
     /// coefficient. ATR publishes 762 kg/h for both engines at maximum cruise
     /// power, and the typed `MaximumCruise` rating is a *sea-level* 2,132 shp;
     /// dividing the one by the other gives this number directly:
@@ -126,7 +126,7 @@ pub struct Pw127m568fModel {
     /// anchor is reproduced after the lapse is applied: **0.364630 kg/kWh**
     /// at the declared inputs.
     ///
-    /// **The trap this doc comment used to set.** Writing a measured PW120A
+    /// **The trap the name sets.** Writing a measured PW120A
     /// PSFC of 0.295 kg/kWh into this field does *not* give the model a
     /// 0.295 kg/kWh engine: it gives it `0.295 x 0.657 = 0.194 kg/kWh`, 34 %
     /// below the intention. Use [`Pw127m568fModel::implied_psfc_kg_kwh`] to
@@ -164,7 +164,7 @@ pub struct Pw127m568fModel {
     /// Momentum theory bounds a propeller's thrust at `P = T (V + v_i)`, but
     /// that bound is a propeller with **no profile loss at all**: at the ATR's
     /// FL170 / 275 kt cruise it gives `eta_ideal = V/(V + v_i) = 0.976`, which
-    /// is what this model used to report and is not a physical propeller.
+    /// is not a physical propeller.
     /// Real blades lose profile drag, tip and non-uniform-inflow power on top
     /// of it.
     ///
@@ -337,11 +337,13 @@ pub enum ModelUncertainty {
 }
 
 /// Typed failures from the isolated turboprop kernel.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum TurbopropError {
     /// Named input was NaN or infinite.
+    #[error("non-finite turboprop input: {0}")]
     NonFinite(&'static str),
     /// Named input is outside the declared numerical or physical domain.
+    #[error("turboprop input outside domain: {field}={value}")]
     OutsideDomain {
         /// Stable name of the rejected input.
         field: &'static str,
@@ -349,35 +351,15 @@ pub enum TurbopropError {
         value: f64,
     },
     /// Requested propeller state lacks a defensible public model.
+    #[error("unsupported turboprop mode: {0:?}")]
     UnsupportedMode(TurbopropMode),
     /// No blade angle within the surrogate pitch bounds absorbs the requested power.
+    #[error("propeller governor cannot absorb requested power {required_power_w} W")]
     GovernorNoSolution {
         /// Propeller power that could not be matched within pitch limits, W.
         required_power_w: f64,
     },
     /// A calculation completed but violated a physical invariant.
+    #[error("nonphysical turboprop result: {0}")]
     NonPhysicalResult(&'static str),
 }
-
-impl fmt::Display for TurbopropError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::NonFinite(field) => write!(formatter, "non-finite turboprop input: {field}"),
-            Self::OutsideDomain { field, value } => {
-                write!(formatter, "turboprop input outside domain: {field}={value}")
-            }
-            Self::UnsupportedMode(mode) => {
-                write!(formatter, "unsupported turboprop mode: {mode:?}")
-            }
-            Self::GovernorNoSolution { required_power_w } => write!(
-                formatter,
-                "propeller governor cannot absorb requested power {required_power_w} W"
-            ),
-            Self::NonPhysicalResult(message) => {
-                write!(formatter, "nonphysical turboprop result: {message}")
-            }
-        }
-    }
-}
-
-impl Error for TurbopropError {}

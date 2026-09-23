@@ -157,14 +157,10 @@ fn barometric_formula(
 /// index whose base altitude is strictly below `altitude_m`, defaulting to
 /// the first layer, which is what this does directly.
 fn layer_index(altitude_m: f64) -> usize {
-    let layers = &*LAYERS;
-    let mut index = 0;
-    for (i, layer) in layers.iter().enumerate() {
-        if altitude_m > layer.base_altitude_m {
-            index = i;
-        }
-    }
-    index
+    LAYERS
+        .iter()
+        .rposition(|layer| altitude_m > layer.base_altitude_m)
+        .unwrap_or(0)
 }
 
 /// Pressure at `altitude_m` (geopotential, in metres) under the ISA, in

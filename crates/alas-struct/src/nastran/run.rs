@@ -42,25 +42,19 @@
 //! terminates. An opt-in installed-solver check establishes the remaining
 //! product boundary where MSC is available.
 
-use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::thread;
-use std::time::{Duration, Instant};
 
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
 
-use alas_exec::process::{kill_process_tree, NewProcessGroup, NoConsoleWindow};
+use alas_exec::process::{
+    drain, drained_text, timeout_from_seconds, wait_with_timeout, DeadlineWait, NewProcessGroup,
+    NoConsoleWindow,
+};
 use alas_exec::SupervisedSpawn;
 
 use super::text;
-
-/// How often the run loop checks whether the solver has exited.
-///
-/// A solve runs for minutes, so the poll costs nothing measurable, and it is
-/// short enough that the timeout is honoured to well under a second.
-const POLL_INTERVAL: Duration = Duration::from_millis(50);
 
 /// How many lines of a captured stream a failure report quotes.
 const TAIL_LINES: usize = 15;
@@ -281,6 +275,10 @@ struct Solve {
 
 /// Spawn `command`, hold it to the timeout, then judge what it left behind.
 fn supervise(mut command: Command, solve: &Solve) -> NastranRunOutcome {
+    let timeout = match timeout_from_seconds(&solve.exe_name, solve.timeout_seconds) {
+        Ok(timeout) => timeout,
+        Err(error) => return NastranRunOutcome::failed(error.to_string()),
+    };
     let spawned = command
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -300,39 +298,29 @@ fn supervise(mut command: Command, solve: &Solve) -> NastranRunOutcome {
     // Both streams are drained on their own threads: a solver can fill one
     // pipe's buffer while the other is untouched, and a full pipe blocks it
     // forever, which would turn every chatty run into a timeout.
-    let stdout_reader = child.stdout.take().map(drain);
-    let stderr_reader = child.stderr.take().map(drain);
+    let stdout_reader = drain(child.stdout.take());
+    let stderr_reader = drain(child.stderr.take());
 
-    let deadline = Instant::now() + Duration::from_secs_f64(solve.timeout_seconds);
-    let status = loop {
-        match child.try_wait() {
-            Ok(Some(status)) => break status,
-            Ok(None) => {
-                if Instant::now() >= deadline {
-                    kill_process_tree(child.id());
-                    // Reap it, and discard whatever it had buffered.
-                    let _ = child.wait();
-                    return NastranRunOutcome::failed(format!(
-                        "Timed out after {:.0}s running: {} \
-                         (solver process tree has been force-killed)",
-                        solve.timeout_seconds, solve.command_line
-                    ));
-                }
-                thread::sleep(POLL_INTERVAL);
-            }
-            Err(error) => {
-                kill_process_tree(child.id());
-                let _ = child.wait();
-                return NastranRunOutcome::failed(format!(
-                    "Failed while waiting on {}: {error}",
-                    solve.exe_name
-                ));
-            }
+    let status = match wait_with_timeout(&mut child, timeout) {
+        DeadlineWait::Exited(status) => status,
+        // Whatever the solver had buffered is discarded with it.
+        DeadlineWait::TimedOut => {
+            return NastranRunOutcome::failed(format!(
+                "Timed out after {:.0}s running: {} \
+                 (solver process tree has been force-killed)",
+                solve.timeout_seconds, solve.command_line
+            ))
+        }
+        DeadlineWait::PollFailed(error) => {
+            return NastranRunOutcome::failed(format!(
+                "Failed while waiting on {}: {error}",
+                solve.exe_name
+            ))
         }
     };
 
-    let stdout = stdout_reader.map(join).unwrap_or_default();
-    let stderr = stderr_reader.map(join).unwrap_or_default();
+    let stdout = drained_text(stdout_reader);
+    let stderr = drained_text(stderr_reader);
     let streams = format!(
         "stdout (tail):\n{}\nstderr (tail):\n{}",
         tail(&stdout, TAIL_LINES),
@@ -409,18 +397,6 @@ fn file_name(path: &Path) -> String {
         Some(name) => name.to_string_lossy().into_owned(),
         None => path.display().to_string(),
     }
-}
-
-fn drain<R: Read + Send + 'static>(mut stream: R) -> thread::JoinHandle<String> {
-    thread::spawn(move || {
-        let mut buffer = Vec::new();
-        let _ = stream.read_to_end(&mut buffer);
-        String::from_utf8_lossy(&buffer).into_owned()
-    })
-}
-
-fn join(handle: thread::JoinHandle<String>) -> String {
-    handle.join().unwrap_or_default()
 }
 
 // These tests drive a real subprocess and a real temporary directory, so a
@@ -534,6 +510,28 @@ mod tests {
             outcome.detail
         );
         assert!(outcome.detail.contains("force-killed"));
+    }
+
+    #[test]
+    fn an_unusable_timeout_is_reported_before_anything_is_launched() {
+        let work = TempDir::new("nastran_bad_timeout");
+        for timeout_seconds in [-1.0, 0.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            // The stand-in would succeed if it ran, so a clean outcome or a
+            // missing-print-file report would mean it was launched.
+            let outcome = stand_in(&work, successful_command(), timeout_seconds, None);
+            assert!(!outcome.ok, "{timeout_seconds}: {}", outcome.detail);
+            assert!(
+                outcome.detail.starts_with("cmd timeout must be")
+                    || outcome.detail.starts_with("sh timeout must be"),
+                "{timeout_seconds}: {}",
+                outcome.detail
+            );
+            assert!(
+                !outcome.detail.contains("wrote no"),
+                "{timeout_seconds}: {}",
+                outcome.detail
+            );
+        }
     }
 
     #[test]

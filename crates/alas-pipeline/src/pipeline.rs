@@ -62,17 +62,21 @@ use crate::full_analysis::{AnalysisReport, FullAnalysis};
 use crate::mission_stage::{self, SelectedLoadCase};
 use crate::openvsp::{export_openvsp_script, materialize_openvsp_project, OpenVspExportResult};
 use crate::payload_layout_export::export_payload_layout_artifact;
-use crate::runs::{RunEvent, RunEventKind, RunEventSeverity};
+use crate::runs::{RunEvent, RunEventSeverity};
 use crate::solver_mode::{AerodynamicSolverMode, OptimizationSolverMode};
 use crate::structural::StructuralAnalysisResult;
 use crate::vspaero::{run_vspaero_analysis, VspaeroAnalysisResult};
 
 mod curl_transport;
 use curl_transport::SystemCurlTransport;
+mod events;
+pub(crate) use events::{begin_component, finish_component};
+use events::{
+    begin_stage, emit_diagnostic, emit_diagnostic_with_severity, emit_tool_diagnostics,
+    finish_stage, warn_artifact_failure,
+};
 mod helpers;
 mod snapshots;
-#[cfg(test)]
-use helpers::optimizer_config;
 use helpers::{
     add_manifest_artifact, add_manifest_artifact_if_exists, check_preset_policy,
     persist_mses_polar_diagnostics, persist_mses_raw_exports, validate_bounds,
@@ -92,8 +96,6 @@ struct MsesSectionCondition {
     reynolds: f64,
     alpha_deg: f64,
 }
-
-const PIPELINE_STAGE_COUNT: u8 = 7;
 
 fn check_cancelled(cancel: Option<&AtomicBool>) -> Result<(), String> {
     if cancel.is_some_and(|flag| flag.load(Ordering::Relaxed)) {
@@ -125,339 +127,13 @@ fn prepare_analysis_workspace(output_dir: Option<PathBuf>) -> Result<PathBuf, St
     std::fs::create_dir_all(&analysis_dir)
         .map_err(|error| format!("analysis workspace creation failed: {error}"))?;
     if output_dir.is_some() {
-        let _ = mark_storage_root(StorageCategoryId::GeneratedOutputs, &analysis_dir);
+        // Without the claim the run's results are still valid; only Manage
+        // Storage loses the ability to recognize and reclaim the directory.
+        if let Err(error) = mark_storage_root(StorageCategoryId::GeneratedOutputs, &analysis_dir) {
+            tracing::warn!(%error, path = %analysis_dir.display(), "output directory could not be claimed for storage management");
+        }
     }
     Ok(analysis_dir)
-}
-
-fn emit_event(events: Option<&(dyn Fn(RunEvent) + Sync)>, run_clock: Instant, event: RunEvent) {
-    if let Some(callback) = events {
-        callback(RunEvent {
-            elapsed_ms: run_clock.elapsed().as_millis() as u64,
-            ..event
-        });
-    }
-}
-
-fn begin_stage(
-    events: Option<&(dyn Fn(RunEvent) + Sync)>,
-    run_clock: Instant,
-    index: u8,
-    stage: &str,
-    message: &str,
-) -> Instant {
-    emit_event(
-        events,
-        run_clock,
-        RunEvent {
-            stage: stage.to_owned(),
-            message: message.to_owned(),
-            fraction: Some(0.0),
-            kind: RunEventKind::StageStarted,
-            severity: RunEventSeverity::Info,
-            stage_index: Some(index),
-            stage_count: Some(PIPELINE_STAGE_COUNT),
-            elapsed_ms: 0,
-            duration_ms: None,
-        },
-    );
-    Instant::now()
-}
-
-fn finish_stage(
-    events: Option<&(dyn Fn(RunEvent) + Sync)>,
-    run_clock: Instant,
-    stage_clock: Instant,
-    index: u8,
-    stage: &str,
-) {
-    let duration_ms = stage_clock.elapsed().as_millis() as u64;
-    emit_event(
-        events,
-        run_clock,
-        RunEvent {
-            stage: stage.to_owned(),
-            message: format!("Completed in {:.3} s", duration_ms as f64 / 1_000.0),
-            fraction: Some(1.0),
-            kind: RunEventKind::StageCompleted,
-            severity: RunEventSeverity::Info,
-            stage_index: Some(index),
-            stage_count: Some(PIPELINE_STAGE_COUNT),
-            elapsed_ms: 0,
-            duration_ms: Some(duration_ms),
-        },
-    );
-}
-
-/// Start a detailed downstream component timer.
-///
-/// Component events intentionally do not carry the seven-stage index. They
-/// are children of the top-level `downstream` stage and are rendered as a
-/// separate, indented timing list by the desktop console.
-pub(crate) fn begin_component(
-    events: Option<&(dyn Fn(RunEvent) + Sync)>,
-    run_clock: Instant,
-    stage: &str,
-    message: &str,
-) -> Instant {
-    emit_event(
-        events,
-        run_clock,
-        RunEvent {
-            stage: stage.to_owned(),
-            message: message.to_owned(),
-            fraction: Some(0.0),
-            kind: RunEventKind::StageStarted,
-            severity: RunEventSeverity::Info,
-            stage_index: None,
-            stage_count: None,
-            elapsed_ms: 0,
-            duration_ms: None,
-        },
-    );
-    Instant::now()
-}
-
-/// Finish a detailed downstream component timer.
-pub(crate) fn finish_component(
-    events: Option<&(dyn Fn(RunEvent) + Sync)>,
-    run_clock: Instant,
-    stage_clock: Instant,
-    stage: &str,
-    status: &str,
-) {
-    let duration_ms = stage_clock.elapsed().as_millis() as u64;
-    let message = if status.eq_ignore_ascii_case("skipped") {
-        status.to_owned()
-    } else {
-        format!("{status} in {:.3} s", duration_ms as f64 / 1_000.0)
-    };
-    emit_event(
-        events,
-        run_clock,
-        RunEvent {
-            stage: stage.to_owned(),
-            message,
-            fraction: Some(1.0),
-            kind: RunEventKind::StageCompleted,
-            severity: RunEventSeverity::Info,
-            stage_index: None,
-            stage_count: None,
-            elapsed_ms: 0,
-            duration_ms: Some(duration_ms),
-        },
-    );
-}
-
-fn emit_diagnostic(
-    events: Option<&(dyn Fn(RunEvent) + Sync)>,
-    run_clock: Instant,
-    stage: &str,
-    message: &str,
-) {
-    emit_diagnostic_with_severity(events, run_clock, stage, message, RunEventSeverity::Info);
-}
-
-fn emit_diagnostic_with_severity(
-    events: Option<&(dyn Fn(RunEvent) + Sync)>,
-    run_clock: Instant,
-    stage: &str,
-    message: &str,
-    severity: RunEventSeverity,
-) {
-    emit_event(
-        events,
-        run_clock,
-        RunEvent {
-            stage: stage.to_owned(),
-            message: message.to_owned(),
-            fraction: None,
-            kind: RunEventKind::Diagnostic,
-            severity,
-            stage_index: None,
-            stage_count: Some(PIPELINE_STAGE_COUNT),
-            elapsed_ms: 0,
-            duration_ms: None,
-        },
-    );
-}
-
-// Coordinated analysis inputs are kept explicit at this integration boundary.
-#[allow(clippy::too_many_arguments)]
-fn emit_tool_diagnostics(
-    events: Option<&(dyn Fn(RunEvent) + Sync)>,
-    run_clock: Instant,
-    environment: &RunEnvironment,
-    openvsp: Option<&OpenVspExportResult>,
-    vspaero: Option<&VspaeroAnalysisResult>,
-    avl: Option<&AvlAnalysisResult>,
-    flowunsteady: Option<&FlowUnsteadyAnalysisResult>,
-    structures: Option<&StructuralAnalysisResult>,
-    mses: Option<&MsesPolarResult>,
-) {
-    let configured = [
-        ("OpenVSP", environment.openvsp_exe.as_deref()),
-        ("VSPAERO", environment.vspaero_exe.as_deref()),
-        ("AVL", environment.avl_exe.as_deref()),
-        ("FLOWUnsteady", environment.flowunsteady_exe.as_deref()),
-        ("MSES", environment.mses_dir.as_deref()),
-        ("Nastran", environment.nastran_exe.as_deref()),
-        ("MSC solver", environment.nastran_solver.as_deref()),
-        ("Patran", environment.patran_exe.as_deref()),
-    ];
-    for (tool, path) in configured {
-        let message = path.map_or_else(
-            || format!("{tool}: not configured"),
-            |path| format!("{tool}: resolved {}", path.display()),
-        );
-        emit_diagnostic_with_severity(
-            events,
-            run_clock,
-            "external_tools",
-            &message,
-            if path.is_some() {
-                RunEventSeverity::Info
-            } else {
-                RunEventSeverity::Warning
-            },
-        );
-    }
-    for (tool, status) in [
-        (
-            "OpenVSP",
-            openvsp.map(|value| {
-                status_with_detail(
-                    format!("{:?}", value.status),
-                    value.runtime_error.as_deref(),
-                )
-            }),
-        ),
-        (
-            "VSPAERO",
-            vspaero.map(|value| {
-                status_with_detail(format!("{:?}", value.status), value.error.as_deref())
-            }),
-        ),
-        (
-            "AVL",
-            avl.map(|value| {
-                status_with_detail(format!("{:?}", value.status), value.error.as_deref())
-            }),
-        ),
-        (
-            "FLOWUnsteady",
-            flowunsteady.map(|value| {
-                status_with_detail(format!("{:?}", value.status), value.error.as_deref())
-            }),
-        ),
-        (
-            "Structures",
-            structures
-                .map(|value| status_with_detail(value.status.clone(), value.error.as_deref())),
-        ),
-        (
-            "MSES",
-            mses.map(|value| {
-                status_with_detail(format!("{:?}", value.status), value.error.as_deref())
-            }),
-        ),
-    ] {
-        emit_diagnostic(
-            events,
-            run_clock,
-            "external_tools",
-            &format!(
-                "{tool}: {}",
-                status.unwrap_or_else(|| "not requested".to_owned())
-            ),
-        );
-    }
-
-    // The overall structural result stays `ok` when the analytical sizing
-    // succeeded; the individual native solver outcomes are surfaced as well
-    // so a missing MSC DLL is not hidden behind the analytical answer.
-    if let Some(structures) = structures {
-        for (tool, outcome) in [
-            (
-                "MSC Nastran SOL 101",
-                structures.nastran.as_ref().map(|result| {
-                    (
-                        result.static_solve.status,
-                        result.static_solve.error.as_deref(),
-                    )
-                }),
-            ),
-            (
-                "MSC Nastran SOL 103",
-                structures
-                    .nastran
-                    .as_ref()
-                    .map(|result| (result.modes.status, result.modes.error.as_deref())),
-            ),
-            (
-                "NASTRAN-95 SOL 101",
-                structures.nastran95.as_ref().map(|result| {
-                    (
-                        result.static_solve.status,
-                        result.static_solve.error.as_deref(),
-                    )
-                }),
-            ),
-            (
-                "NASTRAN-95 SOL 103",
-                structures
-                    .nastran95
-                    .as_ref()
-                    .map(|result| (result.modes.status, result.modes.error.as_deref())),
-            ),
-        ] {
-            if let Some((status, error)) = outcome {
-                emit_diagnostic_with_severity(
-                    events,
-                    run_clock,
-                    "external_tools",
-                    &format!(
-                        "{tool}: {}",
-                        status_with_detail(status.as_str().to_owned(), error)
-                    ),
-                    if status == alas_struct::nastran::ResultStatus::Ok {
-                        RunEventSeverity::Info
-                    } else {
-                        RunEventSeverity::Warning
-                    },
-                );
-            }
-        }
-        if let Some(patran) = structures.patran.as_ref() {
-            emit_diagnostic_with_severity(
-                events,
-                run_clock,
-                "external_tools",
-                &format!(
-                    "Patran: {}",
-                    status_with_detail(patran.status.clone(), patran.error.as_deref())
-                ),
-                if patran.status.eq_ignore_ascii_case("ok") {
-                    RunEventSeverity::Info
-                } else {
-                    RunEventSeverity::Warning
-                },
-            );
-        }
-    }
-}
-
-fn status_with_detail(status: String, error: Option<&str>) -> String {
-    let Some(error) = error.map(str::trim).filter(|error| !error.is_empty()) else {
-        return status;
-    };
-    const MAX_CHARS: usize = 1_000;
-    let detail = error.chars().take(MAX_CHARS).collect::<String>();
-    if detail.chars().count() < error.chars().count() {
-        format!("{status}: {detail} \u{2026}")
-    } else {
-        format!("{status}: {detail}")
-    }
 }
 
 fn mses_section_condition(config: &AlasConfig, report: &AnalysisReport) -> MsesSectionCondition {
@@ -651,6 +327,20 @@ pub struct PipelineExecutionStatus {
     pub quiet_requested: bool,
 }
 
+impl PipelineExecutionStatus {
+    fn for_options(options: &PipelineOptions, parallel_effective: bool) -> Self {
+        Self {
+            parallel_requested: options.parallel,
+            parallel_effective,
+            aerodynamic_solver: options.aerodynamic_solver,
+            optimization_solver: options.optimization_solver,
+            seed_requested: options.seed,
+            seed_applied: options.optimize && options.seed.is_some(),
+            quiet_requested: options.quiet,
+        }
+    }
+}
+
 /// Master pipeline coordinator.
 #[derive(Debug, Clone)]
 pub struct DesignPipeline {
@@ -671,7 +361,7 @@ pub struct DesignPipeline {
 /// single logical "how do you want to watch this run" input rather than three
 /// unrelated positional callbacks.
 pub struct RunObservers<'a> {
-    /// Typed per-stage lifecycle events, as reported by [`emit_diagnostic`].
+    /// Typed per-stage lifecycle events, timers and diagnostics.
     pub events: &'a (dyn Fn(RunEvent) + Sync),
     /// Cumulative, immutable [`PipelineResult`] snapshots published as report
     /// data becomes available.
@@ -793,11 +483,10 @@ impl DesignPipeline {
     /// Execute the same run as [`Self::run_with_environment`] while reporting
     /// typed lifecycle events.
     ///
-    /// The event stream is where a run's per-stage `elapsed_ms`/`duration_ms`
-    /// already live; before this seam existed only the desktop
-    /// design-space entry point could observe them, so a command-line run had
-    /// no record of where its wall time went. The run itself is unchanged:
-    /// the callback is the only added argument.
+    /// The event stream carries each stage's `elapsed_ms`/`duration_ms`, so a
+    /// command-line run can record where its wall time went. The run itself
+    /// is identical to [`Self::run_with_environment`]; the callback is the
+    /// only added argument.
     pub fn run_with_environment_and_events(
         &self,
         options: &PipelineOptions,
@@ -1186,11 +875,7 @@ impl DesignPipeline {
             "full_analysis",
             "Full aircraft analysis",
         );
-        let full = if self.aircraft_override.is_some() {
-            FullAnalysis::new_preserving_engine_config(self.config.clone())
-        } else {
-            FullAnalysis::new(self.config.clone())
-        };
+        let full = FullAnalysis::new(self.config.clone());
         let mut optimized_report = match branch_report {
             Some(report) => report,
             None => match self.aircraft_override.as_ref() {
@@ -1307,15 +992,7 @@ impl DesignPipeline {
             vspaero_result: None,
             avl_result: None,
             flowunsteady_result: None,
-            execution: PipelineExecutionStatus {
-                parallel_requested: options.parallel,
-                parallel_effective: false,
-                aerodynamic_solver: options.aerodynamic_solver,
-                optimization_solver: options.optimization_solver,
-                seed_requested: options.seed,
-                seed_applied: options.optimize && options.seed.is_some(),
-                quiet_requested: options.quiet,
-            },
+            execution: PipelineExecutionStatus::for_options(options, false),
         });
         finish_stage(events, run_clock, stage_clock, 3, "full_analysis");
         check_cancelled(cancel)?;
@@ -1353,14 +1030,31 @@ impl DesignPipeline {
         let openvsp_export = if self.config.downstream.openvsp {
             let af_path = analysis_dir.join("airfoils/optimized_root.dat");
             let openvsp_path = analysis_dir.join("openvsp/optimized_aircraft.vspscript");
-            let _ = export_airfoil_dat(&optimized_report, &self.config, &af_path, "ALAS_Optimized");
+            if let Err(error) =
+                export_airfoil_dat(&optimized_report, &self.config, &af_path, "ALAS_Optimized")
+            {
+                warn_artifact_failure(
+                    events,
+                    run_clock,
+                    "geometry_export",
+                    "Root airfoil Selig file",
+                    &error,
+                );
+            }
             match export_openvsp_script(&optimized_report, &self.config, &openvsp_path) {
                 Ok(export) => Some(match environment.openvsp_exe.as_deref() {
                     Some(executable) => materialize_openvsp_project(export, executable, 120.0),
                     None => export,
                 }),
                 Err(error) => {
-                    tracing::warn!(%error, "OpenVSP geometry script export failed");
+                    // VSPAERO consumes this geometry and is skipped without it.
+                    warn_artifact_failure(
+                        events,
+                        run_clock,
+                        "geometry_export",
+                        "OpenVSP geometry script",
+                        &error,
+                    );
                     None
                 }
             }
@@ -1563,12 +1257,9 @@ impl DesignPipeline {
             let polar_summary = polar.as_ref().map_or_else(
                 || "unavailable".to_owned(),
                 |value| {
-                    let alpha_range = finite_range(&value.alpha_deg)
-                        .map_or_else(|| "none".to_owned(), |(lo, hi)| format!("{lo:.3}..{hi:.3}"));
-                    let cl_range = finite_range(&value.cl)
-                        .map_or_else(|| "none".to_owned(), |(lo, hi)| format!("{lo:.4}..{hi:.4}"));
-                    let cd_range = finite_range(&value.cd)
-                        .map_or_else(|| "none".to_owned(), |(lo, hi)| format!("{lo:.5}..{hi:.5}"));
+                    let alpha_range = finite_range_text(&value.alpha_deg, 3);
+                    let cl_range = finite_range_text(&value.cl, 4);
+                    let cd_range = finite_range_text(&value.cd, 5);
                     format!(
                         "{}/{} alpha points, status={}, OSMAP={}, alpha={alpha_range} deg, CL={cl_range}, CD={cd_range}",
                         value.converged_alpha_count,
@@ -1581,10 +1272,8 @@ impl DesignPipeline {
             let pressure_summary = pressure.as_ref().map_or_else(
                 || "unavailable".to_owned(),
                 |value| {
-                    let mach_range = finite_range(&value.field_mach)
-                        .map_or_else(|| "none".to_owned(), |(lo, hi)| format!("{lo:.3}..{hi:.3}"));
-                    let cp_range = finite_range(&value.field_cp)
-                        .map_or_else(|| "none".to_owned(), |(lo, hi)| format!("{lo:.4}..{hi:.4}"));
+                    let mach_range = finite_range_text(&value.field_mach, 3);
+                    let cp_range = finite_range_text(&value.field_cp, 4);
                     format!(
                         "status={}, upper={}, lower={}, Mach field={}, Cp field={}, Mach={mach_range}, Cp={cp_range}, OSMAP={} ({})",
                         value.status.as_str(),
@@ -1840,7 +1529,13 @@ impl DesignPipeline {
             ) {
                 Ok(database) => Some(database),
                 Err(error) => {
-                    tracing::warn!(%error, "design database export failed");
+                    warn_artifact_failure(
+                        events,
+                        run_clock,
+                        "finalization",
+                        "Design database",
+                        &error,
+                    );
                     None
                 }
             }
@@ -1851,7 +1546,13 @@ impl DesignPipeline {
             match export_payload_layout_artifact(&self.config, optimized_design, layout, &path) {
                 Ok(_) => Some(path),
                 Err(error) => {
-                    tracing::warn!(%error, "payload-layout render artifact export failed");
+                    warn_artifact_failure(
+                        events,
+                        run_clock,
+                        "finalization",
+                        "Payload-layout render artifact",
+                        &error,
+                    );
                     None
                 }
             }
@@ -1861,7 +1562,13 @@ impl DesignPipeline {
             match export_cabin_scene(&self.config, &optimized_report, &path) {
                 Ok(_) => Some(path),
                 Err(error) => {
-                    tracing::warn!(%error, "cabin-scene v2 export failed");
+                    warn_artifact_failure(
+                        events,
+                        run_clock,
+                        "finalization",
+                        "Cabin scene v2",
+                        &error,
+                    );
                     None
                 }
             }
@@ -1869,12 +1576,24 @@ impl DesignPipeline {
 
         if let (Some(out_dir), Some(polar)) = (options.output_dir.as_deref(), &mses_result) {
             if let Err(error) = persist_mses_polar_diagnostics(polar, out_dir) {
-                tracing::warn!(%error, "MSES polar-diagnostic retention failed");
+                warn_artifact_failure(
+                    events,
+                    run_clock,
+                    "downstream/mses",
+                    "MSES polar diagnostics",
+                    &error,
+                );
             }
         }
         if let (Some(out_dir), Some(pressure)) = (options.output_dir.as_deref(), &mses_pressure) {
             if let Err(error) = persist_mses_raw_exports(pressure, out_dir) {
-                tracing::warn!(%error, "MSES raw-output retention failed");
+                warn_artifact_failure(
+                    events,
+                    run_clock,
+                    "downstream/mses",
+                    "MSES raw output",
+                    &error,
+                );
             }
         }
 
@@ -1919,33 +1638,19 @@ impl DesignPipeline {
                 }
                 if let Some(result) = &structural_result {
                     stages.insert("structures".to_owned(), result.status.clone());
-                    if let Some(nastran) = result.nastran.as_ref() {
-                        stages.insert(
-                            "msc_nastran_sol101".to_owned(),
-                            nastran.static_solve.status.as_str().to_owned(),
-                        );
-                        stages.insert(
-                            "msc_nastran_sol103".to_owned(),
-                            nastran.modes.status.as_str().to_owned(),
-                        );
-                        stages.insert(
-                            "msc_nastran_sol111".to_owned(),
-                            nastran.vibration.status.as_str().to_owned(),
-                        );
-                    }
-                    if let Some(nastran95) = result.nastran95.as_ref() {
-                        stages.insert(
-                            "nastran95_sol101".to_owned(),
-                            nastran95.static_solve.status.as_str().to_owned(),
-                        );
-                        stages.insert(
-                            "nastran95_sol103".to_owned(),
-                            nastran95.modes.status.as_str().to_owned(),
-                        );
-                        stages.insert(
-                            "nastran95_sol111".to_owned(),
-                            nastran95.vibration.status.as_str().to_owned(),
-                        );
+                    for (prefix, solver) in [
+                        ("msc_nastran", result.nastran.as_ref()),
+                        ("nastran95", result.nastran95.as_ref()),
+                    ] {
+                        let Some(solver) = solver else { continue };
+                        for (solution, status) in [
+                            ("sol101", solver.static_solve.status),
+                            ("sol103", solver.modes.status),
+                            ("sol111", solver.vibration.status),
+                        ] {
+                            stages
+                                .insert(format!("{prefix}_{solution}"), status.as_str().to_owned());
+                        }
                     }
                     if let Some(patran) = result.patran.as_ref() {
                         stages.insert("patran".to_owned(), patran.status.clone());
@@ -2169,15 +1874,7 @@ impl DesignPipeline {
             vspaero_result,
             avl_result,
             flowunsteady_result,
-            execution: PipelineExecutionStatus {
-                parallel_requested: options.parallel,
-                parallel_effective,
-                aerodynamic_solver: options.aerodynamic_solver,
-                optimization_solver: options.optimization_solver,
-                seed_requested: options.seed,
-                seed_applied: options.optimize && options.seed.is_some(),
-                quiet_requested: options.quiet,
-            },
+            execution: PipelineExecutionStatus::for_options(options, parallel_effective),
         })
     }
 
@@ -2290,43 +1987,47 @@ impl DesignPipeline {
             return (None, None);
         }
         let condition = mses_section_condition(&self.config, report);
-        let dir = match mses_dir {
-            Some(d) => d,
-            None => {
-                let error = "MSES executables not configured (Setup > External Tools)".to_owned();
-                let airfoil_name = report
-                    .airplane
-                    .wings
-                    .first()
-                    .and_then(|wing| wing.xsecs.first())
-                    .map(|section| section.airfoil.name.clone())
-                    .filter(|name| !name.is_empty())
-                    .unwrap_or_else(|| "optimized_root_section".to_owned());
-                return (
-                    Some(MsesPolarResult {
-                        status: alas_aero::mses::MsesStatus::Absent,
-                        error: Some(error.clone()),
-                        airfoil_name,
-                        mach: condition.mach,
-                        reynolds: condition.reynolds,
-                        ..MsesPolarResult::default()
-                    }),
-                    Some(MsesPressureResult {
-                        status: alas_aero::mses::MsesStatus::Absent,
-                        error: Some(error),
-                        alpha_deg: condition.alpha_deg,
-                        ..MsesPressureResult::default()
-                    }),
-                );
-            }
+        let root_airfoil = report
+            .airplane
+            .wings
+            .first()
+            .and_then(|wing| wing.xsecs.first())
+            .map(|section| &section.airfoil);
+        // An enabled stage that cannot run still returns typed results, so
+        // the run log and manifest say why instead of "not requested".
+        let unavailable = |status, error: &str| {
+            let airfoil_name = root_airfoil
+                .map(|airfoil| airfoil.name.clone())
+                .filter(|name| !name.is_empty())
+                .unwrap_or_else(|| "optimized_root_section".to_owned());
+            (
+                Some(MsesPolarResult {
+                    status,
+                    error: Some(error.to_owned()),
+                    airfoil_name,
+                    mach: condition.mach,
+                    reynolds: condition.reynolds,
+                    ..MsesPolarResult::default()
+                }),
+                Some(MsesPressureResult {
+                    status,
+                    error: Some(error.to_owned()),
+                    alpha_deg: condition.alpha_deg,
+                    ..MsesPressureResult::default()
+                }),
+            )
         };
-        let wing = match report.airplane.wings.first() {
-            Some(w) => w,
-            None => return (None, None),
+        let Some(dir) = mses_dir else {
+            return unavailable(
+                alas_aero::mses::MsesStatus::Absent,
+                "MSES executables not configured (Setup > External Tools)",
+            );
         };
-        let root_airfoil = match wing.xsecs.first() {
-            Some(x) => &x.airfoil,
-            None => return (None, None),
+        let Some(root_airfoil) = root_airfoil else {
+            return unavailable(
+                alas_aero::mses::MsesStatus::NotRun,
+                "the analyzed aircraft has no main-wing root section to send to MSES",
+            );
         };
 
         let polar = run_mses_polar_with_cancel(
@@ -2397,15 +2098,17 @@ fn config_for_report_mass(config: &AlasConfig, report: &AnalysisReport) -> AlasC
     config.at_closure_mass(report_mass_basis_kg(report, config.requirements.mtow_kg))
 }
 
-fn finite_range(values: &[f64]) -> Option<(f64, f64)> {
+/// `lo..hi` over the finite entries of `values` at `decimals` places, or
+/// `none` when there are none.
+fn finite_range_text(values: &[f64], decimals: usize) -> String {
     let mut finite = values.iter().copied().filter(|value| value.is_finite());
-    let first = finite.next()?;
-    let mut range = (first, first);
-    for value in finite {
-        range.0 = range.0.min(value);
-        range.1 = range.1.max(value);
-    }
-    Some(range)
+    let Some(first) = finite.next() else {
+        return "none".to_owned();
+    };
+    let (lo, hi) = finite.fold((first, first), |(lo, hi), value| {
+        (lo.min(value), hi.max(value))
+    });
+    format!("{lo:.decimals$}..{hi:.decimals$}")
 }
 
 /// Whether a design-space call pins every coordinate to one literal value.

@@ -171,9 +171,8 @@ pub fn sls_tw_for_oei_condition(
 /// Required SLS installed thrust-to-weight for the FAR 25.121(b) condition at
 /// the selected `V2` speed ratio.
 ///
-/// This additive API keeps the legacy closed-form function and its golden
-/// values unchanged while making the physical inputs that were previously
-/// implicit explicit:
+/// Unlike the closed-form [`tw_oei_climb_constraint`], whose golden values it
+/// leaves unchanged, every physical input of the condition is explicit here:
 ///
 /// * only the two/three/four-engine Part 25 schedule is accepted;
 /// * `CL` is derived from the selected `V2/Vs` ratio;
@@ -185,7 +184,7 @@ pub fn sls_tw_for_oei_condition(
 /// `None` means that the requested engine count or one of the physical inputs
 /// is outside this helper's documented domain. It is an unsupported/evidence
 /// gap for a caller, not a passing zero.
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments)] // one per FAR 25.121(b) physical input
 pub fn tw_oei_climb_constraint_at_v2(
     cd0: f64,
     k: f64,
@@ -306,7 +305,7 @@ pub struct OeiClimbAssessment {
 /// context, selected V2 ratio, condition-specific thrust ratio, and both
 /// additional drag terms must all be finite and physically bounded. No generic
 /// thrust-lapse setting is used as a substitute for that evidence.
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments)] // one per FAR 25.121(b) physical input
 pub fn assess_oei_climb(
     cd0: f64,
     k: f64,

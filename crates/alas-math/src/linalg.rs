@@ -152,6 +152,7 @@ impl DenseMatrix {
                 lu: None,
                 minimum_pivot: 0.0,
                 pivot_ratio: 1.0,
+                norm_inf: 0.0,
             });
         }
         sequential_kernels();
@@ -174,13 +175,31 @@ impl DenseMatrix {
         } else {
             (min_pivot, f64::INFINITY)
         };
+        let norm_inf = row_sum_norm(&self.inner);
         Ok(LuFactorization {
             a: self.inner,
             lu: Some(lu),
             minimum_pivot,
             pivot_ratio,
+            norm_inf,
         })
     }
+}
+
+/// `||A||_infinity`, the largest absolute row sum.
+///
+/// Each row is summed in ascending column order, which is the order a
+/// row-wise `Iterator::sum` would use, but the matrix is walked column by
+/// column so that every read is contiguous in faer's column-major storage.
+fn row_sum_norm(a: &Mat<f64>) -> f64 {
+    let n = a.nrows();
+    let mut row_sums = vec![0.0_f64; n];
+    for j in 0..a.ncols() {
+        for (sum, value) in row_sums.iter_mut().zip(a.col_as_slice(j)) {
+            *sum += value.abs();
+        }
+    }
+    row_sums.into_iter().fold(0.0_f64, f64::max)
 }
 
 /// The LU factorization of a [`DenseMatrix`], ready to solve any number of
@@ -192,6 +211,9 @@ pub struct LuFactorization {
     lu: Option<PartialPivLu<f64>>,
     minimum_pivot: f64,
     pivot_ratio: f64,
+    /// `||A||_infinity`, fixed by the matrix and so computed once rather
+    /// than on every solve's diagnostics.
+    norm_inf: f64,
 }
 
 impl LuFactorization {
@@ -242,25 +264,35 @@ impl LuFactorization {
     }
 
     /// The residual evidence for one solve, against the matrix as given.
+    ///
+    /// `A x` is accumulated column by column so that the reads of `A` are
+    /// contiguous; a row-wise dot product strides through the whole matrix
+    /// once per row, which at the 800-row VLM system misses cache on nearly
+    /// every element. Each entry of `A x` still sums its terms in ascending
+    /// column order, so the residual is the one a row-wise sum produces.
     fn diagnostics(&self, x: &Mat<f64>, b: &Mat<f64>) -> SolveDiagnostics {
         let n = self.dimension();
         let k = b.ncols();
-        let mut max_a = 0.0_f64;
-        let mut max_b = 0.0_f64;
+        let max_b = (0..n)
+            .map(|i| (0..k).map(|j| b[(i, j)].abs()).sum::<f64>())
+            .fold(0.0_f64, f64::max);
         let mut max_x = 0.0_f64;
         let mut residual_norm = 0.0_f64;
-        for i in 0..n {
-            let row_a: f64 = (0..n).map(|j| self.a[(i, j)].abs()).sum();
-            max_a = max_a.max(row_a);
-            let row_b: f64 = (0..k).map(|j| b[(i, j)].abs()).sum();
-            max_b = max_b.max(row_b);
-            for column in 0..k {
-                max_x = max_x.max(x[(i, column)].abs());
-                let predicted: f64 = (0..n).map(|j| self.a[(i, j)] * x[(j, column)]).sum();
-                residual_norm = residual_norm.max((predicted - b[(i, column)]).abs());
+        let mut predicted = vec![0.0_f64; n];
+        for column in 0..k {
+            predicted.fill(0.0);
+            for j in 0..n {
+                let x_j = x[(j, column)];
+                max_x = max_x.max(x_j.abs());
+                for (value, a_ij) in predicted.iter_mut().zip(self.a.col_as_slice(j)) {
+                    *value += a_ij * x_j;
+                }
+            }
+            for (i, value) in predicted.iter().enumerate() {
+                residual_norm = residual_norm.max((value - b[(i, column)]).abs());
             }
         }
-        let scale = (max_a * max_x).max(max_b).max(1.0);
+        let scale = (self.norm_inf * max_x).max(max_b).max(1.0);
         SolveDiagnostics {
             residual_norm,
             normalized_residual: residual_norm / scale,
@@ -497,6 +529,49 @@ mod tests {
             from_flat.solve_vector(&rhs).0
         );
         assert_eq!(from_rows.pivot_ratio(), from_flat.pivot_ratio());
+    }
+
+    /// The residual diagnostics as a row-wise pass computes them, the
+    /// oracle the column-sweep implementation must reproduce bit for bit.
+    fn row_wise_diagnostics(a: &[Vec<f64>], x: &[Vec<f64>], b: &[Vec<f64>]) -> (f64, f64) {
+        let n = a.len();
+        let k = b.first().map_or(0, Vec::len);
+        let (mut max_a, mut max_b, mut max_x, mut residual) = (0.0_f64, 0.0_f64, 0.0_f64, 0.0_f64);
+        for i in 0..n {
+            max_a = max_a.max((0..n).map(|j| a[i][j].abs()).sum::<f64>());
+            max_b = max_b.max((0..k).map(|j| b[i][j].abs()).sum::<f64>());
+            for column in 0..k {
+                max_x = max_x.max(x[i][column].abs());
+                let predicted: f64 = (0..n).map(|j| a[i][j] * x[j][column]).sum();
+                residual = residual.max((predicted - b[i][column]).abs());
+            }
+        }
+        let scale = (max_a * max_x).max(max_b).max(1.0);
+        (residual, residual / scale)
+    }
+
+    #[test]
+    fn the_column_sweep_residual_is_bit_identical_to_the_row_wise_one() {
+        for (n, k, seed) in [
+            (1usize, 1usize, 3u64),
+            (9, 2, 17),
+            (120, 1, 29),
+            (64, 4, 41),
+        ] {
+            let (a, b) = random_system(n, k, seed);
+            let (x, diagnostics) = solve_with_diagnostics(&a, &b).expect("well conditioned");
+            let (residual, normalized) = row_wise_diagnostics(&a, &x, &b);
+            assert_eq!(
+                diagnostics.residual_norm.to_bits(),
+                residual.to_bits(),
+                "n={n}"
+            );
+            assert_eq!(
+                diagnostics.normalized_residual.to_bits(),
+                normalized.to_bits(),
+                "n={n}"
+            );
+        }
     }
 
     #[test]

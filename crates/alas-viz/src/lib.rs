@@ -6,6 +6,9 @@
 //! [`render`] converts backend-neutral [`alas_report::scene::Scene`] vector primitives
 //! into `egui::Shape` lists.
 //!
+//! [`raster`] rasterizes the SVG export of a scene, plus its bundled textures,
+//! for static previews.
+//!
 //! [`view`] provides the interactive [`SceneView`] widget with pan, zoom, and fit-to-view.
 
 pub mod raster;
