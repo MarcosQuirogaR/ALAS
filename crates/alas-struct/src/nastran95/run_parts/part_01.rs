@@ -285,6 +285,7 @@ pub fn run_nastran95(
 /// a deterministic diagnostic instead of a Windows loader dialog.  Search
 /// order mirrors the Windows loader's useful caller-controlled locations:
 /// configured runtime, executable directory, then the inherited `PATH`.
+#[cfg_attr(not(windows), allow(clippy::needless_return))]
 fn validate_runtime_dependencies(
     executable: &Path,
     configured: Option<&Path>,
