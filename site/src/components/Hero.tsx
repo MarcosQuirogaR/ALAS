@@ -19,7 +19,7 @@ export default function Hero() {
         <div className="flex flex-wrap items-center gap-3">
           <p className="section-mark">Aircraft preliminary design</p>
           <span className="inline-flex items-center border border-rule bg-raised px-2.5 py-0.5 font-mono text-[0.72rem] text-fg-dim">
-            v1.1.0 · Windows and Linux
+            v1.2.0 · Windows and Linux
           </span>
         </div>
 
@@ -38,7 +38,7 @@ export default function Hero() {
             href={withBase('#download')}
             className="inline-flex items-center justify-center bg-accent px-6 py-3.5 text-[0.92rem] font-semibold text-base transition-colors hover:bg-accent-bright"
           >
-            Download v1.1.0
+            Download v1.2.0
           </a>
 
           <a
