@@ -78,7 +78,7 @@ cargo run --release --bin alas -- --seed 42 --output isolated-dir --plots
 
 ## Command line options
 
-All flags supported by v1.1.0:
+All flags supported by v1.2.0:
 
 | Flag | Argument | Description |
 |---|---|---|
@@ -95,7 +95,7 @@ All flags supported by v1.1.0:
 | `--seed` | `<INT>` | Specify integer random seed for reproducible optimization |
 | `--aero-solver` | `vlm`, `avl`, `both` | Select aerodynamic result family |
 | `--optimization-solver` | `vlm`, `avl`, `both` | Select optimizer aerodynamic backend |
-| `--optimization-method` | `<METHOD>` | Select algorithm (`differential_evolution`, `feasibility_first_de`, `nsga2`, `turbo_1`, `cma_es`, `sqp`) |
+| `--optimization-method` | `<METHOD>` | `differential_evolution`, the only supported search (L-SHADE, epsilon-constrained) |
 | `--quiet` | None | Suppress verbose terminal logging |
 | `--save-config` | `<PATH>` | Write effective configuration schema to YAML and exit |
 | `--download-navdata` | None | Download missing navigation data files and exit |
