@@ -17,7 +17,7 @@ shown to agree with the original.
 `cargo xtask gate` fails if a crate exists that no row mentions: code may not
 appear without a statement of where it came from and what it must agree with.
 The reverse is not checked, because rows naming crates that do not exist yet
-are the normal state of a plan — most of them are `todo`, and they are the
+are the normal state of a plan: most of them are `todo`, and they are the
 schedule. This is a working document, not a report written afterwards.
 
 **Reference:** `alas @ rust-port-baseline`
@@ -62,7 +62,7 @@ A phase opens only when every row of the phases it depends on is `green`,
 
 | Phase | Contents | Opens after |
 |---|---|---|
-| P0 | Scaffolding, process docs, gate tooling, fixture framework | — |
+| P0 | Scaffolding, process docs, gate tooling, fixture framework | n/a |
 | P1 | `alas-units`, `alas-math`, `alas-atmo`, `alas-i18n` | P0 |
 | P2 | `alas-config` and the derive macro | P0 |
 | P3 | `alas-geom` | P1, P2 |
@@ -97,15 +97,15 @@ rather than taking a dependency on a crate that cannot land yet.
 
 | Python module | Lines | Rust target | Provenance | Tier | Status |
 |---|---:|---|---|---|---|
-| `alas/pipeline.py` | 974 | `alas-pipeline` | — | `iter` | todo |
-| `alas/analysis/full_analysis.py` | 247 | `alas-pipeline::full_analysis` | — | `iter` | todo |
-| `alas/validation.py` | 123 | `alas-config::validation` | — | `exact` | green — `golden/config/validation.json` |
-| `alas/cli.py` | 219 | `alas-app::cli` | — | — | todo |
-| `alas/paths.py` | 220 | `alas-app::paths` | — | `exact` | todo |
-| `alas/proc.py` | 76 | `alas-exec::process` | — | — | todo |
-| `alas/i18n.py` | 90 | `alas-i18n` | — | — | green |
-| `alas/__init__.py` | 36 | — | — | — | dropped: lazy-export shim, no native equivalent needed |
-| — | — | `alas-fonts` | — | — | native: the bundled text face the desktop build draws with, which the Python implementation took from the host system |
+| `alas/pipeline.py` | 974 | `alas-pipeline` | n/a | `iter` | todo |
+| `alas/analysis/full_analysis.py` | 247 | `alas-pipeline::full_analysis` | n/a | `iter` | todo |
+| `alas/validation.py` | 123 | `alas-config::validation` | n/a | `exact` | green: `golden/config/validation.json` |
+| `alas/cli.py` | 219 | `alas-app::cli` | n/a | n/a | todo |
+| `alas/paths.py` | 220 | `alas-app::paths` | n/a | `exact` | todo |
+| `alas/proc.py` | 76 | `alas-exec::process` | n/a | n/a | todo |
+| `alas/i18n.py` | 90 | `alas-i18n` | n/a | n/a | green |
+| `alas/__init__.py` | 36 | n/a | n/a | n/a | dropped: lazy-export shim, no native equivalent needed |
+| n/a | n/a | `alas-fonts` | n/a | n/a | native: the bundled text face the desktop build draws with, which the Python implementation took from the host system |
 
 ## Configuration
 
@@ -114,35 +114,35 @@ boundaries so a reviewer can compare them side by side.
 
 | Python module | Lines | Rust target | Provenance | Tier | Status |
 |---|---:|---|---|---|---|
-| `alas/config/presets.py` | 673 | `alas-config::presets` | — | `exact` | green — `golden/config/aircraft_presets.json` |
-| `alas/config/geometry_config.py` | 519 | `alas-config::geometry` | — | `exact` | green — `golden/config/defaults.json` |
-| `alas/config/optimizer_config.py` | 461 | `alas-config::optimizer` | — | `exact` | green — `golden/config/defaults.json` |
-| `alas/config/structures_config.py` | 344 | `alas-config::structures` | — | `exact` | green — `golden/config/defaults.json` |
-| `alas/config/cabin_config.py` | 291 | `alas-config::cabin` | — | `exact` | green — `golden/config/defaults.json` |
-| `alas/config/airports.py` | 271 | `alas-config::airports` | — | `exact` | green — `golden/config/` |
-| `alas/config/requirements.py` | 232 | `alas-config::requirements` | — | `exact` | green — `golden/config/defaults.json` |
-| `alas/config/design_variables.py` | 227 | `alas-config::design_variables` | — | `exact` | green — `golden/config/design_variables.json` |
-| `alas/config/engines.py` | 189 | `alas-config::engines` | — | `exact` | green — `golden/config/` |
-| `alas/config/materials.py` | 178 | `alas-config::materials` | — | `exact` | green — `golden/config/` |
-| `alas/config/performance_config.py` | 175 | `alas-config::performance` | — | `exact` | green — `golden/config/defaults.json` |
-| `alas/config/propulsion_config.py` | 175 | `alas-config::propulsion` | — | `exact` | green — `golden/config/defaults.json` |
-| `alas/config/analysis_config.py` | 171 | `alas-config::analysis` | — | `exact` | green — `golden/config/defaults.json` |
-| `alas/config/control_surfaces_config.py` | 154 | `alas-config::control_surfaces` | — | `exact` | green — `golden/config/defaults.json` |
-| `alas/config/mass_config.py` | 151 | `alas-config::mass` | — | `exact` | green — `golden/config/defaults.json` |
-| `alas/config/settings.py` | 149 | `alas-config::settings` | — | `exact` | green — `golden/config/settings.json` |
-| `alas/config/mses_config.py` | 126 | `alas-config::mses` | — | `exact` | green — `golden/config/defaults.json` |
-| `alas/config/mission_config.py` | 116 | `alas-config::mission` | — | `exact` | green — `golden/config/defaults.json` |
-| `alas/config/landing_gear_config.py` | 113 | `alas-config::landing_gear` | — | `exact` | green — `golden/config/defaults.json` |
-| `alas/config/performance_presets.py` | 108 | `alas-config::performance_presets` | — | `exact` | green — `golden/config/presets.json` |
-| `alas/config/solver_presets.py` | 99 | `alas-config::solver_presets` | — | `exact` | green — `golden/config/presets.json` |
-| `alas/config/fidelity_presets.py` | 76 | `alas-config::fidelity_presets` | — | `exact` | green — `golden/config/presets.json` |
-| `alas/config/physics_config.py` | 74 | `alas-config::physics` | — | `exact` | green — `golden/config/defaults.json` |
-| `alas/config/__init__.py` | 66 | `alas-config::lib` | — | — | green — re-export surface, checked by every parity test above compiling against it |
-| — | — | `alas-config-derive` | — | — | native |
+| `alas/config/presets.py` | 673 | `alas-config::presets` | n/a | `exact` | green: `golden/config/aircraft_presets.json` |
+| `alas/config/geometry_config.py` | 519 | `alas-config::geometry` | n/a | `exact` | green: `golden/config/defaults.json` |
+| `alas/config/optimizer_config.py` | 461 | `alas-config::optimizer` | n/a | `exact` | green: `golden/config/defaults.json` |
+| `alas/config/structures_config.py` | 344 | `alas-config::structures` | n/a | `exact` | green: `golden/config/defaults.json` |
+| `alas/config/cabin_config.py` | 291 | `alas-config::cabin` | n/a | `exact` | green: `golden/config/defaults.json` |
+| `alas/config/airports.py` | 271 | `alas-config::airports` | n/a | `exact` | green: `golden/config/` |
+| `alas/config/requirements.py` | 232 | `alas-config::requirements` | n/a | `exact` | green: `golden/config/defaults.json` |
+| `alas/config/design_variables.py` | 227 | `alas-config::design_variables` | n/a | `exact` | green: `golden/config/design_variables.json` |
+| `alas/config/engines.py` | 189 | `alas-config::engines` | n/a | `exact` | green: `golden/config/` |
+| `alas/config/materials.py` | 178 | `alas-config::materials` | n/a | `exact` | green: `golden/config/` |
+| `alas/config/performance_config.py` | 175 | `alas-config::performance` | n/a | `exact` | green: `golden/config/defaults.json` |
+| `alas/config/propulsion_config.py` | 175 | `alas-config::propulsion` | n/a | `exact` | green: `golden/config/defaults.json` |
+| `alas/config/analysis_config.py` | 171 | `alas-config::analysis` | n/a | `exact` | green: `golden/config/defaults.json` |
+| `alas/config/control_surfaces_config.py` | 154 | `alas-config::control_surfaces` | n/a | `exact` | green: `golden/config/defaults.json` |
+| `alas/config/mass_config.py` | 151 | `alas-config::mass` | n/a | `exact` | green: `golden/config/defaults.json` |
+| `alas/config/settings.py` | 149 | `alas-config::settings` | n/a | `exact` | green: `golden/config/settings.json` |
+| `alas/config/mses_config.py` | 126 | `alas-config::mses` | n/a | `exact` | green: `golden/config/defaults.json` |
+| `alas/config/mission_config.py` | 116 | `alas-config::mission` | n/a | `exact` | green: `golden/config/defaults.json` |
+| `alas/config/landing_gear_config.py` | 113 | `alas-config::landing_gear` | n/a | `exact` | green: `golden/config/defaults.json` |
+| `alas/config/performance_presets.py` | 108 | `alas-config::performance_presets` | n/a | `exact` | green: `golden/config/presets.json` |
+| `alas/config/solver_presets.py` | 99 | `alas-config::solver_presets` | n/a | `exact` | green: `golden/config/presets.json` |
+| `alas/config/fidelity_presets.py` | 76 | `alas-config::fidelity_presets` | n/a | `exact` | green: `golden/config/presets.json` |
+| `alas/config/physics_config.py` | 74 | `alas-config::physics` | n/a | `exact` | green: `golden/config/defaults.json` |
+| `alas/config/__init__.py` | 66 | `alas-config::lib` | n/a | n/a | green: re-export surface, checked by every parity test above compiling against it |
+| n/a | n/a | `alas-config-derive` | n/a | n/a | native |
 
 `alas-config::materials`, `::engines` and `::airports` change medium. Upstream
 each is a few hundred lines of constructor calls registering immutable
-records — a database written as code, because a dataclass constructor is the
+records, a database written as code, because a dataclass constructor is the
 shortest thing to hand in Python, not because anything in them is executable.
 Here each is JSON under `crates/alas-config/data/`, embedded with
 `include_str!` and parsed once, following the pattern `alas-i18n::es` already
@@ -150,7 +150,7 @@ set for its catalog. A table of published material properties stays reviewable
 as a table, three files stay clear of the 500-line source limit they would
 otherwise dominate, and correcting a published figure is a data change rather
 than a code change. The embedded copies are deliberately separate from the
-`golden/` fixtures — a shipped binary must not need `golden/` on disk — and
+`golden/` fixtures (a shipped binary must not need `golden/` on disk), and
 `tests/parity_databases.rs` is what stops the two drifting.
 
 That test compares parsed values rather than the raw documents, because a
@@ -242,7 +242,7 @@ Reproduced rather than corrected; `deviation-candidate`.
 
 `alas-config::presets` is the one registry here whose entries are whole
 aircraft rather than overrides on one struct, so its fixture records every
-field of all seven rather than the ones its constructors named — several
+field of all seven rather than the ones its constructors named: several
 hundred dimensions read off published specification sheets, where a transposed
 digit produces an aeroplane that flies and is not the one on the sheet. Two
 things a preset deliberately does not settle are reproduced rather than tidied
@@ -250,7 +250,7 @@ up. It names its engine without copying the table entry in, so every preset
 carries `EngineConfig`'s GE9X fallback cycle until the geometry builder calls
 `apply_engine_spec`; resolving it at registration would make a preset disagree
 with the same preset loaded from a saved file. And a preset does not fit the
-design space it is offered in — the bounds in `::design_variables` are one
+design space it is offered in: the bounds in `::design_variables` are one
 global set describing AVE's family, so an A320's fuselage is twenty-eight
 metres shorter than the shortest the search will consider. Upstream
 acknowledges this and expects the caller to narrow the bounds around whatever
@@ -272,7 +272,7 @@ with the certification dive speed, which needs the density and the speed of
 sound at altitude; `alas-atmo` is a P1 leaf with no dependencies of its own,
 and P1 was green before this edge was added. Upstream evaluates that
 atmosphere through AeroSandbox's fitted default rather than the closed form,
-and the two agree to about 1e-11 — well inside the whole metre per second the
+and the two agree to about 1e-11, well inside the whole metre per second the
 rule renders. The fixture's cases are chosen away from the VC and VD
 thresholds so that no verdict is decided by that last digit. One further
 difference, non-numerical: upstream wraps each rule in a bare `except` because
@@ -290,17 +290,17 @@ them.
 
 | Python module | Lines | Rust target | Provenance | Tier | Status |
 |---|---:|---|---|---|---|
-| `alas/geometry/wing_mesh_bdf.py` | 681 | `alas-struct::mesh` | — | `exact` | todo |
-| `alas/geometry/wing_structure.py` | 435 | `alas-geom::wing_structure` | — | `closed` | green — `golden/geom/wing_structure.json` |
-| `alas/geometry/aircraft_builder.py` | 253 | `alas-geom::builder` | — | `closed` | green — `golden/geom/builder.json` |
-| `alas/geometry/airfoils.py` | 247 | `alas-geom::airfoil_library` | — | `linalg` | green — `golden/geom/airfoil_library.json` |
-| `alas/data/airfoil_data.py` | 232 | `alas-geom::airfoil_data` | — | `exact` | green — `golden/geom/airfoil_data.json` |
-| — | — | `alas-geom::asb::airfoil` | AeroSandbox, MIT | `linalg` | green — `golden/geom/asb_airfoil.json` |
-| — | — | `alas-geom::asb::wing` | AeroSandbox, MIT | `closed` | green — `golden/geom/asb_wing.json` |
-| — | — | `alas-geom::asb::fuselage` | AeroSandbox, MIT | `closed` | green — `golden/geom/asb_fuselage.json` |
-| — | — | `alas-geom::asb::airplane` | AeroSandbox, MIT | `closed` | green — `golden/geom/builder.json` |
-| — | — | `alas-geom::asb::mesh` | AeroSandbox, MIT | `closed` | todo |
-| — | — | `alas-geom::selig` | UIUC, see notices | `exact` | green — `golden/geom/selig.json` |
+| `alas/geometry/wing_mesh_bdf.py` | 681 | `alas-struct::mesh` | n/a | `exact` | todo |
+| `alas/geometry/wing_structure.py` | 435 | `alas-geom::wing_structure` | n/a | `closed` | green: `golden/geom/wing_structure.json` |
+| `alas/geometry/aircraft_builder.py` | 253 | `alas-geom::builder` | n/a | `closed` | green: `golden/geom/builder.json` |
+| `alas/geometry/airfoils.py` | 247 | `alas-geom::airfoil_library` | n/a | `linalg` | green: `golden/geom/airfoil_library.json` |
+| `alas/data/airfoil_data.py` | 232 | `alas-geom::airfoil_data` | n/a | `exact` | green: `golden/geom/airfoil_data.json` |
+| n/a | n/a | `alas-geom::asb::airfoil` | AeroSandbox, MIT | `linalg` | green: `golden/geom/asb_airfoil.json` |
+| n/a | n/a | `alas-geom::asb::wing` | AeroSandbox, MIT | `closed` | green: `golden/geom/asb_wing.json` |
+| n/a | n/a | `alas-geom::asb::fuselage` | AeroSandbox, MIT | `closed` | green: `golden/geom/asb_fuselage.json` |
+| n/a | n/a | `alas-geom::asb::airplane` | AeroSandbox, MIT | `closed` | green: `golden/geom/builder.json` |
+| n/a | n/a | `alas-geom::asb::mesh` | AeroSandbox, MIT | `closed` | todo |
+| n/a | n/a | `alas-geom::selig` | UIUC, see notices | `exact` | green: `golden/geom/selig.json` |
 
 `alas-geom::asb::airfoil` is scoped to what this program's Python package
 actually calls onto AeroSandbox's `Airfoil`: construction from explicit
@@ -308,7 +308,7 @@ coordinates or a 4-digit NACA name, the upper/lower surface split, cosine-spaced
 `repanel` through a cubic spline, and `local_thickness`/`max_thickness`. Left
 untranslated: polar/XFoil/NeuralFoil generation, Kulfan parameterization,
 plotting, `normalize`, `scale`/`translate`, `LE_radius`, `TE_angle`,
-`TE_thickness` — a prior grep of every call site onto an `Airfoil` instance
+`TE_thickness`: a prior grep of every call site onto an `Airfoil` instance
 found none of these reached.
 
 Upstream's name-resolution fallback (`Airfoil(name, coordinates=None)`) tries
@@ -317,7 +317,7 @@ database, then a `.dat` file on disk. Every name this program's own
 configuration resolves through that fallback is `"naca0012"` (checked against
 `alas/config/presets.py`), which only ever reaches the first branch, so
 `Airfoil::from_name` implements only that one and returns `None` for anything
-that does not parse as a 4-digit NACA designation — the same outcome upstream's
+that does not parse as a 4-digit NACA designation, the same outcome upstream's
 `except (ValueError, NotImplementedError):` produces on that branch, without
 then trying the UIUC lookup or a file read. This is a documented boundary, not
 a `deviation-candidate`: both unreached branches are absent because nothing
@@ -354,12 +354,12 @@ supplies `name`, `xyz_ref`, `wings`, `fuselages`, `s_ref`, `c_ref` and `b_ref`
 explicitly. Left untranslated: the `propulsors` field (this program's engines
 are `Fuselage`-shaped nacelles, never a `Propulsor`), `analysis_specific_options`,
 and the constructor's fallback that derives `s_ref`/`c_ref`/`b_ref` from
-`wings[0]` when they are not supplied — `AircraftBuilder.build` never omits
+`wings[0]` when they are not supplied; `AircraftBuilder.build` never omits
 any of the three.
 
 `alas-geom::selig` is the third table in this port to change medium, and the
 one where the choice was closest. Upstream reads its 1,665 coordinate sets out
-of `alas/data/coord_seligFmt.zip` — 1.07 MB deflated, 2.52 MB raw — through
+of `alas/data/coord_seligFmt.zip` (1.07 MB deflated, 2.52 MB raw) through
 Python's `zipfile`. Here the archive is unpacked into one embedded text corpus,
 `crates/alas-geom/data/selig.txt`, at a cost of 1.45 MB of binary and no new
 dependency. Reading a zip in Rust means a decompressor and its supporting
@@ -372,7 +372,7 @@ The corpus stores each entry's bytes verbatim, behind a delimiter line `@` plus
 the zip entry's stem, including the name line the parser then skips. Two
 properties of the archive make that safe and were checked rather than assumed:
 every entry is ASCII, and no line in any of them begins with `@`. Storing the
-raw text and not parsed coordinates is deliberate — upstream's reader drops any
+raw text and not parsed coordinates is deliberate: upstream's reader drops any
 line whose first two fields will not parse as floats, and pre-digesting the
 corpus into numbers would retire that behaviour to a Python script instead of
 translating it. The archive also has no two entries whose stems collide under
@@ -388,10 +388,10 @@ an arbitrary-airfoil sweep would otherwise be its only consumer. The default
 aircraft's three sections each resolve through a different branch of
 `AirfoilLibrary.get`, in its order: `naca2410` (the wing tip) is *in* the
 archive and is read from it; `SC2-0714` (the root) is not, and falls to the
-built-in `NAMED_COORDINATES`; `naca0012` (the tail) is not either — the archive
-spells it `n0012` — and falls through to AeroSandbox's NACA generator. So
+built-in `NAMED_COORDINATES`; `naca0012` (the tail) is not either; the archive
+spells it `n0012`, and falls through to AeroSandbox's NACA generator. So
 `alas-geom::builder` could not reach parity on its nominal case until all
-three branches existed — which they now do, and `golden/geom/builder.json`
+three branches existed, which they now do, and `golden/geom/builder.json`
 is the fixture that exercises all three together on the actual default
 aircraft rather than on the three branches in isolation.
 
@@ -399,15 +399,15 @@ aircraft rather than on the three branches in isolation.
 
 | Python module | Lines | Rust target | Provenance | Tier | Status |
 |---|---:|---|---|---|---|
-| `alas/physics/aerodynamics.py` | 328 | `alas-aero::analysis` | — | `linalg` | todo |
-| `alas/physics/mses_analysis.py` | 389 | `alas-aero::mses` | — | `exact` | todo |
-| — | — | `alas-aero::asb_vlm` | AeroSandbox, MIT | `linalg` | todo |
-| — | — | `alas-aero::neuralfoil` | NeuralFoil, MIT | `f32` | todo |
-| — | — | `alas-aero::kulfan` | AeroSandbox, MIT | `linalg` | todo |
-| — | — | `alas-aero::vorlax` | SUAVE, LGPL-2.1 | `f32` | todo |
-| — | — | `alas-aero::drag_buildup` | SUAVE, LGPL-2.1 | `closed` | todo |
-| — | — | `alas-aero::lift_surrogate` | SUAVE, LGPL-2.1 | `linalg` | todo |
-| — | — | `alas-aero::operating_point` | AeroSandbox, MIT | `closed` | todo |
+| `alas/physics/aerodynamics.py` | 328 | `alas-aero::analysis` | n/a | `linalg` | todo |
+| `alas/physics/mses_analysis.py` | 389 | `alas-aero::mses` | n/a | `exact` | todo |
+| n/a | n/a | `alas-aero::asb_vlm` | AeroSandbox, MIT | `linalg` | todo |
+| n/a | n/a | `alas-aero::neuralfoil` | NeuralFoil, MIT | `f32` | todo |
+| n/a | n/a | `alas-aero::kulfan` | AeroSandbox, MIT | `linalg` | todo |
+| n/a | n/a | `alas-aero::vorlax` | SUAVE, LGPL-2.1 | `f32` | todo |
+| n/a | n/a | `alas-aero::drag_buildup` | SUAVE, LGPL-2.1 | `closed` | todo |
+| n/a | n/a | `alas-aero::lift_surrogate` | SUAVE, LGPL-2.1 | `linalg` | todo |
+| n/a | n/a | `alas-aero::operating_point` | AeroSandbox, MIT | `closed` | todo |
 
 The VORLAX kernel is `f32` upstream and is reproduced in `f32`.
 `deviation-candidate`: an `f64` path is expected to be more accurate and is a
@@ -417,20 +417,20 @@ P14 study, not a translation decision.
 
 | Python module | Lines | Rust target | Provenance | Tier | Status |
 |---|---:|---|---|---|---|
-| `alas/physics/propulsion.py` | 488 | `alas-prop::cycle` | — | `closed` | green — `golden/prop/cycle.json` |
-| `alas/physics/mass.py` | 288 | `alas-mass::breakdown` | — | `closed` | green — `golden/mass/breakdown.json` |
-| `alas/physics/stability.py` | 347 | `alas-stab::trim` | — | `linalg` | todo — P7, not P4; needs `alas-aero::asb_vlm` |
-| `alas/physics/dynamics.py` | 96 | `alas-stab::dynamics` | — | `closed` | todo — P7, not P4; needs `alas-aero::asb_vlm` |
-| `alas/physics/performance.py` | 555 | `alas-perf::performance` | — | `closed` | green — `golden/perf/performance.json` (point-performance surface; see scope note) |
-| `alas/physics/landing_gear.py` | 298 | `alas-perf::landing_gear` | — | `closed` | green — `golden/perf/landing_gear.json` |
-| `alas/physics/payload.py` | 540 | `alas-payload::{geometry,layout,oew}` | — | `closed` | green — `golden/payload/layout.json`; see the split below |
-| `alas/physics/cabin_layout.py` | 693 | `alas-payload::cabin` | — | `exact` | green — `golden/payload/layout.json` (item sequence and counts at `exact`, positions and masses at `closed`; the compatibility interior replays the frozen premium-economy slot) |
-| `alas/physics/cargo_loader.py` | 381 | `alas-payload::cargo` | — | `exact` | green — `golden/payload/layout.json` (frozen hold grid keeps its loose bulk position; the product envelope path fit-checks it) |
-| — | — | `alas-mass::torenbeek` | AeroSandbox, MIT | `closed` | green — `golden/mass/torenbeek.json` |
-| — | — | `alas-mass::suave_transport` | SUAVE, LGPL-2.1 | `closed` | todo |
-| — | — | `alas-stab::modes` | AeroSandbox, MIT | `closed` | todo |
-| — | — | `alas-stab::suave_static` | SUAVE, LGPL-2.1 | `closed` | todo |
-| — | — | `alas-prop::suave_turbofan` | SUAVE, LGPL-2.1 | `closed` | todo |
+| `alas/physics/propulsion.py` | 488 | `alas-prop::cycle` | n/a | `closed` | green: `golden/prop/cycle.json` |
+| `alas/physics/mass.py` | 288 | `alas-mass::breakdown` | n/a | `closed` | green: `golden/mass/breakdown.json` |
+| `alas/physics/stability.py` | 347 | `alas-stab::trim` | n/a | `linalg` | todo: P7, not P4; needs `alas-aero::asb_vlm` |
+| `alas/physics/dynamics.py` | 96 | `alas-stab::dynamics` | n/a | `closed` | todo: P7, not P4; needs `alas-aero::asb_vlm` |
+| `alas/physics/performance.py` | 555 | `alas-perf::performance` | n/a | `closed` | green: `golden/perf/performance.json` (point-performance surface; see scope note) |
+| `alas/physics/landing_gear.py` | 298 | `alas-perf::landing_gear` | n/a | `closed` | green: `golden/perf/landing_gear.json` |
+| `alas/physics/payload.py` | 540 | `alas-payload::{geometry,layout,oew}` | n/a | `closed` | green: `golden/payload/layout.json`; see the split below |
+| `alas/physics/cabin_layout.py` | 693 | `alas-payload::cabin` | n/a | `exact` | green: `golden/payload/layout.json` (item sequence and counts at `exact`, positions and masses at `closed`; the compatibility interior replays the frozen premium-economy slot) |
+| `alas/physics/cargo_loader.py` | 381 | `alas-payload::cargo` | n/a | `exact` | green: `golden/payload/layout.json` (frozen hold grid keeps its loose bulk position; the product envelope path fit-checks it) |
+| n/a | n/a | `alas-mass::torenbeek` | AeroSandbox, MIT | `closed` | green: `golden/mass/torenbeek.json` |
+| n/a | n/a | `alas-mass::suave_transport` | SUAVE, LGPL-2.1 | `closed` | todo |
+| n/a | n/a | `alas-stab::modes` | AeroSandbox, MIT | `closed` | todo |
+| n/a | n/a | `alas-stab::suave_static` | SUAVE, LGPL-2.1 | `closed` | todo |
+| n/a | n/a | `alas-prop::suave_turbofan` | SUAVE, LGPL-2.1 | `closed` | todo |
 
 `alas-mass::torenbeek` is scoped to the two entry points `alas/physics/mass.py`
 (not yet ported) calls: `mass_wing`, which itself composes three private
@@ -543,13 +543,13 @@ because nothing in P4 through P9 calls them, not reproduced wrongly.
 
 | Python module | Lines | Rust target | Provenance | Tier | Status |
 |---|---:|---|---|---|---|
-| `alas/integration/suave_bridge.py` | 272 | — | — | — | dropped: the subprocess boundary disappears with the translation |
-| `alas/integration/suave_vehicle.py` | 96 | `alas-mission::vehicle` | — | `closed` | green — `golden/mission/vehicle.json`; source corrections pinned two-sidedly |
-| `alas/integration/suave_mission.py` | 38 | `alas-mission::profile` | — | `closed` | green — `golden/mission/profile.json`; replays the recorded baseline TAS profile |
-| — | — | `alas-mission::segments` | SUAVE, LGPL-2.1 | `iter` | todo |
-| — | — | `alas-mission::numerics` | SUAVE, LGPL-2.1 | `linalg` | todo |
-| — | — | `alas-mission::solve` | SUAVE, LGPL-2.1 | `iter` | todo |
-| — | — | `alas-math::hybrd` | MINPACK, public domain | `linalg` | todo |
+| `alas/integration/suave_bridge.py` | 272 | n/a | n/a | n/a | dropped: the subprocess boundary disappears with the translation |
+| `alas/integration/suave_vehicle.py` | 96 | `alas-mission::vehicle` | n/a | `closed` | green: `golden/mission/vehicle.json`; source corrections pinned two-sidedly |
+| `alas/integration/suave_mission.py` | 38 | `alas-mission::profile` | n/a | `closed` | green: `golden/mission/profile.json`; replays the recorded baseline TAS profile |
+| n/a | n/a | `alas-mission::segments` | SUAVE, LGPL-2.1 | `iter` | todo |
+| n/a | n/a | `alas-mission::numerics` | SUAVE, LGPL-2.1 | `linalg` | todo |
+| n/a | n/a | `alas-mission::solve` | SUAVE, LGPL-2.1 | `iter` | todo |
+| n/a | n/a | `alas-math::hybrd` | MINPACK, public domain | `linalg` | todo |
 
 The six mission configurations differ only in high-lift deflections, which the
 upstream aerodynamic model does not discretize, so all six evaluate identically.
@@ -566,14 +566,14 @@ inertia tensor that is never populated.
 
 | Python module | Lines | Rust target | Provenance | Tier | Status |
 |---|---:|---|---|---|---|
-| `alas/integration/nastran_runner.py` | 737 | `alas-struct::nastran` | — | `exact` | todo |
-| `alas/physics/structural_sizing.py` | 222 | `alas-struct::sizing` | — | `closed` | green — `golden/struct/sizing.json` |
-| `alas/physics/structural_analysis.py` | 215 | `alas-struct::analytical` | — | `closed` | green — `golden/struct/analytical.json` |
-| `alas/physics/structural_loads.py` | 109 | `alas-struct::loads` | — | `closed` | green — `golden/struct/loads.json` |
-| `alas/integration/_nastran_compat.py` | 32 | — | — | — | dropped: a numpy 2.x shim for pyNastran |
-| `alas/integration/patran_runner.py` | 236 | — | — | — | dropped: rendered images only; drawn natively from the displacements |
-| — | — | `alas-struct::op2` | — | `exact` | native |
-| — | — | `alas-struct::nastran95` | — | `exact` | native |
+| `alas/integration/nastran_runner.py` | 737 | `alas-struct::nastran` | n/a | `exact` | todo |
+| `alas/physics/structural_sizing.py` | 222 | `alas-struct::sizing` | n/a | `closed` | green: `golden/struct/sizing.json` |
+| `alas/physics/structural_analysis.py` | 215 | `alas-struct::analytical` | n/a | `closed` | green: `golden/struct/analytical.json` |
+| `alas/physics/structural_loads.py` | 109 | `alas-struct::loads` | n/a | `closed` | green: `golden/struct/loads.json` |
+| `alas/integration/_nastran_compat.py` | 32 | n/a | n/a | n/a | dropped: a numpy 2.x shim for pyNastran |
+| `alas/integration/patran_runner.py` | 236 | n/a | n/a | n/a | dropped: rendered images only; drawn natively from the displacements |
+| n/a | n/a | `alas-struct::op2` | n/a | `exact` | native |
+| n/a | n/a | `alas-struct::nastran95` | n/a | `exact` | native |
 
 `alas-struct::nastran95` targets an open-source solver that predates several
 cards the mesh uses: `RBE3`, `PBARL` and `EIGRL` need reformulating, and modal
@@ -584,21 +584,21 @@ vibration is not, and reports itself unavailable.
 
 | Python module | Lines | Rust target | Provenance | Tier | Status |
 |---|---:|---|---|---|---|
-| `alas/optimization/objective.py` | 638 | `alas-opt::objective` | — | `closed` | todo |
-| `alas/optimization/sampling.py` | 156 | `alas-opt::sampling` | — | `stat` | todo |
-| `alas/optimization/optimizer.py` | 143 | `alas-opt::differential_evolution` | — | `stat` | todo |
-| `alas/analysis/airfoil_screening.py` | 970 | `alas-screen` | — | `stat` | todo |
+| `alas/optimization/objective.py` | 638 | `alas-opt::objective` | n/a | `closed` | todo |
+| `alas/optimization/sampling.py` | 156 | `alas-opt::sampling` | n/a | `stat` | todo |
+| `alas/optimization/optimizer.py` | 143 | `alas-opt::differential_evolution` | n/a | `stat` | todo |
+| `alas/analysis/airfoil_screening.py` | 970 | `alas-screen` | n/a | `stat` | todo |
 
 ## Routing
 
 | Python module | Lines | Rust target | Provenance | Tier | Status |
 |---|---:|---|---|---|---|
-| `alas/routing/navdata_graph.py` | 251 | `alas-route::navdata` | — | `closed` | todo |
-| `alas/routing/simbrief_route.py` | 175 | `alas-route::simbrief` | — | `exact` | todo |
-| `alas/routing/route.py` | 169 | `alas-route::route` | — | `closed` | todo |
-| `alas/routing/kml_import.py` | 33 | `alas-route::kml` | — | `exact` | todo |
-| `alas/integration/assets.py` | 126 | `alas-route::assets` | — | — | todo |
-| `alas/reporting/route_globe.py` | 186 | `alas-report::route_geometry` | — | `closed` | todo |
+| `alas/routing/navdata_graph.py` | 251 | `alas-route::navdata` | n/a | `closed` | todo |
+| `alas/routing/simbrief_route.py` | 175 | `alas-route::simbrief` | n/a | `exact` | todo |
+| `alas/routing/route.py` | 169 | `alas-route::route` | n/a | `closed` | todo |
+| `alas/routing/kml_import.py` | 33 | `alas-route::kml` | n/a | `exact` | todo |
+| `alas/integration/assets.py` | 126 | `alas-route::assets` | n/a | n/a | todo |
+| `alas/reporting/route_globe.py` | 186 | `alas-report::route_geometry` | n/a | `closed` | todo |
 
 ## Reporting
 
@@ -609,22 +609,22 @@ sign-off.
 
 | Python module | Lines | Rust target | Provenance | Tier | Status |
 |---|---:|---|---|---|---|
-| `alas/reporting/visualization.py` | 5,596 | `alas-report::families::*` | — | `closed` | todo |
-| `alas/sidecar/figures_extra.py` | 567 | `alas-report::families::field_performance` | — | `closed` | todo |
-| `alas/sidecar/figures.py` | 496 | `alas-report::registry` | — | — | todo |
-| `alas/reporting/airfoil_sweep_figures.py` | 405 | `alas-report::families::screening` | — | `closed` | todo |
-| `alas/reporting/design_report.py` | 137 | `alas-report::document` | — | — | todo |
-| `alas/reporting/theme.py` | 84 | `alas-report::theme` | — | `exact` | todo |
-| — | — | `alas-report::scene` | — | — | native |
-| — | — | `alas-report::svg` | — | — | native |
-| — | — | `alas-viz` | — | — | native |
-| — | — | `alas-gui` | — | — | native |
+| `alas/reporting/visualization.py` | 5,596 | `alas-report::families::*` | n/a | `closed` | todo |
+| `alas/sidecar/figures_extra.py` | 567 | `alas-report::families::field_performance` | n/a | `closed` | todo |
+| `alas/sidecar/figures.py` | 496 | `alas-report::registry` | n/a | n/a | todo |
+| `alas/reporting/airfoil_sweep_figures.py` | 405 | `alas-report::families::screening` | n/a | `closed` | todo |
+| `alas/reporting/design_report.py` | 137 | `alas-report::document` | n/a | n/a | todo |
+| `alas/reporting/theme.py` | 84 | `alas-report::theme` | n/a | `exact` | todo |
+| n/a | n/a | `alas-report::scene` | n/a | n/a | native |
+| n/a | n/a | `alas-report::svg` | n/a | n/a | native |
+| n/a | n/a | `alas-viz` | n/a | n/a | native |
+| n/a | n/a | `alas-gui` | n/a | n/a | native |
 
 ## Translations
 
 | Python module | Lines | Rust target | Provenance | Tier | Status |
 |---|---:|---|---|---|---|
-| `alas/translations/es.py` | 1,124 | `alas-i18n::es` | — | `exact` | green — `golden/i18n/es_catalog.json` |
+| `alas/translations/es.py` | 1,124 | `alas-i18n::es` | n/a | `exact` | green: `golden/i18n/es_catalog.json` |
 
 ## Dropped: the HTTP sidecar
 
@@ -651,22 +651,22 @@ figure registry survive as library concerns, listed above.
 
 | Rust target | Provenance | Tier | Status |
 |---|---|---|---|
-| `alas-types` | — | `exact` | green |
-| `alas-units` | SUAVE, LGPL-2.1 | `closed` | green — `golden/units/factors.json` |
-| `alas-math::spline` | — | `linalg` | green — `golden/math/spline.json` |
-| `alas-math::chebyshev` | SUAVE, LGPL-2.1 | `linalg` | green — `golden/math/chebyshev.json` |
-| `alas-math::bicubic` | — | `linalg` | green — `golden/math/bicubic.json` |
-| `alas-math::bspline` | — | `linalg` | green — `golden/math/bspline.json` |
-| `alas-atmo::isa` | AeroSandbox, MIT | `closed` | green — `golden/atmo/isa.json` |
-| `alas-atmo::differentiable` | AeroSandbox, MIT | `linalg` | green — `golden/atmo/differentiable.json` |
-| `alas-atmo::atmosphere` | AeroSandbox, MIT | `linalg` | green — `golden/atmo/differentiable.json`, `golden/atmo/isa.json` |
-| `alas-atmo::us1976` | SUAVE, LGPL-2.1 | `closed` | green — `golden/atmo/us1976.json` |
-| `alas-cfd` | OpenCFD OpenFOAM v2606 and Gmsh 4.15.2; no Python counterpart | `native` | native — reusable two-dimensional airfoil study contract, Gmsh extrusion, OpenFOAM lifecycle, parsers and surface results |
-| `alas-exec` | — | — | todo |
-| `alas-testkit` | — | — | native |
-| `alas-acceptance` | — | — | todo |
-| `alas-uav` | — | — | native |
-| `xtask` | — | — | native |
+| `alas-types` | n/a | `exact` | green |
+| `alas-units` | SUAVE, LGPL-2.1 | `closed` | green: `golden/units/factors.json` |
+| `alas-math::spline` | n/a | `linalg` | green: `golden/math/spline.json` |
+| `alas-math::chebyshev` | SUAVE, LGPL-2.1 | `linalg` | green: `golden/math/chebyshev.json` |
+| `alas-math::bicubic` | n/a | `linalg` | green: `golden/math/bicubic.json` |
+| `alas-math::bspline` | n/a | `linalg` | green: `golden/math/bspline.json` |
+| `alas-atmo::isa` | AeroSandbox, MIT | `closed` | green: `golden/atmo/isa.json` |
+| `alas-atmo::differentiable` | AeroSandbox, MIT | `linalg` | green: `golden/atmo/differentiable.json` |
+| `alas-atmo::atmosphere` | AeroSandbox, MIT | `linalg` | green: `golden/atmo/differentiable.json`, `golden/atmo/isa.json` |
+| `alas-atmo::us1976` | SUAVE, LGPL-2.1 | `closed` | green: `golden/atmo/us1976.json` |
+| `alas-cfd` | OpenCFD OpenFOAM v2606 and Gmsh 4.15.2; no Python counterpart | `native` | native: reusable two-dimensional airfoil study contract, Gmsh extrusion, OpenFOAM lifecycle, parsers and surface results |
+| `alas-exec` | n/a | n/a | todo |
+| `alas-testkit` | n/a | n/a | native |
+| `alas-acceptance` | n/a | n/a | todo |
+| `alas-uav` | n/a | n/a | native |
+| `xtask` | n/a | n/a | native |
 
 `alas-math::bicubic` reproduces `scipy.interpolate.RectBivariateSpline` at its
 defaults, which is how every SUAVE aerodynamic surrogate is built. Its fixture

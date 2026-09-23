@@ -38,6 +38,25 @@ pub fn dimensions(path: &str) -> Option<(Value, Value)> {
         "A320-200.geometry.wing.break_span_fraction" => (0.37, 0.34),
         "A320-200.geometry.wing.root_datum_x_m" => (12.9, 12.913),
         "A320-200.requirements.max_structural_payload_kg" => (19_900.0, 21_256.0),
+        // Standard gravity: the frozen two-decimal 9.81 corrected to
+        // `alas_units::STANDARD_GRAVITY` (9.80665), the CODATA/exact
+        // definitional value that already drives every lbf conversion and
+        // the ISA elsewhere in the program. Physics review v1.2, finding
+        // F5. Every registered preset shares this default.
+        "AVE.requirements.gravity_m_s2"
+        | "A340-300.requirements.gravity_m_s2"
+        | "A380-800.requirements.gravity_m_s2"
+        | "B787-9.requirements.gravity_m_s2"
+        | "A320-200.requirements.gravity_m_s2"
+        | "A220-300.requirements.gravity_m_s2"
+        | "DC-10.requirements.gravity_m_s2"
+        | "empty.requirements.gravity_m_s2"
+        | "preset_only.requirements.gravity_m_s2"
+        | "preset_then_field.requirements.gravity_m_s2"
+        | "tuple_field_from_a_list.requirements.gravity_m_s2"
+        | "airports.requirements.gravity_m_s2"
+        | "unknown_preset.requirements.gravity_m_s2"
+        | "deep_partial.requirements.gravity_m_s2" => (9.81, 9.806_65),
         _ => return None,
     };
     Some((json!(old), json!(new)))

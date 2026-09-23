@@ -175,6 +175,17 @@ fn fixed_design_review_exposes_its_binding_constraint_without_promoting_a_finali
     // that exact target so the test isolates the independent mass-feasibility
     // finding below.
     config.requirements.num_passengers = 350;
+    // Since the Korn relation receives the quarter-chord sweep (2026-09-23)
+    // the default design's cruise wave drag is higher, and at M 0.84 it needs
+    // static T/W 0.2676 against the default rating's 0.2655. That thrust
+    // finding is real but not what this test is about, so the engine gets a
+    // 10 % margin and the review keeps isolating the binding design residual.
+    let thrust_kn = config.geometry.engine.thrust_kn();
+    config
+        .geometry
+        .engine
+        .set_thrust_kn(1.10 * thrust_kn)
+        .expect("the default engine accepts a rated thrust");
     let design = DesignVector::default();
     let bounds = design
         .to_array()
@@ -200,7 +211,15 @@ fn fixed_design_review_exposes_its_binding_constraint_without_promoting_a_finali
     assert_eq!(result.optimized_design, Some(design));
     assert!(
         result.feasibility.is_feasible(),
-        "the physical review remains usable; the sizing constraint is retained on the solver branch"
+        "the physical review remains usable; the sizing constraint is retained on the solver \
+         branch; error findings: {:?}",
+        result
+            .feasibility
+            .findings
+            .iter()
+            .filter(|finding| finding.severity == crate::FindingSeverity::Error)
+            .map(|finding| (finding.code, finding.message.as_str()))
+            .collect::<Vec<_>>()
     );
     assert!(result.solver_optimizations.as_ref().is_some_and(|set| {
         set.vlm.status == crate::SolverOptimizationStatus::Failed

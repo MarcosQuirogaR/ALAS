@@ -235,8 +235,16 @@ pub fn run_tool_with_env_and_cancel(
     })?;
     {
         let mut stdin_pipe = stdin_pipe;
+        // A tool that exits before reading its keystrokes closes the pipe
+        // first; on Linux the write then fails with EPIPE, a race Windows
+        // rarely shows. Its exit status and transcript decide the run, so a
+        // broken pipe here is not itself a failure.
         stdin_pipe
             .write_all(stdin_input.as_bytes())
+            .or_else(|error| match error.kind() {
+                std::io::ErrorKind::BrokenPipe => Ok(()),
+                _ => Err(error),
+            })
             .map_err(|source| RunError::Io {
                 command: command.clone(),
                 source,

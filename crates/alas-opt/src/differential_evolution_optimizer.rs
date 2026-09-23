@@ -219,8 +219,8 @@ impl DesignOptimizer {
     /// [`Self::run`], observing an optional pipeline cancellation flag.
     ///
     /// `cancel` is threaded into the L-SHADE generation loop (see
-    /// `search_methods::lshade_de::run`) and checked once per generation
-    /// batch; a cancelled run still returns `Ok`, with
+    /// `search_methods::lshade_de::run`) and checked before every block of
+    /// resolved-worker-count candidates; a cancelled run still returns `Ok`, with
     /// `OptimizationResult::termination` set to `"cancelled"` rather than
     /// `"converged"` or `"iteration_limit"`, and its winner is always a
     /// fully scored candidate, never a partial trial. The frozen
@@ -689,9 +689,9 @@ impl DesignOptimizer {
             de.seed,
             de.evaluation_budget()
         ));
-        // The DE kernel times each generation's batch itself through the
+        // The DE kernel times each evaluation block itself through the
         // scope, so this adapter stays inert: a block counted twice would
-        // make the per-generation cancellation bound unreadable.
+        // make the per-block cancellation bound unreadable.
         let mut evaluator = BatchEvaluator {
             objective,
             workers: staged.workers,
@@ -712,7 +712,7 @@ impl DesignOptimizer {
         // inventing a distinct string here would silently break every caller
         // that checks termination against that fixed set. `cancelled` is the
         // one lifecycle this kernel can reach that is neither: a caller
-        // observed the pipeline's own cancellation signal at a generation
+        // observed the pipeline's own cancellation signal at a block
         // boundary and stopped before either budget or convergence decided
         // the run.
         let termination = if outcome.cancelled {

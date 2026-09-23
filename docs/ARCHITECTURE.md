@@ -5,7 +5,7 @@ in; a trimmed, mass-balanced aircraft with a flown mission, a drag build-up, a
 sized wingbox and sixty-odd figures comes out.
 
 This document describes how that is arranged in Rust. It does not describe the
-models — those are in `docs/methods.md` — and it does not describe the
+models (those are in `docs/methods.md`) and it does not describe the
 translation from Python, which is in `docs/PORTING.md`.
 
 ---
@@ -50,36 +50,36 @@ thin callers of `alas-pipeline`.
 Crates are organized by discipline, not by layer-cake convention. The
 dependency graph is acyclic and shallow, and Cargo enforces it.
 
-**L0 — foundations, no ALAS concepts**
+**L0: foundations, no ALAS concepts**
 `alas-units` (unit conversion factors), `alas-math` (linear algebra wrappers,
 splines, the Chebyshev differentiation matrices, the MINPACK root finder),
 `alas-types` (the stage status contract), `alas-i18n` (English and Spanish
 string tables), `alas-config-derive` (the settings metadata macro).
 
-**L1 — description of an aircraft and its environment**
+**L1: description of an aircraft and its environment**
 `alas-config` (every tunable value, ~5,600 Python lines' worth),
 `alas-atmo` (the two atmosphere models).
 
-**L2 — geometry and the outside world**
+**L2: geometry and the outside world**
 `alas-geom` (airfoils, wings, fuselages, the aircraft builder, the structural
 mesh), `alas-route` (great-circle, airways, flight plans), `alas-exec`
 (child-process orchestration for external solvers).
 
-**L3 — disciplinary analyses**
+**L3: disciplinary analyses**
 `alas-aero` (both vortex-lattice methods, the airfoil surrogate, drag
 build-ups), `alas-prop` (the turbofan cycle), `alas-mass`, `alas-stab`,
 `alas-perf`, `alas-payload`.
 
-**L4 — composed analyses**
+**L4: composed analyses**
 `alas-mission` (the segment solver), `alas-struct` (loads, sizing, the
 finite-element bridge), `alas-opt` (the design search), `alas-screen` (airfoil
 screening).
 
-**L5 — orchestration and output**
+**L5: orchestration and output**
 `alas-pipeline` (stage sequencing, concurrency, persistence), `alas-report`
 (figure scenes and their export).
 
-**L6 — presentation**
+**L6: presentation**
 `alas-viz` (drawing a scene with egui), `alas-gui` (the application),
 `alas-app` (the binary, and the headless command line).
 
@@ -110,8 +110,8 @@ is not.
 
 ### 2. Configuration metadata drives the interface
 
-Configuration structs carry per-field metadata — a label, a unit, a help text,
-bounds — declared once with `#[derive(ConfigNode)]` and a `#[config(...)]`
+Configuration structs carry per-field metadata (a label, a unit, a help text,
+bounds) declared once with `#[derive(ConfigNode)]` and a `#[config(...)]`
 attribute. The doc comment is the help text, so there is one place to write it.
 
 From that single declaration come the settings forms, the YAML round trip, and
@@ -128,8 +128,8 @@ interface.
 
 ### 3. Figures are scenes, not drawings
 
-A figure produces a backend-neutral description — polylines, polygons, text,
-images, axes — and never touches a drawing API directly. `alas-viz` renders a
+A figure produces a backend-neutral description (polylines, polygons, text,
+images, axes) and never touches a drawing API directly. `alas-viz` renders a
 scene into an egui panel; the export path renders the same scene to SVG, and
 from there to PNG and to a multi-page PDF.
 
@@ -164,9 +164,9 @@ absence where it does not.
 
 ## Concurrency
 
-The pipeline runs its independent stages concurrently — the mission, the
+The pipeline runs its independent stages concurrently (the mission, the
 two-dimensional airfoil analysis and the structural solve do not depend on each
-other — and the airfoil screening evaluates candidates in parallel.
+other) and the airfoil screening evaluates candidates in parallel.
 
 Two things the Python implementation needed are gone. There is no module-level
 render lock, because figure construction is a pure function with no global

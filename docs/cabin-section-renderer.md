@@ -11,8 +11,8 @@ The 2-D cabin section is drawn in Rust, in `alas-report`, as an
 
 `crates/alas-report/src/families/geometry/section.rs` consumes the
 `alas.cabin-scene/v2` scene the pipeline already exports and emits scene
-primitives. Those primitives already have two backends — `alas-report::svg` for
-export and `alas-viz::render` for the egui viewport — so one implementation
+primitives. Those primitives already have two backends (`alas-report::svg` for
+export and `alas-viz::render` for the egui viewport), so one implementation
 produces the in-app figure, the SVG, the PDF page and the headless raster.
 
 Four reasons, in the order they decided it:
@@ -29,7 +29,7 @@ Four reasons, in the order they decided it:
 3. **No geometry engine is needed.** The prototype used Shapely for containment
    and area. Containment of a rectangle in a convex section, polygon area and a
    half-width lookup are about eighty lines of Rust, and unused hold area is
-   shaded with the SVG even-odd fill rule rather than a boolean difference —
+   shaded with the SVG even-odd fill rule rather than a boolean difference:
    the printed numbers come from the exact areas.
 4. **Speed makes it usable.** All eight presets render in about one second,
    because `CabinScene::from_parts` builds a scene from geometry and a payload

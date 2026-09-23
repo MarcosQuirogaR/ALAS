@@ -87,7 +87,7 @@ pub struct DragModelConfig {
     /// Leading constant of the Korn wave-drag rise.
     #[config(
         label = "Wave-drag rise coefficient",
-        help = "Leading constant in the Korn wave-drag rise: CD_wave = coefficient * (M - M_drag_divergence)^4."
+        help = "Leading constant in the Lock/Korn wave-drag rise: CD_wave = coefficient * max(M - M_critical, 0)^4. The critical Mach is M_drag_divergence - (0.1 / (4 * coefficient))^(1/3); coefficient must be positive."
     )]
     pub wave_drag_coefficient: f64,
 }

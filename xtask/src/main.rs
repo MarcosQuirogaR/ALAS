@@ -104,7 +104,7 @@ fn gate(root: &Path) -> Result<(), String> {
                 "warnings",
             ],
         ),
-        cargo(root, &["test", "--workspace"]),
+        cargo(root, &["test", "--workspace", "--no-fail-fast"]),
     ];
     report_gate_results(results)
 }

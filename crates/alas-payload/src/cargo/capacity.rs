@@ -18,8 +18,10 @@ pub struct CargoCapacity {
     pub bulk_positions: usize,
     /// Sum of nominal internal ULD volumes in cubic metres.
     pub container_internal_volume_m3: f64,
-    /// Sum of nominal volumes assigned to loose-bulk positions in cubic metres.
+    /// Sum of nominal, unadjusted bulk block volumes in cubic metres.
     pub bulk_nominal_volume_m3: f64,
+    /// Sum of usable bulk block volumes after local headroom adjustment, cubic meters.
+    pub bulk_usable_volume_m3: f64,
     /// Net mass limit of all generated positions in kilograms.
     pub net_capacity_kg: f64,
 }
@@ -32,12 +34,14 @@ impl CargoLoadManager<'_> {
             bulk_positions: 0,
             container_internal_volume_m3: 0.0,
             bulk_nominal_volume_m3: 0.0,
+            bulk_usable_volume_m3: 0.0,
             net_capacity_kg: self.total_capacity(),
         };
         for slot in &self.slots {
             if slot.uld.code == BULK.code {
                 result.bulk_positions += 1;
                 result.bulk_nominal_volume_m3 += slot.uld.volume_m3;
+                result.bulk_usable_volume_m3 += slot.usable_volume_m3();
             } else {
                 result.uld_positions += 1;
                 result.container_internal_volume_m3 += slot.uld.volume_m3;

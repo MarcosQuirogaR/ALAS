@@ -12,7 +12,7 @@ jobs:
   gate:
     name: Repository checks, formatting, clippy and workspace tests
     runs-on: windows-latest
-    timeout-minutes: 60
+    timeout-minutes: 120
     steps:
       - name: Check out source
         uses: actions/checkout@v4

@@ -220,9 +220,19 @@ pub(super) fn declared_architecture(name: &str) -> Option<DeclaredArchitecture> 
     };
 
     // The registered A320 case has the same 150-seat total as Airbus' cited
-    // typical layout, which also publishes four attendant positions.  Keep
-    // the generic FLOPS-derived count for cases whose published cabin total
-    // does not match the registered study cabin.
+    // typical layout, which also publishes four attendant positions. Keep
+    // the regulatory operational minimum (14 CFR 121.391(a) / EASA
+    // ORO.CC.100: one cabin crew member per 50 installed passenger seats,
+    // rounded up) for cases whose published cabin total does not match the
+    // registered study cabin. This is not FLOPS: NASA/TM-2017-219627 eq.
+    // 116 reads `NSTU = 1 + ceil(NPASS/40)` (NPASS >= 51), a different,
+    // heavier count for a transport this size; physics review v1.2, finding
+    // M3. `ceil(seats/50)` is used here because it is the number a real
+    // airline schedule is bound to carry regardless of the FLOPS-fitted
+    // furnishings/systems correlation, and because `cabin_synchronized`
+    // (`alas-pipeline::full_analysis::cabin_sync`) re-derives it against
+    // this same floor whenever the seated cabin changes after this
+    // declaration, so the two paths agree on which rule they follow.
     let flight_attendant_count = match name {
         "A320-200" => 4,
         _ => seats.div_ceil(50),

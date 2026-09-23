@@ -149,7 +149,7 @@ impl<'a> CruiseSolve<'a> {
         )?;
         let aero = AeroAnalysis::new(
             plane,
-            design.sweep_deg,
+            AeroAnalysis::quarter_chord_sweep_deg(plane, design.sweep_deg),
             Some(config.geometry.clone()),
             Some(config.drag_model.clone()),
             Some(config.analysis.clone()),

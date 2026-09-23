@@ -102,7 +102,10 @@ fn an_impossible_design_range_is_hard_infeasible_and_costs_more() {
     assert!(feasible.hard_feasible);
 
     let mut impossible_config = block_fuel_config();
-    impossible_config.optimizer.objective.design_range_nmi = 20_000.0;
+    // Far beyond the default aircraft's reach, yet still a mission the
+    // model can fly to a mass excess: past about 16,000 nmi the mission
+    // itself stops closing and `mtow_ceiling` is no longer the reason.
+    impossible_config.optimizer.objective.design_range_nmi = 12_000.0;
     let impossible_objective = DesignObjective::new(impossible_config);
     let impossible =
         assess_candidate(&impossible_objective, &x).unwrap_or_else(|reason| panic!("{reason}"));
@@ -156,7 +159,7 @@ fn an_off_family_is_removed_and_a_diagnostic_family_is_uncounted() {
 #[test]
 fn the_reject_reason_lists_violated_ids_joined_by_plus() {
     let mut config = block_fuel_config();
-    config.optimizer.objective.design_range_nmi = 20_000.0;
+    config.optimizer.objective.design_range_nmi = 12_000.0;
     let mut objective = DesignObjective::new(config);
     let x = DesignVector::default().to_array();
 

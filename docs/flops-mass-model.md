@@ -127,7 +127,7 @@ equipment scope remains an uncertainty, not a manufactured mass correction.
 ### `SFLAP` is wing-only
 
 NASA/TM-2017-219627 prints `SFLAP` as the "total movable **wing** surface
-area including flaps, elevators, spoilers, etc." — the enumeration
+area including flaps, elevators, spoilers, etc."; the enumeration
 **explicitly names elevators**, so a plain reading includes the tail
 movables. This implementation excludes them.
 
@@ -170,7 +170,7 @@ suspected second typo.
 
 A branch, not a fold. `WENGB` "includes inlet and nozzle weight if they are
 not specified separately". With `baseline_inlet_mass_kg` and
-`baseline_nozzle_mass_kg` absent — the default — the result is eq. 80,
+`baseline_nozzle_mass_kg` absent (the default), the result is eq. 80,
 `WENG = WENGP`, the catalogue dry mass. Declaring either selects eq. 79,
 `WENG = WENGP + WINL + WNOZ`, each scaled by its own exponent on the same
 thrust ratio.

@@ -25,8 +25,10 @@
 //! defines locally and reads as `g`. [`STANDARD_GRAVITY`] (9.80665 m/s^2) is
 //! what [`Atmosphere::density_altitude`]'s approximate formula uses instead,
 //! written as a literal in `atmosphere.py` rather than importing the other
-//! module's constant. Using one where the other belongs would move every
-//! pressure value by a part in 500,000, which is exactly the kind of error
+//! module's constant. Using one where the other belongs would change the
+//! barometric exponent by the relative difference, 3.4e-4, and so move the
+//! pressure by that times the log of the pressure ratio: about 5e-4 at the
+//! tropopause (22,632 against 22,621 Pa). That is exactly the kind of error
 //! this crate exists to make impossible.
 //!
 //! `atmosphere.py` also defines `effective_collision_diameter` at module

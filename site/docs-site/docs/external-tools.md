@@ -1,7 +1,7 @@
 # External Tools Guide
 
-ALAS runs its core multidisciplinary pipeline — vortex-lattice aerodynamics,
-turbofan cycles, wingbox sizing, weight and balance, mission trajectories — as
+ALAS runs its core multidisciplinary pipeline (vortex-lattice aerodynamics,
+turbofan cycles, wingbox sizing, weight and balance, mission trajectories) as
 a single native Rust application, no external solver required. For higher
 fidelity or an independent cross-check, it can also drive a handful of
 specialized external tools as separate child processes. This guide covers
@@ -25,7 +25,7 @@ plan, and separate **Navigation-data directory** / **Saved-routes directory**
 fields for local route data.
 
 Whatever you set here is written to `tool-preferences.json` under
-`%LOCALAPPDATA%\ALAS` on Windows — a per-user file that survives reinstalls
+`%LOCALAPPDATA%\ALAS` on Windows, a per-user file that survives reinstalls
 without touching the project's own config files. Headless and scripted runs read
 the same solver settings from the run's YAML/JSON config instead (`mses` and
 `structures` sections, plus CLI overrides).
@@ -49,13 +49,13 @@ Comparison; the rest still solve, but stay off that chart.
 
 [OpenVSP](https://openvsp.org/) builds parametric aircraft geometry and
 [VSPAERO](https://openvsp.org/) solves 3D panel/vortex aerodynamics on it;
-both are NASA Open Source Agreement software you install yourself — point the
+both are NASA Open Source Agreement software you install yourself; point the
 **Install directory** field at the folder holding both `vspscript.exe` and
 `vspaero.exe`. ALAS drives OpenVSP headlessly through `vspscript.exe`, so its
 on-screen `ScreenGrab` preview isn't always available; when that happens the
 results view reports the native CAD preview as unavailable, with the reason.
 If the mesh export (`VSPGEOM`) itself succeeded, ALAS also builds its own
-wireframe projection from that mesh, available even without the native PNG —
+wireframe projection from that mesh, available even without the native PNG,
 but if the export failed too, neither view exists.
 
 ALAS runs each VSPAERO case with a fixed wake-iteration count and retains the
@@ -64,7 +64,7 @@ a run `completed_comparable` if the lift, drag, and moment coefficients have
 stopped changing between the last two iterations, within a tight numerical
 tolerance; otherwise the run stays `completed_not_comparable`, with the reason
 recorded on the card. Either way, a numerically converged VSPAERO solve only
-means its equations satisfied their tolerance — it says nothing about whether
+means its equations satisfied their tolerance; it says nothing about whether
 the underlying aircraft shape is aerodynamically sound.
 
 ## MSES
@@ -77,7 +77,7 @@ directory** field on the MSES card.
 
 Natural-transition (e^N) runs also need an Orr–Sommerfeld amplification-rate
 table. As tested here, the installed Windows MSES build only accepts the
-double-precision form (`osmapDP.dat`) — the single-precision version some
+double-precision form (`osmapDP.dat`); the single-precision version some
 XFOIL builds ship is rejected by ALAS's format check. This file isn't included
 either; configure a verified, compatible resource from your own MSES/XFOIL
 setup, either through the hidden `mses.osmap_path` config entry or the
@@ -101,7 +101,7 @@ For finite-element cross-checks against ALAS's own analytical wingbox sizing,
 configure **MSC Nastran** (Hexagon, commercial license) and/or **NASTRAN-95**
 (NASA Open Source Agreement 1.3, user-supplied) on the NASTRAN card. Beyond the
 main **Executable path**, a **MSC solver override** covers Student Edition
-installs where the visible launcher and the solver kernel are split — point it
+installs where the visible launcher and the solver kernel are split; point it
 at `analysis.exe` under Patran's `servermode` tree. NASTRAN-95 adds its own
 **Local NASTRAN-95 directory**, a **Runtime DLL directory** for its GNU
 Fortran runtime, and a **Short RF staging directory** under 38 bytes (e.g.
@@ -143,13 +143,13 @@ install found), `incomplete` (a folder exists but a required binary doesn't),
 `output_missing`/`parse_failed` (the result file is gone or malformed), and
 finally `completed_not_comparable` or `completed_comparable`, depending on
 whether the result shares ALAS's reference frame closely enough to appear in a
-comparison chart. A few tools add their own vocabulary — AVL can reject a
+comparison chart. A few tools add their own vocabulary: AVL can reject a
 deck outright (`deck_rejected`), VSPAERO can fail before starting a case
 (`setup_rejected`, `geometry_unavailable`), and MSES reports convergence per
 point rather than per run, as above. Every card has a **Reveal** button to
 open its artifacts directly, and the run's output directory keeps the raw
 inputs, transcripts, and results per tool (`avl/`, `openvsp/`, `vspaero/`,
-`mses/`, `structures/`) — the stdout/stderr and setup files there are the
+`mses/`, `structures/`); the stdout/stderr and setup files there are the
 actual record of what each tool did. Each run also writes its own
 `design_database.json`, an aircraft/config/feasibility export.
 `RELEASE-MANIFEST.json` is a separate, one-off artifact produced when a

@@ -65,17 +65,17 @@
 //! threads does (see `differential_evolution_optimizer::BatchEvaluator`). A
 //! seeded run therefore replays bit-identically at any worker count.
 //!
-//! That batching is also what the cancellation flag is checked against: once
-//! per generation, before its batch is dispatched, exactly like the staged
-//! scan's own blocks (`search::staged`). A flag already set when a
-//! generation would start analyses nothing more; a flag set mid-batch is
-//! observed at the next generation boundary, so the bound on stopping is one
-//! generation's batch rather than one candidate. This is a real change from
-//! the previous serial kernel's per-candidate check, and it is the price of
-//! the batch being genuinely parallel and worker-count-independent: a
-//! parallel batch has no well-defined "next candidate" to stop before. Work
-//! already produced is still never discarded: a cancelled run returns the
-//! best point analysed, exactly as an uncancelled one does.
+//! The cancellation flag is checked before every block of
+//! [`Settings::block_size`] candidates (the resolved worker count), exactly
+//! like the staged scan's own blocks (`search::staged`): blocks are taken in
+//! index order and their scores concatenated in that order, so an
+//! uncancelled run is identical to evaluating the generation as one batch,
+//! and the bound on stopping is the one parallel block in flight rather than
+//! the rest of the generation. With one worker that is one candidate. A
+//! generation cut short by a request applies no selection; its completed
+//! trials are fully scored, so they still compete for the winner. Work
+//! already produced is never discarded: a cancelled run returns the best
+//! point analysed, exactly as an uncancelled one does.
 
 use crate::cancellation::{CancelPhase, CancelScope};
 use crate::python_rng::RandomState;
@@ -129,6 +129,34 @@ pub(crate) struct Settings {
     /// Consecutive generations the best feasible cost must fail to improve
     /// by more than `spread_tolerance` before a converged spread is honoured.
     pub(crate) stagnation_generations: usize,
+    /// Candidates evaluated between two cancellation checks (at least one).
+    /// Never changes which points are evaluated or their order.
+    pub(crate) block_size: usize,
+}
+
+/// Evaluate `points` in index order, one block of `block_size` at a time,
+/// checking the flag before every block after the first (the caller has
+/// just checked before the first). Returns the scores of the blocks that
+/// ran and whether a request cut the batch short.
+fn evaluate_in_blocks(
+    points: &[Vec<f64>],
+    block_size: usize,
+    scope: &CancelScope<'_>,
+    evaluate_batch: &mut EvaluateBatch<'_>,
+) -> (Vec<ScoredPoint>, bool) {
+    let mut scores = Vec::with_capacity(points.len());
+    for (index, block) in points.chunks(block_size.max(1)).enumerate() {
+        if index > 0 && scope.requested() {
+            scope.work_skipped(format!(
+                "{} of {} candidates in the batch left unanalysed",
+                points.len() - scores.len(),
+                points.len()
+            ));
+            return (scores, true);
+        }
+        scores.extend(scope.block(block.len() as u64, || evaluate_batch(block)));
+    }
+    (scores, false)
 }
 
 /// What one run measured about itself, for [`crate::SearchDiagnostics`] and
@@ -199,7 +227,26 @@ pub(crate) fn run(
         clamp_into_bounds(&mut seeded, bounds);
         population[0] = seeded;
     }
-    let mut scored = scope.block(population.len() as u64, || evaluate_batch(&population));
+    let (mut scored, initial_cut) =
+        evaluate_in_blocks(&population, settings.block_size, scope, evaluate_batch);
+    if initial_cut {
+        let first_feasible_cost = scored.iter().find(|p| p.valid).map(|p| p.cost);
+        return Outcome {
+            winner: scored
+                .iter()
+                .min_by_key(|point| point.feasibility_key())
+                .cloned()
+                .unwrap_or_else(|| unevaluated(&population[0])),
+            cancelled: true,
+            converged: false,
+            generations_completed: 0,
+            evaluations: scored.len(),
+            epsilon_final: 0.0,
+            feasible_fraction: 0.0,
+            first_feasible_cost,
+            relative_improvement: None,
+        };
+    }
     debug_assert_eq!(scored.len(), population.len());
 
     let mut best_ever = scored
@@ -296,8 +343,19 @@ pub(crate) fn run(
             trials.push(trial);
         }
 
-        let trial_scores = scope.block(trials.len() as u64, || evaluate_batch(&trials));
+        let (trial_scores, cut) =
+            evaluate_in_blocks(&trials, settings.block_size, scope, evaluate_batch);
         evaluations += trial_scores.len();
+        if cut {
+            for trial_point in trial_scores {
+                if first_feasible_cost.is_none() && trial_point.valid {
+                    first_feasible_cost = Some(trial_point.cost);
+                }
+                best_ever = min_by_feasibility(best_ever, trial_point);
+            }
+            cancelled = true;
+            break;
+        }
         generations_completed += 1;
 
         let mut successes: Vec<(f64, f64, f64)> = Vec::new();

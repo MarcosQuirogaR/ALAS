@@ -35,6 +35,21 @@
 //! the two sides have stopped meaning the same aeroplane, every comparison
 //! below is answering a different question and should say so in one line
 //! rather than in forty.
+//!
+//! # The wave-drag product correction
+//!
+//! `alas-aero::analysis::AeroAnalysis::wave_drag` applies the published
+//! Lock/Korn law, `CD_w = 20 (M - M_crit)^4` with `M_crit` the offset
+//! critical Mach, not the drag-divergence Mach `M_dd` the Korn equation
+//! itself yields (physics review v1.2, finding A3). The frozen `gen_aero_analysis.py`
+//! generator that produced `golden/aero/analysis.json` predates the
+//! correction and still records `20 (M - M_dd)^4`, so every `cd_wave` and
+//! `cd_total` fixture value at or above `M_dd` disagrees with the corrected
+//! product by design. Rather than weaken this comparison, `corrected_wave_drag`
+//! below recomputes the same closed-form `M_dd` the fixture and the product
+//! still agree on (the Korn equation itself is unchanged) and applies the
+//! corrected law, so every other digit of the closed-form arithmetic stays
+//! pinned at `Tier::Closed`.
 
 // This file is itself a test binary, so an unwrap or expect that fails is
 // the assertion failing.
@@ -47,6 +62,37 @@ use alas_config::analysis::AnalysisConfig;
 use alas_testkit::{Comparison, Tier};
 
 use support::{aero, analysis_config, build, names, or_nan, reference_mesh, Fixture};
+
+/// The corrected Lock/Korn law's expectation, for a fixture generated
+/// against the superseded `20 (M - M_dd)^4` form. See the module-level "wave
+/// drag product correction" note.
+fn corrected_wave_drag(kappa: f64, sweep_deg: f64, thickness: f64, mach: f64, cl: f64) -> f64 {
+    let cos_sweep = sweep_deg.to_radians().cos();
+    let mach_dd =
+        kappa / cos_sweep - thickness / cos_sweep.powf(2.0) - cl / (10.0 * cos_sweep.powf(3.0));
+    let mach_crit = mach_dd - (0.1_f64 / 80.0).cbrt();
+    if mach > mach_crit {
+        20.0 * (mach - mach_crit).powf(4.0)
+    } else {
+        0.0
+    }
+}
+
+/// The superseded law the fixture's generator used (`20 (M - M_dd)^4`),
+/// needed to back out a corrected total where the fixture reports only `cd`
+/// / `l_over_d` and does not break the wave term out (the `quick` and
+/// `trimmed` fixtures). See the module-level "wave drag product correction"
+/// note.
+fn superseded_wave_drag(kappa: f64, sweep_deg: f64, thickness: f64, mach: f64, cl: f64) -> f64 {
+    let cos_sweep = sweep_deg.to_radians().cos();
+    let mach_dd =
+        kappa / cos_sweep - thickness / cos_sweep.powf(2.0) - cl / (10.0 * cos_sweep.powf(3.0));
+    if mach > mach_dd {
+        20.0 * (mach - mach_dd).powf(4.0)
+    } else {
+        0.0
+    }
+}
 
 #[test]
 fn the_two_implementations_are_analysing_the_same_aeroplane() {
@@ -141,12 +187,20 @@ fn the_empirical_drag_buildup_matches_python() {
     }
 
     let analysis = aero(&plane, &fixture, reference_mesh());
+    let kappa = analysis.drag.korn_technology_factor;
+    let thickness = analysis.section_thickness();
     for name in names(&fixture.wave) {
         let case = &fixture.wave[name];
         comparison.scalar(
             &format!("wave.{name}"),
             analysis.wave_drag(case.inputs.mach, case.inputs.cl, None),
-            case.cd_wave,
+            corrected_wave_drag(
+                kappa,
+                fixture.sweep_deg,
+                thickness,
+                case.inputs.mach,
+                case.inputs.cl,
+            ),
         );
     }
 
@@ -169,15 +223,25 @@ fn the_empirical_drag_buildup_matches_python() {
             components.cd_induced,
             case.cd_induced,
         );
+        let expected_wave = corrected_wave_drag(
+            kappa,
+            fixture.sweep_deg,
+            thickness,
+            case.inputs.mach,
+            case.inputs.cl,
+        );
         comparison.scalar(
             &format!("components.{name}.cd_wave"),
             components.cd_wave,
-            case.cd_wave,
+            expected_wave,
         );
         comparison.scalar(
             &format!("components.{name}.cd_total"),
             components.cd_total(),
-            case.cd_total,
+            // The fixture's own cd_total was summed with the superseded
+            // cd_wave; substitute the corrected term into the same sum
+            // rather than compare against the stale total.
+            case.cd_total - case.cd_wave + expected_wave,
         );
     }
 
@@ -199,10 +263,18 @@ fn an_aircraft_with_no_wing_falls_back_to_pythons_own_section_thickness() {
     );
     // The fallback is only observable through a consumer that is not itself a
     // sum over wings, which is what makes the wave-drag term the check here.
+    // The corrected Lock/Korn law applies here too; see the module-level
+    // "wave drag product correction" note.
     comparison.scalar(
         "cd_wave",
         analysis.wave_drag(0.86, 0.9, None),
-        fixture.no_wings.cd_wave,
+        corrected_wave_drag(
+            analysis.drag.korn_technology_factor,
+            fixture.sweep_deg,
+            analysis.section_thickness(),
+            0.86,
+            0.9,
+        ),
     );
     comparison.scalar(
         "cd_parasite",
@@ -226,6 +298,8 @@ fn the_vortex_lattice_fed_estimates_match_python() {
             &fixture,
             analysis_config(case.inputs.spanwise, case.inputs.chordwise),
         );
+        let kappa = analysis.drag.korn_technology_factor;
+        let thickness = analysis.section_thickness();
         let quick = analysis
             .quick_performance(
                 case.inputs.cl_target,
@@ -233,13 +307,31 @@ fn the_vortex_lattice_fed_estimates_match_python() {
                 case.inputs.altitude,
             )
             .expect("the nominal aircraft meshes and solves");
+        // Corrected Lock/Korn law: back out the fixture's superseded wave
+        // term (evaluated at the exact input CL, no solve uncertainty) and
+        // substitute the corrected one. See the module-level note.
+        let old_wave = superseded_wave_drag(
+            kappa,
+            fixture.sweep_deg,
+            thickness,
+            case.inputs.mach,
+            case.inputs.cl_target,
+        );
+        let new_wave = corrected_wave_drag(
+            kappa,
+            fixture.sweep_deg,
+            thickness,
+            case.inputs.mach,
+            case.inputs.cl_target,
+        );
+        let expected_cd = case.cd - old_wave + new_wave;
         comparison.scalar(
             &format!("quick.{name}.l_over_d"),
             quick.l_over_d,
-            case.l_over_d,
+            case.inputs.cl_target / expected_cd,
         );
         comparison.scalar(&format!("quick.{name}.alpha"), quick.alpha_deg, case.alpha);
-        comparison.scalar(&format!("quick.{name}.cd"), quick.cd, case.cd);
+        comparison.scalar(&format!("quick.{name}.cd"), quick.cd, expected_cd);
         comparison.scalar(&format!("quick.{name}.cl"), quick.cl, case.cl);
     }
 
@@ -254,10 +346,31 @@ fn the_vortex_lattice_fed_estimates_match_python() {
         let trimmed = analysis
             .trimmed_performance(&trim, case.inputs.mach, case.inputs.altitude)
             .expect("the nominal aircraft meshes and solves");
+        // Corrected Lock/Korn law: back out the fixture's superseded wave
+        // term, evaluated at the trim solve's own settled CL (already
+        // pinned within Linalg tolerance by the `cl` comparison below), and
+        // substitute the corrected one. See the module-level note.
+        let kappa = analysis.drag.korn_technology_factor;
+        let thickness = analysis.section_thickness();
+        let old_wave = superseded_wave_drag(
+            kappa,
+            fixture.sweep_deg,
+            thickness,
+            case.inputs.mach,
+            trimmed.cl,
+        );
+        let new_wave = corrected_wave_drag(
+            kappa,
+            fixture.sweep_deg,
+            thickness,
+            case.inputs.mach,
+            trimmed.cl,
+        );
+        let expected_cd = case.cd - old_wave + new_wave;
         comparison.scalar(
             &format!("trimmed.{name}.l_over_d"),
             trimmed.l_over_d,
-            case.l_over_d,
+            trimmed.cl / expected_cd,
         );
         comparison.scalar(
             &format!("trimmed.{name}.alpha"),
@@ -269,7 +382,7 @@ fn the_vortex_lattice_fed_estimates_match_python() {
             trimmed.incidence_deg,
             or_nan(case.i_h),
         );
-        comparison.scalar(&format!("trimmed.{name}.cd"), trimmed.cd, case.cd);
+        comparison.scalar(&format!("trimmed.{name}.cd"), trimmed.cd, expected_cd);
         comparison.scalar(&format!("trimmed.{name}.cl"), trimmed.cl, case.cl);
         comparison.scalar(
             &format!("trimmed.{name}.cm_residual"),
@@ -286,7 +399,10 @@ fn the_vortex_lattice_fed_estimates_match_python() {
             sweep_alpha_max_deg: case.inputs.alpha_max,
             ..reference_mesh()
         };
-        let polar = aero(&plane, &fixture, config)
+        let sweep_analysis = aero(&plane, &fixture, config);
+        let kappa = sweep_analysis.drag.korn_technology_factor;
+        let thickness = sweep_analysis.section_thickness();
+        let polar = sweep_analysis
             .run_sweep(case.inputs.mach, case.inputs.altitude)
             .expect("the nominal aircraft meshes and solves");
         comparison.slice(
@@ -295,7 +411,34 @@ fn the_vortex_lattice_fed_estimates_match_python() {
             &case.alpha,
         );
         comparison.slice(&format!("sweep.{name}.cl"), &polar.cl, &case.cl);
-        comparison.slice(&format!("sweep.{name}.cd"), &polar.cd, &case.cd);
+        // The corrected Lock/Korn law changes cd_wave and everything summed
+        // from it (cd, l_over_d); see the module-level "wave drag product
+        // correction" note. Recompute the corrected wave term from the
+        // sweep's own solved CL (rather than the fixture's) so the only
+        // remaining source of difference between the two sides is the
+        // parasite/induced VLM residual this row already tolerates, not a
+        // CL mismatch amplified through the quartic term's derivative.
+        let corrected_wave: Vec<f64> = polar
+            .cl
+            .iter()
+            .map(|&cl| {
+                corrected_wave_drag(kappa, fixture.sweep_deg, thickness, case.inputs.mach, cl)
+            })
+            .collect();
+        let corrected_cd: Vec<f64> = case
+            .cd
+            .iter()
+            .zip(case.cd_wave.iter())
+            .zip(corrected_wave.iter())
+            .map(|((total, old_wave), new_wave)| total - old_wave + new_wave)
+            .collect();
+        let corrected_l_over_d: Vec<f64> = case
+            .cl
+            .iter()
+            .zip(corrected_cd.iter())
+            .map(|(cl, cd)| cl / cd)
+            .collect();
+        comparison.slice(&format!("sweep.{name}.cd"), &polar.cd, &corrected_cd);
         comparison.slice(
             &format!("sweep.{name}.cd_induced"),
             &polar.cd_induced,
@@ -304,7 +447,7 @@ fn the_vortex_lattice_fed_estimates_match_python() {
         comparison.slice(
             &format!("sweep.{name}.cd_wave"),
             &polar.cd_wave,
-            &case.cd_wave,
+            &corrected_wave,
         );
         comparison.slice(
             &format!("sweep.{name}.cd_parasite"),
@@ -315,7 +458,7 @@ fn the_vortex_lattice_fed_estimates_match_python() {
         comparison.slice(
             &format!("sweep.{name}.l_over_d"),
             &polar.l_over_d,
-            &case.l_over_d,
+            &corrected_l_over_d,
         );
     }
 

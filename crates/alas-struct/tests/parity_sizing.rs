@@ -253,7 +253,12 @@ fn compare(comparison: &mut Comparison, name: &str, got: &WingboxSizing, want: &
 #[test]
 fn size_wingbox_matches_python_across_structures_config_cases() {
     let fixture: Fixture = alas_testkit::load("struct", "sizing");
-    let req = DesignRequirements::default();
+    // The frozen Python fixture was generated with the historical 9.81 m/s^2
+    // gravity; production requirements use standard gravity (9.80665 m/s^2).
+    let req = DesignRequirements {
+        gravity_m_s2: 9.81,
+        ..DesignRequirements::default()
+    };
 
     let mut comparison = Comparison::new("alas-struct::sizing::size_wingbox", Tier::Closed);
     for case in &fixture.cases {

@@ -491,7 +491,11 @@ mod tests {
             vspaero_case_argument(case),
             std::ffi::OsStr::new("optimized_aircraft")
         );
-        let absolute = Path::new(r"C:\tmp\optimized_aircraft");
+        let absolute = Path::new(if cfg!(windows) {
+            r"C:\tmp\optimized_aircraft"
+        } else {
+            "/tmp/optimized_aircraft"
+        });
         assert_eq!(
             vspaero_case_argument(absolute),
             std::ffi::OsStr::new("optimized_aircraft")

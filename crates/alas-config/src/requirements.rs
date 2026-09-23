@@ -275,7 +275,15 @@ impl Default for DesignRequirements {
             cg_range_pct_mac: 30.0,
             min_physical_static_margin: 0.05,
             passenger_mass_kg: 100.0,
-            gravity_m_s2: 9.81,
+            // The single standard-gravity constant, matching
+            // `alas_units::STANDARD_GRAVITY` (the CODATA/exact definitional
+            // value that already drives every lbf conversion and the ISA
+            // elsewhere in the program), rather than the frozen two-decimal
+            // 9.81 this field previously carried. Physics review v1.2,
+            // finding F5; `alas-config` has no dependency on `alas-units`
+            // so the value is repeated here as a literal rather than
+            // importing the constant across a new crate edge.
+            gravity_m_s2: 9.806_65,
         }
     }
 }
@@ -579,7 +587,7 @@ mod tests {
         assert!(requirements.required_cruise_cl(15_000.0, 1000.0) < base);
         // W / (q S), checked against the arithmetic rather than a recorded
         // number, since this is the one formula in this module.
-        let expected = 358_670.0 * 9.81 / (15_000.0 * 500.0);
+        let expected = 358_670.0 * 9.806_65 / (15_000.0 * 500.0);
         assert!((base - expected).abs() < 1e-12);
     }
 

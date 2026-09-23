@@ -4,12 +4,12 @@ This file lists every third-party component whose code, data or interface this
 program incorporates. It covers three distinct relationships, which have
 different licensing consequences and are kept separate below:
 
-- **Translated code** — a derivative work. The upstream licence applies to the
+- **Translated code**: a derivative work. The upstream licence applies to the
   translation, and every affected module carries a provenance header naming its
   origin, upstream licence and source revision.
-- **Bundled data** — redistributed unmodified, or repacked without changing the
+- **Bundled data**: redistributed unmodified, or repacked without changing the
   values.
-- **Invoked executables** — separate programs the user supplies. Not
+- **Invoked executables**: separate programs the user supplies. Not
   distributed here, not covered by this program's licence.
 
 Cargo dependencies are not listed individually. `cargo tree` enumerates them and
@@ -24,7 +24,7 @@ licences.
 
 ## Translated code
 
-### SUAVE 2.5.2 — LGPL-2.1
+### SUAVE 2.5.2: LGPL-2.1
 
 Stanford University Aerospace Design Lab and contributors.
 <https://github.com/suavecode/SUAVE>
@@ -43,7 +43,7 @@ surrogate), `alas-mass` (`Weights_Transport`), `alas-stab` (`Fidelity_Zero`),
 `alas-prop` (turbofan network and sizing), `alas-atmo` (US Standard 1976),
 `alas-math` (Chebyshev pseudospectral operator).
 
-### AeroSandbox 4.2.8 — MIT
+### AeroSandbox 4.2.8: MIT
 
 Peter Sharpe and contributors. <https://github.com/peterdsharpe/AeroSandbox>
 
@@ -54,17 +54,17 @@ translated from AeroSandbox.
 
 Affected crates: `alas-geom`, `alas-aero`, `alas-atmo`, `alas-mass`, `alas-stab`.
 
-### NeuralFoil — MIT
+### NeuralFoil: MIT
 
 Peter Sharpe and contributors. <https://github.com/peterdsharpe/NeuralFoil>
 
 The airfoil-polar surrogate: network evaluation, the Kulfan/CST coordinate fit
 that produces its inputs, and the output unpacking. The trained weights are
-bundled as data — see below.
+bundled as data; see below.
 
 Affected crate: `alas-aero`.
 
-### MINPACK `hybrd` — public domain
+### MINPACK `hybrd`: public domain
 
 Argonne National Laboratory (Burton S. Garbow, Kenneth E. Hillstrom,
 Jorge J. Moré, 1980). Distributed without restriction.
@@ -122,7 +122,7 @@ into this repository, embedded at compile time by the route/report/pipeline
 renderers, and included in release source archives. It is not downloaded on
 demand and is not user-configurable at runtime.
 
-### XFOIL 6.99 Orr–Sommerfeld map — GPL-2.0-or-later
+### XFOIL 6.99 Orr–Sommerfeld map: GPL-2.0-or-later
 
 The release includes `assets/mses/osmapDP.dat`, an unmodified
 double-precision Orr–Sommerfeld lookup database extracted from Mark Drela's
@@ -145,7 +145,7 @@ executables. The map SHA-256 is
 Fetched at the user's request, cached locally, never redistributed in this
 repository or in a release archive.
 
-### X-Plane navigation data — GPL-3.0
+### X-Plane navigation data: GPL-3.0
 
 Airway and fix data used for airway routing. Downloaded from a public mirror
 when the user enables real airway routing; the program falls back to
@@ -161,7 +161,7 @@ remain user-supplied. AVL specifically ships as its unchanged win32
 executable only in the Windows package, the only build this project has
 reviewed and tested; every other package (including Linux) ships the same
 GPL-2.0 corresponding source and licence text with a written build/
-acquisition note instead of an executable that platform cannot run — see
+acquisition note instead of an executable that platform cannot run; see
 `docs/release-packaging.md` and `xtask/src/dist_avl.rs`.
 
 | Program | Licence | Used for |

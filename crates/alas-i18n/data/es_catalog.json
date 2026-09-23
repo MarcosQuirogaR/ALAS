@@ -286,7 +286,7 @@
   "Latitude [deg]": "Latitud [grados]",
   "Lav": "Aseo",
   "Lavatory count": "N\u00famero de aseos",
-  "Leading constant in the Korn wave-drag rise: CD_wave = coefficient * (M - M_drag_divergence)^4.": "Constante principal del aumento de resistencia de onda de Korn: CD_onda = coeficiente * (M - M_divergencia)^4.",
+  "Leading constant in the Lock/Korn wave-drag rise: CD_wave = coefficient * max(M - M_critical, 0)^4. The critical Mach is M_drag_divergence - (0.1 / (4 * coefficient))^(1/3); coefficient must be positive.": "Constante principal del aumento de resistencia de onda de Lock/Korn: CD_wave = coefficient * max(M - M_critical, 0)^4. El Mach cr\u00edtico es M_drag_divergence - (0.1 / (4 * coefficient))^(1/3); el coeficiente debe ser positivo.",
   "Leading-edge slat chord as a fraction of local wing chord.": "Cuerda del slat de borde de ataque como fracci\u00f3n de la cuerda local del ala.",
   "Length of the aft taper, from the end of the cylindrical cabin section to the tail tip.": "Longitud del afinamiento trasero, desde el final de la secci\u00f3n cil\u00edndrica de cabina hasta la punta de cola.",
   "Lift (kN)": "Sustentaci\u00f3n (kN)",

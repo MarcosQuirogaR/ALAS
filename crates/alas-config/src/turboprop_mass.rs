@@ -32,14 +32,14 @@
 //! | Unusable fuel | FLOPS **alternate** equation 161 | NASA/TM-2017-219627 eq. 161 |
 //! | Engine oil | declared; see below | - |
 //!
-//! Equations 121 and 122 are the only operating items that read a thrust, so
+//! Equations 121 and 123 are the only operating items that read a thrust, so
 //! they are the only two that need a substitute. Section 7.1.4 of the same
 //! NASA document gives thrust-free alternates for both, which keeps the
 //! substitution inside the published source rather than importing a foreign
 //! correlation - but only equation 161 survives inspection. The alternate
 //! engine oil, equation 162, is printed as `WOIL = 240 (NPASS + 39) / 40`
 //! (p. 56) and returns 1,248 lb of oil for the 169-passenger
-//! `LargeSingleAisle1` case against 130.23 lb from the default equation 122
+//! `LargeSingleAisle1` case against 130.23 lb from the default equation 123
 //! for the same aircraft: a factor of ten, and far above any real transport's
 //! oil charge. It is therefore not used, and the oil is declared instead.
 
@@ -240,7 +240,7 @@ pub struct FlopsTurbopropConfig {
         advanced,
         label = "Engine oil mass",
         unit = "kg",
-        help = "Engine oil for every installed engine together. FLOPS equation 122 estimates it from rated thrust and has no shaft-power form, and the same document's thrust-free alternate equation 162 as printed returns ten times equation 122 for the same aircraft, so it is not usable. Zero leaves the oil visibly absent from the ledger rather than filling it with a wrong value."
+        help = "Engine oil for every installed engine together. FLOPS equation 123 estimates it from rated thrust and has no shaft-power form, and the same document's thrust-free alternate equation 162 as printed returns ten times equation 123 for the same aircraft, so it is not usable. Zero leaves the oil visibly absent from the ledger rather than filling it with a wrong value."
     )]
     pub engine_oil_mass_kg: f64,
 }

@@ -364,7 +364,12 @@ fn compare_node_index(exact: &mut Comparison, case: &Case, index: &MeshNodeIndex
 #[test]
 fn build_wing_mesh_bdf_writes_the_deck_python_writes() {
     let fixture: Fixture = alas_testkit::load("struct", "mesh");
-    let req = DesignRequirements::default();
+    // The frozen Python fixture was generated with the historical 9.81 m/s^2
+    // gravity; production requirements use standard gravity (9.80665 m/s^2).
+    let req = DesignRequirements {
+        gravity_m_s2: 9.81,
+        ..DesignRequirements::default()
+    };
     let engine_cfg = EngineConfig::default();
     let mass_cfg = MassModelConfig::default();
 

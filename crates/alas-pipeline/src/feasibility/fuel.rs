@@ -17,6 +17,11 @@
 //! `operating empty + payload + usable fuel + unusable fuel == MTOW` instead
 //! of letting the analyzed takeoff mass silently exceed MTOW by the unusable
 //! amount every time it is nonzero.
+//!
+//! The pure-FLOPS mass architecture already carries unusable fuel inside
+//! operating empty mass (an operating item, FLOPS equation 141), so its
+//! remainder is usable fuel and nothing is reserved a second time; only a
+//! mass model that leaves unusable fuel out of OEW has it reserved here.
 
 use alas_config::{presets, AlasConfig, DesignVector};
 use alas_mass::tanks::FuelTankLayout;
@@ -175,7 +180,11 @@ pub(crate) fn plan_fuel_loading(
         .unwrap_or(f64::NAN);
     let usable_capacity = assess_fuel_capacity(config, design, report);
     let unusable_fuel_kg = resolved_unusable_fuel_kg(config, design, report);
-    let usable_mtow_closure_fuel_kg = gross_mtow_closure_fuel_kg - unusable_fuel_kg.unwrap_or(0.0);
+    let usable_mtow_closure_fuel_kg = usable_closure_fuel_kg(
+        gross_mtow_closure_fuel_kg,
+        unusable_fuel_kg,
+        config.mass_model.mass_architecture.is_pure_flops(),
+    );
     FuelLoadingAssessment {
         unusable_fuel_kg,
         ..plan_from_values(
@@ -217,6 +226,23 @@ pub(crate) fn report_mass_basis_kg(config: &AlasConfig, report: &AnalysisReport)
 /// not a separate wing-volume approximation. `None` when the layout cannot
 /// be resolved; the caller must not treat that the same as a verified zero
 /// (see [`findings`]'s [`FindingCode::FuelTankLayoutUnavailable`] check).
+/// The usable part of the MTOW fuel closure, kg.
+///
+/// `unusable_inside_oew` is true when the mass model already counts unusable
+/// fuel inside operating empty mass; the closure is then usable fuel as it
+/// stands, and subtracting the unusable mass again would count it twice.
+fn usable_closure_fuel_kg(
+    gross_closure_kg: f64,
+    unusable_fuel_kg: Option<f64>,
+    unusable_inside_oew: bool,
+) -> f64 {
+    if unusable_inside_oew {
+        gross_closure_kg
+    } else {
+        gross_closure_kg - unusable_fuel_kg.unwrap_or(0.0)
+    }
+}
+
 fn resolved_unusable_fuel_kg(
     config: &AlasConfig,
     design: &DesignVector,
@@ -605,6 +631,41 @@ mod tests {
         // real extra mass on top, so the aircraft it actually described
         // weighed `mtow + unusable_fuel_kg`. The assertion above is that
         // exact overshoot's regression check.
+    }
+
+    #[test]
+    fn unusable_fuel_is_reserved_only_when_oew_does_not_already_carry_it() {
+        assert_eq!(
+            usable_closure_fuel_kg(10_000.0, Some(150.0), true),
+            10_000.0
+        );
+        assert_eq!(
+            usable_closure_fuel_kg(10_000.0, Some(150.0), false),
+            9_850.0
+        );
+        assert_eq!(usable_closure_fuel_kg(10_000.0, None, false), 10_000.0);
+    }
+
+    #[test]
+    fn pure_flops_closure_counts_unusable_fuel_once() {
+        // The default product architecture is pure FLOPS, whose OEW already
+        // holds unusable fuel as an operating item (equation 141).
+        let preset = presets::get("A320-200").expect("registered A320 preset");
+        let config = AlasConfig::from_value(&serde_json::json!({"preset": preset.name}))
+            .expect("A320 config");
+        assert!(config.mass_model.mass_architecture.is_pure_flops());
+        let report = crate::full_analysis::FullAnalysis::new(config.clone())
+            .run(&preset.design_vector, true)
+            .expect("A320 full analysis");
+        let gross_fuel_kg = report.component_masses["Fuel"];
+        let fuel_loading = plan_fuel_loading(&config, &preset.design_vector, &report);
+        assert!(fuel_loading.unusable_fuel_kg.is_some_and(|kg| kg > 0.0));
+        assert!(
+            (fuel_loading.mtow_closure_fuel_kg - gross_fuel_kg).abs() < 1.0e-6,
+            "usable closure {} kg must equal the gross closure {} kg",
+            fuel_loading.mtow_closure_fuel_kg,
+            gross_fuel_kg
+        );
     }
 
     #[test]
