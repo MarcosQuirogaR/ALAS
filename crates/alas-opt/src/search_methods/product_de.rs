@@ -47,6 +47,9 @@ pub(crate) struct Settings {
     /// Consecutive generations without a meaningful improvement before a
     /// converged spread is honoured.
     pub(crate) stagnation_generations: usize,
+    /// Candidates per cancellation check: the resolved worker count, so the
+    /// stopping bound is the one parallel block in flight.
+    pub(crate) block_size: usize,
 }
 
 impl Settings {
@@ -74,6 +77,7 @@ impl Settings {
             seed,
             spread_tolerance: solver.tolerance.max(0.0),
             stagnation_generations,
+            block_size: solver.resolved_workers().max(1),
         }
     }
 
@@ -92,6 +96,7 @@ impl Settings {
             seed: self.seed,
             spread_tolerance: self.spread_tolerance,
             stagnation_generations: self.stagnation_generations,
+            block_size: self.block_size,
         }
     }
 }
@@ -103,8 +108,9 @@ impl Settings {
 /// seeds the population instead of being silently dropped. Every candidate
 /// the evaluator sees lies inside `bounds`.
 ///
-/// `evaluate_batch` scores one whole generation at a time, in a fixed order
-/// independent of how many worker threads it spreads the batch across; see
+/// `evaluate_batch` scores one block of `block_size` candidates at a time,
+/// in a fixed order independent of how many worker threads it spreads the
+/// block across; see
 /// `lshade_de`'s module documentation for the determinism and cancellation
 /// contract this gives the seeded replay.
 pub(crate) fn run(
@@ -166,6 +172,7 @@ mod tests {
             seed,
             spread_tolerance: 0.01,
             stagnation_generations: 5,
+            block_size: usize::MAX,
         }
     }
 
