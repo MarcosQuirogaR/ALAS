@@ -39,8 +39,8 @@ The compiler was GNU Fortran 16.2.0 on Windows, with `-fno-automatic`, a
 | SOL 101, baseline | 16.47 s | 2.85 MB | Passed |
 | SOL 103, all-grid displacement print | about 457 s | 16.91 MB | Passed |
 | SOL 103, required front-spar nodes only | about 349 s | 1.47 MB | Passed |
-| Global `-O1`, SOL 101 | 0.67 s to failure | — | Fatal 3011 |
-| Global `-O1`, reduced-output SOL 103 | 0.12 s to failure | — | Fatal 3011 |
+| Global `-O1`, SOL 101 | 0.67 s to failure | n/a | Fatal 3011 |
+| Global `-O1`, reduced-output SOL 103 | 0.12 s to failure | n/a | Fatal 3011 |
 
 Restricting the modal displacement request improved modal wall time by about
 24% and reduced retained output by about 91%. All 30 unique printed

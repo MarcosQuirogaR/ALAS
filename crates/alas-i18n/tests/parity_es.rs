@@ -13,11 +13,12 @@
 //! mismatch (a key dropped from one side, or a stray extra key) hide behind
 //! however many pairs happened to still agree.
 //!
-//! Fifteen source strings are intentionally changed and pinned in
+//! Sixteen source strings are intentionally changed and pinned in
 //! [`SOURCE_CORRECTED_CATALOG`]: ten when the native mission replaced the
 //! retired SUAVE runtime boundary, and five more (plus one further rewrite of
 //! an original SUAVE-era entry) when the vortex-lattice mesh-resolution
-//! fields were given absolute-count, evidence-backed help text. That second
+//! fields were given absolute-count, evidence-backed help text, and one when
+//! the wave-drag help moved to the Lock/Korn critical-Mach law. That second
 //! group mirrors `alas_config::tests::parity_config`'s
 //! `solver_agnostic_help_correction`, which documents the same
 //! 2026-09-11 VLM resolution-sensitivity study; see that test and
@@ -161,6 +162,16 @@ const SOURCE_CORRECTED_CATALOG: &[CatalogCorrection] = &[
         corrected_value: "Resoluci\u{00f3}n de paneles en envergadura usada SOLO para el an\u{00e1}lisis final informado de una vez por ejecuci\u{00f3}n (polar de resistencia, punto de crucero equilibrado, punto neutro), no para el bucle del optimizador. D\u{00e9}jala en 1 por la misma raz\u{00f3}n que el campo del bucle: la envergadura ya est\u{00e1} convergida, as\u{00ed} que subirla duplica el n\u{00fa}mero de paneles para cambiar el resultado en torno a un 1 por ciento. Invierte esos paneles en fine_chordwise_resolution.",
         frozen_key: "Spanwise panel resolution used ONLY for the once-per-run final/reported analysis (drag polar, trimmed cruise point, neutral point), not the optimizer loop. Higher fidelity where speed doesn't matter.",
         frozen_value: "Resoluci\u{00f3}n de paneles en envergadura empleada SOLO en el an\u{00e1}lisis final que se ejecuta una vez por ejecuci\u{00f3}n (polar de resistencia, punto de crucero equilibrado, punto neutro), no en el bucle del optimizador. Mayor fidelidad donde la velocidad no importa.",
+    },
+    // The frozen help states the Korn rise from M_drag_divergence; the
+    // corrected law is the Lock/Korn form from the critical Mach, with a
+    // positive coefficient enforced by `alas_config`'s wave-drag validation
+    // (see `alas_config::tests::parity_config`'s wave_drag_coefficient pin).
+    CatalogCorrection {
+        corrected_key: "Leading constant in the Lock/Korn wave-drag rise: CD_wave = coefficient * max(M - M_critical, 0)^4. The critical Mach is M_drag_divergence - (0.1 / (4 * coefficient))^(1/3); coefficient must be positive.",
+        corrected_value: "Constante principal del aumento de resistencia de onda de Lock/Korn: CD_wave = coefficient * max(M - M_critical, 0)^4. El Mach cr\u{00ed}tico es M_drag_divergence - (0.1 / (4 * coefficient))^(1/3); el coeficiente debe ser positivo.",
+        frozen_key: "Leading constant in the Korn wave-drag rise: CD_wave = coefficient * (M - M_drag_divergence)^4.",
+        frozen_value: "Constante principal del aumento de resistencia de onda de Korn: CD_onda = coeficiente * (M - M_divergencia)^4.",
     },
 ];
 

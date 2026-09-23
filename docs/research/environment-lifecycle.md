@@ -263,7 +263,7 @@ Do not count battery energy as both an environmental benefit and a second “fue
 
 ## Staged implementable ALAS model
 
-### Stage E0 — Environmental brief and evidence contract
+### Stage E0: Environmental brief and evidence contract
 
 Add an environmental brief adjacent to the DesignBrief. It should contain:
 
@@ -279,7 +279,7 @@ Add an environmental brief adjacent to the DesignBrief. It should contain:
 
 Validation should reject missing units, denominators, incompatible functional units, unsupported carrier combinations, and unqualified credits. A placeholder should be a visible diagnostic.
 
-### Stage E1 — Deterministic mission energy and fuel baseline
+### Stage E1: Deterministic mission energy and fuel baseline
 
 Reuse the existing mission/propulsion outputs. At each segment/control point, store time, distance, altitude, atmosphere, mass, thrust or shaft power, fuel flow, electric power, and reserve state. Produce:
 
@@ -292,7 +292,7 @@ Reuse the existing mission/propulsion outputs. At each segment/control point, st
 
 This is the only stage that should be required for every candidate in a conventional aircraft study.
 
-### Stage E2 — Species inventory and local-air-quality screen
+### Stage E2: Species inventory and local-air-quality screen
 
 Attach emission indices to the propulsion evaluator by engine mode and carrier. Separate LTO, climb, cruise, descent, holding, APU, and ground equipment when those sources are in scope. Return:
 
@@ -303,7 +303,7 @@ Attach emission indices to the propulsion evaluator by engine mode and carrier. 
 
 Use the ICAO airport-air-quality structure for source and spatial/temporal bookkeeping. Do not call a CEA thermochemical calculation an emissions certification result; CEA can support properties and combustion screening, while calibrated EI requires an engine/emissions model or deck.
 
-### Stage E3 — Non-CO₂ climate screen
+### Stage E3: Non-CO₂ climate screen
 
 Use the complete flight profile, including altitude, time, position and meteorological scenario, to calculate:
 
@@ -314,13 +314,13 @@ Use the complete flight profile, including altitude, time, position and meteorol
 
 Keep RF/ATR/GWP outputs optional and named. If a contrail-avoidance optimizer is later added, its objective should include extra fuel and NOₓ consequences and should be evaluated on the same weather/route ensemble. A route-specific climate diagnostic is not a universal aircraft requirement.
 
-### Stage E4 — Noise source and procedure screen
+### Stage E4: Noise source and procedure screen
 
 At Q0/Q1, predict source levels or relative acoustic power from thrust, fan/propeller rotational speed, jet velocity, airframe configuration, high-lift/gear state, and installation/shielding flags. Propagate along the mission/airport profile to fixed observer points. Evaluate procedure branches such as cutback, continuous descent, approach speed, and track.
 
 At Q2, call an AEDT/ANP-style adapter with airport, runway, traffic, tracks, day/night, and population. Store contours and exposure as a separate assessment object. Never report a Q0 proxy as a DNL contour.
 
-### Stage E5 — Parametric aircraft LCA
+### Stage E5: Parametric aircraft LCA
 
 Build a component/material/process inventory from mass, geometry, propulsion, energy, and structures:
 
@@ -332,11 +332,11 @@ Build a component/material/process inventory from mass, geometry, propulsion, en
 
 Multiply by versioned LCI factors for production, operation, MRO, and EOL. Keep production, use, MRO, and EOL columns visible. The first useful output is a range and a contribution breakdown, not a single rounded CO₂e number. Promote finalists to open or licensed LCI databases only after the goal/scope and allocation choices are frozen.
 
-### Stage E6 — Energy-carrier and infrastructure feasibility
+### Stage E6: Energy-carrier and infrastructure feasibility
 
 Evaluate storage mass/volume, power, heat, reserve, centre of gravity, turnaround, refuelling/charging, and airport availability. These are physical or operational residuals. A concept that requires an unavailable tank volume or impossible peak power is infeasible independently of its environmental score.
 
-### Stage E7 — Finalist fidelity and uncertainty
+### Stage E7: Finalist fidelity and uncertainty
 
 Use higher-fidelity tools only for finalists:
 

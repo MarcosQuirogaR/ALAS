@@ -11,14 +11,14 @@ A "package" can mean three different things, and this page is only ever about
 the third one:
 
 1. a **local package** a developer produced on their own machine with `cargo
-   xtask dist` (see below) — never distributed automatically;
+   xtask dist` (see below), never distributed automatically;
 2. a **CI workflow artifact** produced by the manual `release-preflight.yml`
    (Windows only) or `release-package.yml` (Windows and Linux) GitHub Actions
    workflows on a clean runner and uploaded as a workflow-run artifact for
-   reviewers with repository access — reproducibility evidence, not a
+   reviewers with repository access: reproducibility evidence, not a
    download, and not published; see
    [`release-packaging.md`](release-packaging.md#ci-release-preflight);
-3. an **externally published release** — a maintainer-reviewed, tagged
+3. an **externally published release**: a maintainer-reviewed, tagged
    package a human deliberately publishes for public download. That is the
    only kind of package this downloads page describes below.
 
@@ -26,10 +26,10 @@ the third one:
 
 The Linux package is built on `ubuntu-22.04` (glibc 2.35) deliberately, not a
 newer or rolling image, so it keeps running on any distribution with glibc
-2.35 or newer already installed — most currently supported Linux desktop and
+2.35 or newer already installed; most currently supported Linux desktop and
 server distributions qualify. The desktop application needs the ordinary
 desktop graphics stack an X11 or Wayland session already provides (an X11 or
-Wayland client library, fontconfig, and a working OpenGL/Vulkan driver — the
+Wayland client library, fontconfig, and a working OpenGL/Vulkan driver (the
 same libraries a modern browser or any other `egui`/`wgpu` desktop
 application needs); nothing beyond that is required to be installed
 separately for a normal desktop session. ALAS also runs fully headless from

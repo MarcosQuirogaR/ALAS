@@ -245,12 +245,13 @@ fn draw_matching_chart(data: &MatchingChartData, oei_gradient: f64, theme: Optio
 
     axes.draw_frame(&mut scene, pal);
     add_axis_labels(&mut scene, &axes, pal);
+    // The shaded band is below the cruise T/W floor, where a design cannot
+    // hold cruise; the feasible space is above it, so the label goes there,
+    // midway between the floor and the top of the axes.
+    let mid = ws_kg.len() / 2;
     scene.add(SceneElement::Text {
         text: "FEASIBLE\nDESIGN SPACE".to_owned(),
-        pos: axes.map_point(
-            ws_kg[0] + 0.5 * (ws_kg[ws_kg.len() - 1] - ws_kg[0]),
-            y_max * 0.25,
-        ),
+        pos: axes.map_point(ws_kg[mid], tw_floor[mid] + 0.5 * (y_max - tw_floor[mid])),
         font_size: 13.0,
         color: Color::from_hex("#2ecc71"),
         align: TextAlign::Center,

@@ -427,7 +427,7 @@ fn takeoff_comparison_reference(
     analysis.chordwise_resolution = analysis.fine_chordwise_resolution;
     let vlm_polar = AeroAnalysis::new(
         &report.airplane,
-        report.design.sweep_deg,
+        AeroAnalysis::quarter_chord_sweep_deg(&report.airplane, report.design.sweep_deg),
         Some(config.geometry.clone()),
         Some(config.drag_model.clone()),
         Some(analysis),

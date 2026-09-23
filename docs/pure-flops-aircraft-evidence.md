@@ -178,11 +178,11 @@ otherwise. The exact-engine mass coverage therefore is:
 
 | Engine identity | Bare dry mass | Evidence | FLOPS `WENGB` (since 2026-09-12) |
 |---|---:|---|---|
-| PW1521G-3 | 2177 kg | EASA IM.E.090, Issue 10, III.5 (basic engine with standard equipment; reverser aircraft-side, Note 4) — verified | declared |
-| CFM56-5B4/3 SAC | 2454.8 kg | EASA E.003, Issue 06, III.5 (basic engine, accessories, ECM; starter in type design; the -5B reverser is not in the engine parts list) — verified | declared |
-| CFM56-5C3/F | 2644.4 kg | EASA E.003, Issue 06, III.5; the -5C dry weight contains the adapter kit with mixer, exhaust plug and thrust reverser — verified, not separable | equation 76 retained |
-| Trent 970-84 | 6246 kg | EASA E.012, Issue 12, III.5 ("Not including fluids and Nacelle EBU") — verified | declared |
-| GEnx-1B74/75/P2 | 6147.1 kg | EASA GEnx TCDS Issue 12, III.5 (basic engine, accessories, optional equipment); the 787 fan reversers are listed under the engine type design without a split — verified, scope unresolved | equation 76 retained |
+| PW1521G-3 | 2177 kg | EASA IM.E.090, Issue 10, III.5 (basic engine with standard equipment; reverser aircraft-side, Note 4), verified | declared |
+| CFM56-5B4/3 SAC | 2454.8 kg | EASA E.003, Issue 06, III.5 (basic engine, accessories, ECM; starter in type design; the -5B reverser is not in the engine parts list), verified | declared |
+| CFM56-5C3/F | 2644.4 kg | EASA E.003, Issue 06, III.5; the -5C dry weight contains the adapter kit with mixer, exhaust plug and thrust reverser, verified, not separable | equation 76 retained |
+| Trent 970-84 | 6246 kg | EASA E.012, Issue 12, III.5 ("Not including fluids and Nacelle EBU"), verified | declared |
+| GEnx-1B74/75/P2 | 6147.1 kg | EASA GEnx TCDS Issue 12, III.5 (basic engine, accessories, optional equipment); the 787 fan reversers are listed under the engine type design without a split, verified, scope unresolved | equation 76 retained |
 | CF6-50C | null | FAA TCDS E23EA not retrieved; exact variant mass gap | equation 76 retained |
 | PW127M | null | Reference family proxy only; ATR unsupported |
 | AVE engine | N/A | Notional aircraft |

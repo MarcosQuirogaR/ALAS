@@ -17,6 +17,7 @@ fn settings(seed: u64, population: usize, generations: usize) -> Settings {
         seed,
         spread_tolerance: 0.01,
         stagnation_generations: 5,
+        block_size: usize::MAX,
     }
 }
 
@@ -203,6 +204,63 @@ fn a_cancellation_mid_run_stops_within_one_generation_batch_and_keeps_the_best_p
 }
 
 #[test]
+fn a_request_inside_a_generation_costs_at_most_the_block_in_flight() {
+    let bounds = [(0.0, 1.0), (0.0, 1.0)];
+    let population = 8usize;
+    let watch = CancelWatch::new();
+    let scope = CancelScope::attach(Some(watch.flag()));
+    // One candidate per block; the request lands inside the first
+    // generation's second analysis, after the initial population.
+    let mut analysed = 0usize;
+    let mut evaluate = |points: &[Vec<f64>]| -> Vec<ScoredPoint> {
+        analysed += points.len();
+        if analysed == population + 2 {
+            watch.request_cancellation();
+        }
+        points.iter().map(|v| scored_1d(v)).collect()
+    };
+    let outcome = run(
+        &bounds,
+        Settings {
+            block_size: 1,
+            ..settings(3, population, 40)
+        },
+        None,
+        &scope,
+        &mut evaluate,
+    );
+    assert!(outcome.cancelled);
+    assert_eq!(outcome.generations_completed, 0);
+    assert_eq!(outcome.evaluations, population + 2);
+    assert!(outcome.winner.cost.is_finite());
+}
+
+#[test]
+fn blocked_evaluation_replays_the_single_batch_run_exactly() {
+    let bounds = [(0.0, 1.0), (-2.0, 2.0)];
+    let run_with = |block_size: usize| {
+        let mut evaluate = |points: &[Vec<f64>]| -> Vec<ScoredPoint> {
+            points.iter().map(|v| scored_1d(v)).collect()
+        };
+        run(
+            &bounds,
+            Settings {
+                block_size,
+                ..settings(11, 12, 15)
+            },
+            None,
+            &CancelScope::attach(None),
+            &mut evaluate,
+        )
+    };
+    let whole = run_with(usize::MAX);
+    let blocked = run_with(3);
+    assert_eq!(whole.winner.values, blocked.winner.values);
+    assert_eq!(whole.evaluations, blocked.evaluations);
+    assert_eq!(whole.generations_completed, blocked.generations_completed);
+}
+
+#[test]
 fn the_population_shrinks_toward_the_floor_as_generations_proceed() {
     assert_eq!(ops::linear_reduced_size(96, 0.0), 96);
     assert_eq!(ops::linear_reduced_size(96, 1.0), MIN_POPULATION);
@@ -333,6 +391,7 @@ fn a_run_with_a_stable_feasible_population_reports_convergence() {
             seed: 4,
             spread_tolerance: 0.05,
             stagnation_generations: 4,
+            block_size: usize::MAX,
         },
         None,
         &CancelScope::attach(None),

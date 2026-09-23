@@ -38,7 +38,7 @@ A dry engine is not an installed propulsion system. Nacelle, pylon/strut, inlet,
 | A340-312 / CFM56-5C3/F | 2,680.185 | 2,644.4 | 4 | **-143.140** | Verified EASA family value and matching 14,457 daN CFM56-5C3/F rating. The 5C description includes an adapter kit with mixer, exhaust plug and thrust reverser; starter is engine type design. Scope is conditional. |
 | A380-841 / Trent 970-84 | 6,279.598 | 6,246.0 | 4 | **-134.391** | Verified EASA model value; explicitly excludes fluids and Nacelle EBU; TRU/FFD are aircraft-type-design items. Starter scope is unstated. |
 | 787-9 / GEnx-1B74/75/P2 | 6,285.160 | 6,147.1 | 2 | **-276.120** | Verified EASA family value and approved 787-9 BOM family. Starter is engine type design; 787 fan-reverser installation is listed separately. Reconcile starter/installation before promotion. |
-| DC-10-30 / CF6-50C | 4,156.734 | **unknown** | 3 | — | No exact primary DC-10 installation mass found. NASA CR-3119 gives 4,321 kg bare and 6,174 kg complete pod for a 242.8 kN reference installation, not this DC-10 variant; proxy is prohibited. |
+| DC-10-30 / CF6-50C | 4,156.734 | **unknown** | 3 | - | No exact primary DC-10 installation mass found. NASA CR-3119 gives 4,321 kg bare and 6,174 kg complete pod for a 242.8 kN reference installation, not this DC-10 variant; proxy is prohibited. |
 | AVE-v1 / conceptual GE9X | 8,658.318 | ~9,525.44 | 2 | **+1,734.245** | GE publishes `~21,000 lb` for generic GE9X. This is an estimated notional scenario, not an exact GE9X-105B1A dry or installed mass and not an aircraft anchor. |
 
 The conditional total deltas are recorded numerically in the JSON artifact. The important scope checks are:

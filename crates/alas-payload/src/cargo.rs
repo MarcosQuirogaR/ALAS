@@ -32,6 +32,7 @@
 
 mod capacity;
 mod engine;
+mod headroom;
 mod manager;
 
 pub use capacity::CargoCapacity;
@@ -269,35 +270,6 @@ impl UldType {
             })
             .collect()
     }
-
-    /// Solver contour; visualization-only shapes fall back to their full box.
-    pub(crate) fn collision_contour(
-        &self,
-        y_center: f64,
-        z_bottom: f64,
-        mirrored: bool,
-    ) -> Vec<[f64; 2]> {
-        let contour = if self.contour.fidelity == ContourFidelity::VisualizationOnly {
-            RECTANGULAR_CONTOUR
-        } else {
-            self.contour
-        };
-        contour
-            .vertices
-            .iter()
-            .map(|&[normalized_y, normalized_z]| {
-                let oriented_y = if mirrored && contour.mirrorable {
-                    -normalized_y
-                } else {
-                    normalized_y
-                };
-                [
-                    y_center + oriented_y * self.width * 0.5,
-                    z_bottom + normalized_z * self.height,
-                ]
-            })
-            .collect()
-    }
 }
 
 /// The LD1 container.
@@ -509,6 +481,8 @@ pub struct CargoSlot {
     pub y: f64,
     /// The container standing here.
     pub uld: &'static UldType,
+    /// Clear height used by this position, m. Rigid ULDs retain their full height.
+    pub realized_height_m: f64,
     /// Net cargo loaded, kg, excluding the container's own tare.
     pub payload: f64,
 }
@@ -520,7 +494,22 @@ pub(crate) const MIN_LOADED_KG: f64 = 1.0;
 impl CargoSlot {
     /// What this position may hold.
     pub fn max_net(&self) -> f64 {
-        self.uld.max_net()
+        if self.uld.code == BULK.code {
+            // A loose block's nominal mass is a volume-density proxy, not a
+            // structural hold limit. Retain that density when headroom shrinks.
+            self.uld.max_net() * (self.realized_height_m / self.uld.height).clamp(0.0, 1.0)
+        } else {
+            self.uld.max_net()
+        }
+    }
+
+    /// Usable position volume, cubic meters. Bulk volume follows the realized clearance.
+    pub fn usable_volume_m3(&self) -> f64 {
+        if self.uld.code == BULK.code {
+            self.uld.volume_m3 * (self.realized_height_m / self.uld.height).clamp(0.0, 1.0)
+        } else {
+            self.uld.volume_m3
+        }
     }
 
     /// What it weighs as loaded, container included, and nothing at all
@@ -601,7 +590,8 @@ mod tests {
     #[test]
     fn visualization_contours_keep_the_solver_rectangle_conservative() {
         let rendered = LD3.physical_contour(0.0, 0.0, false);
-        let collision = LD3.collision_contour(0.0, 0.0, false);
+        let collision =
+            headroom::collision_contour_at(&LD3, 0.0, 0.0, LD3.width, LD3.height, false);
         assert!(rendered.len() > collision.len());
         assert_eq!(
             collision,
@@ -670,6 +660,7 @@ mod tests {
             x: 10.0,
             y: 0.0,
             uld: LOWER_DECK_DEFAULT,
+            realized_height_m: LOWER_DECK_DEFAULT.height,
             payload: 0.5,
         };
         assert_eq!(slot.total_weight(), 0.0);

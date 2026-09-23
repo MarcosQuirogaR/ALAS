@@ -105,6 +105,14 @@ pub(crate) fn refine_candidate_3d_with_mass_model(
         cfg2.mass_model.mass_architecture =
             alas_config::MassArchitecture::LegacyReferenceCompatibleComparison;
         cfg2.mass_model.apply_architecture();
+        // The translated screening reference meshed at one panel in each
+        // direction; the product default has since moved to eight chordwise
+        // panels (see `alas_config::analysis`). Pin the frozen mesh here for
+        // the same reason the two overrides above are pinned: a caller
+        // starting from the product `AlasConfig` default must not silently
+        // re-point this replay's VLM solves at a finer mesh and then call
+        // the result parity evidence.
+        cfg2.analysis.restore_reference_mesh();
     }
 
     let builder = match geometry {
@@ -177,7 +185,9 @@ pub(crate) fn refine_candidate_3d_with_mass_model(
     plane.xyz_ref[0] = cg[0];
 
     let aero = if matches!(geometry, ScreeningGeometry::ReferenceCompatibility) {
-        AeroAnalysis::new_reference_compatibility(
+        // The screening fixture predates the Lock/Korn wave-onset correction.
+        // Replay that law only on this explicit reference path.
+        AeroAnalysis::new_frozen_wave_drag_compatibility(
             &plane,
             dv.sweep_deg,
             Some(effective_geometry),
@@ -187,7 +197,7 @@ pub(crate) fn refine_candidate_3d_with_mass_model(
     } else {
         AeroAnalysis::new(
             &plane,
-            dv.sweep_deg,
+            AeroAnalysis::quarter_chord_sweep_deg(&plane, dv.sweep_deg),
             Some(effective_geometry),
             Some(cfg2.drag_model.clone()),
             Some(cfg2.analysis.clone()),

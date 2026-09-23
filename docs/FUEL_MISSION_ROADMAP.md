@@ -38,7 +38,7 @@ A route completing without crossing zero usable fuel is not reserve-compliant.
 
 ## Delivery plan
 
-### P0 — Make the existing result physically honest
+### P0: Make the existing result physically honest
 
 Scope:
 
@@ -65,7 +65,7 @@ Acceptance:
 - No telemetry after the first invalid segment is labeled flown.
 - Mission outputs carry explicit model-validity and convergence status.
 
-### P1 — Introduce typed mass and fuel contracts
+### P1: Introduce typed mass and fuel contracts
 
 Scope:
 
@@ -87,7 +87,7 @@ Acceptance:
 - Unusable fuel belongs to empty mass and cannot be consumed or subtracted twice.
 - Property tests cover finite/nonnegative state and conservation invariants.
 
-### P2 — Solve required fuel and takeoff mass together
+### P2: Solve required fuel and takeoff mass together
 
 Scope:
 
@@ -112,7 +112,7 @@ Acceptance:
 - Regulatory worked examples and independent OFP cases reproduce each ledger
   component, landing fuel, TOM, and landing mass.
 
-### P3 — Make route and trajectory operationally representative
+### P3: Make route and trajectory operationally representative
 
 Scope:
 
@@ -135,7 +135,7 @@ Acceptance:
 - Mission time and distance close in the ground frame.
 - Payload-range and point-mission results cannot use conflicting physics.
 
-### P4 — Couple tanks, CG, trim, and performance
+### P4: Couple tanks, CG, trim, and performance
 
 Scope:
 
@@ -155,7 +155,7 @@ Acceptance:
   applicability; AFM/WBM-only limits remain explicitly unavailable.
 - Trim and fuel-burn changes under forward/aft CG have verified physical signs.
 
-### P5 — Calibration, uncertainty, and advanced operations
+### P5: Calibration, uncertainty, and advanced operations
 
 Scope:
 

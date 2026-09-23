@@ -452,6 +452,22 @@ fn product_default_correction(path: &str) -> Option<(Value, Value)> {
         || path == "OptimizerConfig.solver.workers"
     {
         Some((serde_json::json!(1), serde_json::json!(0)))
+    }
+    // Standard gravity. The frozen value is a two-decimal figure; the
+    // product default is `alas_units::STANDARD_GRAVITY`, the CODATA/exact
+    // definitional value (9.80665 m/s^2) that already drives every lbf
+    // conversion and the ISA elsewhere in the program. Physics review v1.2,
+    // finding F5: this field is the one place mission weights read a
+    // slightly different constant than the rest of the program: a 0.035 %
+    // difference, numerically negligible on its own, but a mixed constant at
+    // the mass -> mission interface. `alas_mission::vehicle::
+    // cruise_thrust_kn_per_engine`'s own literal `9.81` and
+    // `alas_perf::performance::G` are left at the frozen value: both are
+    // documented reproductions of upstream literals, not reads of this
+    // field, so changing this default does not move them and they are out
+    // of scope here.
+    else if path.ends_with(".gravity_m_s2") {
+        Some((serde_json::json!(9.81), serde_json::json!(9.806_65)))
     } else {
         None
     }
@@ -626,11 +642,24 @@ fn compare_transport_planform_schema(
             &field.advanced,
             &false,
         );
-        comparison.exact(
-            &format!("{label}.{}.help", expected_field.name),
-            &field.help,
-            &expected_field.help,
-        );
+        if expected_field.name == "wave_drag_coefficient" {
+            comparison.exact(
+                &format!("{label}.{}.help: corrected law", expected_field.name),
+                &field.help,
+                &"Leading constant in the Lock/Korn wave-drag rise: CD_wave = coefficient * max(M - M_critical, 0)^4. The critical Mach is M_drag_divergence - (0.1 / (4 * coefficient))^(1/3); coefficient must be positive.",
+            );
+            comparison.exact(
+                &format!("{label}.{}.help: frozen law", expected_field.name),
+                &expected_field.help,
+                &"Leading constant in the Korn wave-drag rise: CD_wave = coefficient * (M - M_drag_divergence)^4.",
+            );
+        } else {
+            comparison.exact(
+                &format!("{label}.{}.help", expected_field.name),
+                &field.help,
+                &expected_field.help,
+            );
+        }
 
         let Entry::Leaf(leaf) = &field.entry else {
             comparison.exact(
@@ -915,6 +944,17 @@ fn compare_field(
     if label.ends_with(".fuel_volume_penalty_scale") {
         assert_eq!(field.help, "Deprecated compatibility field. MTOW minus zero-fuel mass is a mass allowance, not mission-required fuel, so it is no longer used by the optimizer. Tank capacity will be constrained against mission fuel plus the selected reserve policy.");
         assert_eq!(expected["help"], "Penalizes the wing's physical usable fuel-tank volume (physics.performance.wing_fuel_volume_m3, Torenbeek geometric estimate) being too small to hold the fuel mass the weight & balance analysis says this design actually needs: a wing that's too thin/small/tapered to carry its own required fuel is not a buildable aircraft, independent of whether the MTOW fuel-mass budget itself closes. Quadratic on the fractional shortfall (required_fuel - tank_capacity) / required_fuel.");
+    } else if label.ends_with(".wave_drag_coefficient") {
+        comparison.exact(
+            &format!("{label}.help: corrected Lock/Korn law"),
+            &field.help,
+            &"Leading constant in the Lock/Korn wave-drag rise: CD_wave = coefficient * max(M - M_critical, 0)^4. The critical Mach is M_drag_divergence - (0.1 / (4 * coefficient))^(1/3); coefficient must be positive.",
+        );
+        comparison.exact(
+            &format!("{label}.help: frozen Python law"),
+            &expected.get("help").and_then(Value::as_str).unwrap_or(""),
+            &"Leading constant in the Korn wave-drag rise: CD_wave = coefficient * (M - M_drag_divergence)^4.",
+        );
     } else if label.ends_with(".share_pct") {
         comparison.exact(
             &format!("{label}.help: product seat-share semantics"),

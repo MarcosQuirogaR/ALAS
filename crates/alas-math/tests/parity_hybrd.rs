@@ -230,6 +230,34 @@ fn hybrd_matches_scipy_fsolve() {
         )
         .unwrap_or_else(|error| panic!("{subject} was refused: {error:?}"));
 
+        // Off the reference runtime the systems' transcendental functions
+        // round differently, and a Powell dogleg trajectory amplifies that
+        // until the two paths legitimately part (ubuntu-22.04 parts from
+        // SciPy at evaluation 14 of the helical valley). The path, the
+        // evaluation count and a non-converged stopping point are properties
+        // of that trajectory, so there only the converged roots are compared:
+        // two converged solves of the same system must find the same root.
+        if !alas_testkit::REFERENCE_RUNTIME {
+            if case.ier == 1 {
+                let mut root = Comparison::new(
+                    format!("{subject} [converged root, off reference runtime]"),
+                    Tier::Iter { relative: 1e-6 },
+                );
+                root.exact("status", &solution.status, &status_from_ier(case.ier));
+                for (index, (got, want)) in solution.x.iter().zip(&case.x).enumerate() {
+                    // Components at a zero root compare absolutely.
+                    let tolerance = 1e-6 * want.abs().max(1e-3);
+                    root.exact(
+                        &format!("|x[{index}] - reference| <= {tolerance:e}"),
+                        &((got - want).abs() <= tolerance),
+                        &true,
+                    );
+                }
+                root.finish();
+            }
+            continue;
+        }
+
         // --- The iteration path, at `linalg` ---
         //
         // Checked before the evaluation count, deliberately: a wrong count is

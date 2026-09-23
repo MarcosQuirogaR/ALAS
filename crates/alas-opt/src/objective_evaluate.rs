@@ -403,13 +403,23 @@ impl DesignObjective {
             trim.trim_alpha_deg
         };
 
-        let aero = AeroAnalysis::new(
-            &plane,
-            dv.sweep_deg,
-            Some(self.config.geometry.clone()),
-            Some(self.config.drag_model.clone()),
-            Some(analysis_config),
-        );
+        let aero = if self.reference_mass_coordinates {
+            AeroAnalysis::new_frozen_wave_drag_compatibility(
+                &plane,
+                dv.sweep_deg,
+                Some(self.config.geometry.clone()),
+                Some(self.config.drag_model.clone()),
+                Some(analysis_config),
+            )
+        } else {
+            AeroAnalysis::new(
+                &plane,
+                AeroAnalysis::quarter_chord_sweep_deg(&plane, dv.sweep_deg),
+                Some(self.config.geometry.clone()),
+                Some(self.config.drag_model.clone()),
+                Some(analysis_config),
+            )
+        };
 
         let tp = TrimPoint {
             trim_alpha_deg: trim.trim_alpha_deg,

@@ -60,13 +60,31 @@ pub enum Tier {
     },
 }
 
+/// Whether this build runs on the C runtime the tiers were established on.
+///
+/// The `Closed` and `Linalg` bounds were set by reproducing the reference on
+/// Windows with the MSVC runtime. Other C runtimes (glibc, for the Linux
+/// package) round the transcendental functions (`sin`, `atan2`, `exp`, `pow`)
+/// to different last bits; the port calls the same functions in the same
+/// order, so the difference is still rounding, but it is amplified through
+/// fits and eigen-solves beyond the reference-runtime bounds. Measured on
+/// ubuntu-22.04 on 2026-09-23: at most 1.1e-10 relative for closed-tier
+/// results (modal eigenvector entries) and 1.6e-7 for least-squares fits.
+/// Off the reference runtime the two tiers therefore widen once, here, to
+/// 1e-9 and 1e-6, bounds still far below anything that matters physically;
+/// the parity claim itself rests on the reference runtime, where the gate
+/// keeps the original bounds.
+pub const REFERENCE_RUNTIME: bool = cfg!(all(windows, target_env = "msvc"));
+
 impl Tier {
     /// The relative and absolute bounds this tier allows.
     pub fn bounds(self) -> (f64, f64) {
         match self {
             Self::Exact => (0.0, 0.0),
-            Self::Closed => (1e-12, 1e-15),
-            Self::Linalg => (1e-9, 1e-12),
+            Self::Closed if REFERENCE_RUNTIME => (1e-12, 1e-15),
+            Self::Closed => (1e-9, 1e-15),
+            Self::Linalg if REFERENCE_RUNTIME => (1e-9, 1e-12),
+            Self::Linalg => (1e-6, 1e-12),
             Self::F32 => (1e-5, 1e-7),
             Self::Iter { relative } => (relative, 0.0),
         }

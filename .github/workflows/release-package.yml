@@ -15,11 +15,6 @@ name: Release package (manual/tag, non-publishing)
 # genuine Linux lane beside rather than replaces.
 on:
   workflow_dispatch:
-    inputs:
-      strict_nastran95:
-        description: "Require a fully reviewed NASTRAN-95 bundle instead of accepting an omitted optional tool"
-        type: boolean
-        default: false
   push:
     tags:
       - "v*"
@@ -42,7 +37,7 @@ jobs:
   package:
     name: Build and validate the ${{ matrix.os }} package (locked, non-publishing)
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 90
+    timeout-minutes: 150
     strategy:
       fail-fast: false
       matrix:
@@ -120,14 +115,14 @@ jobs:
 
       - name: Build and assemble the standalone package from the locked dependency graph
         shell: bash
-        env:
-          ALAS_STRICT_BUNDLED_NASTRAN95: ${{ inputs.strict_nastran95 == true && '1' || '' }}
+        # CI starts from a clean checkout without a reviewed NASTRAN-95 staging
+        # tree. Strict bundling remains a local, explicitly staged release path.
         run: cargo xtask dist
 
       # `cargo xtask dist` already ran its own headless validation (--help,
       # manifest/config checks, a config round-trip smoke run under a
-      # path containing spaces, and — only where AVL is actually bundled,
-      # which today is Windows alone — an AVL cross-check) before it wrote
+      # path containing spaces, and, only where AVL is actually bundled,
+      # which today is Windows alone, an AVL cross-check) before it wrote
       # the archive. This step names exactly the package directory that
       # validation ran against, for the acceptance and smoke steps below.
       - name: Locate the assembled package directory
@@ -140,6 +135,11 @@ jobs:
             echo "no assembled package directory found under dist/" >&2
             exit 1
           fi
+          # Absolute and native: cargo runs the acceptance test with the
+          # crate directory as its working directory, so a workspace-relative
+          # path would not resolve there. Git Bash on Windows needs `pwd -W`
+          # for a path Rust can open.
+          found="$(cd "$found" && (pwd -W 2>/dev/null || pwd))"
           echo "path=$found" >> "$GITHUB_OUTPUT"
           echo "assembled package: $found"
 
@@ -156,7 +156,7 @@ jobs:
 
       # A second, CI-level headless confirmation beside `cargo xtask dist`'s
       # own: run the archived binary's only supported no-window flag
-      # (`-h`/`--help` — this CLI has no `--version`) directly from the
+      # (`-h`/`--help`; this CLI has no `--version`) directly from the
       # unpacked package. `xvfb-run` wraps the Linux invocation defensively;
       # `--help` does not construct an eframe/winit window today, but this
       # keeps the step correct even if that ever changes, at the cost of one

@@ -151,7 +151,12 @@ fn the_free_field_formatter_renders_what_python_renders() {
 #[test]
 fn the_solution_decks_match_python_line_for_line() {
     let fixture: Fixture = alas_testkit::load("struct", "nastran");
-    let req = DesignRequirements::default();
+    // The frozen Python fixture was generated with the historical 9.81 m/s^2
+    // gravity; production requirements use standard gravity (9.80665 m/s^2).
+    let req = DesignRequirements {
+        gravity_m_s2: 9.81,
+        ..DesignRequirements::default()
+    };
     let engine_cfg = EngineConfig::default();
     let mass_cfg = MassModelConfig::default();
 

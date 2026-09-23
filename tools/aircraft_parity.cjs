@@ -191,8 +191,17 @@ const GEAR_STATION_ID_PATTERN = /(\.x_|_x_m|wheelbase|track_width|wheel_track)/i
 // Surfaces provenance markers the model export already declares about itself
 // (never invented here) so a within-tolerance row can be read correctly: it
 // may confirm data retention rather than an independent prediction.
+// Quantities that crates/alas-pipeline/examples/model_reference_dump.rs
+// exports straight from the preset's design vector, requirements or gear
+// layout definition. A match confirms the preset was entered correctly; it is
+// not an output of any ALAS analysis.
+const DECLARED_INPUT_PATTERN = /^(geometry\.(span_m|fuselage_length_m|engine_spanwise_position_m)|mass\.mtow_kg|aero\.cruise_mach|gear\.(n_nlg_wheels|n_mlg_struts|wheels_per_mlg_strut|mlg_wheels_per_strut|main_wheels_total))$/;
+
 function modelProvenanceNote(check, modelPreset) {
   if (!modelPreset) return null;
+  if (DECLARED_INPUT_PATTERN.test(check.id || '')) {
+    return 'Model value is a declared preset input (design vector, requirement or gear layout definition), not an analysis output; a matching result confirms data entry, not a prediction.';
+  }
   if (GEAR_STATION_ID_PATTERN.test(check.id || '') && modelPreset.gear && modelPreset.gear.stations_source_scaled === true) {
     const frame = modelPreset.gear.main_gear_station_frame || 'a registered source drawing frame';
     return `Model gear station is scaled from ${frame}, not independently placed by structural/turnover sizing; a matching result confirms scaling retention, not an independent station prediction.`;
@@ -341,6 +350,13 @@ function buildResult({contract, model, rows, inputs, evidenceBundles}) {
       eligible_comparisons: eligible.length,
       scored_comparisons: eligible.length,
       statuses,
+      // A scored row whose model value is a registered reference input (it
+      // carries a model_provenance_note) confirms data retention, not an
+      // independent prediction, so the two are counted separately.
+      by_provenance: {
+        independent: countBy(eligible.filter(row => !row.model_provenance_note), 'status'),
+        reference_input: countBy(eligible.filter(row => row.model_provenance_note), 'status'),
+      },
       by_category: countBy(rows, 'category'),
       by_preset: Object.fromEntries(Object.keys(contract.aircraft || {}).map(preset => [preset, countBy(rows.filter(row => row.preset === preset), 'status')])),
       model_only_presets: Object.keys(model || {}).filter(preset => !own(contract.aircraft || {}, preset)),
@@ -452,6 +468,7 @@ function renderHtml(result) {
     'Keep SOL101 deformation rows disabled until a matching load case, materials, constraints and independent displacement/strain measurement reference are available.',
   ];
   const statusCounts = Object.entries(summary.statuses).map(([status, count]) => `${count} ${status}`).join(', ');
+  const provenanceCounts = kind => Object.entries((summary.by_provenance || {})[kind] || {}).map(([status, count]) => `${count} ${status}`).join(', ') || 'none';
   const rowsHtml = rows.map(row => {
     const source = row.source_url ? `<a href="${escape(row.source_url)}">${escape(row.source_cite || row.source_title)}</a>` : escape(row.source_cite || row.source_title || '—');
     const diff = row.absolute_error === null ? '—' : `${formatNumber(row.absolute_error)}${row.relative_error === null ? '' : ` (${formatNumber(row.relative_error * 100)}%)`}`;
@@ -467,7 +484,7 @@ function renderHtml(result) {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Real-aircraft parity audit</title><style>
 body{font:14px/1.45 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#1d2b3a;background:#f4f7fa;margin:0}main{max-width:1500px;margin:auto;padding:30px}h1{font-size:30px;margin:0 0 8px}h2{margin:34px 0 12px}p{max-width:1200px}.notice{padding:18px;background:#e6f1fb;border-left:4px solid #2674af}.warning{padding:18px;background:#fff2d8;border-left:4px solid #c37a00}table{border-collapse:collapse;width:100%;background:#fff;margin:10px 0 20px}th,td{border:1px solid #ccd7e2;padding:8px;text-align:left;vertical-align:top}th{background:#e5edf5}td small{display:block;color:#536679;margin-top:4px;overflow-wrap:anywhere}.status{font-weight:700}.within_tolerance{color:#176b3a}.out_of_tolerance{color:#a2351e}.diagnostic{color:#865e00}.unsupported,.evidence_gap{color:#5d6670}.source_conflict{color:#7b1fa2}code{background:#e7edf2;padding:1px 4px;border-radius:3px}a{color:#145e9a;overflow-wrap:anywhere}ul{max-width:1200px}td:nth-child(4),td:nth-child(5),td:nth-child(6){white-space:nowrap}@media(max-width:900px){main{padding:14px}table{display:block;overflow-x:auto}}
 </style></head><body><main><h1>Real-aircraft parity audit</h1><p>Generated ${escape(result.generated_utc)} from <code>${escape(result.inputs.model_path)}</code> against <code>${escape(result.inputs.contract_path)}</code>.</p>
-<div class="notice"><b>Comparison is not certification validation.</b> The contract contains independent source anchors and explicit conditions. No expected value is copied from <code>MODEL.json</code>, and no row is re-pinned to model output. ${escape(summary.rows)} rows: ${escape(statusCounts)}. ${escape(summary.eligible_comparisons)} matched primary comparisons enter the release comparison score; all diagnostic and evidence-gap rows remain visible.</div>
+<div class="notice"><b>Comparison is not certification validation.</b> The contract contains independent source anchors and explicit conditions. No expected value is copied from <code>MODEL.json</code>, and no row is re-pinned to model output. ${escape(summary.rows)} rows: ${escape(statusCounts)}. ${escape(summary.eligible_comparisons)} matched primary comparisons enter the release comparison score; all diagnostic and evidence-gap rows remain visible. Of those, independent model outputs: ${escape(provenanceCounts('independent'))}; registered reference inputs (data retention, not prediction): ${escape(provenanceCounts('reference_input'))}.</div>
 <h2>Inputs and integrity</h2><table><tbody><tr><th>Contract SHA-256</th><td><code>${escape(result.inputs.contract_sha256)}</code></td></tr><tr><th>Model SHA-256</th><td><code>${escape(result.inputs.model_sha256)}</code></td></tr><tr><th>Contract presets</th><td>${escape(summary.contract_presets)}</td></tr><tr><th>Model presets</th><td>${escape(summary.model_presets)}</td></tr><tr><th>Model-only presets</th><td>${escape(summary.model_only_presets.join(', ') || '—')}</td></tr></tbody></table>
 <h2>Status summary</h2>${renderStatusTable(summary)}
 <h2>Integration actions</h2><div class="warning"><ul>${actionItems.map(item => `<li>${escape(item)}</li>`).join('')}</ul></div>

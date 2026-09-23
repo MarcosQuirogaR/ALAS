@@ -11,7 +11,10 @@
 //! full-analysis polar fit carries the Korn wave term at the requested
 //! cruise Mach, the cruise solve's base polar does not, and the solve adds
 //! the wave term exactly once. Covers a wave-active cruise Mach and the
-//! zero-wave case (`wave_drag_coefficient = 0`).
+//! zero-wave case. Validation requires a positive Lock/Korn rise coefficient,
+//! so the zero-wave aircraft instead moves `wave_drag_onset_mach` to
+//! [`NO_WAVE_ONSET_MACH`], above every Mach these tests fly, which is the
+//! model's own switch for "no transonic wave drag".
 
 use alas_aero::analysis::AeroAnalysis;
 use alas_config::{AlasConfig, DesignVector};
@@ -22,10 +25,16 @@ use alas_pipeline::quick_analysis::{reduced_config, CruiseSolve};
 /// the polar fit window, so the sweep's wave term is non-zero there.
 const WAVE_ACTIVE_CRUISE_MACH: f64 = 0.86;
 
-fn reduced_report(cruise_mach: f64, wave_drag_coefficient: f64) -> (AlasConfig, AnalysisReport) {
+/// An onset Mach above every flight Mach used here, so `wave_drag` returns
+/// zero at every sweep and cruise point.
+const NO_WAVE_ONSET_MACH: f64 = 1.0;
+
+fn reduced_report(cruise_mach: f64, wave_drag: bool) -> (AlasConfig, AnalysisReport) {
     let mut config = AlasConfig::default();
     config.requirements.cruise_mach = cruise_mach;
-    config.drag_model.wave_drag_coefficient = wave_drag_coefficient;
+    if !wave_drag {
+        config.drag_model.wave_drag_onset_mach = NO_WAVE_ONSET_MACH;
+    }
     let reduced = reduced_config(&config);
     let report = FullAnalysis::new(reduced.clone())
         .run(&DesignVector::default(), true)
@@ -57,9 +66,8 @@ fn window_wave_terms(config: &AlasConfig, report: &AnalysisReport) -> Vec<f64> {
 
 #[test]
 fn the_cruise_solve_applies_the_wave_term_once_where_the_fitted_polar_already_has_it() {
-    let default_wave = AlasConfig::default().drag_model.wave_drag_coefficient;
-    let (with_wave, report_wave) = reduced_report(WAVE_ACTIVE_CRUISE_MACH, default_wave);
-    let (zero_wave, report_zero) = reduced_report(WAVE_ACTIVE_CRUISE_MACH, 0.0);
+    let (with_wave, report_wave) = reduced_report(WAVE_ACTIVE_CRUISE_MACH, true);
+    let (zero_wave, report_zero) = reduced_report(WAVE_ACTIVE_CRUISE_MACH, false);
     let design = DesignVector::default();
     let mass_kg = with_wave.requirements.mtow_kg;
 
@@ -126,7 +134,7 @@ fn the_cruise_solve_applies_the_wave_term_once_where_the_fitted_polar_already_ha
         .expect("usable q");
     let aero = AeroAnalysis::new(
         &report_wave.airplane,
-        design.sweep_deg,
+        AeroAnalysis::quarter_chord_sweep_deg(&report_wave.airplane, design.sweep_deg),
         Some(with_wave.geometry.clone()),
         Some(with_wave.drag_model.clone()),
         Some(with_wave.analysis.clone()),
@@ -164,7 +172,7 @@ fn the_cruise_solve_applies_the_wave_term_once_where_the_fitted_polar_already_ha
 
 #[test]
 fn a_zero_wave_aircraft_keeps_the_fitted_polar_as_its_whole_drag() {
-    let (zero_wave, report) = reduced_report(WAVE_ACTIVE_CRUISE_MACH, 0.0);
+    let (zero_wave, report) = reduced_report(WAVE_ACTIVE_CRUISE_MACH, false);
     let design = DesignVector::default();
     let solve = CruiseSolve::new(
         &zero_wave,
@@ -198,10 +206,7 @@ fn a_zero_wave_aircraft_keeps_the_fitted_polar_as_its_whole_drag() {
 #[test]
 fn the_default_cruise_point_reports_its_wave_state() {
     let default = AlasConfig::default();
-    let (reduced, report) = reduced_report(
-        default.requirements.cruise_mach,
-        default.drag_model.wave_drag_coefficient,
-    );
+    let (reduced, report) = reduced_report(default.requirements.cruise_mach, true);
     let design = DesignVector::default();
     let solve = CruiseSolve::new(
         &reduced,
@@ -225,15 +230,30 @@ fn the_default_cruise_point_reports_its_wave_state() {
         reduced.requirements.cruise_mach, total.cd0, total.k, base.cd0, base.k, drag.cl, drag.cd_wave, drag.cd_total()
     );
     // With no wave drag among the fitted points the base and total fits agree
-    // exactly; otherwise the correction moves the default aircraft's cruise
-    // drag coefficient by less than 1e-4 (its fitted wave content is small).
+    // exactly. Otherwise the correction removes the fit window's own wave
+    // content from the total polar so the single Korn evaluation at the
+    // requested cruise point is not counted twice. Physics review v1.2
+    // (finding A3) corrected `wave_drag` to the published Lock/Korn law,
+    // `CD_w = 20 (M - M_crit)^4` rather than `20 (M - M_dd)^4`: M_crit sits
+    // below M_dd by `(0.1/80)^(1/3) ~= 0.108`, so the fit window now carries
+    // wave drag starting noticeably before drag divergence instead of being
+    // pinned at zero there. At the default aircraft's M0.84/CL 0.68 cruise
+    // point this raises the duplicate fit-window content to several dozen
+    // drag counts (order 1e-3, ~10% of cd_total here) rather than the < 1
+    // count the superseded law left below M_dd. The physically meaningful
+    // bound is that the correction stays a minority of total drag, not that
+    // it is negligible.
     let shift = (total.cd0 + total.k * drag.cl * drag.cl) - drag.cd_base;
     eprintln!("default cruise cd shift removed by the correction: {shift:.3e}");
     if window.iter().all(|&wave| wave == 0.0) {
         assert!((base.cd0 - total.cd0).abs() < 1e-12);
         assert!((base.k - total.k).abs() < 1e-12);
     } else {
-        assert!(shift.abs() < 1e-4, "shift {shift}");
+        assert!(
+            shift.abs() < 0.3 * drag.cd_total(),
+            "shift {shift} should stay a minority of cd_total {}",
+            drag.cd_total()
+        );
     }
     assert!(drag.cd_total().is_finite() && drag.cd_total() > 0.0);
 }
@@ -250,10 +270,7 @@ fn refusal(result: Result<CruiseSolve<'_>, String>, what: &str) -> String {
 #[test]
 fn a_retained_fallback_polar_is_refused_instead_of_published() {
     let default = AlasConfig::default();
-    let (reduced, report) = reduced_report(
-        default.requirements.cruise_mach,
-        default.drag_model.wave_drag_coefficient,
-    );
+    let (reduced, report) = reduced_report(default.requirements.cruise_mach, true);
     let design = DesignVector::default();
     let mass_kg = reduced.requirements.mtow_kg;
     CruiseSolve::new(&reduced, &report.airplane, &design, &report, mass_kg)

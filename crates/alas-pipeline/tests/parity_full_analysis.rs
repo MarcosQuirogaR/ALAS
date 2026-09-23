@@ -3,6 +3,38 @@
 
 //! Parity tests comparing `alas-pipeline::full_analysis` (`FullAnalysis`)
 //! against `golden/pipeline/full_analysis.json`.
+//!
+//! # Wave-drag re-pin (physics review v1.2, finding A3)
+//!
+//! `alas-aero::analysis::AeroAnalysis::wave_drag` now applies the published
+//! Lock/Korn law (`CD_w = 20 (M - M_crit)^4`) instead of substituting the
+//! drag-divergence Mach `M_dd` for the critical Mach `M_crit`. This raises
+//! cruise CD and lowers L/D for every jet case whose cruise point sits above
+//! `M_crit`, so `design_point.{cd,l_over_d}`, `polar_fit.{cd0,k,oswald_e}`
+//! and (for the `default` case, the only one of the three whose trim solve
+//! converges) `trimmed_design_point.*` were re-pinned to the corrected
+//! values for all three fixture cases (`default`, `narrowbody`,
+//! `high_aspect_ratio`), verified by evaluating the corrected build and
+//! reverting only the wave-drag fix to confirm the old fixture values
+//! reproduce exactly under the superseded law. `high_aspect_ratio` and
+//! `narrowbody`'s `trimmed_design_point` fixture entries are stale
+//! (unrelated pre-existing degenerate/unconverged trims -- confirmed
+//! unaffected by this change under both the old and new law) and were left
+//! untouched; the Rust side already returns `None` for both regardless, so
+//! this test's `if let (Some, Some)` guard never compares them.
+//!
+//! # Gravity re-pin (physics review v1.2, finding F5)
+//!
+//! `alas_config::requirements::DesignRequirements::gravity_m_s2` also moved
+//! from the frozen two-decimal `9.81` to `alas_units::STANDARD_GRAVITY`
+//! (9.80665), a 0.035% decrease that reaches the FLOPS mass model's own
+//! weight-from-mass terms independently of the wave-drag correction above.
+//! `physical_cg` and `component_masses.{Fuel,Propulsion}` shifted by the
+//! same fraction in all three fixture cases (confirmed by reverting only
+//! the gravity default and reproducing the old fixture values exactly), so
+//! those five fields were re-pinned too, in every case, alongside the
+//! aero-driven ones. Every other component mass, and every geometry field,
+//! is unaffected and was left as-is.
 
 // This file is itself a test binary, so an unwrap or expect that fails is the
 // assertion failing.
