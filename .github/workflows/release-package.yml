@@ -135,6 +135,11 @@ jobs:
             echo "no assembled package directory found under dist/" >&2
             exit 1
           fi
+          # Absolute and native: cargo runs the acceptance test with the
+          # crate directory as its working directory, so a workspace-relative
+          # path would not resolve there. Git Bash on Windows needs `pwd -W`
+          # for a path Rust can open.
+          found="$(cd "$found" && (pwd -W 2>/dev/null || pwd))"
           echo "path=$found" >> "$GITHUB_OUTPUT"
           echo "assembled package: $found"
 
