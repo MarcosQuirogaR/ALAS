@@ -1,16 +1,10 @@
 /target/
-/target-terra/
 /tmp/
 /.landmark-backups/
 /exports/
 /.alas-onboarding-seen
 
-# Local editor, assistant and scratch state. Never part of the project; listed
-# so that a working copy cannot accidentally publish it.
-/.agent/
-/.codex/
-/.codex-metadata.json
-/.claude/
+# Local scratch state. Never part of the project.
 /CONTEXT.md
 /MISSING-THINGS.md
 **/*.rs.bk

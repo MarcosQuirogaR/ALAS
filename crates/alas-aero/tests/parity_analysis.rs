@@ -41,8 +41,7 @@
 //! `alas-aero::analysis::AeroAnalysis::wave_drag` applies the published
 //! Lock/Korn law, `CD_w = 20 (M - M_crit)^4` with `M_crit` the offset
 //! critical Mach, not the drag-divergence Mach `M_dd` the Korn equation
-//! itself yields (physics review v1.2, finding A3;
-//! `.agent/reports/physics-review-v1.2.md`). The frozen `gen_aero_analysis.py`
+//! itself yields (physics review v1.2, finding A3). The frozen `gen_aero_analysis.py`
 //! generator that produced `golden/aero/analysis.json` predates the
 //! correction and still records `20 (M - M_dd)^4`, so every `cd_wave` and
 //! `cd_total` fixture value at or above `M_dd` disagrees with the corrected
