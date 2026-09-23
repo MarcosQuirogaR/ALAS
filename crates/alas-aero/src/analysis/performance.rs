@@ -135,23 +135,24 @@ impl AeroAnalysis<'_> {
         plane: &alas_geom::aircraft::airplane::Airplane,
         op_point: &OperatingPoint,
     ) -> Result<VlmResult, VlmError> {
-        // `usize` rather than the configuration's `i64`: a negative or zero
-        // resolution is not a mesh, and both fields are documented as
-        // multipliers of at least one.
-        vlm::run(
-            plane,
-            op_point,
-            self.analysis.spanwise_resolution.max(1) as usize,
-            self.analysis.chordwise_resolution.max(1) as usize,
-        )
+        let (spanwise, chordwise) = self.mesh_resolution();
+        vlm::run(plane, op_point, spanwise, chordwise)
     }
 
     /// The mesh and factored influence matrix of `self.plane` at the
     /// configured resolution, assembled once so that a schedule of operating
     /// points pays the O(n^3) factorization a single time.
     fn system(&self) -> Result<vlm::VlmSystem<'_>, VlmError> {
-        vlm::VlmSystem::assemble(
-            self.plane,
+        let (spanwise, chordwise) = self.mesh_resolution();
+        vlm::VlmSystem::assemble(self.plane, spanwise, chordwise)
+    }
+
+    /// The configured `(spanwise, chordwise)` mesh resolution as the `usize`
+    /// pair the solver takes rather than the configuration's `i64`: floored
+    /// at one, since a negative or zero resolution is not a mesh and both
+    /// fields are documented as multipliers of at least one.
+    fn mesh_resolution(&self) -> (usize, usize) {
+        (
             self.analysis.spanwise_resolution.max(1) as usize,
             self.analysis.chordwise_resolution.max(1) as usize,
         )

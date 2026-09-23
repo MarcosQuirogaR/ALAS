@@ -13,6 +13,8 @@
 //!
 //! Times are wall-clock seconds; masses kg.
 
+// A diagnostic example: its output is the printed report, and a failed
+// unwrap is the probe stopping on an input it cannot run.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::print_stdout)]
 
 use std::time::Instant;

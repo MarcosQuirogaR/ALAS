@@ -37,6 +37,16 @@ fn builder_for_geometry(config: &AlasConfig, geometry: ScreeningGeometry) -> Air
     }
 }
 
+/// A candidate the screen could not score, with the reason it gives.
+fn rejected(name: &str, error: impl Into<String>) -> AirfoilCandidateResult {
+    AirfoilCandidateResult {
+        name: name.to_string(),
+        status: "error".to_string(),
+        error: Some(error.into()),
+        ..Default::default()
+    }
+}
+
 /// Piecewise linear interpolation matching `numpy.interp(x, xp, yp)` with sorted `xp`.
 pub fn interp_linear(x: f64, xp: &[f64], yp: &[f64]) -> f64 {
     if xp.is_empty() || yp.is_empty() {
@@ -107,6 +117,7 @@ pub(crate) fn cruise_condition_with_geometry(
 }
 
 /// Build a wing with `name` as root airfoil and score it using the 2-D NeuralFoil surrogate.
+// Same argument list as `score_candidate_with_geometry`, whose reason applies.
 #[allow(clippy::too_many_arguments)]
 pub fn score_candidate(
     name: &str,
@@ -140,6 +151,7 @@ pub fn score_candidate(
 }
 
 /// Score a candidate using the frozen reference geometry for parity fixtures.
+// Same argument list as `score_candidate_with_geometry`, whose reason applies.
 #[allow(clippy::too_many_arguments)]
 pub fn score_candidate_reference_compatibility(
     name: &str,
@@ -197,22 +209,12 @@ pub(crate) fn score_candidate_with_geometry(
     let plane = match builder.build(Some(dv), false) {
         Ok(p) => p,
         Err(e) => {
-            return AirfoilCandidateResult {
-                name: name.to_string(),
-                status: "error".to_string(),
-                error: Some(e.to_string()),
-                ..Default::default()
-            };
+            return rejected(name, e.to_string());
         }
     };
 
     if plane.wings.is_empty() || plane.wings[0].xsecs.is_empty() {
-        return AirfoilCandidateResult {
-            name: name.to_string(),
-            status: "error".to_string(),
-            error: Some("wing has no cross sections".to_string()),
-            ..Default::default()
-        };
+        return rejected(name, "wing has no cross sections".to_string());
     }
 
     let wing = &plane.wings[0];
@@ -228,12 +230,7 @@ pub(crate) fn score_candidate_with_geometry(
     let prepared = match PreparedAirfoil::prepare(airfoil) {
         Ok(prepared) => prepared,
         Err(e) => {
-            return AirfoilCandidateResult {
-                name: name.to_string(),
-                status: "error".to_string(),
-                error: Some(e.to_string()),
-                ..Default::default()
-            };
+            return rejected(name, e.to_string());
         }
     };
     // One batched network pass over the whole angle schedule: the same
@@ -245,22 +242,17 @@ pub(crate) fn score_candidate_with_geometry(
     let aeros = match prepared.aero_sweep(&conditions, mach, model_size) {
         Ok(aeros) => aeros,
         Err(e) => {
-            return AirfoilCandidateResult {
-                name: name.to_string(),
-                status: "error".to_string(),
-                error: Some(e.to_string()),
-                ..Default::default()
-            };
+            return rejected(name, e.to_string());
         }
     };
     for aero in aeros {
         if !aero.analysis_confidence.is_finite() {
             return AirfoilCandidateResult {
-                name: name.to_string(),
-                status: "error".to_string(),
-                error: Some("NeuralFoil returned non-finite analysis confidence".to_string()),
                 analysis_confidence: Some(aero.analysis_confidence),
-                ..Default::default()
+                ..rejected(
+                    name,
+                    "NeuralFoil returned non-finite analysis confidence".to_string(),
+                )
             };
         }
         confidence_min = confidence_min.min(aero.analysis_confidence);
@@ -270,14 +262,14 @@ pub(crate) fn score_candidate_with_geometry(
 
     if !confidence_min.is_finite() || confidence_min < MIN_NEURALFOIL_ANALYSIS_CONFIDENCE {
         return AirfoilCandidateResult {
-            name: name.to_string(),
-            status: "error".to_string(),
-            error: Some(format!(
-                "NeuralFoil analysis confidence {:.3e} is below the screening floor {:.3e}",
-                confidence_min, MIN_NEURALFOIL_ANALYSIS_CONFIDENCE
-            )),
             analysis_confidence: Some(confidence_min),
-            ..Default::default()
+            ..rejected(
+                name,
+                format!(
+                    "NeuralFoil analysis confidence {:.3e} is below the screening floor {:.3e}",
+                    confidence_min, MIN_NEURALFOIL_ANALYSIS_CONFIDENCE
+                ),
+            )
         };
     }
 
@@ -295,27 +287,17 @@ pub(crate) fn score_candidate_with_geometry(
     let alpha_sorted: Vec<f64> = indexed.iter().map(|p| p.2).collect();
 
     if cl_target < cl_sorted[0] || cl_target > cl_sorted[cl_sorted.len() - 1] {
-        return AirfoilCandidateResult {
-            name: name.to_string(),
-            status: "error".to_string(),
-            error: Some(format!(
+        return rejected(name, format!(
                 "target CL {:.3} outside this airfoil's swept range [{:.3}, {:.3}] (alpha {:.1}..{:.1} deg)",
                 cl_target, cl_sorted[0], cl_sorted[cl_sorted.len() - 1], alphas_deg[0], alphas_deg[alphas_deg.len() - 1]
-            )),
-            ..Default::default()
-        };
+            ));
     }
 
     let cd_at_target = interp_linear(cl_target, &cl_sorted, &cd_sorted);
     let alpha_at_target = interp_linear(cl_target, &cl_sorted, &alpha_sorted);
 
     if cd_at_target <= 0.0 {
-        return AirfoilCandidateResult {
-            name: name.to_string(),
-            status: "error".to_string(),
-            error: Some("non-physical CD <= 0 at target CL".to_string()),
-            ..Default::default()
-        };
+        return rejected(name, "non-physical CD <= 0 at target CL".to_string());
     }
 
     let sample = linspace(0.0, 1.0, 101);
@@ -339,50 +321,33 @@ pub(crate) fn score_candidate_with_geometry(
         tank_cap,
     ];
     if !values.iter().all(|v| v.is_finite()) {
-        return AirfoilCandidateResult {
-            name: name.to_string(),
-            status: "error".to_string(),
-            error: Some("non-finite result (NaN/inf)".to_string()),
-            ..Default::default()
-        };
+        return rejected(name, "non-finite result (NaN/inf)".to_string());
     }
 
     if !(0.005..=0.30).contains(&max_t) {
-        return AirfoilCandidateResult {
-            name: name.to_string(),
-            status: "error".to_string(),
-            error: Some(format!(
+        return rejected(name, format!(
                 "implausible t/c={:.1}% (outside 0.5-30% realistic range), likely a multi-element/degenerate database entry, not a usable wing section",
                 max_t * 100.0
-            )),
-            ..Default::default()
-        };
+            ));
     }
 
     if !(min_tc..=max_tc).contains(&max_t) {
-        return AirfoilCandidateResult {
-            name: name.to_string(),
-            status: "error".to_string(),
-            error: Some(format!(
+        return rejected(
+            name,
+            format!(
                 "t/c={:.1}% is outside the requested thickness window [{:.1}%, {:.1}%]",
                 max_t * 100.0,
                 min_tc * 100.0,
                 max_tc * 100.0
-            )),
-            ..Default::default()
-        };
+            ),
+        );
     }
 
     if !(0.0..=0.30).contains(&cd_at_target) || l_over_d > 150.0 {
-        return AirfoilCandidateResult {
-            name: name.to_string(),
-            status: "error".to_string(),
-            error: Some(format!(
+        return rejected(name, format!(
                 "implausible 2-D result at target CL (CD={:.4}, L/D={:.1}), likely a NeuralFoil CST-fit breakdown for this coordinate set, not a real polar",
                 cd_at_target, l_over_d
-            )),
-            ..Default::default()
-        };
+            ));
     }
 
     // Off-design robustness evaluation

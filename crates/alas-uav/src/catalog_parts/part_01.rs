@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-use std::fmt;
 use std::io::Read;
 use std::sync::OnceLock;
 
@@ -36,7 +35,8 @@ pub struct Catalog {
 }
 
 /// A catalogue import or validation failure.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{message}")]
 pub struct CatalogError {
     message: String,
 }
@@ -48,14 +48,6 @@ impl CatalogError {
         }
     }
 }
-
-impl fmt::Display for CatalogError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.message)
-    }
-}
-
-impl std::error::Error for CatalogError {}
 
 impl Catalog {
     /// Parse and validate a normalized JSON catalogue.

@@ -12,6 +12,9 @@ alas-exec = { path = "../alas-exec" }
 alas-geom = { path = "../alas-geom" }
 serde = { workspace = true }
 serde_json = { workspace = true }
+# Typed error enums derive `Display`/`Error` the same way as the rest of the
+# workspace instead of hand-written impls.
+thiserror = { workspace = true }
 
 [lints]
 workspace = true

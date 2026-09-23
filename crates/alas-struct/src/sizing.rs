@@ -58,7 +58,7 @@ pub use types::{
     MassBreakdown, SparSizing, WingboxSizing, MARGIN_NUMERICAL_ZERO,
 };
 
-pub(crate) use law::gradient_unit;
+pub(crate) use law::{gradient_unit, trapezoid};
 use law::{linspace, SizingLaw};
 use solve::size_wingbox_with_law;
 

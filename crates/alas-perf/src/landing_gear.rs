@@ -333,7 +333,7 @@ pub fn size_landing_gear(
 /// two-point approximation at the primary (first) main-gear station; the
 /// additional positions describe geometry and do not silently calibrate mass
 /// or loads.
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments)] // one argument per gear-sizing input
 pub fn size_landing_gear_with_group_stations(
     mtow_kg: f64,
     x_nlg: f64,
@@ -474,7 +474,7 @@ pub fn size_landing_gear_with_group_stations(
         fuselage_diameter_m * gear_config.track_diameter_factor + wheels_per_strut as f64 * 0.05
     };
 
-    //: Lateral turnover angle (Raymer Ch.11 / Currey overturn criterion).
+    // Lateral turnover angle (Raymer Ch.11 / Currey overturn criterion).
     // The tip-over axis runs from the nose-gear contact to a main-gear
     // contact; in plan view it makes angle delta with the centreline. The
     // lateral lever arm is l_n*sin(delta), smallest at the forward CG limit.

@@ -144,10 +144,10 @@ impl TurbopropOperatingEnvelope {
             // 25,000 ft.
             maximum_operating_altitude_m: 7_620.0,
             maximum_operating_mach: 0.55,
-            // 275 kt true airspeed. Before the blade-efficiency correction the
-            // model carried a 14 % thrust surplus at this point and could
-            // exceed it; it no longer can, which is the one aircraft-level
-            // check available on the correction.
+            // 275 kt true airspeed. Without the blade-efficiency loss the
+            // model carries a 14 % thrust surplus here and can exceed this
+            // speed; with it, it cannot, which is the one aircraft-level check
+            // available on that loss.
             maximum_cruise_true_airspeed_m_s: 141.472_2,
             power_lapse_floor_density_kg_m3,
             supported_modes: &[TurbopropMode::Governed, TurbopropMode::Shutdown],

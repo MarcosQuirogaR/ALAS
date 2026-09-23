@@ -37,6 +37,8 @@ pub use sweeps::{
 use alas_config::{ActiveEngineModel, AlasConfig, TurbofanEngineSpec};
 use alas_prop::cycle::TurbofanCycleInputs;
 
+use crate::families::common::linspace;
+
 /// The cruise design point every propulsion figure evaluates the cycle at.
 ///
 /// Ported from `_propulsion_design_point` (`visualization.py`): the current
@@ -73,27 +75,6 @@ fn is_turboprop(config: &AlasConfig) -> bool {
         config.geometry.engine.propulsion_technology,
         alas_config::PropulsionTechnology::Turboprop
     )
-}
-
-/// `numpy.linspace(start, stop, num)` with the inclusive endpoint NumPy uses.
-///
-/// The interior points are `start + step * i`; the last is set to `stop`
-/// exactly, matching `alas-perf::performance::linspace`'s own note on why
-/// (keeps the axis endpoints bit-identical rather than a rounding of
-/// `start + step * (num - 1)`). Every `np.linspace` call this family ports
-/// (the carpet plot's two axes, the efficiency-decomposition sweep, the BPR
-/// sweep, the altitude/Mach grid) goes through this one copy.
-fn linspace(start: f64, stop: f64, num: usize) -> Vec<f64> {
-    if num == 0 {
-        return Vec::new();
-    }
-    if num == 1 {
-        return vec![start];
-    }
-    let step = (stop - start) / (num - 1) as f64;
-    let mut values: Vec<f64> = (0..num).map(|i| start + step * i as f64).collect();
-    values[num - 1] = stop;
-    values
 }
 
 #[cfg(test)]

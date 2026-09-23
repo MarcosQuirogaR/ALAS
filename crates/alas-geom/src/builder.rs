@@ -36,12 +36,9 @@
 //!
 //! # `sinspace`
 //!
-//! [`sinspace`] is duplicated here rather than shared with
-//! `aircraft::spacing::linspace`/`cosspace`: that module is private to the aircraft model, and
-//! `crate::airfoil_library` and `crate::wing_structure::support` already
-//! establish the pattern of a small private copy per consumer rather than
-//! widening the aircraft model's visibility for one helper (see either module's own
-//! `linspace` for the precedent).
+//! [`sinspace`] lives here rather than beside `aircraft::spacing::linspace`
+//! and `cosspace` because the builder is its only caller; it is built on that
+//! module's `linspace`.
 
 #[path = "builder_parts/error.rs"]
 mod errors;

@@ -45,7 +45,7 @@ impl AeroAnalysis<'_> {
     /// wave drag. The Lock/Korn law is `CD_w = C (M - M_crit)^4` with
     /// `M_crit = M_dd - (0.1/(4 C))^(1/3)`. At the default C=20, the offset
     /// is about 0.1077 (Mason, *Configuration Aerodynamics*, transonic-drag
-    /// notes; Lock 1985; physics review v1.2, A3). The frozen Python fixture
+    /// notes; Lock 1985). The frozen Python fixture
     /// instead used `M_dd` as the start; `parity_analysis.rs` compares against
     /// the corrected expectation without widening tolerance.
     pub fn wave_drag(&self, mach: f64, cl: f64, section_thickness: Option<f64>) -> f64 {

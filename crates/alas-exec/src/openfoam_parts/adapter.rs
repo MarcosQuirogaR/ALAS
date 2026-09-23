@@ -4,6 +4,29 @@
 //! Backend resolution, command construction, and capability probing.
 
 use super::*;
+
+/// Environment additions for a native utility: the OpenFOAM project variables
+/// when a project directory is configured, and the configured bin directory
+/// ahead of the inherited `PATH` so its DLLs and helper tools resolve first.
+fn native_environment(preferences: &OpenFoamPreferences) -> Vec<(OsString, OsString)> {
+    let mut environment = Vec::new();
+    if let Some(project) = preferences.native_project_dir.as_deref() {
+        environment.push((OsString::from("WM_PROJECT_DIR"), OsString::from(project)));
+        environment.push((
+            OsString::from("WM_PROJECT_VERSION"),
+            project_version(project).into(),
+        ));
+    }
+    if let Some(bin) = preferences.native_bin_dir.as_deref() {
+        let old_path = std::env::var_os("PATH").unwrap_or_default();
+        let mut value = OsString::from(bin);
+        value.push(if cfg!(windows) { ";" } else { ":" });
+        value.push(old_path);
+        environment.push((OsString::from("PATH"), value));
+    }
+    environment
+}
+
 impl OpenFoamAdapter {
     /// Resolve an adapter. `Auto` probes native utilities before WSL2.
     pub fn resolve(preferences: OpenFoamPreferences) -> Self {
@@ -157,37 +180,21 @@ impl OpenFoamAdapter {
             OpenFoamBackend::Native | OpenFoamBackend::Auto => {
                 let program = native_program(&self.preferences, tool)?;
                 let mut args = Vec::with_capacity(extra_args.len() + 2);
-                if let Some(case_dir) = case_dir {
-                    args.push(OsString::from("-case"));
+                if case_dir.is_some() {
                     // The process is launched in the isolated case directory;
                     // passing the same relative path again would make
                     // OpenFOAM resolve `case/case` for caller-supplied
                     // relative paths. `.` also handles spaces and Unicode
                     // without shell quoting.
-                    let _ = case_dir;
+                    args.push(OsString::from("-case"));
                     args.push(OsString::from("."));
                 }
                 args.extend(extra_args.iter().cloned());
-                let mut environment = Vec::new();
-                if let Some(project) = self.preferences.native_project_dir.as_deref() {
-                    environment.push((OsString::from("WM_PROJECT_DIR"), OsString::from(project)));
-                    environment.push((
-                        OsString::from("WM_PROJECT_VERSION"),
-                        project_version(project).into(),
-                    ));
-                }
-                if let Some(bin) = self.preferences.native_bin_dir.as_deref() {
-                    let old_path = std::env::var_os("PATH").unwrap_or_default();
-                    let mut value = OsString::from(bin);
-                    value.push(if cfg!(windows) { ";" } else { ":" });
-                    value.push(old_path);
-                    environment.push((OsString::from("PATH"), value));
-                }
                 Ok(OpenFoamCommand {
                     program,
                     args,
                     current_dir: case_dir.map(Path::to_path_buf),
-                    environment,
+                    environment: native_environment(&self.preferences),
                     label: tool.to_owned(),
                 })
             }
@@ -258,26 +265,11 @@ impl OpenFoamAdapter {
                 let program = configured.map(PathBuf::from).unwrap_or_else(|| {
                     PathBuf::from(if cfg!(windows) { "gmsh.exe" } else { "gmsh" })
                 });
-                let mut environment = Vec::new();
-                if let Some(project) = self.preferences.native_project_dir.as_deref() {
-                    environment.push((OsString::from("WM_PROJECT_DIR"), OsString::from(project)));
-                    environment.push((
-                        OsString::from("WM_PROJECT_VERSION"),
-                        project_version(project).into(),
-                    ));
-                }
-                if let Some(bin) = self.preferences.native_bin_dir.as_deref() {
-                    let old_path = std::env::var_os("PATH").unwrap_or_default();
-                    let mut value = OsString::from(bin);
-                    value.push(if cfg!(windows) { ";" } else { ":" });
-                    value.push(old_path);
-                    environment.push((OsString::from("PATH"), value));
-                }
                 Ok(OpenFoamCommand {
                     program,
                     args: extra_args.to_vec(),
                     current_dir: Some(case_dir.to_path_buf()),
-                    environment,
+                    environment: native_environment(&self.preferences),
                     label: "gmsh".to_owned(),
                 })
             }
@@ -286,11 +278,10 @@ impl OpenFoamAdapter {
                     return Err("wsl.exe is not available on this host".to_owned());
                 }
                 let mut args = Vec::with_capacity(extra_args.len() + 8);
-                if let Some(distribution) = self
-                    .preferences
-                    .wsl_distribution
-                    .as_deref()
-                    .filter(|value| !value.trim().is_empty())
+                // Trimmed exactly as for the OpenFOAM utilities, so one
+                // distribution setting names the same distribution for both.
+                if let Some(distribution) =
+                    configured_wsl_value(self.preferences.wsl_distribution.as_deref())
                 {
                     args.push(OsString::from("--distribution"));
                     args.push(OsString::from(distribution));

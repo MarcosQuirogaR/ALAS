@@ -365,8 +365,10 @@ fn estimate_non_cruise_distance(
         profile.takeoff_climb_rate_m_s,
         departure_elevation_m,
     )?;
-    let first_level_m = (cruise_altitude_m * profile.initial_climb_altitude_fraction)
-        .max(departure_elevation_m + 3000.0);
+    // The same levels the ladder-duration check judges, so the footprint and
+    // the check describe one schedule.
+    let [first_level_m, second_level_m, _] =
+        step_climb_levels_m(profile, cruise_altitude_m, departure_elevation_m);
     let first_level_midpoint_m = 0.5 * (current_m + first_level_m);
     leg(
         &mut current_m,
@@ -377,8 +379,6 @@ fn estimate_non_cruise_distance(
         first_level_midpoint_m,
     )?;
     if active_cruise_legs >= 2 {
-        let second_level_m =
-            (cruise_altitude_m * profile.step_climb_1_altitude_fraction).max(first_level_m + 300.0);
         let second_level_midpoint_m = 0.5 * (current_m + second_level_m);
         leg(
             &mut current_m,

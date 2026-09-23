@@ -61,11 +61,10 @@ pub struct SegmentSolution {
     /// **This is the request, not the delivered command.** While the envelope
     /// is enforced the throttle is clamped into `[0, 1]` *after* the root
     /// find, before the final `iterate` (see the clamp loop below), and the
-    /// residual closure itself no longer clamps, so `conditions.throttle` can
-    /// never exceed one and a peak read from there is always exactly `1.000`
-    /// whenever the clamp was active, which reports that the limit was hit and nothing about how far
-    /// short the aeroplane fell. The first version of this field did read it
-    /// from there and was measured returning that useless `1.000`.
+    /// residual closure itself does not clamp, so `conditions.throttle` can
+    /// never exceed one and a peak read from there is exactly `1.000`
+    /// whenever the clamp was active: it says the limit was hit and nothing
+    /// about how far short the aeroplane fell.
     pub peak_throttle: f64,
     /// Smallest finite throttle fraction the root finder *asked for*, or
     /// `NaN` when none was finite. The lower-bound counterpart of
@@ -101,6 +100,14 @@ pub struct SegmentSolution {
     /// does not move like that, and it is what separates a schedule that is
     /// wrong throughout from one that only grazes the floor at an end point.
     pub sub_idle_points: usize,
+}
+
+impl SegmentSolution {
+    /// Whether the segment counts as flown: converged, and on neither the
+    /// throttle stop nor the idle floor.
+    fn is_flown(&self) -> bool {
+        self.converged && !self.throttle_limited && !self.idle_floor_limited
+    }
 }
 
 /// Why a mission could not be flown.
@@ -166,14 +173,14 @@ pub fn converge_root(
         hybrd::solve(
             |point, residual| {
                 segment.unpack_unknowns(point);
-                // The command is no longer clamped here. `common::update_thrust`
+                // The command is not clamped here. `common::update_thrust`
                 // keeps the propulsion deck inside its own domain and continues
                 // the force linearly above the rating, so the residual still
-                // varies with a command the aeroplane cannot deliver. Clamping
-                // at this level instead made the residual flat above one - the
-                // Jacobian column vanished and `hybrd` stalled rather than
-                // reporting the shortfall. The envelope itself is unchanged and
-                // is still enforced after the solve.
+                // varies with a command the aeroplane cannot deliver. A clamp
+                // at this level makes the residual flat above one: the
+                // Jacobian column vanishes and `hybrd` stalls rather than
+                // reporting the shortfall. The envelope is enforced after the
+                // solve.
                 segment.iterate(analyses);
                 residual.copy_from_slice(&segment.pack_residuals());
             },
@@ -242,32 +249,25 @@ pub fn converge_root(
             .iter()
             .all(|throttle| throttle.is_finite() && *throttle >= 0.0 && *throttle <= 1.0);
     // A root the solver could only reach by asking for a force the aeroplane
-    // cannot produce is not a flown segment, and that holds at *both* bounds.
-    // This was implicit while the command was clamped inside the residual,
-    // because no such root existed to find; now that the force is continued
-    // outside the deck's domain one does, and the contract has to say so
-    // explicitly. This only ever *tightens*: a segment that converged before
-    // did so with every command the deck answered directly, so both flags
-    // were already false for it.
+    // cannot produce is not a flown segment, and that holds at *both* bounds:
+    // the force is continued outside the deck's domain, so such a root exists
+    // and the contract has to reject it explicitly.
     //
     // The lower flag is not "the command went negative". A deck's lowest
     // deliverable force is flight idle, which is a *positive* fraction of the
-    // rating - 0.075 to 0.092 over a measured A320-200 `descent_1` - so the
-    // historical `[0, 1]` envelope declared commands available that no engine
-    // will hold. Without this a root found at, say, 0.03 would have been
-    // published as converged and inside the envelope while the aeroplane was
-    // actually sitting at idle producing 2.5 times the commanded force.
+    // rating - 0.075 to 0.092 over a measured A320-200 `descent_1` - so a
+    // `[0, 1]` envelope alone accepts commands no engine will hold: a root at
+    // 0.03 would publish as converged while the aeroplane sits at idle
+    // producing 2.5 times the commanded force.
     //
     // Both flags are read **only where the envelope is enforced**, which is
-    // what [`MissionAnalyses::enforce_throttle_envelope`] has always said:
-    // the frozen SUAVE compatibility path "keeps the reference solver's
-    // converged flag even where its historical engine sizing produces
-    // throttle above one". Applying the upper flag unconditionally instead
-    // turned that fixture's `initial_climb` non-converged, which stopped the
-    // frozen mission after two of its twelve segments and made the recorded
-    // block fuel 3 954 kg against the reference's 82 816 kg. Product missions
-    // are unaffected: they enforce the envelope, so the clause reads exactly
-    // as before.
+    // what [`MissionAnalyses::enforce_throttle_envelope`] says: the frozen
+    // SUAVE compatibility path "keeps the reference solver's converged flag
+    // even where its historical engine sizing produces throttle above one".
+    // Applying the upper flag there turns that fixture's `initial_climb`
+    // non-converged, stops the frozen mission after two of its twelve
+    // segments, and records a block fuel of 3 954 kg against the reference's
+    // 82 816 kg.
     let converged = solution.status.is_converged()
         && throttle_within_available_envelope
         && (!analyses.enforce_throttle_envelope
@@ -291,14 +291,12 @@ pub fn converge_root(
         );
     }
 
-    let peak_throttle = peak_requested_throttle;
-
     Ok(SegmentSolution {
         converged,
         status: solution.status,
         evaluations: solution.evaluations,
         throttle_limited,
-        peak_throttle,
+        peak_throttle: peak_requested_throttle,
         minimum_throttle: minimum_requested_throttle,
         available_throttle_floor,
         idle_floor_limited,
@@ -442,13 +440,9 @@ impl MissionResult {
     /// of the segment loop as soon as a segment exhausts fuel or fails to
     /// converge, so a short segment list is a *consequence* of that break. A
     /// refusal that reported the count first would say "only 11 of 12
-    /// scheduled segments produced a solution" and hide the segment that
-    /// actually failed, which is what the first version of this function
-    /// did, measured on the AVE finalist. The failing segment is therefore
-    /// examined before the count.
-    ///
-    /// No gate moves: every condition below is one `completed_summary`
-    /// already refuses on.
+    /// scheduled segments produced a solution" (measured on the AVE
+    /// finalist) and hide the segment that actually failed. The failing
+    /// segment is therefore examined before the count.
     pub fn completion_refusal(&self) -> Option<String> {
         if self.scheduled_segment_count == 0 {
             return Some("no mission segment was scheduled".to_owned());
@@ -464,9 +458,12 @@ impl MissionResult {
             ));
         }
         // The segment the loop stopped on, named with the reason it stopped.
-        if let Some((index, solution)) = self.solutions.iter().enumerate().find(|(_, solution)| {
-            !solution.converged || solution.throttle_limited || solution.idle_floor_limited
-        }) {
+        if let Some((index, solution)) = self
+            .solutions
+            .iter()
+            .enumerate()
+            .find(|(_, solution)| !solution.is_flown())
+        {
             let tag = self
                 .segments
                 .get(index)
@@ -526,18 +523,24 @@ impl MissionResult {
             ));
         }
         if self.segments.iter().any(|segment| {
-            segment.conditions.total_mass_kg.len() < 2
-                || segment.conditions.time_s.len() < 2
-                || segment.conditions.aircraft_range_m.is_empty()
-                || segment
-                    .conditions
-                    .total_mass_kg
+            let c = &segment.conditions;
+            c.total_mass_kg.len() < 2
+                || c.time_s.len() < 2
+                || c.aircraft_range_m.is_empty()
+                || c.total_mass_kg
                     .iter()
-                    .chain(&segment.conditions.time_s)
-                    .chain(&segment.conditions.aircraft_range_m)
+                    .chain(&c.time_s)
+                    .chain(&c.aircraft_range_m)
                     .any(|value| !value.is_finite())
         }) {
             return Some("a segment produced too few or non-finite samples".to_owned());
+        }
+        if self.physical_summary().is_none() {
+            return Some(
+                "the mission totals are not physical: a non-positive mass, or negative fuel, \
+                 block time or distance"
+                    .to_owned(),
+            );
         }
         None
     }
@@ -546,31 +549,17 @@ impl MissionResult {
     ///
     /// Partial, exhausted, unconverged, throttle-limited, or non-finite
     /// telemetry deliberately produces `None`; [`Self::completion_refusal`]
-    /// names which of those it was.
+    /// names which of those it was. The summary is defined as "no refusal",
+    /// so the two cannot disagree about whether a mission completed.
     pub fn completed_summary(&self) -> Option<CompletedMissionSummary> {
-        if self.scheduled_segment_count == 0
-            || self.fuel_exhaustion.is_some()
-            || self.segments.len() != self.scheduled_segment_count
-            || self.solutions.len() != self.scheduled_segment_count
-            || self.solutions.iter().any(|solution| {
-                !solution.converged || solution.throttle_limited || solution.idle_floor_limited
-            })
-            || self.segments.iter().any(|segment| {
-                segment.conditions.total_mass_kg.len() < 2
-                    || segment.conditions.time_s.len() < 2
-                    || segment.conditions.aircraft_range_m.is_empty()
-                    || segment
-                        .conditions
-                        .total_mass_kg
-                        .iter()
-                        .chain(&segment.conditions.time_s)
-                        .chain(&segment.conditions.aircraft_range_m)
-                        .any(|value| !value.is_finite())
-            })
-        {
+        if self.completion_refusal().is_some() {
             return None;
         }
+        self.physical_summary()
+    }
 
+    /// The scalar totals, when each is finite and inside its physical range.
+    fn physical_summary(&self) -> Option<CompletedMissionSummary> {
         let takeoff_mass_kg = self.initial_mass_kg();
         let landing_mass_kg = self.final_mass_kg();
         let trip_fuel_kg = takeoff_mass_kg - landing_mass_kg;
@@ -765,9 +754,9 @@ mod tests {
     ///
     /// `fly` breaks out of the segment loop the moment a segment does not
     /// converge, so a truncated solution list is the *consequence*. Reporting
-    /// the count first is what the first version of this function did, and on
-    /// the AVE finalist it produced "only 11 of 12 scheduled segments produced
-    /// a solution": true, and silent about which segment failed and why. A
+    /// the count first, on the AVE finalist, reads "only 11 of 12 scheduled
+    /// segments produced a solution": true, and silent about which segment
+    /// failed and why. A
     /// reader of that finding cannot tell a throttle stop from a root-finder
     /// failure, and those have different owners.
     #[test]
@@ -824,11 +813,10 @@ mod tests {
     /// `converge_root`'s throttle unknowns are clamped into `[0, 1]` after the
     /// root find rather than inside the residual closure, so the published
     /// peak of `conditions.throttle` is exactly `1.000` whenever the clamp was
-    /// active,
-    /// for a 2 % shortfall and a 200 % one alike. Reading it from there is
-    /// what the first version of this field did, and the measured AVE case
-    /// duly reported `peak throttle 1.000`, which cannot discriminate a
-    /// marginal thrust deficit from a diverging root find. A value above one
+    /// active, for a 2 % shortfall and a 200 % one alike. Read from there, the
+    /// measured AVE case reports `peak throttle 1.000`, which cannot
+    /// discriminate a marginal thrust deficit from a diverging root find. A
+    /// value above one
     /// must therefore be representable in this field and must survive into
     /// the refusal text.
     #[test]
@@ -945,6 +933,52 @@ mod tests {
         assert!(result
             .completion_refusal()
             .is_some_and(|refusal| refusal.contains("flight idle")));
+    }
+
+    /// A mission whose every segment converged but whose totals are not
+    /// physical (here the aeroplane ends heavier than it started) is refused,
+    /// and the refusal says so rather than leaving the caller with no reason.
+    #[test]
+    fn non_physical_totals_are_refused_with_a_reason() {
+        let spec = SegmentSpec {
+            tag: "cruise".to_owned(),
+            kind: crate::segments::SegmentKind::Cruise {
+                altitude_m: Some(10_000.0),
+                distance_m: 100_000.0,
+            },
+            air_speed_m_s: 230.0,
+            air_speed_reference: Default::default(),
+            true_course_rad: 0.0,
+            temperature_deviation_k: 0.0,
+            number_control_points: 4,
+        };
+        let mut segment = Segment::new(spec, None)
+            .unwrap_or_else(|error| panic!("a four-point cruise sets up: {error}"));
+        segment.conditions.total_mass_kg = vec![60_000.0, 60_100.0, 60_200.0, 60_300.0];
+        segment.conditions.time_s = vec![0.0, 100.0, 200.0, 300.0];
+        segment.conditions.aircraft_range_m = vec![0.0, 1.0e4, 2.0e4, 3.0e4];
+        let flown = SegmentSolution {
+            converged: true,
+            status: Status::Converged,
+            evaluations: 10,
+            throttle_limited: false,
+            peak_throttle: 0.6,
+            minimum_throttle: 0.5,
+            available_throttle_floor: f64::NAN,
+            idle_floor_limited: false,
+            sub_idle_points: 0,
+        };
+        let result = MissionResult {
+            segments: vec![segment],
+            solutions: vec![flown],
+            scheduled_segment_count: 1,
+            fuel_exhaustion: None,
+        };
+
+        assert_eq!(result.completed_summary(), None);
+        assert!(result
+            .completion_refusal()
+            .is_some_and(|refusal| refusal.contains("not physical")));
     }
 
     #[test]

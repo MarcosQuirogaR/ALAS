@@ -19,6 +19,8 @@ use crate::score::interp_linear;
 use crate::types::AirfoilCandidateResult;
 
 /// Verify candidate section using MSES coupled viscous-inviscid solver.
+// The flight condition, the tool location and the cancellation flag are
+// independent inputs of one external run; a struct would only rename them.
 #[allow(clippy::too_many_arguments)]
 pub fn verify_candidate_mses(
     candidate: &mut AirfoilCandidateResult,

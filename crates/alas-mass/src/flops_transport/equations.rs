@@ -45,7 +45,7 @@ pub(super) fn instruments_kg(
     )
 }
 
-/// Equation 104 (corrected doc number; TM eq. 103 is fighter instruments), with the scaled counts `FNEW` and `FNEF`.
+/// Equation 104 (eq. 103 is the fighter form), with the scaled counts `FNEW` and `FNEF`.
 pub(super) fn hydraulics_kg(
     fuselage_planform_area_m2: f64,
     wing_area_m2: f64,
@@ -67,7 +67,7 @@ pub(super) fn hydraulics_kg(
     )
 }
 
-/// Equation 106 (corrected doc number), with the scaled total engine count `FNENG`.
+/// Equation 106, with the scaled total engine count `FNENG`.
 pub(super) fn electrical_kg(
     fuselage_length_m: f64,
     fuselage_width_m: f64,
@@ -138,7 +138,7 @@ pub(super) fn air_conditioning_kg(
     )
 }
 
-/// Equation 115 (corrected doc number; TM eq. 113 is air conditioning). `nacelle_diameter_m` is the scaled diameter `FNAC` of
+/// Equation 115 (eq. 113 is air conditioning). `nacelle_diameter_m` is the scaled `FNAC` of
 /// equation 85 and `engine_count` the scaled count `FNENG`.
 pub(super) fn anti_ice_kg(
     span_m: f64,
@@ -178,7 +178,7 @@ pub(super) fn unusable_fuel_kg(
     )
 }
 
-/// Equation 123 (corrected doc number; TM eq. 122 is fighter unusable fuel), with the scaled count `FNENG` and scaled thrust `FTHRST`.
+/// Equation 123 (eq. 122 is the fighter form), with scaled `FNENG` and thrust `FTHRST`.
 pub(super) fn engine_oil_kg(engine_count: f64, thrust_n: f64) -> f64 {
     pounds_to_kg(0.082 * engine_count * (thrust_n / POUND_FORCE).powf(0.65))
 }
@@ -235,7 +235,7 @@ pub(super) fn cargo_containers_kg(containerized_mass_kg: f64) -> f64 {
 /// exactly as well, which confirms the coefficients and the exponent
 /// independently of the convention. It is also the same `D_av` that FLOPS
 /// equation 56 already uses in this crate (`structure.rs`), so the two methods
-/// now read the same quantity from the same geometry.
+/// read the same quantity from the same geometry.
 ///
 /// Feeding the maximum width instead understates a non-circular fuselage:
 /// 1,723.8 kg on the A380-800 (7.14 m wide, 8.41 m deep) and 86.4 kg on the

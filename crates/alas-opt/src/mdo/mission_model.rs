@@ -186,7 +186,7 @@ impl SegmentMissionModel {
     /// # Errors
     ///
     /// A description of the first invalid term.
-    #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::too_many_arguments)] // one named physical input per model term; a struct would only rename them once
     pub fn new(
         profile: MissionProfileConfig,
         cruise_mach: f64,

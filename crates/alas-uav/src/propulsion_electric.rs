@@ -24,8 +24,6 @@ mod fixture;
 mod mission;
 mod solver;
 
-use std::fmt;
-
 pub use acc2026::{
     assess_acc2026_electrical, Acc2026ElectricalAssessment, Acc2026ElectricalFinding,
 };
@@ -49,16 +47,19 @@ pub use solver::{
 };
 
 /// A failure to resolve or calculate a source-bounded electric operating point.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum ElectricPropulsionError {
     /// A numerical request is not finite or violates a documented bound.
+    #[error("{0}")]
     InvalidInput(String),
     /// A selection names no catalogue record.
+    #[error("catalogue has no component '{id}'")]
     MissingComponent {
         /// Requested catalogue identifier.
         id: String,
     },
     /// A selection names a record from the wrong catalogue family.
+    #[error("component '{id}' is not a {expected}")]
     WrongComponentFamily {
         /// Selected component identifier.
         id: String,
@@ -66,6 +67,7 @@ pub enum ElectricPropulsionError {
         expected: &'static str,
     },
     /// The selected catalogue record has no required published value.
+    #[error("component '{id}' has no published {field}")]
     MissingEvidence {
         /// Selected component identifier.
         id: String,
@@ -73,6 +75,7 @@ pub enum ElectricPropulsionError {
         field: &'static str,
     },
     /// The selected battery is outside a motor or ESC cell-count range.
+    #[error("component '{id}' does not support the selected {cells}S battery")]
     CellCountMismatch {
         /// Component whose range is violated.
         id: String,
@@ -80,16 +83,22 @@ pub enum ElectricPropulsionError {
         cells: u16,
     },
     /// No propeller performance table is reviewed for the selection.
+    #[error("no reviewed performance table is available for '{id}'")]
     UnsupportedPropeller {
         /// Selected propeller identifier.
         id: String,
     },
     /// The requested speed or RPM falls outside a reviewed table.
+    #[error("the reviewed propeller table does not cover {speed_m_s:.3} m/s")]
     PerformanceTableOutOfRange {
         /// True airspeed requested by the caller.
         speed_m_s: f64,
     },
     /// The reviewed RPM table does not bracket a motor/propeller equilibrium.
+    #[error(
+        "no motor/propeller equilibrium at {speed_m_s:.3} m/s within the reviewed \
+         {minimum_rpm:.0}-{maximum_rpm:.0} RPM range"
+    )]
     NoEquilibrium {
         /// True airspeed requested by the caller.
         speed_m_s: f64,
@@ -100,37 +109,21 @@ pub enum ElectricPropulsionError {
     },
 }
 
-impl fmt::Display for ElectricPropulsionError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::InvalidInput(message) => formatter.write_str(message),
-            Self::MissingComponent { id } => write!(formatter, "catalogue has no component '{id}'"),
-            Self::WrongComponentFamily { id, expected } => {
-                write!(formatter, "component '{id}' is not a {expected}")
-            }
-            Self::MissingEvidence { id, field } => {
-                write!(formatter, "component '{id}' has no published {field}")
-            }
-            Self::CellCountMismatch { id, cells } => {
-                write!(formatter, "component '{id}' does not support the selected {cells}S battery")
-            }
-            Self::UnsupportedPropeller { id } => {
-                write!(formatter, "no reviewed performance table is available for '{id}'")
-            }
-            Self::PerformanceTableOutOfRange { speed_m_s } => write!(
-                formatter,
-                "the reviewed propeller table does not cover {speed_m_s:.3} m/s"
-            ),
-            Self::NoEquilibrium {
-                speed_m_s,
-                minimum_rpm,
-                maximum_rpm,
-            } => write!(
-                formatter,
-                "no motor/propeller equilibrium at {speed_m_s:.3} m/s within the reviewed {minimum_rpm:.0}-{maximum_rpm:.0} RPM range"
-            ),
-        }
-    }
+/// Whether a catalogue motor publishes its full winding model (resistance and
+/// no-load current) rather than Kv alone.
+///
+/// Without it the solver substitutes zero for both, an ideal motor, and each
+/// consumer has to be told: the solve result through its assumption list and
+/// the optimizer map, which has none, through its evidence text.
+fn has_winding_model(motor: &crate::catalog::MotorSpec) -> bool {
+    motor.winding_resistance_ohm.is_some() && motor.no_load_current_a.is_some()
 }
 
-impl std::error::Error for ElectricPropulsionError {}
+/// The qualifier the optimizer map's evidence carries for a Kv-only motor.
+fn ideal_motor_note(motor: &crate::catalog::MotorSpec) -> &'static str {
+    if has_winding_model(motor) {
+        ""
+    } else {
+        " (winding model incomplete: unverified ideal-motor estimate)"
+    }
+}

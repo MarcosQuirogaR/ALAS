@@ -9,7 +9,9 @@
 #[path = "objective_model.rs"]
 mod objective_model;
 
-pub(crate) use objective_model::apply_candidate_payload_load_case;
+pub(crate) use objective_model::{
+    apply_candidate_payload_load_case, restore_winning_payload_load_case,
+};
 pub use objective_model::{
     wing_fuel_volume_m3, wing_fuel_volume_m3_reference_compatibility, DesignObjective,
 };

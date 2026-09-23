@@ -52,7 +52,7 @@ const SPECIFIC_HEAT_CAPACITY_AIR: f64 = 1006.0;
 ///
 /// `mission analysis model.Attributes.Gases.Air.compute_absolute_viscosity`, cited upstream to
 /// <https://www.cfd-online.com/Wiki/Sutherland's_law>. Numerically identical
-/// to [`crate::isa`]'s private Sutherland constant, but kept as this module's
+/// to [`crate::atmosphere`]'s private Sutherland constant, but kept as this module's
 /// own copy rather than shared: the two upstream projects each define it
 /// independently (`native aerodynamic model/atmosphere.py` and `mission analysis model/Attributes/Gases/
 /// Air.py` do not share code either), so one copy per translated source file
@@ -86,7 +86,8 @@ struct Break {
     /// it recomputes density from `p` and `T` through the ideal gas law
     /// instead, so this field exists only for fidelity to the source table
     /// and is not consumed by anything in this module.
-    #[allow(dead_code)] // carried for fidelity to the upstream table; see above
+    // Carried for fidelity to the upstream table; see the field doc above.
+    #[allow(dead_code)]
     density_kg_m3: f64,
 }
 
@@ -195,13 +196,11 @@ static SEGMENTS: LazyLock<[Segment; BREAKS.len() - 1]> = LazyLock::new(|| {
 /// than reproducing the overwrite loop.
 fn segment_for(geopotential_altitude_m: f64) -> &'static Segment {
     let segments = &*SEGMENTS;
-    let mut index = 0;
-    for (i, segment) in segments.iter().enumerate() {
-        if geopotential_altitude_m >= segment.base_altitude_m {
-            index = i;
-        }
-    }
-    &segments[index]
+    segments
+        .iter()
+        .rev()
+        .find(|segment| geopotential_altitude_m >= segment.base_altitude_m)
+        .unwrap_or(&segments[0])
 }
 
 /// Every quantity `compute_values` reports.
@@ -235,9 +234,12 @@ pub struct Values {
 }
 
 /// Why a checked US Standard Atmosphere evaluation was rejected.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, thiserror::Error)]
 pub enum Us1976Error {
     /// Geometric altitude or temperature deviation was not finite.
+    #[error(
+        "US1976 inputs must be finite (altitude={altitude_m:?}, temperature deviation={temperature_deviation_k:?})"
+    )]
     NonFiniteInput {
         /// Geometric altitude in metres.
         altitude_m: f64,
@@ -245,11 +247,15 @@ pub enum Us1976Error {
         temperature_deviation_k: f64,
     },
     /// Geometric-to-geopotential conversion is singular at `-R_earth`.
+    #[error("US1976 geometric altitude {altitude_m} m is singular at the Earth-radius conversion")]
     GeometricAltitudeSingularity {
         /// Geometric altitude at the singular conversion point.
         altitude_m: f64,
     },
     /// Geopotential altitude lies outside the tabulated US1976 model band.
+    #[error(
+        "US1976 altitude {altitude_m} m lies outside the tabulated geopotential model [{min_m}, {max_m}] m"
+    )]
     AltitudeOutsideModel {
         /// Requested geometric altitude in metres.
         altitude_m: f64,
@@ -259,37 +265,9 @@ pub enum Us1976Error {
         max_m: f64,
     },
     /// The evaluated state contains a nonphysical or non-finite property.
+    #[error("US1976 returned a nonphysical atmospheric state")]
     NonPhysicalState,
 }
-
-impl std::fmt::Display for Us1976Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::NonFiniteInput {
-                altitude_m,
-                temperature_deviation_k,
-            } => write!(
-                f,
-                "US1976 inputs must be finite (altitude={altitude_m:?}, temperature deviation={temperature_deviation_k:?})"
-            ),
-            Self::GeometricAltitudeSingularity { altitude_m } => write!(
-                f,
-                "US1976 geometric altitude {altitude_m} m is singular at the Earth-radius conversion"
-            ),
-            Self::AltitudeOutsideModel {
-                altitude_m,
-                min_m,
-                max_m,
-            } => write!(
-                f,
-                "US1976 altitude {altitude_m} m lies outside the tabulated geopotential model [{min_m}, {max_m}] m"
-            ),
-            Self::NonPhysicalState => f.write_str("US1976 returned a nonphysical atmospheric state"),
-        }
-    }
-}
-
-impl std::error::Error for Us1976Error {}
 
 /// Compute atmospheric values at `altitude_m` (geometric altitude above mean
 /// sea level, in metres), with an optional temperature deviation.

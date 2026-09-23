@@ -12,7 +12,7 @@ use crate::history::OptimizationHistory;
 /// Keeping this bookkeeping outside the numerical evaluator keeps the latter
 /// below the repository's production-source size limit without changing the
 /// order or contents of the history vectors.
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments)] // one named diagnostic per history label it derives
 pub(crate) fn record_objective_result(
     history: &mut OptimizationHistory,
     dv: DesignVector,

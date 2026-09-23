@@ -437,9 +437,9 @@ pub fn assess_physical_feasibility_with_load_case(
     // The installed sea-level reference thrust, taken from whichever physical
     // model the aircraft actually has: the certificated jet rating for a
     // turbofan, the propeller model's ground-roll mean thrust for a
-    // turboprop. The jet rating stays exactly zero for a shaft-power engine,
-    // so a propeller aircraft no longer arrives here with nothing, and it is
-    // the roll mean rather than the static value because a propeller's thrust
+    // turboprop. The jet rating is exactly zero for a shaft-power engine, so
+    // a propeller aircraft needs the propeller model's value, and it is the
+    // roll mean rather than the static value because a propeller's thrust
     // falls through the roll. See `static_thrust`.
     //
     // The propeller branch needs the lift-off speed the roll mean is taken
@@ -630,12 +630,10 @@ pub fn assess_physical_feasibility_with_load_case(
             }
         };
         // Report the input that actually failed. This guard covers three
-        // different quantities but used to publish `wing_area_m2` as the
-        // finding's `actual` whichever one of them was at fault, so the ATR
-        // 72-600 - whose wing area is a perfectly healthy 61.0 m2 - reported
-        // "inputs are not finite and positive (actual 61.000 m^2, limit
-        // 0.000 m^2)". A reader cannot act on that, and the quantity really
-        // at fault there is the static thrust-to-weight ratio.
+        // different quantities; publishing `wing_area_m2` as the finding's
+        // `actual` whichever one was at fault would tell a reader that a
+        // healthy 61.0 m^2 ATR 72-600 wing is "not finite and positive" when
+        // the quantity at fault is the static thrust-to-weight ratio.
         let unusable = |value: f64| !value.is_finite() || value <= 0.0;
         let failure = if unusable(wing_area_m2) {
             Some(("wing reference area", wing_area_m2, "m^2"))
@@ -653,10 +651,10 @@ pub fn assess_physical_feasibility_with_load_case(
         if let Some((quantity, value, unit)) = failure {
             // When it is the thrust that is missing, the propulsion model
             // already said why in its own terms; repeat that rather than
-            // implying the geometry is malformed. A turboprop no longer
-            // reaches this on a zero jet rating, because the propeller deck
-            // supplies the static thrust, so an unavailable thrust here means
-            // the deck itself could not be built or evaluated.
+            // implying the geometry is malformed. A turboprop does not reach
+            // this on a zero jet rating, because the propeller deck supplies
+            // the static thrust, so an unavailable thrust here means the deck
+            // itself could not be built or evaluated.
             let thrust_reason = match &sea_level_static_thrust.source {
                 static_thrust::StaticThrustSource::Unavailable { reason }
                     if quantity == "static thrust-to-weight ratio" =>

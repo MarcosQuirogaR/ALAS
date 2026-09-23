@@ -55,7 +55,6 @@ crates/alas-gui/src/views/results_view/summary.rs	902	Layout-derived aircraft me
 crates/alas-gui/src/views/screening_view.rs	857	Advanced Settings > Airfoil Screening: the multi-stage sweep's options, run/cancel controls, status, and ranked result table. Frozen at the 1.2 review size pending decomposition into modules with interfaces.
 crates/alas-gui/src/views/tools_view/cards.rs	569	Card renderers for the external-tools page. Frozen at the 1.2 review size pending decomposition into modules with interfaces.
 crates/alas-gui/src/views/uav_view/sections.rs	525	Mission, hardware, and propulsion controls for the fixed-wing UAV workflow. Assembled from 2 include! fragments; frozen at review size pending decomposition into modules with interfaces.
-crates/alas-mass/src/breakdown/coordinates.rs	502	Mass-coordinate placement and weight-and-balance orchestration. Frozen at the 1.2 review size pending decomposition into modules with interfaces.
 crates/alas-mass/src/dispatch.rs	532	The takeoff-mass fixed point: finding the fuel load a mission's own weight requires. frozen at review size pending decomposition into modules with interfaces.
 crates/alas-mass/src/flops_transport/airframe.rs	615	Resolve a built ALAS transport into the FLOPS structural and propulsion inputs, and evaluate whichever of the two groups is selected. Frozen at the 1.2 review size pending decomposition into modules with interfaces.
 crates/alas-mass/src/flops_transport/equations.rs	589	Closed-form FLOPS transport equations in their published imperial units. Frozen at the 1.2 review size pending decomposition into modules with interfaces.
@@ -64,7 +63,6 @@ crates/alas-mass/src/flops_transport/turboprop.rs	540	Shaft-power propulsion-gro
 crates/alas-mass/src/stations.rs	798	Geometry-derived component stations: where each ledger item sits and how big it is. Frozen at the 1.2 review size pending decomposition into modules with interfaces.
 crates/alas-mass/src/wing_centroid.rs	533	Preliminary main-wing structural mass centroid. Assembled from 2 include! fragments; frozen at review size pending decomposition into modules with interfaces.
 crates/alas-mass/src/wing_inventory.rs	672	An enumerated, sourced non-box wing inventory for a clean-sheet transport wing. Assembled from 2 include! fragments; frozen at review size pending decomposition into modules with interfaces.
-crates/alas-mass/src/wing_reconciliation.rs	725	The one wing-mass basis both product consumers build on. Frozen at the 1.2 review size pending decomposition into modules with interfaces.
 crates/alas-mission/src/profile.rs	566	The mission half of the mission request. Frozen at the 1.2 review size pending decomposition into modules with interfaces.
 crates/alas-mission/src/segments.rs	557	One leg of a mission, and the two-unknown system that flies it. frozen at review size pending decomposition into modules with interfaces.
 crates/alas-mission/src/solve.rs	705	Solving a segment, and flying a mission one segment at a time. Frozen at the 1.2 review size pending decomposition into modules with interfaces.
@@ -113,7 +111,6 @@ crates/alas-report/src/families/geometry/sandbox_scene.rs	539	The sandbox worksp
 crates/alas-report/src/families/geometry/section.rs	1565	Dimensioned transverse cabin section, drawn from a resolved cabin scene. Assembled from 4 include! fragments; frozen at review size pending decomposition into modules with interfaces.
 crates/alas-report/src/families/propulsion/sweeps.rs	518	Parametric trade-space figures: the OPR x TIT carpet plot, efficiency decomposition vs OPR, and specific-thrust/TSFC sensitivity to bypass ratio (dual-axis). Assembled from 2 include! fragments; frozen at review size pending decomposition into modules with interfaces.
 crates/alas-report/src/families/structures_dynamics/modes.rs	745	Rayleigh-versus-MSC/NASTRAN-95 normal-mode frequencies and spanwise shapes. Frozen at the 1.2 review size pending decomposition into modules with interfaces.
-crates/alas-report/src/pdf/render.rs	543	PDF object and content-stream serialization for report scenes. Frozen at the 1.2 review size pending decomposition into modules with interfaces.
 crates/alas-report/src/registry.rs	633	Figure registry and metadata catalogue for interactive UI and batch export. Assembled from 2 include! fragments; frozen at review size pending decomposition into modules with interfaces.
 crates/alas-report/src/scene.rs	802	Backend-neutral 2D/3D scene description, coordinate transforms, and cameras. Frozen at the 1.2 review size pending decomposition into modules with interfaces.
 crates/alas-screen/src/runner.rs	684	Screening runner orchestrating Stage 1 (2-D), Stage 2 (3-D), and Stage 3 (MSES). Frozen at the 1.2 review size pending decomposition into modules with interfaces.
@@ -131,6 +128,6 @@ crates/alas-uav/src/production_verdict_impl.rs	639	Coupled calculations behind t
 crates/alas-uav/src/propulsion_electric/cpacs35.rs	514	CPACS 3.5 toolspecific extension for electric UAV operating data. Assembled from 2 include! fragments; frozen at review size pending decomposition into modules with interfaces.
 crates/alas-uav/src/propulsion_electric/solver.rs	706	Coupled DC-motor and propeller torque balance. Assembled from 2 include! fragments; frozen at review size pending decomposition into modules with interfaces.
 crates/alas-uav/src/shared_core.rs	610	Adapter from preliminary UAV output to the production geometry and VLM core. Assembled from 2 include! fragments; frozen at review size pending decomposition into modules with interfaces.
-crates/alas-viz/src/render.rs	776	Plotters-backed conversion of [`Scene`] elements into `egui` painter shapes. Frozen at the 1.2 review size pending decomposition into modules with interfaces.
+crates/alas-viz/src/render.rs	595	Conversion of [`Scene`] elements into `egui` painter shapes, with no plotting-library backend. Frozen at the 1.2 review size pending decomposition into modules with interfaces.
 xtask/src/dist.rs	1830	Packaging and distribution assembly task for xtask. Frozen at the 1.2 review size pending decomposition into modules with interfaces.
 xtask/src/evidence.rs	590	Bookkeeping checks for the evidence described by the porting ledger. Assembled from 2 include! fragments; frozen at review size pending decomposition into modules with interfaces.

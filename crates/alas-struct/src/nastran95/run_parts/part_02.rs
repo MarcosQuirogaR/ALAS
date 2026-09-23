@@ -187,18 +187,6 @@ fn is_page_furniture(line: &str) -> bool {
         || line.contains("EIGENVALUE")
 }
 
-fn drain<R: Read + Send + 'static>(mut stream: R) -> thread::JoinHandle<String> {
-    thread::spawn(move || {
-        let mut buffer = Vec::new();
-        let _ = stream.read_to_end(&mut buffer);
-        String::from_utf8_lossy(&buffer).into_owned()
-    })
-}
-
-fn join(handle: thread::JoinHandle<String>) -> String {
-    handle.join().unwrap_or_default()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -334,13 +322,14 @@ mod tests {
             open_core_words: None,
             max_open_core_words: LEGACY_MAX_OPEN_CORE_WORDS,
         };
-        for timeout in [f64::NAN, f64::MAX] {
+        for timeout in [f64::NAN, f64::INFINITY, 0.0, -1.0] {
             let outcome = run_nastran95(&solver, "", Path::new("not-created"), timeout);
             let RunOutcome::Failed(error) = outcome else {
                 panic!("an invalid timeout must not launch a solve");
             };
-            assert!(error.contains("representable"), "{error}");
+            assert!(error.starts_with("nastran.exe timeout must be"), "{error}");
         }
+        assert!(!Path::new("not-created").exists());
     }
 
     #[test]

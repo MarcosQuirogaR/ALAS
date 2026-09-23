@@ -24,6 +24,7 @@ alas-struct = { path = "../alas-struct" }
 alas-opt = { path = "../alas-opt" }
 alas-screen = { path = "../alas-screen" }
 alas-pipeline = { path = "../alas-pipeline" }
+base64 = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

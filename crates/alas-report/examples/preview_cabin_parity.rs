@@ -8,6 +8,7 @@
 //! empty mass and the seated passenger count from both, per preset, so the
 //! agreement is a measured number and not an inference from the call site.
 
+// A probe that reports to the console and stops at the first broken fixture.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::print_stdout)]
 
 use alas_config::presets;

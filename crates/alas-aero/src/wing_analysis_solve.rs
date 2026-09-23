@@ -398,19 +398,16 @@ fn span_load(
         let trailing_edge = midpoint(panel.back_left, panel.back_right);
         let chord = leading_edge.map_or(0.0, |edge| distance(edge, trailing_edge));
         leading_edge = None;
-        // NaN in any of these means a diverged/invalid upstream state (e.g.
-        // `dynamic_pressure_pa` is an explicit NaN sentinel from
-        // `operating_point` for an unreachable atmosphere state, or the
-        // lattice solve produced degenerate panel geometry). Such a station
-        // must be rejected, not silently propagated into `section_cl`, so
-        // this checks finiteness explicitly rather than relying on
-        // `!(x > 0.0)`, which is false (i.e. "valid") for NaN operands on
-        // this partially ordered type. Matches the reference-geometry guard
-        // above (`is_finite() && x > 0.0`).
-        if !(strip_width.is_finite() && strip_width > 0.0)
-            || !(chord.is_finite() && chord > 0.0)
-            || !(dynamic_pressure.is_finite() && dynamic_pressure > 0.0)
-        {
+        // A non-finite value in any of these means a diverged or invalid
+        // upstream state (`dynamic_pressure_pa` is an explicit NaN sentinel
+        // from `operating_point` for an unreachable atmosphere state, or the
+        // lattice produced degenerate panel geometry). Such a strip is
+        // dropped rather than propagated into `section_cl`, matching the
+        // reference-geometry guard above (`is_finite() && x > 0.0`).
+        let usable = [strip_width, chord, dynamic_pressure]
+            .iter()
+            .all(|&value| value.is_finite() && value > 0.0);
+        if !usable {
             strip_lift = 0.0;
             continue;
         }

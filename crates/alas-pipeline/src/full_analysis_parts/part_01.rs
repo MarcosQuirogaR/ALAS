@@ -18,11 +18,7 @@ impl FullAnalysis {
     /// preserve live engine fields regardless of whether they came from CPACS,
     /// a preset, a saved configuration, or the engine designer.
     pub fn new_preserving_engine_config(config: AlasConfig) -> Self {
-        let reference_compatibility = config.mass_model.uses_reference_mass_methods();
-        Self {
-            config,
-            reference_compatibility,
-        }
+        Self::new(config)
     }
 
     /// Construct a full analysis that reproduces the frozen Python wing point.
@@ -224,7 +220,7 @@ impl FullAnalysis {
             .run_sweep(req.cruise_mach, req.cruise_altitude_m)
             .map_err(|e| format!("polar sweep error: {e:?}"))?;
 
-        let design_point = self.compute_design_point(&plane, &polar);
+        let design_point = self.compute_design_point(&plane, &polar)?;
         let polar_fit = self.fit_polar(&plane, &polar);
 
         let (x_np, sm, _) = if self.reference_compatibility {
@@ -269,7 +265,7 @@ impl FullAnalysis {
 
         Ok(AnalysisReport {
             design: *design,
-            airplane: plane.clone(),
+            airplane: plane,
             polar,
             design_point,
             polar_fit,

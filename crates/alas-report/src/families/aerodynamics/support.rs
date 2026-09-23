@@ -9,25 +9,7 @@
 use crate::colormap::Colormap;
 use crate::scene::{Axes2D, Fill, Scene, SceneElement};
 
-/// The padded `(min, max)` of every finite value in `values`, or `(0, 1)` if
-/// none is finite. `pad_frac` widens each side by that fraction of the span,
-/// matching matplotlib's default 5% autoscale margin at `0.05`.
-pub(super) fn padded_range(values: impl Iterator<Item = f64>, pad_frac: f64) -> (f64, f64) {
-    let mut lo = f64::INFINITY;
-    let mut hi = f64::NEG_INFINITY;
-    for v in values {
-        if v.is_finite() {
-            lo = lo.min(v);
-            hi = hi.max(v);
-        }
-    }
-    if !lo.is_finite() || !hi.is_finite() {
-        return (0.0, 1.0);
-    }
-    let span = (hi - lo).max(1e-9);
-    let pad = span * pad_frac;
-    (lo - pad, hi + pad)
-}
+pub(super) use crate::families::common::padded_range;
 
 /// Cell boundaries for `n` sample points taken at the midpoint of each cell,
 /// on a linear axis: interior edges are the midpoint of each adjacent pair,

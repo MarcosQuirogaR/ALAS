@@ -1,17 +1,26 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-// Geometry seams for the clean-sheet wing inventory: the FLOPS and
-// non-box-planform inputs read off the built wing, and the configured
-// control-surface areas and centroids the inventory items are placed at.
+//! Geometry seams for the clean-sheet wing inventory: the FLOPS and
+//! non-box-planform inputs read off the built wing, and the configured
+//! control-surface areas and centroids the inventory items are placed at.
+
+use alas_config::AlasConfig;
+use alas_geom::aircraft::wing::Wing;
+
+use crate::flops_transport::structure::{FlopsWingInputs, WingBendingFactor};
+use crate::torenbeek::WingSecondaryMassBreakdown;
+use crate::wing_inventory::FixedNonBoxStructure;
+
+use super::{design_gross_mass_kg, WingReconciliationError};
 
 /// FLOPS Eqs. 33-38 inputs read off the built wing.
 ///
-/// `movable_surface_area_m2` is left at zero: [`build_wing_inventory`]
+/// `movable_surface_area_m2` is left at zero: [`crate::wing_inventory::build_wing_inventory`]
 /// overwrites it with the enumerated movable areas so the two cannot disagree.
 /// `thickness_to_chord` is the chord-weighted mean section thickness, which is
 /// the `TCA` the equations ask for.
-fn flops_wing_inputs(config: &AlasConfig, wing: &Wing) -> FlopsWingInputs {
+pub(super) fn flops_wing_inputs(config: &AlasConfig, wing: &Wing) -> FlopsWingInputs {
     FlopsWingInputs {
         design_gross_mass_kg: design_gross_mass_kg(config),
         wing_area_m2: wing.reference_area(),
@@ -55,7 +64,7 @@ fn chord_weighted_thickness_to_chord(wing: &Wing) -> f64 {
 /// centre spar does not move the boundary. The chordwise fraction is the strip
 /// forward of the front spar plus the strip aft of the rear spar; the centroid
 /// is the area-weighted mid-chord point of those two strips.
-fn fixed_non_box_structure(config: &AlasConfig, wing: &Wing) -> FixedNonBoxStructure {
+pub(super) fn fixed_non_box_structure(config: &AlasConfig, wing: &Wing) -> FixedNonBoxStructure {
     let (fractions, full_span) = config.structures.resolved_spars();
     let bounding: Vec<f64> = fractions
         .iter()
@@ -66,9 +75,7 @@ fn fixed_non_box_structure(config: &AlasConfig, wing: &Wing) -> FixedNonBoxStruc
         .collect();
     let front = bounding.iter().copied().fold(f64::INFINITY, f64::min);
     let rear = bounding.iter().copied().fold(f64::NEG_INFINITY, f64::max);
-    if bounding.len() < 2
-        || front.partial_cmp(&rear) != Some(std::cmp::Ordering::Less)
-    {
+    if bounding.len() < 2 || front.partial_cmp(&rear) != Some(std::cmp::Ordering::Less) {
         return FixedNonBoxStructure {
             chord_fraction_outside_box: 0.0,
             centroid_m: surface_centroid(wing, 0.0, 1.0, 0.5),
@@ -91,7 +98,7 @@ fn fixed_non_box_structure(config: &AlasConfig, wing: &Wing) -> FixedNonBoxStruc
     }
 }
 
-fn validate_secondary_breakdown(
+pub(super) fn validate_secondary_breakdown(
     breakdown: WingSecondaryMassBreakdown,
 ) -> Result<(), WingReconciliationError> {
     let values = [
@@ -115,7 +122,12 @@ fn validate_secondary_breakdown(
     }
 }
 
-fn configured_surface_area(wing: &Wing, start: f64, end: f64, chord_fraction: f64) -> f64 {
+pub(super) fn configured_surface_area(
+    wing: &Wing,
+    start: f64,
+    end: f64,
+    chord_fraction: f64,
+) -> f64 {
     let start = start.clamp(0.0, 1.0);
     let end = end.clamp(0.0, 1.0);
     let chord_fraction = chord_fraction.clamp(0.0, 1.0);
@@ -137,7 +149,12 @@ fn configured_surface_area(wing: &Wing, start: f64, end: f64, chord_fraction: f6
     area * if wing.symmetric { 2.0 } else { 1.0 }
 }
 
-fn surface_centroid(wing: &Wing, start: f64, end: f64, chordwise_fraction: f64) -> [f64; 3] {
+pub(super) fn surface_centroid(
+    wing: &Wing,
+    start: f64,
+    end: f64,
+    chordwise_fraction: f64,
+) -> [f64; 3] {
     let start = start.clamp(0.0, 1.0);
     let end = end.clamp(0.0, 1.0);
     if end <= start {

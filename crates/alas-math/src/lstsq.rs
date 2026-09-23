@@ -194,8 +194,7 @@ pub fn least_squares(a: &[Vec<f64>], b: &[f64]) -> Result<Vec<f64>, LeastSquares
     // values: the two differ by a modest factor and this branch is unreached
     // on every problem in this workspace, which sit six orders clear of it.
     let largest = (0..columns).fold(0.0_f64, |best, k| best.max(matrix[k][k].abs()));
-    let threshold =
-        f64::from(u32::try_from(rows.max(columns)).unwrap_or(u32::MAX)) * f64::EPSILON * largest;
+    let threshold = rows.max(columns) as f64 * f64::EPSILON * largest;
     if let Some(column) = (0..columns).find(|&k| matrix[k][k].abs() <= threshold) {
         return Err(LeastSquaresError::RankDeficient { column });
     }

@@ -497,7 +497,7 @@ mod tests {
         assert!((scaled.engines * scaled.thrust_per_engine_n - 8.0 * 50_000.0).abs() < 1e-6);
         // Equation 85 as Aviary's `distributed_nacelle_diam_factor` evaluates
         // it: 0.5 D sqrt(N), which is sqrt(2) for eight one-metre nacelles,
-        // not the D sqrt(N/2) this port previously used.
+        // not D sqrt(N/2).
         assert!((scaled.nacelle_diameter_m - 0.5 * 8.0_f64.sqrt()).abs() < 1e-12);
         assert!((scaled.nacelle_diameter_m - std::f64::consts::SQRT_2).abs() < 1e-12);
         let twin = distributed_scaling(2, 2, 0, 120_000.0, 2.0);
@@ -509,7 +509,7 @@ mod tests {
         // constant D exactly): treated as a function of a continuous engine
         // count, the two pieces meet with no jump at the boundary. No
         // registered preset exceeds four engines, so this is unreached in
-        // practice either way. Physics review v1.2, finding M2.
+        // practice either way.
         assert_eq!(scaled_nacelle_diameter_m(3.0, 4), 3.0);
         assert!((scaled_nacelle_diameter_m(3.0, 5) - 1.5 * 5.0_f64.sqrt()).abs() < 1e-12);
     }

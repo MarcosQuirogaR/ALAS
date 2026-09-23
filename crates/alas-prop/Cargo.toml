@@ -14,6 +14,9 @@ alas-atmo = { path = "../alas-atmo" }
 # `compute_turbofan_cycle` reads a `PropulsionCycleConfig` for every component
 # efficiency and pressure loss, exactly as the reference module does.
 alas-config = { path = "../alas-config" }
+# Typed error enums derive `Display`/`Error` the same way as the rest of the
+# workspace instead of hand-written impls.
+thiserror = { workspace = true }
 
 [dev-dependencies]
 alas-testkit = { path = "../alas-testkit" }

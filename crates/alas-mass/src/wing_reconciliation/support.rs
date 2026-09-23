@@ -156,8 +156,8 @@ mod tests {
     #[test]
     fn a_box_heavier_than_the_empirical_wing_is_reported_not_fatal() {
         // A semi-wing box of 6,000 kg is a 12,000 kg complete box against a
-        // 8,000 kg empirical wing: the A320-class case that used to abort
-        // the fixed-aircraft path with an opaque structural-sizing error.
+        // 8,000 kg empirical wing: an A320-class case that must not abort the
+        // fixed-aircraft path with an opaque structural-sizing error.
         let sized_box = SizedWingboxMass::symmetric_semiwing(6_000.0, [19.0, 6.0, -1.0]);
         let reference = ReferenceWingMass {
             total_mass_kg: 8_000.0,

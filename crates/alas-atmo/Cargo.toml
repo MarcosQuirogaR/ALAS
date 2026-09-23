@@ -13,6 +13,9 @@ rust-version.workspace = true
 # `alas-math` owns. Both are P1 leaves and `alas-math` depends on nothing in
 # the workspace, so the edge introduces no layering.
 alas-math = { path = "../alas-math" }
+# The checked-construction and airspeed error enums derive their `Display`
+# through it, as every other error type in the workspace does.
+thiserror = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]

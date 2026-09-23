@@ -270,3 +270,60 @@ fn a_timeout_kills_the_solver_tree_and_retains_the_failure_evidence() {
 
     fs::remove_dir_all(&root).unwrap_or_else(|error| panic!("remove {}: {error}", root.display()));
 }
+
+#[test]
+fn a_timeout_beyond_the_clock_range_runs_without_a_deadline() {
+    // `Instant::now() + Duration::MAX` panics; a caller asking for an
+    // effectively unbounded run must get one rather than a crashed worker.
+    let root = temporary_directory("unbounded");
+    let geometry = write_geometry(&root);
+    let executable = write_fake_solver(&root, FakeSolverBehavior::WritesOutputs, 1);
+
+    let result = run_avl(&executable, &geometry, &[0.0], 1.0e30);
+
+    assert_eq!(result.status, AvlProcessStatus::Completed);
+    fs::remove_dir_all(&root).unwrap_or_else(|error| panic!("remove {}: {error}", root.display()));
+}
+
+#[test]
+fn an_unremovable_stale_artifact_is_a_launch_failure_not_a_rejected_deck() {
+    let root = temporary_directory("stale-directory");
+    let geometry = write_geometry(&root);
+    let executable = write_fake_solver(&root, FakeSolverBehavior::WritesOutputs, 1);
+    let blocking = root.join("case.avl.000.ft");
+    fs::create_dir_all(&blocking)
+        .unwrap_or_else(|error| panic!("create {}: {error}", blocking.display()));
+
+    let result = run_avl(&executable, &geometry, &[0.0], 5.0);
+
+    assert_eq!(result.status, AvlProcessStatus::LaunchFailed);
+    assert!(result
+        .error
+        .as_deref()
+        .is_some_and(|error| error.contains("cannot remove stale")));
+    fs::remove_dir_all(&root).unwrap_or_else(|error| panic!("remove {}: {error}", root.display()));
+}
+
+#[test]
+fn an_unusable_timeout_is_an_invalid_timeout_and_nothing_is_launched() {
+    let root = temporary_directory("invalid-timeout");
+    let geometry = write_geometry(&root);
+    let executable = write_fake_solver(&root, FakeSolverBehavior::WritesOutputs, 1);
+
+    for timeout_seconds in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, 0.0, -1.0] {
+        let result = run_avl(&executable, &geometry, &[0.0], timeout_seconds);
+
+        assert_eq!(
+            result.status,
+            AvlProcessStatus::InvalidTimeout,
+            "{timeout_seconds}"
+        );
+        assert!(result
+            .error
+            .as_deref()
+            .is_some_and(|error| error.starts_with("AVL timeout must be")));
+        // The fake solver would have written its force file had it run.
+        assert!(!root.join("case.avl.000.ft").exists(), "{timeout_seconds}");
+    }
+    fs::remove_dir_all(&root).unwrap_or_else(|error| panic!("remove {}: {error}", root.display()));
+}

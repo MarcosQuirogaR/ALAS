@@ -222,12 +222,9 @@ pub fn run_structural_analysis_with_environment_events(
     // reliefs the bending moment with a geometric tank estimate and no
     // powerplant; `alas-mass`'s wing reconciliation reliefs it with the
     // aircraft's *declared* integral fuel capacity and its wing-mounted engine
-    // point loads. Solving one box and weighing another put 14 299.5 kg
-    // against 15 128.2 kg per semi-wing on the A340-300, a 5.5 % divergence
-    // between the structure this stage reports and the structure the mass
-    // ledger charges. Required consumer correction C2, from an internal
-    // handoff note on pushing the components results; the two call sites now
-    // share one relief.
+    // point loads. Solving one box and weighing another differs by about
+    // 5.5 % per semi-wing on the A340-300 (14 299.5 kg against 15 128.2 kg),
+    // so both call sites share one relief.
     let stations = alas_struct::sizing::sizing_stations(&wsg, scfg);
     let (box_front, box_rear) = alas_struct::sizing::box_chord_band(&wsg);
     // The *structural design weight*, not this run's dispatch mass. The
@@ -237,12 +234,9 @@ pub fn run_structural_analysis_with_environment_events(
     // (`design_gross_mass_kg`: a declared FLOPS `DG` override where one
     // exists, the requirement otherwise). `config.requirements` is the raw
     // requirement, and under a fixed-aircraft basis the two differ whenever
-    // the pipeline evaluates at a dispatch mass - the box that is solved was
-    // then sized *and bounded* at the mission mass while the box that is
-    // weighed was sized at the design mass. Required consumer correction C1,
-    // from an internal handoff note on load-case relief, on top of C2 from
-    // the components-results push handoff note below, which made the two
-    // call sites share one relief in the first place.
+    // the pipeline evaluates at a dispatch mass; building the loads from it
+    // would size and bound the solved box at the mission mass while the
+    // weighed box is sized at the design mass.
     let mut design_req = config.requirements.clone();
     design_req.mtow_kg = alas_mass::wing_reconciliation::design_gross_mass_kg(config);
     let declared_fuel_kg_m = alas_mass::wing_reconciliation::declared_integral_wing_fuel_kg_m(

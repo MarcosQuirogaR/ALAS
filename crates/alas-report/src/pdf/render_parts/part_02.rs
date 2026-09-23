@@ -67,38 +67,34 @@ fn format_number(value: f64) -> String {
     format!("{value:.3}")
 }
 
-fn pdf_literal(text: &str) -> String {
-    let mut out = String::from("(");
-    for character in text.chars() {
-        let byte = win_ansi_byte(character);
-        match byte {
-            b'(' | b')' | b'\\' => {
-                out.push('\\');
-                out.push(byte as char);
-            }
-            32..=126 => out.push(byte as char),
-            _ => out.push_str(&format!("\\{byte:03o}")),
+
+#[cfg(test)]
+mod tests {
+    use super::{append_scene_text, SceneTextStyle};
+    use crate::scene::{Color, TextAlign, TextBaseline};
+
+    fn style(baseline: TextBaseline, angle_deg: f64) -> SceneTextStyle {
+        SceneTextStyle {
+            font_size_pt: 12.0,
+            color: Color::rgb(0, 0, 0),
+            align: TextAlign::Left,
+            baseline,
+            angle_deg,
         }
     }
-    out.push(')');
-    out
-}
 
-fn win_ansi_byte(character: char) -> u8 {
-    match character {
-        '\u{00b0}' => 0xb0,
-        '\u{00b1}' => 0xb1,
-        '\u{00b5}' => 0xb5,
-        '\u{00b7}' => 0xb7,
-        '\u{00d7}' => 0xd7,
-        '\u{00f7}' => 0xf7,
-        '\u{2013}' => 0x96,
-        '\u{2014}' => 0x97,
-        '\u{2018}' | '\u{2019}' => 0x92,
-        '\u{201c}' | '\u{201d}' => 0x94,
-        '\u{2026}' => 0x85,
-        character if character.is_ascii() => character as u8,
-        _ => b'?',
+    #[test]
+    fn scene_text_uses_points_one_row_per_line_and_the_svg_rotation() {
+        let mut out = String::new();
+        append_scene_text(&mut out, &["A", "B"], [100.0, 50.0], &style(TextBaseline::Middle, 0.0));
+        // 12 pt is 16 CSS px; SVG centers the two rows at y = 40.4 and 59.6.
+        assert_eq!(out.matches("/F1 16.000 Tf").count(), 2);
+        assert!(out.contains("1.000 0.000 0.000 -1.000 100.000 45.200 Tm\n(A) Tj"));
+        assert!(out.contains("1.000 0.000 0.000 -1.000 100.000 64.400 Tm\n(B) Tj"));
+
+        let mut rotated = String::new();
+        append_scene_text(&mut rotated, &["C"], [100.0, 50.0], &style(TextBaseline::Middle, -90.0));
+        // Reading upward: glyph tops face -x, so the baseline sits 4.8 px toward +x.
+        assert!(rotated.contains("0.000 -1.000 -1.000 -0.000 104.800 50.000 Tm"));
     }
 }
-

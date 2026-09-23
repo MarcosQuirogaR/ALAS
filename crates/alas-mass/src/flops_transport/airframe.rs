@@ -226,9 +226,14 @@ pub fn evaluate_airframe_product(request: &FlopsAirframeRequest<'_>) -> FlopsAir
         reasons.push(Reason::StructureConfiguration);
     }
 
-    let (Some(wing), Some(fuselage)) = (main_wing(plane), primary_fuselage(plane)) else {
-        reasons.push(Reason::MainWingGeometry);
-        reasons.push(Reason::FuselageGeometry);
+    let (wing, fuselage) = (main_wing(plane), primary_fuselage(plane));
+    let (Some(wing), Some(fuselage)) = (wing, fuselage) else {
+        if wing.is_none() {
+            reasons.push(Reason::MainWingGeometry);
+        }
+        if fuselage.is_none() {
+            reasons.push(Reason::FuselageGeometry);
+        }
         return sort_reasons(reasons);
     };
     let horizontal = find_surface(plane, "Horizontal Stabilizer", 1);
@@ -387,23 +392,7 @@ pub fn evaluate_airframe_product(request: &FlopsAirframeRequest<'_>) -> FlopsAir
                     Some(group)
                 }
                 Err(blockers) => {
-                    reasons.extend(blockers.into_iter().map(|blocker| match blocker {
-                        TurbopropMassUnverifiedReason::InvalidConfiguration => {
-                            Reason::TurbopropMassConfiguration
-                        }
-                        TurbopropMassUnverifiedReason::InvalidOperatingPoint => {
-                            Reason::TurbopropOperatingPoint
-                        }
-                        TurbopropMassUnverifiedReason::ShaftPowerRating => {
-                            Reason::TurbopropShaftPowerRating
-                        }
-                        TurbopropMassUnverifiedReason::PropellerGeometry => {
-                            Reason::TurbopropPropellerGeometry
-                        }
-                        TurbopropMassUnverifiedReason::NacelleArchitecture => {
-                            Reason::TurbopropNacelleArchitecture
-                        }
-                    }));
+                    reasons.extend(blockers.into_iter().map(Reason::from));
                     None
                 }
             }
@@ -429,20 +418,11 @@ pub fn evaluate_airframe_product(request: &FlopsAirframeRequest<'_>) -> FlopsAir
         Some(value) => (value, "declared"),
         None => (requirements.mtow_kg, "requirements_mtow"),
     };
-    // This function has no `AlasConfig`/`DesignMode`/preset identity in scope
-    // (only `DesignRequirements` and `MassModelConfig`, via
-    // `FlopsAirframeRequest`), so it cannot call the mode-aware
-    // `AlasConfig::landing_mass_limit_kg` resolver itself. Every product call
-    // site instead resolves that limit ahead of time and passes it down
-    // through the ordinary `mlw_fraction_mtow` slot via
-    // `AlasConfig::analysis_mass_model`, so `mass_model.mlw_fraction_mtow`
-    // here already *is* the resolved limit divided by the takeoff-mass
-    // requirement for those callers. The fraction therefore multiplies
-    // `requirements.mtow_kg`, the mass it was derived from, and not the
-    // design gross mass, which a declared override may have pinned elsewhere.
-    // The plain fraction is only reached by standalone low-level callers
-    // that build a `MassModelConfig` directly without going through
-    // `AlasConfig`, where the documented fraction semantics still apply.
+    // With no `AlasConfig` in scope, the mode-aware landing-mass limit arrives
+    // pre-resolved: `AlasConfig::analysis_mass_model` writes it into
+    // `mlw_fraction_mtow` as limit / `requirements.mtow_kg`. The fraction
+    // therefore multiplies `requirements.mtow_kg`, the mass it was derived
+    // from, not the design gross mass a declared override may have pinned.
     let (design_landing_mass_kg, landing_source) = match technology.design_landing_mass_kg {
         Some(value) => (value, "declared"),
         None => (
@@ -500,8 +480,8 @@ pub fn evaluate_airframe_product(request: &FlopsAirframeRequest<'_>) -> FlopsAir
                 .map(|y| y.abs() / semispan)
                 .filter(|eta| *eta > 0.0 && *eta <= 1.0)
                 .collect();
-            let span_ft = wing.reference_span();
-            let aspect_ratio = span_ft * span_ft / wing.reference_area();
+            let span_m = wing.reference_span();
+            let aspect_ratio = span_m * span_m / wing.reference_area();
             let Some(factor) = detailed_bending_factor(
                 &detailed_stations(wing),
                 &engine_eta,
@@ -613,6 +593,20 @@ pub fn evaluate_airframe_product(request: &FlopsAirframeRequest<'_>) -> FlopsAir
     FlopsAirframeEvaluation::Verified(Box::new(breakdown))
 }
 
+impl From<TurbopropMassUnverifiedReason> for Reason {
+    fn from(reason: TurbopropMassUnverifiedReason) -> Self {
+        match reason {
+            TurbopropMassUnverifiedReason::InvalidConfiguration => Self::TurbopropMassConfiguration,
+            TurbopropMassUnverifiedReason::InvalidOperatingPoint => Self::TurbopropOperatingPoint,
+            TurbopropMassUnverifiedReason::ShaftPowerRating => Self::TurbopropShaftPowerRating,
+            TurbopropMassUnverifiedReason::PropellerGeometry => Self::TurbopropPropellerGeometry,
+            TurbopropMassUnverifiedReason::NacelleArchitecture => {
+                Self::TurbopropNacelleArchitecture
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -695,6 +689,18 @@ mod tests {
                 propulsion: true,
             },
         })
+    }
+
+    #[test]
+    fn a_missing_main_wing_does_not_also_blame_a_valid_fuselage() {
+        let (mut plane, geometry) = built_default();
+        plane.wings.clear();
+        let result = evaluate(&plane, &geometry, &declared_mass_model(), None);
+        let FlopsAirframeEvaluation::Unverified { reasons } = result else {
+            panic!("an aircraft without a wing must not evaluate");
+        };
+        assert!(reasons.contains(&Reason::MainWingGeometry), "{reasons:?}");
+        assert!(!reasons.contains(&Reason::FuselageGeometry), "{reasons:?}");
     }
 
     #[test]

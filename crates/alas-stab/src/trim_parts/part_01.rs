@@ -79,7 +79,8 @@ pub fn munk_apparent_mass_factor(fineness: f64) -> f64 {
 /// destabilising (moves the neutral point forward). Integrates the *actual*
 /// fuselage cross-section area distribution `A(x) = (pi/4) w(x) h(x)`, with a
 /// local-flow factor that reduces the afterbody's contribution by the wing
-/// downwash. `cl_alpha` is the wing lift-curve slope, per radian.
+/// downwash. `cl_alpha` is the wing lift-curve slope, per radian. Zero with no
+/// fuselage; NaN with a fuselage but no wing.
 pub fn fuselage_cm_alpha(airplane: &Airplane, cl_alpha: f64) -> f64 {
     fuselage_cm_alpha_with_reference_mode(airplane, cl_alpha, false)
 }
@@ -98,7 +99,9 @@ fn fuselage_cm_alpha_with_reference_mode(
     cl_alpha: f64,
     reference_compatibility: bool,
 ) -> f64 {
-    let fus = &airplane.fuselages[0];
+    let Some(fus) = airplane.fuselages.first() else {
+        return 0.0;
+    };
 
     // `np.argsort` on the station X coordinates, then applied to the widths
     // and heights (which are `_xsec_width`/`_xsec_height`; see the module doc).
@@ -115,7 +118,9 @@ fn fuselage_cm_alpha_with_reference_mode(
         return 0.0;
     }
 
-    let wing = main_wing(airplane);
+    let Some(wing) = main_wing(airplane).filter(|wing| !wing.xsecs.is_empty()) else {
+        return f64::NAN;
+    };
     let x_le = wing.xsecs[0].xyz_le[0];
     let x_te = x_le + wing.xsecs[0].chord;
     let x_h = match hstab(airplane) {
@@ -171,8 +176,7 @@ fn fuselage_cm_alpha_with_reference_mode(
 /// this VLM route is incompressible and linear, so `CL_alpha` and `Cm_alpha`
 /// are functions of geometry and angle of attack alone, and the ratio
 /// `-dCm/dCL` this function returns does not depend on which velocity was
-/// probed. Physics review v1.2, finding A4. NaN when the two probes carry
-/// the same lift (a degenerate `dCL`).
+/// probed. NaN when the two probes carry the same lift (a degenerate `dCL`).
 ///
 /// # Errors
 ///
@@ -224,14 +228,11 @@ pub fn autobalance(
 /// fixed reference condition (`autobalance_velocity_m_s`, 250 m/s / M~0.73 at
 /// sea level by default). This is an incompressible, linear VLM route with no
 /// Mach or Prandtl-Glauert correction, so the result is invariant to the
-/// probe velocity; "fixed low-speed" in a previous version of this comment
-/// was both the wrong Mach description for the default and beside the point,
-/// since no speed-dependent physics is evaluated here at all (physics review
-/// v1.2, finding A4). Applies a tail dynamic-pressure efficiency to the
-/// tail's stabilising contribution, then shifts the neutral point forward
-/// by the fuselage (Munk/Multhopp) term.
-/// `static_margin` is measured against the real CG (`xyz_ref[0]`). NaN margin
-/// and slope on a degenerate probe.
+/// probe velocity. Applies a tail dynamic-pressure efficiency to the tail's
+/// stabilising contribution, then shifts the neutral point forward by the
+/// fuselage (Munk/Multhopp) term. `static_margin` is measured against the real
+/// CG (`xyz_ref[0]`). NaN margin and slope on a degenerate probe. `cl_alpha`
+/// is *per radian* (per degree in [`StabilityTrimResult::cl_alpha`]).
 ///
 /// # Errors
 ///
@@ -280,7 +281,7 @@ fn neutral_point_with_reference_mode(
     let cl_alpha = d_cl / d_alpha;
     let sm_vlm = -d_cm / d_cl;
     let x_np_vlm = x_cg + sm_vlm * c_ref;
-    let x_wing_ac = main_wing(airplane).aerodynamic_center(AC_CHORD_FRACTION)[0];
+    let x_wing_ac = main_wing_ac_x(airplane);
     let eta_t = analysis.tail_efficiency;
     let mut x_np = x_wing_ac + eta_t * (x_np_vlm - x_wing_ac);
 
@@ -362,7 +363,7 @@ fn stability_and_trim_with_reference_mode(
     } else {
         let sm_vlm = -cm_alpha / cl_alpha;
         let x_np_vlm = x_cg + sm_vlm * c_ref;
-        let x_wing_ac = main_wing(airplane).aerodynamic_center(AC_CHORD_FRACTION)[0];
+        let x_wing_ac = main_wing_ac_x(airplane);
         let eta_t = analysis.tail_efficiency;
         let mut x_np = x_wing_ac + eta_t * (x_np_vlm - x_wing_ac);
 
@@ -413,20 +414,13 @@ fn stability_and_trim_with_reference_mode(
     //                       = [cl_target - CL_1, -Cm_1]  (slopes per degree).
     let jacobian = vec![vec![cl_alpha, cl_ih], vec![cm_alpha, cm_ih]];
     let rhs = vec![vec![cl_target - r1.cl_lift], vec![-r1.cm_pitch]];
-    let (d_a, d_ih, converged) = match linalg::solve(&jacobian, &rhs) {
-        Ok(solution)
-            if solution.len() >= 2
-                && solution[0].first().is_some_and(|value| value.is_finite())
-                && solution[1].first().is_some_and(|value| value.is_finite())
-                && jacobian
-                    .first()
-                    .and_then(|row| row.first())
-                    .zip(jacobian.get(1).and_then(|row| row.get(1)))
-                    .zip(jacobian.first().and_then(|row| row.get(1)))
-                    .zip(jacobian.get(1).and_then(|row| row.first()))
-                    .is_some_and(|(((a, d), b), c)| (a * d - b * c).abs() > DEGENERACY_FLOOR) =>
+    let (d_a, d_ih, converged) = match linalg::solve(&jacobian, &rhs).as_deref() {
+        Ok([row_a, row_ih, ..])
+            if row_a.first().is_some_and(|value| value.is_finite())
+                && row_ih.first().is_some_and(|value| value.is_finite())
+                && (cl_alpha * cm_ih - cl_ih * cm_alpha).abs() > DEGENERACY_FLOOR =>
         {
-            (solution[0][0], solution[1][0], true)
+            (row_a[0], row_ih[0], true)
         }
         // Upstream's `except np.linalg.LinAlgError`: a singular Jacobian falls
         // back to the pure-alpha correction with the incidence left as flown.

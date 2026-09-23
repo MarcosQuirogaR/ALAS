@@ -154,7 +154,7 @@ pub fn calculate_component_masses_checked(
 }
 
 /// Checked mass buildup with the selected landing-gear architecture.
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments)] // one argument per configured mass input
 pub fn calculate_component_masses_checked_with_gear(
     plane: &Airplane,
     requirements: &DesignRequirements,
@@ -200,7 +200,7 @@ pub fn calculate_component_masses_checked_with_gear(
 /// frozen Torenbeek/fraction relations are not evaluated at all. Under the
 /// comparison architecture it is the frozen buildup with the configured
 /// control surfaces and gear layout reflected in the wing.
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments)] // one argument per configured mass input
 pub fn calculate_component_masses_checked_product_with_gear(
     plane: &Airplane,
     requirements: &DesignRequirements,
@@ -265,7 +265,7 @@ impl ProductMassBuildup {
 /// [`ComponentMassError`] when a selected FLOPS input is missing or the
 /// airframe evaluation is incomplete. There is no fallback to the comparison
 /// architecture.
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments)] // one argument per configured mass input
 pub fn calculate_flops_mass_buildup(
     plane: &Airplane,
     requirements: &DesignRequirements,
@@ -290,8 +290,7 @@ pub fn calculate_flops_mass_buildup(
     if mm.mass_architecture.is_pure_flops() {
         // The frozen buildup is not evaluated here at all: under the pure
         // architecture there is nothing for it to contribute, and computing
-        // it first is how a legacy value used to survive into a group FLOPS
-        // was supposed to own.
+        // it first would let a legacy value survive into a group FLOPS owns.
         return flops_methods::build_pure_flops(
             plane,
             requirements,

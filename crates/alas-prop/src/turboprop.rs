@@ -1189,4 +1189,51 @@ mod tests {
         );
         assert!(cruise.propulsive_efficiency > 0.80);
     }
+
+    #[test]
+    fn a_rejected_model_parameter_is_named_with_its_own_value() {
+        let model = Pw127m568fModel {
+            governed_propeller_speed_rpm: 50.0,
+            ..Pw127m568fModel::default()
+        };
+        let error = model
+            .evaluate(
+                TurbopropCondition {
+                    density_kg_m3: 1.0,
+                    true_airspeed_m_s: 100.0,
+                },
+                nominal_command(),
+            )
+            .unwrap_err();
+        assert_eq!(
+            error,
+            TurbopropError::OutsideDomain {
+                field: "governed_propeller_speed_rpm",
+                value: 50.0,
+            }
+        );
+        assert_eq!(
+            error.to_string(),
+            "turboprop input outside domain: governed_propeller_speed_rpm=50"
+        );
+        let model = Pw127m568fModel {
+            maximum_climb_power_w: -1.0,
+            ..Pw127m568fModel::default()
+        };
+        assert_eq!(
+            model
+                .evaluate(
+                    TurbopropCondition {
+                        density_kg_m3: 1.0,
+                        true_airspeed_m_s: 100.0,
+                    },
+                    nominal_command(),
+                )
+                .unwrap_err(),
+            TurbopropError::OutsideDomain {
+                field: "maximum_climb_power_w",
+                value: -1.0,
+            }
+        );
+    }
 }

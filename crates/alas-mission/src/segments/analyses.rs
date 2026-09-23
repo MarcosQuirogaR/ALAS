@@ -382,7 +382,8 @@ impl MissionAnalyses {
     /// Legacy turbofans have no named schedules, so their established rating
     /// fraction is supplied explicitly by the mission configuration. Typed
     /// technologies receive the named rating without reinterpretation.
-    #[allow(clippy::too_many_arguments)] // mirrors the existing mission thrust boundary plus rating
+    // Mirrors the mission thrust boundary (`thrust`) plus the rating pair.
+    #[allow(clippy::too_many_arguments)]
     pub fn thrust_for_rating(
         &self,
         atmosphere: &Us1976Values,

@@ -9,7 +9,6 @@
 //! elevon/reflex model by changing a label, so those cases stop here with a
 //! typed reason.
 
-use std::fmt;
 
 use crate::topology::{
     TopologyAvailability, TopologyUnavailableReason, UavAnalysisPath, UavTopology,
@@ -42,9 +41,14 @@ impl TopologyOptimizedUav {
 }
 
 /// Failure to start or complete a topology-aware preliminary search.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum TopologyOptimizationError {
     /// The selected arrangement needs an omitted sizing/control model.
+    #[error(
+        "{} is unavailable for preliminary optimization: {}",
+        .topology.label(),
+        .reason.description()
+    )]
     UnsupportedTopology {
         /// Requested arrangement.
         topology: UavTopology,
@@ -52,30 +56,8 @@ pub enum TopologyOptimizationError {
         reason: TopologyUnavailableReason,
     },
     /// Existing deterministic search failure after topology admission.
-    Optimization(OptimizationError),
-}
-
-impl fmt::Display for TopologyOptimizationError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::UnsupportedTopology { topology, reason } => write!(
-                formatter,
-                "{} is unavailable for preliminary optimization: {}",
-                topology.label(),
-                reason.description()
-            ),
-            Self::Optimization(error) => error.fmt(formatter),
-        }
-    }
-}
-
-impl std::error::Error for TopologyOptimizationError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::UnsupportedTopology { .. } => None,
-            Self::Optimization(error) => Some(error),
-        }
-    }
+    #[error("{0}")]
+    Optimization(#[source] OptimizationError),
 }
 
 /// Run a deterministic preliminary search for a selected arrangement.

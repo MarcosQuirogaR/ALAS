@@ -367,10 +367,10 @@ fn cumulative_arc_length(points: &[(f64, f64)]) -> Vec<f64> {
 /// `[xp[0], xp[-1]]` clamped to the nearest endpoint's `fp` value rather than
 /// extrapolated.
 ///
-/// A linear scan rather than a binary search: every caller in this module
-/// passes at most a few hundred points, and a scan needs no fallible
-/// `f64` ordering to implement without panicking.
-fn numpy_interp(x: f64, xp: &[f64], fp: &[f64]) -> f64 {
+/// A linear scan rather than a binary search: every caller passes at most a
+/// few hundred points, and a scan needs no fallible `f64` ordering to
+/// implement without panicking.
+pub(crate) fn numpy_interp(x: f64, xp: &[f64], fp: &[f64]) -> f64 {
     let Some(&first_x) = xp.first() else {
         return f64::NAN; // `numpy.interp` itself raises on empty `xp`; nothing here calls it that way.
     };

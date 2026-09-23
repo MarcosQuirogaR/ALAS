@@ -16,10 +16,9 @@ pub(crate) struct CabinAsset {
 }
 
 impl CabinAsset {
-    // Retained as a small geometry primitive for callers that need to filter
-    // station-local assets; current renderers already filter by DeckItem
-    // interval before constructing the asset.
-    #[allow(dead_code)]
+    // Only the regression tests filter station-local assets; the renderers
+    // already filter by DeckItem interval before constructing the asset.
+    #[cfg(test)]
     pub(crate) fn intersects(&self, station: f64) -> bool {
         station >= self.x0 - 1e-9 && station <= self.x1 + 1e-9
     }

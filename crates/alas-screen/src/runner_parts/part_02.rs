@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-// The private dispatcher carries the explicit parity/product mode seam.
-#[allow(clippy::too_many_arguments)]
 fn run_airfoil_screening_with_mass_model(
     config: &AlasConfig,
     dv: Option<&DesignVector>,
@@ -146,12 +144,11 @@ fn run_airfoil_screening_with_mass_model(
     let mut n_refined = 0;
     if options.refine_3d && !results.is_empty() && options.refine_top_n > 0 && !cancelled {
         let top_n_limit = options.refine_top_n.min(results.len());
-        let mut shortlist_indices: Vec<usize> = (0..top_n_limit).collect();
-        for (idx, r) in results.iter().enumerate().skip(top_n_limit) {
-            if r.is_reference && !shortlist_indices.contains(&idx) {
-                shortlist_indices.push(idx);
-            }
-        }
+        let shortlist_indices: Vec<usize> = (0..top_n_limit)
+            .chain(
+                (top_n_limit..results.len()).filter(|&index| results[index].is_reference),
+            )
+            .collect();
 
         for (step, &idx) in shortlist_indices.iter().enumerate() {
             if let Some(cancel_fn) = should_cancel {
@@ -242,14 +239,16 @@ fn run_airfoil_screening_with_mass_model(
                 .collect();
 
             let mses_limit = options.mses_top_n.min(refined_indices.len());
-            let mut mses_indices: Vec<usize> =
-                refined_indices.iter().take(mses_limit).copied().collect();
-
-            for &idx in &refined_indices[mses_limit..] {
-                if results[idx].is_reference && !mses_indices.contains(&idx) {
-                    mses_indices.push(idx);
-                }
-            }
+            let mses_indices: Vec<usize> = refined_indices[..mses_limit]
+                .iter()
+                .copied()
+                .chain(
+                    refined_indices[mses_limit..]
+                        .iter()
+                        .copied()
+                        .filter(|&index| results[index].is_reference),
+                )
+                .collect();
 
             let cancellation = Arc::new(AtomicBool::new(false));
             if should_cancel.is_some_and(|cancel_fn| cancel_fn()) {
@@ -391,14 +390,18 @@ where
     }
     let workers = job_count.min(worker_limit.max(1));
     let next = Arc::new(AtomicUsize::new(0));
+    // Stops the monitor on completion; `cancellation` itself must stay clear
+    // because the caller reads it afterwards as "the run was cancelled".
+    let drained = AtomicBool::new(false);
     let (sender, receiver) = channel();
     let mut output = Vec::with_capacity(job_count);
     thread::scope(|scope| {
         let job_ref = &job;
         if let Some(cancel_check) = cancel_check {
             let cancellation = cancellation.clone();
+            let drained = &drained;
             scope.spawn(move || {
-                while !cancellation.load(Ordering::Relaxed) {
+                while !cancellation.load(Ordering::Relaxed) && !drained.load(Ordering::Relaxed) {
                     if cancel_check() {
                         cancellation.store(true, Ordering::Relaxed);
                         break;
@@ -430,10 +433,9 @@ where
             on_result(index, &value);
             output.push((index, value));
         }
-        // Stop the scoped cancellation monitor after all workers have
-        // drained. Without this release edge a non-cancelled sweep would
-        // keep the monitor alive until `thread::scope` tried to join it.
-        cancellation.store(true, Ordering::Relaxed);
+        // Without this edge a non-cancelled sweep would keep the monitor
+        // alive, and `thread::scope` would wait on it forever.
+        drained.store(true, Ordering::Relaxed);
     });
     output.sort_by_key(|(index, _)| *index);
     output

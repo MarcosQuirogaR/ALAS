@@ -294,7 +294,7 @@ impl DesignOptimizer {
 
         // Keep the run on the same explicit payload load case every
         // candidate was scored with.
-        let _ = apply_candidate_payload_load_case(&mut self.config, &result.best_design);
+        restore_winning_payload_load_case(&mut self.config, &result.best_design);
         Ok(result)
     }
 
@@ -379,7 +379,7 @@ impl DesignOptimizer {
         }
         let result = ensure_feasible(result)?;
 
-        let _ = apply_candidate_payload_load_case(&mut self.config, &result.best_design);
+        restore_winning_payload_load_case(&mut self.config, &result.best_design);
         Ok(result)
     }
 
@@ -896,7 +896,7 @@ impl DesignOptimizer {
     /// sentinel (infinite cost, invalid), which can never be mistaken for an
     /// analysed design. Either way `termination` is [`CANCELLED`] and
     /// `search_diagnostics.converged` is false.
-    #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::too_many_arguments)] // the pre-search state it reports on, one argument per piece
     fn cancelled_before_search_result<E: SearchObjective + ?Sized>(
         &self,
         objective: &mut E,

@@ -19,7 +19,8 @@ impl AvlObjective<'_> {
                 .work_skipped("AVL candidate not started on the cancellation request");
             return ObjectiveEvaluation::rejected(self.failure_cost(), "cancelled");
         }
-        let report = match FullAnalysis::new(self.config.clone()).run(design, true) {
+        let analysis = FullAnalysis::new(self.config.clone());
+        let report = match analysis.run(design, true) {
             Ok(report) => report,
             Err(_) => return ObjectiveEvaluation::rejected(self.failure_cost(), "full_analysis"),
         };
@@ -52,7 +53,7 @@ impl AvlObjective<'_> {
         let Some(polar) = avl.comparable_polar() else {
             return ObjectiveEvaluation::rejected(self.failure_cost(), "avl_unavailable");
         };
-        let required_cl = FullAnalysis::new(self.config.clone()).cruise_cl(&report.airplane);
+        let required_cl = analysis.cruise_cl(&report.airplane);
         let Some(point) = interpolate_avl_at_lift(polar, required_cl) else {
             return ObjectiveEvaluation::rejected(
                 self.failure_cost(),
@@ -494,10 +495,10 @@ mod tests {
 
     #[test]
     fn a_serial_request_reaches_the_candidate_batch_and_not_only_the_branches() {
-        // `--no-parallel` used to decide only whether the VLM and AVL
-        // branches ran side by side. A user who asks for a serial run gets
-        // one candidate evaluated at a time as well, whatever the automatic
-        // worker count would have resolved to on this machine.
+        // `--no-parallel` reaches the candidate batch, not only the choice
+        // to run the VLM and AVL branches side by side: a serial run
+        // evaluates one candidate at a time, whatever the automatic worker
+        // count would resolve to on this machine.
         let mut config = AlasConfig::default();
         config.optimizer.solver.workers = 0;
         assert!(

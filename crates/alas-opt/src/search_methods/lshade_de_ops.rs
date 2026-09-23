@@ -11,17 +11,7 @@ use crate::python_rng::RandomState;
 use super::{ARCHIVE_RATE, EPSILON_DECAY_EXPONENT, MEMORY_SIZE, MIN_POPULATION};
 use crate::search_methods::{OrderedF64, ScoredPoint};
 
-/// The score of a candidate whose evaluation produced nothing: worst on
-/// every ordering key, so it can never be mistaken for an analysed design.
-pub(super) fn unevaluated(values: &[f64]) -> ScoredPoint {
-    ScoredPoint {
-        values: values.to_vec(),
-        cost: f64::INFINITY,
-        valid: false,
-        constraint_violation: f64::INFINITY,
-        objectives: [f64::INFINITY; 3],
-    }
-}
+pub(super) use crate::search_methods::product_de::unevaluated;
 
 pub(super) fn min_by_feasibility(left: ScoredPoint, right: ScoredPoint) -> ScoredPoint {
     if right.feasibility_key() < left.feasibility_key() {

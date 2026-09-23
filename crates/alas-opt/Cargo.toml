@@ -8,12 +8,10 @@ authors.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-alas-types = { path = "../alas-types" }
 alas-config = { path = "../alas-config" }
 alas-geom = { path = "../alas-geom" }
 alas-atmo = { path = "../alas-atmo" }
 alas-mass = { path = "../alas-mass" }
-alas-struct = { path = "../alas-struct" }
 alas-payload = { path = "../alas-payload" }
 alas-perf = { path = "../alas-perf" }
 alas-aero = { path = "../alas-aero" }

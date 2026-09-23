@@ -144,7 +144,11 @@ impl Route {
 
     /// The whole path's length, and zero for a route with nothing in it.
     pub fn total_distance_m(&self) -> f64 {
-        self.cumulative_distance_m().last().copied().unwrap_or(0.0)
+        // Same left-to-right sum as `cumulative_distance_m`, without the
+        // per-waypoint vector.
+        self.waypoints.windows(2).fold(0.0, |total, leg| {
+            total + haversine_m(leg[0].lat, leg[0].lon, leg[1].lat, leg[1].lon)
+        })
     }
 
     /// Sample the great-circle arc between two airports into `n` intervals.

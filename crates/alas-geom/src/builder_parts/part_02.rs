@@ -15,23 +15,6 @@ fn n_subdivisions_usize(n: i64) -> usize {
     usize::try_from(n).unwrap_or(0)
 }
 
-/// Evenly spaced points from `start` to `stop`, inclusive: NumPy's
-/// `linspace(start, stop, num, endpoint=True)`. Duplicated from
-/// `aircraft::spacing::linspace`; see the module doc.
-fn linspace(start: f64, stop: f64, num: usize) -> Vec<f64> {
-    if num == 0 {
-        return Vec::new();
-    }
-    if num == 1 {
-        return vec![start];
-    }
-    let step = (stop - start) / (num - 1) as f64;
-    let mut values: Vec<f64> = (0..num).map(|i| start + i as f64 * step).collect();
-    let last = values.len() - 1;
-    values[last] = stop;
-    values
-}
-
 /// Sine-spaced points from `start` to `stop`, bunched near `start`:
 /// `native aerodynamic model.numpy.spacing.sinspace` at its default `reverse_spacing =
 /// False`: `start + (stop - start) * (1 - cos(linspace(0, pi/2, num)))`, with

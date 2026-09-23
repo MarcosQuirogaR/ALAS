@@ -216,7 +216,29 @@ pub const MAXIMUM_AUTOMATIC_WORKERS: usize = 8;
 pub const LEGACY_METHOD_TOKENS: &[&str] =
     &["feasibility_first_de", "nsga2", "turbo_1", "cma_es", "sqp"];
 
+/// A run seed above what the configuration's signed [`SolverSettings::seed`]
+/// holds.
+///
+/// Refused rather than wrapped, so a seed given on the command line or to
+/// the pipeline never silently replays a different, negative seed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("optimizer seed exceeds the supported integer range (0 to {max}), got {seed}", max = i64::MAX)]
+pub struct SeedOutOfRange {
+    /// The refused seed.
+    pub seed: u64,
+}
+
 impl SolverSettings {
+    /// Store a run seed given as an unsigned integer.
+    ///
+    /// The one range check for every front end that accepts a seed: values
+    /// up to `i64::MAX` are stored unchanged, larger ones are refused with
+    /// [`SeedOutOfRange`] and leave the setting untouched.
+    pub fn set_seed(&mut self, seed: u64) -> Result<(), SeedOutOfRange> {
+        self.seed = Some(i64::try_from(seed).map_err(|_| SeedOutOfRange { seed })?);
+        Ok(())
+    }
+
     /// The worker count to actually evaluate a batch with.
     ///
     /// Resolves the `0` automatic setting against the machine, so the
@@ -305,6 +327,18 @@ fn is_default_convergence_stagnation_generations(value: &i64) -> bool {
 mod tests {
     use super::*;
     use crate::{Entry, Kind, OptionSource};
+
+    #[test]
+    fn a_seed_is_stored_up_to_the_signed_limit_and_refused_above_it() {
+        let mut settings = SolverSettings::default();
+        settings.set_seed(i64::MAX as u64).unwrap();
+        assert_eq!(settings.seed, Some(i64::MAX));
+
+        let error = settings.set_seed(i64::MAX as u64 + 1).unwrap_err();
+        assert_eq!(error.seed, i64::MAX as u64 + 1);
+        assert!(error.to_string().starts_with("optimizer seed exceeds"));
+        assert_eq!(settings.seed, Some(i64::MAX));
+    }
 
     fn leaf(name: &str, settings: &SolverSettings) -> crate::LeafField {
         match &settings.schema().field(name).unwrap().entry {

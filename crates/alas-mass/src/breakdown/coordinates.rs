@@ -25,8 +25,8 @@ use super::{
 /// The three cabin groups (systems, furnishings and the lumped planning
 /// payload) are all placed as fractions of the **installed cabin**, because
 /// all three are distributed over the same floor. See `x_payload` below for why
-/// the payload no longer sits at the centre of a block beginning at the forward
-/// bulkhead, and what that was worth per aircraft.
+/// the payload does not sit at the centre of a block beginning at the forward
+/// bulkhead.
 pub fn define_mass_coordinates(
     plane: &Airplane,
     geometry_config: &GeometryConfig,
@@ -64,50 +64,18 @@ pub fn define_mass_coordinates(
     // Furnishings (seats, galleys, etc.) and operational items, also installed
     // over the whole cabin, for the same reason.
     let x_furn = cabin_start + 0.50 * cabin_len;
-    // Payload CG at the centre of the cabin it is distributed over.
-    //
-    // The tempting form is `cabin_start + 0.50 * occupied_len`, the centre of a
-    // block that always begins at the FORWARD BULKHEAD. Whenever the payload
-    // does not fill the cabin that is the aircraft's forward loading extreme
-    // applied as if it were the neutral case, and it is asymmetric against the
-    // two lines directly above: `x_systems` and `x_furn` are placed as
-    // fractions of the installed cabin, because that is where installed
-    // equipment sits. A lumped planning payload is distributed over the same
-    // floor and an operator trims it into the certified envelope; it is not
-    // loaded nose first.
-    //
-    // Measured (`alas-mass/examples/payload_station_matrix.rs`), the forward-
-    // bulkhead form put the centroid this far forward of the cabin centre, and
-    // moved the centre of gravity at maximum take-off mass by:
-    //
-    //   ATR72-600  fill 0.495  4.583 m forward  ->  1.435 m of CG
-    //   A220-300   fill 0.570  6.125 m          ->  1.178 m
-    //   A320-200   fill 0.706  3.910 m          ->  0.752 m
-    //   AVE        fill 0.771  6.485 m          ->  0.633 m
-    //   A340-300   fill 0.785  4.955 m          ->  0.553 m
-    //   B787-9     fill 0.800  4.530 m          ->  0.516 m
-    //   DC-10      fill 0.811  3.650 m          ->  0.352 m
-    //   A380-800   fill 1.000  0.000 m          ->  0.000 m
-    //
-    // On the ATR 72-600 that 1.435 m is 57.4 % of its 2.499 m mean aerodynamic
-    // chord. The correction consults no centre-of-gravity target and adds no
-    // coefficient: it is the one symmetric placement available, and on an
-    // aircraft whose payload fills its cabin it is exactly the previous value.
-    //
-    // The retired comment's concern was that a fuselage stretched beyond the
-    // payload's need would shift the payload centre of gravity aft "for free",
-    // so the optimizer "must pay a CG-mismatch penalty for unrealistic
-    // stretch". That is an optimizer-stability argument, not a physical one: a
-    // longer cabin carrying the same payload over a uniformly loaded floor does
-    // move its centroid aft, exactly as `x_systems` and `x_furn` already do. An
-    // implausible stretch is the geometry plausibility windows' to reject (the
-    // fuselage fineness window exists for it), not something to suppress by
-    // placing mass where it is not.
-    //
-    // The occupied length itself is no longer needed here: it describes the
-    // payload's spatial EXTENT, which these lumped coordinates do not carry.
-    // `alas_mass::stations::ComponentStations::payload_fallback` still reports
-    // it, as that station's `extent_m`, which is the field that means it.
+    // Payload CG at the centre of the installed cabin it is distributed over,
+    // the same fraction-of-cabin placement `x_systems` and `x_furn` use. The
+    // centre of an occupied block starting at the forward bulkhead would be
+    // the forward loading extreme applied as the neutral case: measured with
+    // `examples/payload_station_matrix.rs`, it moves the MTOW centre of gravity
+    // forward by 1.435 m on the ATR 72-600 (fill 0.495, 57.4 % of its 2.499 m
+    // MAC), 0.752 m on the A320-200 (fill 0.706) and 0 on the A380-800 (fill
+    // 1.000). A longer cabin carrying the same payload over a uniformly loaded
+    // floor does move its centroid aft; an implausible stretch is for the
+    // fuselage fineness window to reject, not for a displaced payload station
+    // to penalise. The payload's spatial extent is reported by
+    // `stations::ComponentStations::payload_fallback` as its `extent_m`.
     let x_payload = cabin_start + 0.50 * cabin_len;
 
     let mut coords = MassCoordinates {

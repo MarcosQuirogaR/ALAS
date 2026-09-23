@@ -118,6 +118,7 @@ dependencies = [
  "alas-math",
  "alas-testkit",
  "serde",
+ "thiserror 2.0.19",
  "tracing",
 ]
 
@@ -129,6 +130,7 @@ dependencies = [
  "alas-geom",
  "serde",
  "serde_json",
+ "thiserror 2.0.19",
 ]
 
 [[package]]
@@ -160,6 +162,7 @@ version = "1.2.0"
 dependencies = [
  "serde",
  "serde_json",
+ "thiserror 2.0.19",
  "win32job",
 ]
 
@@ -275,9 +278,7 @@ dependencies = [
  "alas-perf",
  "alas-prop",
  "alas-stab",
- "alas-struct",
  "alas-testkit",
- "alas-types",
  "alas-units",
  "serde",
  "serde_json",
@@ -347,6 +348,7 @@ dependencies = [
  "alas-testkit",
  "serde",
  "serde_json",
+ "thiserror 2.0.19",
 ]
 
 [[package]]
@@ -370,6 +372,7 @@ dependencies = [
  "alas-stab",
  "alas-struct",
  "alas-testkit",
+ "base64",
  "plotters",
  "plotters-backend",
  "serde",
@@ -456,6 +459,7 @@ dependencies = [
  "alas-geom",
  "serde",
  "serde_json",
+ "thiserror 2.0.19",
 ]
 
 [[package]]
@@ -473,8 +477,6 @@ dependencies = [
  "alas-fonts",
  "alas-report",
  "egui",
- "plotters",
- "plotters-backend",
  "rayon",
  "resvg",
  "tiny-skia",

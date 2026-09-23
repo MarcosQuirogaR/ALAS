@@ -396,15 +396,13 @@ impl Segment {
             .sum();
 
         let initial_time = self.conditions.time_s[0];
-        for (point, &node) in self
-            .numerics
-            .dimensionless
-            .control_points
-            .clone()
-            .iter()
-            .enumerate()
+        for (time, &node) in self
+            .conditions
+            .time_s
+            .iter_mut()
+            .zip(&self.numerics.dimensionless.control_points)
         {
-            self.conditions.time_s[point] = initial_time + node * span;
+            *time = initial_time + node * span;
         }
     }
 

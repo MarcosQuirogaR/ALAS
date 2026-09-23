@@ -40,17 +40,14 @@ const TYPICAL_CRUISE_FUEL_BURN_FRACTION_PER_HOUR: f64 = 0.0325;
 /// worth flying to once the remaining leg can hold the new level for at
 /// least `step_m / (dh/dt)`.
 ///
-/// A previous version of this function used a single 30-minute constant for
-/// every step, justified by "an aircraft's optimum altitude rises on the
-/// order of 1,000-2,000 ft per hour of cruise". That comment was itself
-/// unsourced and overstated the physical rate by roughly 2-3x: at
-/// [`TYPICAL_CRUISE_FUEL_BURN_FRACTION_PER_HOUR`] the optimum altitude rises
-/// 520-830 ft/h across the 2.5-4 %/hour range it was drawn from, not
-/// 1,000-2,000 ft/h (physics review v1.2, section 2.3). See
+/// A single fixed duration for every step (a commonly quoted 30 minutes, on
+/// the basis that the optimum altitude rises "1,000-2,000 ft per hour")
+/// overstates the physical rate by roughly 2-3x: across the 2.5-4 %/hour
+/// burn range the optimum altitude rises 520-830 ft/h. See the
 /// `crates/alas-mission/src/profile.rs` tests
 /// `a_short_declared_sector_does_not_receive_the_long_route_step_ladder` and
-/// `a_long_route_keeps_the_declared_three_leg_profile` for where the margin
-/// actually falls under the corrected rate.
+/// `a_long_route_keeps_the_two_leg_profile_under_the_corrected_minimum` for
+/// where the margin falls under this rate.
 pub(super) fn minimum_cruise_leg_duration_for_step_s(step_m: f64) -> f64 {
     if !step_m.is_finite() || step_m <= 0.0 {
         return 0.0;
