@@ -61,6 +61,10 @@ use alas_pipeline::{
 };
 use serde_json::{json, Value};
 
+#[path = "optimization_preset_audit/comparison.rs"]
+mod comparison;
+use comparison::{baseline_comparison, design_gross_mass_kg};
+
 /// Fixed recorded seed for every optimization run in this harness. A fixed
 /// constant, not a "representative" or hidden default: recorded verbatim in
 /// every result row and every saved effective config.
@@ -842,59 +846,6 @@ fn persist_telemetry(result_dir: &Path, telemetry: &CancelSnapshot) {
     }
 }
 
-/// The nominal design and the delivered design, side by side.
-///
-/// `compare_baseline` is on for every run this harness starts, so an
-/// optimization run analyses the registered preset's own design vector at
-/// reporting fidelity as well as the search's. Without both columns a row
-/// says what the optimizer produced but not what it produced it *against*,
-/// and an improvement claim cannot be checked.
-///
-/// Units and frame are the run's own, restated in `metric_conventions`:
-/// lengths in metres in body axes with the origin at the fuselage nose and
-/// `+x` aft, masses in kilograms, `l_over_d` dimensionless at the reported
-/// design point. Deltas are optimized minus baseline, so a negative fuel
-/// delta is less fuel.
-fn baseline_comparison(result: &PipelineResult) -> Value {
-    let metrics = |report: Option<&alas_pipeline::AnalysisReport>| {
-        report.map_or_else(
-            || json!(null),
-            |report| {
-                json!({
-                    "cruise_l_over_d": report.design_point.l_over_d,
-                    "trimmed_l_over_d": report.trimmed_design_point.as_ref().map(|point| point.l_over_d),
-                    "x_neutral_point_m": report.x_neutral_point,
-                    "static_margin": report.static_margin,
-                    "cd0": report.polar_fit.cd0,
-                    "fuel_kg": report.component_masses.get("Fuel").copied(),
-                    "payload_kg": report.component_masses.get("Payload").copied(),
-                    "wing_area_m2": report.airplane.s_ref,
-                })
-            },
-        )
-    };
-    let delta = |extract: fn(&alas_pipeline::AnalysisReport) -> f64| match (
-        result.baseline_analysis.as_ref(),
-        result.optimized_report.as_ref(),
-    ) {
-        (Some(baseline), Some(optimized)) => json!(extract(optimized) - extract(baseline)),
-        _ => json!(null),
-    };
-    json!({
-        "baseline": metrics(result.baseline_analysis.as_ref()),
-        "optimized": metrics(result.optimized_report.as_ref()),
-        "delta": {
-            "cruise_l_over_d": delta(|report| report.design_point.l_over_d),
-            "x_neutral_point_m": delta(|report| report.x_neutral_point),
-            "static_margin": delta(|report| report.static_margin),
-            "fuel_kg": delta(|report| report.component_masses.get("Fuel").copied().unwrap_or(f64::NAN)),
-            "wing_area_m2": delta(|report| report.airplane.s_ref),
-        },
-        "delta_convention": "optimized minus baseline, in the units of the same field above",
-        "comparable": result.baseline_analysis.is_some() && result.optimized_report.is_some(),
-    })
-}
-
 /// The largest uninterruptible unit this run executed, seconds.
 ///
 /// This is the cancellation bound the run actually had. `None` means nothing
@@ -1036,7 +987,9 @@ fn build_success_row(
     let fuel_kg = report
         .and_then(|r| r.component_masses.get("Fuel").copied())
         .unwrap_or(0.0);
-    let oew_kg = (mtow_kg - payload_kg - fuel_kg).max(0.0);
+    let oew_kg = report.map_or(0.0, |r| {
+        (design_gross_mass_kg(r) - payload_kg - fuel_kg).max(0.0)
+    });
     let cruise_l_over_d = report.map(|r| r.design_point.l_over_d);
     let neutral_point_x = report.map(|r| r.x_neutral_point);
     let static_margin = report.map(|r| r.static_margin);
@@ -1202,10 +1155,10 @@ fn metric_conventions() -> Value {
         "mtow_kg": "Maximum take-off mass, kilograms, from the requirements group of the \
                     effective configuration. Not a computed result: it is the sizing requirement \
                     the candidate was closed against.",
-        "oew_kg": "Operating empty mass, kilograms, computed here as mtow_kg - payload - fuel \
-                   from the reported component mass breakdown; a missing payload or fuel entry \
-                   is read as zero, which inflates this figure rather than failing silently, so \
-                   it is only meaningful when the mass breakdown is complete.",
+        "oew_kg": "Operating empty mass, kilograms: the sum of the reported component masses \
+                   excluding Payload and Fuel. Fuel is the signed MTOW - MZFW closure at the \
+                   design gross mass the candidate was sized at, which equals mtow_kg only for a \
+                   fixed-aircraft basis; a clean-sheet candidate closes at its own take-off mass.",
         "cruise_l_over_d": "Lift-to-drag ratio at the reported design point, dimensionless, \
                             trimmed. Valid only for the design-point Mach, altitude and mass \
                             recorded in the same report.",
