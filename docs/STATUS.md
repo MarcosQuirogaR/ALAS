@@ -46,9 +46,14 @@ continuously enforced by `cargo xtask gate`.
   `NoFeasibleDesign` error with the least-violating candidate as diagnostics,
   never a reported optimum.
 - **Determinism.** One generation's trial vectors are built in fixed order
-  from the seeded stream, then evaluated as a single batch; `solver.workers`
-  changes only how that batch is spread across threads, so a seeded run
-  replays bit-identically at any worker count. The frozen
+  from the seeded stream, then evaluated in index order in blocks of the
+  resolved worker count; `solver.workers` changes only how the work is split
+  and spread across threads, so a seeded run replays bit-identically at any
+  worker count. The cancellation flag is read before every block, so a
+  request inside a generation costs at most the block in flight (one
+  analysis with one worker), not the rest of the generation (fixed
+  2026-09-23; the earlier once-per-generation check failed the pipeline's
+  cancellation-bound test intermittently). The frozen
   reference-compatibility replay keeps its own pre-existing, deliberately
   different worker-count behavior (see its own docs).
 - **Convergence.** A real termination distinction: `converged` (population
