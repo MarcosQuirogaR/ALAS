@@ -197,7 +197,7 @@ pub(crate) fn refine_candidate_3d_with_mass_model(
     } else {
         AeroAnalysis::new(
             &plane,
-            dv.sweep_deg,
+            AeroAnalysis::quarter_chord_sweep_deg(&plane, dv.sweep_deg),
             Some(effective_geometry),
             Some(cfg2.drag_model.clone()),
             Some(cfg2.analysis.clone()),

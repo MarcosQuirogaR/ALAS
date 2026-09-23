@@ -134,7 +134,7 @@ fn the_cruise_solve_applies_the_wave_term_once_where_the_fitted_polar_already_ha
         .expect("usable q");
     let aero = AeroAnalysis::new(
         &report_wave.airplane,
-        design.sweep_deg,
+        AeroAnalysis::quarter_chord_sweep_deg(&report_wave.airplane, design.sweep_deg),
         Some(with_wave.geometry.clone()),
         Some(with_wave.drag_model.clone()),
         Some(with_wave.analysis.clone()),

@@ -414,7 +414,7 @@ impl DesignObjective {
         } else {
             AeroAnalysis::new(
                 &plane,
-                dv.sweep_deg,
+                AeroAnalysis::quarter_chord_sweep_deg(&plane, dv.sweep_deg),
                 Some(self.config.geometry.clone()),
                 Some(self.config.drag_model.clone()),
                 Some(analysis_config),

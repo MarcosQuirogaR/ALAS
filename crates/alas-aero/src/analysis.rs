@@ -464,7 +464,7 @@ impl<'a> AeroAnalysis<'a> {
                 Some(thickness),
             ),
             cd_induced,
-            cd_wave: self.wave_drag(mach, cl, Some(thickness)),
+            cd_wave: self.wave_drag(mach, cl, self.reference_compatibility.then_some(thickness)),
         }
     }
 }
