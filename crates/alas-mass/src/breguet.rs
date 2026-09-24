@@ -27,14 +27,11 @@ use crate::fuel_plan::{FuelBurnModel, FuelModelError, LegEstimate};
 ///
 /// Attributed to Roskam, *Airplane Design, Part I*, jet-transport
 /// segment-fraction table, not Raymer's *Aircraft Design: A Conceptual
-/// Approach* Table 3.2 as a previous version of this doc comment said:
-/// Raymer's Table 3.2 lists different values for the same phases (from
-/// recollection: warm-up+takeoff 0.970, climb 0.985, landing 0.995), so the
-/// two tables cannot both be the source of these four numbers (physics
-/// review v1.2, finding F4). The Roskam table and page were not
-/// independently re-opened against the primary text in that review either;
-/// treat this attribution as the best available correction, not a verified
-/// citation.
+/// Approach* Table 3.2, which lists different values for the same phases
+/// (warm-up and takeoff 0.970, climb 0.985, landing 0.995, not re-checked
+/// against the printed table). The Roskam table and page have not been
+/// checked against the primary text either: treat this as the best available
+/// attribution, not a verified citation.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SegmentFractions {
     /// Mass fraction remaining after takeoff.

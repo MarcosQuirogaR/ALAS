@@ -38,10 +38,11 @@
 //!
 //! Every wing is optionally [`Wing::subdivide_sections`]'d (only when
 //! `spanwise_resolution > 1`, upstream's own guard, at the default
-//! resolution of `1` this branch is skipped entirely, but
-//! `AnalysisConfig.fine_spanwise_resolution` defaults to `2` and is used by
-//! the full-analysis path through this same code, so the branch is real
-//! production behavior and not hypothetical; see `docs/PORTING.md`), then
+//! resolution of `1` this branch is skipped entirely, but the configured
+//! `AnalysisConfig` spanwise resolutions reach this same code through the
+//! full-analysis path and the mesh-resolution validation admits values above
+//! one, so the branch is real production behavior and not hypothetical; see
+//! `docs/PORTING.md`), then
 //! meshed with [`Wing::mesh_thin_surface`] at `chordwise_resolution`,
 //! `add_camber=true`. `is_trailing_edge` and `areas`, upstream's other two
 //! per-panel byproducts of this step, are not computed here: neither is read

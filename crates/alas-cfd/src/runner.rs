@@ -2,6 +2,38 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 use super::*;
+
+/// The status a stage leaves the study in, or `None` when it completed.
+///
+/// A stage that could not even be resolved or logged (`Err`) is recorded as
+/// `__failure` under `label` and reported as a launch failure; a stage that
+/// ran and did not complete has already recorded its own `__failure` in
+/// `execute_resolved_stage`.
+fn stage_failure(
+    outcome: Result<OpenFoamProcessStatus, String>,
+    label: &str,
+    command_logs: &mut BTreeMap<String, String>,
+) -> Option<OpenFoamProcessStatus> {
+    match outcome {
+        Ok(OpenFoamProcessStatus::Completed) => None,
+        Ok(status) => Some(status),
+        Err(error) => {
+            command_logs.insert("__failure".to_owned(), format!("{label}: {error}"));
+            Some(OpenFoamProcessStatus::LaunchFailed)
+        }
+    }
+}
+
+/// Record a case-file failure between stages as `__failure` and return the
+/// status it leaves the study in.
+fn file_failure(
+    command_logs: &mut BTreeMap<String, String>,
+    message: String,
+) -> OpenFoamProcessStatus {
+    command_logs.insert("__failure".to_owned(), message);
+    OpenFoamProcessStatus::Failed
+}
+
 /// Run a complete isolated airfoil study through the configured OpenFOAM backend.
 pub fn run_study<F>(
     config: &CfdStudyConfig,
@@ -34,7 +66,6 @@ where
         ),
     );
     let mut command_logs = BTreeMap::new();
-    let mut final_process_status = OpenFoamProcessStatus::Completed;
     let mut mesh_output = String::new();
 
     let capabilities = adapter.probe();
@@ -49,19 +80,16 @@ where
             .clone()
             .unwrap_or_else(|| "unknown".to_owned()),
     );
-    let required_commands_available = ["gmshToFoam", "checkMesh", "postProcess", solver_name]
-        .iter()
-        .all(|tool| capabilities.commands.get(*tool).copied().unwrap_or(false))
-        && capabilities.commands.get("gmsh").copied().unwrap_or(false);
-    if !required_commands_available {
-        let mut missing = ["gmshToFoam", "checkMesh", "postProcess", solver_name]
-            .iter()
-            .filter(|tool| !capabilities.commands.get(**tool).copied().unwrap_or(false))
-            .map(|tool| (*tool).to_owned())
-            .collect::<Vec<_>>();
-        if !capabilities.commands.get("gmsh").copied().unwrap_or(false) {
-            missing.push("gmsh".to_owned());
-        }
+    let command_available = |tool: &str| capabilities.commands.get(tool).copied().unwrap_or(false);
+    let mut missing = ["gmshToFoam", "checkMesh", "postProcess", solver_name]
+        .into_iter()
+        .filter(|tool| !command_available(tool))
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    if !command_available("gmsh") {
+        missing.push("gmsh".to_owned());
+    }
+    if !missing.is_empty() {
         command_logs.insert(
             "__failure".to_owned(),
             format!(
@@ -71,8 +99,11 @@ where
                 capabilities.detail,
             ),
         );
-        final_process_status = OpenFoamProcessStatus::LaunchFailed;
-        return finish_failed(command_logs, mesh_output, final_process_status);
+        return finish_failed(
+            command_logs,
+            mesh_output,
+            OpenFoamProcessStatus::LaunchFailed,
+        );
     }
     emit_event(
         &mut emit,
@@ -93,10 +124,13 @@ where
             "Gmsh is unavailable. Configure the Gmsh executable in CFD settings or add gmsh to PATH; the study will not substitute snappyHexMesh."
                 .to_owned(),
         );
-        final_process_status = OpenFoamProcessStatus::LaunchFailed;
-        return finish_failed(command_logs, mesh_output, final_process_status);
+        return finish_failed(
+            command_logs,
+            mesh_output,
+            OpenFoamProcessStatus::LaunchFailed,
+        );
     }
-    let gmsh_status = match execute_gmsh_stage(
+    let gmsh = execute_gmsh_stage(
         adapter,
         &mut StageContext {
             case_dir,
@@ -116,19 +150,11 @@ where
             "-o".into(),
             "constant/triSurface/airfoil.msh".into(),
         ],
-    ) {
-        Ok(status) => status,
-        Err(error) => {
-            command_logs.insert("__failure".to_owned(), format!("gmsh: {error}"));
-            final_process_status = OpenFoamProcessStatus::LaunchFailed;
-            return finish_failed(command_logs, mesh_output, final_process_status);
-        }
-    };
-    if gmsh_status != OpenFoamProcessStatus::Completed {
-        final_process_status = gmsh_status;
-        return finish_failed(command_logs, mesh_output, final_process_status);
+    );
+    if let Some(status) = stage_failure(gmsh, "gmsh", &mut command_logs) {
+        return finish_failed(command_logs, mesh_output, status);
     }
-    let convert_status = match execute_stage(
+    let convert = execute_stage(
         adapter,
         &mut StageContext {
             case_dir,
@@ -142,28 +168,19 @@ where
         CfdStage::Meshing,
         "gmshToFoam",
         vec!["constant/triSurface/airfoil.msh".into()],
-    ) {
-        Ok(status) => status,
-        Err(error) => {
-            command_logs.insert("__failure".to_owned(), format!("gmshToFoam: {error}"));
-            final_process_status = OpenFoamProcessStatus::LaunchFailed;
-            return finish_failed(command_logs, mesh_output, final_process_status);
-        }
-    };
-    if convert_status != OpenFoamProcessStatus::Completed {
-        final_process_status = convert_status;
-        return finish_failed(command_logs, mesh_output, final_process_status);
+    );
+    if let Some(status) = stage_failure(convert, "gmshToFoam", &mut command_logs) {
+        return finish_failed(command_logs, mesh_output, status);
     }
     let boundary_path = case_dir.join("constant/polyMesh/boundary");
     let boundary_report = match mesh::ensure_boundary_patch_types(&boundary_path) {
         Ok(report) => report,
         Err(error) => {
-            command_logs.insert(
-                "__failure".to_owned(),
+            let status = file_failure(
+                &mut command_logs,
                 format!("boundary contract: converted mesh could not be validated: {error}"),
             );
-            final_process_status = OpenFoamProcessStatus::Failed;
-            return finish_failed(command_logs, mesh_output, final_process_status);
+            return finish_failed(command_logs, mesh_output, status);
         }
     };
     emit_event(
@@ -177,7 +194,7 @@ where
             boundary_report.updated
         ),
     );
-    let check_status = match execute_stage(
+    let check = execute_stage(
         adapter,
         &mut StageContext {
             case_dir,
@@ -191,17 +208,9 @@ where
         CfdStage::QualityGate,
         "checkMesh",
         vec!["-writeAllFields".into(), "-meshQuality".into()],
-    ) {
-        Ok(status) => status,
-        Err(error) => {
-            command_logs.insert("__failure".to_owned(), format!("checkMesh: {error}"));
-            final_process_status = OpenFoamProcessStatus::LaunchFailed;
-            return finish_failed(command_logs, mesh_output, final_process_status);
-        }
-    };
-    if check_status != OpenFoamProcessStatus::Completed {
-        final_process_status = check_status;
-        return finish_failed(command_logs, mesh_output, final_process_status);
+    );
+    if let Some(status) = stage_failure(check, "checkMesh", &mut command_logs) {
+        return finish_failed(command_logs, mesh_output, status);
     }
     let quality = parse_mesh_quality(&mesh_output);
     // The solver deserves a budget proportional to the work it was asked to do;
@@ -218,17 +227,10 @@ where
             CfdEventSeverity::Error,
             "Mesh rejected by the quality gate; solution was not launched.".to_owned(),
         );
-        final_process_status = OpenFoamProcessStatus::Failed;
-        return finish_failed_quality(command_logs, quality, final_process_status);
+        return finish_failed_quality(command_logs, quality, OpenFoamProcessStatus::Failed);
     }
-    if !simulation.compressible
-        && capabilities
-            .commands
-            .get("potentialFoam")
-            .copied()
-            .unwrap_or(false)
-    {
-        let init_status = match execute_stage(
+    if !simulation.compressible && command_available("potentialFoam") {
+        let init = execute_stage(
             adapter,
             &mut StageContext {
                 case_dir,
@@ -242,17 +244,9 @@ where
             CfdStage::Initialization,
             "potentialFoam",
             vec!["-initialiseUBCs".into(), "-writephi".into()],
-        ) {
-            Ok(status) => status,
-            Err(error) => {
-                command_logs.insert("__failure".to_owned(), format!("potentialFoam: {error}"));
-                final_process_status = OpenFoamProcessStatus::LaunchFailed;
-                return finish_failed_quality(command_logs, quality.clone(), final_process_status);
-            }
-        };
-        if init_status != OpenFoamProcessStatus::Completed {
-            final_process_status = init_status;
-            return finish_failed_quality(command_logs, quality.clone(), final_process_status);
+        );
+        if let Some(status) = stage_failure(init, "potentialFoam", &mut command_logs) {
+            return finish_failed_quality(command_logs, quality, status);
         }
     } else if simulation.compressible {
         emit_event(
@@ -288,15 +282,11 @@ where
                     .min(simulation.write_interval.max(1)),
             ),
         ) {
-            command_logs.insert(
-                "__failure".to_owned(),
-                format!("{solver_name}-startup: {error}"),
-            );
-            final_process_status = OpenFoamProcessStatus::Failed;
-            return finish_failed_quality(command_logs, quality, final_process_status);
+            let status = file_failure(&mut command_logs, format!("{solver_name}-startup: {error}"));
+            return finish_failed_quality(command_logs, quality, status);
         }
         let startup_label = format!("{solver_name}-startup");
-        let startup_status = match execute_solver_stage_with_tool(
+        let startup = execute_solver_stage_with_tool(
             adapter,
             &mut StageContext {
                 case_dir,
@@ -310,29 +300,17 @@ where
             CfdStage::Solution,
             &startup_label,
             solver_name,
-        ) {
-            Ok(status) => status,
-            Err(error) => {
-                command_logs.insert(
-                    "__failure".to_owned(),
-                    format!("{solver_name}-startup: {error}"),
-                );
-                final_process_status = OpenFoamProcessStatus::LaunchFailed;
-                return finish_failed_quality(command_logs, quality, final_process_status);
-            }
-        };
-        if startup_status != OpenFoamProcessStatus::Completed {
-            final_process_status = startup_status;
-            return finish_failed_quality(command_logs, quality, final_process_status);
+        );
+        if let Some(status) = stage_failure(startup, &startup_label, &mut command_logs) {
+            return finish_failed_quality(command_logs, quality, status);
         }
         if let Err(error) = fs::write(case_dir.join("system/fvSchemes"), fv_schemes(config, false))
         {
-            command_logs.insert(
-                "__failure".to_owned(),
+            let status = file_failure(
+                &mut command_logs,
                 format!("{solver_name}-final: cannot switch to final convection scheme: {error}"),
             );
-            final_process_status = OpenFoamProcessStatus::Failed;
-            return finish_failed_quality(command_logs, quality, final_process_status);
+            return finish_failed_quality(command_logs, quality, status);
         }
         if let Err(error) = rewrite_solver_control_dict(
             case_dir,
@@ -343,12 +321,8 @@ where
                 simulation.write_interval,
             )),
         ) {
-            command_logs.insert(
-                "__failure".to_owned(),
-                format!("{solver_name}-final: {error}"),
-            );
-            final_process_status = OpenFoamProcessStatus::Failed;
-            return finish_failed_quality(command_logs, quality, final_process_status);
+            let status = file_failure(&mut command_logs, format!("{solver_name}-final: {error}"));
+            return finish_failed_quality(command_logs, quality, status);
         }
         emit_event(
             &mut emit,
@@ -370,18 +344,16 @@ where
                 simulation.write_interval,
             )),
         ) {
-            command_logs.insert("__failure".to_owned(), format!("{solver_name}: {error}"));
-            final_process_status = OpenFoamProcessStatus::Failed;
-            return finish_failed_quality(command_logs, quality, final_process_status);
+            let status = file_failure(&mut command_logs, format!("{solver_name}: {error}"));
+            return finish_failed_quality(command_logs, quality, status);
         }
         if let Err(error) = fs::write(case_dir.join("system/fvSchemes"), fv_schemes(config, false))
         {
-            command_logs.insert(
-                "__failure".to_owned(),
+            let status = file_failure(
+                &mut command_logs,
                 format!("{solver_name}: cannot write final convection scheme: {error}"),
             );
-            final_process_status = OpenFoamProcessStatus::Failed;
-            return finish_failed_quality(command_logs, quality, final_process_status);
+            return finish_failed_quality(command_logs, quality, status);
         }
     }
     let solution_label = if two_stage_solver {
@@ -389,7 +361,7 @@ where
     } else {
         solver_name.to_owned()
     };
-    let solution_status = match execute_solver_stage_with_tool(
+    let solution = execute_solver_stage_with_tool(
         adapter,
         &mut StageContext {
             case_dir,
@@ -403,19 +375,11 @@ where
         CfdStage::Solution,
         &solution_label,
         solver_name,
-    ) {
-        Ok(status) => status,
-        Err(error) => {
-            command_logs.insert("__failure".to_owned(), format!("{solution_label}: {error}"));
-            final_process_status = OpenFoamProcessStatus::LaunchFailed;
-            return finish_failed_quality(command_logs, quality, final_process_status);
-        }
-    };
-    if solution_status != OpenFoamProcessStatus::Completed {
-        final_process_status = solution_status;
-        return finish_failed_quality(command_logs, quality, final_process_status);
+    );
+    if let Some(status) = stage_failure(solution, &solution_label, &mut command_logs) {
+        return finish_failed_quality(command_logs, quality, status);
     }
-    let post_status = match execute_solver_postprocess_stage_with_tool(
+    let post = execute_solver_postprocess_stage_with_tool(
         adapter,
         &mut StageContext {
             case_dir,
@@ -427,20 +391,10 @@ where
         },
         &mut emit,
         solver_name,
-    ) {
-        Ok(status) => status,
-        Err(error) => {
-            command_logs.insert(
-                "__failure".to_owned(),
-                format!("{solver_name}-postProcess: {error}"),
-            );
-            final_process_status = OpenFoamProcessStatus::LaunchFailed;
-            return finish_failed_quality(command_logs, quality, final_process_status);
-        }
-    };
-    if post_status != OpenFoamProcessStatus::Completed {
-        final_process_status = post_status;
-        return finish_failed_quality(command_logs, quality, final_process_status);
+    );
+    let post_label = format!("{solver_name}-postProcess");
+    if let Some(status) = stage_failure(post, &post_label, &mut command_logs) {
+        return finish_failed_quality(command_logs, quality, status);
     }
     let quality = parse_mesh_quality(&mesh_output);
     let results = build_results_with_quality(
@@ -448,7 +402,7 @@ where
         &generated,
         command_logs,
         quality,
-        final_process_status,
+        OpenFoamProcessStatus::Completed,
     );
     emit_event(
         &mut emit,
@@ -467,4 +421,51 @@ where
     );
     write_result_artifacts(&results)?;
     Ok(results)
+}
+
+#[cfg(test)]
+// A failed expect here is the test's own fixture or assertion failing.
+#[allow(clippy::expect_used)]
+mod tests {
+    use super::*;
+    use alas_exec::openfoam::{OpenFoamBackend, OpenFoamPreferences};
+
+    #[test]
+    fn an_unavailable_toolchain_is_a_persisted_launch_failure_naming_every_missing_tool() {
+        let root = std::env::temp_dir().join(format!(
+            "alas-cfd-runner-missing-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        let absent = root.join("absent-openfoam-bin");
+        let adapter = OpenFoamAdapter::resolve(OpenFoamPreferences {
+            backend: OpenFoamBackend::Native,
+            native_bin_dir: Some(absent.to_string_lossy().into_owned()),
+            gmsh_executable: Some(absent.join("gmsh.exe").to_string_lossy().into_owned()),
+            ..OpenFoamPreferences::default()
+        });
+        let config = CfdStudyConfig::default();
+        let solver = config.effective_simulation().solver.executable();
+        let cancel = Arc::new(AtomicBool::new(false));
+
+        let results = run_study(&config, &adapter, &root.join("case"), &cancel, |_| {})
+            .expect("a missing toolchain is a recorded outcome, not an error");
+
+        let failure = results
+            .command_logs
+            .get("__failure")
+            .expect("the failure reason is recorded");
+        assert!(
+            failure.contains(&format!(
+                "missing gmshToFoam, checkMesh, postProcess, {solver}, gmsh"
+            )),
+            "{failure}"
+        );
+        assert_eq!(
+            results.provenance.template_version, TEMPLATE_VERSION,
+            "the generated case is still recorded"
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
 }

@@ -228,6 +228,7 @@ fn draw_equirectangular_sphere(
     // Every row is projected independently and written into its own slice
     // of the canvas, so the rows run on the rayon pool; the per-pixel
     // arithmetic is unchanged and the result is identical to a serial pass.
+    let rotation = CameraRotation::new(camera);
     let stride = destination.width() as usize * 4;
     let rows = &mut destination.data_mut()[top as usize * stride..bottom as usize * stride];
     rows.par_chunks_mut(stride)
@@ -242,7 +243,7 @@ fn draw_equirectangular_sphere(
                     continue;
                 }
                 let depth = (1.0 - radial_sq).sqrt();
-                let [world_x, world_y, z] = sphere_sample_direction(dx, dy, depth, camera);
+                let [world_x, world_y, z] = rotation.sample_direction(dx, dy, depth);
                 let longitude = world_y.atan2(world_x);
                 let source_longitude = source_longitude(longitude, mirror_longitude);
                 let latitude = z.clamp(-1.0, 1.0).asin();
@@ -264,16 +265,44 @@ fn draw_equirectangular_sphere(
 /// Reconstruct the unit-length globe direction under one orthographic pixel.
 /// This is the inverse of [`Camera3D::project`]; the caller may then reflect
 /// the source longitude together with the globe's geographic geometry.
+#[cfg(test)]
 fn sphere_sample_direction(dx: f64, dy: f64, depth: f64, camera: Camera3D) -> [f64; 3] {
-    let azimuth = camera.azim_deg.to_radians();
-    let elevation = camera.elev_deg.to_radians();
-    let y_rot = dy * elevation.sin() + depth * elevation.cos();
-    let z = -dy * elevation.cos() + depth * elevation.sin();
-    [
-        dx * azimuth.cos() + y_rot * azimuth.sin(),
-        -dx * azimuth.sin() + y_rot * azimuth.cos(),
-        z,
-    ]
+    CameraRotation::new(camera).sample_direction(dx, dy, depth)
+}
+
+/// Sines and cosines of a camera's azimuth and elevation, computed once per
+/// globe rather than once per pixel.
+#[derive(Clone, Copy)]
+struct CameraRotation {
+    sin_azimuth: f64,
+    cos_azimuth: f64,
+    sin_elevation: f64,
+    cos_elevation: f64,
+}
+
+impl CameraRotation {
+    fn new(camera: Camera3D) -> Self {
+        let (sin_azimuth, cos_azimuth) = camera.azim_deg.to_radians().sin_cos();
+        let (sin_elevation, cos_elevation) = camera.elev_deg.to_radians().sin_cos();
+        Self {
+            sin_azimuth,
+            cos_azimuth,
+            sin_elevation,
+            cos_elevation,
+        }
+    }
+
+    /// The unit-length globe direction under one orthographic pixel: the
+    /// inverse of [`Camera3D::project`].
+    fn sample_direction(self, dx: f64, dy: f64, depth: f64) -> [f64; 3] {
+        let y_rot = dy * self.sin_elevation + depth * self.cos_elevation;
+        let z = -dy * self.cos_elevation + depth * self.sin_elevation;
+        [
+            dx * self.cos_azimuth + y_rot * self.sin_azimuth,
+            -dx * self.sin_azimuth + y_rot * self.cos_azimuth,
+            z,
+        ]
+    }
 }
 
 fn source_longitude(world_longitude: f64, mirror_longitude: bool) -> f64 {

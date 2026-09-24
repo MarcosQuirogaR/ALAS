@@ -16,6 +16,7 @@
 //!
 //! Run: `cargo run --release -p alas-report --example preview_loading_contract`
 
+// A developer probe whose whole output is the printed comparison.
 #![allow(clippy::print_stdout)]
 
 use std::time::Instant;

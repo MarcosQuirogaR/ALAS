@@ -814,7 +814,7 @@ mod tests {
     /// are evaluated at. The lumped analysis places its own gear point and
     /// never consults `alas_mass::stations`, so this builds the same inputs
     /// for an aircraft whose main-gear station the station model refuses.
-    #[allow(clippy::expect_used)]
+    #[allow(clippy::expect_used)] // a registered preset that fails to build is the test failing
     fn preset_case(preset: &str) -> (AlasConfig, Airplane, MassBreakdown, MassCoordinates, f64) {
         let mut config = AlasConfig::from_value(&serde_json::json!({ "preset": preset }))
             .unwrap_or_else(|error| panic!("{error}"));

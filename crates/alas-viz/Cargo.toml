@@ -10,8 +10,6 @@ rust-version.workspace = true
 alas-fonts = { path = "../alas-fonts" }
 alas-report = { path = "../alas-report" }
 egui = { workspace = true }
-plotters = { workspace = true }
-plotters-backend = { workspace = true }
 resvg = { workspace = true }
 tiny-skia = { workspace = true }
 # The orthographic globe is projected pixel by pixel; the rows are independent

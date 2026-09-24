@@ -37,6 +37,8 @@ use crate::scene::{Axes2D, Color, Scene, Stroke};
 use alas_geom::wing_structure::WingStructureGeometry;
 use alas_pipeline::structural::StructuralAnalysisResult;
 
+pub(super) use crate::families::common::linspace;
+
 /// `plt_cm_tab10()`'s six colors, in order. `Color::from_hex` special-cases
 /// `tab:blue/orange/green/red` (the four the rest of this crate already
 /// needed); `tab:purple` and `tab:brown` are spelled out as literal hex here
@@ -275,23 +277,6 @@ pub(super) fn structures_unavailable_message(
 /// inside the canvas instead of running past it.
 pub(super) fn status_message_scene(title: &str, message: &str, theme: Option<&str>) -> Scene {
     crate::status_figure::figure_status_message(title, message, false, theme)
-}
-
-/// NumPy `linspace(start, stop, n)` with `endpoint=True`. Duplicated from
-/// `alas-struct::sizing`'s private helper of the same contract -- that
-/// module keeps its own copy for the same reason, and this crate does not
-/// depend on `alas-struct`'s internals.
-pub(super) fn linspace(start: f64, stop: f64, n: usize) -> Vec<f64> {
-    if n == 0 {
-        return Vec::new();
-    }
-    if n == 1 {
-        return vec![start];
-    }
-    let step = (stop - start) / (n - 1) as f64;
-    let mut values: Vec<f64> = (0..n).map(|i| start + i as f64 * step).collect();
-    values[n - 1] = stop;
-    values
 }
 
 #[cfg(test)]

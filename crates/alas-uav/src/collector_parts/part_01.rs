@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 use std::collections::{BTreeSet, VecDeque};
-use std::fmt;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -149,7 +148,8 @@ pub struct CollectedCatalogue {
 }
 
 /// A collection, policy, or parsing failure.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{message}")]
 pub struct CollectorError {
     message: String,
 }
@@ -161,14 +161,6 @@ impl CollectorError {
         }
     }
 }
-
-impl fmt::Display for CollectorError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.message)
-    }
-}
-
-impl std::error::Error for CollectorError {}
 
 /// Collect relevant product pages under a validated crawl policy.
 pub fn collect(
@@ -314,6 +306,9 @@ pub fn robots_allows(robots_txt: &str, url: &str) -> bool {
         None => return false,
     };
     let mut active = false;
+    // Consecutive `User-agent` lines open one group (RFC 9309 section 2.1), so
+    // `*` anywhere in the run makes the group's rules apply.
+    let mut in_agent_run = false;
     let mut best: Option<(usize, bool)> = None;
     for raw_line in robots_txt.lines() {
         let line = raw_line.split('#').next().unwrap_or_default().trim();
@@ -323,9 +318,11 @@ pub fn robots_allows(robots_txt: &str, url: &str) -> bool {
         let name = name.trim().to_ascii_lowercase();
         let value = value.trim();
         if name == "user-agent" {
-            active = value == "*";
+            active = (in_agent_run && active) || value == "*";
+            in_agent_run = true;
             continue;
         }
+        in_agent_run = false;
         if !active || (name != "allow" && name != "disallow") || value.is_empty() {
             continue;
         }

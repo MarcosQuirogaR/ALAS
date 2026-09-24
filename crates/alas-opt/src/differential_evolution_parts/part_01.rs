@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::evaluator::{ObjectiveEvaluation, ObjectiveEvaluator};
 use crate::history::OptimizationHistory;
-use crate::objective::{apply_candidate_payload_load_case, DesignObjective};
+use crate::objective::{restore_winning_payload_load_case, DesignObjective};
 use crate::python_rng::{Pcg64, RandomState};
 use crate::search_methods::{MethodOutcome, ScoredPoint};
 

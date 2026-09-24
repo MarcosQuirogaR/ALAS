@@ -148,7 +148,8 @@ pub fn parse_args(args: &[String]) -> Result<Option<CliArgs>, String> {
             unknown if unknown.starts_with('-') => {
                 return Err(format!("unknown option: {unknown}"));
             }
-            _ => {}
+            // No option is positional; running on defaults would hide a typo.
+            unexpected => return Err(format!("unexpected argument: {unexpected}")),
         }
     }
 
@@ -198,7 +199,11 @@ pub fn load_config(args: &CliArgs) -> Result<AlasConfig, String> {
     };
 
     if let Some(seed) = args.seed {
-        config.optimizer.solver.seed = Some(seed as i64);
+        config
+            .optimizer
+            .solver
+            .set_seed(seed)
+            .map_err(|error| error.to_string())?;
     }
     if let Some(method) = &args.optimization_method {
         config.optimizer.solver.method = method.clone();
@@ -429,19 +434,15 @@ pub fn run_cli(args: &[String]) -> i32 {
                 alas_pipeline::format_feasibility(&result.feasibility)
             );
         }
+        print_mses_summary(&result);
+        print_structural_summary(&result);
+        print_cpacs_summary(&result);
     }
-
-    print_mses_summary(&result, cli.quiet);
-    print_structural_summary(&result, cli.quiet);
-    print_cpacs_summary(&result, cli.quiet);
 
     0
 }
 
-fn print_cpacs_summary(result: &PipelineResult, quiet: bool) {
-    if quiet {
-        return;
-    }
+fn print_cpacs_summary(result: &PipelineResult) {
     if let Some(export) = &result.cpacs_export {
         println!(
             "\n--- CPACS aircraft: {} (v{}) ---",
@@ -451,13 +452,9 @@ fn print_cpacs_summary(result: &PipelineResult, quiet: bool) {
     }
 }
 
-fn print_mses_summary(result: &PipelineResult, quiet: bool) {
-    if quiet {
+fn print_mses_summary(result: &PipelineResult) {
+    let Some(mses) = &result.mses_result else {
         return;
-    }
-    let mses = match result.mses_result {
-        Some(ref m) => m,
-        None => return,
     };
     if !mses.has_usable_data() {
         println!("\n--- MSES analysis: {} ---", mses.status.as_str());

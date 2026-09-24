@@ -7,11 +7,12 @@ use super::*;
 use std::io::Read;
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::Ordering;
-use std::sync::mpsc::{sync_channel, SyncSender, TryRecvError};
+use std::sync::mpsc::{sync_channel, RecvTimeoutError, SyncSender};
 use std::thread;
 use std::time::Instant;
 
 use crate::process::{kill_process_tree, NewProcessGroup, NoConsoleWindow};
+use crate::supervise::SupervisedSpawn;
 enum PipeMessage {
     Chunk(OpenFoamOutputStream, Vec<u8>),
     Closed(OpenFoamOutputStream),
@@ -56,21 +57,26 @@ where
     for (key, value) in &command.environment {
         process.env(key, value);
     }
+    // Supervised like every other solver spawn, so a CFD run that outlives a
+    // crashed or force-closed ALAS is ended by the job object.
     let spawn = process
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .no_window()
         .new_process_group()
-        .spawn();
-    let Ok(mut child) = spawn else {
-        return OpenFoamProcessResult {
-            status: OpenFoamProcessStatus::LaunchFailed,
-            exit_code: None,
-            stdout: String::new(),
-            stderr: format!("could not launch {}", command.program.display()),
-            elapsed_seconds: started.elapsed().as_secs_f64(),
-        };
+        .spawn_supervised(&format!("OpenFOAM {}", command.label));
+    let mut child = match spawn {
+        Ok(child) => child,
+        Err(error) => {
+            return OpenFoamProcessResult {
+                status: OpenFoamProcessStatus::LaunchFailed,
+                exit_code: None,
+                stdout: String::new(),
+                stderr: format!("could not launch {}: {error}", command.program.display()),
+                elapsed_seconds: started.elapsed().as_secs_f64(),
+            };
+        }
     };
 
     // Reader threads continuously drain both pipes, including bytes beyond
@@ -89,23 +95,10 @@ where
     drop(output_tx);
     let mut stdout = CapturedPipe::new();
     let mut stderr = CapturedPipe::new();
-    let mut drain = |blocking: bool| loop {
-        let message = if blocking {
-            match output_rx.recv_timeout(Duration::from_millis(50)) {
-                Ok(message) => message,
-                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => break,
-                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
-            }
-        } else {
-            match output_rx.try_recv() {
-                Ok(message) => message,
-                Err(TryRecvError::Empty) | Err(TryRecvError::Disconnected) => break,
-            }
-        };
-        consume_pipe_message(message, &mut stdout, &mut stderr, &mut callback);
-    };
     let (status, exit_code) = loop {
-        drain(false);
+        while let Ok(message) = output_rx.try_recv() {
+            consume_pipe_message(message, &mut stdout, &mut stderr, &mut callback);
+        }
         if cancel.load(Ordering::Relaxed) {
             terminate_child(&mut child);
             break (OpenFoamProcessStatus::Cancelled, None);
@@ -144,8 +137,8 @@ where
         }
         let message = match output_rx.recv_timeout(remaining.min(Duration::from_millis(50))) {
             Ok(message) => message,
-            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
-            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+            Err(RecvTimeoutError::Timeout) => continue,
+            Err(RecvTimeoutError::Disconnected) => break,
         };
         consume_pipe_message(message, &mut stdout, &mut stderr, &mut callback);
     }

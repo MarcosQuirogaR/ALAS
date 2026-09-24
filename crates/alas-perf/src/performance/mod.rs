@@ -36,10 +36,6 @@
 //!
 //! [`alas_geom`]: https://docs.rs/alas-geom
 
-// A test asserts on values it loaded from a fixture it controls, so a failed
-// unwrap or expect there is the assertion failing.
-#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
-
 pub mod constraints;
 pub mod envelope;
 pub mod speeds;

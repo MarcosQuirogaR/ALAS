@@ -194,23 +194,17 @@ pub fn run_solver_optimizations(
         mode,
         OptimizationSolverMode::Avl | OptimizationSolverMode::Both
     );
-    let bounds = bounds.map(<[(f64, f64)]>::to_vec);
     let nominal = *nominal_design;
-    let vlm_config = serial_solver_config(config, parallel);
-    let avl_config = serial_solver_config(config, parallel);
-    let vlm_environment = environment.clone();
-    let avl_environment = environment.clone();
     let vlm_output = output_dir.map(|path| path.join("solvers/vlm"));
     let avl_output = output_dir.map(|path| path.join("solvers/avl"));
 
     let run_vlm = || {
         if want_vlm {
             run_vlm_optimizer(VlmOptimizerRequest {
-                config: vlm_config,
+                config: serial_solver_config(config, parallel),
                 seed,
-                _environment: vlm_environment,
                 nominal,
-                bounds: bounds.as_deref(),
+                bounds,
                 output_dir: vlm_output,
                 acceptance_route,
                 cancel,
@@ -222,11 +216,11 @@ pub fn run_solver_optimizations(
     let run_avl = || {
         if want_avl {
             run_avl_optimizer(
-                avl_config,
+                serial_solver_config(config, parallel),
                 seed,
-                avl_environment,
+                environment,
                 nominal,
-                bounds.as_deref(),
+                bounds,
                 avl_output,
                 cancel,
             )
@@ -264,6 +258,17 @@ pub fn run_solver_optimizations(
     }
 }
 
+/// Inputs of one native VLM optimization branch.
+struct VlmOptimizerRequest<'a> {
+    config: AlasConfig,
+    seed: Option<u64>,
+    nominal: DesignVector,
+    bounds: Option<&'a [(f64, f64)]>,
+    output_dir: Option<PathBuf>,
+    acceptance_route: Option<&'a AcceptanceRoute>,
+    cancel: Option<&'a AtomicBool>,
+}
+
 /// Run the native search, then make the design it delivers survive the
 /// application's own reporting-fidelity re-evaluation before the branch is
 /// reported as completed.
@@ -274,36 +279,24 @@ pub fn run_solver_optimizations(
 /// Those are two models, and they can disagree by about the coarse mesh's own
 /// error - enough to move a trimmed body attitude out of a two-degree design
 /// window, or to leave a route the analytic closure sized for unflyable at
-/// the mass it closed at. The optimizer used to report `converged` in exactly
-/// those runs and the feasibility stage used to report the same aircraft
-/// INFEASIBLE.
+/// the mass it closed at. Without this step the optimizer would report
+/// `converged` in exactly those runs while the feasibility stage reports the
+/// same aircraft INFEASIBLE.
 ///
 /// So the finalist is re-evaluated here, inside the optimization stage's own
 /// clock. If it is accepted, nothing changes but the record. If it is
-/// rejected, the loop offers the search's next-best *hard-feasible* candidate
-/// - never a design the search itself rejected - and the first one the
-///   application accepts is delivered, with the run reported as a
-///   reporting-fidelity fallback rather than as convergence. If none is
-///   accepted the search's own finalist is still returned, with its full
-///   report and every finding intact, and the run is reported as
-///   `reporting_fidelity_rejected`. No limit, residual or tolerance is
-///   weakened anywhere in that ladder.
-struct VlmOptimizerRequest<'a> {
-    config: AlasConfig,
-    seed: Option<u64>,
-    _environment: RunEnvironment,
-    nominal: DesignVector,
-    bounds: Option<&'a [(f64, f64)]>,
-    output_dir: Option<PathBuf>,
-    acceptance_route: Option<&'a AcceptanceRoute>,
-    cancel: Option<&'a AtomicBool>,
-}
-
+/// rejected, the loop offers the search's next-best *hard-feasible*
+/// candidate (never a design the search itself rejected) and the first one
+/// the application accepts is delivered, with the run reported as a
+/// reporting-fidelity fallback rather than as convergence. If none is
+/// accepted the search's own finalist is still returned, with its full
+/// report and every finding intact, and the run is reported as
+/// `reporting_fidelity_rejected`. No limit, residual or tolerance is
+/// weakened anywhere in that ladder.
 fn run_vlm_optimizer(request: VlmOptimizerRequest<'_>) -> SolverOptimizationResult {
     let VlmOptimizerRequest {
         config,
         seed,
-        _environment,
         nominal,
         bounds,
         output_dir,
@@ -315,7 +308,7 @@ fn run_vlm_optimizer(request: VlmOptimizerRequest<'_>) -> SolverOptimizationResu
         Ok(config) => config,
         Err(error) => return SolverOptimizationResult::failed(SolverKind::Vlm, output_dir, error),
     };
-    let mut optimizer = DesignOptimizer::new(effective_config.clone());
+    let mut optimizer = DesignOptimizer::new(effective_config);
     let mut optimization = match optimizer.run_cancellable(bounds, Some(&nominal), None, cancel) {
         Ok(result) => result,
         Err(error) => {
@@ -450,7 +443,7 @@ fn run_vlm_optimizer(request: VlmOptimizerRequest<'_>) -> SolverOptimizationResu
 fn run_avl_optimizer(
     config: AlasConfig,
     seed: Option<u64>,
-    environment: RunEnvironment,
+    environment: &RunEnvironment,
     nominal: DesignVector,
     bounds: Option<&[(f64, f64)]>,
     output_dir: Option<PathBuf>,
@@ -470,7 +463,19 @@ fn run_avl_optimizer(
             "AVL optimization requires an output directory to retain solver evidence",
         );
     };
-    let _ = std::fs::create_dir_all(&output_root);
+    // Every AVL evaluation writes its geometry and session files below this
+    // root; without it each candidate would fail later with a less direct
+    // error, so the branch fails here with the cause.
+    if let Err(error) = std::fs::create_dir_all(&output_root) {
+        return SolverOptimizationResult::failed(
+            SolverKind::Avl,
+            output_dir,
+            format!(
+                "AVL optimization output directory {} could not be created: {error}",
+                output_root.display()
+            ),
+        );
+    }
     let effective_config = match seeded_config(&config, seed) {
         Ok(config) => config,
         Err(error) => return SolverOptimizationResult::failed(SolverKind::Avl, output_dir, error),
@@ -544,34 +549,6 @@ fn run_avl_optimizer(
     }
 }
 
-/// The solver configuration a run with `parallel` uses.
-///
-/// `parallel` is the run-level "use this machine" switch (`--no-parallel`
-/// clears it), and it used to reach only the choice to run the VLM and AVL
-/// branches side by side: candidate evaluation inside each branch read
-/// `optimizer.solver.workers` and never saw the flag, so a serial request
-/// still started a batch on every worker the setting allowed. Clamping the
-/// count here is what makes the serial request actually serial.
-///
-/// It is a scheduling change only - the batch, its designs and their scores
-/// are identical at any worker count - so a serial run returns the same
-/// aircraft, more slowly.
-///
-/// What this does *not* claim is a single-threaded process. One coupled
-/// evaluation still fills its vortex-lattice influence matrix and factorises
-/// it across the shared rayon pool (`alas_aero::vlm::system`,
-/// `alas_math::linalg`). That is data parallelism inside one arithmetic
-/// operation, with a result documented and tested as bit-identical to the
-/// serial loop, not concurrent evaluation of independent work; no candidate,
-/// branch or pipeline stage overlaps another under `--no-parallel`.
-fn serial_solver_config(config: &AlasConfig, parallel: bool) -> AlasConfig {
-    let mut config = config.clone();
-    if !parallel {
-        config.optimizer.solver.workers = 1;
-    }
-    config
-}
-
 /// Persist what a cancelled search produced, in its own branch directory.
 ///
 /// # Why a cancelled run writes anything at all
@@ -641,24 +618,6 @@ fn write_cancelled_search_record(
     }
 }
 
-fn create_branch_directory(output_dir: Option<PathBuf>) -> Option<PathBuf> {
-    if let Some(path) = &output_dir {
-        let _ = std::fs::create_dir_all(path);
-    }
-    output_dir
-}
-
-fn seeded_config(config: &AlasConfig, seed: Option<u64>) -> Result<AlasConfig, String> {
-    let mut effective = config.clone();
-    if let Some(seed) = seed {
-        effective.optimizer.solver.seed = Some(
-            i64::try_from(seed)
-                .map_err(|_| "optimizer seed exceeds the supported integer range")?,
-        );
-    }
-    Ok(effective)
-}
-
 /// The AVL-backed objective: one external solver process per uncached
 /// candidate.
 ///
@@ -675,7 +634,7 @@ struct AvlObjective<'a> {
     objective: DesignObjective,
     executable: PathBuf,
     output_root: PathBuf,
-    cache: BTreeMap<String, ObjectiveEvaluation>,
+    cache: BTreeMap<Vec<u64>, ObjectiveEvaluation>,
     scope: alas_opt::CancelScope<'a>,
 }
 
@@ -696,10 +655,12 @@ impl<'a> AvlObjective<'a> {
         }
     }
 
-    fn cache_key(design: &DesignVector) -> String {
+    /// Short, stable directory name for one design's AVL evidence (64-bit
+    /// FNV-1a over the coordinate bits).
+    fn evaluation_dir_name(bits: &[u64]) -> String {
         let mut hash = 0xcbf29ce484222325_u64;
-        for value in design.to_array() {
-            for byte in value.to_bits().to_le_bytes() {
+        for value in bits {
+            for byte in value.to_le_bytes() {
                 hash ^= u64::from(byte);
                 hash = hash.wrapping_mul(0x100000001b3_u64);
             }
@@ -710,12 +671,14 @@ impl<'a> AvlObjective<'a> {
 
 impl ObjectiveEvaluator for AvlObjective<'_> {
     fn evaluate(&mut self, design: &DesignVector) -> ObjectiveEvaluation {
-        let key = Self::cache_key(design);
-        if let Some(cached) = self.cache.get(&key) {
+        // Keyed by the exact coordinate bits, so two designs can never share
+        // an evaluation; only the directory name is hashed.
+        let bits: Vec<u64> = design.to_array().into_iter().map(f64::to_bits).collect();
+        if let Some(cached) = self.cache.get(&bits) {
             return cached.clone();
         }
-        let evaluation = self.evaluate_uncached(design, &key);
-        self.cache.insert(key, evaluation.clone());
+        let evaluation = self.evaluate_uncached(design, &Self::evaluation_dir_name(&bits));
+        self.cache.insert(bits, evaluation.clone());
         evaluation
     }
 }

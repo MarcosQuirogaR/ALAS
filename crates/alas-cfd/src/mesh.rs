@@ -19,7 +19,6 @@
 //! total field thickness to the geometric sum of the requested layers.
 
 use std::collections::BTreeMap;
-use std::fmt;
 #[cfg(test)]
 use std::fs;
 
@@ -83,34 +82,23 @@ const EDGE_X_TOLERANCE: f64 = 1.0e-10;
 const CLOSURE_TOLERANCE: f64 = 1.0e-10;
 
 /// A meshing input or converted-case validation error.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum MeshError {
     /// The snapshot or mesh controls contain invalid values.
+    #[error("invalid meshing input: {0}")]
     InvalidInput(String),
     /// The coordinate loop is finite but outside this module's supported
     /// single-section topology.
+    #[error("unsupported airfoil geometry: {0}")]
     UnsupportedGeometry(String),
     /// A converted boundary file could not be read or written.
+    #[error("mesh file I/O error: {0}")]
     Io(String),
     /// A boundary file was readable but did not contain the required patch
     /// dictionary structure.
+    #[error("mesh file parse error: {0}")]
     Parse(String),
 }
-
-impl fmt::Display for MeshError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::InvalidInput(message) => write!(formatter, "invalid meshing input: {message}"),
-            Self::UnsupportedGeometry(message) => {
-                write!(formatter, "unsupported airfoil geometry: {message}")
-            }
-            Self::Io(message) => write!(formatter, "mesh file I/O error: {message}"),
-            Self::Parse(message) => write!(formatter, "mesh file parse error: {message}"),
-        }
-    }
-}
-
-impl std::error::Error for MeshError {}
 
 /// Whether an edge has one sharp endpoint or a finite blunt face.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

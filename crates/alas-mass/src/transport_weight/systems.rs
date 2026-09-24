@@ -18,7 +18,7 @@
 //! this program builds: the [`AccessoriesType::Other`] variant here.
 //! Reproduced, not corrected.
 
-use alas_units::POUND_MASS;
+use alas_units::{FOOT, POUND_MASS};
 
 use super::{OperationalItems, SystemsBreakdown};
 
@@ -66,7 +66,6 @@ pub enum AccessoriesType {
 /// `tail_area_m2` is `sum(wing.areas.reference)` over the horizontal and
 /// vertical tails; `main_wing_area_m2` feeds only the BWB fallback upstream
 /// applies when there is no tail area at all.
-/// Evaluate the mission reference `systems` correlation from its explicit inputs.
 ///
 /// This is exported for comparison evidence and for a future explicitly
 /// selected subsystem method. It is not the product mass-buildup path:
@@ -81,7 +80,7 @@ pub fn systems(
     main_wing_area_m2: f64,
 ) -> SystemsBreakdown {
     let num_seats = f64::from(passenger_count);
-    let s_ref_ft2 = reference_area_m2 / (alas_units::FOOT * alas_units::FOOT);
+    let s_ref_ft2 = reference_area_m2 / (FOOT * FOOT);
 
     // With no tail (a BWB), upstream assumes the flight controls live on the
     // wing and charges 1% of its area instead. Kept faithfully, though every
@@ -91,7 +90,7 @@ pub fn systems(
     } else {
         tail_area_m2
     };
-    let area_hv_ft2 = s_tail_m2 / (alas_units::FOOT * alas_units::FOOT);
+    let area_hv_ft2 = s_tail_m2 / (FOOT * FOOT);
 
     let flt_ctrl_scaler = match control_type {
         ControlSystemType::FullyPowered => 3.5,
@@ -166,7 +165,6 @@ pub fn systems(
 /// The mass of the operating items (crew, unusable fuel, engine oil,
 /// passenger service and cargo containers) `operating_items`
 /// (http://aerodesign.stanford.edu/aircraftdesign/AircraftDesign.html).
-/// Evaluate mission reference's operating-items correlation from its explicit inputs.
 ///
 /// As with [`systems`], callers must identify the accessory category rather
 /// than treating this as a replacement for the product mass model.

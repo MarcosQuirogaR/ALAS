@@ -61,54 +61,17 @@ pub(super) fn intersect_line_ray(
     Some((s, t))
 }
 
-/// Piecewise-linear interpolation matching `numpy.interp(x, xp, fp)`'s
-/// default clamp behaviour: `x` outside `[xp[0], xp[-1]]` clamps to the
-/// nearest endpoint's `fp` value rather than extrapolating.
+/// Piecewise-linear interpolation with `numpy.interp`'s end clamping, shared
+/// with the airfoil model so the wingbox surface is read with the same
+/// arithmetic the section was built with.
 ///
-/// Duplicated from the equivalent helper in `aircraft::airfoil` and
-/// `airfoil_library` rather than shared, since both of those are out of
-/// scope for this module to touch (see `docs/PORTING.md`).
-pub(super) fn clamped_interp(x: f64, xp: &[f64], fp: &[f64]) -> f64 {
-    let Some(&first_x) = xp.first() else {
-        return f64::NAN; // Nothing here calls this with an empty surface.
-    };
-    let last = xp.len() - 1;
-    if x <= first_x {
-        return fp[0];
-    }
-    if x >= xp[last] {
-        return fp[last];
-    }
-    for i in 1..xp.len() {
-        if x <= xp[i] {
-            let (x0, x1) = (xp[i - 1], xp[i]);
-            let (y0, y1) = (fp[i - 1], fp[i]);
-            if x1 == x0 {
-                return y0;
-            }
-            return y0 + (y1 - y0) * (x - x0) / (x1 - x0);
-        }
-    }
-    fp[last]
-}
+/// Not `alas_math::interp`: its slope form `fp[j] + slope * (x - xp[j])`
+/// can differ from this `y0 + (y1 - y0) * (x - x0) / (x1 - x0)` in the last
+/// bit, so switching is a numerical change rather than a refactor.
+pub(super) use crate::aircraft::airfoil::numpy_interp as clamped_interp;
 
-/// Evenly spaced points from `start` to `stop`, inclusive: NumPy's
-/// `linspace(start, stop, num, endpoint=True)`. A copy of
-/// `aircraft::spacing::linspace`, which is reachable from here: the copy is
-/// historical, not a visibility workaround.
-pub(super) fn linspace(start: f64, stop: f64, num: usize) -> Vec<f64> {
-    if num == 0 {
-        return Vec::new();
-    }
-    if num == 1 {
-        return vec![start];
-    }
-    let step = (stop - start) / (num - 1) as f64;
-    let mut values: Vec<f64> = (0..num).map(|i| start + i as f64 * step).collect();
-    let last = values.len() - 1;
-    values[last] = stop;
-    values
-}
+/// NumPy's `linspace(start, stop, num, endpoint=True)`.
+pub(super) use crate::aircraft::spacing::linspace;
 
 /// `x` rounded to 6 decimal places: `np.round(x, 6)`.
 ///

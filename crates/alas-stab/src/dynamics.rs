@@ -23,7 +23,8 @@
 //! [`compute_dynamic_modes`] runs a fresh
 //! [`vlm::run_with_stability_derivatives`] sweep on the built aircraft and
 //! hands the result to [`crate::modes::get_modes`]. Every derivative it feeds
-//! `get_modes` is a forward difference of two dense VLM AIC solves, so the
+//! `get_modes` is a finite difference of dense VLM AIC solves (central in the
+//! product path, forward in the frozen reference path), so the
 //! eigenvalues it reports inherit that solve's tier: `linalg`, the same
 //! construction `alas-stab::trim` and `alas-aero::vlm` carry, and the
 //! finite differencing amplifies the sub-`linalg` LAPACK-vs-Gaussian residual
@@ -72,6 +73,9 @@ const CHORDWISE_RESOLUTION: usize = 10;
 /// each inertia is `mass * r^2`. A well-established conceptual-design
 /// approximation for transport aircraft, used before a real structural mass
 /// distribution exists, not a substitute for a mass-properties model.
+///
+/// `Iyy` and `Izz` are NaN when the airplane has no fuselage stations to
+/// measure a length from.
 pub fn estimate_inertia(plane: &Airplane, mass_kg: f64) -> (f64, f64, f64) {
     // Dynamic roll inertia is an aircraft-level reference quantity.  Use the
     // same lateral/Y span that normalizes the aerodynamic derivatives rather
@@ -92,8 +96,15 @@ pub fn estimate_inertia_reference_compatibility(plane: &Airplane, mass_kg: f64) 
 }
 
 fn estimate_inertia_with_span(plane: &Airplane, mass_kg: f64, span: f64) -> (f64, f64, f64) {
-    let fus = &plane.fuselages[0];
-    let fus_len = fus.xsecs[fus.xsecs.len() - 1].xyz_c[0] - fus.xsecs[0].xyz_c[0];
+    // The pitch and yaw radii scale with the primary fuselage's length. An
+    // airplane without one (or with a fuselage that has no stations) has no
+    // length to scale, so `Iyy`/`Izz` come back NaN, visibly unusable, rather
+    // than a panic or a plausible number from an invented length.
+    let fus_len = plane
+        .fuselages
+        .first()
+        .and_then(|fus| Some(fus.xsecs.last()?.xyz_c[0] - fus.xsecs.first()?.xyz_c[0]))
+        .unwrap_or(f64::NAN);
     let rx = RX_SPAN_FRACTION * span;
     let ry = RY_LENGTH_FRACTION * fus_len;
     let rz = RZ_LENGTH_FRACTION * fus_len;
@@ -160,13 +171,13 @@ fn wrap(name: &'static str, mode: &modes::Mode) -> DynamicMode {
 /// The longitudinal and lateral-directional dynamic modes at `op_point`:
 /// `compute_dynamic_modes`.
 ///
-/// Runs a fresh [`vlm::run_with_stability_derivatives`] sweep (six VLM
-/// solves) and hands its derivatives to [`crate::modes::get_modes`], then
+/// Runs a fresh [`vlm::run_with_stability_derivatives`] sweep (one
+/// factorization, eleven solves) and hands its derivatives to [`crate::modes::get_modes`], then
 /// wraps each eigenmode with its period and stability flag.
 ///
 /// # Errors
 ///
-/// See [`VlmError`]: any of the six underlying solves can fail the way one can.
+/// See [`VlmError`]: any of the underlying solves can fail the way one can.
 pub fn compute_dynamic_modes(
     plane: &Airplane,
     op_point: &OperatingPoint,
@@ -273,6 +284,15 @@ mod tests {
             c_ref: 1.0,
             b_ref,
         }
+    }
+
+    #[test]
+    fn estimate_inertia_without_a_fuselage_reports_nan_pitch_and_yaw_not_a_panic() {
+        let mut plane = probe(20.0, 10.0);
+        plane.fuselages.clear();
+        let (ixx, iyy, izz) = estimate_inertia(&plane, 1000.0);
+        assert!((ixx - 1000.0 * 2.5 * 2.5).abs() < 1e-9, "ixx={ixx}");
+        assert!(iyy.is_nan() && izz.is_nan(), "iyy={iyy} izz={izz}");
     }
 
     #[test]

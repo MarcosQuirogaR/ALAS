@@ -14,6 +14,8 @@
 //!   `cargo run --release -p alas-opt --example dispatch_failure_probe -- \
 //!      [preset|all] [clean_sheet|reference_adaptation]`
 
+// A diagnostic example: its output is the printed report, and a failed
+// unwrap is the probe stopping on an input it cannot run.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::print_stdout)]
 
 use alas_config::AlasConfig;

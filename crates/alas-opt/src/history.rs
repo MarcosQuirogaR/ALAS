@@ -62,7 +62,7 @@ impl OptimizationHistory {
     }
 
     /// Record a single evaluation step.
-    #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::too_many_arguments)] // one positional field per history vector it appends to
     pub fn record(
         &mut self,
         dv: DesignVector,

@@ -63,20 +63,23 @@
 
 use alas_atmo::Atmosphere;
 
+use crate::vector3::cross3;
+
 /// The reference frame a vector is expressed in: geometry, body, wind or
 /// stability axes. See the module doc for which pairs
 /// [`OperatingPoint::convert_axes`] is actually exercised on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AxisFrame {
-    /// X downstream (aft), Z up, origin at the aircraft's geometric datum.
-    /// A 180-degree rotation about Y of the wind/body convention (X forward,
-    /// Z down) flips X to aft *and* Z to up, not Z alone; physics review
-    /// v1.2, section 5 "geometry/aero frame" (prior finding, corrected here).
+    /// X aft (downstream), Y right, Z up, origin at the aircraft's geometric
+    /// datum: body axes with X and Z reversed, which is exactly the
+    /// `(-x, y, -z)` map [`OperatingPoint::convert_axes`] applies.
     Geometry,
-    /// X forward, Z down, the frame the equations of motion are usually
-    /// written in.
+    /// X forward, Y right, Z down, the frame the equations of motion are
+    /// usually written in.
     Body,
-    /// X aligned with the freestream, as seen at the current alpha and beta.
+    /// X pointing into the oncoming freestream (forward along the flight
+    /// path), Y right, Z down, as seen at the current alpha and beta. Lift is
+    /// `-Z` and drag is `-X` in this frame.
     Wind,
     /// Body axes rotated about Y by alpha alone (no beta rotation).
     Stability,
@@ -143,9 +146,8 @@ impl OperatingPoint {
     fn rotation_matrix_wind_to_geometry(&self) -> [[f64; 3]; 3] {
         let alpha_rotation = rotate_y((-self.alpha).to_radians());
         let beta_rotation = rotate_z(self.beta.to_radians());
-        // Geometry axes put X downstream (aft) and Z up: a 180-degree flip
-        // about Y turns wind axes' upstream-X/down-Z into aft-X/up-Z, not
-        // aft-X/down-Z (physics review v1.2, section 5).
+        // Geometry axes put X downstream and Z up, opposite wind axes'
+        // upstream/down convention: a 180-degree flip about Y.
         let axes_flip = rotate_y(std::f64::consts::PI);
 
         matmul3(matmul3(axes_flip, alpha_rotation), beta_rotation)
@@ -304,15 +306,6 @@ fn matvec3(m: [[f64; 3]; 3], v: [f64; 3]) -> [f64; 3] {
     ]
 }
 
-/// The cross product `a x b`.
-fn cross3(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
-    [
-        a[1] * b[2] - a[2] * b[1],
-        a[2] * b[0] - a[0] * b[2],
-        a[0] * b[1] - a[1] * b[0],
-    ]
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -395,6 +388,20 @@ mod tests {
         assert!((x - 4.0).abs() < 1e-12);
         assert!((y - -2.0).abs() < 1e-12);
         assert!((z - 1.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn geometry_axes_are_x_aft_z_up_against_body_axes_x_forward_z_down() {
+        // The frame documentation on `AxisFrame` rests on this: body +X
+        // (forward) is geometry -X, body +Z (down) is geometry -Z, and Y is
+        // shared.
+        let point = op(0.0, 0.0);
+        let forward = point.convert_axes(1.0, 0.0, 0.0, AxisFrame::Body, AxisFrame::Geometry);
+        let down = point.convert_axes(0.0, 0.0, 1.0, AxisFrame::Body, AxisFrame::Geometry);
+        let right = point.convert_axes(0.0, 1.0, 0.0, AxisFrame::Body, AxisFrame::Geometry);
+        assert_eq!(forward, (-1.0, 0.0, 0.0));
+        assert_eq!(down, (0.0, 0.0, -1.0));
+        assert_eq!(right, (0.0, 1.0, 0.0));
     }
 
     #[test]

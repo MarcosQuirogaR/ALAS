@@ -4,26 +4,23 @@
 //! The one seam every export, figure and diagnostic resolves landing-gear
 //! stations through.
 //!
-//! Each of those consumers used to rebuild the model-derived fallback itself
-//! (`mac_le + mlg_x_fraction_mac * MAC`, a fraction of fuselage length for the
-//! nose) and hand it straight to
-//! [`alas_config::LandingGearConfig::resolved_station_positions`]. That rule
-//! is a *wing-mounted gear* rule with a stated domain, so every independent
-//! copy of it was a place where an aircraft with no wing-root gear bay could
-//! still be drawn, plotted or exported with gear at a station the mass model
-//! refuses to supply.
+//! The model-derived fallback (`mac_le + mlg_x_fraction_mac * MAC`, a
+//! fraction of fuselage length for the nose) is a *wing-mounted gear* rule
+//! with a stated domain. A consumer that rebuilt it and handed it straight to
+//! [`alas_config::LandingGearConfig::resolved_station_positions`] could draw,
+//! plot or export an aircraft with no wing-root gear bay with gear at a
+//! station the mass model refuses to supply.
 //!
-//! The applicability gate itself now lives in
+//! The applicability gate lives in
 //! [`alas_config::LandingGearConfig::resolved_station_positions_checked`]; the
 //! geometric measurement that feeds it lives in `alas_mass::stations`, which
 //! is where the wing root and the fuselage crown are already compared. This
 //! module only joins the two, so neither the rule nor its boundary is
 //! restated here.
 //!
-//! Numerically this is a no-op on every aircraft that has a main-gear
-//! station: the resolved positions are exactly what
-//! `resolved_station_positions` returned before, including the retained
-//! low-wing fallback for the presets that use it.
+//! On every aircraft that has a main-gear station the resolved positions
+//! equal those of the unchecked `resolved_station_positions`, including the
+//! retained low-wing fallback for the presets that use it.
 
 use alas_config::{AlasConfig, LandingGearStationPositions, MainGearFallbackRefusal};
 use alas_geom::aircraft::airplane::Airplane;
@@ -123,7 +120,7 @@ mod tests {
     }
 
     /// The fallback stations each consumer builds, in the convention they all
-    /// share, so the test compares the seam against what they used to do.
+    /// share, so the test compares the seam against the unchecked rule.
     fn fallbacks(config: &AlasConfig, plane: &Airplane) -> (f64, f64, f64, f64) {
         let wing = plane
             .wings

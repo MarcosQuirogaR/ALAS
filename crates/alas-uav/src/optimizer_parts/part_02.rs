@@ -2,8 +2,6 @@
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
 
-impl std::error::Error for OptimizationError {}
-
 /// Search catalogue combinations and continuous geometry with a fixed seed.
 pub fn optimize(problem: &OptimizationProblem<'_>) -> Result<OptimizedUav, OptimizationError> {
     optimize_with_control(problem, |_| {}, || false)

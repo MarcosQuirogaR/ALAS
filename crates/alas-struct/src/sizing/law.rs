@@ -9,19 +9,10 @@
 //! and has to apply the same law to do it.
 
 /// NumPy `linspace(start, stop, n)` with `endpoint=True`: `n` evenly spaced
-/// points, the last pinned exactly to `stop`.
-pub(super) fn linspace(start: f64, stop: f64, n: usize) -> Vec<f64> {
-    if n == 0 {
-        return Vec::new();
-    }
-    if n == 1 {
-        return vec![start];
-    }
-    let step = (stop - start) / (n - 1) as f64;
-    let mut values: Vec<f64> = (0..n).map(|i| start + i as f64 * step).collect();
-    values[n - 1] = stop;
-    values
-}
+/// points, the last pinned exactly to `stop`. The geometry crate's function is
+/// the one the wingbox geometry is sampled with, so the sizing grid shares its
+/// arithmetic rather than carrying a copy of it.
+pub(super) use alas_geom::aircraft::spacing::linspace;
 
 /// NumPy `gradient(f)` at unit spacing, `edge_order=1`: central differences
 /// interior, one-sided at the two ends. For a uniform `y` this is the constant
@@ -43,7 +34,7 @@ pub(crate) fn gradient_unit(f: &[f64]) -> Vec<f64> {
 
 /// NumPy `trapezoid(y, x)`: the trapezoidal integral of `y` over the sample
 /// points `x`.
-pub(super) fn trapezoid(y: &[f64], x: &[f64]) -> f64 {
+pub(crate) fn trapezoid(y: &[f64], x: &[f64]) -> f64 {
     let mut acc = 0.0;
     for i in 0..y.len().saturating_sub(1) {
         acc += (x[i + 1] - x[i]) * (y[i + 1] + y[i]) / 2.0;

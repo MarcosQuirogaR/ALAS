@@ -1,18 +1,18 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Marcos Quiroga Rodriguez
 
-use std::io::{Read, Write};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-use alas_exec::process::{kill_process_tree, NewProcessGroup, NoConsoleWindow};
+use alas_exec::process::{
+    drain, drained_text, timeout_from_seconds, wait_with_timeout, DeadlineWait, NewProcessGroup,
+    NoConsoleWindow,
+};
 
 use crate::nastran::text::{self};
-
-/// How often the run loop checks whether the solver has exited.
-const POLL_INTERVAL: Duration = Duration::from_millis(50);
 
 /// `RFOPEN` declares both `RFDIR` and its assembled filename as
 /// `CHARACTER*44`. `AERO10` is the longest rigid-format member, and the slash
@@ -204,13 +204,9 @@ pub fn run_nastran95(
     work_dir: &Path,
     timeout_seconds: f64,
 ) -> RunOutcome {
-    let timeout = match Duration::try_from_secs_f64(timeout_seconds) {
-        Ok(timeout) if !timeout.is_zero() => timeout,
-        Ok(_) | Err(_) => {
-            return RunOutcome::Failed(format!(
-                "nastran.exe timeout must be finite, positive, and representable, got {timeout_seconds}"
-            ));
-        }
+    let timeout = match timeout_from_seconds("nastran.exe", timeout_seconds) {
+        Ok(timeout) => timeout,
+        Err(error) => return RunOutcome::Failed(error.to_string()),
     };
     let open_core = match open_core_words(
         solver.open_core_words.as_deref(),
@@ -554,36 +550,24 @@ fn supervise(mut command: Command, deck: &str, timeout: Duration) -> RunOutcome 
             let _ = stdin.write_all(owned.as_bytes());
         });
     }
-    let stdout_reader = child.stdout.take().map(drain);
-    let stderr_reader = child.stderr.take().map(drain);
+    let stdout_reader = drain(child.stdout.take());
+    let stderr_reader = drain(child.stderr.take());
 
-    let Some(deadline) = Instant::now().checked_add(timeout) else {
-        return RunOutcome::Failed("nastran.exe timeout exceeds the clock range".to_owned());
-    };
-    let status = loop {
-        match child.try_wait() {
-            Ok(Some(status)) => break status,
-            Ok(None) => {
-                if Instant::now() >= deadline {
-                    kill_process_tree(child.id());
-                    let _ = child.wait();
-                    return RunOutcome::Failed(format!(
-                        "nastran.exe timed out after {:.0}s (tree force-killed)",
-                        timeout.as_secs_f64()
-                    ));
-                }
-                thread::sleep(POLL_INTERVAL);
-            }
-            Err(error) => {
-                kill_process_tree(child.id());
-                let _ = child.wait();
-                return RunOutcome::Failed(format!("failed while waiting on nastran.exe: {error}"));
-            }
+    let status = match wait_with_timeout(&mut child, timeout) {
+        DeadlineWait::Exited(status) => status,
+        DeadlineWait::TimedOut => {
+            return RunOutcome::Failed(format!(
+                "nastran.exe timed out after {:.0}s (tree force-killed)",
+                timeout.as_secs_f64()
+            ));
+        }
+        DeadlineWait::PollFailed(error) => {
+            return RunOutcome::Failed(format!("failed while waiting on nastran.exe: {error}"));
         }
     };
 
-    let stdout = stdout_reader.map(join).unwrap_or_default();
-    let stderr = stderr_reader.map(join).unwrap_or_default();
+    let stdout = drained_text(stdout_reader);
+    let stderr = drained_text(stderr_reader);
     if !status.success() {
         let code = status
             .code()

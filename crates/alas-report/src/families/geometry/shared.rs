@@ -16,6 +16,8 @@ use alas_geom::aircraft::airplane::Airplane;
 
 use crate::scene::{Color, Fill, Point2D, Scene, SceneElement, Stroke};
 
+pub(super) use crate::families::common::equal_aspect_ranges;
+
 /// Data-space bounding box of every wing planform and fuselage silhouette on
 /// `plane`, mirrored across `y = 0` where a wing is symmetric: used to size
 /// every geometry figure's axes from the real aircraft rather than a fixed
@@ -61,31 +63,6 @@ pub(super) fn airplane_bbox(plane: &Airplane) -> (f64, f64, f64, f64, f64, f64) 
         return (0.0, 1.0, -1.0, 1.0, -1.0, 1.0);
     }
     (x_min, x_max, y_min, y_max, z_min, z_max)
-}
-
-/// Two axis ranges, one per pixel extent (`u_px`, `v_px`), that share a
-/// single data-units-per-pixel scale and are centred on each data interval:
-/// the self-contained substitute for `ax.set_aspect("equal")` this crate's
-/// [`crate::scene::Axes2D`] cannot do on its own. `pad_frac` grows both data
-/// intervals before fitting, so drawn geometry does not touch the panel
-/// frame.
-pub(super) fn equal_aspect_ranges(
-    u_lo: f64,
-    u_hi: f64,
-    u_px: f64,
-    v_lo: f64,
-    v_hi: f64,
-    v_px: f64,
-    pad_frac: f64,
-) -> ((f64, f64), (f64, f64)) {
-    let u_span = ((u_hi - u_lo).abs()).max(1e-6) * (1.0 + pad_frac);
-    let v_span = ((v_hi - v_lo).abs()).max(1e-6) * (1.0 + pad_frac);
-    let scale = (u_px / u_span).min(v_px / v_span);
-    let u_half = u_px / scale / 2.0;
-    let v_half = v_px / scale / 2.0;
-    let u_c = (u_lo + u_hi) / 2.0;
-    let v_c = (v_lo + v_hi) / 2.0;
-    ((u_c - u_half, u_c + u_half), (v_c - v_half, v_c + v_half))
 }
 
 /// Draw every wing's top-view planform outline on `plane`: `_draw_planform`.

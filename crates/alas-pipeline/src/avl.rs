@@ -26,6 +26,9 @@ pub enum AvlAnalysisStatus {
     NotConfigured,
     /// The aircraft could not be represented by the declared AVL deck scope.
     DeckRejected,
+    /// The configured timeout was not a finite number of seconds greater than
+    /// zero; the solver was not launched.
+    InvalidTimeout,
     /// The executable could not be launched.
     LaunchFailed,
     /// The native process exceeded its deadline.
@@ -48,6 +51,7 @@ impl AvlAnalysisStatus {
         match self {
             Self::NotConfigured => "not_configured",
             Self::DeckRejected => "deck_rejected",
+            Self::InvalidTimeout => "invalid_timeout",
             Self::LaunchFailed => "launch_failed",
             Self::TimedOut => "timed_out",
             Self::SolverFailed => "solver_failed",
@@ -253,6 +257,11 @@ fn run_avl_analysis_with_reference(
     match process.status {
         AvlProcessStatus::InputMissing => {
             result.status = AvlAnalysisStatus::DeckRejected;
+            result.error = process.error;
+            return result;
+        }
+        AvlProcessStatus::InvalidTimeout => {
+            result.status = AvlAnalysisStatus::InvalidTimeout;
             result.error = process.error;
             return result;
         }

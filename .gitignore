@@ -60,3 +60,6 @@
 # A global or editor ignore rule for build/ directories would otherwise hide
 # this module, which is ordinary Rust source rather than a build output.
 !crates/alas-pipeline/src/cabin_scene/build/
+
+# Timestamp file OpenVSP writes into its working directory.
+/.vsptime

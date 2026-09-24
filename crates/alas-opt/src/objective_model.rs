@@ -123,6 +123,24 @@ fn wing_fuel_volume_m3_with_references(wing: &Wing, usable_fraction: f64, s: f64
     v_geo * usable_fraction.clamp(0.0, 1.0)
 }
 
+/// [`apply_candidate_payload_load_case`] on a run that has already finished.
+///
+/// The winner was scored under its own load case, so the result stands if
+/// restoring that case on the run's configuration fails; the configuration
+/// then still describes the previous payload, which is reported rather than
+/// dropped.
+pub(crate) fn restore_winning_payload_load_case(
+    config: &mut AlasConfig,
+    design_vector: &DesignVector,
+) {
+    if let Err(error) = apply_candidate_payload_load_case(config, design_vector) {
+        tracing::warn!(
+            %error,
+            "the winning design's payload load case could not be restored on the run configuration"
+        );
+    }
+}
+
 /// Resolve a geometry-driven payload only when the configured load case asks.
 ///
 /// Passenger capacity is always dynamic: for every study, registered

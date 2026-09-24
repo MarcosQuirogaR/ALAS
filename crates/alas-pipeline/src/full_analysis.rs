@@ -187,6 +187,9 @@ mod station_coordinates;
 pub(crate) use station_coordinates::station_coordinates_for;
 pub use station_coordinates::StationPlacementFailure;
 
+mod design_point;
+use design_point::design_point_nearest;
+
 /// The one-cabin-per-case rule, shared rather than mirrored.
 ///
 /// `alas-report`'s quick preview runs the same two mass passes this module

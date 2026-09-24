@@ -217,7 +217,7 @@ fn declared_additional_and_extra(policy: &FuelPolicyConfig) -> (FuelQuantity, Fu
 /// comparison to the trip-fuel fraction), while the study convention skips
 /// the holding-flow call entirely unless the policy states a positive floor,
 /// per the scheme's own documentation.
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments)] // one argument per reported fuel-policy input
 fn easa_style_reserves(
     policy: &FuelPolicyConfig,
     model: &dyn FuelBurnModel,

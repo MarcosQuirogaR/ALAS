@@ -37,8 +37,8 @@ failures, none a Windows regression (process races, path fixtures, parity
 tiers set on the MSVC runtime); see the testkit's `REFERENCE_RUNTIME`.
 
 **Numerical results, all eight presets** (baseline matrix, and the
-`balanced` optimisation matrix with seed 20260922, measured at `89c565e`,
-before the physics corrections in the next paragraph):
+`balanced` optimisation matrix with seed 20260922; rerun after the physics
+corrections in the next paragraph, with the same outcome per preset):
 
 - Baseline: every preset executes. The model's own physical checks raise
   findings for two: AVE (analysed zero-fuel CG forward of its configured
@@ -46,7 +46,9 @@ before the physics corrections in the next paragraph):
   load, modelled OEW 15,244 kg against 13,450 kg, cruise T/W shortfall).
 - Optimisation: seven presets deliver a numerically feasible candidate;
   none converges within the `balanced` budget (15 generations), so every
-  termination is `iteration_limit`. ATR72-600 returns `NoFeasibleDesign`
+  termination is `iteration_limit`. Wall times run from 389 s (A220-300)
+  to 1,381 s (B787-9, beyond the harness's default 1,200 s guard once the
+  corrected wave drag applied). ATR72-600 returns `NoFeasibleDesign`
   (896 candidates; dominant rejections nose-gear load, MTOW-limited dispatch,
   sizing not closed, static-margin floor). Presets are optimised clean-sheet,
   so a candidate closes at its own take-off mass; fuel deltas against the
@@ -90,6 +92,12 @@ Specific limits that release notes must not overstate:
   between step climbs is derived rather than fixed: a step of height dh is
   taken once fuel burn has lowered the optimum altitude by dh, at the
   modelled burn rate (about 2.9 h for a 600 m step).
+- **Cancellation latency outside the search.** Inside the DE search a cancel
+  costs at most the block in flight. Finalist verification at reporting
+  fidelity and the reporting stages after it check the flag only between
+  blocks and stages: on the B787-9 a request landing there waited for an
+  8-candidate verification block (94 s) and stopped at the next stage
+  boundary after 193 s. The run records this bound rather than hiding it.
 - **ATR72-600** is outside the mass model's validity domain. The wing datum
   is sourced and the turboprop propulsion station is ordinary; the negative
   margin comes from the generic FLOPS transport fuselage, furnishings and

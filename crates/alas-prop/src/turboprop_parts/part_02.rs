@@ -178,15 +178,14 @@ impl Pw127m568fModel {
         // momentum theory. The power that reaches the disc is not the whole
         // shaft power: a real blade spends part of it on profile drag, tip
         // loss and non-uniform inflow, and bounding with the *whole* shaft
-        // power is a propeller with none of those. That bound is what the
-        // cruise points used to sit on, at eta_p = 0.98, which no propeller of
-        // this class reaches.
+        // power is a propeller with none of those: at cruise that bound sits
+        // at eta_p = 0.98, which no propeller of this class reaches.
         //
-        // The same treatment the static branch already applies (a figure of
-        // merit as an effective-power loss factor) is therefore applied at
-        // every airspeed, with the blade efficiency blended from the static
-        // figure of merit to the declared forward-flight value. At `V = 0` the
-        // two coincide exactly, so the static thrust is unchanged.
+        // The static branch's treatment (a figure of merit as an
+        // effective-power loss factor) is therefore applied at every
+        // airspeed, with the blade efficiency blended from the static figure
+        // of merit to the declared forward-flight value. At `V = 0` the two
+        // coincide exactly, so the static thrust is the static branch's.
         let blade_efficiency = self.blade_efficiency(advance_ratio);
         let ideal_thrust_bound_n = actuator_disk_thrust_bound_n(
             blade_efficiency * propeller_power_w,
@@ -435,18 +434,31 @@ impl Pw127m568fModel {
                 return Err(TurbopropError::OutsideDomain { field, value });
             }
         }
-        if self.propeller_diameter_m <= 0.0
-            || self.reference_psfc_kg_kwh <= 0.0
-            || self.normal_takeoff_power_w <= 0.0
-            || self.maximum_takeoff_reserve_power_w <= 0.0
-            || self.maximum_continuous_power_w <= 0.0
-            || self.maximum_climb_power_w <= 0.0
-            || self.maximum_cruise_power_w <= 0.0
-            || !(100.0..=2_000.0).contains(&self.governed_propeller_speed_rpm)
-        {
+        // Report the parameter that actually failed; a combined check would
+        // name none of them and quote an unrelated value.
+        for (field, value) in [
+            ("propeller_diameter_m", self.propeller_diameter_m),
+            ("reference_psfc_kg_kwh", self.reference_psfc_kg_kwh),
+            ("normal_takeoff_power_w", self.normal_takeoff_power_w),
+            (
+                "maximum_takeoff_reserve_power_w",
+                self.maximum_takeoff_reserve_power_w,
+            ),
+            (
+                "maximum_continuous_power_w",
+                self.maximum_continuous_power_w,
+            ),
+            ("maximum_climb_power_w", self.maximum_climb_power_w),
+            ("maximum_cruise_power_w", self.maximum_cruise_power_w),
+        ] {
+            if value <= 0.0 {
+                return Err(TurbopropError::OutsideDomain { field, value });
+            }
+        }
+        if !(100.0..=2_000.0).contains(&self.governed_propeller_speed_rpm) {
             return Err(TurbopropError::OutsideDomain {
-                field: "positive_model_parameter",
-                value: self.propeller_diameter_m.min(self.reference_psfc_kg_kwh),
+                field: "governed_propeller_speed_rpm",
+                value: self.governed_propeller_speed_rpm,
             });
         }
         Ok(())
